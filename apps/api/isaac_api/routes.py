@@ -12335,11 +12335,63 @@ _PROPOSAL_LIST_LIMIT_DESC = (
 )
 
 _PROPOSAL_LIST_AFTER_DESC = (
-    "Continue after this proposal id, which is what the previous page returned as "
-    "`next_cursor`. An id this record does not hold is refused rather than treated "
-    "as the beginning of the list, because silently restarting a page walk would "
-    "return the same window forever."
+    "Continue after this cursor, which is what the previous page returned as "
+    "`next_cursor`. Pass it back verbatim and pass the same `order` with it. A "
+    "cursor this record does not hold is refused rather than treated as the "
+    "beginning of the list, because silently restarting a page walk would return "
+    "the same window forever; a cursor minted under the OTHER `order` is refused "
+    "for the same reason, since continuing an oldest-first walk in newest-first "
+    "order would hand back the rows already read and call them the next page."
 )
+
+_PROPOSAL_LIST_ORDER_DESC = (
+    "Which end of the record's proposal order to read from. `oldest_first` is the "
+    "default and is the order this list has always returned — proposal time, ties "
+    "broken by id, so a review queue reads chronologically. `newest_first` is the "
+    "exact reverse of that same total order, so the most recently proposed change "
+    "is in the FIRST window. Both return the same rows and the same counts; only "
+    "the direction differs."
+)
+
+#: The cursor prefix that carries a window's order, so a cursor cannot be replayed
+#: under the other one.
+#:
+#: **THE OLDEST-FIRST CURSOR IS UNCHANGED AND IS STILL THE BARE PROPOSAL ID.** That
+#: asymmetry is deliberate and is the whole reason this is a prefix rather than an
+#: encoding: every `next_cursor` this server has ever issued was a bare proposal id
+#: meaning "continue oldest-first", and re-encoding them would have broken a cursor a
+#: client is holding right now for a walk this change does not otherwise touch. So a
+#: bare id keeps meaning exactly what it has always meant, and only the NEW direction
+#: — which has issued no cursors, because it did not exist — carries a tag.
+#:
+#: `:` is safe as the separator because a proposal id is minted by `new_record_id()`
+#: and is 26 characters of `[0-9A-Z]`, so it can never contain one. A bare id is
+#: therefore never mistaken for a tagged cursor, and a tagged cursor is never
+#: mistaken for an id this record might hold.
+_PROPOSAL_CURSOR_ORDER_PREFIX = "newest_first:"
+
+
+def _proposal_cursor_order(after: str) -> str:
+    """The order the cursor ``after`` was minted under."""
+    return (
+        "newest_first"
+        if after.startswith(_PROPOSAL_CURSOR_ORDER_PREFIX)
+        else "oldest_first"
+    )
+
+
+def _proposal_cursor_id(after: str) -> str:
+    """The proposal id inside the cursor ``after``, whichever form it takes."""
+    if after.startswith(_PROPOSAL_CURSOR_ORDER_PREFIX):
+        return after[len(_PROPOSAL_CURSOR_ORDER_PREFIX) :]
+    return after
+
+
+def _proposal_cursor_for(proposal_id: str, order: str) -> str:
+    """The cursor to publish for ``proposal_id`` under ``order``."""
+    if order == "newest_first":
+        return f"{_PROPOSAL_CURSOR_ORDER_PREFIX}{proposal_id}"
+    return proposal_id
 
 
 @router.get(
@@ -12360,6 +12412,12 @@ _PROPOSAL_LIST_AFTER_DESC = (
         "`limit` returns a window, not everything; `has_more` and `next_cursor` "
         "page through the rest, and `total` remains how many proposals the record "
         "HOLDS so a client can always say how much of the list it is showing. "
+        "`order` CHOOSES WHICH END OF THAT LIST THE FIRST WINDOW COMES FROM. The "
+        "default `oldest_first` is unchanged and is what this operation has always "
+        "returned; `newest_first` is the exact reverse of the same total order, so "
+        "the most recently proposed change is in the first window instead of being "
+        "reachable only by paging to the last one. A `next_cursor` belongs to the "
+        "order it was issued under and is refused under the other — see the 422. "
         "CLOSED PROPOSALS ARE INCLUDED — accepting, rejecting, superseding and "
         "withdrawing are states reached by explicit acts and recorded in each "
         "proposal's history, and this API has no operation that deletes a "
@@ -12403,9 +12461,9 @@ _PROPOSAL_LIST_AFTER_DESC = (
         "which entry the id names."
     ),
     response_description=(
-        "One window of the record's proposals in proposal order, the per-state "
-        "counts, the paths a proposal may target, the cursor for the next window, "
-        "and the record's current `ETag`."
+        "One window of the record's proposals in the requested order, the per-state "
+        "counts, the paths a proposal may target, the cursor for the next window in "
+        "that same order, and the record's current `ETag`."
     ),
     responses={
         **_R_STORAGE_UNAVAILABLE,
@@ -12424,6 +12482,12 @@ _PROPOSAL_LIST_AFTER_DESC = (
                 "holds, so the window it asks to continue from does not exist. It is "
                 "refused rather than restarted from the beginning, which would return "
                 "the same window forever to a client that believed it was advancing. "
+                "`cursor_order_mismatch` — `after` was issued by a window in the "
+                "OTHER `order`. The id it names does exist, which is exactly why this "
+                "is refused rather than answered: continuing the walk from the wrong "
+                "side would return rows the client had already read as though they "
+                "were the next page. Pass the `order` the cursor came from, or start "
+                "that order's walk without `after`. "
                 "This code also carries the framework's own parameter-validation "
                 "error, for example a `limit` outside the permitted range; the two "
                 "are told apart by the body, which carries `error` and `message` here "
@@ -12459,20 +12523,55 @@ def list_proposals(
         int, Query(ge=1, le=_PROPOSAL_WINDOW_MAX, description=_PROPOSAL_LIST_LIMIT_DESC)
     ] = _PROPOSAL_WINDOW_DEFAULT,
     after: Annotated[str | None, Query(description=_PROPOSAL_LIST_AFTER_DESC)] = None,
+    order: Annotated[
+        Literal["oldest_first", "newest_first"],
+        Query(description=_PROPOSAL_LIST_ORDER_DESC),
+    ] = "oldest_first",
 ):
     exp = ws.load_experiment(experiment_id, session_id=scope)
     if exp is None:
         return _not_found(experiment_id)
+    # ONE SORT, READ FROM EITHER END. `sorted_proposals` is the canonical
+    # `(proposed_utc, proposal_id)` order and stays the single definition of it;
+    # `newest_first` is its exact reverse, which is still TOTAL, so a cursor walk in
+    # that direction is as well defined as the forward one. Nothing about `by_state`,
+    # `total` or `unreadable_entries` moves — they are computed over the whole record
+    # by `_proposals_payload` and never over the window.
     ordered = exp.sorted_proposals()
+    if order == "newest_first":
+        ordered = ordered[::-1]
     if after is not None:
+        # A CURSOR MINTED UNDER THE OTHER ORDER IS REFUSED, AND IT HAS TO BE CHECKED
+        # BEFORE THE LOOKUP. Both orders hold the same proposals, so the id inside
+        # such a cursor is always FOUND — the walk would simply continue from the
+        # wrong side and hand back rows the client had already read as if they were
+        # the next page. That is the same wrong-answer-instead-of-an-error failure
+        # the unknown-cursor refusal below exists to prevent, and it is invisible to
+        # the lookup, which is why it is a separate check rather than a fallthrough.
+        if _proposal_cursor_order(after) != order:
+            return _proposal_refusal(
+                "cursor_order_mismatch",
+                (
+                    "`after` is a cursor from a `"
+                    f"{_proposal_cursor_order(after)}` window and this request asked "
+                    f"for `{order}`. Continuing one order's walk in the other would "
+                    "return rows already read as though they were the next page, so "
+                    "it is refused rather than answered. Pass the `order` the cursor "
+                    "came from, or start that order's walk without `after`."
+                ),
+                after=after,
+                cursor_order=_proposal_cursor_order(after),
+                requested_order=order,
+            )
         # A CURSOR THIS RECORD DOES NOT HOLD IS REFUSED, NOT CLAMPED. Treating it as
         # the beginning would return the FIRST window again, so a client paging
         # forward would loop over the same rows believing it was advancing.
+        after_id = _proposal_cursor_id(after)
         position = next(
             (
                 index
                 for index, proposal in enumerate(ordered)
-                if proposal.proposal_id == after
+                if proposal.proposal_id == after_id
             ),
             None,
         )
@@ -12496,7 +12595,11 @@ def list_proposals(
         exp,
         selected=window,
         has_more=has_more,
-        next_cursor=window[-1].proposal_id if has_more and window else None,
+        next_cursor=(
+            _proposal_cursor_for(window[-1].proposal_id, order)
+            if has_more and window
+            else None
+        ),
     )
 
 

@@ -1371,6 +1371,211 @@ def test_DEC5_an_unknown_cursor_is_refused_rather_than_restarting(client, experi
     assert response.json()["error"] == "unknown_cursor"
 
 
+# --- the list ORDER, and the cursor that belongs to one --------------------------
+#
+# WHY THIS EXISTS. `_sorted_proposals` orders `(proposed_utc, proposal_id)` oldest
+# first and `list_proposals` walks that order forward from the cursor, so a freshly
+# created proposal — which carries the LATEST `proposed_utc` of anything on the
+# record — sorts LAST. On a record already holding a full window's worth, the newest
+# proposal is not in the default window at all and is reachable only by paging to the
+# end. `order=newest_first` is the direction that puts it in the first window.
+
+
+def test_newest_first_returns_the_exact_reverse_of_the_default_order(
+    client, experiment
+):
+    """Both orders return the same rows; only the direction differs.
+
+    MUTATION: made the route ignore `order` (dropped the `[::-1]`). RED — the reversal
+    assertion fails. A second mutation returning `sorted(..., reverse=True)` on the
+    STATE rather than the canonical key would pass this, which is why the assertion is
+    against the stored canonical order rather than against a re-derived one.
+    """
+    for index in range(5):
+        assert _create(client, experiment, value=f"Cu{index}O").status_code == 200
+
+    canonical = [p.proposal_id for p in _stored(experiment.id).sorted_proposals()]
+
+    oldest = client.get(f"/api/experiments/{experiment.id}/proposals")
+    assert oldest.status_code == 200, oldest.text
+    assert [p["proposal_id"] for p in oldest.json()["proposals"]] == canonical
+
+    newest = client.get(
+        f"/api/experiments/{experiment.id}/proposals?order=newest_first"
+    )
+    assert newest.status_code == 200, newest.text
+    assert [p["proposal_id"] for p in newest.json()["proposals"]] == canonical[::-1]
+
+
+def test_the_default_order_is_unchanged_when_order_is_omitted(client, experiment):
+    """The parameter is ADDITIVE. Omitting it must be byte-identical to before it
+    existed, because every existing client omits it."""
+    for index in range(4):
+        assert _create(client, experiment, value=f"Cu{index}O").status_code == 200
+
+    omitted = client.get(f"/api/experiments/{experiment.id}/proposals")
+    explicit = client.get(
+        f"/api/experiments/{experiment.id}/proposals?order=oldest_first"
+    )
+    assert omitted.status_code == explicit.status_code == 200
+    assert omitted.json() == explicit.json()
+
+
+def test_the_newest_proposal_is_in_the_FIRST_newest_first_window(client, experiment):
+    """THE GAP THIS CLOSES, stated as the measurement it is.
+
+    With more proposals than one window, the last-created one is absent from the
+    default window and present in the first `newest_first` one.
+    """
+    window = routes._PROPOSAL_WINDOW_DEFAULT
+    latest = None
+    for index in range(window + 3):
+        latest = _created(client, experiment, value=f"Cu{index}O")["proposal_id"]
+
+    default_window = client.get(f"/api/experiments/{experiment.id}/proposals").json()
+    assert latest not in [p["proposal_id"] for p in default_window["proposals"]]
+
+    newest = client.get(
+        f"/api/experiments/{experiment.id}/proposals?order=newest_first"
+    ).json()
+    assert newest["proposals"][0]["proposal_id"] == latest
+    # The counts describe the RECORD, not the window, in either direction.
+    assert newest["total"] == default_window["total"] == window + 3
+    assert newest["by_state"] == default_window["by_state"]
+    assert newest["unreadable_entries"] == default_window["unreadable_entries"]
+
+
+def test_a_newest_first_cursor_walks_the_whole_list_exactly_once(client, experiment):
+    """The reverse of a total order is a total order, so the walk is as well defined."""
+    for index in range(7):
+        assert _create(client, experiment, value=f"Cu{index}O").status_code == 200
+
+    seen: list[str] = []
+    cursor = None
+    for _ in range(10):
+        query = f"?limit=3&order=newest_first{'' if cursor is None else f'&after={cursor}'}"
+        body = client.get(f"/api/experiments/{experiment.id}/proposals{query}").json()
+        seen.extend(p["proposal_id"] for p in body["proposals"])
+        if not body["has_more"]:
+            break
+        cursor = body["next_cursor"]
+    canonical = [p.proposal_id for p in _stored(experiment.id).sorted_proposals()]
+    assert seen == canonical[::-1]
+    assert len(set(seen)) == 7
+
+
+def test_an_oldest_first_cursor_is_STILL_the_bare_proposal_id(client, experiment):
+    """The cursor a client is holding right now keeps working and keeps its shape.
+
+    MUTATION: tagged both orders (`f"{order}:{id}"`). RED here — an existing client's
+    stored `next_cursor` would have stopped being a bare id, which is a breaking
+    change to a contract this slice had no reason to break.
+    """
+    for index in range(4):
+        assert _create(client, experiment, value=f"Cu{index}O").status_code == 200
+    body = client.get(f"/api/experiments/{experiment.id}/proposals?limit=2").json()
+    assert body["next_cursor"] == body["proposals"][-1]["proposal_id"]
+    assert ":" not in body["next_cursor"]
+
+
+def test_a_newest_first_cursor_carries_its_order(client, experiment):
+    for index in range(4):
+        assert _create(client, experiment, value=f"Cu{index}O").status_code == 200
+    body = client.get(
+        f"/api/experiments/{experiment.id}/proposals?limit=2&order=newest_first"
+    ).json()
+    assert body["next_cursor"] == f"newest_first:{body['proposals'][-1]['proposal_id']}"
+
+
+def test_a_cursor_from_the_other_order_is_REFUSED_not_answered(client, experiment):
+    """THE WRONG-ANSWER FAILURE THIS REFUSAL EXISTS FOR, and it is why the check runs
+    BEFORE the lookup.
+
+    Both orders hold the same proposals, so the id inside a cross-order cursor is
+    always FOUND. The walk would simply continue from the wrong side and hand back
+    rows the client had already read, labelled as the next page — an error the
+    unknown-cursor refusal cannot catch, because nothing is unknown.
+
+    MUTATION: deleted the mismatch check and MEASURED what the route then answered,
+    rather than predicting it. Over the six proposals below, `canonical` being the
+    stored oldest-first order: the crossed newest-first request answered **200** with
+    `[canonical[0]]` — the OLDEST proposal on the record, served as the next page of a
+    newest-first walk — and the crossed oldest-first request answered **200** with
+    `[canonical[5]]`, the NEWEST served as the next page of an oldest-first walk.
+    Two wrong answers, no error, and nothing in the body says so.
+    """
+    for index in range(6):
+        assert _create(client, experiment, value=f"Cu{index}O").status_code == 200
+
+    oldest = client.get(f"/api/experiments/{experiment.id}/proposals?limit=2").json()
+    forward_cursor = oldest["next_cursor"]
+    newest = client.get(
+        f"/api/experiments/{experiment.id}/proposals?limit=2&order=newest_first"
+    ).json()
+    reverse_cursor = newest["next_cursor"]
+
+    crossed = client.get(
+        f"/api/experiments/{experiment.id}/proposals"
+        f"?order=newest_first&after={forward_cursor}"
+    )
+    assert crossed.status_code == 422, crossed.text
+    assert crossed.json()["error"] == "cursor_order_mismatch"
+    assert crossed.json()["cursor_order"] == "oldest_first"
+    assert crossed.json()["requested_order"] == "newest_first"
+
+    back = client.get(
+        f"/api/experiments/{experiment.id}/proposals?after={reverse_cursor}"
+    )
+    assert back.status_code == 422, back.text
+    assert back.json()["error"] == "cursor_order_mismatch"
+    assert back.json()["cursor_order"] == "newest_first"
+    assert back.json()["requested_order"] == "oldest_first"
+
+
+def test_an_unknown_cursor_in_the_right_order_is_still_unknown_cursor(
+    client, experiment
+):
+    """NEGATIVE CONTROL for the test above: the mismatch refusal must not swallow the
+    unknown-cursor one. A tagged cursor naming nothing is `unknown_cursor`, not
+    `cursor_order_mismatch`."""
+    _created(client, experiment)
+    response = client.get(
+        f"/api/experiments/{experiment.id}/proposals"
+        "?order=newest_first&after=newest_first:01JQZZNOTAPROPOSAL000000"
+    )
+    assert response.status_code == 422, response.text
+    assert response.json()["error"] == "unknown_cursor"
+
+
+def test_an_order_this_route_does_not_offer_is_refused(client, experiment):
+    """The `Literal` is the closed set; a third direction is a 422, not a default."""
+    response = client.get(
+        f"/api/experiments/{experiment.id}/proposals?order=alphabetical"
+    )
+    assert response.status_code == 422, response.text
+
+
+def test_the_order_parameter_is_published_through_the_derived_surfaces(client):
+    """OpenAPI and the MCP tool schema are DERIVED from the route, so neither may be
+    updated by hand — this asserts the derivation actually carried it."""
+    from isaac_api.mcp.tools import TOOLS
+
+    spec = client.get("/api/openapi").json()
+    params = spec["paths"]["/api/experiments/{experiment_id}/proposals"]["get"][
+        "parameters"
+    ]
+    order = next(p for p in params if p["name"] == "order")
+    assert order["in"] == "query"
+    assert set(order["schema"]["enum"]) == {"oldest_first", "newest_first"}
+    assert order["schema"]["default"] == "oldest_first"
+
+    published = TOOLS["isaac_list_proposals"].input_schema["properties"]["order"]
+    assert set(published["enum"]) == {"oldest_first", "newest_first"}
+    assert published["description"] == order["schema"].get(
+        "description", order.get("description")
+    )
+
+
 # --- DEC-6: hydration returns the pair shape ----------------------------------
 
 
