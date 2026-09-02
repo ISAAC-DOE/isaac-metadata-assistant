@@ -488,6 +488,26 @@ function ProposalsBrowser({
   const [busyId, setBusyId] = useState<string | null>(null);
   const [refusal, setRefusal] = useState<string | null>(null);
   const [announcement, setAnnouncement] = useState('');
+  /**
+   * THE VISIBLE HALF OF AN ARRIVAL ANNOUNCEMENT — see the effect that sets it,
+   * below. `null` means nothing is being said; dismissing sets it back to `null`
+   * without touching `announcement` (the sr-only region), which is a one-shot
+   * utterance and needs no dismissal of its own.
+   */
+  const [arrivalNote, setArrivalNote] = useState<string | null>(null);
+  /**
+   * THE RUNNING TOTAL BEHIND `arrivalNote`, ACCUMULATED SINCE THE LAST DISMISS.
+   *
+   * A second arrival while the first note is still standing used to render the
+   * SAME sentence a second time — invisible, because the text had not changed —
+   * so a reader who dismissed nothing still lost the second arrival. The note is
+   * now built from this running total rather than from one arrival's own delta,
+   * and it is reset ONLY by Dismiss — never by this panel's own review acts,
+   * because a proposal counted here may still be sitting unreviewed regardless
+   * of what this reader just accepted, rejected, superseded or withdrew on a
+   * DIFFERENT proposal. See `dismissArrivalNote` below.
+   */
+  const arrivalTotalRef = useRef(0);
 
   /**
    * Put a sentence into the live region SO THAT IT IS ACTUALLY ANNOUNCED.
@@ -524,11 +544,59 @@ function ProposalsBrowser({
   /** Suppresses the loading blank on a reload this panel caused itself. */
   const silentRef = useRef(false);
 
+  /*
+   * ARRIVAL DETECTION — WHY IT READS `by_state.open` RATHER THAN DIFFING THE WINDOW.
+   *
+   * The obvious mechanism is "an id in the freshly loaded window that was not in
+   * the previous one". It was checked against the server and rejected, because a
+   * newly arrived proposal is NOT guaranteed to land inside the window this panel
+   * is looking at.
+   *
+   * `sorted_proposals` (`workspace.py::_sorted_proposals`) orders OLDEST FIRST —
+   * `(proposed_utc, proposal_id)` — and `list_proposals` (`routes.py`) walks that
+   * order from the cursor forward. A newly arrived proposal has the LATEST
+   * `proposed_utc` of anything on the record, so it sorts LAST, not first. The
+   * panel's default view is `cursor=null`, i.e. the FIRST `_PROPOSAL_WINDOW_DEFAULT`
+   * (50) entries — the OLDEST 50. On any record already holding 50+ proposals, a
+   * new arrival is never in that window at all, however many times it is re-read;
+   * it only becomes visible once a reader has paged all the way to the last
+   * window. A window-diff mechanism would therefore announce nothing for the
+   * ordinary case this slice exists to handle, and readers of records with fewer
+   * than 50 proposals would get an inconsistent experience depending on which
+   * page and filter they happened to have open.
+   *
+   * `by_state`, by contrast, is computed by `_proposals_payload` over
+   * `exp.proposals` — the WHOLE record — on every list response, REGARDLESS of the
+   * `state` filter or the cursor. A freshly created proposal is always `open`
+   * (`proposals.STATE_OPEN`), and the four review acts this panel can perform each
+   * move a proposal OUT of `open`, never in — there is no path in this build that
+   * creates a proposal already reviewed. So an INCREASE in `by_state.open` between
+   * two loads can only mean a proposal arrived from elsewhere: it cannot be
+   * produced by this panel's own accept/reject/supersede/withdraw, and it is
+   * insensitive to which filter or page is currently open. That is the mechanism
+   * implemented below.
+   */
+  /** The `by_state.open` count as of the last successfully loaded response, for
+   *  ANY reason (signal, filter, page, this panel's own act). `null` only before
+   *  the very first successful load — the guard against announcing on hydration. */
+  const lastOpenCountRef = useRef<number | null>(null);
+  /**
+   * True only while the fetch about to run was started BY THE SIGNAL EFFECT below,
+   * as opposed to a filter change, a page change, `reload(false)`'s Retry, or this
+   * panel's own review act (`review`/`recoverFromStale` call `reload(true)`
+   * directly, never through this ref). Read once at the top of the fetch effect
+   * and immediately reset, so it is tied to exactly the request it was set for and
+   * cannot leak onto an unrelated later request.
+   */
+  const arrivalReloadRef = useRef(false);
+
   const filterId = useId();
 
   useEffect(() => {
     let alive = true;
     const generation = ++generationRef.current;
+    const isArrivalReload = arrivalReloadRef.current;
+    arrivalReloadRef.current = false;
     if (!silentRef.current) setList({ status: 'loading' });
     silentRef.current = false;
 
@@ -541,6 +609,53 @@ function ProposalsBrowser({
         if (!alive || generation !== generationRef.current) return;
         setList({ status: 'data', loaded });
         setVersion(loaded.experiment_version);
+
+        const openNow = loaded.by_state.open ?? 0;
+        const previousOpen = lastOpenCountRef.current;
+        /*
+         * SUPPRESSED: initial hydration (`previousOpen === null`); a reload this
+         * panel caused itself (`isArrivalReload === false` — filter/page changes,
+         * `reload(false)`'s Retry, and this panel's own review acts never set the
+         * ref); an UNCHANGED count (`openNow === previousOpen` — nothing this
+         * panel can read moved either way, so there is nothing to say); and a
+         * count that fell (`openNow < previousOpen` — a review act ELSEWHERE
+         * moved a proposal out of `open`, which is not an arrival). Repeated
+         * polling with an unchanged count and duplicate signals are both already
+         * excluded upstream: `proposalSignal`'s own dedupe (below) means this
+         * effect is not even re-entered for either.
+         *
+         * `n` IS A LOWER BOUND, NOT AN EXACT COUNT, and the sentence says so.
+         * `openNow > previousOpen` is sound evidence that AT LEAST one arrival
+         * happened (nothing this panel does can raise `open`) — but it is a NET
+         * delta over the whole interval between two reads, and an arrival landing
+         * beside an unrelated review act ELSEWHERE nets to a smaller rise, or to
+         * none at all if the two exactly offset. A same-count `3 -> 3` where one
+         * proposal arrived and a different one was reviewed by someone else in
+         * the same window is invisible to this mechanism, by construction — see
+         * the `net-offset` test, which pins that this panel says nothing false
+         * about that case rather than overclaiming a count it cannot know.
+         */
+        if (isArrivalReload && previousOpen !== null && openNow > previousOpen) {
+          const n = openNow - previousOpen;
+          arrivalTotalRef.current += n;
+          const total = arrivalTotalRef.current;
+          // The SPOKEN sentence is per-arrival (this arrival's own delta) so a
+          // screen-reader user hears each arrival as it happens, even while the
+          // VISIBLE note (below) already reflects an earlier, undismissed one.
+          const spoken =
+            `At least ${n} ${n === 1 ? 'proposed change' : 'proposed changes'} arrived and ` +
+            `${n === 1 ? 'is' : 'are'} ready to review.`;
+          // The VISIBLE note is the RUNNING TOTAL since the last Dismiss (M3) —
+          // never content, never a field path: `total` and the fixed words below
+          // are the only things this can ever say, by construction of what it
+          // reads.
+          const cumulative =
+            `At least ${total} ${total === 1 ? 'proposed change' : 'proposed changes'} arrived ` +
+            `and ${total === 1 ? 'is' : 'are'} ready to review.`;
+          announce(spoken);
+          setArrivalNote(cumulative);
+        }
+        lastOpenCountRef.current = openNow;
       })
       .catch((err: unknown) => {
         if (!alive || generation !== generationRef.current) return;
@@ -550,7 +665,7 @@ function ProposalsBrowser({
     return () => {
       alive = false;
     };
-  }, [experimentId, filter, cursor, reloadNonce]);
+  }, [experimentId, filter, cursor, reloadNonce, announce]);
 
   const reload = useCallback((silent: boolean) => {
     silentRef.current = silent;
@@ -596,6 +711,12 @@ function ProposalsBrowser({
   useEffect(() => {
     if (proposalSignal === null || proposalSignal === lastSignalRef.current) return;
     lastSignalRef.current = proposalSignal;
+    // Marks the reload this triggers as one that MAY raise an arrival
+    // announcement — see `arrivalReloadRef` and the fetch effect that reads it.
+    // A duplicate `proposalSignal` never reaches here at all (the guard above),
+    // so "repeated polling with no new ids" never sets this ref in the first
+    // place, on top of the count-based guard inside the fetch effect.
+    arrivalReloadRef.current = true;
     reload(true);
   }, [proposalSignal, reload]);
 
@@ -746,6 +867,40 @@ function ProposalsBrowser({
       <p className="sr-only" role="status" aria-live="polite">
         {announcement}
       </p>
+
+      {/*
+        THE VISIBLE HALF OF AN ARRIVAL, for a reader who is not using a screen
+        reader — the sr-only region above already spoke this same sentence once.
+        No `role`/`aria-live` here: giving it one would announce the sentence a
+        second time, from a second region, for one event.
+
+        NO ANIMATION, so `prefers-reduced-motion` needs nothing further — there is
+        nothing here to reduce. It never steals focus: it appears in place, and
+        Dismiss is an ordinary tab stop rather than one this component moves focus
+        to. Layout is flex/wrap only, no fixed pixel width, so it does not overflow
+        a narrow viewport — matching the toolbar it sits beside.
+      */}
+      {arrivalNote !== null && (
+        <div className="proposals-arrival-note" role="note">
+          <span className="proposals-arrival-note-text">{arrivalNote}</span>
+          {/*
+            Dismiss clears the RUNNING TOTAL (M3) — and ONLY the running total.
+            It does not mark anything reviewed and it never touches `proposals`,
+            `filter`, `cursor` or triggers a reload: the arrived proposals may
+            still be sitting unreviewed after this click, exactly as before it.
+          */}
+          <button
+            type="button"
+            className="btn btn-secondary"
+            onClick={() => {
+              arrivalTotalRef.current = 0;
+              setArrivalNote(null);
+            }}
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
 
       {refusal && (
         <div className="proposals-error" role="alert">
