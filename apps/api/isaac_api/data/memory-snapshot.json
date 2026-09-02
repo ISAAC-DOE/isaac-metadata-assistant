@@ -10504,7 +10504,7 @@
       },
       {
         "path": "apps/web/src/lib/api.ts",
-        "sha256": "9fa4915bb48f5d0c12f75664ca8f6e1c66776dec7abb77a693f81ee6160668c9"
+        "sha256": "0c7f4e3b3d8a18dd6af72e1cc73d01ab4f983b963bb9ce409925c65bdb39b59d"
       },
       {
         "path": "apps/web/src/lib/assistant.ts",
@@ -10524,7 +10524,7 @@
       },
       {
         "path": "apps/web/src/lib/types.ts",
-        "sha256": "3fcf60d4e9ecc61118e7964ac8401d38a67d4ab19c16956bce6bf0281bd591ce"
+        "sha256": "a7d2dffe6dc41cbb96f2dbeab420ff4c0102b17294e380481d6fdb0dd4b0d251"
       },
       {
         "path": "apps/web/src/lib/useFetch.ts",
@@ -10564,7 +10564,7 @@
       },
       {
         "path": "apps/web/src/screens/RecordWorkbench.tsx",
-        "sha256": "eaac7cc13459c69226c3294d25824b362e15b8211b6680bfbac9cf255b3e3493"
+        "sha256": "103e2e7eb15d0480104eddcf40c89cb238d6f38eb652cd04f5a714deb69ae29c"
       },
       {
         "path": "apps/web/src/screens/SettingsPage.tsx",
@@ -11012,7 +11012,7 @@
       }
     ],
     "served_file_count": 200,
-    "served_manifest_fingerprint": "b88aa0364fbe89d62e8fba7cd088edba89b3c05d9d5a0d7cf0c642cd44c29769"
+    "served_manifest_fingerprint": "2cab9c7479c32fa8ce36726ee5b852c21a1408579cd7e20a5a1dc778ccb7bda0"
   },
   "overview": {
     "built_at_commit": "caab1d0a69c1733524bda5dde495623bc4b7bad1",
