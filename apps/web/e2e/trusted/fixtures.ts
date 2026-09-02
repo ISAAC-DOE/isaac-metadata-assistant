@@ -40,6 +40,16 @@ export interface ServerProposal {
   accepted_value: unknown;
   accepted_from: string | null;
   target_stale: boolean | null;
+  /*
+   * ADDED 2026-09-02 for `two-actor-workflow.spec.ts`. Every one of these is on the
+   * wire already — measured by listing the served keys of a real proposal:
+   * `client_request_key`, `target_digest` and `current_target_digest` are all in the
+   * serializer's output. They are declared here rather than cast at the use site so a
+   * server that stopped sending one is a compile error in the spec that reads it.
+   */
+  client_request_key: string | null;
+  target_digest: string;
+  current_target_digest: string | null;
   history: {
     action: string;
     actor_subject: string | null;
@@ -66,8 +76,52 @@ export interface ServerApi {
       target_field_path: string;
       proposed_value: unknown;
       rule: string;
+      /*
+       * THE EXACTLY-ONCE KEY, added 2026-09-02. The route takes it and answers
+       * `deduplicated: true` with the SAME `proposal_id` when a key it has already
+       * seen on this record arrives again — measured, not assumed. An MCP producer
+       * retrying a request it never saw the answer to is the case it exists for, and
+       * a spec that omits it cannot tell a retry from a second proposal.
+       */
+      client_request_key?: string;
     }
   ): Promise<ServerProposal>;
+  /**
+   * `propose`, WITHOUT the "this must MINT a proposal" assertion — for the one call
+   * that is deliberately a REPLAY and must be allowed to come back deduplicated.
+   */
+  proposeRaw(
+    id: string,
+    body: Record<string, unknown>
+  ): Promise<{ proposal: ServerProposal; deduplicated: boolean }>;
+  /** Review one proposal over HTTP — used ONLY to measure a refusal, never to act. */
+  review(
+    id: string,
+    proposalId: string,
+    body: Record<string, unknown>
+  ): Promise<{ status: number; body: Record<string, unknown> }>;
+  /** One record-level field, written the way the Record Description panel writes it. */
+  setRecordField(id: string, path: string, value: unknown): Promise<void>;
+  /** The served draft's value at one record-level field path, or `undefined`. */
+  recordFieldValue(id: string, path: string): Promise<unknown>;
+  /** `POST .../validate` — the verdict the Workbench's Validate & Review renders. */
+  validate(id: string): Promise<{
+    ok: boolean;
+    errors: { path: string; message: string }[];
+    dry_run: boolean;
+    official_validator_ran?: boolean;
+    runs?: { run_id: string; ok: boolean; errors: { path: string; message: string }[] }[];
+  }>;
+  /** One page of the change feed. `cursor` omitted means the cursorless resync. */
+  changes(
+    id: string,
+    query?: { cursor?: string; limit?: number }
+  ): Promise<{
+    changes: { kind: string; entity_id: string; changed_at_rev: number; state?: string }[];
+    next_cursor: string;
+    has_more: boolean;
+    limit: number;
+  }>;
   /** The proposals as the list operation reports them. */
   proposals(id: string): Promise<{
     proposals: ServerProposal[];
@@ -88,6 +142,24 @@ function makeServer(api: APIRequestContext): ServerApi {
     const res = await api.get(`${TRUSTED_API_BASE}/experiments/${id}`);
     const body = (await json(res, `GET /experiments/${id}`)) as { version: string };
     return body.version;
+  };
+
+  /**
+   * One record-level field's value, read off the SERVED DRAFT rather than out of any
+   * stored document — the same place the Record Description panel reads it from, so a
+   * mismatch between what the panel shows and what this asserts is impossible.
+   */
+  const recordFieldValue = async (id: string, path: string): Promise<unknown> => {
+    const res = await api.get(`${TRUSTED_API_BASE}/experiments/${id}/draft`);
+    const body = (await json(res, `GET /draft`)) as {
+      groups: { fields?: { path: string; value?: unknown }[] }[];
+    };
+    for (const group of body.groups ?? []) {
+      for (const field of group.fields ?? []) {
+        if (field.path === path) return field.value;
+      }
+    }
+    return undefined;
   };
 
   const runEtag = async (id: string, runId: string): Promise<string> => {
@@ -139,6 +211,78 @@ function makeServer(api: APIRequestContext): ServerApi {
     proposals: async (id) => {
       const res = await api.get(`${TRUSTED_API_BASE}/experiments/${id}/proposals`);
       return (await json(res, `GET /proposals`)) as Awaited<ReturnType<ServerApi['proposals']>>;
+    },
+    proposeRaw: async (id, body) => {
+      const res = await api.post(`${TRUSTED_API_BASE}/experiments/${id}/proposals`, {
+        headers: { 'content-type': 'application/json', 'If-Match': `"${await version(id)}"` },
+        data: body,
+      });
+      expect(res.status(), `POST /proposals -> ${res.status()} ${await res.text()}`).toBe(200);
+      return (await res.json()) as { proposal: ServerProposal; deduplicated: boolean };
+    },
+    /*
+     * DELIBERATELY DOES NOT ASSERT `res.ok()`. Its only caller is measuring a REFUSAL,
+     * and a helper that threw on a non-2xx could not be used to observe one — the
+     * status is the observation.
+     */
+    review: async (id, proposalId, body) => {
+      const res = await api.post(
+        `${TRUSTED_API_BASE}/experiments/${id}/proposals/${proposalId}/review`,
+        {
+          headers: { 'content-type': 'application/json', 'If-Match': `"${await version(id)}"` },
+          data: body,
+        }
+      );
+      let parsed: Record<string, unknown> = {};
+      try {
+        parsed = (await res.json()) as Record<string, unknown>;
+      } catch {
+        parsed = {};
+      }
+      return { status: res.status(), body: parsed };
+    },
+    setRecordField: async (id, path, value) => {
+      /*
+       * `POST .../answers` WITH THE BARE DOTTED PATH AS THE KEY, which is exactly what
+       * `RecordDescriptionPanel` sends for a path the record does not yet hold
+       * (`api.submitAnswer` -> this route; it routes an already-held path to `/edit`
+       * instead). Measured over HTTP: `field:system.technique` is refused
+       * `422 unrecognized_field` and `system.technique` is accepted 200 — so the
+       * `field:` prefix that the RUN override routes take is wrong here, and a fixture
+       * using it would report the record-level surface as broken.
+       */
+      const res = await api.post(`${TRUSTED_API_BASE}/experiments/${id}/answers`, {
+        headers: { 'content-type': 'application/json', 'If-Match': `"${await version(id)}"` },
+        data: { confirmed_by_user: true, answers: { [path]: value } },
+      });
+      expect(
+        res.ok(),
+        `POST /answers ${path} -> ${res.status()} ${await res.text()}`
+      ).toBeTruthy();
+      // A 200 IS NOT ENOUGH, for the reason `setRunField` states: these routes drop a
+      // value they do not recognise and still answer 200.
+      expect(
+        await recordFieldValue(id, path),
+        `the record-level write returned 200 but ${path} did not take the value`
+      ).toEqual(value);
+    },
+    recordFieldValue: (id, path) => recordFieldValue(id, path),
+    validate: async (id) => {
+      const res = await api.post(`${TRUSTED_API_BASE}/experiments/${id}/validate`, {
+        headers: { 'content-type': 'application/json' },
+        data: {},
+      });
+      return json(res, 'POST /validate') as ReturnType<ServerApi['validate']>;
+    },
+    changes: async (id, query = {}) => {
+      const params = new URLSearchParams();
+      if (query.cursor !== undefined) params.set('cursor', query.cursor);
+      if (query.limit !== undefined) params.set('limit', String(query.limit));
+      const qs = params.toString();
+      const res = await api.get(
+        `${TRUSTED_API_BASE}/experiments/${id}/changes${qs === '' ? '' : `?${qs}`}`
+      );
+      return json(res, 'GET /changes') as ReturnType<ServerApi['changes']>;
     },
     setRunField: async (id, runId, path, value) => {
       const before = await api.get(`${TRUSTED_API_BASE}/experiments/${id}/runs/${runId}`);
