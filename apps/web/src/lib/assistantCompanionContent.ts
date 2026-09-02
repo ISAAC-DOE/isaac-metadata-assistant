@@ -96,8 +96,22 @@ export const ASSISTANT_COMPANION_COPY = {
    * What the section is, said before any state is reported. Present tense about
    * what the companion IS, and deliberately silent about whether it works —
    * that is the state's job, one paragraph down.
+   *
+   * CORRECTED 2026-09-02. The prior sentence claimed "nothing you do there
+   * changes a record here unless you come back and change it yourself" — an
+   * unqualified denial that was FALSE the day it shipped. The companion's own
+   * permitted tool set (`apps/api/isaac_api/mcp/policy.py::PERMITTED_TOOL_NAMES`,
+   * requested in `artifacts/isaac-assistant/tool-permission-manifest.json` as
+   * `isaac:draft.write` and `isaac:proposals.write`) includes
+   * `isaac_answer_questions` and `isaac_create_run`, which write directly into a
+   * record's draft the moment a scientist confirms them in Claude — no separate
+   * trip back to this website is needed for that write to happen — and
+   * `isaac_propose_field_value`, which attaches a reviewable suggestion instead.
+   * What stays true, and is why this is a correction rather than a rewrite, is
+   * the boundary one line down: nothing is exported or made official except by
+   * finishing that separately, here.
    */
-  lead: 'An optional companion page, opened in Claude, that a scientist can ask about their ISAAC work. It is a separate place you open, never a part of this website, and nothing you do there changes a record here unless you come back and change it yourself.',
+  lead: 'An optional companion page, opened in Claude, that a scientist can ask about their ISAAC work. It is a separate place you open, never a part of this website. Some actions there write directly into this record’s draft once you confirm them — closing an open question, adding a run — and others leave a suggestion attached to the record for review instead; nothing is exported or made official except separately, here.',
 
   /**
    * THE HEADLINE BOUNDARY, rendered in every state including the one with a
