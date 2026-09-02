@@ -616,12 +616,24 @@ describe('useChangeFeed', () => {
  * `grow` adds entries AFTER each page is cut, which is how a record under sustained
  * writes is modelled: the cursor keeps moving and `has_more` never goes false.
  */
-function feedServer(opts: { total: number; limit?: number; grow?: number }) {
+function feedServer(opts: {
+  total: number;
+  limit?: number;
+  grow?: number;
+  /**
+   * Report `has_more: false` on every Nth reply EVEN THOUGH entries remain. Not a
+   * hypothetical: it is the counterexample an independent review used to measure the
+   * published rate bound false, and it models any server that reports a lull it is
+   * about to contradict. The client cannot audit the claim, so it clears its budget.
+   */
+  flapEvery?: number;
+}) {
   const pageSize = opts.limit ?? 50;
   let total = opts.total;
   const at: number[] = [];
   const sent: (string | undefined)[] = [];
   let caughtUpAt: number | null = null;
+  let replies = 0;
 
   const impl = async (
     _id: string,
@@ -639,7 +651,9 @@ function feedServer(opts: { total: number; limit?: number; grow?: number }) {
       changed_at_rev: from + i,
     }));
     total += opts.grow ?? 0;
-    const has_more = end < total;
+    replies += 1;
+    const flapping = opts.flapEvery !== undefined && replies % opts.flapEvery === 0;
+    const has_more = end < total && !flapping;
     if (!has_more && caughtUpAt === null) caughtUpAt = now;
     return {
       changes,
@@ -656,11 +670,19 @@ function feedServer(opts: { total: number; limit?: number; grow?: number }) {
     impl,
     at,
     sent,
+    /** New entries arriving after the client has already caught up. */
+    addEntries(n: number) {
+      total += n;
+    },
     get requests() {
       return at.length;
     },
     get caughtUpAt() {
       return caughtUpAt;
+    },
+    /** Every inter-request interval, in order. */
+    get gaps() {
+      return at.slice(1).map((t, k) => t - at[k]);
     },
   };
 }
@@ -880,6 +902,74 @@ describe('useChangeFeed drain boundaries', () => {
     expect(new Set(gaps)).toEqual(new Set([POLL_INTERVAL_MS]));
   }, 20_000);
 
+  it('a FLAPPING server gets a fresh burst per cycle — the sustained bound does NOT cover it', async () => {
+    /*
+     * THE COUNTEREXAMPLE TO THE PUBLISHED BOUND, MEASURED RATHER THAN ARGUED, and
+     * this test exists because an independent review found the branch publishing
+     * `26 + T / POLL_INTERVAL_MS` as "the hard rate bound" with no premise attached.
+     * The premise is a server answering `has_more: true` CONTINUOUSLY. A server that
+     * reports `has_more: false` every 21st reply while entries still remain clears
+     * `drains` each time and is handed a fresh 20-page burst every cycle.
+     *
+     * THE CLIENT IS NOT WRONG TO DO THAT, which is why nothing here is "fixed": the
+     * reset rule is "the server said it had finished", and a client cannot audit that
+     * claim. Weakening it was tried and measured WORSE. What was wrong was publishing
+     * a bound without its premise, and the remedy is the honest cycle bound below.
+     */
+    const CYCLE = POLL_INTERVAL_MS + CHANGE_FEED_MAX_CONSECUTIVE_DRAINS * CHANGE_FEED_DRAIN_DELAY_MS;
+    expect(CYCLE).toBe(13_000);
+    const srv = feedServer({ total: 10_000_000, limit: 50, flapEvery: 21 });
+    const t0 = Date.now();
+    mount(srv);
+
+    await advance(60_000 - (Date.now() - t0));
+    // THE MEASURED NUMBER, asserted exactly. The sustained bound would have said 33.
+    expect(srv.requests).toBe(85);
+
+    await advance(600_000 - (Date.now() - t0));
+    expect(srv.requests).toBe(966);
+
+    // THE BOUND THAT DOES HOLD against any server behaviour, because the reset is the
+    // server's word: at most one cadence gap plus a whole burst per cycle.
+    const perCycle = 1 + CHANGE_FEED_MAX_CONSECUTIVE_DRAINS;
+    expect(966).toBeLessThanOrEqual(perCycle * (Math.ceil(600_000 / CYCLE) + 1));
+    expect(85).toBeLessThanOrEqual(perCycle * (Math.ceil(60_000 / CYCLE) + 1));
+    // ~1.6 req/s — the same figure the rejected budget-refill design was measured at.
+    // Recorded because the ceiling is structural, not because it is comfortable.
+    expect(966 / 600).toBeCloseTo(1.61, 1);
+
+    // And it never goes faster than the drain delay, at any point in any cycle.
+    expect(Math.min(...srv.gaps)).toBe(CHANGE_FEED_DRAIN_DELAY_MS);
+  }, 30_000);
+
+  it('a SECOND backlog, after the first one finished, drains at the FULL burst rate', async () => {
+    /*
+     * THE COUNTER IS CLEARED BY `has_more: false`, AND NOTHING PINNED THAT. The mutant
+     * `drains = drains + 1` — never reset at all — passed all 53 tests of the previous
+     * revision, while this file's own prose promised "a later backlog gets a full
+     * budget of its own". Under that mutant the first backlog leaves the counter at 21,
+     * so the second one starts in the CONTINUATION tier at 1,000 ms instead of 250 ms.
+     *
+     * The first backlog is deliberately 21 pages rather than two: a short first
+     * backlog leaves the counter below the ceiling, where `changeFeedBacklogDelayMs`
+     * returns the same 250 ms either way and the mutant survives.
+     */
+    const srv = feedServer({ total: 1050, limit: 50 }); // 21 pages
+    const t0 = Date.now();
+    mount(srv);
+    await advance(POLL_INTERVAL_MS + CHANGE_FEED_DRAIN_DELAY_MS * 20);
+    expect(srv.requests).toBe(21);
+    expect(srv.caughtUpAt! - t0).toBe(13_000); // the counter is now cleared
+
+    srv.addEntries(1000); // a new backlog arrives while the client is idle
+    await advance(POLL_INTERVAL_MS);
+    expect(offsets(srv, t0)[21]).toBe(21_000); // found at the ordinary cadence
+
+    await advance(CHANGE_FEED_DRAIN_DELAY_MS * 3);
+    // 250 ms apart — the burst rate, not the 1,000 ms the continuation tier would give.
+    expect(offsets(srv, t0).slice(21, 25)).toEqual([21_000, 21_250, 21_500, 21_750]);
+  });
+
   // --- the feed floor: a refused cursor -------------------------------------
 
   it('RESYNCS FROM THE FEED FLOOR after a 422, instead of resending the refused cursor forever', async () => {
@@ -1042,13 +1132,12 @@ describe('useChangeFeed drain boundaries', () => {
     let hang = false;
     vi.spyOn(api, 'getChanges').mockImplementation((id, o = {}, signal) => {
       signal?.addEventListener('abort', () => aborted.push(true));
-      if (hang) return new Promise<ApiChangeFeedPage>(() => {});
+      if (hang) return new Promise<ApiChangeFeedPage>((res) => (release = res));
       return srv.impl(id as string, o);
     });
-    const errors: unknown[] = [];
-    const spyErr = vi.spyOn(console, 'error').mockImplementation((...a) => errors.push(a));
-
-    const { unmount } = renderHook(() => useChangeFeed(EXP_ID, { onChanges: vi.fn() }));
+    const onChanges = vi.fn();
+    let release: (p: ApiChangeFeedPage) => void = () => {};
+    const { unmount } = renderHook(() => useChangeFeed(EXP_ID, { onChanges }));
     await advance(POLL_INTERVAL_MS + CHANGE_FEED_DRAIN_DELAY_MS * 2);
     const during = srv.requests;
     expect(during).toBe(3); // genuinely mid-drain
@@ -1064,10 +1153,24 @@ describe('useChangeFeed drain boundaries', () => {
 
     await advance(POLL_INTERVAL_MS * 5);
     expect(srv.requests).toBe(during);
-    // React logs an "update on an unmounted component" warning through console.error;
-    // its absence is the assertion, not a nice-to-have.
-    expect(errors).toEqual([]);
-    spyErr.mockRestore();
+
+    // NO WORK HAPPENS WHEN THE ABORTED REQUEST LATER SETTLES, and this assertion
+    // replaces one that could not fail. The previous version spied on `console.error`
+    // and asserted no "update on an unmounted component" warning — but React 18.3.1
+    // REMOVED that warning entirely, so the spy was asserting the absence of something
+    // this version of React never emits. It was vacuous, and its comment said the
+    // opposite. `onChanges` is an OBSERVABLE post-unmount side effect: the `.then`
+    // guard is the same `cancelled || ac.signal.aborted` check that gates every
+    // `setState` in the chain, so a callback that does not fire is evidence the guard
+    // held, where a missing console warning was evidence of nothing.
+    const beforeRelease = onChanges.mock.calls.length;
+    await act(async () => {
+      release(page({ changes: [ENTRY], returned: 1, next_cursor: 'LATE', remaining: 0 }));
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(onChanges.mock.calls.length).toBe(beforeRelease);
+    expect(srv.requests).toBe(during); // and it did not restart the chain either
+    expect(vi.getTimerCount()).toBe(0);
   });
 
   it('UNMOUNTING BETWEEN POLLS leaves no pending timer', async () => {

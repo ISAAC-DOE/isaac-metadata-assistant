@@ -137,13 +137,32 @@ export const CHANGE_FEED_MAX_CONSECUTIVE_DRAINS = 20;
  * module's own prose promised the ordinary cadence. The escalation keeps that promise
  * literally — in the limit the continuation delay IS `POLL_INTERVAL_MS`.
  *
- * THE HARD RATE BOUND, which is the property that makes an unbounded loop impossible
- * rather than merely unlikely: under a server answering `has_more: true` with a moving
- * cursor forever, the delays after the first page are 250 x 20, then 500, 1000, 2000,
- * 4000, then `POLL_INTERVAL_MS` forever. So in any window of T milliseconds the client
- * issues **at most 26 + T / POLL_INTERVAL_MS requests** — one more than the 25 pages
- * that fit in the transition, plus the cadence. Pinned by
- * `change-feed.test.ts` -> "sustained has_more never exceeds the documented rate bound".
+ * THE RATE BOUND, AND ITS PREMISE, WHICH MUST NEVER BE QUOTED APART. Under a server
+ * answering `has_more: true` **continuously** with a moving cursor, the delays after
+ * the first page are 250 x 20, then 500, 1000, 2000, 4000, then `POLL_INTERVAL_MS`
+ * forever, so in any window of T ms the client issues at most `26 + T / POLL_INTERVAL_MS`
+ * requests. Pinned by `change-feed.test.ts` ->
+ * "SUSTAINED has_more never exceeds the documented rate bound".
+ *
+ * THAT BOUND IS FALSE OUTSIDE THAT PREMISE, AND AN EARLIER REVISION OF THIS DOCSTRING
+ * PUBLISHED IT UNQUALIFIED AS "the hard rate bound". An independent review measured
+ * the counterexample: a server that reports `has_more: false` on every 21st reply
+ * while entries still remain clears `drains` each time, so the client gets a FRESH
+ * burst per cycle. Measured on the harness at limit 50 with jitter pinned to 1.0:
+ * **85 requests in 60,000 ms** (against that bound's 33.5) and 966 in 600,000 ms.
+ *
+ * THE BOUND THAT HOLDS AGAINST **ANY** SERVER BEHAVIOUR is a cycle bound, not a
+ * cadence one: the reset is the server's word, so the fastest sustainable pattern is
+ * one cadence gap followed by the whole burst — `1 + CHANGE_FEED_MAX_CONSECUTIVE_DRAINS`
+ * = 21 requests per `POLL_INTERVAL_MS + 20 x CHANGE_FEED_DRAIN_DELAY_MS` = 13,000 ms,
+ * about **1.6 req/s**. Pinned by "a FLAPPING server gets a fresh burst per cycle".
+ *
+ * THAT NUMBER DESERVES TO BE READ TWICE: ~1.6 req/s is exactly the figure the rejected
+ * budget-refill design was measured at. The difference is WHERE the refill comes from —
+ * this client refills only on the server's own claim to be finished, which is the
+ * strictly weaker (and the only honest) rule, since a client cannot audit that claim.
+ * Chasing the flapping case by weakening the reset was tried and measured WORSE
+ * (74 req/min against a pause the server genuinely meant), so it is not done here.
  *
  * The continuation delay is NOT jittered, for the same reason the burst delay is not:
  * jitter desynchronises two TABS at the cadence, and these requests are continuations
@@ -153,9 +172,15 @@ export const CHANGE_FEED_MAX_CONSECUTIVE_DRAINS = 20;
  */
 export function changeFeedBacklogDelayMs(drainsSoFar: number): number {
   if (drainsSoFar < CHANGE_FEED_MAX_CONSECUTIVE_DRAINS) return CHANGE_FEED_DRAIN_DELAY_MS;
-  // Clamped so a very long-lived backlog cannot turn the exponent into `Infinity`
-  // before `Math.min` sees it. 32 doublings is already far past the ceiling.
-  const steps = Math.min(drainsSoFar - CHANGE_FEED_MAX_CONSECUTIVE_DRAINS + 1, 32);
+  // NO CLAMP ON THE EXPONENT, and its absence is deliberate rather than overlooked.
+  // A previous version clamped it at 32 doublings and justified that as stopping the
+  // exponent becoming `Infinity`. An independent review measured the justification
+  // false: `2 ** 1e15` IS `Infinity`, and `Math.min(Infinity, POLL_INTERVAL_MS)` is
+  // `POLL_INTERVAL_MS` — the ceiling already handles it, so the clamp changed no
+  // return value at any input and the hazard it named did not exist. Removing it is
+  // safer than keeping a guard whose comment teaches a reader something untrue; the
+  // property is asserted at `Number.MAX_SAFE_INTEGER` by the ladder test.
+  const steps = drainsSoFar - CHANGE_FEED_MAX_CONSECUTIVE_DRAINS + 1;
   return Math.min(CHANGE_FEED_DRAIN_DELAY_MS * 2 ** steps, POLL_INTERVAL_MS);
 }
 
@@ -294,8 +319,14 @@ export function useChangeFeed(
     let failures = 0;
     let interval = POLL_INTERVAL_MS;
     let cancelled = false;
-    // Consecutive backlog pages fetched at `CHANGE_FEED_DRAIN_DELAY_MS`. Reset by any
-    // poll that is not a drain, so a later backlog gets a full budget of its own.
+    // Consecutive pages the server answered `has_more: true` for. It decides the drain
+    // rate through `changeFeedBacklogDelayMs`, and it is cleared by EXACTLY TWO
+    // events: a page reporting `has_more: false`, and a failed poll. It is NOT cleared
+    // by "any poll that is not a drain" — which is what this comment used to say, and
+    // it contradicted the one at the increment below, because a page that says
+    // `has_more: true` with an UNMOVED cursor is not a drain and still increments it.
+    // The consequence a reader needs: a later backlog gets a full burst budget only
+    // once the server has said the previous one finished.
     let drains = 0;
 
     // A fresh record starts a fresh feed: drop the previous record's cursor rather
