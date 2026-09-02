@@ -16,6 +16,7 @@
     "test:e2e:install": "playwright install --with-deps chromium",
     "typecheck:e2e": "tsc -p e2e/tsconfig.json --noEmit",
     "test:e2e:mutation": "playwright test --config=playwright.mutation.config.ts",
+    "test:e2e:trusted": "playwright test --config=playwright.trusted.config.ts",
     "bench:runs": "playwright test --config=playwright.bench.config.ts --reporter=list"
   },
   "dependencies": {

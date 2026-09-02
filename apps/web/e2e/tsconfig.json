@@ -38,6 +38,7 @@
     "**/*.ts",
     "../playwright.config.ts",
     "../playwright.mutation.config.ts",
+    "../playwright.trusted.config.ts",
     "../playwright.bench.config.ts"
   ]
 }
