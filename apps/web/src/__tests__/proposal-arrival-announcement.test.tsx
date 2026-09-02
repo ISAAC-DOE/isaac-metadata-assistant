@@ -187,6 +187,18 @@ function activityFor(ids: string[], highestRev: number, proposalRev: number = hi
     proposalStates: [],
     otherKinds: [],
     highestRev,
+    /*
+     * NO RUN NEWS, WHICH IS WHAT EVERY CASE IN THIS FILE IS ABOUT — a proposal
+     * arriving. `runIds` above is already empty; `runRev` is the RUN-scoped floor
+     * that pairs with it, and `-1` is what `recordChanges.summarise` produces when
+     * no run entry was seen (it seeds the max at `-1` and never lowers it).
+     *
+     * Added 2026-09-02, when `RecordChangeSummary` was structurally widened to
+     * carry `runRev` for real. It was a REQUIRED field the moment the producer
+     * branch landed, so this literal stopped compiling — a merge-reconciliation
+     * gap, not a change to anything this file asserts.
+     */
+    runRev: -1,
     proposalRev,
   };
 }
