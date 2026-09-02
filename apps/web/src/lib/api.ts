@@ -67,6 +67,7 @@ import type {
   ApiProposalsResponse,
   ApiProvenanceResponse,
   ApiProviderCapabilities,
+  ApiAssistantCompanion,
   ApiProviderRefusal,
   ApiRevisionDetail,
   ApiRevisionDiff,
@@ -2423,6 +2424,30 @@ export const api = {
    */
   getProviderCapabilities(): Promise<ApiProviderCapabilities> {
     return getJson<ApiProviderCapabilities>('/providers/capabilities');
+  },
+
+  /**
+   * Whether this deployment has an assistant artifact companion link, FROM THE
+   * SERVER.
+   *
+   * Deliberately not a constant in this bundle, for the same reason
+   * `getProviderCapabilities` is not: a link compiled in here would describe the
+   * build the browser was built from rather than the deployment it is talking
+   * to, and this bundle must never carry an artifact URL at all — a published
+   * artifact URL is access-bearing in an organization.
+   *
+   * NOT CACHED, AND THE SERVER IS NOT CACHING EITHER. The route re-reads the
+   * environment per request so that an operator who changes the variable is not
+   * reported from a value some process happened to read once. A client that
+   * cached the answer for the life of a page load would reintroduce exactly the
+   * staleness the route refuses, so the caller issues this where it renders.
+   *
+   * Read-only in the strongest sense available: the server opens no outbound
+   * connection to answer it, so a `configured` answer is a statement about a
+   * supplied value's SHAPE and never about whether the link resolves.
+   */
+  getAssistantCompanion(): Promise<ApiAssistantCompanion> {
+    return getJson<ApiAssistantCompanion>('/runtime/assistant-companion');
   },
 
   /**

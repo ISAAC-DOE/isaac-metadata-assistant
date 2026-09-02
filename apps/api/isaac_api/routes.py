@@ -47,6 +47,7 @@ from isaac_records.official import EXPECTED_VERSION, schema_path, validate_offic
 from isaac_records.portal_warnings import portal_warnings
 
 from . import __version__
+from . import artifact_link
 from . import assets
 from . import assistant_query
 from . import change_feed as cf
@@ -13853,6 +13854,173 @@ def _capabilities_payload() -> dict:
 )
 def get_provider_capabilities() -> dict:
     return _capabilities_payload()
+
+
+# --- 7f. the assistant artifact companion link (READ-ONLY configuration) -------
+#
+# `artifact_link.py` decides whether this deployment has a companion artifact and
+# refuses a configured value it will not use. UNTIL THIS OPERATION EXISTED NOTHING
+# READ IT: no route registered it, no module imported it and no screen referenced
+# it, so the entry point the companion needs — ISAAC offering the link — did not
+# exist, and the validation could not be reached by anything a scientist meets.
+# This operation is that consumer, and it is deliberately a REPORT: it resolves
+# configuration and returns what it found, and it acts on nothing.
+#
+# WHAT IT DELIBERATELY DOES NOT DO, each published as a named field rather than
+# left to be inferred from an absent one:
+#
+#   * It never fetches the link, so it cannot say whether the link resolves. That
+#     is `checked_reachable`, a constant false.
+#   * It never calls `artifact_link.embed_markup`, which raises by design — ISAAC
+#     deep-links and does not embed. That is `link_kind`, a constant `deep_link`.
+#   * It cannot know whether any scientist has enabled the ISAAC connector in
+#     their own Claude settings, and no part of this application can do it for
+#     them. That is `prerequisite`.
+#
+# AND IT HOLDS NO LINK OF ITS OWN. There is no default, no fallback and no literal
+# anywhere on this path: an unset variable resolves to the unconfigured link, which
+# serves nothing. A published artifact URL is access-bearing in an organization, so
+# committing one would put it in a history that outlives the artifact.
+
+
+#: The three states this operation can report. THREE VALUES RATHER THAN A BOOLEAN,
+#: because "nobody set a link" and "somebody set one that was refused" are
+#: different facts about a deployment and a screen needs different words for them.
+_COMPANION_UNCONFIGURED = "unconfigured"
+_COMPANION_CONFIGURED = "configured"
+_COMPANION_REFUSED = "refused"
+
+#: What `reason` says when a link passed every check. The other two states take
+#: their reason from ``artifact_link`` itself, so the words a reader is shown for an
+#: absent or a refused link cannot drift from the module that decided it.
+_COMPANION_CONFIGURED_REASON = (
+    "an operator supplied a link and it passed every check this application makes"
+)
+
+#: A constant, and the constant is the point. ``artifact_link.embed_markup`` raises
+#: for the reason recorded in its docstring, and this operation never calls it, so
+#: nothing here can hand a client markup, an iframe, or an allowed-domain list.
+_COMPANION_LINK_KIND = "deep_link"
+
+#: The condition this application cannot observe, published beside the link rather
+#: than omitted. A link offered with nothing beside it implies an in-app feature
+#: that will simply work, which is false for anyone who has not done this.
+_COMPANION_PREREQUISITE = (
+    "Each scientist enables the ISAAC connector in their own Claude settings. No "
+    "administrator and no part of this application can do that for them, and "
+    "nothing here can observe whether they have."
+)
+
+#: Where the steps, their owners and the decisions they are blocked on are written.
+_COMPANION_REFERENCE = "docs/isaac-assistant-artifact-operator-checklist.md"
+
+
+def _artifact_companion_payload() -> dict:
+    """Resolve the companion link and project it onto the published shape.
+
+    The environment is read HERE, per request, and never cached: an operator who
+    changes the variable must not be reported from a value this process happened to
+    read once.
+    """
+    try:
+        link = artifact_link.resolve_artifact_link()
+    except artifact_link.ArtifactLinkRefusal as refusal:
+        # A PRESENT-BUT-WRONG VALUE IS A 200 CARRYING `refused` — not a 5xx, and
+        # not a 404. It is a fact about this deployment's configuration that an
+        # operator has to be able to READ; an error status would present it as a
+        # fault in the request or in the server, and would let a client's error
+        # handling swallow the one sentence that says what to fix. The same posture
+        # the verification operation takes for an unrecognised mode: refusing is a
+        # result the reader must see rather than a malformed request.
+        #
+        # The message is `artifact_link`'s own. It names the category and
+        # deliberately does not repeat the configured value, and it is RELAYED
+        # rather than re-worded here so that a category added there cannot leave a
+        # stale sentence in this module.
+        state, url, reason = _COMPANION_REFUSED, None, str(refusal)
+    else:
+        if link.is_configured:
+            state, url = _COMPANION_CONFIGURED, link.url
+            reason = _COMPANION_CONFIGURED_REASON
+        else:
+            state, url, reason = _COMPANION_UNCONFIGURED, None, link.reason
+    return {
+        "state": state,
+        # Non-null exactly when `state` is `configured`, and it is the NORMALISED
+        # form the module stores rather than the string as pasted, so what a client
+        # renders is by construction what passed validation.
+        "url": url,
+        "reason": reason,
+        # The NAME of the variable an operator sets, never its value. Read from the
+        # module so a rename there cannot leave a wrong name published here.
+        "configured_by": artifact_link.ARTIFACT_URL_ENV,
+        "link_kind": _COMPANION_LINK_KIND,
+        # Here so a screen cannot read `configured` as `working`. Nothing on this
+        # path opens an outbound connection.
+        "checked_reachable": False,
+        "prerequisite": _COMPANION_PREREQUISITE,
+        "reference": _COMPANION_REFERENCE,
+    }
+
+
+@router.get(
+    "/runtime/assistant-companion",
+    tags=[TAG_META],
+    summary="Report the Assistant Artifact Companion Link",
+    description=(
+        "Reports whether this deployment has an assistant artifact companion "
+        "link, so a screen can offer that link truthfully or say plainly that "
+        "there is none. Read-only: it opens no outbound connection, fetches "
+        "nothing, writes nothing, and reads no credential.\n\n"
+        "`state` is one of `unconfigured`, `configured` or `refused`, and it is "
+        "three values rather than a boolean on purpose. `unconfigured` means "
+        "nobody has supplied a link; it is the DEFAULT and a working state, not a "
+        "fault, not a wait, and not something to ask a scientist to fix. "
+        "`refused` means somebody supplied one and this application will not use "
+        "it. Collapsing those two into `false` would tell a reader that nothing "
+        "was configured when something was, and the two need different words on a "
+        "screen.\n\n"
+        "`url` is the link, and it is non-null exactly when `state` is "
+        "`configured`. It is the normalised form — re-serialised from the parts "
+        "that were checked — so the link a client renders is by construction the "
+        "link that passed validation and never the string as it was supplied.\n\n"
+        "A REFUSAL NAMES ITS CATEGORY AND NEVER REPEATS WHAT WAS SUPPLIED. "
+        "`reason` says which check failed: the scheme is not https, the host is "
+        "not a permitted artifact host, it carries embedded credentials, it names "
+        "an explicit port, it names no path, it carries a query string or a "
+        "fragment, or it contains a control character. No part of the supplied "
+        "value appears anywhere in the response, because an operator who pastes "
+        "the wrong string into the wrong variable must not have it copied back "
+        "out. `configured_by` names the environment variable an operator sets; "
+        "the value that variable holds is never published here.\n\n"
+        "THIS IS A DEEP LINK AND NOTHING ELSE. `link_kind` is a constant "
+        "`deep_link`. This operation never returns markup, an inline frame, or a "
+        "list of domains permitted to host the companion; embedding an "
+        "organization-private artifact is refused in this repository rather than "
+        "merely unimplemented, and the evidence is recorded in "
+        "`docs/isaac-assistant-artifact-feasibility.md`.\n\n"
+        "`checked_reachable` is a constant `false`, and it is published so that a "
+        "screen cannot read `configured` as `working`. This operation checks the "
+        "SHAPE of a supplied link and never resolves it, so a configured link may "
+        "still be absent, moved, or visible to nobody.\n\n"
+        "`prerequisite` states the condition this application cannot observe: "
+        "each scientist enables the ISAAC connector in their own Claude settings, "
+        "and nothing here can do that for them or see whether they have. A link "
+        "offered without that sentence beside it implies an in-app feature that "
+        "will simply work, which is false for anyone who has not done it. It is "
+        "published in every state so that no key appears in one state and not "
+        "another, but it QUALIFIES a link rather than standing in for one: a "
+        "screen showing it where `state` is not `configured` would be describing "
+        "how to reach a companion this deployment does not have."
+    ),
+    response_description=(
+        "Whether a companion link is configured, the link itself when there is "
+        "one, why there is none when there is not, and the limits of the claim."
+    ),
+    responses={**_R_UNAUTHORIZED},
+)
+def get_assistant_artifact_companion() -> dict:
+    return _artifact_companion_payload()
 
 
 @router.post(

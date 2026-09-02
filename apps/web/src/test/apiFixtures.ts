@@ -2929,6 +2929,77 @@ export const aboutResponseNoCommit = {
   build_commit: null,
 };
 
+// --- Assistant artifact companion fixtures (GET /api/runtime/assistant-companion)
+// Shapes verbatim from apps/api/isaac_api/routes.py `_artifact_companion_payload()`.
+// All three states carry the SAME key set — that is the route's contract, and a
+// fixture that dropped a key in one state would let a component branch on a
+// missing property and pass.
+
+/**
+ * THE ONLY URL ANY TEST IN THIS REPOSITORY MAY USE FOR A COMPANION LINK, and it
+ * is built to be unmistakable at a glance.
+ *
+ * A published artifact URL is access-bearing in an organization: the path IS the
+ * thing that decides who can reach it. Committing a real one would put an
+ * access-bearing identifier into a git history that outlives the artifact, so no
+ * real URL may enter this repository — not in a fixture, not in a comment, not
+ * in a snapshot.
+ *
+ * The host is the vendor's public hostname, which is not access-bearing and is
+ * what makes the fixture structurally representative. Everything after it is a
+ * sentence saying what the value is, so a reader who finds this string anywhere
+ * cannot mistake it for an artifact anyone could open.
+ *
+ * `assistant-companion.test.tsx` enforces this MECHANICALLY over every tracked
+ * source file, with an anti-vacuity assertion, so the rule cannot be satisfied
+ * by there being nothing to check.
+ */
+export const SYNTHETIC_COMPANION_MARKER = 'synthetic-fixture-not-a-real-artifact';
+/*
+ * WRITTEN AS A PLAIN LITERAL, NOT INTERPOLATED, and the difference is the whole
+ * point of the guard that reads it. Built as a template string
+ * (`...artifacts/${SYNTHETIC_COMPANION_MARKER}`) the committed bytes contain the
+ * placeholder rather than the marker, so a sweep of tracked source for "every
+ * claude.ai URL carries the marker" matched NOTHING and its anti-vacuity
+ * assertion fired — which is the anti-vacuity assertion doing its job, and is
+ * why it is there.
+ */
+export const SYNTHETIC_COMPANION_URL =
+  'https://claude.ai/public/artifacts/synthetic-fixture-not-a-real-artifact';
+
+/** The DEFAULT and a working state: no operator has supplied a link. */
+export const assistantCompanionUnconfigured = {
+  state: 'unconfigured',
+  url: null,
+  reason: 'no artifact URL is configured',
+  configured_by: 'ISAAC_ASSISTANT_ARTIFACT_URL',
+  link_kind: 'deep_link',
+  checked_reachable: false,
+  prerequisite:
+    'Each scientist enables the ISAAC connector in their own Claude settings. No administrator and no part of this application can do that for them, and nothing here can observe whether they have.',
+  reference: 'docs/isaac-assistant-artifact-operator-checklist.md',
+};
+
+/** An operator supplied a link and it passed every SHAPE check. Not a claim
+ *  that the link resolves — `checked_reachable` stays `false` here, exactly as
+ *  the server keeps it false in every state. */
+export const assistantCompanionConfigured = {
+  ...assistantCompanionUnconfigured,
+  state: 'configured',
+  url: SYNTHETIC_COMPANION_URL,
+  reason: 'an operator supplied a link and it passed every check this application makes',
+};
+
+/** A value was supplied and refused. The reason NAMES A CATEGORY and repeats no
+ *  part of what was supplied — the fixture is verbatim from `artifact_link._refuse`
+ *  so a test cannot accidentally assert on an echo the server never emits. */
+export const assistantCompanionRefused = {
+  ...assistantCompanionUnconfigured,
+  state: 'refused',
+  reason:
+    'ISAAC_ASSISTANT_ARTIFACT_URL was refused: the host is not a permitted artifact host. The value is deliberately not repeated here.',
+};
+
 // --- P36.6 / P36R S8 Schema Reference browser fixture (GET /api/schema) -----
 // A small, hand-built SUBSET of the real vendored schema (schema/isaac_
 // record_v1.json) — just enough shape (required + optional top-level fields, a
@@ -3397,6 +3468,13 @@ export const REAL_CONTRACT_DESCRIPTIONS: readonly { op: string; description: str
   { op: "GET /api/schema", description: "The vendored official ISAAC record schema verbatim, its title and the version this build validates against, plus every controlled vocabulary in the repository keyed by its filename stem.\n\nEvery field, type, required flag, enumeration, description and composition relationship a client renders comes straight from these two sources; the schema is loaded through the same path resolver the validator uses, never a hardcoded copy. This is a read-only reference view of the public canonical schema — there is no propose, review, approve, or edit affordance." },
   { op: "GET /api/runtime/database/recon", description: "A sanitized, aggregate-only reconnaissance report over this deployment\'s own application database. It answers one question — do the stored records validate against the vendored official ISAAC schema — and reports the answer as counts.\n\nThe scan is strictly read-only, and no write is possible: the transaction is set AND verified read-only server-side, every statement is checked against a SELECT-only allowlist before it is issued, and values are always bound as parameters. The row count is also compared before and after, but that is a concurrency check rather than a mutation proof — a row-count equality cannot detect an update and cannot distinguish this scan\'s writes from a concurrent writer\'s, so it is the verified read-only transaction and the allowlist that carry the guarantee. The statement counters report every statement this service issues through a cursor; they are not a wire-level record, because the driver\'s own transaction framing never passes through one.\n\nThe response carries aggregates only: record totals, counts by type and domain, validation totals by rule family and by schema path, and the gate results. It never carries a record id, a title, a scientific value, a stored document, a connection detail, or a credential; per-record content stays closed. A serialized-output scan runs over every response shape before it is returned and replaces it with a sanitized failure if it trips. Every shape also carries a fixed `limitations` list saying what the gates cannot establish — in particular that the production-isolation gate is a tripwire rather than proof, and that the confirmed transport encryption does not verify the server certificate.\n\nWhen the deployment has no database configured, the operation reports that and connects to nothing. Repeat calls inside a short window are served from memory, and a scan already in progress is reported as a conflict rather than opening a second connection. The operation takes no parameters and no body." },
   { op: "GET /api/runtime/verification", description: "Aggregate results of three programs run over a corpus of official ISAAC records: official schema validation, a stricter format-aware shadow validation, and a deterministic mutation harness that deep-clones each record before mutating it. **Which** corpus is selected by `mode`, and a completed report names it in `metadata.verification_mode`.\n\nAggregate only. No record id, title, field value, evidence entry or per-record outcome appears, and every histogram is projected through a minimum-cell-size floor so a category with few occurrences is withheld rather than named.\n\n**Two corpora, selected by `mode`. A completed report names the one it read; a status envelope (`running`, `refused`, `unavailable`, `error`) carries no `metadata` at all, so it names no corpus and reports no figures.**\n\n* `public_reference` (default) — the ten public upstream ISAAC example records vendored in this repository. Already published, so reading them needs no approval, and a run in `public_reference` mode does not open a database connection to reach them.\n* `authorized_private_sample` — a bounded, read-only, aggregate-only pass over the records this application holds in its own datastore, under the approval recorded on 2026-08-05. This mode **does** open one short-lived read-only connection — to whatever host the process\'s own libpq environment names, which in the deployed configuration is the in-cluster database reached from the pod. Nothing on this path checks where the process is running; that it runs in the pod is how the deployment is configured, not something this operation enforces. Each record is deep-copied in memory, mutated only as a copy, and discarded; no identifier, title, field value, evidence entry or per-record outcome is retained or returned.\n\nAn unknown mode is **refused**, never silently served the other one. For the private mode the two failure words are not interchangeable, and each has its own cause. `refused` means an environment gate rejected the run before anything was opened — in practice that `PGDATABASE` is not exactly the expected database name, and absent counts as not exactly. `unavailable` means that gate passed but no connection was obtained: the driver would not import, or one of the remaining libpq connection variables (`PGHOST`, `PGUSER`, or the credential variable beside them) is missing or empty, or the attempt itself failed. So a deployment with `PGDATABASE` set and `PGHOST` unset reports `unavailable`, not `refused`.\n\nThe sweep runs off the request path. The first call returns `running`; poll until `status` is `ok`." },
+  // The assistant artifact companion link. TRANSCRIBED FROM THE GENERATED
+  // DOCUMENT, never written by hand — `test_contract_description_parity.py`
+  // compares these strings byte for byte against what the server serves, in
+  // BOTH directions. The em dashes below are LITERAL characters, not `\u2014`
+  // escapes: that comparison unescapes only `\n`, `\"`, `\'` and `\\`, so an
+  // escaped form would survive as the six literal characters and fail parity.
+  { op: "GET /api/runtime/assistant-companion", description: "Reports whether this deployment has an assistant artifact companion link, so a screen can offer that link truthfully or say plainly that there is none. Read-only: it opens no outbound connection, fetches nothing, writes nothing, and reads no credential.\n\n`state` is one of `unconfigured`, `configured` or `refused`, and it is three values rather than a boolean on purpose. `unconfigured` means nobody has supplied a link; it is the DEFAULT and a working state, not a fault, not a wait, and not something to ask a scientist to fix. `refused` means somebody supplied one and this application will not use it. Collapsing those two into `false` would tell a reader that nothing was configured when something was, and the two need different words on a screen.\n\n`url` is the link, and it is non-null exactly when `state` is `configured`. It is the normalised form — re-serialised from the parts that were checked — so the link a client renders is by construction the link that passed validation and never the string as it was supplied.\n\nA REFUSAL NAMES ITS CATEGORY AND NEVER REPEATS WHAT WAS SUPPLIED. `reason` says which check failed: the scheme is not https, the host is not a permitted artifact host, it carries embedded credentials, it names an explicit port, it names no path, it carries a query string or a fragment, or it contains a control character. No part of the supplied value appears anywhere in the response, because an operator who pastes the wrong string into the wrong variable must not have it copied back out. `configured_by` names the environment variable an operator sets; the value that variable holds is never published here.\n\nTHIS IS A DEEP LINK AND NOTHING ELSE. `link_kind` is a constant `deep_link`. This operation never returns markup, an inline frame, or a list of domains permitted to host the companion; embedding an organization-private artifact is refused in this repository rather than merely unimplemented, and the evidence is recorded in `docs/isaac-assistant-artifact-feasibility.md`.\n\n`checked_reachable` is a constant `false`, and it is published so that a screen cannot read `configured` as `working`. This operation checks the SHAPE of a supplied link and never resolves it, so a configured link may still be absent, moved, or visible to nobody.\n\n`prerequisite` states the condition this application cannot observe: each scientist enables the ISAAC connector in their own Claude settings, and nothing here can do that for them or see whether they have. A link offered without that sentence beside it implies an in-app feature that will simply work, which is false for anyone who has not done it. It is published in every state so that no key appears in one state and not another, but it QUALIFIES a link rather than standing in for one: a screen showing it where `state` is not `configured` would be describing how to reach a companion this deployment does not have." },
   // Persistent ingestion proposals. TRANSCRIBED FROM THE GENERATED DOCUMENT,
   // never written by hand — `test_contract_description_parity.py` compares these
   // strings byte for byte against what the server serves, in BOTH directions.

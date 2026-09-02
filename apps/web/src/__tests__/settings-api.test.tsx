@@ -1720,7 +1720,15 @@ describe('the Full Description rule over the REAL generated contract', () => {
     // read one, review one. They are transcribed from the generated document by the
     // same rule every other row here is, and `test_contract_description_parity.py`
     // proves the transcription rather than leaving it asserted here.
-    expect(REAL_CONTRACT_DESCRIPTIONS).toHaveLength(76);
+    // 76 -> 77: `GET /api/runtime/assistant-companion`. Until it existed,
+    // `artifact_link.py` had no consumer at all — it validated an operator-supplied
+    // companion URL and nothing read the result, so "does this deployment have a
+    // companion artifact?" was answerable only by reading Python. It is a REPORT: it
+    // opens no outbound connection and acts on nothing, which is why its own
+    // description publishes `checked_reachable: false` rather than leaving a reader to
+    // infer that a `configured` link was never fetched. RE-MEASURED from the served
+    // document, not incremented.
+    expect(REAL_CONTRACT_DESCRIPTIONS).toHaveLength(77);
     // 84,501 -> 84,584 (+83): the assistant seam's own description was corrected, in
     // ONE operation and with the paragraph count unchanged. It read "so every request
     // is answered `501`" while the paragraph two below it documented the `422` — a
@@ -2119,7 +2127,32 @@ describe('the Full Description rule over the REAL generated contract', () => {
     // grew 7,036 -> 9,220 characters, which only puts it further past
     // `PURPOSE_DISCLOSURE_MIN_CHARS` (400), and the appended prose adds `cannot` and
     // `deliberately` to the `BOUNDARY_CAVEAT_MARKERS` already keeping it inline.
-    expect(total).toBe(129149);
+    //
+    // 129,149 -> 132,039 (+2,890) and 76 -> 77 operations, 2026-09-01: ONE new
+    // operation, `GET /api/runtime/assistant-companion`, and NO existing description
+    // changed — `test_contract_description_parity.py` proves that in both directions
+    // rather than leaving it asserted here. The whole delta is the new entry's own
+    // lead-plus-remainder.
+    //
+    // MEASURED THREE WAYS THAT AGREE, none of them an increment of the old figure:
+    //   · over the SERVED document — the `splitPurpose` paragraph rule transcribed
+    //     into Python over `create_app().openapi()`, restricted to the 77 operations
+    //     this array names: 132,039.
+    //   · over the TRANSCRIBED array read back out of `apiFixtures.ts` as text: the
+    //     same 132,039, which is the parity check stated as an aggregate.
+    //   · internal consistency: raw sum of the 77 served descriptions = 132,547; this
+    //     figure drops the 254 `\n\n` separators, and 132,547 - 508 = 132,039.
+    //
+    // `collapsedOps` is STILL zero and was re-measured, not assumed. The new
+    // operation's remainder is 2,637 characters — well past
+    // `PURPOSE_DISCLOSURE_MIN_CHARS` (400), so length alone WOULD collapse all six of
+    // its post-lead paragraphs, and every one of them is boundary copy: the refusal
+    // category rule, the deep-link-only refusal, and the `checked_reachable` /
+    // `prerequisite` limits. It stays inline because the remainder hits three
+    // `BOUNDARY_CAVEAT_MARKERS` entries — `never`, `cannot` and `refus` — each
+    // measured against the real served string rather than eyeballed. No marker was
+    // added for it; the list already covered this vocabulary.
+    expect(total).toBe(132039);
     // 104,045 -> 114,959 (+10,914): the four new operations, and NO existing
     // description changed — `test_contract_description_parity.py` proves that rather
     // than leaving it asserted here. RE-DERIVED from the served document and never
@@ -2324,7 +2357,17 @@ describe('the Full Description rule over the REAL generated contract', () => {
     // unchanged: a change that moved this to 249 while the character total moved by the
     // same 2,184 would mean the prose had been appended instead, which is a different
     // (and here, worse) editorial decision rather than a different number.
-    expect(REAL_CONTRACT_DESCRIPTIONS.reduce((n, d) => n + rest(d).length, 0)).toBe(248);
+    // 248 -> 254 (+6), 2026-09-01: `GET /api/runtime/assistant-companion` carries a
+    // lead plus SIX post-lead paragraphs, and no other description moved. It is
+    // asserted separately from the character total for the reason every entry above
+    // gives, and here the two move together — +2,890 characters AND +6 paragraphs —
+    // which is the signature of prose APPENDED as new paragraphs rather than woven
+    // into existing ones. That was the right editorial choice for this description:
+    // each of the six states one separable limit (three states not a boolean, the
+    // normalised `url`, the refusal-names-its-category rule, deep-link-only,
+    // `checked_reachable`, the connector prerequisite), and a reader who stops early
+    // must not have skipped one. RE-DERIVED from the served document, not incremented.
+    expect(REAL_CONTRACT_DESCRIPTIONS.reduce((n, d) => n + rest(d).length, 0)).toBe(254);
     // 211 -> 235 (+24): the four new operations carry a lead plus 24 post-lead
     // paragraphs between them. It is asserted separately from the character total
     // for the reason every entry above gives: a change that moved one and not the

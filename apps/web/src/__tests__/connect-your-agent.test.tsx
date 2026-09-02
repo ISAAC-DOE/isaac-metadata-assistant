@@ -46,7 +46,13 @@ import {
   mcpDeploymentState,
 } from '../lib/mcpConnectContent';
 import { SETTINGS_TAB_IDS, ROUTES, isSettingsTab } from '../lib/routes';
-import { stubFetchRoutes, aboutResponse, graphStatusAvailable, openApiFixture } from '../test/apiFixtures';
+import {
+  stubFetchRoutes,
+  aboutResponse,
+  assistantCompanionUnconfigured,
+  graphStatusAvailable,
+  openApiFixture,
+} from '../test/apiFixtures';
 
 afterEach(() => {
   cleanup();
@@ -60,6 +66,14 @@ function fullRoutes() {
     'GET /api/about': { body: aboutResponse },
     'GET /api/openapi': { body: openApiFixture },
     'GET /api/graph/status': { body: graphStatusAvailable },
+    /* The companion-link read (Connect Your Agent tab). NOT page-level: the route
+       re-reads the environment per request so an operator's change is never
+       reported from a cached value, so the section issues it where it renders.
+       Stubbed with the DEFAULT state — `unconfigured` — so this file's
+       forbidden-substring sweep and heading-outline checks run over the state
+       the overwhelming majority of deployments are in, rather than over the
+       failed-read branch an unstubbed route would produce. */
+    'GET /api/runtime/assistant-companion': { body: assistantCompanionUnconfigured },
   };
 }
 
