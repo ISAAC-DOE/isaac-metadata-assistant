@@ -131,6 +131,71 @@ evidence doc it will add (`docs/evidence/two-actor-workflow-proof-2026-09-02.md`
 
 ## 4. What independent review found that CI did not
 
+**The session's most important CI lesson, and it is not one of the per-PR review catches below —
+it is that `main`'s own CI failed twice, on two different merge commits, and the release gate is
+what stopped either from shipping.**
+
+`main` CI **FAILED at `2b8a017`** (the #222 merge; run `33683247282`, conclusion `cancelled` —
+superseded when the next merge landed before it finished) **and at `1ef0c0d`** (the #223 merge;
+run `33685271261`): vitest ran clean — `194 passed (194)` files, `5154 passed (5154)` tests — and
+then the separate `Build` step failed:
+
+```
+src/__tests__/proposal-arrival-announcement.test.tsx(183,3): error TS2741: Property 'runRev' is
+missing in type '{ recordMoved: false; runIds: never[]; proposalIds: string[]; proposalStates:
+never[]; otherKinds: never[]; highestRev: number; proposalRev: number; }' but required in type
+'RecordChangeSummary'.
+```
+
+**Cause:** PR #222 added this test file building a `RecordChangeSummary` literal without `runRev`.
+PR #224, merged separately, made `runRev` a *required* field of that same type. Each PR was
+exact-head green against its own base — neither PR's own CI run ever saw the other PR's diff — and
+GitHub reports **mergeability**, not **compilability**: a green checkmark and a "can be merged"
+badge on each PR said nothing about whether `tsc -b` would pass on the tree the merge actually
+produces. Nobody typechecked the combination before either merge, because nothing in the workflow
+does that automatically for a fast-forward of two independently-green branches.
+
+**The release gate is exactly what caught it, and quoting its own log removes any doubt that
+something red could have shipped:**
+
+```
+release gate REFUSED for 2b8a0170c29889556e0a80668dd3c701c45ffbef: a required 'CI' run for this
+commit concluded 'cancelled', not 'success'
+release gate REFUSED for 1ef0c0d67713991ce5db26207750f47170e0b4bb: a required 'CI' run for this
+commit concluded 'failure', not 'success'
+```
+
+Both refusals are quoted verbatim from `gh run view 33685276446 --log` and
+`gh run view 33688344451 --log` respectively (also quoted in §8's release table). **Nothing red was
+released.** The break was invisible in each PR's own diff and visible only once both landed on
+`main` — and even then it was caught by the release gate refusing to tag an image, not by a human
+reading a log.
+
+**The fix landed twice, independently, because two branches hit the same break in parallel before
+either had seen the other's fix:** PR #225's merge commit `7e29e81` ("Merge origin/main (2b8a017)
+into feat/proposals-newest-first") added the missing `runRev: -1` to the same test file, with the
+commit message naming `npx tsc -b` — not a test — as what caught it. PR #226's commit `da88c63`
+independently hit and fixed the identical break merging the same two producer/consumer branches
+together, before #226's own review pass. Both are one-line fixes; neither branch had to guess at
+the value, because `-1` is `recordChanges.ts`'s own documented "no run entry survived" sentinel,
+not a filler.
+
+**Durable rule for this repository, because "exact-head-green" protects less than it sounds like it
+does:** before merging a PR whose base has moved since it went green, re-run `tsc -b` (and the
+relevant test suite) **on the merge result** — either `git merge-tree` into a throwaway worktree,
+or merge `main` into the branch and let CI run against that merge commit — not just on the PR's own
+HEAD against its own stale base. The exact-head-green rule protects the *head*; it says nothing
+about the *merge*, and this session produced two counterexamples in the space of nine minutes
+(`2b8a017` at 21:06, `1ef0c0d` at 21:27).
+
+**`f58e8d2`'s own CI (run `33687944765`) had NOT concluded at the time of writing** — measured
+`status: "in_progress"`, `conclusion: ""` via `gh run view 33687944765 --json headSha,conclusion,status`.
+This document does not claim `main` is green again; that claim needs a later, successful
+conclusion of that specific run, re-checked rather than assumed. TODO(second pass): confirm
+`33687944765`'s conclusion and record it here rather than inferring it from a later release.
+
+---
+
 One line each, in review order. Every one of these passed its PR's full test suite before review
 and would have merged wrong without an independent second pass.
 
@@ -192,6 +257,7 @@ and would have merged wrong without an independent second pass.
 | Open PRs at PR #219's own writing | 0 | **1** (itself) | `4748fda` |
 | CLAUDE.md §11 NUL-byte trap | "live again" in `RecordDescriptionPanel.tsx`, 2 bytes | **0 bytes; 0 files under `apps/web/src`; 1 file repo-wide (the documented zip exemption)** | measured this session, see §3 |
 | Proposals newest-arrival reachability | counted but not on the visible page past 50 entries | **`newest_first` order + "Show Newest" makes it reachable without paging** | #225 body |
+| "Exact-head-green protects a merge" | assumed | **FALSE — `main` CI failed at `2b8a017` and `1ef0c0d`, both merges of independently-green PRs whose combination was never typechecked (see §4)** | measured this session, `gh run view 33683247282`/`33685271261` |
 
 ---
 
@@ -288,7 +354,7 @@ All SHAs and tags below were read from each release-gate run's own log output
 | `1ef0c0d` | #223 | `33688344451` | **REFUSED** — `release gate REFUSED for 1ef0c0d…: a required 'CI' run for this commit concluded 'failure', not 'success'` | never released |
 | `f58e8d2` | #225 | (final `main` at time of writing) | pending — release gate had not yet reported at time of writing | TODO(second pass) |
 
-**Read the two refusals precisely; they are not the same reason.** `2b8a017`'s own CI run was
+**See §4 for why both merges broke `tsc -b` on `main` despite each PR being green on its own head — the underlying cause, not just the refusal.** Read the two refusals precisely; they are not the same reason. `2b8a017`'s own CI run was
 *cancelled* (superseded by the next merge landing before it finished). `1ef0c0d`'s own CI run
 *concluded `failure`* — the gate log does not say cancellation for this one, and this document
 does not assert it did. Both merge commits are superseded in the fast-forward history by later

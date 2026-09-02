@@ -1335,6 +1335,31 @@ Current state:
   bundle, `RUN_LIST_LIMIT_MAX`/`RUN_PAGE_MAX` literal duplication left untested, and every hosted
   QA still `PENDING (Krish)`.
 
+  **THE SESSION'S MOST IMPORTANT CI LESSON: `main`'s OWN CI FAILED TWICE, ON TWO MERGE COMMITS, AND
+  ONLY THE RELEASE GATE STOPPED EITHER FROM SHIPPING.** `main` CI failed at `2b8a017` (#222's
+  merge; run `33683247282`, `cancelled` — superseded when the next merge landed first) and at
+  `1ef0c0d` (#223's merge; run `33685271261`): vitest passed clean (194 files / 5,154 tests), then
+  the separate `Build` step failed — `src/__tests__/proposal-arrival-announcement.test.tsx(183,3):
+  error TS2741: Property 'runRev' is missing in type '{ ...; highestRev: number; proposalRev:
+  number; }' but required in type 'RecordChangeSummary'`. **Cause:** #222 added that test literal
+  without `runRev`; #224, merged separately, made `runRev` REQUIRED on that same type. Each PR was
+  exact-head green against its own base — GitHub reports mergeability, not compilability, and
+  nothing typechecked the combination before either merge. The release gate is what actually
+  stopped a broken image: `release gate REFUSED for 2b8a017…: a required 'CI' run for this commit
+  concluded 'cancelled', not 'success'` and `release gate REFUSED for 1ef0c0d…: … concluded
+  'failure', not 'success'` (quoted from `gh run view 33685276446/33688344451 --log`). **Nothing red
+  was released.** The fix landed twice, independently, before either branch had seen the other's
+  fix: #225's merge commit `7e29e81` and #226's commit `da88c63` each added the missing `runRev: -1`
+  (`recordChanges.ts`'s own documented "no run entry survived" sentinel, not a filler) the moment
+  `tsc -b` — not a test — caught it on their own merge with `main`. **Durable rule: exact-head-green
+  protects the HEAD, not the MERGE.** Before merging a PR whose base has moved since it went green,
+  re-run `tsc -b` (and the suite) on the MERGE RESULT — `git merge-tree` into a throwaway worktree,
+  or merge `main` into the branch and let CI run against that commit — never assume a stale base's
+  green run still describes the tree the merge will produce. This produced two counterexamples
+  nine minutes apart. `f58e8d2`'s own CI (run `33687944765`) had **not concluded** at the time this
+  was written (`status: "in_progress"`) — do not read this paragraph as asserting `main` is green
+  again; that needs its own later, separately-checked conclusion.
+
 - Current repository status is summarized in README.md and docs/mentor-brief.md; see git history for the exact commit state.
 - Start any further phase (beyond the completed Phase 36 / Phase 36R slices) only after explicit user approval.
 
