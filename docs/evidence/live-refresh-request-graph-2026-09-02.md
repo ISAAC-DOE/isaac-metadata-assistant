@@ -403,3 +403,61 @@ Every new guard was checked by reverting the behaviour it pins and confirming it
 One test — "TEN run entries in ONE feed page cost ONE bundle" — passes under all of the
 above, and that is stated in the test itself rather than left to be found: it pins a
 property of the page → summary → refetch mapping, which the gate does not create.
+
+### 8.1 Two claims that were UNPINNED, found by independent review (added 2026-09-02)
+
+The review of PR #224 measured two of this slice's own claims as **reachable by no
+assertion anywhere** — reverting either passed all 5,087 tests. Both were comments, and a
+comment no test can fail is a claim free to drift. They are pinned now, and the finding is
+recorded rather than quietly fixed, because "I added a guard" and "the guard can fail" are
+different statements and this slice made the first one twice.
+
+| Claim | Was | Now pinned by | Mutation | Result |
+|---|---|---|---|---|
+| the assistant's `pending_summary` chip counts `pendingTotal`, not the array handed to it | unpinned | `…/live-refresh-request-graph.test.tsx` · "the assistant's pending_summary chip counts pendingTotal…" | `state.bundle.pendingTotal ?? pending.length` → `pending.length` | **1 failed** |
+| …and its `?? pending.length` fallback is a real branch | unpinned | same test, CONTROL 2 | `… ?? pending.length` → `state.bundle.pendingTotal` | **1 failed** |
+| `liveRefreshRef` is SINGLE-SHOT — the bound reaches the poll-driven refetch and nothing else | unpinned | same file · "SINGLE-SHOT: pressing Refresh after a windowed refresh issues the UNBOUNDED read" | delete `liveRefreshRef.current = false` | **1 failed** |
+
+The second row matters more than it looks: without it, *deleting* the fallback would have
+passed, and every fixture in the repository that casts to `RecordBundle` (there are
+several, and they carry no `pendingTotal`) would have started composing
+`"undefined fields still need you"`.
+
+The `liveRefreshRef` test presses the **Refresh button the screen actually renders** rather
+than calling `reload` directly, because the claim is about what a person gets. It asserts an
+ORDERING (the unbounded read came after the windowed one) and not "the last `/pending` call
+is the bare one" — the last one is `?limit=50`, `useRecordSession`'s AgentContext prefix
+re-firing because `reload` blanks to `loading` and drops `detail`. That first attempt failed
+for exactly that reason and the corrected form is in the test's own comment.
+
+### 8.2 `onAgentRefresh` bypasses the gate on purpose (M4, recorded not tested)
+
+`RecordWorkbench.onAgentRefresh` calls `bundle.reloadSilent()` directly rather than through
+`reloadFromSignal`, so it is neither gated nor windowed. Deliberate on both counts: it runs
+after the reader **confirmed** a staged proposal, so it must not be dropped as redundant
+because a poller happened to have a refetch outstanding — a scientist who confirms a value
+and sees the old one is the defect `CLAUDE.md` §11 records four surfaces committing — and
+its list is not windowed for the same reason first paint is not. Its cost is one bundle per
+confirmed proposal, bounded by how fast a person can press a button. Recorded as a comment
+in the guard file so a future slice routing it through the gate knows what it has to argue
+away.
+
+---
+
+## 9. `CLAUDE.md` §11 corrected in place (2026-09-02)
+
+§11 said `api.getPending` "**still exists and is still correct twice**, for Review Record
+and Export Readiness … Do not 'fix' those two." This slice pages one of those two, on one
+of its paths, and recorded nothing — so the instruction would have sent a future session to
+undo it.
+
+The sentence is **struck and annotated rather than rewritten**, this repository's
+convention. The correction states: `api.getPending` itself is unchanged; **Export Readiness
+is untouched**; Review Record's **initial load is unchanged and still unbounded**; its
+**live refresh** uses `?limit=10` through the new opt-in `pendingLimit`; and **no count
+understates**, because `pendingTotal` carries `pending_page.total` and every count on the
+screen and in the assistant chip reads that — with the test that fails if one is taken from
+the fetched array named inline.
+
+`CLAUDE.md` is in the served-content manifest (§17's own table lists it among the six root
+files), so the snapshot was regenerated in the same change.

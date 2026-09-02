@@ -29,6 +29,13 @@
  *   6. NEGATIVE CONTROLS for 3 and 5 — a later, genuinely separate change still
  *      refetches, and a failed refetch re-opens the gate. Without these, a gate that
  *      simply refused everything after the first event would pass 3, 4 and 5.
+ *   7. THE TWO CLAIMS THAT MAKE THE BOUND SAFE, each of which an independent review
+ *      measured as UNPINNED — reverting either passed all 5,087 tests. (a) the
+ *      assistant's `pending_summary` chip counts `pendingTotal`, not the length of the
+ *      array it was handed; (b) `liveRefreshRef` is SINGLE-SHOT, so the bound reaches
+ *      the poll-driven refetch and nothing else — pressing Refresh still issues the
+ *      unbounded read. A claim in a comment that no test can fail is a claim free to
+ *      drift, which is the failure this repository keeps recording.
  *
  * ── WHAT IT DOES NOT MEASURE, STATED RATHER THAN IMPLIED ────────────────────────
  *
@@ -41,7 +48,7 @@
  */
 
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
-import { render, act } from '@testing-library/react';
+import { render, act, fireEvent } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 
 import { AppRoutes } from '../App';
@@ -55,6 +62,16 @@ import {
 import type { RouteResult } from '../test/apiFixtures';
 import type { ApiChangeEntry, ApiChangeFeedPage } from '../lib/types';
 import { POLL_INTERVAL_MS } from '../lib/useRecordSync';
+import { compose } from '../lib/assistantComposer';
+import {
+  draftResponse,
+  validateDryRun,
+  auditNotExported,
+  warningsDryRun,
+  evidenceResponse,
+  graphStatusUnavailable,
+} from '../test/apiFixtures';
+import type { ApiPendingItem, RecordBundle } from '../lib/types';
 
 const ID = 'demo';
 const BASE = `/api/experiments/${ID}`;
@@ -550,4 +567,174 @@ describe('the record screen live-refresh request graph', () => {
     await settle(POLL_INTERVAL_MS * 2);
     expect(bundleCount(calls) - before, 'and the next poll tried again').toBeGreaterThan(1);
   });
+
+  // --- 5. the two claims a review measured as unpinned -----------------------
+
+  it("the assistant's pending_summary chip counts pendingTotal, not the array it was handed", async () => {
+    /*
+     * WHAT WOULD HAVE SHIPPED WITHOUT THIS. `assistantComposer`'s review chip is the
+     * SECOND consumer of `bundle.pending`, and it is the one whose entire purpose is to
+     * be grounded. After a windowed live refresh it is handed ten entries for a record
+     * holding thirty, and counting them would make it answer "10 fields still need you"
+     * — an understatement stated as a fact, in the assistant's own voice.
+     *
+     * An independent review measured that `state.bundle.pendingTotal ?? pending.length`
+     * was reachable by no assertion anywhere: reverting it to `pending.length` passed all
+     * 5,087 tests. It is asserted here rather than in `assistantComposer.test.ts`
+     * because the reason the two numbers can differ at all lives in THIS slice — that
+     * file's own fixtures carry no `pendingTotal`, so from there the distinction is
+     * invisible.
+     *
+     * IT IS ASSERTED OVER THE COMPOSED TEXT, not over an intermediate. The chip's
+     * contract is a sentence a person reads, and both halves of it move: the COUNT and
+     * the REMAINDER after the three labels it shows.
+     */
+    const ALL = Array.from({ length: 30 }, (_, i) => ({
+      ...(pendingResponse.pending[0] as Record<string, unknown>),
+      id: `synthetic-blocker-${i}`,
+      blocker_key: `synthetic-blocker-${i}`,
+      about: `synthetic_field_${i}`,
+      question: `Confirm synthetic field ${i}?`,
+    })) as unknown as ApiPendingItem[];
+
+    const reviewBundle = (over: Partial<RecordBundle>): RecordBundle =>
+      ({
+        detail: experimentDetail,
+        groups: draftResponse.groups,
+        pending: ALL,
+        pendingTotal: ALL.length,
+        validate: validateDryRun,
+        audit: auditNotExported,
+        warnings: warningsDryRun,
+        evidence: evidenceResponse.evidence,
+        graph: graphStatusUnavailable,
+        ...over,
+      }) as unknown as RecordBundle;
+
+    const chipText = (bundle: RecordBundle) =>
+      compose({ context: 'review', bundle }).prompts[0].answer!.text;
+
+    // A WINDOWED bundle: ten entries fetched, thirty outstanding — exactly the state a
+    // live refresh leaves the screen in.
+    expect(chipText(reviewBundle({ pending: ALL.slice(0, 10), pendingTotal: 30 }))).toBe(
+      '30 fields still need you: synthetic_field_0, synthetic_field_1, ' +
+        'synthetic_field_2, …and 27 more.',
+    );
+
+    /*
+     * CONTROL 1 — the COMPLETE bundle says the same thing, so the assertion above is
+     * about the total and not about the window. Same count, same remainder, from a
+     * thirty-entry array.
+     */
+    expect(chipText(reviewBundle({ pending: ALL, pendingTotal: 30 }))).toBe(
+      '30 fields still need you: synthetic_field_0, synthetic_field_1, ' +
+        'synthetic_field_2, …and 27 more.',
+    );
+
+    /*
+     * CONTROL 2 — the `?? pending.length` fallback is a real branch and is asserted as
+     * one. A caller that composed a bundle without the field (every fixture that casts
+     * to `RecordBundle` does) gets the list's own length, because absence of a bound
+     * MEANS the read was complete. Without this, deleting the fallback would pass.
+     */
+    const noTotal = reviewBundle({ pending: ALL.slice(0, 4) });
+    delete (noTotal as unknown as Record<string, unknown>).pendingTotal;
+    expect(chipText(noTotal)).toBe(
+      '4 fields still need you: synthetic_field_0, synthetic_field_1, ' +
+        'synthetic_field_2, …and 1 more.',
+    );
+  });
+
+  it('SINGLE-SHOT: pressing Refresh after a windowed refresh issues the UNBOUNDED read', async () => {
+    /*
+     * THE OTHER CLAIM A REVIEW MEASURED AS UNPINNED. `liveRefreshRef` is consumed by the
+     * fetcher on read, so the bound lasts exactly one fetch. Deleting
+     * `liveRefreshRef.current = false` passed the whole suite — and would have made the
+     * bound STICKY: the first poll-driven refresh would quietly narrow every later read,
+     * including the one a person asked for by pressing a button. `useFetch` has ONE
+     * fetcher for three callers (deps/first paint, `reload`, `reloadSilent`), which is
+     * exactly why the mode has to be consumed rather than left set.
+     *
+     * WHY REFRESH IS THE RIGHT CONTROL TO PRESS. A reader pressing it is asking for the
+     * authoritative read, and the screen's own copy — "Showing the first 10 of 30" —
+     * tells them there is more. Serving them a window would answer a different question
+     * than the one the button asks.
+     *
+     * The detail is deliberately NOT bumped, so the refetch lands on the same revision
+     * and `activity` stays true (`recordRev` 0 never reaches `highestRev` 1) — which is
+     * what renders `RecordActivityNote` and its Refresh button in the first place.
+     */
+    const { container } = mount();
+    await settle();
+    expect(unboundedPendingReads(calls), "first paint's read").toHaveLength(1);
+
+    feed.changes = [runEntry(1, KNOWN_REV + 1)];
+    await settle(POLL_INTERVAL_MS * 2);
+
+    // The poll-driven refetch was WINDOWED…
+    expect(
+      calls.filter((c) => c === `GET ${BASE}/pending?limit=${LIVE_PENDING_WINDOW}`),
+      'the live refresh is bounded',
+    ).toHaveLength(1);
+    expect(unboundedPendingReads(calls), 'and it added no unbounded read').toHaveLength(1);
+
+    // …and the notice that offers Refresh is on screen, which is what makes the next
+    // step a real user act rather than a call into an internal.
+    const note = container.querySelector('.record-activity-note');
+    expect(note, 'the activity notice must be rendered for its Refresh to be pressable').not.toBeNull();
+    const refresh = [...note!.querySelectorAll('button')].find(
+      (b) => (b.textContent ?? '').trim() === 'Refresh',
+    );
+    expect(refresh, "the notice's Refresh button").toBeTruthy();
+
+    await act(async () => {
+      fireEvent.click(refresh!);
+    });
+    await settle();
+
+    // THE ASSERTION. A second unbounded read — the human's — and no second window.
+    expect(unboundedPendingReads(calls), 'Refresh issued the authoritative read').toHaveLength(2);
+    expect(
+      calls.filter((c) => c === `GET ${BASE}/pending?limit=${LIVE_PENDING_WINDOW}`),
+      'and did not reuse the live window',
+    ).toHaveLength(1);
+    /*
+     * AND STATED AS AN ORDERING, because the two counts above would also be satisfied by
+     * an unbounded read that happened to PRECEDE the windowed one — which is what a
+     * sticky flag would produce if the very first refetch were the unbounded one.
+     *
+     * It is deliberately NOT written as "the last `/pending` call is the bare one": the
+     * last one is `?limit=50`, which is `useRecordSession`'s AgentContext prefix
+     * re-firing because `reload` blanks to `loading`, drops `detail`, and so re-runs
+     * that effect. That read is not this screen's bundle and is unchanged by this slice.
+     */
+    const windowedAt = calls.lastIndexOf(`GET ${BASE}/pending?limit=${LIVE_PENDING_WINDOW}`);
+    const unboundedAt = calls.lastIndexOf(`GET ${BASE}/pending`);
+    expect(windowedAt).toBeGreaterThanOrEqual(0);
+    expect(unboundedAt, 'the human Refresh came AFTER the windowed live refresh').toBeGreaterThan(
+      windowedAt,
+    );
+  });
+
+  /*
+   * ── M4, RECORDED RATHER THAN TESTED: `onAgentRefresh` BYPASSES THE GATE ON PURPOSE.
+   *
+   * `RecordWorkbench.onAgentRefresh` calls `bundle.reloadSilent()` directly, not through
+   * `reloadFromSignal`, so it is neither gated nor windowed. That is deliberate on both
+   * counts and is not an oversight the gate should be widened to cover:
+   *
+   *   · IT IS NOT A POLL. It runs after the reader CONFIRMED a staged proposal — a write
+   *     they just made — and the one thing that must not happen there is the refresh
+   *     being dropped as "redundant" because a poller happened to have one outstanding.
+   *     A scientist who confirms a value and sees the old one is the defect
+   *     `CLAUDE.md` §11 records four surfaces committing.
+   *   · IT IS NOT WINDOWED for the same reason first paint is not: it is a person's act,
+   *     and the authoritative list is the right answer to it.
+   *
+   * Its cost is one bundle per confirmed proposal, which is bounded by how fast a human
+   * can press a button, and the gate re-opens on its settlement like any other. If a
+   * future slice routes it through `reloadFromSignal`, these two properties are what it
+   * has to argue away.
+   */
+
 });
