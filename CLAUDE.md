@@ -1334,12 +1334,15 @@ Current state:
   MERGE-after-fixes; its independent review found and fixed three of its own proof's assertions
   being true by construction (comparing a rev against zero instead of the pre-accept cursor; a
   count asserted to *reach* a value but never to *stay* there; two loops that could iterate zero
-  times and still read as a pass). `f58e8d2` (#225) released as **v0.0.211**; `fd179f2` (#226) had
-  not yet completed its own CI run at the time this bullet was last updated — do not read that as a
-  refusal, it is simply not yet reported. See the closure doc for the full account, every number's
-  source, and what remains — a server-side revision discriminator so a proposal-only act need not
-  refetch the whole bundle, `RUN_LIST_LIMIT_MAX`/`RUN_PAGE_MAX` literal duplication left untested,
-  and every hosted QA still `PENDING (Krish)`.
+  times and still read as a pass). `f58e8d2` (#225) released as **v0.0.211**; ~~`fd179f2` (#226)
+  had not yet completed its own CI run at the time this bullet was last updated — do not read that
+  as a refusal, it is simply not yet reported.~~ — **RESOLVED: `fd179f2`'s CI (run `33692815125`)
+  concluded `success`; release gate run `33695480008` printed `commit under release: fd179f2…` and
+  set `TAG="v0.0.212"`; `git rev-list -n1 v0.0.212` resolves to `fd179f2` — released as v0.0.212.**
+  See the closure doc for the full account, every number's source, and what remains — a
+  server-side revision discriminator so a proposal-only act need not refetch the whole bundle,
+  `RUN_LIST_LIMIT_MAX`/`RUN_PAGE_MAX` literal duplication left untested, and every hosted QA still
+  `PENDING (Krish)` regardless of any image having released.
 
   **THE SESSION'S MOST IMPORTANT CI LESSON: `main`'s OWN CI FAILED TWICE, ON TWO MERGE COMMITS, AND
   ONLY THE RELEASE GATE STOPPED EITHER FROM SHIPPING.** `main` CI failed at `2b8a017` (#222's
@@ -1362,9 +1365,14 @@ Current state:
   re-run `tsc -b` (and the suite) on the MERGE RESULT — `git merge-tree` into a throwaway worktree,
   or merge `main` into the branch and let CI run against that commit — never assume a stale base's
   green run still describes the tree the merge will produce. This produced two counterexamples
-  nine minutes apart. `f58e8d2`'s own CI (run `33687944765`) had **not concluded** at the time this
-  was written (`status: "in_progress"`) — do not read this paragraph as asserting `main` is green
-  again; that needs its own later, separately-checked conclusion.
+  nine minutes apart. ~~`f58e8d2`'s own CI (run `33687944765`) had **not concluded** at the time
+  this was written (`status: "in_progress"`) — do not read this paragraph as asserting `main` is
+  green again; that needs its own later, separately-checked conclusion.~~ — **RESOLVED: `main`
+  went green.** `33687944765` concluded `success`, `f58e8d2` released as **v0.0.211**, and the
+  next merge (`fd179f2`, #226) released cleanly too as **v0.0.212** — both re-verified independently
+  (`gh run view <id> --json conclusion`; `gh run view <id> --log` for each release gate's
+  `commit under release`/`TAG=` lines; `git rev-list -n1 <tag>` cross-checked against each SHA).
+  `main` at `fd179f2` is the last state this bullet describes.
 
 - Current repository status is summarized in README.md and docs/mentor-brief.md; see git history for the exact commit state.
 - Start any further phase (beyond the completed Phase 36 / Phase 36R slices) only after explicit user approval.

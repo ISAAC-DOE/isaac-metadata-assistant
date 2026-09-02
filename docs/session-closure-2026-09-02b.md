@@ -218,9 +218,11 @@ This document does not claim `main` is green again; that claim needs a later, su
 conclusion of that specific run, re-checked rather than assumed.~~ — **RESOLVED, this pass:**
 re-checked via the same command, `33687944765` now reads `{"conclusion":"success","status":
 "completed"}`. `main` at `f58e8d2` released cleanly as **v0.0.211** (§8). `fd179f2` (#226's merge,
-now on top of `f58e8d2`) has its OWN separate CI run (`33692815125`) which had **not** concluded at
-the time of this pass — see §7/§8; that is the run whose conclusion still needs confirming, not
-`33687944765`, which is now closed out.
+now on top of `f58e8d2`) has its OWN separate CI run (`33692815125`) which had, at the time of THIS
+paragraph's pass, **not** concluded — see §7/§8 for the run whose conclusion needed confirming.
+**That run has since concluded `success` and released as v0.0.212** — see §7/§8 for the completed
+figures; this paragraph is left as the historical record of what was known at the time it was
+written, per this repository's convention of correcting in place rather than rewriting history.
 
 ---
 
@@ -338,10 +340,15 @@ and nothing is blocked on them.
 - **PR #226 has MERGED, as `fd179f2`**, since the previous pass of this document. Its wiring
   (`RunsSection` now consuming both `runActivity` and `recordVersion`; the change feed paged at
   `limit: 200`; the two-actor proof) passed its own independent review (§4, verdict
-  MERGE-after-fixes). `fd179f2`'s own CI run had **not yet concluded** at the time of this pass
-  (run `33692815125`, `status: in_progress`) — it has not released an image and has not been
-  hosted-QA'd. Nothing in §1's table should be read as "shipped to production" until §7/§8's
-  Part-2 markers and `fd179f2`'s CI conclusion are filled in.
+  MERGE-after-fixes). ~~`fd179f2`'s own CI run had **not yet concluded** at the time of this
+  pass (run `33692815125`, `status: in_progress`) — it has not released an image and has not been
+  hosted-QA'd.~~ — **RESOLVED: `33692815125` concluded `success`** (re-verified via `gh run view
+  33692815125 --json conclusion`), and the release gate then ran as `33695480008`, printing
+  `commit under release: fd179f23e6b77ffd05a91722e1873bad64365c50` and setting `TAG="v0.0.212"`;
+  `git rev-list -n1 v0.0.212` resolves to `fd179f2` — released as **v0.0.212**. See §8 for the
+  completed table row. **Hosted QA is still unobserved from this environment** and remains
+  `HOSTED QA PENDING (Krish)` regardless of the image having released — a release is not a hosted
+  verification.
 
 ---
 
@@ -388,10 +395,15 @@ All Part-2 figures below are quoted as measured by the orchestrator, not re-run 
   Release gate run `33691355159` printed `commit under release:
   f58e8d27afe9ab829da369e081f3b41409ece2bd` and its build job set `TAG="v0.0.211"`;
   `git rev-list -n1 v0.0.211` resolves to `f58e8d2`. §8's table row for `f58e8d2` is filled in below.
-- **`fd179f2`'s CI: still PENDING**, re-verified at the time of this pass via `gh run list --branch
-  main --workflow CI --json headSha,status,conclusion` → `{"conclusion":"","headSha":"fd179f2…",
-  "status":"in_progress"}`. §8's table row for `fd179f2` is left explicitly marked pending, not
-  guessed, per the coordinator's instruction not to infer a conclusion.
+- ~~**`fd179f2`'s CI: still PENDING**, re-verified at the time of this pass via `gh run list
+  --branch main --workflow CI --json headSha,status,conclusion` → `{"conclusion":"",
+  "headSha":"fd179f2…","status":"in_progress"}`. §8's table row for `fd179f2` is left explicitly
+  marked pending, not guessed, per the coordinator's instruction not to infer a conclusion.~~ —
+  **RESOLVED: `fd179f2`'s CI (run `33692815125`) concluded `success`**, re-verified via
+  `gh run view 33692815125 --json conclusion` → `{"conclusion":"success"}`. Release gate run
+  `33695480008` printed `commit under release: fd179f23e6b77ffd05a91722e1873bad64365c50` and set
+  `TAG="v0.0.212"`; `git rev-list -n1 v0.0.212` (after `git fetch --tags`) resolves to `fd179f2`.
+  §8's table row for `fd179f2` is now filled in with the released outcome, not left pending.
 - `docs/evidence/two-actor-workflow-proof-2026-09-02.md` — **confirmed present on `main`**
   (`git show origin/main:docs/evidence/two-actor-workflow-proof-2026-09-02.md | head` succeeds) —
   and **confirmed NOT in the manifest or the served path set** after regenerating both artifacts in
@@ -425,7 +437,7 @@ All SHAs and tags below were read from each release-gate run's own log output
 | `2b8a017` | #222 | `33685276446` | **REFUSED** — `release gate REFUSED for 2b8a017…: a required 'CI' run for this commit concluded 'cancelled', not 'success'` | never released |
 | `1ef0c0d` | #223 | `33688344451` | **REFUSED** — `release gate REFUSED for 1ef0c0d…: a required 'CI' run for this commit concluded 'failure', not 'success'` | never released |
 | `f58e8d2` | #225 | `33691355159` | `commit under release: f58e8d2…` → success | **v0.0.211** |
-| `fd179f2` | #226 | (fd179f2's own CI, run `33692815125`, was still `in_progress` at the time of writing) | **PENDING — not yet reported** | not yet released |
+| `fd179f2` | #226 | `33695480008` | `commit under release: fd179f2…` → success | **v0.0.212** |
 
 **See §4 for why both merges broke `tsc -b` on `main` despite each PR being green on its own head — the underlying cause, not just the refusal.** Read the two refusals precisely; they are not the same reason. `2b8a017`'s own CI run was
 *cancelled* (superseded by the next merge landing before it finished). `1ef0c0d`'s own CI run
@@ -440,10 +452,18 @@ fails release for the identical reason.
 "commit under release\|TAG="` (`commit under release: f58e8d27afe9ab829da369e081f3b41409ece2bd`;
 `TAG="v0.0.211"`), and cross-checked with `git rev-list -n1 v0.0.211` resolving to `f58e8d2`.
 
-`fd179f2` (PR #226's merge) has **not yet completed its own CI run**, re-confirmed at the time of
+~~`fd179f2` (PR #226's merge) has **not yet completed its own CI run**, re-confirmed at the time of
 this pass via `gh run list --branch main --workflow CI --json headSha,status,conclusion` →
 `{"conclusion":"","headSha":"fd179f2…","status":"in_progress"}`. Do not read the row above as a
 refusal; it is a status that has not arrived yet, and is deliberately left distinguishable from
 `2b8a017`'s and `1ef0c0d`'s actual refusals. This document does not fill in `fd179f2`'s release-gate
 row or image tag, because neither exists yet — a third session (or a later check of this same PR)
-would need to observe and record that conclusion when it lands.
+would need to observe and record that conclusion when it lands.~~ — **RESOLVED, one further pass
+later.** `fd179f2`'s CI (run `33692815125`) concluded `success` — re-verified via `gh run view
+33692815125 --json conclusion`. Release gate run `33695480008` then ran and printed `commit under
+release: fd179f23e6b77ffd05a91722e1873bad64365c50` and its build job set `TAG="v0.0.212"`;
+`git rev-list -n1 v0.0.212` (after `git fetch --tags`) resolves to `fd179f2`. `fd179f2` released
+cleanly as **v0.0.212**, and the table row above is now filled in rather than left pending.
+**This does not touch hosted QA**, which remains `HOSTED QA PENDING (Krish)` for every image from
+this session regardless of release — a successful release-gate tag is not an observation of the
+hosted deployment.
