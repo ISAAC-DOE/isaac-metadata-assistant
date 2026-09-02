@@ -71,7 +71,7 @@ import {
 } from '../lib/routes';
 import type { RecordChangeSummary } from '../lib/recordChanges';
 import type { ApiRunView } from '../lib/types';
-import { RUNS_PAGE_SIZE } from '../lib/runPaging';
+import { RUNS_PAGE_SIZE, RUN_LIST_LIMIT_MAX } from '../lib/runPaging';
 import { mutationFailureCopy } from '../lib/mutationErrors';
 
 /*
@@ -299,6 +299,15 @@ function RunsBrowser({
   runsRef.current = list.status === 'data' ? list.loaded.runs : [];
 
   /*
+   * THE LOADED SNAPSHOT, read the same way — see `runsRef` immediately above for
+   * why a ref rather than a dependency. The signal-driven reload path needs
+   * `received` (not `runs.length`; see `Loaded.received`'s own comment on why
+   * they differ) to decide how large a single bounded re-read can safely be.
+   */
+  const loadedRef = useRef<Loaded | null>(null);
+  loadedRef.current = list.status === 'data' ? list.loaded : null;
+
+  /*
    * A run this section just created, waiting for the reload it triggered.
    * Held in a ref rather than in state because the only reader is the reload's
    * own `.then`, and re-rendering on it would say nothing.
@@ -361,10 +370,37 @@ function RunsBrowser({
    *   `pendingSignalReloadRef` — the follow-up itself, consumed exactly once when
    *   the in-flight request settles, so N signals that arrive mid-flight produce
    *   AT MOST ONE extra request rather than N.
+   *
+   *   `pendingSignalLimitRef` — HOW MANY RUNS THE NEXT SIGNAL-DRIVEN REQUEST ASKS
+   *   FOR. A silent reload used to always ask for exactly `RUNS_PAGE_SIZE` (50) —
+   *   the same request `Add Run`/`Remove Run` already trigger — which REPLACES
+   *   the loaded list with page one. That is fine after an Add or a Remove,
+   *   because this section is the one that changed the count and already knows
+   *   what page the reader is on. It is NOT fine here: a reader who pressed Load
+   *   More several times to reach, say, 100 of 120 runs would have those 100
+   *   silently cut back to 50 by a colleague's UNRELATED edit — measured on a
+   *   120-run fixture, 100 loaded cards became 50. So a signal-driven reload asks
+   *   for exactly what is already on screen (`received`, capped at
+   *   `RUN_LIST_LIMIT_MAX`) in ONE bounded request, set here and consumed once at
+   *   the top of the fetch effect below.
    */
   const lastRunsSignalKeyRef = useRef<string | null>(null);
   const runsReloadInFlightRef = useRef(false);
   const pendingSignalReloadRef = useRef(false);
+  const pendingSignalLimitRef = useRef<number | null>(null);
+  /**
+   * TRUE WHEN A SIGNAL ARRIVED WHILE MORE THAN `RUN_LIST_LIMIT_MAX` RUNS WERE
+   * ALREADY LOADED — the case a single bounded request cannot safely reconcile.
+   * Reconciling it anyway would mean either truncating what the reader is
+   * looking at (the defect above, only worse) or paging through several
+   * requests behind their back while more may still be changing underneath. So
+   * this section does neither: it says so, and offers a normal (non-silent)
+   * Refresh, which re-reads the first page exactly as every other reload in
+   * this file already does. Further signals are ignored while this stands —
+   * the reader has to act before another silent decision is made on their
+   * behalf — see the effect below.
+   */
+  const [runsStaleNotice, setRunsStaleNotice] = useState(false);
 
   const setFocusRun = useCallback(
     (runId: string | null) => {
@@ -473,15 +509,42 @@ function RunsBrowser({
      */
     runsReloadInFlightRef.current = true;
 
+    /*
+     * THE LIMIT THIS REQUEST ASKS FOR. A signal-driven reload sets
+     * `pendingSignalLimitRef` to `received` (capped) before bumping
+     * `reloadNonce`, and it is consumed here, ONCE, at the top of the effect run
+     * it was set for — every other trigger (a search, a filter, `Add Run`,
+     * `Remove Run`, the plain `Reload This Section` button, the over-cap
+     * Refresh) leaves it `null` and gets the ordinary `RUNS_PAGE_SIZE` first
+     * page, exactly as before this slice.
+     */
+    const requestLimit = pendingSignalLimitRef.current ?? RUNS_PAGE_SIZE;
+    pendingSignalLimitRef.current = null;
+    /** What was on screen before THIS request left — the fallback basis for a
+     *  follow-up decision if this request fails and there is no fresh count to
+     *  read one off. */
+    const receivedBeforeThisRequest = loadedRef.current?.received ?? 0;
+
     /**
      * Consume a pending signal-driven follow-up, if one arrived while this
      * request was outstanding. AT MOST ONE extra request per settle, never one
      * per signal — see `pendingSignalReloadRef`'s own comment.
+     *
+     * `basisCount` is what will be ON SCREEN once this settle is applied — the
+     * just-received page's own length on success, or what was already loaded on
+     * failure (nothing changed, so the prior count still describes the screen).
+     * A follow-up that would itself exceed the cap does not silently reload
+     * either; it raises the same over-cap notice a first signal would.
      */
-    const runsSignalFollowUp = () => {
+    const runsSignalFollowUp = (basisCount: number) => {
       runsReloadInFlightRef.current = false;
       if (!pendingSignalReloadRef.current) return;
       pendingSignalReloadRef.current = false;
+      if (basisCount > RUN_LIST_LIMIT_MAX) {
+        setRunsStaleNotice(true);
+        return;
+      }
+      pendingSignalLimitRef.current = basisCount > 0 ? basisCount : RUNS_PAGE_SIZE;
       silentRef.current = true;
       setReloadNonce((n) => n + 1);
     };
@@ -489,7 +552,7 @@ function RunsBrowser({
     let alive = true;
     api
       .listRuns(experimentId, {
-        limit: RUNS_PAGE_SIZE,
+        limit: requestLimit,
         offset: 0,
         ...criteriaQuery(query, overridesFilter, exportedFilter),
       })
@@ -498,7 +561,7 @@ function RunsBrowser({
           dropCreated();
           return;
         }
-        runsSignalFollowUp();
+        runsSignalFollowUp(res.runs.length);
         setExperimentVersion(res.experiment_version);
         setList({
           status: 'data',
@@ -544,7 +607,7 @@ function RunsBrowser({
       .catch((err: unknown) => {
         dropCreated();
         if (!alive || generation !== generationRef.current) return;
-        runsSignalFollowUp();
+        runsSignalFollowUp(receivedBeforeThisRequest);
         setList({ status: 'error', error: asApiError(err) });
       });
     return () => {
@@ -605,15 +668,45 @@ function RunsBrowser({
 
     lastRunsSignalKeyRef.current = key;
 
+    /*
+     * A STANDING NOTICE MEANS THE READER HAS NOT YET ACTED, and a further
+     * signal changes nothing about that: this section already told them the
+     * list may be behind and offered Refresh. Reloading silently underneath an
+     * un-acted-on notice would be exactly the "guess at a limit" this whole
+     * path exists to avoid — see `runsStaleNotice`'s own comment.
+     */
+    if (runsStaleNotice) return;
+
+    /*
+     * HOW MUCH IS ON SCREEN RIGHT NOW, AND WHETHER ONE BOUNDED REQUEST CAN
+     * SAFELY RE-READ ALL OF IT. `received` (not `runs.length`; see `Loaded`'s
+     * own comment) is what the reader has actually paged their way to. Above
+     * `RUN_LIST_LIMIT_MAX` the server's own response cap means a single
+     * request cannot return it, and this section refuses to silently start
+     * paging multiple requests behind the reader's back while the record may
+     * still be changing — see the note this renders instead.
+     */
+    const receivedNow = loadedRef.current?.received ?? 0;
+    if (receivedNow > RUN_LIST_LIMIT_MAX) {
+      setRunsStaleNotice(true);
+      return;
+    }
+
     if (runsReloadInFlightRef.current) {
       // COALESCE. One follow-up, consumed by `runsSignalFollowUp` above once the
       // in-flight request settles — not one request per signal that lands here.
       pendingSignalReloadRef.current = true;
       return;
     }
+    // ONE BOUNDED REQUEST FOR EXACTLY WHAT IS ON SCREEN — never the plain
+    // `RUNS_PAGE_SIZE` first page, which would cut a reader who pressed Load
+    // More back down to 50 on a colleague's unrelated edit. `0` means nothing
+    // has loaded yet (the ordinary first read is still in flight or has not
+    // started), in which case the ordinary page size is exactly right.
+    pendingSignalLimitRef.current = receivedNow > 0 ? receivedNow : RUNS_PAGE_SIZE;
     silentRef.current = true;
     setReloadNonce((n) => n + 1);
-  }, [activity, experimentVersion]);
+  }, [activity, experimentVersion, runsStaleNotice]);
 
   // --- one more page ------------------------------------------------------
   const loadMore = () => {
@@ -876,6 +969,20 @@ function RunsBrowser({
     setAddStale(false);
     setRemoveError(null);
     setReloadNonce((n) => n + 1);
+  };
+
+  /*
+   * THE OVER-CAP NOTICE'S OWN REFRESH — a NORMAL (non-silent) reload, on
+   * purpose. Above `RUN_LIST_LIMIT_MAX` this section cannot re-read what is on
+   * screen in one bounded request, so it does not try to preserve it: this
+   * reload blanks the list and returns to the ordinary first `RUNS_PAGE_SIZE`
+   * page, exactly like every other "Reload This Section" control in this file.
+   * `pendingSignalLimitRef` is left untouched (`null`), so the fetch effect
+   * takes the ordinary path.
+   */
+  const refreshAfterRunsChangedElsewhere = () => {
+    setRunsStaleNotice(false);
+    reloadSection();
   };
 
   /*
@@ -1401,6 +1508,28 @@ function RunsBrowser({
         <p className="runs-note" role="status">
           {removeNote}
         </p>
+      )}
+
+      {/*
+        RUNS CHANGED ELSEWHERE, AND TOO MANY ARE LOADED TO RE-READ SILENTLY.
+        `role="status"`, matching `addNote`/`removeNote`: this is information,
+        not a refusal of something the reader asked for. The button is `Reload
+        This Section`'s own sibling in shape — same `<div>` + `<p>` + button
+        layout `addError` uses below — deliberately NOT silent (see
+        `refreshAfterRunsChangedElsewhere`), because above the cap this section
+        cannot promise to preserve what was on screen anyway.
+      */}
+      {runsStaleNotice && (
+        <div className="runs-note" role="status">
+          <p>Runs changed elsewhere. Refresh to see the current list.</p>
+          <button
+            type="button"
+            className="btn btn-secondary"
+            onClick={refreshAfterRunsChangedElsewhere}
+          >
+            Refresh
+          </button>
+        </div>
       )}
 
       {addError !== null && (

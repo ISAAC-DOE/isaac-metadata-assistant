@@ -33,3 +33,24 @@
  * server's ceiling would be treating a safety bound as a recommendation.
  */
 export const RUNS_PAGE_SIZE = 50;
+
+/**
+ * `RUN_PAGE_MAX` (`apps/api/isaac_api/routes.py`) — the largest page the run listing
+ * route will EVER return in one response, mirrored here for exactly one purpose: a
+ * change-feed signal that a run moved elsewhere has to decide, WITHOUT a round trip,
+ * whether the section can re-read everything currently on screen in a single bounded
+ * request. That decision has to be made client-side before the request is sent, so
+ * this is a case the general "do not retype a server bound" rule (see `_RUN_LIMIT_DESC`
+ * in `routes.py`, which interpolates rather than retypes) cannot avoid: there is no
+ * request this value could instead be read off. If the server's bound ever changes,
+ * this one has to change with it — NO TEST IN THIS TREE PINS THAT AGREEMENT TODAY, and
+ * that is a named gap rather than an oversight papered over: closing it needs either a
+ * committed test reading `RUN_PAGE_MAX` out of the OpenAPI document this build already
+ * serves, or a Python-side test asserting the two literals match, and neither exists
+ * yet.
+ *
+ * A record with more runs LOADED than this cannot be silently reconciled in one
+ * request; see `RunsSection`'s "over the cap" path, which shows a note and a Refresh
+ * control instead of guessing at a limit the server would clamp or refuse.
+ */
+export const RUN_LIST_LIMIT_MAX = 200;
