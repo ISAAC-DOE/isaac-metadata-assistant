@@ -963,8 +963,12 @@ Current state:
   because "the trap is live" is exactly the kind of claim a future session acts on.** Re-measured
   this session: `python3 -c "print(open('apps/web/src/components/RecordDescriptionPanel.tsx','rb').read().count(b'\x00'))"`
   → **0**. A full sweep of the **397** files then tracked under `apps/web/src` found **zero**
-  holding a NUL byte, and a sweep of all **1,019** tracked files repository-wide found exactly
-  **one** — the already-documented exemption
+  holding a NUL byte, and ~~a sweep of all **1,019** tracked files repository-wide found exactly
+  one~~ — **corrected 2026-09-02, independent review of PR #227: `git ls-tree -r b82e555
+  --name-only | wc -l` reads 1020, not 1019, at the commit this figure was first measured against**
+  (re-measured again at this session's later head, `git ls-tree -r f86fe87 --name-only | wc -l` →
+  **1,023**, reflecting files the branch added afterward). **In every one of those measurements the
+  substantive claim holds: exactly one** — the already-documented exemption
   `qa/validator-upload-package/isaac-validator-qa-files.zip` (918 NUL bytes). The file was fixed,
   consistent with the mechanical guard named two paragraphs below
   (`apps/web/src/__tests__/source-is-greppable.test.ts`) now existing and holding. **The durable

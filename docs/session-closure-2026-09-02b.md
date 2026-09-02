@@ -20,7 +20,7 @@ merge.
 |---|---|---|---|
 | `RunsSection` had no change-feed refresh path at all | #222, corrected by #224's contract in #222's own follow-up commit `4151203`, wired live by #226 | `2b8a017` (feat), redesign commit `4151203` pre-merge, wiring merged `fd179f2` | `runs-live-refresh-integration.test.tsx` (#226): exactly one bounded `listRuns` re-read for a colleague's run edit, for a run removal, and when the record poller wins the race |
 | A colleague's proposal arrived with no announcement | #222 | `2b8a017` | `proposal-arrival-announcement.test.tsx`; suppressed on hydration, on the panel's own review acts, and on repeated no-op polls |
-| The drain budget was exactly exhausted at the row ceiling | #221 | `d5498e8` | `useChangeFeed.test.ts` — hard bound proven: ≤ 26 + T/8000 requests in any T ms window under sustained `has_more`; 100-page drain 645 s → 620.5 s |
+| The drain budget was exactly exhausted at the row ceiling | #221 | `d5498e8` | `apps/web/src/__tests__/change-feed.test.ts` — hard bound proven: ≤ 26 + T/8000 requests in any T ms window under sustained `has_more`; 100-page drain 645 s → 620.5 s |
 | Events refetched the full record bundle including unbounded `/pending` | #224 | `0cd8f6b` | `live-refresh-request-graph.test.tsx`: one run edit, record poller first, 44 req / 4 bundles / 4 unbounded `/pending` → 17 / 1 / 0 |
 | Run-scoped proposals were "structurally untestable" | #223 | `1ef0c0d` | `test_run_scoped_proposal_lifecycle.py` (30 tests) + `e2e/trusted/*` (5 specs), on a record created through `POST /api/experiments` with two runs |
 
@@ -120,8 +120,13 @@ cited in §2.
   python3 -c "print(open('apps/web/src/components/RecordDescriptionPanel.tsx','rb').read().count(b'\x00'))"
   ```
   → **0**. A sweep of all 397 files currently tracked under `apps/web/src` found **zero** files
-  holding a NUL byte. A sweep of all 1,019 currently-tracked files repository-wide found exactly
-  **one** — the already-documented exemption `qa/validator-upload-package/isaac-validator-qa-files.zip`
+  holding a NUL byte. ~~A sweep of all 1,019 currently-tracked files repository-wide found exactly
+  one~~ — **corrected 2026-09-02, independent review of PR #227: `git ls-tree -r b82e555 --name-only
+  | wc -l` reads 1020, not 1019, at the commit this figure was first measured against.** Re-measured
+  again at this document's own current head, `git ls-tree -r f86fe87 --name-only | wc -l` → **1,023**
+  (the branch added files between those two commits — evidence docs and this closure document
+  itself). A full byte-level re-sweep at 1,023 files still finds exactly **one** holding a NUL byte —
+  the already-documented exemption `qa/validator-upload-package/isaac-validator-qa-files.zip`
   (918 NUL bytes). The file was fixed (consistent with the mechanical guard
   `apps/web/src/__tests__/source-is-greppable.test.ts` that the same paragraph says now exists) and
   the "IS LIVE AGAIN" claim is stale. Corrected in `CLAUDE.md` §11 in place — see §7 below. The
