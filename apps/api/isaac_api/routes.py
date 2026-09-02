@@ -12275,6 +12275,7 @@ def _proposals_payload(
     selected: list,
     has_more: bool,
     next_cursor: str | None,
+    order: str,
 ) -> dict:
     """The list body. ``total`` counts what EXISTS, never what was returned."""
     by_state = {state: 0 for state in proposals.PROPOSAL_STATES}
@@ -12295,6 +12296,22 @@ def _proposals_payload(
         "by_state": by_state,
         "has_more": has_more,
         "next_cursor": next_cursor,
+        # THE ORDER THIS WINDOW WAS READ IN, STATED BY THE RESPONSE ITSELF.
+        #
+        # It is here for the same reason `window_default` and `window_max` are: a
+        # client that has to remember what it ASKED for in order to describe what it
+        # GOT will eventually describe one while holding the other. That is not
+        # hypothetical — the panel's count line was built from request state and
+        # therefore claimed "newest first" over the oldest-first rows still on
+        # screen while a read was in flight, and went on claiming it over an empty
+        # list after a read that failed. Because that line is a live region, the one
+        # utterance a screen reader got was made while the claim was false.
+        #
+        # It also answers the question for an MCP caller, which cannot see the query
+        # string at all: `isaac_list_proposals` returns this body, so the direction
+        # the rows are in is IN the rows' own envelope rather than something the
+        # agent has to have kept.
+        "order": order,
         "window_default": _PROPOSAL_WINDOW_DEFAULT,
         "window_max": _PROPOSAL_WINDOW_MAX,
         "max_per_record": _MAX_PROPOSALS_PER_RECORD,
@@ -12368,6 +12385,22 @@ _PROPOSAL_LIST_ORDER_DESC = (
 #: and is 26 characters of `[0-9A-Z]`, so it can never contain one. A bare id is
 #: therefore never mistaken for a tagged cursor, and a tagged cursor is never
 #: mistaken for an id this record might hold.
+#:
+#: **THAT INVARIANT IS ABOUT API-MINTED IDS, AND SAYING SO IS PART OF IT.** Every
+#: `proposal_id` this application creates is a ULID from `new_record_id()`, so the
+#: claim holds for every id these routes have ever issued — but `IngestionProposal`
+#: performs no id-shape validation on hydration, so a hand-edited or legacy document
+#: could persist a `proposal_id` CONTAINING a `:` and this parser would then read its
+#: leading segment as an order tag. **The consequence is a refusal, not a wrong
+#: answer, which is the property that makes the qualification tolerable rather than a
+#: defect to fix here.** Such an id can only reach this code as a client's `after`
+#: value: if the leading segment is not exactly `newest_first` the whole string is
+#: treated as an id, is not found, and is `422 unknown_cursor`; if it somehow is, the
+#: order check refuses `422 cursor_order_mismatch` or the truncated remainder is not
+#: found. No path returns a window from the wrong side. Note also that this server
+#: never MINTS such a cursor — `next_cursor` is built from a stored `proposal_id`, so
+#: a document carrying one would publish it and the client would hand it straight
+#: back, into the same refusal.
 _PROPOSAL_CURSOR_ORDER_PREFIX = "newest_first:"
 
 
@@ -12418,6 +12451,10 @@ def _proposal_cursor_for(proposal_id: str, order: str) -> str:
         "the most recently proposed change is in the first window instead of being "
         "reachable only by paging to the last one. A `next_cursor` belongs to the "
         "order it was issued under and is refused under the other — see the 422. "
+        "THE RESPONSE STATES ITS OWN `order`, so a caller describing the rows it "
+        "received never has to remember which direction it asked for. That matters "
+        "most where the query string is not visible: an agent calling this through "
+        "MCP reads the direction out of the same envelope as the rows. "
         "CLOSED PROPOSALS ARE INCLUDED — accepting, rejecting, superseding and "
         "withdrawing are states reached by explicit acts and recorded in each "
         "proposal's history, and this API has no operation that deletes a "
@@ -12461,7 +12498,7 @@ def _proposal_cursor_for(proposal_id: str, order: str) -> str:
         "which entry the id names."
     ),
     response_description=(
-        "One window of the record's proposals in the requested order, the per-state "
+        "One window of the record's proposals, the order they are in, the per-state "
         "counts, the paths a proposal may target, the cursor for the next window in "
         "that same order, and the record's current `ETag`."
     ),
@@ -12541,13 +12578,27 @@ def list_proposals(
     if order == "newest_first":
         ordered = ordered[::-1]
     if after is not None:
-        # A CURSOR MINTED UNDER THE OTHER ORDER IS REFUSED, AND IT HAS TO BE CHECKED
-        # BEFORE THE LOOKUP. Both orders hold the same proposals, so the id inside
-        # such a cursor is always FOUND — the walk would simply continue from the
-        # wrong side and hand back rows the client had already read as if they were
-        # the next page. That is the same wrong-answer-instead-of-an-error failure
-        # the unknown-cursor refusal below exists to prevent, and it is invisible to
-        # the lookup, which is why it is a separate check rather than a fallthrough.
+        # A CURSOR MINTED UNDER THE OTHER ORDER IS REFUSED. Both orders hold the same
+        # proposals, so the id inside such a cursor is always FOUND — the walk would
+        # simply continue from the wrong side and hand back rows the client had
+        # already read as if they were the next page. That is the same
+        # wrong-answer-instead-of-an-error failure the unknown-cursor refusal below
+        # exists to prevent, and it is invisible to the lookup, which is why it is a
+        # separate check rather than a fallthrough.
+        #
+        # ~~"AND IT HAS TO BE CHECKED BEFORE THE LOOKUP"~~ — **withdrawn as stated,
+        # because a review MEASURED it and it was an overstatement.** Moving this
+        # block below the lookup passes every test in the suite: on a cross-order
+        # cursor whose id the record HOLDS the two orderings are indistinguishable,
+        # since the id is found either way and the mismatch then refuses. So the
+        # order is a PREFERENCE, not a necessity — and it is pinned rather than left
+        # as prose, because exactly ONE input distinguishes the two: a cross-order
+        # cursor naming an id this record does NOT hold. Checked first it is
+        # `cursor_order_mismatch`, which names the mistake the client actually made
+        # and can act on; checked second it is `unknown_cursor`, which sends a client
+        # that crossed the orders looking for a proposal that was never the problem.
+        # `test_a_cross_order_cursor_naming_an_unknown_id_blames_the_order` is that
+        # input.
         if _proposal_cursor_order(after) != order:
             return _proposal_refusal(
                 "cursor_order_mismatch",
@@ -12600,6 +12651,7 @@ def list_proposals(
             if has_more and window
             else None
         ),
+        order=order,
     )
 
 

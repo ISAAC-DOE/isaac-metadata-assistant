@@ -299,6 +299,16 @@ the same rows and the same `total`, `returned`, `by_state`, `unreadable_entries`
 only the direction differs, and there is no second sort — the reverse of a total order is total,
 which is what keeps the cursor walk as well defined as the forward one.
 
+**The RESPONSE states its own `order`**, beside `window_default` and `window_max` and for the same
+reason they are there. A caller that has to remember what it ASKED for in order to describe what it
+GOT will eventually describe one while holding the other, and that was measured rather than
+imagined: the panel's count line was built from request state and so claimed "newest first" over
+the oldest-first rows still on screen while a read was in flight, and went on claiming it over an
+empty list after a read that failed — in a live region, so the single utterance a screen reader
+received was the one made while the claim was false. It also answers the question for an MCP
+caller, which never sees the query string at all. **A refusal carries no `order`**: there is no
+window, so there is nothing whose direction could be stated.
+
 **A CURSOR BELONGS TO THE ORDER IT WAS ISSUED UNDER, and a cross-order cursor is refused rather
 than answered.** This is not caution: both orders hold the same proposals, so the id inside such a
 cursor is always **found**, and the walk would simply continue from the wrong side and hand back
@@ -307,16 +317,28 @@ removed, over six proposals with `canonical` the stored oldest-first order: the 
 newest-first request answered **200** with `[canonical[0]]` and the crossed oldest-first request
 answered **200** with `[canonical[5]]` — two wrong answers, no error, nothing in either body
 saying so. It is the same wrong-answer-instead-of-an-error failure `unknown_cursor` exists to
-prevent, and it is invisible to that check, which is why it is a separate refusal checked
-**before** the lookup: **`422 cursor_order_mismatch`**, naming the cursor's order and the requested
-one.
+prevent, and it is invisible to that check, which is why it is a separate refusal:
+**`422 cursor_order_mismatch`**, naming the cursor's order and the requested one.
+
+It is checked **before** the lookup, and that is a **preference rather than a necessity** — a
+review measured the stronger claim and found it false: on a cross-order cursor whose id the record
+HOLDS, the two orderings are indistinguishable. Exactly one input separates them, and it is pinned
+by test rather than argued here: a cross-order cursor naming an id the record does **not** hold.
+Checked first it is `cursor_order_mismatch`, which names the mistake the client actually made;
+checked second it is `unknown_cursor`, which sends a client that crossed the orders looking for a
+proposal that was never the problem.
 
 **The `oldest_first` cursor is still the bare proposal id.** The asymmetry is deliberate and is why
 the order travels as a prefix rather than as an encoding: every `next_cursor` this server has ever
 issued was a bare id meaning "continue oldest-first", so those keep meaning exactly that, and only
 the new direction — which had issued none, because it did not exist — carries a
 `newest_first:` tag. `:` is safe as the separator because a proposal id is 26 characters of
-`[0-9A-Z]` from `new_record_id()`. Re-encoding both directions was mutation-tested and turns two
+`[0-9A-Z]` from `new_record_id()` — **an invariant about API-MINTED ids, and the qualification is
+part of it**: `IngestionProposal` validates no id shape on hydration, so a hand-edited or legacy
+document could persist a `proposal_id` containing a `:`. **The consequence is a refusal and never a
+wrong answer**, which is why it is stated rather than fixed here: such a value can only arrive as a
+client's `after`, and every path through it ends in `422 unknown_cursor` or `422
+cursor_order_mismatch` — none returns a window from the wrong side. Re-encoding both directions was mutation-tested and turns two
 pre-existing DEC-5 tests red; that is the breaking change this shape avoids, and a future slice
 that wants symmetry is proposing a contract break rather than a tidy-up.
 

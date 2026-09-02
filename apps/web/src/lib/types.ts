@@ -2841,15 +2841,6 @@ export interface ApiProposal {
 }
 
 /**
- * `GET /experiments/{id}/proposals` — ONE WINDOW, and this list is bounded where
- * this API's other lists are not.
- *
- * Omitting `limit` returns `window_default` rows, not everything; `has_more` and
- * `next_cursor` page through the rest. `total` stays how many proposals the record
- * HOLDS — never how many were returned — so a client showing one window can always
- * state the record's true size instead of implying the rest are gone.
- */
-/**
  * Which end of the record's proposal order a window is read from.
  *
  * `oldest_first` is the server's default and is the order this list has always
@@ -2861,6 +2852,15 @@ export interface ApiProposal {
  */
 export type ApiProposalOrder = 'oldest_first' | 'newest_first';
 
+/**
+ * `GET /experiments/{id}/proposals` — ONE WINDOW, and this list is bounded where
+ * this API's other lists are not.
+ *
+ * Omitting `limit` returns `window_default` rows, not everything; `has_more` and
+ * `next_cursor` page through the rest. `total` stays how many proposals the record
+ * HOLDS — never how many were returned — so a client showing one window can always
+ * state the record's true size instead of implying the rest are gone.
+ */
 export interface ApiProposalsResponse {
   proposals: ApiProposal[];
   /** How many the record HOLDS. Ignores `state`, `limit` and `after`. */
@@ -2880,6 +2880,20 @@ export interface ApiProposalsResponse {
    * `newest_first` it carries a prefix; nothing here may parse or construct one.
    */
   next_cursor: string | null;
+  /**
+   * THE ORDER THIS WINDOW WAS READ IN, AS THE RESPONSE ITSELF STATES IT.
+   *
+   * Read this, never the `order` a request carried. A surface that describes what it
+   * GOT using what it ASKED for will eventually describe one while holding the
+   * other — measured: the count line claimed "newest first" over the oldest-first
+   * rows still on screen while a read was in flight, and went on claiming it over
+   * an empty list after a read that failed. It is a live region, so the single
+   * utterance a screen reader received was the one made while the claim was false.
+   *
+   * REQUIRED, not optional, so a fixture cannot omit it and a consumer cannot reach
+   * for a default that would be a second copy of the server's.
+   */
+  order: ApiProposalOrder;
   window_default: number;
   window_max: number;
   max_per_record: number;

@@ -1555,6 +1555,74 @@ def test_an_order_this_route_does_not_offer_is_refused(client, experiment):
     assert response.status_code == 422, response.text
 
 
+def test_a_cross_order_cursor_naming_an_unknown_id_blames_the_order(client, experiment):
+    """THE ONE INPUT THAT DISTINGUISHES THE TWO REFUSAL ORDERINGS, pinned because the
+    route's comment used to assert a NECESSITY a review measured as a preference.
+
+    On a cross-order cursor whose id the record HOLDS, checking the order before or
+    after the lookup is indistinguishable — the id is found either way and the
+    mismatch refuses. This is the input where they differ: a cursor in the wrong
+    order naming an id the record does not hold. The order check runs FIRST, so the
+    answer names the mistake the client actually made; run second it would be
+    `unknown_cursor`, sending a client that crossed the orders to look for a proposal
+    that was never the problem.
+
+    MUTATION: moved the mismatch block below the lookup. Only this test goes red —
+    which is the measurement, not an accident: it is the reason the preference is
+    pinned here rather than argued in a comment.
+    """
+    _created(client, experiment)
+    response = client.get(
+        f"/api/experiments/{experiment.id}/proposals"
+        "?order=newest_first&after=01JQZZNOTAPROPOSAL000000"
+    )
+    assert response.status_code == 422, response.text
+    body = response.json()
+    assert body["error"] == "cursor_order_mismatch", body
+    assert body["cursor_order"] == "oldest_first"
+    assert body["requested_order"] == "newest_first"
+
+
+def test_the_response_states_the_order_it_was_read_in(client, experiment):
+    """THE RESPONSE SAYS ITS OWN DIRECTION, so a caller never has to remember what it
+    asked for in order to describe what it got.
+
+    That is not a convenience: the panel's count line was built from REQUEST state
+    and therefore claimed "newest first" over oldest-first rows while a read was in
+    flight, and went on claiming it over an empty list after a read that failed —
+    in a live region, so the one utterance a screen reader received was made while
+    the claim was false. It is also the only way an MCP caller can know, since it
+    never sees the query string.
+
+    MUTATION: dropped the key from `_proposals_payload`. RED here and in the
+    published-surface test below.
+    """
+    _created(client, experiment)
+
+    omitted = client.get(f"/api/experiments/{experiment.id}/proposals").json()
+    assert omitted["order"] == "oldest_first", "the default is STATED, not implied"
+
+    newest = client.get(
+        f"/api/experiments/{experiment.id}/proposals?order=newest_first"
+    ).json()
+    assert newest["order"] == "newest_first"
+
+    # It describes the WINDOW, so it survives a filter and a cursor unchanged —
+    # unlike `returned`, and like `window_default`.
+    filtered = client.get(
+        f"/api/experiments/{experiment.id}/proposals?order=newest_first&state=open"
+    ).json()
+    assert filtered["order"] == "newest_first"
+
+    # A REFUSAL CARRIES NO `order` AT ALL, which is the honest shape: there is no
+    # window, so there is nothing whose direction could be stated.
+    refused = client.get(
+        f"/api/experiments/{experiment.id}/proposals?after=01JQZZNOTAPROPOSAL000000"
+    )
+    assert refused.status_code == 422
+    assert "order" not in refused.json()
+
+
 def test_the_order_parameter_is_published_through_the_derived_surfaces(client):
     """OpenAPI and the MCP tool schema are DERIVED from the route, so neither may be
     updated by hand — this asserts the derivation actually carried it."""

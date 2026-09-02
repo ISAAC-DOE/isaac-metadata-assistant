@@ -126,6 +126,12 @@ function page(
     },
     has_more: false,
     next_cursor: null,
+    // THE SERVER STATES THE ORDER AND THIS FIXTURE STATES IT TOO, defaulting to
+    // the server's own default. It is deliberately not optional in
+    // `ApiProposalsResponse`: a test that wants to model a newest-first window has
+    // to say so, which is what makes "the count line describes the LOADED window"
+    // assertable at all.
+    order: 'oldest_first' as const,
     window_default: 50,
     window_max: 200,
     max_per_record: 1000,
@@ -759,6 +765,11 @@ describe('the arrival note leads somewhere', () => {
             returned: 1,
             has_more: !newest,
             next_cursor: newest ? null : 'OLD_1',
+            // ANSWERED FROM THE KEY, as the server answers it from the query: the
+            // count line is built from `loaded.order`, so a stub that always
+            // returned the default would prove only that the panel renders a
+            // constant.
+            order: newest ? 'newest_first' : 'oldest_first',
           }),
         };
       },
@@ -865,6 +876,44 @@ describe('the arrival note leads somewhere', () => {
     // And no proposal content ever reaches either surface.
     expect(statusText()).not.toContain(SENTINEL);
     expect(document.querySelector('.proposals-count')?.textContent ?? '').not.toContain(SENTINEL);
+  });
+
+  it('CLEARS THE RUNNING TOTAL, so the next arrival counts from there and not from before it', async () => {
+    /*
+     * `arrivalTotalRef` accumulates arrivals the reader has not ACKNOWLEDGED — not
+     * arrivals they have not reviewed; Dismiss's own comment is explicit that it
+     * marks nothing reviewed, and neither does this. Being taken to the window that
+     * HOLDS them is an acknowledgement, so the total has to reset here for the same
+     * reason it resets on Dismiss.
+     *
+     * MUTATION: deleted `arrivalTotalRef.current = 0` from the action's handler.
+     * Before this test the whole file passed 82/82 with the line gone — the reset
+     * was unpinned. With it, the second arrival reads "At least 2", counting one the
+     * reader had already been shown.
+     */
+    const { bump } = stubBothOrders();
+    const view = renderPanel(null);
+    await screen.findByText('Proposed value');
+
+    bump();
+    rerenderWith(view, activityFor(['NEW_9'], 9));
+    await waitFor(() =>
+      expect(arrivalNoteText()).toBe('At least 1 proposed change arrived and is ready to review.'),
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Show Open, Newest First' }));
+    await waitFor(() => expect(arrivalNoteText()).toBeNull());
+    // The reader has now SEEN that arrival — the window it is in is on screen.
+    await screen.findByText(NEWEST_VALUE);
+
+    // A SECOND, GENUINELY NEW arrival. It is one proposal, and the note must say so.
+    bump();
+    rerenderWith(view, activityFor(['NEW_10'], 14));
+    await waitFor(() => expect(arrivalNoteText()).not.toBeNull());
+    expect(arrivalNoteText()).toBe(
+      'At least 1 proposed change arrived and is ready to review.',
+    );
+    expect(arrivalNoteText()).not.toContain('At least 2');
   });
 
   it('NEGATIVE CONTROL: with no arrival there is no action to activate', async () => {

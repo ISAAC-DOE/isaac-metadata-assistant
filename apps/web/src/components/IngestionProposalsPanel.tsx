@@ -851,8 +851,18 @@ function ProposalsBrowser({
     if (!loaded) return '';
     const total = `${loaded.total} ${loaded.total === 1 ? 'proposal' : 'proposals'} on this record`;
     const shown = `Showing ${loaded.returned} of ${total}`;
-    return `${shown}${orderClause(order)}${unreadableClause(loaded.unreadable_entries)}`;
-  }, [loaded, order]);
+    // `loaded.order`, NOT the `order` STATE, and the whole line is built from one
+    // source for that reason. `shown` is response state and `loaded` falls back to
+    // the last SUCCESSFUL window, so a clause taken from request state describes a
+    // window the numbers beside it are not from. Measured before the response
+    // carried its own order: after an order change whose read answered 503 the line
+    // read "… · newest first" over zero cards and stayed that way until Retry, and
+    // in flight it read "newest first" over the oldest-first rows. Because
+    // `.proposals-count` is `aria-live`, that made the one utterance a screen reader
+    // got the one where the claim was false — and no second utterance when it
+    // became true, since by then the text no longer changed.
+    return `${shown}${orderClause(loaded.order)}${unreadableClause(loaded.unreadable_entries)}`;
+  }, [loaded]);
 
   /** The filter options: "All" plus whatever states the SERVER reports. */
   const filterOptions = useMemo(() => {

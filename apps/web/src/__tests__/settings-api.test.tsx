@@ -2181,7 +2181,23 @@ describe('the Full Description rule over the REAL generated contract', () => {
     // `collapsedOps` is STILL zero and was re-measured, not assumed: the proposals
     // remainder GREW, which only puts it further past `PURPOSE_DISCLOSURE_MIN_CHARS`
     // (400), and the new prose adds no marker the paragraph did not already carry.
-    expect(total).toBe(132478);
+    // ── REVIEW FIX I1, 2026-09-02. 132,478 -> 132,760 (+282), and again BOTH the
+    // operation count (77) and the POST-LEAD PARAGRAPH COUNT (254) hold. The list
+    // response now STATES its own `order`, and the sentences saying so were written
+    // into the same bounded-list paragraph as the parameter they describe — for the
+    // same reason as the entry above, and because the key exists to spare a caller
+    // from remembering the request, which is part of what the parameter means rather
+    // than a separate limit.
+    //
+    // Per operation, re-derived rather than apportioned: `GET .../proposals`
+    // 3,493 -> 3,775 (+282), the whole delta. Every other entry byte-identical, and
+    // `test_contract_description_parity.py` proves that in both directions.
+    //
+    // Derived two ways that agree, neither an increment: raw sum over the 77 named
+    // operations 133,268, minus 2 per `\n\n` separator (254 x 2 = 508) = 132,760;
+    // and the same figure off the transcribed array, which is what `total` sums. The
+    // entry was re-transcribed from `create_app().openapi()` by script.
+    expect(total).toBe(132760);
     // 104,045 -> 114,959 (+10,914): the four new operations, and NO existing
     // description changed — `test_contract_description_parity.py` proves that rather
     // than leaving it asserted here. RE-DERIVED from the served document and never
