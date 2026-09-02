@@ -194,8 +194,18 @@ export const ASSISTANT_COMPANION_COPY = {
     {
       id: 'connector',
       claim: 'It cannot see your own Claude settings.',
+      /*
+       * WRITTEN AROUND THE RATCHET, NOT THE RATCHET AROUND THIS SENTENCE. It
+       * used to say "whether you have ENABLED the ISAAC connector … nothing
+       * here can ENABLE it for you". Both readings are honest, but `enabled` is
+       * also the adjective a fake connected state wears — "the companion is
+       * live, active and enabled" was measured to pass every control in this
+       * slice — so the word joined the ratchet and this sentence moved to
+       * "turned on". The file's own rule, stated three times in the test: the
+       * page is written to the ratchet, never the ratchet loosened to the page.
+       */
       detail:
-        'Whether you have enabled the ISAAC connector is yours to know. Nothing here can enable it for you and nothing here can check it, so this section never reports on it — it only tells you it is a step you take yourself.',
+        'Whether you have turned on the ISAAC connector is yours to know. Nothing here can turn it on for you and nothing here can check it, so this section never reports on it — it only tells you it is a step you take yourself.',
     },
   ],
 

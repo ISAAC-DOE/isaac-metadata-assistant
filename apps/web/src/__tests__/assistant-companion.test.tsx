@@ -46,7 +46,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { describe, it, expect, afterEach, vi } from 'vitest';
-import { render, screen, within, cleanup, waitFor } from '@testing-library/react';
+import { render, screen, within, cleanup, waitFor, fireEvent } from '@testing-library/react';
 
 import { MemoryRouter } from 'react-router-dom';
 
@@ -133,7 +133,36 @@ const CONNECTION_CLAIM =
  * sentence anywhere here may claim the link was opened, resolved or confirmed.
  */
 const REACHABILITY_CLAIM =
-  /\b(verified|validated the link|we opened|we checked the link|confirmed to work|known to work|is working|responds|resolves)\b/i;
+  /\b(verified|validated the link|we opened|we checked the link|confirmed to work|known to work|responds|resolves)\b/i;
+
+/**
+ * THE STATE-CLAIM RATCHET — the third, and it exists because the first two left
+ * a four-word hole that an independent review measured.
+ *
+ * The component's own docstring promised no state renders a claim that something
+ * is "connected, reachable, working, live, active, enabled or online", each
+ * pinned behaviourally. It was not true: `CONNECTION_CLAIM` covered none of
+ * `live`/`active`/`enabled`, and `REACHABILITY_CLAIM` covered `is working` but
+ * not the bare adjective. Measured on the branch: setting the configured label to
+ * "The companion is live, active and enabled for this deployment" produced ZERO
+ * new failures across all 37 tests. That sentence is
+ * `ai-integration-decision-packet.md` §6's forbidden fake `Connected` state in
+ * different words, and every control in this file waved it through.
+ *
+ * `available` and `ready` join it for the same reason, and `working` moves here
+ * from `REACHABILITY_CLAIM` so the bare adjective is covered rather than only
+ * the phrase.
+ *
+ * `enables` IS DELIBERATELY NOT MATCHED, and the exclusion is by grammatical form
+ * rather than by exemption — the same device that lets `CONNECTION_CLAIM` coexist
+ * with the word `connector`. The server's own `prerequisite` reads "Each
+ * scientist enables the ISAAC connector in their own Claude settings": a
+ * third-person verb whose subject is a scientist, describing an action in another
+ * product. That is an instruction, not a state claim about this deployment, and
+ * it arrives from the server so this repository cannot reword it. The adjectival
+ * `enabled`/`enabling` is what a state claim wears, and both are matched.
+ */
+const STATE_CLAIM = /\b(live|active|enabled|enabling|working|available|ready)\b/i;
 
 /**
  * THE ERROR-FRAMING RATCHET, applied ONLY to the `unconfigured` render.
@@ -186,6 +215,51 @@ describe('the section is mounted on a real tab, not merely written', () => {
     ).toBeInTheDocument();
     // And the live read really happened on the page, not just in isolation.
     expect(await within(panel).findByText(COPY.unconfiguredLabel)).toBeInTheDocument();
+  });
+
+
+  it('re-reads on every remount, and NOT while the tab stays open', async () => {
+    /*
+     * THE NARROWED CLAIM, MEASURED. The prose in `SettingsPage.tsx` and in the
+     * component used to say section-level placement avoided pinning the answer
+     * "for the life of a page load". `useFetch(…, [])` pins it for the life of
+     * the MOUNT, so the true benefit is narrower: a reader who leaves the tab
+     * and returns gets a fresh read; a reader who stays does not. Both halves
+     * are asserted, because only asserting the first would let the prose keep
+     * overstating the second.
+     */
+    const calls = stubFetchRoutes({
+      'GET /api/about': { body: aboutResponse },
+      'GET /api/openapi': { body: openApiFixture },
+      'GET /api/graph/status': { body: graphStatusAvailable },
+      [ROUTE]: { body: assistantCompanionUnconfigured },
+    });
+    render(
+      <MemoryRouter
+        initialEntries={[ROUTES.settingsTab('mcp')]}
+        future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+      >
+        <SettingsPage />
+      </MemoryRouter>,
+    );
+    await screen.findByText(COPY.unconfiguredLabel);
+    const afterFirst = calls.filter((key) => key === ROUTE).length;
+    expect(afterFirst).toBe(1);
+
+    // Leave the tab. The section unmounts; nothing re-reads.
+    fireEvent.click(screen.getByRole('tab', { name: 'Overview' }));
+    await waitFor(() =>
+      expect(screen.queryByText(COPY.unconfiguredLabel)).not.toBeInTheDocument(),
+    );
+    expect(calls.filter((key) => key === ROUTE).length).toBe(afterFirst);
+
+    // Come back. It remounts, and reads again — the whole benefit, stated
+    // exactly.
+    fireEvent.click(screen.getByRole('tab', { name: 'Connect Your Agent' }));
+    await screen.findByText(COPY.unconfiguredLabel);
+    await waitFor(() =>
+      expect(calls.filter((key) => key === ROUTE).length).toBe(afterFirst + 1),
+    );
   });
 });
 
@@ -251,12 +325,16 @@ describe('no state claims a connection, in any casing', () => {
     const swept = everyString(container);
     expect(swept, 'a connection claim reached the DOM').not.toMatch(CONNECTION_CLAIM);
     expect(swept, 'a reachability claim reached the DOM').not.toMatch(REACHABILITY_CLAIM);
+    expect(swept, 'a live/active/enabled state claim reached the DOM').not.toMatch(
+      STATE_CLAIM,
+    );
   });
 
   it('renders no connection claim on a failed read either', async () => {
     const { container } = await renderUnreadable();
     expect(everyString(container)).not.toMatch(CONNECTION_CLAIM);
     expect(everyString(container)).not.toMatch(REACHABILITY_CLAIM);
+    expect(everyString(container)).not.toMatch(STATE_CLAIM);
   });
 
   it('THE RATCHETS ARE NOT VACUOUS — each fires on the string it exists to catch', () => {
@@ -268,8 +346,26 @@ describe('no state claims a connection, in any casing', () => {
     expect('the companion is reachable').toMatch(CONNECTION_CLAIM);
     expect('this link was verified').toMatch(REACHABILITY_CLAIM);
     expect('we checked the link and it responds').toMatch(REACHABILITY_CLAIM);
-    // And the one word that must NOT fire, because the server sends it.
+    // THE EXACT SENTENCE THAT SLIPPED THROUGH ALL 37 TESTS, and each of its
+    // three words on its own — a control that only fired on the whole phrase
+    // would go quiet the moment someone used one of them.
+    expect('The companion is live, active and enabled for this deployment').toMatch(
+      STATE_CLAIM,
+    );
+    for (const claim of [
+      'the companion is live',
+      'the link is active',
+      'the connector is enabled',
+      'the companion is working',
+      'the companion is available',
+      'the companion is ready',
+    ]) {
+      expect(claim, claim).toMatch(STATE_CLAIM);
+    }
+    // And the two forms that must NOT fire, because the server sends them and
+    // this repository cannot reword what the server sends.
     expect('enables the ISAAC connector').not.toMatch(CONNECTION_CLAIM);
+    expect('Each scientist enables the ISAAC connector').not.toMatch(STATE_CLAIM);
   });
 
   it('honours checked_reachable by having NO branch that could read it as true', async () => {
@@ -428,12 +524,29 @@ describe('a refusal names a category and echoes nothing', () => {
   it('the canary check is not vacuous — it fires when the value IS rendered', async () => {
     // The same canary, in the field the configured branch DOES render, proves
     // the sweep can see a value that reaches the DOM.
-    // ASSEMBLED FROM PARTS, never written whole, so the committed bytes of this
-    // file contain no URL carrying a long opaque segment — which is precisely
-    // the property the repository-wide guard below asserts. A control string
-    // that trips the guard it exists to validate is not a control string.
+    /*
+     * ASSEMBLED SO THAT NO `claude.ai/` PREFIX EXISTS IN THE COMMITTED BYTES,
+     * and the earlier version of this comment is the lesson.
+     *
+     * It said splitting the trailing id made the control safe "because the
+     * committed bytes contain no URL carrying a long opaque segment". That was
+     * true of the ID rule and FALSE of the MARKER rule, which is applied to the
+     * same bytes by the sweeps below: the scheme-plus-host-plus-path prefix is
+     * ITSELF a complete match for the URL regex, and it carries no marker. Both
+     * controls therefore became offenders the moment this file was committed —
+     * invisible while it was untracked, red in CI the instant it was not.
+     *
+     * (That prefix is deliberately DESCRIBED rather than quoted on this line.
+     * Written out, this comment would reproduce the defect it explains — the
+     * same recursion `source-is-greppable.test.ts` records happening twice to
+     * its own doc comment about NUL bytes.)
+     *
+     * Splitting the SCHEME and HOST apart means the regex has nothing to anchor
+     * on at all, so the control is invisible to every sweep in this file rather
+     * than merely passing one of two.
+     */
     const CANARY =
-      'https://claude.ai/public/artifacts/' + 'CANARY-VALUE-THAT-' + 'MUST-NEVER-RENDER';
+      'https://' + 'claude.ai' + '/public/artifacts/' + 'CANARY-VALUE-THAT-' + 'MUST-NEVER-RENDER';
     const { container } = await renderWith({
       ...assistantCompanionConfigured,
       url: CANARY,
@@ -471,7 +584,13 @@ describe('deep link only, with the prerequisite beside it', () => {
     // after it and not in a footnote.
     const relation = prerequisite.compareDocumentPosition(link);
     expect(relation & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(container).toBeTruthy();
+    // `expect(container).toBeTruthy()` stood here and asserted nothing: a
+    // render always returns a container. Replaced with the claim it was
+    // presumably reaching for — that both nodes are inside this section, so the
+    // ordering above is an ordering WITHIN the surface and not an accident of
+    // two unrelated trees.
+    expect(container.contains(prerequisite)).toBe(true);
+    expect(container.contains(link)).toBe(true);
   });
 
   it('does NOT show the prerequisite where there is no link to qualify', async () => {
@@ -514,6 +633,61 @@ describe('deep link only, with the prerequisite beside it', () => {
     // published here.
     expect(screen.getByText('A_RENAMED_VARIABLE')).toBeInTheDocument();
     expect(visibleText(container)).not.toContain('ISAAC_ASSISTANT_ARTIFACT_URL');
+  });
+});
+
+// --- a malformed body degrades one line, and never blanks the page -----------
+
+describe('a server value this client cannot show costs one line, not the page', () => {
+  /*
+   * THE FAILURE MODE, MEASURED BEFORE THE FIX: this application has no
+   * `ErrorBoundary` anywhere, so a non-string reaching JSX throws "Objects are
+   * not valid as a React child" during render and React unmounts the whole tree.
+   * That is not this section going blank — it is the entire Settings page.
+   *
+   * These are behavioural: each feeds a wrong-typed value and asserts the
+   * section still rendered, which a string check on the fallback sentence could
+   * not establish.
+   */
+  it.each([['reason'], ['prerequisite'], ['configured_by'], ['reference']])(
+    'renders the section when %s is not a string',
+    async (field) => {
+      const { container } = await renderWith({
+        ...assistantCompanionConfigured,
+        [field]: { nested: 'object' },
+      });
+      // The section is still on screen — the claim that matters.
+      expect(screen.getByRole('heading', { name: COPY.heading })).toBeInTheDocument();
+      expect(container.querySelectorAll('h3, h4').length).toBeGreaterThan(3);
+      // And no `[object Object]` was coerced onto the page in its place.
+      expect(everyString(container)).not.toContain('[object Object]');
+    },
+  );
+
+  it('a malformed field costs ONLY its own line — a configured link still works', async () => {
+    // The §11 precedent, asserted rather than assumed: one unreadable value must
+    // not take the working parts of the surface with it.
+    const { container } = await renderWith({
+      ...assistantCompanionConfigured,
+      reference: 12345,
+    });
+    expect(renderedUrls(container)).toEqual([SYNTHETIC_COMPANION_URL]);
+    expect(
+      screen.getByRole('link', { name: new RegExp(COPY.openLinkText, 'i') }),
+    ).toBeInTheDocument();
+  });
+
+  it('the fallback never invents a value, and never claims a state', async () => {
+    const { container } = await renderWith({
+      ...assistantCompanionRefused,
+      reason: ['an', 'array'],
+    });
+    const swept = everyString(container);
+    expect(swept).not.toMatch(CONNECTION_CLAIM);
+    expect(swept).not.toMatch(REACHABILITY_CLAIM);
+    expect(swept).not.toMatch(STATE_CLAIM);
+    // Nothing from the malformed value is reconstructed onto the page.
+    expect(swept).not.toContain('array');
   });
 });
 
@@ -656,6 +830,56 @@ describe('no committed URL can be mistaken for a real artifact', () => {
       .filter((rel) => rel !== '');
   }
 
+  /**
+   * A path segment that cannot be a real artifact id: at least 16 characters
+   * from the opaque-id alphabet, unless it SAYS it is synthetic.
+   *
+   * THE EXEMPTION IS BY CONTENT, NOT BY AN EQUALITY ALLOWLIST, and that is the
+   * whole reason it works across files this slice does not own.
+   * `test_assistant_artifact_companion_route.py` already states this rule for
+   * itself at `_NON_IDENTIFYING_PATHS`: every `claude.ai` path in that file
+   * "either says `synthetic` outright" or is one of three enumerated stubs. So
+   * `includes('synthetic')` is not a carve-out invented here to make a red test
+   * green — it is the neighbouring file's own published rule, applied by this
+   * one. An equality list of that file's literals would have gone stale the
+   * first time it added a fixture, which is the failure mode of pinning strings
+   * instead of properties.
+   */
+  function looksLikeARealId(segment: string): boolean {
+    if (segment.toLowerCase().includes('synthetic')) return false;
+    return segment.length >= 16 && /^[A-Za-z0-9_-]+$/.test(segment);
+  }
+
+  /** Every segment of a URL's path, query and fragment. */
+  function segmentsOf(url: string): string[] {
+    return url.replace(/^https?:\/\/(?:www\.)?claude\.ai/i, '').split(/[/?#&=]/);
+  }
+
+  /**
+   * BOTH RULES, over one list of files. Factored out because the by-path sweep
+   * below applied only the ID rule and was therefore structurally unable to see
+   * the two MARKER offenders it was added to catch — a fix-for-the-fix that left
+   * half the hole open.
+   */
+  function offendersIn(paths: readonly string[]): {
+    unmarked: string[];
+    suspicious: string[];
+    found: number;
+  } {
+    const unmarked: string[] = [];
+    const suspicious: string[] = [];
+    const urls = urlsUnder(paths);
+    for (const { rel, url } of urls) {
+      if (!url.includes(SYNTHETIC_COMPANION_MARKER)) unmarked.push(rel + ': ' + url);
+      for (const segment of segmentsOf(url)) {
+        if (looksLikeARealId(segment)) {
+          suspicious.push(rel + ': ' + url + ' (segment "' + segment + '")');
+        }
+      }
+    }
+    return { unmarked, suspicious, found: urls.length };
+  }
+
   function urlsUnder(paths: readonly string[]): { rel: string; url: string }[] {
     const found: { rel: string; url: string }[] = [];
     for (const rel of paths) {
@@ -695,18 +919,15 @@ describe('no committed URL can be mistaken for a real artifact', () => {
     expect(web.length).toBeGreaterThan(100);
     expect(web).toContain('apps/web/src/test/apiFixtures.ts');
 
-    const found = urlsUnder(web);
+    const { unmarked, found } = offendersIn(web);
 
     // ANTI-VACUITY, PART TWO: at least one URL was actually matched, so a regex
     // that matched nothing cannot read as a clean sweep. This assertion HAS
     // fired for real: the fixture originally built its URL by template
     // interpolation, so the committed bytes held the placeholder rather than the
     // marker, and the "clean" result was entirely vacuous.
-    expect(found.length, 'the URL sweep matched no URL — it proves nothing').toBeGreaterThan(0);
+    expect(found, 'the URL sweep matched no URL — it proves nothing').toBeGreaterThan(0);
 
-    const unmarked = found
-      .filter(({ url }) => !url.includes(SYNTHETIC_COMPANION_MARKER))
-      .map(({ rel, url }) => rel + ': ' + url);
     expect(unmarked, 'an unmarked artifact URL is committed under apps/web').toEqual([]);
   });
 
@@ -724,19 +945,8 @@ describe('no committed URL can be mistaken for a real artifact', () => {
      * threshold and is exempted BY VALUE rather than by length, because it says
      * in words what it is.
      */
-    const found = urlsUnder(everyTrackedPath());
-    expect(found.length, 'the repository-wide sweep matched no URL').toBeGreaterThan(0);
-
-    const suspicious: string[] = [];
-    for (const { rel, url } of found) {
-      const path = url.replace(/^https?:\/\/(?:www\.)?claude\.ai/i, '');
-      for (const segment of path.split(/[/?#&=]/)) {
-        if (segment === SYNTHETIC_COMPANION_MARKER) continue;
-        if (segment.length >= 16 && /^[A-Za-z0-9_-]+$/.test(segment)) {
-          suspicious.push(rel + ': ' + url + ' (segment "' + segment + '")');
-        }
-      }
-    }
+    const { suspicious, found } = offendersIn(everyTrackedPath());
+    expect(found, 'the repository-wide sweep matched no URL').toBeGreaterThan(0);
     expect(suspicious, 'a committed URL carries what looks like a real artifact id').toEqual(
       [],
     );
@@ -745,11 +955,13 @@ describe('no committed URL can be mistaken for a real artifact', () => {
   it('THE ID RULE IS NOT VACUOUS — it fires on a URL shaped like a real one', () => {
     // Without this the threshold could be wrong by an order of magnitude and
     // every assertion above would still pass over every file.
-    // Assembled from parts for the same reason as the canary above: written
-    // whole, this control would itself be an offender under the very rule it is
-    // here to prove fires.
+    // Scheme and host split apart, for the reason set out at the canary above:
+    // splitting only the id left the `claude.ai/` prefix as a committed literal,
+    // which the MARKER rule counts as an unmarked URL even though the ID rule is
+    // satisfied. A control that trips one of the two guards it exists to
+    // validate is not a control.
     const REAL_SHAPED =
-      'https://claude.ai/public/artifacts/' + 'a1b2c3d4-e5f6' + '-7890abcdef1234';
+      'https://' + 'claude.ai' + '/public/artifacts/' + 'a1b2c3d4-e5f6' + '-7890abcdef1234';
     const segments = REAL_SHAPED.replace(/^https?:\/\/(?:www\.)?claude\.ai/i, '').split(
       /[/?#&=]/,
     );
@@ -762,15 +974,29 @@ describe('no committed URL can be mistaken for a real artifact', () => {
     expect(SYNTHETIC_COMPANION_MARKER.length).toBeGreaterThanOrEqual(16);
   });
 
-  it('sweeps THIS SLICE’S OWN FILES by path, tracked or not', () => {
+  it('sweeps THIS SLICE’S OWN FILES by path, applying BOTH rules, tracked or not', () => {
     /*
-     * THE GAP THIS CLOSES, AND IT WAS A REAL ONE. Both sweeps above enumerate
-     * `git ls-files`, so a file that is written but not yet committed is INVISIBLE
-     * to them — including this file. The first version of the two anti-vacuity
-     * controls below wrote a real-shaped URL as a single literal, and both sweeps
-     * reported clean solely because this file was untracked; the moment it was
-     * committed the repository-wide rule would have failed on its own control
-     * strings. Naming the paths explicitly makes the result independent of
+     * THE GAP THIS CLOSES, AND IT HAS NOW BEEN A REAL ONE TWICE.
+     *
+     * Both sweeps above enumerate `git ls-files`, so a file written but not yet
+     * committed is INVISIBLE to them — including this one. The two anti-vacuity
+     * controls in this file originally wrote a real-shaped URL as a single
+     * literal, and both sweeps reported clean solely because the file was
+     * untracked. The moment it was committed, both went red in CI.
+     *
+     * THE FIRST VERSION OF THIS TEST — added specifically to close that — DID
+     * NOT CLOSE IT, in two independent ways, and the shape of the miss is worth
+     * more than the fix:
+     *
+     *   · it applied only the ID rule, never the MARKER rule, so it was
+     *     structurally unable to see the very offenders it was written for; and
+     *   · its `own` list named four `apps/web` files and omitted
+     *     `apps/api/tests/.../route.py`, where three further offenders lived.
+     *
+     * A guard written to catch a specific miss, that reproduces the miss, is the
+     * recurring defect this whole file is about. It now runs the SAME predicate
+     * pair as the two sweeps above — not a second implementation that can drift
+     * from them — over an explicit path list, so the result does not depend on
      * whether a commit has happened yet.
      */
     const own = [
@@ -778,24 +1004,33 @@ describe('no committed URL can be mistaken for a real artifact', () => {
       'apps/web/src/lib/assistantCompanionContent.ts',
       'apps/web/src/screens/settings/AssistantCompanion.tsx',
       'apps/web/src/test/apiFixtures.ts',
+      // The backend half of the same slice. Omitting it is how three offenders
+      // reached `main`: this file's author owned it, and the sweep did not.
+      'apps/api/tests/test_assistant_artifact_companion_route.py',
     ];
-    const found = urlsUnder(own);
-    // Anti-vacuity: the named files exist and were read.
-    expect(found.length, 'this slice’s own files matched no URL').toBeGreaterThan(0);
 
-    const problems: string[] = [];
-    for (const { rel, url } of found) {
-      if (!url.includes(SYNTHETIC_COMPANION_MARKER)) {
-        // Not marked: then it must at least carry no plausible identifier.
-        const path = url.replace(/^https?:\/\/(?:www\.)?claude\.ai/i, '');
-        for (const segment of path.split(/[/?#&=]/)) {
-          if (segment.length >= 16 && /^[A-Za-z0-9_-]+$/.test(segment)) {
-            problems.push(rel + ': ' + url);
-          }
-        }
-      }
+    // Anti-vacuity, part one: every named file exists. A typo'd path would
+    // otherwise be silently skipped by `urlsUnder`'s read guard and shrink the
+    // sweep to nothing while still reading clean.
+    for (const rel of own) {
+      expect(existsSync(join(REPO_ROOT, rel)), 'named but missing: ' + rel).toBe(true);
     }
-    expect(problems, 'this slice committed a URL shaped like a real artifact').toEqual([]);
+
+    const { unmarked, suspicious, found } = offendersIn(own);
+
+    // Anti-vacuity, part two: at least one URL was actually matched.
+    expect(found, 'this slice’s own files matched no URL').toBeGreaterThan(0);
+
+    // The ID rule binds everywhere, including files this slice does not own the
+    // conventions of.
+    expect(suspicious, 'this slice committed a URL shaped like a real artifact').toEqual([]);
+
+    // The MARKER rule binds only under `apps/web`, where this slice sets the
+    // convention. The backend file states and enforces its own equivalent rule
+    // (`_NON_IDENTIFYING_PATHS`), and imposing this one on it would mean
+    // rewriting another slice's fixtures to satisfy a guard written here.
+    const webOnly = unmarked.filter((entry) => entry.startsWith('apps/web/'));
+    expect(webOnly, 'an unmarked artifact URL is committed under apps/web').toEqual([]);
   });
 
   it('the marker itself says what it is, in words, not just by convention', () => {

@@ -16,7 +16,7 @@ string presence rather than by what the code does: a visible lowercase "Status:
 connected…" survived 25 tests, and a fabricating seam returning
 ``{ok: true, record: {...}}`` survived them too.
 
-So every claim below is driven rather than read:
+So the claims that CAN be driven are driven rather than read:
 
 * the refusal categories are produced by CONFIGURING each bad value and reading
   the response, not by inspecting ``artifact_link``;
@@ -30,6 +30,31 @@ So every claim below is driven rather than read:
 * "it opens no outbound connection" is checked by ARMING the four plausible ways a
   future author would fetch a URL so that each raises — again with a negative
   control proving the trap is live.
+
+AND THE CLAIM ABOVE IS NARROWED RATHER THAN LEFT STANDING, because "every claim
+below is driven" was itself a claim pinned by nothing. An independent review named
+four tests whose subject is the CONTENT of published documentation:
+``test_the_operation_is_published_in_the_generated_contract`` and
+``test_the_published_documentation_offers_no_embed``.
+
+Two of the four are now driven — ``..._the_variable_name_is_published_...`` renames
+the module constant and re-reads, and ``..._the_prerequisite_...`` asserts the same
+sentence across all three states.
+
+THE OTHER TWO ARE IRREDUCIBLY ABOUT TEXT, and pretending otherwise would be the
+same overstatement in a new place. Whether a *description* offers a reader an
+embedding affordance is a property of the words, not of any behaviour: there is no
+execution that "not documenting an iframe" could be observed through. The
+behavioural half of that boundary is covered separately and really is driven —
+``embed_markup`` is replaced with a recorder and the recorder is asserted empty in
+all three states. So the honest statement is: the BEHAVIOUR is driven, and two
+documentation-content assertions are string checks that say so.
+
+TWO KNOWN LIMITS OF THE OUTBOUND TRAP, stated rather than left to be discovered.
+It arms the standard library only, so a future author reaching for a third-party
+HTTP client would not trip it; and it cannot observe a connection opened from a
+thread it does not own. Both are why the constant ``checked_reachable: False`` is
+published as a contract rather than inferred from this test passing.
 
 NOTHING HERE PUBLISHES, SHARES, OR CONTACTS ANYTHING
 ====================================================
@@ -48,6 +73,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from isaac_api import artifact_link
+from isaac_api import routes
 
 COMPANION_PATH = "/api/runtime/assistant-companion"
 
@@ -257,10 +283,18 @@ def test_a_refusal_never_becomes_a_server_error(client, env):
     module catches a `ValueError` from `urlsplit` there, and an earlier revision of
     that module did not — so a route that did not guard the refusal would surface
     them as a crash whose message QUOTES the value.
+
+    THE STATUS CODE ALONE WAS NOT ENOUGH, and the gap is the kind this file is
+    about: `status_code == 200` is satisfied by a handler that never refuses at
+    all — a constant payload stub passes every assertion here while the refusal
+    path has stopped existing. So the outcome is asserted too. A refusal must
+    arrive AS a refusal, not merely without a stack trace.
     """
     for _category, value, _because in REFUSALS:
         env.setenv(artifact_link.ARTIFACT_URL_ENV, value)
-        assert client.get(COMPANION_PATH).status_code == 200, value
+        response = client.get(COMPANION_PATH)
+        assert response.status_code == 200, value
+        assert response.json()["state"] == "refused", value
 
 
 def test_a_blank_value_is_unconfigured_rather_than_refused(client, env):
@@ -491,6 +525,34 @@ def test_reachability_is_never_claimed_in_any_state(client, env, value):
     assert companion(client)["checked_reachable"] is False
 
 
+#: THE §6 RATCHET. Flat substrings, case-insensitive, NOT negation-aware.
+#:
+#: THIS WAS NEGATION-AWARE AND THE DOCSTRING CLAIMED THAT MATCHED THE COMPANION
+#: PAGE'S OWN GUARD. THE PARITY WAS BACKWARDS. `assistant-companion.test.tsx`
+#: states the opposite rule three times: *"FLAT substrings, not negation-aware …
+#: A guard a future author can satisfy by inserting the word 'not' is not a
+#: guard."* Measured on this branch before the change: planting
+#: `"There is no connected session."` into the served `prerequisite` left this
+#: file at 4 passed. Inserting one word switched the guard off, which is exactly
+#: what the frontend rule exists to prevent.
+#:
+#: Honest negations are therefore phrased another way in the served copy — the
+#: same discipline `assistantCompanionContent.ts` already applies to its own.
+#:
+#: The second group is the state-claim vocabulary an independent review measured
+#: as a hole in the frontend ratchet ("live, active and enabled" passed every
+#: control there). `enables` is deliberately absent: the served `prerequisite`
+#: says *"Each scientist enables the ISAAC connector"*, a third-person verb whose
+#: subject is a scientist, describing an action in another product. That is an
+#: instruction, not a state claim. The adjectival forms are what a state claim
+#: wears, and they are matched.
+_FORBIDDEN_STATE_CLAIM = re.compile(
+    r"(?i)\b(connected|connecting|connection|connects|disconnect|disconnected"
+    r"|reachable|unreachable|online|offline"
+    r"|live|active|enabled|enabling|working|available|ready)\b"
+)
+
+
 @pytest.mark.parametrize(
     "value",
     [None, SYNTHETIC_LINK, "http://claude.ai/public/artifacts/synthetic-s"],
@@ -499,23 +561,46 @@ def test_reachability_is_never_claimed_in_any_state(client, env, value):
 def test_no_state_claims_the_companion_is_connected(client, env, value):
     """`docs/ai-integration-decision-packet.md` §6 forbids a fake connected state.
 
-    Case-insensitive and negation-aware, matching the guard over the companion page
-    itself — where a *visible* lowercase claim once passed 25 tests because the
-    check was case-sensitive.
+    Case-insensitive and FLAT, matching the rule the guard over the companion page
+    actually states — where a *visible* lowercase claim once passed 25 tests
+    because the check was case-sensitive.
     """
     if value is not None:
         env.setenv(artifact_link.ARTIFACT_URL_ENV, value)
     dumped = json.dumps(companion(client))
-    for match in re.finditer(r"(?i)\bconnected\b", dumped):
-        preceding = dumped[: match.start()]
-        assert re.search(r"(?i)\b(not|never|isn'?t|no)\s+$", preceding), dumped
+    match = _FORBIDDEN_STATE_CLAIM.search(dumped)
+    assert match is None, f"served payload claims a state: {match.group(0)!r} in {dumped}"
 
 
 def test_the_connected_search_would_actually_fire():
-    """A negative control for the check above."""
-    pattern = re.compile(r"(?i)\bconnected\b")
-    assert pattern.search('{"state": "connected"}')
-    assert not pattern.search('{"state": "configured"}')
+    """The negative control for the check above.
+
+    IT USED TO EXERCISE ONLY THE BARE `connected` PATTERN AND NEVER THE BRANCH
+    THAT COULD SWITCH THE GUARD OFF. Measured: replacing the old lookbehind with
+    an always-true `r"(?i)"` AND planting `"Your workspace is connected."` into
+    the served `prerequisite` still gave 4 passed — the control was blind to the
+    half that mattered, so a neutered guard read as a working one.
+
+    The guard is now one flat pattern with no branch to neuter, and this control
+    drives THAT pattern — the same object the assertion above uses, not a
+    re-typed copy that could drift from it.
+    """
+    fire = _FORBIDDEN_STATE_CLAIM.search
+    # The claim itself, and the lowercase form that once passed 25 tests.
+    assert fire('{"state": "connected"}')
+    assert fire('{"note": "Your workspace is connected."}')
+    assert fire('{"note": "STATUS: CONNECTED"}')
+    # THE NEGATION CASES — the whole point. A guard satisfied by adding a word is
+    # not a guard, so each of these MUST still fire.
+    assert fire('{"note": "There is no connected session."}')
+    assert fire('{"note": "This is not connected."}')
+    assert fire('{"note": "Never connected."}')
+    # The state-claim vocabulary that was measured missing from the page guard.
+    for claim in ("is live", "is active", "is enabled", "is working", "is ready"):
+        assert fire(f'{{"note": "The companion {claim}."}}'), claim
+    # And what must NOT fire: the served payload's own real vocabulary.
+    assert not fire('{"state": "configured"}')
+    assert not fire('{"prerequisite": "Each scientist enables the ISAAC connector"}')
 
 
 # --- 7. THE PUBLISHED SHAPE IS A CONTRACT ---------------------------------------
@@ -567,21 +652,50 @@ def test_a_link_is_served_exactly_when_the_state_says_configured(
     assert (body["url"] is not None) is (body["state"] == "configured")
 
 
-def test_the_variable_name_is_published_and_the_value_is_not(client, env):
+def test_the_variable_name_is_published_and_the_value_is_not(client, env, monkeypatch):
     """An operator needs to know WHICH variable to set. That is a name, and a name
-    is not a value."""
+    is not a value.
+
+    DRIVEN, NOT READ. The second assertion used to be `ARTIFACT_URL_ENV in
+    json.dumps(body)`, which is trivially true in every state because
+    `configured_by` is that constant — it restated the first assertion and
+    established nothing further. Renaming the module constant proves the value is
+    read FROM the module rather than transcribed into the route, which is the
+    property the route's own comment claims ("so a rename there cannot leave a
+    wrong name published here")."""
     env.setenv(artifact_link.ARTIFACT_URL_ENV, SYNTHETIC_LINK)
     body = companion(client)
     assert body["configured_by"] == artifact_link.ARTIFACT_URL_ENV
-    assert artifact_link.ARTIFACT_URL_ENV in json.dumps(body)
+    # The value that variable HOLDS never appears, in any field.
+    assert SYNTHETIC_LINK.rsplit("/", 1)[-1] not in json.dumps(
+        {k: v for k, v in body.items() if k != "url"}
+    )
+
+    monkeypatch.setattr(artifact_link, "ARTIFACT_URL_ENV", "A_RENAMED_VARIABLE")
+    assert companion(client)["configured_by"] == "A_RENAMED_VARIABLE"
 
 
-def test_the_prerequisite_this_application_cannot_observe_is_stated(client):
+def test_the_prerequisite_this_application_cannot_observe_is_stated(client, env):
     """The feasibility record requires the connector prerequisite to travel beside
-    the link, because a scientist who has not enabled it lands on a companion that
-    can do nothing."""
-    body = companion(client)
-    assert "connector" in body["prerequisite"].lower()
+    the link, because a scientist who has not turned it on lands on a companion
+    that can do nothing.
+
+    THE CLAIM IS PRESENCE IN EVERY STATE, which is a property of the published
+    shape rather than of any one response — a key that appeared only when a link
+    existed would make a client branch on a missing property. Stated that way it
+    IS a behavioural claim, and it is driven across all three states rather than
+    read once from the default one."""
+    seen = set()
+    for value in (None, SYNTHETIC_LINK, "http://claude.ai/public/artifacts/synthetic-p"):
+        if value is not None:
+            env.setenv(artifact_link.ARTIFACT_URL_ENV, value)
+        body = companion(client)
+        assert "connector" in body["prerequisite"].lower(), body["state"]
+        seen.add(body["state"])
+        # It is the SAME sentence in every state — a per-state variant would let
+        # one of them quietly drop the part this application cannot observe.
+        assert body["prerequisite"] == routes._COMPANION_PREREQUISITE, body["state"]
+    assert seen == {"unconfigured", "configured", "refused"}
     assert body["reference"].endswith(".md")
 
 

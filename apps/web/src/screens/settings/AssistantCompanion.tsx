@@ -17,10 +17,18 @@
  * and switching tabs should not re-hit the backend. This read is different in
  * the one way that matters: the route re-reads the environment per request and
  * never caches, precisely so that an operator who changes the variable is not
- * reported from a value the process happened to read once. Hoisting it to page
- * level would pin the answer for the life of a page load and reintroduce exactly
- * the staleness the route refuses. It also feeds ONE tab, so hoisting buys
- * nothing.
+ * reported from a value the process happened to read once.
+ *
+ * WHAT THAT BUYS ON THE CLIENT IS NARROWER THAN "NOT STALE", and saying so is
+ * the point of this paragraph. `useFetch(…, [])` pins the answer for the life of
+ * this component's MOUNT — on this tab, the page load, unless the reader
+ * switches tabs and comes back, which unmounts and remounts it. So the honest
+ * claim is: page-level placement would re-read once per page load however often
+ * the reader returned to the tab; section-level placement re-reads on every
+ * return. Not live, just less pinned. The route's non-caching is the guarantee
+ * that matters and is verified against the route; the remount is asserted in
+ * `assistant-companion.test.tsx` rather than left as prose. It also feeds ONE
+ * tab, so hoisting buys nothing to weigh against that.
  *
  * WHAT THIS COMPONENT DELIBERATELY DOES NOT RENDER, and each absence is pinned
  * behaviourally by `__tests__/assistant-companion.test.tsx`:
@@ -104,6 +112,36 @@ function companionHref(state: SectionState, url: string | null | undefined): str
   return typeof url === 'string' && url.length > 0 ? url : null;
 }
 
+/**
+ * A server-supplied string, or a fixed sentence saying it could not be read.
+ *
+ * WHY THIS EXISTS, AND WHY IT IS NOT BELT-AND-BRACES. `companionHref` already
+ * type-guards `url`, and its comment calls that "belt-and-braces — but the cost
+ * is one line". The four fields below were rendered RAW, and their failure mode
+ * is strictly worse than the one that was guarded: this application has no
+ * `ErrorBoundary` anywhere, so a non-string reaching JSX throws "Objects are not
+ * valid as a React child" during render, React unmounts the tree, and THE ENTIRE
+ * SETTINGS PAGE GOES BLANK — not this section, the page. Measured on this
+ * branch before the fix, with `reason: {nested: 'object'}`.
+ *
+ * IT DEGRADES ONE LINE, NEVER THE SECTION, and that is the §11 precedent rather
+ * than a preference: a malformed value that is already PERSISTED (or, here,
+ * already served) must be READ rather than refused, because the reader did
+ * nothing wrong and their surface must not vanish. So a malformed `reference`
+ * costs the reference line and leaves a configured link working, exactly as one
+ * unreadable pending entry leaves the rest of a record readable.
+ *
+ * It invents nothing: the fallback says the value was not readable, which is
+ * what happened, and never substitutes a plausible-looking value.
+ */
+function readableText(value: unknown, fallback: string): string {
+  return typeof value === 'string' && value.length > 0 ? value : fallback;
+}
+
+/** Said in place of a field the server sent in a shape this client cannot show.
+ *  One sentence, reused, naming no field value and promising no retry. */
+const UNREADABLE_FIELD = 'This deployment sent a value here that could not be displayed.';
+
 export function AssistantCompanionSection({
   /** Selects the Endpoint Explorer tab, so a reader can check every claim here
    *  against the operation's own published description. */
@@ -179,7 +217,7 @@ export function AssistantCompanionSection({
               {state === 'refused' && data && (
                 <>
                   <h4 className="api-connect-heading">{COPY.refusedReasonHeading}</h4>
-                  <p className="api-keys-note">{data.reason}</p>
+                  <p className="api-keys-note">{readableText(data.reason, UNREADABLE_FIELD)}</p>
                   <p className="api-keys-note">{COPY.refusedScientistNote}</p>
                 </>
               )}
@@ -203,7 +241,7 @@ export function AssistantCompanionSection({
       {href && data && (
         <>
           <h4 className="api-connect-heading">{COPY.configuredPrerequisiteHeading}</h4>
-          <p className="api-connect-prerequisite">{data.prerequisite}</p>
+          <p className="api-connect-prerequisite">{readableText(data.prerequisite, UNREADABLE_FIELD)}</p>
           <p>
             <a
               className="settings-jump-btn"
@@ -248,13 +286,13 @@ export function AssistantCompanionSection({
             <div className="api-keys-row">
               <dt>{COPY.configuredByLabel}</dt>
               <dd>
-                <code className="mono">{data.configured_by}</code>
+                <code className="mono">{readableText(data.configured_by, UNREADABLE_FIELD)}</code>
               </dd>
             </div>
             <div className="api-keys-row">
               <dt>{COPY.referenceLabel}</dt>
               <dd>
-                <code className="mono">{data.reference}</code>
+                <code className="mono">{readableText(data.reference, UNREADABLE_FIELD)}</code>
               </dd>
             </div>
           </dl>
