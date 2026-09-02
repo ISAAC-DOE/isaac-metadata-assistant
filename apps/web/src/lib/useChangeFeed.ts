@@ -30,6 +30,15 @@
  * IMPORTED from that module rather than re-declared: two pollers against one
  * deployment with two different cadences would be two things to reason about.
  *
+ * TWO DELIBERATE DIVERGENCES. THE SENTENCE ABOVE USED TO DENY THE FIRST, AND THE
+ * SECOND WAS MEASURED INTO EXISTENCE — see `changeFeedBacklogDelayMs`, whose
+ * escalating CONTINUATION tier exists because the burst budget alone left a backlog
+ * of one page more than the ceiling costing a full 8 s cadence for that one page
+ * (measured: caught up at mount+21,000 ms for 22 pages against mount+13,000 ms for
+ * 21). The hook also now REPORTS whether it is caught up, from the server's own
+ * `has_more`/`remaining` rather than from anything it infers, so a surface can say
+ * "still catching up" truthfully instead of showing a stale view that looks current.
+ *
  * ONE DELIBERATE DIVERGENCE, AND THE SENTENCE ABOVE USED TO DENY IT. It read "nothing
  * here justifies a second number", and then this file grew one — so the claim is
  * narrowed to CADENCE rather than left standing while being false. `useRecordSync`
@@ -77,18 +86,103 @@ export { DEGRADED_THRESHOLD, POLL_INTERVAL_MS, POLL_MAX_BACKOFF_MS };
 export const CHANGE_FEED_DRAIN_DELAY_MS = 250;
 
 /**
- * HOW MANY CONSECUTIVE BACKLOG PAGES BEFORE FALLING BACK TO THE ORDINARY CADENCE.
+ * HOW MANY CONSECUTIVE BACKLOG PAGES MAY BE FETCHED AT THE FULL DRAIN RATE.
  *
  * A bound on a SERVER defect, not on legitimate paging. Draining is guaranteed to
  * terminate on its own — every accepted page moves the cursor past what it returned,
  * so `remaining` strictly decreases — and the fast-follow additionally requires the
  * cursor to have MOVED, so a server answering `has_more: true` with an unchanged
  * cursor is refused a second fast request rather than being hammered. This cap is the
- * belt to that pair of braces: 20 pages is 1,000 entries at the default window, past
- * which the client keeps draining at the ordinary cadence rather than stopping. No
- * entry is skipped either way; only the rate changes.
+ * belt to that pair of braces: 20 pages is 1,000 entries at the default window.
+ *
+ * ITS NAME AND VALUE ARE UNCHANGED; WHAT HAPPENS AT THE CEILING IS NOT. It used to
+ * mean "past here, one page per ORDINARY CADENCE", and the cost of that was measured
+ * rather than argued: a backlog of 22 pages caught up at mount+21,000 ms while 21
+ * pages caught up at mount+13,000 ms — **8,000 ms for one extra entry**, a cliff at a
+ * number no scientist can see. It is now the first of two tiers; see
+ * `changeFeedBacklogDelayMs` for the second and for the rate bound that replaces the
+ * cliff. No entry is skipped in either tier; only the rate changes.
  */
 export const CHANGE_FEED_MAX_CONSECUTIVE_DRAINS = 20;
+
+/**
+ * THE DELAY BEFORE THE NEXT BACKLOG PAGE, given how many have already been taken
+ * consecutively. The ONE place the drain rate is decided, exported so the contract
+ * document and the tests pin the same function the hook runs rather than a
+ * transcription of it.
+ *
+ * TWO TIERS, AND THE SECOND ONE IS WHY THIS FUNCTION EXISTS.
+ *
+ *   * **Burst** (`drainsSoFar < CHANGE_FEED_MAX_CONSECUTIVE_DRAINS`):
+ *     `CHANGE_FEED_DRAIN_DELAY_MS`, i.e. 250 ms — unchanged.
+ *   * **Continuation** (at and past the ceiling): the delay DOUBLES from the drain
+ *     delay and is capped at `POLL_INTERVAL_MS`, giving 500, 1000, 2000, 4000, 8000,
+ *     8000, … So the client keeps paging, at a rate that decays to exactly the
+ *     ordinary cadence and never exceeds it.
+ *
+ * WHAT THIS BUYS, MEASURED (limit 50, jitter pinned to 1.0, mount at t=0):
+ *
+ *   | backlog | before | after |
+ *   |---|---|---|
+ *   | 21 pages (the ceiling) | caught up at +13,000 ms | +13,000 ms — unchanged |
+ *   | 22 pages (one past it) | +21,000 ms | **+13,500 ms** |
+ *   | 25 pages | +45,000 ms | **+20,500 ms** |
+ *   | 100 pages | +645,000 ms | **+620,500 ms** |
+ *
+ * WHAT IT DELIBERATELY DOES NOT DO — and this is the constraint the design was
+ * written around rather than an omission. It does NOT refill the burst budget at the
+ * ceiling. That was tried once and measured as a defect: resetting the counter there
+ * made every cadence tick start a fresh 20-page burst, sustaining ~1.6 req/s
+ * indefinitely against a server that answers `has_more: true` forever, while this
+ * module's own prose promised the ordinary cadence. The escalation keeps that promise
+ * literally — in the limit the continuation delay IS `POLL_INTERVAL_MS`.
+ *
+ * THE RATE BOUND, AND ITS PREMISE, WHICH MUST NEVER BE QUOTED APART. Under a server
+ * answering `has_more: true` **continuously** with a moving cursor, the delays after
+ * the first page are 250 x 20, then 500, 1000, 2000, 4000, then `POLL_INTERVAL_MS`
+ * forever, so in any window of T ms the client issues at most `26 + T / POLL_INTERVAL_MS`
+ * requests. Pinned by `change-feed.test.ts` ->
+ * "SUSTAINED has_more never exceeds the documented rate bound".
+ *
+ * THAT BOUND IS FALSE OUTSIDE THAT PREMISE, AND AN EARLIER REVISION OF THIS DOCSTRING
+ * PUBLISHED IT UNQUALIFIED AS "the hard rate bound". An independent review measured
+ * the counterexample: a server that reports `has_more: false` on every 21st reply
+ * while entries still remain clears `drains` each time, so the client gets a FRESH
+ * burst per cycle. Measured on the harness at limit 50 with jitter pinned to 1.0:
+ * **85 requests in 60,000 ms** (against that bound's 33.5) and 966 in 600,000 ms.
+ *
+ * THE BOUND THAT HOLDS AGAINST **ANY** SERVER BEHAVIOUR is a cycle bound, not a
+ * cadence one: the reset is the server's word, so the fastest sustainable pattern is
+ * one cadence gap followed by the whole burst — `1 + CHANGE_FEED_MAX_CONSECUTIVE_DRAINS`
+ * = 21 requests per `POLL_INTERVAL_MS + 20 x CHANGE_FEED_DRAIN_DELAY_MS` = 13,000 ms,
+ * about **1.6 req/s**. Pinned by "a FLAPPING server gets a fresh burst per cycle".
+ *
+ * THAT NUMBER DESERVES TO BE READ TWICE: ~1.6 req/s is exactly the figure the rejected
+ * budget-refill design was measured at. The difference is WHERE the refill comes from —
+ * this client refills only on the server's own claim to be finished, which is the
+ * strictly weaker (and the only honest) rule, since a client cannot audit that claim.
+ * Chasing the flapping case by weakening the reset was tried and measured WORSE
+ * (74 req/min against a pause the server genuinely meant), so it is not done here.
+ *
+ * The continuation delay is NOT jittered, for the same reason the burst delay is not:
+ * jitter desynchronises two TABS at the cadence, and these requests are continuations
+ * of one read. At the ceiling that means an unjittered 8,000 ms against the cadence's
+ * jittered 8,000 ± 20%, which is a difference of at most 1.6 s in when one tab's
+ * catch-up request lands and is recorded here rather than engineered away.
+ */
+export function changeFeedBacklogDelayMs(drainsSoFar: number): number {
+  if (drainsSoFar < CHANGE_FEED_MAX_CONSECUTIVE_DRAINS) return CHANGE_FEED_DRAIN_DELAY_MS;
+  // NO CLAMP ON THE EXPONENT, and its absence is deliberate rather than overlooked.
+  // A previous version clamped it at 32 doublings and justified that as stopping the
+  // exponent becoming `Infinity`. An independent review measured the justification
+  // false: `2 ** 1e15` IS `Infinity`, and `Math.min(Infinity, POLL_INTERVAL_MS)` is
+  // `POLL_INTERVAL_MS` — the ceiling already handles it, so the clamp changed no
+  // return value at any input and the hazard it named did not exist. Removing it is
+  // safer than keeping a guard whose comment teaches a reader something untrue; the
+  // property is asserted at `Number.MAX_SAFE_INTEGER` by the ladder test.
+  const steps = drainsSoFar - CHANGE_FEED_MAX_CONSECUTIVE_DRAINS + 1;
+  return Math.min(CHANGE_FEED_DRAIN_DELAY_MS * 2 ** steps, POLL_INTERVAL_MS);
+}
 
 /**
  * THE CADENCE CLAIM, as a person would read it.
@@ -154,16 +248,50 @@ function isVisible(): boolean {
   return document.visibilityState === 'visible';
 }
 
+export interface ChangeFeedState {
+  /** Three consecutive failed polls: the feed is not updating and says so. */
+  degraded: boolean;
+  cursor: string | undefined;
+  /**
+   * THE SERVER'S OWN `has_more` FROM THE LAST SUCCESSFUL PAGE — never an inference
+   * from `changes.length === limit`, which would be wrong in both directions (a
+   * full page can be the last one, and the server clamps the limit).
+   *
+   * `true` means the deployment says there are entities this client has not been
+   * handed yet, so a surface that renders "up to date" while this is `true` is
+   * making a claim the server has contradicted. It is deliberately NOT cleared by a
+   * failed poll: a failure tells you nothing about whether you caught up, and the
+   * last thing the server said is still the last thing it said.
+   *
+   * It stays `true` while the stuck-cursor guard is refusing to fast-follow, which
+   * is exactly the state in which a surface must not claim to be current.
+   */
+  catchingUp: boolean;
+  /**
+   * THE SERVER'S OWN `remaining` — entities after the page this client last read —
+   * or `null` when no successful page has arrived yet, when the server did not send
+   * a finite number, or when a refused cursor has just been dropped (at which point
+   * the last figure describes a position this client no longer holds).
+   *
+   * `null` is "this client does not know", never "zero". A surface that renders it
+   * as a count must branch on `null` rather than defaulting it.
+   */
+  remaining: number | null;
+  checkNow: () => void;
+}
+
 export function useChangeFeed(
   recordId: string | undefined,
   opts: UseChangeFeedOptions,
-): { degraded: boolean; cursor: string | undefined; checkNow: () => void } {
+): ChangeFeedState {
   const { onChanges, enabled = true, limit } = opts;
   const [degraded, setDegraded] = useState(false);
   // The cursor is state so a surface can show progress, and a ref so the poll chain
   // reads the CURRENT one without re-subscribing the effect on every page.
   const [cursor, setCursor] = useState<string | undefined>(undefined);
   const cursorRef = useRef<string | undefined>(undefined);
+  const [catchingUp, setCatchingUp] = useState(false);
+  const [remaining, setRemaining] = useState<number | null>(null);
 
   const active = enabled && !!recordId;
 
@@ -191,8 +319,14 @@ export function useChangeFeed(
     let failures = 0;
     let interval = POLL_INTERVAL_MS;
     let cancelled = false;
-    // Consecutive backlog pages fetched at `CHANGE_FEED_DRAIN_DELAY_MS`. Reset by any
-    // poll that is not a drain, so a later backlog gets a full budget of its own.
+    // Consecutive pages the server answered `has_more: true` for. It decides the drain
+    // rate through `changeFeedBacklogDelayMs`, and it is cleared by EXACTLY TWO
+    // events: a page reporting `has_more: false`, and a failed poll. It is NOT cleared
+    // by "any poll that is not a drain" — which is what this comment used to say, and
+    // it contradicted the one at the increment below, because a page that says
+    // `has_more: true` with an UNMOVED cursor is not a drain and still increments it.
+    // The consequence a reader needs: a later backlog gets a full burst budget only
+    // once the server has said the previous one finished.
     let drains = 0;
 
     // A fresh record starts a fresh feed: drop the previous record's cursor rather
@@ -202,6 +336,9 @@ export function useChangeFeed(
     cursorRef.current = undefined;
     setCursor(undefined);
     setDegraded(false);
+    // A fresh feed is one nothing is known about yet — not one known to be caught up.
+    setCatchingUp(false);
+    setRemaining(null);
 
     const pollId = recordId!;
 
@@ -227,7 +364,12 @@ export function useChangeFeed(
       // Decided in `.then`, read in `.finally`. A per-poll local rather than a shared
       // one, for the reason every other local in this effect is per-run: a settled
       // poll must never steer a scheduling decision that belongs to a later one.
-      let drainNext = false;
+      //
+      // `null` means "no backlog continuation — use the ordinary cadence". A NUMBER
+      // is the exact delay this poll's answer earned, computed by
+      // `changeFeedBacklogDelayMs` at the moment the page was read rather than
+      // re-derived in `.finally` from a counter that has since moved.
+      let backlogDelay: number | null = null;
       const cursorBefore = cursorRef.current;
 
       api
@@ -240,6 +382,22 @@ export function useChangeFeed(
           if (cancelled || ac.signal.aborted) return;
           // Stale guard: the record must not have moved on since this poll started.
           if (currentRef.current.recordId !== pollId) return;
+
+          // HAND THE ENTRIES OVER **BEFORE** ADOPTING THE POSITION PAST THEM, and
+          // that order is the whole no-loss guarantee rather than a stylistic
+          // preference. It used to be the other way round, and the consequence was
+          // measurable: a consumer that threw — a classifier meeting a `kind` it had
+          // never seen, a reducer over a malformed entry — left the cursor already
+          // advanced past a page nobody had processed, and the next request resumed
+          // AFTER it. The page was gone, silently, and the poll looked successful.
+          //
+          // Written this way, a throwing consumer takes the whole `.then` into the
+          // `.catch` below with the cursor untouched, so the very same page is asked
+          // for again on the next poll. The failure is loud (it counts toward
+          // `degraded`) and it is lossless, which is the pair worth having. Nothing
+          // below this line can run without the entries having been delivered.
+          if (page.changes.length > 0) onChangesRef.current(page.changes);
+
           failures = 0;
           interval = POLL_INTERVAL_MS;
           setDegraded(false);
@@ -249,44 +407,99 @@ export function useChangeFeed(
           // page said") rather than two, and no branch to get backwards.
           cursorRef.current = page.next_cursor;
           setCursor(page.next_cursor);
-          if (page.changes.length > 0) onChangesRef.current(page.changes);
-          // PAGE THROUGH A BACKLOG rather than waiting a full cadence per page. All
-          // three conditions are load-bearing: the server has to SAY there is more,
-          // the cursor has to have MOVED (otherwise a fast follow-up would ask the
-          // identical question), and the budget has to be unspent.
-          drainNext =
-            page.has_more &&
-            page.next_cursor !== cursorBefore &&
-            drains < CHANGE_FEED_MAX_CONSECUTIVE_DRAINS;
-          // THE BUDGET IS SPENT PER BACKLOG, NOT PER POLL, AND THAT DISTINCTION IS THE
-          // WHOLE CAP. It used to reset to 0 on the poll that hit the ceiling, so the
-          // next cadence tick began a FRESH 20-page burst: against a server answering
-          // `has_more: true` with a moving cursor forever, the sustained rate was
-          // ~21 requests per (8s + 20x250ms) — about 1.6 req/s indefinitely, ~13x the
-          // ordinary cadence — while the constant's own docstring promised the client
-          // "keeps draining at the ORDINARY CADENCE". An independent review measured
-          // that; the claim was false and the belt re-buckled itself.
+
+          // WHETHER THIS CLIENT IS CAUGHT UP IS THE SERVER'S ANSWER, NOT A GUESS.
+          // `has_more` is read as `=== true` so a page missing the key reads as
+          // "caught up" rather than as a truthy object, and `remaining` is taken only
+          // when it is a finite number — an absent or non-numeric one becomes `null`,
+          // which says "this client does not know" instead of inventing a zero.
+          setCatchingUp(page.has_more === true);
+          setRemaining(
+            typeof page.remaining === 'number' && Number.isFinite(page.remaining)
+              ? page.remaining
+              : null,
+          );
+
+          // PAGE THROUGH A BACKLOG rather than waiting a full cadence per page. Both
+          // conditions are load-bearing: the server has to SAY there is more, and the
+          // cursor has to have MOVED — otherwise a fast follow-up would ask the
+          // identical question of a server that has already failed to answer it.
           //
-          // It now clears only when the server says the backlog is done. So a capped
-          // client really does fall back to one request per cadence until `has_more`
-          // goes false, which is what the sentence above has always said.
+          // THE BUDGET IS NO LONGER A CLIFF. `changeFeedBacklogDelayMs` decides the
+          // rate from how many pages have been taken consecutively: the first 20 at
+          // the drain delay, then a doubling continuation that decays to exactly the
+          // ordinary cadence. So "the budget is spent" now slows the client rather
+          // than dropping it to one page per 8 s at a boundary nobody can see — which
+          // was measured at 8,000 ms of extra latency for ONE extra entry.
+          backlogDelay =
+            page.has_more && page.next_cursor !== cursorBefore
+              ? changeFeedBacklogDelayMs(drains)
+              : null;
+
+          // THE COUNTER IS SPENT PER BACKLOG, NOT PER POLL, AND THAT DISTINCTION IS
+          // THE WHOLE BOUND. It used to reset to 0 on the poll that hit the ceiling,
+          // so the next cadence tick began a FRESH 20-page burst: against a server
+          // answering `has_more: true` with a moving cursor forever, the sustained
+          // rate was ~21 requests per (8s + 20x250ms) — about 1.6 req/s indefinitely,
+          // ~13x the ordinary cadence. An independent review measured that; the claim
+          // was false and the belt re-buckled itself. The escalation above does NOT
+          // reintroduce it: the counter still clears only when the server says the
+          // backlog is done, and the continuation delay only ever grows.
+          //
+          // It increments on `has_more` even when the cursor did NOT move. That is
+          // the conservative direction — a stuck server spends the budget rather than
+          // banking it — and it means a server that unsticks itself after twenty
+          // stuck polls resumes in the continuation tier rather than with a fresh
+          // burst. Stated because it is a real behaviour, not because it is ideal.
           drains = page.has_more ? drains + 1 : 0;
         })
-        .catch(() => {
+        .catch((err: unknown) => {
           if (cancelled || ac.signal.aborted) return;
-          failures += 1;
-          if (failures >= DEGRADED_THRESHOLD) setDegraded(true);
-          interval = Math.min(interval * 2, POLL_MAX_BACKOFF_MS);
           // A failed poll is never a drain, and it forfeits the budget: backing off
           // and fast-following are contradictory instructions.
           drains = 0;
+
+          // A REFUSED CURSOR IS RECOVERABLE, AND THIS HOOK USED TO NEVER RECOVER FROM
+          // IT. `422 malformed_cursor` is the server's published refusal of a cursor
+          // that is the wrong version, the wrong feed, or corrupt, and its single
+          // documented remedy is "drop the cursor and resync". The hook did not: it
+          // counted a failure, backed off, and sent THE SAME REFUSED CURSOR again on
+          // every subsequent poll, forever — a feed permanently dark behind a
+          // `degraded` flag whose cause no retry could clear.
+          //
+          // The condition is `cursorBefore !== undefined` and that is what keeps this
+          // from looping. Only a request that CARRIED a cursor may drop one, so a
+          // resync that is itself refused (a malformed `limit`, say — FastAPI answers
+          // 422 for that too, and this client cannot tell the two apart because
+          // `httpErrorWithReason` attaches the server's `error` string on 404 only)
+          // falls through to the ordinary ladder below and backs off like any other
+          // failure. At most every other request can take this branch.
+          //
+          // The backoff is deliberately NOT escalated here: the request was refused
+          // for a reason that has just been fixed, so making the fix wait longer
+          // would be punishing the recovery. The failure IS counted, so three
+          // consecutive dark polls still say `degraded` rather than looking healthy.
+          const status = (err as { status?: unknown } | null | undefined)?.status;
+          if (status === 422 && cursorBefore !== undefined) {
+            cursorRef.current = undefined;
+            setCursor(undefined);
+            // The last `remaining` described a position this client no longer holds.
+            setRemaining(null);
+            failures += 1;
+            if (failures >= DEGRADED_THRESHOLD) setDegraded(true);
+            return;
+          }
+
+          failures += 1;
+          if (failures >= DEGRADED_THRESHOLD) setDegraded(true);
+          interval = Math.min(interval * 2, POLL_MAX_BACKOFF_MS);
         })
         .finally(() => {
           inFlight = false;
           controller = null;
           // The next poll is scheduled only after this one SETTLED — a setTimeout
           // chain, never setInterval, which is what makes non-overlap structural.
-          schedule(drainNext ? CHANGE_FEED_DRAIN_DELAY_MS : withJitter(interval));
+          schedule(backlogDelay !== null ? backlogDelay : withJitter(interval));
         });
     }
 
@@ -321,5 +534,5 @@ export function useChangeFeed(
   }, [active, recordId, limit]);
 
   const checkNow = useCallback(() => checkNowRef.current(), []);
-  return { degraded, cursor, checkNow };
+  return { degraded, cursor, catchingUp, remaining, checkNow };
 }

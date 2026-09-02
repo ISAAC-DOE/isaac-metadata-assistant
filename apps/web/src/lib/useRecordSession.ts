@@ -251,6 +251,33 @@ export interface RecordSession {
    * proposals in its own batch.
    */
   proposalActivity: RecordChangeSummary | null;
+  /**
+   * THE SAME SUMMARY, ASKED A THIRD QUESTION: did a RUN move, relative to where the
+   * RUN LIST read stands? — `null` when the latest run-floored summary named none.
+   *
+   * IT IS NOT `activity`, AND FOR EXACTLY THE REASON `proposalActivity` IS NOT.
+   * `RunsSection` issues its own paged `api.listRuns` read; the record bundle does not
+   * carry the list it renders. So a record refetch adopts no run-list state, and on the
+   * ordinary ordering — the record poller resolving before the feed poller, measured in
+   * `recordChanges.ChangeFloors` — the record floor has already risen past the `run`
+   * entry by the time the feed delivers it, and a floor never comes back down. The
+   * entry is dropped permanently and the run list is never told.
+   *
+   * IDS AND A POSITION. NO RUN CONTENT, EVER — a `run` feed entry carries none, so a
+   * consumer must re-read through the route that owns the list. Key a refresh on
+   * `runRev` + `runIds`; never on `highestRev`, which can reach past the runs in its
+   * own batch (see `RecordChangeSummary.runRev`).
+   *
+   * IT IS DELIVERED ONCE. The run floor advances as a signal is handed on, so a
+   * cursorless resync — which returns every entity at its current position — does not
+   * re-report a run this hook has already reported. That is a DIVERGENCE from the
+   * proposal floor, which deliberately does not advance, and the divergence is safe
+   * only because this summary feeds no announced sentence: `activity` and
+   * `describeChangeSummary` are computed from the RECORD-floored summary, which this
+   * does not touch. See `handleFeed` for the measurement that made the proposal floor
+   * stateless and why it does not apply here.
+   */
+  runActivity: RecordChangeSummary | null;
   /** The CHANGE FEED poller's degraded state — separate from `syncDegraded`. */
   feedDegraded: boolean;
 }
@@ -388,6 +415,23 @@ export function useRecordSession(
    */
   const [latest, setLatest] = useState<RecordChangeSummary | null>(null);
 
+  /*
+   * THE LATEST RUN-FLOORED SUMMARY — a SECOND raw summary over the SAME entries, and
+   * the reason it is a second value rather than a second reading of the first.
+   *
+   * `latest` above is computed with the run floor set to the RECORD's revision, which
+   * is byte-identical to what this hook did before a run floor existed. That is
+   * deliberate: `latest` drives `activity`, and `activity` drives a visible banner
+   * whose sentence is announced into a live region. Widening what survives the filter
+   * there would change that sentence, and `change-feed-preserves-unsaved-input.test.tsx`
+   * exists because a changing sentence is re-announced.
+   *
+   * This one is computed with the run list's OWN floor, and feeds `runActivity` only.
+   * Nothing renders from it and nothing announces it; a run surface uses it to decide
+   * whether to re-read its own paged list.
+   */
+  const [latestRun, setLatestRun] = useState<RecordChangeSummary | null>(null);
+
   // The P29.1 session snapshot. Re-read imperatively after a change/refresh so a
   // proposal marked stale by a revision change is immediately visible.
   const [session, setSession] = useState(() => loadSession(id));
@@ -440,6 +484,42 @@ export function useRecordSession(
     proposalFloorRef.current.rev = recordRev;
   }
 
+  /*
+   * WHERE THE RUN LIST READ STANDS — the third floor, and the reason a run change
+   * could be dropped exactly the way a proposal change was.
+   *
+   * `RunsSection` fetches the run list itself (`api.listRuns`, its own paging), so the
+   * record bundle refetch adopts none of it. Measured against the RECORD floor, a `run`
+   * entry is filtered the moment the record poller wins the race — and it wins the
+   * ordinary case, per the browser measurement in `recordChanges.ChangeFloors`. The
+   * entry is then gone for good.
+   *
+   * SEEDED FROM `recordRev`, ONCE PER RECORD, for `proposalFloorRef`'s reason: the run
+   * list mounts once `bundle.status === 'data'` and issues its own first read then, so
+   * every run at or below that revision is already on screen. Seeding from `-1` would
+   * make the first cursorless poll report every run of the record as news.
+   *
+   * IT DOES ADVANCE, WHICH IS THE OPPOSITE OF THE PROPOSAL FLOOR, AND THE DIFFERENCE IS
+   * NOT AN INCONSISTENCY. The proposal floor was made stateless because advancing it
+   * narrowed a REPLAYED batch, which changed `activity`'s rendered sentence and
+   * re-announced it into a live region — see `handleFeed`. This floor cannot do that:
+   * the summary it governs (`latestRun`) feeds no sentence, no banner and no live
+   * region. What it does instead is what the proposal side gets from
+   * `IngestionProposalsPanel`'s `proposalRev`+ids key — a signal delivered once — with
+   * the same effect and one less thing for a consumer to remember.
+   *
+   * A REF, NOT STATE: nothing renders from it, and a `setState` here would re-run the
+   * poll effect it is read inside.
+   */
+  const runFloorRef = useRef<{ id: string; rev: number | undefined }>({
+    id,
+    rev: undefined,
+  });
+  if (runFloorRef.current.id !== id) runFloorRef.current = { id, rev: undefined };
+  if (runFloorRef.current.rev === undefined && recordRev !== undefined) {
+    runFloorRef.current.rev = recordRev;
+  }
+
   // Latest onChange without re-subscribing the poller effect.
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
@@ -457,6 +537,9 @@ export function useRecordSession(
     // the record they just opened had changed elsewhere, which would be false — and
     // would hand the proposals panel another record's proposal ids to re-read on.
     setLatest(null);
+    // Same argument, same reason, for the run-floored summary: its ids name runs that
+    // belong to the record being left.
+    setLatestRun(null);
   }, [id]);
 
   // Fetch the AgentContext inputs (pending + evidence classification). Keyed on
@@ -578,7 +661,45 @@ export function useRecordSession(
       const summary = summariseChanges(entries, {
         record: recordRev,
         proposal: proposalFloorRef.current.rev,
+        /*
+         * THE RECORD'S OWN REVISION, NOT THE RUN FLOOR, AND THAT IS THE POINT OF
+         * COMPUTING THIS SUMMARY SEPARATELY FROM THE RUN ONE BELOW.
+         *
+         * This summary is what `activity` and therefore `RecordActivityNote` are
+         * derived from, and that banner's sentence is announced into a live region.
+         * Passing the run floor here would widen what survives, change the sentence
+         * on a replayed batch, and re-announce it — the exact defect
+         * `change-feed-preserves-unsaved-input.test.tsx` pins, arrived at from the
+         * other direction. With `run: recordRev` this call is byte-identical to what
+         * it was before a run floor existed, which is the property that lets the run
+         * floor be added without touching a single announced string.
+         */
+        run: recordRev,
       });
+
+      /*
+       * THE RUN SURFACE'S OWN QUESTION, over the SAME entries, with the run list's own
+       * floor — see `runFloorRef`. It is asked BEFORE the early return below, because
+       * the two questions have different answers: a batch in which the record poller
+       * has already filtered the `run` entry produces `summary === null` and a
+       * perfectly real run signal, which is precisely the case the run floor exists
+       * for and the case that used to be lost.
+       */
+      const runSummary = summariseChanges(entries, {
+        record: recordRev,
+        proposal: proposalFloorRef.current.rev,
+        run: runFloorRef.current.rev,
+      });
+      if (runSummary && runSummary.runIds.length > 0) {
+        // DELIVERED ONCE: advance past the runs just reported so a cursorless resync
+        // does not hand the same ids to the run list again. Safe here and not on the
+        // proposal floor for the reason `runFloorRef` sets out — nothing announces this.
+        if (runSummary.runRev > (runFloorRef.current.rev ?? -1)) {
+          runFloorRef.current.rev = runSummary.runRev;
+        }
+        setLatestRun(runSummary);
+      }
+
       if (!summary) return; // nothing newer than what is on screen — say nothing
 
       /*
@@ -689,6 +810,14 @@ export function useRecordSession(
     // Deliberately derived from `latest` rather than from `activity`: the whole point
     // is that it survives the record read catching up.
     proposalActivity: latest !== null && latest.proposalIds.length > 0 ? latest : null,
+    /*
+     * FROM `latestRun`, NOT FROM `latest`, and never filtered by `isCaughtUp`. The
+     * record read catching up says nothing about whether the RUN LIST has: it is a
+     * different read, behind a different route, in a different component. Filtering
+     * this on the record's revision would null it at exactly the moment a colleague's
+     * run edit arrived on the ordinary ordering — which is the whole defect.
+     */
+    runActivity: latestRun !== null && latestRun.runIds.length > 0 ? latestRun : null,
     feedDegraded,
   };
 }

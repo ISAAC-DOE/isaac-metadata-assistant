@@ -202,17 +202,42 @@ export const REVIEW_CATALOG: GroundedChip[] = [
       if (state.context !== 'review') return null;
       const { pending } = state.bundle;
       if (!pending) return null; // data absent → chip disabled
-      if (pending.length === 0) {
+      /*
+       * THE COUNT COMES FROM `pendingTotal`, NOT FROM `pending.length`, AND SINCE THE
+       * RECORD SCREEN'S LIVE REFRESH BOUNDS THE LIST THOSE TWO ARE DIFFERENT NUMBERS.
+       *
+       * `RecordBundle.pending` is complete on the initial load and a PREFIX after a
+       * poll-driven refetch (`api.getRecordBundle`'s `pendingLimit`). Counting the
+       * fetched array would have made this chip answer "10 fields still need you" over
+       * a record holding three thousand — an understatement stated as a fact, on the
+       * one surface whose whole purpose is to be grounded.
+       *
+       * `?? pending.length` is the honest fallback for a caller that composed a bundle
+       * without the field (test fixtures cast to `RecordBundle` do), where the list IS
+       * the set. It is not a guess: absence of a bound means the read was complete.
+       */
+      const total = state.bundle.pendingTotal ?? pending.length;
+      if (total === 0) {
         return { text: 'No pending fields are listed for this record.', answeredFrom: 'workflow' };
       }
       // One label per pending item (full-length; never drops an item for
       // lacking `about`). First usable value wins: about → question → id →
-      // the server's own reason. joinCapped's "…and K more" is then computed over the
-      // FULL list, so the shown count and the listed labels always agree (Fix 6b).
+      // the server's own reason.
       const labels = pending.map(pendingLabel);
-      const verb = pending.length === 1 ? 'needs' : 'need';
+      const verb = total === 1 ? 'needs' : 'need';
+      /*
+       * THE REMAINDER IS COUNTED OFF THE TOTAL, WHICH IS WHY `joinCapped` IS NOT USED
+       * HERE ANY MORE. It computes "…and K more" from the array it is handed, and the
+       * array may now be a window: over 3,002 questions it would have said "…and 7
+       * more" beside a count of 3,002. Same ≤3 shown, same wording; the only change is
+       * which number K is derived from. `blockingSummary` and the evidence chips still
+       * use `joinCapped`, because their lists are never bounded.
+       */
+      const shown = labels.slice(0, 3);
+      const rest = total - shown.length;
+      const listed = rest > 0 ? `${shown.join(', ')}, …and ${rest} more` : shown.join(', ');
       return {
-        text: `${count(pending.length, 'field')} still ${verb} you: ${joinCapped(labels)}.`,
+        text: `${count(total, 'field')} still ${verb} you: ${listed}.`,
         answeredFrom: 'workflow',
       };
     },
