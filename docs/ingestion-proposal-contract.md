@@ -235,7 +235,7 @@ per-proposal validator**: a second concurrency scheme with no consumer is a trap
 
 | Operation | Shape | CAS | Refusals (existing typed codes) |
 |---|---|---|---|
-| List | `GET /api/experiments/{id}/proposals` | none; returns `ETag` | `404 experiment_not_found`; `503 experiment_storage_unavailable` |
+| List | `GET /api/experiments/{id}/proposals` | none; returns `ETag` | `404 experiment_not_found`; `422 unknown_cursor`; **`422 cursor_order_mismatch`** (added 2026-09-02, see below); `503 experiment_storage_unavailable` |
 | Read one | `GET .../proposals/{proposal_id}` | none; returns `ETag` | `404 proposal_not_found` (new, modelled on `note_not_found`, `routes.py:9751-9767` — "the record was read successfully and holds no such thing") |
 | Create | `POST .../proposals` | **required** | `422 unrecognized_field` (unknown body key, or a target outside the permitted set); `422 unknown_run`; `422 invalid_field_value`; `422 unrepresentable_value` (value JSON cannot round-trip); `422 unsupported_proposal` (model refusal relayed, never a 500 — `routes.py:10110-10115`); `422 too_many_proposals`; **`422 proposals_too_large`** (added 2026-08-30, see below); `428 precondition_required`; `400 malformed_if_match`; `412 stale_write`; `409 wildcard_precondition_refused` (`If-Match: *`) |
 | Review | `POST .../proposals/{id}/review` — `{confirmed_by_user, action: accept\|reject\|supersede\|withdraw, value?, accepted_from?, reason?}` | **required** | `422 confirmation_required`; `422 unknown_proposal_action`; `422 not_an_allowed_value` (enum target); `409 human_actor_required` (§5); `422 no_write_path_for_field` (§6); `409 target_run_removed` (new — see below); **`409 target_scope_mismatch`** (added 2026-08-30, see below); `412 stale_write`; `409 proposal_stale` (new — ~~`base_rev` moved~~ **the TARGET DIGEST moved; `base_rev` is not the staleness key and never was — see §10 DEC-1, which supersedes this parenthetical and was written after it**; the accept re-reads and refuses rather than overwriting) |
@@ -281,6 +281,50 @@ number is a JUDGEMENT and not a measurement, and the code says so**: nothing her
 parse or a hash cost at any document size. It gates **create only**; refusing an *acceptance* because
 the audit trail would not fit would leave a proposal permanently un-acceptable, which is DEC-9's
 unclearable-queue defect one feature over.
+
+**`order`, and `422 cursor_order_mismatch` (added 2026-09-02).** DEC-5's window is read from the
+**oldest** end: `_sorted_proposals` (`workspace.py:1738`) orders `(proposed_utc, proposal_id)` and
+the list route walks that order forward from the cursor. A newly created proposal carries the
+LATEST `proposed_utc` on the record and therefore sorts **last**, so on a record already holding
+`_PROPOSAL_WINDOW_DEFAULT` (50) proposals it is **not in the default window at all** and is
+reachable only by paging to the end. That was measured as a real dead end on the website: the
+panel's arrival announcement reads `by_state.open` — the whole record, deliberately — so it could
+truthfully say a proposal had arrived while the window in front of the reader could never contain
+it.
+
+`GET .../proposals` therefore takes an optional **`order`**, with `oldest_first` (**the default,
+and unchanged** — a review queue reads chronologically, and every existing client omits the
+parameter) and `newest_first`, which is the **exact reverse of the same total order**. Both return
+the same rows and the same `total`, `returned`, `by_state`, `unreadable_entries` and `has_more`;
+only the direction differs, and there is no second sort — the reverse of a total order is total,
+which is what keeps the cursor walk as well defined as the forward one.
+
+**A CURSOR BELONGS TO THE ORDER IT WAS ISSUED UNDER, and a cross-order cursor is refused rather
+than answered.** This is not caution: both orders hold the same proposals, so the id inside such a
+cursor is always **found**, and the walk would simply continue from the wrong side and hand back
+rows the client had already read as though they were the next page. Measured with the check
+removed, over six proposals with `canonical` the stored oldest-first order: the crossed
+newest-first request answered **200** with `[canonical[0]]` and the crossed oldest-first request
+answered **200** with `[canonical[5]]` — two wrong answers, no error, nothing in either body
+saying so. It is the same wrong-answer-instead-of-an-error failure `unknown_cursor` exists to
+prevent, and it is invisible to that check, which is why it is a separate refusal checked
+**before** the lookup: **`422 cursor_order_mismatch`**, naming the cursor's order and the requested
+one.
+
+**The `oldest_first` cursor is still the bare proposal id.** The asymmetry is deliberate and is why
+the order travels as a prefix rather than as an encoding: every `next_cursor` this server has ever
+issued was a bare id meaning "continue oldest-first", so those keep meaning exactly that, and only
+the new direction — which had issued none, because it did not exist — carries a
+`newest_first:` tag. `:` is safe as the separator because a proposal id is 26 characters of
+`[0-9A-Z]` from `new_record_id()`. Re-encoding both directions was mutation-tested and turns two
+pre-existing DEC-5 tests red; that is the breaking change this shape avoids, and a future slice
+that wants symmetry is proposing a contract break rather than a tidy-up.
+
+`order` is published through `policy.proposal_list_query_parameters()`, so the OpenAPI parameter
+and `isaac_list_proposals`' tool schema are **derived from the route signature** and neither was
+edited by hand. Adding it to `PROPOSAL_LIST_QUERY_ALLOWLIST` is what exposes it, and that gate was
+satisfied on the same ground as `state`: `order` names no field, selects on no scientific content,
+and widens no response.
 
 **Concurrent acceptance of the same field.** Two accepts naming one target serialise on the record
 lock and on the record's `If-Match`: the first wins and moves `rev`; the second finds its
