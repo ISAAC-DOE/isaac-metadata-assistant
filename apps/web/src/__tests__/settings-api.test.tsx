@@ -2152,7 +2152,36 @@ describe('the Full Description rule over the REAL generated contract', () => {
     // `BOUNDARY_CAVEAT_MARKERS` entries — `never`, `cannot` and `refus` — each
     // measured against the real served string rather than eyeballed. No marker was
     // added for it; the list already covered this vocabulary.
-    expect(total).toBe(132039);
+    // ── PROPOSAL ORDER, 2026-09-02. 132,039 -> 132,478 (+439), and BOTH the
+    // operation count (77) and the POST-LEAD PARAGRAPH COUNT (254) are UNCHANGED.
+    // That pair is the informative half, exactly as the 2026-09-01 re-measurement
+    // above says it is: `GET .../proposals` gained an `order` parameter, and the
+    // sentences describing it were written INTO the existing bounded-list paragraph
+    // rather than appended as a new one — because `order` is part of what the bound
+    // means (which end of the list the window comes from), and a reader who has
+    // taken in that the list is a window must take in the direction with it. A
+    // number that had moved to 255 here would mean the prose had been appended
+    // instead, which is a different editorial decision rather than a different
+    // number. The route's new 422 (`cursor_order_mismatch`) sits in the RESPONSE
+    // description, which this aggregate does not read at all.
+    //
+    // Per operation, re-derived rather than apportioned: `GET .../proposals`
+    // 3,054 -> 3,493 (+439), which is the whole delta. Every other entry is
+    // byte-identical, and `test_contract_description_parity.py` proves that in both
+    // directions rather than leaving it asserted here.
+    //
+    // MEASURED TWO WAYS THAT AGREE, neither an increment of the old figure:
+    //   · over the SERVED document, restricted to the 77 operations this array
+    //     names: raw sum 132,986, minus 2 per `\n\n` separator (254 x 2 = 508)
+    //     = 132,478.
+    //   · over the TRANSCRIBED array, which is what `total` above sums: the same
+    //     132,478, which is the parity check stated as an aggregate. The entry was
+    //     re-transcribed from `create_app().openapi()`, never hand-edited.
+    //
+    // `collapsedOps` is STILL zero and was re-measured, not assumed: the proposals
+    // remainder GREW, which only puts it further past `PURPOSE_DISCLOSURE_MIN_CHARS`
+    // (400), and the new prose adds no marker the paragraph did not already carry.
+    expect(total).toBe(132478);
     // 104,045 -> 114,959 (+10,914): the four new operations, and NO existing
     // description changed — `test_contract_description_parity.py` proves that rather
     // than leaving it asserted here. RE-DERIVED from the served document and never
