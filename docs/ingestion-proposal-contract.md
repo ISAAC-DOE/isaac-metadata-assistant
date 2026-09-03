@@ -705,8 +705,16 @@ proposal does not reach, in a section arguing that the storage location has no l
 4. **Giving the 7 unwritable paths a write route.** §6 declines it and says why.
 5. **An automatic producer.** `notes.py:10-21` is explicit that no pipeline was rewired and that the
    vocabulary exists ahead of its producers. This contract adds a *destination* for valued
-   proposals; wiring `extraction.py`'s `unrecognised_labels`, or CSV ingest, or the transcript
-   reader's currently-unstored `candidates`, is separate work.
+   proposals; wiring `extraction.py`'s `unrecognised_labels`, ~~or CSV ingest, or the transcript
+   reader's currently-unstored `candidates`, is~~ or CSV ingest, is separate work.
+   **SUPERSEDED IN PART, 2026-09-03 — the transcript clause is struck IN PLACE rather than
+   deleted, because it was true when it was written and a reader must be able to see that this
+   is a recorded change and not a drift.** The transcript reader's candidates are **no longer
+   unstored**: `POST /api/experiments/{experiment_id}/transcript` mints one durable
+   `IngestionProposal` per candidate, server-side, inside the same `record_lock` and the same
+   save as the notes it stores. See **§11**. The other two producers are unwired exactly as this
+   item says, and "an automatic producer" is still not covered by anything — a capture is a
+   scientist pressing Finalize, not a pipeline (§11.6).
 6. **An apply route for `POST /ingestion/csv/preview`.** That is a **committed human decision**
    (reconciliation-only, "a deliberate authority boundary, NOT a defect"), not residual work.
 7. **Any LLM or external model provider.** A proposal's `rule` is a deterministic sentence from a
@@ -856,3 +864,136 @@ production model provider exists or is authorized; and the **acceptance route an
 human_actor_required` in every default-configured deployment**, because no trusted authentication
 boundary exists in this build — a configuration fact, not a build defect, and one no application
 change can close. It is exercised in CI through the deterministic fixture verifier.
+
+---
+
+## 11. Revision — 2026-09-03. The first producer is wired, and §8.5 is superseded.
+
+**Authorization basis.** The committed sentence permitting this work is `CLAUDE.md` §15's 2026-08-29 application-side
+scope extension, which authorizes *"persistent ingestion proposals and the durable contract they
+need"* — a producer that mints them is inside that grant, and §10.0's basis for this contract is the
+same entry. **The storage LOCATION needs no new authorization and this slice claims none:** proposals
+stay at `state["proposals"]` inside the experiment state document, covered by the 2026-08-07 lift's
+*"app-owned tables for experiments and their normal application state"*. `db_write.OWNED_TABLES` is
+unchanged, no migration exists, and DEC-12 holds — so this slice adds no table and needs no operator
+action, which is the property §7 chose the location for.
+
+**What this entry does NOT claim.** The 2026-08-29 grant reaches the repository as an owner
+instruction relayed in-session and, as §15 itself says, the repository records the decision and not
+its delivery. Nothing here is authorized by this document's own prose.
+
+### 11.0 What changed
+
+**§8.5 said this contract adds "a *destination* for valued proposals" and that "wiring
+`extraction.py`'s `unrecognised_labels`, or CSV ingest, or the transcript reader's currently-unstored
+`candidates`, is separate work."** That separate work has now been done for **one** of the three:
+**the transcript reader**. The sentence is superseded for that producer and is otherwise unchanged —
+`extraction.py`'s residue and CSV ingest are still unwired, and the CSV apply route is still a
+committed human decision (§8.6) rather than residual work. **§8.5 itself now carries the
+correction, struck IN PLACE and dated, so a reader who arrives there rather than here is not told
+the candidates are still unstored.**
+
+`POST /api/experiments/{experiment_id}/transcript` now mints one `IngestionProposal` per candidate
+it reads, **server-side, inside the same `ws.record_lock` block and the same `save_versioned` call
+as the notes it stores**.
+
+### 11.1 Why the mint is server-side, and in that critical section
+
+The contract's own rule for the review route (§10.3) is that the read, the comparison and the
+mutation happen inside one `record_lock` block. The same reasoning applies to a capture, for two
+reasons that are specific to it rather than borrowed:
+
+1. **The scientist performed ONE act.** A client-side mint would be N+1 requests, each with its own
+   `If-Match`, each able to fail on its own — so a closed tab, a slept laptop or a `412` partway
+   through would leave a record whose notes were stored and whose proposals were not, with no
+   surface able to say which candidates were missing. Minting here makes the proposals **atomic with
+   the notes they cite**: one lock, one save, one revision, and either the record holds both or it
+   holds neither.
+2. **The citation is not constructible client-side.** A proposal REQUIRES a `note_id` naming a note
+   the record already holds, and the ids of the notes a capture stores do not exist until that
+   request mints them — so a client minting proposals would have to read them back out of the
+   capture's own response, which is exactly the round trip atomicity removes.
+
+### 11.2 The idempotency key, and the guarantee it does NOT give
+
+Each minted proposal carries a deterministic `client_request_key`:
+`transcript-capture:{note_id}:{candidate_index}`. **`note_id` AND the index**, because two candidates
+can come from one segment — and therefore from one note — when a sentence gives two values for one
+field, and the reader deliberately keeps both.
+
+**It does not make two finalizations of the same text idempotent, and reading it that way is the
+error worth naming.** A note id is a fresh ULID minted by the same request, so two deliberate
+finalizations produce different notes, different keys, and two sets of proposals — which is correct
+and is what `capture_note` already does with the words themselves: two finalizations are two acts.
+What protects a **retry** is the record's own precondition: a capture that reached disk advanced the
+`ETag`, so the retry meets `412` and nothing is stored twice.
+
+The key's actual job is the one DEC-13 added it for, and it is a job about **two producers rather
+than one**: the capture publishes the key, so a client that mints a proposal cannot mint a second
+one for a candidate this route already minted.
+
+**AND THAT IS A CAPABILITY TODAY, NOT A LIVE CONCERN — corrected 2026-09-03, because the first
+version of this paragraph overstated it.** It said `api.ts` gaining `createProposal` "is what makes
+that a live concern rather than a hypothetical". It does not. **`createProposal` exists in
+`apps/web/src/lib/api.ts` and NO SURFACE CALLS IT at this HEAD**: the transcript route is the only
+producer in this build, so no second producer is racing it and none can until a surface performs the
+create. The method is kept rather than deleted because its caller is named and next — the "Propose a
+value from this note" act in Unmapped Notes, the note-mapping path — and because it is the client
+half of the guarantee this key exists to give, which is exactly what that surface will need. Its own
+comment block in `api.ts` records the same ruling, including the condition under which it should be
+deleted instead (the standard this repository applied to `getProposal`, which shipped with no caller
+and was removed), and quotes rather than deletes the paragraph that had declined to add it "until a
+producer lands". **The collision becomes live when that surface lands, and not before.**
+
+### 11.3 A candidate with no proposal is DISCLOSED, never dropped (§5 I6)
+
+The response carries two new keys. `proposals` is one entry per candidate that now has a stored
+proposal — `candidate_index`, `client_request_key`, `deduplicated`, and the proposal view. `deduplicated`
+is **per item**, because a capture is many creates and one flag for the batch would answer a question
+nobody asked. `unproposable` is one entry per candidate that got none, carrying the path, the note id
+and the server's own typed `error` and `message`; **a client renders that message and composes none
+of its own.**
+
+Both ceilings are DISCLOSED rather than enforced by refusing the capture, because refusing a
+transcript for a reason that has nothing to do with it would destroy it:
+
+* the **row** ceiling (`_MAX_PROPOSALS_PER_RECORD`) is checked per candidate as the batch grows;
+* the **per-record byte** ceiling (`_MAX_PROPOSAL_STATE_BYTES`) is measured once over the whole
+  projected document, and over it **no proposal from that capture is stored** and every candidate is
+  disclosed. All-or-nothing rather than "as many as fit": a partial batch chosen by byte arithmetic
+  would be the route deciding which of a scientist's values are worth keeping.
+
+Every segment still becomes a Note, unconditionally, so the words survive every outcome.
+
+### 11.4 `accept_contract` names the review route now
+
+It named `PATCH /api/experiments/{experiment_id}/runs/{run_id}`, which was correct while a candidate
+lived only in a response body: accepting one WAS a direct run edit made by the tab holding it. It now
+names `POST /api/experiments/{experiment_id}/proposals/{proposal_id}/review`, and lists the record's
+`ETag` and **a trusted human identity that no default-configured deployment establishes** among its
+requirements (§5 **I4** is unchanged in every respect). The value still lands through the same
+writer; what changed is who a client asks. `test_transcript_capture.py`'s assertion was **inverted
+rather than deleted**.
+
+### 11.5 What this does NOT change
+
+**I1** and **I2** hold and are asserted over the capture itself: every export unit's draft and every
+run's resolved draft are byte-identical across a capture that mints proposals, and the exported
+record is byte-identical. **I4** is untouched — acceptance still answers `409 human_actor_required`
+in every default-configured deployment. **I7** is untouched and asserted: a capture inside a
+worked-example session is invisible to the ordinary scope. **DEC-12 holds: `db_write.OWNED_TABLES`
+is unchanged and no migration exists** — proposals still live at `state["proposals"]`.
+
+Change-feed emission needed **no new code and that is the point**: `save_versioned` maintains
+`Experiment.proposal_change_revs`, so minting inside the capture's existing save emits exactly what
+`POST .../proposals` emits, by the same mechanism rather than by a second one this route would have
+to keep in step. Asserted by test rather than argued.
+
+### 11.6 Still not covered
+
+The other two producers §8.5 names. An automatic producer of any kind — this is a scientist pressing
+Finalize, not a pipeline. And the record-scoped case is **unconstructible from a transcript rather
+than merely unbuilt**: all five paths the reader can propose are run-scoped
+(`_PROPOSAL_WRITER_SCOPE` over `tc.READABLE_FIELD_PATHS` is `{"run"}`, derived by test), and
+`read_transcript` withholds every candidate while the run is unsettled — so a capture with no run
+selected stores its notes and no proposal at all, and says so.

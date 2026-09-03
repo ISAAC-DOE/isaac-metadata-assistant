@@ -1311,3 +1311,276 @@ describe('useChangeFeed drain boundaries', () => {
     expect(result.current.cursor).toBeUndefined();
   });
 });
+
+// =============================================================================
+// 8. AT-LEAST-ONCE DELIVERY, A POISON PAGE, AND CURSOR RECOVERY
+//
+// This feed is AT-LEAST-ONCE, not exactly-once, and this section is where that is
+// said out loud rather than implied by the absence of a duplicate test. A cursor is
+// adopted only after a page has been handed to the consumer, so any failure between
+// those two points redelivers the page — which is the correct direction (a coalescing
+// state entry says "this entity moved", and re-reading an entity twice is inert) and
+// is the direction that makes a lost page impossible.
+//
+// What the hook must NEVER do, and what these tests pin:
+//
+//   * move the cursor BACKWARDS, or to a position nothing handed it;
+//   * hand the consumer something that is not a page of entries;
+//   * silently restart the feed from its floor, which turns a whole record's history
+//     into "new changes" on a loop;
+//   * wedge a fast retry loop against a page it cannot read.
+// =============================================================================
+
+describe('useChangeFeed — at-least-once delivery and poison pages', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.spyOn(Math, 'random').mockReturnValue(0.5); // jitter factor exactly 1.0
+    setVisibility('visible');
+  });
+  afterEach(() => {
+    vi.clearAllTimers();
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  async function advance(ms: number) {
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(ms);
+    });
+  }
+
+  it('THE SAME PAGE TWICE is delivered twice and moves the cursor only forward', async () => {
+    /*
+     * A server that answers the identical page to two consecutive polls — the same
+     * entries, the same `next_cursor` — is the plain duplicate case. The hook does
+     * NOT dedupe, and that is the design rather than a gap: it is a delivery
+     * mechanism, the entries are state claims rather than events, and a client-side
+     * dedupe would need a memory of every entity it had ever seen in order to be
+     * correct across a resync.
+     *
+     * The guarantee it DOES make is the one asserted here: the cursor ends where the
+     * last page said, never at an earlier position, and no extra request is made —
+     * `has_more: false` means there is nothing to fast-follow, so the second read is
+     * an ordinary cadence tick and not a drain.
+     */
+    const repeated = page({ changes: [ENTRY], returned: 1, next_cursor: 'SAME' });
+    const spy = vi.spyOn(api, 'getChanges').mockResolvedValue(repeated);
+    const onChanges = vi.fn();
+    const { result } = renderHook(() => useChangeFeed(EXP_ID, { onChanges }));
+
+    await advance(POLL_INTERVAL_MS);
+    expect(result.current.cursor).toBe('SAME');
+    await advance(POLL_INTERVAL_MS);
+
+    // AT LEAST ONCE, stated as an equality so a future dedupe cannot land silently.
+    expect(onChanges).toHaveBeenCalledTimes(2);
+    expect(onChanges.mock.calls[0][0]).toEqual([ENTRY]);
+    expect(onChanges.mock.calls[1][0]).toEqual([ENTRY]);
+    // NEVER BACKWARDS, and never to a position the server did not issue.
+    expect(result.current.cursor).toBe('SAME');
+    // The second request carried the cursor the first one earned, so the repeat is
+    // the SERVER's doing and not this client asking the wrong question twice.
+    expect(spy.mock.calls[1][1]).toMatchObject({ cursor: 'SAME' });
+    expect(spy).toHaveBeenCalledTimes(2);
+  });
+
+  it('A REDELIVERY AFTER A THROWING CONSUMER is the same page, not the feed floor', async () => {
+    /*
+     * The complement of "a throwing consumer does not advance the cursor": what the
+     * retry ASKS FOR. The cursor before the failed page must be re-sent, so the server
+     * resumes from there — a client that dropped the cursor on any failure would
+     * restart at the floor and redeliver everything before it as well.
+     */
+    let boom = false;
+    const onChanges = vi.fn((_entries: ApiChangeEntry[]) => {
+      if (boom) throw new Error('consumer exploded');
+    });
+    const spy = vi
+      .spyOn(api, 'getChanges')
+      .mockResolvedValueOnce(page({ changes: [ENTRY], returned: 1, next_cursor: 'C-1' }))
+      .mockResolvedValue(page({ changes: [ENTRY], returned: 1, next_cursor: 'C-2' }));
+    const { result } = renderHook(() => useChangeFeed(EXP_ID, { onChanges }));
+
+    await advance(POLL_INTERVAL_MS);
+    expect(result.current.cursor).toBe('C-1');
+
+    boom = true;
+    await advance(POLL_INTERVAL_MS);
+    expect(result.current.cursor).toBe('C-1'); // unmoved by the page it could not process
+
+    // THE RETRY ASKED THE SAME QUESTION. Not `undefined` — which is the feed floor —
+    // and not a position past the page nobody processed.
+    expect(spy.mock.calls[1][1]).toMatchObject({ cursor: 'C-1' });
+
+    boom = false;
+    await advance(POLL_INTERVAL_MS * 8);
+    expect(spy.mock.calls[2][1]).toMatchObject({ cursor: 'C-1' });
+    expect(result.current.cursor).toBe('C-2');
+    // AT LEAST ONCE: the entry arrived on the good page, was thrown away by the
+    // consumer, and arrived again. Never zero times.
+    expect(onChanges.mock.calls.length).toBeGreaterThanOrEqual(3);
+  });
+
+  it('A PAGE WHOSE `changes` IS NOT AN ARRAY is refused, not handed to the consumer', async () => {
+    /*
+     * MEASURED BEFORE THE GUARD: `"abc".length > 0` is true, so a string body reached
+     * `onChanges` AS the entries — a consumer that iterates would invent one claim per
+     * character, which is the defect `CLAUDE.md` §11 records on the server side for
+     * `enumerate("abc")`. The types describe the contract, not the bytes a deployment
+     * or a proxy actually sent.
+     *
+     * MUTATION: deleting the `Array.isArray` half of the guard in `useChangeFeed`
+     * turns the first two assertions RED — `onChanges` is called with `'abc'`.
+     */
+    const poison = { ...page(), changes: 'abc' } as unknown as ApiChangeFeedPage;
+    vi.spyOn(api, 'getChanges').mockResolvedValue(poison);
+    const onChanges = vi.fn();
+    const { result } = renderHook(() => useChangeFeed(EXP_ID, { onChanges }));
+
+    await advance(POLL_INTERVAL_MS);
+    expect(onChanges).not.toHaveBeenCalled();
+    // THE CURSOR IS UNMOVED, so nothing is skipped: the same page is asked for again.
+    expect(result.current.cursor).toBeUndefined();
+    expect(result.current.degraded).toBe(false); // one failure is not yet a verdict
+  });
+
+  it('A PAGE WITH NO `next_cursor` does not silently restart the feed from its floor', async () => {
+    /*
+     * THE WORSE HALF OF THE SAME HOLE, and the reason the guard checks two things.
+     * `cursorRef.current = page.next_cursor` was unconditional, so a reply missing the
+     * key set the cursor to `undefined` — and the NEXT poll then carried no cursor at
+     * all, which the server answers from the floor of the feed. One malformed reply
+     * therefore redelivered the record's entire change history as though it were new,
+     * on every subsequent poll.
+     *
+     * MUTATION: deleting the `typeof page.next_cursor !== 'string'` half turns the
+     * cursor assertion RED — the second request carries `cursor: undefined`.
+     */
+    const spy = vi
+      .spyOn(api, 'getChanges')
+      .mockResolvedValueOnce(page({ changes: [ENTRY], returned: 1, next_cursor: 'GOOD-1' }))
+      .mockResolvedValue({ ...page(), next_cursor: undefined } as unknown as ApiChangeFeedPage);
+    const onChanges = vi.fn();
+    const { result } = renderHook(() => useChangeFeed(EXP_ID, { onChanges }));
+
+    await advance(POLL_INTERVAL_MS);
+    expect(result.current.cursor).toBe('GOOD-1');
+
+    await advance(POLL_INTERVAL_MS * 3);
+    expect(result.current.cursor).toBe('GOOD-1');
+    for (const call of spy.mock.calls.slice(1)) {
+      expect(call[1]).toMatchObject({ cursor: 'GOOD-1' });
+    }
+    // The good page was delivered once and the poison pages delivered nothing.
+    expect(onChanges).toHaveBeenCalledTimes(1);
+  });
+
+  it('A POISON PAGE DEGRADES AND BACKS OFF rather than wedging a fast retry loop', async () => {
+    /*
+     * "It cannot wedge the drain loop permanently" has a precise meaning here: the
+     * unreadable page is retried FOREVER — deliberately, because the alternative is
+     * skipping it — but at the ordinary failure ladder rather than at the drain rate,
+     * and with `degraded` true so a surface stops claiming to be current.
+     *
+     * The numbers are the ladder's own: 8s, then 16s, then 32s, then 64s clamped to
+     * `POLL_MAX_BACKOFF_MS`. Six requests in 200 s is what a client backing off looks
+     * like; a wedged drain loop would be hundreds.
+     */
+    const poison = { ...page(), changes: null } as unknown as ApiChangeFeedPage;
+    const spy = vi.spyOn(api, 'getChanges').mockResolvedValue(poison);
+    const onChanges = vi.fn();
+    const { result } = renderHook(() => useChangeFeed(EXP_ID, { onChanges }));
+
+    // THREE POLLS, NOT THREE CADENCES — the ladder doubles after each failure, so
+    // the third request lands at 8,000 + 16,000 + 32,000 ms rather than at 24,000.
+    // Advancing "three cadences" and asserting `degraded` would have measured two
+    // failures and read as a regression in the guard rather than in the arithmetic.
+    await advance(POLL_INTERVAL_MS + POLL_INTERVAL_MS * 2 + POLL_INTERVAL_MS * 4);
+    // IT SAYS SO. Three consecutive unreadable pages is the same verdict three
+    // network failures earn, because from a reader's point of view it is the same
+    // fact: this view is not updating.
+    expect(result.current.degraded).toBe(true);
+
+    const byNow = spy.mock.calls.length;
+    await advance(200_000);
+    expect(spy.mock.calls.length - byNow).toBeLessThanOrEqual(
+      Math.ceil(200_000 / POLL_MAX_BACKOFF_MS) + 2,
+    );
+    expect(onChanges).not.toHaveBeenCalled();
+    expect(result.current.degraded).toBe(true);
+  });
+
+  it('A POISON PAGE RECOVERS COMPLETELY once the server answers a readable one', async () => {
+    /*
+     * The other half of "recovers or stops honestly": nothing about the refusal is
+     * sticky. The entry the poison pages were hiding is delivered, `degraded` clears,
+     * and the cursor advances — no resync, no lost page, no manual intervention.
+     */
+    const good = page({ changes: [ENTRY], returned: 1, next_cursor: 'RECOVERED' });
+    const spy = vi
+      .spyOn(api, 'getChanges')
+      .mockResolvedValue({ ...page(), changes: 7 } as unknown as ApiChangeFeedPage);
+    const onChanges = vi.fn();
+    const { result } = renderHook(() => useChangeFeed(EXP_ID, { onChanges }));
+
+    await advance(POLL_INTERVAL_MS + POLL_INTERVAL_MS * 2 + POLL_INTERVAL_MS * 4);
+    expect(result.current.degraded).toBe(true);
+
+    spy.mockResolvedValue(good);
+    // EXACTLY ONE POLL. Three failures put the ladder at its 60,000 ms ceiling, so
+    // one `POLL_MAX_BACKOFF_MS` is one request — advancing further would count the
+    // ordinary cadence ticks after the recovery and say nothing about the recovery.
+    await advance(POLL_MAX_BACKOFF_MS);
+    expect(result.current.degraded).toBe(false);
+    expect(result.current.cursor).toBe('RECOVERED');
+    expect(onChanges).toHaveBeenCalledTimes(1);
+    expect(onChanges.mock.calls[0][0]).toEqual([ENTRY]);
+  });
+
+  it('A 422 STALE CURSOR loses no entry and does not leave the feed degraded', async () => {
+    /*
+     * Section 6 already pins the cursor MECHANICS of the resync — dropped, not
+     * re-sent, and not backed off. What is pinned here is the part a reader
+     * experiences and that test does not assert: the entries on the far side of the
+     * refusal still arrive, and `degraded` does not stick.
+     *
+     * It is written as a complement rather than a second copy: it asserts `onChanges`
+     * and `degraded`, and asserts nothing about which cursor went out.
+     */
+    const refusal = new ApiError('refused', { status: 422, reason: 'malformed_cursor' });
+    let refuse = false;
+    const onChanges = vi.fn();
+    vi.spyOn(api, 'getChanges').mockImplementation((async (
+      _id: string,
+      o: { cursor?: string } = {},
+    ) => {
+      if (refuse && o.cursor !== undefined) throw refusal;
+      return page({ next_cursor: 'FRESH-1', changes: [ENTRY], returned: 1 });
+    }) as never);
+    const { result } = renderHook(() => useChangeFeed(EXP_ID, { onChanges }));
+
+    await advance(POLL_INTERVAL_MS);
+    expect(onChanges).toHaveBeenCalledTimes(1);
+
+    refuse = true;
+    await advance(POLL_INTERVAL_MS);
+    expect(result.current.cursor).toBeUndefined();
+    // ONE refusal is not a verdict, and the remedy has already been applied.
+    expect(result.current.degraded).toBe(false);
+
+    // THE REFUSAL IS FIXED, which is what makes the next assertions about RECOVERY
+    // rather than about the oscillation. While it is NOT fixed the hook alternates —
+    // a cursorless resync succeeds, the poll after it carries the cursor and is
+    // refused again — which is the documented "at most every other request can take
+    // this branch" and is a different property, pinned in section 6.
+    refuse = false;
+    await advance(POLL_INTERVAL_MS * 2);
+    // The cursorless resync succeeded, so the entry arrived again rather than being
+    // stranded behind a position the server had refused.
+    const delivered = onChanges.mock.calls;
+    expect(delivered.length).toBeGreaterThanOrEqual(2);
+    expect(delivered[delivered.length - 1][0]).toEqual([ENTRY]);
+    expect(result.current.degraded).toBe(false);
+    expect(result.current.cursor).toBe('FRESH-1');
+  });
+});

@@ -432,10 +432,31 @@ describe('the transcript box', () => {
     abstentions: [],
     review_required: [],
     notes: [],
+    /* ONE STORED PROPOSAL PER CANDIDATE, which is what the server now does. A
+       fixture with an empty `proposals` over a non-empty `candidates` would render
+       the panel's "no proposal was stored" branch for every row and quietly change
+       what these Discard tests are looking at. */
+    proposals: candidates.map((_, index) => ({
+      candidate_index: index,
+      client_request_key: `transcript-capture:n1:${index}`,
+      deduplicated: false,
+      proposal: {
+        proposal_id: `p${index}`,
+        experiment_id: EXP,
+        note_id: 'n1',
+        run_id: 'run-1',
+        target_field_path: 'context.temperature_K',
+        proposed_value: 300,
+        rule: 'a rule',
+        state: 'open',
+        applied: false,
+      },
+    })),
+    unproposable: [],
     ambiguity_policy: [],
     accept_contract: {
-      method: 'PATCH',
-      path: '/api/experiments/{experiment_id}/runs/{run_id}',
+      method: 'POST',
+      path: '/api/experiments/{experiment_id}/proposals/{proposal_id}/review',
       requires: ['confirmed_by_user: true'],
       message: 'This operation writes no field.',
     },
@@ -546,14 +567,58 @@ describe('the transcript box', () => {
   });
 
   /*
-   * A LEAK THIS CONTROL MADE VISIBLE, FOUND IN REVIEW. `edits` — values typed over a
-   * proposal — was not cleared when the record changed, and `hasStagedCapture` counted
-   * it. So a reader who edited a proposal on one record and opened another met a Discard
-   * trigger over an EMPTY box, offering to clear something they could not see, under copy
-   * reading "This clears the transcript box". Both halves are asserted: the reset drops
-   * the map, and the predicate counts it only while the proposals are on screen.
+   * TWO TESTS USED TO SIT HERE AND THEY ARE REPLACED BY ONE, WITH BOTH DEFECTS THEY
+   * CLOSED NAMED RATHER THAN FORGOTTEN.
+   *
+   * They were "offers nothing on a fresh record, even after a proposal was edited on
+   * the last one" and "offers nothing once the only edited proposal has been ACCEPTED
+   * and the box emptied". Both were about `edits` — the map of values typed over a
+   * proposal before accepting it — and both closed the same defect from different
+   * sides: `hasStagedCapture` counted entries the reader could no longer see, so
+   * Discard offered to clear something invisible, under copy reading "This clears the
+   * transcript box". The first leaked across a record change; the second leaked across
+   * an accept, because the row that rendered the input unmounted and neither `accept`
+   * nor `reject` deleted its entry.
+   *
+   * `edits` NO LONGER EXISTS. The Accept control it fed is gone — a candidate is now a
+   * durable proposal reviewed on the proposals surface — so the map went with it, and
+   * `hasStagedCapture` is now `text !== ''`. The defect is closed by DELETION rather
+   * than by a predicate, which is the stronger form; what must not be lost is the RULE
+   * the two tests were enforcing, so it is asserted directly below: the control is
+   * offered only for state the reader can see, and proposals on screen are not that
+   * state — they are the server's answer, not a staged edit.
    */
-  it('offers nothing on a fresh record, even after a proposal was edited on the last one', async () => {
+  it('offers nothing once the box is empty, however many proposals are on screen', async () => {
+    stubFetchRoutes({
+      [RUNS]: { body: runsPage },
+      [CAPS]: { body: capabilities },
+      [CAPTURE]: { body: captureReading([CANDIDATE]) },
+    });
+    render(
+      <MemoryRouter
+        initialEntries={['/']}
+        future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+      >
+        <TranscriptCapturePanel experimentId={EXP} />
+      </MemoryRouter>,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Start a capture' }));
+    fireEvent.change(screen.getByLabelText('Transcript'), {
+      target: { value: 'Temperature was 300 K.' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Finalize and read' }));
+    await screen.findByText('context.temperature_K');
+
+    // The reader empties the box themselves. The proposal row is STILL on screen —
+    // which is the case the old tests were reaching for — and nothing about it is
+    // staged, so nothing may be offered.
+    fireEvent.change(screen.getByLabelText('Transcript'), { target: { value: '' } });
+    expect(screen.getByText('context.temperature_K')).toBeInTheDocument();
+    expect(trigger(DISCARD_COPY.transcriptAfterFinalize)).toBeNull();
+    expect(trigger(DISCARD_COPY.transcriptUnsent)).toBeNull();
+  });
+
+  it('offers nothing on a fresh record, whatever the last one was showing', async () => {
     stubFetchRoutes({
       [RUNS]: { body: runsPage },
       [`GET /api/experiments/other/runs`]: { body: runsPage },
@@ -573,8 +638,7 @@ describe('the transcript box', () => {
       target: { value: 'Temperature was 300 K.' },
     });
     fireEvent.click(screen.getByRole('button', { name: 'Finalize and read' }));
-    const edit = await screen.findByLabelText('Edit before accepting');
-    fireEvent.change(edit, { target: { value: '310' } });
+    await screen.findByText('context.temperature_K');
 
     // Same mounted component, different record — the panel is not keyed on the id.
     view.rerender(
@@ -588,62 +652,6 @@ describe('the transcript box', () => {
     await waitFor(() => expect(screen.getByLabelText('Transcript')).toHaveValue(''));
     expect(trigger(DISCARD_COPY.transcriptUnsent)).toBeNull();
     expect(trigger(DISCARD_COPY.transcriptAfterFinalize)).toBeNull();
-  });
-
-  /*
-   * THE SAME LEAK, ONE STEP FURTHER IN — found by independent review of the fix above,
-   * because "only while the proposals are on screen" was not what the predicate said.
-   *
-   * The edit `<input>` renders only on a candidate row's `decision === undefined`
-   * branch: accepting (or rejecting) a proposal replaces it with the accepted/rejected
-   * line, and NEITHER `accept` NOR `reject` deletes the row's `edits` entry. So
-   * `reading !== null && Object.keys(edits).length > 0` stayed true over a map whose
-   * every entry was invisible. Empty the transcript box by hand afterwards and the
-   * reader was offered "Discard this transcript" — with no transcript, and no edit
-   * anywhere on screen — under copy whose first clause is "This clears the transcript
-   * box". That is the same "offering to clear something they could not see" defect the
-   * test above exists to close, reachable without ever leaving the record.
-   */
-  it('offers nothing once the only edited proposal has been ACCEPTED and the box emptied', async () => {
-    stubFetchRoutes({
-      [RUNS]: { body: runsPage },
-      [CAPS]: { body: capabilities },
-      [CAPTURE]: { body: captureReading([CANDIDATE]) },
-      [`PATCH /api/experiments/${EXP}/runs/run-1`]: {
-        body: { run: { ...RUN, version: 'r1.1' }, experiment_version: 'g1.5' },
-      },
-    });
-    render(
-      <MemoryRouter
-        initialEntries={['/']}
-        future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
-      >
-        <TranscriptCapturePanel experimentId={EXP} />
-      </MemoryRouter>,
-    );
-    fireEvent.click(screen.getByRole('button', { name: 'Start a capture' }));
-    fireEvent.change(screen.getByLabelText('Transcript'), {
-      target: { value: 'Temperature was 300 K.' },
-    });
-    fireEvent.click(screen.getByRole('button', { name: 'Finalize and read' }));
-
-    const edit = await screen.findByLabelText('Edit before accepting');
-    fireEvent.change(edit, { target: { value: '310' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Accept' }));
-    // The row is decided, so the box that held the edit is gone from the document.
-    await waitFor(() =>
-      expect(screen.queryByLabelText('Edit before accepting')).toBeNull(),
-    );
-
-    // The reader now empties the transcript box themselves. Nothing they can see is
-    // staged, so nothing may be offered.
-    fireEvent.change(screen.getByLabelText('Transcript'), { target: { value: '' } });
-    expect(trigger(DISCARD_COPY.transcriptAfterFinalize)).toBeNull();
-    expect(trigger(DISCARD_COPY.transcriptUnsent)).toBeNull();
-
-    // …and the Undo the accepted value earned is untouched by any of this: the map the
-    // Discard would have cleared is `edits`, never `decisions`.
-    expect(screen.getByRole('button', { name: 'Undo' })).toBeInTheDocument();
   });
 
   /*

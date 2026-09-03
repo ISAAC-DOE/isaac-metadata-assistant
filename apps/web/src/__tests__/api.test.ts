@@ -1274,3 +1274,150 @@ describe("per-run override client — confirmation and the RUN's If-Match", () =
     });
   });
 });
+
+describe('createProposal — the create that lands with its producer', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  function captureFetch(response: { ok?: boolean; status?: number; body?: unknown }) {
+    const seen: { url: string; init: RequestInit }[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        seen.push({ url: String(input), init: init ?? {} });
+        return {
+          ok: response.ok ?? true,
+          status: response.status ?? 200,
+          json: async () => response.body ?? {},
+        } as Response;
+      }),
+    );
+    return seen;
+  }
+
+  const bodyOf = (init: RequestInit) => JSON.parse(String(init.body)) as Record<string, unknown>;
+
+  const CREATED = {
+    proposal: { proposal_id: 'p1', state: 'open' },
+    deduplicated: false,
+    experiment_version: 'g1.6',
+  };
+
+  it('sends exactly the four required fields and nothing it was not given', async () => {
+    const seen = captureFetch({ body: CREATED });
+    await api.createProposal(EXP_ID, {
+      experimentVersion: 'g1.5',
+      noteId: 'n1',
+      targetFieldPath: 'context.temperature_K',
+      proposedValue: 300,
+      rule: 'the sentence that produced it',
+    });
+    expect(seen[0].url).toContain(`/experiments/${EXP_ID}/proposals`);
+    expect(seen[0].init.method).toBe('POST');
+    // NOTHING IS DEFAULTED. No `run_id`, no span, no key — a client that filled any
+    // of them in would be deciding something a scientist has to.
+    expect(bodyOf(seen[0].init)).toEqual({
+      note_id: 'n1',
+      target_field_path: 'context.temperature_K',
+      proposed_value: 300,
+      rule: 'the sentence that produced it',
+    });
+    // THE RECORD'S token, not a run's: a proposal lives in the record's own document.
+    expect((seen[0].init.headers as Record<string, string>)['If-Match']).toBe('"g1.5"');
+  });
+
+  it('carries the run, the span and the key when — and only when — it is given them', async () => {
+    const seen = captureFetch({ body: CREATED });
+    await api.createProposal(EXP_ID, {
+      experimentVersion: 'g1.5',
+      noteId: 'n1',
+      targetFieldPath: 'context.temperature_K',
+      proposedValue: 300,
+      rule: 'r',
+      runId: 'run-1',
+      startChar: 0,
+      endChar: 22,
+      clientRequestKey: 'transcript-capture:n1:0',
+    });
+    expect(bodyOf(seen[0].init)).toEqual({
+      note_id: 'n1',
+      target_field_path: 'context.temperature_K',
+      proposed_value: 300,
+      rule: 'r',
+      run_id: 'run-1',
+      start_char: 0,
+      end_char: 22,
+      client_request_key: 'transcript-capture:n1:0',
+    });
+  });
+
+  it('sends HALF a span as no span at all, rather than letting the server refuse it', async () => {
+    // `start_char` and `end_char` travel together; the server refuses half a span.
+    // Sending one would turn a client bug into a `422` the caller has to interpret.
+    const seen = captureFetch({ body: CREATED });
+    await api.createProposal(EXP_ID, {
+      experimentVersion: 'g1.5',
+      noteId: 'n1',
+      targetFieldPath: 'context.temperature_K',
+      proposedValue: 300,
+      rule: 'r',
+      startChar: 4,
+    });
+    expect(Object.keys(bodyOf(seen[0].init))).not.toContain('start_char');
+    expect(Object.keys(bodyOf(seen[0].init))).not.toContain('end_char');
+  });
+
+  it('returns `deduplicated` so a caller cannot report a create off the status', async () => {
+    // `200` is BOTH outcomes. A caller reading the status alone would announce a
+    // create that may not have happened, which is why the flag is on the body.
+    const seen = captureFetch({
+      body: { ...CREATED, deduplicated: true, proposal: { proposal_id: 'p-first' } },
+    });
+    const created = await api.createProposal(EXP_ID, {
+      experimentVersion: 'g1.5',
+      noteId: 'n1',
+      targetFieldPath: 'context.temperature_K',
+      proposedValue: 300,
+      rule: 'r',
+      clientRequestKey: 'k',
+    });
+    expect(created.deduplicated).toBe(true);
+    expect(created.proposal.proposal_id).toBe('p-first');
+    expect(seen).toHaveLength(1);
+  });
+
+  it('omits If-Match entirely for a blank token, so the server answers 428 not 400', async () => {
+    const seen = captureFetch({ body: CREATED });
+    await api.createProposal(EXP_ID, {
+      experimentVersion: '',
+      noteId: 'n1',
+      targetFieldPath: 'context.temperature_K',
+      proposedValue: 300,
+      rule: 'r',
+    });
+    // `request()` supplies the Content-Type header for a body; what must be absent is
+    // the precondition, and asserting the whole `headers` object would be asserting
+    // against the transport rather than against this function's one decision.
+    expect((seen[0].init.headers as Record<string, string>)['If-Match']).toBeUndefined();
+  });
+
+  it('a refusal reaches the caller as an ApiError carrying the typed body', async () => {
+    // `no_write_path_for_field` and `target_requires_a_run` have different remedies,
+    // so this function relays the body rather than composing one sentence for both.
+    captureFetch({
+      ok: false,
+      status: 422,
+      body: { error: 'no_write_path_for_field', key: 'system.configuration.beamline' },
+    });
+    await expect(
+      api.createProposal(EXP_ID, {
+        experimentVersion: 'g1.5',
+        noteId: 'n1',
+        targetFieldPath: 'system.configuration.beamline',
+        proposedValue: 'x',
+        rule: 'r',
+      }),
+    ).rejects.toMatchObject({ status: 422 });
+  });
+});

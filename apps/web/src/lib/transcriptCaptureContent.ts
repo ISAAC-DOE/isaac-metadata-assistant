@@ -85,8 +85,9 @@ export const CAPTURE_COPY = {
     'Type or paste notes about a run, then finalize them. You can also record ' +
     'audio here, but turning a recording into text needs a transcription ' +
     'provider — the panel reports what this deployment has before you rely on ' +
-    'it. Nothing is read while you are still writing, and no value is written ' +
-    'until you accept one.',
+    'it. Nothing is read while you are still writing, and nothing here writes a ' +
+    'value: what is read is stored as a proposal, and a proposal is accepted or ' +
+    'rejected in Ingestion Proposals.',
 
   guidanceHeading: 'Before you start',
   guidanceDismiss: 'Got it',
@@ -168,16 +169,78 @@ export const CAPTURE_COPY = {
   candidatesEmpty:
     'Nothing was proposed from this transcript. Every word of it was stored ' +
     'with the record as notes.',
+  /*
+   * THE PANEL NO LONGER ACCEPTS ANYTHING, AND THIS SENTENCE IS WHY THE OLD ONE HAD
+   * TO GO RATHER THAN BE REWORDED. It read: "A proposal, not a value. Nothing is
+   * written to the record until you accept it, and accepting it records your
+   * confirmation." That described an Accept button IN THIS PANEL that wrote the run
+   * field directly through `PATCH .../runs/{run_id}` — a control that no longer
+   * exists, because a candidate is now a DURABLE proposal stored with the record and
+   * reviewed on the proposals surface, where a colleague can see it and where a
+   * rejection is recorded rather than forgotten. Leaving the sentence would have
+   * pointed a reader at a control that is not on the screen.
+   *
+   * The six action strings beside it — `accept`, `reject`, `edit`, `undo`,
+   * `accepted`, `rejected`, `undone` — went with it, for the same reason: a label
+   * for a control that does not exist is a label nothing can be checked against.
+   */
+  /*
+   * AND THE LEAD SENTENCE DESCRIBES THE PER-ROW LABELS RATHER THAN MAKING THEIR
+   * CLAIM. Its first version here ended "Each proposal below is stored with this
+   * record and waits in Ingestion Proposals until someone accepts or rejects it
+   * there" — and it is rendered UNCONDITIONALLY above the list, including on a
+   * reading that carries `unproposable` rows. That is reachable in production
+   * (`too_many_proposals`, `proposals_too_large`), and on such a reading the
+   * paragraph asserted storage for candidates the server had just said it stored
+   * nothing for, one line above the server's own sentence saying so. The blanket
+   * claim now lives in `candidatesAllStored`, rendered only when every candidate got
+   * a proposal.
+   */
   candidateNotAValue:
-    'A proposal, not a value. Nothing is written to the record until you accept ' +
-    'it, and accepting it records your confirmation.',
-  accept: 'Accept',
-  reject: 'Reject',
-  edit: 'Edit before accepting',
-  undo: 'Undo',
-  accepted: 'Accepted and written to the run.',
-  rejected: 'Rejected. The words it came from are still stored as a note.',
-  undone: 'Undone. The run holds the value it held before.',
+    'A proposal, not a value. Nothing here is written to the record. Each row ' +
+    'below carries its own label saying whether a proposal was stored for it, ' +
+    'and the reason when none was.',
+  /*
+   * THE BLANKET CLAIM, AND THE ONLY READING IT IS TRUE OF: no candidate was refused,
+   * and at least one was read. It never sits above a row the server declined.
+   */
+  candidatesAllStored:
+    'Every proposal below is stored with this record and waits in Ingestion ' +
+    'Proposals until someone accepts or rejects it there.',
+  /*
+   * TWO CONFLICT SENTENCES, FOR THE REASON THE LEAD SENTENCE WAS SPLIT. The conflict
+   * line read "Both are stored" whatever had happened to the two candidates, so a
+   * conflict in which one of them was refused claimed storage for it. The first is
+   * used only when EVERY candidate the conflict names got a proposal; the second
+   * states the conflict and claims nothing about storage, leaving that to each row's
+   * own label.
+   */
+  conflictBothStored:
+    'This transcript proposes another value for the same field. Both are ' +
+    'stored; accept at most one in Ingestion Proposals.',
+  conflictNotAllStored:
+    'This transcript proposes another value for the same field. Only the rows ' +
+    'labelled as stored are waiting in Ingestion Proposals; accept at most one ' +
+    'of them there.',
+  proposalStored: 'Stored. Waiting in Ingestion Proposals.',
+  /*
+   * NOT REACHABLE FROM THE SERVER AT THIS HEAD, and said here so nobody reads its
+   * test as evidence of a live path. It renders on `deduplicated: true`, which the
+   * transcript route cannot currently emit: the key it dedupes on is built from a
+   * note id that is a fresh ULID minted by the same request, so no proposal already
+   * on the record can carry it (contract §11.2; `routes.py::_mint_transcript_proposals`
+   * says the same beside the branch). It is exercised from a FIXTURE — see
+   * `transcript-capture.test.tsx`, "a proposal the record already held says so
+   * instead of claiming a create" — and it is kept because the field is on the wire
+   * and a row that showed "Stored." for a proposal this capture did not create would
+   * be claiming an act that did not happen.
+   */
+  proposalAlreadyStored:
+    'Already stored — this record held a proposal for it, so a second one was ' +
+    'not created.',
+  proposalMissing:
+    'No proposal was stored for this one. The words it came from are still ' +
+    'stored as a note.',
 
   clarificationsHeading: 'Questions this reader will not answer for you',
   abstentionsHeading: 'Recognised and deliberately not proposed',

@@ -12,9 +12,18 @@
  * has been confirmed by a person, which is a different claim.
  *
  * STATUS IS NEVER CARRIED BY COLOUR ALONE. Every state that is tinted also
- * carries a word — "Accepted and written to the run.", "Rejected.", "Question",
- * "Not proposed", "Needs review" — and the recording state is additionally
- * announced to a live region. A reader who sees no colour loses no information.
+ * carries a word — "Stored. Waiting in Ingestion Proposals.", the server's own
+ * refusal sentence, "Question", "Not proposed", "Needs review" — and the recording
+ * state is additionally announced to a live region. A reader who sees no colour
+ * loses no information.
+ *
+ * THE FIRST THREE OF THOSE WORDS USED TO BE "Accepted and written to the run.",
+ * "Rejected." and an Accept/Reject control's labels, and they are named here rather
+ * than silently swapped because this comment was the rule those strings satisfied.
+ * They went with the Accept button: this panel writes nothing now, so the states a
+ * candidate row can be in are the server's — stored, refused, unaccounted — and each
+ * still carries its own sentence. The old strings no longer exist in
+ * `transcriptCaptureContent.ts`, so a comment naming them was naming nothing.
  *
  * State is carried on `data-state` / `data-outcome`, matching `.run-card` and
  * `.note-card`.
@@ -283,8 +292,22 @@
   background: var(--surface-raised);
 }
 
-.capture-candidate[data-state='accepted'],
-.capture-candidate[data-state='rejected'] {
+/*
+ * THE EMITTED STATES, AND THEY ARE THE ONES THE PANEL WRITES. `accepted` and
+ * `rejected` were this rule's selectors and neither is emitted any more — the panel
+ * sets `stored`, `refused` or `unaccounted`, per the server's own account of what it
+ * did with each candidate — so the rule matched nothing and the tint had silently
+ * stopped appearing on any row.
+ *
+ * EVERY TINTED STATE STILL CARRIES A WORD, which is the rule at the top of this file
+ * and the reason all three are listed rather than only `stored`: `stored` renders
+ * "Stored. Waiting in Ingestion Proposals.", `refused` renders the SERVER's refusal
+ * sentence, and `unaccounted` renders "No proposal was stored for this one." A
+ * reader who sees no border loses nothing.
+ */
+.capture-candidate[data-state='stored'],
+.capture-candidate[data-state='refused'],
+.capture-candidate[data-state='unaccounted'] {
   border-color: var(--border-strong);
 }
 
@@ -315,17 +338,13 @@
   font-style: italic;
 }
 
-.capture-candidate-actions {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-  margin-top: 8px;
-}
-
-.capture-candidate-actions .capture-control {
-  max-width: 24ch;
-}
+/*
+ * `.capture-candidate-actions` AND ITS `.capture-control` RULE WERE DELETED HERE.
+ * They laid out the Accept / Reject / Edit / Undo row and the inline edit box, and
+ * this panel issues no write but the finalize itself — no element carries the class
+ * any more, in this bundle or any other. Dead selectors are worse than no selectors:
+ * they read as evidence that a control exists.
+ */
 
 @media (prefers-reduced-motion: reduce) {
   .capture-section * {
