@@ -42,6 +42,22 @@ ships no `createProposal`, and `routes.py` records that *"NOTHING WAS REWIRED TO
 THEM. There is no automatic producer"*. **No surface in this build can create a
 proposal**, so a second browser would have nothing to click.
 
+> **CORRECTION, 2026-09-03 — the last sentence has EXPIRED, and it is annotated rather
+> than rewritten because this document is the record of one measurement made on
+> 2026-09-02 and every word above was true of the build it ran against.**
+> `POST /api/experiments/{experiment_id}/transcript` now mints a durable ingestion
+> proposal per candidate it reads, in the same lock and the same save as the notes, and
+> `lib/api.ts` has gained `createProposal`. So a surface in this build **can** create a
+> proposal: a scientist finalizing a transcript. See
+> [`docs/ingestion-proposal-contract.md`](../ingestion-proposal-contract.md) §11.
+>
+> **What this does NOT change, stated so the correction is not read as wider than it
+> is:** every step of the proof above still holds as run, the reason B is an HTTP
+> context is still sound for a *record-scoped* proposal (the transcript reader's five
+> paths are all run-scoped, so it cannot produce step 6's shape), and **the acceptance
+> gate is untouched** — accepting still requires a trusted human identity that no
+> default-configured deployment establishes.
+
 The suite's inherited rule is not weakened: **the reviewed act happens through the visible
 UI.** A's rejection (step 9) and A's acceptance (step 14) are clicks. B's HTTP calls
 establish starting state and read server state back as an independent check; they never

@@ -12698,29 +12698,65 @@ def get_proposal(
     return {"proposal": _proposal_view(exp, proposal)}
 
 
-def _proposal_value_refusal(value, rule: str) -> JSONResponse | None:
-    """Refuse a value+rule pair that is too large or could not be stored intact.
+def _proposal_value_problem(value, rule: str) -> tuple[str, str, dict] | None:
+    """Why a value+rule pair cannot be stored, as DATA rather than as a response.
 
-    TWO REFUSALS AND NOT ONE, deliberately, where `_is_storable_value` collapses them
-    into a boolean. "This is bigger than one proposal may be" and "this contains
-    something JSON cannot represent" have different remedies — shorten it, versus fix
-    the encoding — and one code for the two would be one name for two repairs.
+    THREE REFUSALS AND NOT ONE, deliberately, where `_is_storable_value` collapses
+    two of them into a boolean. "This is null", "this is bigger than one proposal may
+    be" and "this contains something JSON cannot represent" have different remedies —
+    give a value, versus shorten it, versus fix the encoding — and one code for the
+    three would be one name for three repairs.
+
+    ONE DEFINITION, TWO PRESENTATIONS, and the split exists because a second caller
+    arrived that must not answer with a response at all. `POST .../proposals` refuses
+    the whole request (:func:`_proposal_value_refusal` below). The transcript capture
+    mints many proposals in one act and must keep going: a candidate this rejects is
+    DISCLOSED as unproposable beside the ones that were minted, and the notes are
+    stored either way. Reimplementing the predicate there would be a second answer to
+    "what may a proposal hold", free to drift from this one.
+
+    THE NULL CHECK MOVED HERE FROM `post_proposal`, 2026-09-03, and the reason is the
+    same one that split this function out. It sat in the route as a fourth inline
+    branch, so the OTHER producer — the transcript mint — had no null check at all:
+    a candidate carrying `None` would have been stored as a proposal that CLEARS the
+    field if it were ever applied, which the route had refused since the day it
+    shipped. One producer refusing what another accepts is two answers to "what may a
+    proposal hold", which is exactly what this function exists to prevent.
+
+    **THE CODE AND THE MESSAGE ARE `post_proposal`'S OWN, BYTE FOR BYTE**
+    (`invalid_proposed_value`), so nothing on the wire moved: the OpenAPI text, the
+    MCP tool's documented refusal (`mcp/tools.py:330`) and
+    `test_ingestion_proposals.py::test_a_null_value_is_refused_because_it_would_clear_the_field`
+    all still describe what the route does. It is checked FIRST, as it was in the
+    route, because "no value" is a stronger objection than any fact about its size.
     """
+    if value is None:
+        return (
+            "invalid_proposed_value",
+            (
+                "`proposed_value` must not be null. A null would CLEAR the field "
+                "if it were ever applied, and clearing a confirmed value is a "
+                "different act with its own questions — it is not something a "
+                "proposal may smuggle in. Nothing was written."
+            ),
+            {},
+        )
     if not _value_depth_within(value, _MAX_VALUE_DEPTH):
-        return _proposal_refusal(
+        return (
             "unrepresentable_value",
             (
                 "This value is nested more deeply than a stored value may be, so a "
                 "record containing it could not be read back reliably. It is REFUSED "
                 "rather than reshaped. Nothing was written."
             ),
+            {},
         )
     try:
         rendered = _render_exactly_as_a_response_would(
             {"proposed_value": value, "rule": rule}
         )
     except (ValueError, TypeError, UnicodeEncodeError):
-        return _proposal_refusal(
+        return (
             "unrepresentable_value",
             (
                 "This value could not be stored intact — it contains something JSON "
@@ -12728,9 +12764,10 @@ def _proposal_value_refusal(value, rule: str) -> JSONResponse | None:
                 "so a record containing it could not be read back. It is REFUSED "
                 "rather than reshaped. Nothing was written."
             ),
+            {},
         )
     if len(rendered) > _MAX_PROPOSAL_BYTES:
-        return _proposal_refusal(
+        return (
             "value_too_large",
             (
                 "The proposed value and its rule are larger together than one "
@@ -12738,10 +12775,18 @@ def _proposal_value_refusal(value, rule: str) -> JSONResponse | None:
                 "truncated value misrepresents what was proposed and a truncated "
                 "rule misrepresents why. Nothing was written."
             ),
-            max_bytes=_MAX_PROPOSAL_BYTES,
-            bytes=len(rendered),
+            {"max_bytes": _MAX_PROPOSAL_BYTES, "bytes": len(rendered)},
         )
     return None
+
+
+def _proposal_value_refusal(value, rule: str) -> JSONResponse | None:
+    """:func:`_proposal_value_problem`, rendered as this route's typed 422."""
+    problem = _proposal_value_problem(value, rule)
+    if problem is None:
+        return None
+    error, message, extra = problem
+    return _proposal_refusal(error, message, **extra)
 
 
 #: **ONE SUCCESS CODE, `200`, AND THE DEPARTURE FROM THE THREE SIBLING CREATE ROUTES
@@ -13004,19 +13049,15 @@ def post_proposal(
                 ),
             )
         proposed_value = body["proposed_value"]
-        if proposed_value is None:
-            return _proposal_refusal(
-                "invalid_proposed_value",
-                (
-                    "`proposed_value` must not be null. A null would CLEAR the field "
-                    "if it were ever applied, and clearing a confirmed value is a "
-                    "different act with its own questions — it is not something a "
-                    "proposal may smuggle in. Nothing was written."
-                ),
-            )
-        size_refusal = _proposal_value_refusal(proposed_value, rule)
-        if size_refusal is not None:
-            return size_refusal
+        # THE NULL REFUSAL LIVES IN `_proposal_value_problem` NOW, not inline here,
+        # and it answers with the same `invalid_proposed_value` and the same sentence
+        # it always did. It moved so the OTHER producer — the transcript mint — is
+        # bound by it too: it had no null check of its own, so it would have stored a
+        # proposal that CLEARS the field if it were ever applied. One producer
+        # refusing what another accepts is two answers to "what may a proposal hold".
+        value_refusal = _proposal_value_refusal(proposed_value, rule)
+        if value_refusal is not None:
+            return value_refusal
 
         start_char = body.get("start_char")
         end_char = body.get("end_char")
@@ -13902,9 +13943,12 @@ def post_proposal_review(
 # `POST /api/experiments/{id}/transcript` is the working path and does not involve
 # a provider at all. It reads a transcript a scientist finalized, using this
 # repository's own closed table of literal patterns, and it PROPOSES. It writes
-# exactly one kind of thing — Unmapped Notes, which are structurally not values and
-# not evidence — and it writes them for EVERY segment, so no proposal being
-# accepted, and no acceptance succeeding, can lose what was typed.
+# two kinds of thing, neither of which is a value: Unmapped Notes for EVERY segment,
+# so no proposal being rejected and no acceptance failing can lose what was typed;
+# and one durable ingestion proposal per candidate, in the same lock and the same
+# save, so a candidate is a queue entry a colleague can review rather than a row in
+# one browser's memory. Notes and proposals are both structurally not values and not
+# evidence, and both live outside `draft`, so an export is unchanged by either.
 
 
 #: The body keys the transcript operation accepts. Anything else is REFUSED rather
@@ -13951,6 +13995,357 @@ def _transcript_refusal(error: str, message: str, **extra) -> JSONResponse:
     return JSONResponse(
         status_code=422, content={"error": error, "message": message, **extra}
     )
+
+
+#: The prefix on every `client_request_key` the transcript capture mints.
+#:
+#: It exists so a key this SERVER composed is distinguishable from one a client
+#: chose, in a namespace both write into. Nothing branches on it — `find_by_client_
+#: request_key` compares whole strings — so it is disclosure rather than dispatch.
+_TRANSCRIPT_PROPOSAL_KEY_PREFIX = "transcript-capture:"
+
+
+def _transcript_proposal_key(note_id: str, candidate_index: int) -> str:
+    """The deterministic idempotency key for one candidate of one capture.
+
+    ``note_id`` and the candidate's position in this reading, because that pair is
+    what identifies a candidate and nothing else does: two candidates can come from
+    ONE segment — and therefore from one note — when a sentence gives two values for
+    one field, and the reader deliberately keeps both rather than preferring one.
+
+    **WHAT THIS KEY DOES AND DOES NOT GUARANTEE, stated here because the obvious
+    reading of "idempotency key" is wrong for this route.** A note id is a fresh ULID
+    minted by this same request, so two deliberate finalizations of the SAME text
+    produce different notes and therefore different keys — and two sets of proposals.
+    That is correct and is not a duplicate: `capture_note` already stores the words
+    twice for the same reason, because two finalizations are two acts.
+
+    What protects a RETRY is the record's own precondition, not this key: a capture
+    that reached disk advanced the record's `ETag`, so the retry meets `412` and
+    nothing is stored twice. The key's job is the other one — the response publishes
+    it, so a client that also holds `createProposal` cannot mint a second proposal for
+    a candidate this route already minted. Exactly-once across the two producers, by
+    the mechanism contract §10 DEC-13 added it for.
+    """
+    return f"{_TRANSCRIPT_PROPOSAL_KEY_PREFIX}{note_id}:{candidate_index}"
+
+
+def _mint_transcript_proposals(
+    exp: Experiment, reading, *, run_id: str | None, captured: list
+) -> tuple[list[tuple[int, object, bool]], list[dict]]:
+    """Turn this reading's candidates into DURABLE proposals on ``exp``. In memory.
+
+    Returns ``(minted, unproposable)``. ``minted`` is one ``(candidate_index,
+    proposal, deduplicated)`` triple per candidate that now has a stored proposal;
+    ``unproposable`` is one disclosure per candidate that does not, each naming the
+    path, the candidate, and the reason. **Nothing is dropped silently** — contract
+    §5 **I6** — and the note behind every candidate is stored either way, by the loop
+    that runs before this one.
+
+    WHY MINTING IS SERVER-SIDE AND IN THIS CRITICAL SECTION.
+    =======================================================
+
+    A client-side mint would be N+1 requests after the capture, each with its own
+    `If-Match`, each able to fail on its own — so a browser that closed, a tab that
+    slept, or a 412 partway through would leave a record whose notes were stored and
+    whose proposals were not, with no surface able to say which candidates were
+    missing. The scientist's act was ONE act ("read this transcript"), and the
+    contract's own rule for the review route is that the read, the comparison and the
+    mutation happen inside one ``record_lock`` block (§10.3). Minting here makes the
+    proposals **atomic with the notes they cite**: one lock, one ``save_versioned``,
+    one revision. Either the record holds the notes and the proposals or it holds
+    neither.
+
+    It also keeps the citation constructible. A proposal REQUIRES a ``note_id`` naming
+    a note the record already holds; the ids of the notes this capture stores do not
+    exist until this request mints them, so a client minting proposals would have to
+    read them back out of this response — which is exactly the round trip the atomicity
+    above removes.
+
+    THIS FUNCTION WRITES NO SCIENTIFIC VALUE (contract §5 **I1**) and adds nothing to
+    ``draft`` (§5 **I2**). ``state["proposals"]`` is outside ``draft``, which is the
+    property §7 chose the location for, so the exported record is unchanged by
+    construction rather than by assertion.
+
+    THE TWO CEILINGS ARE DISCLOSED, NEVER ENFORCED BY REFUSING THE CAPTURE. The row
+    count is checked per candidate as the batch grows; the per-record byte ceiling is
+    measured ONCE over the whole projected document, and if it is exceeded **no
+    proposal from this capture is stored** and every candidate is disclosed as
+    unproposable. All-or-nothing rather than "as many as fit", because a partial batch
+    chosen by byte arithmetic would be this route deciding which of a scientist's
+    values are worth keeping. Refusing the whole capture was the other option and is
+    worse: it would destroy a transcript for a reason that has nothing to do with it.
+    """
+    minted: list[tuple[int, object, bool]] = []
+    unproposable: list[dict] = []
+    pending: list = []
+    # `post_proposal`'S OWN LOOKUP, CALLED RATHER THAN REIMPLEMENTED. A dict built
+    # here over `exp.proposals` answered a subtly DIFFERENT question: iteration order
+    # is insertion order, so a dict comprehension keeps the LAST proposal carrying a
+    # key while `find_by_client_request_key` over `sorted_proposals()` returns the
+    # EARLIEST — and that choice is load-bearing, for the reason its own docstring
+    # gives ("the answer a retrying client must get back is the proposal its FIRST
+    # attempt minted"). Two producers sharing one key must also share one answer to
+    # "did this create already happen?".
+    #
+    # The sorted list is taken ONCE, outside the loop, because `exp.proposals` cannot
+    # change while this runs: `pending` is added to the record only after the loop.
+    # Re-sorting per candidate would be the same answer at C times the cost.
+    sorted_existing = exp.sorted_proposals()
+    # The keys THIS batch has minted, which are not on the record yet. Every write to
+    # one experiment holds the record lock, which is what makes this sound without a
+    # uniqueness constraint (§10 DEC-13).
+    minted_in_batch: dict[str, object] = {}
+
+    def disclose(index: int, candidate, note_id: str | None, error: str, message: str, **extra):
+        unproposable.append(
+            {
+                "candidate_index": index,
+                "field_path": candidate.field_path,
+                "note_id": note_id,
+                "error": error,
+                "message": message,
+                **extra,
+            }
+        )
+
+    for index, candidate in enumerate(reading.candidates):
+        segment_index = candidate.provenance.get("segment_index")
+        note = (
+            captured[segment_index]
+            if isinstance(segment_index, int)
+            and not isinstance(segment_index, bool)
+            and 0 <= segment_index < len(captured)
+            else None
+        )
+        if note is None:  # pragma: no cover - the reader stamps every candidate
+            disclose(
+                index,
+                candidate,
+                None,
+                "note_not_recorded",
+                (
+                    "This candidate could not be traced back to a stored note, so a "
+                    "proposal citing it could not be created. The transcript itself "
+                    "is stored and nothing was lost."
+                ),
+            )
+            continue
+        path = candidate.field_path
+        if path not in PROPOSAL_TARGET_PATHS:
+            # UNREACHABLE TODAY, AND DELIBERATELY WRITTEN ANYWAY. The module-level
+            # `_UNACCEPTABLE_READER_PATHS` guard proves every reader path is run
+            # writable, and `PROPOSAL_TARGET_PATHS` is a superset of that set — so
+            # this branch cannot fire at this HEAD. It is the branch that keeps the
+            # promise if either set moves: a candidate at a path no route writes is
+            # DISCLOSED with the reason, never dropped, and the wording is
+            # `post_proposal`'s so the two cannot drift into different claims about
+            # the same limitation.
+            disclose(
+                index,
+                candidate,
+                note.id,
+                "no_write_path_for_field",
+                (
+                    "No write operation in this build accepts a value at this path, "
+                    "so a proposal for it could be created and never applied. The "
+                    "words are stored as a note and can still be mapped to this "
+                    "path. THIS IS A LIMITATION OF THIS BUILD AND NOT A STATEMENT "
+                    "ABOUT THE OFFICIAL ISAAC SCHEMA, which defines this field."
+                ),
+            )
+            continue
+        scope_of_target = _PROPOSAL_WRITER_SCOPE[_proposal_writer_for(path)]
+        if scope_of_target == "run" and run_id is None:
+            # ALSO UNREACHABLE TODAY: `read_transcript` withholds every candidate
+            # while the run is unsettled, and "no run selected" is one of those cases.
+            # Same reasoning as the branch above — the guard is what makes the claim
+            # survive a change to either side of it.
+            disclose(
+                index,
+                candidate,
+                note.id,
+                "target_requires_a_run",
+                (
+                    "A proposal at this path is applied through a run's writer, so "
+                    "it must name the run it is about; it is never inferred. The "
+                    "words are stored as a note."
+                ),
+            )
+            continue
+        if scope_of_target == "record" and run_id is not None:
+            # UNREACHABLE TODAY, THE THIRD OF THE THREE, and for a reason that is
+            # derived by test rather than asserted here: every path this reader can
+            # propose is RUN-scoped, so `scope_of_target` is never "record" on this
+            # route (`_PROPOSAL_WRITER_SCOPE` over `tc.READABLE_FIELD_PATHS` is
+            # `{"run"}` —
+            # `test_transcript_capture_mints_proposals.py::test_the_five_readable_paths_are_all_run_scoped_targets`).
+            # A record-scoped transcript proposal is UNCONSTRUCTIBLE rather than
+            # merely unbuilt. Written anyway, and kept the same shape as the two
+            # branches above: if a future rule gives the reader a record-scoped path,
+            # that candidate is DISCLOSED with the reason rather than aimed at
+            # whichever run the capture happened to name.
+            disclose(
+                index,
+                candidate,
+                note.id,
+                "target_is_record_scoped",
+                (
+                    "A value at this path is written on the RECORD, not on a run, so "
+                    "a proposal for it must not name one. The words are stored as a "
+                    "note."
+                ),
+            )
+            continue
+
+        key = _transcript_proposal_key(note.id, index)
+        already = proposals.find_by_client_request_key(
+            sorted_existing, key
+        ) or minted_in_batch.get(key)
+        if already is not None:
+            # UNREACHABLE TODAY, AND THE REASON IS THE ONE §11.2 NAMES: `note.id` is a
+            # fresh ULID minted by THIS request, so no proposal already on the record
+            # can carry a key built from it, and the key also carries the candidate
+            # index, which is unique within this loop — so `minted_in_batch` cannot
+            # collide either. Two deliberate finalizations of the same text are two
+            # acts and produce two sets of proposals; what protects a RETRY is the
+            # record's own `ETag` precondition, not this key.
+            #
+            # KEPT, because the branch is what makes the *exactly-once* claim true
+            # rather than merely likely: `client_request_key` is published for the
+            # OTHER producer, and if a future change makes a key reachable twice
+            # here — a stable key derived from the note's text, say — this answers
+            # with the EXISTING proposal instead of minting a second. It is the same
+            # answer `post_proposal` gives, through the same lookup.
+            #
+            # The client-facing `deduplicated: true` that this produces is therefore
+            # not reachable from this route at this HEAD; `CAPTURE_COPY
+            # .proposalAlreadyStored` is exercised from a FIXTURE
+            # (`transcript-capture.test.tsx`: "a proposal the record already held
+            # says so instead of claiming a create"), and that test says so.
+            minted.append((index, already, True))
+            continue
+
+        problem = _proposal_value_problem(candidate.proposed_value, candidate.rule)
+        if problem is not None:
+            error, message, extra = problem
+            disclose(index, candidate, note.id, error, message, **extra)
+            continue
+        if len(exp.proposals) + len(pending) >= _MAX_PROPOSALS_PER_RECORD:
+            disclose(
+                index,
+                candidate,
+                note.id,
+                "too_many_proposals",
+                (
+                    "This record already holds the maximum number of proposals, so "
+                    "no proposal was created for this candidate. The words are "
+                    "stored as a note and nothing was removed to make room."
+                ),
+                max_per_record=_MAX_PROPOSALS_PER_RECORD,
+            )
+            continue
+
+        run = exp.get_run(run_id) if run_id is not None else None
+        try:
+            digest = proposals.target_digest(_proposal_target_state(exp, run, path))
+        except (TypeError, ValueError) as refusal:  # pragma: no cover - hand-edited doc
+            disclose(
+                index,
+                candidate,
+                note.id,
+                "unrepresentable_value",
+                (
+                    "What this record currently holds at that path could not be "
+                    f"digested, so a proposal for it would have no acceptance "
+                    f"precondition to check against: {refusal}."
+                ),
+            )
+            continue
+        try:
+            proposal = proposals.new_proposal(
+                proposal_id=new_record_id(),
+                experiment_id=exp.id,
+                note_id=note.id,
+                target_field_path=path,
+                proposed_value=candidate.proposed_value,
+                rule=candidate.rule,
+                # READ OFF THE NOTE, exactly as `post_proposal` does, so what
+                # produced the content is stated once and by the thing that holds it.
+                source=note.source,
+                proposed_utc=_now_iso(),
+                base_rev=exp.rev,
+                target_digest=digest,
+                # THE PROPOSER'S ACTOR SEAM STAYS UNSET. A capture establishes no
+                # attributable actor — no trusted authentication boundary exists in
+                # this build — and a subject beside a recognised basis would be a
+                # name nothing vouched for.
+                trust_basis=submissions.TRUST_BASIS_UNATTRIBUTED,
+                run_id=run_id,
+                # THE SPAN IS THE WHOLE NOTE, and it is computed from the NOTE's own
+                # text rather than from the segment's, so it is valid by construction
+                # whatever `capture_note` does to the string. The excerpt derived on
+                # read is then exactly the sentence the rule quoted (contract §10
+                # DEC-3), which is what a reviewer needs in front of them.
+                start_char=0,
+                end_char=len(note.text),
+                client_request_key=key,
+            )
+        except proposals.UnsupportedProposal as refusal:  # pragma: no cover - see below
+            # The model's own refusals are DISCLOSED, never raised. Unreachable
+            # through this route today — every field is composed here from a reading
+            # whose shapes the checks above cover — and written because the
+            # alternative to a disclosure is a traceback out of a capture that had
+            # already stored the scientist's words.
+            disclose(index, candidate, note.id, "unsupported_proposal", str(refusal))
+            continue
+
+        pending.append(proposal)
+        minted_in_batch[key] = proposal
+        minted.append((index, proposal, False))
+
+    if not pending:
+        return minted, unproposable
+
+    # THE PER-RECORD BYTE CEILING, MEASURED ONCE OVER WHAT WOULD BE STORED. See the
+    # docstring: over it, the whole batch is disclosed rather than partly stored.
+    try:
+        projected = _render_exactly_as_a_response_would(
+            [existing.to_state() for existing in exp.proposals]
+            + [proposal.to_state() for proposal in pending]
+        )
+        over = len(projected) > _MAX_PROPOSAL_STATE_BYTES
+        measured = len(projected)
+    except (ValueError, TypeError, UnicodeEncodeError):  # pragma: no cover - see above
+        over, measured = True, None
+    if over:
+        pending_ids = {id(proposal) for proposal in pending}
+        kept: list[tuple[int, object, bool]] = []
+        for index, proposal, deduplicated in minted:
+            if id(proposal) not in pending_ids:
+                kept.append((index, proposal, deduplicated))
+                continue
+            disclose(
+                index,
+                reading.candidates[index],
+                proposal.note_id,
+                "proposals_too_large",
+                (
+                    "This record's proposals would be larger together than one "
+                    "record's may be, so NO proposal was created for this capture. "
+                    "Nothing was trimmed to make room — the oldest proposal is a "
+                    "recorded judgement — and every segment of the transcript is "
+                    "stored as a note."
+                ),
+                max_bytes=_MAX_PROPOSAL_STATE_BYTES,
+                **({} if measured is None else {"bytes": measured}),
+            )
+        unproposable.sort(key=lambda entry: entry["candidate_index"])
+        return kept, unproposable
+
+    for proposal in pending:
+        exp.add_proposal(proposal)
+    return minted, unproposable
 
 
 def _retention_disclosure(notes_captured: int) -> dict:
@@ -14474,27 +14869,35 @@ def post_assistant_ask(
         "while text is still being typed: a request without it is `422` and "
         "nothing is stored, so text that is still being written can never move a "
         "value.\n\n"
-        "NOTHING HERE IS A VALUE. Every proposal is a candidate carrying the "
-        "words it came from, the rule that read them, `verified: false`, "
-        "`is_evidence: false` and a `status` of `needs_confirmation`, which are "
-        "constants of the shape rather than fields a request can set. A candidate "
-        "RETURNED HERE becomes a value only when a person accepts it through "
-        "`PATCH /api/experiments/{experiment_id}/runs/{run_id}` with "
-        "`confirmed_by_user: true` and that run's own `ETag` — this operation "
-        "writes no field, and `accept_contract` in the response says where the "
-        "write happens. "
-        "THAT IS A CLAIM ABOUT THESE CANDIDATES, WHICH ARE NOT STORED, AND NOT "
-        "ABOUT THE NOTES BELOW. A note this operation stores can afterwards be "
-        "cited by a persistent ingestion proposal, and accepting one writes "
-        "through whichever of three routes owns its target — the run field edit, "
-        "the run override, or the record-level enum write. For a record-scoped "
-        "path such as `system.technique` that is NOT the run `PATCH` above. Both "
-        "paths require a person and neither is automatic, and no proposal is "
-        "created by this operation.\n\n"
+        "NOTHING HERE IS A VALUE. Every candidate carries the words it came from, "
+        "the rule that read them, `verified: false`, `is_evidence: false` and a "
+        "`status` of `needs_confirmation`, which are constants of the shape rather "
+        "than fields a request can set. EVERY CANDIDATE IS ALSO STORED AS A "
+        "DURABLE INGESTION PROPOSAL, in the same critical section and the same "
+        "revision as the notes below, so what was read survives closing the tab "
+        "instead of living only in this response body. `proposals` reports each "
+        "stored row with the `candidate_index` it came from and whether an "
+        "existing proposal carrying the same `client_request_key` was returned "
+        "rather than a second one minted; `unproposable` reports every candidate "
+        "that got no proposal, with the reason, because nothing read is dropped in "
+        "silence. STORING A PROPOSAL WRITES NO FIELD: this operation leaves every "
+        "value of this record and of every run byte-for-byte unchanged, and a "
+        "proposal is inert to export. A candidate becomes a value only when a "
+        "person accepts its proposal through "
+        "`POST /api/experiments/{experiment_id}/proposals/{proposal_id}/review`, "
+        "with `confirmed_by_user: true`, the RECORD's own `ETag`, and a trusted "
+        "human identity that no default-configured deployment establishes — and "
+        "that acceptance writes through whichever of the three existing writers "
+        "owns the target: the run field edit, the run override, or the "
+        "record-level enum write, the same ones manual entry uses. "
+        "`accept_contract` in the response states it, and it is no longer "
+        "`PATCH /api/experiments/{experiment_id}/runs/{run_id}`.\n\n"
         "EVERY SEGMENT OF THE TRANSCRIPT BECOMES AN UNMAPPED NOTE, including the "
         "segments that produced a candidate. That redundancy is deliberate: a "
-        "candidate is not stored anywhere, so rejecting one — or failing to "
-        "accept it — would otherwise destroy the words behind it. `retention` "
+        "proposal stores a value and a target, not the prose around them, and it "
+        "cites the note for its words — so a segment that produced no candidate, "
+        "and a proposal that is rejected or never accepted, both still leave "
+        "everything that was said stored verbatim. `retention` "
         "reports the one storage state this build enforces and names the states "
         "it does not offer, rather than presenting a control that would do "
         "nothing.\n\n"
@@ -14510,7 +14913,10 @@ def post_assistant_ask(
         "CANDIDATES ARE WITHHELD WHENEVER THE RUN IS UNSETTLED — when no run was "
         "selected, and whenever any run clarification was raised. A proposal a "
         "scientist could accept against the wrong run is worse than no proposal, "
-        "and the transcript is stored either way.\n\n"
+        "and the transcript is stored either way. No ingestion proposal is created "
+        "in that case either: there are no candidates to create one from, so "
+        "`proposals` and `unproposable` are both empty and the record holds "
+        "exactly the notes.\n\n"
         "Storing the transcript rewrites the record, so this requires the "
         "RECORD's current `ETag` in `If-Match` — omitted is `428`, malformed is "
         "`400`, and stale is `412` with nothing written. Text too large, or a "
@@ -14519,7 +14925,8 @@ def post_assistant_ask(
         "other value is `422` naming what is enforced."
     ),
     response_description=(
-        "The proposed candidates, the clarifications, abstentions and conflicts "
+        "The proposed candidates, the ingestion proposals stored from them and the "
+        "candidates that got none, the clarifications, abstentions and conflicts "
         "the reader refused to resolve, the notes it stored, the retention state, "
         "and the record's new `ETag`."
     ),
@@ -14677,11 +15084,23 @@ def post_transcript(
             # and the save below has not run.
             return _transcript_refusal("unsupported_note", str(refusal))
 
+        # AND THE CANDIDATES BECOME DURABLE PROPOSALS, IN THIS SAME CRITICAL SECTION
+        # AND THIS SAME SAVE. Before this, a candidate lived only in the response
+        # body and in one component's state: navigating away destroyed it, and the
+        # only way to act on one was a direct `PATCH .../runs/{run_id}` from the
+        # panel that happened to be holding it. See `_mint_transcript_proposals` for
+        # why the mint is here rather than in the client.
+        minted, unproposable = _mint_transcript_proposals(
+            exp, reading, run_id=run_id, captured=captured
+        )
+
         _changed, stale = _save_versioned(exp, if_match)
         if stale is not None:
             return stale  # another writer won the race; nothing was stored
 
         response.headers["ETag"] = exp.etag()
+        # The notes THIS request stored, indexed once for the proposal views below.
+        captured_by_id = {note.id: note for note in captured}
         return {
             "capture": {
                 "finalized": True,
@@ -14697,26 +15116,79 @@ def post_transcript(
             "abstentions": [entry.to_dict() for entry in reading.abstentions],
             "review_required": [entry.to_dict() for entry in reading.review_required],
             "notes": [_note_view(note) for note in captured],
+            # WHAT THIS CAPTURE STORED, AS OPPOSED TO WHAT IT READ. `candidates`
+            # above are the reading; these are the durable rows a reviewer will meet
+            # in Ingestion Proposals, each carrying the `candidate_index` it came
+            # from so a client can pair the two without matching on a field path
+            # (two candidates can share one).
+            "proposals": [
+                {
+                    "candidate_index": index,
+                    "client_request_key": proposal.client_request_key,
+                    # PER ITEM, NOT PER REQUEST. A capture is many creates, and a
+                    # single flag for the batch would answer a question nobody asked.
+                    "deduplicated": deduplicated,
+                    # ONE INDEX FOR THE WHOLE LIST, not a walk of `exp.notes` per
+                    # proposal — `_proposal_view`'s optional index exists for exactly
+                    # this, and the list operation already passes one. It is built
+                    # from `captured`, which is the complete set of notes a FRESH
+                    # mint can cite: a minted proposal's `note_id` is
+                    # `captured[segment_index].id` by construction.
+                    #
+                    # A DEDUPLICATED ONE PASSES NO INDEX, and that is not tidiness —
+                    # it cites a note from an EARLIER capture, which is not in
+                    # `captured`, and the index's contract is that a miss means "no
+                    # note" (the list relies on that). Handing it a partial index
+                    # would silently drop the excerpt off a proposal whose note the
+                    # record still holds, i.e. answer "no words" about words that
+                    # exist. That branch is unreachable at this HEAD (see the mint's
+                    # dedupe comment), which is a reason to keep it correct cheaply,
+                    # not a reason to leave it wrong.
+                    "proposal": _proposal_view(
+                        exp,
+                        proposal,
+                        notes_by_id=None if deduplicated else captured_by_id,
+                    ),
+                }
+                for index, proposal, deduplicated in minted
+            ],
+            # AND WHAT IT DID NOT STORE, NAMED. A candidate with no proposal is
+            # reported with the reason rather than omitted — contract §5 I6, nothing
+            # captured is discarded — and its words are a note either way.
+            "unproposable": unproposable,
             "ambiguity_policy": [dict(entry) for entry in tc.AMBIGUITY_POLICY],
             # THE SERVER'S OWN ANSWER TO "WHERE DOES ACCEPTING WRITE?", for the
             # reason the notes list reports its mappable paths: the alternative is
             # a second copy of the write contract in the browser bundle, free to
             # drift from the operation that enforces it.
+            #
+            # IT NAMES THE REVIEW ROUTE NOW AND NOT `PATCH .../runs/{run_id}`, and
+            # that is the whole of this change from a client's point of view. The run
+            # `PATCH` is still a real operation and manual entry still uses it; what
+            # is no longer true is that it is where a CANDIDATE is accepted, because
+            # a candidate is now a stored proposal and the proposal's own review
+            # operation is what writes it — through that same `PATCH`'s writer, so
+            # nothing about how the value lands has changed.
             "accept_contract": {
-                "method": "PATCH",
-                "path": "/api/experiments/{experiment_id}/runs/{run_id}",
+                "method": "POST",
+                "path": "/api/experiments/{experiment_id}/proposals/{proposal_id}/review",
                 "requires": [
                     "confirmed_by_user: true",
-                    "If-Match set to that run's own current ETag",
+                    "action: accept",
+                    "accepted_from: candidate (or edited, with the corrected value)",
+                    "If-Match set to the RECORD's own current ETag",
+                    "a trusted human identity, which no default-configured "
+                    "deployment establishes",
                 ],
                 "message": (
-                    "This operation writes no field. A candidate RETURNED HERE "
-                    "becomes a value only through that request, made by a person "
-                    "who accepted it. This says nothing about the notes stored "
-                    "beside it: one of those may later be cited by an ingestion "
-                    "proposal, and accepting that proposal writes through "
-                    "whichever route owns its target — for a record-scoped path, "
-                    "not this one."
+                    "This operation writes no field. Every candidate it could "
+                    "propose is now stored as an ingestion proposal, listed above, "
+                    "and one becomes a value only when a person accepts it through "
+                    "that request — which writes through whichever of the three "
+                    "existing writers owns the target, the same ones manual entry "
+                    "uses. A candidate reported under `unproposable` has no "
+                    "proposal and cannot be accepted; its words are stored as a "
+                    "note with everything else this capture read."
                 ),
             },
             "experiment_version": exp.version_token(),
