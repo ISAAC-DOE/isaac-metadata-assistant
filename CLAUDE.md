@@ -957,9 +957,23 @@ Current state:
   ABOVE IS THEREFORE WITHDRAWN AS A GENERAL CLAIM — measured 2026-08-31.*** Both halves of the
   2026-08-30 correction were true **of `experimentGraph.ts`**, and are kept for that reason. What
   was wrong was generalising a fact about ONE file into a fact about the tree. Re-measured at
-  `bebf4e2` and again at `ddec2b5`: **379 files under `apps/web/src`, and exactly ONE holds a NUL
+  `bebf4e2` and again at `ddec2b5`: ~~**379 files under `apps/web/src`, and exactly ONE holds a NUL
   byte — `components/RecordDescriptionPanel.tsx`, 2 of them**, a `rows.join('\0')` separator typed
-  as a raw byte instead of an escape.
+  as a raw byte instead of an escape.~~ — **STALE AS OF 2026-09-02, struck rather than deleted
+  because "the trap is live" is exactly the kind of claim a future session acts on.** Re-measured
+  this session: `python3 -c "print(open('apps/web/src/components/RecordDescriptionPanel.tsx','rb').read().count(b'\x00'))"`
+  → **0**. A full sweep of the **397** files then tracked under `apps/web/src` found **zero**
+  holding a NUL byte, and ~~a sweep of all **1,019** tracked files repository-wide found exactly
+  one~~ — **corrected 2026-09-02, independent review of PR #227: `git ls-tree -r b82e555
+  --name-only | wc -l` reads 1020, not 1019, at the commit this figure was first measured against**
+  (re-measured again at this session's later head, `git ls-tree -r f86fe87 --name-only | wc -l` →
+  **1,023**, reflecting files the branch added afterward). **In every one of those measurements the
+  substantive claim holds: exactly one** — the already-documented exemption
+  `qa/validator-upload-package/isaac-validator-qa-files.zip` (918 NUL bytes). The file was fixed,
+  consistent with the mechanical guard named two paragraphs below
+  (`apps/web/src/__tests__/source-is-greppable.test.ts`) now existing and holding. **The durable
+  `-a` rule below is UNCHANGED and is not what this correction touches** — it is a rule about how
+  to search, not a claim about this file's current bytes.
 
   **IT COST EXACTLY THE CONFUSION THIS ENTRY PREDICTED, AND IT COST IT TO THE RECORD-CAPTURE
   SURFACE.** `RecordDescriptionPanel.tsx` is the file implementing record-level field capture, so
@@ -1290,6 +1304,75 @@ Current state:
   responsive / 200%-zoom sign-off, which **no CDP method can drive**; personal-deploy
   retirement; and **every hosted QA** — `/krish` sits behind an Authentik edge this
   environment cannot authenticate to, so the honest status is `HOSTED QA PENDING (Krish)`.
+
+- **Session of 2026-09-02 (second) — eight PRs (#219–#226, all merged), and the recurring
+  finding was that a guard passed while being wrong.** Closure record:
+  [`docs/session-closure-2026-09-02b.md`](docs/session-closure-2026-09-02b.md). This session closed
+  the five application-side gaps the FIRST 2026-09-02 session's closure note (`docs/session-closure-2026-09-02.md`
+  §7) had left open: `RunsSection` now follows the change feed (#222, redesigned against #224's
+  `<generation>.<rev>` contract, wired live in #226); a colleague's proposal is announced (#222); the
+  drain-budget cliff at the row ceiling is fixed and its bound is *proven*, not observed (#221,
+  645 s → 620.5 s at 100 pages); one live event now costs one bundle refetch and zero unbounded
+  `/pending` calls instead of four of each (#224, 44 → 17 requests); and run-scoped proposals — the
+  first session's "structurally untestable" — turned out to be a property of the two exported seed
+  records, not of the product: `POST /api/experiments` takes runs fine, and #223 proves the full
+  lifecycle on a record built that way (30 backend tests + 5 trusted-identity browser specs).
+  A sixth gap found in the same arc: proposals served oldest-first, so a new arrival past the
+  50-entry window was counted but not reachable — closed by #225 (`order=newest_first` + "Show
+  Newest"). A seventh, unrelated to the five: the Assistant Companion's lead copy denied writes its
+  own MCP tool set performs (#220). **Every one of these PRs required an independent review to catch
+  a defect its own test suite had passed** — a guard passing on a comparison against zero rather
+  than the value its message named (#226 I-1); a consumer keying its dedupe on a rev value a stale
+  proposal inflates (#224 review, folded into #222); an assistant chip's count with no test naming
+  it (#224 review); a docstring claiming an assertion the test body did not make (#223 review); a
+  count line whose "newest/oldest" clause was built from request state rather than the response it
+  sat beside (#225 review). Two premises from the first session's own closure note were themselves
+  wrong: "run-scoped proposals are structurally untestable" (above), and its own release/open-PR
+  table, measured from inside its own still-open PR (#219, corrected same-session in `4748fda`).
+  **CLAUDE.md §11's NUL-byte trap paragraph is corrected below** (this session re-measured it at 0).
+  PR #226 (wiring + the full two-actor proof) **merged as `fd179f2`**, verdict
+  MERGE-after-fixes; its independent review found and fixed three of its own proof's assertions
+  being true by construction (comparing a rev against zero instead of the pre-accept cursor; a
+  count asserted to *reach* a value but never to *stay* there; two loops that could iterate zero
+  times and still read as a pass). `f58e8d2` (#225) released as **v0.0.211**; ~~`fd179f2` (#226)
+  had not yet completed its own CI run at the time this bullet was last updated — do not read that
+  as a refusal, it is simply not yet reported.~~ — **RESOLVED: `fd179f2`'s CI (run `33692815125`)
+  concluded `success`; release gate run `33695480008` printed `commit under release: fd179f2…` and
+  set `TAG="v0.0.212"`; `git rev-list -n1 v0.0.212` resolves to `fd179f2` — released as v0.0.212.**
+  See the closure doc for the full account, every number's source, and what remains — a
+  server-side revision discriminator so a proposal-only act need not refetch the whole bundle,
+  `RUN_LIST_LIMIT_MAX`/`RUN_PAGE_MAX` literal duplication left untested, and every hosted QA still
+  `PENDING (Krish)` regardless of any image having released.
+
+  **THE SESSION'S MOST IMPORTANT CI LESSON: `main`'s OWN CI FAILED TWICE, ON TWO MERGE COMMITS, AND
+  ONLY THE RELEASE GATE STOPPED EITHER FROM SHIPPING.** `main` CI failed at `2b8a017` (#222's
+  merge; run `33683247282`, `cancelled` — superseded when the next merge landed first) and at
+  `1ef0c0d` (#223's merge; run `33685271261`): vitest passed clean (194 files / 5,154 tests), then
+  the separate `Build` step failed — `src/__tests__/proposal-arrival-announcement.test.tsx(183,3):
+  error TS2741: Property 'runRev' is missing in type '{ ...; highestRev: number; proposalRev:
+  number; }' but required in type 'RecordChangeSummary'`. **Cause:** #222 added that test literal
+  without `runRev`; #224, merged separately, made `runRev` REQUIRED on that same type. Each PR was
+  exact-head green against its own base — GitHub reports mergeability, not compilability, and
+  nothing typechecked the combination before either merge. The release gate is what actually
+  stopped a broken image: `release gate REFUSED for 2b8a017…: a required 'CI' run for this commit
+  concluded 'cancelled', not 'success'` and `release gate REFUSED for 1ef0c0d…: … concluded
+  'failure', not 'success'` (quoted from `gh run view 33685276446/33688344451 --log`). **Nothing red
+  was released.** The fix landed twice, independently, before either branch had seen the other's
+  fix: #225's merge commit `7e29e81` and #226's commit `da88c63` each added the missing `runRev: -1`
+  (`recordChanges.ts`'s own documented "no run entry survived" sentinel, not a filler) the moment
+  `tsc -b` — not a test — caught it on their own merge with `main`. **Durable rule: exact-head-green
+  protects the HEAD, not the MERGE.** Before merging a PR whose base has moved since it went green,
+  re-run `tsc -b` (and the suite) on the MERGE RESULT — `git merge-tree` into a throwaway worktree,
+  or merge `main` into the branch and let CI run against that commit — never assume a stale base's
+  green run still describes the tree the merge will produce. This produced two counterexamples
+  nine minutes apart. ~~`f58e8d2`'s own CI (run `33687944765`) had **not concluded** at the time
+  this was written (`status: "in_progress"`) — do not read this paragraph as asserting `main` is
+  green again; that needs its own later, separately-checked conclusion.~~ — **RESOLVED: `main`
+  went green.** `33687944765` concluded `success`, `f58e8d2` released as **v0.0.211**, and the
+  next merge (`fd179f2`, #226) released cleanly too as **v0.0.212** — both re-verified independently
+  (`gh run view <id> --json conclusion`; `gh run view <id> --log` for each release gate's
+  `commit under release`/`TAG=` lines; `git rev-list -n1 <tag>` cross-checked against each SHA).
+  `main` at `fd179f2` is the last state this bullet describes.
 
 - Current repository status is summarized in README.md and docs/mentor-brief.md; see git history for the exact commit state.
 - Start any further phase (beyond the completed Phase 36 / Phase 36R slices) only after explicit user approval.
