@@ -76,9 +76,16 @@ function card(): HTMLElement {
 async function openRename(): Promise<HTMLElement> {
   await screen.findByRole('button', { name: /Add Run/ });
   await act(async () => {
-    // Anchored: the card also carries `Focus run Run 1`, whose accessible name
-    // contains but does not begin with the label.
-    fireEvent.click(within(card()).getByRole('button', { name: /^Run \d/ }));
+    // ANCHORED ON THE VERB, NOT THE LABEL (fix round, review finding m-8).
+    // The compact row's own open control carries an `.sr-only` "Open " prefix
+    // ahead of the run's label (I-3), so its accessible name begins
+    // `Open Run 1 …` rather than `Run 1 …`. `.run-card-header` alone would
+    // also match the FOCUSED editor's own heading once this run is open (it
+    // is a plain `<h3 class="run-card-header run-card-header-static">`,
+    // never a button — see `RunCard.tsx`'s m-2 note), so a raw class query
+    // here could silently resolve to the wrong element on a re-render; role
+    // + name pins it to the one `<button>` that exists before this click.
+    fireEvent.click(within(card()).getByRole('button', { name: /^Open Run \d/ }));
   });
   await act(async () => {
     fireEvent.click(within(card()).getByRole('button', { name: /Name for this run/ }));
@@ -238,7 +245,8 @@ describe('the control that did not exist', () => {
     renderRecord();
     await screen.findByRole('button', { name: /Add Run/ });
     await act(async () => {
-      fireEvent.click(within(card()).getByRole('button', { name: /^Run \d/ }));
+      // Role + name, anchored on the verb — see `openRename`'s own note.
+      fireEvent.click(within(card()).getByRole('button', { name: /^Open Run \d/ }));
     });
     await act(async () => {
       fireEvent.click(within(card()).getByRole('button', { name: /Name for this run/ }));

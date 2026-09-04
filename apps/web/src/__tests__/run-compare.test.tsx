@@ -1185,7 +1185,19 @@ describe('what else the record holds about each run', () => {
     expect(document.body.textContent).toContain('Reading what else this record holds');
 
     // Open a run while both conflict reads are still outstanding, then come back.
-    fireEvent.click(screen.getByRole('button', { name: 'Focus run Run 1' }));
+    // ANCHORED ON THE VERB (fix round, review finding m-8): the compact
+    // row's own open control carries an `.sr-only` "Open " prefix ahead of
+    // the run's label (I-3), so its accessible name begins `Open Run 1 …`.
+    // Role + name, not a raw `.run-card-header` class query — that class
+    // also matches the FOCUSED editor's own plain `<h3>` heading
+    // (`RunCard.tsx`'s m-2 note), and this click is only ever made while
+    // compact.
+    fireEvent.click(
+      within(document.querySelector('[data-run-id="RUN001"]') as HTMLElement).getByRole(
+        'button',
+        { name: /^Open Run \d/ },
+      ),
+    );
     await screen.findByText(/Viewing one run/);
     release!();
     fireEvent.click(screen.getByRole('button', { name: /Back to all runs/ }));
