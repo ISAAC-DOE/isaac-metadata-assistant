@@ -51,7 +51,7 @@ ahead of it — this is why PR-D's own branch head moved three times
 | `7320b9c` (PR-E merge) | `33834758234` | success |
 | `3aa6e95` (PR-D head, final re-merge) | `33835029534` | success |
 | `51f4f40` (#232 merge) | `33837450907` | success (resolved during this fix pass — released as **v0.0.218**, see below) |
-| `ec945d7` (PR-D merge, `main` HEAD) | `33837767977` | **UNRESOLVED at hand-off (still running at last check) — see §9** |
+| `ec945d7` (PR-D merge, `main` HEAD) | `33837767977` | success (resolved after the second fix pass — released as **v0.0.219**, see below) |
 
 **Release tags** (`git tag --sort=-creatordate`, `git rev-list -n1 <tag>`,
 re-derived rather than copied):
@@ -63,20 +63,40 @@ re-derived rather than copied):
 | v0.0.216 | `363180f` | #230 |
 | v0.0.217 | `7320b9c` | #233 |
 | v0.0.218 | `51f4f40` | #232 |
+| v0.0.219 | `ec945d7` | #231 |
 
-`51f4f40` (#232)'s CI concluded `success` during this fix pass, and the
+`51f4f40` (#232)'s CI concluded `success` during the first fix pass, and the
 release gate — resolved via `gh run view 33839970832 --log`, which shows
 `commit under release: 51f4f4015bccbf176baa7d0784c5730ee73b09f7` and
 `release gate ALLOWED for 51f4f40…: all 1 required 'CI' run(s) for this
 commit concluded 'success'`, then `TAG="v0.0.218"` — tagged it **v0.0.218**;
-`git rev-list -n1 v0.0.218` resolves to `51f4f40`, confirmed. **No tag
-exists yet for `ec945d7`** (PR-D's merge, current `main` HEAD): its own CI
-run (`33837767977`) was still `in_progress` at last check (three of four
-jobs running — `tests and synthetic demo`, `browser accessibility and
-responsive baseline`, `frontend tests and build`; only `migration and
-durable repository against a real PostgreSQL` had concluded, `success`).
-§9 gives the full detail and the exact command to re-check, rather than
-assuming "CI was running so it must have passed."
+`git rev-list -n1 v0.0.218` resolves to `51f4f40`, confirmed.
+
+**`ec945d7` (PR-D's merge, then current `main` HEAD) has since resolved
+too**, in a later pass of this document. Its own CI run (`33837767977`)
+concluded `success`, confirmed with `gh run view 33837767977 --json
+status,conclusion`. The release gate then ran as `33842289349` and, per its
+own log (`gh run view 33842289349 --log | grep -aE "commit under release|
+release gate|TAG="`), printed `commit under release:
+ec945d75e21b64cf6138a9ec09199c413deae692`, `release gate ALLOWED for
+ec945d7…: all 1 required 'CI' run(s) for this commit concluded 'success'`,
+then `TAG="v0.0.219"` — tagged it **v0.0.219**; `git rev-list -n1 v0.0.219`
+resolves to `ec945d7`, confirmed. **All six PRs of this session are now
+merged AND released**, `v0.0.214` through `v0.0.219`. §9 has the full
+detail and no longer carries an "unresolved" status for `ec945d7`.
+
+**A seventh, related PR merged after this closure doc's own drafting
+began and is worth recording here rather than treated as out of scope:**
+[#235](https://github.com/ISAAC-DOE/isaac-metadata-assistant/pull/235)
+("test(trusted): two-actor proof with a REAL second browser", head
+`632ac85`) — this is PR-F1, the real-second-browser proof discussed in §7b
+— **merged as `30ac611`** (`gh pr view 235 --json state,mergeCommit`
+confirms `MERGED` / `30ac6115e73cb601918ba326f69b15274581ce6e`). It is
+test/doc-only (a new Playwright spec plus its own evidence doc); it also
+releases an image when its own CI concludes, on the same mechanism as every
+other merge in this table — not reported here as a further release because
+this document does not track PR #235's own CI/release status as closely as
+the six PRs that are this session's actual subject.
 
 ---
 
@@ -332,14 +352,14 @@ review method rather than in application code:
 
 ## 7b. The two-actor real-browser proof (PR-F1, parallel worktree)
 
-A separate slice (PR-F1, running in `/Users/krishverma/Documents/ISAAC-wt-proof`,
-landing in the same PR wave as this closure) produced
+A separate slice (PR-F1, developed in
+`/Users/krishverma/Documents/ISAAC-wt-proof`) produced
 [`docs/evidence/two-actor-real-browser-proof-2026-09-03.md`](docs/evidence/two-actor-real-browser-proof-2026-09-03.md)
-**(lands with the proof PR, merged ahead of this document — the file does
-not yet exist on `main` as this docs PR is being prepared; the link will
-resolve once PR-F1 merges, per the orchestrator's stated merge order)** —
-two real Chromium browser contexts (not an HTTP client standing in for a
-second actor) driving the actual UI through PR-A's and PR-D's new proposal
+— merged to `main` as PR
+[#235](https://github.com/ISAAC-DOE/isaac-metadata-assistant/pull/235)
+(`30ac611`), ahead of this document, so the link resolves — two real
+Chromium browser contexts (not an HTTP client standing in for a second
+actor) driving the actual UI through PR-A's and PR-D's new proposal
 producers. Referenced here by path rather than duplicated, because it is not
 this slice's own evidence. What it establishes, quoted rather than
 re-derived:
@@ -439,12 +459,15 @@ Proposals. Not fixed here; named as residue.
 
 ---
 
-## 9. CI resolution for the two pending runs — ONE RESOLVED, ONE STILL OPEN
+## 9. CI resolution for the two runs that were pending at hand-off — BOTH NOW RESOLVED
 
 At the time §1's table was first drafted, `51f4f40` (#232's merge) and
 `ec945d7` (PR-D's merge, current `main` HEAD) both had CI runs still
-executing. Re-checked repeatedly through this slice; the two runs did not
-resolve together.
+executing. Re-checked repeatedly across three passes of this document; the
+two runs did not resolve together, but both have now resolved, `success`,
+and both have released images. Kept as two separate write-ups below (rather
+than collapsed into one paragraph) because each pass's own re-check is part
+of the record of how this was established, not asserted.
 
 **`51f4f40` (#232) — RESOLVED, success, released as v0.0.218.**
 
@@ -484,36 +507,46 @@ the run's actual release target — resolved from
 field — was `51f4f40`. Nothing here was a queue; it was one CI run's
 completion firing one release for that CI run's own commit.
 
-**`ec945d7` (PR-D merge, current `main` HEAD) — STILL UNRESOLVED as of
-`2026-09-04T05:21:49Z` (`date -u`).**
+**`ec945d7` (PR-D merge, current `main` HEAD) — RESOLVED, success, released
+as v0.0.219.**
+
+The status at the time an earlier pass of this document was drafted (quoted
+here as history, not as current state):
+
+```
+$ gh run view 33837767977 --json status,conclusion   # AS OF THAT EARLIER PASS
+{"status":"in_progress","conclusion":""}
+```
+
+Re-checked in a later pass and now resolved:
 
 ```
 $ gh run view 33837767977 --json status,conclusion
-{"status":"in_progress","conclusion":""}
-$ gh run view 33837767977 --json jobs --jq '.jobs[] | "\(.name): \(.status)/\(.conclusion)"'
-tests and synthetic demo: in_progress/
-browser accessibility and responsive baseline: in_progress/
-migration and durable repository against a real PostgreSQL: completed/success
-frontend tests and build: in_progress/
+{"status":"completed","conclusion":"success"}
+$ gh run view 33842289349 --log | grep -aE "commit under release|release gate|TAG="
+commit under release: ec945d75e21b64cf6138a9ec09199c413deae692
+release gate ALLOWED for ec945d75e21b64cf6138a9ec09199c413deae692: all 1
+  required 'CI' run(s) for this commit concluded 'success'
+TAG="v0.0.219"
+$ git fetch --tags && git rev-list -n1 v0.0.219
+ec945d75e21b64cf6138a9ec09199c413deae692
 ```
 
-**This document does not assume a pass for `ec945d7`.** Every other CI run
-this session resolved `success` (§1's table), including `51f4f40` now — but
-that is not the same as observing `ec945d7`'s own conclusion, and this
-document says so rather than interpolating. Whoever next opens this
-document should re-run the two commands above. `origin/main` already ends
-at `ec945d7` regardless of that run's own CI conclusion (CI running against
-`main` does not gate `main` itself — only the release-gate workflow, which
-runs after CI succeeds, decides whether an image ships), so no code-level
-rollback question is implied by an unresolved CI run here. Per the corrected
-mechanism above: `ec945d7`'s image follows specifically when **`ec945d7`'s
-own CI run** (`33837767977`) concludes `success` — that completion is what
-fires the next `build-push.yaml` run, which then resolves and releases
-`github.event.workflow_run.head_sha` for THAT run, i.e. `ec945d7` itself
-(expected tag `v0.0.219` by the observed sequence, not guaranteed). If it
-fails, that is new information this document did not have and should be
-investigated before trusting `ec945d7` as a clean head for any future work
-built on it.
+This confirms the mechanism corrected earlier in this section, exactly as
+predicted: `ec945d7`'s own CI run concluding `success` fired
+`build-push.yaml` as run `33842289349`, which resolved
+`github.event.workflow_run.head_sha` to `ec945d7` itself (not the branch
+tip at trigger time — by this point `ec945d7` WAS the tip, so the two
+happened to coincide, but the resolution is still via the triggering CI
+run's own commit, not an assumption that the tip is always right) and
+released it as **v0.0.219**.
+
+**All six PRs of this session (#228–#233, plus #232) are now merged AND
+released** — images v0.0.214 through v0.0.219. Nothing in this document
+remains "unresolved" for the release status of this session's own work.
+The only CI status this document does not track to a conclusion is PR
+#235's own (the real-second-browser proof, §7b/§1) — that PR is not this
+session's own subject matter and its release status is not repeated here.
 
 ---
 
@@ -545,12 +578,12 @@ act as Krish, Dean, or Angel.
 >   (still deferred, as you asked).
 >
 > No action is requested now. If you want to see the new screens before the
-> next hosted QA: images `v0.0.214` (`a342175`) through `v0.0.218`
-> (`51f4f40`) carry #228/#229/#230/#233/#232. #231 (`ec945d7`, current `main`
-> HEAD) is merged but its own CI had not concluded as this was written, so
-> no image exists for it yet — if its CI concludes success, one further
-> image will follow. See `docs/session-closure-2026-09-03.md` §1/§9 for
-> exact SHAs and the current status.
+> next hosted QA: images `v0.0.214` (`a342175`) through `v0.0.219`
+> (`ec945d7`) carry all six PRs — #228/#229/#230/#233/#232/#231. A seventh,
+> related PR (#235, the real-second-browser proof — test/doc-only, no
+> product-screen change) has also merged and releases its own image on the
+> same mechanism once its CI concludes. See
+> `docs/session-closure-2026-09-03.md` §1/§9 for exact SHAs and tags.
 
 ### To Angel (scientific classification)
 
@@ -567,11 +600,12 @@ act as Krish, Dean, or Angel.
 > **Subject: ISAAC redesign shipped to main — your gates**
 >
 > Krish — the record-screen redesign is on `main`. Six PRs merged
-> (#228–#233); images `v0.0.214`–`v0.0.218` are released and carry
-> #228/#229/#230/#233/#232. #231 (`ec945d7`, current `main` HEAD) is merged
-> but its own CI had not concluded as this was written, so no image exists
-> for it yet — check `docs/session-closure-2026-09-03.md` §9 for the
-> resolved status before assuming it's shipped. What only you can do:
+> (#228–#233, plus #232); images `v0.0.214`–`v0.0.219` are all released and
+> together carry every one of them (`ec945d7`, `v0.0.219`, is the current
+> `main` HEAD as this was written). A seventh, related PR (#235 — the
+> real-second-browser proof, test/doc-only) has also merged and will release
+> its own image once its CI concludes; nothing in it changes a product
+> screen. What only you can do:
 > 1. Hosted QA behind Authentik for the new images — checklist:
 >    `docs/krish-manual-verification-checklist.md` §1b covers the four new
 >    workspaces (Record Fields / Runs / Capture & Proposals / Graph), Runs
