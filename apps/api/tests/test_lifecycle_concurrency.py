@@ -46,10 +46,18 @@ never only the status code:
 * the durable rows: submissions, revisions, run revisions and change rows;
 * and, where a value could have leaked, that the loser's sentinel appears NOWHERE
   in the persisted document — asserted since 2026-09-03 over the document's PARSED
-  LEAVES (``_value_sites``) rather than as a substring of ``json.dumps(state)``,
+  DOCUMENT (``_sentinel_sites``) rather than as a substring of ``json.dumps(state)``,
   which also matched a sentinel's digits inside a random id and so failed at random.
-  The leaf form is the stronger statement, and every site that makes it is paired
-  with a positive control proving the same walk DOES find the winner's value.
+  What is stronger about the walk is precisely that it has NO FALSE POSITIVES — a
+  sentinel's digits inside an identifier are not a site. It was NOT stronger in
+  every respect when first written: the value-only version was WEAKER about dict
+  KEYS, and missed a sentinel that reached the document as one (``_key_paths``
+  records the measurement). Keys are now walked too, so the statement is stronger
+  in both directions rather than only the one that was measured first. FIFTEEN
+  sites make the statement — fourteen assert emptiness and ONE asserts presence
+  (the decision test's "still a candidate"), which is the site the discarded
+  substring form could pass by chance. Each is paired with a positive control
+  proving the same walk DOES find the winner's value.
 
 DETERMINISM: NO TEST HERE DEPENDS ON THREAD SCHEDULING
 ======================================================
@@ -159,9 +167,14 @@ RECORD_CONFLICT_ADDRESS = "sample.material.formula"
 #:   * a false PASS at the file's ONE *positive* site — `assert lost in
 #:     _state_json(after)` in the decision test, where a chance collision satisfies
 #:     "still a candidate" for a value that is not in the document at all.
-#: The property is preserved and strengthened by `_value_sites`: the loser's value
-#: reaches NOTHING — no field, no evidence quote, no answer, no note — asserted over
-#: the PARSED leaves, where an id is a leaf of its own and can never equal a sentinel.
+#: The property is preserved by `_sentinel_sites`: the loser's value reaches NOTHING
+#: — no field, no evidence quote, no answer, no note, and no dict KEY — asserted over
+#: the PARSED document, where an id is a leaf of its own and can never equal a
+#: sentinel. ~~and strengthened~~ — **stated precisely (review): the walk is stronger
+#: only in having no false positives.** On its first commit it was strictly WEAKER
+#: about keys than the substring form it replaced, and a partial write that left an
+#: orphan `block_evidence["series:<loser>"]` passed it; keys are walked as of the
+#: same day, and the guard test pins that shape.
 #: The sentinels themselves are unchanged; only the statement about them is.
 VALUE_A = 4711
 VALUE_B = 4712
@@ -298,17 +311,69 @@ def _leaves(document, _path: str = ""):
         yield _path or "/", document
 
 
+def _key_paths(document, _path: str = ""):
+    """Every dict KEY in a parsed document, as ``(path, key)`` pairs.
+
+    THIS EXISTS BECAUSE ITS ABSENCE WAS A REGRESSION, found by independent review
+    of PR #232 and not by any test. ``_leaves`` yields values only, so a sentinel
+    that reaches the document as a KEY was invisible to it — and this document
+    keys a dict BY a sentinel-carrying value in at least one place:
+    ``draft["block_evidence"]`` is keyed ``f"series:{series_id}"``
+    (``isaac_records.complete``:242 and :595). Measured on the orphan-key shape a
+    merging partial write would leave — ``block_evidence["series:race-b"]`` whose
+    own entry mentions ``race-b`` nowhere as a value — the discarded substring form
+    CAUGHT it and the value-only walk did NOT. That is exactly the partial write
+    the assertion in ``test_two_run_level_answers_with_one_token_leave_exactly_the
+    _winner`` says it catches, so the leaf walk was not strictly stronger than what
+    it replaced until this was added.
+    """
+    if isinstance(document, dict):
+        for key, value in document.items():
+            yield f"{_path}/{key}", key
+            yield from _key_paths(value, f"{_path}/{key}")
+    elif isinstance(document, list):
+        for index, item in enumerate(document):
+            yield from _key_paths(item, f"{_path}/{index}")
+
+
 def _sentinel_pattern(sentinel) -> re.Pattern[str]:
-    """How a sentinel is recognised INSIDE a longer string leaf.
+    """How a sentinel is recognised INSIDE a longer string (a leaf, or a key).
 
-    A string sentinel (``"race-a"``, ``"ORIGINAL-OVERRIDE"``, an actor name) is
-    matched by plain containment: it carries a hyphen or a dot and cannot occur
-    inside a ULID or a hex digest by chance.
+    A STRING sentinel is matched by plain containment. ~~It carries a hyphen or a
+    dot and cannot occur inside a ULID or a hex digest by chance.~~ — **CORRECTED
+    2026-09-03 (review m-1): that reason is false for two of the string sentinels
+    actually passed here**, and a justification that does not cover its own inputs
+    is not a justification. The enumeration, per sentinel class:
 
-    A NUMERIC sentinel is matched only when it is delimited by something that is
-    not alphanumeric (or by the ends of the string). ``4712`` is four digits and
-    DOES occur inside random ids by chance — see ``VALUE_A``'s comment — so an
-    undelimited match is not evidence that the value reached anything.
+    * ``"race-a"``, ``"ORIGINAL-OVERRIDE"``, ``"REPLACEMENT-OVERRIDE"`` — carry a
+      hyphen, which occurs in neither Crockford base32 nor hex;
+    * ``"ada.lovelace"``, ``"grace.hopper"`` — carry a dot, likewise;
+    * ``"LiFePO4"``, ``"LiFePO3"`` — **no hyphen and no dot.** They are safe for a
+      different reason: MIXED CASE. A ULID here is upper-case Crockford base32 and
+      a digest is lower-case hex, so a token containing both ``L`` and ``i`` sits
+      inside neither;
+    * a 26-char ULID or a 16-char generation, passed as a positive control (``rid``,
+      ``run_b``, ``keep``, ``record_id``) — **also no hyphen and no dot**, and safe
+      for a third reason: at 26 and 16 characters they cannot occur inside another
+      random token by chance at any rate worth writing down.
+
+    A NUMERIC sentinel is matched only when delimited by a non-alphanumeric
+    character (or by the ends of the string). ``4712`` is four digits and DOES
+    occur inside random ids by chance — see ``VALUE_A``'s comment.
+
+    THE DELIMITER IS TWO-SIDED, AND THE COST IS DELIBERATE (review m-3): a numeric
+    sentinel directly followed by a letter is NOT a site, so a leak rendered
+    ``"4712K"`` is missed while ``"4712 K"``, ``"4712."`` and ``"(4712)"`` are
+    caught. A left-only guard would catch ``"4712K"`` too — and would re-admit the
+    flake, because a hex nonce can BEGIN with the four digits. Measured here over
+    2,000,000 ``secrets.token_hex(8)`` nonces for one sentinel: plain substring
+    (the defect this file shipped) **401**, left-only **31 = 1.55e-5** (theory
+    ``1/16**4`` = 1.526e-5), two-sided **0** — and that 0 is structural rather than
+    lucky, because inside an all-alphanumeric token a two-sided match requires the
+    token to BE the four digits, which a 16-character nonce cannot be. A
+    trailing-letter rendering of a leaked value is hypothetical; the collision is
+    the defect this file actually shipped, so the two-sided form is chosen and the
+    gap is recorded rather than left to be discovered.
     """
     body = re.escape(str(sentinel))
     if isinstance(sentinel, str):
@@ -316,16 +381,31 @@ def _sentinel_pattern(sentinel) -> re.Pattern[str]:
     return re.compile(rf"(?<![0-9A-Za-z]){body}(?![0-9A-Za-z])")
 
 
-def _value_sites(document, sentinel) -> list[str]:
-    """Every path in a parsed ``document`` where ``sentinel`` reaches it AS A VALUE.
+def _sentinel_sites(document, sentinel, *, keys: bool = True) -> list[str]:
+    """Every path in a parsed ``document`` where ``sentinel`` REACHES it.
 
-    Three ways a leaf counts, in decreasing exactness:
+    Three ways a VALUE counts, in decreasing exactness:
 
     * it *is* the sentinel (``4712``, ``"race-a"``) — a field, an answer, a payload;
     * it is the sentinel rendered as text (``"4712"``);
     * it is a longer string that QUOTES the sentinel per :func:`_sentinel_pattern`
       — which is how a value reaches an evidence quote, a note, or a rendered
       answer rather than a field of its own.
+
+    And, unless ``keys=False``, a dict KEY counts the same three ways — see
+    :func:`_key_paths` for the measured reason that channel is real. Key sites are
+    marked ``(key)`` in the returned path so a failure says which channel leaked;
+    ``keys=False`` is passed by the POSITIVE controls, which mean specifically
+    "the value is stored", a strictly stronger claim than "the id is a key".
+
+    Including keys cannot reintroduce the collision this walk exists to remove.
+    Measured over five full runs of this file — 21,581 key occurrences, 172
+    distinct keys, spanning states, published official records, evidence sidecars
+    and durable rows: NO key holds a ULID, a 16-char hex token, or four
+    consecutive digits. Exactly FOUR of the 172 carry a digit at all, and every one
+    is a spelling of two literals — ``sha256``/``asset_sha256`` and
+    ``CuO2_mass_fraction``/``sample.composition.CuO2_mass_fraction``. None of
+    ``4711``/``4712``/``4713`` matches any key under the pattern above.
 
     This replaces ``str(sentinel) in json.dumps(exp.to_state())``. That form was
     not a weaker version of this one; it was a different statement about a
@@ -335,35 +415,43 @@ def _value_sites(document, sentinel) -> list[str]:
     "01M…9e66e7cd464712"}'``. See ``VALUE_A``'s corrected comment for which
     direction each site could fail in; the two are not symmetric.
 
-    Comparing PARSED leaves cannot collide with an identifier, because an
-    identifier is a whole leaf of its own and is never *equal* to a sentinel, and
-    the containment branch is delimited for numeric sentinels.
+    Comparing PARSED leaves and keys cannot collide with an identifier, because an
+    identifier is a whole leaf (or, per the census, never a key) and is never
+    *equal* to a sentinel, and the containment branch is delimited for numeric
+    sentinels.
 
     Every emptiness assertion in this file is paired with a POSITIVE control
     calling this same function, so a walk that stopped descending — or returned
     ``[]`` unconditionally — fails those tests instead of satisfying them
-    silently. Verified by mutation on 2026-09-03: ``return []`` here turns 12 of
-    this file's tests red.
+    silently. ~~Verified by mutation on 2026-09-03: ``return []`` here turns 12 of
+    this file's tests red.~~ — **CORRECTED (review m-2): 12 was ONE observation
+    reported as the count.** Re-measured over 10 runs: ``return []`` turns **at
+    least 9** red — observed 9 once, 10 four times, 11 four times, 12 once —
+    because several positive controls sit inside ONE branch of a race whose outcome
+    the scheduler picks. The floor is the honest number; the ceiling is not
+    reproducible on demand, and 12 was the run that happened to be reported.
     """
     pattern = _sentinel_pattern(sentinel)
-    sites = []
-    for path, value in _leaves(document):
-        if isinstance(value, bool):
+
+    def _hit(candidate) -> bool:
+        if isinstance(candidate, bool):
             # `True == 1` in Python; no sentinel here is 0 or 1, and a boolean is
-            # never one of these values, so a boolean leaf is never a site.
-            continue
-        hit = value == sentinel or (
-            isinstance(value, str)
-            and (value == str(sentinel) or pattern.search(value) is not None)
+            # never one of these values, so a boolean is never a site.
+            return False
+        return candidate == sentinel or (
+            isinstance(candidate, str)
+            and (candidate == str(sentinel) or pattern.search(candidate) is not None)
         )
-        if hit:
-            sites.append(path)
+
+    sites = [path for path, value in _leaves(document) if _hit(value)]
+    if keys:
+        sites += [f"{path} (key)" for path, key in _key_paths(document) if _hit(key)]
     return sites
 
 
-def _state_sites(exp, sentinel) -> list[str]:
-    """``_value_sites`` over the whole persisted state of one record."""
-    return _value_sites(exp.to_state(), sentinel)
+def _state_sites(exp, sentinel, *, keys: bool = True) -> list[str]:
+    """``_sentinel_sites`` over the whole persisted state of one record."""
+    return _sentinel_sites(exp.to_state(), sentinel, keys=keys)
 
 
 def _artifacts(exp) -> set[str]:
@@ -459,12 +547,13 @@ def _experiment_with_runs(store, *, labels: tuple[str, ...], run_draft=None, exp
 # =============================================================================
 
 
-def test_the_sentinel_walk_finds_values_and_never_an_identifier():
-    """``_value_sites`` is the file's own instrument, so it is measured here.
+def test_the_sentinel_walk_finds_values_and_keys_and_never_an_identifier():
+    """``_sentinel_sites`` is the file's own instrument, so it is measured here.
 
     Every "the loser's value is nowhere" assertion in this file is only as good as
-    this walk, and the form it replaced was measurably wrong (see ``VALUE_A``'s
-    corrected comment). Three properties, each with the case that used to break:
+    this walk, and BOTH the form it replaced and its own first version were
+    measurably wrong (see ``VALUE_A``'s corrected comment and :func:`_key_paths`).
+    Four properties, each with the case that used to break:
 
     * the exact document shape CI failed on — a 16-hex ``generation`` ending in the
       sentinel's four digits — yields NO site, where ``str(sentinel) in
@@ -472,8 +561,11 @@ def test_the_sentinel_walk_finds_values_and_never_an_identifier():
     * a value that really is there yields a site, as an ``int`` leaf, as the same
       value rendered as text, and when QUOTED inside a longer string (which is how
       a value reaches an evidence answer or a note rather than a field);
-    * a STRING sentinel is matched by plain containment, because these carry a
-      hyphen or a dot and cannot occur inside a ULID or a hex digest.
+    * **a sentinel reaching the document only as a dict KEY yields a site.** This
+      is the orphan ``block_evidence["series:race-b"]`` a merging partial write
+      leaves, which the substring form caught and the value-only walk did not;
+    * ``keys=False`` restricts the answer to VALUES, which is what the positive
+      controls mean and is the stronger claim of the two.
     """
     collided = {
         "id": "01LIFECYCLECONCURRENCY0001",
@@ -483,10 +575,10 @@ def test_the_sentinel_walk_finds_values_and_never_an_identifier():
     assert str(VALUE_B) in json.dumps(collided), (
         "this fixture no longer reproduces the collision it exists to reproduce"
     )
-    assert _value_sites(collided, VALUE_B) == [], (
+    assert _sentinel_sites(collided, VALUE_B) == [], (
         "the sentinel's digits inside an identifier were counted as a value"
     )
-    assert _value_sites(collided, VALUE_A) == []
+    assert _sentinel_sites(collided, VALUE_A) == []
 
     present = {
         "runs": [
@@ -496,19 +588,55 @@ def test_the_sentinel_walk_finds_values_and_never_an_identifier():
             }}}
         ]
     }
-    assert _value_sites(present, VALUE_A) == [
+    assert _sentinel_sites(present, VALUE_A) == [
         f"/runs/0/draft/fields/{RUN_FIELD}/value",
         f"/runs/0/draft/fields/{RUN_FIELD}/evidence/0/answer",
         f"/runs/0/draft/fields/{RUN_FIELD_2}/note",
     ]
 
-    assert _value_sites({"series": [{"series_id": "race-a"}]}, "race-a") == [
+    assert _sentinel_sites({"series": [{"series_id": "race-a"}]}, "race-a") == [
         "/series/0/series_id"
     ]
-    assert _value_sites({"series": [{"series_id": "race-a"}]}, "race-b") == []
+    assert _sentinel_sites({"series": [{"series_id": "race-a"}]}, "race-b") == []
     # A boolean leaf is never a site — `True == 1` in Python, and this is the guard
     # that keeps a future sentinel of `1` from matching every flag in the document.
-    assert _value_sites({"ok": True}, 1) == []
+    assert _sentinel_sites({"ok": True}, 1) == []
+
+    # THE ORPHAN KEY, which is the shape review m-1/I-1 measured: the run's series
+    # is the WINNER's, and the loser's id survives ONLY as a `block_evidence` key
+    # whose own entry names it nowhere. `isaac_records.complete` writes those keys
+    # as `f"series:{series_id}"` (:242, :595) and does not delete a stale one, so a
+    # write that merged the block rather than replacing it lands exactly here.
+    orphan_key = {
+        "runs": [{
+            "id": "01RUNAAAAAAAAAAAAAAAAAAAAA",
+            "draft": {
+                "series": [{"series_id": "race-a"}],
+                "block_evidence": {
+                    "series:race-a": [{"kind": "user_confirmation", "answer": "race-a"}],
+                    "series:race-b": [{"kind": "user_confirmation", "answer": "confirmed"}],
+                },
+            },
+        }]
+    }
+    assert "race-b" in json.dumps(orphan_key), (
+        "this fixture no longer reproduces the leak it exists to reproduce"
+    )
+    assert _sentinel_sites(orphan_key, "race-b") == [
+        "/runs/0/draft/block_evidence/series:race-b (key)"
+    ], "a sentinel reaching the document as a KEY was not reported"
+    # AND THE TWO CHANNELS STAY DISTINGUISHABLE, which is why the positive controls
+    # can be strict: with `keys=False` the same document is clean, because no VALUE
+    # in it is the loser's id.
+    assert _sentinel_sites(orphan_key, "race-b", keys=False) == []
+    # The winner is present in BOTH channels, and `keys=False` still finds it.
+    assert _sentinel_sites(orphan_key, "race-a", keys=False) == [
+        "/runs/0/draft/series/0/series_id",
+        "/runs/0/draft/block_evidence/series:race-a/0/answer",
+    ]
+    # A KEY cannot reintroduce the collision either: the numeric branch stays
+    # delimited on both sides, so digits inside a key are not a site.
+    assert _sentinel_sites({"block_evidence": {"series:aa4712bb": []}}, VALUE_B) == []
 
 
 # =============================================================================
@@ -595,7 +723,7 @@ def test_two_edits_of_one_run_with_one_token_leave_exactly_the_winner(client, mo
         "the rejected writer's value reached the record — this is a lost update, at "
         f"{lost_sites}"
     )
-    # POSITIVE CONTROL for the line above. Without it, a `_value_sites` that walked
+    # POSITIVE CONTROL for the line above. Without it, a `_sentinel_sites` that walked
     # nothing — or that stopped descending into runs — would satisfy the assertion
     # vacuously, and the file's central claim would be pinned by a helper that
     # cannot see the document.
@@ -606,7 +734,7 @@ def test_two_edits_of_one_run_with_one_token_leave_exactly_the_winner(client, mo
     # of the parsed leaves finds those same two and nothing else. So the leaf form
     # loses no coverage here: there is no third channel by which a value reaches
     # this document embedded in longer prose.
-    assert _state_sites(after, won), (
+    assert _state_sites(after, won, keys=False), (
         "the winner's value is not findable as a leaf value — the walk this test's "
         "central assertion depends on cannot see the document"
     )
@@ -780,14 +908,14 @@ def test_override_and_revert_to_inherited_race_leaves_exactly_the_winners_outcom
             "the override won, so the address must still carry one"
         )
         assert stored_overrides[OVERRIDE_ADDRESS].payload["value"] == "REPLACEMENT-OVERRIDE"
-        original_sites = _value_sites(state, "ORIGINAL-OVERRIDE")
+        original_sites = _sentinel_sites(state, "ORIGINAL-OVERRIDE")
         assert original_sites == [], (
             "the winner's payload replaced the original — the original must be gone, "
             f"and is still at {original_sites}"
         )
         # POSITIVE CONTROL: the same walk finds the value that IS there, so the
         # emptiness above is a fact about the document and not about the walk.
-        assert _value_sites(state, "REPLACEMENT-OVERRIDE"), (
+        assert _sentinel_sites(state, "REPLACEMENT-OVERRIDE", keys=False), (
             "the walk cannot see the override payload it is being trusted to search"
         )
         assert override_response.json()["override"]["address"] == OVERRIDE_ADDRESS
@@ -798,16 +926,16 @@ def test_override_and_revert_to_inherited_race_leaves_exactly_the_winners_outcom
         assert OVERRIDE_ADDRESS not in stored_overrides, (
             "the clear won, so the run must inherit again — no override may remain"
         )
-        replacement_sites = _value_sites(state, "REPLACEMENT-OVERRIDE")
+        replacement_sites = _sentinel_sites(state, "REPLACEMENT-OVERRIDE")
         assert replacement_sites == [], (
             f"the refused override's payload reached the record, at {replacement_sites}"
         )
-        assert _value_sites(state, "ORIGINAL-OVERRIDE") == []
+        assert _sentinel_sites(state, "ORIGINAL-OVERRIDE") == []
         # POSITIVE CONTROL. This branch is the one where NEITHER payload may be
         # present, so there is no in-document value of this test's own to find; the
         # run's id is used instead, because it is a leaf of the state by definition
         # and an empty result for it would mean the walk reached nothing at all.
-        assert _value_sites(state, rid), (
+        assert _sentinel_sites(state, rid, keys=False), (
             "the walk found not even the run's own id — the two emptiness "
             "assertions above would then be true of any document whatsoever"
         )
@@ -876,7 +1004,7 @@ def test_removing_a_run_while_it_is_being_edited(client, monkeypatch):
         assert edit_body["id"] == run_a
         assert after.get_run(run_a) is None, "the removal won, so the run must be gone"
         assert {run.id for run in after.runs} == {run_b}
-        value_sites = _value_sites(state, VALUE_A)
+        value_sites = _sentinel_sites(state, VALUE_A)
         assert value_sites == [], (
             "the refused edit's value survived the removal of the run it addressed, "
             f"at {value_sites}"
@@ -885,7 +1013,7 @@ def test_removing_a_run_while_it_is_being_edited(client, monkeypatch):
         # test's own values, so the surviving run's id stands in: an empty result
         # for it would mean the walk reached nothing and the line above proved
         # nothing.
-        assert _value_sites(state, run_b), (
+        assert _sentinel_sites(state, run_b, keys=False), (
             "the walk found not even the surviving run's id"
         )
         assert remove.json()["removed_run_id"] == run_a
@@ -904,7 +1032,7 @@ def test_removing_a_run_while_it_is_being_edited(client, monkeypatch):
         # The same walk, on the branch where the value IS present: it finds it. That
         # is the positive half of the pair, on the same document shape as the
         # emptiness assertion in the branch above.
-        assert _value_sites(state, VALUE_A), (
+        assert _sentinel_sites(state, VALUE_A, keys=False), (
             "the edit won, so its value must be findable as a leaf of the state"
         )
         assert remove.headers["ETag"] == after.etag()
@@ -1267,14 +1395,14 @@ def test_two_scientists_submitting_at_once_record_exactly_one_attributed_submiss
         db.changes,
         db.submission_runs,
     ]
-    refused_sites = _value_sites(durable, refused_subject)
+    refused_sites = _sentinel_sites(durable, refused_subject)
     assert refused_sites == [], (
         "the refused scientist's name reached a durable row — a submission would be "
         f"attributed to somebody who did not make it, at {refused_sites}"
     )
     # POSITIVE CONTROL on the same rows: the winner's name IS there, so the
     # emptiness above is a statement about these rows and not about the walk.
-    assert _value_sites(durable, recorded["subject"]), (
+    assert _sentinel_sites(durable, recorded["subject"], keys=False), (
         "the walk cannot find the winner's own name in the durable rows"
     )
     assert len(db.revisions) == 1, db.revisions
@@ -1371,7 +1499,7 @@ def test_a_run_edit_arriving_while_a_submit_is_in_flight(
         # POSITIVE CONTROL: this branch holds none of the test's own values, so the
         # run's id stands in — an empty result for it would mean the walk above
         # searched nothing.
-        assert _state_sites(after, rid), "the walk found not even the run's own id"
+        assert _state_sites(after, rid, keys=False), "the walk found not even the run's own id"
         published = {entry["record_id"] for entry in submit.json()["records"]}
         assert published, submit.json()
         for record_id in published:
@@ -1383,19 +1511,19 @@ def test_a_run_edit_arriving_while_a_submit_is_in_flight(
             sidecar_doc = json.loads(
                 (after.records_dir / f"{record_id}.evidence.json").read_bytes()
             )
-            record_hits = _value_sites(record_doc, VALUE_A)
+            record_hits = _sentinel_sites(record_doc, VALUE_A)
             assert record_hits == [], (
                 "a published official record carries content that was never "
                 f"submitted, at {record_hits}"
             )
-            sidecar_hits = _value_sites(sidecar_doc, VALUE_A)
+            sidecar_hits = _sentinel_sites(sidecar_doc, VALUE_A)
             assert sidecar_hits == [], sidecar_hits
             # POSITIVE CONTROL for both walks: the artifact really was read and
             # really was walked. `record_id` is a leaf of the official record, and
             # the sidecar keys its evidence by official JSON path, so an empty
             # result for the path this run's field lives at would mean the walk
             # descended into nothing.
-            assert _value_sites(record_doc, record_id), (
+            assert _sentinel_sites(record_doc, record_id, keys=False), (
                 "the official record's own id is not a leaf of the document walked"
             )
             # `_leaves` is a GENERATOR: `assert _leaves(...)` would be true of any
@@ -1561,7 +1689,7 @@ def test_no_writer_can_observe_the_window_between_publication_and_the_state_save
     )
     # POSITIVE CONTROL: the run's id is a leaf of the state, so an empty result
     # here would mean the walk above searched nothing.
-    assert _state_sites(after, rid), "the walk found not even the run's own id"
+    assert _state_sites(after, rid, keys=False), "the walk found not even the run's own id"
     assert len(db.submissions) == 1, db.submissions
     assert state_path.read_bytes() != before_state, (
         "the submission's own state save never landed"
@@ -1690,7 +1818,7 @@ def test_two_decisions_about_one_conflict_at_once_store_exactly_one(client, monk
     # it always was, so here the walk must FIND it — and it must find it as a value,
     # which the old substring form could not distinguish from a chance collision
     # with an id (see `VALUE_A`'s corrected comment).
-    assert _state_sites(after, lost), (
+    assert _state_sites(after, lost, keys=False), (
         f"the loser's choice {lost!r} is no longer even a candidate answer"
     )
 
@@ -1934,7 +2062,7 @@ def test_two_run_level_answers_with_one_token_leave_exactly_the_winner(client, m
     )
     # POSITIVE CONTROL: the same walk finds the WINNER's series id, so "nowhere"
     # above is a fact about the document rather than about the walk.
-    assert _state_sites(after, stored), (
+    assert _state_sites(after, stored, keys=False), (
         f"the winner's series id {stored!r} is not findable as a leaf value"
     )
     # EXACTLY ONE revision, on the run and on the record.
@@ -2151,7 +2279,7 @@ def test_a_run_level_answer_racing_a_correction_of_the_same_field(client, monkey
         f"{overwritten_sites}"
     )
     # POSITIVE CONTROL: the correction's own series id IS a leaf of the state.
-    assert _state_sites(after, "race-c"), (
+    assert _state_sites(after, "race-c", keys=False), (
         "the walk cannot see the series id the assertion above trusts it to search for"
     )
 
@@ -2235,7 +2363,7 @@ def test_a_genuine_run_answer_and_a_correction_share_the_run_s_one_validator(
             f"{refused_sites}"
         )
         # POSITIVE CONTROL: the surviving spectrum's series id IS found.
-        assert _state_sites(after, "race-a"), (
+        assert _state_sites(after, "race-a", keys=False), (
             "the walk cannot see the surviving spectrum's series id"
         )
     else:
@@ -2306,6 +2434,6 @@ def test_a_run_level_answer_racing_the_removal_of_that_run(client, monkeypatch):
         # POSITIVE CONTROL. This branch holds none of this test's own values by
         # design, so the surviving run's id stands in: an empty result for it
         # would mean the walk reached nothing and the line above proved nothing.
-        assert _state_sites(after, keep), (
+        assert _state_sites(after, keep, keys=False), (
             "the walk found not even the surviving run's id"
         )
