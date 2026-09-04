@@ -4,8 +4,9 @@ This is a measured comparison of the Review Record screen before and after the
 record-screen redesign (PR-A through PR-E, plus #232 — see
 `docs/session-closure-2026-09-03.md` for the full slice history). Every number
 in this document comes from one of the two harness runs described below;
-nothing is estimated. Screenshots referenced but not committed here are named
-by their local scratchpad path.
+nothing is estimated. **No screenshot from either run is committed to this
+repository** (see "Screenshots" below for why); every one referenced here is
+named by its local scratchpad path instead.
 
 ## Method
 
@@ -193,37 +194,52 @@ errors in both BEFORE and AFTER (see caveats).
 
 ## Screenshots
 
-Selected screenshots are committed under
-`docs/evidence/redesign-2026-09-03/` (3.2 MB total, every file individually
-under 400 KB, confirmed with `find … -size +400k` returning nothing; no
-`.gitignore` rule excludes images in this repository):
+**No screenshot is committed to this repository.** An earlier pass of this
+document staged 24 selected PNGs under `docs/evidence/redesign-2026-09-03/`
+and described them as committed; that directory was removed
+(`git rm`, commit `d474cc0`) because PR #234's frontend CI job failed
+`apps/web/src/__tests__/source-is-greppable.test.ts` — this repository's
+greppability guard holds every TRACKED file to zero raw NUL bytes, with
+exactly one named exemption
+(`qa/validator-upload-package/isaac-validator-qa-files.zip`, per
+`CLAUDE.md` §11's "Session of 2026-08-26/27" entry). A PNG is binary and
+therefore fails that guard by construction; the guard does not distinguish
+a "small, individually-reasonable" image from any other binary file, and
+adding a second exemption for this bundle was rejected rather than pursued.
+All screenshots this evidence run produced exist **only in this session's
+local scratchpad bundle**, listed here by filename so a reader with access
+to that path (or a re-run of the capture — see "Reproduction" below) can
+find them:
 
-- `workspaces/record__{desktop,tablet,mobile390,mobile320}__viewport.png` —
-  the fields workspace at 1440/768/390/320.
-- `workspaces/record-runs__{desktop,tablet,mobile390,mobile320}__viewport.png`
-  — the Runs workspace (master-detail list) at the same four widths.
-- `workspaces/record-capture__{desktop,tablet,mobile390,mobile320}__viewport.png`
-  — the Capture & Proposals workspace at the same four widths.
-- `workspaces/record-assistant-drawer__tablet__assistant.png` — the
-  Assistant drawer open at 768px (tablet).
-- `workspaces/record__desktop__assistant-collapsed.png` — the Assistant rail
-  collapsed at 1440px (captured with a one-off script,
-  `harness/collapsed-rail-shot.mjs`, that clicks `Collapse Assistant` and
-  screenshots the result — not part of the main capture pass).
-- `transcript-states/{01..10}-*-1440.png` — the ten `TranscriptCapturePanel`
-  states (idle, requesting permission, recording, held, permission denied,
-  unsupported, processing, proposals ready, recoverable error, proposal-card
-  expanded) at 1440px, copied from this session's own prior capture at
-  `/private/tmp/.../scratchpad/prd/shots/` (the same 10 states also exist at
-  768/390/320 in that scratchpad path, 40 files / 5.9 MB total — not
-  committed here to stay well inside the 6 MB budget; reference the
-  scratchpad path directly if the other three widths are needed).
+`/private/tmp/claude-501/-Users-krishverma-Documents-ISAAC/8921bb97-45b0-4cab-8fc0-3d4453250d98/scratchpad/evidence/after/screenshots/`:
+
+- `record__{desktop,laptop,tablet,mobile390,mobile320}__viewport.png` —
+  the fields workspace at 1440/1280/768/390/320.
+- `record-runs__{desktop,laptop,tablet,mobile390,mobile320}__viewport.png`
+  — the Runs workspace (master-detail list) at the same five widths.
+- `record-capture__{desktop,laptop,tablet,mobile390,mobile320}__viewport.png`
+  — the Capture & Proposals workspace at the same five widths.
+- `record-assistant-drawer__{tablet,mobile390,mobile320}__{viewport,full,assistant}.png`
+  — the Assistant drawer open at 768/390/320.
+- `record__desktop__assistant-collapsed.png` — the Assistant rail collapsed
+  at 1440px (captured with a one-off script, `harness/collapsed-rail-shot.mjs`,
+  that clicks `Collapse Assistant` and screenshots the result — not part of
+  the main capture pass).
+
+`/private/tmp/claude-501/-Users-krishverma-Documents-ISAAC/8921bb97-45b0-4cab-8fc0-3d4453250d98/scratchpad/prd/shots/`:
+
+- `{01-idle,02-requesting-permission,03-recording,04-held,05-permission-denied,
+  06-unsupported,07-processing,08-proposals-ready,09-recoverable-error,
+  10-proposal-card-more-open}-{1440,768,390,320}.png` — the ten
+  `TranscriptCapturePanel` states at all four widths (40 files, 5.9 MB
+  total), from this session's own prior capture.
 
 The full 110-screenshot AFTER set (viewport + full-page for every page ×
-viewport, plus the three assistant-drawer captures) remains local at
+viewport, plus the three assistant-drawer captures) is at
 `/private/tmp/claude-501/-Users-krishverma-Documents-ISAAC/8921bb97-45b0-4cab-8fc0-3d4453250d98/scratchpad/evidence/after/screenshots/`
 (18 MB) and the equivalent 79-screenshot BEFORE set at `.../evidence/before/screenshots/`
-(16 MB); neither full set is committed.
+(16 MB) — neither set, nor any subset of either, is committed to this
+repository.
 
 ## Reproduction
 
