@@ -170,9 +170,17 @@ const runRows = (page: Page) => page.locator('article.run-card[data-compact="tru
 /** The ONE run's full editor, present only while a run is open. */
 const openRunCard = (page: Page) => page.locator('article.run-card:not([data-compact])');
 
-/** Open the record and add two runs, leaving them as two COMPACT ROWS. */
+/**
+ * Open the record and add two runs, leaving them as two COMPACT ROWS.
+ *
+ * `openRecord`'s third argument is REQUIRED as of main's sidebar rewrite
+ * (PR #229, `own-session-fixtures.ts::openRecord`) — the record screen is
+ * now four `?view=` destinations on one route, so a bare `/record/<id>`
+ * opens Record Fields and Runs may not even be mounted. `'runs'` is what
+ * every call in this file needs.
+ */
 async function twoCompactRows(page: Page) {
-  await openRecord(page, SEED.partial);
+  await openRecord(page, SEED.partial, 'runs');
   await pwExpect(page.getByRole('heading', { name: 'Runs', exact: true })).toBeVisible();
   await pwExpect(addRun(page)).toBeEnabled();
 
@@ -688,7 +696,7 @@ test.describe('run card — narrow widths', () => {
   test('@runs-layout run cards widen the document by nothing at 320', async ({ page }) => {
     await page.setViewportSize({ width: 320, height: 812 });
 
-    await openRecord(page, SEED.partial);
+    await openRecord(page, SEED.partial, 'runs');
     await pwExpect(page.getByRole('heading', { name: 'Runs', exact: true })).toBeVisible();
     await pwExpect(addRun(page)).toBeEnabled();
     await pwExpect(runRows(page)).toHaveCount(0);

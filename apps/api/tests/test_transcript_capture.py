@@ -259,13 +259,33 @@ def test_reading_a_transcript_writes_no_draft_field(client, experiment_id):
 
 
 def test_the_operation_states_where_accepting_actually_writes(client, experiment_id):
+    """INVERTED, not deleted: the contract now names the proposal review route.
+
+    This test pinned `PATCH /api/experiments/{experiment_id}/runs/{run_id}` and was
+    correct while a candidate lived only in the response body — accepting one WAS a
+    direct run edit, made by the one component holding it. It is not correct now:
+    every candidate is stored as an ingestion proposal in this same save, and a
+    stored proposal is accepted through its own review operation, which then writes
+    through that same run edit's writer. The value still lands the same way; what
+    changed is who a client asks.
+
+    Inverting rather than deleting is this repository's established remedy for a
+    test that pins a behaviour a change deliberately moves — deleting it would leave
+    no assertion that `accept_contract` says anything true at all.
+    """
     run = _make_run(client, experiment_id)
     contract = _finalize(client, experiment_id, CLEAN, run_id=run["id"]).json()[
         "accept_contract"
     ]
-    assert contract["method"] == "PATCH"
-    assert contract["path"] == "/api/experiments/{experiment_id}/runs/{run_id}"
+    assert contract["method"] == "POST"
+    assert (
+        contract["path"]
+        == "/api/experiments/{experiment_id}/proposals/{proposal_id}/review"
+    )
     assert "confirmed_by_user: true" in contract["requires"]
+    # THE OLD TARGET IS NAMED AS THE ONE THIS IS NOT, so a client that transcribed
+    # it cannot read the new contract as a rewording of the old one.
+    assert "/runs/{run_id}" not in contract["path"]
 
 
 def test_every_proposable_path_is_one_the_run_edit_will_actually_write():

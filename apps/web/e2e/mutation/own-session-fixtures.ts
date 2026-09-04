@@ -331,8 +331,30 @@ export async function openComplete(page: Page, id: string) {
   ).toBeVisible();
 }
 
-export async function openRecord(page: Page, id: string) {
-  await page.goto(`/record/${id}`);
+/*
+ * `?view=` NAMES THE WORKSPACE, and it is required rather than cosmetic. The Review
+ * Record screen is four `?view=` destinations on one route (`RECORD_VIEW_IDS`), each
+ * lazily mounted, so a bare `/record/<id>` opens Record Fields and the panel a spec
+ * is about may not exist on the page at all. The default is unchanged from what a
+ * reader gets by typing the bare URL.
+ */
+/**
+ * THE WORKSPACE IS REQUIRED — there is deliberately no default.
+ *
+ * This helper waits on `.evidence-trail-link`, which is in the record's SIDEBAR and
+ * therefore visible from every workspace. So unlike its sibling in
+ * `e2e/trusted/fixtures.ts` (which waits on the Ingestion Proposals heading and so
+ * fails loudly if it lands wrong), a bad default here would open the wrong workspace
+ * SILENTLY and the spec would fail some distance away on a missing `Add Run` or a
+ * missing proposal card. Making the argument required turns "someone simplified a
+ * three-argument call back to two" from a runtime mystery into a compile error.
+ */
+export async function openRecord(
+  page: Page,
+  id: string,
+  view: 'fields' | 'runs' | 'capture' | 'graph'
+) {
+  await page.goto(`/record/${id}?view=${view}`);
   await expect(page.locator('.evidence-trail-link')).toBeVisible();
 }
 

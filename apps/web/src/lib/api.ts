@@ -61,6 +61,7 @@ import type {
   ApiPendingPage,
   ApiPendingResponse,
   ApiProposalAcceptedFrom,
+  ApiProposalCreated,
   ApiProposalReviewAction,
   ApiProposalReviewed,
   ApiProposalOrder,
@@ -1730,13 +1731,50 @@ export const api = {
    * counter. If a detail view is ever built that needs something the window omits,
    * this comes back with the caller that needs it.
    *
-   * THERE IS NO `createProposal` HERE, AND ITS ABSENCE IS DELIBERATE. Nothing in this
-   * build produces a proposal: the transcript reader still stores its candidates as
-   * Notes, the extractor still discards its residue, and CSV ingest still reconciles
-   * rather than applies. `POST .../proposals` exists on the server and has no
-   * automatic caller (`routes.py`: "NOTHING WAS REWIRED TO FEED THEM"), so adding a
-   * create button here would be this client manufacturing the queue it is reviewing.
-   * When a producer lands, the create call lands with it.
+   * `createProposal` IS HERE NOW, AND THE PARAGRAPH IT REPLACES IS QUOTED RATHER
+   * THAN DELETED, because it was right when it was written and the reason it stopped
+   * being right is the whole of this change. It said:
+   *
+   *   "THERE IS NO `createProposal` HERE, AND ITS ABSENCE IS DELIBERATE. Nothing in
+   *    this build produces a proposal: the transcript reader still stores its
+   *    candidates as Notes, the extractor still discards its residue, and CSV ingest
+   *    still reconciles rather than applies. `POST .../proposals` exists on the
+   *    server and has no automatic caller (`routes.py`: 'NOTHING WAS REWIRED TO FEED
+   *    THEM'), so adding a create button here would be this client manufacturing the
+   *    queue it is reviewing. When a producer lands, the create call lands with it."
+   *
+   * A PRODUCER HAS LANDED. `POST .../transcript` now mints a durable proposal for
+   * every candidate it reads, inside the same lock and the same save as the notes it
+   * stores, so the queue is fed by a scientist finalizing a transcript rather than by
+   * this client. The create call lands with it, exactly as that paragraph said.
+   *
+   * WHAT IT IS FOR, AND WHAT IT IS NOT. It exists so a surface can mint a proposal
+   * FROM A NOTE THE RECORD ALREADY HOLDS — the note-mapping path, where a scientist
+   * says "this sentence is the temperature" about words that are already stored. It
+   * is NOT a way to invent a value: `noteId`, `targetFieldPath` and `rule` are all
+   * required and none is defaulted here, and the server refuses a target outside the
+   * set its list operation reports. Passing `clientRequestKey` makes the create
+   * exactly-once within the record, which is what stops this client and the
+   * transcript route from both minting a proposal for one candidate.
+   *
+   * AND IT HAS NO CALLER TODAY, WHICH IS THE EXACT CONDITION THAT GOT `getProposal`
+   * DELETED FOUR PARAGRAPHS ABOVE — so the difference has to be stated here rather
+   * than left for the next reader to weigh. `getProposal` was deleted because
+   * nothing would ever need it: the list window already carries every field a detail
+   * read would return, so its caller was not late, it was impossible. This one's
+   * caller is NAMED AND NEXT: the "Propose a value from this note" act in Unmapped
+   * Notes, which is the note-mapping path described above and is the following slice
+   * in this arc. It also has a second job the moment it lands, which `getProposal`
+   * had no analogue of — it is the client half of the two-producer collision DEC-13
+   * added `client_request_key` for, and the transcript route now publishes that key
+   * precisely so this call can present it (contract §11.2).
+   *
+   * **UNTIL THAT SURFACE LANDS, THE COLLISION IS A CAPABILITY AND NOT A LIVE
+   * CONCERN**, and no sentence anywhere may say two producers are racing today: the
+   * transcript route is the only producer in this build. If that surface does not
+   * land, this method should be deleted the way `getProposal` was, rather than kept
+   * alive by the inventory counter in `backend-down-state.test.tsx` — a counter is
+   * not a reason to keep dead code, and that rule applies to this method too.
    *
    * ONE VALIDATOR, THE RECORD'S. A proposal lives inside the experiment's own state
    * document, so a review carries the EXPERIMENT's version token — never a run's, and
@@ -1773,6 +1811,67 @@ export const api = {
     const path = `/experiments/${enc(experimentId)}/proposals`;
     const search = params.toString();
     return getJson<ApiProposalsResponse>(search === '' ? path : `${path}?${search}`);
+  },
+
+  /**
+   * Mint ONE proposal from a note this record already holds.
+   *
+   * NOTHING IS DEFAULTED, AND THAT IS THE POINT. There is no fallback `rule`, no
+   * inferred `runId`, and no `targetFieldPath` guessed from a note's own mapping:
+   * every one of those would be this client deciding something a scientist has to.
+   * `runId` is sent only when the caller named one, so a record-scoped target stays
+   * record-scoped and a run-scoped one is refused rather than aimed at whichever run
+   * happens to exist.
+   *
+   * `startChar`/`endChar` TRAVEL TOGETHER or not at all — the server refuses half a
+   * span, and this sends both or neither rather than discovering that at runtime.
+   *
+   * THE PRECONDITION IS THE RECORD'S. A proposal lives in the experiment's own state
+   * document, so this carries the EXPERIMENT's version token, never a run's.
+   *
+   * THE CALLER READS `deduplicated`, NOT THE STATUS. `200` means the request
+   * succeeded; the body says whether it created anything. A caller that reported
+   * "created" off the status would be claiming an act that may not have happened.
+   */
+  async createProposal(
+    experimentId: string,
+    opts: {
+      experimentVersion: string;
+      noteId: string;
+      targetFieldPath: string;
+      proposedValue: unknown;
+      rule: string;
+      runId?: string;
+      startChar?: number;
+      endChar?: number;
+      clientRequestKey?: string;
+    },
+  ): Promise<ApiProposalCreated> {
+    const path = `/experiments/${enc(experimentId)}/proposals`;
+    const body: Record<string, unknown> = {
+      note_id: opts.noteId,
+      target_field_path: opts.targetFieldPath,
+      proposed_value: opts.proposedValue,
+      rule: opts.rule,
+    };
+    if (opts.runId !== undefined) body.run_id = opts.runId;
+    if (opts.startChar !== undefined && opts.endChar !== undefined) {
+      body.start_char = opts.startChar;
+      body.end_char = opts.endChar;
+    }
+    if (opts.clientRequestKey !== undefined) body.client_request_key = opts.clientRequestKey;
+    const res = await request(path, {
+      method: 'POST',
+      body: JSON.stringify(body),
+      // Truthiness guard, `createRun`'s: an empty token must be sent as ABSENT
+      // (server 428) rather than as `If-Match: ""`, which is malformed (400) and
+      // would report a client bug as a precondition failure.
+      ...(opts.experimentVersion
+        ? { headers: { 'If-Match': `"${opts.experimentVersion}"` } }
+        : {}),
+    });
+    if (res.ok) return readJson<ApiProposalCreated>(res, path);
+    throw await mutationError(res, path);
   },
 
   /**

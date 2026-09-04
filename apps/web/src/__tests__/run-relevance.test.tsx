@@ -135,7 +135,7 @@ function renderRecord(extra: Record<string, RouteEntry>) {
   stubFetchRoutes({ ...bundleRoutes(ID), ...extra });
   render(
     <MemoryRouter
-      initialEntries={[`/record/${ID}`]}
+      initialEntries={[`/record/${ID}?view=runs`]}
       future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
     >
       <AppRoutes />

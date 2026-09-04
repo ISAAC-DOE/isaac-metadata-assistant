@@ -203,6 +203,12 @@
 
      [clip] section.field-group < div#record-view-panel-fields.record-view-panel
             scrollWidth 265 vs clientWidth 240 (overflow-x: hidden)
+
+   (Quoted verbatim from that run. The panel's ELEMENT ID has since changed —
+   `record-view-panel-fields` -> `record-workspace-fields`, when the record gained
+   four workspaces — and the quote is left as it was said rather than back-edited.
+   The `.record-view-panel` CLASS this rule and the one below actually match is
+   unchanged.)
        widest overflowing child: span.record-section-summary < button.fg-header
                                  (right edge 305 vs 280)
 

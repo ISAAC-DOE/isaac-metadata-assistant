@@ -140,7 +140,7 @@ function renderRecordIn(extra: Record<string, RouteEntry>) {
   stubFetchRoutes({ ...bundleRoutes(ID), ...extra });
   return render(
     <MemoryRouter
-      initialEntries={[`/record/${ID}`]}
+      initialEntries={[`/record/${ID}?view=runs`]}
       future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
     >
       <AppRoutes />
@@ -152,7 +152,7 @@ function renderRecord(extra: Record<string, RouteEntry>): string[] {
   const calls = stubFetchRoutes({ ...bundleRoutes(ID), ...extra });
   render(
     <MemoryRouter
-      initialEntries={[`/record/${ID}`]}
+      initialEntries={[`/record/${ID}?view=runs`]}
       future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
     >
       <AppRoutes />
@@ -983,7 +983,7 @@ describe('leaving the screen mid-save', () => {
     });
     const view = render(
       <MemoryRouter
-        initialEntries={[`/record/${ID}`]}
+        initialEntries={[`/record/${ID}?view=runs`]}
         future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
       >
         <AppRoutes />
@@ -1059,7 +1059,7 @@ describe('leaving the screen mid-save', () => {
     });
     const view = render(
       <MemoryRouter
-        initialEntries={[`/record/${ID}`]}
+        initialEntries={[`/record/${ID}?view=runs`]}
         future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
       >
         <AppRoutes />
@@ -1140,7 +1140,7 @@ describe('leaving the screen mid-save', () => {
     });
     const view = render(
       <MemoryRouter
-        initialEntries={[`/record/${ID}`]}
+        initialEntries={[`/record/${ID}?view=runs`]}
         future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
       >
         <AppRoutes />
@@ -1194,7 +1194,7 @@ describe('leaving the screen mid-save', () => {
     });
     const view = render(
       <MemoryRouter
-        initialEntries={[`/record/${ID}`]}
+        initialEntries={[`/record/${ID}?view=runs`]}
         future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
       >
         <AppRoutes />
@@ -1658,18 +1658,24 @@ describe('PHASE 2 — save state that outlives the card', () => {
    * say so the other way round: "the Runs section lives inside the `fields` tabpanel,
    * so switching view unmounts every card". That is no longer true — the panel is kept
    * mounted and hidden (D1), because unmounting it destroyed every unsaved textarea on
-   * the record screen. What these tests are about is unchanged: a verdict that arrives
+   * the record screen. The runs also no longer live in the FIELDS panel at all: they
+   * have their own `?view=runs` workspace, which is hidden-but-mounted by the same
+   * mechanism and for the same reason. What these tests are about is unchanged: a verdict that arrives
    * while no card is on screen has to be there when one comes back, and the card must
    * not be reachable or announced while the graph is up.
    */
+  /* THE SWITCHER IS THE SIDEBAR'S WORKSPACE LIST — real `<Link>`s, not
+     `role="tab"`. The runs now live on their OWN workspace (`?view=runs`), so
+     leaving them for the Graph is still the conditional-mount case these tests
+     are about; only the control moved. */
   function toGraph() {
     return act(async () => {
-      fireEvent.click(screen.getByRole('tab', { name: 'Graph' }));
+      fireEvent.click(screen.getByRole('link', { name: 'Graph' }));
     });
   }
-  function toFields() {
+  function toRuns() {
     return act(async () => {
-      fireEvent.click(screen.getByRole('tab', { name: 'Record Fields' }));
+      fireEvent.click(screen.getByRole('link', { name: 'Runs' }));
     });
   }
 
@@ -1696,7 +1702,7 @@ describe('PHASE 2 — save state that outlives the card', () => {
     expect(patches).toBe(1);
 
     /*
-     * Leave the fields view entirely.
+     * Leave the runs workspace entirely.
      *
      * THIS ASSERTION USED TO BE `[data-run-id]` COUNT 0, i.e. it pinned the unmount —
      * which was the defect (D1): unmounting the panel silently destroyed every unsaved
@@ -1710,7 +1716,7 @@ describe('PHASE 2 — save state that outlives the card', () => {
     expect(document.querySelectorAll('[data-run-id]')).toHaveLength(1);
     expect(screen.queryByRole('button', { name: /Add Run/ })).toBeNull();
     expect(
-      (document.querySelector('#record-view-panel-fields') as HTMLElement).hidden,
+      (document.querySelector('#record-workspace-runs') as HTMLElement).hidden,
     ).toBe(true);
 
     // The refusal lands with nothing mounted. Under the old hook this verdict went
@@ -1720,7 +1726,7 @@ describe('PHASE 2 — save state that outlives the card', () => {
       await vi.advanceTimersByTimeAsync(200);
     });
 
-    await toFields();
+    await toRuns();
     const card = cardFor('RUNAAA');
     expect(within(card).getByRole('status').textContent).toContain('Save failed');
     expect(headerOf('RUNAAA')).toHaveAccessibleName(/Save failed/);
@@ -1758,7 +1764,7 @@ describe('PHASE 2 — save state that outlives the card', () => {
     expect(within(cardFor('RUNAAA')).getByRole('status').textContent).toContain('Save failed');
 
     await toGraph();
-    await toFields();
+    await toRuns();
 
     // The refusal, the held edit and the control that re-sends it all survived the
     // round trip. Under the old hook the state died with the card.
@@ -1806,7 +1812,7 @@ describe('PHASE 2 — save state that outlives the card', () => {
     expect(within(cardFor('RUNAAA')).getByRole('status').textContent).toContain('Save failed');
 
     await toGraph();
-    await toFields();
+    await toRuns();
     /*
      * NO RE-EXPAND HERE, AND THAT IS THE SECOND THING D1 CHANGED. This line used to
      * read `await expand('RUNAAA')`, because the round trip UNMOUNTED the card and a
@@ -1935,9 +1941,13 @@ describe('PHASE 2 — save state that outlives the card', () => {
     await screen.findByRole('button', { name: /Add Run/ });
     await expand('RUNAAA');
     // The wording moved when D1 fixed the record-view switch: it said "live here only"
-    // and named "the tab", which on a screen whose own tabs are Record Fields / Graph
-    // read as the view tab — the very gesture that used to destroy the card. It now
-    // says "this browser tab" and states that the record's views keep the edit.
+    // and named "the tab", which on a screen that then had its own `Record Fields` /
+    // `Graph` TAB BAR read as the view tab — the very gesture that used to destroy the
+    // card. It now says "this browser tab" and states that the record's own views keep
+    // the edit. (That tab bar has since been retired: the record's four workspaces are
+    // a link list in its sidebar. The ambiguity the copy was fixed for is therefore
+    // gone, and the fixed copy is still the right copy — "this browser tab" is what it
+    // has always meant.)
     const note = /Changes this tab has not finished saving live in this browser tab only/;
 
     // Nothing held: no warning. A permanent one would be false most of the time.

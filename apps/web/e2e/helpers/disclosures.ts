@@ -84,6 +84,16 @@
  * The record screen's OTHER collapsed `.field-group` cards (Experiment Name, Record
  * Information, Record Links) also stay closed, for the same reason and with the same
  * status: a real, still-open coverage gap, named here rather than left to be found.
+ *
+ * ── AND ASSET REFERENCES, ADDED WITH THE RECORD WORKSPACES ──────────────────
+ *
+ * `AssetReferencesPanel` is mounted `collapsedByDefault` on the Record Fields
+ * workspace, which would otherwise have taken a whole browser — its create form,
+ * its per-asset cards, its run-association controls — out of every scan at every
+ * viewport, and the counts would have DROPPED. This helper's own history is that
+ * exactly such a drop was once recorded as an accessibility win; it is a coverage
+ * loss. So the disclosure is opened here, and the panel keeps the same scanned DOM
+ * it had when it was an always-open section.
  */
 
 import { expect, type Page } from '@playwright/test';
@@ -118,6 +128,24 @@ export const PROSE_DISCLOSURES: Readonly<Record<string, number>> = Object.freeze
  * may mount zero, and any it does mount are still opened.
  */
 export const FIELD_GROUP_SURFACES: ReadonlySet<string> = new Set(['record-detail']);
+
+/**
+ * Surfaces that MUST mount the COLLAPSED Asset References disclosure.
+ *
+ * Declared for exactly the reason `FIELD_GROUP_SURFACES` is, and the reason is
+ * sharper here because the first version of `openAssetReferences` had no such
+ * declaration and FAILED OPEN. It guarded on `count() === 0 → return` and then
+ * asserted `toHaveCount(0)` on the SAME selector, so a broken selector satisfied
+ * both: nothing was found, nothing was opened, nothing was asserted, and the a11y
+ * gate stayed green while a whole browser — the create form, the per-asset cards,
+ * the run-association controls — went unscanned at every viewport. Measured: the
+ * only visible effect was axe `passes` dropping 46 → 44, which no gate reads.
+ *
+ * `record-detail` is the bare `/record/<id>`, i.e. the Record Fields workspace,
+ * which is the one workspace that mounts the collapsed variant. The other record
+ * surfaces (`record-runs`, `record-capture`) mount no Asset References at all.
+ */
+export const ASSET_DISCLOSURE_SURFACES: ReadonlySet<string> = new Set(['record-detail']);
 
 export async function openUnreachableDisclosures(page: Page, surfaceId: string): Promise<void> {
   const technical = page.locator('details.stats-technical');
@@ -169,6 +197,47 @@ export async function openUnreachableDisclosures(page: Page, surfaceId: string):
   }
 
   await openDraftBlocks(page, surfaceId);
+  await openAssetReferences(page, surfaceId);
+}
+
+/**
+ * Open the Asset References disclosure on the surfaces that mount it.
+ *
+ * ── IT ASSERTS THAT IT OPENED SOMETHING, WHICH THE FIRST VERSION DID NOT ─────
+ *
+ * That version guarded on `count() === 0 → return` and then asserted
+ * `toHaveCount(0)` on the same selector, so BOTH steps were satisfied by finding
+ * nothing — a broken selector read exactly like a surface with no disclosure.
+ * `ASSET_DISCLOSURE_SURFACES` is what makes the difference checkable: on a surface
+ * that must mount one, finding none is a FAILURE rather than a quiet return.
+ *
+ * DESCENDANT SELECTORS, NOT CHILD COMBINATORS, for the reason `openDraftBlocks`
+ * records: the toggle is wrapped in an `<h2 class="fg-heading">` so the section is
+ * a heading landmark, and a `>` chain encodes that wrapper's exact depth. If a
+ * later change moves the button one element, a child chain stops matching and —
+ * without the positive assertion below — would fail open all over again.
+ */
+export async function openAssetReferences(page: Page, surfaceId: string): Promise<void> {
+  const COLLAPSED = '.assets-collapsible .fg-header[aria-expanded="false"]';
+  const toggle = page.locator(COLLAPSED);
+  const mounted = await toggle.count();
+  if (ASSET_DISCLOSURE_SURFACES.has(surfaceId)) {
+    expect(
+      mounted,
+      `surface "${surfaceId}" is declared in ASSET_DISCLOSURE_SURFACES ` +
+        '(e2e/helpers/disclosures.ts) but mounts no collapsed Asset References ' +
+        `disclosure matching "${COLLAPSED}". Either the panel stopped being mounted ` +
+        'collapsed there — in which case remove it from the set — or this selector ' +
+        'is broken, in which case a whole asset browser is silently exempt from every ' +
+        'axe scan at every viewport while the counts merely drift down.'
+    ).toBeGreaterThan(0);
+  }
+  if (mounted === 0) return;
+  await toggle.first().click();
+  await expect(page.locator(COLLAPSED)).toHaveCount(0);
+  /* AND THE BODY IS REALLY OPEN. `aria-expanded` moving is the button's claim
+     about itself; this is the thing axe will actually scan. */
+  await expect(page.locator('.assets-collapsible .fg-body').first()).toBeVisible();
 }
 
 /**
@@ -202,14 +271,21 @@ export async function openDraftBlocks(page: Page, surfaceId: string): Promise<vo
      the bound turns "a header that will not stay open" into a named failure instead of a
      hung scan at every viewport. One press each is `mounted` passes. */
   for (let pass = 0; pass < mounted; pass++) {
+    /* A DESCENDANT SELECTOR, NOT A CHILD ONE, and the change is load-bearing.
+       `FieldGroup`'s toggle is now wrapped in an `<h2 class="fg-heading">` so the
+       section is a heading landmark (it was measured invisible to heading
+       navigation). `>` stopped matching at that point — and it would have failed
+       OPEN rather than loudly: `count() === 0` reads as "nothing left to open",
+       so the loop would break immediately and every draft block would go
+       unscanned while this helper reported success. */
     const collapsed = page.locator(
-      'section[data-draft-block] > .fg-header[aria-expanded="false"]'
+      'section[data-draft-block] .fg-header[aria-expanded="false"]'
     );
     if ((await collapsed.count()) === 0) break;
     await collapsed.first().click();
   }
 
   await expect(
-    page.locator('section[data-draft-block] > .fg-header[aria-expanded="false"]')
+    page.locator('section[data-draft-block] .fg-header[aria-expanded="false"]')
   ).toHaveCount(0);
 }

@@ -63,7 +63,28 @@ test('attribute the DOM by class at a high run count', async ({ page, request, s
     report.push(`${label}: total=${total}\n  ${top.map(([c, n]) => `${c}×${n}`).join(', ')}`);
   };
 
-  await openRecord(page, TARGET);
+  /*
+   * ── THE `record` PROBE NOW MEASURES ONE WORKSPACE, NOT THE WHOLE SCREEN. ───
+   *
+   * `/record/<id>` used to be one column holding everything. It is now four
+   * lazily-mounted `?view=` workspaces, and this probe opens `runs` — so the
+   * number below counts the run list and Validate & Review, and counts NONE of:
+   *
+   *   · Record Fields — the four draft blocks, the Record Identity sections
+   *     (Rename, Record Description, Record Info, Relationships) and Asset
+   *     References;
+   *   · Capture & Proposals — transcript capture, unmapped notes, ingestion
+   *     proposals;
+   *   · Graph.
+   *
+   * SO THIS FIGURE IS NOT COMPARABLE TO ANY `record` NUMBER RECORDED BEFORE THAT
+   * SPLIT, including the ones in `docs/run-scale-measurements.md`. It is still the
+   * right probe for the question this bench asks — where the DOM goes as runs
+   * scale — because the run list is on this workspace; it is the wrong number to
+   * quote as "the record screen's DOM cost". Re-run the other three workspaces
+   * before making that claim, rather than adding this one to a remembered total.
+   */
+  await openRecord(page, TARGET, 'runs');
   await expect(page.getByRole('heading', { name: 'Runs', exact: true })).toBeVisible({
     timeout: 300_000,
   });

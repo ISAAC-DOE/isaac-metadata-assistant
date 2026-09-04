@@ -75,7 +75,7 @@ const outcome = (card: Locator) => panel(card).locator('.run-inherited-outcome')
 /* ── waiting ───────────────────────────────────────────────────────────────── */
 
 async function openRunsSection(page: Page, id: string) {
-  await openRecord(page, id);
+  await openRecord(page, id, 'runs');
   await expect(page.getByRole('heading', { name: 'Runs', exact: true })).toBeVisible();
   await expect(addRun(page)).toBeEnabled();
 }

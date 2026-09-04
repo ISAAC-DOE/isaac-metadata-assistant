@@ -2977,6 +2977,23 @@ export interface ApiProposalReviewed {
   experiment_version: string;
 }
 
+/**
+ * `POST .../proposals` — the create, which has TWO outcomes under ONE status.
+ *
+ * `deduplicated: false` means this request minted the proposal. `deduplicated:
+ * true` means one carrying the same `client_request_key` was already on the record,
+ * so the EXISTING one is returned, nothing was minted, and the record's `ETag` is
+ * unchanged. The operation deliberately answers `200` rather than `201`, because an
+ * operation that may mint nothing must not declare at the operation level that it
+ * creates — so the body is what says which of the two happened, and a caller that
+ * ignored this field would be reporting a create that did not occur.
+ */
+export interface ApiProposalCreated {
+  proposal: ApiProposal;
+  deduplicated: boolean;
+  experiment_version: string;
+}
+
 /* --------------------------------------------------------------------------
  * Transcript capture.
  *
@@ -3292,6 +3309,42 @@ export interface ApiCaptureRetention {
   raw_audio: { stored: boolean; reason: string };
 }
 
+/**
+ * ONE DURABLE PROPOSAL A CAPTURE STORED, paired to the candidate it came from.
+ *
+ * `candidate_index` and not a field path, because two candidates can share one path
+ * — a sentence giving two values for one field produces both, and the reader keeps
+ * both deliberately. Matching on the path would silently collapse them.
+ *
+ * `deduplicated` is PER ITEM. A capture is many creates, so a single flag for the
+ * batch would answer a question nobody asked.
+ */
+export interface ApiTranscriptMintedProposal {
+  candidate_index: number;
+  /**
+   * The server-composed idempotency key for this candidate. Published so a client
+   * that ALSO calls `createProposal` cannot mint a second proposal for it.
+   */
+  client_request_key: string | null;
+  deduplicated: boolean;
+  proposal: ApiProposal;
+}
+
+/**
+ * A candidate that got NO proposal, with the reason. Never an omission.
+ *
+ * Contract §5 **I6**: nothing captured is discarded. The words are stored as a note
+ * whatever appears here, and `error` is one of the server's typed reasons — a client
+ * renders `message` and does not compose one of its own.
+ */
+export interface ApiTranscriptUnproposable {
+  candidate_index: number;
+  field_path: string;
+  note_id: string | null;
+  error: string;
+  message: string;
+}
+
 export interface ApiTranscriptCapture {
   capture: {
     finalized: boolean;
@@ -3306,8 +3359,16 @@ export interface ApiTranscriptCapture {
   abstentions: ApiCaptureAbstention[];
   review_required: ApiCaptureReviewRequired[];
   notes: ApiNote[];
+  /** What the capture STORED, as opposed to what it read. */
+  proposals: ApiTranscriptMintedProposal[];
+  /** And what it did not, named rather than omitted. */
+  unproposable: ApiTranscriptUnproposable[];
   ambiguity_policy: { kind: string; outcome: ApiCaptureOutcome; rule: string }[];
-  /** The server's own statement of where accepting a candidate writes. */
+  /**
+   * The server's own statement of where accepting a candidate writes. It names
+   * `POST .../proposals/{proposal_id}/review` — NOT the run `PATCH` it named while
+   * candidates were unstored — and a client renders it rather than transcribing it.
+   */
   accept_contract: {
     method: string;
     path: string;

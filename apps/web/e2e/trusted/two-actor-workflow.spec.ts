@@ -73,6 +73,7 @@ import type { APIRequestContext, Page } from '@playwright/test';
 import {
   addRunThroughTheUi,
   createExperimentThroughTheUi,
+  switchWorkspace,
   expect,
   proposalCard,
   test,
@@ -268,9 +269,17 @@ test.describe('two scientists, one record, end to end', () => {
     // ── STEP 3 — A enters RECORD-level information through the website ────────
     const recordTarget = await deriveRecordTarget(request, server, id);
     /*
+     * A HOP TO RECORD FIELDS FIRST, THROUGH THE SIDEBAR, because that is where this
+     * panel lives. The record screen is four lazily-mounted `?view=` workspaces, and
+     * step 2 left A on Runs; `RecordDescriptionPanel` is on Record Fields. Clicked
+     * rather than navigated so the visit — and everything the page is holding — is
+     * one visit, which is what steps 6-7 depend on.
+     */
+    await switchWorkspace(page, 'fields');
+    /*
      * THE RECORD DESCRIPTION PANEL IS COLLAPSED ON FIRST PAINT, so it is opened by
      * its own disclosure header — not by a URL parameter and not by a state poke.
-     * It is mounted UNGATED at `RecordWorkbench.tsx:1063`, which is why a record with
+     * It is mounted UNGATED on the Record Fields workspace, which is why a record with
      * no exported artifact and (a moment ago) no runs still offers it.
      */
     const recordPanel = page.getByRole('region', {
@@ -289,6 +298,10 @@ test.describe('two scientists, one record, end to end', () => {
       .toEqual(recordTarget.chosen);
 
     // ── STEP 4 — A enters RUN-level variables for run one, through the website ─
+    // Back to Runs, where the cards are. The one A typed into in step 3 is still
+    // mounted behind this switch — that is the D1 guarantee — but it is not the
+    // surface this step acts on.
+    await switchWorkspace(page, 'runs');
     const runTarget = await deriveRunTarget(request, server, id);
     expect(
       new Set([runTarget.runOne, runTarget.runTwo, runTarget.proposed, runTarget.moved]).size,
@@ -316,6 +329,14 @@ test.describe('two scientists, one record, end to end', () => {
     await server.setRunField(id, runTwo.id, runTarget.path, runTarget.runTwo);
 
     // ── STEP 5 — A opens the proposal-review surface, and it is EMPTY ─────────
+    /*
+     * AND THIS IS NOW A REAL "OPENS", which the step name always claimed. The
+     * proposal-review surface is the Capture & Proposals workspace; it used to be
+     * further down the same column, so the step asserted a heading it had not
+     * navigated to. A opens it here and STAYS here for steps 6-17 — the live-arrival
+     * assertion in step 7 depends on no navigation happening after this point.
+     */
+    await switchWorkspace(page, 'capture');
     const proposals = page.getByRole('region', { name: 'Ingestion Proposals' });
     await expect(
       page.getByRole('heading', { name: 'Ingestion Proposals' }),
@@ -843,7 +864,6 @@ test.describe('two scientists, one record, end to end', () => {
 
     await page.reload();
     await expect(page.getByRole('heading', { name: 'Ingestion Proposals' })).toBeVisible();
-    await expect(page.locator('.run-card'), 'step 18: both runs survive a reload').toHaveCount(2);
     await expect(
       cardInState(page, runTarget.path, 'Accepted'),
       'step 18: the accepted proposal survives'
@@ -852,6 +872,22 @@ test.describe('two scientists, one record, end to end', () => {
       cardInState(page, recordTarget.path, 'Rejected'),
       'step 18: and so does the rejected one — a rejection is KEPT, not deleted'
     ).toBeVisible();
+    /*
+     * THE RUNS ARE READ ON THEIR OWN WORKSPACE, AND THE COUNT IS ASSERTED AS VISIBLE
+     * RATHER THAN AS PRESENT.
+     *
+     * The reload lands on `?view=capture`, where `RunsSection` is not mounted — so
+     * this assertion has to switch. It is also strengthened while it moves:
+     * `toHaveCount` counts the DOM and would pass over two hidden cards, which is
+     * exactly the state a reader would experience as the runs having vanished. Each
+     * card is asserted VISIBLE, which is the claim "both runs survive a reload"
+     * actually makes.
+     */
+    await switchWorkspace(page, 'runs');
+    const survivingRuns = page.locator('.run-card');
+    await expect(survivingRuns, 'step 18: both runs survive a reload').toHaveCount(2);
+    await expect(survivingRuns.nth(0)).toBeVisible();
+    await expect(survivingRuns.nth(1)).toBeVisible();
     expect(
       await server.recordFieldValue(id, recordTarget.path),
       'step 18: A’s record-level value survives'

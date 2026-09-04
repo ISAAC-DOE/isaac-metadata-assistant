@@ -33,8 +33,28 @@ describe('P33 HQA#5 — metadata groups default to collapsed', () => {
     for (const h of headers) {
       expect(h.getAttribute('aria-expanded')).toBe('false');
     }
-    // no group body is rendered while all are collapsed
-    expect(container.querySelector('.fg-body')).toBeNull();
+    /* NO GROUP BODY IS SHOWN while all are collapsed.
+     *
+     * ~~`expect(container.querySelector('.fg-body')).toBeNull()`~~ — CORRECTED, and
+     * the correction narrows the claim rather than weakening it. `FieldGroup` and the
+     * three identity panels render their body CONDITIONALLY, so for them "absent" and
+     * "not shown" coincide. Asset References does not: its collapsed mount keeps the
+     * browser MOUNTED behind `hidden` on purpose, because that is what makes the count
+     * on its own header a real read rather than a guess (see its header). A DOM-absence
+     * assertion would therefore have failed for a reason that has nothing to do with
+     * what this test is about, and passing it by exempting that section would have
+     * stopped checking it. `hidden` is what a reader can tell, and it is what is
+     * asserted — for every body, including the ones that are absent. */
+    const bodies = Array.from(container.querySelectorAll('.fg-body'));
+    /* A NON-EMPTY GUARD, because a `for` over nothing asserts nothing. If every
+       `.fg-body` stopped being rendered — the mount vanishing, the class being
+       renamed — the loop below would pass over an empty list and this test would
+       report that no group body is shown, which is true and useless. */
+    expect(bodies.length, 'no .fg-body was rendered at all, so the loop below is vacuous')
+      .toBeGreaterThan(0);
+    for (const body of bodies) {
+      expect((body as HTMLElement).hidden).toBe(true);
+    }
   });
 
   it('expanding a group works and does not collapse the others (not an accordion)', async () => {

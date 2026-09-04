@@ -442,12 +442,20 @@ export function flushPending(experimentId: string, runId: string): void {
  *
  * WHY IT EXISTS. `flushPending` used to be reached only from a card's unmount
  * teardown, and the one gesture that reliably unmounted every card was switching the
- * record's view tab — which is exactly the gesture that has stopped unmounting them
- * (`RecordWorkbench` now keeps the fields panel mounted and hides it, because the
- * unmount was destroying every unsaved textarea on the screen). Losing the flush with
- * it would have been a silent regression in the OTHER direction: the store keeps the
- * debounce alive, so the edit still goes out eventually, but between the switch and
- * the timer a closed tab loses it, and that window is what the flush closes.
+ * record's ~~view tab~~ WORKSPACE — which is exactly the gesture that has stopped
+ * unmounting them (`RecordWorkbench` keeps each workspace panel mounted and hides
+ * it, because the unmount was destroying every unsaved textarea on the screen).
+ * Losing the flush with it would have been a silent regression in the OTHER
+ * direction: the store keeps the debounce alive, so the edit still goes out
+ * eventually, but between the switch and the timer a closed tab loses it, and that
+ * window is what the flush closes.
+ *
+ * "view tab" is struck rather than edited because the CONTROL changed as well as the
+ * word: the record screen's `.section-tabs` bar was retired and the four workspaces
+ * (`fields` · `runs` · `capture` · `graph`) are now a `<Link>` list in the record's
+ * own sidebar. `RecordWorkbench` calls this on the link's click AND from an effect
+ * on the active workspace changing, so browser Back and Forward — which the switch
+ * is now a real push into — reach it too.
  *
  * So the property is preserved rather than carried by the unmount that used to
  * provide it: the view switch flushes explicitly. `flushPending`'s own guards still
