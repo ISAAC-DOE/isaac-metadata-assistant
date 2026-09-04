@@ -3,9 +3,12 @@
  * truth about itself.
  *
  * THE ORDER OF THE CONTROLS IS THE ORDER OF THE WORKFLOW, and it is not a layout
- * preference: choose the run, write or dictate the notes, finalize them, review
- * what was proposed, accept one at a time. A control that appears before the step
- * it belongs to invites the step to be skipped.
+ * preference: choose the run, write or dictate the notes, finalize them, read what
+ * was proposed and what was stored. ~~accept one at a time~~ — the last step USED to
+ * be "accept one at a time" and it is struck rather than deleted because the
+ * paragraph two below explains why that control is gone; accepting now happens on
+ * the proposals surface, not here. A control that appears before the step it belongs
+ * to invites the step to be skipped.
  *
  * THREE THINGS THIS COMPONENT WILL NOT DO
  * =======================================
@@ -14,12 +17,20 @@
  * `onChange` that calls the server. `captureTranscript` is reachable from exactly
  * one button, and the server refuses a body without `finalized: true` in any case.
  *
- * **It never writes a value by itself.** Accepting a proposal calls
- * `api.updateRun` — the existing confirmed-edit path, with the RUN's own
- * `If-Match` — from a control the reader activated. There is no second write
- * path here and no batch "accept all": accepting is one decision about one value,
- * and a control that made five of them at once would be a confirmation nobody
- * gave five times.
+ * **It never writes a value by itself, and it no longer accepts one either.**
+ * This paragraph used to read: "Accepting a proposal calls `api.updateRun` — the
+ * existing confirmed-edit path, with the RUN's own `If-Match` — from a control the
+ * reader activated." That control is GONE. It was correct while a candidate lived
+ * only in this component's state, and it is the thing that made a candidate perish
+ * on navigation: the value could only be accepted by the one tab holding it, and
+ * a colleague could not see it at all.
+ *
+ * Finalizing now mints a DURABLE ingestion proposal per candidate, server-side,
+ * in the same lock and the same save as the notes. This panel therefore lists what
+ * was stored and says where it is reviewed; it calls no write path of its own, so
+ * the claim above is now structural rather than a promise about one function. The
+ * separate proposals surface is where a person accepts or rejects — which is also
+ * what makes a rejection a recorded act instead of a click nobody else can see.
  *
  * **It never claims a capability the deployment does not have.** The transcription
  * status is rendered from `GET /api/providers/capabilities` and from the refusal
@@ -46,7 +57,6 @@ import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 
 import { ApiError, api, providerRefusalOf } from '../lib/api';
 import { mutationFailureCopy } from '../lib/mutationErrors';
-import { RUN_FIELDS, envelopeValue, parseRunField } from '../lib/runFields';
 import {
   CAPTURE_COPY,
   CAPTURE_GUIDANCE_EXAMPLE,
@@ -57,11 +67,12 @@ import {
   markCaptureGuidanceSeen,
 } from '../lib/transcriptCapturePreference';
 import type {
-  ApiFieldCandidate,
   ApiProviderCapabilities,
   ApiProviderRefusal,
   ApiRunView,
   ApiTranscriptCapture,
+  ApiTranscriptMintedProposal,
+  ApiTranscriptUnproposable,
 } from '../lib/types';
 import { DiscardStaged } from './DiscardStaged';
 import { DISCARD_COPY } from '../lib/discardContent';
@@ -82,17 +93,8 @@ const FALLBACK = {
   transcription: 'The transcription request could not be completed. No audio was sent and nothing was changed.',
   finalize:
     'This transcript was NOT stored and nothing was read from it. Your text is still in the box above.',
-  accept:
-    'This value was NOT written to the run. The run holds what it held before, and the words behind the proposal are still stored as a note.',
-  undo: 'The run was NOT changed back. It still holds the value that was accepted.',
   createRun: 'No run was created. Nothing else was changed.',
 } as const;
-
-/** One reader decision about one proposal. `previous` is what the run held before. */
-interface Decision {
-  state: 'accepted' | 'rejected';
-  previous?: unknown;
-}
 
 /** Whether this browser can record at all. Asked, never assumed. */
 function audioRecordingAvailable(): boolean {
@@ -100,10 +102,6 @@ function audioRecordingAvailable(): boolean {
   const recorder = (window as { MediaRecorder?: unknown }).MediaRecorder;
   const devices = typeof navigator === 'undefined' ? undefined : navigator.mediaDevices;
   return typeof recorder === 'function' && typeof devices?.getUserMedia === 'function';
-}
-
-function specFor(fieldPath: string) {
-  return RUN_FIELDS.find((entry) => entry.path === fieldPath);
 }
 
 /** A proposal rendered for a human. Never `[object Object]`, never invented. */
@@ -140,8 +138,6 @@ export function TranscriptCapturePanel({ experimentId }: { experimentId: string 
   const [selectedRun, setSelectedRun] = useState('');
   const [text, setText] = useState('');
   const [reading, setReading] = useState<ApiTranscriptCapture | null>(null);
-  const [decisions, setDecisions] = useState<Record<number, Decision>>({});
-  const [edits, setEdits] = useState<Record<number, string>>({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [announcement, setAnnouncement] = useState<string>('');
@@ -254,16 +250,14 @@ export function TranscriptCapturePanel({ experimentId }: { experimentId: string 
    */
   useEffect(() => {
     setReading(null);
-    setDecisions({});
     setSelectedRun('');
     setText('');
-    /* `edits` belongs to the CANDIDATES of the record that was open — it is keyed by
-       their position in that record's proposal list — so it belongs in this reset with
-       them. It was missing, and while nothing rendered the stale entries (a proposal row
-       needs `reading`, and `finalize` clears the map before setting it), they were enough
-       to make `hasStagedCapture` true on the next record. Found in review of the Discard
-       slice, which is what first made that leak visible. */
-    setEdits({});
+    /* `decisions` and `edits` were reset here too and are GONE rather than left as
+       dead setters: both existed for the in-panel Accept control, which no longer
+       exists. The `edits` entry in particular was a review fix — it survived a record
+       change and made the Discard trigger offer to clear something the reader could
+       not see — so it is recorded here that the leak was closed by deleting the state,
+       not by forgetting the fix. */
   }, [experimentId]);
 
   useEffect(() => {
@@ -379,15 +373,19 @@ export function TranscriptCapturePanel({ experimentId }: { experimentId: string 
         ...(selectedRun ? { runId: selectedRun } : {}),
       });
       setReading(payload);
-      setDecisions({});
-      setEdits({});
       setExperimentVersion(payload.experiment_version);
       // The transcript stays in the box on purpose. It is stored with the record
       // either way, and clearing it would make a reader who wants to correct a
       // sentence retype the lot.
+      //
+      // THE ANNOUNCEMENT COUNTS WHAT WAS STORED, NOT WHAT WAS READ, and the two can
+      // differ: a candidate the server could not turn into a proposal is reported
+      // under `unproposable`, and saying "2 proposed" over one stored proposal would
+      // be the panel claiming an act the server declined. Both numbers are said.
       setAnnouncement(
         `Finalized. ${payload.capture.segments} segment(s) stored with this record, ` +
-          `${payload.candidates.length} value(s) proposed.`,
+          `${payload.candidates.length} value(s) read, ` +
+          `${payload.proposals.length} stored as proposal(s) for review.`,
       );
       await loadRuns();
     } catch (cause: unknown) {
@@ -398,82 +396,38 @@ export function TranscriptCapturePanel({ experimentId }: { experimentId: string 
     }
   }
 
-  /* ---- accept / reject / undo -------------------------------------------- */
+  /* ---- what the capture stored ------------------------------------------- */
 
-  const targetRun = useMemo(
-    () => runs.find((run) => run.id === (reading?.capture.run_id ?? '')) ?? null,
-    [runs, reading],
-  );
+  /*
+   * THERE IS NO ACCEPT, REJECT, EDIT OR UNDO HERE ANY MORE, AND NO WRITE PATH AT
+   * ALL. `writeField`, `accept`, `reject` and `undo` all lived here and all called
+   * `api.updateRun`; between them they were the only way to act on a candidate, and
+   * they were reachable from exactly one tab, for exactly as long as that tab stayed
+   * on this screen.
+   *
+   * The server now stores a durable proposal per candidate in the same save as the
+   * notes, so acting on one is the proposals surface's job — where the act is
+   * recorded, a rejection has a reason, and a colleague can see the queue. This
+   * section is READ-ONLY: it pairs each candidate with what the server said it did
+   * with it, and nothing below issues a request.
+   *
+   * A SEPARATE SLICE REBUILDS THIS PANEL'S INTERACTION. What is here is the minimum
+   * that is TRUE — deliberately not a redesign, because a redesign made in the same
+   * change as a contract move is a redesign nobody can review against the contract.
+   */
 
-  async function writeField(fieldPath: string, value: unknown) {
-    if (!targetRun) throw new Error('no run');
-    const written = await api.updateRun(
-      experimentId,
-      targetRun.id,
-      { fields: { [fieldPath]: value } },
-      targetRun.version,
-    );
-    setRuns((current) =>
-      current.map((run) => (run.id === written.run.id ? written.run : run)),
-    );
-  }
+  const mintedByCandidate = useMemo(() => {
+    const map = new Map<number, ApiTranscriptMintedProposal>();
+    for (const entry of reading?.proposals ?? []) map.set(entry.candidate_index, entry);
+    return map;
+  }, [reading]);
 
-  async function accept(index: number, candidate: ApiFieldCandidate) {
-    setBusy(true);
-    setError(null);
-    const spec = specFor(candidate.field_path);
-    const raw = edits[index];
-    let value: unknown = candidate.proposed_value;
-    if (spec && raw !== undefined) {
-      const parsed = parseRunField(spec, raw);
-      if (!parsed.ok) {
-        setError(parsed.error);
-        setBusy(false);
-        return;
-      }
-      value = parsed.value;
-    }
-    const previous = envelopeValue(targetRun?.fields?.[candidate.field_path]);
-    try {
-      await writeField(candidate.field_path, value);
-      setDecisions((current) => ({ ...current, [index]: { state: 'accepted', previous } }));
-      setAnnouncement(`${candidate.field_path}: ${CAPTURE_COPY.accepted}`);
-    } catch (cause: unknown) {
-      setError(mutationFailureCopy(cause, FALLBACK.accept));
-      if (cause instanceof ApiError && cause.status === 412) await loadRuns();
-    } finally {
-      setBusy(false);
-    }
-  }
+  const unproposableByCandidate = useMemo(() => {
+    const map = new Map<number, ApiTranscriptUnproposable>();
+    for (const entry of reading?.unproposable ?? []) map.set(entry.candidate_index, entry);
+    return map;
+  }, [reading]);
 
-  function reject(index: number, candidate: ApiFieldCandidate) {
-    setDecisions((current) => ({ ...current, [index]: { state: 'rejected' } }));
-    setAnnouncement(`${candidate.field_path}: ${CAPTURE_COPY.rejected}`);
-  }
-
-  async function undo(index: number, candidate: ApiFieldCandidate) {
-    const decision = decisions[index];
-    if (!decision || decision.state !== 'accepted') return;
-    setBusy(true);
-    setError(null);
-    try {
-      // The SAME write path, with the value the run held before — `null` clears
-      // the field, which is the contract's own meaning and is what "it held
-      // nothing before" honestly restores.
-      await writeField(candidate.field_path, decision.previous ?? null);
-      setDecisions((current) => {
-        const next = { ...current };
-        delete next[index];
-        return next;
-      });
-      setAnnouncement(`${candidate.field_path}: ${CAPTURE_COPY.undone}`);
-    } catch (cause: unknown) {
-      setError(mutationFailureCopy(cause, FALLBACK.undo));
-      if (cause instanceof ApiError && cause.status === 412) await loadRuns();
-    } finally {
-      setBusy(false);
-    }
-  }
 
   async function createRun() {
     setBusy(true);
@@ -515,47 +469,24 @@ export function TranscriptCapturePanel({ experimentId }: { experimentId: string 
    *     was typed. Clearing it would hide the panel's own record of what was stored
    *     with the record moments earlier, which is the disclosure a reader most needs
    *     at exactly that moment.
-   *   * `decisions` holds the Undo path for proposals that were ACCEPTED — values
-   *     already written to the run through `api.updateRun`. Dropping that map would
-   *     take away the only control that reverses a real write, in the name of
-   *     discarding something unsent. A control that quietly removed a remedy would be
-   *     doing the opposite of what it says.
+   *
+   * IT USED TO REACH `edits` TOO, AND `edits` IS GONE — with the Accept control it
+   * belonged to. Two review fixes lived on that map (it survived a record change, and
+   * it outlived the row that rendered it, both leaving Discard offering to clear
+   * something invisible); they are recorded here rather than dropped, because the
+   * defect they closed is a property of "offer a control only for state the reader can
+   * see", not of that one map. `text` is now the whole of what Discard reaches, so the
+   * predicate is the plainest form of that rule.
    *
    * The copy branches on the same condition for the same reason: once a finalize has
    * landed, the words ARE stored with the record as notes, and a sentence saying
    * nothing has been sent would be false. See `lib/discardContent.ts`.
    */
-  /*
-   * `edits` COUNTS ONLY WHILE THE PROPOSALS IT EDITS ARE ON SCREEN, and the guard is a
-   * review fix rather than belt-and-braces. An `edits` entry is only reachable, and only
-   * rendered, from a proposal row — and those exist only while `reading !== null`. The
-   * map survived a record change (the reset below did not clear it), so a reader who
-   * edited a proposal on one record and moved to another met a Discard trigger over an
-   * EMPTY box, offering to clear something they could not see, under the copy that says
-   * "This clears the transcript box". The reset now drops the map as well; tying the
-   * predicate to what is rendered is the structural half of the same fix, so the control
-   * can never be offered for state the branch below is not describing.
-   *
-   * `reading !== null` WAS NOT THE WHOLE OF "ON SCREEN", and this is the second half of
-   * that fix, found in independent review of the first. The edit `<input>` renders only
-   * on the `decision === undefined` branch of a candidate row — accepting or rejecting a
-   * proposal unmounts it and NEITHER `accept` NOR `reject` deletes its `edits` entry. So
-   * a reader who typed over a proposal, accepted it, and then emptied the transcript box
-   * by hand was still offered "Discard this transcript" with an empty box and no visible
-   * edit anywhere: a control offering to clear state the reader cannot see, which is the
-   * exact defect the paragraph above claims to have closed. An entry counts only while
-   * the row that renders it is still undecided.
-   */
-  const stagedEditCount =
-    reading === null
-      ? 0
-      : Object.keys(edits).filter((index) => decisions[Number(index)] === undefined).length;
-  const hasStagedCapture = text !== '' || stagedEditCount > 0;
+  const hasStagedCapture = text !== '';
   const discardCopy =
     reading === null ? DISCARD_COPY.transcriptUnsent : DISCARD_COPY.transcriptAfterFinalize;
   const discardStagedCapture = () => {
     setText('');
-    setEdits({});
   };
 
   /* ---- render ------------------------------------------------------------ */
@@ -803,21 +734,43 @@ export function TranscriptCapturePanel({ experimentId }: { experimentId: string 
         <div className="capture-reading">
           <h3 className="capture-subhead">{CAPTURE_COPY.candidatesHeading}</h3>
           <p className="capture-note">{CAPTURE_COPY.candidateNotAValue}</p>
+          {/* THE BLANKET "every one of them is stored" CLAIM IS CONDITIONAL, and the
+              condition is the server's own `unproposable` list being empty. Rendered
+              unconditionally it stood above rows the server had just declined to
+              store — reachable in production through `too_many_proposals` and
+              `proposals_too_large` — asserting storage one line above the sentence
+              that denied it. Each row still carries its own label either way, which
+              is what the lead paragraph now describes rather than claims. */}
+          {reading.unproposable.length === 0 && reading.candidates.length > 0 && (
+            <p className="capture-note">{CAPTURE_COPY.candidatesAllStored}</p>
+          )}
           {reading.candidates.length === 0 ? (
             <p className="capture-note">{CAPTURE_COPY.candidatesEmpty}</p>
           ) : (
             <ul className="capture-candidates">
               {reading.candidates.map((candidate, index) => {
-                const decision = decisions[index];
-                const spec = specFor(candidate.field_path);
-                const conflicted = reading.review_required.some((entry) =>
+                const minted = mintedByCandidate.get(index);
+                const refused = unproposableByCandidate.get(index);
+                const conflicts = reading.review_required.filter((entry) =>
                   entry.candidate_indexes.includes(index),
+                );
+                const conflicted = conflicts.length > 0;
+                /* WHETHER "Both are stored" IS TRUE OF THIS CONFLICT, measured over
+                   every candidate the conflict names rather than assumed. A conflict
+                   in which one side was refused (`too_many_proposals`,
+                   `proposals_too_large`) used to be told "Both are stored" anyway. */
+                const conflictAllStored = conflicts.every((entry) =>
+                  entry.candidate_indexes.every((other) => mintedByCandidate.has(other)),
                 );
                 return (
                   <li
                     className="capture-candidate"
                     key={`${candidate.field_path}-${candidate.start_char}-${index}`}
-                    data-state={decision?.state ?? 'open'}
+                    /* `stored` / `refused` / `unaccounted`, and never `open`. There is
+                       no undecided state on this screen any more: the server has
+                       already said what it did with each candidate by the time this
+                       renders. */
+                    data-state={minted ? 'stored' : refused ? 'refused' : 'unaccounted'}
                   >
                     <p className="capture-candidate-path">{candidate.field_path}</p>
                     <p className="capture-candidate-value">
@@ -827,68 +780,30 @@ export function TranscriptCapturePanel({ experimentId }: { experimentId: string 
                     <p className="capture-candidate-rule">{candidate.rule}</p>
                     {conflicted && (
                       <p className="capture-candidate-conflict">
-                        This transcript proposes another value for the same field.
-                        Accept at most one.
+                        {conflictAllStored
+                          ? CAPTURE_COPY.conflictBothStored
+                          : CAPTURE_COPY.conflictNotAllStored}
                       </p>
                     )}
-                    {decision?.state === 'accepted' ? (
+                    {minted ? (
                       <p className="capture-candidate-state">
-                        <span aria-hidden="true">✓ </span>
-                        {CAPTURE_COPY.accepted}{' '}
-                        <button
-                          type="button"
-                          className="btn btn-secondary"
-                          onClick={() => undo(index, candidate)}
-                          disabled={busy}
-                        >
-                          {CAPTURE_COPY.undo}
-                        </button>
+                        {minted.deduplicated
+                          ? CAPTURE_COPY.proposalAlreadyStored
+                          : CAPTURE_COPY.proposalStored}
                       </p>
-                    ) : decision?.state === 'rejected' ? (
-                      <p className="capture-candidate-state">
-                        <span aria-hidden="true">— </span>
-                        {CAPTURE_COPY.rejected}
-                      </p>
+                    ) : refused ? (
+                      /* THE SERVER'S OWN SENTENCE, not one composed here. A reason
+                         written in this bundle would be this client explaining a
+                         refusal it did not make. */
+                      <p className="capture-candidate-state">{refused.message}</p>
                     ) : (
-                      <div className="capture-candidate-actions">
-                        {spec && (
-                          <>
-                            <label
-                              className="capture-label"
-                              htmlFor={`${ids}-edit-${index}`}
-                            >
-                              {CAPTURE_COPY.edit}
-                            </label>
-                            <input
-                              id={`${ids}-edit-${index}`}
-                              className="capture-control"
-                              value={edits[index] ?? displayValue(candidate.proposed_value)}
-                              onChange={(event) =>
-                                setEdits((current) => ({
-                                  ...current,
-                                  [index]: event.target.value,
-                                }))
-                              }
-                            />
-                          </>
-                        )}
-                        <button
-                          type="button"
-                          className="btn btn-primary"
-                          onClick={() => accept(index, candidate)}
-                          disabled={busy || targetRun === null}
-                        >
-                          {CAPTURE_COPY.accept}
-                        </button>
-                        <button
-                          type="button"
-                          className="btn btn-secondary"
-                          onClick={() => reject(index, candidate)}
-                          disabled={busy}
-                        >
-                          {CAPTURE_COPY.reject}
-                        </button>
-                      </div>
+                      /* UNREACHABLE IF THE SERVER KEEPS ITS PROMISE — every candidate
+                         index appears in exactly one of the two lists — and rendered
+                         anyway, because the alternative to a sentence here is a row
+                         that silently says nothing about what happened to a value. */
+                      <p className="capture-candidate-state">
+                        {CAPTURE_COPY.proposalMissing}
+                      </p>
                     )}
                   </li>
                 );
@@ -968,11 +883,18 @@ export function TranscriptCapturePanel({ experimentId }: { experimentId: string 
             ))}
           </ul>
           <p className="capture-note">
-            {reading.accept_contract.message} Accepting writes through{' '}
+            {/* THE SERVER'S OWN SENTENCE AND THE SERVER'S OWN ROUTE. This panel used
+                to print the contract beside an Accept button it owned; the button is
+                gone and the contract is still printed, because a reader who wants to
+                know where their proposal can be accepted should not have to find out
+                by clicking something. Neither the method nor the path is transcribed
+                here — a second copy in this bundle would be free to drift from the
+                operation that enforces it. */}
+            {reading.accept_contract.message} Accepting one happens through{' '}
             <code>
               {reading.accept_contract.method} {reading.accept_contract.path}
             </code>
-            .
+            , which is what the Ingestion Proposals surface calls.
           </p>
         </div>
       )}

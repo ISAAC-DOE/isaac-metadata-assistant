@@ -396,6 +396,40 @@ export function useChangeFeed(
           // for again on the next poll. The failure is loud (it counts toward
           // `degraded`) and it is lossless, which is the pair worth having. Nothing
           // below this line can run without the entries having been delivered.
+          // A PAGE THIS CLIENT CANNOT READ IS REFUSED WHOLE, NOT PARTLY BELIEVED,
+          // AND THE TWO HALVES OF THE CHECK FAIL IN DIFFERENT DIRECTIONS.
+          //
+          // The types say `changes: ApiChangeEntry[]` and `next_cursor: string`, and
+          // the types describe the CONTRACT rather than the bytes: this runs on
+          // whatever a deployment, a proxy, or a partially-written response actually
+          // sent. Neither half was checked, and each had its own failure.
+          //
+          //   * `changes` NOT AN ARRAY. `"abc".length > 0` is true, so a string body
+          //     was handed to the consumer AS the entries, and a consumer that
+          //     iterates would invent one claim per character — the same defect
+          //     `CLAUDE.md` §11 records on the server for `enumerate("abc")`, which
+          //     "would invent three per-position claims the draft never made".
+          //   * `next_cursor` MISSING. `cursorRef.current = undefined` sends the NEXT
+          //     poll with no cursor at all, which the server answers from the FLOOR of
+          //     the feed — so one malformed reply silently redelivers the record's
+          //     whole change history as though it were new, on a loop. That is the
+          //     duplicate-effect hazard this hook's ordering is otherwise careful
+          //     about, arriving through the one line that was not guarded.
+          //
+          // THROWING IS THE RECOVERY, and it is deliberately the same path a network
+          // failure takes: the cursor is NOT advanced, so the identical page is asked
+          // for again; the failure counts toward `degraded`, so a surface says the
+          // feed is not updating instead of looking current; and the backoff decays
+          // the retry rate to the 60 s ceiling rather than wedging a fast drain loop.
+          // Nothing is skipped and nothing is guessed at — the alternative, treating
+          // an unreadable page as empty and advancing past it, would lose every entry
+          // it contained and report success.
+          if (!Array.isArray(page.changes) || typeof page.next_cursor !== 'string') {
+            throw new Error(
+              'the change feed returned a page this client cannot read: it is ' +
+                'refused rather than partly believed, and the cursor is unmoved.',
+            );
+          }
           if (page.changes.length > 0) onChangesRef.current(page.changes);
 
           failures = 0;

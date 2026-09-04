@@ -323,18 +323,96 @@ and nothing is blocked on them.
   split one save's entities across two pages, making that inference unsound. The sound fix is a
   server-side revision discriminator so a proposal-only act need not refetch the whole record
   bundle; tracked, not built.
-- **`RUN_LIST_LIMIT_MAX` / `RUN_PAGE_MAX` literal duplication is untested.** #222's redesign
+
+  **INVESTIGATED AND MEASURED 2026-09-03. The item is UNCHANGED as a residue — nothing was
+  built — but it is no longer a design sketch, and one thing it did not say is now measured
+  and is the load-bearing part.** Measured over HTTP at `6ce3f5c`, on a record with one run
+  and one note:
+
+  | act | record `rev` | served-detail fields that differ | bundle members changed |
+  |---|---|---|---|
+  | `POST .../proposals` | 2 → 3 | `/rev`, `/version`, `/workflow/record_rev` | **none** |
+  | note `edit` review | 2 → 3 | `/rev`, `/version`, `/workflow/record_rev` | `notes` |
+
+  Also measured: the authoritative signature *minus* `proposals` is **byte-identical** across
+  the proposal act, and `GET /api/experiments/{id}` with the pre-proposal `If-None-Match`
+  answers **200**, not 304 — so `useRecordSync` fires, `handleChanged` runs,
+  `RecordWorkbench`'s `onChange` calls `bundle.reloadSilent()`, and the whole bundle is
+  refetched.
+
+  **THE ROW THAT MATTERS IS THE SECOND ONE, AND IT KILLS THE CHEAP FIX.** The obvious
+  client-side shortcut — "if the fresh detail differs from the held one only in the version
+  fields, skip the refetch" — is **unsound, by measurement rather than by caution**: a
+  note-text edit produces the *identical* three-field delta while changing a bundle member.
+  Every derived summary the detail carries (`status`, `draft_ok`, `pending_count`,
+  `evidenced_field_count`, `workflow`) is unmoved by both. So no inference over what the
+  server already publishes can separate them, which is precisely why the discriminator has to
+  be **served**.
+
+  **THE SERVER HALF IS SOUND AND IS SPECIFIED HERE so it is not re-derived.** A stored
+  `content_rev` on the experiment, maintained exactly as `proposal_change_revs` already is:
+  a `_content_signature` (the authoritative payload **minus** `proposals`), a
+  `_bump_content_rev(next_rev)` called only on `save_versioned`'s write branch, the field
+  rolled back with the others on a refused write, persisted in the state document (**no table,
+  no migration** — it sits beside `proposal_change_revs`), hydrating to `rev` when absent so a
+  legacy document over-reports at most once. It carries **no page-boundary unsoundness**,
+  which is the objection #224 raised: it is an ABSOLUTE stored position on the entity, not an
+  inference from which entities happened to share a page.
+
+  **WHY IT IS NOT BUILT HERE, named rather than implied.** The client half is not a
+  comparison — it is a *version-adoption* problem. `useRecordSession` does not own `version`;
+  it reads it straight off the bundle's `detail` (`const version = detail?.version`). Skipping
+  `reloadSilent()` therefore leaves `version` stale, so `useRecordSync` would answer 200 on
+  **every** subsequent poll and every `If-Match` write would meet 412 — strictly worse than
+  the refetch it saves. Consuming the discriminator needs either a data-adoption seam on
+  `useFetch` (a generic hook used across the app) or a second owner of the authoritative
+  token inside `useRecordSession` — which that module's own header exists to forbid
+  ("behind one authoritative `version`/`recordRev`") — plus a change to `RecordWorkbench`'s
+  `onChange`. Shipping the served field with no consumer would be the shape this repository
+  has already deleted once (`api.getProposal`, *"dead code kept alive by a counter is worse
+  than a smaller counter"*). **So: sound, specified, and deliberately not half-built.**
+- ~~**`RUN_LIST_LIMIT_MAX` / `RUN_PAGE_MAX` literal duplication is untested.** #222's redesign
   (`5205496` I2) mirrors the server's `RUN_PAGE_MAX = 200` as a client-side `RUN_LIST_LIMIT_MAX`
   literal rather than reading it from the server; nothing pins the two values against drifting
-  apart.
+  apart.~~ — **CLOSED 2026-09-03**, and struck rather than deleted because "nothing pins this"
+  is a claim a future session acts on. `apps/api/tests/test_run_page_bound_parity.py` asserts
+  all three expressions of the one bound agree: the Python constant, the `maximum` FastAPI
+  derives from it onto the served `limit` parameter, and the TypeScript literal — failing with
+  both numbers named so the message says which side moved. `runPaging.ts`'s own docstring,
+  which named this gap, is corrected in place. **The DUPLICATION is not closed, only the
+  DRIFT:** serving the bound and reading it needs `RunsSection`'s over-the-cap decision to
+  change, which belongs to a slice that owns that component.
 - **The change-feed burst budget is still not refilled at the row ceiling, by design.** #221 fixed
   the cliff at and past the budget; it did not add a refill mechanism, so a client that stays caught
   up for a long session still eventually pays the 8 s cadence rather than ever re-entering burst
   mode. Recorded as intended behaviour, not a defect, but worth naming so a future session does not
   "fix" it without re-deriving why.
-- **At-least-once delivery / poison-page semantics of the feed consumer are unexamined.** No test in
+- ~~**At-least-once delivery / poison-page semantics of the feed consumer are unexamined.** No test in
   this session's PRs establishes what happens if the same page is delivered twice, or if a
-  malformed page can wedge the drain loop permanently rather than just slowly.
+  malformed page can wedge the drain loop permanently rather than just slowly.~~ — **EXAMINED AND
+  CLOSED 2026-09-03, and it was not only a documentation gap: the sweep found a real defect with
+  two halves, both in the one unguarded line of `useChangeFeed`.**
+
+  `cursorRef.current = page.next_cursor` and `page.changes.length > 0` both trusted the wire to
+  match the type. **(i)** `changes` not an array — `"abc".length > 0` is `true`, so a string body
+  was handed to the consumer AS the entries, and a consumer that iterates would invent one claim
+  per character (the same defect `CLAUDE.md` §11 records server-side for `enumerate("abc")`).
+  **(ii)** `next_cursor` missing — the cursor became `undefined`, so the next poll carried none and
+  the server answered from the **floor of the feed**: one malformed reply silently redelivered the
+  record's entire change history as though it were new, on every subsequent poll. That is the
+  duplicate-effect hazard the hook's careful deliver-then-adopt ordering exists to prevent,
+  arriving through the one line that was not guarded.
+
+  The page is now refused whole when either half fails, which takes the same path a network
+  failure takes: **the cursor is not advanced** (so nothing is skipped and the same page is asked
+  for again), the failure counts toward `degraded` (so a surface stops claiming to be current),
+  and the backoff decays the retry to the 60 s ceiling rather than wedging a fast drain loop.
+  Seven tests in `change-feed.test.ts` §8 pin it (counted in the file: the `it(` blocks
+  under `describe('useChangeFeed — at-least-once delivery and poison pages')`), and both halves of the guard were
+  **mutation-checked**: deleting the `Array.isArray` clause turns two RED, deleting the
+  `typeof next_cursor` clause turns one RED. The section also states out loud what the feed IS —
+  **at-least-once, not exactly-once** — with a test asserting the duplicate page is delivered
+  twice and moves the cursor only forward, so a future dedupe cannot land silently.
 - **`isaac_runs` Stage 2b** and an apply route for `POST /ingestion/csv/preview` remain unchanged —
   the latter is a committed human decision (CLAUDE.md §15), not residual work.
 - **PR #226 has MERGED, as `fd179f2`**, since the previous pass of this document. Its wiring

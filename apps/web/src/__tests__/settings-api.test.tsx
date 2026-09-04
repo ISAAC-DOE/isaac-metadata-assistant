@@ -2197,7 +2197,31 @@ describe('the Full Description rule over the REAL generated contract', () => {
     // operations 133,268, minus 2 per `\n\n` separator (254 x 2 = 508) = 132,760;
     // and the same figure off the transcribed array, which is what `total` sums. The
     // entry was re-transcribed from `create_app().openapi()` by script.
-    expect(total).toBe(132760);
+    // ── TRANSCRIPT CAPTURE MINTS PROPOSALS, 2026-09-03. 132,760 -> 133,555 (+795),
+    // and again BOTH the operation count (77) and the POST-LEAD PARAGRAPH COUNT (254)
+    // hold. `POST .../transcript` now stores a durable ingestion proposal per
+    // candidate, so its description's two false claims had to go — that a candidate
+    // "is not stored anywhere", and that accepting one happens through
+    // `PATCH .../runs/{run_id}` — and the two new response keys had to be named.
+    //
+    // EVERY WORD WAS WOVEN INTO AN EXISTING PARAGRAPH, deliberately and not by luck:
+    // paragraph 3 was rewritten in place, paragraph 4's redundancy sentence was
+    // re-scoped, and paragraph 6 gained a clause. Appending would have re-baselined
+    // the `settings-explorer` accessibility cells on two platforms, which the 104,045
+    // entry below names as a hard constraint rather than a preference. Per operation
+    // the remainder count for this one is unchanged at 6.
+    //
+    // Per operation, re-derived rather than apportioned: `POST .../transcript`
+    // 3,110 -> 3,905 (+795), the whole delta. Every other entry byte-identical, and
+    // `test_contract_description_parity.py` proves that in both directions.
+    //
+    // Derived two ways that agree, neither an increment: the splitPurpose rule
+    // transcribed into Python over `create_app().openapi()` restricted to the 77
+    // named operations -> 133,555 / 254; and the same rule over the transcribed
+    // array -> the same two numbers. Internal consistency as a CHECK, not the
+    // derivation: raw sum 134,063 minus 2 per `\n\n` separator (254 x 2 = 508) =
+    // 133,555. The entry was re-transcribed from `create_app().openapi()` by script.
+    expect(total).toBe(133555);
     // 104,045 -> 114,959 (+10,914): the four new operations, and NO existing
     // description changed — `test_contract_description_parity.py` proves that rather
     // than leaving it asserted here. RE-DERIVED from the served document and never

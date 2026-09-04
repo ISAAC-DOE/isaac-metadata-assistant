@@ -43,11 +43,23 @@ export const RUNS_PAGE_SIZE = 50;
  * this is a case the general "do not retype a server bound" rule (see `_RUN_LIMIT_DESC`
  * in `routes.py`, which interpolates rather than retypes) cannot avoid: there is no
  * request this value could instead be read off. If the server's bound ever changes,
- * this one has to change with it — NO TEST IN THIS TREE PINS THAT AGREEMENT TODAY, and
+ * this one has to change with it — ~~NO TEST IN THIS TREE PINS THAT AGREEMENT TODAY, and
  * that is a named gap rather than an oversight papered over: closing it needs either a
  * committed test reading `RUN_PAGE_MAX` out of the OpenAPI document this build already
  * serves, or a Python-side test asserting the two literals match, and neither exists
- * yet.
+ * yet.~~
+ *
+ * **CLOSED 2026-09-03, and the sentence above is struck rather than deleted because
+ * "no test pins this" is exactly the kind of claim a future session acts on.**
+ * `apps/api/tests/test_run_page_bound_parity.py` now does BOTH of the two things that
+ * paragraph named: it asserts the served OpenAPI parameter's `maximum` IS
+ * `routes.RUN_PAGE_MAX`, and it asserts this literal equals that constant, failing with
+ * both numbers named so the message says which side moved.
+ *
+ * WHAT IS STILL TRUE, AND IS WHY THE COPY REMAINS A COPY: the check closes the DRIFT,
+ * not the duplication. The better fix is for the run listing to SERVE this bound and
+ * for `RunsSection` to read it, at which point this constant disappears; that is a
+ * change to that component's over-the-cap decision and belongs to a slice that owns it.
  *
  * A record with more runs LOADED than this cannot be silently reconciled in one
  * request; see `RunsSection`'s "over the cap" path, which shows a note and a Refresh

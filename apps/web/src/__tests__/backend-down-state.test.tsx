@@ -734,7 +734,26 @@ describe('the sub-read inventory this file derives from api.ts', () => {
     // application never performs. A counter is not a reason to keep dead code; see
     // `api.ts`'s proposals block. Read out of this test's own failure output, not
     // derived by adding a delta.
-    expect(experimentPathLiterals.length).toBe(45);
+    //
+    // 45 -> 46: `createProposal`, which lands with the producer that feeds the queue —
+    // `POST .../transcript` now mints a durable proposal per candidate, so the
+    // paragraph in `api.ts` promising the create "when a producer lands" is met. It
+    // writes the SAME bare `/experiments/${…}/proposals` literal `listProposals`
+    // already writes, so this array — which counts OCCURRENCES — gains one while
+    // `SUB_READ_SUFFIXES` and `SUB_READ_SEGMENTS` do not move at all: there is no new
+    // sub-path, and no new product word is needed in `SUB_RESOURCE_LABELS`. That is
+    // the `renameExperiment` shape above, not the `getProvenance` one. Read out of
+    // this test's own failure output (`expected 46 to be 45`), not derived by adding
+    // a delta.
+    //
+    // WHICH SLICE CONSUMES THIS BUMP, NAMED — because an unconsumed one is exactly
+    // what got `getProposal` deleted two paragraphs above. `createProposal` has NO
+    // caller at this HEAD; the caller it is waiting for is the "Propose a value from
+    // this note" act in Unmapped Notes (the note-mapping path), the following slice
+    // in this arc. If that slice does not land, the method goes the way `getProposal`
+    // went and this number returns to 45. It is NOT kept alive by this counter — see
+    // the ruling in `api.ts`'s proposals block, which says so in those terms.
+    expect(experimentPathLiterals.length).toBe(46);
     expect(bareRecordLiterals.length).toBeGreaterThan(0);
     // 31 -> 33: `runs/SEG-1/answers` and `runs/SEG-1/edit`, the two run-level write
     // suffixes. Both are WRITES rather than reads, and they appear here because this

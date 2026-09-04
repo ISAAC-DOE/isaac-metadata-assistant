@@ -116,6 +116,36 @@ function noteOf(text: string, id: string) {
   };
 }
 
+/**
+ * One entry of the capture's `proposals` list — what the SERVER stored, paired to
+ * the candidate it came from.
+ *
+ * `candidate_index` and not a field path, for the reason the wire type gives: two
+ * candidates can share one path, and matching on the path would collapse them.
+ */
+function mintedFor(index: number, over: Partial<Record<string, unknown>> = {}) {
+  return {
+    candidate_index: index,
+    client_request_key: `transcript-capture:n1:${index}`,
+    deduplicated: false,
+    proposal: {
+      proposal_id: `p${index}`,
+      experiment_id: EXP,
+      note_id: 'n1',
+      run_id: 'run-1',
+      target_field_path: 'context.temperature_K',
+      proposed_value: 300,
+      rule: 'the words temperature and a number followed by K appear in one clause',
+      state: 'open',
+      applied: false,
+      verified: false,
+      is_evidence: false,
+      is_field_value: false,
+    },
+    ...over,
+  };
+}
+
 function reading(over: Partial<Record<string, unknown>> = {}) {
   return {
     capture: {
@@ -139,11 +169,22 @@ function reading(over: Partial<Record<string, unknown>> = {}) {
     abstentions: [],
     review_required: [],
     notes: [noteOf('Temperature was 300 K.', 'n1')],
+    proposals: [mintedFor(0)],
+    unproposable: [],
     ambiguity_policy: [],
+    /*
+     * THE CONTRACT NAMES THE REVIEW ROUTE, and this fixture used to name
+     * `PATCH .../runs/{run_id}`. It changed because the server's did: a candidate is
+     * now stored as a durable proposal in the same save as the notes, and a stored
+     * proposal is accepted through its own operation. A fixture still carrying the
+     * run PATCH would let this suite go on proving a contract the server no longer
+     * publishes — which is the exact failure `test_contract_description_parity.py`
+     * exists to catch on the description side.
+     */
     accept_contract: {
-      method: 'PATCH',
-      path: '/api/experiments/{experiment_id}/runs/{run_id}',
-      requires: ['confirmed_by_user: true', 'If-Match set to that run’s own current ETag'],
+      method: 'POST',
+      path: '/api/experiments/{experiment_id}/proposals/{proposal_id}/review',
+      requires: ['confirmed_by_user: true', 'action: accept'],
       message: 'This operation writes no field.',
     },
     experiment_version: 'g1.5',
@@ -270,82 +311,123 @@ describe('unfinished text', () => {
   });
 });
 
-// --- 2. a candidate is never a value, and accepting uses the existing path ----
+// --- 2. a candidate is never a value, and the panel now WRITES NOTHING --------
+//
+// THIS SECTION USED TO PROVE THE OPPOSITE HALF OF THE SAME PROMISE, and the four
+// tests it lost are named here rather than quietly dropped: "accepting writes
+// through the existing run edit, with the run's own version", "the panel never
+// issues a write to any path but the run edit", "undo restores what the run held
+// before, through the same path", and "rejecting writes nothing at all". All four
+// were correct, and all four pinned an Accept control that lived in this panel and
+// called `PATCH .../runs/{run_id}` directly.
+//
+// That control is gone. A candidate is now stored server-side as a durable ingestion
+// proposal in the same save as the notes, and accepting one is the proposals
+// surface's act — which is what makes it visible to a colleague, recorded with a
+// reason when refused, and survivable across a navigation. So the claim those four
+// tests made ("the write goes through the existing path") is now made where the write
+// is, and what this section proves instead is stronger and simpler: from finalize
+// onward this panel issues NO write at all.
 
-describe('accepting a proposal', () => {
-  it('accepting writes through the existing run edit, with the run’s own version', async () => {
-    const patched = { run: { ...RUN, version: 'r1.1', fields: { 'context.temperature_K': { value: 300 } } } };
-    stubFetchRoutes({
-      ...BASE_ROUTES,
-      [TRANSCRIPT]: { body: reading() },
-      [`PATCH /api/experiments/${EXP}/runs/run-1`]: { body: patched },
-    } as never);
-    await renderPanel();
-    await typeAndFinalize();
-    fireEvent.click(await screen.findByRole('button', { name: 'Accept' }));
-
-    // TWO matches on purpose: the card states it, and the live region announces
-    // it. Asserting one of them would break the moment the other was removed.
-    expect(await screen.findAllByText(/Accepted and written to the run/)).toHaveLength(2);
-    const patch = writes().filter((entry) => entry.key.startsWith('PATCH'));
-    expect(patch).toHaveLength(1);
-    expect(patch[0].key).toBe(`PATCH /api/experiments/${EXP}/runs/run-1`);
-    expect(patch[0].body.confirmed_by_user).toBe(true);
-    expect(patch[0].body.fields).toEqual({ 'context.temperature_K': 300 });
-    // THE RUN'S TOKEN, NOT THE RECORD'S. Sending `g1.4` here is a 412, and a
-    // client that sent neither would be a blind overwrite.
-    expect(patch[0].ifMatch).toBe('"r1.0"');
-  });
-
-  it('the panel never issues a write to any path but the run edit', async () => {
-    stubFetchRoutes({
-      ...BASE_ROUTES,
-      [TRANSCRIPT]: { body: reading() },
-      [`PATCH /api/experiments/${EXP}/runs/run-1`]: { body: { run: { ...RUN, version: 'r1.1' } } },
-    } as never);
-    await renderPanel();
-    await typeAndFinalize();
-    fireEvent.click(await screen.findByRole('button', { name: 'Accept' }));
-    await screen.findAllByText(/Accepted and written to the run/);
-
-    const paths = new Set(writes().map((entry) => entry.key));
-    expect(paths).toEqual(
-      new Set([TRANSCRIPT, `PATCH /api/experiments/${EXP}/runs/run-1`]),
-    );
-  });
-
-  it('undo restores what the run held before, through the same path', async () => {
-    // The run starts EMPTY at this path, so "what it held before" is nothing, and
-    // an honest undo clears the field rather than writing a plausible old value.
-    let version = 'r1.0';
-    stubFetchRoutes({
-      ...BASE_ROUTES,
-      [TRANSCRIPT]: { body: reading() },
-      [`PATCH /api/experiments/${EXP}/runs/run-1`]: () => {
-        version = version === 'r1.0' ? 'r1.1' : 'r1.2';
-        return { body: { run: { ...RUN, version } } };
-      },
-    } as never);
-    await renderPanel();
-    await typeAndFinalize();
-    fireEvent.click(await screen.findByRole('button', { name: 'Accept' }));
-    fireEvent.click(await screen.findByRole('button', { name: 'Undo' }));
-    await screen.findByRole('button', { name: 'Accept' });
-
-    const patches = writes().filter((entry) => entry.key.startsWith('PATCH'));
-    expect(patches).toHaveLength(2);
-    expect(patches[1].body.fields).toEqual({ 'context.temperature_K': null });
-    // The version the FIRST write returned, adopted rather than re-read.
-    expect(patches[1].ifMatch).toBe('"r1.1"');
-  });
-
-  it('rejecting writes nothing at all', async () => {
+describe('what the capture stored', () => {
+  it('the panel issues no write but the finalize itself', async () => {
     stubFetchRoutes({ ...BASE_ROUTES, [TRANSCRIPT]: { body: reading() } } as never);
     await renderPanel();
     await typeAndFinalize();
-    fireEvent.click(await screen.findByRole('button', { name: 'Reject' }));
-    await screen.findAllByText(/Rejected\./);
-    expect(writes().filter((entry) => entry.key.startsWith('PATCH'))).toEqual([]);
+    await screen.findByText('context.temperature_K');
+
+    // THE WHOLE SET, not "no PATCH". A `queryByRole('button', {name: 'Accept'})`
+    // assertion would pass over a panel that had merely renamed the control, and a
+    // "no PATCH" assertion would pass over one that had moved the write to a POST.
+    expect(writes().map((entry) => entry.key)).toEqual([TRANSCRIPT]);
+    expect(screen.queryByRole('button', { name: 'Accept' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Reject' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Undo' })).toBeNull();
+    expect(screen.queryByLabelText('Edit before accepting')).toBeNull();
+  });
+
+  it('a stored proposal says it is waiting for review, and where', async () => {
+    stubFetchRoutes({ ...BASE_ROUTES, [TRANSCRIPT]: { body: reading() } } as never);
+    const { container } = await renderPanel();
+    await typeAndFinalize();
+    await screen.findByText('context.temperature_K');
+
+    expect(screen.getByText(CAPTURE_COPY.proposalStored)).toBeInTheDocument();
+    expect(screen.getByText(/waits in Ingestion Proposals/)).toBeInTheDocument();
+    // THE POSITIVE CONTROL FOR THE CONDITIONAL BLANKET CLAIM. This reading refused
+    // nothing, so the paragraph saying every proposal below is stored is true of it
+    // and is shown. Its negative control is in the refused-candidate test below,
+    // which asserts the same paragraph is ABSENT.
+    expect(screen.getByText(CAPTURE_COPY.candidatesAllStored)).toBeInTheDocument();
+    // THE SERVER'S ROUTE, RENDERED RATHER THAN TRANSCRIBED. A literal in this bundle
+    // would be a second copy of the write contract, free to drift.
+    expect(container.textContent).toContain(
+      '/api/experiments/{experiment_id}/proposals/{proposal_id}/review',
+    );
+    expect(container.textContent).not.toContain('/runs/{run_id}');
+  });
+
+  it('a proposal the record already held says so instead of claiming a create', async () => {
+    /*
+     * A FIXTURE-ONLY PATH, AND THAT IS STATED RATHER THAN IMPLIED. No request can
+     * make the server emit `deduplicated: true` here at this HEAD — the transcript
+     * route's dedupe key is built from a note id minted by the same request, so
+     * nothing already on the record can carry it (contract §11.2). The field is on
+     * the wire, so the panel must render it truthfully; this asserts it does, and
+     * does not assert that a deployment produces it.
+     */
+    stubFetchRoutes({
+      ...BASE_ROUTES,
+      [TRANSCRIPT]: { body: reading({ proposals: [mintedFor(0, { deduplicated: true })] }) },
+    } as never);
+    await renderPanel();
+    await typeAndFinalize();
+    await screen.findByText('context.temperature_K');
+    expect(screen.getByText(CAPTURE_COPY.proposalAlreadyStored)).toBeInTheDocument();
+    expect(screen.queryByText(CAPTURE_COPY.proposalStored)).toBeNull();
+  });
+
+  it("a candidate the server could not store says so, in the SERVER's words", async () => {
+    const refused = reading({
+      proposals: [],
+      unproposable: [
+        {
+          candidate_index: 0,
+          field_path: 'context.temperature_K',
+          note_id: 'n1',
+          error: 'no_write_path_for_field',
+          message:
+            'No write operation in this build accepts a value at this path, so a ' +
+            'proposal for it could be created and never applied.',
+        },
+      ],
+    });
+    stubFetchRoutes({ ...BASE_ROUTES, [TRANSCRIPT]: { body: refused } } as never);
+    const { container } = await renderPanel();
+    await typeAndFinalize();
+    await screen.findByText('context.temperature_K');
+
+    expect(
+      screen.getByText(/No write operation in this build accepts a value at this path/),
+    ).toBeInTheDocument();
+    // AND NOT A SENTENCE THIS BUNDLE COMPOSED. The panel renders the server's
+    // `message`; a reason written here would be this client explaining a refusal it
+    // did not make.
+    expect(container.textContent).not.toContain(CAPTURE_COPY.proposalStored);
+    // AND NO BLANKET CLAIM ABOVE THE LIST. The lead paragraph used to end "Each
+    // proposal below is stored with this record and waits in Ingestion Proposals",
+    // rendered unconditionally — so on THIS reading it asserted storage for the one
+    // candidate the server had just declined, one line above the server's own
+    // sentence saying nothing was stored. The claim now renders only when
+    // `unproposable` is empty. MUTATION: dropping the
+    // `reading.unproposable.length === 0` guard in the panel turns this RED.
+    expect(container.textContent).not.toContain(CAPTURE_COPY.candidatesAllStored);
+    expect(container.textContent).not.toContain('is stored with this record and waits');
+    // The lead paragraph is still there, describing the labels rather than claiming
+    // them, so this is not passing merely because the whole paragraph vanished.
+    expect(screen.getByText(/A proposal, not a value/)).toBeInTheDocument();
+    // The words are still stored, which is the whole of the promise.
+    expect(screen.getAllByText('Temperature was 300 K.').length).toBeGreaterThanOrEqual(1);
   });
 
   it('a proposal is labelled as a proposal, with the words it came from', async () => {
@@ -379,26 +461,38 @@ describe('nothing a scientist wrote is discarded', () => {
     expect(await screen.findByLabelText('Transcript')).toHaveValue('The cryostat rattled.');
   });
 
-  it('text survives a failed accept', async () => {
-    stubFetchRoutes({
-      ...BASE_ROUTES,
-      [TRANSCRIPT]: { body: reading() },
-      [`PATCH /api/experiments/${EXP}/runs/run-1`]: {
-        status: 412,
-        body: { error: 'stale_write', current_version: 'r9.9' },
-      },
-    } as never);
+  /*
+   * "TEXT SURVIVES A FAILED ACCEPT" WAS HERE, and it went with the Accept control it
+   * exercised — it clicked Accept, met a `412` from `PATCH .../runs/{run_id}`, and
+   * asserted the transcript was still on screen. There is no accept in this panel any
+   * more, so the case it covered has moved to the proposals surface.
+   *
+   * WHAT REPLACES IT COVERS THE SAME PROMISE ON THE PATH THAT STILL EXISTS: a
+   * candidate the SERVER declined to store as a proposal. That is now the way a value
+   * can fail to become one, and the claim is unchanged — the words survive.
+   */
+  it('text survives a candidate the server declined to store', async () => {
+    const refused = reading({
+      proposals: [],
+      unproposable: [
+        {
+          candidate_index: 0,
+          field_path: 'context.temperature_K',
+          note_id: 'n1',
+          error: 'too_many_proposals',
+          message:
+            'This record already holds the maximum number of proposals, so no ' +
+            'proposal was created for this candidate.',
+        },
+      ],
+    });
+    stubFetchRoutes({ ...BASE_ROUTES, [TRANSCRIPT]: { body: refused } } as never);
     await renderPanel();
     await typeAndFinalize();
-    fireEvent.click(await screen.findByRole('button', { name: 'Accept' }));
-
-    await screen.findByRole('alert');
-    expect(screen.getByRole('alert')).toHaveTextContent(/was NOT written to the run/);
+    await screen.findByText(/already holds the maximum number of proposals/);
     // The stored note and the transcript are both still on screen.
     expect(screen.getAllByText('Temperature was 300 K.').length).toBeGreaterThanOrEqual(1);
     expect(await screen.findByLabelText('Transcript')).toHaveValue('Temperature was 300 K.');
-    // And the proposal is still offered, not silently marked accepted.
-    expect(screen.getByRole('button', { name: 'Accept' })).toBeInTheDocument();
   });
 
   it('a failed finalize says the transcript was not stored and keeps the text', async () => {
@@ -482,6 +576,9 @@ describe('ambiguity', () => {
   it('two values for one field are BOTH offered, with the conflict stated', async () => {
     const conflicted = reading({
       candidates: [candidate(), candidate({ proposed_value: 320, quote: 'Later the temperature was 320 K.', start_char: 23 })],
+      // TWO candidates, so TWO stored proposals. The server mints one per candidate,
+      // and a fixture with one would be asserting against a server that dropped one.
+      proposals: [mintedFor(0), mintedFor(1, { proposal: { proposal_id: 'p1', proposed_value: 320 } })],
       review_required: [
         {
           outcome: 'needs_review',
@@ -497,7 +594,64 @@ describe('ambiguity', () => {
     await typeAndFinalize();
     const conflicts = await screen.findAllByText(/proposes another value for the same field/);
     expect(conflicts).toHaveLength(2);
-    expect(screen.getAllByRole('button', { name: 'Accept' })).toHaveLength(2);
+    // BOTH ARE STORED AND NEITHER IS PREFERRED. The panel used to offer two Accept
+    // buttons here; it now shows two stored proposals and says the choice is made in
+    // Ingestion Proposals. What must not change is that there are TWO of them —
+    // dropping one would be the preference this reader refuses to hold.
+    expect(screen.getAllByText(CAPTURE_COPY.proposalStored)).toHaveLength(2);
+    expect(screen.getAllByText(CAPTURE_COPY.conflictBothStored)).toHaveLength(2);
+    expect(screen.queryByRole('button', { name: 'Accept' })).toBeNull();
+  });
+
+  it('a conflict whose other side was REFUSED does not say both are stored', async () => {
+    /*
+     * "Both are stored" was rendered for every conflict, whatever the server had
+     * done with the two candidates — so this reading, in which the second candidate
+     * hit the row ceiling, was told both were stored while one row beside it carried
+     * the server's sentence saying no proposal was created for it.
+     *
+     * MUTATION: reverting the conflict line to the single unconditional sentence
+     * turns this RED on both assertions.
+     */
+    const halfRefused = reading({
+      candidates: [candidate(), candidate({ proposed_value: 320, quote: 'Later the temperature was 320 K.', start_char: 23 })],
+      proposals: [mintedFor(0)],
+      unproposable: [
+        {
+          candidate_index: 1,
+          field_path: 'context.temperature_K',
+          note_id: 'n1',
+          error: 'too_many_proposals',
+          message:
+            'This record already holds the maximum number of proposals, so no ' +
+            'proposal was created for this candidate.',
+        },
+      ],
+      review_required: [
+        {
+          outcome: 'needs_review',
+          kind: 'conflicting_values_for_one_field',
+          field_path: 'context.temperature_K',
+          reason: 'Accept at most one.',
+          candidate_indexes: [0, 1],
+        },
+      ],
+    });
+    stubFetchRoutes({ ...BASE_ROUTES, [TRANSCRIPT]: { body: halfRefused } } as never);
+    const { container } = await renderPanel();
+    await typeAndFinalize();
+    await screen.findByText(/already holds the maximum number of proposals/);
+
+    // The conflict is still stated on BOTH rows — it is a real conflict — and
+    // neither of them claims the refused side is stored.
+    expect(
+      screen.getAllByText(CAPTURE_COPY.conflictNotAllStored),
+    ).toHaveLength(2);
+    expect(container.textContent).not.toContain(CAPTURE_COPY.conflictBothStored);
+    expect(container.textContent).not.toContain('Both are stored');
+    // And the row that DID get a proposal still says so, so this is not passing by
+    // the panel having stopped reporting storage altogether.
+    expect(screen.getByText(CAPTURE_COPY.proposalStored)).toBeInTheDocument();
   });
 });
 
@@ -818,6 +972,11 @@ describe('accessibility', () => {
     await screen.findByText('context.temperature_K');
     const status = container.querySelector('[role="status"]');
     expect(status?.textContent).toMatch(/1 segment\(s\) stored with this record/);
+    // AND WHAT WAS STORED, not only what was read. The two can differ — a candidate
+    // the server declined is reported separately — so announcing the read count alone
+    // would let the panel imply a store that did not happen.
+    expect(status?.textContent).toMatch(/1 value\(s\) read/);
+    expect(status?.textContent).toMatch(/1 stored as proposal\(s\) for review/);
   });
 });
 
