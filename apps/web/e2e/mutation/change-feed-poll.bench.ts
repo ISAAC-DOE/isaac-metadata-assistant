@@ -163,7 +163,11 @@ test('measure the change feed poller: cadence, pause, event cost and backoff', a
   //     than 6 s after at least one request means the burst is over.
   // =======================================================================
   const tMount = Date.now();
-  await page.goto(`/record/${TARGET}`);
+  /* `?view=capture` — the record screen's four workspaces are lazily-mounted
+     `?view=` destinations, and the proposals panel lives on Capture & Proposals.
+     A bare `/record/<id>` opens Record Fields, where it is not in the DOM at all,
+     so the wait below would hang for its full timeout rather than fail. */
+  await page.goto(`/record/${TARGET}?view=capture`);
   await expect(page.getByRole('heading', { name: 'Ingestion Proposals' })).toBeVisible({
     timeout: 180_000,
   });

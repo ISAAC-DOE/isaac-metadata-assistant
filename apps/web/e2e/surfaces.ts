@@ -101,6 +101,46 @@ export const SURFACES: readonly Surface[] = [
     ready: { role: 'heading', name: 'Review Record' },
   },
   {
+    /*
+     * THE RUNS WORKSPACE — `?view=runs`, and NOT the same DOM as `record-detail`.
+     *
+     * The record screen's four destinations are `?view=` deep links on one route
+     * (`RECORD_VIEW_IDS`), and `record-detail` lands on `fields`, which is what the
+     * route defaults to. So until this entry existed, axe, the 320/390 narrow sweep,
+     * the five-project layout probes and the 200% zoom pass had never loaded the run
+     * list, its search and filter controls, its paging, a `RunCard`'s accordion or
+     * `ValidateReview` on ANY surface — several hundred lines of markup on a measured
+     * route, unmeasured. That is the same failure mode `evidence-graph` and
+     * `statistics-example` were added to fix, and it is worth naming as the same one.
+     *
+     * `ready` waits on the Runs section's own heading rather than the page `h1`: the
+     * screen heading renders while the runs list is still fetching, and scanning in
+     * between would audit a `role="status"` loading panel.
+     */
+    id: 'record-runs',
+    name: 'Record Detail — Runs',
+    path: `/record/${SEED.partial}?view=runs`,
+    scope: 'example',
+    ready: { role: 'heading', name: 'Runs' },
+  },
+  {
+    /*
+     * THE CAPTURE & PROPOSALS WORKSPACE — `?view=capture`, the third `?view=` deep
+     * link, and unmeasured for the same reason the entry above was. It mounts three
+     * panels no other surface reaches on this route: transcript capture (its voice
+     * controls, its seam-status disclosure and its textarea), the unmapped-notes
+     * queue, and the ingestion-proposals list.
+     *
+     * `ready` waits on the transcript panel's own heading, which is the first of the
+     * three and the one whose capability report resolves last.
+     */
+    id: 'record-capture',
+    name: 'Record Detail — Capture & Proposals',
+    path: `/record/${SEED.partial}?view=capture`,
+    scope: 'example',
+    ready: { role: 'heading', name: /Transcript/i },
+  },
+  {
     id: 'guided-completion',
     name: 'Guided Completion',
     path: recordSub(SEED.partial, 'complete'),

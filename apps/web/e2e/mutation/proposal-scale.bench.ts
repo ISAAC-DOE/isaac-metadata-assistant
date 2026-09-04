@@ -334,7 +334,11 @@ test('measure the ingestion-proposal read path and the change feed', async ({
      * would include a background poll this bench did not intend to measure.
      */
     const tOpenScale = Date.now();
-    await page.goto(`/record/${TARGET}`);
+    /* `?view=capture` — the record screen's four workspaces are lazily-mounted
+       `?view=` destinations, and the proposals panel lives on Capture & Proposals.
+       A bare `/record/<id>` opens Record Fields, where it is not in the DOM at all,
+       so the wait below would hang for its full timeout rather than fail. */
+    await page.goto(`/record/${TARGET}?view=capture`);
     await expect(page.getByRole('heading', { name: 'Ingestion Proposals' })).toBeVisible({
       timeout: 300_000,
     });
@@ -589,7 +593,11 @@ test('measure the ingestion-proposal read path and the change feed', async ({
   });
 
   const tOpen = Date.now();
-  await page.goto(`/record/${TARGET}`);
+  /* `?view=capture` — the record screen's four workspaces are lazily-mounted
+     `?view=` destinations, and the proposals panel lives on Capture & Proposals.
+     A bare `/record/<id>` opens Record Fields, where it is not in the DOM at all,
+     so the wait below would hang for its full timeout rather than fail. */
+  await page.goto(`/record/${TARGET}?view=capture`);
   await expect(page.getByRole('heading', { name: 'Ingestion Proposals' })).toBeVisible({
     timeout: 300_000,
   });

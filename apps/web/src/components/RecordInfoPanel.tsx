@@ -109,22 +109,28 @@ function Section({
   const bodyId = `${id}-body`;
   return (
     <section className="field-group" aria-label={`${title} (${sublabel})`}>
-      <button
-        type="button"
-        className="fg-header"
-        aria-expanded={expanded}
-        aria-controls={expanded ? bodyId : undefined}
-        onClick={() => setExpanded((open) => !open)}
-      >
-        <Chevron className="fg-chevron" size={16} strokeWidth={2} aria-hidden="true" />
-        <span className="fg-block">{title}</span>
-        {/* Not `.fg-sublabel` / `.fg-summary`: those two paint a colour that is
-            already below the contrast threshold on this screen, and reusing them
-            would have grown the measured `color-contrast` count by four. See the
-            rule's own comment in `record-info.css`. */}
-        <span className="record-section-key">{sublabel}</span>
-        <span className="record-section-summary">{summary}</span>
-      </button>
+      {/* A REAL HEADING LANDMARK — see `FieldGroup`'s own note for the measurement.
+          `h2` at the level of this workspace's other sections, so the outline under
+          the screen's single `h1` stays contiguous. A transparent wrapper: `.fg-heading`
+          resets margin and type, so nothing about this header's appearance changes. */}
+      <h2 className="fg-heading">
+        <button
+          type="button"
+          className="fg-header"
+          aria-expanded={expanded}
+          aria-controls={expanded ? bodyId : undefined}
+          onClick={() => setExpanded((open) => !open)}
+        >
+          <Chevron className="fg-chevron" size={16} strokeWidth={2} aria-hidden="true" />
+          <span className="fg-block">{title}</span>
+          {/* Not `.fg-sublabel` / `.fg-summary`: those two paint a colour that is
+              already below the contrast threshold on this screen, and reusing them
+              would have grown the measured `color-contrast` count by four. See the
+              rule's own comment in `record-info.css`. */}
+          <span className="record-section-key">{sublabel}</span>
+          <span className="record-section-summary">{summary}</span>
+        </button>
+      </h2>
       {expanded && (
         <div className="fg-body" id={bodyId}>
           {children}

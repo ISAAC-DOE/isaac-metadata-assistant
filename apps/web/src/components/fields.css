@@ -13,6 +13,22 @@
 .field-group + .field-group {
   margin-top: 12px;
 }
+/*
+ * THE ACCORDION HEADING WRAPPER — a transparent `<h2>` around the toggle.
+ *
+ * It exists for the ACCESSIBILITY TREE, not for the visual one: it makes each
+ * collapsible section a heading landmark (see `FieldGroup`'s own note for the
+ * measurement) and must change nothing that is painted. So it resets the three
+ * things a UA stylesheet puts on an `h2` — margin, font-size and font-weight —
+ * and lets `.fg-block` inside the button keep owning the type, exactly as before.
+ */
+.fg-heading {
+  margin: 0;
+  font-size: inherit;
+  font-weight: inherit;
+  line-height: inherit;
+}
+
 .fg-header {
   display: flex;
   align-items: center;

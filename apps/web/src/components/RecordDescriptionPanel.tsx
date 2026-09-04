@@ -184,20 +184,26 @@ export function RecordDescriptionPanel({ experimentId }: { experimentId: string 
 
   return (
     <section className="field-group" aria-label="Record Description (record-level values)">
-      <button
-        type="button"
-        className="fg-header"
-        aria-expanded={expanded}
-        aria-controls={expanded ? bodyId : undefined}
-        onClick={() => setExpanded((open) => !open)}
-      >
-        <Chevron className="fg-chevron" size={16} strokeWidth={2} aria-hidden="true" />
-        <span className="fg-block">Record Description</span>
-        <span className="record-section-key">record-level</span>
-        <span className="record-section-summary">
-          technique, facility, sample, contributors and tags — every run inherits these
-        </span>
-      </button>
+      {/* A REAL HEADING LANDMARK — see `FieldGroup`'s own note for the measurement.
+          `h2` at the level of this workspace's other sections, so the outline under
+          the screen's single `h1` stays contiguous. A transparent wrapper: `.fg-heading`
+          resets margin and type, so nothing about this header's appearance changes. */}
+      <h2 className="fg-heading">
+        <button
+          type="button"
+          className="fg-header"
+          aria-expanded={expanded}
+          aria-controls={expanded ? bodyId : undefined}
+          onClick={() => setExpanded((open) => !open)}
+        >
+          <Chevron className="fg-chevron" size={16} strokeWidth={2} aria-hidden="true" />
+          <span className="fg-block">Record Description</span>
+          <span className="record-section-key">record-level</span>
+          <span className="record-section-summary">
+            technique, facility, sample, contributors and tags — every run inherits these
+          </span>
+        </button>
+      </h2>
       {expanded && (
         <div className="fg-body" id={bodyId}>
           {/* Keyed on the record so switching records rebuilds this editor's state

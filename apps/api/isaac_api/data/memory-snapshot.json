@@ -10360,7 +10360,7 @@
       },
       {
         "path": "apps/web/src/__tests__/live-screens.test.tsx",
-        "sha256": "7b6698c24cd5ce67dfb9cf435e13a8dbfb2782eb61e68dc70f03d378e13b2557"
+        "sha256": "c347498494bd830c5fad7dee462a139812ff7cee11bebb3c8d481bac77ffa72d"
       },
       {
         "path": "apps/web/src/__tests__/memory-concepts.test.tsx",
@@ -10440,7 +10440,7 @@
       },
       {
         "path": "apps/web/src/components/FieldGroup.tsx",
-        "sha256": "f9d03405ad2512a9d6138be72199eff0098535a5f6233033e6375cad059d89b8"
+        "sha256": "9b0be487103bf0c763df3e24c58f21b5c2510d945d2d6b7b3c631ec1ae589ca7"
       },
       {
         "path": "apps/web/src/components/FieldRow.tsx",
@@ -10512,11 +10512,11 @@
       },
       {
         "path": "apps/web/src/lib/labels.ts",
-        "sha256": "31ccde02c176fa65feb08696feba415b3aef731a3b2ae322b0dc219884cf23c9"
+        "sha256": "664a616ad19bdabb4525a2b005ef7b52732b775aa02551fb4038236fcc6f57cd"
       },
       {
         "path": "apps/web/src/lib/routes.ts",
-        "sha256": "9b74b56084971929f351e31d3bb2d8a36115b6dc8e3d923e0cb74d929523ea16"
+        "sha256": "0194e9fca6567798c78a15f9d8e4bd6696adaa786a7aa9354dc5fb7f0ca3fd1f"
       },
       {
         "path": "apps/web/src/lib/status.ts",
@@ -10564,7 +10564,7 @@
       },
       {
         "path": "apps/web/src/screens/RecordWorkbench.tsx",
-        "sha256": "81a728dcb9b88675e5219ec094a76aa828ef662f1ff4fb2e5713690905ebabf5"
+        "sha256": "868bdeb834ec983b55654b8e883dca89c761ded78d0b2478547ab079ad8a2127"
       },
       {
         "path": "apps/web/src/screens/SettingsPage.tsx",
@@ -11012,7 +11012,7 @@
       }
     ],
     "served_file_count": 200,
-    "served_manifest_fingerprint": "98ffbd36b16c8520be82a2b22bf4930731d0c15eb1ddd941dc5c9d233c10a712"
+    "served_manifest_fingerprint": "05155efddbef908a208080a0a3a8825a7a5bb740203c5b278a3e67af7d946f1a"
   },
   "overview": {
     "built_at_commit": "caab1d0a69c1733524bda5dde495623bc4b7bad1",

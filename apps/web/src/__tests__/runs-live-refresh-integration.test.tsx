@@ -135,10 +135,12 @@ function detailRoute(): {
   route: (init?: RequestInit) => RouteResult;
   bump: (toRev: number) => void;
   hold: (held: boolean) => void;
+  failBundleRead: (fail: boolean) => void;
   version: () => string;
 } {
   let rev = KNOWN_REV;
   let held = false;
+  let failBundle = false;
   const token = () => `1.${rev}`;
   const bodyFor = () => ({ ...experimentDetail, id: ID, version: token(), rev });
   return {
@@ -149,12 +151,29 @@ function detailRoute(): {
     hold: (v: boolean) => {
       held = v;
     },
+    /*
+     * MAKE THE BUNDLE REFETCH FAIL — the PLAIN `GET {id}` only, never the
+     * conditional one.
+     *
+     * It exists to isolate `activity`, which control A in this file's header
+     * measured as impossible any other way: `needsCanonicalRefetch` makes ANY run
+     * signal also trigger a bundle refetch, the refetch moves `detail.version`,
+     * and the completeness path then subsumes the fast path. Refusing the refetch
+     * removes exactly that subsumption and nothing else — `useFetch.reloadSilent`
+     * keeps the old data and raises `refreshFailed`, so `detail.version` on screen
+     * does NOT move and `RunsSection`'s `recordVersion` prop is unchanged. See the
+     * test that uses it for why that is a real state and not a contrivance.
+     */
+    failBundleRead: (v: boolean) => {
+      failBundle = v;
+    },
     route: (init?: RequestInit): RouteResult => {
       const inm = (init?.headers as Record<string, string> | undefined)?.['If-None-Match'];
       if (inm) {
         if (held || inm === `"${token()}"`) return { status: 304, etag: inm };
         return { status: 200, body: bodyFor(), etag: `"${token()}"` };
       }
+      if (failBundle) return { status: 503, body: { error: 'record_read_unavailable' } };
       return { status: 200, body: bodyFor(), etag: `"${token()}"` };
     },
   };
@@ -248,10 +267,33 @@ describe('the runs live refresh, wired through the real Record Workbench', () =>
        * `recordVersion` prop against it; a fixture that froze `experiment_version` at
        * `1.0` would make the completeness path fire forever and every count below
        * would be a count of the fixture.
+       *
+       * ── AND IT HONOURS `limit`/`offset`, WHICH IT DID NOT USED TO ──────────
+       *
+       * The old fixture returned EVERY run whatever was asked for, and reported
+       * `total` as the length of what it returned. That is not what
+       * `routes.py` does — it slices `[offset:offset + limit]` and reports the
+       * record's real `total` — and the difference is not cosmetic: a bounded
+       * re-read asks for `limit = received`, so a colleague ADDING a run while
+       * the reader has 2 of 2 loaded produces a page of 2 out of a total of 3.
+       * Against the old fixture that state was unreachable — the re-read simply
+       * returned 3 runs — so the screen's own honesty about it ("Showing 2 of 3",
+       * with Load More reachable) could not be tested at all, and a regression
+       * that silently swallowed the third run would have looked identical.
        */
-      [`GET ${BASE}/runs`]: () => ({
-        body: { ...runsPage([...serverRuns]), experiment_version: detail.version() },
-      }),
+      [`GET ${BASE}/runs`]: (_init: RequestInit | undefined, key?: string) => {
+        const q = (key ?? '').includes('?') ? (key ?? '').slice((key ?? '').indexOf('?') + 1) : '';
+        const params = new URLSearchParams(q);
+        const offset = Number(params.get('offset') ?? 0);
+        const limit = Number(params.get('limit') ?? serverRuns.length);
+        const page = serverRuns.slice(offset, offset + limit);
+        return {
+          body: {
+            ...runsPage(page, { total: serverRuns.length, offset }),
+            experiment_version: detail.version(),
+          },
+        };
+      },
       // ONE-SHOT, which is what a cursor actually does: the real feed advances past
       // what it returned, so a second poll gets an empty page.
       [`GET ${BASE}/changes`]: () => {
@@ -260,7 +302,13 @@ describe('the runs live refresh, wired through the real Record Workbench', () =>
         return { body: feedPage(changes) };
       },
     } as never);
-    return renderAt(`/record/${ID}`);
+    /* `?view=runs` — the record screen's four workspaces are `?view=` deep links
+       on one route, and the run list lives on `runs`. A bare `/record/<id>` opens
+       Record Fields, where `RunsSection` is not mounted at all, so every count
+       below would be a count of zero. The wiring this file is about
+       (`activity`/`recordVersion` reaching `RunsSection` from the screen) is
+       unchanged by which workspace mounts it. */
+    return renderAt(`/record/${ID}?view=runs`);
   }
 
   beforeEach(() => {
@@ -444,6 +492,120 @@ describe('the runs live refresh, wired through the real Record Workbench', () =>
       'whichever poller wins, the runs list is re-read once for one event',
     ).toBe(1);
     expect(view.container.textContent).toContain('Run 1 (edited)');
+    view.unmount();
+  });
+
+  // --- 4b. the fast path, ISOLATED --------------------------------------------
+
+  it("with the bundle refetch FAILING, a colleague's run edit STILL reaches the section — which only `activity` can do", async () => {
+    /*
+     * ── WHY THIS TEST EXISTS, AND WHAT IT FIXES ABOUT THIS FILE ──────────────
+     *
+     * Control A in this file's header is honest and damning: deleting
+     * `activity={runActivity}` from `RecordWorkbench.tsx` left all seven tests
+     * GREEN, because `needsCanonicalRefetch` returns true for any run signal, the
+     * bundle refetch that follows moves `detail.version`, and the COMPLETENESS
+     * path then does the work the fast path was supposed to do. So the screen's
+     * wiring of that prop was untested — `tsc -b` and 5,174 tests all passed with
+     * it deleted — and the last time a prop on this screen was unwired, a
+     * colleague's run edit moved no pixel and two green branches shipped it.
+     *
+     * ── THE STATE THIS BUILDS IS REAL, NOT A CONTRIVANCE ─────────────────────
+     *
+     * A record bundle is nine requests over a network. A refetch of it failing
+     * while the change feed keeps answering is an ordinary transient — the screen
+     * has a whole disclosed state for it (`refreshFailed` -> `LiveSyncNote`), and
+     * `useFetch.reloadSilent` deliberately keeps the old data rather than blanking
+     * the screen. In that state `detail.version` does NOT move, so
+     * `RunsSection.recordVersion` is unchanged and the completeness path is
+     * structurally unable to fire. What is left is exactly one route from the
+     * colleague's edit to the run list: the `activity` prop.
+     *
+     * MUTATION CONTROL, RUN AND REVERTED:
+     *   · delete `activity={runActivity}` from `RecordWorkbench.tsx`
+     *     -> THIS TEST FAILS (`expected +0 to be 1`, and the edited label never
+     *     appears). The six pre-existing tests stay green, which is control A
+     *     reproduced — that is the point: this is the one that can see it.
+     */
+    const view = mount();
+    await settle();
+    expect(runCards(view)).toBe(2);
+    const before = runsReads(calls).length;
+
+    // The record poller is held (304) AND the bundle read refuses. Nothing this
+    // screen reads about the RECORD can move.
+    detail.hold(true);
+    detail.failBundleRead(true);
+
+    serverRuns = [
+      runFixture({ id: RUN_ONE, label: 'Run 1 (edited, fast path only)', ordinal: 1 }),
+      runFixture({ id: RUN_TWO, label: 'Run 2', ordinal: 2 }),
+    ];
+    detail.bump(KNOWN_REV + 1);
+    feed.changes = [experimentEntry(KNOWN_REV + 1), runEntry(RUN_ONE, KNOWN_REV + 1)];
+    await settle(POLL_INTERVAL_MS * 3);
+
+    expect(
+      runsReads(calls).length - before,
+      'the fast path alone re-reads the runs exactly once',
+    ).toBe(1);
+    expect(runsReadLimits(calls).slice(before)).toEqual(['2']);
+    // Adopted, not merely requested.
+    expect(view.container.textContent).toContain('Run 1 (edited, fast path only)');
+    view.unmount();
+  });
+
+  // --- 4c. a colleague ADDS a run while the page is full ----------------------
+
+  it('a colleague ADDING a third run while 2 of 2 are loaded reports "Showing 2 of 3", with Load More reachable', async () => {
+    /*
+     * THE TRUTHFUL OUTCOME, AND WHY IT IS THE ONE TO ASSERT. A bounded re-read asks
+     * for exactly what is on screen (`limit = received`, here 2). The server slices
+     * `[offset:offset + limit]` and reports the record's real `total`, so the third
+     * run is NOT in the response — and the section must say so rather than either
+     * pretending the record has two runs or silently growing the page it promised to
+     * bound. "Showing 2 of 3 runs" plus a reachable Load More is exactly that.
+     *
+     * MUTATION CONTROL, RUN AND REVERTED:
+     *   · revert the runs fixture to the old body (`runsPage([...serverRuns])`,
+     *     ignoring `limit`/`offset`) -> THIS TEST FAILS: the count line reads
+     *     "Showing 3 of 3 runs" and there is no Load More, because the fixture
+     *     answered a question the real route would not have answered.
+     */
+    const view = mount();
+    await settle();
+    expect(runCards(view)).toBe(2);
+    expect(view.container.querySelector('.runs-count')?.textContent).toBe('Showing 2 of 2 runs');
+    expect(
+      [...view.container.querySelectorAll('button')].some((b) =>
+        (b.textContent ?? '').includes('Load more runs'),
+      ),
+      'a full record shows no Load More',
+    ).toBe(false);
+    const before = runsReads(calls).length;
+
+    const RUN_THREE = '01SYNTHTESTRUN0000000000A3';
+    serverRuns = [
+      runFixture({ id: RUN_ONE, label: 'Run 1', ordinal: 1 }),
+      runFixture({ id: RUN_TWO, label: 'Run 2', ordinal: 2 }),
+      runFixture({ id: RUN_THREE, label: 'Run 3', ordinal: 3 }),
+    ];
+    detail.bump(KNOWN_REV + 1);
+    feed.changes = [experimentEntry(KNOWN_REV + 1), runEntry(RUN_THREE, KNOWN_REV + 1)];
+    await settle(POLL_INTERVAL_MS * 3);
+
+    // Bounded to what was on screen, so the re-read is a page and not a fetch of
+    // everything the record now holds.
+    expect(runsReadLimits(calls).slice(before)).toEqual(['2']);
+    expect(runCards(view)).toBe(2);
+    expect(view.container.querySelector('.runs-count')?.textContent).toBe('Showing 2 of 3 runs');
+    expect(view.container.textContent).not.toContain('Run 3');
+    expect(
+      [...view.container.querySelectorAll('button')].some((b) =>
+        (b.textContent ?? '').includes('Load more runs'),
+      ),
+      'the third run is reachable rather than silently dropped',
+    ).toBe(true);
     view.unmount();
   });
 

@@ -67,19 +67,39 @@ export function isStatisticsTab(value: string | null | undefined): value is Stat
 }
 
 /**
- * The Review Record screen's two VIEWS — the field workbench and the
- * experiment-scoped graph — on the SAME `?tab=`-style mechanism as Settings,
- * Governance and Statistics. A fourth use of one convention, not a fourth
- * convention.
+ * The Review Record screen's four WORKSPACES — the record's own fields, its
+ * runs, the capture-and-proposals pipeline, and the experiment-scoped graph —
+ * on the SAME `?tab=`-style mechanism as Settings, Governance and Statistics.
+ * ~~A fourth use of one convention, not a fourth convention.~~ — THE SIXTH, and
+ * the miscount was inherited rather than introduced here: `?tab=` on Settings,
+ * Governance and Statistics, `?view=` here and again on Evidence, and `?run=`
+ * below all read and write one parameter the same way. Corrected rather than
+ * deleted because the sentence's point — one convention, reused — is the reason
+ * this list could gain two members without gaining a mechanism.
  *
- * Deep-linkability is the point: a graph a scientist reached by clicking a tab
- * and cannot then link a colleague to is half a feature. Anything unrecognised
+ * Deep-linkability is the point: a graph a scientist reached by clicking and
+ * cannot then link a colleague to is half a feature. Anything unrecognised
  * falls back to `fields`, so there is no dead route and an old bookmark still
  * lands on the record.
+ *
+ * ── IT WENT FROM TWO MEMBERS TO FOUR, AND THE MECHANISM DID NOT CHANGE. ─────
+ *
+ * `fields` and `graph` were two RENDERINGS of one record and were switched by a
+ * `.section-tabs` bar at the top of the main column. `runs` and `capture` are
+ * different CONTENT of the same record, and the switcher is now the record's own
+ * sidebar (`RecordWorkspaceNav`) rather than a second navigation bar — one place
+ * a reader looks for "where can I go from here", beside the workflow spine that
+ * already answers "where am I in the pipeline". The two lists are deliberately
+ * unlike each other: the spine is SERVER-DERIVED and GATED, and these four are
+ * ungated local destinations that carry no completion state and never look like
+ * workflow steps.
+ *
+ * `fields` stays FIRST and stays the fallback, so `/record/<id>` bare is exactly
+ * the screen it has always been.
  */
 export const RECORD_VIEW_PARAM = 'view';
 
-export const RECORD_VIEW_IDS = ['fields', 'graph'] as const;
+export const RECORD_VIEW_IDS = ['fields', 'runs', 'capture', 'graph'] as const;
 
 export type RecordViewId = (typeof RECORD_VIEW_IDS)[number];
 
@@ -235,22 +255,33 @@ export const ROUTES = {
    *  any other query parameter survives. */
   recordView: (id: string, view: RecordViewId) =>
     `/record/${id}?${RECORD_VIEW_PARAM}=${view}`,
-  /** A deep link to ONE run on a record, e.g. `/record/<id>?run=<runId>`. Same
-   *  division of labour as `settingsTab` and `recordView`: whole-URL links use
-   *  this, while the Runs section itself enters and leaves focus by copying its
-   *  own `URLSearchParams` so any other query parameter survives. */
+  /** A deep link to ONE run on a record, e.g.
+   *  `/record/<id>?view=runs&run=<runId>`. Same division of labour as
+   *  `settingsTab` and `recordView`: whole-URL links use this, while the Runs
+   *  section itself enters and leaves focus by copying its own
+   *  `URLSearchParams` so any other query parameter survives.
+   *
+   *  IT NAMES THE WORKSPACE NOW, and it has to. A run lives on the `runs`
+   *  workspace, and a URL that carried only `?run=` would land the reader on
+   *  Record Fields with a focused run they cannot see. The screen ALSO reads a
+   *  bare `?run=` as `runs` (see `RecordWorkbench`), so every link minted before
+   *  this change still opens the run it names — the redundancy is deliberate:
+   *  one half serves old links, the other makes new ones self-describing. */
   recordRun: (id: string, runId: string) =>
-    `/record/${id}?${RECORD_RUN_PARAM}=${encodeURIComponent(runId)}`,
+    `/record/${id}?${RECORD_VIEW_PARAM}=runs&${RECORD_RUN_PARAM}=${encodeURIComponent(runId)}`,
   /** A deep link to a comparison of two runs, e.g.
-   *  `/record/<id>?compare=<runA>&compare=<runB>`. Same division of labour as
+   *  `/record/<id>?view=runs&compare=<runA>&compare=<runB>`. It names the
+   *  workspace for the reason `recordRun` above states, and the screen reads a
+   *  bare `?compare=` as `runs` so links minted before that still land right.
+   *  Same division of labour as
    *  `recordRun`: whole-URL links use this, while the Runs section adds and
    *  removes runs by copying its own `URLSearchParams`. It builds whatever it is
    *  given — including one id, which is a half-made selection and a legitimate
    *  thing to link to — and never pads the list to two. */
   recordCompare: (id: string, runIds: readonly string[]) =>
-    `/record/${id}?${runIds
-      .map((runId) => `${RECORD_COMPARE_PARAM}=${encodeURIComponent(runId)}`)
-      .join('&')}`,
+    `/record/${id}?${RECORD_VIEW_PARAM}=runs${runIds
+      .map((runId) => `&${RECORD_COMPARE_PARAM}=${encodeURIComponent(runId)}`)
+      .join('')}`,
   complete: (id: string) => `/record/${id}/complete`,
   evidence: (id: string) => `/record/${id}/evidence`,
   /** A deep link to ONE Evidence view, e.g. `/record/<id>/evidence?view=graph`.

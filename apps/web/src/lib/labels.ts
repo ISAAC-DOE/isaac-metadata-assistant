@@ -137,6 +137,25 @@ export const LABELS = {
   stepAudit: 'Audit',
   workflowEyebrow: 'Workflow',
 
+  // Record workspaces — the record screen's four local destinations, and the
+  // group label above them. Title Case per `casing-and-copy.md` Register 1
+  // (nav labels). `Workspaces` is a GROUP LABEL for a nav list, in the same
+  // eyebrow idiom the spine uses for `Workflow`; it is deliberately not the
+  // name of a screen, and nothing on the record page is titled with it.
+  //
+  // They are NOT workflow steps and must never be given completion state: the
+  // spine above them is the server-derived gated pipeline, and these four are
+  // always reachable regardless of it.
+  recordWorkspacesEyebrow: 'Workspaces',
+  workspaceFields: 'Record Fields',
+  workspaceRuns: 'Runs',
+  workspaceCapture: 'Capture & Proposals',
+  workspaceGraph: 'Graph',
+  // The eyebrow that separates the record's own identity/reference sections
+  // from the scientific draft blocks above them (audit P2: eight structurally
+  // different rows read as one undifferentiated list).
+  recordIdentityEyebrow: 'Record Identity',
+
   // Status chips
   chipVerified: 'Verified',
   chipConfirmed: 'Confirmed by You',

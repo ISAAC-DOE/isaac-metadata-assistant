@@ -337,18 +337,90 @@ export async function createExperimentThroughTheUi(page: Page, title: string): P
   expect(id, `the URL after creating did not carry a record id: ${page.url()}`).toMatch(
     /^[0-9A-Z]{26}$/
   );
+  /*
+   * ── AND THEN OPEN THE RUNS WORKSPACE, WHICH IS WHY THIS FUNCTION NOW ENDS
+   * ── WITH A NAVIGATION. ─────────────────────────────────────────────────────
+   *
+   * Create lands on the BARE `/record/<id>`, which is Record Fields — and the
+   * record screen's four workspaces are lazily mounted `?view=` destinations, so
+   * `RunsSection` is not on that page AT ALL. Every caller of this helper adds a
+   * run as its next act (`addRunThroughTheUi`), so without this hop the whole
+   * trusted suite fails on `Add Run` not existing.
+   *
+   * IT IS HERE RATHER THAN IN `addRunThroughTheUi` on purpose: that helper is
+   * called twice in a row, and a navigation between two Add Run clicks would
+   * discard the page between them — turning a two-click sequence into two
+   * separate visits and losing exactly the in-page state those specs are about.
+   */
+  await openWorkspace(page, id, 'runs');
   return id;
 }
 
-/** Add one run THROUGH THE SCREEN, and wait for the count to actually grow. */
+/**
+ * Open one of the record's four workspaces by URL, and wait for it to be there.
+ *
+ * A FULL NAVIGATION, used only where a spec has no page state to preserve (right
+ * after a create, or after a deliberate reload). Where the state matters, use
+ * `switchWorkspace` below — it clicks the control a scientist clicks.
+ */
+export async function openWorkspace(
+  page: Page,
+  id: string,
+  view: 'fields' | 'runs' | 'capture' | 'graph'
+): Promise<void> {
+  await page.goto(`/record/${id}?view=${view}`);
+  await expect(
+    page.getByRole('link', { name: WORKSPACE_LABEL[view] }),
+    `the ${view} workspace did not open on /record/${id}`
+  ).toHaveAttribute('aria-current', 'page');
+}
+
+/**
+ * Switch workspace THROUGH THE SIDEBAR — the control a scientist uses.
+ *
+ * Preferred over `openWorkspace` in the middle of a sequence: the switch is an
+ * in-app `<Link>`, so the page, its pollers and its record session survive it,
+ * which is what lets a spec walk several workspaces inside one visit. It also
+ * means the trusted suite exercises the switcher itself rather than only the URL
+ * contract behind it.
+ */
+export async function switchWorkspace(
+  page: Page,
+  view: 'fields' | 'runs' | 'capture' | 'graph'
+): Promise<void> {
+  await page.getByRole('link', { name: WORKSPACE_LABEL[view] }).click();
+  await expect(
+    page.getByRole('link', { name: WORKSPACE_LABEL[view] }),
+    `the sidebar did not mark ${view} as the open workspace`
+  ).toHaveAttribute('aria-current', 'page');
+}
+
+/** The four sidebar labels, verbatim (`lib/labels.ts`). */
+const WORKSPACE_LABEL = {
+  fields: 'Record Fields',
+  runs: 'Runs',
+  capture: 'Capture & Proposals',
+  graph: 'Graph',
+} as const;
+
+/** Add one run THROUGH THE SCREEN, and wait for the count to actually grow.
+ *  Requires the RUNS workspace to be open — see `createExperimentThroughTheUi`. */
 export async function addRunThroughTheUi(page: Page, expectedTotal: number): Promise<void> {
   await page.getByRole('button', { name: 'Add Run' }).click();
   await expect(page.locator('.run-card')).toHaveCount(expectedTotal);
 }
 
-/** Navigate to the Review Record screen and wait for the proposals panel. */
-export async function openRecord(page: Page, id: string): Promise<void> {
-  await page.goto(`/record/${id}`);
+/*
+ * `?view=` NAMES THE WORKSPACE, and it is required rather than cosmetic. The Review
+ * Record screen is four `?view=` destinations on one route (`RECORD_VIEW_IDS`), each
+ * lazily mounted, so a bare `/record/<id>` opens Record Fields and the panel a spec
+ * is about may not exist on the page at all. The default is unchanged from what a
+ * reader gets by typing the bare URL.
+ */
+/** Navigate to the Review Record screen's Capture & Proposals workspace and wait
+ *  for the proposals panel. */
+export async function openRecord(page: Page, id: string, view = 'capture'): Promise<void> {
+  await page.goto(`/record/${id}?view=${view}`);
   await expect(page.getByRole('heading', { name: 'Ingestion Proposals' })).toBeVisible();
 }
 

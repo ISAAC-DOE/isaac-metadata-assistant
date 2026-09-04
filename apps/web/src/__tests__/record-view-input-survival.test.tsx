@@ -1,21 +1,41 @@
 /*
- * D1 — SWITCHING THE RECORD'S VIEW TAB MUST NOT DESTROY UNSAVED TEXT.
+ * D1 — SWITCHING THE RECORD'S WORKSPACE MUST NOT DESTROY UNSAVED TEXT.
  *
  * WHAT WAS WRONG. The fields tabpanel on the Review Record screen was one arm of a
  * ternary (`activeView === 'graph' ? <graph/> : <fields/>`), so clicking `Graph`
- * UNMOUNTED everything inside it. `selectView` only rewrites `?view=` with
- * `replace: true`, so nothing about the gesture reads as leaving the screen — and yet
- * it silently discarded the transcript box (typed or dictated), the "Capture a note"
+ * UNMOUNTED everything inside it. The switch only rewrote `?view=`, so nothing about
+ * the gesture reads as leaving the screen — and yet it silently discarded the
+ * transcript box (typed or dictated), the "Capture a note"
  * box, an open note's Edit-wording textarea and dismissal reason, an open asset
  * create/edit form including its Notes and Caption-verbatim textareas, an open run
  * override value, and any run-field text this build could not parse.
  *
- * WHY THESE FOUR CASES. They are chosen to cover the four DIFFERENT places the text
- * lived, not four instances of one thing: a panel's own state (transcript), a child of
- * a panel (the capture box), a form inside a list item that only exists while a
- * disclosure is open (an asset edit form), and text the autosave store deliberately
- * never receives (a held-invalid run field — `onFieldChange` returns before
- * `autosave.queue`, so this one could not be rescued by the store at all).
+ * ── AND THE RISK GREW WHEN THE SCREEN GAINED FOUR WORKSPACES ────────────────
+ *
+ * The three boxes below no longer share one panel: the transcript and the note box
+ * are on `Capture & Proposals`, the asset form is on `Record Fields`, and the run
+ * field is on `Runs`. So there are now THREE panels that must survive being left,
+ * and the ways to leave one went from one (the graph) to three. Each case below
+ * therefore makes TWO round trips — out to the Graph, which is the conditional
+ * mount, and out to a sibling WORKSPACE, which is the hidden-but-mounted one — and
+ * the second half is coverage this file could not have had before.
+ *
+ * WHY THESE CASES. ~~"WHY THESE FOUR CASES"~~ — THERE ARE THREE `it`s, and the
+ * header has said four for as long as it has existed. The miscount is corrected
+ * rather than the missing case invented: what the sentence enumerates is FOUR
+ * PLACES THE TEXT LIVED, and the first case covers two of them in one round trip.
+ *
+ * The four places, not four instances of one thing: a panel's own state (the
+ * transcript box), a child of a panel (the "Capture a note" box) — those two share
+ * case one — a form inside a list item that only exists while a disclosure is open
+ * (an asset edit form), and text the autosave store deliberately never receives (a
+ * held-invalid run field: `onFieldChange` returns before `autosave.queue`, so this
+ * one could not be rescued by the store at all).
+ *
+ * A fourth `it` is NOT added to make the number true. The remaining box the D1 note
+ * lists — an open note's Edit-wording textarea — needs a stored note to open, which
+ * this file's fixtures do not have, and manufacturing one to satisfy a heading would
+ * be writing a test for the sake of a count. It is named here as uncovered instead.
  *
  * WHAT THIS FILE DELIBERATELY DOES NOT ASSERT: that the panel is unmounted, or that it
  * is not. It asserts what a reader can tell — while the graph is up nothing in the
@@ -82,11 +102,11 @@ const BASE = `/api/experiments/${ID}`;
 
 const RUN = runFixture({ id: 'RUNAAA', label: 'Run 1', ordinal: 1, version: 'ra.0' });
 
-function renderRecord(extra: Record<string, RouteEntry> = {}) {
+function renderRecord(extra: Record<string, RouteEntry> = {}, view = '') {
   stubFetchRoutes({ ...bundleRoutes(ID), ...extra });
   return render(
     <MemoryRouter
-      initialEntries={[`/record/${ID}`]}
+      initialEntries={[`/record/${ID}${view === '' ? '' : `?view=${view}`}`]}
       future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
     >
       <AppRoutes />
@@ -94,17 +114,15 @@ function renderRecord(extra: Record<string, RouteEntry> = {}) {
   );
 }
 
-const toGraph = () =>
+/* THE SWITCHER IS THE SIDEBAR'S WORKSPACE LIST — a real `<Link>`, not a
+   `role="tab"`. The `?view=` mechanism these cases turn on is unchanged. */
+const go = (name: string) =>
   act(async () => {
-    fireEvent.click(screen.getByRole('tab', { name: 'Graph' }));
-  });
-const toFields = () =>
-  act(async () => {
-    fireEvent.click(screen.getByRole('tab', { name: 'Record Fields' }));
+    fireEvent.click(screen.getByRole('link', { name }));
   });
 
-const fieldsPanel = () =>
-  document.querySelector('#record-view-panel-fields') as HTMLElement | null;
+const panel = (id: string) =>
+  document.querySelector(`#record-workspace-${id}`) as HTMLElement | null;
 
 beforeEach(() => {
   vi.useRealTimers();
@@ -116,9 +134,9 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe('the record view tabs keep unsaved text', () => {
-  it('keeps the transcript box and the note-capture box across a Graph round trip', async () => {
-    renderRecord({ [`GET ${BASE}/runs`]: { body: runsPage([RUN]) } });
+describe('the record workspaces keep unsaved text', () => {
+  it('keeps the transcript box and the note-capture box across a Graph AND a workspace round trip', async () => {
+    renderRecord({ [`GET ${BASE}/runs`]: { body: runsPage([RUN]) } }, 'capture');
 
     // The capture panel opens behind its own disclosure; opening it is the reader's
     // first act, and the box only exists after it.
@@ -128,9 +146,9 @@ describe('the record view tabs keep unsaved text', () => {
     const capture = screen.getByLabelText('Capture a note');
     fireEvent.change(capture, { target: { value: 'the second monochromator was warm' } });
 
-    await toGraph();
+    await go('Graph');
     /*
-     * Nothing in the fields view is on screen. The query is BY ROLE on purpose:
+     * Nothing in the capture workspace is on screen. The query is BY ROLE on purpose:
      * `*ByRole` is the only family that respects the accessibility tree, so it is the
      * one that can distinguish "hidden from the reader" from "absent from the DOM".
      * `queryByLabelText` matches a `display: none` textarea perfectly well and would
@@ -139,22 +157,43 @@ describe('the record view tabs keep unsaved text', () => {
      */
     expect(screen.queryByRole('textbox', { name: 'Transcript' })).toBeNull();
     expect(screen.queryByRole('textbox', { name: 'Capture a note' })).toBeNull();
-    expect(screen.queryByRole('button', { name: /Add Run/ })).toBeNull();
-    expect(fieldsPanel()?.hidden).toBe(true);
+    expect(panel('capture')?.hidden).toBe(true);
 
-    await toFields();
+    await go('Capture & Proposals');
     expect((screen.getByLabelText('Transcript') as HTMLTextAreaElement).value).toBe(
       'the scan was repeated at 8979 eV',
     );
     expect((screen.getByLabelText('Capture a note') as HTMLTextAreaElement).value).toBe(
       'the second monochromator was warm',
     );
-    expect(fieldsPanel()?.hidden).toBe(false);
+    expect(panel('capture')?.hidden).toBe(false);
+
+    /* THE SECOND ROUND TRIP — out to a SIBLING WORKSPACE rather than to the graph.
+       This is the leg the four-destination screen added: `Runs` is a hidden-but-
+       mounted panel like this one, so a bug that hid the wrong panel, or that
+       remounted this one on the way back, would show up here and nowhere else. */
+    await go('Runs');
+    expect(screen.queryByRole('textbox', { name: 'Transcript' })).toBeNull();
+    expect(panel('capture')?.hidden).toBe(true);
+    expect(panel('runs')?.hidden).toBe(false);
+
+    await go('Capture & Proposals');
+    expect((screen.getByLabelText('Transcript') as HTMLTextAreaElement).value).toBe(
+      'the scan was repeated at 8979 eV',
+    );
+    expect((screen.getByLabelText('Capture a note') as HTMLTextAreaElement).value).toBe(
+      'the second monochromator was warm',
+    );
   });
 
   it('keeps an open asset edit form, including what was typed in it', async () => {
     renderRecord({ [`GET ${BASE}/assets`]: { body: assetsPage([assetFixture()]) } });
 
+    /* ASSET REFERENCES IS COLLAPSED ON ARRIVAL on the Record Fields workspace, so
+       opening it is the reader's first act and the card only becomes reachable
+       after it. The panel stays MOUNTED while collapsed (its own header explains
+       why), so this is a disclosure press and not a mount. */
+    fireEvent.click(await screen.findByRole('button', { name: /Asset References/ }));
     const assetCard = (await waitFor(() => {
       const el = document.querySelector('[data-asset-id="reduced_spectrum"]');
       if (el === null) throw new Error('no asset card yet');
@@ -164,20 +203,28 @@ describe('the record view tabs keep unsaved text', () => {
     const notes = screen.getByLabelText(/^Notes/);
     fireEvent.change(notes, { target: { value: 'exported from the beamline reduction' } });
 
-    await toGraph();
+    await go('Graph');
     // By role, for the reason recorded in the case above.
     expect(screen.queryByRole('textbox', { name: /^Notes/ })).toBeNull();
 
-    await toFields();
+    await go('Record Fields');
     // The form is still OPEN — a reader who left it open did not close it — and it
     // still holds what they typed.
+    expect((screen.getByLabelText(/^Notes/) as HTMLTextAreaElement).value).toBe(
+      'exported from the beamline reduction',
+    );
+
+    // ...and across a sibling workspace too, for the reason the first case records.
+    await go('Capture & Proposals');
+    expect(screen.queryByRole('textbox', { name: /^Notes/ })).toBeNull();
+    await go('Record Fields');
     expect((screen.getByLabelText(/^Notes/) as HTMLTextAreaElement).value).toBe(
       'exported from the beamline reduction',
     );
   });
 
   it('keeps run-field text the screen could not parse, which no store ever receives', async () => {
-    renderRecord({ [`GET ${BASE}/runs`]: { body: runsPage([RUN]) } });
+    renderRecord({ [`GET ${BASE}/runs`]: { body: runsPage([RUN]) } }, 'runs');
     await screen.findByRole('button', { name: /Add Run/ });
     await act(async () => {
       fireEvent.click(within(card()).getByRole('button', { name: /^Run \d/ }));
@@ -191,8 +238,14 @@ describe('the record view tabs keep unsaved text', () => {
       expect(within(card()).getByRole('status').textContent ?? '').not.toContain('Saving'),
     );
 
-    await toGraph();
-    await toFields();
+    await go('Graph');
+    await go('Runs');
+    expect(
+      (within(card()).getByLabelText('Temperature (K)') as HTMLInputElement).value,
+    ).toBe('abc');
+
+    await go('Record Fields');
+    await go('Runs');
     expect(
       (within(card()).getByLabelText('Temperature (K)') as HTMLInputElement).value,
     ).toBe('abc');
