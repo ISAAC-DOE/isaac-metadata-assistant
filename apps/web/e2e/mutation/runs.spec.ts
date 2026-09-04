@@ -56,15 +56,52 @@ const SETTLE_MS = 3_000;
 
 /* ── locators ──────────────────────────────────────────────────────────────── */
 
+/*
+ * MASTER-DETAIL (PR-C): the list renders COMPACT ROWS only — one open control
+ * per run, showing the label, ordinal, condition summary and save-status —
+ * and exactly ONE run's full, field-editable card is ever open at a time,
+ * addressed by `?run=<id>` and reached by clicking that row. Every locator
+ * below is renamed and re-scoped for that shape rather than patched in place,
+ * because "card" used to mean one thing (an in-list accordion this file could
+ * expand independently) and now means two different things depending on
+ * whether the run is open.
+ */
 const addRun = (page: Page) => page.getByRole('button', { name: 'Add Run' });
-const runCards = (page: Page) => page.locator('article.run-card');
+/** Every run in the COMPACT list — `RunCard`'s `compact` mode. */
+const runRows = (page: Page) => page.locator('article.run-card[data-compact="true"]');
+/** The ONE run's full editor, present only while a run is open (`?run=`). */
+const openRun = (page: Page) => page.locator('article.run-card:not([data-compact])');
 const runCount = (page: Page) => page.locator('.runs-count');
 
-/** One card, by its position in the list. Position is the reader's mental model. */
-const nthCard = (page: Page, n: number) => runCards(page).nth(n);
+/** One compact row, by its position in the list. Position is the reader's mental model. */
+const nthRow = (page: Page, n: number) => runRows(page).nth(n);
+
+/** Click a compact row's own open control, and wait for the one-run editor. */
+async function openNthRun(page: Page, n: number): Promise<Locator> {
+  await header(nthRow(page, n)).click();
+  const run = openRun(page);
+  await expect(run).toBeVisible();
+  return run;
+}
+
+/** Leave the open editor, back to the compact list. */
+async function backToAllRuns(page: Page) {
+  await page.getByRole('button', { name: 'Back to all runs' }).click();
+  await expect(openRun(page)).toHaveCount(0);
+}
 
 const header = (card: Locator) => card.locator('button.run-card-header');
+/**
+ * The OPEN editor's own heading — a plain `<h3>`, not a button (fix round,
+ * review finding m-2: the only open editor on screen must not be able to
+ * collapse into nothing, so it carries no disclosure semantics at all).
+ * Use this, not `header()`, when `card` is the run returned by `openNthRun`.
+ */
+const focusedHeading = (card: Locator) => card.locator('h3.run-card-header');
 const saveStatus = (card: Locator) => card.locator('.run-save-status');
+/** The filled-count fraction — a FULL-CARD field only; the compact row does
+ *  not render it (see `RunCard`'s own file header on why). Always query it
+ *  from the OPEN run, never from a compact row. */
 const progress = (card: Locator) => card.locator('.run-card-progress');
 const conditions = (card: Locator) => card.locator('.run-card-conditions');
 
@@ -93,10 +130,13 @@ async function openRunsSection(page: Page, id: string) {
   await expect(addRun(page)).toBeEnabled();
 }
 
-/** Click Add Run and wait for the card the server created. */
+/** Click Add Run and wait for the card the server created. It lands as a
+ *  COMPACT ROW — Add Run puts keyboard focus on the new row, not on an open
+ *  editor — matching the product: a create must not silently jump the
+ *  reader into a full-screen form they did not ask to open. */
 async function clickAddRun(page: Page, expectedTotal: number) {
   await addRun(page).click();
-  await expect(runCards(page)).toHaveCount(expectedTotal);
+  await expect(runRows(page)).toHaveCount(expectedTotal);
   /*
    * THE COUNT NOW STATES WHAT IT IS A COUNT OF, and this expectation changed with
    * it rather than being loosened. The toolbar used to read `{runs.length} runs`,
@@ -254,12 +294,12 @@ test.describe('R5 · the Run workspace', () => {
 
     await clickAddRun(page, 1);
 
-    // The card on screen and the run on the server are the SAME run — asserted by
-    // id, because "a card appeared" and "a run exists" are different claims.
+    // The row on screen and the run on the server are the SAME run — asserted by
+    // id, because "a row appeared" and "a run exists" are different claims.
     const after = await readRuns(request, session, SEED.fresh);
     expect(after).toHaveLength(1);
-    await expect(nthCard(page, 0)).toHaveAttribute('data-run-id', after[0].id);
-    await expect(header(nthCard(page, 0))).toContainText(after[0].label);
+    await expect(nthRow(page, 0)).toHaveAttribute('data-run-id', after[0].id);
+    await expect(header(nthRow(page, 0))).toContainText(after[0].label);
 
     /*
      * THE FIRST RUN ADOPTS WHAT THE RECORD ALREADY HOLDS, and this assertion is the
@@ -273,12 +313,17 @@ test.describe('R5 · the Run workspace', () => {
      * they are the record's own evidenced values, not invented ones. The
      * "nothing is claimed" property is asserted on the SECOND run below, which is where
      * it still holds and where it is now the interesting case.
+     *
+     * BOTH ARE READ FROM THE COMPACT ROW — save-status and the condition summary
+     * are exactly the two facts a compact row promises without opening the run.
      */
-    await expect(saveStatus(nthCard(page, 0))).toHaveText('');
-    await expect(conditions(nthCard(page, 0))).toContainText('298 K');
+    await expect(saveStatus(nthRow(page, 0))).toHaveText('');
+    await expect(conditions(nthRow(page, 0))).toContainText('298 K');
     /*
      * The scope is part of the figure — a bare "0 of N" is a completion claim the
-     * number is not entitled to make. See the note in RunCard.tsx.
+     * number is not entitled to make. See the note in RunCard.tsx. THE PROGRESS
+     * FRACTION IS A FULL-CARD FIELD ONLY — the compact row deliberately withholds
+     * it — so the run has to be OPEN to read it.
      *
      * THE DENOMINATOR IS MATCHED AS A PATTERN, NOT AS A LITERAL, and it used to be
      * `'0 of 3'`. That literal broke the moment the screen offered the whole writable
@@ -287,18 +332,21 @@ test.describe('R5 · the Run workspace', () => {
      * NUMERATOR being zero and the SCOPE being stated; the size of the offered set is
      * `runFields.ts`'s business and is asserted against the rendered controls below.
      */
-    await expect(progress(nthCard(page, 0))).toHaveText(
+    const opened = await openNthRun(page, 0);
+    await expect(progress(opened)).toHaveText(
       /^\s*\d+ of \d+\s+run fields on this screen\s*$/,
     );
+    await backToAllRuns(page);
 
     // AND THE SECOND RUN ADOPTS NOTHING, which is the other half of the rule: copying
     // one run's spectrum or conditions onto another would assert they measured the same
     // thing. So "nothing is claimed about a run nobody has touched" survives here.
     await clickAddRun(page, 2);
-    const second = nthCard(page, 1);
+    const second = nthRow(page, 1);
     await expect(saveStatus(second)).toHaveText('');
     await expect(conditions(second)).toContainText('No conditions recorded yet');
-    await expect(progress(second)).toHaveText(/^\s*0 of \d+\s+run fields on this screen\s*$/);
+    const secondOpened = await openNthRun(page, 1);
+    await expect(progress(secondOpened)).toHaveText(/^\s*0 of \d+\s+run fields on this screen\s*$/);
   });
 
   test('a typed value says Saved only AFTER the server acknowledges, and survives a reload', async ({
@@ -308,7 +356,7 @@ test.describe('R5 · the Run workspace', () => {
   }) => {
     await openRunsSection(page, SEED.fresh);
     await clickAddRun(page, 1);
-    const card = nthCard(page, 0);
+    const card = await openNthRun(page, 0);
 
     // Hold the PATCH open, so "Saving…" is observable as a real state rather than
     // inferred from a screenshot taken at a lucky moment.
@@ -350,14 +398,23 @@ test.describe('R5 · the Run workspace', () => {
     );
     await expect(card.locator('.run-field')).toHaveCount(denominator);
 
-    // DURABILITY, through the real read path rather than through React state.
+    /*
+     * DURABILITY, through the real read path rather than through React state.
+     *
+     * `?run=<id>` IS ON THE URL — `openNthRun` navigated there — so a full page
+     * reload lands back on the SAME open run, resolved from the URL exactly as
+     * a bookmarked or shared deep link would be. It opens expanded by default
+     * (the reader is asking for this one run), so the field's value is on
+     * screen with no further click, unlike the old in-list accordion this
+     * replaced.
+     */
     await page.reload();
     await expect(page.getByRole('heading', { name: 'Runs', exact: true })).toBeVisible();
-    const reloaded = nthCard(page, 0);
+    const reloaded = openRun(page);
+    await expect(reloaded).toBeVisible();
     await expect(conditions(reloaded)).toContainText('277.15 K');
     await expect(progress(reloaded)).toHaveText(/^\s*\d+ of \d+\s+run fields on this screen\s*$/);
     // And the value is in the box, not merely in the summary line.
-    await header(reloaded).click();
     await expect(fieldControl(reloaded, 'context.temperature_K')).toHaveValue('277.15');
   });
 
@@ -376,11 +433,13 @@ test.describe('R5 · the Run workspace', () => {
     expect(first.ordinal, 'ordinals order the list').toBeLessThan(second.ordinal);
     const firstRevBefore = first.rev;
 
-    // Edit ONLY the second card.
-    const card2 = nthCard(page, 1);
-    await expect(card2).toHaveAttribute('data-run-id', second.id);
+    // Edit ONLY the second run. Master-detail: opening it is what makes its
+    // fields reachable at all.
+    await expect(nthRow(page, 1)).toHaveAttribute('data-run-id', second.id);
+    const card2 = await openNthRun(page, 1);
     await fieldControl(card2, 'context.temperature_K').fill('310');
     await expect(saveStatus(card2)).toHaveText('Saved', { timeout: 10_000 });
+    await backToAllRuns(page);
 
     const after = await readRuns(request, session, SEED.fresh);
     const a1 = after.find((r) => r.id === first.id)!;
@@ -399,10 +458,12 @@ test.describe('R5 · the Run workspace', () => {
     expect(a1.values['context.temperature_K']).toBe(298);
     expect(a1.rev, 'Run 1 must not have been written at all').toBe(firstRevBefore);
 
-    // And the screen agrees about both.
-    await expect(saveStatus(nthCard(page, 0))).toHaveText('');
-    await expect(conditions(nthCard(page, 0))).toContainText('298 K');
-    await expect(conditions(card2)).toContainText('310 K');
+    // And the screen agrees about both — read from the compact LIST, back after
+    // leaving focus, which is exactly what a reader sees without opening either
+    // run again.
+    await expect(saveStatus(nthRow(page, 0))).toHaveText('');
+    await expect(conditions(nthRow(page, 0))).toContainText('298 K');
+    await expect(conditions(nthRow(page, 1))).toContainText('310 K');
   });
 
   test('a value this build cannot shape is NOT sent, and the box says why', async ({
@@ -412,7 +473,7 @@ test.describe('R5 · the Run workspace', () => {
   }) => {
     await openRunsSection(page, SEED.fresh);
     await clickAddRun(page, 1);
-    const card = nthCard(page, 0);
+    const card = await openNthRun(page, 0);
     const patches = countPatches(page, SEED.fresh);
     const before = await readRuns(request, session, SEED.fresh);
 
@@ -429,17 +490,16 @@ test.describe('R5 · the Run workspace', () => {
     await expect(saveStatus(card)).toHaveText('Change not sent');
 
     /*
-     * AND IT SURVIVES COLLAPSING THE CARD. This is the browser half of a review
-     * finding: the field error lives inside the expanded panel, so before the fix a
-     * reader who typed something unparseable and collapsed the card was left with a
-     * card that said nothing at all — or worse, still said "Saved" from a previous
-     * successful write, while holding an edit that would never be sent.
+     * AND IT IS VISIBLE WITH NO ACTION AT ALL — THE CARD CAN NO LONGER
+     * COLLAPSE (fix round, review finding m-2). This used to prove the field
+     * error survived collapsing and re-expanding the card; that action is
+     * gone entirely, because the only open editor on screen must not be able
+     * to collapse into nothing. What survives from the original finding: the
+     * heading's own accessible text carries the same fact the live region
+     * does, so a reader who never opens the body still sees it.
      */
-    await header(card).click();
-    await expect(header(card)).toHaveAttribute('aria-expanded', 'false');
     await expect(saveStatus(card)).toHaveText('Change not sent');
-    await expect(header(card)).toContainText('Change not sent');
-    await header(card).click();
+    await expect(focusedHeading(card)).toContainText('Change not sent');
 
     const after = await readRuns(request, session, SEED.fresh);
     expect(after[0].rev).toBe(before[0].rev);
@@ -460,7 +520,7 @@ test.describe('R5 · the Run workspace', () => {
   }) => {
     await openRunsSection(page, SEED.fresh);
     await clickAddRun(page, 1);
-    const card = nthCard(page, 0);
+    const card = await openNthRun(page, 0);
 
     // The rev the run already has. MEASURED, not assumed to be 0: creating a run
     // is itself a write, so `_bump_changed_runs` has already taken it from 0 to 1
@@ -501,31 +561,41 @@ test.describe('R5 · the Run workspace', () => {
     expect(after[0].values['context.typo_K']).toBeUndefined();
   });
 
-  test('I3 · a save refused while the card is COLLAPSED is still announced and still recoverable', async ({
+  test('I3 · a save refused while the run is a COMPACT ROW is still announced and still recoverable', async ({
     page,
     request,
     session,
   }) => {
+    /*
+     * MASTER-DETAIL (PR-C). "Collapsed" used to mean an in-list accordion put
+     * away in place; the property this spec exists to pin — a refused write is
+     * visible WITHOUT opening the run — now means visible on the COMPACT ROW,
+     * once the reader has LEFT focus. This is orchestrator requirement #4,
+     * verbatim: "Unsaved/failed autosave must remain visible on the compact
+     * row." Before `90b432d` the failed state lived only inside the expanded
+     * panel; this spec's job is to prove it now survives leaving the run
+     * entirely, not merely collapsing its panel in place.
+     */
     await openRunsSection(page, SEED.fresh);
     await clickAddRun(page, 1);
-    const card = nthCard(page, 0);
+    const card = await openNthRun(page, 0);
 
     await injectUnwritablePathOnce(page, 'context.typo_K');
     await fieldControl(card, 'context.temperature_K').fill('288');
-    // Collapse before the refusal lands. Before `90b432d` the failed state lived
-    // only inside the expanded panel, so this reader was told nothing at all.
-    await header(card).click();
-    await expect(header(card)).toHaveAttribute('aria-expanded', 'false');
+    // Leave focus before the refusal lands — back to the compact row.
+    await backToAllRuns(page);
+    const row = nthRow(page, 0);
+    await expect(header(row)).not.toHaveAttribute('aria-expanded');
 
-    await expect(saveStatus(card)).toContainText('Save failed', { timeout: 10_000 });
-    // In the header's ACCESSIBLE NAME, so reaching the collapsed card by keyboard
-    // alone says what is wrong with it.
-    await expect(header(card)).toContainText('Save failed');
-    const retry = card.getByRole('button', { name: 'Retry Save' });
+    await expect(saveStatus(row)).toContainText('Save failed', { timeout: 10_000 });
+    // In the row's own ACCESSIBLE NAME, so reaching it by keyboard alone says
+    // what is wrong with it — same guarantee the full header always carried.
+    await expect(header(row)).toContainText('Save failed');
+    const retry = row.getByRole('button', { name: 'Retry Save' });
     await expect(retry).toBeVisible();
 
     await retry.click();
-    await expect(saveStatus(card)).toHaveText('Saved', { timeout: 10_000 });
+    await expect(saveStatus(row)).toHaveText('Saved', { timeout: 10_000 });
     expect((await readRuns(request, session, SEED.fresh))[0].values['context.temperature_K']).toBe(
       288,
     );
@@ -538,7 +608,7 @@ test.describe('R5 · the Run workspace', () => {
   }) => {
     await openRunsSection(page, SEED.fresh);
     await clickAddRun(page, 1);
-    const card = nthCard(page, 0);
+    const card = await openNthRun(page, 0);
 
     /*
      * WAITING FOR THE REQUEST TO HAVE LEFT IS THE WHOLE TEST, and the first version
@@ -647,7 +717,19 @@ test.describe('R5 · the Run workspace', () => {
      * card (verified against a reintroduced defect).
      */
     await page.getByRole('link', { name: 'Runs' }).click();
-    const remounted = nthCard(page, 0);
+    /*
+     * STILL THE OPEN RUN — `?run=` is untouched by switching the record's
+     * own workspace, so the reader returns to the same editor they left.
+     * This used to say "view tab"; there is no tab bar any more (main's
+     * sidebar rewrite, PR #229) — `Runs` is a `<Link>` in
+     * `RecordWorkspaceNav`, and that component's own header states the
+     * property this assertion depends on: each destination's `to` is built
+     * by COPYING the current `URLSearchParams` and setting only
+     * `?view=`, never rebuilding the search string, so `?run=` (and
+     * `?compare=`, `?at=`) survive every workspace switch by construction.
+     */
+    const remounted = openRun(page);
+    await expect(remounted).toBeVisible();
     // `Saved`, NOT the empty string this line used to assert. The empty string WAS the
     // old behaviour and was the defect: a card that had just had a write acknowledged
     // for it came back claiming nothing, because the state died with the component.
@@ -667,7 +749,7 @@ test.describe('R5 · the Run workspace', () => {
   }) => {
     await openRunsSection(page, SEED.fresh);
     await clickAddRun(page, 1);
-    const card = nthCard(page, 0);
+    const card = await openNthRun(page, 0);
 
     // A second client moves the run on. The page's token is now stale.
     const [run] = await readRuns(request, session, SEED.fresh);
@@ -712,7 +794,7 @@ test.describe('R5 · the Run workspace', () => {
   }) => {
     await openRunsSection(page, SEED.fresh);
     await clickAddRun(page, 1);
-    const card = nthCard(page, 0);
+    const card = await openNthRun(page, 0);
 
     const before = await readRuns(request, session, SEED.fresh);
     await card.getByRole('button', { name: 'Check Run' }).click();
@@ -728,5 +810,48 @@ test.describe('R5 · the Run workspace', () => {
     expect(after[0].rev, 'a check must not advance the run').toBe(before[0].rev);
     expect(after[0].version).toBe(before[0].version);
     await expect(saveStatus(card)).toHaveText('');
+  });
+
+  /*
+   * REVIEW FINDING I-6(4) — THE ONE PLACE `history` IS OBSERVABLE FROM
+   * INSIDE THIS SUITE. Every other spec in this file drives the app through
+   * its own controls; this is the one browser fact no jsdom test can stand
+   * in for, because jsdom's `MemoryRouter` has no real `window.history` for
+   * a real Back button to pop. Opening a run from the compact list PUSHES a
+   * new history entry (`RunsSection.tsx`'s `setFocusRun(run.id, { push:
+   * true })`) — deliberately, so the browser's OWN Back button undoes
+   * exactly that click and returns to the list, rather than leaving the
+   * reader on the record they arrived from several Back presses later.
+   *
+   * MUTATION CONTROL: removing `{ push: true }` from the compact row's
+   * `onFocusRun` call turns this red. Opening a run then REPLACES the
+   * current history entry instead of pushing a new one, so there is nothing
+   * for the browser's Back button to pop back OUT of focus mode — the run
+   * stays open and `openRun(page)` is still visible after `page.goBack()`.
+   */
+  test('page.goBack() after opening a run from the list returns to the list, with the row focused', async ({
+    page,
+  }) => {
+    await openRunsSection(page, SEED.fresh);
+    await clickAddRun(page, 1);
+
+    const row = nthRow(page, 0);
+    await header(row).click();
+    await expect(openRun(page)).toBeVisible();
+    await expect(page).toHaveURL(/[?&]run=/);
+
+    await page.goBack();
+
+    await expect(openRun(page)).toHaveCount(0);
+    await expect(row).toBeVisible();
+    await expect(page).not.toHaveURL(/[?&]run=/);
+    // FOCUS RESTORED TO THE ROW, not merely to the page. The explicit "Back
+    // to all runs" button has always done this by calling
+    // `setCardFocusId(focusRunId)` before clearing focus; the browser's own
+    // Back button pops history without ever calling that handler, so
+    // `RunsSection.tsx` restores it from a ref that tracks whichever run
+    // focus was last on (`previousFocusRunIdRef`) — see its own comment for
+    // why neither existing handler covers this path.
+    await expect(header(row)).toBeFocused();
   });
 });

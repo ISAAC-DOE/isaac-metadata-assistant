@@ -410,6 +410,45 @@ export async function addRunThroughTheUi(page: Page, expectedTotal: number): Pro
   await expect(page.locator('.run-card')).toHaveCount(expectedTotal);
 }
 
+/**
+ * Open the Nth run (0-based, in the order the list already renders them) from
+ * the COMPACT list, and return its editor.
+ *
+ * MASTER-DETAIL (PR-C): a compact row is label/ordinal/conditions behind ONE
+ * open control and holds no field — `getByLabel('Environment')` or any other
+ * run-field control exists ONLY once a run is open, addressed by `?run=`. The
+ * row's own click is the sole way in; its accessible name begins with an
+ * `.sr-only` "Open " ahead of the run's own label (`RunCard.tsx`), which is
+ * why this is found by role and name rather than by a class a future markup
+ * change could quietly stop matching.
+ */
+export async function openRun(page: Page, nth: number) {
+  await page
+    .locator('.run-card[data-compact="true"]')
+    .nth(nth)
+    .getByRole('button', { name: /^Open / })
+    .click();
+  const editor = page.locator('.run-card:not([data-compact])');
+  await expect(editor, `run ${nth} did not open into its editor`).toBeVisible();
+  return editor;
+}
+
+/**
+ * Leave the open run, back to the compact list — clearing `?run=`.
+ *
+ * NOT OPTIONAL AFTER `openRun` IF THE SPEC RE-VISITS THE RUNS WORKSPACE
+ * LATER. `RecordWorkspaceNav` copies the CURRENT search params when
+ * switching workspaces and sets only `?view=`, so a stray `?run=` left on
+ * the URL survives every later `switchWorkspace` call and reopens the SAME
+ * run — silently turning "both runs are visible in the compact list" (a
+ * later assertion elsewhere might depend on this) into "one run's editor is
+ * open" the next time the Runs workspace is visited.
+ */
+export async function backToAllRuns(page: Page): Promise<void> {
+  await page.getByRole('button', { name: 'Back to all runs' }).click();
+  await expect(page.locator('.run-card:not([data-compact])')).toHaveCount(0);
+}
+
 /*
  * `?view=` NAMES THE WORKSPACE, and it is required rather than cosmetic. The Review
  * Record screen is four `?view=` destinations on one route (`RECORD_VIEW_IDS`), each

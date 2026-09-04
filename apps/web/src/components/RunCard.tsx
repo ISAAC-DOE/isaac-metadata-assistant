@@ -1,5 +1,13 @@
 /*
- * ONE RUN, as a collapsible card.
+ * ONE RUN — a collapsible card when it is the ONE open editor, and a COMPACT
+ * ROW when it is one of several in the list (PR-C, master-detail). The two
+ * are the SAME component and the SAME autosave subscription, distinguished by
+ * the `compact` prop, so a save that fails or an edit that is still pending
+ * reports through the identical `useRunAutosave` instance and the identical
+ * `.run-card-save` region regardless of which header renders above it — see
+ * `RunsSection`'s own file header for why exactly one run is ever the open
+ * editor, and each markup branch's own comment below for what it withholds
+ * and why.
  *
  * COLLAPSED it answers the four questions a scientist scanning a list of runs
  * actually has: which run is this, what conditions was it taken under, how much
@@ -68,11 +76,19 @@
  * ACCESSIBILITY, the parts that are decisions rather than defaults:
  *   * A real accordion — `h3 > button[aria-expanded][aria-controls]` over a
  *     panel with `role="region"` and `aria-labelledby` pointing back at the
- *     button. Not a div with an onClick, and not `aria-selected`.
+ *     button. Not a div with an onClick, and not `aria-selected`. STILL TRUE
+ *     of the two sections INSIDE an open run (Conditions / Inherited / Name,
+ *     each its own `RunSection`) and of nothing else now: the CARD's own
+ *     header used to be one more instance of this same pattern for the
+ *     non-compact (focused) case, and it no longer is — see m-2 below. A
+ *     compact row's header remains a real `<button>`, but one that navigates
+ *     rather than discloses, so it deliberately carries neither
+ *     `aria-expanded` nor `aria-controls`.
  *   * The autosave status lives in ONE `role="status"` region per card, so two runs
  *     saving at once are two independent regions rather than one contradictory
- *     stream. It is OUTSIDE the collapsible panel, with Retry Save, so a write the
- *     server refuses is reported and recoverable in either state.
+ *     stream. It is OUTSIDE the run's own field panel, with Retry Save, so a write
+ *     the server refuses is reported and recoverable regardless of whether that
+ *     panel is even rendered (a compact row renders none at all).
  *     STATED PRECISELY, because the earlier wording said these "announce as two
  *     runs": the region carries no accessible name and no run identity, so a screen
  *     reader hears "Saved" twice and not which run each belongs to. Giving it a name
@@ -83,14 +99,14 @@
  */
 
 import './runs.css';
-import { useEffect, useId, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState, type RefObject } from 'react';
 import { StatusChip } from './StatusChip';
 import { RunInheritedPanel } from './RunInheritedPanel';
 import { RunRenameForm } from './RunRenameForm';
 import { RunSection } from './RunSection';
 import { FindingList } from './RunFindingList';
 import { inheritedTally, type InheritedTally } from '../lib/runOverrides';
-import { Check, ChevronDown, ChevronRight, CircleAlert, RotateCcw, TriangleAlert } from './icons';
+import { Check, ChevronRight, CircleAlert, RotateCcw, TriangleAlert } from './icons';
 import { api } from '../lib/api';
 import {
   RUN_FIELDS,
@@ -128,8 +144,7 @@ type CheckState =
 export function RunCard({
   experimentId,
   run,
-  expanded,
-  onToggle,
+  compact = false,
   onRun,
   focusOnMount,
   onFocused,
@@ -141,22 +156,43 @@ export function RunCard({
   removing = false,
   removeError = null,
   onReloadSection,
+  onHeldInvalidChange,
 }: {
   experimentId: string;
   run: ApiRunView;
-  expanded: boolean;
-  onToggle: () => void;
+  /**
+   * COMPACT IS A LIST ROW, NOT A SMALLER CARD. Master-detail (`RunsSection`'s
+   * own file header) means exactly one run's full editor is open on screen at
+   * a time, addressed by `?run=`; every OTHER run renders as this — a single
+   * open control naming the run, its condition summary, its ordinal, its
+   * save-status indicator (the same live region a full card renders, so a
+   * refused write is visible without opening anything) and, only when the
+   * data is already on hand, whether it overrides the record or has been
+   * exported. It never renders the accordion panel, never accepts an
+   * expand/collapse toggle, and never renders Remove — removal is offered
+   * only once a run is open, per the destructive-action separation this
+   * surface has always kept.
+   *
+   * `onFocusRun` IS THE WHOLE CLICK TARGET here, and it always was in this
+   * file's own intent — a standalone "Focus" button briefly sat beside the
+   * row too (fix round, review finding I-3), which put the same gesture
+   * behind a SECOND, easy-to-miss control: two 52×24 targets for one act, and
+   * 73px of extra row height once they wrapped at 320px. It is gone; the row
+   * itself carries the verb instead (an `.sr-only` "Open" ahead of the run's
+   * name in the button's accessible name, so a screen reader hears what the
+   * control does and WCAG 2.5.3 still holds — the visible text is a substring
+   * of the accessible name, not the reverse).
+   */
+  compact?: boolean;
   /** Adopt a run the server returned (a save or a refresh). */
   onRun: (run: ApiRunView) => void;
   /** True for the run that was just added — focus moves to its header. */
   focusOnMount?: boolean;
   onFocused?: () => void;
   /**
-   * Isolate this run on the record screen. Supplied by the LIST and deliberately
-   * not by the focused view — a control that puts the reader where they already
-   * are is a dead control, and this surface has a written rule against offering
-   * one (see the `RUN_FIELDS` note above about a control whose only outcome is a
-   * 422). Absent means the card renders no such button at all.
+   * Isolate this run on the record screen. Required when `compact` is true —
+   * the row's own open control calls it. Absent in the focused view, where it
+   * would put the reader exactly where they already are.
    */
   onFocusRun?: () => void;
   /**
@@ -203,6 +239,16 @@ export function RunCard({
   removeError?: { message: string; stale: boolean } | null;
   /** Re-read this section's first page. Rendered only for a `stale` refusal. */
   onReloadSection?: () => void;
+  /**
+   * TOLD, NOT ASKED — the focused view's own confirm-before-leaving gate
+   * (fix round, review finding I-1) needs to know whether THIS card holds
+   * text it could not read, and that fact lives entirely in local state one
+   * component up from where "Back to all runs" is rendered. Called whenever
+   * `heldInvalid` changes, never polled. Supplied only by the focused view;
+   * a compact row never holds an open field for text to be held in, so it
+   * has nothing to report.
+   */
+  onHeldInvalidChange?: (heldInvalid: boolean) => void;
 }) {
   const baseId = useId();
   const headerId = `${baseId}-header`;
@@ -287,7 +333,15 @@ export function RunCard({
     setFieldErrors({});
   }, [adoptedNonce]);
 
-  const headerRef = useRef<HTMLButtonElement>(null);
+  /*
+   * Either a compact row's `<button>` or the focused view's plain `<h3>` —
+   * both are valid `.focus()` targets, and `focusOnMount`/`onFocused` only
+   * ever call `.focus()` on it, never anything element-specific. `HTMLElement`
+   * is the honest common type; React's own per-tag ref prop types do not
+   * union, so each branch below casts through `RefObject<HTMLElement>` rather
+   * than duplicating the ref for two branches that share one target.
+   */
+  const headerRef = useRef<HTMLElement>(null);
   useEffect(() => {
     if (!focusOnMount) return;
     headerRef.current?.focus();
@@ -334,7 +388,6 @@ export function RunCard({
 
   const conditions = runConditionsSummary(run);
   const filled = runFilledCount(run);
-  const Chevron = expanded ? ChevronDown : ChevronRight;
 
   /*
    * WHAT THIS RUN INHERITS, COUNTED — never guessed and never a percentage.
@@ -358,16 +411,35 @@ export function RunCard({
    * server answered 200 to a PATCH carrying every edit this hook held, AND NOTHING
    * HAS BEEN TYPED SINCE". Something had been typed since.
    *
-   * The error text itself lives inside `{expanded && …}`, so collapsing the card
-   * removed the only indication, and nothing clears `fieldErrors` outside a refresh:
-   * the card sat at `300 K · 1 of 3 set · Saved` indefinitely while holding "abc".
-   * This is the same defect finding I3 fixed for server refusals; client refusals
-   * were left out of that rule and are brought under it here.
+   * The error text itself used to live only inside the collapsible body, so
+   * collapsing the card removed the only indication, and nothing clears
+   * `fieldErrors` outside a refresh: the card sat at `300 K · 1 of 3 set ·
+   * Saved` indefinitely while holding "abc". This is the same defect finding
+   * I3 fixed for server refusals; client refusals were left out of that rule
+   * and are brought under it here. THE BODY CAN NO LONGER BE COLLAPSED AT ALL
+   * (fix round, review finding m-2 — the focused view is the only editor, and
+   * an editor that can collapse into nothing is a defect on its own), so the
+   * held-invalid text is now always visible while it is held; the header
+   * chip below is kept anyway, because a reader tabbing through the header
+   * before reaching the body still needs to hear it.
    */
   const invalidPaths = Object.keys(fieldErrors);
   const heldInvalid = invalidPaths.length > 0;
   const notSentLabel =
     invalidPaths.length === 1 ? 'Change not sent' : `${invalidPaths.length} changes not sent`;
+
+  /*
+   * REPORTED, NOT POLLED — see `onHeldInvalidChange`'s own doc. The focused
+   * view (`RunsSection`'s "Back to all runs") needs this fact one component
+   * up, to confirm before a leave that would silently discard it (I-1). Fires
+   * on every change including the initial mount, so a run whose autosave
+   * store somehow still held an unparseable draft the instant it opened would
+   * still be reported — though in practice `fieldErrors` starts empty on
+   * every mount.
+   */
+  useEffect(() => {
+    onHeldInvalidChange?.(heldInvalid);
+  }, [heldInvalid, onHeldInvalidChange]);
 
   /*
    * HELD-INVALID IS ADDITIVE, NEVER A REPLACEMENT — and the first version of this got
@@ -412,93 +484,164 @@ export function RunCard({
       .join(' · ') || null;
 
   return (
-    <article className="run-card" data-run-id={run.id}>
+    <article className="run-card" data-run-id={run.id} data-compact={compact || undefined}>
       {/*
-        THE HEADER ROW IS A FLEX WRAPPER AND NOT JUST THE HEADING, because the
-        Focus control cannot live inside the heading's button — a button inside a
-        button is not valid, and the accordion button already owns the whole row.
-        It is a SIBLING of the heading, in the same visual line, so it is reachable
-        by keyboard on a COLLAPSED card: isolating one run out of a page of fifty
-        must not require expanding it first.
+        THE HEADER ROW IS A FLEX WRAPPER AND NOT JUST THE HEADING, because Compare
+        cannot live inside a compact row's own open `<button>` — a button inside a
+        button is not valid, and that button already owns the whole row. Compare
+        is a SIBLING of the heading, in the same visual line, so it is reachable by
+        keyboard on a COMPACT row without opening it first. (The non-compact
+        heading is a plain `<h3>`, not a button, so this constraint is specific to
+        the compact case — but the layout stays a flex row in both, for one shared
+        geometry rather than two.)
       */}
       <div className="run-card-top">
-      <h3 className="run-card-heading">
-        <button
-          ref={headerRef}
-          id={headerId}
-          type="button"
-          className="run-card-header"
-          aria-expanded={expanded}
-          aria-controls={panelId}
-          onClick={onToggle}
-        >
-          <Chevron className="run-card-chevron" size={16} strokeWidth={2} aria-hidden="true" />
-          <span className="run-card-name">{run.label}</span>
-          <span className="run-card-conditions">
-            {conditions ?? <span className="run-card-conditions-empty">No conditions recorded yet</span>}
-          </span>
+      {compact ? (
+        <h3 className="run-card-heading">
           {/*
-            THE DENOMINATOR DISCLOSES ITS SCOPE, because this project has a written
-            rule against one that does not: a coverage figure must be "enumerated
-            from the record's own content" (`docs/evidence-sidecar-audit.md:172`,
-            `docs/mentor-decisions.md:57`), and the status bar already carries a
-            dedicated affordance for exactly this — `.statusbar-cover-scope`, "the
-            record-specific denominator disclosure sitting beside the figure it
-            qualifies".
-
-            "1 of 3 set" said none of that, and the disclosure is MORE necessary now
-            rather than less. The gap it originally named — this screen offered three
-            of the five paths `RUN_WRITABLE_FIELD_PATHS` accepts — is closed: the
-            screen offers all five. The gap that MATTERS is the one that remains and
-            is much larger: a valid ISAAC record needs far more than five fields, most
-            of them inherited from the experiment. So "5 of 5" is still displayable on
-            a run whose Check Run fails, which is exactly the completion claim the bare
-            number was never entitled to make.
-
-            Not deleted when the smaller gap closed, because the sentence a reader
-            needs is "this counts the fields on this screen, not the record" — and
-            that is true of five as it was of three.
+            REVIEW FINDING m-6. This is now a SELF-CONTAINED JSX comment, and
+            the button below is a plain, unwrapped sibling child — not, as it
+            briefly was, a comment and an expression sharing one curly-brace
+            container. That earlier shape compiled (tsc accepted it
+            throughout the previous fix round), but it is not the idiomatic
+            form this file uses everywhere else, and a stray trailing brace
+            survived one edit as literal JSXText — content esbuild renders
+            verbatim without complaint, which is exactly why a structural
+            mistake like it can ship unnoticed. Two changes, made together:
+            the comment closes itself; the button no longer depends on a
+            container it happens to share with it.
           */}
-          <span className="run-card-progress">
-            {filled} of {RUN_FIELDS.length}{' '}
-            <span className="run-card-progress-scope">run fields on this screen</span>
-          </span>
-          <CheckSummaryChip check={check} />
           {/*
-            A REFUSED WRITE IS A HEADER FACT, not a panel one. `failed` used to
-            be rendered only inside the expanded panel, so a save that was
-            refused after the reader collapsed the card was announced nowhere
-            and recoverable nowhere — the card read exactly as if nothing had
-            happened. It sits beside `conflict` because they are the same kind
-            of claim: this run holds an edit the server has not taken. Inside
-            the header button on purpose — that puts the words into the
-            header's accessible name, so reaching the collapsed card by
-            keyboard alone says what is wrong with it.
+            THE COMPACT ROW'S OPEN CONTROL — not a smaller accordion. It does not
+            disclose anything IN PLACE, so it carries no `aria-expanded` and no
+            `aria-controls`: clicking it navigates to `?run=<id>` (the existing
+            Focus Run machinery). It is now the ONLY control that opens a run — a
+            standalone "Focus" button briefly sat beside it too (fix round,
+            review finding I-3: two 52×24 targets for one act, 73px of extra row
+            height once they wrapped at 320px) — so the row's accessible name
+            carries the verb itself, via an `.sr-only` "Open" ahead of the run's
+            name: the visible text ("Run 1", the ordinal, the conditions) is a
+            substring of the accessible name, which is what WCAG 2.5.3 asks for,
+            and a screen reader now hears what the control DOES rather than only
+            what it names. Only what `RunsSection` already fetched is shown: the
+            label, the ordinal, the one-line condition summary, the same
+            fields-on-this-screen count the full editor's own header states (I-2
+            — it was dropped from the compact row when this slice first shipped,
+            and restored here because "how much of this run is filled in" is one
+            of the four questions this file's own header says a scanning reader
+            actually has), and — as chips, never colour alone — whether this run
+            overrides the record, has been exported, or holds a write the server
+            has not yet acknowledged. No Check Run verdict here: a check is
+            client-only state from an explicit action, and it does not survive
+            leaving focus, so showing it on a row the reader has not opened would
+            be a stale claim.
           */}
-          {autosave.status === 'failed' && <StatusChip kind="fail" label="Save failed" />}
-          {autosave.status === 'conflict' && <StatusChip kind="needsYou" label="Conflict" />}
-          {/* Same reasoning as the two above, and the same place: in the header
-              button, so the collapsed card says it in its accessible name. */}
-          {showHeldInvalid && <StatusChip kind="needsYou" label={notSentLabel} />}
-        </button>
-      </h3>
-        {onFocusRun && (
-          /*
-            THE ACCESSIBLE NAME CARRIES THE RUN, the visible word does not need to.
-            Fifty cards each offering a button called "Focus" is fifty identically
-            named controls in a screen reader's list; `aria-label` names which run,
-            and it CONTAINS the visible word, so WCAG 2.5.3 (label in name) still
-            holds and speech input still reaches it by saying "Focus".
-          */
           <button
+            ref={headerRef as RefObject<HTMLButtonElement>}
+            id={headerId}
             type="button"
-            className="run-card-focus"
-            aria-label={`Focus run ${run.label}`}
+            className="run-card-header run-card-header-compact"
             onClick={onFocusRun}
           >
-            Focus
+            <span className="sr-only">Open </span>
+            <ChevronRight className="run-card-chevron" size={16} strokeWidth={2} aria-hidden="true" />
+            <span className="run-card-name">{run.label}</span>
+            <span className="run-card-ordinal">#{run.ordinal}</span>
+            <span className="run-card-conditions">
+              {conditions ?? <span className="run-card-conditions-empty">No conditions recorded yet</span>}
+            </span>
+            {/* Same disclosure the full editor's header carries, and the same
+                reason: "5 of 5" on its own would read as a completion claim a
+                run's own fields are not entitled to make. See the full note on
+                `.run-card-progress-scope` a few lines below, in the non-compact
+                branch — the text is identical, so it is written once. */}
+            <span className="run-card-progress">
+              {filled} of {RUN_FIELDS.length}{' '}
+              <span className="run-card-progress-scope">run fields on this screen</span>
+            </span>
+            {/* Never colour alone: the word is the signal, the palette reinforces
+                it. Withheld entirely when this run overrides nothing — a "0
+                overridden" chip on every row would be noise, not information. */}
+            {tally.overridden > 0 && (
+              <StatusChip kind="confirmed" label={`${tally.overridden} overridden`} />
+            )}
+            {run.record_id !== null && <StatusChip kind="exported" />}
+            {/* Same two facts the full header carries, and the same reason: a
+                refused or unacknowledged write has to be visible without
+                opening the run. */}
+            {autosave.status === 'failed' && <StatusChip kind="fail" label="Save failed" />}
+            {autosave.status === 'conflict' && <StatusChip kind="needsYou" label="Conflict" />}
           </button>
-        )}
+        </h3>
+      ) : (
+          /*
+            THE FOCUSED VIEW'S HEADING — A PLAIN `h3`, NOT AN ACCORDION BUTTON
+            (fix round, review finding m-2). It used to be a real
+            `button[aria-expanded][aria-controls]` that could collapse the ONLY
+            open editor on screen into nothing — a state this surface can reach
+            no other way, since master-detail means there is never a second
+            place a run's fields are visible. An editor that can vanish under
+            its own header is a defect on its own, independent of anything else
+            this fix round found, so the toggle is removed rather than guarded.
+            `tabIndex={-1}` keeps it a valid target for `focusOnMount` (a newly
+            created run still receives focus here) and for the Next/Previous run
+            controls (`RunsSection`'s toolbar) WITHOUT adding it to the ordinary
+            Tab order — a heading is not normally a stop, and this one still
+            is not.
+          */
+          <h3
+            ref={headerRef as RefObject<HTMLHeadingElement>}
+            id={headerId}
+            tabIndex={-1}
+            className="run-card-heading run-card-header run-card-header-static"
+          >
+            <span className="run-card-name">{run.label}</span>
+            <span className="run-card-conditions">
+              {conditions ?? <span className="run-card-conditions-empty">No conditions recorded yet</span>}
+            </span>
+            {/*
+              THE DENOMINATOR DISCLOSES ITS SCOPE, because this project has a written
+              rule against one that does not: a coverage figure must be "enumerated
+              from the record's own content" (`docs/evidence-sidecar-audit.md:172`,
+              `docs/mentor-decisions.md:57`), and the status bar already carries a
+              dedicated affordance for exactly this — `.statusbar-cover-scope`, "the
+              record-specific denominator disclosure sitting beside the figure it
+              qualifies".
+
+              "1 of 3 set" said none of that, and the disclosure is MORE necessary now
+              rather than less. The gap it originally named — this screen offered three
+              of the five paths `RUN_WRITABLE_FIELD_PATHS` accepts — is closed: the
+              screen offers all five. The gap that MATTERS is the one that remains and
+              is much larger: a valid ISAAC record needs far more than five fields, most
+              of them inherited from the experiment. So "5 of 5" is still displayable on
+              a run whose Check Run fails, which is exactly the completion claim the bare
+              number was never entitled to make.
+
+              Not deleted when the smaller gap closed, because the sentence a reader
+              needs is "this counts the fields on this screen, not the record" — and
+              that is true of five as it was of three.
+            */}
+            <span className="run-card-progress">
+              {filled} of {RUN_FIELDS.length}{' '}
+              <span className="run-card-progress-scope">run fields on this screen</span>
+            </span>
+            <CheckSummaryChip check={check} />
+            {/*
+              A REFUSED WRITE IS A HEADER FACT, not a body one. `failed` sits
+              in the heading rather than only in the body below it because the
+              body is now unconditionally open — this is no longer a defence
+              against a collapsed card hiding it, but the two facts (a save the
+              server refused, and a value this run holds) still read as one
+              line, and splitting them would ask the reader to reassemble it.
+              It sits beside `conflict` because they are the same kind of
+              claim: this run holds an edit the server has not taken.
+            */}
+            {autosave.status === 'failed' && <StatusChip kind="fail" label="Save failed" />}
+            {autosave.status === 'conflict' && <StatusChip kind="needsYou" label="Conflict" />}
+            {/* Same reasoning as the two above, and the same place. */}
+            {showHeldInvalid && <StatusChip kind="needsYou" label={notSentLabel} />}
+          </h3>
+      )}
         {onCompare && (
           /*
             A TOGGLE, AND IT SAYS WHICH STATE IT IS IN THREE WAYS: `aria-pressed`,
@@ -606,9 +749,12 @@ export function RunCard({
 
         A THIRD CORRECTION, MADE WHEN THE RECORD-VIEW SWITCH WAS FIXED (D1). The sentence
         named the browser tab and a reload — and "tab" was ambiguous on a screen whose own
-        tabs are `Record Fields` / `Graph`, where switching one used to destroy this card
-        outright. It now says "browser tab", because the record's views no longer unmount
-        the panel.
+        ~~tabs are `Record Fields` / `Graph`~~ — **corrected 2026-09-03, PR-B reviewer
+        finding: the record screen's views are sidebar workspace links addressed by
+        `?view=`, not a tab bar; there has been no tab bar to be ambiguous with for some
+        time, and this sentence kept describing one** — where switching one used to
+        destroy this card outright. It now says "browser tab", because the record's views
+        no longer unmount the panel.
         AND IT LEFT OUT ONE FATE ENTIRELY: this disclosure also renders while
         `heldInvalid`, and a held-invalid edit is NEVER queued to the store
         (`onFieldChange` returns before `autosave.queue`), so it is not "not finished
@@ -617,9 +763,14 @@ export function RunCard({
         have genuinely different fates: paging, searching or filtering the runs list
         unmounts this card, which loses unparseable text and does NOT lose a queued edit.
       */}
-      {(autosave.status === 'saving' ||
-        autosave.status === 'failed' ||
-        autosave.status === 'conflict') && (
+      {/* Withheld on a compact row: the chip in the header already says the same
+          fact, and this paragraph is prose worth the space only once the reader
+          has opened the run. `heldInvalid` cannot be true here regardless — a
+          compact row renders no field input for text to be held in. */}
+      {!compact &&
+        (autosave.status === 'saving' ||
+          autosave.status === 'failed' ||
+          autosave.status === 'conflict') && (
         <p className="run-card-session-note">
           Changes this tab has not finished saving live in this browser tab only. Moving
           between this record’s views keeps them. If you close the browser tab or reload,
@@ -627,15 +778,23 @@ export function RunCard({
           been saved.
         </p>
       )}
-      {heldInvalid && (
+      {!compact && heldInvalid && (
         <p className="run-card-session-note">
           Text this screen could not read has not been sent anywhere, and is held in this
-          card only. Moving between this record’s views keeps it; paging, searching or
-          filtering the runs list, or reloading the page, does not.
+          card only. Moving between this record’s views keeps it; leaving this run, paging,
+          searching or filtering the runs list, or reloading the page, does not.
         </p>
       )}
 
-      {expanded && (
+      {/*
+        UNCONDITIONALLY OPEN NOW (fix round, review finding m-2). This used to
+        read `!compact && expanded &&` — the focused view's own in-place
+        collapse, now removed because it could put the ONLY open editor on
+        screen behind a header with nothing beneath it. A compact row still
+        never renders this body at all; the two conditions used to do
+        different jobs and now only one of them is doing anything.
+      */}
+      {!compact && (
         <div id={panelId} className="run-card-body" role="region" aria-labelledby={headerId}>
           {/*
             A RUN WITH NOTHING TO SHOW SAYS SO, rather than presenting five empty

@@ -313,12 +313,19 @@ a:hover {
  * Four more `<summary>` toggles were measured under the floor and are recorded
  * further down as DELIBERATELY LEFT OPEN, with the measurement that decided it.
  *
- * Plus two that this suite's surface catalogue cannot reach, because no seeded
+ * Plus one that this suite's surface catalogue cannot reach, because no seeded
  * example record has a run, so no surface renders a run card. Reported at 23px —
- * ONE pixel short — and they are the two a scientist uses constantly:
+ * ONE pixel short — and a scientist uses it constantly:
  *
- *   52.0 x 23.0   button.run-card-focus             "Focus run …"
  *   69.5 x 23.0   button.run-card-compare           "Compare run …"
+ *
+ * ~~`button.run-card-focus` "Focus run …" (52.0 x 23.0)~~ — REMOVED, not
+ * merely fixed (fix round, PR-C, review finding I-3). The control it measured
+ * no longer exists: a compact row's own open button already did the same
+ * act beside it, and I-3 found that redundant — two 52×24 targets for one
+ * act, and 73px of extra row height once they wrapped at 320px. Struck
+ * rather than deleted so a reader does not go looking for a selector this
+ * file used to floor.
  *
  * `.btn` is included as a FLOOR rather than as a finding: it measures ~35px tall
  * today, and the point of naming it is that a future compact variant cannot fall
@@ -389,7 +396,6 @@ a:hover {
  * is the kind of credit that hides a regression later.
  */
 .btn,
-.run-card-focus,
 .run-card-compare,
 .gov-banner .gov-action,
 .guided-dontknow,
@@ -400,8 +406,9 @@ a:hover {
 .record-title-link {
   min-height: 24px;
 }
-/* VERTICAL CENTRING INSIDE THE GROWN BOX IS FREE FOR ALL NINE — and the reason
-   is NOT the one this comment used to give.
+/* VERTICAL CENTRING INSIDE THE GROWN BOX IS FREE FOR ALL EIGHT (nine, until the
+   fix round that removed `.run-card-focus` — see its own struck note above) —
+   and the reason is NOT the one this comment used to give.
 
    ~~"Vertical centring for the ones that are already flex containers is free.
    For `.gov-action` it has to be asked for"~~ — **CORRECTED IN PLACE 2026-08-25,
@@ -423,9 +430,9 @@ a:hover {
      span,   display: inline-block                     top 4.0 / bottom 15.0
 
    Only the non-button shows the top-aligned asymmetry the review was looking
-   for. Three of these nine are not flex containers (`.run-card-focus`,
-   `.run-card-compare`, `.api-samples-tabs-tab` declare no `display`) and are
-   centred anyway.
+   for. Two of these eight are not flex containers (`.run-card-compare` and
+   `.api-samples-tabs-tab` declare no `display`; `.run-card-focus` was a third
+   until the fix round removed the element) and are centred anyway.
 
    `.gov-action` IS ALSO A `<button>`, so its `display: inline-flex;
    align-items: center; justify-content: center` in `components/chrome.css` is a

@@ -72,7 +72,9 @@ import type { APIRequestContext, Page } from '@playwright/test';
 
 import {
   addRunThroughTheUi,
+  backToAllRuns,
   createExperimentThroughTheUi,
+  openRun,
   switchWorkspace,
   expect,
   proposalCard,
@@ -308,13 +310,20 @@ test.describe('two scientists, one record, end to end', () => {
       'step 4: the four run-level values in play must be DISTINCT, or a wrong read passes'
     ).toBe(4);
     /*
+     * OPENED FIRST — MASTER-DETAIL (PR-C). The compact list holds no field control at
+     * all; `.run-card.first()` used to reach one directly because every run rendered
+     * its own accordion in place, and that stopped being true the moment this branch
+     * shipped one open editor addressed by `?run=`. `openRun` clicks the first
+     * compact row's own "Open Run …" control and returns the editor that replaces the
+     * list, which is where `getByLabel('Environment')` actually lives.
+     *
      * TYPED INTO THE RUN CARD, WHICH AUTOSAVES. There is no per-field Save button:
      * `RunCard` queues the change and `runAutosaveStore` flushes it after a 600 ms
      * debounce through `PATCH .../runs/{id}`. That is why the confirmation below polls
      * the SERVER rather than reading the box back — reading the box back would confirm
      * only that typing works.
      */
-    const runOneCard = page.locator('.run-card').first();
+    const runOneCard = await openRun(page, 0);
     await runOneCard.getByLabel('Environment').selectOption(runTarget.runOne);
     await expect
       .poll(async () => {
@@ -324,6 +333,17 @@ test.describe('two scientists, one record, end to end', () => {
         return body.run.fields[runTarget.path]?.value;
       }, `step 4: run one's ${runTarget.path} autosaved to the server`)
       .toEqual(runTarget.runOne);
+    /*
+     * BACK TO THE COMPACT LIST BEFORE LEAVING THIS WORKSPACE — not merely tidiness.
+     * `RecordWorkspaceNav` copies the current search params when switching workspaces
+     * and sets only `?view=`, so a `?run=` left on the URL here would survive every
+     * later `switchWorkspace` call (including step 5's, into the freeze window) and
+     * silently reopen THIS run's editor the next time the Runs workspace is visited —
+     * which is step 18, where the assertion is "both runs are visible in the compact
+     * list". Closing it now, well before step 5, keeps that assertion honest without
+     * touching the no-navigation window steps 6-17 depend on (see step 5's own note).
+     */
+    await backToAllRuns(page);
     // Run two gets a DIFFERENT value out of band, so that "the panel read the run the
     // proposal names" is a distinguishable claim rather than a tautology.
     await server.setRunField(id, runTwo.id, runTarget.path, runTarget.runTwo);
