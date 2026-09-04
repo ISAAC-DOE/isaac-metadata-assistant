@@ -50,6 +50,20 @@ export interface ServerProposal {
   client_request_key: string | null;
   target_digest: string;
   current_target_digest: string | null;
+  /*
+   * ADDED 2026-09-03 for `two-actor-real-browser.spec.ts`. These two are the
+   * PROPOSER's identity, and they are declared beside `history` on purpose: the
+   * two are easy to confuse and say different things. A proposal created THROUGH
+   * THE WEBSITE by a person is still `subject: null` / `trust_basis:
+   * "unattributed"` — creating one needs no attributable actor in any deployment
+   * — while the `accept` entry in `history` carries the REVIEWER's subject and
+   * basis. Both are on the wire already, measured by listing a real proposal's
+   * served keys; declaring them makes a server that stopped sending one a compile
+   * error in the spec that reads it, rather than an `undefined` that quietly
+   * satisfies a `toBeNull()`.
+   */
+  subject: string | null;
+  trust_basis: string;
   history: {
     action: string;
     actor_subject: string | null;
