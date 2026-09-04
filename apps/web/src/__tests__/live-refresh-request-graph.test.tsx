@@ -211,7 +211,11 @@ describe('the record screen live-refresh request graph', () => {
   let feed: { changes: ApiChangeEntry[] };
   let calls: string[];
 
-  function mount(extra: Record<string, unknown> = {}) {
+  /** `view` opens one of the record screen's four `?view=` workspaces; the default
+   *  is Record Fields, exactly as a bare `/record/<id>` is. A test that asserts
+   *  about a panel names the workspace that mounts it — the panels are lazily
+   *  mounted per workspace, so a count taken on the wrong one is a count of zero. */
+  function mount(extra: Record<string, unknown> = {}, view = '') {
     detail = detailRoute();
     feed = { changes: [] };
     calls = stubFetchRoutes({
@@ -230,7 +234,7 @@ describe('the record screen live-refresh request graph', () => {
       },
       ...extra,
     } as never);
-    return renderAt(`/record/${ID}`);
+    return renderAt(`/record/${ID}${view === '' ? '' : `?view=${view}`}`);
   }
 
   beforeEach(() => {
@@ -367,7 +371,12 @@ describe('the record screen live-refresh request graph', () => {
   });
 
   it('TEN proposal entries cost NO bundle at all — the record read is not stale for them', async () => {
-    mount();
+    /* `?view=capture` — the proposals list lives on the Capture & Proposals
+       workspace, and the negative-control assertion at the end of this test needs
+       the panel that owns that content to be MOUNTED. On Record Fields it is not,
+       and the control would pass vacuously: zero proposal reads before, zero
+       after. */
+    mount({}, 'capture');
     await settle();
     const before = bundleCount(calls);
     const proposalsBefore = countPath(calls, `GET ${BASE}/proposals`);
@@ -451,6 +460,70 @@ describe('the record screen live-refresh request graph', () => {
     getByText('30 Fields Need Your Confirmation');
     getByText(/Showing the first 10 of 30\./);
     getByText(/20 more are waiting/);
+  });
+
+  it('the COMPACT banner on ?view=runs states the record’s 30 after a windowed refresh, not the 10 that arrived', async () => {
+    /*
+     * THE SAME INVARIANT AS THE TEST ABOVE, WHERE THERE IS NOTHING TO FALL BACK ON.
+     *
+     * On Record Fields the banner lists the questions and prints "Showing the first
+     * 10 of 30", so a build that had confused the page for the record would be
+     * caught twice over. On every OTHER workspace the questions are folded away —
+     * the banner is the icon, the count, one sentence and the action — so the COUNT
+     * IS THE ENTIRE CLAIM. If it could shrink to the size of a windowed read, a
+     * scientist on the Runs workspace would be told the record owes ten things when
+     * it owes thirty, with nothing else on screen to contradict it.
+     *
+     * The route is the same `truncating` one: unbounded reads get all thirty, a
+     * `?limit=` read gets a page plus a `pending_page` naming the real total.
+     */
+    const ALL = Array.from({ length: 30 }, (_, i) => ({
+      ...(pendingResponse.pending[0] as Record<string, unknown>),
+      id: `synthetic-blocker-${i}`,
+      blocker_key: `synthetic-blocker-${i}`,
+      about: `synthetic_field_${i}`,
+      question: `Confirm synthetic field ${i}?`,
+    }));
+    const truncating = (_init?: RequestInit, path?: string) => {
+      const limit = Number(/[?&]limit=(\d+)/.exec(path ?? '')?.[1] ?? NaN);
+      if (!Number.isFinite(limit)) return { body: { pending: ALL } };
+      const page = ALL.slice(0, limit);
+      return {
+        body: {
+          pending: page,
+          pending_page: {
+            total: ALL.length,
+            returned: page.length,
+            offset: 0,
+            limit,
+            withheld: ALL.length - page.length,
+            complete: false,
+            run_id: null,
+            record_total: ALL.length,
+          },
+        },
+      };
+    };
+
+    const { getByText, queryByText } = mount({ [`GET ${BASE}/pending`]: truncating }, 'runs');
+    await settle();
+    getByText('30 Fields Need Your Confirmation');
+    // The compact form: no list, and therefore no sentence about a list.
+    expect(document.querySelectorAll('.needsyou-item')).toHaveLength(0);
+    expect(document.querySelector('.needsyou-more')).toBeNull();
+
+    detail.bump(KNOWN_REV + 1);
+    feed.changes = [experimentEntry(KNOWN_REV + 1), runEntry(1, KNOWN_REV + 1)];
+    await settle(POLL_INTERVAL_MS * 3);
+
+    // The refresh really did fetch TEN — otherwise the assertion below is vacuous.
+    expect(
+      calls.filter((c) => c === `GET ${BASE}/pending?limit=${LIVE_PENDING_WINDOW}`),
+    ).toHaveLength(1);
+    // ...and the banner still says THIRTY.
+    getByText('30 Fields Need Your Confirmation');
+    expect(queryByText('10 Fields Need Your Confirmation')).toBeNull();
+    expect(document.querySelectorAll('.needsyou-item')).toHaveLength(0);
   });
 
   // --- 4. in-flight coalescing, and the controls that make it mean something --

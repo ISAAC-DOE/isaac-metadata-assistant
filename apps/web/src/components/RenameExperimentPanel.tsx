@@ -210,27 +210,33 @@ export function RenameExperimentPanel({
 
   return (
     <section className="field-group" aria-label="Experiment Name (name)">
-      <button
-        type="button"
-        className="fg-header"
-        aria-expanded={expanded}
-        aria-controls={expanded ? bodyId : undefined}
-        onClick={() => {
-          // Collapsing retires the confirmation with the panel that carried it: a
-          // "Name saved." still sitting there on a later visit would report an act
-          // from a session the reader may not remember making.
-          setSaved(false);
-          setExpanded((isOpen) => !isOpen);
-        }}
-      >
-        <Chevron className="fg-chevron" size={16} strokeWidth={2} aria-hidden="true" />
-        <span className="fg-block">Experiment Name</span>
-        {/* The same two quiet spans `RecordInfoPanel` uses, and for its reason:
-            `.fg-sublabel` / `.fg-summary` paint a colour already below the contrast
-            threshold on this screen. */}
-        <span className="record-section-key">name</span>
-        <span className="record-section-summary">what this experiment is called</span>
-      </button>
+      {/* A REAL HEADING LANDMARK — see `FieldGroup`'s own note for the measurement.
+          `h2` at the level of this workspace's other sections, so the outline under
+          the screen's single `h1` stays contiguous. A transparent wrapper: `.fg-heading`
+          resets margin and type, so nothing about this header's appearance changes. */}
+      <h2 className="fg-heading">
+        <button
+          type="button"
+          className="fg-header"
+          aria-expanded={expanded}
+          aria-controls={expanded ? bodyId : undefined}
+          onClick={() => {
+            // Collapsing retires the confirmation with the panel that carried it: a
+            // "Name saved." still sitting there on a later visit would report an act
+            // from a session the reader may not remember making.
+            setSaved(false);
+            setExpanded((isOpen) => !isOpen);
+          }}
+        >
+          <Chevron className="fg-chevron" size={16} strokeWidth={2} aria-hidden="true" />
+          <span className="fg-block">Experiment Name</span>
+          {/* The same two quiet spans `RecordInfoPanel` uses, and for its reason:
+              `.fg-sublabel` / `.fg-summary` paint a colour already below the contrast
+              threshold on this screen. */}
+          <span className="record-section-key">name</span>
+          <span className="record-section-summary">what this experiment is called</span>
+        </button>
+      </h2>
       {expanded && (
         <div className="fg-body" id={bodyId}>
           {/* ALWAYS MOUNTED, empty when there is nothing to say. A live region

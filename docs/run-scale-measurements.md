@@ -1,5 +1,21 @@
 # High-run-count: the measured envelope, and what it rules out
 
+> # 2026-09-03 — EVERY `record` DOM FIGURE IN THIS DOCUMENT PREDATES THE WORKSPACE SPLIT
+>
+> The Review Record screen was one column holding the runs, Validate & Review, transcript
+> capture, unmapped notes, ingestion proposals, asset references, the four draft blocks and the
+> four record-identity sections. It is now **four lazily-mounted `?view=` workspaces**
+> (`fields` · `runs` · `capture` · `graph`), and only the open one is in the DOM.
+>
+> So every `record` node count below — and the one `e2e/mutation/dom-attribution.bench.ts`
+> prints, which now opens `?view=runs` — measures **one workspace**, not the screen. The
+> comparison this document invites ("the record screen holds N nodes at 1,000 runs") is no
+> longer available from a single figure, and the numbers here must not be re-quoted as though
+> it were. **What is unaffected:** every conclusion drawn from the RUN LIST itself — the
+> paging bound, `RUN_LIST_LIMIT_MAX`, the needs-you banner's bound — because the run list and
+> that banner are still measured together on the `runs` workspace. **What is retired:** any
+> cross-workspace total. Re-run all four before making one.
+
 > # RE-MEASURED AGAIN ON 2026-08-27 — SEE [`docs/evidence/scale-envelope-2026-08-27.md`](evidence/scale-envelope-2026-08-27.md)
 >
 > That sweep measured this branch's new surfaces (the Evidence Graph's five sub-fetches,

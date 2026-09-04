@@ -375,3 +375,19 @@
   font-size: 12px;
   color: var(--text-primary);
 }
+
+/*
+ * THE COLLAPSED (record-workspace) MOUNT — see `AssetReferencesPanel`'s prop note.
+ *
+ * IT NEEDS ITS OWN TOP MARGIN, MEASURED. It borrows `.field-group`'s card shell,
+ * and `fields.css` gives that its spacing through `.field-group + .field-group`
+ * — an ADJACENT-SIBLING rule. This section's previous sibling is the Record
+ * Identity wrapper, not a `.field-group`, so the rule does not fire and the card
+ * sat flush against Relationships: measured at 1440px, bottom 923 / top 923, a
+ * 0px gap where every other card in the column has 12.
+ *
+ * 12px is that same value rather than a new one, so the column keeps one rhythm.
+ */
+.assets-collapsible {
+  margin-top: 12px;
+}

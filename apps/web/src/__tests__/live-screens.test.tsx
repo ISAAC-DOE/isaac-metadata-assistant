@@ -3,7 +3,7 @@ import { render, fireEvent, within } from '@testing-library/react';
 import { MemoryRouter, useLocation } from 'react-router-dom';
 import { AppRoutes } from '../App';
 import { RUN_COMMAND } from '../lib/api';
-import { NEEDSYOU_VISIBLE } from '../screens/RecordWorkbench';
+import { NEEDSYOU_VISIBLE, NEEDSYOU_VISIBLE_GROUPS } from '../screens/RecordWorkbench';
 import {
   EXP_ID,
   bundleRoutes,
@@ -192,10 +192,25 @@ describe('S3 · Review Record (live bundle)', () => {
     expect(getByTestId('pathname').textContent).toBe('/record/demo/evidence');
   });
 
-  // P33 S4 (D9/C2) — the needs-you banner is a NUMBERED list. Each item shows a
-  // concise structured label as the primary line and its technical locator once
-  // as a demoted mono token; a raw identifier is never the primary label.
-  it('renders the needs-you banner as a numbered list with concise labels and locators shown once', async () => {
+  /*
+   * P33 S4 (D9/C2) — the needs-you banner names each question with a concise
+   * structured label and its technical locator once as a demoted mono token; a raw
+   * identifier is never the primary label.
+   *
+   * ~~"a NUMBERED list"~~ — WITHDRAWN, and the reason is a measured defect rather
+   * than a preference. The flat numbered list rendered the SAME THREE QUESTIONS
+   * TWICE, byte-identical, on a record with two runs — Run A and Run B each own a
+   * `series`, a `qc` and a `descriptor`, and nothing in the row said which run it
+   * belonged to, so a reader could not resolve the ambiguity without leaving the
+   * page. The ordinals made that worse rather than better: they implied six
+   * distinct things. The list is now grouped by the OWNER the server named
+   * (`run_id`/`run_label`, record-level first) and the ordinals are gone, because
+   * the order is the server's and carries nothing a reader can act on.
+   *
+   * WHAT DID NOT CHANGE, and is still asserted below: the label/locator treatment
+   * of each question, and the bound.
+   */
+  it('groups the needs-you banner by owner, with concise labels and locators shown once', async () => {
     stubFetchRoutes(bundleRoutes('demo'));
     const { container, findByText, getByText, getAllByText, queryByText } = renderAt(
       '/record/demo',
@@ -203,12 +218,16 @@ describe('S3 · Review Record (live bundle)', () => {
 
     await findByText('5 Fields Need Your Confirmation');
 
-    // an ordered (numbered) list, one <li> per pending item
-    const list = container.querySelector('ol.needsyou-list');
+    // ONE row per owner. These five pending items are all record-level (no
+    // `run_id`), so they are one group — and all five are still named inside it.
+    const list = container.querySelector('ul.needsyou-list');
     expect(list).not.toBeNull();
-    expect(list!.querySelectorAll('li')).toHaveLength(5);
-    // a visible ordinal accompanies each item
-    expect(list!.querySelectorAll('.needsyou-num')).toHaveLength(5);
+    expect(list!.querySelectorAll(':scope > li.needsyou-group')).toHaveLength(1);
+    expect(list!.querySelectorAll('.needsyou-item')).toHaveLength(5);
+    // ...and the owner is NAMED, which is the whole point of the grouping.
+    expect(
+      [...list!.querySelectorAll('.needsyou-owner')].map((el) => el.textContent),
+    ).toEqual(['This record']);
 
     // concise structured labels are the primary line (3 asset blockers, plus the
     // structured series + descriptor) — never the verbose question echo
@@ -244,7 +263,7 @@ describe('S3 · Review Record (live bundle)', () => {
    * read as complete would be worse than the slow one — a scientist counting eleven
    * items and concluding eleven questions remain would be wrong by three thousand.
    */
-  it('lists at most NEEDSYOU_VISIBLE pending items and states how many more there are', async () => {
+  it('bounds the banner by BOTH rows and questions, and states the remainder in words', async () => {
     const many = Array.from({ length: 64 }, (_, i) => ({
       id: 'series',
       blocker_key: `01RUN${String(i).padStart(21, '0')}:series`,
@@ -272,12 +291,41 @@ describe('S3 · Review Record (live bundle)', () => {
     // THE TITLE CARRIES THE FULL COUNT. It is the one number a reader acts on.
     await findByText('64 Fields Need Your Confirmation');
 
-    const list = container.querySelector('ol.needsyou-list')!;
-    expect(list.querySelectorAll('li')).toHaveLength(NEEDSYOU_VISIBLE);
+    const list = container.querySelector('ul.needsyou-list')!;
+    /*
+     * TWO BOUNDS, AND THIS FIXTURE IS THE CASE WHERE THE SECOND ONE BINDS.
+     *
+     * `NEEDSYOU_VISIBLE` (10) bounds how many QUESTIONS are named;
+     * `NEEDSYOU_VISIBLE_GROUPS` (3) bounds how many OWNERS get a row. These 64
+     * questions belong to 64 DIFFERENT runs — one each — so the row bound is
+     * reached first and three questions are named, not ten. That is the intended
+     * behaviour rather than a shortfall: a banner listing ten runs is the wall of
+     * rows this compaction exists to remove, and a reader cannot act on run 7 from
+     * here in any case. What makes it acceptable is the same thing that made the
+     * old truncation acceptable, and it is asserted immediately below: the screen
+     * SAYS the list is a prefix, with both numbers, and both numbers are the
+     * record's own (`pendingTotal`) rather than the window's.
+     *
+     * The other binding order is covered by the case above: five questions all
+     * owned by the RECORD are one row, and all five are named.
+     */
+    expect(list.querySelectorAll(':scope > li.needsyou-group')).toHaveLength(
+      NEEDSYOU_VISIBLE_GROUPS,
+    );
+    expect(list.querySelectorAll('.needsyou-item')).toHaveLength(NEEDSYOU_VISIBLE_GROUPS);
+    /* THE QUESTION BUDGET IS NOT THE BINDING BOUND HERE, and saying so mechanically
+       is what stops this test reading as though it were: three named questions is
+       well inside ten, so a change that raised or removed `NEEDSYOU_VISIBLE` would
+       not move a single assertion above. */
+    expect(NEEDSYOU_VISIBLE_GROUPS).toBeLessThan(NEEDSYOU_VISIBLE);
+    // Each row NAMES ITS RUN, which is the ambiguity the flat list could not resolve.
+    expect(
+      [...list.querySelectorAll('.needsyou-owner')].map((el) => el.textContent),
+    ).toEqual(['Run 1', 'Run 2', 'Run 3']);
     // AND THE REMAINDER IS STATED IN WORDS, not as an ellipsis — a screen-reader user
     // who has just heard "64" needs to be told this list is a prefix of it.
-    expect(getByText(/Showing the first 10 of 64/)).toBeInTheDocument();
-    expect(getByText(/54 more are waiting/)).toBeInTheDocument();
+    expect(getByText(/Showing the first 3 of 64/)).toBeInTheDocument();
+    expect(getByText(/61 more are waiting/)).toBeInTheDocument();
   });
 
   it('gives every listed pending item a DISTINCT React key, across runs', async () => {

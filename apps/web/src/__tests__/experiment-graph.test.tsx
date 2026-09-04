@@ -76,11 +76,25 @@ function routesFor(bundle: ExperimentGraphBundle) {
   return { ...bundleRoutes(GRAPH_EXP_ID), ...experimentGraphRoutes(GRAPH_EXP_ID, bundle) };
 }
 
-/** Open the record, switch to the Graph view, and wait for it to load. */
+/*
+ * THE SWITCHER IS THE SIDEBAR'S WORKSPACE LIST, NOT A TAB BAR.
+ *
+ * The record screen's `.section-tabs` strip is retired: its two entries folded
+ * into `RecordWorkspaceNav` when the record gained four destinations, so one
+ * place answers "where can I go from here" instead of a sidebar and a tab bar
+ * answering overlapping questions. The `?view=` deep-link mechanism these tests
+ * are actually about is UNCHANGED — same parameter, same fallback — so only the
+ * control being clicked moved: `role="tab"` + `aria-selected` became a real
+ * `<Link>` with `aria-current="page"`.
+ */
+const workspaceLink = (view: RenderResult, name: string) =>
+  view.getByRole('link', { name });
+
+/** Open the record, switch to the Graph workspace, and wait for it to load. */
 async function openGraph(bundle: ExperimentGraphBundle = experimentGraphBundle()) {
   stubFetchRoutes(routesFor(bundle));
   const view = renderAt(`/record/${GRAPH_EXP_ID}`);
-  const tab = await view.findByRole('tab', { name: 'Graph' });
+  const tab = await view.findByRole('link', { name: 'Graph' });
   fireEvent.click(tab);
   await view.findByRole('heading', { name: 'Experiment Graph' });
   return view;
@@ -98,9 +112,9 @@ describe('the graph lives inside the record, and is linkable', () => {
     stubFetchRoutes(routesFor(experimentGraphBundle()));
     const view = renderAt(`/record/${GRAPH_EXP_ID}`);
 
-    const fieldsTab = await view.findByRole('tab', { name: 'Record Fields' });
-    expect(fieldsTab).toHaveAttribute('aria-selected', 'true');
-    expect(view.getByRole('tab', { name: 'Graph' })).toHaveAttribute('aria-selected', 'false');
+    const fieldsTab = await view.findByRole('link', { name: 'Record Fields' });
+    expect(fieldsTab).toHaveAttribute('aria-current', 'page');
+    expect(workspaceLink(view, 'Graph')).not.toHaveAttribute('aria-current');
     // The graph has NOT been fetched yet: it is opt-in, not a page-load cost.
     expect(view.queryByRole('heading', { name: 'Experiment Graph' })).toBeNull();
   });
@@ -109,7 +123,7 @@ describe('the graph lives inside the record, and is linkable', () => {
     stubFetchRoutes(routesFor(experimentGraphBundle()));
     const view = renderAt(`/record/${GRAPH_EXP_ID}?view=graph`);
     expect(await view.findByRole('heading', { name: 'Experiment Graph' })).toBeInTheDocument();
-    expect(view.getByRole('tab', { name: 'Graph' })).toHaveAttribute('aria-selected', 'true');
+    expect(workspaceLink(view, 'Graph')).toHaveAttribute('aria-current', 'page');
   });
 
   it('switching the view writes it to the URL, so the graph can be shared', async () => {
@@ -122,9 +136,9 @@ describe('the graph lives inside the record, and is linkable', () => {
   it('an unrecognised view falls back to the fields, never to a dead screen', async () => {
     stubFetchRoutes(routesFor(experimentGraphBundle()));
     const view = renderAt(`/record/${GRAPH_EXP_ID}?view=constellation`);
-    expect(await view.findByRole('tab', { name: 'Record Fields' })).toHaveAttribute(
-      'aria-selected',
-      'true',
+    expect(await view.findByRole('link', { name: 'Record Fields' })).toHaveAttribute(
+      'aria-current',
+      'page',
     );
   });
 

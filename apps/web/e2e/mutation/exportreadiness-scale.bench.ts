@@ -92,7 +92,7 @@ test('measure Export Readiness and the record screen request count', async ({
     // ---- the record screen, with its requests attributed ------------------
     tally = new Map();
     const tRec = Date.now();
-    await openRecord(page, TARGET);
+    await openRecord(page, TARGET, 'runs');
     await expect(page.getByRole('heading', { name: 'Runs', exact: true })).toBeVisible({
       timeout: 300_000,
     });

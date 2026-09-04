@@ -776,7 +776,10 @@ const STATES: readonly VisualState[] = [
     id: 'record-runs',
     what: 'Record → Runs — the run workspace with no runs recorded, and the invitation to add one',
     async reach({ page, app }) {
-      await app.gotoExample(`/record/${SEED.partial}`);
+      // `?view=runs` — the record's four workspaces are `?view=` destinations and
+      // each is lazily mounted, so a bare `/record/<id>` opens Record Fields and
+      // this section is not on the page at all.
+      await app.gotoExample(`/record/${SEED.partial}?view=runs`);
       await settled(page);
       const heading = page.getByRole('heading', { name: 'Runs', exact: true }).first();
       await expect(heading).toBeVisible({ timeout: 20_000 });
@@ -809,6 +812,11 @@ const STATES: readonly VisualState[] = [
     id: 'record-compare',
     what: 'Record → Compare Runs, deep-linked to two runs this record does not have — refused per id',
     async reach({ page, app }) {
+      /* NO `?view=` ON PURPOSE. A `?compare=` link with no workspace named is
+         exactly the shape of every comparison link minted before the record gained
+         four workspaces, and the screen resolves it to `runs` rather than landing
+         the reader on Record Fields with an invisible comparison. Photographing the
+         LEGACY form is therefore worth more here than photographing the new one. */
       await app.gotoExample(
         `/record/${SEED.partial}?compare=${ABSENT_RUN_A}&compare=${ABSENT_RUN_B}`
       );
@@ -839,7 +847,8 @@ const STATES: readonly VisualState[] = [
     id: 'record-validate-review',
     what: 'Record → Validate & Review, before it has run — what it checks and what it will not do',
     async reach({ page, app }) {
-      await app.gotoExample(`/record/${SEED.partial}`);
+      // It sits directly below the run list, on the Runs workspace.
+      await app.gotoExample(`/record/${SEED.partial}?view=runs`);
       await settled(page);
       const heading = page.getByRole('heading', { name: 'Validate & Review' }).first();
       await expect(heading).toBeVisible({ timeout: 20_000 });
@@ -859,7 +868,8 @@ const STATES: readonly VisualState[] = [
     id: 'record-unmapped-notes',
     what: 'Record → Unmapped Notes — captured content with no confident schema home, kept rather than forced',
     async reach({ page, app }) {
-      await app.gotoExample(`/record/${SEED.partial}`);
+      // Second of the three panels on the Capture & Proposals workspace.
+      await app.gotoExample(`/record/${SEED.partial}?view=capture`);
       await settled(page);
       const heading = page.getByRole('heading', { name: 'Unmapped Notes' }).first();
       await expect(heading).toBeVisible({ timeout: 20_000 });
@@ -884,7 +894,28 @@ const STATES: readonly VisualState[] = [
       await settled(page);
       const heading = page.getByRole('heading', { name: 'Asset References' }).first();
       await expect(heading).toBeVisible({ timeout: 20_000 });
-      await expect(page.locator('.assets-sub').first()).toContainText(/does not upload, open, download or hash/i);
+      /*
+       * COLLAPSED ON ARRIVAL on the Record Fields workspace, so the disclosure is
+       * opened before the shot. This is not a workaround for a hidden state: the
+       * sentence asserted below is the whole reason this state is photographed, and
+       * photographing a closed header instead would have quietly dropped the claim
+       * while the screenshot still looked like coverage.
+       *
+       * THE TOGGLE IS ASSERTED TO EXIST, NOT GUARDED ON. The first version wrapped
+       * the click in `if (count > 0)`, so a selector that stopped matching skipped
+       * the click silently — and the assertion below is `toContainText`, which
+       * passes on text that is in the DOM but HIDDEN. Together those two would have
+       * photographed a closed card while still reporting the disclosure as covered.
+       */
+      const toggle = page.locator('.assets-collapsible .fg-header');
+      await expect(toggle, 'the collapsed Asset References disclosure is mounted here').toHaveCount(1);
+      await toggle.click();
+      await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+      const sub = page.locator('.assets-collapsible .assets-sub').first();
+      // VISIBLE, then its text. `toContainText` alone cannot tell an open card from
+      // a `hidden` one, and this state's whole point is that the reader can read it.
+      await expect(sub).toBeVisible();
+      await expect(sub).toContainText(/does not upload, open, download or hash/i);
       return heading;
     },
     /*
@@ -894,7 +925,7 @@ const STATES: readonly VisualState[] = [
      * reading as a verification, and in a 2400px page shot it is four lines
      * somewhere in the lower third.
      */
-    frame: ({ page }) => page.locator('section.assets-section'),
+    frame: ({ page }) => page.locator('section.assets-collapsible, section.assets-section').first(),
   },
   {
     id: 'record-confirmation',

@@ -210,7 +210,7 @@ test('measure the high-run-count envelope', async ({ page, request, session }) =
 
     // --- navigate, and time until the Runs section is actually usable -------
     const tLoad = Date.now();
-    await openRecord(page, TARGET);
+    await openRecord(page, TARGET, 'runs');
     await expect(page.getByRole('heading', { name: 'Runs', exact: true })).toBeVisible({
       timeout: 120_000,
     });

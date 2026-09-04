@@ -1,0 +1,112 @@
+/*
+ * RecordWorkspaceNav — the record's four local destinations, in the record's
+ * own sidebar between the WorkflowSpine and the Evidence Trail link.
+ *
+ * NO NEW VISUAL LANGUAGE. Every value here is either a token or is lifted from
+ * an idiom already shipped in this app: the eyebrow is `.eyebrow` (base.css,
+ * the same one `WorkflowSpine` uses for `Workflow`), and the row is `.nav-item`
+ * (chrome.css) — tint + weight + label colour for the active item, and NO
+ * coloured left edge, per `design-handoff/05-design-system/no-vertical-rail-rule.md`.
+ *
+ * DELIBERATELY UNLIKE THE SPINE, and that is the point rather than a shortfall:
+ * no disc, no connector line, no state glyph. The spine renders a gated,
+ * server-derived pipeline; these are ungated destinations. A reader has to be
+ * able to tell the two lists apart before reading either, and the difference in
+ * row shape is what does it.
+ */
+
+.workspace-nav {
+  padding: 4px 12px 0;
+}
+
+/* The separation between the two lists is a hairline, not a card: the sidebar
+   is one bordered region and nesting a card inside it would be the nested-card
+   anti-pattern. `border-top` here rather than `border-bottom` on `.spine` so a
+   surface that mounts the spine standalone (GuidedCompletion) is unaffected. */
+.workspace-nav-eyebrow {
+  padding: 12px 8px 8px;
+  border-top: 1px solid var(--border-faint);
+}
+
+.workspace-nav-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.workspace-nav-row + .workspace-nav-row {
+  margin-top: 2px;
+}
+
+.workspace-nav-item {
+  display: block;
+  width: 100%;
+  padding: 8px 10px;
+  border-radius: var(--radius-inner);
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 500;
+  text-align: left;
+  text-decoration: none;
+  transition: background 0.14s ease, color 0.14s ease;
+}
+
+.workspace-nav-item:hover {
+  background: var(--border-faint);
+}
+
+.workspace-nav-item:active {
+  background: var(--action-selected-border);
+}
+
+/* Tint + weight + label colour. Never colour alone: the weight step and the
+   `aria-current="page"` attribute both carry the state independently. */
+.workspace-nav-item.active {
+  background: var(--action-tint);
+  color: var(--action-hover);
+  font-weight: 600;
+}
+
+.workspace-nav-item:focus-visible {
+  outline: 2px solid var(--action);
+  outline-offset: 2px;
+}
+
+/* ---- Responsive: the ≤1024px band -----------------------------------
+ *
+ * At this width `.screen-body` stacks (`chrome.css`), so the whole sidebar sits
+ * ABOVE the main content. A second full-height vertical list there would push
+ * the needs-you banner further down an already-long narrow page — measured at
+ * 390px, the stacked spine + Evidence Trail alone already put it ~700px down.
+ *
+ * So the list becomes a WRAPPING ROW, which is exactly the collapse `LeftNav`
+ * already performs at this same breakpoint (`chrome.css`, `.leftnav` →
+ * `flex-direction: row; flex-wrap: wrap`). Reused rather than reinvented: the
+ * idiom is already shipped, already measured, and already familiar from the
+ * app's primary nav one region over.
+ *
+ * At 320px the four labels wrap to two lines, by the same measured behaviour
+ * `LeftNav` shows there. That is accepted, not worked around.
+ */
+@media (max-width: 1024px) {
+  .workspace-nav {
+    padding: 0 10px 8px;
+  }
+  .workspace-nav-eyebrow {
+    padding: 8px 2px 6px;
+  }
+  .workspace-nav-list {
+    display: flex;
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+  .workspace-nav-row + .workspace-nav-row {
+    margin-top: 0;
+  }
+  .workspace-nav-item {
+    width: auto;
+  }
+}

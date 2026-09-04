@@ -120,19 +120,41 @@ function stubRunsBackend(initial: { runs: Run[]; version: string }) {
   const queue: Array<() => void> = [];
   const calls: string[] = [];
 
-  const respond = () => ({
-    ok: true,
-    status: 200,
-    headers: { get: () => null },
-    json: async () => ({
-      runs: box.runs,
-      experiment_version: box.version,
-      total: box.runs.length,
-      matched: box.runs.length,
-      returned: box.runs.length,
-      offset: 0,
-    }),
-  });
+  /*
+   * ── IT HONOURS `limit`/`offset`, WHICH IT DID NOT USED TO ─────────────────
+   *
+   * The old body returned EVERY run whatever was asked for and reported `total`
+   * as the length of what it returned. `routes.py` slices `[offset:offset +
+   * limit]` and reports the record's real `total`, and the difference is the one
+   * this section's whole bounded-reload design turns on: a signal-driven re-read
+   * asks for `limit = received`, so a run ADDED elsewhere while the reader holds a
+   * full page produces a page of N out of a total of N+1. Against the old body
+   * that state was unreachable, and a re-read that silently grew the page it had
+   * promised to bound would have looked identical to a correct one.
+   *
+   * `paged` defaults ON. Every existing test in this file loads fewer runs than
+   * `RUNS_PAGE_SIZE`, so slicing is the identity for them and no count moves.
+   */
+  const respond = (path: string) => {
+    const q = path.includes('?') ? path.slice(path.indexOf('?') + 1) : '';
+    const params = new URLSearchParams(q);
+    const offset = Number(params.get('offset') ?? 0);
+    const limit = Number(params.get('limit') ?? box.runs.length);
+    const page = box.runs.slice(offset, offset + limit);
+    return {
+      ok: true,
+      status: 200,
+      headers: { get: () => null },
+      json: async () => ({
+        runs: page,
+        experiment_version: box.version,
+        total: box.runs.length,
+        matched: box.runs.length,
+        returned: page.length,
+        offset,
+      }),
+    };
+  };
 
   stubFetchRoutes({});
   const inner = globalThis.fetch as unknown as (
@@ -151,9 +173,12 @@ function stubRunsBackend(initial: { runs: Run[]; version: string }) {
         method === 'GET' && (path === `${BASE}/runs` || path.startsWith(`${BASE}/runs?`));
       if (!isListing) return inner(input, init);
       calls.push(path);
-      if (!hold) return respond() as unknown as Response;
+      if (!hold) return respond(path) as unknown as Response;
       return new Promise<Response>((resolve) => {
-        queue.push(() => resolve(respond() as unknown as Response));
+        /* The page is computed when the response is RELEASED, not when it was
+           queued, which is what the real server does: a held request answers with
+           what the record holds at the moment it is answered. */
+        queue.push(() => resolve(respond(path) as unknown as Response));
       });
     }),
   );
@@ -226,19 +251,58 @@ afterEach(() => {
 // ---------------------------------------------------------------------------
 
 describe('a run that arrived through the change feed (fast path)', () => {
-  it('a created run becomes visible after a signal', async () => {
+  it('a colleague CREATING a run is reported by a signal — the total moves and Load More appears, and the bounded re-read does NOT smuggle it onto the page', async () => {
+    /*
+     * ── THIS TEST REPLACES ONE WHOSE PREMISE WAS FALSE, AND THE FALSE PREMISE IS
+     * ── THE USEFUL PART. ───────────────────────────────────────────────────────
+     *
+     * ~~`a created run becomes visible after a signal`~~ loaded two runs, had a
+     * colleague create a third, and asserted that all THREE rendered. It passed for
+     * one reason: `stubRunsBackend` returned every run whatever `limit` was asked
+     * for. The real route slices `[offset:offset + limit]`, and a signal-driven
+     * re-read asks for `limit = received` — `triggerBoundedSilentReload` sets
+     * `pendingSignalLimitRef` to exactly what is on screen — so the response can
+     * never contain a run the page did not already have room for. **There is no
+     * page size at which it could**: the bound IS the received count, so a created
+     * run is structurally outside every bounded re-read, at every list length.
+     *
+     * So the old assertion was reading the fixture, not the product, and the
+     * property it named does not exist. What DOES exist is better than nothing and
+     * is what a scientist actually needs: the re-read is what tells the section the
+     * record's `total` has moved, so the count line stops claiming the record has
+     * two runs and Load More becomes reachable. Nothing is silently dropped and
+     * nothing is silently added.
+     *
+     * MUTATION CONTROL, RUN AND REVERTED:
+     *   · revert `stubRunsBackend.respond` to the old body (return `box.runs`, report
+     *     `total` as its length) -> THIS TEST FAILS: three cards render and the count
+     *     reads "Showing 3 of 3 runs", which is the old test passing again and is
+     *     exactly the behaviour no server produces.
+     */
     const backend = stubRunsBackend({ runs: [mkRun(1), mkRun(2)], version: '1.0' });
     const { rerender } = render(<Harness activity={null} />);
     await waitForList();
     await waitFor(() => expect(renderedIds()).toEqual(['RUN001', 'RUN002']));
     expect(backend.calls).toHaveLength(1);
+    expect(document.querySelector('.runs-count')?.textContent).toBe('Showing 2 of 2 runs');
+    expect(screen.queryByRole('button', { name: /Load more runs/ })).toBeNull();
 
     // The colleague's create advanced the record to rev 1, and a third run now
     // exists on the server the section has not yet read.
     backend.setRuns([mkRun(1), mkRun(2), mkRun(3)], '1.1');
     rerender(<Harness activity={summary({ runIds: ['RUN003'], runRev: 1 })} />);
-
     await waitFor(() => expect(backend.calls).toHaveLength(2));
+
+    // Bounded to what was on screen: a page of two, out of a record of three.
+    expect(new URLSearchParams(backend.calls[1].split('?')[1]).get('limit')).toBe('2');
+    await waitFor(() =>
+      expect(document.querySelector('.runs-count')?.textContent).toBe('Showing 2 of 3 runs'),
+    );
+    expect(renderedIds()).toEqual(['RUN001', 'RUN002']);
+
+    // Reachable, not dropped — and one press really does bring it.
+    expect(screen.getByRole('button', { name: /Load more runs/ })).toBeEnabled();
+    fireEvent.click(screen.getByRole('button', { name: /Load more runs/ }));
     await waitFor(() => expect(renderedIds()).toEqual(['RUN001', 'RUN002', 'RUN003']));
   });
 
