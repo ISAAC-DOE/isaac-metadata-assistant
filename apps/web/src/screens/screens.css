@@ -113,10 +113,51 @@
   border-radius: var(--radius-card);
 }
 .needsyou-icon { color: var(--advisory-icon); flex: none; margin-top: 1px; }
+/* The owner of a grouped row — "This record", or a run's own label. It is the
+   thing the row is ABOUT, so it leads and it is the only emphasised part; the
+   questions behind it are the detail. Not a chip and not a colour: the record
+   screen already carries three colour-bearing signal families and a fourth would
+   compete with them for no new meaning. */
+.needsyou-owner {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--advisory-text);
+}
+
 .needsyou-body { flex: 1; }
 .needsyou-title { font-size: 14px; font-weight: 600; color: var(--advisory-text); }
 .needsyou-text { margin-top: 4px; font-size: 12.5px; color: var(--text-secondary); line-height: 1.5; }
-.needsyou-action { flex: none; align-self: center; }
+/* THE PRIMARY ACTION SITS BESIDE THE TITLE, not floated to the vertical middle of
+   whatever the banner happens to hold. `center` was defensible while the banner was
+   always a list — the button landed roughly beside its own subject. It is wrong now
+   that the banner has two forms: on the compact form (every workspace but Record
+   Fields) the box is three lines tall and `center` put the one control a reader can
+   act on level with the explanation rather than with the count it acts on. */
+.needsyou-action { flex: none; align-self: flex-start; }
+
+/* ---- the Record Identity group (Record Fields workspace) ------------
+ *
+ * FOUR SECTIONS ABOUT THE WHOLE RECORD, marked off from the four scientific
+ * draft blocks above them. The audit measured the problem exactly: eight
+ * structurally different `.fg-header` rows shared one visual idiom with no
+ * grouping cue, so a reader could not tell where the science stopped without
+ * reading every label.
+ *
+ * THE CUE IS AN EYEBROW AND A HAIRLINE, and nothing else. No card, no tint, no
+ * border around the group — wrapping four cards in a fifth container would be the
+ * nested-card anti-pattern, and the sections already carry their own card chrome.
+ * The eyebrow is `.eyebrow` from `styles/base.css`, the same idiom `WorkflowSpine`
+ * uses for `Workflow`; the extra space above it is the grouping (proximity before
+ * decoration).
+ */
+.record-identity {
+  margin-top: 24px;
+}
+.record-identity-eyebrow {
+  padding-top: 14px;
+  padding-bottom: 10px;
+  border-top: 1px solid var(--border-faint);
+}
 
 /* ---- S4 completion header + progress ------------------------------- */
 .completion-header {
@@ -1185,58 +1226,90 @@
    ONLY intentionally dark surface and its own contrast-checked token set.
    Nothing graph-related remains here. */
 
-/* Live pending blockers listed inside the needs-you banner (S3), as a NUMBERED
- * list: a visible ordinal badge, the concise label as the primary line, and the
- * technical locator demoted to a mono token beneath it (shown exactly once). */
+/*
+ * THE GROUPED ROWS. One line per OWNER — the record itself, then each run that
+ * owns an open question — rather than one line per question.
+ *
+ * WHY IT CHANGED, MEASURED. The list was numbered and per-question, and on the
+ * seeded two-run record it rendered "Reduced Spectrum", "What is the QC
+ * verdict…", "Scientific Descriptor" and then the SAME THREE AGAIN, byte-
+ * identical, because Run A and Run B each own the same three kinds and nothing in
+ * the row said which run it belonged to. The ordinal numbers made that worse
+ * rather than better: they implied six distinct things.
+ *
+ * `list-style: none` and no `.needsyou-num`, because the sequence carries no
+ * information a reader can act on — the order is the server's, not a priority.
+ */
 .needsyou-list {
-  margin: 8px 0 0;
-  padding: 0;
   list-style: none;
+  margin: 10px 0 0;
+  padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 6px;
-}
-/* The overflow line. Deliberately styled as PROSE rather than as a list item: it is a
-   statement about the list, not another entry in it, and a reader must not be able to
-   mistake "3,000 more are waiting" for the 3,000th question. */
-.needsyou-more {
-  margin: 8px 0 0;
-  font-size: 13px;
-  color: var(--text-muted);
-}
-.needsyou-list li {
-  display: flex;
-  align-items: baseline;
   gap: 8px;
-  font-size: 12px;
-  color: var(--text-secondary);
 }
-.needsyou-num {
-  flex: none;
-  min-width: 16px;
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--advisory-text);
-  font-variant-numeric: tabular-nums;
-}
-.needsyou-item {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
+/* One row per owner: the owner's name, then that owner's open questions. A grid
+   rather than a flex row so every owner's questions start at the same x — the
+   names are short and unequal, and a ragged second column is what makes a list
+   like this hard to scan. It collapses to one column below, where the names would
+   otherwise squeeze the questions into a strip. */
+.needsyou-group {
+  display: grid;
+  grid-template-columns: minmax(0, max-content) minmax(0, 1fr);
+  gap: 4px 12px;
+  align-items: baseline;
   min-width: 0;
 }
+.needsyou-questions {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+/* One open question: the concise label, then its technical locator once, demoted.
+   `min-width: 0` + `overflow-wrap` so a long URI breaks inside the row rather than
+   widening the banner past its box. */
+.needsyou-item {
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 2px 8px;
+  line-height: 1.5;
+}
+/* THE QUESTION IS THE CONTENT; the owner beside it is the label. Restoring the
+   weight and the stronger colour the flat list gave it, which the grouped rewrite
+   dropped: at `--text-secondary` 400 beside an owner at 600 the row read as a run
+   name with some grey underneath, inverting what a reader is there to find. */
 .needsyou-q {
+  font-size: 12.5px;
   line-height: 1.45;
   font-weight: 500;
   color: var(--text-primary);
 }
 .needsyou-about {
+  min-width: 0;
   font-size: 11px;
-  color: var(--text-tertiary);
-  /* HIER-2: wrap a long locator at safe boundaries, never mid-token — a break-all
-   * split a URI like "…/notebook" into "…/n" + "otebook". */
+  color: var(--text-muted);
   overflow-wrap: anywhere;
-  word-break: break-word;
+}
+.needsyou-item-more {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+/* The overflow line. Deliberately styled as PROSE rather than as a list item: it
+   is a statement about the list, not another entry in it, and a reader must not be
+   able to mistake "3,000 more are waiting" for the 3,000th question. Kept when the
+   list became grouped, because grouping makes the distinction MORE necessary — the
+   rows are now owners and this sentence counts questions. */
+.needsyou-more {
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.5;
 }
 
 /* ---- S4 live completion states -------------------------------------- */
@@ -2947,6 +3020,9 @@
    * 465.2px-tall block (banner h=499.2). The row must break: the body keeps the
    * line with the icon, and the action becomes a full-width control beneath it. */
   .needsyou-banner { flex-wrap: wrap; }
+  /* The owner name and its questions stack: at this width a `max-content` first
+     column leaves the second one a strip, and the questions carry long URIs. */
+  .needsyou-group { grid-template-columns: minmax(0, 1fr); }
   .needsyou-body { flex: 1 1 180px; min-width: 0; }
   .needsyou-action {
     flex: 1 0 100%;

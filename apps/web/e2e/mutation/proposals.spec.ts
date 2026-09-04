@@ -284,8 +284,15 @@ async function assertNoAttributableActor(api: APIRequestContext): Promise<void> 
 // The screen
 // ---------------------------------------------------------------------------
 
+/*
+ * `?view=` NAMES THE WORKSPACE, and it is required rather than cosmetic. The Review
+ * Record screen is four `?view=` destinations on one route (`RECORD_VIEW_IDS`), each
+ * lazily mounted, so a bare `/record/<id>` opens Record Fields and the panel a spec
+ * is about may not exist on the page at all. The default is unchanged from what a
+ * reader gets by typing the bare URL.
+ */
 async function openRecord(page: Page, id: string): Promise<void> {
-  await page.goto(`/record/${id}`);
+  await page.goto(`/record/${id}?view=capture`);
   await expect(page.getByRole('heading', { name: 'Ingestion Proposals' })).toBeVisible();
   // The panel's own count line, which is only rendered once a window has LOADED.
   // Waiting on it means no assertion below races the first read.

@@ -117,7 +117,11 @@ test('measure the record screen live-refresh request graph', async ({ page, requ
 
   // ---- A · first paint -------------------------------------------------------
   const tMount = Date.now();
-  await page.goto(`/record/${TARGET}`);
+  /* `?view=runs` — the record screen's four workspaces are lazily-mounted
+     `?view=` destinations, and `RunsSection` lives on Runs. A bare
+     `/record/<id>` opens Record Fields, where it is not in the DOM at all, so
+     the wait below would hang for its full timeout rather than fail. */
+  await page.goto(`/record/${TARGET}?view=runs`);
   await expect(page.getByRole('heading', { name: 'Runs' })).toBeVisible({ timeout: 180_000 });
   await page.waitForTimeout(2_000); // let the mount's fan-out finish arriving
   const paint = report('A · first paint', since(tMount));

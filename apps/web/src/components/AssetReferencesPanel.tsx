@@ -51,7 +51,11 @@ import type {
   ApiAssetsResponse,
 } from '../lib/types';
 import { BackendDown, LoadingPanel } from './FetchStates';
+import { ChevronDown, ChevronRight } from './icons';
 import './assets.css';
+// The collapsed mount reuses `FieldGroup`'s shell (`.field-group` / `.fg-header`
+// / `.fg-body`) rather than inventing a second disclosure idiom for this screen.
+import './fields.css';
 
 /** Same narrowing the other panels use — a non-`ApiError` throw still renders a panel. */
 function asApiError(err: unknown): ApiError {
@@ -218,23 +222,95 @@ export function sha256Problem(value: string): string {
   return `A sha256 is exactly 64 characters. This one is ${value.length}.`;
 }
 
-export function AssetReferencesPanel({ experimentId }: { experimentId: string }) {
+/**
+ * `collapsedByDefault` — the RECORD WORKSPACE mount, where this panel closes the
+ * Record Fields column and a browser opened on arrival would make that column's
+ * footer taller than its science.
+ *
+ * THE BROWSER STAYS MOUNTED WHILE COLLAPSED, and that is the point rather than an
+ * oversight: it is what makes the count on the header REAL. Nothing here guesses,
+ * and nothing renders a number before the read resolves — a collapsed header with
+ * no count is the honest state of a list nobody has finished reading, and it is
+ * what this panel shows until `listAssets` answers. The panel's own fetch, its
+ * version token, its refusal recovery and every open form are untouched by the
+ * disclosure: hiding is `hidden` on the body, so a form left open behind a
+ * collapse still holds what was typed into it.
+ *
+ * WITHOUT THE PROP NOTHING CHANGES. Every other mount — and every existing test
+ * that renders this component directly — gets the always-open `<h2>` section it
+ * has always had, so the heading outline of those surfaces is unmoved.
+ */
+export function AssetReferencesPanel({
+  experimentId,
+  collapsedByDefault = false,
+}: {
+  experimentId: string;
+  collapsedByDefault?: boolean;
+}) {
+  const [expanded, setExpanded] = useState(!collapsedByDefault);
+  const [count, setCount] = useState<number | null>(null);
+
+  const description = (
+    <p className="assets-sub">
+      The files this record points at — where each one is, what it is for, and the
+      sha256 you record for it. ISAAC stores the reference only: it does not
+      upload, open, download or hash the file, so a digest here is the one you
+      entered and has not been checked against anything.
+    </p>
+  );
+
+  /* Keyed on the record so switching records rebuilds this panel's state
+     rather than showing one record's assets under another's heading. */
+  const browser = (
+    <AssetsBrowser key={experimentId} experimentId={experimentId} onCount={setCount} />
+  );
+
+  if (!collapsedByDefault) {
+    return (
+      <section className="assets-section" aria-labelledby="asset-references-heading">
+        <div className="assets-head">
+          <h2 className="assets-title" id="asset-references-heading">
+            Asset References
+          </h2>
+          {description}
+        </div>
+        {browser}
+      </section>
+    );
+  }
+
+  const Chevron = expanded ? ChevronDown : ChevronRight;
   return (
-    <section className="assets-section" aria-labelledby="asset-references-heading">
-      <div className="assets-head">
-        <h2 className="assets-title" id="asset-references-heading">
-          Asset References
-        </h2>
-        <p className="assets-sub">
-          The files this record points at — where each one is, what it is for, and the
-          sha256 you record for it. ISAAC stores the reference only: it does not
-          upload, open, download or hash the file, so a digest here is the one you
-          entered and has not been checked against anything.
-        </p>
+    <section className="field-group assets-collapsible" aria-label="Asset References (assets)">
+      {/* `h2 > button[aria-expanded][aria-controls]`, the accordion shape
+          `RunCard` already documents — a real heading landmark, not a div with
+          an onClick. `h2` and not `h3` because the sections above it in this
+          workspace are `h2`s and this is their peer, and because an `h3` under
+          the screen's single `h1` with no `h2` between them skips a level. */}
+      <h2 className="fg-heading">
+        <button
+          type="button"
+          className="fg-header"
+          aria-expanded={expanded}
+          aria-controls="asset-references-body"
+          onClick={() => setExpanded((v) => !v)}
+        >
+          <Chevron className="fg-chevron" size={16} strokeWidth={2} aria-hidden="true" />
+          <span className="fg-block">Asset References</span>
+          <span className="fg-sublabel">assets</span>
+          {/* NO COUNT UNTIL THE READ ANSWERS. `null` is "not known yet", and it
+              renders nothing — never a 0 this panel has not established. */}
+          <span className="fg-summary">
+            {count === null
+              ? ''
+              : `${count} ${count === 1 ? 'reference' : 'references'}`}
+          </span>
+        </button>
+      </h2>
+      <div id="asset-references-body" className="fg-body" hidden={!expanded}>
+        {description}
+        {browser}
       </div>
-      {/* Keyed on the record so switching records rebuilds this panel's state
-          rather than showing one record's assets under another's heading. */}
-      <AssetsBrowser key={experimentId} experimentId={experimentId} />
     </section>
   );
 }
@@ -253,7 +329,15 @@ const STALE_ASSET_COPY =
   'be your own edit elsewhere on this screen. Nothing was lost: this section has picked ' +
   'up the current version and what you typed is still here, so try again.';
 
-function AssetsBrowser({ experimentId }: { experimentId: string }) {
+function AssetsBrowser({
+  experimentId,
+  onCount,
+}: {
+  experimentId: string;
+  /** Reports how many references this record holds, each time the list is read.
+   *  Optional: the always-open mount has a heading that names no number. */
+  onCount?: (n: number) => void;
+}) {
   const [list, setList] = useState<ListState>({ status: 'loading' });
   const [version, setVersion] = useState<string | null>(null);
   const [reloadNonce, setReloadNonce] = useState(0);
@@ -281,6 +365,9 @@ function AssetsBrowser({ experimentId }: { experimentId: string }) {
         if (!alive || generation !== generationRef.current) return;
         setList({ status: 'data', loaded });
         setVersion(loaded.experiment_version);
+        /* `total`, the server's own figure for the whole record — not
+           `loaded.assets.length`, which is what this page happens to hold. */
+        onCount?.(loaded.total);
       })
       .catch((err: unknown) => {
         if (!alive || generation !== generationRef.current) return;

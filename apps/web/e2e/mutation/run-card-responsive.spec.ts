@@ -135,7 +135,7 @@ const runCards = (page: Page) => page.locator('article.run-card');
  * spec must fail loudly rather than quietly measure two collapsed strips.
  */
 async function twoOpenRuns(page: Page) {
-  await openRecord(page, SEED.partial);
+  await openRecord(page, SEED.partial, 'runs');
   await pwExpect(page.getByRole('heading', { name: 'Runs', exact: true })).toBeVisible();
   await pwExpect(addRun(page)).toBeEnabled();
 
@@ -535,7 +535,7 @@ test.describe('run card — narrow widths', () => {
   test('@runs-layout run cards widen the document by nothing at 320', async ({ page }) => {
     await page.setViewportSize({ width: 320, height: 812 });
 
-    await openRecord(page, SEED.partial);
+    await openRecord(page, SEED.partial, 'runs');
     await pwExpect(page.getByRole('heading', { name: 'Runs', exact: true })).toBeVisible();
     await pwExpect(addRun(page)).toBeEnabled();
     await pwExpect(runCards(page)).toHaveCount(0);

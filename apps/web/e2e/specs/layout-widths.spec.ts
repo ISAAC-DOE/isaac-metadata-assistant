@@ -827,8 +827,24 @@ test.describe('surface catalogue coverage', () => {
   });
 
   test('@responsive the Compare Runs table is still unreachable in the read-only scope', async ({ page, app }) => {
-    const partial = SURFACES.find((s) => s.id === 'record-detail')!;
-    await app.open(partial);
+    /*
+     * THE `record-runs` SURFACE, NOT `record-detail`, AND THE SWAP IS A REPAIR.
+     *
+     * This opened `record-detail`, which is the BARE `/record/<id>` — and since the
+     * screen became four lazily-mounted `?view=` workspaces, that URL opens Record
+     * Fields, where `RunsSection` is not in the DOM at all. So `.run-card-compare`
+     * counted 0 for a reason that has nothing to do with what this test claims:
+     * it would have counted 0 on a build where run cards DID render, and the
+     * tripwire — whose whole job is to fire when Compare Runs becomes reachable —
+     * had quietly become unfailable. It is asserted on the workspace the controls
+     * live on, where 0 is a fact about the seeded record rather than about which
+     * panel happens to be mounted.
+     */
+    const runsSurface = SURFACES.find((s) => s.id === 'record-runs')!;
+    await app.open(runsSurface);
+    // The section is genuinely on the page — otherwise the count below is 0 for
+    // the same vacuous reason all over again.
+    await expect(page.locator('section.runs-section')).toHaveCount(1);
     // No run cards on a seeded example record, therefore no Focus / Compare
     // controls, therefore no `?compare=` table to catalogue. This is the
     // mechanical form of the prose above, so the note cannot rot into a claim

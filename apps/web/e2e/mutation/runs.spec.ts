@@ -88,7 +88,7 @@ const fieldError = (card: Locator, path: string) =>
 
 /** Open a record and wait for the Runs section's OWN fetch to have landed. */
 async function openRunsSection(page: Page, id: string) {
-  await openRecord(page, id);
+  await openRecord(page, id, 'runs');
   await expect(page.getByRole('heading', { name: 'Runs', exact: true })).toBeVisible();
   await expect(addRun(page)).toBeEnabled();
 }
@@ -572,18 +572,32 @@ test.describe('R5 · the Run workspace', () => {
     await fieldControl(card, 'timestamps.acquired_start_utc').fill('2026-01-31T09:00:00Z');
 
     /*
-     * Leave the fields view while that first PATCH is still open. This is ONE CLICK
-     * AWAY in the product: the Runs section lives inside the fields tabpanel.
+     * Leave the runs workspace while that first PATCH is still open. This is ONE
+     * CLICK AWAY in the product: the record's four workspaces are a permanent list
+     * in its own sidebar.
+     *
+     * ~~the Runs section lives inside the fields tabpanel~~ — no longer true: the
+     * runs have their own `?view=runs` workspace. The mechanism this spec depends on
+     * is unchanged, which is why only the sentence moved.
      *
      * IT NO LONGER UNMOUNTS THE CARDS, and this comment used to say it did. The panel
      * is kept mounted and hidden (D1) because unmounting it destroyed every unsaved
-     * textarea on the record screen; the view switch now calls `flushExperiment`
-     * explicitly, so the flush this spec depends on happens for the same reason it
-     * always did. `flushPending` still declines to send while a request is in flight,
+     * textarea on the record screen; the workspace switch calls `flushExperiment`
+     * explicitly.
+     *
+     * ~~"so the flush this spec depends on happens for the same reason it always
+     * did"~~ — OVERSTATED, and corrected here because it made the flush sound
+     * load-bearing for this assertion when it is not. Nothing unmounts any more, so
+     * the store's 600 ms debounce is still alive and the second edit WOULD go out on
+     * its own timer. What `flushExperiment` changes is WHEN: it closes the window
+     * between the switch and the timer, in which a closed browser tab loses the edit.
+     * It accelerates the send rather than rescuing it — and this spec's real subject
+     * is unchanged and is stated below: every accepted edit reaches the network
+     * exactly once, whichever path carries it. `flushPending` still declines to send while a request is in flight,
      * so the second edit still has to travel via the settle handler — which is exactly
      * what this spec is about, unchanged.
      */
-    await page.getByRole('tab', { name: 'Graph' }).click();
+    await page.getByRole('link', { name: 'Graph' }).click();
     // ATTACHED *AND* HIDDEN, and both halves are needed. Playwright reports a
     // non-existent element as hidden, so `toBeHidden()` alone passes whether the card
     // is hidden (the fixed behaviour) or unmounted (the defect) — it stopped
@@ -617,7 +631,7 @@ test.describe('R5 · the Run workspace', () => {
      * in a browser rather than only in jsdom.
      *
      * This comment used to record the opposite as an honest limit: "Returning to the
-     * fields view re-mounts a card whose autosave state is brand new, so the detached
+     * runs re-mounts a card whose autosave state is brand new, so the detached
      * write's OUTCOME is reported nowhere … if it had been refused, this card would
      * look exactly the same." That was true of the in-component hook. Save state now
      * lives in `runAutosaveStore`, keyed by experiment and run and disposed at the
@@ -632,7 +646,7 @@ test.describe('R5 · the Run workspace', () => {
      * unmounted is reported when it comes back", which fails if the state dies with the
      * card (verified against a reintroduced defect).
      */
-    await page.getByRole('tab', { name: 'Record Fields' }).click();
+    await page.getByRole('link', { name: 'Runs' }).click();
     const remounted = nthCard(page, 0);
     // `Saved`, NOT the empty string this line used to assert. The empty string WAS the
     // old behaviour and was the defect: a card that had just had a write acknowledged

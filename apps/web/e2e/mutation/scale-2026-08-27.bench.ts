@@ -319,7 +319,7 @@ test('measure the 2026-08-27 scale envelope', async ({ page, request, session })
 
     // ---- BROWSER: the record screen --------------------------------------
     const tLoad = Date.now();
-    await openRecord(page, TARGET);
+    await openRecord(page, TARGET, 'runs');
     await expect(page.getByRole('heading', { name: 'Runs', exact: true })).toBeVisible({
       timeout: 180_000,
     });
