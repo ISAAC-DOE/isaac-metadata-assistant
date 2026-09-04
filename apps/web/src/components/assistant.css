@@ -672,6 +672,23 @@ button.assistant-source-chip-nav:focus-visible {
 .assistant-followup:disabled { opacity: 0.55; cursor: default; }
 .assistant-followup:focus-visible { outline: 2px solid var(--assist); outline-offset: 2px; }
 
+/* PR-E — the workspace-context lead sentence ("You are on Runs."). Plain text,
+ * subordinate to the header, in the SAME size/colour family as
+ * `.assistant-caveat`/`.assistant-note` rather than a new visual weight — it
+ * orients, it does not alert. The workspace name is the only emphasised word
+ * (`<strong>`), matching the needs-you banner's own convention of bolding the
+ * one thing a row is ABOUT. */
+.assistant-workspace-context {
+  margin: 0 0 12px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-tertiary);
+}
+.assistant-workspace-context strong {
+  color: var(--assist-text);
+  font-weight: 600;
+}
+
 /* P29.4 — honest, manual-first degraded state. Subordinate tint (never a verdict
    color); it only tells the reader the assistant cannot verify the record right
    now, and never disables the surrounding manual workflow. */

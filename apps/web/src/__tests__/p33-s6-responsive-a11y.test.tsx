@@ -91,16 +91,110 @@ describe('RESP-1 · AssistantDrawer — dialog behaviour (viewport-independent)'
     expect(document.activeElement).toBe(dialog);
   });
 
-  it('traps Tab within the panel (wraps at the boundary)', () => {
+  it('traps Tab within the panel (wraps at the boundary) — and focus actually MOVES between two distinct controls', () => {
+    /*
+     * C-1 (independent review, 2026-09-03) — CONTAINMENT ALONE IS NOT PROOF
+     * OF A WORKING TRAP. `dialog.contains(document.activeElement)` stays
+     * true even if focus never moved at all — e.g. `next.focus()` called on
+     * an item CSS actually hides is a no-op, so `document.activeElement`
+     * stays on whatever it already was — which is STILL "contained" by the
+     * dialog. That is precisely how six sequential Tab presses from the
+     * close button, measured live in a real browser, never left it: this
+     * assertion style would have passed the whole time.
+     *
+     * N-1 (re-review, 2026-09-03) — NAMING THE ACTUAL FIX, NOT A DISCARDED
+     * ONE. An earlier revision of this comment named
+     * `getClientRects().length > 0` as the mechanism. That was tried and
+     * abandoned before this file was last touched: jsdom has no layout
+     * engine, so EVERY element's `getClientRects()` is empty there
+     * regardless of its CSS, which would have collapsed the trap's item
+     * list to zero and broken every test below. The code in
+     * `AssistantDrawer.tsx` uses `getComputedStyle(...).display`/
+     * `visibility`, walked from each candidate up to the panel
+     * (ancestor-aware, since `display` is not inherited — a button inside a
+     * `display: none` wrapper reports its OWN `inline-block`, not `none`).
+     *
+     * AND STATED PLAINLY RATHER THAN IMPLIED: THIS TEST DOES NOT DETECT THAT
+     * MUTANT. Measured directly — removing the visibility filter from
+     * `AssistantDrawer.tsx` entirely and re-running this file still passes
+     * 26/26, because `renderDrawer()`'s fixture holds only two plain,
+     * always-visible `<button>`s beside the real component's own controls,
+     * and (separately measured) jsdom's `.focus()` does not appear to
+     * respect `display: none` the way a real browser's does — calling it on
+     * a hidden element still moves `document.activeElement` here. So the
+     * "focus MOVED, not merely contained" assertions below hardens this
+     * test against a DIFFERENT, weaker class of regression (a trap that
+     * literally never advances focus at all) but cannot stand in for the
+     * real guarantee. The C-1 guarantee — that a CSS-hidden control is
+     * excluded from the cycle and Tab actually reaches the composer — is
+     * proven ONLY in a real browser, in `e2e/specs/keyboard.spec.ts`
+     * (`@interaction the assistant drawer trap moves focus to the composer
+     * at 768px`), and that spec is the one to trust for this property.
+     */
     const { view, trigger } = renderDrawer();
     fireEvent.click(trigger);
     const dialog = view.getByRole('dialog');
-    // Tab is always contained (preventDefault ran => fireEvent returns false),
-    // and focus stays inside the panel.
+    const before = document.activeElement;
     expect(fireEvent.keyDown(dialog, { key: 'Tab' })).toBe(false);
-    expect(dialog.contains(document.activeElement)).toBe(true);
+    const afterOne = document.activeElement;
+    expect(dialog.contains(afterOne)).toBe(true);
+    expect(afterOne).not.toBe(before); // focus MOVED, not merely "still inside"
+
     expect(fireEvent.keyDown(dialog, { key: 'Tab', shiftKey: true })).toBe(false);
-    expect(dialog.contains(document.activeElement)).toBe(true);
+    const afterTwo = document.activeElement;
+    expect(dialog.contains(afterTwo)).toBe(true);
+    expect(afterTwo).not.toBe(afterOne); // Shift+Tab moved it again, elsewhere
+  });
+
+  /*
+   * N-2 (re-review, 2026-09-03) — A BUTTON INSIDE A `display: none` WRAPPER
+   * IS SKIPPED, NOT MERELY A `display: none` ELEMENT ITSELF.
+   *
+   * `display` is not inherited: a real, enabled `<button>` nested inside a
+   * hidden ancestor still reports its OWN computed `display` as (say)
+   * `inline-block`, never `none` — so a filter that reads only the
+   * candidate's own computed style would let it straight through, then
+   * `.focus()` on it is a no-op in a real browser, exactly the C-1 shape of
+   * bug one level removed. `AssistantDrawer.tsx`'s `isReachableFocusTarget`
+   * walks the candidate's OWN ancestor chain up to the panel to catch this.
+   *
+   * This IS a mutation this jsdom test can detect (unlike C-1's main
+   * defect): jsdom computes `display: none` correctly from inline styles
+   * regardless of layout, so a per-element-only check really does let
+   * `hidden-inner` through here, and the ancestor walk really does exclude
+   * it — verified by literally reverting `isReachableFocusTarget` to check
+   * only `el` itself (dropping the ancestor loop) and re-running this test:
+   * it fails, naming `hidden-inner` as reached.
+   */
+  it('a focusable control nested inside a display:none WRAPPER is excluded from the trap (ancestor-aware)', () => {
+    const view = render(
+      <AssistantDrawer railClassName="record-right narrow">
+        <button type="button">reachable-one</button>
+        <div style={{ display: 'none' }}>
+          <button type="button">hidden-inner</button>
+        </div>
+        <button type="button">reachable-two</button>
+      </AssistantDrawer>,
+    );
+    const trigger = view.container.querySelector('.assistant-drawer-trigger') as HTMLButtonElement;
+    fireEvent.click(trigger);
+    const dialog = view.getByRole('dialog');
+
+    const seen = new Set<string>();
+    let node: Element | null = document.activeElement;
+    if (node) seen.add(node.textContent ?? '<none>');
+    // Walk enough Tab presses to cycle the whole (short) list at least twice
+    // over, so a wraparound would surface `hidden-inner` if it were in the
+    // cycle at all.
+    for (let i = 0; i < 8; i++) {
+      fireEvent.keyDown(dialog, { key: 'Tab' });
+      node = document.activeElement;
+      seen.add(node?.textContent ?? '<none>');
+    }
+
+    expect(seen.has('hidden-inner')).toBe(false);
+    expect(seen.has('reachable-one')).toBe(true);
+    expect(seen.has('reachable-two')).toBe(true);
   });
 
   it('Shift+Tab from the just-opened panel lands on the LAST focusable (MIN-2)', () => {

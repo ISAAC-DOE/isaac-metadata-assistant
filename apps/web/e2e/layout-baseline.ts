@@ -494,6 +494,26 @@ export const LAYOUT_BASELINE: readonly LayoutFinding[] = [
       'load@width-390': fixedOnDarwin('main#main.screen-main.centered < div.screen-body.full < div.screen-card'),
     },
   },
+  // I-1 (independent review, 2026-09-03) — A `LAYOUT-05` ENTRY WAS ADDED HERE
+  // AND HAS BEEN DELETED, NOT NARROWED, BECAUSE THE DEFECT IT RECORDED NEVER
+  // EXISTED. It claimed `div.screen-card`'s `overflow: hidden` clipped the
+  // floating `button.assistant-drawer-trigger` (`position: fixed`) on
+  // `record-runs@tablet-768x1024`. Measured directly: `position: fixed` lays
+  // an element out against the viewport, not against DOM ancestors, unless
+  // an ancestor establishes a containing block for it (`transform`,
+  // `perspective`, `filter`, `backdrop-filter`, matching `will-change`, or
+  // `contain: paint|layout|strict|content`) — and no ancestor between the
+  // trigger and `document.documentElement` has any of those (`cbAncestors:
+  // []`). `elementFromPoint` returned the trigger, hit-testable, at every
+  // sampled point including the region the old numeric-only comparison
+  // called "21px below the card", and the failure screenshot shows the pill
+  // whole and clickable. The probe that produced the finding
+  // (`findClippedText` in `e2e/helpers/layout.ts`) walked DOM ancestors
+  // comparing rects with no `position` check at all; it is fixed at the
+  // source (`isUnconstrainedFixed`, added there) rather than patched here by
+  // keeping a baseline entry for a false positive. `chrome.css`'s
+  // `--assistant-trigger-reserve` was correctly left untouched by that fix —
+  // it was never the defective part.
 ];
 
 export const layoutKey = (surfaceId: string, projectId: string): string => `${surfaceId}@${projectId}`;

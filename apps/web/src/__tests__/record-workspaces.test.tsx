@@ -307,6 +307,46 @@ describe('the record workspace list', () => {
     // bare `?` that resolves to Record Fields.
     expect(ROUTES.recordCompare(ID, [])).toBe(`/record/${ID}?view=runs`);
   });
+
+  /*
+   * I-4 (independent review of PR-E, 2026-09-03) — THE ASSISTANT COMPOSER
+   * SURVIVES A WORKSPACE SWITCH, AS ONE MOUNT.
+   *
+   * `rightPanel` (`RecordWorkbench.tsx`) sits OUTSIDE the `?view=` conditional
+   * entirely — the same property `record-view-input-survival.test.tsx`
+   * exercises for the MAIN-column panels, but that file's own header says it
+   * does not cover the assistant rail. This closes that gap for the one input
+   * PR-E's `workspaceContext` prop touches on every switch: if a future
+   * change keyed the panel by `activeView` (`key={activeView}` on
+   * `<AssistantPanel>` or `<AssistantDrawer>`) to force a "fresh" panel per
+   * workspace, React would tear down and remount the whole subtree on every
+   * switch — this test is the guard, and the mutation is named so a reader
+   * can reproduce the red build: add `key={activeView}` to either component
+   * in the `rightPanel` JSX and this test fails.
+   */
+  it('the assistant composer is the SAME mounted node, with its typed text intact, across a workspace switch', async () => {
+    renderAt(`/record/${ID}`);
+    const composer = (await screen.findByLabelText(
+      'Ask the assistant a question',
+    )) as HTMLInputElement;
+    fireEvent.change(composer, { target: { value: 'Draft question in progress' } });
+    expect(composer.value).toBe('Draft question in progress');
+
+    fireEvent.click(await screen.findByRole('link', { name: 'Runs' }));
+    await screen.findByRole('link', { name: 'Runs', current: 'page' });
+
+    const composerAfter = screen.getByLabelText('Ask the assistant a question') as HTMLInputElement;
+    // Same DOM node — a remount would create a NEW element even if its value
+    // happened to reset to the same text by coincidence, which it would not:
+    // the input is CONTROLLED (`value={composerText}`), so a remount resets
+    // it to empty.
+    expect(composerAfter).toBe(composer);
+    expect(composerAfter.value).toBe('Draft question in progress');
+
+    // ...and the lead sentence DID update — proving the panel re-rendered
+    // with new props rather than the switch simply doing nothing.
+    expect(screen.getByText(/You are on/).textContent).toBe('You are on Runs.');
+  });
 });
 
 /*

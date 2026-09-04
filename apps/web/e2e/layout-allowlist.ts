@@ -151,6 +151,51 @@ export const HIDDEN_TEXT_ALLOWANCES: readonly OverflowAllowance[] = [
     reason: 'Visually-hidden label for the CSV reconciliation file input.',
     evidence: 'apps/web/src/components/csv-reconcile.css:74',
   },
+  {
+    // I-2 (independent review, 2026-09-03) — the compact `<=1024px` workflow
+    // spine keeps a non-current step's blocking reason IN the accessibility
+    // tree (screen readers still hear it — that is the whole point of the
+    // fix) while hiding it visually, so the class below is a genuine
+    // accessible-name-carrier by the same definition every other entry in
+    // this list uses.
+    //
+    // DISCLOSED RATHER THAN LEFT IMPLICIT: `WorkflowSpine.tsx` applies this
+    // class whenever a step is not the CURRENT one and has a reason, with NO
+    // viewport check — React cannot see the viewport, only `workflow.css`'s
+    // `<=1024px` media query decides whether the class actually does
+    // anything. So at desktop widths (>1024px, the vertical spine) this same
+    // class is present on the same elements but INERT — the text renders
+    // exactly as it always has, at the same 212px column width, same 11px
+    // font. This entry therefore ALSO exempts that desktop-visible text from
+    // the clipping probe, which is broader than the narrow-only defect it is
+    // meant to allow. Accepted deliberately rather than silently: the
+    // desktop vertical spine's `.spine-meta` predates this slice, was never a
+    // LAYOUT-01 through LAYOUT-04 finding, and nothing about its desktop CSS
+    // changed here, so the exemption does not remove real, current
+    // protection — it removes a check that has never once fired for this
+    // element. A future width-aware allowance mechanism could narrow this;
+    // none exists in `helpers/layout.ts` today.
+    id: 'ALLOW-SPINE-META-COMPACT-NARROW',
+    match: '.spine-meta-compact-narrow',
+    surfaces: [
+      'record-detail',
+      'record-runs',
+      'record-capture',
+      'guided-completion',
+      'evidence',
+      'evidence-graph',
+      'export-readiness',
+      'export-readiness-done',
+    ],
+    reason:
+      'A blocked/reopened step\'s reason text, kept in the accessibility tree but visually hidden ' +
+      'in the compact <=1024px workflow-spine stepper so screen-reader users still hear it while ' +
+      'the row stays one line tall. Visible and unhidden again at >1024px (see evidence).',
+    evidence:
+      'apps/web/src/components/workflow.css — `.spine-meta-compact-narrow` inside ' +
+      '`@media (max-width: 1024px)`; the class is applied by ' +
+      'apps/web/src/components/WorkflowSpine.tsx (`step.current` check).',
+  },
 ];
 
 /**

@@ -714,6 +714,12 @@ function LoadedWorkbench({
         agentContext={agentContext}
         degraded={agentDegraded}
         agentPrompts={workspaceAgentPrompts(activeView)}
+        // PR-E — reuses the SAME label `RecordWorkspaceNav`'s own pill row
+        // shows for `activeView` (`workspaceRegionName` below does the exact
+        // same lookup for the region's aria-label); the panel renders
+        // "You are on <label>." beneath its header and re-renders it on every
+        // workspace switch without remounting or resetting anything else.
+        workspaceContext={RECORD_WORKSPACES.find((w) => w.id === activeView)?.label}
         onRefresh={onAgentRefresh}
       />
     </AssistantDrawer>
