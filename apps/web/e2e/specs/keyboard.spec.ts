@@ -153,6 +153,80 @@ test('@interaction disabled controls are named, inert and explained', async ({ p
   expect(unnamed, 'disabled controls without an accessible name').toEqual([]);
 });
 
+/*
+ * C-1 (independent review of PR-E, 2026-09-03) — THE REAL-BROWSER PROOF.
+ *
+ * jsdom cannot see this defect at all: it has no layout engine, so every
+ * element's rendered geometry is empty there regardless of its actual CSS,
+ * AND (measured separately) jsdom's `.focus()` does not appear to respect
+ * `display: none` the way a real browser's does — calling it on a hidden
+ * element still moved `document.activeElement` in this project's own vitest
+ * suite. So a unit test can assert the FILTER LOGIC is present, but only a
+ * real browser can prove the trap actually reaches the composer. This is
+ * that proof.
+ *
+ * THE DEFECT, measured before the fix: `AssistantDrawer`'s focus trap built
+ * its cycled item list with a bare `querySelectorAll` over focusable
+ * selectors, with no visibility check. `.assistant-rail-toggle` (PR-E's
+ * desktop collapse control) is a real, enabled `<button>` at every viewport
+ * — CSS-hidden by `display: none` only outside its own `(min-width:
+ * 1025px)` band — so at 768px it was collected into the trap's list anyway.
+ * `next.focus()` on a `display: none` element is a no-op in a real browser,
+ * and the handler calls `e.preventDefault()` unconditionally before that,
+ * suppressing the native Tab that would otherwise have moved focus anyway.
+ * Six sequential Tab presses from the close button therefore never left it
+ * — every Suggested Question, every Agent Action pill, and the composer
+ * itself were unreachable by keyboard on any tablet or phone width.
+ */
+test('@interaction the assistant drawer trap moves focus to the composer at 768px', async ({
+  page,
+  app,
+}) => {
+  await page.setViewportSize({ width: 768, height: 1024 });
+  await app.gotoExample(`/record/${SEED.partial}`);
+
+  const trigger = page.locator('button.assistant-drawer-trigger');
+  await expect(trigger).toBeVisible({ timeout: 20_000 });
+  await trigger.click();
+  const panel = page.locator('aside.assistant-drawer-panel');
+  await expect(panel).toHaveAttribute('data-open', 'true');
+
+  // The drawer moves focus to the PANEL itself on open (not the close
+  // button) — `AssistantDrawer.tsx`'s own open effect calls
+  // `panelRef.current?.focus()`, and the panel is `tabIndex={-1}` while
+  // open, matching that.
+  await expect(panel).toBeFocused();
+
+  // Walk Tab forward from the panel. If the trap still collects the
+  // CSS-hidden desktop toggle, focus gets stuck on the close button (or on
+  // whatever element precedes the hidden one in DOM order) — this is the
+  // exact shape of the measured defect, reproduced live rather than assumed.
+  const composer = page.locator('input.assistant-composer-input');
+  let reached = false;
+  for (let i = 0; i < 20; i++) {
+    await page.keyboard.press('Tab');
+    if (await composer.evaluate((el) => el === document.activeElement)) {
+      reached = true;
+      break;
+    }
+  }
+  expect(reached, 'Tab from the close button must reach the composer within 20 presses').toBe(
+    true,
+  );
+  await expect(composer).toBeFocused();
+
+  // ...and the composer is genuinely usable once reached — not merely
+  // focusable while still functionally inert.
+  await composer.fill('reachable by keyboard');
+  await expect(composer).toHaveValue('reachable by keyboard');
+
+  // The CSS-hidden toggle itself is never a stop on this walk.
+  const toggleFocused = await page.evaluate(
+    () => document.activeElement?.classList.contains('assistant-rail-toggle') ?? false,
+  );
+  expect(toggleFocused).toBe(false);
+});
+
 test('@interaction the unavailable API-key action is disabled AND says why', async ({ page, app }) => {
   await app.goto('/settings?tab=api');
   const create = page.getByRole('button', { name: /Create API Key/i });

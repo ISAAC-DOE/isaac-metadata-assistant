@@ -10412,7 +10412,7 @@
       },
       {
         "path": "apps/web/src/components/AssistantPanel.tsx",
-        "sha256": "43ac8cb6b8cb52a2a28eeb24b5074ce186130a3dceb6cbfbd79df34620868f09"
+        "sha256": "75b868c466251527e7529c39b2937a0fae47111e67ff25f2003d7d9989413f66"
       },
       {
         "path": "apps/web/src/components/CoverageBadge.tsx",
@@ -10492,11 +10492,11 @@
       },
       {
         "path": "apps/web/src/components/WorkflowSpine.tsx",
-        "sha256": "8d392415eb18224cb3ff92b38419ebadfda60eef260afd30c13dabd49009bde8"
+        "sha256": "b2d12f4adea568c9a3b09739f883bb90a64d9369104368055c85c8e774117208"
       },
       {
         "path": "apps/web/src/components/icons.tsx",
-        "sha256": "d32bbae3f5d17fc2347578d2cd66a2ee92272bdfded5b92f52a8abedde91b9ac"
+        "sha256": "ba1fbfee055e47df975b8e295d016cedebe054ef60c4c8861089fb1444c29065"
       },
       {
         "path": "apps/web/src/lib/adapt.ts",
@@ -10564,7 +10564,7 @@
       },
       {
         "path": "apps/web/src/screens/RecordWorkbench.tsx",
-        "sha256": "868bdeb834ec983b55654b8e883dca89c761ded78d0b2478547ab079ad8a2127"
+        "sha256": "c469898478cedcf659273ca5f2860f9db1d0eaf3f2dc0054d45853bdc1206b64"
       },
       {
         "path": "apps/web/src/screens/SettingsPage.tsx",
@@ -11012,7 +11012,7 @@
       }
     ],
     "served_file_count": 200,
-    "served_manifest_fingerprint": "7e0f333e3d0b2090c0a6bb09eb0df9c42a9b762dbe506696f95b9fa58e032fdd"
+    "served_manifest_fingerprint": "7de76bd36ada36e94f703d5548644da440d46be227a68a4518228bc9b57f16d8"
   },
   "overview": {
     "built_at_commit": "caab1d0a69c1733524bda5dde495623bc4b7bad1",

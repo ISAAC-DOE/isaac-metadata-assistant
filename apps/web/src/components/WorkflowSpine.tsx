@@ -106,8 +106,24 @@ export function WorkflowSpine({ workflow, recordId }: WorkflowSpineProps) {
             <span className="spine-text">
               <span className="spine-label">{step.label}</span>
               {/* The reason is shown for unsatisfied steps only, giving a
-               * non-color signal that also distinguishes reopened from blocked. */}
-              {step.reason && <span className="spine-meta">{step.reason}</span>}
+               * non-color signal that also distinguishes reopened from blocked.
+               *
+               * I-2 (independent review, 2026-09-03) — `spine-meta-compact-narrow`
+               * is a DEDICATED class, not the structural
+               * `.spine-step:not(.current) .spine-meta` selector the CSS fix
+               * could otherwise have used, because `e2e/layout-allowlist.ts`'s
+               * own rule 1 requires a HIDDEN-TEXT allowance to name "a specific
+               * class" on the element itself, not a descendant/ancestor
+               * selector. The class exists in the DOM at every viewport
+               * (React has no viewport awareness); `workflow.css` gives it a
+               * visually-hidden treatment ONLY inside the `<=1024px` media
+               * query, so at desktop widths it is present but inert and the
+               * text renders exactly as it always has. */}
+              {step.reason && (
+                <span className={`spine-meta${step.current ? '' : ' spine-meta-compact-narrow'}`}>
+                  {step.reason}
+                </span>
+              )}
             </span>
           );
           return (

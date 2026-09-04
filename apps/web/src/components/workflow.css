@@ -145,14 +145,209 @@
   line-height: 1.4;
 }
 
-/* ---- Responsive (P33 S6 · RESP-1) — additive, narrow widths only ---- */
-/* The 212px spine becomes a full-width block above the main content; the
-   vertical connector line + row layout are unchanged. Desktop untouched. */
+/* ---- Responsive (P33 S6 · RESP-1, extended PR-E) — additive, narrow widths
+   only. Desktop (>1024px) is untouched: every rule below is inside a
+   max-width query. ------------------------------------------------------ */
+/*
+ * PR-E — THE COMPACT HORIZONTAL STEPPER.
+ *
+ * MEASURED (before this change, seeded record with 2 pending, `?view=fields`,
+ * darwin, dev servers): the stacked vertical spine + workspace nav + evidence
+ * trail link pushed the first workspace content (the needs-you banner) to
+ * y=577px at both 1024×768 and 768×1024, and to y=615px at 390×844 and
+ * 320×700 — matching the ~600px figure `ia-brief.md` §10 and
+ * `record-workspaces.css`'s own comment measured before the workspace nav
+ * existed. Below is the fix: the same five `<li class="spine-step">` items
+ * `workflow.ordered_steps` renders — SAME markup, SAME order, SAME per-step
+ * state, nothing re-derived — laid out as ONE ROW instead of a five-row
+ * vertical list, cutting the spine's own height from ~358px to a single
+ * ~70px band. Re-measured after (see the PR report): firstMainChildTop drops
+ * to well under half its prior value at every one of the four widths.
+ *
+ * `.spine-step-row` flips from a horizontal disc+text row to a centered
+ * column (disc above, label below) — the SAME <a>/<span> element, same
+ * children, just re-flowed. The unsatisfied-step REASON
+ * (`.spine-meta`) is hidden for every step except the CURRENT one: showing
+ * all five reasons at once in a one-line-tall row is exactly the "content
+ * pushed down the page" defect this compact mode exists to fix, and the
+ * reason for the one step a reader is actually blocked on is the one that
+ * matters most. This is a presentation choice (CSS `display`), not a data
+ * change — the reason text is still there in the DOM for every step, so nothing
+ * about `workflow-spine.test.tsx`'s existing assertions on `.spine-meta`
+ * content (querying the DOM directly, not a rendered viewport) changes.
+ * State stays NEVER colour-only at this width too: completed/current/
+ * reopened/blocked keep four visually distinct disc glyphs
+ * (Check/Pencil/TriangleAlert/Lock) and four distinct label colours with no
+ * reason text required to tell them apart.
+ *
+ * THE CONNECTOR. Desktop's vertical spine draws a "thin neutral line between
+ * discs" (`design-handoff/05-design-system/no-vertical-rail-rule.md` — this
+ * is the one rail-shaped thing the rule explicitly allows, because it
+ * connects step DISCS rather than marking a card's edge). The horizontal
+ * version reuses the same idiom rather than a per-pair calc(): ONE continuous
+ * 2px bar sits behind the whole row (`.spine-steps::before`, z-index 0) at
+ * the discs' own vertical center, and every disc (all four states are opaque
+ * fills — `--cover-bg`/`--action`/`--advisory-bg`/`--screen-base`, never
+ * transparent) sits above it (z-index 1) and occludes the segment behind it,
+ * which reads as a broken chain of connected steps without measuring any
+ * per-item gap.
+ */
 @media (max-width: 1024px) {
   .spine {
     width: 100%;
     border-right: none;
     border-bottom: 1px solid var(--border);
+    padding: 10px 12px 12px;
+  }
+
+  .spine-steps {
+    position: relative;
+    display: flex;
+    flex-direction: row;
+    align-items: flex-start;
+    gap: 2px;
+  }
+  /* The continuous connector bar — see the comment above. 20px inset keeps it
+     clear of the row's own edges; z-index:0 sits it behind every disc. */
+  .spine-steps::before {
+    content: '';
+    position: absolute;
+    top: 22px;
+    left: 20px;
+    right: 20px;
+    height: 2px;
+    background: var(--border-strong);
+    z-index: 0;
+  }
+
+  .spine-step {
+    flex: 1 1 0;
+    min-width: 0;
+  }
+  /* The disc/label row: was a horizontal flex row (disc beside text); becomes
+     a centered column (disc above label) so five of them read as one
+     horizontal sequence rather than five stacked mini-rows. */
+  .spine-step-row {
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 2px;
+    text-align: center;
+  }
+  .spine-disc {
+    position: relative;
+    z-index: 1;
+  }
+  .spine-text {
+    padding-top: 0;
+    width: 100%;
+    min-width: 0;
+  }
+  .spine-label {
+    /* I-3 (independent review, 2026-09-03) — raised from 10.5px: the design
+       system's own 11px floor (`typography.md:57`) applies to every body/label
+       size in this app, and the compact stepper had no standing exception.
+       Re-measured after raising: at 768/390/320 the longest label ("Review
+       Export Readiness") still clamps cleanly to its two lines with no visible
+       clipping at any of the three widths — the extra 0.5px did not push a
+       third line, because `-webkit-line-clamp` measures against the column's
+       actual wrapped width, not a fixed character budget. */
+    font-size: 11px;
+    line-height: 1.25;
+    /* Two lines, not one: "Review Export Readiness" is the longest label and
+       must not blow out every column to fit it on one line. */
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  /* Only the CURRENT step's reason renders VISUALLY in the compact stepper —
+     see the comment above the media query for why.
+     I-2 (independent review, 2026-09-03) — VISUALLY HIDDEN, NOT display:none.
+     `display: none` removes an element from the accessibility tree as well as
+     the viewport, and `WorkflowSpine.tsx:56-58`'s own contract is that a
+     `reopened` step must be "distinct from a never-started `blocked` step by
+     BOTH style and its reason text" — the reason is the one piece of text
+     that tells those two states apart (they otherwise share "not yet
+     satisfied" phrasing and only differ by icon + colour, which
+     `no-vertical-rail-rule.md` and this component's own tests already treat
+     as needing a THIRD, non-colour signal). Removing the non-current reasons
+     from the accessibility tree at this width made every screen-reader user
+     on a tablet or phone lose that distinction — MEASURED via an ariaSnapshot
+     comparison at 768px vs 1440px: the narrow snapshot named zero of the
+     three unsatisfied steps' reasons, the wide one named all three. The
+     visually-hidden clip technique keeps the text in the DOM and in the
+     accessibility tree while still occupying no visible space (removed from
+     flow via `position: absolute`, exactly as `display: none` was, so the
+     compact row's height is unaffected) and painting nothing (1x1px, fully
+     clipped). See `workflow-spine.a11y.test.tsx` for the ariaSnapshot proof.
+     Targets the dedicated `.spine-meta-compact-narrow` class
+     (`WorkflowSpine.tsx`), not a `:not(.current)` structural selector — see
+     that component's own comment for why: `e2e/layout-allowlist.ts`'s hidden-
+     text allowance rule requires naming a specific class on the element
+     itself, and this is the class that allowance now names. */
+  .spine-meta-compact-narrow {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: 0;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+  .spine-meta {
+    font-size: 11px;
+    line-height: 1.3;
+  }
+  /* The desktop connector (a vertical line down the LEFT edge of every step)
+     must not also render here — it is superseded by `.spine-steps::before`
+     above. */
+  .spine-step:not(:last-child)::before {
+    content: none;
+  }
+}
+
+/* At phone widths the five equal-width columns get too narrow to hold a
+   two-line label and a 24px disc without clipping (MEASURED: 5 columns in a
+   ~296px available row is ~55px each, well under a usable touch target).
+   Wrapping to two rows — three steps, then two — keeps every column wide
+   enough to read, matching the workspace nav pill row's own two-row wrap at
+   this width (`record-workspaces.css`) rather than introducing a second,
+   different narrow-width idiom (a horizontal scroller) one region away from
+   it.
+   M-5 (independent review, 2026-09-03) — THE CONNECTOR GAP, DISCLOSED WITH
+   MEASUREMENTS RATHER THAN ASSERTED. `.spine-steps::before` is ONE bar, fixed
+   at `top: 22px` from `.spine-steps`'s own top edge; it does not move with
+   the flex-wrap and cannot "know" a second row exists. MEASURED at 320×900
+   and 390×900 on the seeded record: row 1's three discs (steps 1-3) center
+   at viewport y=164.3, close enough to the bar (which sits at container-top
+   + 22px) to read as running through them; row 2's two discs (steps 4-5)
+   center at y=236.6 (320px) / y=223.5 (390px) — 60-72px BELOW the bar, so the
+   bar visually stops after row 1 and row 2's pair renders with NO connecting
+   line between them at all. This was previously described as reading
+   "correctly for a stepper that continues on the next line" — that is a
+   design INTENT, not a measured fact, and it is corrected here: the honest
+   description is that row 2 is disconnected, not that the disconnection
+   reads as intentional continuation. A second bar was deliberately NOT added
+   to close this: the exact x-span of "the first two of three columns" is a
+   function of `flex: 1 1 30%` plus `gap` plus the row's actual rendered
+   width, which is not a value CSS alone can express without either
+   duplicating the flex math in a `calc()` that would silently drift if the
+   gap or basis above ever changes, or a JS measurement this component does
+   not otherwise need. The five-step canonical workflow is fixed (always
+   exactly 5 steps, always this order — see `workflow-spine.test.tsx`), so a
+   future slice COULD hard-code a `:nth-child(4)` connector sized to this
+   exact layout; it was left out here as a cosmetic addition outside this
+   review's fix, not as an oversight. */
+@media (max-width: 640px) {
+  .spine-steps {
+    flex-wrap: wrap;
+    row-gap: 10px;
+  }
+  .spine-step {
+    flex: 1 1 30%;
+    min-width: 30%;
   }
 }
 

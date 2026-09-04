@@ -575,6 +575,45 @@ export async function findClippedText(
           }
         });
 
+      // I-1 (independent review, 2026-09-03) — `position: fixed` escapes the
+      // normal containing-block chain. A `position: fixed` element is laid
+      // out against the INITIAL containing block (the viewport), not against
+      // its DOM ancestors, UNLESS one of those ancestors itself establishes a
+      // containing block for fixed-position descendants (a `transform`,
+      // `perspective`, or `filter` other than `none`; a `backdrop-filter`
+      // other than `none`; `will-change` naming one of those properties; or
+      // `contain: paint|layout|strict|content`). An `overflow: hidden`
+      // ancestor with none of those does NOT clip a fixed descendant, no
+      // matter how the two boxes' rects compare numerically — the browser
+      // paints the fixed element on top, unclipped. This was measured
+      // directly against `.assistant-drawer-trigger`: `elementFromPoint`
+      // returned the trigger at every sampled point including the "21px
+      // below the card" region the old numeric-only comparison flagged, and
+      // no ancestor between it and `document.documentElement` had any of the
+      // five properties above (`cbAncestors: []`). The probe skips such an
+      // element entirely, rather than walking the axis loop below and
+      // reporting a clip the browser never actually renders.
+      const establishesFixedContainingBlock = (el: Element): boolean => {
+        const st = getComputedStyle(el);
+        if (st.transform !== 'none') return true;
+        if (st.perspective !== 'none') return true;
+        if (st.filter !== 'none') return true;
+        if (st.backdropFilter && st.backdropFilter !== 'none') return true;
+        if (st.willChange && /transform|perspective|filter/.test(st.willChange)) return true;
+        if (/paint|layout|strict|content/.test(st.contain)) return true;
+        return false;
+      };
+
+      const isUnconstrainedFixed = (el: Element): boolean => {
+        if (getComputedStyle(el).position !== 'fixed') return false;
+        for (let a = el.parentElement; a; a = a.parentElement) {
+          if (establishesFixedContainingBlock(a)) return false;
+        }
+        // No ancestor constrains it — it is positioned against the viewport
+        // and cannot be clipped by any ancestor's `overflow`.
+        return true;
+      };
+
       for (const el of Array.from(container.querySelectorAll<HTMLElement>('*'))) {
         const text = ownText(el);
         if (!text) continue;
@@ -637,6 +676,15 @@ export async function findClippedText(
           continue;
         }
         if (rect.width === 0 || rect.height === 0) continue;
+        // I-1 — an unconstrained `position: fixed` element is immune to every
+        // ancestor's `overflow`, so the per-axis walk below (which compares
+        // this element's rect against ancestor rects) cannot legitimately
+        // find a clip for it. See `isUnconstrainedFixed` above for the exact
+        // condition and the measurement that motivated it. Content-loss
+        // (Tiers 1/2, above this line) is UNAFFECTED — an element's own
+        // text overflowing its own box is a real defect regardless of how it
+        // is positioned, so that check still runs for a fixed element.
+        if (isUnconstrainedFixed(el)) continue;
 
         // Per-axis walk. `liveX`/`liveY` go false as soon as that axis is
         // resolved — either by a scrollable ancestor (reachable, stop looking)
