@@ -13,6 +13,12 @@
  *
  * WHAT IS IN HERE IS THEREFORE ONLY WHAT THIS CLIENT ITSELF KNOWS: how to speak
  * to the reader, what this browser does with audio, and what the controls mean.
+ *
+ * PR-D (2026-09-03): the panel became a state-driven interface — see
+ * `TranscriptCapturePanel.tsx`'s own header for the nine-state table this copy
+ * now serves. Renamed/added strings are marked below; nothing removed a claim
+ * that used to be true, and every removed string had no remaining caller (dead
+ * copy is the same defect as dead code — CLAUDE.md's own rule for both).
  */
 
 /**
@@ -46,48 +52,44 @@ export const CAPTURE_GUIDANCE_EXAMPLE = {
 } as const;
 
 export const CAPTURE_COPY = {
-  panelHeading: 'Transcript capture',
-  start: 'Start a capture',
-  close: 'Close capture',
+  // Register 1 (Title Case): section heading.
+  panelHeading: 'Transcript Capture',
   /*
-   * IT USED TO OFFER "dictate" AS AN EQUAL THIRD OPTION, and it is the one string
-   * in this module that broke the module's own rule at the top of the file.
+   * ONE ENTRY ACTION, TITLE CASE, NAMING THE TASK RATHER THAN THE MECHANISM.
+   * Replaces `start`/`close` ('Start a capture' / 'Close capture'), which named
+   * the UI gesture ("a capture") rather than what pressing it does. This is the
+   * one control a reader meets before opening the panel at all, so it carries
+   * the panel's whole purpose in three words.
+   */
+  entryOpen: 'Capture Experiment Notes',
+  entryClose: 'Close Capture',
+
+  /*
+   * SHORTENED, AND THE DETAIL IT DROPPED MOVED INTO THE GUIDANCE DISCLOSURE
+   * BELOW RATHER THAN DISAPPEARING. The previous version of this string carried
+   * the full transcription-needs-a-provider explanation as PERMANENT body copy,
+   * visible even while the panel is collapsed — the opposite of progressive
+   * disclosure. The seam's own status line (rendered from
+   * `GET /api/providers/capabilities`) already states that fact truthfully and
+   * specifically once the panel is open; restating it here in general terms was
+   * redundant with a more accurate copy of itself one section down.
    *
-   * The old sentence read: "Type, paste, or dictate notes about a run, then
-   * finalize them. Nothing is read while you are still writing, and no value is
-   * written until you accept one." It sits in the panel HEADER
-   * (`TranscriptCapturePanel.tsx:500`), which renders BEFORE the panel is opened —
-   * so the promise of dictation was on screen while the seam status that qualifies
-   * it, and the refusal body that explains it, were both still inside the collapsed
-   * body.
-   *
-   * AND DICTATION CANNOT WORK IN A SHIPPED DEPLOYMENT. `POST /api/transcription`
-   * answers `501` with `reason: no_provider_configured`, and that is not a
-   * misconfiguration to be corrected: `providers/config.py::_selected` resolves
-   * unset, empty and unrecognised values all to `unconfigured`, while
-   * `validate_provider_config_or_raise` REFUSES to boot an app whose seam is set to
-   * `deterministic-fake` (DECISION D6). So the only implementation a running
-   * application can hold is the unconfigured one. `ai-integration-decision-packet.md`
-   * §9 — "build nothing that implies any of it exists" — binds per `CLAUDE.md` §15,
-   * and an unqualified "dictate" implied exactly that.
-   *
-   * WHAT IS SAID INSTEAD, and why it does not break the rule it is fixing: typing
-   * and pasting are named as the working path because this client does that work
-   * itself; recording is named because this client does that too (`MediaRecorder`,
-   * audio held in the tab); and turning audio into text is named as needing a
-   * provider WITHOUT asserting whether this deployment has one. That last part is
-   * still the server's to say, and the panel still says it from
-   * `GET /api/providers/capabilities`. The recorder is deliberately NOT gated or
-   * removed — a provider-ready recording UX may exist, provided the copy around it
-   * is true.
+   * C1 — CORRECTED, INDEPENDENT REVIEW OF PR-D. This sentence renders in the
+   * COLLAPSED header (`TranscriptCapturePanel.tsx`, outside the `open` body),
+   * so it is read BEFORE any seam status or provider qualification is visible
+   * anywhere on screen. A version that said "...or record notes..." presented
+   * recording as an equally-finished path to a proposal — it is not: finalize
+   * posts TEXT only, and turning a recording into that text needs a
+   * transcription provider this build never ships configured
+   * (`ai-integration-decision-packet.md` §9 / `CLAUDE.md` §15). The collapsed
+   * header therefore names only the path that always works — typing or
+   * pasting — and says nothing about recording at all; the open body's Voice
+   * Capture section, with its own seam status, is the only place recording is
+   * introduced.
    */
   panelIntro:
-    'Type or paste notes about a run, then finalize them. You can also record ' +
-    'audio here, but turning a recording into text needs a transcription ' +
-    'provider — the panel reports what this deployment has before you rely on ' +
-    'it. Nothing is read while you are still writing, and nothing here writes a ' +
-    'value: what is read is stored as a proposal, and a proposal is accepted or ' +
-    'rejected in Ingestion Proposals.',
+    'Type or paste notes about a run, then finalize them to store a proposal ' +
+    'for each value it can store. Nothing here writes a value directly.',
 
   guidanceHeading: 'Before you start',
   guidanceDismiss: 'Got it',
@@ -95,33 +97,31 @@ export const CAPTURE_COPY = {
   guidanceStorageNote:
     'This browser remembers that you have seen this. It is not stored on the ' +
     'server and does not follow you to another device.',
-
-  voiceHeading: 'Voice capture',
   /*
-   * THE DISCLOSURE'S OWN FAILURE STATE, and it had none — which made the disclosure
-   * conditional on the very thing it discloses.
-   *
-   * `TranscriptCapturePanel` rendered the seam line only for `transcription !== null`,
-   * and `transcription` is `null` in THREE reachable states: the capabilities fetch
-   * has not resolved yet (every first paint after the panel opens), it rejected, or
-   * the report carries no `transcription` seam. In all three the recording controls
-   * rendered underneath with NO statement about whether this deployment can transcribe
-   * at all — the one qualification the recorder's whole justification rests on.
-   *
-   * WHY THAT IS WORSE THAN A COSMETIC GAP. `docs/ai-integration-decision-packet.md`'s
-   * D6 supersession argues the mitigation for shipping a recorder against an
-   * unconfigured seam is DISCLOSURE, not prevention — "the seam's status renders ABOVE
-   * the controls, before any recording starts". That argument is false for as long as
-   * the fetch has not resolved, which is exactly the window in which a reader decides
-   * whether to press Start.
-   *
-   * IT FAILS CLOSED WITHOUT OVERSTATING. It does not say "not configured": the panel's
-   * own rule is that a string in this bundle describes the build the browser came from
-   * and not the deployment it is talking to, and the `.catch` deliberately leaves the
-   * report ABSENT rather than defaulting it for the same reason. Unknown is reported as
-   * unknown. The audio claim beside it is unaffected and is restated here because it is
-   * the thing a reader most needs when the rest is uncertain: nothing is sent either way.
+   * THE DETAIL `panelIntro` USED TO CARRY, MOVED RATHER THAN DELETED. This is
+   * the "one concise contextual help disclosure" the interface now uses instead
+   * of permanent body text — closed by default, remembered per browser, exactly
+   * as the guidance sentence above it already was.
    */
+  /*
+   * I7 — CORRECTED, INDEPENDENT REVIEW OF PR-D. "for each value it recognises"
+   * overstated the server's own guarantee: `_MAX_PROPOSALS_PER_RECORD` and the
+   * per-record byte ceiling both mean a value the extractor DID recognise can
+   * still be disclosed as `unproposable` rather than stored — see
+   * `TranscriptCapturePanel`'s own `summaryUnproposable`/`unproposableHeading`,
+   * which exist precisely because "recognised" and "stored" are not the same
+   * claim. This sentence now makes the claim the code can actually keep.
+   */
+  guidanceMechanism:
+    'Recording keeps audio in this tab only — it is never uploaded. Turning a ' +
+    'recording into text needs a transcription provider; this deployment reports ' +
+    'whether one is configured next to the recording controls, before you rely on ' +
+    'it. Typing or pasting always works, with no provider needed. Finalizing reads ' +
+    'the text once and stores a proposal for each value it can store; values it ' +
+    'cannot store are listed with the reason — never a value written directly to ' +
+    'the record.',
+
+  voiceHeading: 'Voice Capture',
   voiceSeamUnreported:
     'Transcription: not reported. This deployment has not told the page whether a ' +
     'transcription provider is configured — the capability report has not been read, ' +
@@ -135,17 +135,49 @@ export const CAPTURE_COPY = {
     'Audio stays in this tab’s memory. It is never uploaded, never written to ' +
     'disk, and is discarded when you clear it, leave this record, or reload the ' +
     'page. This application declares no upload endpoint for it to reach.',
-  voiceRecord: 'Start recording',
-  voiceStop: 'Stop recording',
-  voiceDiscard: 'Discard audio',
-  voiceTranscribe: 'Request a transcript',
+
+  // -- primary/secondary controls, per voice state --------------------------
+  voiceRecord: 'Start Recording',
+  voiceRequesting: 'Requesting…',
+  voiceStop: 'Stop Recording',
+  voiceDiscard: 'Discard Audio',
+  voiceTranscribe: 'Request a Transcript',
+  /** The `held`/`permission-denied` primary: focuses the textarea. No request. */
+  voiceTypeWhatWasSaid: 'Type What Was Said',
+  /** The `permission-denied` secondary: re-invokes `startRecording`. */
+  voiceTryAgain: 'Try Recording Again',
+
+  // -- live-region text, per voice state -------------------------------------
   voiceRecordingLive: 'Recording. Audio is being held in this tab.',
   voiceIdleLive: 'Not recording.',
+  /** NEW — the `requesting-permission` state's own announcement. */
+  voiceRequestingLive: 'Requesting microphone access…',
   voiceHeldLive: 'Recording stopped. Audio is held in this tab and has not been sent.',
   voiceDiscardedLive: 'Audio discarded.',
+  /*
+   * I8 — FOUR REASONS `getUserMedia` CAN FAIL, EACH ITS OWN SENTENCE, INDEPENDENT
+   * REVIEW OF PR-D. The panel used to collapse every failure into one denial
+   * sentence — true of a real refusal, false (or at best uninformative) of "no
+   * microphone exists" and "something else is using it", which are different
+   * facts calling for different reader reactions. Each doubles as the PERSISTENT
+   * `permission-denied` notice AND the live announcement fired once on entering
+   * that state — the two are the same sentence by design, per the state table
+   * this panel's header cites. The last is the FAIL-CLOSED default: a browser can
+   * throw a `DOMException` this list does not name, and that case must still say
+   * something true rather than guess a specific cause.
+   */
   voicePermissionRefused:
     'This browser did not grant microphone access, so nothing was recorded. ' +
     'Typing or pasting a transcript below does the same work.',
+  voiceNoMicrophone:
+    'No microphone was found, so nothing was recorded. Typing or pasting a ' +
+    'transcript below does the same work.',
+  voiceMicrophoneBusy:
+    'The microphone is in use elsewhere, so nothing was recorded. Typing or ' +
+    'pasting a transcript below does the same work.',
+  voiceStartFailed:
+    'Recording could not be started, so nothing was recorded. Typing or pasting ' +
+    'a transcript below does the same work.',
   voiceAfterRefusal:
     'The audio is still held in this tab and was not sent anywhere. Type or ' +
     'paste what was said, and finalize that instead.',
@@ -154,93 +186,52 @@ export const CAPTURE_COPY = {
   transcriptHint:
     'Finalizing stores this text with the record and reads it. Editing it ' +
     'afterwards means finalizing again.',
-  runLabel: 'Run these notes describe',
+  runLabel: 'Run These Notes Describe',
   runPlaceholder: 'Choose a run…',
   runHint:
-    'Required before any value can be proposed. It is never chosen for you, ' +
-    'even when the record has exactly one run.',
-  runCreate: 'Create a run',
-  finalize: 'Finalize and read',
+    'Required before a run-scoped value can be proposed. It is never chosen for ' +
+    'you, even when the record has exactly one run.',
+  /*
+   * "CREATE A RUN" IS NOW THE RUN SELECTOR'S OWN EMPTY STATE, NOT A PERMANENT
+   * BUTTON BESIDE IT. Capturing notes never strictly requires a run — a
+   * record-scoped value can still be proposed — so this is a placement decision
+   * offered exactly when it is the honest next step, per `ia-brief.md` §6.
+   */
+  runCreate: 'Create a Run',
+  runEmptyPrefix: 'This record has no runs yet.',
+  runEmptySuffix: ', or capture notes without one.',
+  /** Said when a run IS selected — states what proposals from THIS capture will target. */
+  runTargetsRun: (label: string) => `Proposals from this transcript will target ${label}.`,
+  /** Said when NO run is selected. Never implies a run is required. */
+  runTargetsNone:
+    'No run is selected. Proposals from this transcript will target the record ' +
+    'itself — only run-scoped values need a run chosen first.',
+
+  finalize: 'Finalize and Read',
   finalizeHint:
     'Reading happens only when you press this. Text you are still typing is ' +
     'never read and never stored.',
+  /** NEW — the `processing` state's own announcement, distinct from a generic busy. */
+  processingLive: 'Reading transcript…',
 
-  candidatesHeading: 'Proposed values',
+  // -- the `proposals-ready` summary card ------------------------------------
+  summaryHeading: 'What This Reading Stored',
   candidatesEmpty:
     'Nothing was proposed from this transcript. Every word of it was stored ' +
     'with the record as notes.',
-  /*
-   * THE PANEL NO LONGER ACCEPTS ANYTHING, AND THIS SENTENCE IS WHY THE OLD ONE HAD
-   * TO GO RATHER THAN BE REWORDED. It read: "A proposal, not a value. Nothing is
-   * written to the record until you accept it, and accepting it records your
-   * confirmation." That described an Accept button IN THIS PANEL that wrote the run
-   * field directly through `PATCH .../runs/{run_id}` — a control that no longer
-   * exists, because a candidate is now a DURABLE proposal stored with the record and
-   * reviewed on the proposals surface, where a colleague can see it and where a
-   * rejection is recorded rather than forgotten. Leaving the sentence would have
-   * pointed a reader at a control that is not on the screen.
-   *
-   * The six action strings beside it — `accept`, `reject`, `edit`, `undo`,
-   * `accepted`, `rejected`, `undone` — went with it, for the same reason: a label
-   * for a control that does not exist is a label nothing can be checked against.
-   */
-  /*
-   * AND THE LEAD SENTENCE DESCRIBES THE PER-ROW LABELS RATHER THAN MAKING THEIR
-   * CLAIM. Its first version here ended "Each proposal below is stored with this
-   * record and waits in Ingestion Proposals until someone accepts or rejects it
-   * there" — and it is rendered UNCONDITIONALLY above the list, including on a
-   * reading that carries `unproposable` rows. That is reachable in production
-   * (`too_many_proposals`, `proposals_too_large`), and on such a reading the
-   * paragraph asserted storage for candidates the server had just said it stored
-   * nothing for, one line above the server's own sentence saying so. The blanket
-   * claim now lives in `candidatesAllStored`, rendered only when every candidate got
-   * a proposal.
-   */
-  candidateNotAValue:
-    'A proposal, not a value. Nothing here is written to the record. Each row ' +
-    'below carries its own label saying whether a proposal was stored for it, ' +
-    'and the reason when none was.',
-  /*
-   * THE BLANKET CLAIM, AND THE ONLY READING IT IS TRUE OF: no candidate was refused,
-   * and at least one was read. It never sits above a row the server declined.
-   */
-  candidatesAllStored:
-    'Every proposal below is stored with this record and waits in Ingestion ' +
-    'Proposals until someone accepts or rejects it there.',
-  /*
-   * TWO CONFLICT SENTENCES, FOR THE REASON THE LEAD SENTENCE WAS SPLIT. The conflict
-   * line read "Both are stored" whatever had happened to the two candidates, so a
-   * conflict in which one of them was refused claimed storage for it. The first is
-   * used only when EVERY candidate the conflict names got a proposal; the second
-   * states the conflict and claims nothing about storage, leaving that to each row's
-   * own label.
-   */
-  conflictBothStored:
-    'This transcript proposes another value for the same field. Both are ' +
-    'stored; accept at most one in Ingestion Proposals.',
-  conflictNotAllStored:
-    'This transcript proposes another value for the same field. Only the rows ' +
-    'labelled as stored are waiting in Ingestion Proposals; accept at most one ' +
-    'of them there.',
-  proposalStored: 'Stored. Waiting in Ingestion Proposals.',
-  /*
-   * NOT REACHABLE FROM THE SERVER AT THIS HEAD, and said here so nobody reads its
-   * test as evidence of a live path. It renders on `deduplicated: true`, which the
-   * transcript route cannot currently emit: the key it dedupes on is built from a
-   * note id that is a fresh ULID minted by the same request, so no proposal already
-   * on the record can carry it (contract §11.2; `routes.py::_mint_transcript_proposals`
-   * says the same beside the branch). It is exercised from a FIXTURE — see
-   * `transcript-capture.test.tsx`, "a proposal the record already held says so
-   * instead of claiming a create" — and it is kept because the field is on the wire
-   * and a row that showed "Stored." for a proposal this capture did not create would
-   * be claiming an act that did not happen.
-   */
-  proposalAlreadyStored:
-    'Already stored — this record held a proposal for it, so a second one was ' +
-    'not created.',
-  proposalMissing:
-    'No proposal was stored for this one. The words it came from are still ' +
-    'stored as a note.',
+  /** `n` proposals, `m` notes — the two counts the state table's own row names. */
+  summaryStored: (proposals: number, notes: number) =>
+    `${proposals} ${proposals === 1 ? 'proposal' : 'proposals'}, ${notes} ` +
+    `${notes === 1 ? 'note' : 'notes'} stored with this record.`,
+  summaryUnproposable: (count: number) =>
+    `${count} ${count === 1 ? 'value' : 'values'} read from this transcript could ` +
+    `not be stored as ${count === 1 ? 'a proposal' : 'proposals'}; the words behind ` +
+    `${count === 1 ? 'it are' : 'them are'} still stored as ${count === 1 ? 'a note' : 'notes'}.`,
+  unproposableHeading: 'Not Stored As Proposals',
+  reviewProposals: (n: number) => `Review ${n} ${n === 1 ? 'Proposal' : 'Proposals'}`,
+  captureAnother: 'Capture Another Note',
+  /** NEW — generic retry, re-invokes whichever action last failed. */
+  tryAgain: 'Try Again',
 
   clarificationsHeading: 'Questions this reader will not answer for you',
   abstentionsHeading: 'Recognised and deliberately not proposed',

@@ -268,6 +268,36 @@
   gap: 6px;
 }
 
+/*
+ * "PROPOSE A VALUE FROM THIS NOTE" — its own field-value error and its own
+ * absent-with-reason line, reusing the form's existing tokens rather than
+ * inventing new ones. Same visual weight as `.notes-error`'s text: this is a
+ * LOCAL validation refusal (bad JSON, a null value), not a server refusal —
+ * the server one already renders through the panel-level `.notes-error` banner.
+ */
+.note-form-error {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-primary);
+  max-width: 68ch;
+}
+
+/*
+ * m12, INDEPENDENT REVIEW OF PR-D — renamed from `.note-propose-unavailable`,
+ * which was a PER-CARD selector; no element carries that class any more (the
+ * explanation moved to this ONE panel-level banner, in `NotesBrowser`,
+ * directly above the notes list). Dead selectors are worse than no selectors —
+ * they read as evidence a control still exists.
+ */
+.notes-propose-unavailable-banner {
+  margin: 8px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-tertiary);
+  max-width: 68ch;
+}
+
 /* --- empty / error --------------------------------------------------------- */
 
 .notes-empty {

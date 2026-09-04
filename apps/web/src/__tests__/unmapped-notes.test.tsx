@@ -26,7 +26,7 @@
  * Every fixture is synthetic and no test here reaches a backend.
  */
 import { describe, it, expect, afterEach, vi, type Mock } from 'vitest';
-import { render, screen, fireEvent, within } from '@testing-library/react';
+import { render, screen, fireEvent, within, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 
 import { UnmappedNotesPanel } from '../components/UnmappedNotesPanel';
@@ -34,11 +34,41 @@ import {
   noteFixture,
   notesEmpty,
   notesPage,
+  runFixture,
+  runsPage,
   stubFetchRoutes,
 } from '../test/apiFixtures';
 
 const EXP = 'demo';
 const NOTES = `GET /api/experiments/${EXP}/notes`;
+const PROPOSALS = `GET /api/experiments/${EXP}/proposals`;
+const CREATE_PROPOSAL = `POST /api/experiments/${EXP}/proposals`;
+const RUNS = `GET /api/experiments/${EXP}/runs`;
+
+/** `GET .../proposals`'s served capability vocabulary — the two sets PR-D's
+ *  "Propose a value from this note" form reads and never transcribes. */
+function proposalsCapabilities(over: Partial<Record<string, unknown>> = {}) {
+  return {
+    proposals: [],
+    total: 0,
+    returned: 0,
+    by_state: { open: 0, accepted: 0, rejected: 0, superseded: 0, withdrawn: 0 },
+    has_more: false,
+    next_cursor: null,
+    order: 'oldest_first',
+    window_default: 50,
+    window_max: 200,
+    max_per_record: 500,
+    unreadable_entries: 0,
+    target_field_paths: ['context.environment', 'system.technique'],
+    record_scoped_target_field_paths: ['system.technique'],
+    states: ['open', 'accepted', 'rejected', 'superseded', 'withdrawn'],
+    review_actions: ['accept', 'reject', 'supersede', 'withdraw'],
+    accepted_from_values: ['candidate', 'edited'],
+    experiment_version: 'g1.4',
+    ...over,
+  };
+}
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -1152,5 +1182,356 @@ describe('the value hint is per path, not on average', () => {
     expect(screen.getByText(/It does not write a value/).textContent).toContain(
       'entered and confirmed on a run of this record',
     );
+  });
+});
+
+// --- 10. "Propose a value from this note" (PR-D) -------------------------------
+
+describe('propose a value from this note', () => {
+  it('happy path: a record-scoped path needs no run, and the write is exactly-once by construction', async () => {
+    stubFetchRoutes({
+      [NOTES]: { body: notesPage([noteFixture()]) },
+      [PROPOSALS]: { body: proposalsCapabilities() },
+      [CREATE_PROPOSAL]: {
+        body: {
+          proposal: { proposal_id: 'p1', target_field_path: 'system.technique' },
+          deduplicated: false,
+          experiment_version: 'g1.5',
+        },
+      },
+    });
+    renderPanel();
+
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Propose a value from this note' }),
+    );
+    const fieldSelect = (await screen.findByLabelText(
+      'Field this value is for',
+    )) as HTMLSelectElement;
+    // The server's own list — the paths this build can target — never hardcoded.
+    expect(
+      within(fieldSelect)
+        .getAllByRole('option')
+        .map((o) => (o as HTMLOptionElement).value),
+    ).toEqual(['', 'context.environment', 'system.technique']);
+    fireEvent.change(fieldSelect, { target: { value: 'system.technique' } });
+    // Record-scoped: no run selector is offered for it.
+    expect(screen.queryByLabelText('Run this value is about')).toBeNull();
+
+    fireEvent.change(screen.getByLabelText('The value, as JSON'), {
+      target: { value: '"XAS"' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Propose This Value' }));
+
+    await screen.findByText(/Proposal stored\. Review it in Ingestion Proposals\./);
+    const calls = (globalThis.fetch as Mock).mock.calls as [string, RequestInit?][];
+    const create = calls.find(([, init]) => init?.method === 'POST');
+    expect(create).toBeDefined();
+    const [, init] = create!;
+    const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+    expect(body.note_id).toBe(noteFixture().id);
+    expect(body.target_field_path).toBe('system.technique');
+    expect(body.proposed_value).toBe('XAS');
+    expect(body.run_id).toBeUndefined();
+    expect(typeof body.rule).toBe('string');
+    expect((body.rule as string).length).toBeGreaterThan(0);
+    expect(typeof body.client_request_key).toBe('string');
+    expect((init?.headers as Record<string, string>)['If-Match']).toBe('"1.0"');
+    // The panel writes NOTHING else — no note review, no field write.
+    expect(calls.filter(([, i]) => i?.method === 'POST')).toHaveLength(1);
+  });
+
+  it('a run-scoped path requires choosing a run, never inferred from the only one', async () => {
+    stubFetchRoutes({
+      [NOTES]: { body: notesPage([noteFixture()]) },
+      [PROPOSALS]: { body: proposalsCapabilities() },
+      [RUNS]: { body: runsPage([runFixture({ id: 'run-1', label: 'Run 1' })]) },
+    });
+    renderPanel();
+
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Propose a value from this note' }),
+    );
+    fireEvent.change(await screen.findByLabelText('Field this value is for'), {
+      target: { value: 'context.environment' },
+    });
+    const runSelect = (await screen.findByLabelText(
+      'Run this value is about',
+    )) as HTMLSelectElement;
+    expect(runSelect.value).toBe('');
+    // m13, independent review of PR-D: `context.environment` is a RUN_FIELDS
+    // spec (an enum), so it now renders as the typed "Environment" select —
+    // never the JSON textarea fallback, which is reserved for paths with no
+    // spec at all.
+    fireEvent.change(screen.getByLabelText('Environment'), {
+      target: { value: 'in_situ' },
+    });
+    // Submit stays unavailable until a run is chosen — it is required, not optional.
+    expect(
+      (screen.getByRole('button', { name: 'Propose This Value' }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(true);
+    fireEvent.change(runSelect, { target: { value: 'run-1' } });
+    expect(
+      (screen.getByRole('button', { name: 'Propose This Value' }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(false);
+  });
+
+  it('a run-scoped path with no runs on the record refuses honestly, offering no submit', async () => {
+    stubFetchRoutes({
+      [NOTES]: { body: notesPage([noteFixture()]) },
+      [PROPOSALS]: { body: proposalsCapabilities() },
+      [RUNS]: { body: runsPage([]) },
+    });
+    renderPanel();
+
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Propose a value from this note' }),
+    );
+    fireEvent.change(await screen.findByLabelText('Field this value is for'), {
+      target: { value: 'context.environment' },
+    });
+    await screen.findByText(/this record has no runs yet \(or they could not be read\)/);
+    expect(screen.queryByLabelText('Run this value is about')).toBeNull();
+  });
+
+  it('control absent, with a reason, when this build has no proposable paths', async () => {
+    stubFetchRoutes({
+      [NOTES]: { body: notesPage([noteFixture()]) },
+      [PROPOSALS]: { body: proposalsCapabilities({ target_field_paths: [] }) },
+    });
+    renderPanel();
+
+    await screen.findByText(noteFixture().text);
+    expect(
+      screen.queryByRole('button', { name: 'Propose a value from this note' }),
+    ).toBeNull();
+    expect(
+      await screen.findByText(/this build accepts no proposal target yet/),
+    ).toBeInTheDocument();
+  });
+
+  it('control absent, with a different reason, when the capability read fails', async () => {
+    stubFetchRoutes({
+      [NOTES]: { body: notesPage([noteFixture()]) },
+      [PROPOSALS]: { status: 503, body: { error: 'experiment_storage_unavailable' } },
+    });
+    renderPanel();
+
+    await screen.findByText(noteFixture().text);
+    expect(
+      screen.queryByRole('button', { name: 'Propose a value from this note' }),
+    ).toBeNull();
+    expect(
+      await screen.findByText(/the set of proposable fields could not be read/),
+    ).toBeInTheDocument();
+  });
+
+  it('a double submit dedupes to one proposal — the server’s own client_request_key guarantee', async () => {
+    // I3b, independent review of PR-D: `creates > 1` only proved a COUNT
+    // shape, never the KEY the server actually dedupes on. This now captures
+    // both request bodies and pins the property that matters — the identical
+    // second submit sends the SAME `client_request_key` as the first, and (in
+    // the follow-up case below) a genuinely CHANGED value sends a DIFFERENT
+    // one. A mutant that built the key from, say, `Date.now()` would still
+    // pass the old assertion (the stub still returns `deduplicated: creates >
+    // 1` on the second call) but fails this one.
+    // `deduplicated` is now keyed off the ACTUAL `client_request_key` the
+    // component sends, not a call counter — so a third submit carrying a
+    // genuinely different value (a different key) is correctly answered as a
+    // fresh create, not as a repeat of the first.
+    const seenKeys = new Set<string>();
+    stubFetchRoutes({
+      [NOTES]: { body: notesPage([noteFixture()]) },
+      [PROPOSALS]: { body: proposalsCapabilities() },
+      [CREATE_PROPOSAL]: (init) => {
+        const requestBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
+        const key = String(requestBody.client_request_key);
+        const dup = seenKeys.has(key);
+        seenKeys.add(key);
+        return {
+          body: {
+            proposal: { proposal_id: 'p1', target_field_path: 'system.technique' },
+            deduplicated: dup,
+            experiment_version: 'g1.5',
+          },
+        };
+      },
+    });
+    renderPanel();
+
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Propose a value from this note' }),
+    );
+    fireEvent.change(await screen.findByLabelText('Field this value is for'), {
+      target: { value: 'system.technique' },
+    });
+    fireEvent.change(screen.getByLabelText('The value, as JSON'), {
+      target: { value: '"XAS"' },
+    });
+    const submit = screen.getByRole('button', { name: 'Propose This Value' });
+    fireEvent.click(submit);
+    await screen.findByText(/Proposal stored\. Review it in Ingestion Proposals\./);
+
+    // A second identical submit (e.g. the form re-opened and re-sent) is answered
+    // `deduplicated: true`, and the panel says so rather than claiming a second
+    // create.
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Propose a value from this note' }),
+    );
+    fireEvent.change(await screen.findByLabelText('Field this value is for'), {
+      target: { value: 'system.technique' },
+    });
+    fireEvent.change(screen.getByLabelText('The value, as JSON'), {
+      target: { value: '"XAS"' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Propose This Value' }));
+    await screen.findByText(/This value was already proposed from this note/);
+
+    const postCalls = (
+      (globalThis.fetch as Mock).mock.calls as [string, RequestInit?][]
+    ).filter(([, init]) => init?.method === 'POST');
+    expect(postCalls).toHaveLength(2);
+    const [firstBody, secondBody] = postCalls.map(
+      ([, init]) => JSON.parse(String(init?.body)) as Record<string, unknown>,
+    );
+    expect(typeof firstBody.client_request_key).toBe('string');
+    expect(secondBody.client_request_key).toBe(firstBody.client_request_key);
+
+    // Now change the value and submit again — a genuinely different value
+    // must mint a genuinely different key, never the one above.
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Propose a value from this note' }),
+    );
+    fireEvent.change(await screen.findByLabelText('Field this value is for'), {
+      target: { value: 'system.technique' },
+    });
+    fireEvent.change(screen.getByLabelText('The value, as JSON'), {
+      target: { value: '"XRD"' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Propose This Value' }));
+    await screen.findByText(/Proposal stored\. Review it in Ingestion Proposals\./);
+
+    const postCallsAfterChange = (
+      (globalThis.fetch as Mock).mock.calls as [string, RequestInit?][]
+    ).filter(([, init]) => init?.method === 'POST');
+    expect(postCallsAfterChange).toHaveLength(3);
+    const thirdBody = JSON.parse(
+      String(postCallsAfterChange[2][1]?.body),
+    ) as Record<string, unknown>;
+    expect(thirdBody.client_request_key).not.toBe(firstBody.client_request_key);
+  });
+
+  it('a 412 reloads the version and says so — nothing is silently lost', async () => {
+    let attempts = 0;
+    stubFetchRoutes({
+      [NOTES]: { body: notesPage([noteFixture()]) },
+      [PROPOSALS]: { body: proposalsCapabilities() },
+      [CREATE_PROPOSAL]: () => {
+        attempts += 1;
+        return attempts === 1
+          ? { status: 412, body: { error: 'stale_write', current_version: 'g2.0' } }
+          : {
+              body: {
+                proposal: { proposal_id: 'p1', target_field_path: 'system.technique' },
+                deduplicated: false,
+                experiment_version: 'g2.1',
+              },
+            };
+      },
+    });
+    renderPanel();
+
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Propose a value from this note' }),
+    );
+    fireEvent.change(await screen.findByLabelText('Field this value is for'), {
+      target: { value: 'system.technique' },
+    });
+    fireEvent.change(screen.getByLabelText('The value, as JSON'), {
+      target: { value: '"XAS"' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Propose This Value' }));
+
+    await screen.findByText(/picked up the current version and what you typed is still here/);
+    // The form is NOT closed and NOT cleared by a refusal — it can be retried.
+    expect(
+      (screen.getByLabelText('The value, as JSON') as HTMLTextAreaElement).value,
+    ).toBe('"XAS"');
+  });
+
+  it('refuses a null value locally, without sending a request', async () => {
+    stubFetchRoutes({
+      [NOTES]: { body: notesPage([noteFixture()]) },
+      [PROPOSALS]: { body: proposalsCapabilities() },
+    });
+    renderPanel();
+
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Propose a value from this note' }),
+    );
+    fireEvent.change(await screen.findByLabelText('Field this value is for'), {
+      target: { value: 'system.technique' },
+    });
+    fireEvent.change(screen.getByLabelText('The value, as JSON'), {
+      target: { value: 'null' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Propose This Value' }));
+
+    await screen.findByText(/A null value cannot be proposed here/);
+    const calls = (globalThis.fetch as Mock).mock.calls as [string, RequestInit?][];
+    expect(calls.filter(([, i]) => i?.method === 'POST')).toHaveLength(0);
+  });
+
+  /*
+   * MUTATION-GUARDED. Removing the lazy-fetch guard in `ensureRunsForPropose`
+   * (`runsForProposeFetchedRef`) would issue a SECOND `GET .../runs` for the
+   * SAME mount the moment a reader closed and reopened the propose form — this
+   * is the negative control pinning that it stays at one.
+   */
+  it('MUTATION-GUARDED: the run list is fetched at most once per mount, even across repeated opens', async () => {
+    stubFetchRoutes({
+      [NOTES]: { body: notesPage([noteFixture()]) },
+      [PROPOSALS]: { body: proposalsCapabilities() },
+      [RUNS]: { body: runsPage([runFixture({ id: 'run-1', label: 'Run 1' })]) },
+    });
+    renderPanel();
+
+    const openClose = async () => {
+      fireEvent.click(
+        await screen.findByRole('button', { name: 'Propose a value from this note' }),
+      );
+      fireEvent.change(await screen.findByLabelText('Field this value is for'), {
+        target: { value: 'context.environment' },
+      });
+      await screen.findByLabelText('Run this value is about');
+      fireEvent.click(
+        screen.getByRole('button', { name: 'Propose a value from this note' }),
+      );
+    };
+    await openClose();
+    await openClose();
+
+    await waitFor(() => {
+      const calls = (globalThis.fetch as Mock).mock.calls as [string, RequestInit?][];
+      const runReads = calls.filter(([url]) => String(url).includes('/runs'));
+      expect(runReads.length).toBe(1);
+    });
+  });
+
+  it('the run list is NOT fetched at all when nothing has opened the propose form', async () => {
+    // The regression this guards: an eager mount-time fetch here doubled the read
+    // `RunsSection` already performs on the real Record Workbench, breaking
+    // `runs-live-refresh-integration.test.tsx`'s "first paint reads the runs ONCE".
+    stubFetchRoutes({
+      [NOTES]: { body: notesPage([noteFixture()]) },
+      [PROPOSALS]: { body: proposalsCapabilities() },
+    });
+    renderPanel();
+    await screen.findByText(noteFixture().text);
+
+    const calls = (globalThis.fetch as Mock).mock.calls as [string, RequestInit?][];
+    expect(calls.some(([url]) => String(url).includes('/runs'))).toBe(false);
   });
 });

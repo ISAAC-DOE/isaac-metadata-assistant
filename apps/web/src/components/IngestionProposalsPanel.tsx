@@ -11,13 +11,23 @@
  * `types.ts` types all three as the literal `false` so nothing here can branch on one
  * being true.
  *
- * NOTHING IN THIS BUILD PRODUCES A PROPOSAL, AND THIS PANEL SAYS SO RATHER THAN
- * LOOKING BROKEN. `routes.py` states it directly — "NOTHING WAS REWIRED TO FEED THEM.
- * There is no automatic producer" — so a record's proposal list is empty in every
- * deployment today. The empty state reports that as a fact about the build, exactly as
- * `UnmappedNotesPanel` reports that it manufactures no notes, instead of implying the
- * read failed. There is deliberately no create control here either: a review surface
- * that manufactured the queue it reviews would be reviewing itself.
+ * ~~"NOTHING IN THIS BUILD PRODUCES A PROPOSAL"~~ — CORRECTED, PR-D (2026-09-03).
+ * That was true when this panel shipped and stopped being true twice over: finalizing
+ * a transcript capture mints a proposal per candidate (PR-A), and
+ * `UnmappedNotesPanel`'s "Propose a Value from This Note" act mints one from a note
+ * this record already holds (this change). This panel still has NO create control of
+ * its own — a review surface that manufactured the queue it reviews would be
+ * reviewing itself — but the queue is no longer structurally empty in every
+ * deployment, and the empty state below is worded for that.
+ *
+ * m14 — A NAMED DEVIATION FROM `ia-brief.md` §8, INDEPENDENT REVIEW OF PR-D.
+ * §8 specifies the target run is stated verbatim, "'On run `<run_id>`' stated
+ * on every card" — an id, unconditionally. This panel instead resolves and
+ * shows the run's LABEL when one is cheaply available (`runLabels`, fetched at
+ * most once per mount — see `ProposalsBrowser`'s own comment on it), falling
+ * back to the raw id only when no label was resolved. That is a readability
+ * improvement over the brief's literal text, not an oversight, and it is named
+ * here because a brief deviation should be a stated decision, not a silent one.
  *
  * FIVE THINGS THIS PANEL WILL NOT DO, each of which it would be easy to do:
  *
@@ -40,6 +50,25 @@
  *      background change-feed update, a filter change or a refusal cannot take a
  *      half-written corrected value with it. `CLAUDE.md` §11 records this repository
  *      shipping the opposite three times.
+ *
+ * THE FIVE-BUTTON CARD (audit finding P2) IS RESOLVED HERE, AS AN ORCHESTRATOR
+ * DECISION RATHER THAN A DESIGN-BRIEF ONE. `impeccable-audit.md` P2 measured five
+ * peer-weighted buttons against the ≤4-item working-memory guideline and left the
+ * fix an open decision, because the codebase's own stated philosophy — "every
+ * refusing action is a full peer, never demoted" (this panel and
+ * `UnmappedNotesPanel` both make the argument) — directly opposes grouping any of
+ * them. PR-D's resolution: **Accept as Proposed** and **Reject…** stay top-level
+ * peers — Reject is the single most common refusing act, a wrong value, and both
+ * remain reachable in one click. **Correct the Value, Then Accept**, **Supersede…**
+ * and **Withdraw…** move behind one **More Actions** disclosure — reachable in
+ * two clicks, never zero, and never hidden entirely. This is a narrower reading of
+ * "peer" than the codebase's stated philosophy literally allows, and it is named
+ * as a deliberate trade rather than papered over: nothing here demotes what a
+ * refusing act MEANS (Reject, Supersede and Withdraw all still read as full,
+ * equally-weighted acts once reached, with identical confirmation and copy), only
+ * how many controls compete for attention on first render. Every one of the four
+ * refusing/correcting acts is still reachable, still requires the same explicit
+ * confirmation step, and still records the same history entry it always did.
  *
  * THE ACCEPT CONTROL, AND THE TWO DIFFERENT RULES ABOUT IT.
  *
@@ -84,6 +113,7 @@ import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import { api, ApiError } from '../lib/api';
 import { mutationFailureCopy, staleWriteCurrentVersion, statusOf } from '../lib/mutationErrors';
 import type { RecordChangeSummary } from '../lib/recordChanges';
+import { allProposalsSelfMinted } from '../lib/selfMintedProposals';
 import type {
   ApiProposal,
   ApiProposalOrder,
@@ -476,7 +506,13 @@ export function IngestionProposalsPanel({
   return (
     <section className="proposals-section" aria-labelledby="ingestion-proposals-heading">
       <div className="proposals-head">
-        <h2 className="proposals-title" id="ingestion-proposals-heading">
+        {/*
+          `tabIndex={-1}` makes this heading a programmatic focus target without
+          adding it to the Tab order — `TranscriptCapturePanel`'s `proposals-ready`
+          state uses it as its primary action's destination ("Review N Proposals"
+          scrolls here and focuses it), exactly the pattern skip-links use.
+        */}
+        <h2 className="proposals-title" id="ingestion-proposals-heading" tabIndex={-1}>
           Ingestion Proposals
         </h2>
         <p className="proposals-sub">
@@ -526,6 +562,29 @@ function ProposalsBrowser({
    */
   const [order, setOrder] = useState<ApiProposalOrder>('oldest_first');
   const [version, setVersion] = useState<string | null>(null);
+  /**
+   * RUN LABELS, RESOLVED FOR DISPLAY ONLY — never a source of truth for anything
+   * this panel writes. Each card's `run_id` stays the identifier every request
+   * uses; this map only supplies a friendlier string for "On run …" when one is
+   * cheaply available, and falls back to the raw id otherwise. Fetched AT MOST
+   * ONCE per mount of this record's panel, and only once a loaded window
+   * actually holds a run-scoped proposal — a record with none never issues the
+   * extra read at all.
+   */
+  const [runLabels, setRunLabels] = useState<Record<string, string>>({});
+  /*
+   * m11, INDEPENDENT REVIEW OF PR-D — CHECKED, NOT CHANGED: this ref (and every
+   * other piece of state in this component) already resets on a record switch
+   * without any explicit code here, because `ProposalsBrowser` is mounted with
+   * `key={experimentId}` (see the parent below) — a changed `key` unmounts and
+   * remounts the whole component, which is React's own mechanism for exactly
+   * this, and is why `IngestionProposalsPanel`'s own comment above that call
+   * site already gives the reason ("switching records rebuilds this panel's
+   * state"). Labels from experiment A therefore cannot survive into a freshly
+   * mounted read of experiment B; recorded here so this is not re-flagged as a
+   * missing reset.
+   */
+  const runLabelsFetchedRef = useRef(false);
   const [reloadNonce, setReloadNonce] = useState(0);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [refusal, setRefusal] = useState<string | null>(null);
@@ -713,6 +772,28 @@ function ProposalsBrowser({
     };
   }, [experimentId, filter, cursor, order, reloadNonce, announce]);
 
+  // ONE read, at most, per mount — never re-fetched on every list refresh, and
+  // never fetched at all for a record with no run-scoped proposal in the window
+  // seen so far. A run created or renamed after this read stays unresolved (the
+  // card falls back to the raw id, which is always correct, just less friendly)
+  // rather than this panel adding a poller of its own for a display nicety.
+  useEffect(() => {
+    if (list.status !== 'data' || runLabelsFetchedRef.current) return;
+    if (!list.loaded.proposals.some((p) => p.run_id !== null)) return;
+    runLabelsFetchedRef.current = true;
+    api
+      .listRuns(experimentId)
+      .then((res) => {
+        const map: Record<string, string> = {};
+        for (const run of res.runs) map[run.id] = run.label;
+        setRunLabels(map);
+      })
+      .catch(() => {
+        // Left unresolved. `ProposalCard` falls back to the raw run id, which is
+        // never wrong — only less readable — so a failed read here is silent.
+      });
+  }, [list, experimentId]);
+
   const reload = useCallback((silent: boolean) => {
     silentRef.current = silent;
     setReloadNonce((n) => n + 1);
@@ -757,14 +838,32 @@ function ProposalsBrowser({
   useEffect(() => {
     if (proposalSignal === null || proposalSignal === lastSignalRef.current) return;
     lastSignalRef.current = proposalSignal;
+    /*
+     * SELF-MINTED SUPPRESSION, AND ITS LIMIT STATED PLAINLY. If every id THIS
+     * batch names is one this same tab minted a moment ago (via
+     * `TranscriptCapturePanel`'s finalize or `UnmappedNotesPanel`'s "Propose a
+     * value from this note" — see `lib/selfMintedProposals.ts`), the reload
+     * below still happens — the new proposal must still appear — but it is NOT
+     * marked arrival-eligible, so the count-based arrival note (built for a
+     * COLLEAGUE's change) stays silent for a change this reader just made.
+     *
+     * THIS IS A SAME-TAB COURTESY, NOT A GUARANTEE ACROSS TABS OR READERS. The
+     * change feed carries no actor field at all (`RecordChangeSummary`'s own
+     * header), so a second tab of the same record — this reader's own, or a
+     * colleague's — is invisible to this check and its arrivals announce
+     * normally. It is fail-CLOSED: a batch this tab cannot fully vouch for is
+     * always treated as a genuine arrival.
+     */
+    const selfMinted =
+      activity !== null && allProposalsSelfMinted(experimentId, activity.proposalIds);
     // Marks the reload this triggers as one that MAY raise an arrival
     // announcement — see `arrivalReloadRef` and the fetch effect that reads it.
     // A duplicate `proposalSignal` never reaches here at all (the guard above),
     // so "repeated polling with no new ids" never sets this ref in the first
     // place, on top of the count-based guard inside the fetch effect.
-    arrivalReloadRef.current = true;
+    arrivalReloadRef.current = !selfMinted;
     reload(true);
-  }, [proposalSignal, reload]);
+  }, [proposalSignal, reload, activity, experimentId]);
 
   /**
    * Turn a refused write into a state a reader can act from.
@@ -1112,6 +1211,7 @@ function ProposalsBrowser({
                     }}
                     offeredActions={offeredActions}
                     acceptedFromValues={list.loaded.accepted_from_values}
+                    runLabels={runLabels}
                     busy={busyId === proposal.proposal_id || version === null}
                     onReview={review}
                   />
@@ -1253,10 +1353,29 @@ function EmptyProposals({
   return (
     <div className="proposals-empty">
       <p>
-        No ingestion proposals on this record{disclosure}. Nothing in this build creates
-        one: the transcript reader stores what it reads as unmapped notes, and no other
-        pipeline proposes a value. Proposals appear here only when something proposes
-        one, and nothing is ever inferred from this record's contents.
+        {/*
+          m10, INDEPENDENT REVIEW OF PR-D — `{disclosure}` MOVED TO THE END. It
+          used to sit mid-sentence, interrupting a call-to-action ("propose a
+          value{disclosure}.") with an unrelated fact about unreadable stored
+          entries before the sentence had finished making its point. The other
+          two empty states in this file (above) attach it to a plain COUNT
+          clause ("… in total{disclosure}."), which is the pattern this now
+          matches: the disclosure trails the whole paragraph, as its own
+          closing fact, rather than breaking a sentence in the middle of it.
+
+          I7, INDEPENDENT REVIEW OF PR-D — "for every value it reads" also
+          overstated the same guarantee `guidanceMechanism` did: the row and
+          byte ceilings mean a value the transcript reader DID read can still
+          go unstored (see `TranscriptCapturePanel`'s own
+          `summaryUnproposable`). "for each value it can store" is the claim
+          this build can keep.
+        */}
+        No proposals yet. Capture notes above or ask a colleague&rsquo;s agent to propose
+        a value. A proposal is created three ways: finalizing a transcript capture
+        mints one for each value it can store, proposing a value from an existing
+        note in Unmapped Notes mints one, and an MCP agent may call
+        <code> isaac_propose_field_value</code> with a note it can cite. Nothing is
+        ever inferred from this record&rsquo;s contents on its own{disclosure}.
       </p>
     </div>
   );
@@ -1271,6 +1390,7 @@ function ProposalCard({
   served,
   offeredActions,
   acceptedFromValues,
+  runLabels,
   busy,
   onReview,
 }: {
@@ -1279,6 +1399,8 @@ function ProposalCard({
   served: { targetFieldPaths?: string[]; recordScopedTargetFieldPaths?: string[] };
   offeredActions: ApiProposalReviewAction[];
   acceptedFromValues: string[];
+  /** Display-only. See the fetch note in `ProposalsBrowser`. */
+  runLabels: Record<string, string>;
   busy: boolean;
   onReview: (
     proposal: ApiProposal,
@@ -1297,8 +1419,19 @@ function ProposalCard({
   const [editedError, setEditedError] = useState<string | null>(null);
   const [reason, setReason] = useState('');
   const [historyOpen, setHistoryOpen] = useState(false);
+  /**
+   * PR-D's resolution of the audit's P2 finding — see the module header's "THE
+   * ACCEPT CONTROL" section for the full account. Accept and Reject stay top-level
+   * peers; Correct-the-Value-Then-Accept, Supersede and Withdraw move behind this
+   * one disclosure. `moreOpen` is per-card, local state: it is not persisted, not
+   * announced on its own (the buttons it reveals are ordinary tab stops, not a
+   * live-region event), and closing the card's whole action area (a review the
+   * server recorded) discards it along with everything else in this component.
+   */
+  const [moreOpen, setMoreOpen] = useState(false);
 
   const editorId = useId();
+  const moreId = useId();
   const isOpen = proposal.state === 'open';
   const unavailable = acceptUnavailableReason(proposal, served);
   /*
@@ -1317,6 +1450,13 @@ function ProposalCard({
     isOpen && offeredActions.includes('accept') && unavailable === null;
   const canAccept = acceptPossible && acceptedFromValues.includes('candidate');
   const canEditAccept = acceptPossible && acceptedFromValues.includes('edited');
+
+  /** I5: true while an editor that lives INSIDE the More-Actions group (the
+   *  correction JSON box, or a Supersede/Withdraw reason box) is open — Reject's
+   *  own editor is in the top-level row and is not one of these. */
+  const editorProtectedFromCollapse =
+    editor !== null &&
+    (editor.kind === 'edited' || (editor.kind === 'reason' && editor.action !== 'reject'));
 
   async function run(
     action: ApiProposalReviewAction,
@@ -1350,7 +1490,11 @@ function ProposalCard({
         <span className="proposal-state">{stateLabel(proposal.state)}</span>
         <span className="proposal-path mono">{proposal.target_field_path}</span>
         <span className="proposal-scope">
-          {proposal.run_id === null ? 'On the record' : `On run ${proposal.run_id}`}
+          {proposal.run_id === null
+            ? 'On the record'
+            : /* Falls back to the raw id when no label was resolved — see
+                 `ProposalsBrowser`'s fetch note. Never wrong, only less friendly. */
+              `On run ${runLabels[proposal.run_id] ?? proposal.run_id}`}
         </span>
         <span className="proposal-when">Proposed {proposal.proposed_utc}</span>
       </header>
@@ -1402,6 +1546,11 @@ function ProposalCard({
       {isOpen ? (
         <>
           <div className="proposal-actions">
+            {/*
+              ACCEPT AS PROPOSED — the primary act, and the only button in this row
+              styled `btn-primary`. See the P2 note at the top of this file for why
+              it stands beside Reject rather than a wider peer row.
+            */}
             {canAccept && (
               <button
                 type="button"
@@ -1419,53 +1568,140 @@ function ProposalCard({
                 {ACTION_LABELS.accept}
               </button>
             )}
-            {canEditAccept && (
+            {/*
+              REJECT — the one refusing act kept at the top level, per the P2
+              resolution: it is the single most common refusing act (a wrong
+              value), so it stays reachable in one click rather than the two the
+              disclosure below needs.
+            */}
+            {offeredActions.includes('reject') && (
               <button
                 type="button"
                 className="btn btn-secondary"
-                aria-expanded={editor?.kind === 'edited'}
-                aria-controls={editor?.kind === 'edited' ? `${editorId}-edited` : undefined}
+                aria-expanded={editor?.kind === 'reason' && editor.action === 'reject'}
+                aria-controls={
+                  editor?.kind === 'reason' && editor.action === 'reject'
+                    ? `${editorId}-reason`
+                    : undefined
+                }
                 disabled={busy}
-                onClick={() => {
-                  setEditedError(null);
-                  setEditor((open) => {
-                    if (open?.kind === 'edited') return null;
-                    // Prefilled ONCE, and only when the box is empty, so re-opening
-                    // never overwrites what is already being typed.
-                    setEditedText((text) => (text === '' ? jsonText(proposal.proposed_value) : text));
-                    return { kind: 'edited' };
-                  });
-                }}
+                onClick={() =>
+                  setEditor((open) =>
+                    open?.kind === 'reason' && open.action === 'reject'
+                      ? null
+                      : { kind: 'reason', action: 'reject' },
+                  )
+                }
               >
-                Correct the Value, Then Accept
+                {ACTION_LABELS.reject}…
               </button>
             )}
-            {offeredActions
-              .filter((action): action is 'reject' | 'supersede' | 'withdraw' => action !== 'accept')
-              .map((action) => (
+            {/*
+              MORE — one disclosure toggle, offered only when it would reveal
+              something. `aria-expanded`/`aria-controls` name a real, in-document
+              region exactly as every other toggle on this card does; opening it
+              is not itself an act and announces nothing.
+
+              I5, INDEPENDENT REVIEW OF PR-D — "FEWER ACTIONS" MUST NOT ORPHAN
+              AN OPEN, TYPED-INTO FORM. Collapsing this group used to unmount
+              `.proposal-more` unconditionally — including a Supersede/Withdraw
+              reason box or the "Correct the Value" JSON editor mid-edit, taking
+              whatever the reader had typed with it. `editorProtectedFromCollapse`
+              is true exactly while one of THIS group's own editors is open
+              (Reject's editor lives in the top-level row and is unaffected), and
+              disables ONLY this toggle's collapse action — the group's OTHER
+              buttons stay clickable, so a reader can still switch to a different
+              action's editor inside it. Re-enabled once the protecting editor is
+              closed by its own Cancel or a review the server recorded, the same
+              two ways every other editor on this card is ever cleared.
+
+              r2, INDEPENDENT REVIEW OF PR-D — A DISABLED CONTROL MUST NOT BE
+              SILENT ABOUT WHY. `disabled` alone tells a screen-reader user
+              nothing beyond "not available right now" — indistinguishable from
+              a control disabled because the deployment doesn't support the
+              action at all. `aria-describedby` points at a plain-text reason
+              that exists ONLY while the button is actually disabled (no
+              dangling id when it is not), read together with the label the
+              same way a form field's hint text is.
+            */}
+            {(canEditAccept ||
+              offeredActions.includes('supersede') ||
+              offeredActions.includes('withdraw')) && (
+              <>
                 <button
-                  key={action}
                   type="button"
                   className="btn btn-secondary"
-                  aria-expanded={editor?.kind === 'reason' && editor.action === action}
-                  aria-controls={
-                    editor?.kind === 'reason' && editor.action === action
-                      ? `${editorId}-reason`
-                      : undefined
+                  aria-expanded={moreOpen}
+                  aria-controls={moreOpen ? moreId : undefined}
+                  aria-describedby={
+                    moreOpen && editorProtectedFromCollapse ? `${moreId}-collapse-reason` : undefined
                   }
-                  disabled={busy}
-                  onClick={() =>
-                    setEditor((open) =>
-                      open?.kind === 'reason' && open.action === action
-                        ? null
-                        : { kind: 'reason', action },
-                    )
-                  }
+                  disabled={moreOpen && editorProtectedFromCollapse}
+                  onClick={() => setMoreOpen((open) => !open)}
                 >
-                  {ACTION_LABELS[action]}…
+                  {moreOpen ? 'Fewer Actions' : 'More Actions'}
                 </button>
-              ))}
+                {moreOpen && editorProtectedFromCollapse && (
+                  <p className="proposal-more-collapse-reason" id={`${moreId}-collapse-reason`}>
+                    Close the open form below first — collapsing would discard what you typed.
+                  </p>
+                )}
+              </>
+            )}
           </div>
+
+          {moreOpen && (
+            <div className="proposal-more" id={moreId} role="group" aria-label="More actions">
+              {canEditAccept && (
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  aria-expanded={editor?.kind === 'edited'}
+                  aria-controls={editor?.kind === 'edited' ? `${editorId}-edited` : undefined}
+                  disabled={busy}
+                  onClick={() => {
+                    setEditedError(null);
+                    setEditor((open) => {
+                      if (open?.kind === 'edited') return null;
+                      // Prefilled ONCE, and only when the box is empty, so re-opening
+                      // never overwrites what is already being typed.
+                      setEditedText((text) => (text === '' ? jsonText(proposal.proposed_value) : text));
+                      return { kind: 'edited' };
+                    });
+                  }}
+                >
+                  Correct the Value, Then Accept
+                </button>
+              )}
+              {offeredActions
+                .filter((action): action is 'supersede' | 'withdraw' =>
+                  action === 'supersede' || action === 'withdraw',
+                )
+                .map((action) => (
+                  <button
+                    key={action}
+                    type="button"
+                    className="btn btn-secondary"
+                    aria-expanded={editor?.kind === 'reason' && editor.action === action}
+                    aria-controls={
+                      editor?.kind === 'reason' && editor.action === action
+                        ? `${editorId}-reason`
+                        : undefined
+                    }
+                    disabled={busy}
+                    onClick={() =>
+                      setEditor((open) =>
+                        open?.kind === 'reason' && open.action === action
+                          ? null
+                          : { kind: 'reason', action },
+                      )
+                    }
+                  >
+                    {ACTION_LABELS[action]}…
+                  </button>
+                ))}
+            </div>
+          )}
 
           {editor?.kind === 'edited' && (
             <div className="proposal-form" id={`${editorId}-edited`}>

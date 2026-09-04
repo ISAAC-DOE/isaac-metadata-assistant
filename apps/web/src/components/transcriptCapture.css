@@ -125,6 +125,7 @@
 }
 
 .capture-guidance-keeps,
+.capture-guidance-mechanism,
 .capture-guidance-storage {
   margin: 8px 0 0;
   font-size: 12px;
@@ -173,6 +174,54 @@
 
 .capture-note-warn {
   color: var(--text-body);
+}
+
+/*
+ * THE ELAPSED-TIME INDICATOR.
+ *
+ * m5, INDEPENDENT REVIEW OF PR-D — CORRECTED: it is NOT `aria-hidden` any more.
+ * The ticking count is still not re-announced every second in the LIVE region
+ * (that would be noise; the one live announcement for `recording` stays
+ * "Recording. Audio is being held in this tab." — `voiceLive`, fired once on
+ * entry) — but the element's own text ("Recording · 0:12") is now in the
+ * accessibility tree, so a screen-reader user who navigates to it afterwards
+ * still gets both the state and the time, rather than nothing at all.
+ */
+.capture-elapsed {
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+  align-self: center;
+}
+
+/* ---- the run selector's own empty state (0 runs) ---- */
+
+.capture-run-empty {
+  margin: 4px 0 0;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--text-muted);
+  max-width: 68ch;
+}
+
+/*
+ * m2, INDEPENDENT REVIEW OF PR-D — A REAL `.btn.btn-secondary`, TOKEN-STYLED,
+ * NOT A LINK-STYLED SPAN. This used to override the color entirely
+ * (`--text-link`/`--text-body`, neither a token this design system declares a
+ * BUTTON ever uses) and strip the border/background a button carries — so it
+ * read, and behaved, like inline link text rather than the control it is. Only
+ * SIZE is adjusted here, to sit inline in the sentence; colour, border and
+ * background all come from `.btn-secondary` itself.
+ */
+.capture-run-empty-create {
+  padding: 2px 8px;
+  font-size: 12px;
+}
+
+/* ---- the recoverable-error banner's Try Again control ---- */
+
+.capture-error-retry {
+  margin-left: 4px;
 }
 
 .capture-refusal {
@@ -344,7 +393,33 @@
  * this panel issues no write but the finalize itself — no element carries the class
  * any more, in this bundle or any other. Dead selectors are worse than no selectors:
  * they read as evidence that a control exists.
+ *
+ * `.capture-candidates` AND ITS ROW SELECTORS ABOVE ARE ALSO DEAD, kept in this
+ * file rather than deleted so the "state is carried on `data-state`" note at the
+ * top of the file stays honest about what it once described — PR-D (2026-09-03)
+ * replaced the per-candidate list with the summary card below, per
+ * `ia-brief.md` §6 ("the panel stops rendering that inline list").
  */
+
+/* ---- proposals-ready summary card ---- */
+
+.capture-summary-line {
+  margin: 4px 0 0;
+  font-size: 13px;
+  font-weight: 600;
+  /* m1, INDEPENDENT REVIEW OF PR-D: the record-level counts this line states
+     (N proposals, M notes) are the card's most load-bearing fact, not muted
+     body copy — promoted from `--text-body`. */
+  color: var(--text-primary);
+  max-width: 68ch;
+}
+
+.capture-reading-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
 
 @media (prefers-reduced-motion: reduce) {
   .capture-section * {

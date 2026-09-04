@@ -308,7 +308,9 @@ const REJECT = 'Reject';
 const SUPERSEDE = 'Supersede';
 const WITHDRAW = 'Withdraw';
 
-/** Open one refusing act's editor, type an optional reason, and confirm it. */
+/** Open one refusing act's editor, type an optional reason, and confirm it.
+ *  Reject stays a top-level peer; Supersede and Withdraw sit behind "More
+ *  Actions" (P2 resolution) and that disclosure is opened first for them. */
 async function refuseThroughTheUi(
   page: Page,
   noteId: string,
@@ -316,6 +318,9 @@ async function refuseThroughTheUi(
   reason?: string
 ): Promise<void> {
   const card = cardFor(page, noteId);
+  if (act !== REJECT) {
+    await card.getByRole('button', { name: 'More Actions' }).click();
+  }
   await card.getByRole('button', { name: `${act}…`, exact: true }).click();
   const form = card.locator('.proposal-form');
   await expect(form).toBeVisible();
@@ -658,11 +663,20 @@ test('a proposal left alone stays open — there is no defer act, and inaction r
     panel.getByRole('button', { name: /defer|decide later|snooze|remind me/i })
   ).toHaveCount(0);
 
-  // The four acts that DO exist are the four the server offered, and no fifth.
+  /*
+   * THE FOUR ACTS THAT DO EXIST ARE THE FOUR THE SERVER OFFERED, AND NO FIFTH —
+   * split across the top-level row and the "More Actions" disclosure PR-D's P2
+   * resolution introduced (Accept + Reject stay top-level peers; Correct-the-Value,
+   * Supersede and Withdraw sit one click behind "More Actions").
+   */
   await expect(card.locator('.proposal-actions button')).toHaveText([
     'Accept as Proposed',
-    'Correct the Value, Then Accept',
     'Reject…',
+    'More Actions',
+  ]);
+  await card.getByRole('button', { name: 'More Actions' }).click();
+  await expect(card.locator('.proposal-more button')).toHaveText([
+    'Correct the Value, Then Accept',
     'Supersede…',
     'Withdraw…',
   ]);
@@ -888,6 +902,8 @@ test('an unsaved correction survives a background change-feed refresh', async ({
   await openRecord(page, id);
   const card = cardFor(page, noteId);
 
+  // Behind "More Actions" now (P2 resolution).
+  await card.getByRole('button', { name: 'More Actions' }).click();
   await card.getByRole('button', { name: 'Correct the Value, Then Accept' }).click();
   const editor = card.getByLabel('The corrected value, as JSON');
   await expect(editor).toBeVisible();

@@ -246,14 +246,22 @@ function activityFor(
 // --- 1. the honest read states -------------------------------------------------
 
 describe('the read states', () => {
-  it('says the record has no proposals AND that nothing in this build creates one', async () => {
+  it('says no proposals exist yet and names how one is created — PR-D corrected this claim', async () => {
+    /*
+     * "Nothing in this build creates one" was TRUE when this test was written and is
+     * FALSE now: finalizing a transcript capture (PR-A) and "Propose a value from
+     * this note" (PR-D) both mint proposals, and an MCP agent may call
+     * `isaac_propose_field_value`. The empty state is corrected to name all three
+     * rather than assert none exist.
+     */
     stubFetchRoutes({ [LIST]: { body: page([]) } });
     renderPanel();
 
-    await screen.findByText(/No ingestion proposals on this record/);
-    // The claim that carries the meaning: the emptiness is a fact about the build,
-    // not a failed read and not an absence of anything to review.
-    expect(screen.getByText(/Nothing in this build creates\s+one/)).toBeTruthy();
+    await screen.findByText(/No proposals yet\. Capture notes above/);
+    expect(
+      screen.getByText(/ask a colleague’s agent to propose a value/),
+    ).toBeTruthy();
+    expect(screen.getByText(/isaac_propose_field_value/)).toBeTruthy();
     // An empty record must NOT offer a "show all" escape hatch — nothing is filtered.
     expect(screen.queryByRole('button', { name: 'Show All Proposals' })).toBeNull();
   });
@@ -262,7 +270,7 @@ describe('the read states', () => {
     stubFetchRoutes({ [LIST]: { body: page([], { unreadable_entries: 2 }) } });
     renderPanel();
 
-    await screen.findByText(/No ingestion proposals on this record/);
+    await screen.findByText(/No proposals yet\. Capture notes above/);
     // BOTH surfaces carry it: an empty state is where a reader stops looking, so it
     // cannot be the one place the number is left out.
     const disclosures = screen.getAllByText(
@@ -912,9 +920,11 @@ describe('when Accept is withheld, and when it is not', () => {
     await screen.findByText(/No write operation in this build accepts a value at this field path/);
     expect(screen.queryByRole('button', { name: 'Accept as Proposed' })).toBeNull();
     // A proposal that cannot be applied must still be CLEARABLE — gating the three
-    // refusing acts would leave the queue permanently stuck.
-    expect(screen.getByRole('button', { name: 'Withdraw…' })).toBeTruthy();
+    // refusing acts would leave the queue permanently stuck. Supersede and Withdraw
+    // sit behind "More Actions" (P2 resolution); Reject stays top-level.
     expect(screen.getByRole('button', { name: 'Reject…' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'More Actions' }));
+    expect(screen.getByRole('button', { name: 'Withdraw…' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Supersede…' })).toBeTruthy();
     // And the refusal is about THIS BUILD, never about the official schema.
     expect(
@@ -936,6 +946,7 @@ describe('when Accept is withheld, and when it is not', () => {
     // refusing acts on the same condition would leave the queue permanently
     // unclearable, which is the exact defect `conflict_resolution.py` was built to fix.
     expect(screen.getByRole('button', { name: 'Reject…' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'More Actions' }));
     expect(screen.getByRole('button', { name: 'Supersede…' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Withdraw…' })).toBeTruthy();
   });
@@ -978,8 +989,9 @@ describe('when Accept is withheld, and when it is not', () => {
     expect(screen.getByText(/the reachable cause is that the run is no longer on this record/)).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Accept as Proposed' })).toBeNull();
     // DEC-9: a proposal that cannot be applied must still be CLEARABLE.
-    expect(screen.getByRole('button', { name: 'Withdraw…' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Reject…' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'More Actions' }));
+    expect(screen.getByRole('button', { name: 'Withdraw…' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Supersede…' })).toBeTruthy();
   });
 
@@ -1021,7 +1033,9 @@ describe('when Accept is withheld, and when it is not', () => {
     renderPanel();
 
     // The correction path IS offered — the two halves are independent, and a server
-    // that offers only `edited` must not lose its accept control entirely.
+    // that offers only `edited` must not lose its accept control entirely. It sits
+    // behind "More Actions" now (P2 resolution).
+    fireEvent.click(await screen.findByRole('button', { name: 'More Actions' }));
     await screen.findByRole('button', { name: 'Correct the Value, Then Accept' });
     expect(screen.queryByRole('button', { name: 'Accept as Proposed' })).toBeNull();
   });
@@ -1099,8 +1113,10 @@ describe('the review write', () => {
     });
     renderPanel();
 
+    // Behind "More Actions" now (P2 resolution) — opened before it is queried.
+    fireEvent.click(await screen.findByRole('button', { name: 'More Actions' }));
     fireEvent.click(
-      await screen.findByRole('button', { name: 'Correct the Value, Then Accept' }),
+      screen.getByRole('button', { name: 'Correct the Value, Then Accept' }),
     );
     const box = screen.getByLabelText('The corrected value, as JSON') as HTMLTextAreaElement;
     // Prefilled with the candidate as JSON, so the type is never guessed.
@@ -1118,8 +1134,10 @@ describe('the review write', () => {
     stubFetchRoutes({ [LIST]: { body: page([proposalFixture()]) } });
     renderPanel();
 
+    // Behind "More Actions" now (P2 resolution) — opened before it is queried.
+    fireEvent.click(await screen.findByRole('button', { name: 'More Actions' }));
     fireEvent.click(
-      await screen.findByRole('button', { name: 'Correct the Value, Then Accept' }),
+      screen.getByRole('button', { name: 'Correct the Value, Then Accept' }),
     );
     fireEvent.change(screen.getByLabelText('The corrected value, as JSON'), {
       target: { value: 'Cu2O' },
@@ -1135,8 +1153,10 @@ describe('the review write', () => {
     stubFetchRoutes({ [LIST]: { body: page([proposalFixture()]) } });
     renderPanel();
 
+    // Behind "More Actions" now (P2 resolution) — opened before it is queried.
+    fireEvent.click(await screen.findByRole('button', { name: 'More Actions' }));
     fireEvent.click(
-      await screen.findByRole('button', { name: 'Correct the Value, Then Accept' }),
+      screen.getByRole('button', { name: 'Correct the Value, Then Accept' }),
     );
     fireEvent.change(screen.getByLabelText('The corrected value, as JSON'), {
       target: { value: 'null' },
@@ -1194,7 +1214,8 @@ describe('the review write', () => {
     });
     renderPanel();
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Withdraw…' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'More Actions' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Withdraw…' }));
     fireEvent.click(screen.getByRole('button', { name: 'Confirm Withdraw' }));
 
     await waitFor(() => expect(posts().length).toBe(1));
@@ -1295,7 +1316,8 @@ describe('each refusal keeps the server\'s own distinction', () => {
     });
     renderPanel();
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Withdraw…' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'More Actions' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Withdraw…' }));
     fireEvent.click(screen.getByRole('button', { name: 'Confirm Withdraw' }));
 
     // THE COPY IS THE BEHAVIOUR ASSERTION: this sentence is reachable ONLY through
@@ -1356,8 +1378,10 @@ describe('each refusal keeps the server\'s own distinction', () => {
     });
     renderPanel();
 
+    // Behind "More Actions" now (P2 resolution) — opened before it is queried.
+    fireEvent.click(await screen.findByRole('button', { name: 'More Actions' }));
     fireEvent.click(
-      await screen.findByRole('button', { name: 'Correct the Value, Then Accept' }),
+      screen.getByRole('button', { name: 'Correct the Value, Then Accept' }),
     );
     fireEvent.change(screen.getByLabelText('The corrected value, as JSON'), {
       target: { value: '"Cu2O-corrected-by-a-scientist"' },
@@ -1386,8 +1410,10 @@ describe('each refusal keeps the server\'s own distinction', () => {
     });
     renderPanel();
 
+    // Behind "More Actions" now (P2 resolution) — opened before it is queried.
+    fireEvent.click(await screen.findByRole('button', { name: 'More Actions' }));
     fireEvent.click(
-      await screen.findByRole('button', { name: 'Correct the Value, Then Accept' }),
+      screen.getByRole('button', { name: 'Correct the Value, Then Accept' }),
     );
     fireEvent.change(screen.getByLabelText('The corrected value, as JSON'), {
       target: { value: '"Cu2O"' },
@@ -1478,8 +1504,10 @@ describe('a background change-feed update', () => {
     });
     const view = renderPanel(null);
 
+    // Behind "More Actions" now (P2 resolution) — opened before it is queried.
+    fireEvent.click(await screen.findByRole('button', { name: 'More Actions' }));
     fireEvent.click(
-      await screen.findByRole('button', { name: 'Correct the Value, Then Accept' }),
+      screen.getByRole('button', { name: 'Correct the Value, Then Accept' }),
     );
     fireEvent.change(screen.getByLabelText('The corrected value, as JSON'), {
       target: { value: '"half-typed-by-a-scien' },
@@ -1643,8 +1671,10 @@ describe('a background change-feed update', () => {
     stubFetchRoutes({ [LIST]: { body: page([proposalFixture()]) } });
     const view = renderPanel(null);
 
+    // Behind "More Actions" now (P2 resolution) — opened before it is queried.
+    fireEvent.click(await screen.findByRole('button', { name: 'More Actions' }));
     fireEvent.click(
-      await screen.findByRole('button', { name: 'Correct the Value, Then Accept' }),
+      screen.getByRole('button', { name: 'Correct the Value, Then Accept' }),
     );
     fireEvent.change(screen.getByLabelText('The corrected value, as JSON'), {
       target: { value: '"half-typed-by-a-scien' },
@@ -1690,7 +1720,12 @@ describe('the act announcement', () => {
     });
     renderPanel();
 
-    const withdrawFirst = (await screen.findAllByRole('button', { name: 'Withdraw…' }))[0];
+    // Each card carries its own "More Actions" disclosure — both are opened
+    // before either card's Withdraw is reachable.
+    for (const toggle of await screen.findAllByRole('button', { name: 'More Actions' })) {
+      fireEvent.click(toggle);
+    }
+    const withdrawFirst = screen.getAllByRole('button', { name: 'Withdraw…' })[0];
     fireEvent.click(withdrawFirst);
     fireEvent.click(screen.getByRole('button', { name: 'Confirm Withdraw' }));
     await waitFor(() => expect(screen.getByRole('status').textContent).not.toBe(''));
@@ -1813,5 +1848,70 @@ describe('the state filter', () => {
     // scientist read "1 proposal" off a record that holds nine.
     await screen.findByText(/Showing 1 of 9 proposals on this record/);
     expect(urls().some((u) => u.endsWith('/proposals?state=open'))).toBe(true);
+  });
+});
+
+// --- I5, independent review of PR-D: "Fewer Actions" must never orphan an open editor ---
+
+describe('"Fewer Actions" cannot discard an open Supersede/Withdraw or Correct-the-Value editor', () => {
+  it('MUTATION-GUARDED: the collapse control is disabled while "Correct the Value" is open, and re-enables only once it is closed, with the typed text intact throughout', async () => {
+    stubFetchRoutes({ [LIST]: { body: page([proposalFixture()]) } });
+    renderPanel();
+
+    fireEvent.click(await screen.findByRole('button', { name: 'More Actions' }));
+    const fewerActions = screen.getByRole('button', { name: 'Fewer Actions' });
+    expect(fewerActions).not.toBeDisabled();
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Correct the Value, Then Accept' }),
+    );
+    const editorBox = (await screen.findByLabelText(
+      'The corrected value, as JSON',
+    )) as HTMLTextAreaElement;
+    fireEvent.change(editorBox, { target: { value: '"CuO2"' } });
+
+    // The group's own collapse control is now disabled — clicking it (even if a
+    // test bypassed the disabled attribute) must not be reachable at all, and the
+    // editor and its typed text must both still be in the document.
+    expect(screen.getByRole('button', { name: 'Fewer Actions' })).toBeDisabled();
+    expect(
+      (screen.getByLabelText('The corrected value, as JSON') as HTMLTextAreaElement).value,
+    ).toBe('"CuO2"');
+    // The disclosure region itself — "More Actions"'s own group — is untouched.
+    expect(screen.getByRole('group', { name: 'More actions' })).toBeInTheDocument();
+
+    // Cancelling the editor (the same way every other editor on this card is
+    // ever cleared) is what re-enables the collapse — not a forced unmount.
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(screen.queryByLabelText('The corrected value, as JSON')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Fewer Actions' })).not.toBeDisabled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Fewer Actions' }));
+    expect(screen.queryByRole('button', { name: 'More Actions' })).toBeInTheDocument();
+    expect(screen.queryByRole('group', { name: 'More actions' })).toBeNull();
+  });
+
+  it('MUTATION-GUARDED: the same protection holds for an open Supersede reason box, and a typed reason survives', async () => {
+    stubFetchRoutes({ [LIST]: { body: page([proposalFixture()]) } });
+    renderPanel();
+
+    fireEvent.click(await screen.findByRole('button', { name: 'More Actions' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Supersede…' }));
+    const reasonBox = await screen.findByLabelText('Reason (optional)');
+    fireEvent.change(reasonBox, { target: { value: 'A later run redid this measurement.' } });
+
+    expect(screen.getByRole('button', { name: 'Fewer Actions' })).toBeDisabled();
+    expect((screen.getByLabelText('Reason (optional)') as HTMLInputElement).value).toBe(
+      'A later run redid this measurement.',
+    );
+
+    // Reject's own editor is NOT in this group (it lives in the top-level row)
+    // and must never be protected by it — opening Reject's editor instead must
+    // leave "Fewer Actions" collapsible, because there is nothing of THIS
+    // group's to lose.
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(screen.getByRole('button', { name: 'Fewer Actions' })).not.toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Reject…' }));
+    expect(screen.getByRole('button', { name: 'Fewer Actions' })).not.toBeDisabled();
   });
 });

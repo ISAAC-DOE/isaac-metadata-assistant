@@ -306,6 +306,36 @@
   margin-top: 10px;
 }
 
+/*
+ * THE "MORE ACTIONS" DISCLOSURE (P2 resolution). Same peer treatment as
+ * `.proposal-actions` above — no colour, no visual demotion of Supersede or
+ * Withdraw once the disclosure is open, because they are still full, equally
+ * confirmed acts. A plain inset rather than a card: this is a reveal of MORE OF
+ * THE SAME row, not a nested container.
+ */
+.proposal-more {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--border-faint);
+}
+
+/*
+ * r2, INDEPENDENT REVIEW OF PR-D. The reason the "Fewer Actions" toggle is
+ * disabled, named inline rather than left to a bare `disabled` attribute —
+ * same treatment as `.proposal-form-hint` below, at full row width since it
+ * sits beside the action row rather than inside a form.
+ */
+.proposal-more-collapse-reason {
+  width: 100%;
+  margin: 4px 0 0;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-tertiary);
+}
+
 .proposal-form {
   display: flex;
   flex-direction: column;
