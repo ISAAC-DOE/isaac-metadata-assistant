@@ -185,5 +185,17 @@ for (const surface of SURFACES) {
           )}`
         : undefined
     ).toEqual([]);
+
+    // N-3 (re-review of PR-E, 2026-09-03) — I-2's property (a non-current
+    // step's blocking reason stays in the ACCESSIBILITY TREE at <=1024px,
+    // visually hidden but not `aria-hidden`) pinned against a REAL rendered
+    // tree, not only a CSS-source grep. `record-runs` at `tablet-768x1024`
+    // reliably has a blocked, non-current step (`SEED.partial` needs
+    // "Complete Metadata" first), so its `nav.spine` ariaSnapshot must name
+    // that reason even though nothing paints it.
+    if (surface.id === 'record-runs' && project === 'tablet-768x1024') {
+      const spineSnapshot = await page.locator('nav.spine').ariaSnapshot();
+      expect(spineSnapshot).toContain("Complete 'Complete Metadata' first.");
+    }
   });
 }

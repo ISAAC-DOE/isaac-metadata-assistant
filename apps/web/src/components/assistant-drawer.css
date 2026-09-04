@@ -1,12 +1,18 @@
 /*
- * P33 S6 (RESP-1) — the responsive Assistant rail.
+ * P33 S6 (RESP-1), extended PR-E — the responsive Assistant rail.
  *
- * DESKTOP is the default and is intentionally untouched: the trigger, backdrop,
- * and in-panel close are hidden, and the panel is styled entirely by its rail
- * class (.record-right / .memory-right). Every drawer/slide-over behaviour is
- * scoped inside the max-width media query below, so the desktop layout stays
- * byte-identical. Overrides use the [data-open] attribute so they beat the
- * plain .record-right / .memory-right rules regardless of stylesheet order.
+ * DESKTOP was fully untouched before PR-E: the trigger, backdrop, and
+ * in-panel close were hidden, and the panel was styled entirely by its rail
+ * class (.record-right / .memory-right). It is now ALMOST untouched — PR-E
+ * adds one opt-in desktop-only feature, the collapse toggle, scoped to its
+ * own `(min-width: 1025px)` band at the end of this file so the expanded
+ * state stays pixel-identical to before. Every ≤1024px drawer/slide-over
+ * behaviour below is unchanged. Overrides use the [data-open] / (PR-E)
+ * [data-collapsed] attributes so they beat the plain .record-right /
+ * .memory-right rules regardless of stylesheet order — precedent for this
+ * exact specificity tie already existed here before PR-E (`[data-open]`
+ * against `.record-right.narrow`), so `[data-collapsed]` follows the same,
+ * already-proven pattern rather than inventing a new one.
  */
 .assistant-drawer-trigger {
   display: none;
@@ -16,6 +22,21 @@
 }
 .assistant-drawer-close {
   display: none;
+}
+/* PR-E — the desktop collapse/expand control. Hidden by default (≤1024px
+   uses the trigger + in-panel close above instead); made visible only inside
+   the desktop band below. */
+.assistant-rail-toggle {
+  display: none;
+}
+/* PR-E — the content wrapper is transparent to layout by default at EVERY
+   width (`display: contents` removes its own box; `AssistantPanel` and
+   everything around it lay out exactly as if this div were not there). Only
+   the desktop-collapsed band below turns it into a real, hidden box — see
+   the comment there for why `display: none` rather than `contents` is what
+   actually hides the content. */
+.assistant-drawer-content {
+  display: contents;
 }
 
 @media (max-width: 1024px) {
@@ -116,5 +137,118 @@
   .assistant-drawer-close:focus-visible {
     outline: 2px solid var(--action);
     outline-offset: 2px;
+  }
+}
+
+/*
+ * PR-E — the desktop rail collapse. Scoped to `(min-width: 1025px)` rather
+ * than the bare absence of the ≤1024px query above, so the boundary is
+ * explicit and can never overlap the narrow band by one pixel. `open` is
+ * force-closed by AssistantDrawer.tsx the moment the viewport crosses to
+ * this width, so `[data-open]` is never true here and none of the slide-over
+ * rules above ever fire inside this block.
+ *
+ * MEASURED (before this feature; PR report has the exact figures): at
+ * 1280×800 the record surfaces' main column already had 722px available with
+ * the rail OPEN, with zero horizontal overflow or wrapped elements found on
+ * Record Fields, Runs or Capture — so the rail defaults to OPEN at every
+ * desktop width, including 1025–1280px. This band adds a way to collapse it
+ * on request; it does not change the default.
+ */
+@media (min-width: 1025px) {
+  .assistant-rail-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    flex: none;
+    padding: 4px 8px;
+    border-radius: var(--radius-control);
+    border: 1px solid transparent;
+    background: transparent;
+    color: var(--text-secondary);
+    font-size: 11px;
+    font-weight: 600;
+    line-height: 1.3;
+    white-space: nowrap;
+    cursor: pointer;
+    /* Reduced-motion is handled globally (`styles/base.css`'s blanket
+       `prefers-reduced-motion` rule collapses every transition-duration to
+       0.001ms), so no separate reduced-motion rule is needed here. */
+    transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+  }
+  .assistant-rail-toggle:hover {
+    background: var(--assist-tint);
+    border-color: var(--assist-border);
+    color: var(--assist-text);
+  }
+  .assistant-rail-toggle:focus-visible {
+    outline: 2px solid var(--assist);
+    outline-offset: 2px;
+  }
+
+  /* EXPANDED (the default): the toggle sits above the panel content,
+     right-aligned — a small subordinate control, not a competing header.
+     The rail's own width/padding are untouched (no rule here overrides
+     them), which is what keeps this state pixel-identical to the pre-PR-E
+     rail. */
+  .assistant-drawer-panel[data-collapsed='false'] .assistant-rail-toggle {
+    align-self: flex-end;
+    margin-bottom: 6px;
+  }
+
+  /* COLLAPSED: the rail shrinks to a slim, PERMANENTLY VISIBLE strip holding
+     only this control — "the rail leaves the layout and the main column
+     takes the width" (main is `flex: 1`, this is `flex: none`, so main
+     absorbs essentially all of the freed space), while the strip itself
+     stays a real, discoverable, labelled affordance instead of disappearing
+     outright. `width`/`padding` beat `.record-right`/`.record-right.narrow`/
+     `.memory-right`'s own declarations by the same specificity precedent
+     `[data-open]` already relies on above. */
+  /* No `width` transition here, deliberately: animating a layout property
+     (`width`) causes the layout-thrash class of jank the Impeccable detector
+     flags (`detect.mjs` — "Layout property animation … use transform and
+     opacity instead"), and it is one infrequent, user-initiated click, not a
+     scroll-linked or frequent state change — the instant snap is the correct
+     choice here, not merely a workaround. */
+  .assistant-drawer-panel[data-collapsed='true'] {
+    width: 44px;
+    min-width: 44px;
+    padding: 16px 0;
+    align-items: center;
+  }
+  /* M-2 (independent review, 2026-09-03) — STRETCHED TO FILL THE STRIP. The
+     claim two comments up ("the strip itself stays a real, discoverable,
+     labelled affordance") was true of the visible LABEL but not of the
+     CLICKABLE area: without `align-self: stretch`, this button sized to its
+     own content inside the aside's `align-items: center` and left dead,
+     unclickable margin on both sides of the 44px column. Stretching it makes
+     the entire strip the hit target, matching the claim rather than merely
+     the width number. */
+  .assistant-drawer-panel[data-collapsed='true'] .assistant-rail-toggle {
+    flex-direction: column;
+    align-self: stretch;
+    width: 100%;
+    padding: 10px 6px;
+  }
+  /* The word "Assistant" stays visible (not icon-only) even in the 44px
+     strip — vertical writing-mode is the standard technique for a labelled
+     affordance in a slim rail (VS Code's own collapsed side-bar tab uses the
+     same idiom), and it is the SAME text node as the expanded state's label
+     (`Expand Assistant` here vs `Collapse Assistant` there), so the
+     accessible name and the visible text never diverge. */
+  .assistant-drawer-panel[data-collapsed='true'] .assistant-rail-toggle-label {
+    writing-mode: vertical-rl;
+    text-orientation: mixed;
+    white-space: nowrap;
+  }
+
+  /* The panel content is mounted at every width and in both collapse states
+     (see AssistantDrawer.tsx) — this is the ONE rule that visually hides it,
+     and only in the collapsed desktop state. `display: none` (not
+     `visibility: hidden`) removes it from the accessibility tree and the tab
+     order, which is correct here: nothing inside a 44px strip should be
+     reachable by Tab. */
+  .assistant-drawer-panel[data-collapsed='true'] .assistant-drawer-content {
+    display: none;
   }
 }

@@ -137,6 +137,20 @@ interface AssistantPanelProps {
   /** Optional subordinate note, e.g. "truth questions route to the CLI…". */
   note?: string;
   /**
+   * PR-E — the current workspace's own label ("Runs", "Capture & Proposals"),
+   * reusing the SAME copy `RecordWorkspaceNav`'s pill row already shows
+   * (`RECORD_WORKSPACES` in `components/RecordWorkspaceNav.tsx`, itself
+   * sourced from `lib/labels.ts`) — no new copy, no new backend intent.
+   * Passed ONLY by `RecordWorkbench` (the one mount with more than one
+   * destination sharing this single Assistant mount); every other mount
+   * omits it and this renders nothing, exactly as before. It re-renders on
+   * every workspace switch — the parent passes a new string on the SAME
+   * mounted panel — so it orients a reader who arrives on Runs or Capture
+   * without resetting the conversation, any staged proposal, or the
+   * composer's typed text: none of that state depends on this prop.
+   */
+  workspaceContext?: string;
+  /**
    * P34.4 — which free-form query endpoint the composer submits to. `'record'`
    * (default) POSTs to the per-experiment resolver (`api.askAssistant`), used by
    * the four RECORD surfaces that each pass a real `experimentId`. `'memory'`
@@ -465,6 +479,7 @@ export function AssistantPanel({
   availability,
   showAvailabilityStatus = true,
   note,
+  workspaceContext,
   queryScope = 'record',
   agentContext,
   degraded = false,
@@ -1348,7 +1363,15 @@ export function AssistantPanel({
             to its own subordinate action row beneath (`.assistant-head-right`,
             `flex-basis: 100%`). */}
         <div className="assistant-head-titles">
-          <span className="assistant-label">{LABELS.assistant}</span>
+          {/* `tabIndex={-1}` (PR-E) — never a Tab stop, but a valid
+              PROGRAMMATIC focus target: `AssistantDrawer`'s desktop
+              collapse toggle moves focus here on expand, the way a
+              conventional "expand a panel" control moves focus to that
+              panel's own heading. Purely additive: nothing about this
+              element's role, text, or place in the DOM changes. */}
+          <span className="assistant-label" tabIndex={-1}>
+            {LABELS.assistant}
+          </span>
           {/* The status row renders only where BOTH are true: the mounting screen
               actually fetched GET /api/graph/status and passed `availability`
               (a mount that cannot truthfully know it — Guided Completion loads
@@ -1393,6 +1416,21 @@ export function AssistantPanel({
           )}
         </div>
       </div>
+
+      {/* PR-E — the workspace-context lead sentence. Renders BELOW the header
+          and ABOVE everything else (degraded state, empty state, the
+          conversation) so it is the first thing read after "Assistant"
+          itself, on every one of the four record workspaces this single
+          panel mount serves. It orients rather than instructs: a reader who
+          switches from Runs to Capture sees this line update on the next
+          render (the parent passes a new `workspaceContext` string into the
+          SAME mounted panel), while everything below — conversation,
+          composer text, a staged proposal — is untouched by the switch. */}
+      {workspaceContext && (
+        <p className="assistant-workspace-context">
+          You are on <strong>{workspaceContext}</strong>.
+        </p>
+      )}
 
       {/* P29.4 — honest, manual-first degraded state: when the live AgentContext
           cannot be verified the assistant says so plainly and answers no
