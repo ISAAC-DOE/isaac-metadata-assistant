@@ -82,6 +82,7 @@ import {
   type ServerApi,
 } from './fixtures';
 import { FIXTURE_ACTOR_SUBJECT, FIXTURE_TRUST_BASIS, TRUSTED_API_BASE } from './env';
+import { RUNS_PAGE_SIZE } from '../../src/lib/runPaging';
 
 /**
  * The RECORD-level field A fills in and B then proposes a change to.
@@ -267,6 +268,16 @@ test.describe('two scientists, one record, end to end', () => {
     expect(runs, 'step 2: two Add Run clicks produced two runs on the server').toHaveLength(2);
     const [runOne, runTwo] = runs;
     await expect(page.locator('.run-card'), 'step 2: both are on screen').toHaveCount(2);
+    /*
+     * THE SCOPE LINE READS A LABEL, NOT AN ID (post-merge ruling on m14). Built
+     * from THIS SAME `server.runs()` read, so every `.proposal-scope` assertion
+     * below can prove "the scope line names run X" by resolving X's LABEL back
+     * to X's id through this map — the disambiguation the UI itself performs
+     * only when two loaded runs share a label (see `duplicateRunLabels` in
+     * `IngestionProposalsPanel.tsx`), proven here regardless of whether that
+     * collision happens to occur.
+     */
+    const labelToId = new Map(runs.map((r) => [r.label, r.id]));
 
     // ── STEP 3 — A enters RECORD-level information through the website ────────
     const recordTarget = await deriveRecordTarget(request, server, id);
@@ -531,7 +542,14 @@ test.describe('two scientists, one record, end to end', () => {
     await expect(runCard, 'step 11: the new card appears with no reload').toBeVisible({
       timeout: DISCOVERY_DEADLINE,
     });
-    await expect(runCard.locator('.proposal-scope')).toHaveText(`On run ${runTwo.id}`);
+    // The scope line reads a LABEL, not an id (post-merge ruling on m14) — and
+    // "which run" is proven via the label→id map built above from this SAME
+    // `server.runs()` read, not merely by matching the string the panel shows.
+    await expect(runCard.locator('.proposal-scope')).toHaveText(`On run ${runTwo.label}`);
+    expect(
+      labelToId.get(runTwo.label),
+      'step 11: the scope line\'s label resolves back to the SECOND run'
+    ).toBe(runTwo.id);
     /*
      * THE DISCLOSED COST OF THE RUNS RE-READ, COUNTED AT THE WIRE.
      *
@@ -545,15 +563,55 @@ test.describe('two scientists, one record, end to end', () => {
      * received count (2), not the page size. An UNBOUNDED re-read would fetch a
      * 1,000-run list because a proposal was filed.
      */
+    /*
+     * A SECOND, BOUNDED-BUT-DIFFERENT READ IS ALSO EXPECTED HERE, AND IT IS NOT
+     * THE ONE THIS ASSERTION IS ABOUT (found via independent review, post-merge
+     * ruling on m14; the F2 fix that followed on the SAME finding closed the
+     * gap this comment used to describe). This is the FIRST run-scoped
+     * proposal in the whole flow, so `IngestionProposalsPanel`'s own
+     * once-per-mount run-label resolution (`api.listRuns(experimentId, {limit:
+     * RUNS_PAGE_SIZE})` — see its fetch effect) fires for the first time at
+     * this exact moment too, to resolve `runTwo`'s LABEL for the scope line
+     * just asserted above. That read is real, legitimate, now BOUNDED at
+     * `RUNS_PAGE_SIZE` rather than unbounded (F2 fix), and unrelated to
+     * `RunsSection`'s completeness path — so it is filtered OUT of "the"
+     * attributed read below, which must specifically carry `limit=2` (the
+     * record's actual run count) to prove what this comment block's original
+     * intent requires: a record-only version bump does not fetch an unbounded
+     * run list.
+     */
     await expect
       .poll(
-        () => runsReads.length - runsReadsBefore,
-        'step 11: exactly ONE bounded runs re-read is attributable to the proposal act'
+        () =>
+          runsReads
+            .slice(runsReadsBefore)
+            .filter((u) => new URL(u).searchParams.get('limit') === '2').length,
+        'step 11: exactly ONE BOUNDED (limit=2) runs re-read is attributable to the proposal act'
       )
       .toBe(1);
-    const attributedRead = runsReads[runsReadsBefore];
+    const attributedRead = runsReads
+      .slice(runsReadsBefore)
+      .find((u) => new URL(u).searchParams.get('limit') === '2')!;
     const attributedLimit = new URL(attributedRead).searchParams.get('limit');
     expect(attributedLimit, `step 11: and it is BOUNDED — ${attributedRead}`).toBe('2');
+    /*
+     * OPTIONAL STRENGTHENING (independent review, post-merge, following F2).
+     * Now that BOTH known reads at this moment are bounded — RunsSection's
+     * `limit=2` and `IngestionProposalsPanel`'s `limit=RUNS_PAGE_SIZE` — the
+     * UNFILTERED delta since baseline can be pinned EXACTLY, closing the gap
+     * a "look only at the bounded-to-2 one" assertion leaves open: a THIRD,
+     * unrelated re-read (bounded or not) could slip in unnoticed if nothing
+     * ever counted the total. This does.
+     */
+    expect(
+      runsReads.slice(runsReadsBefore).length,
+      'step 11: exactly TWO runs reads total — RunsSection\'s limit=2 completeness ' +
+        'read and IngestionProposalsPanel\'s bounded label read, and nothing else'
+    ).toBe(2);
+    expect(
+      runsReads.slice(runsReadsBefore).filter((u) => new URL(u).searchParams.get('limit') === String(RUNS_PAGE_SIZE)).length,
+      'step 11: and the OTHER one is the label read, bounded at RUNS_PAGE_SIZE'
+    ).toBe(1);
     /*
      * AND IT IS STILL EXACTLY ONE AFTER TWO MORE FEED POLLS.
      *
@@ -593,9 +651,11 @@ test.describe('two scientists, one record, end to end', () => {
       )
       .toBeGreaterThanOrEqual(2);
     expect(
-      runsReads.length - runsReadsBefore,
-      'step 11: and it is STILL exactly one after two further feed polls — the bound ' +
-        'fires once per EVENT, not once per poll'
+      runsReads
+        .slice(runsReadsBefore)
+        .filter((u) => new URL(u).searchParams.get('limit') === '2').length,
+      'step 11: and the BOUNDED read is STILL exactly one after two further feed polls ' +
+        '— the bound fires once per EVENT, not once per poll'
     ).toBe(1);
 
     // ── STEP 12 — three distinct values, and the label says whose ─────────────
@@ -695,9 +755,17 @@ test.describe('two scientists, one record, end to end', () => {
      * and differ only in which run they name, so an index would be asserting whichever
      * one the panel happened to order first.
      */
+    // The label→id map (built above from `server.runs()`) is what makes this
+    // filter mean "the card naming run ONE" rather than "the card whose scope
+    // line happens to contain this literal string" (post-merge ruling on m14 —
+    // the scope line reads a label, never an id, by default).
+    expect(
+      labelToId.get(runOne.label),
+      'step 13: run ONE\'s label resolves back to run ONE, not run two'
+    ).toBe(runOne.id);
     const throwawayCard = page
       .locator('.proposal-card')
-      .filter({ has: page.locator('.proposal-scope', { hasText: `On run ${runOne.id}` }) });
+      .filter({ has: page.locator('.proposal-scope', { hasText: `On run ${runOne.label}` }) });
     await expect(
       throwawayCard.locator('.proposal-target-state'),
       'step 13: the stale card tells the reader the value moved'

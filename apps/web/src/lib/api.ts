@@ -1757,24 +1757,16 @@ export const api = {
    * exactly-once within the record, which is what stops this client and the
    * transcript route from both minting a proposal for one candidate.
    *
-   * AND IT HAS NO CALLER TODAY, WHICH IS THE EXACT CONDITION THAT GOT `getProposal`
-   * DELETED FOUR PARAGRAPHS ABOVE — so the difference has to be stated here rather
-   * than left for the next reader to weigh. `getProposal` was deleted because
-   * nothing would ever need it: the list window already carries every field a detail
-   * read would return, so its caller was not late, it was impossible. This one's
-   * caller is NAMED AND NEXT: the "Propose a value from this note" act in Unmapped
-   * Notes, which is the note-mapping path described above and is the following slice
-   * in this arc. It also has a second job the moment it lands, which `getProposal`
-   * had no analogue of — it is the client half of the two-producer collision DEC-13
-   * added `client_request_key` for, and the transcript route now publishes that key
-   * precisely so this call can present it (contract §11.2).
-   *
-   * **UNTIL THAT SURFACE LANDS, THE COLLISION IS A CAPABILITY AND NOT A LIVE
-   * CONCERN**, and no sentence anywhere may say two producers are racing today: the
-   * transcript route is the only producer in this build. If that surface does not
-   * land, this method should be deleted the way `getProposal` was, rather than kept
-   * alive by the inventory counter in `backend-down-state.test.tsx` — a counter is
-   * not a reason to keep dead code, and that rule applies to this method too.
+   * ~~"AND IT HAS NO CALLER TODAY... its caller is NAMED AND NEXT: the 'Propose a
+   * value from this note' act in Unmapped Notes... UNTIL THAT SURFACE LANDS, THE
+   * COLLISION IS A CAPABILITY AND NOT A LIVE CONCERN"~~ — SUPERSEDED, PR-D
+   * (2026-09-03). The named surface landed: `UnmappedNotesPanel.tsx`'s "Propose a
+   * value from this note" act calls this method — `noteId`, `targetFieldPath`,
+   * `rule` and `proposedValue` are all supplied by that form, never defaulted here.
+   * The two-producer collision DEC-13 added `client_request_key` for is now LIVE,
+   * not merely capable: the transcript route and a person mapping a note by hand can
+   * race to mint a proposal for the same candidate, and the key is what keeps that
+   * to one. See contract §11.2, corrected in the same change.
    *
    * ONE VALIDATOR, THE RECORD'S. A proposal lives inside the experiment's own state
    * document, so a review carries the EXPERIMENT's version token — never a run's, and

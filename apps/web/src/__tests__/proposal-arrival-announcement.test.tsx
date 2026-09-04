@@ -30,6 +30,7 @@ import { act, render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom';
 
 import { IngestionProposalsPanel } from '../components/IngestionProposalsPanel';
+import { markSelfMintedProposals } from '../lib/selfMintedProposals';
 import { PROPOSAL_RECORD_SCOPED_TARGET_PATHS, PROPOSAL_TARGET_PATHS, stubFetchRoutes } from '../test/apiFixtures';
 import type { RecordChangeSummary } from '../lib/recordChanges';
 import type { ApiProposal, ApiProposalsResponse } from '../lib/types';
@@ -532,6 +533,78 @@ describe('an arrival is NOT announced', () => {
       expect(statusText()).toBe('');
     },
   );
+
+  /*
+   * PR-D — OWN-ACT SUPPRESSION. A proposal `TranscriptCapturePanel`'s finalize or
+   * `UnmappedNotesPanel`'s "Propose a value from this note" just minted, on the
+   * SAME screen, must not read as a colleague's arrival — see
+   * `lib/selfMintedProposals.ts` for exactly what this local, same-tab mechanism
+   * can and cannot know (it says nothing about a second tab or a colleague's
+   * browser, which are invisible to it and announce normally).
+   */
+  it('a proposal THIS tab just minted (e.g. via transcript finalize) is not announced as a colleague’s', async () => {
+    let reads = 0;
+    stubFetchRoutes({
+      [LIST]: () => {
+        reads += 1;
+        return {
+          body:
+            reads === 1
+              ? pageWithOpenCount([proposalFixture()], 1)
+              : pageWithOpenCount(
+                  [proposalFixture(), proposalFixture({ proposal_id: 'PR-D-SELF-MINTED' })],
+                  2,
+                ),
+        };
+      },
+    });
+    const view = renderPanel(null);
+    await screen.findByText('Proposed value');
+
+    // Simulates what `TranscriptCapturePanel.finalize()` / `UnmappedNotesPanel`'s
+    // propose form do on success — see both components' own call sites.
+    markSelfMintedProposals(EXP, ['PR-D-SELF-MINTED']);
+
+    rerenderWith(view, activityFor(['PR-D-SELF-MINTED'], 9));
+    // The list DOES still refresh — the new proposal must still appear.
+    await waitFor(() => expect(reads).toBe(2));
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    // But no arrival note, in either channel — this is "my own act", not a
+    // colleague's change appearing unprompted.
+    expect(arrivalNoteText()).toBeNull();
+    expect(statusText()).toBe('');
+  });
+
+  it('MUTATION-GUARDED — a batch this tab did NOT mint still announces normally, so the guard above is not vacuously silencing everything', async () => {
+    let reads = 0;
+    stubFetchRoutes({
+      [LIST]: () => {
+        reads += 1;
+        return {
+          body:
+            reads === 1
+              ? pageWithOpenCount([proposalFixture()], 1)
+              : pageWithOpenCount(
+                  [proposalFixture(), proposalFixture({ proposal_id: 'PR-D-A-COLLEAGUES' })],
+                  2,
+                ),
+        };
+      },
+    });
+    const view = renderPanel(null);
+    await screen.findByText('Proposed value');
+
+    // Deliberately NOT marked self-minted — a genuine colleague's arrival.
+    rerenderWith(view, activityFor(['PR-D-A-COLLEAGUES'], 9));
+    await waitFor(() => expect(reads).toBe(2));
+
+    await waitFor(() =>
+      expect(arrivalNoteText()).toBe('At least 1 proposed change arrived and is ready to review.'),
+    );
+  });
 });
 
 describe('I1b — the arrival flag does not leak onto a later, unrelated request', () => {

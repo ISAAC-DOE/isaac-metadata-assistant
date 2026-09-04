@@ -177,12 +177,12 @@ async function aRecordWithTwoRunsAndAProposal(
   });
   expect(proposal.run_id).toBe(second.id);
 
-  return { id, first, second, target, proposal };
+  return { id, runs, first, second, target, proposal };
 }
 
 test.describe('a run-scoped ingestion proposal, reviewed in a browser', () => {
   test('the scientist sees it, and sees which RUN it is about', async ({ page, request, server }) => {
-    const { id, second, target } = await aRecordWithTwoRunsAndAProposal(
+    const { id, runs, second, target } = await aRecordWithTwoRunsAndAProposal(
       page,
       request,
       server,
@@ -193,11 +193,26 @@ test.describe('a run-scoped ingestion proposal, reviewed in a browser', () => {
     const card = proposalCard(page, target.path);
     await expect(card).toBeVisible();
 
-    // THE SCOPE LINE. `On run <id>` for a run-scoped proposal, `On the record` for a
-    // record-scoped one — the panel's own two-way branch on `proposal.run_id`.
+    /*
+     * THE SCOPE LINE READS A LABEL, NOT AN ID (post-merge ruling on m14). A
+     * scientist reads "On run Run 2", not "On run 01RUN…" — so this asserts the
+     * LABEL served by `server.runs()`, never a hardcoded string, and never the
+     * raw id the panel no longer shows by default.
+     *
+     * "WHICH RUN" IS STILL PROVEN, THOUGH — via the label→id mapping built from
+     * the SAME `server.runs()` read that produced `second`. If two runs on this
+     * record ever shared a label, that map would collapse two ids onto one key
+     * and this line would catch it; here it proves the scope line's label
+     * resolves unambiguously back to the SECOND run and no other.
+     */
+    const labelToId = new Map(runs.map((r) => [r.label, r.id]));
     const scope = card.locator('.proposal-scope');
-    await expect(scope).toHaveText(`On run ${second.id}`);
+    await expect(scope).toHaveText(`On run ${second.label}`);
     await expect(scope).not.toHaveText('On the record');
+    expect(
+      labelToId.get(second.label),
+      'the scope line\'s label resolves back to the SECOND run, not the first'
+    ).toBe(second.id);
 
     // ...and the proposed value is the third value, rendered under its own label.
     await expect(card.locator('.proposal-value-label').first()).toHaveText('Proposed value');

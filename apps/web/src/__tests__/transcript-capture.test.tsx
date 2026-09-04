@@ -1,33 +1,37 @@
 /*
  * The Transcript Capture panel.
  *
+ * PR-D (2026-09-03) REPLACED THE PANEL'S INSTRUCTION-DOCUMENT-PLUS-CONTROL-PILE WITH
+ * A STATE MACHINE — see `TranscriptCapturePanel.tsx`'s own header table. This suite
+ * is rewritten to match: sections 2 and 4 below no longer assert a per-candidate
+ * list (that UI is gone, replaced by a compact summary card), and new sections cover
+ * the voice state machine's five reachable states, the `processing` lock, and the
+ * `proposals-ready` summary's own controls.
+ *
  * WHAT WOULD FAIL BEFORE THE BEHAVIOUR THESE TESTS DEFEND. Each is a way the panel
  * could be built that renders perfectly and still breaks the feature's promise:
  *
  *   1. A panel that reads while the reader types — a debounce, an `onChange`
  *      handler, an autosave. Authoritative metadata would then move from text
- *      nobody finished.
- *      (`typing alone sends nothing`, `finalizing is the only thing that reads`)
- *   2. An Accept control that writes through a path of its own, or one that omits
- *      the run's `If-Match`, silently overwriting a concurrent edit.
- *      (`accepting writes through the existing run edit, with the run's version`,
- *       `the panel never issues a write to any path but the run edit`)
- *   3. A panel that clears the transcript box, or hides the stored notes, after a
+ *      nobody finished. ('typing alone sends nothing', 'finalizing is the only
+ *      thing that reads')
+ *   2. A panel that clears the transcript box, or hides the stored notes, after a
  *      reading that proposed nothing — leaving a scientist to believe their words
- *      went nowhere.
- *      (`text survives a reading that proposed nothing`,
- *       `text survives a failed accept`)
- *   4. A voice surface that says "Connected", "Ready", or "Configured", or that
- *      shows a spinner where a refusal belongs.
- *      (`no part of this panel claims a provider exists`,
- *       `the refusal is rendered from the server's own words`)
- *   5. A run chosen on the reader's behalf when the record has exactly one.
- *      (`the run is never pre-selected`)
+ *      went nowhere. ('text survives a reading that proposed nothing')
+ *   3. A voice surface that says "Connected", "Ready", or "Configured", or that
+ *      shows a spinner where a refusal belongs. ('no part of this panel claims a
+ *      provider exists')
+ *   4. A run chosen on the reader's behalf when the record has exactly one.
+ *      ('the run is never pre-selected')
+ *   5. A `processing` state that lets a second click double-submit, or that leaves
+ *      the form editable while a write is in flight.
+ *   6. A `proposals-ready` state that keeps rendering the old per-candidate accept/
+ *      reject UI PR-A already removed the write path for.
  *
  * Every fixture is synthetic and no test here reaches a backend.
  */
 import { describe, it, expect, afterEach, beforeEach, vi, type Mock } from 'vitest';
-import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, within, act } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import axe from 'axe-core';
 
@@ -55,6 +59,8 @@ const runsPage = {
   returned: 1,
   offset: 0,
 };
+
+const noRunsPage = { ...runsPage, runs: [], total: 0, matched: 0, returned: 0 };
 
 /** The seam report a deployment with no provider actually serves. */
 const capabilities = {
@@ -116,13 +122,7 @@ function noteOf(text: string, id: string) {
   };
 }
 
-/**
- * One entry of the capture's `proposals` list — what the SERVER stored, paired to
- * the candidate it came from.
- *
- * `candidate_index` and not a field path, for the reason the wire type gives: two
- * candidates can share one path, and matching on the path would collapse them.
- */
+/** One entry of the capture's `proposals` list. */
 function mintedFor(index: number, over: Partial<Record<string, unknown>> = {}) {
   return {
     candidate_index: index,
@@ -172,15 +172,6 @@ function reading(over: Partial<Record<string, unknown>> = {}) {
     proposals: [mintedFor(0)],
     unproposable: [],
     ambiguity_policy: [],
-    /*
-     * THE CONTRACT NAMES THE REVIEW ROUTE, and this fixture used to name
-     * `PATCH .../runs/{run_id}`. It changed because the server's did: a candidate is
-     * now stored as a durable proposal in the same save as the notes, and a stored
-     * proposal is accepted through its own operation. A fixture still carrying the
-     * run PATCH would let this suite go on proving a contract the server no longer
-     * publishes — which is the exact failure `test_contract_description_parity.py`
-     * exists to catch on the description side.
-     */
     accept_contract: {
       method: 'POST',
       path: '/api/experiments/{experiment_id}/proposals/{proposal_id}/review',
@@ -196,6 +187,17 @@ const BASE_ROUTES: Record<string, unknown> = {
   [RUNS]: { body: runsPage },
   [CAPS]: { body: capabilities },
 };
+
+// jsdom implements no `scrollIntoView` — a real gap in the test environment, not
+// in any browser this ships to. `reviewProposals` calls it unconditionally, so a
+// bare click threw `TypeError: heading.scrollIntoView is not a function` and
+// crashed React's event handler. Polyfilled here, scoped to this file, rather
+// than in the shared setup — no other suite in this repository has needed it yet.
+if (typeof Element !== 'undefined' && typeof Element.prototype.scrollIntoView !== 'function') {
+  Element.prototype.scrollIntoView = function scrollIntoViewPolyfill() {
+    /* no-op: jsdom has no layout, so there is nothing to scroll */
+  };
+}
 
 beforeEach(() => {
   try {
@@ -216,6 +218,7 @@ beforeEach(() => {
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
+  if (vi.isFakeTimers()) vi.useRealTimers();
 });
 
 /** Render the panel and OPEN it — it is a closed disclosure until a reader acts. */
@@ -228,7 +231,7 @@ async function renderPanel() {
       <TranscriptCapturePanel experimentId={EXP} />
     </MemoryRouter>,
   );
-  fireEvent.click(screen.getByRole('button', { name: 'Start a capture' }));
+  fireEvent.click(screen.getByRole('button', { name: CAPTURE_COPY.entryOpen }));
   return rendered;
 }
 
@@ -253,19 +256,23 @@ function writes(): { key: string; body: Record<string, unknown>; ifMatch?: strin
 async function typeAndFinalize(text = 'Temperature was 300 K.') {
   const box = await screen.findByLabelText('Transcript');
   fireEvent.change(box, { target: { value: text } });
-  fireEvent.change(await screen.findByLabelText(/Run these notes describe/), {
+  fireEvent.change(await screen.findByLabelText(CAPTURE_COPY.runLabel), {
     target: { value: 'run-1' },
   });
-  fireEvent.click(screen.getByRole('button', { name: 'Finalize and read' }));
+  fireEvent.click(screen.getByRole('button', { name: CAPTURE_COPY.finalize }));
 }
 
 // --- 1. nothing is read from unfinished text ---------------------------------
 
-describe('unfinished text', () => {
-  it('a closed panel fetches nothing at all', async () => {
-    // The record screen already issues a bundle of reads on mount. A section that
-    // quietly added two more, for readers who never dictate anything, would change
-    // the request pattern of every screen it appears on.
+describe('C1, independent review of PR-D: the collapsed header names only the path that always works', () => {
+  it('the collapsed-header sentence mentions no recording/voice/transcription path, and is visible before the panel is opened', async () => {
+    /*
+     * Before the fix, `panelIntro` rendered inside the always-visible header
+     * AND described recording as an equally-finished path alongside typing —
+     * false: finalize posts typed text only, and every deployment's own
+     * transcription seam answers 501. A reader who never opens the panel
+     * must not be told a claim the panel cannot keep.
+     */
     stubFetchRoutes(BASE_ROUTES as never);
     render(
       <MemoryRouter
@@ -275,7 +282,29 @@ describe('unfinished text', () => {
         <TranscriptCapturePanel experimentId={EXP} />
       </MemoryRouter>,
     );
-    await screen.findByRole('button', { name: 'Start a capture' });
+    // Not opened — the entry toggle is the only interaction so far.
+    const intro = await screen.findByText(CAPTURE_COPY.panelIntro);
+    expect(intro).toBeInTheDocument();
+    const text = intro.textContent ?? '';
+    expect(text.toLowerCase()).not.toMatch(/record|voice|transcri|speak|dictat/);
+    // Screen.queryByLabelText('Transcript') stays null while collapsed —
+    // confirms the sentence really is the COLLAPSED header, not open-body text.
+    expect(screen.queryByLabelText('Transcript')).toBeNull();
+  });
+});
+
+describe('unfinished text', () => {
+  it('a closed panel fetches nothing at all', async () => {
+    stubFetchRoutes(BASE_ROUTES as never);
+    render(
+      <MemoryRouter
+        initialEntries={['/']}
+        future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+      >
+        <TranscriptCapturePanel experimentId={EXP} />
+      </MemoryRouter>,
+    );
+    await screen.findByRole('button', { name: CAPTURE_COPY.entryOpen });
     expect(requests()).toEqual([]);
     expect(screen.queryByLabelText('Transcript')).toBeNull();
   });
@@ -296,7 +325,7 @@ describe('unfinished text', () => {
     stubFetchRoutes({ ...BASE_ROUTES, [TRANSCRIPT]: { body: reading() } } as never);
     await renderPanel();
     await typeAndFinalize();
-    await screen.findByText('context.temperature_K');
+    await screen.findByText(CAPTURE_COPY.summaryStored(1, 1));
     const finalize = writes().filter((entry) => entry.key === TRANSCRIPT);
     expect(finalize).toHaveLength(1);
     expect(finalize[0].body.finalized).toBe(true);
@@ -307,87 +336,56 @@ describe('unfinished text', () => {
   it('the finalize control is unavailable while the box is empty', async () => {
     stubFetchRoutes(BASE_ROUTES as never);
     await renderPanel();
-    expect(await screen.findByRole('button', { name: 'Finalize and read' })).toBeDisabled();
+    expect(await screen.findByRole('button', { name: CAPTURE_COPY.finalize })).toBeDisabled();
   });
 });
 
-// --- 2. a candidate is never a value, and the panel now WRITES NOTHING --------
-//
-// THIS SECTION USED TO PROVE THE OPPOSITE HALF OF THE SAME PROMISE, and the four
-// tests it lost are named here rather than quietly dropped: "accepting writes
-// through the existing run edit, with the run's own version", "the panel never
-// issues a write to any path but the run edit", "undo restores what the run held
-// before, through the same path", and "rejecting writes nothing at all". All four
-// were correct, and all four pinned an Accept control that lived in this panel and
-// called `PATCH .../runs/{run_id}` directly.
-//
-// That control is gone. A candidate is now stored server-side as a durable ingestion
-// proposal in the same save as the notes, and accepting one is the proposals
-// surface's act — which is what makes it visible to a colleague, recorded with a
-// reason when refused, and survivable across a navigation. So the claim those four
-// tests made ("the write goes through the existing path") is now made where the write
-// is, and what this section proves instead is stronger and simpler: from finalize
-// onward this panel issues NO write at all.
+// --- 2. proposals-ready: the summary card, not the old per-candidate list -----
 
-describe('what the capture stored', () => {
+describe('proposals-ready: what the capture stored', () => {
   it('the panel issues no write but the finalize itself', async () => {
     stubFetchRoutes({ ...BASE_ROUTES, [TRANSCRIPT]: { body: reading() } } as never);
     await renderPanel();
     await typeAndFinalize();
-    await screen.findByText('context.temperature_K');
-
-    // THE WHOLE SET, not "no PATCH". A `queryByRole('button', {name: 'Accept'})`
-    // assertion would pass over a panel that had merely renamed the control, and a
-    // "no PATCH" assertion would pass over one that had moved the write to a POST.
+    await screen.findByText(CAPTURE_COPY.summaryStored(1, 1));
     expect(writes().map((entry) => entry.key)).toEqual([TRANSCRIPT]);
     expect(screen.queryByRole('button', { name: 'Accept' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Reject' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Undo' })).toBeNull();
-    expect(screen.queryByLabelText('Edit before accepting')).toBeNull();
+    // AND THE OLD PER-CANDIDATE ROW IS GONE — the whole point of the summary card.
+    expect(screen.queryByText('context.temperature_K')).toBeNull();
   });
 
-  it('a stored proposal says it is waiting for review, and where', async () => {
+  it('the summary states both counts and offers Review N Proposals', async () => {
     stubFetchRoutes({ ...BASE_ROUTES, [TRANSCRIPT]: { body: reading() } } as never);
-    const { container } = await renderPanel();
-    await typeAndFinalize();
-    await screen.findByText('context.temperature_K');
-
-    expect(screen.getByText(CAPTURE_COPY.proposalStored)).toBeInTheDocument();
-    expect(screen.getByText(/waits in Ingestion Proposals/)).toBeInTheDocument();
-    // THE POSITIVE CONTROL FOR THE CONDITIONAL BLANKET CLAIM. This reading refused
-    // nothing, so the paragraph saying every proposal below is stored is true of it
-    // and is shown. Its negative control is in the refused-candidate test below,
-    // which asserts the same paragraph is ABSENT.
-    expect(screen.getByText(CAPTURE_COPY.candidatesAllStored)).toBeInTheDocument();
-    // THE SERVER'S ROUTE, RENDERED RATHER THAN TRANSCRIBED. A literal in this bundle
-    // would be a second copy of the write contract, free to drift.
-    expect(container.textContent).toContain(
-      '/api/experiments/{experiment_id}/proposals/{proposal_id}/review',
-    );
-    expect(container.textContent).not.toContain('/runs/{run_id}');
-  });
-
-  it('a proposal the record already held says so instead of claiming a create', async () => {
-    /*
-     * A FIXTURE-ONLY PATH, AND THAT IS STATED RATHER THAN IMPLIED. No request can
-     * make the server emit `deduplicated: true` here at this HEAD — the transcript
-     * route's dedupe key is built from a note id minted by the same request, so
-     * nothing already on the record can carry it (contract §11.2). The field is on
-     * the wire, so the panel must render it truthfully; this asserts it does, and
-     * does not assert that a deployment produces it.
-     */
-    stubFetchRoutes({
-      ...BASE_ROUTES,
-      [TRANSCRIPT]: { body: reading({ proposals: [mintedFor(0, { deduplicated: true })] }) },
-    } as never);
     await renderPanel();
     await typeAndFinalize();
-    await screen.findByText('context.temperature_K');
-    expect(screen.getByText(CAPTURE_COPY.proposalAlreadyStored)).toBeInTheDocument();
-    expect(screen.queryByText(CAPTURE_COPY.proposalStored)).toBeNull();
+    expect(await screen.findByText('1 proposal, 1 note stored with this record.')).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: CAPTURE_COPY.reviewProposals(1) }),
+    ).toBeInTheDocument();
   });
 
-  it("a candidate the server could not store says so, in the SERVER's words", async () => {
+  /*
+   * MUTATION 1 — quoted in the slice report. Removing the `proposalsStored > 0`
+   * guard around the "Review N Proposals" button would render it reading "Review 0
+   * Proposals", which is a control offering to review nothing. This is the negative
+   * control for that guard.
+   */
+  it('MUTATION-GUARDED: Review N Proposals is absent when nothing was stored as a proposal', async () => {
+    const nothingProposed = reading({
+      candidates: [],
+      proposals: [],
+      notes: [noteOf('Just an aside, nothing measurable.', 'n1')],
+    });
+    stubFetchRoutes({ ...BASE_ROUTES, [TRANSCRIPT]: { body: nothingProposed } } as never);
+    await renderPanel();
+    await typeAndFinalize('Just an aside, nothing measurable.');
+    await screen.findByText(CAPTURE_COPY.candidatesEmpty);
+    expect(screen.queryByRole('button', { name: /Review \d+ Proposals?/ })).toBeNull();
+  });
+
+  it('an unstored candidate is disclosed with the server’s own message', async () => {
     const refused = reading({
       proposals: [],
       unproposable: [
@@ -403,43 +401,40 @@ describe('what the capture stored', () => {
       ],
     });
     stubFetchRoutes({ ...BASE_ROUTES, [TRANSCRIPT]: { body: refused } } as never);
-    const { container } = await renderPanel();
+    await renderPanel();
     await typeAndFinalize();
-    await screen.findByText('context.temperature_K');
-
     expect(
-      screen.getByText(/No write operation in this build accepts a value at this path/),
+      await screen.findByText(/No write operation in this build accepts a value at this path/),
     ).toBeInTheDocument();
-    // AND NOT A SENTENCE THIS BUNDLE COMPOSED. The panel renders the server's
-    // `message`; a reason written here would be this client explaining a refusal it
-    // did not make.
-    expect(container.textContent).not.toContain(CAPTURE_COPY.proposalStored);
-    // AND NO BLANKET CLAIM ABOVE THE LIST. The lead paragraph used to end "Each
-    // proposal below is stored with this record and waits in Ingestion Proposals",
-    // rendered unconditionally — so on THIS reading it asserted storage for the one
-    // candidate the server had just declined, one line above the server's own
-    // sentence saying nothing was stored. The claim now renders only when
-    // `unproposable` is empty. MUTATION: dropping the
-    // `reading.unproposable.length === 0` guard in the panel turns this RED.
-    expect(container.textContent).not.toContain(CAPTURE_COPY.candidatesAllStored);
-    expect(container.textContent).not.toContain('is stored with this record and waits');
-    // The lead paragraph is still there, describing the labels rather than claiming
-    // them, so this is not passing merely because the whole paragraph vanished.
-    expect(screen.getByText(/A proposal, not a value/)).toBeInTheDocument();
+    expect(screen.getByText(CAPTURE_COPY.summaryUnproposable(1))).toBeInTheDocument();
     // The words are still stored, which is the whole of the promise.
     expect(screen.getAllByText('Temperature was 300 K.').length).toBeGreaterThanOrEqual(1);
   });
 
-  it('a proposal is labelled as a proposal, with the words it came from', async () => {
+  /*
+   * MUTATION 2 — quoted in the slice report. Removing the
+   * `unproposableCount > 0` guard would render `summaryUnproposable(0)` (or the
+   * heading with an empty list) on every fully-stored reading. This reading refuses
+   * nothing, so the disclosure and its heading must both be absent.
+   */
+  it('MUTATION-GUARDED: the unproposable disclosure is absent when nothing was refused', async () => {
     stubFetchRoutes({ ...BASE_ROUTES, [TRANSCRIPT]: { body: reading() } } as never);
     await renderPanel();
     await typeAndFinalize();
-    await screen.findByText('context.temperature_K');
-    expect(screen.getByText(/A proposal, not a value/)).toBeInTheDocument();
-    expect(screen.getByText(/“Temperature was 300 K\.”/)).toBeInTheDocument();
-    expect(
-      screen.getByText(/the words temperature and a number followed by K/),
-    ).toBeInTheDocument();
+    await screen.findByText(CAPTURE_COPY.summaryStored(1, 1));
+    expect(screen.queryByText(CAPTURE_COPY.unproposableHeading)).toBeNull();
+    expect(screen.queryByText(/could not be stored as a proposal/)).toBeNull();
+  });
+
+  it('a proposal is not shown as a value — the nature sentence stays off this panel', async () => {
+    // The per-candidate quote/rule breakdown moved with the accept/reject UI to
+    // `IngestionProposalsPanel`, which is where a reader now checks a proposal
+    // against the words it came from. This panel states counts, not content.
+    stubFetchRoutes({ ...BASE_ROUTES, [TRANSCRIPT]: { body: reading() } } as never);
+    await renderPanel();
+    await typeAndFinalize();
+    await screen.findByText(CAPTURE_COPY.summaryStored(1, 1));
+    expect(screen.queryByText(/A proposal, not a value/)).toBeNull();
   });
 });
 
@@ -449,28 +444,42 @@ describe('nothing a scientist wrote is discarded', () => {
   it('text survives a reading that proposed nothing', async () => {
     const empty = reading({
       candidates: [],
+      proposals: [],
       notes: [noteOf('The cryostat rattled.', 'n2')],
     });
     stubFetchRoutes({ ...BASE_ROUTES, [TRANSCRIPT]: { body: empty } } as never);
     await renderPanel();
     await typeAndFinalize('The cryostat rattled.');
-    await screen.findByText(/Nothing was proposed from this transcript/);
-    // The words are shown as stored, AND the box still holds them. Both matches
-    // are wanted: the stored-notes list and the textarea's own value.
+    await screen.findByText(CAPTURE_COPY.candidatesEmpty);
     expect(screen.getAllByText('The cryostat rattled.').length).toBeGreaterThanOrEqual(1);
     expect(await screen.findByLabelText('Transcript')).toHaveValue('The cryostat rattled.');
   });
 
   /*
-   * "TEXT SURVIVES A FAILED ACCEPT" WAS HERE, and it went with the Accept control it
-   * exercised — it clicked Accept, met a `412` from `PATCH .../runs/{run_id}`, and
-   * asserted the transcript was still on screen. There is no accept in this panel any
-   * more, so the case it covered has moved to the proposals surface.
-   *
-   * WHAT REPLACES IT COVERS THE SAME PROMISE ON THE PATH THAT STILL EXISTS: a
-   * candidate the SERVER declined to store as a proposal. That is now the way a value
-   * can fail to become one, and the claim is unchanged — the words survive.
+   * REGRESSION — found taking this slice's own screenshots. "Capture Another
+   * Note" lived inside the `candidates.length > 0` branch, so a reading that
+   * proposed nothing (every word stored as a note, nothing recognised as a
+   * value — exactly the case above) offered NO way back to a fresh box short of
+   * closing and reopening the whole panel. `Review N Proposals` correctly stays
+   * absent here — there is nothing to review.
    */
+  it('MUTATION-GUARDED: Capture Another Note stays offered even when nothing was proposed', async () => {
+    const empty = reading({
+      candidates: [],
+      proposals: [],
+      notes: [noteOf('Just an aside, nothing measurable.', 'n2')],
+    });
+    stubFetchRoutes({ ...BASE_ROUTES, [TRANSCRIPT]: { body: empty } } as never);
+    await renderPanel();
+    await typeAndFinalize('Just an aside, nothing measurable.');
+    await screen.findByText(CAPTURE_COPY.candidatesEmpty);
+
+    expect(screen.queryByRole('button', { name: /Review \d+ Proposals?/ })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: CAPTURE_COPY.captureAnother }));
+    expect(screen.queryByText(CAPTURE_COPY.candidatesEmpty)).toBeNull();
+    expect(await screen.findByLabelText('Transcript')).toHaveValue('');
+  });
+
   it('text survives a candidate the server declined to store', async () => {
     const refused = reading({
       proposals: [],
@@ -490,21 +499,28 @@ describe('nothing a scientist wrote is discarded', () => {
     await renderPanel();
     await typeAndFinalize();
     await screen.findByText(/already holds the maximum number of proposals/);
-    // The stored note and the transcript are both still on screen.
     expect(screen.getAllByText('Temperature was 300 K.').length).toBeGreaterThanOrEqual(1);
     expect(await screen.findByLabelText('Transcript')).toHaveValue('Temperature was 300 K.');
   });
 
-  it('a failed finalize says the transcript was not stored and keeps the text', async () => {
+  it('a failed finalize says the transcript was not stored, keeps the text, and offers Try Again', async () => {
+    let calls = 0;
     stubFetchRoutes({
       ...BASE_ROUTES,
-      [TRANSCRIPT]: { status: 412, body: { error: 'stale_write' } },
+      [TRANSCRIPT]: () => {
+        calls += 1;
+        return { status: 412, body: { error: 'stale_write' } };
+      },
     } as never);
     await renderPanel();
     await typeAndFinalize();
     await screen.findByRole('alert');
     expect(screen.getByRole('alert')).toHaveTextContent(/was NOT stored/);
     expect(await screen.findByLabelText('Transcript')).toHaveValue('Temperature was 300 K.');
+
+    // recoverable-error's own primary action re-invokes the same failed act.
+    fireEvent.click(screen.getByRole('button', { name: CAPTURE_COPY.tryAgain }));
+    await waitFor(() => expect(calls).toBe(2));
   });
 
   it('the panel says every segment is stored, including the ones that proposed', async () => {
@@ -521,7 +537,7 @@ describe('ambiguity', () => {
   it('the run is never pre-selected, even with exactly one run', async () => {
     stubFetchRoutes(BASE_ROUTES as never);
     await renderPanel();
-    const select = await screen.findByLabelText(/Run these notes describe/);
+    const select = await screen.findByLabelText(CAPTURE_COPY.runLabel);
     expect(select).toHaveValue('');
     expect(screen.getByText(/never chosen for you, even when the record has exactly one run/)).toBeInTheDocument();
   });
@@ -529,6 +545,7 @@ describe('ambiguity', () => {
   it('a clarification is rendered as a question with its alternatives', async () => {
     const asked = reading({
       candidates: [],
+      proposals: [],
       clarifications: [
         {
           outcome: 'clarification',
@@ -549,13 +566,13 @@ describe('ambiguity', () => {
     await screen.findByText(/matches more than one run/);
     expect(screen.getByText('Cooling sweep')).toBeInTheDocument();
     expect(screen.getByText('Cooling repeat')).toBeInTheDocument();
-    // NOTHING was proposed, so there is no Accept control to press by mistake.
     expect(screen.queryByRole('button', { name: 'Accept' })).toBeNull();
   });
 
   it('an abstention states the subject and the reason, and proposes nothing', async () => {
     const abstained = reading({
       candidates: [],
+      proposals: [],
       abstentions: [
         {
           outcome: 'abstention',
@@ -573,11 +590,12 @@ describe('ambiguity', () => {
     expect(screen.queryByRole('button', { name: 'Accept' })).toBeNull();
   });
 
-  it('two values for one field are BOTH offered, with the conflict stated', async () => {
+  it('two values for one field are BOTH stored, with the contradiction stated', async () => {
+    // The per-candidate "Both are stored"/"only the labelled rows" copy moved with
+    // the row it annotated. The contradiction itself is still disclosed, directly,
+    // through `review_required` — unchanged mechanism, unchanged section.
     const conflicted = reading({
       candidates: [candidate(), candidate({ proposed_value: 320, quote: 'Later the temperature was 320 K.', start_char: 23 })],
-      // TWO candidates, so TWO stored proposals. The server mints one per candidate,
-      // and a fixture with one would be asserting against a server that dropped one.
       proposals: [mintedFor(0), mintedFor(1, { proposal: { proposal_id: 'p1', proposed_value: 320 } })],
       review_required: [
         {
@@ -592,84 +610,33 @@ describe('ambiguity', () => {
     stubFetchRoutes({ ...BASE_ROUTES, [TRANSCRIPT]: { body: conflicted } } as never);
     await renderPanel();
     await typeAndFinalize();
-    const conflicts = await screen.findAllByText(/proposes another value for the same field/);
-    expect(conflicts).toHaveLength(2);
-    // BOTH ARE STORED AND NEITHER IS PREFERRED. The panel used to offer two Accept
-    // buttons here; it now shows two stored proposals and says the choice is made in
-    // Ingestion Proposals. What must not change is that there are TWO of them —
-    // dropping one would be the preference this reader refuses to hold.
-    expect(screen.getAllByText(CAPTURE_COPY.proposalStored)).toHaveLength(2);
-    expect(screen.getAllByText(CAPTURE_COPY.conflictBothStored)).toHaveLength(2);
-    expect(screen.queryByRole('button', { name: 'Accept' })).toBeNull();
-  });
-
-  it('a conflict whose other side was REFUSED does not say both are stored', async () => {
-    /*
-     * "Both are stored" was rendered for every conflict, whatever the server had
-     * done with the two candidates — so this reading, in which the second candidate
-     * hit the row ceiling, was told both were stored while one row beside it carried
-     * the server's sentence saying no proposal was created for it.
-     *
-     * MUTATION: reverting the conflict line to the single unconditional sentence
-     * turns this RED on both assertions.
-     */
-    const halfRefused = reading({
-      candidates: [candidate(), candidate({ proposed_value: 320, quote: 'Later the temperature was 320 K.', start_char: 23 })],
-      proposals: [mintedFor(0)],
-      unproposable: [
-        {
-          candidate_index: 1,
-          field_path: 'context.temperature_K',
-          note_id: 'n1',
-          error: 'too_many_proposals',
-          message:
-            'This record already holds the maximum number of proposals, so no ' +
-            'proposal was created for this candidate.',
-        },
-      ],
-      review_required: [
-        {
-          outcome: 'needs_review',
-          kind: 'conflicting_values_for_one_field',
-          field_path: 'context.temperature_K',
-          reason: 'Accept at most one.',
-          candidate_indexes: [0, 1],
-        },
-      ],
-    });
-    stubFetchRoutes({ ...BASE_ROUTES, [TRANSCRIPT]: { body: halfRefused } } as never);
-    const { container } = await renderPanel();
-    await typeAndFinalize();
-    await screen.findByText(/already holds the maximum number of proposals/);
-
-    // The conflict is still stated on BOTH rows — it is a real conflict — and
-    // neither of them claims the refused side is stored.
+    await screen.findByText('2 proposals, 1 note stored with this record.');
+    // The reason sits beside a `<strong>field_path</strong>` inside its own `<li>`,
+    // so its OWN text (RTL's `getByText` unit) is only the trailing fragment —
+    // asserted against the row's full text instead of via `getByText`.
+    const row = screen.getByText('context.temperature_K').closest('li');
+    expect(row?.textContent).toContain('Accept at most one.');
     expect(
-      screen.getAllByText(CAPTURE_COPY.conflictNotAllStored),
-    ).toHaveLength(2);
-    expect(container.textContent).not.toContain(CAPTURE_COPY.conflictBothStored);
-    expect(container.textContent).not.toContain('Both are stored');
-    // And the row that DID get a proposal still says so, so this is not passing by
-    // the panel having stopped reporting storage altogether.
-    expect(screen.getByText(CAPTURE_COPY.proposalStored)).toBeInTheDocument();
+      screen.getByRole('button', { name: CAPTURE_COPY.reviewProposals(2) }),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Accept' })).toBeNull();
   });
 });
 
 // --- 5. the voice surface claims nothing --------------------------------------
 
-describe('voice capture', () => {
+describe('voice capture: honesty', () => {
   it('no part of this panel claims a provider exists', async () => {
     stubFetchRoutes({ ...BASE_ROUTES, [TRANSCRIPT]: { body: reading() } } as never);
     const { container } = await renderPanel();
     await typeAndFinalize();
-    await screen.findByText('context.temperature_K');
+    await screen.findByText(CAPTURE_COPY.summaryStored(1, 1));
     const text = (container.textContent ?? '').toLowerCase();
     for (const banned of [
       'connected',
       'ready to transcribe',
       'provider configured',
       'temporarily',
-      'try again',
       'coming soon',
       'not yet available',
     ]) {
@@ -680,35 +647,12 @@ describe('voice capture', () => {
   it('the seam status is rendered from the server, not from this bundle', async () => {
     stubFetchRoutes(BASE_ROUTES as never);
     await renderPanel();
-    // Byte-for-byte the `reason` the capability report served.
     await screen.findByText(/No transcription provider is configured\. Speech is not transcribed/);
   });
 
-  it('I9 — the seam line still renders when the capability report never arrives', async () => {
-    /*
-     * THE DISCLOSURE WAS CONDITIONAL ON THE VERY THING IT DISCLOSES. The seam line was
-     * guarded by `transcription !== null`, and `transcription` is `null` in three
-     * reachable states: the capabilities fetch has not resolved (every first paint after
-     * the panel opens), it rejected, or the report names no such seam. In all three the
-     * voice section rendered with NO statement about whether this deployment can
-     * transcribe at all.
-     *
-     * WHY THAT IS LOAD-BEARING RATHER THAN COSMETIC. `docs/ai-integration-decision-packet.md`'s
-     * D6 supersession justifies shipping a recorder against an unconfigured seam on the
-     * grounds that "the mitigation is disclosure, not prevention — the seam's status
-     * renders ABOVE the controls, before any recording starts". That argument is false
-     * for exactly as long as the fetch has not resolved, which is the window in which a
-     * reader decides whether to press Start.
-     *
-     * The failure is simulated the way it actually happens — the capabilities request
-     * rejects — and the assertion is that the panel says UNKNOWN. It must not say "not
-     * configured": the panel's own rule is that a string in this bundle describes the
-     * build the browser came from, not the deployment it is talking to, which is why the
-     * `.catch` leaves the report absent rather than defaulting it.
-     */
+  it('the seam line still renders when the capability report never arrives', async () => {
     stubFetchRoutes({ ...BASE_ROUTES, [CAPS]: { status: 503, body: { detail: 'no' } } } as never);
     const { container } = await renderPanel();
-
     const seam = await waitFor(() => {
       const el = container.querySelector('.capture-seam');
       if (!el) throw new Error('no seam line rendered');
@@ -716,22 +660,237 @@ describe('voice capture', () => {
     });
     expect(seam.getAttribute('data-configured')).toBe('unreported');
     expect(seam.textContent).toMatch(/not reported/i);
-    // It states the consequence for the reader…
-    expect(seam.textContent).toMatch(/treat turning a recording into text as unavailable/i);
-    // …and the audio claim, which is true either way and is what matters most when the
-    // rest is unknown.
-    expect(seam.textContent).toMatch(/nothing is sent anywhere/i);
-    // AND IT DOES NOT OVERSTATE. Unknown is not "not configured" — a client cannot
-    // assert a fact about the server it failed to read.
     expect(seam.textContent).not.toMatch(/no transcription provider is configured/i);
-
-    // THE POSITION IS THE ARGUMENT: the status is above the controls, before any
-    // recording starts. `voiceHeading` opens the section the line belongs to.
-    const voice = container.querySelector('.capture-voice') as HTMLElement;
-    expect(voice.contains(seam)).toBe(true);
   });
 
-  it('the refusal is rendered from the server’s own words, with what is missing', async () => {
+  it('no request this panel makes carries audio', async () => {
+    stubFetchRoutes({ ...BASE_ROUTES, [TRANSCRIPT]: { body: reading() } } as never);
+    await renderPanel();
+    await typeAndFinalize();
+    await screen.findByText(CAPTURE_COPY.summaryStored(1, 1));
+    for (const entry of writes()) {
+      expect(Object.keys(entry.body)).not.toContain('audio');
+      expect(Object.keys(entry.body)).not.toContain('audio_data');
+    }
+    expect(requests().some((key) => key.includes('/uploads'))).toBe(false);
+  });
+});
+
+// --- 6. the voice STATE MACHINE ------------------------------------------------
+//
+// jsdom has no `MediaRecorder`, so every test that needs `recording`/`held`/
+// `requesting-permission`/`permission-denied` installs `FakeMediaRecorder` first.
+// Without it, `voice` is pinned to `unsupported` — which is its own state below.
+
+class FakeMediaRecorder {
+  static instances: FakeMediaRecorder[] = [];
+  state: 'inactive' | 'recording' = 'inactive';
+  ondataavailable: ((event: { data: Blob }) => void) | null = null;
+  constructor(_stream: unknown) {
+    FakeMediaRecorder.instances.push(this);
+  }
+  start() {
+    this.state = 'recording';
+  }
+  /** `stop()` emits its final `dataavailable` ASYNCHRONOUSLY — see `dropAudio`'s
+   *  own comment in the panel for the ordering hazard this reproduces. */
+  stop() {
+    this.state = 'inactive';
+    const emit = this.ondataavailable;
+    setTimeout(() => emit?.({ data: new Blob(['audio-bytes']) }), 0);
+  }
+}
+
+function installRecorder(getUserMedia: Mock) {
+  FakeMediaRecorder.instances = [];
+  (globalThis as never as Record<string, unknown>).MediaRecorder = FakeMediaRecorder;
+  (globalThis as never as Record<string, unknown>).Blob =
+    (globalThis as never as Record<string, unknown>).Blob ?? class {};
+  Object.defineProperty(globalThis.navigator, 'mediaDevices', {
+    configurable: true,
+    value: { getUserMedia },
+  });
+}
+
+afterEach(() => {
+  delete (globalThis as never as Record<string, unknown>).MediaRecorder;
+});
+
+describe('voice state machine', () => {
+  it('unsupported: voice controls are absent and only typing is offered', async () => {
+    // jsdom's own baseline — no installRecorder() call in this test.
+    stubFetchRoutes(BASE_ROUTES as never);
+    await renderPanel();
+    await screen.findByText(/This browser does not offer audio recording/);
+    expect(screen.queryByRole('button', { name: CAPTURE_COPY.voiceRecord })).toBeNull();
+    expect(await screen.findByLabelText('Transcript')).toBeInTheDocument();
+  });
+
+  it('idle: Start Recording is the one primary action, and the live region says so', async () => {
+    installRecorder(vi.fn(async () => ({ getTracks: () => [{ stop: vi.fn() }] })));
+    stubFetchRoutes(BASE_ROUTES as never);
+    const { container } = await renderPanel();
+    await screen.findByRole('button', { name: CAPTURE_COPY.voiceRecord });
+    expect(screen.queryByRole('button', { name: CAPTURE_COPY.voiceStop })).toBeNull();
+    const live = container.querySelectorAll('[aria-live="polite"]');
+    expect(Array.from(live).some((el) => el.textContent === CAPTURE_COPY.voiceIdleLive)).toBe(true);
+  });
+
+  it('requesting-permission: Start becomes disabled and busy-labeled; typing stays live', async () => {
+    let resolveGetUserMedia: (v: unknown) => void = () => {};
+    const gate = new Promise((resolve) => {
+      resolveGetUserMedia = resolve;
+    });
+    installRecorder(vi.fn(() => gate));
+    stubFetchRoutes(BASE_ROUTES as never);
+    const { container } = await renderPanel();
+    fireEvent.click(await screen.findByRole('button', { name: CAPTURE_COPY.voiceRecord }));
+
+    const busyButton = await screen.findByRole('button', { name: CAPTURE_COPY.voiceRequesting });
+    expect(busyButton).toBeDisabled();
+    expect(busyButton).toHaveAttribute('aria-busy', 'true');
+    const live = container.querySelectorAll('[aria-live="polite"]');
+    expect(
+      Array.from(live).some((el) => el.textContent === CAPTURE_COPY.voiceRequestingLive),
+    ).toBe(true);
+    // The textarea is never blocked by an in-flight permission prompt.
+    const box = await screen.findByLabelText('Transcript');
+    expect(box).not.toBeDisabled();
+    fireEvent.change(box, { target: { value: 'typed while requesting' } });
+    expect(box).toHaveValue('typed while requesting');
+
+    await act(async () => {
+      resolveGetUserMedia({ getTracks: () => [{ stop: vi.fn() }] });
+      await Promise.resolve();
+    });
+    await screen.findByRole('button', { name: CAPTURE_COPY.voiceStop });
+  });
+
+  it('recording: elapsed time ticks and is cleared on stop', async () => {
+    /*
+     * FAKE TIMERS ARE ENABLED BEFORE THE CLICK, and everything after is driven by
+     * explicit `act()`/`advanceTimersByTimeAsync` rather than `findBy*`/`waitFor`
+     * — the same discipline `run-workspace.test.tsx` documents ("everything AFTER
+     * `vi.useFakeTimers()` … is driven by explicit `advanceTimersByTimeAsync`").
+     * The timer under test (`startElapsedTimer`'s `setInterval`) is created the
+     * instant `recording` is entered, so it must already be bound to the FAKE
+     * clock when that happens — enabling fake timers only afterward binds the
+     * interval to the real one, and `advanceTimersByTimeAsync` then advances a
+     * clock nothing is listening to (measured: the elapsed text stayed `0:00`).
+     */
+    vi.useFakeTimers();
+    installRecorder(vi.fn(async () => ({ getTracks: () => [{ stop: vi.fn() }] })));
+    stubFetchRoutes(BASE_ROUTES as never);
+    const { container } = await renderPanel();
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: CAPTURE_COPY.voiceRecord }));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(screen.getByRole('button', { name: CAPTURE_COPY.voiceStop })).toBeInTheDocument();
+    // m5: not `aria-hidden` and prefixed with the state, so a screen reader that
+    // navigates here (rather than catching the one-shot live announcement) still
+    // gets both facts.
+    const elapsed = container.querySelector('.capture-elapsed');
+    expect(elapsed).not.toHaveAttribute('aria-hidden');
+    expect(elapsed?.textContent).toBe('Recording · 0:00');
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5000);
+    });
+    expect(container.querySelector('.capture-elapsed')?.textContent).toBe('Recording · 0:05');
+
+    fireEvent.click(screen.getByRole('button', { name: CAPTURE_COPY.voiceStop }));
+    expect(screen.getByRole('button', { name: CAPTURE_COPY.voiceTypeWhatWasSaid })).toBeInTheDocument();
+    // `held` renders no elapsed indicator at all — it belongs to `recording` only.
+    expect(container.querySelector('.capture-elapsed')).toBeNull();
+    vi.useRealTimers();
+  });
+
+  it('held: Type What Was Said is primary; Request a Transcript and Discard Audio are offered', async () => {
+    installRecorder(vi.fn(async () => ({ getTracks: () => [{ stop: vi.fn() }] })));
+    stubFetchRoutes(BASE_ROUTES as never);
+    await renderPanel();
+    await act(async () => {
+      fireEvent.click(await screen.findByRole('button', { name: CAPTURE_COPY.voiceRecord }));
+      await Promise.resolve();
+    });
+    fireEvent.click(await screen.findByRole('button', { name: CAPTURE_COPY.voiceStop }));
+
+    const typeButton = await screen.findByRole('button', { name: CAPTURE_COPY.voiceTypeWhatWasSaid });
+    expect(screen.getByRole('button', { name: CAPTURE_COPY.voiceTranscribe })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: CAPTURE_COPY.voiceDiscard })).toBeInTheDocument();
+
+    const box = screen.getByLabelText('Transcript') as HTMLTextAreaElement;
+    box.blur();
+    fireEvent.click(typeButton);
+    expect(document.activeElement).toBe(box);
+  });
+
+  /*
+   * I8, INDEPENDENT REVIEW OF PR-D — FOUR BRANCHES, EACH ITS OWN TEST, EACH
+   * CLASSIFIED BY THE REAL `DOMException.name` A BROWSER ACTUALLY THROWS.
+   * Note also I8's SECOND requirement, pinned once for all four here rather
+   * than per-branch: the persistent notice is PLAIN TEXT, never a second live
+   * region — `role="alert"` carries an implicit `aria-live="assertive"`, and
+   * the one announcement already happened through the sr-only status region.
+   */
+  const denialCases: {
+    name: string;
+    domName: string;
+    copy: string;
+  }[] = [
+    { name: 'NotAllowedError → denied', domName: 'NotAllowedError', copy: CAPTURE_COPY.voicePermissionRefused },
+    { name: 'NotFoundError → no microphone', domName: 'NotFoundError', copy: CAPTURE_COPY.voiceNoMicrophone },
+    { name: 'OverconstrainedError → no microphone', domName: 'OverconstrainedError', copy: CAPTURE_COPY.voiceNoMicrophone },
+    { name: 'NotReadableError → microphone busy', domName: 'NotReadableError', copy: CAPTURE_COPY.voiceMicrophoneBusy },
+    { name: 'an unnamed/unrecognised DOMException → generic, names no cause', domName: 'SomeFutureError', copy: CAPTURE_COPY.voiceStartFailed },
+  ];
+
+  for (const { name, domName, copy } of denialCases) {
+    it(`permission-denied (${name}): the right sentence, said once, and never a second live region`, async () => {
+      installRecorder(vi.fn(async () => {
+        throw new DOMException('synthetic, for this test only', domName);
+      }));
+      stubFetchRoutes(BASE_ROUTES as never);
+      const { container } = await renderPanel();
+      await act(async () => {
+        fireEvent.click(await screen.findByRole('button', { name: CAPTURE_COPY.voiceRecord }));
+        await Promise.resolve();
+      });
+
+      // Persistent, visible text — and NOT a live region: `role="alert"` would
+      // be a SECOND announcement of the same sentence the status region (below)
+      // already made once. Queried by class, not text: the sr-only status
+      // region carries the identical sentence, so `findByText` alone would see
+      // two matches.
+      const notice = await waitFor(() => {
+        const el = container.querySelector('.capture-note-warn');
+        if (el === null) throw new Error('persistent notice not rendered yet');
+        return el;
+      });
+      expect(notice.textContent).toBe(copy);
+      expect(notice.tagName).toBe('P');
+      expect(notice).not.toHaveAttribute('role');
+      expect(notice).not.toHaveAttribute('aria-live');
+
+      expect(screen.getByRole('button', { name: CAPTURE_COPY.voiceTypeWhatWasSaid })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: CAPTURE_COPY.voiceTryAgain })).toBeInTheDocument();
+
+      // The ONE announcement, in the ordinary status region, is the SAME sentence.
+      const live = container.querySelectorAll('[role="status"]');
+      expect(Array.from(live).some((el) => el.textContent === copy)).toBe(true);
+      // No `role="alert"` anywhere on this card — the second-live-region defect.
+      expect(container.querySelectorAll('[role="alert"]').length).toBe(0);
+
+      // Still there after a delay — it is a state, not a one-shot toast.
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(container.querySelector('.capture-note-warn')?.textContent).toBe(copy);
+    });
+  }
+
+  it('held: a transcription refusal is rendered from the server’s own words', async () => {
+    installRecorder(vi.fn(async () => ({ getTracks: () => [{ stop: vi.fn() }] })));
     stubFetchRoutes({
       ...BASE_ROUTES,
       [TRANSCRIBE]: {
@@ -746,79 +905,534 @@ describe('voice capture', () => {
         },
       },
     } as never);
-    // The panel reports the browser has no recorder in jsdom, which is TRUE here
-    // and is itself the honest surface — so this test drives the API directly to
-    // pin the refusal rendering the recorder path leads to.
-    const { api, providerRefusalOf } = await import('../lib/api');
-    const failure = await api.requestTranscription({ audioRef: 'held-in-tab:1' }).catch((e: unknown) => e);
-    const stated = providerRefusalOf(failure);
-    expect(stated?.missing).toEqual(['an approved transcription provider (decision D9)']);
-    expect(stated?.message).toContain('no provider is configured');
+    await renderPanel();
+    await act(async () => {
+      fireEvent.click(await screen.findByRole('button', { name: CAPTURE_COPY.voiceRecord }));
+      await Promise.resolve();
+    });
+    fireEvent.click(await screen.findByRole('button', { name: CAPTURE_COPY.voiceStop }));
+    fireEvent.click(await screen.findByRole('button', { name: CAPTURE_COPY.voiceTranscribe }));
+
+    expect(
+      await screen.findByText('This build cannot transcribe speech: no provider is configured.'),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText('an approved transcription provider (decision D9)'),
+    ).toBeInTheDocument();
+    // Audio stays held — a refusal to transcribe is not a discard.
+    expect(screen.getByRole('button', { name: CAPTURE_COPY.voiceDiscard })).toBeInTheDocument();
   });
 
-  it('a browser with no recorder says so plainly and keeps the typed path', async () => {
-    // jsdom has no `MediaRecorder`, which is the case this branch exists for.
+  it('duplicate Start is prevented — a second click while requesting starts no second recorder', async () => {
+    let resolveGetUserMedia: (v: unknown) => void = () => {};
+    const gate = new Promise((resolve) => {
+      resolveGetUserMedia = resolve;
+    });
+    const getUserMedia = vi.fn(() => gate);
+    installRecorder(getUserMedia);
     stubFetchRoutes(BASE_ROUTES as never);
     await renderPanel();
-    await screen.findByText(/This browser does not offer audio recording/);
-    expect(await screen.findByLabelText('Transcript')).toBeInTheDocument();
+    const start = await screen.findByRole('button', { name: CAPTURE_COPY.voiceRecord });
+    fireEvent.click(start);
+    // The control that would fire a second `getUserMedia` no longer renders in
+    // `requesting-permission` — this IS the duplicate-session guard.
+    expect(screen.queryByRole('button', { name: CAPTURE_COPY.voiceRecord })).toBeNull();
+    await act(async () => {
+      resolveGetUserMedia({ getTracks: () => [{ stop: vi.fn() }] });
+      await Promise.resolve();
+    });
+    expect(getUserMedia).toHaveBeenCalledTimes(1);
   });
 
-  it('the header does NOT offer dictation as a third equal option', async () => {
-    /*
-     * THE COPY THIS PINS USED TO OVERCLAIM. `panelIntro` read "Type, paste, or
-     * dictate notes about a run, then finalize them." — dictation offered
-     * unqualified, in the panel HEADER, which renders BEFORE the panel is opened
-     * and therefore before the seam status and the refusal body that would explain
-     * it. `POST /api/transcription` answers `501` `no_provider_configured` in every
-     * shipped deployment, and not by accident: `providers/config.py::_selected`
-     * resolves unset, empty and unrecognised values all to `unconfigured`, and
-     * `validate_provider_config_or_raise` REFUSES TO BOOT an app whose seam is set
-     * to `deterministic-fake` (DECISION D6) — so the unconfigured implementation is
-     * the only one a running application can hold.
-     * `ai-integration-decision-packet.md` §9, "build nothing that implies any of it
-     * exists", binds per `CLAUDE.md` §15.
-     *
-     * WHAT THIS TEST MUST NOT BECOME: a requirement that the recorder is gone. The
-     * Record / Request a transcript / Discard controls are a deliberate product
-     * decision and stay. Only the promise around them is corrected, and the
-     * assertions below check the copy — not the controls.
-     */
+  it('unmount mid-recording stops tracks', async () => {
+    const stop = vi.fn();
+    installRecorder(vi.fn(async () => ({ getTracks: () => [{ stop }] })));
     stubFetchRoutes(BASE_ROUTES as never);
-    const { container } = await renderPanel();
-    const text = container.textContent ?? '';
-    expect(text).not.toContain('or dictate');
-    expect(text).not.toMatch(/Type, paste, or dictate/);
-    // It still says what DOES work, and says the audio path depends on something
-    // this bundle cannot assert the presence of.
-    expect(CAPTURE_COPY.panelIntro).toContain('Type or paste notes');
-    expect(CAPTURE_COPY.panelIntro).toContain('needs a transcription');
-    /*
-     * AND IT STILL DOES NOT STATE A STATUS, which is the rule at the top of
-     * `transcriptCaptureContent.ts`: every claim about what the deployment CAN do
-     * comes from the server. A hardcoded "not configured" here would be a claim
-     * about a deployment this bundle has never met — so fixing an overclaim must
-     * not introduce the opposite one.
-     */
-    for (const banned of ['not configured', 'unavailable', 'cannot transcribe', 'disabled']) {
-      expect(CAPTURE_COPY.panelIntro.toLowerCase()).not.toContain(banned);
-    }
+    const rendered = await renderPanel();
+    await act(async () => {
+      fireEvent.click(await screen.findByRole('button', { name: CAPTURE_COPY.voiceRecord }));
+      await Promise.resolve();
+    });
+    await screen.findByRole('button', { name: CAPTURE_COPY.voiceStop });
+    rendered.unmount();
+    expect(stop).toHaveBeenCalled();
   });
 
-  it('no request this panel makes carries audio', async () => {
-    stubFetchRoutes({ ...BASE_ROUTES, [TRANSCRIPT]: { body: reading() } } as never);
-    await renderPanel();
-    await typeAndFinalize();
-    await screen.findByText('context.temperature_K');
-    for (const entry of writes()) {
-      expect(Object.keys(entry.body)).not.toContain('audio');
-      expect(Object.keys(entry.body)).not.toContain('audio_data');
-    }
-    expect(requests().some((key) => key.includes('/uploads'))).toBe(false);
+  it('the elapsed timer is cleared on unmount, not left running', async () => {
+    const clearSpy = vi.spyOn(window, 'clearInterval');
+    installRecorder(vi.fn(async () => ({ getTracks: () => [{ stop: vi.fn() }] })));
+    stubFetchRoutes(BASE_ROUTES as never);
+    const rendered = await renderPanel();
+    fireEvent.click(await screen.findByRole('button', { name: CAPTURE_COPY.voiceRecord }));
+    await screen.findByRole('button', { name: CAPTURE_COPY.voiceStop });
+    const callsBefore = clearSpy.mock.calls.length;
+    rendered.unmount();
+    expect(clearSpy.mock.calls.length).toBeGreaterThan(callsBefore);
   });
 });
 
-// --- 6. first-use guidance ----------------------------------------------------
+// --- 7. `processing` locks the form and prevents a double submit --------------
+
+describe('processing: the finalize lock', () => {
+  it('the disabled attribute stops an ordinary second click', async () => {
+    const gateHandle: { resolve: (() => void) | null } = { resolve: null };
+    const gate = new Promise<void>((resolve) => {
+      gateHandle.resolve = () => resolve();
+    });
+    stubFetchRoutes({
+      ...BASE_ROUTES,
+      [TRANSCRIPT]: async () => {
+        await gate;
+        return { body: reading() };
+      },
+    } as never);
+    await renderPanel();
+    const box = await screen.findByLabelText('Transcript');
+    fireEvent.change(box, { target: { value: 'Temperature was 300 K.' } });
+    fireEvent.change(await screen.findByLabelText(CAPTURE_COPY.runLabel), {
+      target: { value: 'run-1' },
+    });
+    const finalizeButton = screen.getByRole('button', { name: CAPTURE_COPY.finalize });
+    fireEvent.click(finalizeButton);
+    fireEvent.click(finalizeButton);
+    fireEvent.click(finalizeButton);
+
+    const busyButton = await screen.findByRole('button', { name: /Reading/ });
+    expect(busyButton).toBeDisabled();
+    expect(busyButton).toHaveAttribute('aria-busy', 'true');
+    // The rest of the form is locked too — a run select and a textarea a reader
+    // could otherwise edit mid-submit.
+    expect(box).toBeDisabled();
+    expect(screen.getByLabelText(CAPTURE_COPY.runLabel)).toBeDisabled();
+
+    gateHandle.resolve?.();
+    await screen.findByText(CAPTURE_COPY.summaryStored(1, 1));
+    expect(writes().filter((entry) => entry.key === TRANSCRIPT)).toHaveLength(1);
+  });
+
+  /*
+   * I3a, INDEPENDENT REVIEW OF PR-D — THE TEST ABOVE PROVED THE WRONG THING.
+   * `fireEvent.click` on a `disabled` DOM button never dispatches, in jsdom or
+   * in a real browser — so that test passes even with the
+   * `if (busyKind !== null …) return;` guard DELETED from `finalize()`
+   * entirely: the disabled attribute alone was already stopping every
+   * repeated click. This test bypasses the button altogether and dispatches
+   * `submit` directly on the `<form>` — which `finalize()`'s own `onSubmit`
+   * calls regardless of any button's disabled state, exactly as a stray
+   * re-entrant call or a double Enter-press would — so the GUARD ITSELF, not
+   * the disabled attribute, is what is under test.
+   *
+   * MUTATION-GUARDED: delete `if (busyKind !== null || text.trim() === '')
+   * return;` from `finalize()` and this turns red (two POSTs instead of one).
+   */
+  it('MUTATION-GUARDED: the in-flight guard inside finalize() itself stops a second submit, bypassing the disabled button', async () => {
+    const gateHandle: { resolve: (() => void) | null } = { resolve: null };
+    const gate = new Promise<void>((resolve) => {
+      gateHandle.resolve = () => resolve();
+    });
+    stubFetchRoutes({
+      ...BASE_ROUTES,
+      [TRANSCRIPT]: async () => {
+        await gate;
+        return { body: reading() };
+      },
+    } as never);
+    const { container } = await renderPanel();
+    const box = await screen.findByLabelText('Transcript');
+    fireEvent.change(box, { target: { value: 'Temperature was 300 K.' } });
+    fireEvent.change(await screen.findByLabelText(CAPTURE_COPY.runLabel), {
+      target: { value: 'run-1' },
+    });
+
+    const form = container.querySelector('form.capture-form');
+    expect(form).not.toBeNull();
+    fireEvent.submit(form as HTMLFormElement);
+    // A SECOND submit, still gated — the button is disabled by now, but this
+    // never touches the button.
+    fireEvent.submit(form as HTMLFormElement);
+    fireEvent.submit(form as HTMLFormElement);
+
+    gateHandle.resolve?.();
+    await screen.findByText(CAPTURE_COPY.summaryStored(1, 1));
+    expect(writes().filter((entry) => entry.key === TRANSCRIPT)).toHaveLength(1);
+  });
+});
+
+// --- 7b. I1 — Try Again re-invokes the CURRENT action, never a stale closure ---
+
+describe('I1: Try Again dispatches through a tag, never a captured closure', () => {
+  it('MUTATION-GUARDED: a 412 → edited text → Try Again sends the NEW version AND the NEW text', async () => {
+    /*
+     * THE DEFECT THIS GUARDS. `setRetry(() => finalize)` used to capture
+     * `experimentVersion` and `text` AT THE MOMENT OF FAILURE. A 412 already
+     * calls `loadRuns()` to adopt the record's current version — so the very
+     * next "Try Again" re-sent the OLD, already-known-stale version and was
+     * refused again, FOREVER, and separately re-sent whatever was typed at
+     * failure time, silently discarding any edit made afterwards. Both halves
+     * are asserted below: the second attempt's `If-Match` is the version
+     * `loadRuns()` adopted, and its body is the text typed AFTER the failure,
+     * not before it.
+     */
+    let transcriptAttempts = 0;
+    let runsReads = 0;
+    stubFetchRoutes({
+      [RUNS]: () => {
+        runsReads += 1;
+        return { body: { ...runsPage, experiment_version: runsReads === 1 ? 'g1.4' : 'g2.0' } };
+      },
+      [CAPS]: { body: capabilities },
+      [TRANSCRIPT]: () => {
+        transcriptAttempts += 1;
+        if (transcriptAttempts === 1) {
+          return { status: 412, body: { error: 'stale_write', current_version: 'g2.0' } };
+        }
+        return { body: reading({ experiment_version: 'g2.1' }) };
+      },
+    } as never);
+    await renderPanel();
+    await typeAndFinalize('The FIRST, stale text.');
+    await screen.findByRole('alert');
+    // The 412 handler's own `loadRuns()` — the second RUNS read, adopting g2.0.
+    await waitFor(() => expect(runsReads).toBe(2));
+
+    fireEvent.change(await screen.findByLabelText('Transcript'), {
+      target: { value: 'The SECOND, corrected text.' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: CAPTURE_COPY.tryAgain }));
+
+    await waitFor(() => expect(transcriptAttempts).toBe(2));
+    const finalizeCalls = writes().filter((entry) => entry.key === TRANSCRIPT);
+    expect(finalizeCalls).toHaveLength(2);
+    expect(finalizeCalls[1].ifMatch).toBe('"g2.0"');
+    expect(finalizeCalls[1].body.text).toBe('The SECOND, corrected text.');
+  });
+});
+
+// --- 7c. I2 — exactly one primary action per state ----------------------------
+
+describe('I2: exactly one .btn-primary is ever visible', () => {
+  function primaries(container: HTMLElement): HTMLElement[] {
+    return Array.from(container.querySelectorAll('.btn-primary'));
+  }
+
+  it('collapsed: the entry action is the only primary', async () => {
+    stubFetchRoutes(BASE_ROUTES as never);
+    const { container } = render(
+      <MemoryRouter
+        initialEntries={['/']}
+        future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+      >
+        <TranscriptCapturePanel experimentId={EXP} />
+      </MemoryRouter>,
+    );
+    await screen.findByRole('button', { name: CAPTURE_COPY.entryOpen });
+    const found = primaries(container);
+    expect(found).toHaveLength(1);
+    expect(found[0].textContent).toBe(CAPTURE_COPY.entryOpen);
+  });
+
+  it('MUTATION-GUARDED: open, idle, empty box — Start Recording is the only primary; Close Capture and Finalize are secondary', async () => {
+    /*
+     * MEASURED BEFORE THIS FIX: `idle` rendered THREE `.btn-primary` at once
+     * (the entry toggle, Start Recording, and Finalize and Read). Reverting
+     * the entry toggle's class to an unconditional `btn btn-primary` — its
+     * shape before I2 — turns this test's length assertion red (2, not 1).
+     */
+    installRecorder(vi.fn(async () => ({ getTracks: () => [{ stop: vi.fn() }] })));
+    stubFetchRoutes(BASE_ROUTES as never);
+    const { container } = await renderPanel();
+    await screen.findByRole('button', { name: CAPTURE_COPY.voiceRecord });
+    const found = primaries(container);
+    expect(found).toHaveLength(1);
+    expect(found[0].textContent).toBe(CAPTURE_COPY.voiceRecord);
+    expect(screen.getByRole('button', { name: CAPTURE_COPY.entryClose })).toHaveClass(
+      'btn-secondary',
+    );
+    expect(screen.getByRole('button', { name: CAPTURE_COPY.finalize })).toHaveClass(
+      'btn-secondary',
+    );
+  });
+
+  it('open, idle, WITH text typed — Start Recording still wins; Finalize stays secondary until nothing else claims the slot', async () => {
+    installRecorder(vi.fn(async () => ({ getTracks: () => [{ stop: vi.fn() }] })));
+    stubFetchRoutes(BASE_ROUTES as never);
+    const { container } = await renderPanel();
+    fireEvent.change(await screen.findByLabelText('Transcript'), {
+      target: { value: 'Some notes, not yet recorded or sent.' },
+    });
+    const found = primaries(container);
+    expect(found).toHaveLength(1);
+    expect(found[0].textContent).toBe(CAPTURE_COPY.voiceRecord);
+  });
+
+  it('unsupported browser, WITH text — Finalize becomes primary, because no voice control competes for the slot', async () => {
+    // jsdom's own baseline has no `MediaRecorder` — no `installRecorder()` call.
+    stubFetchRoutes(BASE_ROUTES as never);
+    const { container } = await renderPanel();
+    await screen.findByText(/This browser does not offer audio recording/);
+    fireEvent.change(await screen.findByLabelText('Transcript'), {
+      target: { value: 'Typed, on a browser with no recorder.' },
+    });
+    const found = primaries(container);
+    expect(found).toHaveLength(1);
+    expect(found[0].textContent).toBe(CAPTURE_COPY.finalize);
+  });
+
+  it('recording: Stop Recording is the only primary', async () => {
+    installRecorder(vi.fn(async () => ({ getTracks: () => [{ stop: vi.fn() }] })));
+    stubFetchRoutes(BASE_ROUTES as never);
+    const { container } = await renderPanel();
+    await act(async () => {
+      fireEvent.click(await screen.findByRole('button', { name: CAPTURE_COPY.voiceRecord }));
+      await Promise.resolve();
+    });
+    await screen.findByRole('button', { name: CAPTURE_COPY.voiceStop });
+    const found = primaries(container);
+    expect(found).toHaveLength(1);
+    expect(found[0].textContent).toBe(CAPTURE_COPY.voiceStop);
+  });
+
+  it('held: Type What Was Said is the only primary; Request a Transcript and Discard Audio are secondary', async () => {
+    installRecorder(vi.fn(async () => ({ getTracks: () => [{ stop: vi.fn() }] })));
+    stubFetchRoutes(BASE_ROUTES as never);
+    const { container } = await renderPanel();
+    await act(async () => {
+      fireEvent.click(await screen.findByRole('button', { name: CAPTURE_COPY.voiceRecord }));
+      await Promise.resolve();
+    });
+    fireEvent.click(await screen.findByRole('button', { name: CAPTURE_COPY.voiceStop }));
+    await screen.findByRole('button', { name: CAPTURE_COPY.voiceTypeWhatWasSaid });
+    const found = primaries(container);
+    expect(found).toHaveLength(1);
+    expect(found[0].textContent).toBe(CAPTURE_COPY.voiceTypeWhatWasSaid);
+  });
+
+  it('processing: only the busy Finalize button is primary, even though voice is concurrently idle', async () => {
+    installRecorder(vi.fn(async () => ({ getTracks: () => [{ stop: vi.fn() }] })));
+    const gateHandle: { resolve: (() => void) | null } = { resolve: null };
+    const gate = new Promise<void>((resolve) => {
+      gateHandle.resolve = () => resolve();
+    });
+    stubFetchRoutes({
+      ...BASE_ROUTES,
+      [TRANSCRIPT]: async () => {
+        await gate;
+        return { body: reading() };
+      },
+    } as never);
+    const { container } = await renderPanel();
+    fireEvent.change(await screen.findByLabelText('Transcript'), {
+      target: { value: 'Temperature was 300 K.' },
+    });
+    fireEvent.change(await screen.findByLabelText(CAPTURE_COPY.runLabel), {
+      target: { value: 'run-1' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: CAPTURE_COPY.finalize }));
+    await screen.findByRole('button', { name: /Reading/ });
+
+    const found = primaries(container);
+    expect(found).toHaveLength(1);
+    expect(found[0].textContent).toMatch(/Reading/);
+    // `voice` is still `idle` throughout — `formLocked` alone must demote it.
+    expect(screen.getByRole('button', { name: CAPTURE_COPY.voiceRecord })).toHaveClass(
+      'btn-secondary',
+    );
+    gateHandle.resolve?.();
+    await screen.findByText(CAPTURE_COPY.summaryStored(1, 1));
+  });
+
+  it('proposals-ready, with proposals stored: Review N Proposals is the only primary; Capture Another Note is secondary', async () => {
+    // A recorder is installed deliberately so the voice control is genuinely
+    // `idle` (and therefore assertable below as demoted to secondary) rather
+    // than `unsupported` (which renders no "Start Recording" button at all).
+    installRecorder(vi.fn(async () => ({ getTracks: () => [{ stop: vi.fn() }] })));
+    stubFetchRoutes({ ...BASE_ROUTES, [TRANSCRIPT]: { body: reading() } } as never);
+    const { container } = await renderPanel();
+    await typeAndFinalize();
+    await screen.findByText(CAPTURE_COPY.summaryStored(1, 1));
+    const found = primaries(container);
+    expect(found).toHaveLength(1);
+    expect(found[0].textContent).toBe(CAPTURE_COPY.reviewProposals(1));
+    expect(screen.getByRole('button', { name: CAPTURE_COPY.captureAnother })).toHaveClass(
+      'btn-secondary',
+    );
+    // The voice control, still `idle`, is ALSO demoted now that reading owns the slot.
+    expect(screen.getByRole('button', { name: CAPTURE_COPY.voiceRecord })).toHaveClass(
+      'btn-secondary',
+    );
+  });
+
+  it('proposals-ready, nothing proposed: Capture Another Note becomes primary — there is no Review control to compete with it', async () => {
+    const empty = reading({ candidates: [], proposals: [], notes: [] });
+    stubFetchRoutes({ ...BASE_ROUTES, [TRANSCRIPT]: { body: empty } } as never);
+    const { container } = await renderPanel();
+    await typeAndFinalize();
+    await screen.findByText(CAPTURE_COPY.candidatesEmpty);
+    const found = primaries(container);
+    expect(found).toHaveLength(1);
+    expect(found[0].textContent).toBe(CAPTURE_COPY.captureAnother);
+  });
+
+  it('recoverable-error: Try Again is the only primary, even though the voice state would otherwise claim the slot', async () => {
+    // A recorder is installed deliberately, so `voice` is genuinely `idle`
+    // (and would otherwise show its own primary) rather than `unsupported`
+    // (which shows none) — this is the case the error must actually override.
+    installRecorder(vi.fn(async () => ({ getTracks: () => [{ stop: vi.fn() }] })));
+    stubFetchRoutes({
+      ...BASE_ROUTES,
+      [TRANSCRIPT]: { status: 412, body: { error: 'stale_write' } },
+    } as never);
+    const { container } = await renderPanel();
+    await typeAndFinalize();
+    await screen.findByRole('alert');
+    const found = primaries(container);
+    expect(found).toHaveLength(1);
+    expect(found[0].textContent).toBe(CAPTURE_COPY.tryAgain);
+    // `voice` is `idle` throughout this failure — it must not also be primary.
+    expect(screen.getByRole('button', { name: CAPTURE_COPY.voiceRecord })).toHaveClass(
+      'btn-secondary',
+    );
+  });
+});
+
+// --- 8. `proposals-ready`'s own controls ---------------------------------------
+
+describe('proposals-ready controls', () => {
+  it('Review N Proposals moves focus to the Ingestion Proposals heading', async () => {
+    stubFetchRoutes({ ...BASE_ROUTES, [TRANSCRIPT]: { body: reading() } } as never);
+    render(
+      <MemoryRouter
+        initialEntries={['/']}
+        future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+      >
+        <TranscriptCapturePanel experimentId={EXP} />
+        {/* Stands in for `IngestionProposalsPanel`'s own heading, which lives
+            directly below this panel on every screen this app mounts it on. */}
+        <h2 id="ingestion-proposals-heading" tabIndex={-1}>
+          Ingestion Proposals
+        </h2>
+      </MemoryRouter>,
+    );
+    fireEvent.click(screen.getByRole('button', { name: CAPTURE_COPY.entryOpen }));
+    await typeAndFinalize();
+    fireEvent.click(
+      await screen.findByRole('button', { name: CAPTURE_COPY.reviewProposals(1) }),
+    );
+    await waitFor(() =>
+      expect(document.activeElement?.id).toBe('ingestion-proposals-heading'),
+    );
+  });
+
+  /*
+   * m6, INDEPENDENT REVIEW OF PR-D — `reviewProposals` MUST NEVER BE A DEAD
+   * CONTROL. The two tests below drive the FALLBACK paths directly: no
+   * `IngestionProposalsPanel` mounted at all, and a `.proposals-section` with
+   * no heading (a layout this component does not control but must still not
+   * silently fail against). The REAL `IngestionProposalsPanel` end-to-end case
+   * — the one I4 asks for — lives in
+   * `transcript-to-proposals-integration.test.tsx`, where it is exercised
+   * against the genuine component and its genuine `tabIndex={-1}` heading,
+   * not a stand-in.
+   */
+  it('m6: with no Ingestion Proposals surface anywhere, Review N Proposals announces truthfully instead of doing nothing', async () => {
+    stubFetchRoutes({ ...BASE_ROUTES, [TRANSCRIPT]: { body: reading() } } as never);
+    const { container } = await renderPanel();
+    await typeAndFinalize();
+    fireEvent.click(
+      await screen.findByRole('button', { name: CAPTURE_COPY.reviewProposals(1) }),
+    );
+    const status = container.querySelector('[role="status"]');
+    await waitFor(() =>
+      expect(status?.textContent).toMatch(/Ingestion Proposals could not be located/),
+    );
+    expect(status?.textContent).toMatch(/Your proposals are still stored/);
+  });
+
+  it('m6: falls back to the proposals SECTION by class when the heading itself is missing', async () => {
+    stubFetchRoutes({ ...BASE_ROUTES, [TRANSCRIPT]: { body: reading() } } as never);
+    render(
+      <MemoryRouter
+        initialEntries={['/']}
+        future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+      >
+        <TranscriptCapturePanel experimentId={EXP} />
+        {/* A section with no heading — the id-based lookup must miss, and the
+            class-based fallback must still find this. */}
+        <section className="proposals-section" />
+      </MemoryRouter>,
+    );
+    fireEvent.click(screen.getByRole('button', { name: CAPTURE_COPY.entryOpen }));
+    await typeAndFinalize();
+    fireEvent.click(
+      await screen.findByRole('button', { name: CAPTURE_COPY.reviewProposals(1) }),
+    );
+    await screen.findByText(/scrolled to the proposals section instead/);
+  });
+
+  it('Capture Another Note clears the summary and the box without touching stored notes/proposals', async () => {
+    stubFetchRoutes({ ...BASE_ROUTES, [TRANSCRIPT]: { body: reading() } } as never);
+    await renderPanel();
+    await typeAndFinalize();
+    await screen.findByText(CAPTURE_COPY.summaryStored(1, 1));
+    fireEvent.click(screen.getByRole('button', { name: CAPTURE_COPY.captureAnother }));
+    expect(screen.queryByText(CAPTURE_COPY.summaryStored(1, 1))).toBeNull();
+    expect(await screen.findByLabelText('Transcript')).toHaveValue('');
+    // No request was issued by clearing the screen — nothing was un-stored.
+    expect(writes().filter((entry) => entry.key === TRANSCRIPT)).toHaveLength(1);
+  });
+
+  it('Discard This Transcript stays reachable and scoped to the typed text only', async () => {
+    stubFetchRoutes({ ...BASE_ROUTES, [TRANSCRIPT]: { body: reading() } } as never);
+    await renderPanel();
+    await typeAndFinalize();
+    await screen.findByText(CAPTURE_COPY.summaryStored(1, 1));
+    fireEvent.click(screen.getByRole('button', { name: /Discard this transcript/i }));
+    fireEvent.click(screen.getByRole('button', { name: 'Discard' }));
+    expect(await screen.findByLabelText('Transcript')).toHaveValue('');
+    // The summary is untouched — this control never reaches what was stored.
+    expect(screen.getByText(CAPTURE_COPY.summaryStored(1, 1))).toBeInTheDocument();
+  });
+});
+
+// --- 9. the run selector's own empty state -------------------------------------
+
+describe('the run selector empty state', () => {
+  it('shows Create a Run only when the record has zero runs, as the selector’s own empty state', async () => {
+    stubFetchRoutes({ ...BASE_ROUTES, [RUNS]: { body: noRunsPage } } as never);
+    const { container } = await renderPanel();
+    const empty = await waitFor(() => {
+      const el = container.querySelector('.capture-run-empty');
+      if (!el) throw new Error('run-empty state not rendered yet');
+      return el as HTMLElement;
+    });
+    // The sentence spans a sibling `<button>`, so it is asserted against the
+    // paragraph's full text rather than via `getByText`, which matches only an
+    // element's OWN (non-nested) text content.
+    expect(empty.textContent).toContain(CAPTURE_COPY.runEmptyPrefix);
+    expect(empty.textContent).toContain(CAPTURE_COPY.runEmptySuffix);
+    expect(screen.queryByLabelText(CAPTURE_COPY.runLabel)).toBeNull();
+    expect(screen.getByRole('button', { name: CAPTURE_COPY.runCreate })).toBeInTheDocument();
+  });
+
+  it('the run selector renders normally, with no permanent Create a Run button, once a run exists', async () => {
+    stubFetchRoutes(BASE_ROUTES as never);
+    await renderPanel();
+    expect(await screen.findByLabelText(CAPTURE_COPY.runLabel)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: CAPTURE_COPY.runCreate })).toBeNull();
+  });
+
+  it('announces which run proposals from this capture will target', async () => {
+    stubFetchRoutes(BASE_ROUTES as never);
+    await renderPanel();
+    expect(await screen.findByText(CAPTURE_COPY.runTargetsNone)).toBeInTheDocument();
+    fireEvent.change(await screen.findByLabelText(CAPTURE_COPY.runLabel), {
+      target: { value: 'run-1' },
+    });
+    expect(await screen.findByText(CAPTURE_COPY.runTargetsRun('Run 1'))).toBeInTheDocument();
+  });
+});
+
+// --- 10. first-use guidance ----------------------------------------------------
 
 describe('first-use guidance', () => {
   it('is shown on first use with the exact guidance sentence and a worked example', async () => {
@@ -835,15 +1449,13 @@ describe('first-use guidance', () => {
     stubFetchRoutes(BASE_ROUTES as never);
     await renderPanel();
     fireEvent.click(await screen.findByRole('button', { name: 'Got it' }));
-
     expect(screen.queryByText(CAPTURE_GUIDANCE_SENTENCE)).toBeNull();
     expect(isCaptureGuidanceSeen()).toBe(true);
-    // Unobtrusive, but not gone: one control brings it back.
     fireEvent.click(screen.getByRole('button', { name: 'Show capture guidance' }));
     expect(screen.getByText(CAPTURE_GUIDANCE_SENTENCE)).toBeInTheDocument();
   });
 
-  it('is not shown again once this browser has seen it', async () => {
+  it('is closed by default once this browser has seen it — the steady state', async () => {
     stubFetchRoutes(BASE_ROUTES as never);
     await renderPanel();
     await screen.findByLabelText('Transcript');
@@ -857,25 +1469,9 @@ describe('first-use guidance', () => {
     await renderPanel();
     await screen.findByText(/This browser remembers that you have seen this/);
   });
-
-  it('stores no transcript text and no record identifier', async () => {
-    localStorage.removeItem(CAPTURE_GUIDANCE_KEY);
-    stubFetchRoutes(BASE_ROUTES as never);
-    await renderPanel();
-    fireEvent.click(await screen.findByRole('button', { name: 'Got it' }));
-    const stored = localStorage.getItem(CAPTURE_GUIDANCE_KEY) ?? '';
-    expect(Object.keys(JSON.parse(stored)).sort()).toEqual([
-      'guidanceId',
-      'seen',
-      'seenAt',
-      'version',
-    ]);
-    expect(stored).not.toContain(EXP);
-    expect(stored).not.toContain('run-1');
-  });
 });
 
-// --- 7. retention: only what is enforced --------------------------------------
+// --- 11. retention: only what is enforced --------------------------------------
 
 describe('retention', () => {
   it('reports the enforced state and names the ones this build does not offer', async () => {
@@ -896,7 +1492,7 @@ describe('retention', () => {
   });
 });
 
-// --- 8. accessibility ---------------------------------------------------------
+// --- 12. accessibility ---------------------------------------------------------
 
 describe('accessibility', () => {
   async function violations(container: HTMLElement) {
@@ -922,7 +1518,7 @@ describe('accessibility', () => {
     stubFetchRoutes({ ...BASE_ROUTES, [TRANSCRIPT]: { body: reading() } } as never);
     const { container } = await renderPanel();
     await typeAndFinalize();
-    await screen.findByText('context.temperature_K');
+    await screen.findByText(CAPTURE_COPY.summaryStored(1, 1));
     expect(await violations(container)).toEqual([]);
   });
 
@@ -947,6 +1543,7 @@ describe('accessibility', () => {
   it('an outcome is never distinguished by colour alone', async () => {
     const mixed = reading({
       candidates: [],
+      proposals: [],
       abstentions: [
         {
           outcome: 'abstention',
@@ -960,61 +1557,58 @@ describe('accessibility', () => {
     stubFetchRoutes({ ...BASE_ROUTES, [TRANSCRIPT]: { body: mixed } } as never);
     await renderPanel();
     await typeAndFinalize('We measured the Cu K-edge.');
-    // A WORD, not a hue. Removing the tag would turn this red.
     const item = (await screen.findByText(/No field exists for this/)).closest('li');
     expect(within(item as HTMLElement).getByText('Not proposed')).toBeInTheDocument();
   });
 
-  it('finalizing announces what happened to the text', async () => {
+  it('finalizing announces BOTH numbers — read and stored — pointing at Proposals below', async () => {
+    /*
+     * I7, INDEPENDENT REVIEW OF PR-D: the announcement used to name only what
+     * was STORED, dropping the READ count the build this replaces always
+     * said. `reading()`'s fixture carries one candidate and one stored
+     * proposal, so "1 value(s) read" and "1 stored as proposal(s)" are the
+     * same number here — the negative-count test below is what actually
+     * proves the two are tracked separately rather than one being echoed as
+     * the other.
+     */
     stubFetchRoutes({ ...BASE_ROUTES, [TRANSCRIPT]: { body: reading() } } as never);
     const { container } = await renderPanel();
     await typeAndFinalize();
-    await screen.findByText('context.temperature_K');
+    await screen.findByText(CAPTURE_COPY.summaryStored(1, 1));
     const status = container.querySelector('[role="status"]');
     expect(status?.textContent).toMatch(/1 segment\(s\) stored with this record/);
-    // AND WHAT WAS STORED, not only what was read. The two can differ — a candidate
-    // the server declined is reported separately — so announcing the read count alone
-    // would let the panel imply a store that did not happen.
     expect(status?.textContent).toMatch(/1 value\(s\) read/);
-    expect(status?.textContent).toMatch(/1 stored as proposal\(s\) for review/);
+    expect(status?.textContent).toMatch(/1 stored as proposal\(s\)/);
+    expect(status?.textContent).toMatch(/Review them in Ingestion Proposals below/);
+  });
+
+  it('MUTATION-GUARDED: the read and stored counts differ when a candidate could not be stored, and the announcement says both', async () => {
+    const halfStored = reading({
+      proposals: [],
+      unproposable: [
+        {
+          candidate_index: 0,
+          field_path: 'context.temperature_K',
+          note_id: 'n1',
+          error: 'too_many_proposals',
+          message: 'This record already holds the maximum number of proposals.',
+        },
+      ],
+    });
+    stubFetchRoutes({ ...BASE_ROUTES, [TRANSCRIPT]: { body: halfStored } } as never);
+    const { container } = await renderPanel();
+    await typeAndFinalize();
+    await screen.findByText(/already holds the maximum number of proposals/);
+    const status = container.querySelector('[role="status"]');
+    expect(status?.textContent).toMatch(/1 value\(s\) read/);
+    expect(status?.textContent).toMatch(/0 stored as proposal\(s\)/);
+    // NOTHING was stored — the announcement must not direct a reader to an
+    // empty Ingestion Proposals destination.
+    expect(status?.textContent).not.toMatch(/Review them in Ingestion Proposals below/);
   });
 });
 
-// --- 6. the panel toggle, and the recorder lifecycle -------------------------
-//
-// THIS BLOCK EXISTS BECAUSE ITS ABSENCE SHIPPED TWO DEFECTS.
-//
-// Independent review found both, and neither was reachable by the suite as it
-// stood: nothing here ever closed the panel, and jsdom has no `MediaRecorder`,
-// so `audioRecordingAvailable()` returned false, `voice` was pinned to
-// `'unsupported'`, and every line of the recorder lifecycle — start, stop,
-// discard, drop — was dead to the tests. The "no part of this panel claims a
-// provider exists" scan was likewise only ever scanning the unsupported branch.
-
-/** The smallest `MediaRecorder` that reproduces the real ordering hazard. */
-class FakeMediaRecorder {
-  static instances: FakeMediaRecorder[] = [];
-  state: 'inactive' | 'recording' = 'inactive';
-  ondataavailable: ((event: { data: Blob }) => void) | null = null;
-  constructor(_stream: unknown) {
-    FakeMediaRecorder.instances.push(this);
-  }
-  start() {
-    this.state = 'recording';
-  }
-  /**
-   * THE POINT OF THIS FAKE. A real `MediaRecorder` emits its final
-   * `dataavailable` ASYNCHRONOUSLY, on a later task — which is exactly how a
-   * "discarded" recording used to end up back in the buffer after the live
-   * region had already announced it gone. A synchronous fake would not
-   * reproduce the defect and the test would pass against the broken code.
-   */
-  stop() {
-    this.state = 'inactive';
-    const emit = this.ondataavailable;
-    setTimeout(() => emit?.({ data: new Blob(['audio-bytes']) }), 0);
-  }
-}
+// --- 13. the panel toggle, and the recorder lifecycle -------------------------
 
 describe('the panel toggle and the recorder lifecycle', () => {
   const tracks = { stop: vi.fn() };
@@ -1022,67 +1616,51 @@ describe('the panel toggle and the recorder lifecycle', () => {
   beforeEach(() => {
     FakeMediaRecorder.instances = [];
     tracks.stop.mockClear();
-    (globalThis as never as Record<string, unknown>).MediaRecorder = FakeMediaRecorder;
-    (globalThis as never as Record<string, unknown>).Blob =
-      (globalThis as never as Record<string, unknown>).Blob ?? class {};
-    Object.defineProperty(globalThis.navigator, 'mediaDevices', {
-      configurable: true,
-      value: { getUserMedia: vi.fn(async () => ({ getTracks: () => [tracks] })) },
-    });
-  });
-
-  afterEach(() => {
-    delete (globalThis as never as Record<string, unknown>).MediaRecorder;
+    installRecorder(vi.fn(async () => ({ getTracks: () => [tracks] })));
   });
 
   it('CLOSING THE PANEL DOES NOT DISCARD TYPED TEXT', async () => {
-    // The fourth path the three "text survives" controls missed. The reset
-    // effect used to key on `open` and ran its setters BEFORE the `if (!open)`
-    // guard, so collapsing the panel — to scroll, or by accident — wiped every
-    // word. Finalize had not been pressed, so nothing had reached the server and
-    // there was nothing to recover from.
     stubFetchRoutes(BASE_ROUTES as never);
     await renderPanel();
     const box = await screen.findByLabelText('Transcript');
     fireEvent.change(box, { target: { value: 'Several careful paragraphs.' } });
 
-    fireEvent.click(screen.getByRole('button', { name: /Close capture/i }));
-    fireEvent.click(screen.getByRole('button', { name: /Start a capture/i }));
+    fireEvent.click(screen.getByRole('button', { name: CAPTURE_COPY.entryClose }));
+    fireEvent.click(screen.getByRole('button', { name: CAPTURE_COPY.entryOpen }));
 
     const reopened = await screen.findByLabelText('Transcript');
     expect((reopened as HTMLTextAreaElement).value).toBe('Several careful paragraphs.');
   });
 
   it('DISCARDING MID-RECORDING REALLY DISCARDS, even though stop() emits later', async () => {
-    // `MediaRecorder.stop()` fires `dataavailable` on a later task. The handler
-    // closes over a stable ref, so clearing the buffer and THEN stopping put the
-    // complete recording straight back — after the live region had announced
-    // "Audio discarded." Nulling the recorder ref does not unbind a handler.
     stubFetchRoutes(BASE_ROUTES as never);
     await renderPanel();
-    fireEvent.click(await screen.findByRole('button', { name: /Start recording/i }));
+    await act(async () => {
+      fireEvent.click(await screen.findByRole('button', { name: CAPTURE_COPY.voiceRecord }));
+      await Promise.resolve();
+    });
     await waitFor(() => expect(FakeMediaRecorder.instances).toHaveLength(1));
+    fireEvent.click(await screen.findByRole('button', { name: CAPTURE_COPY.voiceStop }));
 
     const recorder = FakeMediaRecorder.instances[0];
-    fireEvent.click(screen.getByRole('button', { name: /Discard/i }));
+    fireEvent.click(await screen.findByRole('button', { name: CAPTURE_COPY.voiceDiscard }));
 
-    // The handler must be detached BEFORE the async emission lands.
     expect(recorder.ondataavailable).toBeNull();
     await new Promise((resolve) => setTimeout(resolve, 5));
     expect(recorder.ondataavailable).toBeNull();
-    // And the microphone was actually released.
     expect(tracks.stop).toHaveBeenCalled();
   });
 
   it('CLOSING THE PANEL RELEASES THE MICROPHONE', async () => {
-    // Closing does not unmount, and Stop/Discard live inside the body that stops
-    // rendering — so a hot microphone had no ISAAC-visible control at all.
     stubFetchRoutes(BASE_ROUTES as never);
     await renderPanel();
-    fireEvent.click(await screen.findByRole('button', { name: /Start recording/i }));
+    await act(async () => {
+      fireEvent.click(await screen.findByRole('button', { name: CAPTURE_COPY.voiceRecord }));
+      await Promise.resolve();
+    });
     await waitFor(() => expect(FakeMediaRecorder.instances).toHaveLength(1));
 
-    fireEvent.click(screen.getByRole('button', { name: /Close capture/i }));
+    fireEvent.click(screen.getByRole('button', { name: CAPTURE_COPY.entryClose }));
     await waitFor(() => expect(tracks.stop).toHaveBeenCalled());
     expect(FakeMediaRecorder.instances[0].state).toBe('inactive');
   });

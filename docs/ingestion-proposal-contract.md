@@ -932,10 +932,10 @@ The key's actual job is the one DEC-13 added it for, and it is a job about **two
 than one**: the capture publishes the key, so a client that mints a proposal cannot mint a second
 one for a candidate this route already minted.
 
-**AND THAT IS A CAPABILITY TODAY, NOT A LIVE CONCERN — corrected 2026-09-03, because the first
+~~**AND THAT IS A CAPABILITY TODAY, NOT A LIVE CONCERN — corrected 2026-09-03, because the first
 version of this paragraph overstated it.** It said `api.ts` gaining `createProposal` "is what makes
-that a live concern rather than a hypothetical". It does not. **`createProposal` exists in
-`apps/web/src/lib/api.ts` and NO SURFACE CALLS IT at this HEAD**: the transcript route is the only
+that a live concern rather than a hypothetical". It does not. `createProposal` exists in
+`apps/web/src/lib/api.ts` and NO SURFACE CALLS IT at this HEAD: the transcript route is the only
 producer in this build, so no second producer is racing it and none can until a surface performs the
 create. The method is kept rather than deleted because its caller is named and next — the "Propose a
 value from this note" act in Unmapped Notes, the note-mapping path — and because it is the client
@@ -943,7 +943,20 @@ half of the guarantee this key exists to give, which is exactly what that surfac
 comment block in `api.ts` records the same ruling, including the condition under which it should be
 deleted instead (the standard this repository applied to `getProposal`, which shipped with no caller
 and was removed), and quotes rather than deletes the paragraph that had declined to add it "until a
-producer lands". **The collision becomes live when that surface lands, and not before.**
+producer lands". The collision becomes live when that surface lands, and not before.**~~ —
+**SUPERSEDED, SAME DAY (PR-D).** The named surface landed: `UnmappedNotesPanel.tsx`'s "Propose a
+value from this note" act calls `api.createProposal` — `note_id`, `target_field_path`, `rule` and
+`proposed_value` are all supplied by the form, never defaulted, exactly as this contract requires. **A
+second producer now exists, and the collision this key was added for is live, not merely capable.** A
+transcript capture and a person mapping the same note by hand can now race to mint a proposal for the
+same candidate; `client_request_key` (§2 DEC-13) is what keeps that to one proposal. The transcript
+route's key is unchanged: `transcript-capture:{note_id}:{candidate_index}`. The note-mapping surface's
+own key is a different shape, deliberately: `note-propose:{note_id}:{target_field_path}:{a
+non-cryptographic digest of the proposed value, taken over its JSON serialisation}` — it keys on the
+path and the VALUE rather than a candidate index, because a person choosing a field and typing a value
+has no candidate index to key on at all. The two shapes never need to match each other for the
+guarantee to hold: exactly-once dedup is per producer's own retry of its own request, inside one
+`record_lock`, and the two producers are never asked to agree on one key format.
 
 ### 11.3 A candidate with no proposal is DISCLOSED, never dropped (§5 I6)
 

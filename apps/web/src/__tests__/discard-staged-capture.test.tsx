@@ -32,6 +32,7 @@ import axe from 'axe-core';
 
 import { AppRoutes } from '../App';
 import { TranscriptCapturePanel } from '../components/TranscriptCapturePanel';
+import { CAPTURE_COPY } from '../lib/transcriptCaptureContent';
 import { UnmappedNotesPanel } from '../components/UnmappedNotesPanel';
 import { ConflictResolutionPanel } from '../components/ConflictResolutionPanel';
 import { GuidedPrompt } from '../components/GuidedPrompt';
@@ -329,7 +330,7 @@ describe('the transcript box', () => {
         <TranscriptCapturePanel experimentId={EXP} />
       </MemoryRouter>,
     );
-    fireEvent.click(screen.getByRole('button', { name: 'Start a capture' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Capture Experiment Notes' }));
     return screen.getByLabelText('Transcript') as HTMLTextAreaElement;
   }
 
@@ -377,8 +378,8 @@ describe('the transcript box', () => {
   it('CLOSING the panel still keeps the text — the deliberate behaviour this control does not replace', async () => {
     const box = await open();
     fireEvent.change(box, { target: { value: 'paragraphs worth keeping' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Close capture' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Start a capture' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Close Capture' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Capture Experiment Notes' }));
     expect((screen.getByLabelText('Transcript') as HTMLTextAreaElement).value).toBe(
       'paragraphs worth keeping',
     );
@@ -388,8 +389,8 @@ describe('the transcript box', () => {
     const box = await open();
     fireEvent.change(box, { target: { value: 'abandoned' } });
     discardVia(DISCARD_COPY.transcriptUnsent);
-    fireEvent.click(screen.getByRole('button', { name: 'Close capture' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Start a capture' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Close Capture' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Capture Experiment Notes' }));
     expect((screen.getByLabelText('Transcript') as HTMLTextAreaElement).value).toBe('');
     expect(trigger(DISCARD_COPY.transcriptUnsent)).toBeNull();
   });
@@ -500,11 +501,11 @@ describe('the transcript box', () => {
         <TranscriptCapturePanel experimentId={EXP} />
       </MemoryRouter>,
     );
-    fireEvent.click(screen.getByRole('button', { name: 'Start a capture' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Capture Experiment Notes' }));
     fireEvent.change(screen.getByLabelText('Transcript'), {
       target: { value: 'Notes for run 1.' },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Finalize and read' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Finalize and Read' }));
     await waitFor(() =>
       expect(screen.getByLabelText('Transcript')).toHaveValue('Notes for run 1.'),
     );
@@ -550,11 +551,11 @@ describe('the transcript box', () => {
         <TranscriptCapturePanel experimentId={EXP} />
       </MemoryRouter>,
     );
-    fireEvent.click(screen.getByRole('button', { name: 'Start a capture' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Capture Experiment Notes' }));
     fireEvent.change(screen.getByLabelText('Transcript'), {
       target: { value: 'Notes for run 1.' },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Finalize and read' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Finalize and Read' }));
     await screen.findByRole('alert');
 
     // A 412 is the compare-and-swap refusal: nothing was stored, so the body that says
@@ -602,18 +603,18 @@ describe('the transcript box', () => {
         <TranscriptCapturePanel experimentId={EXP} />
       </MemoryRouter>,
     );
-    fireEvent.click(screen.getByRole('button', { name: 'Start a capture' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Capture Experiment Notes' }));
     fireEvent.change(screen.getByLabelText('Transcript'), {
       target: { value: 'Temperature was 300 K.' },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Finalize and read' }));
-    await screen.findByText('context.temperature_K');
+    fireEvent.click(screen.getByRole('button', { name: 'Finalize and Read' }));
+    await screen.findByText(CAPTURE_COPY.summaryStored(1, 0));
 
     // The reader empties the box themselves. The proposal row is STILL on screen —
     // which is the case the old tests were reaching for — and nothing about it is
     // staged, so nothing may be offered.
     fireEvent.change(screen.getByLabelText('Transcript'), { target: { value: '' } });
-    expect(screen.getByText('context.temperature_K')).toBeInTheDocument();
+    expect(screen.getByText(CAPTURE_COPY.summaryStored(1, 0))).toBeInTheDocument();
     expect(trigger(DISCARD_COPY.transcriptAfterFinalize)).toBeNull();
     expect(trigger(DISCARD_COPY.transcriptUnsent)).toBeNull();
   });
@@ -633,12 +634,12 @@ describe('the transcript box', () => {
         <TranscriptCapturePanel experimentId={EXP} />
       </MemoryRouter>,
     );
-    fireEvent.click(screen.getByRole('button', { name: 'Start a capture' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Capture Experiment Notes' }));
     fireEvent.change(screen.getByLabelText('Transcript'), {
       target: { value: 'Temperature was 300 K.' },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Finalize and read' }));
-    await screen.findByText('context.temperature_K');
+    fireEvent.click(screen.getByRole('button', { name: 'Finalize and Read' }));
+    await screen.findByText(CAPTURE_COPY.summaryStored(1, 0));
 
     // Same mounted component, different record — the panel is not keyed on the id.
     view.rerender(

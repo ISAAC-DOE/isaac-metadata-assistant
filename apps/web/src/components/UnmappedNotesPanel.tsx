@@ -45,12 +45,26 @@
  * ONE VALIDATOR, THE RECORD'S. Every write carries the experiment's version token,
  * which is re-read from each write's own response rather than from the record bundle
  * — the same rule `RunsSection` follows for creating a run.
+ *
+ * PR-D (2026-09-03) ADDED A FIFTH ACT: "Propose a value from this note". It is the
+ * named caller `api.createProposal`'s own doc comment said was next — see
+ * `lib/api.ts`'s `createProposal`, and `docs/ingestion-proposal-contract.md` §11.2,
+ * both corrected in the same change to say so. It is a PEER of the other four, per
+ * this file's own "THE FOUR ACTIONS ARE PEERS" rule above, now five: proposing is no
+ * more a fallback than mapping, keeping or dismissing is, and it is styled identically.
+ * Unlike Map/Edit/Keep/Dismiss it does not change `note.state` at all — a proposal is
+ * a SEPARATE record on the experiment (`state["proposals"]`), reviewed on the
+ * Ingestion Proposals surface, never here. The note stays exactly as it was; the
+ * proposal is what changed.
  */
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 
 import { api, ApiError } from '../lib/api';
 import { mutationFailureCopy, staleWriteCurrentVersion } from '../lib/mutationErrors';
-import type { ApiNote, ApiNoteState, ApiNotesResponse } from '../lib/types';
+import { markSelfMintedProposals } from '../lib/selfMintedProposals';
+import { RUN_FIELDS, parseRunField, type RunFieldSpec } from '../lib/runFields';
+import { RUNS_PAGE_SIZE } from '../lib/runPaging';
+import type { ApiNote, ApiNoteState, ApiNotesResponse, ApiRunView } from '../lib/types';
 import { BackendDown, LoadingPanel } from './FetchStates';
 import { DiscardStaged } from './DiscardStaged';
 import { DISCARD_COPY } from '../lib/discardContent';
@@ -155,6 +169,71 @@ type ListState =
   | { status: 'loading' }
   | { status: 'error'; error: ApiError }
   | { status: 'data'; loaded: ApiNotesResponse };
+
+/**
+ * "Propose a value from this note"'s two capability reads, both SERVED, never
+ * transcribed here — `GET .../proposals` reports the paths this build can target
+ * and which of them are record-scoped; `null` means the read failed, which is a
+ * different fact from "nothing is proposable" (`targetFieldPaths: []`) and is
+ * rendered as a different sentence.
+ */
+type ProposalCapabilities = {
+  targetFieldPaths: string[];
+  recordScopedTargetFieldPaths: string[];
+} | null;
+
+/**
+ * THE RULE SENTENCE FOR A HUMAN-MAPPED PROPOSAL. `rule` is required and must be
+ * "the sentence that produced this value and this target, not an identifier" —
+ * for an extracted candidate that sentence describes the extraction rule; for
+ * this act there is no extraction rule, and the honest sentence says exactly
+ * that: a person read the note and chose the value directly. It is a FIXED
+ * constant rather than something a scientist types, because composing a
+ * provenance sentence is a burden this act does not need to impose — the act
+ * itself IS the provenance.
+ */
+const HUMAN_PROPOSED_RULE =
+  'A person read this note directly and entered this value for the field by hand; ' +
+  'no automated rule matched it.';
+
+/**
+ * A short, deterministic, NON-cryptographic digest of a proposed value — used only
+ * to build `client_request_key` so an accidental double click on "Propose This
+ * Value" dedupes to one proposal rather than two. It carries no security property;
+ * exactly-once enforcement is the server's, inside `record_lock` (contract §2,
+ * DEC-13) — this only has to be STABLE for the same (note, path, value) triple
+ * within one click, which a plain hash over the value's JSON serialisation is.
+ *
+ * m8, INDEPENDENT REVIEW OF PR-D — THE COLLISION BEHAVIOUR, NAMED RATHER THAN
+ * LEFT IMPLICIT. This is a 32-bit hash (`hash >>> 0`), not a cryptographic one,
+ * so two DIFFERENT values for the SAME (note, path) CAN — with vanishing but
+ * non-zero probability — produce the SAME `client_request_key`. If that ever
+ * happens: proposing value A stores it under key K; proposing DIFFERENT value B
+ * for the same note+path later computes the SAME key K, and the server's
+ * dedup (contract §2 DEC-13 — "a key already present … returns the EXISTING
+ * proposal") returns A's proposal with `deduplicated: true` — the reader is
+ * told "already proposed" while the record still holds A, not B. Nothing is
+ * corrupted (A is a real, previously-confirmed proposal; B is simply not
+ * stored), but the CONFIRMATION is misleading for that one request. Two things
+ * bound the risk to theoretical: the key space this collision would need to
+ * land in is scoped to ONE (note_id, field_path) pair — not the record, not
+ * the experiment — and a real note is proposed against a handful of paths at
+ * most, nowhere near the ~2^16 distinct values against one pair before a
+ * birthday-bound collision becomes plausible. Upgrading to a wider,
+ * collision-resistant digest (e.g. a truncated `SubtleCrypto` SHA-256) would
+ * close this to a cryptographic margin; not done here because the risk this
+ * function actually has to cover — an accidental double click on the SAME
+ * value — cannot manifest it at all (identical value ⇒ identical digest by
+ * construction), and a wider digest is a separate, reviewable change.
+ */
+function stableValueDigest(value: unknown): string {
+  const json = JSON.stringify(value) ?? 'undefined';
+  let hash = 5381;
+  for (let index = 0; index < json.length; index += 1) {
+    hash = (Math.imul(hash, 33) + json.charCodeAt(index)) | 0;
+  }
+  return (hash >>> 0).toString(16);
+}
 
 export function UnmappedNotesPanel({ experimentId }: { experimentId: string }) {
   return (
@@ -327,6 +406,125 @@ function NotesBrowser({ experimentId }: { experimentId: string }) {
     [experimentId, version, reload],
   );
 
+  /*
+   * THE TARGET-PATH CAPABILITY, FETCHED ONCE PER MOUNT — this panel already fetches
+   * the notes list unconditionally on mount, so one more read on the same
+   * always-visible destination is not a new category of cost. `null` (not `[]`) is
+   * the read-failed state and renders a DIFFERENT sentence than "this build has no
+   * proposable paths"; see `ProposalCapabilities` above.
+   *
+   * THE RUN LIST IS DELIBERATELY NOT FETCHED HERE. It used to be, eagerly, and
+   * `runs-live-refresh-integration.test.tsx`'s "first paint reads the runs ONCE"
+   * invariant caught it: `RunsSection` already reads this record's runs on mount,
+   * so fetching them again here doubled a read the Record Workbench asserts happens
+   * exactly once. It is fetched LAZILY instead — see `ensureRunsForPropose` below —
+   * the moment a reader actually opens a propose form, which is the earliest point
+   * a run-scoped path can be chosen.
+   */
+  const [proposalCapabilities, setProposalCapabilities] = useState<ProposalCapabilities>(null);
+  /** The PANEL-LEVEL version of `NoteCard`'s own `canPropose` — used only to
+   *  decide whether the one-time banner below renders. See m12. */
+  const canProposeAnywhere =
+    proposalCapabilities !== null && proposalCapabilities.targetFieldPaths.length > 0;
+  const [runsForPropose, setRunsForPropose] = useState<ApiRunView[]>([]);
+  const runsForProposeFetchedRef = useRef(false);
+
+  /** Idempotent: a second call while the first is in flight, or after it
+   *  succeeded, does nothing. A failed read may be retried by a later open. */
+  const ensureRunsForPropose = useCallback(() => {
+    if (runsForProposeFetchedRef.current) return;
+    runsForProposeFetchedRef.current = true;
+    /*
+     * F2, INDEPENDENT REVIEW OF PR-D (post-merge). Bounded at `RUNS_PAGE_SIZE`,
+     * the same first-page size every other `listRuns` call in this app asks
+     * for — omitting `limit` returns EVERY run on the record (`routes.py`,
+     * measured; `omitting_limit_returns_MORE_THAN_ONE_PAGE_of_runs`), which
+     * this picker has no reason to ask for. UNLIKE the label lookup in
+     * `IngestionProposalsPanel`, a run beyond this page is not merely shown
+     * less prettily — it is NOT OFFERED as an option here at all, so this
+     * picker never implies it has listed every run on the record; a record
+     * with more than `RUNS_PAGE_SIZE` runs needs its target run's id entered
+     * some other way (an MCP call, or a future paged picker), not a claim this
+     * dropdown does not make.
+     */
+    api
+      .listRuns(experimentId, { limit: RUNS_PAGE_SIZE })
+      .then((res) => setRunsForPropose(res.runs))
+      .catch(() => {
+        // Left empty, which reads as "no runs available" — fail-closed, never
+        // letting a reader submit a proposal naming a run this read could not
+        // confirm exists. Un-set the guard so a later open may retry the read.
+        runsForProposeFetchedRef.current = false;
+      });
+  }, [experimentId]);
+
+  useEffect(() => {
+    let alive = true;
+    api
+      .listProposals(experimentId, { limit: 1 })
+      .then((res) => {
+        if (!alive) return;
+        setProposalCapabilities({
+          targetFieldPaths: res.target_field_paths,
+          recordScopedTargetFieldPaths: res.record_scoped_target_field_paths,
+        });
+      })
+      .catch(() => {
+        if (alive) setProposalCapabilities(null);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [experimentId]);
+
+  /**
+   * Mint a proposal from a note this record already holds.
+   *
+   * NEVER TOUCHES `note.state` OR TRIGGERS A NOTES-LIST RELOAD — a proposal is a
+   * separate record on the experiment; the note that cited it is unchanged, and
+   * `list.loaded.notes` has nothing to re-fetch. The EXPERIMENT version DOES
+   * move (the write is inside the same `record_lock` as every other write here),
+   * so it is adopted from the response exactly as every other write on this
+   * panel adopts its own — the next act on ANY note uses the current token.
+   */
+  const proposeValue = useCallback(
+    async (
+      note: ApiNote,
+      opts: { fieldPath: string; runId?: string; value: unknown; clientRequestKey: string },
+    ) => {
+      if (!version) throw new Error('no record version held yet');
+      setMutationError(null);
+      try {
+        const written = await api.createProposal(experimentId, {
+          experimentVersion: version,
+          noteId: note.id,
+          targetFieldPath: opts.fieldPath,
+          proposedValue: opts.value,
+          rule: HUMAN_PROPOSED_RULE,
+          ...(opts.runId !== undefined ? { runId: opts.runId } : {}),
+          clientRequestKey: opts.clientRequestKey,
+        });
+        setVersion(written.experiment_version);
+        // Same-tab courtesy, not a server fact — see `lib/selfMintedProposals.ts`.
+        markSelfMintedProposals(experimentId, [written.proposal.proposal_id]);
+        setAnnouncement(
+          written.deduplicated
+            ? 'This value was already proposed from this note — no second proposal was ' +
+                'created. Review it in Ingestion Proposals.'
+            : 'Proposal stored. Review it in Ingestion Proposals.',
+        );
+        return written;
+      } catch (err: unknown) {
+        setMutationError(
+          recoverFromStale(err, 'That proposal could not be stored. Nothing was written.'),
+        );
+        setAnnouncement('');
+        throw err;
+      }
+    },
+    [experimentId, version, recoverFromStale],
+  );
+
   /**
    * The last successfully loaded page, kept across a reload.
    *
@@ -428,6 +626,25 @@ function NotesBrowser({ experimentId }: { experimentId: string }) {
         onAnnounce={setAnnouncement}
       />
 
+      {/*
+        m12, INDEPENDENT REVIEW OF PR-D — SAID ONCE, AT THE PANEL, NOT ONCE PER
+        NOTE CARD. Every `NoteCard` used to render its OWN copy of this sentence
+        when proposing was unavailable, so a record with a dozen unreviewed
+        notes repeated the identical explanation a dozen times. The reason is a
+        fact about this BUILD (or this read), not about any one note, so it is
+        stated here once; `NoteCard` now renders no button and no text of its
+        own in this case — see the comment beside its own `canPropose` check.
+      */}
+      {!canProposeAnywhere && (
+        <p className="notes-propose-unavailable-banner">
+          {proposalCapabilities === null
+            ? 'Proposing a value from a note could not be offered: the set of ' +
+              'proposable fields could not be read.'
+            : 'Proposing a value from a note is not offered: this build accepts ' +
+              'no proposal target yet.'}
+        </p>
+      )}
+
       {list.status === 'loading' && (
         <LoadingPanel label="Loading this record's unmapped notes…" />
       )}
@@ -455,8 +672,12 @@ function NotesBrowser({ experimentId }: { experimentId: string }) {
                   // MILD direction (a reader is told they need a run when they may
                   // not), never to a claim that no run is needed when one is.
                   recordWritablePaths={list.loaded.record_writable_field_paths ?? []}
+                  proposalCapabilities={proposalCapabilities}
+                  runsForPropose={runsForPropose}
+                  onEnsureRunsForPropose={ensureRunsForPropose}
                   busy={busyNoteId === note.id || version === null}
                   onReview={review}
+                  onPropose={proposeValue}
                 />
               </li>
             ))}
@@ -680,8 +901,12 @@ function NoteCard({
   mappablePaths,
   valueWritablePaths,
   recordWritablePaths,
+  proposalCapabilities,
+  runsForPropose,
+  onEnsureRunsForPropose,
   busy,
   onReview,
+  onPropose,
 }: {
   note: ApiNote;
   mappablePaths: string[];
@@ -696,6 +921,14 @@ function NoteCard({
    * subset of `valueWritablePaths`, also served rather than derived here.
    */
   recordWritablePaths: string[];
+  /** The server's own proposable-path vocabulary. `null` ⇒ the read failed. */
+  proposalCapabilities: ProposalCapabilities;
+  /** For choosing a run when a proposal target is run-scoped. `[]` may mean
+   *  "not fetched yet" or "genuinely none" — both render the same honest case. */
+  runsForPropose: ApiRunView[];
+  /** Triggers the lazy run-list read the first time it is genuinely needed. See
+   *  `NotesBrowser`'s `ensureRunsForPropose` for why it is not fetched eagerly. */
+  onEnsureRunsForPropose: () => void;
   busy: boolean;
   onReview: (
     note: ApiNote,
@@ -703,12 +936,23 @@ function NoteCard({
     opts: { fieldPath?: string; text?: string; reason?: string },
     announce: string,
   ) => Promise<void>;
+  onPropose: (
+    note: ApiNote,
+    opts: { fieldPath: string; runId?: string; value: unknown; clientRequestKey: string },
+  ) => Promise<{ deduplicated: boolean }>;
 }) {
-  const [open, setOpen] = useState<'map' | 'edit' | 'dismiss' | null>(null);
+  const [open, setOpen] = useState<'map' | 'edit' | 'dismiss' | 'propose' | null>(null);
   /** No default selection. See rule 1 in the module header — nothing is proposed. */
   const [fieldPath, setFieldPath] = useState('');
   const [editText, setEditText] = useState(note.display_text);
   const [reason, setReason] = useState('');
+
+  /* ---- "Propose a value from this note" form state ------------------------ */
+  const [proposeFieldPath, setProposeFieldPath] = useState('');
+  const [proposeRunId, setProposeRunId] = useState('');
+  const [proposeValueText, setProposeValueText] = useState('');
+  const [proposeError, setProposeError] = useState<string | null>(null);
+  const [proposeBusy, setProposeBusy] = useState(false);
 
   /*
    * D3 — WHAT A FORM HOLDS IS NOT DISCARDED BY CLOSING IT, only by Cancel and by a
@@ -755,10 +999,12 @@ function NoteCard({
   const editId = useId();
   const reasonId = useId();
   const bodyId = useId();
+  const proposeId = useId();
 
   const mapRef = useRef<HTMLButtonElement>(null);
   const editRef = useRef<HTMLButtonElement>(null);
   const dismissRef = useRef<HTMLButtonElement>(null);
+  const proposeRef = useRef<HTMLButtonElement>(null);
 
   /*
    * FOCUS RETURNS TO THE CONTROL THAT OPENED THE FORM, AND IT HAS TO BE AN EFFECT.
@@ -775,7 +1021,7 @@ function NoteCard({
    * `returning` flag: null means "no form was open", so a first render, and a
    * `keep` (which has no form), never steal focus to a button nobody pressed.
    */
-  const returningTo = useRef<'map' | 'edit' | 'dismiss' | null>(null);
+  const returningTo = useRef<'map' | 'edit' | 'dismiss' | 'propose' | null>(null);
   useEffect(() => {
     if (open !== null) return;
     const returning = returningTo.current;
@@ -786,7 +1032,9 @@ function NoteCard({
         ? mapRef.current
         : returning === 'edit'
           ? editRef.current
-          : dismissRef.current;
+          : returning === 'dismiss'
+            ? dismissRef.current
+            : proposeRef.current;
     trigger?.focus();
   }, [open]);
 
@@ -797,13 +1045,19 @@ function NoteCard({
    * different things: a `Cancel` button knows which form it is inside, and a recorded
    * review knows which ACT succeeded (`keep` has no form and consumes nothing).
    */
-  const closeForm = (which: 'map' | 'edit' | 'dismiss' | null, discard: boolean) => {
+  const closeForm = (which: 'map' | 'edit' | 'dismiss' | 'propose' | null, discard: boolean) => {
     if (open !== null) returningTo.current = open;
     setOpen(null);
     if (!discard) return;
     if (which === 'map') setFieldPath('');
     if (which === 'edit') setEditText(note.display_text);
     if (which === 'dismiss') setReason('');
+    if (which === 'propose') {
+      setProposeFieldPath('');
+      setProposeRunId('');
+      setProposeValueText('');
+      setProposeError(null);
+    }
   };
 
   /**
@@ -832,6 +1086,82 @@ function NoteCard({
        * since D2 the banner's own remedy no longer unmounts this card either, so
        * "stays put" is true of the remedy as well as of the refusal.
        */
+    }
+  };
+
+  /* ---- "Propose a value from this note" — derived state and its one write ---- */
+
+  /** Absent, with a reason, rather than disabled — the same rule `DiscardStaged`
+   *  and every other absent-when-inapplicable control in this app follows. */
+  const canPropose = proposalCapabilities !== null && proposalCapabilities.targetFieldPaths.length > 0;
+  const proposeIsRecordScoped =
+    proposalCapabilities !== null &&
+    proposalCapabilities.recordScopedTargetFieldPaths.includes(proposeFieldPath);
+  const proposeNeedsRun = proposeFieldPath !== '' && !proposeIsRecordScoped;
+  /*
+   * m13, INDEPENDENT REVIEW OF PR-D — TYPED ENTRY WHERE A SPEC EXISTS, JSON ONLY
+   * AS THE FALLBACK. `RUN_FIELDS` is `RunCard`'s own closed, five-path,
+   * server-verified writable set (each entry backed by the official schema's
+   * declared type — an enum, a number, or an ISO date-time) — the exact same
+   * spec `RunCard` itself uses to render its controls. A proposal TARGET path
+   * that happens to be one of those five gets the SAME typed control
+   * (`parseRunField` does the parsing either way), so a scientist proposing
+   * `context.temperature_K` types `300`, not `300` wrapped in JSON quoting
+   * rules they have to remember. A target OUTSIDE that five — `system.technique`,
+   * `sample.*`, `system.facility.*`, and anything future the server's
+   * `target_field_paths` widens to — has no client-side spec for its shape at
+   * all, and the honest fallback for a shape this file does not know is JSON
+   * text, exactly as before: never a guess at a type the schema did not confirm.
+   */
+  const proposeFieldSpec: RunFieldSpec | null =
+    RUN_FIELDS.find((spec) => spec.path === proposeFieldPath) ?? null;
+
+  const runPropose = async () => {
+    if (proposeBusy || proposeFieldPath === '') return;
+    if (proposeNeedsRun && proposeRunId === '') return;
+    let parsedValue: unknown;
+    if (proposeFieldSpec !== null) {
+      const parsed = parseRunField(proposeFieldSpec, proposeValueText);
+      if (!parsed.ok) {
+        setProposeError(parsed.error);
+        return;
+      }
+      parsedValue = parsed.value;
+    } else {
+      try {
+        parsedValue = JSON.parse(proposeValueText) as unknown;
+      } catch {
+        setProposeError(
+          'That is not valid JSON, so it was not sent and nothing was written. A text ' +
+            'value needs quotes around it, for example "CuO".',
+        );
+        return;
+      }
+    }
+    if (parsedValue === null) {
+      setProposeError(
+        'A null value cannot be proposed here — clearing a field is a different act ' +
+          'with its own questions. Nothing was sent.',
+      );
+      return;
+    }
+    setProposeError(null);
+    setProposeBusy(true);
+    try {
+      const clientRequestKey =
+        `note-propose:${note.id}:${proposeFieldPath}:` + stableValueDigest(parsedValue);
+      await onPropose(note, {
+        fieldPath: proposeFieldPath,
+        ...(proposeNeedsRun ? { runId: proposeRunId } : {}),
+        value: parsedValue,
+        clientRequestKey,
+      });
+      closeForm('propose', true);
+    } catch {
+      /* Refused, or a 412. The panel-level banner reports it (including, on a 412,
+         that the version was reloaded); this form and its typed input stay put. */
+    } finally {
+      setProposeBusy(false);
     }
   };
 
@@ -931,6 +1261,34 @@ function NoteCard({
         >
           Dismiss
         </button>
+        {/*
+          m12, INDEPENDENT REVIEW OF PR-D — ABSENT, WITH NO PER-CARD REASON.
+          When proposing is unavailable the button is simply absent here — the
+          ONE explanatory sentence for "why" is the panel-level banner
+          (`NotesBrowser`, right above the notes list), stated once rather than
+          repeated identically on every card in the list. "Absent, never
+          disabled" is unchanged: this is not a disabled control claiming
+          something exists and then refusing it.
+        */}
+        {canPropose && (
+          <button
+            ref={proposeRef}
+            type="button"
+            className="btn btn-secondary"
+            disabled={busy}
+            aria-expanded={open === 'propose'}
+            aria-controls={open === 'propose' ? proposeId : undefined}
+            onClick={() => {
+              // Idempotent (see `ensureRunsForPropose`) — safe to call on every
+              // open, including a re-open, rather than tracking "was it opened
+              // before" here too.
+              onEnsureRunsForPropose();
+              setOpen(open === 'propose' ? null : 'propose');
+            }}
+          >
+            Propose a value from this note
+          </button>
+        )}
       </div>
 
       {open === 'map' && (
@@ -1093,6 +1451,187 @@ function NoteCard({
               type="button"
               className="btn btn-secondary"
               onClick={() => closeForm('dismiss', true)}
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
+      {open === 'propose' && canPropose && proposalCapabilities !== null && (
+        <div className="note-form" id={proposeId}>
+          <label className="notes-control-label" htmlFor={`${proposeId}-path`}>
+            Field this value is for
+          </label>
+          <select
+            id={`${proposeId}-path`}
+            className="note-field-select"
+            value={proposeFieldPath}
+            onChange={(e) => {
+              setProposeFieldPath(e.target.value);
+              setProposeRunId('');
+              setProposeError(null);
+              // The value box's CONTROL TYPE can change with the field (a typed
+              // enum/number/datetime control for a `RUN_FIELDS` path, JSON text
+              // otherwise) — clearing it here stops a JSON-quoted string or a
+              // bare number surviving into a control shaped for the other kind.
+              setProposeValueText('');
+            }}
+          >
+            {/* No pre-selection, even when `note.candidate_field_path` names one —
+                the same rule the Map form follows: a person chooses. */}
+            <option value="">Choose a field…</option>
+            {proposalCapabilities.targetFieldPaths.map((path) => (
+              <option key={path} value={path}>
+                {path}
+              </option>
+            ))}
+          </select>
+          <p className="note-form-hint">
+            This is the server&rsquo;s own list of the paths this build can target with
+            a proposal — a subset of the official schema, not every field it defines.
+          </p>
+
+          {proposeFieldPath !== '' && proposeNeedsRun && (
+            <>
+              <label className="notes-control-label" htmlFor={`${proposeId}-run`}>
+                Run this value is about
+              </label>
+              {runsForPropose.length === 0 ? (
+                <p className="note-form-hint" role="alert">
+                  This field is applied through a run&rsquo;s writer, and this record
+                  has no runs yet (or they could not be read). Create a run from the
+                  Runs section before proposing a value here — it is never inferred.
+                </p>
+              ) : (
+                <select
+                  id={`${proposeId}-run`}
+                  className="note-field-select"
+                  value={proposeRunId}
+                  onChange={(e) => setProposeRunId(e.target.value)}
+                >
+                  <option value="">Choose a run…</option>
+                  {runsForPropose.map((run) => (
+                    <option key={run.id} value={run.id}>
+                      {run.label}
+                    </option>
+                  ))}
+                </select>
+              )}
+              <p className="note-form-hint">
+                Required: a value at this field path is applied through a run&rsquo;s
+                writer, so the proposal must name the run it is about. It is never
+                inferred, even when this record has exactly one run.
+              </p>
+            </>
+          )}
+
+          {proposeFieldPath !== '' && proposeFieldSpec !== null && (
+            <>
+              {/*
+                m13 — THE TYPED CONTROL, when `RUN_FIELDS` declares a spec for
+                this path: the same enum/number/datetime shapes `RunCard` uses,
+                parsed by the same `parseRunField`. No JSON, no quoting rule to
+                remember.
+              */}
+              <label className="notes-control-label" htmlFor={`${proposeId}-value`}>
+                {proposeFieldSpec.label}
+                {proposeFieldSpec.unit ? ` (${proposeFieldSpec.unit})` : ''}
+              </label>
+              {proposeFieldSpec.kind === 'enum' ? (
+                <select
+                  id={`${proposeId}-value`}
+                  className="note-field-select"
+                  value={proposeValueText}
+                  onChange={(e) => {
+                    setProposeValueText(e.target.value);
+                    setProposeError(null);
+                  }}
+                >
+                  <option value="">Choose a value…</option>
+                  {proposeFieldSpec.options?.map((option) => (
+                    <option key={option} value={option}>
+                      {option}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <input
+                  id={`${proposeId}-value`}
+                  className="note-reason-input"
+                  type="text"
+                  inputMode={proposeFieldSpec.kind === 'number' ? 'decimal' : undefined}
+                  value={proposeValueText}
+                  onChange={(e) => {
+                    setProposeValueText(e.target.value);
+                    setProposeError(null);
+                  }}
+                />
+              )}
+              <p className="note-form-hint">
+                <span className="mono">{proposeFieldSpec.path}</span> — the same field
+                the Runs section itself edits, entered the same way.
+                {proposeFieldSpec.hint ? ` ${proposeFieldSpec.hint}` : ''} This does not
+                write the value — it stores a proposal for someone to accept or reject
+                on the Ingestion Proposals screen.
+              </p>
+            </>
+          )}
+
+          {proposeFieldPath !== '' && proposeFieldSpec === null && (
+            <>
+              {/*
+                THE JSON FALLBACK — no client-side spec exists for this path's
+                shape, so the type is never guessed. See the `proposeFieldSpec`
+                comment above for exactly which paths this covers.
+              */}
+              <label className="notes-control-label" htmlFor={`${proposeId}-value`}>
+                The value, as JSON
+              </label>
+              <textarea
+                id={`${proposeId}-value`}
+                className="notes-capture-input mono"
+                rows={3}
+                value={proposeValueText}
+                onChange={(e) => {
+                  setProposeValueText(e.target.value);
+                  setProposeError(null);
+                }}
+              />
+              <p className="note-form-hint">
+                Entered as JSON so the type is never guessed: a text value is quoted,
+                for example <span className="mono">&quot;CuO&quot;</span>. This does
+                not write the value — it stores a proposal for someone to accept or
+                reject on the Ingestion Proposals screen.
+              </p>
+            </>
+          )}
+
+          {proposeError !== null && (
+            <p className="note-form-error" role="alert">
+              {proposeError}
+            </p>
+          )}
+
+          <div className="note-form-actions">
+            <button
+              type="button"
+              className="btn btn-primary"
+              disabled={
+                busy ||
+                proposeBusy ||
+                proposeFieldPath === '' ||
+                proposeValueText.trim() === '' ||
+                (proposeNeedsRun && proposeRunId === '')
+              }
+              onClick={() => void runPropose()}
+            >
+              {proposeBusy ? 'Proposing…' : 'Propose This Value'}
+            </button>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={() => closeForm('propose', true)}
             >
               Cancel
             </button>

@@ -140,7 +140,7 @@ describe('the record workspaces keep unsaved text', () => {
 
     // The capture panel opens behind its own disclosure; opening it is the reader's
     // first act, and the box only exists after it.
-    fireEvent.click(await screen.findByRole('button', { name: 'Start a capture' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Capture Experiment Notes' }));
     const transcript = screen.getByLabelText('Transcript');
     fireEvent.change(transcript, { target: { value: 'the scan was repeated at 8979 eV' } });
     const capture = screen.getByLabelText('Capture a note');
