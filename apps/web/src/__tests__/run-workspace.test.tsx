@@ -168,13 +168,30 @@ function cardFor(runId: string): HTMLElement {
   return el as HTMLElement;
 }
 
-/** The accordion header button of one run card. */
-function headerOf(runId: string): HTMLButtonElement {
-  // ANCHORED, and it did not used to be. A card now carries a SECOND button whose
-  // accessible name mentions the run — `Focus run Run 1` — so an unanchored /Run \d/
-  // matches two controls and this helper throws. The accordion header's name BEGINS
-  // with the run label; the Focus control's does not.
-  return within(cardFor(runId)).getByRole('button', { name: /^Run \d/ }) as HTMLButtonElement;
+/**
+ * The header of one run card — a compact row's own open `<button>`, or, once
+ * focused, the plain `<h3>` heading m-2 replaced its accordion button with
+ * (fix round, PR-C). Read by CLASS rather than by role or accessible name,
+ * because the two states are no longer the same element type: a compact
+ * row's `.sr-only` "Open " prefix (I-3) also moved its accessible name off
+ * `/^Run \d/`, and a focused card's heading carries the role "heading", not
+ * "button", so a single `getByRole('button', …)` could never match both.
+ * `.run-card-header` is the one class both branches still share.
+ *
+ * DELIBERATELY THE ONE EXCEPTION (fix round, review finding m-8). Every
+ * other test file's own click-to-open helper is compact-only at the moment
+ * it runs, so those restore `getByRole('button', { name: /^Open Run \d/ })`
+ * — a real assertion, not a coincidence, that would fail loudly if ever
+ * called on an already-focused run. This one is the exception because it is
+ * called AFTER focusing too, to read attributes off whichever element is
+ * currently on screen; a role-anchored query there would throw the moment
+ * the run it names is focused, which is exactly half of what this helper is
+ * for.
+ */
+function headerOf(runId: string): HTMLElement {
+  const el = cardFor(runId).querySelector('.run-card-header');
+  if (el === null) throw new Error(`no header rendered for ${runId}`);
+  return el as HTMLElement;
 }
 
 async function expand(runId: string) {
@@ -294,21 +311,58 @@ describe('Add Run', () => {
 // ---------------------------------------------------------------------------
 
 describe('run card accordion semantics', () => {
-  it('is a real accordion: button + aria-expanded + aria-controls over a labelled region', async () => {
+  /*
+   * MASTER-DETAIL, REWRITTEN RATHER THAN DELETED. This test used to prove a run's
+   * card was a real in-list accordion — collapsed by default, no `aria-expanded`
+   * lie, expand reveals a labelled region, collapse removes it again. The list row
+   * is no longer that control: `RunsSection`'s compact row (`RunCard`'s own
+   * `compact` mode) does not disclose anything in place, so it carries no
+   * `aria-expanded` at all — clicking it NAVIGATES to `?run=<id>`. That is a real
+   * behaviour change (design brief §7, Constraints §7.3), not a relocation, so the
+   * property this test protects moves with it in two pieces:
+   *
+   *   1. the compact row is a plain button naming the run, with no false
+   *      `aria-expanded` claim;
+   *   2. ONCE OPEN, the run's own accordion — Conditions / Inherited / Name — is
+   *      unchanged: still a real `h3 > button[aria-expanded][aria-controls]` over
+   *      a labelled `role="region"`, and it still collapses and expands WITHOUT
+   *      leaving focus, because `FocusedRun` still drives it through the same
+   *      `onToggle`.
+   */
+  it('the compact row is a plain open control, carrying no false aria-expanded', async () => {
     renderRecord({ [`GET ${BASE}/runs`]: { body: runsBody([RUN_A]) } });
     await screen.findByRole('button', { name: /Add Run/ });
 
-    const header = headerOf('RUN' + 'AAA');
+    const header = headerOf('RUNAAA');
     expect(header.tagName).toBe('BUTTON');
-    expect(header).toHaveAttribute('aria-expanded', 'false');
-    const panelId = header.getAttribute('aria-controls');
-    expect(panelId).toBeTruthy();
-    // Collapsed: the panel is not in the document.
-    expect(document.getElementById(panelId!)).toBeNull();
+    // It does not disclose anything IN PLACE, so it must not claim to.
+    expect(header).not.toHaveAttribute('aria-expanded');
+    expect(header).not.toHaveAttribute('aria-controls');
+    // And nothing it could plausibly control is in the document yet.
+    expect(cardFor('RUNAAA').querySelector('.run-card-body')).toBeNull();
+  });
 
-    await expand('RUNAAA');
-    expect(header).toHaveAttribute('aria-expanded', 'true');
-    const panel = document.getElementById(panelId!);
+  /*
+   * REWRITTEN, NOT DELETED (fix round, review finding m-2). This used to prove
+   * the focused view's heading was a real accordion — `aria-expanded`,
+   * `aria-controls`, collapsing in place without leaving focus. That whole
+   * premise is gone: an editor that can collapse into nothing is a defect on
+   * a screen where it is the ONLY open editor, reachable no other way than by
+   * its own header. The property worth proving is the opposite one now — the
+   * heading carries NO disclosure semantics at all, and the panel it labels
+   * cannot be made to disappear by clicking it.
+   */
+  it('opens on a plain, non-collapsing heading — not an accordion button (m-2)', async () => {
+    renderRecord({ [`GET ${BASE}/runs`]: { body: runsBody([RUN_A]) } });
+    await screen.findByRole('button', { name: /Add Run/ });
+
+    await expand('RUNAAA'); // navigates into focus; the panel opens by default
+    const header = headerOf('RUNAAA');
+    expect(header.tagName).toBe('H3');
+    expect(header).not.toHaveAttribute('aria-expanded');
+    expect(header).not.toHaveAttribute('aria-controls');
+
+    const panel = cardFor('RUNAAA').querySelector('.run-card-body');
     expect(panel).not.toBeNull();
     expect(panel).toHaveAttribute('role', 'region');
     expect(panel).toHaveAttribute('aria-labelledby', header.id);
@@ -318,9 +372,12 @@ describe('run card accordion semantics', () => {
       expect(within(panel as HTMLElement).getByLabelText(label)).toBeInTheDocument();
     }
 
-    await expand('RUNAAA');
-    expect(header).toHaveAttribute('aria-expanded', 'false');
-    expect(document.getElementById(panelId!)).toBeNull();
+    // IT CANNOT COLLAPSE. There is no handler on the heading to click, and the
+    // panel it labels stays exactly where it was.
+    fireEvent.click(header);
+    expect(cardFor('RUNAAA').querySelector('.run-card-body')).not.toBeNull();
+    // Still on the SAME run, addressed by the same URL.
+    expect(cardFor('RUNAAA')).toBeInTheDocument();
   });
 
   /*
@@ -808,6 +865,16 @@ describe('two runs on one screen', () => {
    * into Run 1's slot, which the assertions below catch.
    */
   it('stay isolated: editing the SECOND run neither writes to nor re-renders the first', async () => {
+    /*
+     * MASTER-DETAIL REWRITE. The original test proved isolation by expanding
+     * BOTH cards simultaneously — a state master-detail no longer allows. The
+     * isolation claim is proven the way it now actually has to hold: focusing
+     * RUN B, editing it, leaving focus (which UNMOUNTS its card), then
+     * re-focusing RUN A and reading its values back — untouched, and its own
+     * autosave store entry making no claim about a save it never made. This is
+     * a STRONGER proof of the same property than the original, because it also
+     * crosses the unmount/remount boundary the store exists to survive.
+     */
     const log = patchLog();
     const savedB = {
       ...RUN_B,
@@ -829,10 +896,8 @@ describe('two runs on one screen', () => {
       },
     });
     await screen.findByRole('button', { name: /Add Run/ });
-    await expand('RUNAAA');
-    await expand('RUNBBB');
 
-    expect((within(cardFor('RUNAAA')).getByLabelText('Temperature (K)') as HTMLInputElement).value).toBe('300');
+    await expand('RUNBBB');
     expect((within(cardFor('RUNBBB')).getByLabelText('Temperature (K)') as HTMLInputElement).value).toBe('77');
 
     vi.useFakeTimers();
@@ -847,34 +912,57 @@ describe('two runs on one screen', () => {
     expect(log.seen.map((c) => c.url)).toEqual(['RUNBBB']);
     expect(log.seen[0].ifMatch).toBe('"rb.0"');
 
-    // Both cards are still there under their own ids — a by-position
-    // replacement would have put Run 2's object in Run 1's slot.
-    expect(document.querySelectorAll('[data-run-id="RUNAAA"]')).toHaveLength(1);
-    expect(document.querySelectorAll('[data-run-id="RUNBBB"]')).toHaveLength(1);
-
-    const a = cardFor('RUNAAA');
     const b = cardFor('RUNBBB');
-
-    // Run 1's own values are untouched…
-    expect(within(a).getByText('Run 1')).toBeInTheDocument();
-    expect((within(a).getByLabelText('Temperature (K)') as HTMLInputElement).value).toBe('300');
-    expect((within(a).getByLabelText('Environment') as HTMLSelectElement).value).toBe('in_situ');
-    // …and Run 1 is not claiming anything about a save it did not make.
-    expect(within(a).getByRole('status').textContent).toBe('');
-
-    // Run 2 is, and it adopted the value the SERVER returned.
     expect(within(b).getByText('Run 2')).toBeInTheDocument();
     expect(within(b).getByRole('status').textContent).toBe('Saved');
     expect((within(b).getByLabelText('Temperature (K)') as HTMLInputElement).value).toBe('78');
     expect((within(b).getByLabelText('Environment') as HTMLSelectElement).value).toBe('ex_situ');
+
+    // Leave focus — RUN B's full card unmounts — then open RUN A.
+    vi.useRealTimers();
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Back to all runs' }));
+    });
+    await expand('RUNAAA');
+
+    // Run 1's own values are untouched, and it is not claiming anything about a
+    // save it did not make — a by-position replacement, or a shared draft
+    // reference between the two cards, would have leaked Run 2's edit here.
+    const a = cardFor('RUNAAA');
+    expect(within(a).getByText('Run 1')).toBeInTheDocument();
+    expect((within(a).getByLabelText('Temperature (K)') as HTMLInputElement).value).toBe('300');
+    expect((within(a).getByLabelText('Environment') as HTMLSelectElement).value).toBe('in_situ');
+    expect(within(a).getByRole('status').textContent).toBe('');
+    // And only ONE write ever happened, for Run 2 — reopening Run 1 issued no
+    // PATCH of its own.
+    expect(log.seen.map((c) => c.url)).toEqual(['RUNBBB']);
   });
 
-  it('collapses and expands independently', async () => {
+  it('only one run is open at a time: focusing a second run replaces the first, never adds to it', async () => {
+    /*
+     * MASTER-DETAIL REWRITE of "collapses and expands independently" — a claim
+     * about independent per-card accordions that no longer applies. The
+     * property worth pinning now is the opposite one: exactly ONE run's full
+     * editor is ever mounted, and opening a different run REPLACES it rather
+     * than adding a second one beside it.
+     */
     renderRecord({ [`GET ${BASE}/runs`]: { body: runsBody([RUN_A, RUN_B]) } });
     await screen.findByRole('button', { name: /Add Run/ });
+
     await expand('RUNAAA');
-    expect(headerOf('RUNAAA')).toHaveAttribute('aria-expanded', 'true');
-    expect(headerOf('RUNBBB')).toHaveAttribute('aria-expanded', 'false');
+    // Its field panel is open (m-2: unconditionally, since a focused run's
+    // editor no longer has an `aria-expanded` to check).
+    expect(cardFor('RUNAAA').querySelector('.run-card-body')).not.toBeNull();
+    // RUN B is not even in the document while RUN A is focused — the list
+    // itself is replaced by the one-run editor, not merely collapsed beside it.
+    expect(document.querySelector('[data-run-id="RUNBBB"]')).toBeNull();
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Back to all runs' }));
+    });
+    await expand('RUNBBB');
+    expect(cardFor('RUNBBB').querySelector('.run-card-body')).not.toBeNull();
+    expect(document.querySelector('[data-run-id="RUNAAA"]')).toBeNull();
   });
 });
 
@@ -1149,8 +1237,15 @@ describe('leaving the screen mid-save', () => {
  * rather than the card, is indistinguishable from a correct one when only one
  * card exists or when the edited card is at index 0.
  */
-describe('a save refused while the card is collapsed', () => {
-  async function failWhileCollapsed() {
+describe('a save refused while the card is a compact row', () => {
+  /*
+   * MASTER-DETAIL REWRITE. "Collapsed" used to mean an in-list accordion put
+   * away; the property this suite exists to pin — a refused write is visible
+   * WITHOUT opening the card — now means visible on the COMPACT ROW, once the
+   * reader has left focus. This is orchestrator requirement #4, verbatim:
+   * "Unsaved/failed autosave must remain visible on the compact row."
+   */
+  async function failAsCompactRow() {
     let patches = 0;
     renderRecord({
       [`GET ${BASE}/runs`]: { body: runsBody([RUN_A, RUN_B]) },
@@ -1170,21 +1265,22 @@ describe('a save refused while the card is collapsed', () => {
       });
       await vi.advanceTimersByTimeAsync(AUTOSAVE_DEBOUNCE_MS + 50);
     });
-    // Collapse it, the way a reader who has finished typing would.
+    // Leave focus — back to the compact row — the way a reader who has
+    // finished typing would.
     await act(async () => {
-      fireEvent.click(headerOf('RUNBBB'));
+      fireEvent.click(screen.getByRole('button', { name: 'Back to all runs' }));
     });
-    expect(headerOf('RUNBBB')).toHaveAttribute('aria-expanded', 'false');
+    expect(headerOf('RUNBBB')).not.toHaveAttribute('aria-expanded');
     return { patches: () => patches };
   }
 
-  it('says so on the collapsed card, in words, on the right card', async () => {
-    await failWhileCollapsed();
+  it('says so on the compact row, in words, on the right row', async () => {
+    await failAsCompactRow();
     const b = cardFor('RUNBBB');
     const a = cardFor('RUNAAA');
 
-    // The refusal is on the card, in words, with the card collapsed. Both the
-    // header indicator and the live region carry it — the same pairing the
+    // The refusal is on the row, in words, without opening it. Both the row's
+    // own header indicator and the live region carry it — the same pairing the
     // `conflict` state already had.
     expect(within(b).getByRole('status').textContent).toContain('Save failed');
     expect(headerOf('RUNBBB')).toHaveAccessibleName(/Save failed/);
@@ -1193,9 +1289,6 @@ describe('a save refused while the card is collapsed', () => {
     );
     expect(b.textContent ?? '').toMatch(/Save failed/);
 
-    // Reaching the collapsed header by keyboard alone announces it: the words
-    // are part of the header's accessible name, not a colour on a chip.
-    expect(headerOf('RUNBBB')).toHaveAccessibleName(/Save failed/);
     // Both indicators are a glyph PLUS words, and the glyph is decorative — the
     // failure is never carried by colour or by a shape alone.
     for (const indicator of [
@@ -1213,9 +1306,22 @@ describe('a save refused while the card is collapsed', () => {
     expect(headerOf('RUNAAA')).not.toHaveAccessibleName(/Save failed/);
   });
 
-  it('keeps Retry Save reachable without expanding the card first', async () => {
-    const { patches } = await failWhileCollapsed();
-    expect(patches()).toBe(1);
+  it('keeps Retry Save reachable without opening the run first', async () => {
+    /*
+     * TWO PATCHES BEFORE ANY RETRY, NOT ONE — and that is the store's own
+     * documented behaviour, not a defect this test papers over.
+     * `runAutosaveStore.flushPending` fires on unmount whenever an entry is
+     * holding an edit and is not halted (`flushPending`'s own header:
+     * "the edit leaves IMMEDIATELY … its outcome is remembered by the store").
+     * A 422 is a considered refusal, not a halt, so the still-held edit is
+     * still pending — and leaving focus now UNMOUNTS the card (master-detail;
+     * "collapsing" a list row used to leave the same component instance
+     * mounted, so this flush was unreachable from a mere collapse before).
+     * The second patch is expected, and it fails 422 again for the same
+     * reason the first one did.
+     */
+    const { patches } = await failAsCompactRow();
+    expect(patches()).toBe(2);
     const b = cardFor('RUNBBB');
 
     const retry = within(b).getByRole('button', { name: 'Retry Save' });
@@ -1223,9 +1329,9 @@ describe('a save refused while the card is collapsed', () => {
       fireEvent.click(retry);
       await vi.advanceTimersByTimeAsync(50);
     });
-    // It re-sent the held edit — the card is still collapsed.
-    expect(patches()).toBe(2);
-    expect(headerOf('RUNBBB')).toHaveAttribute('aria-expanded', 'false');
+    // It re-sent the held edit — the run is still a compact row, unopened.
+    expect(patches()).toBe(3);
+    expect(headerOf('RUNBBB')).not.toHaveAttribute('aria-expanded');
     // Run 1 was never written to.
     expect(within(cardFor('RUNAAA')).queryByRole('button', { name: 'Retry Save' })).toBeNull();
   });
@@ -1302,14 +1408,19 @@ describe('a value the client itself refuses (review finding: the client-refusal 
     expect(within(card).getByRole('status').textContent).toBe('Change not sent');
   });
 
-  it('says so on the COLLAPSED card, where the field error cannot be seen', async () => {
+  /*
+   * REWRITTEN, NOT DELETED (m-2). The focused editor can no longer be
+   * collapsed at all, so "on the collapsed card" is no longer a state this
+   * screen can reach. What survives from the original property, and is still
+   * worth pinning: the header's OWN accessible name carries "Change not
+   * sent" too, not only the live region — the same rule the server-refusal
+   * case already established, so a keyboard-only reader landing on the
+   * heading (without reading the body) still hears what is wrong.
+   */
+  it('says so in the heading too, not only in the live region', async () => {
     await saveThenTypeGarbage();
-    await act(async () => {
-      fireEvent.click(headerOf('RUNAAA'));
-    });
-    expect(headerOf('RUNAAA')).toHaveAttribute('aria-expanded', 'false');
     const card = cardFor('RUNAAA');
-    // In the header's accessible name, so keyboard-only reaching the collapsed card
+    // In the header's accessible name, so keyboard-only reaching this card
     // says what is wrong with it — the same rule as the server-refusal case.
     expect(headerOf('RUNAAA')).toHaveAccessibleName(/Change not sent/);
     expect(within(card).getByRole('status').textContent).toBe('Change not sent');
@@ -1514,6 +1625,10 @@ describe('the denominator discloses its scope (review finding: invented denomina
   it('says which fields it is counting, never a bare "of N"', async () => {
     renderRecord({ [`GET ${BASE}/runs`]: { body: runsBody([RUN_A]) } });
     await screen.findByRole('button', { name: /Add Run/ });
+    // The progress denominator is a FULL-CARD field — the compact row deliberately
+    // withholds it (see `RunCard`'s own header note on why a compact row shows no
+    // Check Run verdict and no filled-count), so the run has to be open to read it.
+    await expand('RUNAAA');
     /*
      * RENAMED FROM "says which three fields", because the screen now offers five and a
      * test whose NAME carries a stale count is a small lie in the place a reader looks
@@ -1702,12 +1817,13 @@ describe('PHASE 2 — save state that outlives the card', () => {
      * NO RE-EXPAND HERE, AND THAT IS THE SECOND THING D1 CHANGED. This line used to
      * read `await expand('RUNAAA')`, because the round trip UNMOUNTED the card and a
      * remounted one starts collapsed. The panel is now kept mounted and hidden, so the
-     * card keeps the state the reader left it in — and `expand` is a TOGGLE, so calling
-     * it here would collapse the card and hide the conflict panel, which lives inside
-     * the collapsible body. Asserted rather than assumed, because "still expanded" is
-     * now a property this test depends on.
+     * card keeps the state the reader left it in. NEITHER HALF OF THAT SENTENCE IS
+     * ABOUT COLLAPSING ANY MORE (m-2: the focused editor cannot collapse at all), so
+     * what is asserted now is simply that its field panel is still there — which
+     * "expand" would be a no-op on regardless, since it is the compact row's OWN
+     * open control and this card is not compact.
      */
-    expect(headerOf('RUNAAA')).toHaveAttribute('aria-expanded', 'true');
+    expect(cardFor('RUNAAA').querySelector('.run-card-body')).not.toBeNull();
 
     stale = true;
     await act(async () => {

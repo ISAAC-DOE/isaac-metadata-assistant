@@ -151,9 +151,20 @@ function cardFor(runId: string): HTMLElement {
 
 async function expand(runId: string) {
   await act(async () => {
-    // Anchored: the card also carries a `Focus run Run 1` control, whose accessible
-    // name contains but does not begin with the run label. See run-workspace.test.tsx.
-    fireEvent.click(within(cardFor(runId)).getByRole('button', { name: /^Run \d/ }));
+    /*
+     * ANCHORED ON THE VERB, NOT THE LABEL (fix round, review finding m-8).
+     * The compact row's own open control carries an `.sr-only` "Open "
+     * prefix ahead of the run's label (I-3), so its accessible name begins
+     * `Open Run 1 …` rather than `Run 1 …`. Role + name, not a raw
+     * `.run-card-header` class query: that class matches BOTH the compact
+     * row's `<button>` and the focused editor's own plain `<h3>` heading
+     * (`RunCard.tsx`'s m-2 note) — this helper is only ever called while
+     * COMPACT, so pinning the query to `role="button"` is a real assertion
+     * rather than a coincidence, and would fail loudly if it were ever
+     * called on an already-focused run instead of silently clicking a
+     * heading nothing happens to.
+     */
+    fireEvent.click(within(cardFor(runId)).getByRole('button', { name: /^Open Run \d/ }));
   });
 }
 

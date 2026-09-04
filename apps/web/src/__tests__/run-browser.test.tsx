@@ -1023,7 +1023,17 @@ describe('Focus Run', () => {
 
     const card = document.querySelector('[data-run-id="RUN003"]')!;
     await act(async () => {
-      fireEvent.click(within(card as HTMLElement).getByRole('button', { name: /^Focus run/ }));
+      /*
+       * The standalone "Focus" button this test used to click is gone (fix
+       * round, review finding I-3) — the row's own open control does the
+       * act. ANCHORED ON THE VERB (m-8), not a raw `.run-card-header` class
+       * query: that class also matches the FOCUSED editor's own plain
+       * `<h3>` heading once a run is open (`RunCard.tsx`'s m-2 note), and
+       * this click is only ever made while compact.
+       */
+      fireEvent.click(
+        within(card as HTMLElement).getByRole('button', { name: /^Open Run \d/ }),
+      );
     });
 
     await waitFor(() => expect(renderedIds()).toEqual(['RUN003']));
@@ -1147,7 +1157,18 @@ describe('Focus Run', () => {
     expect(countText()).toBe('No run with that id · 20 runs in this record');
   });
 
-  it('is offered on a collapsed card, so no run is reachable only by expanding it', async () => {
+  /*
+   * REWRITTEN, NOT DELETED (fix round, review finding I-3). This used to
+   * prove a SECOND, standalone "Focus run …" button sat beside the row as a
+   * sibling rather than nested inside it — two 52×24 targets for one act,
+   * which is exactly the defect I-3 found and removed. There is now exactly
+   * ONE control per row, so the property worth pinning is the opposite one:
+   * that single control is reachable on a collapsed card (no expanding
+   * required), carries no false `aria-expanded`, and its accessible name
+   * carries a VERB — an `.sr-only` "Open" — ahead of the run's own label, so
+   * a screen reader hears what the control does and not only what it names.
+   */
+  it('is reachable on a collapsed card by ONE control, not two, and that control names its own act', async () => {
     const all = Array.from({ length: 3 }, (_, i) => mkRun(i + 1));
     stubBackend((q) => serveRuns(all, q));
     renderRecord();
@@ -1156,35 +1177,325 @@ describe('Focus Run', () => {
 
     for (const id of renderedIds()) {
       const card = document.querySelector(`[data-run-id="${id}"]`) as HTMLElement;
-      const header = within(card).getByRole('button', { name: /^Run \d/ });
-      expect(header).toHaveAttribute('aria-expanded', 'false');
-      const focusButton = within(card).getByRole('button', { name: /^Focus run/ });
-      expect(focusButton.tagName).toBe('BUTTON');
-      /*
-       * A SIBLING OF THE HEADER, NOT A CHILD OF IT — asserted because a mutation
-       * run nested it inside and the whole suite stayed green (91 of 91). jsdom
-       * renders a button inside a button happily and React only logs a
-       * `validateDOMNesting` warning, which nothing here was reading.
-       *
-       * The a11y e2e sweep cannot cover this either, and the reason is structural
-       * rather than a thoroughness problem: its record surface has no runs, so a
-       * Focus control never renders there at all. That makes this the only layer
-       * where the invariant can be pinned.
-       *
-       * It matters because the HTML parser does not nest interactive content: a
-       * real browser would close the outer button before the inner one, which puts
-       * the Focus control OUTSIDE the accordion in the accessibility tree while it
-       * still looks nested on screen — and the collapsed-card guarantee this very
-       * test asserts would quietly stop meaning what it says.
-       */
-      expect(header.contains(focusButton)).toBe(false);
-      expect(focusButton.closest('button')).toBe(focusButton);
-      // The accessible name names WHICH run, so fifty of these are fifty
-      // distinguishable controls rather than fifty called "Focus".
-      expect(focusButton.getAttribute('aria-label')).toContain(
-        card.querySelector('.run-card-name')?.textContent,
-      );
+      const header = within(card).getByRole('button', { name: /^Open Run \d/ });
+      // The compact row's own open control is itself a way to reach the run
+      // (master-detail: clicking it navigates straight to the full editor),
+      // so it carries no `aria-expanded` — it never discloses anything in
+      // place for that attribute to describe.
+      expect(header).not.toHaveAttribute('aria-expanded');
+      // EXACTLY ONE control offers this act now — a standalone "Focus"
+      // button briefly sat beside it (two 52×24 targets for one act) and is
+      // gone. `Compare` is the only other button on a compact row.
+      expect(within(card).getAllByRole('button')).toHaveLength(2);
+      expect(within(card).queryByRole('button', { name: /^Focus run/ })).toBeNull();
+      // THE ACCESSIBLE NAME CARRIES A VERB ("Open", `.sr-only`) AND STILL
+      // CONTAINS THE VISIBLE LABEL (WCAG 2.5.3 asks for containment, not that
+      // the visible text come first): a sighted reader sees the run's own
+      // name; a screen reader hears "Open" ahead of it.
+      expect(header).toHaveAccessibleName(new RegExp(`^Open ${card.querySelector('.run-card-name')?.textContent}`));
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 5b — the leave confirmation, and Next / Previous run (review findings
+// I-1, C-2, I-8, I-6)
+// ---------------------------------------------------------------------------
+
+/** Open a compact row by id — anchored on the verb (I-3/m-8), see the note on `headerOf`-style helpers elsewhere in this file. */
+async function openCompactRow(runId: string) {
+  await act(async () => {
+    fireEvent.click(
+      within(document.querySelector(`[data-run-id="${runId}"]`) as HTMLElement).getByRole(
+        'button',
+        { name: /^Open Run \d/ },
+      ),
+    );
+  });
+}
+
+describe('the leave confirmation, and Next / Previous run', () => {
+  it('Stay keeps the held-invalid text; Leave anyway discards it; an unmodified run leaves in one click', async () => {
+    const all = [mkRun(1), mkRun(2)];
+    stubBackend((q) => serveRuns(all, q));
+    renderRecord();
+    await waitForList();
+    await waitFor(() => expect(renderedIds()).toHaveLength(2));
+
+    // THE ORDINARY CASE IS UNAFFECTED: an unmodified run still leaves on one
+    // click — `requestLeave` only arms the confirmation when there is
+    // something to warn about.
+    await openCompactRow('RUN001');
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Back to all runs' })).toBeTruthy());
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Back to all runs' }));
+    });
+    await waitFor(() => expect(renderedIds()).toHaveLength(2));
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+
+    // Re-open RUN001 and hold text this screen could not parse.
+    await openCompactRow('RUN001');
+    const card = () => document.querySelector('[data-run-id="RUN001"]') as HTMLElement;
+    fireEvent.change(within(card()).getByLabelText('Temperature (K)'), { target: { value: 'abc' } });
+    await waitFor(() => expect(within(card()).getByRole('status').textContent).toBe('Change not sent'));
+
+    // "Back to all runs" now ARMS the confirmation instead of leaving.
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Back to all runs' }));
+    });
+    const dialog = await screen.findByRole('alertdialog');
+    expect(
+      within(dialog).getByText(/holds text this screen could not read/),
+    ).toBeInTheDocument();
+    expect(screen.getByTestId('url').textContent).toBe(`/record/${ID}?${RECORD_RUN_PARAM}=RUN001`);
+
+    // STAY — the text survives, and the reader is still on RUN001.
+    await act(async () => {
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Stay' }));
+    });
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+    expect((within(card()).getByLabelText('Temperature (K)') as HTMLInputElement).value).toBe(
+      'abc',
+    );
+    expect(screen.getByRole('button', { name: 'Back to all runs' })).toBeInTheDocument();
+
+    // LEAVE ANYWAY — this time it actually leaves, AND ANNOUNCES IT: the
+    // same live-region idiom `removeNote` uses for a removal, because the
+    // reader has just lost text with no server copy to fall back on.
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Back to all runs' }));
+    });
+    await screen.findByRole('alertdialog');
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Leave anyway' }));
+    });
+    await waitFor(() => expect(renderedIds()).toHaveLength(2));
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+    expect(screen.getByText(/Left Run 1\. The text it could not save is gone\./)).toBeInTheDocument();
+    expect(screen.getByTestId('url').textContent).toBe(`/record/${ID}`);
+  });
+
+  /*
+   * REVIEW FINDING I-9. `aria-modal="true"` was declared before this test
+   * existed; nothing enforced it. MUTATION CONTROL: deleting the
+   * document-level keydown effect in `RunsSection.tsx` (the one that both
+   * traps Tab/Shift+Tab and handles Escape) turns this red on all three
+   * assertions below — Tab from `Leave anyway` would leave the dialog
+   * entirely (there is nothing else to Tab to in this harness, so focus
+   * would fall to the document body), Shift+Tab from `Stay` would do
+   * nothing, and Escape dispatched on `document.body` would be heard by
+   * nothing at all, leaving the dialog open.
+   */
+  it('the dialog traps Tab/Shift+Tab, and Escape closes it as Stay from anywhere (I-9)', async () => {
+    const all = [mkRun(1), mkRun(2)];
+    stubBackend((q) => serveRuns(all, q));
+    renderRecord();
+    await waitForList();
+    await waitFor(() => expect(renderedIds()).toHaveLength(2));
+
+    await openCompactRow('RUN001');
+    const card = () => document.querySelector('[data-run-id="RUN001"]') as HTMLElement;
+    fireEvent.change(within(card()).getByLabelText('Temperature (K)'), {
+      target: { value: 'abc' },
+    });
+    await waitFor(() =>
+      expect(within(card()).getByRole('status').textContent).toBe('Change not sent'),
+    );
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Back to all runs' }));
+    });
+    const dialog = await screen.findByRole('alertdialog');
+    const stay = within(dialog).getByRole('button', { name: 'Stay' });
+    const leaveAnyway = within(dialog).getByRole('button', { name: 'Leave anyway' });
+
+    // Focus moved into the dialog on open (I-8) — to Stay, the safe default.
+    await waitFor(() => expect(stay).toHaveFocus());
+
+    // TAB FROM THE LAST CONTROL WRAPS TO THE FIRST — the dialog is the whole
+    // tab ring while it is open.
+    leaveAnyway.focus();
+    fireEvent.keyDown(leaveAnyway, { key: 'Tab' });
+    expect(stay).toHaveFocus();
+
+    // SHIFT+TAB FROM THE FIRST CONTROL WRAPS TO THE LAST.
+    fireEvent.keyDown(stay, { key: 'Tab', shiftKey: true });
+    expect(leaveAnyway).toHaveFocus();
+
+    // ESCAPE FROM ANYWHERE — dispatched on `document.body`, not on a control
+    // inside the dialog, because the handler is document-level and must not
+    // depend on focus already being inside it. It acts as Stay: nothing is
+    // discarded, and focus returns to the trigger.
+    fireEvent.keyDown(document.body, { key: 'Escape' });
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull());
+    expect(screen.getByRole('button', { name: 'Back to all runs' })).toHaveFocus();
+    expect((within(card()).getByLabelText('Temperature (K)') as HTMLInputElement).value).toBe(
+      'abc',
+    );
+  });
+
+  /*
+   * THE CRITICAL FINDING (C-2), MEASURED BEFORE THE FIX: held-invalid text on
+   * a run, then a click on Next, produced no warning at all and the text was
+   * gone the moment the neighbouring run mounted. `focusNeighbor` and
+   * "Back to all runs" now share the one `requestLeave` door.
+   */
+  it('Next and Previous open the SAME confirmation as Back when the current run holds unsent text (C-2)', async () => {
+    const all = [mkRun(1), mkRun(2), mkRun(3)];
+    stubBackend((q) => serveRuns(all, q));
+    renderRecord();
+    await waitForList();
+    await waitFor(() => expect(renderedIds()).toHaveLength(3));
+
+    // Open the MIDDLE run so both Previous and Next are enabled.
+    await openCompactRow('RUN002');
+    const card = () => document.querySelector('[data-run-id="RUN002"]') as HTMLElement;
+    fireEvent.change(within(card()).getByLabelText('Temperature (K)'), { target: { value: 'abc' } });
+    await waitFor(() => expect(within(card()).getByRole('status').textContent).toBe('Change not sent'));
+
+    // NEXT — armed, not silent.
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Next run' }));
+    });
+    expect(await screen.findByRole('alertdialog')).toBeInTheDocument();
+    // Still on RUN002 — the confirmation, not the navigation, happened.
+    expect(screen.getByTestId('url').textContent).toBe(`/record/${ID}?${RECORD_RUN_PARAM}=RUN002`);
+    // STAY — the text is still exactly what was typed.
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Stay' }));
+    });
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+    expect((within(card()).getByLabelText('Temperature (K)') as HTMLInputElement).value).toBe(
+      'abc',
+    );
+
+    // PREVIOUS — the same gate, and this time confirmed.
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Previous run' }));
+    });
+    expect(await screen.findByRole('alertdialog')).toBeInTheDocument();
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Leave anyway' }));
+    });
+    await waitFor(() =>
+      expect(screen.getByTestId('url').textContent).toBe(
+        `/record/${ID}?${RECORD_RUN_PARAM}=RUN001`,
+      ),
+    );
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+  });
+
+  /*
+   * REVIEW FINDING I-6(2). `hasPrevRun`/`hasNextRun` and the act
+   * Next/Previous perform now share ONE function, `neighborRun`
+   * (`RunsSection.tsx`) — this is the test that makes that sharing matter:
+   * a boundary refusal has to be TRUE both in what the button announces and
+   * in what it does. MUTATION CONTROL: reverting `neighborRun` to wrap
+   * (`onPage[(index + direction + onPage.length) % onPage.length]`) turns
+   * this red — `hasNextRun` would then read `true` at the last run, the
+   * assertion on `aria-disabled` fails, and the subsequent click would
+   * navigate to RUN001 instead of staying on RUN003.
+   */
+  it('Next is refused at the last loaded run, and Previous at the first, each with a stated reason — never a wrap', async () => {
+    const all = [mkRun(1), mkRun(2), mkRun(3)];
+    stubBackend((q) => serveRuns(all, q));
+    renderRecord();
+    await waitForList();
+    await waitFor(() => expect(renderedIds()).toHaveLength(3));
+
+    // FIRST run: Previous is refused, with a stated reason, and stays put.
+    await openCompactRow('RUN001');
+    const prev = () => screen.getByRole('button', { name: /^Previous run/ });
+    expect(prev()).toHaveAttribute('aria-disabled', 'true');
+    expect(prev().getAttribute('aria-label')).toMatch(
+      /this is the first run on the loaded list/,
+    );
+    await act(async () => {
+      fireEvent.click(prev());
+    });
+    expect(screen.getByTestId('url').textContent).toBe(`/record/${ID}?${RECORD_RUN_PARAM}=RUN001`);
+    // And it never wrapped to the LAST run either.
+    expect(screen.getByTestId('url').textContent).not.toContain('RUN003');
+
+    // Walk to the LAST run.
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Next run' }));
+    });
+    await waitFor(() =>
+      expect(screen.getByTestId('url').textContent).toBe(
+        `/record/${ID}?${RECORD_RUN_PARAM}=RUN002`,
+      ),
+    );
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Next run' }));
+    });
+    await waitFor(() =>
+      expect(screen.getByTestId('url').textContent).toBe(
+        `/record/${ID}?${RECORD_RUN_PARAM}=RUN003`,
+      ),
+    );
+
+    // LAST run: Next is refused, with a stated reason, and stays put.
+    const next = () => screen.getByRole('button', { name: /^Next run/ });
+    expect(next()).toHaveAttribute('aria-disabled', 'true');
+    expect(next().getAttribute('aria-label')).toMatch(
+      /this is the last run on the loaded list/,
+    );
+    await act(async () => {
+      fireEvent.click(next());
+    });
+    expect(screen.getByTestId('url').textContent).toBe(`/record/${ID}?${RECORD_RUN_PARAM}=RUN003`);
+    // And it never wrapped to the FIRST run either.
+    expect(screen.getByTestId('url').textContent).not.toContain('RUN001');
+  });
+
+  /*
+   * REVIEW FINDING I-6(3). `FocusedRun` keys its `RunCard` on `run.id`
+   * precisely because focus can now move laterally between two runs without
+   * ever leaving focus mode (Next/Previous) — without the key, React would
+   * reuse the SAME `RunCard` instance across the switch and carry its local
+   * state (an unsaved draft, a held-invalid field) onto a run it does not
+   * belong to. MUTATION CONTROL: deleting `key={run.id}` from `RunCard` in
+   * `RunsSection.tsx`'s `FocusedRun` turns this red — RUN002's Temperature
+   * field then still reads "abc", RUN001's held text, instead of empty.
+   */
+  it("switching via Next renders the NEW run's own fields, never the previous run's held text", async () => {
+    const all = [mkRun(1), mkRun(2)];
+    stubBackend((q) => serveRuns(all, q));
+    renderRecord();
+    await waitForList();
+    await waitFor(() => expect(renderedIds()).toHaveLength(2));
+
+    await openCompactRow('RUN001');
+    const card1 = () => document.querySelector('[data-run-id="RUN001"]') as HTMLElement;
+    fireEvent.change(within(card1()).getByLabelText('Temperature (K)'), {
+      target: { value: 'abc' },
+    });
+    await waitFor(() =>
+      expect(within(card1()).getByRole('status').textContent).toBe('Change not sent'),
+    );
+
+    // Next -> the leave confirmation -> Leave anyway.
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Next run' }));
+    });
+    await screen.findByRole('alertdialog');
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Leave anyway' }));
+    });
+    await waitFor(() =>
+      expect(screen.getByTestId('url').textContent).toBe(
+        `/record/${ID}?${RECORD_RUN_PARAM}=RUN002`,
+      ),
+    );
+
+    const card2 = () => document.querySelector('[data-run-id="RUN002"]') as HTMLElement;
+    // RUN002's own field — empty, per `mkRun`'s `fields: {}` — never "abc".
+    expect((within(card2()).getByLabelText('Temperature (K)') as HTMLInputElement).value).toBe(
+      '',
+    );
+    // And no leftover held-invalid state either.
+    expect(within(card2()).getByRole('status').textContent).toBe('');
   });
 });
 
@@ -1339,15 +1650,35 @@ describe('Add Run while filtering', () => {
  * would pass even if the write had been silently dropped.
  */
 describe('an edit in flight', () => {
+  /*
+   * MASTER-DETAIL, AND WHY THE HELPER NOW LEAVES FOCUS TOO. A field is only
+   * ever a control inside the OPEN editor — a compact row renders none — so
+   * queuing an edit requires focusing the run first, which navigates and
+   * REMOUNTS `RunCard` in `FocusedRun`'s subtree (the compact list is
+   * replaced, not merely hidden). `card` captured before the click is
+   * therefore stale; the field is read from the run's card AFTER the click.
+   * Leaving focus again is done by the caller, not here, because each test
+   * below asserts on the pending edit at a DIFFERENT point relative to it.
+   */
   async function typeIntoFirstRun() {
-    const card = document.querySelector('[data-run-id="RUN001"]') as HTMLElement;
+    const compact = document.querySelector('[data-run-id="RUN001"]') as HTMLElement;
     await act(async () => {
-      fireEvent.click(within(card).getByRole('button', { name: /^Run \d/ }));
+      // ANCHORED ON THE VERB (m-8) — see the note on the click a few tests
+      // above for why this is role + name and not a raw class query.
+      fireEvent.click(within(compact).getByRole('button', { name: /^Open Run \d/ }));
     });
+    const opened = document.querySelector('[data-run-id="RUN001"]') as HTMLElement;
     await act(async () => {
-      fireEvent.change(within(card).getByLabelText('Temperature (K)'), {
+      fireEvent.change(within(opened).getByLabelText('Temperature (K)'), {
         target: { value: '277.15' },
       });
+    });
+  }
+
+  /** Leave the one open editor, back to the compact list. */
+  async function backToAllRuns() {
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Back to all runs' }));
     });
   }
 
@@ -1359,7 +1690,18 @@ describe('an edit in flight', () => {
    * save read as a lost edit. Freezing the clock is what makes "still held while
    * the card is gone" observable at all.
    */
-  it('is not lost when a filter change unmounts the card, and is still sent', async () => {
+  it('is not lost when leaving focus unmounts the card, and is still sent', async () => {
+    /*
+     * MASTER-DETAIL REWRITE. A field control exists only inside the OPEN
+     * editor, and the search/filter controls exist only in the COMPACT list —
+     * the two are never on screen together, so "filter, and the focused card
+     * unmounts under it" is no longer a reachable sequence. What replaced it
+     * is stronger, not weaker: leaving focus (the one gesture that is ALWAYS
+     * required before any filter/search/paging control is even reachable)
+     * unmounts the card by itself, and `useRunAutosave`'s teardown flushes a
+     * held edit on every unmount regardless of what caused it — so this test
+     * now proves the property unconditionally rather than for one trigger.
+     */
     const all = Array.from({ length: 40 }, (_, i) => mkRun(i + 1));
     const patched: unknown[] = [];
     stubBackend((q) => serveRuns(all, q), {
@@ -1379,24 +1721,30 @@ describe('an edit in flight', () => {
     expect(snapshotFor(ID, 'RUN001').pendingCount).toBe(1);
     expect(patched).toHaveLength(0);
 
-    // Filter the card off the screen. `RUN001` carries no override, so it is gone.
+    // Leave focus — the card unmounts, and the clock has not moved: 0 ms of the
+    // 600 ms debounce have elapsed, so nothing but the unmount can have sent it.
+    await backToAllRuns();
+    await flush();
+
+    /*
+     * THE EDIT LEFT THE MOMENT THE CARD DID. `useRunAutosave`'s teardown calls
+     * `flushPending`, so leaving the run DISPATCHES the held edit rather than
+     * dropping it. This is the assertion the slice needs: it fails if the
+     * store were ever moved back inside the card, because there would be
+     * nothing left to flush and nothing left to report the outcome to.
+     */
+    expect(patched).toHaveLength(1);
+    expect(patched[0]).toMatchObject({ fields: { 'context.temperature_K': 277.15 } });
+    expect(snapshotFor(ID, 'RUN001').status).toBe('saved');
+
+    // Now filter the run off the compact list — a SEPARATE unmount, of a card
+    // holding nothing. Nothing is sent a second time.
     await act(async () => {
       fireEvent.change(screen.getByLabelText('Overrides'), { target: { value: 'any' } });
     });
     await flush();
     expect(renderedIds()).toHaveLength(0);
-
-    /*
-     * THE EDIT LEFT THE MOMENT THE CARD DID, and the clock has not moved — 0 ms
-     * of the 600 ms debounce have elapsed. `useRunAutosave`'s teardown calls
-     * `flushPending`, so filtering a card off the screen DISPATCHES the held
-     * edit rather than dropping it. This is the assertion the slice needs: it
-     * fails if the store were ever moved back inside the card, because there
-     * would be nothing left to flush and nothing left to report the outcome to.
-     */
     expect(patched).toHaveLength(1);
-    expect(patched[0]).toMatchObject({ fields: { 'context.temperature_K': 277.15 } });
-    expect(snapshotFor(ID, 'RUN001').status).toBe('saved');
 
     // Nothing is sent twice when the debounce that was already flushed comes due.
     await act(async () => {
@@ -1406,7 +1754,7 @@ describe('an edit in flight', () => {
     expect(patched).toHaveLength(1);
   });
 
-  it('is not lost across Load More or a search', async () => {
+  it('is not lost across leaving focus, then Load More or a search', async () => {
     const all = Array.from({ length: 120 }, (_, i) => mkRun(i + 1));
     const patched: unknown[] = [];
     stubBackend((q) => serveRuns(all, q), {
@@ -1423,28 +1771,31 @@ describe('an edit in flight', () => {
     await typeIntoFirstRun();
     expect(snapshotFor(ID, 'RUN001').pendingCount).toBe(1);
 
+    // Load More and Search are both compact-list-only controls — reaching
+    // either means leaving focus first, which is the unmount that sends the
+    // held edit (see the previous test). Nothing here is a timer coincidence:
+    // the clock has not moved when it is dispatched.
+    await backToAllRuns();
+    await flush();
+    expect(patched).toHaveLength(1);
+    expect(patched[0]).toMatchObject({ fields: { 'context.temperature_K': 277.15 } });
+    expect(snapshotFor(ID, 'RUN001').status).toBe('saved');
+
     await act(async () => {
       fireEvent.click(loadMoreButton()!);
     });
     await flush();
-    // LOAD MORE APPENDS, so RUN001's card is still mounted and the edit is still
-    // held — the debounce has not run and nothing has been sent.
     expect(renderedIds()).toHaveLength(100);
-    expect(snapshotFor(ID, 'RUN001').pendingCount).toBe(1);
-    expect(patched).toHaveLength(0);
+    // Nothing sent a second time by paging a run that is already saved.
+    expect(patched).toHaveLength(1);
 
     await act(async () => {
       fireEvent.change(screen.getByLabelText('Search runs'), { target: { value: 'RUN110' } });
-      // The SEARCH debounce only — 300 ms, inside the 600 ms autosave window, so
-      // nothing here is a timer coincidence: what sends the edit is the unmount.
       await vi.advanceTimersByTimeAsync(RUN_SEARCH_DEBOUNCE_MS + 10);
     });
     await flush();
     expect(renderedIds()).toEqual(['RUN110']);
-
-    // A search that filters the card away DISPATCHES the edit rather than losing it.
+    // Nor by searching one off the list.
     expect(patched).toHaveLength(1);
-    expect(patched[0]).toMatchObject({ fields: { 'context.temperature_K': 277.15 } });
-    expect(snapshotFor(ID, 'RUN001').status).toBe('saved');
   });
 });

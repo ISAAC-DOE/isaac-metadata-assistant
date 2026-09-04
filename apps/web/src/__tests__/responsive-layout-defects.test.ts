@@ -334,14 +334,18 @@ describe('F4 · the fixed Assistant trigger no longer sits on top of the status 
 describe('F5 · pointer targets clear the WCAG 2.5.8 floor of 24px', () => {
   /*
    * Every selector below was measured under 24px tall, on darwin, at 1280 and
-   * 390, across the whole `e2e/surfaces.ts` catalogue. The two run-card controls
-   * were reported at 23px — one pixel short — by the sweep that commissioned
-   * this work; they are not in the list this suite can reach, because no seeded
-   * example record has a run, so no catalogued surface renders a run card.
+   * 390, across the whole `e2e/surfaces.ts` catalogue. The run-card control was
+   * reported at 23px — one pixel short — by the sweep that commissioned this
+   * work; it is not in the list this suite can reach, because no seeded example
+   * record has a run, so no catalogued surface renders a run card.
+   *
+   * `.run-card-focus` was a SECOND such control and is gone, not merely fixed
+   * (fix round, PR-C, review finding I-3): a compact row's own open button did
+   * the same act beside it, which was the defect — two 52×24 targets for one
+   * act, and 73px of extra row height once they wrapped at 320px.
    */
   const FLOORED: readonly [string, string][] = [
     ['.btn', 'the shared button family (a floor, not a finding — it measures ~35px)'],
-    ['.run-card-focus', '52.0 x 23.0 — "Focus run …"'],
     ['.run-card-compare', '69.5 x 23.0 — "Compare run …"'],
     ['.gov-banner .gov-action', '82.9 x 17.0 — "Read Policy"'],
     ['.guided-dontknow', '252.4 x 17.0 — "I don\'t know — leave honestly missing"'],

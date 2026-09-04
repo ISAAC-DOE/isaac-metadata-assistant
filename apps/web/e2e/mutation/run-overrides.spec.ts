@@ -54,9 +54,18 @@ const NOT_OVERRIDABLE = 'field:system.domain';
 
 /* ── locators ──────────────────────────────────────────────────────────────── */
 
+/*
+ * MASTER-DETAIL (PR-C): the list is compact rows only, and exactly one run's
+ * full, field-editable card is ever open — reached by clicking its row,
+ * addressed by `?run=<id>`. See `runs.spec.ts`'s own header for the full
+ * argument; this file re-derives only the two locators its own tests need.
+ */
 const addRun = (page: Page) => page.getByRole('button', { name: 'Add Run' });
-const runCards = (page: Page) => page.locator('article.run-card');
-const nthCard = (page: Page, n: number) => runCards(page).nth(n);
+/** Every run in the COMPACT list. */
+const runRows = (page: Page) => page.locator('article.run-card[data-compact="true"]');
+/** The ONE run's full editor, present only while a run is open. */
+const openRunCard = (page: Page) => page.locator('article.run-card:not([data-compact])');
+const nthRow = (page: Page, n: number) => runRows(page).nth(n);
 const header = (card: Locator) => card.locator('button.run-card-header');
 const panel = (card: Locator) => card.locator('section.run-inherited');
 const row = (card: Locator, address: string) =>
@@ -72,25 +81,32 @@ async function openRunsSection(page: Page, id: string) {
 }
 
 /**
- * Add `count` runs and return the FIRST card, with its inherited panel open.
+ * Add `count` runs and return the FIRST run, OPEN — its inherited panel is
+ * visible with no further click, because a freshly-focused run opens
+ * expanded by default (`RunsSection`'s `FocusedRun`).
  *
- * A newly added card is expanded BY THE COMPONENT (focus moves to its header), so
- * this asserts the expanded state rather than clicking to reach it — the first
- * version of this helper clicked the header unconditionally and therefore COLLAPSED
- * every card it was supposed to open, which is why it is written this way and said
- * out loud. If that behaviour changes, the fallback click still opens the card and
- * the assertion below is what makes the change visible rather than silent.
+ * Add Run itself does NOT open the run — it lands as a compact row with
+ * keyboard focus on its own open control (a create must not silently jump
+ * the reader into a full-screen form they did not ask for), so this helper
+ * clicks that control once, explicitly, rather than asserting an
+ * already-expanded state the way its predecessor did for the old in-list
+ * accordion.
  */
 async function addAndExpand(page: Page, count: number): Promise<Locator> {
   for (let i = 1; i <= count; i += 1) {
     await addRun(page).click();
-    await expect(runCards(page)).toHaveCount(i);
+    await expect(runRows(page)).toHaveCount(i);
   }
-  const card = nthCard(page, 0);
-  if ((await header(card).getAttribute('aria-expanded')) !== 'true') {
-    await header(card).click();
-  }
-  await expect(header(card)).toHaveAttribute('aria-expanded', 'true');
+  await header(nthRow(page, 0)).click();
+  const card = openRunCard(page);
+  await expect(card).toBeVisible();
+  /*
+   * NO `aria-expanded` CHECK HERE (fix round, review finding m-2). The
+   * focused editor's heading is a plain `<h3>`, not an accordion button — it
+   * can no longer collapse at all, so there is nothing for that attribute to
+   * describe. The panel being visible is the whole of what "opened expanded
+   * by default" now means.
+   */
   await expect(panel(card)).toBeVisible();
   return card;
 }
@@ -254,10 +270,25 @@ test.describe('per-run overrides of inherited record values', () => {
     await recordOverride(card, MATERIAL, 'Reloaded Oxide');
     await expect(outcome(card)).toContainText('Override recorded');
 
+    /*
+     * `?run=<id>` IS ON THE URL — `addAndExpand` navigated there — so a full
+     * `page.reload()` (which reloads the CURRENT url, `?run=` included) lands
+     * back on the SAME open run, resolved from the URL. It opens expanded by
+     * default, so no click is needed to see the panel again — unlike the old
+     * in-list accordion this replaced.
+     *
+     * `openRunsSection` is deliberately NOT called again here, unlike the
+     * pattern every other test in this file uses after a fresh navigation:
+     * `openRecord` does `page.goto('/record/<id>')`, a NAVIGATION rather than
+     * a reload, which would silently drop the `?run=` query string this
+     * assertion depends on — measured: the first version of this fix did
+     * call it again and left `openRunCard` unresolved, because the go-to
+     * discarded the query the reload had just preserved.
+     */
     await page.reload();
-    await openRunsSection(page, SEED.partial);
-    const reloaded = nthCard(page, 0);
-    await header(reloaded).click();
+    await expect(page.getByRole('heading', { name: 'Runs', exact: true })).toBeVisible();
+    const reloaded = openRunCard(page);
+    await expect(reloaded).toBeVisible();
     await expect(row(reloaded, MATERIAL)).toHaveAttribute('data-state', 'overridden');
     await expect(row(reloaded, MATERIAL)).toContainText('Reloaded Oxide');
 

@@ -50,7 +50,9 @@
  * (`RunCard.onFieldChange` returns first when it does not), so text this build cannot
  * shape lives in the card's own state and IS lost when paging, searching or filtering
  * unmounts the card. `RunCard` discloses that on screen while it holds such text. The
- * record's own view tabs no longer unmount anything (`RecordWorkbench` hides the
+ * ~~record's own view tabs~~ — **corrected 2026-09-03, PR-B reviewer finding: there
+ * is no tab bar to name; the record screen's views are sidebar workspace links
+ * addressed by `?view=`** — no longer unmount anything (`RecordWorkbench` hides the
  * fields panel instead), so this list is now the only in-screen gesture that does.
  */
 
@@ -306,7 +308,6 @@ function RunsBrowser({
 
   const [list, setList] = useState<ListState>({ status: 'loading' });
   const [experimentVersion, setExperimentVersion] = useState<string | null>(null);
-  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [loadingMore, setLoadingMore] = useState(false);
   const [moreError, setMoreError] = useState<string | null>(null);
   const [reloadNonce, setReloadNonce] = useState(0);
@@ -335,6 +336,55 @@ function RunsBrowser({
    * section's own furniture instead. See the effect that consumes it.
    */
   const [fallbackFocus, setFallbackFocus] = useState(false);
+
+  /*
+   * WHETHER THE FOCUSED RUN HOLDS TEXT IT COULD NOT READ — review finding I-1.
+   * Reported by `RunCard` itself (`onHeldInvalidChange`, see its own doc),
+   * because that is where `fieldErrors` lives; this component only needs to
+   * know the boolean to decide whether leaving the run needs a confirmation
+   * first. Reset to `false` on every focus change (the "focus run" effect
+   * below), so a stale `true` from the run just left cannot leak onto the
+   * next one before its own card has had a chance to report anything.
+   */
+  const [focusedHeldInvalid, setFocusedHeldInvalid] = useState(false);
+  /**
+   * Open only while the reader has asked to leave a run that holds unsent
+   * text and has not yet said which way. Same idiom as `RunCard`'s own
+   * `confirmingRemove`: the first click ARMS the confirmation rather than
+   * acting, and a second, explicit act either backs out ("Stay") or commits
+   * ("Leave anyway"). Reset on every focus change for the same reason
+   * `focusedHeldInvalid` is.
+   */
+  const [confirmingLeave, setConfirmingLeave] = useState(false);
+  /**
+   * THE ACT THE CONFIRMATION IS GUARDING — review finding C-2. Back,
+   * Previous and Next each want to do something different once the reader
+   * says "Leave anyway", so the gate stores WHICH act rather than assuming
+   * "leave to the list": `focusNeighbor(1)` and `focusNeighbor(-1)` are
+   * themselves navigations away from the current run, and a fixed
+   * "go to the list" action would have been wrong for both of them.
+   */
+  const [pendingLeave, setPendingLeave] = useState<(() => void) | null>(null);
+  /**
+   * Whichever of Back / Previous / Next most recently opened the
+   * confirmation — focus returns here on "Stay" or Escape, never on "Leave
+   * anyway" (that act navigates away, and the normal focus-on-arrival
+   * machinery — `cardFocusId` — takes over from there).
+   */
+  const leaveTriggerRef = useRef<HTMLButtonElement | null>(null);
+  /** The confirmation's own first control — focus moves here the instant it opens (I-8). */
+  const stayButtonRef = useRef<HTMLButtonElement>(null);
+  /** The confirmation's own LAST control — the other end of the focus trap (I-9). */
+  const leaveAnywayButtonRef = useRef<HTMLButtonElement>(null);
+  /**
+   * Said on screen, in a live region, once "Leave anyway" has actually
+   * discarded held-invalid text (review finding I-6) — the same idiom as
+   * `removeNote` for a removal: the caret has just moved away from the run
+   * whose card carried the only copy of that text, and a reader who cannot
+   * see the screen would otherwise have nothing but silence to confirm the
+   * destructive act they just confirmed actually happened.
+   */
+  const [leaveNote, setLeaveNote] = useState<string | null>(null);
 
   const searchRef = useRef<HTMLInputElement>(null);
   const addRef = useRef<HTMLButtonElement>(null);
@@ -510,19 +560,28 @@ function RunsBrowser({
   const [runsStaleNotice, setRunsStaleNotice] = useState(false);
 
   const setFocusRun = useCallback(
-    (runId: string | null) => {
+    (runId: string | null, options?: { push?: boolean }) => {
       /*
        * The repo's URL-state convention, copied exactly from `GovernancePage`,
        * `SettingsPage` and `ProjectMemory`: switch by COPYING the current
        * `URLSearchParams`, so `?view=graph` and anything else on the record URL
-       * survives entering and leaving focus. `replace`, because focusing a run is
-       * not a destination — pushing each focus and unfocus would bury the screen
-       * the reader arrived from behind a stack of Back presses.
+       * survives entering and leaving focus.
+       *
+       * REPLACE IS THE DEFAULT, AND `push` IS THE ONE EXCEPTION (review finding
+       * I-5). Leaving focus, and moving between runs WHILE ALREADY focused
+       * (Next/Previous run, below), all stay `replace` — none of those is a
+       * destination the reader would want a Back press to return to; pushing
+       * every lateral move would make Back a chore of walking back through
+       * every run visited instead of returning to the list in one press.
+       * ENTERING focus from a compact row's own click is the one caller that
+       * passes `push: true`, because THAT click's whole point is "go look at
+       * one run" — a destination — and Back should undo exactly that: land
+       * back on the list, not on whichever run was open before.
        */
       const next = new URLSearchParams(searchParams);
       if (runId === null) next.delete(RECORD_RUN_PARAM);
       else next.set(RECORD_RUN_PARAM, runId);
-      setSearchParams(next, { replace: true });
+      setSearchParams(next, { replace: !options?.push });
     },
     [searchParams, setSearchParams],
   );
@@ -560,6 +619,22 @@ function RunsBrowser({
    */
   const compareIdsRef = useRef(compareIds);
   compareIdsRef.current = compareIds;
+  /*
+   * THE LIVE URL, readable from a `.then()` that may settle long after the
+   * render that started it — review finding I-4. `removeRun` used to build
+   * its `URLSearchParams` edit from the `searchParams` its `useCallback`
+   * closed over at the time it was LAST RECREATED, which is not the same
+   * moment as when it RUNS: the callback's dependency array names
+   * `experimentId`, `experimentVersion` and `focusRunId`, so a `?compare=`
+   * edit landing in between (nothing here depends on `compareIds`) left the
+   * memoized closure pointing at a stale `searchParams` — and a removal that
+   * ran after it would overwrite that newer edit with the old snapshot,
+   * silently reverting a comparison change the reader had just made. Same
+   * pattern this file already uses for `runsRef`/`loadedRef`/`compareIdsRef`:
+   * read the ref, not the render-time capture.
+   */
+  const searchParamsRef = useRef(searchParams);
+  searchParamsRef.current = searchParams;
   const toggleCompare = useCallback(
     (runId: string) => {
       // Read through the ref rather than joining the ids into a dependency string:
@@ -586,6 +661,90 @@ function RunsBrowser({
    */
   const setFocusRunRef = useRef(setFocusRun);
   setFocusRunRef.current = setFocusRun;
+
+  /*
+   * NEXT / PREVIOUS RUN — review finding I-5. THE ONE PLACE "IS THERE A
+   * LOADED NEIGHBOUR" IS ANSWERED (review finding I-6: it used to be
+   * answered TWICE — once here, once in the toolbar's own `hasPrevRun`/
+   * `hasNextRun` — and the two computations could in principle disagree,
+   * which a rendered "enabled" state and an internal "no-op" refusal
+   * disagreeing about would be a defect neither half's own tests could
+   * catch alone). `neighborRun` is now the single source both read.
+   *
+   * Moves focus to the neighbouring run ON THE CURRENTLY LOADED PAGE, in the
+   * order the page already lists them (the server's own ordinal order — the
+   * same order `runsRef` and the successor-caret logic in `removeRun`
+   * already read). NEVER WRAPS: `onPage[index + direction]` is `undefined`
+   * past either end, and that is returned as-is rather than falling back to
+   * the opposite end — Previous/Next name themselves by POSITION ("the
+   * first run on the loaded list"), and a Next that silently wrapped from
+   * the last run back to the first would make that sentence false the
+   * instant it fired, with no confirmation or label warning it was coming.
+   * It does not fetch across a page boundary either: silently downloading
+   * the rest of the list to answer one click would reopen exactly the cost
+   * `docs/run-scale-measurements.md` removed from every other control on
+   * this screen, and the toolbar's own disabled-with-a-reason state (below)
+   * says so rather than pretending the boundary does not exist.
+   */
+  const neighborRun = useCallback(
+    (direction: 1 | -1): ApiRunView | undefined => {
+      if (focusRunId === null) return undefined;
+      const onPage = runsRef.current;
+      const index = onPage.findIndex((r) => r.id === focusRunId);
+      if (index === -1) return undefined;
+      return onPage[index + direction];
+    },
+    [focusRunId],
+  );
+
+  /*
+   * `replace` (`setFocusRun`'s default) — Next/Previous is a lateral move
+   * within focus mode, not a new destination, so Back must still return to
+   * the LIST in one press rather than stepping back through every run
+   * visited this way.
+   */
+  const focusNeighbor = useCallback(
+    (direction: 1 | -1) => {
+      const neighbor = neighborRun(direction);
+      if (neighbor === undefined) return;
+      setFocusRun(neighbor.id);
+    },
+    [neighborRun, setFocusRun],
+  );
+
+  /*
+   * THE ONE GATE EVERY WAY OF LEAVING THE FOCUSED RUN GOES THROUGH — review
+   * finding C-2. Back, Previous and Next each used to decide for themselves
+   * whether to confirm first, and only Back actually did: Next and Previous
+   * called `focusNeighbor` directly, so a reader with unparseable text held
+   * in Run 1 could click Next and land on Run 2 with NO warning at all —
+   * `RunCard`'s `key={run.id}` then unmounted the card holding it, exactly
+   * the silent loss I-1 exists to prevent, just reached by a door I-1 never
+   * covered.
+   *
+   * `requestLeave(go, trigger)` is the single door now: if the focused run
+   * holds text this screen could not read, it stores `go` (never invoked
+   * here) and `trigger` (the button that asked to leave, for focus
+   * restoration — see `leaveTriggerRef`), and arms the confirmation instead
+   * of acting. Otherwise it just runs `go` — the ordinary case is
+   * unaffected, exactly one click, no dialog. "Leave anyway" is the only
+   * caller that ever invokes the stored `go`.
+   */
+  const requestLeave = useCallback(
+    (go: () => void, trigger: HTMLButtonElement | null) => {
+      if (focusedHeldInvalid) {
+        leaveTriggerRef.current = trigger;
+        setPendingLeave(() => go);
+        setConfirmingLeave(true);
+        // A stale announcement from an EARLIER leave must not sit under a
+        // fresh confirmation the reader has not acted on yet.
+        setLeaveNote(null);
+        return;
+      }
+      go();
+    },
+    [focusedHeldInvalid],
+  );
 
   // --- the first page, and every reset of it ------------------------------
   useEffect(() => {
@@ -938,15 +1097,55 @@ function RunsBrowser({
     return () => clearTimeout(timer);
   }, [searchText, query]);
 
+  /*
+   * THE RUN FOCUS WAS ON, ONE RENDER AGO — review finding I-6(4). The
+   * explicit "Back to all runs" button (and the leave confirmation's own
+   * "Leave anyway") already call `setCardFocusId(focusRunId)` themselves
+   * before clearing focus, so the row that was open gets `focusOnMount`
+   * when it remounts. NEITHER of those runs when the reader presses the
+   * BROWSER'S OWN Back button instead — `setFocusRun` now pushes a history
+   * entry on entering focus from the list (I-5's own `push: true`)
+   * specifically so that control works, and popping it changes
+   * `focusRunId` without ever calling either handler. This ref is what lets
+   * the effect below restore focus on THAT path too, so "Back returns to
+   * the list, focus restored to the row" is true regardless of which Back
+   * the reader used.
+   */
+  const previousFocusRunIdRef = useRef<string | null>(null);
+
   // --- focus run ----------------------------------------------------------
   useEffect(() => {
     if (focusRunId === null || focusRunId === '') {
+      // Left focus mode. If it was left by something OTHER than the
+      // explicit handlers above (i.e. the browser's own Back/Forward),
+      // `cardFocusId` was never set for it — set it now, from the run this
+      // effect itself last saw focused, so the row it was on picks up
+      // `focusOnMount` the moment it remounts. Harmless if a handler
+      // already set the same value: `setCardFocusId` with an unchanged
+      // value is a no-op re-render.
+      if (previousFocusRunIdRef.current !== null) {
+        setCardFocusId(previousFocusRunIdRef.current);
+      }
+      previousFocusRunIdRef.current = null;
       setFocus({ status: 'idle' });
       return;
     }
-    // A focused run is always shown open — the reader asked for this one run.
-    setExpanded((prev) => (prev[focusRunId] === true ? prev : { ...prev, [focusRunId]: true }));
+    previousFocusRunIdRef.current = focusRunId;
     setCardFocusId(focusRunId);
+    /*
+     * A FRESH RUN HAS REPORTED NOTHING YET (review finding I-1). Both reset on
+     * every focus change, including a lateral Next/Previous move that never
+     * leaves focus mode at all — without this, a "leave anyway" confirmation
+     * left armed by the PREVIOUS run's held-invalid text would ambush the
+     * reader on a run that has typed nothing. `RunCard`'s own
+     * `onHeldInvalidChange` will report `true` again within one render if the
+     * newly-focused run's card genuinely holds one (it never does on mount,
+     * since `fieldErrors` always starts empty), so this is never left
+     * incorrectly `false` for longer than that.
+     */
+    setFocusedHeldInvalid(false);
+    setConfirmingLeave(false);
+    setPendingLeave(null);
 
     if (runsRef.current.some((r) => r.id === focusRunId)) {
       setFocus({ status: 'page' });
@@ -1044,7 +1243,6 @@ function RunsBrowser({
       .then((res) => {
         setAdding(false);
         setExperimentVersion(res.experiment_version);
-        setExpanded((prev) => ({ ...prev, [res.run.id]: true }));
         /*
          * CREATING A RUN WHILE A SEARCH OR FILTER IS ACTIVE IS A REAL CONFLICT,
          * and both of the obvious answers are dishonest. A new run holds no
@@ -1152,15 +1350,34 @@ function RunsBrowser({
    * every one of them would otherwise be left pointing at a run the server has
    * forgotten:
    *
-   *   1. FOCUS RUN is a query parameter. Removing the focused run would leave the
-   *      reader on `?run=<dead id>`, which resolves to "No run with that id is in
-   *      this record" — a true sentence, arrived at by the app's own action, over a
-   *      screen the reader cannot get out of except by pressing Back.
+   *   1. FOCUS RUN is a query parameter, and MASTER-DETAIL MEANS IT IS ALWAYS
+   *      SET HERE (m-5: this enumeration used to describe the general case;
+   *      Remove is offered only inside the one open editor — see `RunCard`'s
+   *      own header on why a compact row never renders it — so the run being
+   *      removed is always the focused run). Left alone, the reader would sit
+   *      on `?run=<dead id>`, which resolves to "No run with that id is in
+   *      this record" — a true sentence, arrived at by the app's own action,
+   *      over a screen the reader cannot get out of except by pressing Back.
+   *      It is cleared HERE, in the SAME commit as `setRemovingId(null)` and
+   *      BEFORE anything below triggers the section's own reload (fix round,
+   *      review finding C-1) — see `searchParamsRef`'s own note a few lines
+   *      up for why the read side of this edit had to change too — so that
+   *      dead-end is never rendered even for one frame between the removal
+   *      landing and the silent reload settling.
    *   2. THE COMPARISON SELECTION is also in the URL and also by id.
    *   3. AUTOSAVE STATE lives in a module map keyed `<experimentId>/<runId>` and is
    *      disposed only when the record screen goes away.
    *   4. THE KEYBOARD CARET is on a control inside a card that is about to
    *      disappear. Left alone it drops to the top of the document.
+   *
+   * THE SUCCESSOR-ROW CARET PLACEMENT BELOW IS NOW A FALLBACK, NOT THE COMMON
+   * CASE (m-5). It dates from before master-detail, when Remove could be
+   * reached from an in-list expanded card and the reader stayed in the list
+   * afterward, so the caret moved to the row below. That path is unreachable
+   * through this component's own UI today — every call site removes the
+   * FOCUSED run, so `focusRunId === run.id` is always true when this runs —
+   * and the branch below is kept only as a defensive fallback should a future
+   * caller ever invoke `removeRun` on a run that is not the one focused.
    *
    * SEARCH AND FILTERS ARE DELIBERATELY LEFT ALONE, which is the opposite of what
    * `addRun` does. A create can produce a run the current criteria exclude, so the
@@ -1180,33 +1397,72 @@ function RunsBrowser({
         .removeRun(experimentId, run.id, { experimentVersion })
         .then((res) => {
           setRemovingId(null);
-          setExperimentVersion(res.experiment_version);
-          // (3) — stop reporting on a run that no longer exists.
-          disposeRun(experimentId, run.id);
 
-          // (2) — take it out of the comparison, or the panel keeps resolving a
-          // dead id and renders its own not-found state about the app's own act.
+          /*
+           * (1) AND (2), UNIFIED INTO ONE `setSearchParams` CALL, AND MOVED
+           * FIRST — fix round, review findings C-1 and I-4.
+           *
+           * C-1: this used to run AFTER `disposeRun`/`setExperimentVersion`/
+           * the note text, and last of all before the reload it triggers.
+           * Clearing `?run=` is what takes the reader OUT of focus mode; doing
+           * it as late as possible in the same commit as everything else this
+           * `.then()` does left the smallest possible but real window in
+           * which a slower render pass could show the focused view with the
+           * just-removed run already gone from a reloaded page — rendering
+           * exactly the "No run with the id … is in this record" dead-end
+           * this comment block's own item (1) says the app must not produce.
+           * It is now the very first thing after `setRemovingId(null)`, and
+           * strictly before `silentRef.current = true; setReloadNonce(...)`
+           * a few lines down — the reload is never even STARTED before the
+           * URL that would make its result render as a dead-end has already
+           * been corrected.
+           *
+           * I-4: it now reads `searchParamsRef.current`, not the `searchParams`
+           * this `useCallback` closed over. The dependency array below names
+           * `experimentId`, `experimentVersion` and `focusRunId` — never
+           * `searchParams` itself — so a `?compare=` edit landing between two
+           * renders neither of those three depend on left the memoized
+           * closure pointing at a stale snapshot. Building `nextParams` from
+           * it and then writing back would silently REVERT that newer edit,
+           * which is a defect in exactly this function's own stated job:
+           * `setCompareIds` and `setFocusRun(null)` each used to build their
+           * own `next = new URLSearchParams(searchParams)` from the SAME
+           * pre-removal snapshot — react-router does not re-render between
+           * two synchronous calls in one event handler, so `searchParams` had
+           * not yet moved when the second call read it, and the SECOND call's
+           * copy silently discarded the FIRST call's edit. Measured on a run
+           * that was BOTH the focused run AND in the comparison: `?compare=`
+           * kept naming the just-deleted run, because clearing `?run=` was
+           * the second call and it started from a URL that had never seen
+           * the comparison edit. One `URLSearchParams`, read through the ref
+           * and edited once, closes both defects together.
+           */
+          const nextParams = new URLSearchParams(searchParamsRef.current);
+          let paramsChanged = false;
+
+          // Take it out of the comparison, or the panel keeps resolving a dead id
+          // and renders its own not-found state about the app's own act.
           const selected = compareIdsRef.current;
           if (selected.includes(run.id)) {
-            setCompareIds(selected.filter((id) => id !== run.id));
+            nextParams.delete(RECORD_COMPARE_PARAM);
+            for (const id of selected.filter((sel) => sel !== run.id)) {
+              nextParams.append(RECORD_COMPARE_PARAM, id);
+            }
+            paramsChanged = true;
           }
-          setExpanded((prev) => {
-            if (!(run.id in prev)) return prev;
-            const next = { ...prev };
-            delete next[run.id];
-            return next;
-          });
 
-          // (1) and (4). The successor is read from the page the reader is looking
-          // at, BEFORE the reload replaces it, because that is the list the caret
-          // is currently in. The run below is preferred over the run above for the
+          // The successor is read from the page the reader is looking at, BEFORE
+          // the reload replaces it, because that is the list the caret is
+          // currently in. The run below is preferred over the run above for the
           // reason a list does: it now occupies the position the removed run held.
+          // See this function's own header for why this branch is now a fallback.
           const onPage = runsRef.current;
           const index = onPage.findIndex((r) => r.id === run.id);
           const successor =
             index === -1 ? undefined : onPage[index + 1] ?? onPage[index - 1];
           if (focusRunId === run.id) {
-            setFocusRunRef.current(null);
+            nextParams.delete(RECORD_RUN_PARAM);
+            paramsChanged = true;
             setCardFocusId(null);
             setFallbackFocus(true);
           } else if (successor !== undefined) {
@@ -1215,6 +1471,12 @@ function RunsBrowser({
             setCardFocusId(null);
             setFallbackFocus(true);
           }
+
+          if (paramsChanged) setSearchParams(nextParams, { replace: true });
+
+          setExperimentVersion(res.experiment_version);
+          // (3) — stop reporting on a run that no longer exists.
+          disposeRun(experimentId, run.id);
 
           /*
            * WHAT THE NOTE MAY SAY. The counts are the SERVER's — `remaining_run_count`
@@ -1336,7 +1598,11 @@ function RunsBrowser({
           });
         });
     },
-    [experimentId, experimentVersion, focusRunId, setCompareIds],
+    // `setCompareIds` is no longer called here (I-4: the comparison edit is
+    // folded into the one `setSearchParams` call above, read through
+    // `searchParamsRef`), and `searchParams` itself is deliberately absent —
+    // reading it through the ref is the whole point of the fix.
+    [experimentId, experimentVersion, focusRunId, setSearchParams],
   );
 
   /*
@@ -1470,6 +1736,89 @@ function RunsBrowser({
   const listSettledRef = useRef(false);
   if (list.status !== 'loading') listSettledRef.current = true;
 
+  /*
+   * WHETHER THE FOCUSED RUN HAS A LOADED NEIGHBOUR, FOR THE TOOLBAR'S OWN
+   * Next/Previous buttons (I-5), read through `neighborRun` — THE SAME
+   * FUNCTION `focusNeighbor` calls to actually move (review finding I-6) —
+   * so the rendered disabled state and the act it describes can never
+   * disagree. `neighborRun` reads `runsRef.current`, which is assigned
+   * unconditionally near the top of this render before this line runs, so
+   * calling it here during render is exactly as current as `loaded` itself.
+   * `focusedIndexOnPage` is kept separately only for the REASON text (a run
+   * not on the loaded page at all vs. one that is the first/last on it) —
+   * it is not what decides whether the buttons are disabled.
+   */
+  const focusedIndexOnPage =
+    focused && loaded !== null ? loaded.runs.findIndex((r) => r.id === focusRunId) : -1;
+  const hasPrevRun = focused && neighborRun(-1) !== undefined;
+  const hasNextRun = focused && neighborRun(1) !== undefined;
+  const leaveConfirmId = `${baseId}-leave-confirm`;
+  const leaveConfirmTitleId = `${baseId}-leave-confirm-title`;
+  const leaveConfirmTextId = `${baseId}-leave-confirm-text`;
+
+  /*
+   * A REAL DIALOG MOVES FOCUS INTO ITSELF ON OPEN — review finding I-8. Every
+   * other property (`role="alertdialog"`, `aria-labelledby`/`aria-describedby`)
+   * was already true; this is the one that makes it actually behave like one
+   * rather than merely being labelled as one. NEITHER `RunCard`'s own
+   * `confirmingRemove` panel NOR `AssetReferencesPanel`'s disclosures move
+   * focus in on open — both only return it to the trigger on close — so this
+   * is a NEW pattern on this surface, not a reuse of an existing one; it is
+   * introduced here because I-8 asks for it specifically. `Stay` is the
+   * target because it is the SAFE default: it is the one of the two actions
+   * that discards nothing.
+   */
+  useEffect(() => {
+    if (confirmingLeave) stayButtonRef.current?.focus();
+  }, [confirmingLeave]);
+
+  /*
+   * A REAL FOCUS TRAP, AND ESCAPE THAT WORKS FROM ANYWHERE — review finding
+   * I-9. `aria-modal="true"` was already declared; the keyboard behaviour
+   * that makes the claim true was not, which I-8's own comment overclaimed
+   * ("behave like the dialog it claims to be") before this existed. Tab from
+   * the LAST control (`Leave anyway`) wraps to the FIRST (`Stay`); Shift+Tab
+   * from `Stay` wraps to `Leave anyway` — the two controls are the whole tab
+   * ring while this is open, so a keyboard user can never Tab past the
+   * dialog onto Previous/Next or anything else on the screen behind it.
+   *
+   * ATTACHED AT THE DOCUMENT LEVEL, DELIBERATELY, not as the dialog's own
+   * `onKeyDown` (which this replaces): a listener on the dialog element only
+   * fires while focus is somewhere INSIDE it, so Escape would do nothing in
+   * the one-render gap before the effect above has moved focus in, and
+   * nothing at all if focus were ever knocked outside it by anything this
+   * file does not control. A document listener, added the instant the
+   * dialog opens and removed the instant it closes — by Stay, Leave anyway,
+   * or Escape itself — has neither gap.
+   */
+  useEffect(() => {
+    if (!confirmingLeave) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        setConfirmingLeave(false);
+        setPendingLeave(null);
+        leaveTriggerRef.current?.focus();
+        return;
+      }
+      if (e.key !== 'Tab') return;
+      const stay = stayButtonRef.current;
+      const leaveAnyway = leaveAnywayButtonRef.current;
+      if (stay === null || leaveAnyway === null) return;
+      if (e.shiftKey) {
+        if (document.activeElement === stay) {
+          e.preventDefault();
+          leaveAnyway.focus();
+        }
+      } else if (document.activeElement === leaveAnyway) {
+        e.preventDefault();
+        stay.focus();
+      }
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [confirmingLeave]);
+
   return (
     <>
       {/*
@@ -1493,18 +1842,179 @@ function RunsBrowser({
       <div className="runs-toolbar">
         {loaded !== null &&
           (focused ? (
-            <button
-              type="button"
-              className="btn btn-secondary"
-              onClick={() => {
-                // The list the reader had is untouched — focus never changed the
-                // search or the filters, so leaving it returns them to exactly it.
-                setCardFocusId(focusRunId);
-                setFocusRun(null);
-              }}
-            >
-              Back to all runs
-            </button>
+            <div className="runs-focus-nav">
+              {/*
+                CONFIRM-BEFORE-LEAVING, review finding I-1 — AND NOW THE ONE
+                DOOR EVERY WAY OF LEAVING GOES THROUGH, review finding C-2.
+                Leaving a run whose card holds text this screen could not
+                read used to discard it with no warning at all — the same
+                "silently destroys work" shape `confirmingRemove` on
+                `RunCard` exists to guard against for a REMOVAL, brought here
+                for a LEAVE. This button, Previous and Next all call
+                `requestLeave`, which ARMS the confirmation instead of acting
+                whenever `focusedHeldInvalid` is true, and just acts
+                otherwise — an unmodified run still leaves on one click,
+                exactly as before.
+              */}
+              <button
+                type="button"
+                className="btn btn-secondary"
+                aria-expanded={focusedHeldInvalid ? confirmingLeave : undefined}
+                aria-controls={focusedHeldInvalid && confirmingLeave ? leaveConfirmId : undefined}
+                onClick={(e) => {
+                  requestLeave(() => {
+                    // The list the reader had is untouched — focus never changed
+                    // the search or the filters, so leaving it returns them to
+                    // exactly it.
+                    setCardFocusId(focusRunId);
+                    setFocusRun(null);
+                  }, e.currentTarget);
+                }}
+              >
+                Back to all runs
+              </button>
+
+              {/*
+                THE LEAVE CONFIRMATION ITSELF — I-1, C-2 and I-8. Rendered
+                RIGHT HERE, between Back and Previous/Next rather than after
+                the whole toolbar, so it sits BEFORE them in DOM order — which
+                is what puts `Stay`/`Leave anyway` ahead of Previous/Next in
+                the tab order once focus moves into it (I-8's own point,
+                below). `.runs-leave-confirm`'s own `flex-basis: 100%` (see
+                `runs.css`) wraps it onto its own line inside this flex row,
+                so Previous/Next drop below it visually rather than sitting
+                beside a dialog that is, for the moment, the only thing worth
+                interacting with.
+
+                THE SAME IDIOM AS `RunCard`'s OWN `confirmingRemove` panel:
+                text naming what will be lost, then two peer buttons, Stay
+                first. `role="alertdialog"` because it is exactly that — a
+                decision the reader must make before the destructive act
+                (leaving) proceeds, not a passive announcement.
+                `aria-modal="true"`, the focus-in-on-open effect and the
+                document-level focus trap + Escape handler above (review
+                finding I-9) are what make it actually BEHAVE like the
+                dialog it claims to be, not only read like one: Tab and
+                Shift+Tab cannot leave it, and Escape is the keyboard
+                equivalent of `Stay` — the SAFE default, never `Leave
+                anyway` — from anywhere, not only while focus happens to sit
+                inside this element.
+
+                Rendered only while BOTH a leave is armed AND the run still
+                holds the text that armed it; the second half matters because
+                `RunCard` can report `false` again (the reader fixed the
+                field) while `confirmingLeave` is still `true` from an
+                earlier click — the confirmation should not stay open once
+                the thing it was warning about is gone.
+              */}
+              {focused && confirmingLeave && focusedHeldInvalid && (
+                <div
+                  className="runs-leave-confirm"
+                  id={leaveConfirmId}
+                  role="alertdialog"
+                  aria-modal="true"
+                  aria-labelledby={leaveConfirmTitleId}
+                  aria-describedby={leaveConfirmTextId}
+                >
+                  <p className="runs-leave-confirm-title sr-only" id={leaveConfirmTitleId}>
+                    Leave this run without saving?
+                  </p>
+                  <p className="runs-leave-confirm-text" id={leaveConfirmTextId}>
+                    This run holds text this screen could not read, and it has not
+                    been sent anywhere. Leaving this run now — including moving to
+                    another run, reloading, paging, searching or filtering the runs
+                    list — loses it, and it cannot be recovered.
+                  </p>
+                  <div className="runs-leave-confirm-actions">
+                    <button
+                      ref={stayButtonRef}
+                      type="button"
+                      className="btn btn-secondary"
+                      onClick={() => {
+                        setConfirmingLeave(false);
+                        setPendingLeave(null);
+                        leaveTriggerRef.current?.focus();
+                      }}
+                    >
+                      Stay
+                    </button>
+                    <button
+                      ref={leaveAnywayButtonRef}
+                      type="button"
+                      className="btn btn-danger"
+                      onClick={() => {
+                        const go = pendingLeave;
+                        setConfirmingLeave(false);
+                        setPendingLeave(null);
+                        // ANNOUNCED, not only performed (review finding I-6)
+                        // — `focusedRun` is still the run being left at the
+                        // moment this fires, so its label is real rather
+                        // than guessed.
+                        setLeaveNote(
+                          `Left ${focusedRun?.label ?? 'the run'}. The text it could not save is gone.`,
+                        );
+                        go?.();
+                      }}
+                    >
+                      Leave anyway
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/*
+                NEXT / PREVIOUS RUN (I-5), THROUGH THE SAME `requestLeave`
+                DOOR AS BACK (C-2). Before this fix, both called
+                `focusNeighbor` directly — so held-invalid text on the
+                current run was discarded with NO warning the moment a
+                reader clicked Next, the exact loss I-1 exists to prevent,
+                reached by a door I-1 never covered. Disabled WITH a stated
+                reason rather than hidden — a control that vanishes the
+                moment it would be useless is a control a reader has to
+                relearn the existence of; `aria-disabled` keeps it focusable
+                and announced, matching this file's own `Compare` idiom
+                above. A visible disabled state lives in `runs.css`
+                (review finding I-7) — `aria-disabled` alone painted nothing,
+                so a hovered, unreachable Previous/Next looked identical to
+                an enabled one.
+              */}
+              <button
+                type="button"
+                className="btn btn-secondary"
+                aria-disabled={!hasPrevRun || undefined}
+                aria-label={
+                  hasPrevRun
+                    ? 'Previous run'
+                    : focusedIndexOnPage === -1
+                      ? 'Previous run — this run is not on the loaded list, so it has no loaded neighbour'
+                      : 'Previous run — this is the first run on the loaded list'
+                }
+                onClick={(e) => {
+                  if (!hasPrevRun) return;
+                  requestLeave(() => focusNeighbor(-1), e.currentTarget);
+                }}
+              >
+                Previous run
+              </button>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                aria-disabled={!hasNextRun || undefined}
+                aria-label={
+                  hasNextRun
+                    ? 'Next run'
+                    : focusedIndexOnPage === -1
+                      ? 'Next run — this run is not on the loaded list, so it has no loaded neighbour'
+                      : 'Next run — this is the last run on the loaded list'
+                }
+                onClick={(e) => {
+                  if (!hasNextRun) return;
+                  requestLeave(() => focusNeighbor(1), e.currentTarget);
+                }}
+              >
+                Next run
+              </button>
+            </div>
           ) : (
             <button
               ref={addRef}
@@ -1670,6 +2180,29 @@ function RunsBrowser({
       )}
 
       {/*
+        A DISCARDED LEAVE IS ANNOUNCED THE SAME WAY A REMOVAL IS — review
+        finding I-6. Rendered here rather than inside the confirmation panel
+        because the panel itself is gone by the time this fires (`Leave
+        anyway`'s own handler closes it first), and this position is the one
+        already proven to survive the transition back to the list.
+
+        ALWAYS MOUNTED, EMPTY UNTIL FILLED — the same idiom `.runs-count`
+        above already uses, and this used NOT to (review finding m-10). A
+        node that is inserted into the DOM the SAME MOMENT it is first
+        populated is not reliably announced by assistive tech — this file's
+        own toolbar comment documents exactly that defect for `.runs-count`
+        and fixes it the same way: mount the live region before there is
+        anything to say, and let it go blank rather than disappear.
+        `.runs-leave-note` (below, in `runs.css`) collapses `.runs-note`'s
+        own padding/border/background to nothing while empty, so the always-
+        present node has no visual footprint until "Leave anyway" actually
+        fills it.
+      */}
+      <p className="runs-note runs-leave-note" role="status">
+        {leaveNote}
+      </p>
+
+      {/*
         RUNS CHANGED ELSEWHERE, AND TOO MANY ARE LOADED TO RE-READ SILENTLY.
         `role="status"`, matching `addNote`/`removeNote`: this is information,
         not a refusal of something the reader asked for. The button is `Reload
@@ -1714,15 +2247,12 @@ function RunsBrowser({
             run={focusedRun}
             cardFocusId={cardFocusId}
             onCardFocused={() => setCardFocusId(null)}
-            expanded={expanded[focusRunId] ?? true}
-            onToggle={() =>
-              setExpanded((prev) => ({ ...prev, [focusRunId]: !(prev[focusRunId] ?? true) }))
-            }
             onRun={replaceRun}
             onRemove={removeRun}
             removingId={removingId}
             removeError={removeError}
             onReloadSection={reloadSection}
+            onHeldInvalidChange={setFocusedHeldInvalid}
             onLeave={() => {
               setCardFocusId(focusRunId);
               setFocusRun(null);
@@ -1732,28 +2262,71 @@ function RunsBrowser({
           <EmptyRuns total={loaded.total} filtering={filtering} onClear={clearCriteria} />
         ) : (
           <>
+            {/*
+              MASTER-DETAIL: the list is a list of COMPACT ROWS, never a second
+              place a run's editor can be open. `RunCard`'s own `compact` mode
+              (see its file header) renders one open control per row — label,
+              ordinal, condition summary, the fields-on-this-screen count, and
+              the override/exported/save-status chips this section already
+              has in hand from the SAME response that filled the list, never a
+              second read — plus the unchanged `Compare` control. The row's
+              own click IS the open gesture (`onFocusRun` below, pushed rather
+              than replaced — see `setFocusRun`'s own note); a standalone
+              "Focus" button briefly sat beside it too, and is gone (fix
+              round, review finding I-3). `onRemove` is deliberately absent
+              here — removal is offered only once a run is open, matching the
+              destructive-action separation this surface has always kept.
+
+              NO `aria-current` ON A ROW, and that is a decision rather than an
+              omission (m-4): the compact list and the one open editor never
+              coexist — opening a run REPLACES the list with `FocusedRun`, it
+              does not mark a row inside it — so there is never a moment at
+              which one row among several on screen is "the current one" for
+              `aria-current` to name. The property it would express is
+              already carried, more precisely, by the URL (`?run=`) and by
+              which view (list vs. editor) is on screen at all.
+
+              NO PROPOSAL-AFFECTED CHIP, DEFERRED RATHER THAN BUILT (m-1). The
+              design brief (§7, "Proposal-affected") asks for a small "N
+              pending proposals" chip on a run's row, and Constraints §7.2
+              says plainly that this brief does not know whether the existing
+              bundle/list responses already carry a cheap per-run open-
+              proposal count, and that implementation must check before
+              adding a new read — and, per the anti-goals, must never show a
+              stale or optimistic count if one is not cheaply available.
+              Checked here: neither this section's own `GET …/runs` response
+              nor the record bundle's proposal summary carries a per-run
+              count today; `IngestionProposalsPanel`'s own listing is
+              filterable by run but is a bounded PAGE, not a count, and
+              deriving one client-side would mean either an unbounded
+              second read this section's whole design exists to avoid
+              (see the file header) or a count that silently understates
+              once a record has more open proposals than one page holds —
+              exactly the kind of partial figure the anti-goals forbid
+              showing as though it were complete. Building the chip against
+              that would be inventing a labelled-as-precise number this
+              build cannot honestly produce; not building it is the
+              honest answer until a cheap, bounded, per-run count exists on
+              the wire. Left for a later slice, not silently dropped.
+            */}
             <div className="runs-list">
               {loaded.runs.map((run) => (
                 <RunCard
                   key={run.id}
                   experimentId={experimentId}
                   run={run}
-                  expanded={expanded[run.id] ?? false}
-                  onToggle={() =>
-                    setExpanded((prev) => ({ ...prev, [run.id]: !(prev[run.id] ?? false) }))
-                  }
+                  compact
                   onRun={replaceRun}
                   focusOnMount={cardFocusId === run.id}
                   onFocused={() => setCardFocusId(null)}
-                  onFocusRun={() => setFocusRun(run.id)}
+                  // PUSH (I-5): opening a run from the list is a destination —
+                  // Back should return here, to the list, not to whichever run
+                  // was open before this click (there was none; this is how
+                  // focus mode is entered in the first place).
+                  onFocusRun={() => setFocusRun(run.id, { push: true })}
                   onCompare={() => toggleCompare(run.id)}
                   comparing={compareIds.includes(run.id)}
                   compareFull={compareIds.length >= RUN_COMPARE_MAX}
-                  onRemove={() => removeRun(run)}
-                  removing={removingId === run.id}
-                  removeError={
-                    removeError !== null && removeError.runId === run.id ? removeError : null
-                  }
                   onReloadSection={reloadSection}
                 />
               ))}
@@ -1949,13 +2522,12 @@ function FocusedRun({
   run,
   cardFocusId,
   onCardFocused,
-  expanded,
-  onToggle,
   onRun,
   onRemove,
   removingId,
   removeError,
   onReloadSection,
+  onHeldInvalidChange,
   onLeave,
 }: {
   experimentId: string;
@@ -1965,8 +2537,6 @@ function FocusedRun({
   run: ApiRunView | undefined;
   cardFocusId: string | null;
   onCardFocused: () => void;
-  expanded: boolean;
-  onToggle: () => void;
   onRun: (run: ApiRunView) => void;
   /**
    * REMOVAL IS OFFERED HERE, unlike Focus and Compare. Those two are withheld
@@ -1978,6 +2548,8 @@ function FocusedRun({
   removingId: string | null;
   removeError: { runId: string; message: string; stale: boolean } | null;
   onReloadSection: () => void;
+  /** Passed straight through to `RunCard` — see its own doc on `onHeldInvalidChange`. */
+  onHeldInvalidChange: (heldInvalid: boolean) => void;
   onLeave: () => void;
 }) {
   if (focus.status === 'loading') {
@@ -2004,21 +2576,33 @@ function FocusedRun({
   return (
     <div className="runs-list">
       {/*
-        The card is the SAME card the list renders, with the same autosave, the
-        same overrides panel and the same Check Run — focus is a filter on what is
-        on screen, not a second, read-only rendering of a run. It OPENS expanded
-        (the reader asked for this one run, and a collapsed one would make focus
-        cost an extra click to be worth anything) and can still be collapsed,
-        because the accordion means the same thing here as it does in the list.
+        THE ONE FULL EDITOR, master-detail (PR-C) — the SAME `RunCard` the
+        compact list rows use, with the SAME autosave, the same overrides
+        panel and the same Check Run, but `compact` is false here: this is
+        the one place the run's own fields, its inherited panel, its rename
+        section and Remove are ever rendered. Focus is a filter on WHICH run
+        is open, not a second, read-only rendering of one already visible
+        elsewhere — the compact list is replaced while a run is open, never
+        shown beside it. IT CAN NO LONGER COLLAPSE AT ALL (fix round, review
+        finding m-2) — it used to open expanded and could still be collapsed
+        IN PLACE without leaving focus, through its own in-editor accordion,
+        but that accordion could put the ONLY open editor on screen behind a
+        header with nothing beneath it, which is a defect this surface can
+        reach no other way. `key={run.id}` is load-bearing now that focus can
+        move laterally between two runs without ever leaving focus mode
+        (Next/Previous run, in the toolbar above): without it, React would
+        reuse this same `RunCard` instance across the switch and carry over
+        local state — an unsaved draft, a held-invalid field, an open Remove
+        confirmation — that belongs to the run just left, not the one just
+        opened.
 
         NO `onFocusRun`: the Focus control is withheld from the focused view. It
         would put the reader exactly where they already are.
       */}
       <RunCard
+        key={run.id}
         experimentId={experimentId}
         run={run}
-        expanded={expanded}
-        onToggle={onToggle}
         onRun={onRun}
         focusOnMount={cardFocusId === run.id}
         onFocused={onCardFocused}
@@ -2028,6 +2612,7 @@ function FocusedRun({
           removeError !== null && removeError.runId === run.id ? removeError : null
         }
         onReloadSection={onReloadSection}
+        onHeldInvalidChange={onHeldInvalidChange}
       />
     </div>
   );
