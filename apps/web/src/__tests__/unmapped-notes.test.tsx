@@ -1278,6 +1278,28 @@ describe('propose a value from this note', () => {
     ).toBe(false);
   });
 
+  it('F2, INDEPENDENT REVIEW OF PR-D (post-merge): the run picker\'s read is BOUNDED — it asks for RUNS_PAGE_SIZE, never every run on the record', async () => {
+    stubFetchRoutes({
+      [NOTES]: { body: notesPage([noteFixture()]) },
+      [PROPOSALS]: { body: proposalsCapabilities() },
+      [RUNS]: { body: runsPage([runFixture({ id: 'run-1', label: 'Run 1' })]) },
+    });
+    renderPanel();
+
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Propose a value from this note' }),
+    );
+    fireEvent.change(await screen.findByLabelText('Field this value is for'), {
+      target: { value: 'context.environment' },
+    });
+    await screen.findByLabelText('Run this value is about');
+
+    const calls = (globalThis.fetch as Mock).mock.calls as [string, RequestInit?][];
+    const runsCall = calls.find(([url]) => String(url).includes('/runs'));
+    expect(runsCall, 'no request to /runs was made at all').toBeDefined();
+    expect(String(runsCall?.[0])).toContain('limit=50');
+  });
+
   it('a run-scoped path with no runs on the record refuses honestly, offering no submit', async () => {
     stubFetchRoutes({
       [NOTES]: { body: notesPage([noteFixture()]) },

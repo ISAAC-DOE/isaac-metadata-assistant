@@ -63,6 +63,7 @@ import { api, ApiError } from '../lib/api';
 import { mutationFailureCopy, staleWriteCurrentVersion } from '../lib/mutationErrors';
 import { markSelfMintedProposals } from '../lib/selfMintedProposals';
 import { RUN_FIELDS, parseRunField, type RunFieldSpec } from '../lib/runFields';
+import { RUNS_PAGE_SIZE } from '../lib/runPaging';
 import type { ApiNote, ApiNoteState, ApiNotesResponse, ApiRunView } from '../lib/types';
 import { BackendDown, LoadingPanel } from './FetchStates';
 import { DiscardStaged } from './DiscardStaged';
@@ -433,8 +434,21 @@ function NotesBrowser({ experimentId }: { experimentId: string }) {
   const ensureRunsForPropose = useCallback(() => {
     if (runsForProposeFetchedRef.current) return;
     runsForProposeFetchedRef.current = true;
+    /*
+     * F2, INDEPENDENT REVIEW OF PR-D (post-merge). Bounded at `RUNS_PAGE_SIZE`,
+     * the same first-page size every other `listRuns` call in this app asks
+     * for — omitting `limit` returns EVERY run on the record (`routes.py`,
+     * measured; `omitting_limit_returns_MORE_THAN_ONE_PAGE_of_runs`), which
+     * this picker has no reason to ask for. UNLIKE the label lookup in
+     * `IngestionProposalsPanel`, a run beyond this page is not merely shown
+     * less prettily — it is NOT OFFERED as an option here at all, so this
+     * picker never implies it has listed every run on the record; a record
+     * with more than `RUNS_PAGE_SIZE` runs needs its target run's id entered
+     * some other way (an MCP call, or a future paged picker), not a claim this
+     * dropdown does not make.
+     */
     api
-      .listRuns(experimentId)
+      .listRuns(experimentId, { limit: RUNS_PAGE_SIZE })
       .then((res) => setRunsForPropose(res.runs))
       .catch(() => {
         // Left empty, which reads as "no runs available" — fail-closed, never

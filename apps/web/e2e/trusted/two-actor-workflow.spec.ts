@@ -80,6 +80,7 @@ import {
   type ServerApi,
 } from './fixtures';
 import { FIXTURE_ACTOR_SUBJECT, FIXTURE_TRUST_BASIS, TRUSTED_API_BASE } from './env';
+import { RUNS_PAGE_SIZE } from '../../src/lib/runPaging';
 
 /**
  * The RECORD-level field A fills in and B then proposes a change to.
@@ -543,18 +544,21 @@ test.describe('two scientists, one record, end to end', () => {
      * 1,000-run list because a proposal was filed.
      */
     /*
-     * A SECOND, UNBOUNDED READ IS ALSO EXPECTED HERE, AND IT IS NOT THE ONE THIS
-     * ASSERTION IS ABOUT (found via independent review, post-merge ruling on
-     * m14). This is the FIRST run-scoped proposal in the whole flow, so
-     * `IngestionProposalsPanel`'s own once-per-mount run-label resolution
-     * (`api.listRuns(experimentId)`, no `limit` — see its fetch effect) fires
-     * for the first time at this exact moment too, to resolve `runTwo`'s LABEL
-     * for the scope line just asserted above. That read is real, legitimate,
-     * unbounded by design (`listRuns`'s own contract: omitting `limit` returns
-     * the whole list), and unrelated to `RunsSection`'s completeness path —
-     * so it is filtered out here rather than lumped into "the" attributed read,
-     * which must stay BOUNDED to prove what this comment block's original intent
-     * requires: a record-only version bump does not fetch an unbounded run list.
+     * A SECOND, BOUNDED-BUT-DIFFERENT READ IS ALSO EXPECTED HERE, AND IT IS NOT
+     * THE ONE THIS ASSERTION IS ABOUT (found via independent review, post-merge
+     * ruling on m14; the F2 fix that followed on the SAME finding closed the
+     * gap this comment used to describe). This is the FIRST run-scoped
+     * proposal in the whole flow, so `IngestionProposalsPanel`'s own
+     * once-per-mount run-label resolution (`api.listRuns(experimentId, {limit:
+     * RUNS_PAGE_SIZE})` — see its fetch effect) fires for the first time at
+     * this exact moment too, to resolve `runTwo`'s LABEL for the scope line
+     * just asserted above. That read is real, legitimate, now BOUNDED at
+     * `RUNS_PAGE_SIZE` rather than unbounded (F2 fix), and unrelated to
+     * `RunsSection`'s completeness path — so it is filtered OUT of "the"
+     * attributed read below, which must specifically carry `limit=2` (the
+     * record's actual run count) to prove what this comment block's original
+     * intent requires: a record-only version bump does not fetch an unbounded
+     * run list.
      */
     await expect
       .poll(
@@ -570,6 +574,24 @@ test.describe('two scientists, one record, end to end', () => {
       .find((u) => new URL(u).searchParams.get('limit') === '2')!;
     const attributedLimit = new URL(attributedRead).searchParams.get('limit');
     expect(attributedLimit, `step 11: and it is BOUNDED — ${attributedRead}`).toBe('2');
+    /*
+     * OPTIONAL STRENGTHENING (independent review, post-merge, following F2).
+     * Now that BOTH known reads at this moment are bounded — RunsSection's
+     * `limit=2` and `IngestionProposalsPanel`'s `limit=RUNS_PAGE_SIZE` — the
+     * UNFILTERED delta since baseline can be pinned EXACTLY, closing the gap
+     * a "look only at the bounded-to-2 one" assertion leaves open: a THIRD,
+     * unrelated re-read (bounded or not) could slip in unnoticed if nothing
+     * ever counted the total. This does.
+     */
+    expect(
+      runsReads.slice(runsReadsBefore).length,
+      'step 11: exactly TWO runs reads total — RunsSection\'s limit=2 completeness ' +
+        'read and IngestionProposalsPanel\'s bounded label read, and nothing else'
+    ).toBe(2);
+    expect(
+      runsReads.slice(runsReadsBefore).filter((u) => new URL(u).searchParams.get('limit') === String(RUNS_PAGE_SIZE)).length,
+      'step 11: and the OTHER one is the label read, bounded at RUNS_PAGE_SIZE'
+    ).toBe(1);
     /*
      * AND IT IS STILL EXACTLY ONE AFTER TWO MORE FEED POLLS.
      *

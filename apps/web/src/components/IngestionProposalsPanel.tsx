@@ -119,6 +119,7 @@ import { api, ApiError } from '../lib/api';
 import { mutationFailureCopy, staleWriteCurrentVersion, statusOf } from '../lib/mutationErrors';
 import type { RecordChangeSummary } from '../lib/recordChanges';
 import { allProposalsSelfMinted } from '../lib/selfMintedProposals';
+import { RUNS_PAGE_SIZE } from '../lib/runPaging';
 import type {
   ApiProposal,
   ApiProposalOrder,
@@ -799,8 +800,23 @@ function ProposalsBrowser({
     if (list.status !== 'data' || runLabelsFetchedRef.current) return;
     if (!list.loaded.proposals.some((p) => p.run_id !== null)) return;
     runLabelsFetchedRef.current = true;
+    /*
+     * F2, INDEPENDENT REVIEW OF PR-D (post-merge). Bounded at `RUNS_PAGE_SIZE`,
+     * the same first-page size every other `listRuns` call in this app asks
+     * for (`RunsSection`, `EvidenceExplorer`, `ConflictResolutionPanel`) —
+     * omitting `limit` returns EVERY run on the record (`routes.py`, measured;
+     * `omitting_limit_returns_MORE_THAN_ONE_PAGE_of_runs`), which this fetch
+     * has no reason to ask for: it exists only to resolve DISPLAY labels for
+     * the run-scoped proposals in the loaded window, never to enumerate every
+     * run a record has. A run beyond this page is NOT a completeness claim
+     * this component makes anywhere — it stays unresolved, and its card falls
+     * back to the raw id exactly as an already-unresolved run does today, per
+     * the comment above this effect. `TranscriptCapturePanel.tsx`'s own
+     * unbounded `listRuns` call is a separate, pre-existing site and is left
+     * alone here — out of scope for this fix.
+     */
     api
-      .listRuns(experimentId)
+      .listRuns(experimentId, { limit: RUNS_PAGE_SIZE })
       .then((res) => {
         const map: Record<string, string> = {};
         const counts: Record<string, number> = {};

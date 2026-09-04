@@ -57,6 +57,7 @@ import {
 import {
   PROPOSAL_RECORD_SCOPED_TARGET_PATHS,
   PROPOSAL_TARGET_PATHS,
+  runFixture,
   stubFetchRoutes,
 } from '../test/apiFixtures';
 import type { RecordChangeSummary } from '../lib/recordChanges';
@@ -64,7 +65,9 @@ import type { ApiProposal, ApiProposalsResponse } from '../lib/types';
 
 const EXP = 'demo';
 const LIST = `GET /api/experiments/${EXP}/proposals`;
+const RUNS = `GET /api/experiments/${EXP}/runs`;
 const RUN_ONE = '01RUNAAAAAAAAAAAAAAAAAAAA0';
+const RUN_TWO = '01RUNBBBBBBBBBBBBBBBBBBBB0';
 
 /*
  * THE TWO PATHS UNDER TEST, AND THE SERVED SETS THEY COME FROM — MEASURED.
@@ -1913,5 +1916,136 @@ describe('"Fewer Actions" cannot discard an open Supersede/Withdraw or Correct-t
     expect(screen.getByRole('button', { name: 'Fewer Actions' })).not.toBeDisabled();
     fireEvent.click(screen.getByRole('button', { name: 'Reject…' }));
     expect(screen.getByRole('button', { name: 'Fewer Actions' })).not.toBeDisabled();
+  });
+});
+
+// --- F1/F2, independent review of PR-D (post-merge): the run-label lookup ---
+
+describe('run labels for the scope line (F1/F2, independent review of PR-D, post-merge)', () => {
+  it('F2: the run-label lookup is BOUNDED — it asks for RUNS_PAGE_SIZE, never every run on the record', async () => {
+    stubFetchRoutes({
+      [LIST]: { body: page([proposalFixture({ target_field_path: RUN_PATH, run_id: RUN_ONE })]) },
+      [RUNS]: {
+        body: {
+          runs: [runFixture({ id: RUN_ONE, label: 'Run 1' })],
+          experiment_version: '1.7',
+          total: 1,
+          matched: 1,
+          returned: 1,
+          offset: 0,
+        },
+      },
+    });
+    renderPanel();
+
+    await screen.findByText('sample.material.name');
+    // The fetch fires once the run-scoped proposal above is in the loaded
+    // window — waiting for it to resolve is what `waitFor` below is for.
+    await waitFor(() => {
+      const runsCall = urls().find((u) => u.includes('/runs'));
+      expect(runsCall, 'no request to /runs was made at all').toBeDefined();
+      expect(runsCall).toContain('limit=50');
+    });
+  });
+
+  it('F1: two loaded runs sharing ONE label disambiguate — the id becomes a `title` and an `.sr-only` suffix', async () => {
+    stubFetchRoutes({
+      [LIST]: {
+        body: page([
+          proposalFixture({ target_field_path: RUN_PATH, run_id: RUN_ONE }),
+          proposalFixture({
+            proposal_id: 'P2',
+            target_field_path: 'context.temperature_K',
+            run_id: RUN_TWO,
+          }),
+        ]),
+      },
+      [RUNS]: {
+        body: {
+          // BOTH runs named "Run 2" — a rename or a coincidence, and legal:
+          // nothing anywhere in this application enforces label uniqueness.
+          runs: [
+            runFixture({ id: RUN_ONE, label: 'Run 2' }),
+            runFixture({ id: RUN_TWO, label: 'Run 2' }),
+          ],
+          experiment_version: '1.7',
+          total: 2,
+          matched: 2,
+          returned: 2,
+          offset: 0,
+        },
+      },
+    });
+    renderPanel();
+
+    const cardOne = await screen.findByRole('article', { name: /sample\.material\.name/ });
+    const cardTwo = await screen.findByRole('article', { name: /context\.temperature_K/ });
+
+    // Both cards' scope lines read the label alone until the run-label fetch
+    // resolves. Waiting for the disambiguation to appear on EITHER is the
+    // signal that it has.
+    await waitFor(() => {
+      expect(within(cardOne).getByText(/On run Run 2/).closest('.proposal-scope')).toHaveAttribute(
+        'title',
+        RUN_ONE,
+      );
+    });
+    const scopeOne = within(cardOne).getByText(/On run Run 2/).closest('.proposal-scope');
+    const scopeTwo = within(cardTwo).getByText(/On run Run 2/).closest('.proposal-scope');
+    expect(scopeOne).toHaveAttribute('title', RUN_ONE);
+    expect(scopeTwo).toHaveAttribute('title', RUN_TWO);
+    // The `.sr-only` suffix carries the DISTINGUISHING id — never the other
+    // card's — so assistive technology hears which run each card means even
+    // though the visible label is identical on both.
+    expect(scopeOne?.textContent).toContain(RUN_ONE);
+    expect(scopeOne?.textContent).not.toContain(RUN_TWO);
+    expect(scopeTwo?.textContent).toContain(RUN_TWO);
+    expect(scopeTwo?.textContent).not.toContain(RUN_ONE);
+  });
+
+  it('F1 NEGATIVE CONTROL: two loaded runs with DISTINCT labels get no id disclosure at all — the label alone is already unambiguous', async () => {
+    stubFetchRoutes({
+      [LIST]: {
+        body: page([
+          proposalFixture({ target_field_path: RUN_PATH, run_id: RUN_ONE }),
+          proposalFixture({
+            proposal_id: 'P2',
+            target_field_path: 'context.temperature_K',
+            run_id: RUN_TWO,
+          }),
+        ]),
+      },
+      [RUNS]: {
+        body: {
+          runs: [
+            runFixture({ id: RUN_ONE, label: 'Run 1' }),
+            runFixture({ id: RUN_TWO, label: 'Run 2' }),
+          ],
+          experiment_version: '1.7',
+          total: 2,
+          matched: 2,
+          returned: 2,
+          offset: 0,
+        },
+      },
+    });
+    renderPanel();
+
+    const cardOne = await screen.findByRole('article', { name: /sample\.material\.name/ });
+    const cardTwo = await screen.findByRole('article', { name: /context\.temperature_K/ });
+
+    await waitFor(() => {
+      expect(within(cardOne).getByText('On run Run 1')).toBeInTheDocument();
+    });
+    const scopeOne = within(cardOne).getByText('On run Run 1').closest('.proposal-scope');
+    const scopeTwo = within(cardTwo).getByText('On run Run 2').closest('.proposal-scope');
+    expect(scopeOne).not.toHaveAttribute('title');
+    expect(scopeTwo).not.toHaveAttribute('title');
+    // No raw id leaks into either card's accessible text when disambiguation
+    // was never needed.
+    expect(scopeOne?.textContent).toBe('On run Run 1');
+    expect(scopeTwo?.textContent).toBe('On run Run 2');
+    expect(scopeOne?.textContent).not.toContain(RUN_ONE);
+    expect(scopeTwo?.textContent).not.toContain(RUN_TWO);
   });
 });
