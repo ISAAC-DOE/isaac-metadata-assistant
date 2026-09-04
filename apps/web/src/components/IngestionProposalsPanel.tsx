@@ -28,6 +28,11 @@
  * back to the raw id only when no label was resolved. That is a readability
  * improvement over the brief's literal text, not an oversight, and it is named
  * here because a brief deviation should be a stated decision, not a silent one.
+ * A ruling on this deviation (post-merge, independent review of PR-D) keeps the
+ * label as the primary text — a scientist reads labels, not ids — but requires
+ * the id to stay reachable for disambiguation: exactly when this run's label is
+ * one two or more loaded runs share, `ProposalCard` also renders the id as a
+ * `title` attribute and an `.sr-only` suffix. See `duplicateRunLabels` there.
  *
  * FIVE THINGS THIS PANEL WILL NOT DO, each of which it would be easy to do:
  *
@@ -572,6 +577,19 @@ function ProposalsBrowser({
    * extra read at all.
    */
   const [runLabels, setRunLabels] = useState<Record<string, string>>({});
+  /**
+   * r-ruling, INDEPENDENT REVIEW OF PR-D (post-merge). Labels are a scientist's
+   * own names for their runs, chosen with no uniqueness constraint anywhere in
+   * this application — two runs on the same record can legitimately read
+   * "Run 2" and "Run 2" (a rename, a copy-pasted label, a coincidence). A label
+   * alone would then make two DIFFERENT runs' scope lines read identically,
+   * which is exactly what `.proposal-scope` exists to prevent. This set holds
+   * every label that names MORE THAN ONE of the runs loaded in the same read as
+   * `runLabels` — `ProposalCard` consults it to decide whether the id needs to
+   * be surfaced for disambiguation, or whether the label alone is already
+   * unambiguous.
+   */
+  const [duplicateRunLabels, setDuplicateRunLabels] = useState<Set<string>>(new Set());
   /*
    * m11, INDEPENDENT REVIEW OF PR-D — CHECKED, NOT CHANGED: this ref (and every
    * other piece of state in this component) already resets on a record switch
@@ -785,8 +803,15 @@ function ProposalsBrowser({
       .listRuns(experimentId)
       .then((res) => {
         const map: Record<string, string> = {};
-        for (const run of res.runs) map[run.id] = run.label;
+        const counts: Record<string, number> = {};
+        for (const run of res.runs) {
+          map[run.id] = run.label;
+          counts[run.label] = (counts[run.label] ?? 0) + 1;
+        }
         setRunLabels(map);
+        setDuplicateRunLabels(
+          new Set(Object.keys(counts).filter((label) => counts[label] > 1)),
+        );
       })
       .catch(() => {
         // Left unresolved. `ProposalCard` falls back to the raw run id, which is
@@ -1212,6 +1237,7 @@ function ProposalsBrowser({
                     offeredActions={offeredActions}
                     acceptedFromValues={list.loaded.accepted_from_values}
                     runLabels={runLabels}
+                    duplicateRunLabels={duplicateRunLabels}
                     busy={busyId === proposal.proposal_id || version === null}
                     onReview={review}
                   />
@@ -1391,6 +1417,7 @@ function ProposalCard({
   offeredActions,
   acceptedFromValues,
   runLabels,
+  duplicateRunLabels,
   busy,
   onReview,
 }: {
@@ -1401,6 +1428,8 @@ function ProposalCard({
   acceptedFromValues: string[];
   /** Display-only. See the fetch note in `ProposalsBrowser`. */
   runLabels: Record<string, string>;
+  /** Labels shared by more than one loaded run — see the state's own comment. */
+  duplicateRunLabels: Set<string>;
   busy: boolean;
   onReview: (
     proposal: ApiProposal,
@@ -1489,13 +1518,39 @@ function ProposalCard({
       <header className="proposal-card-head">
         <span className="proposal-state">{stateLabel(proposal.state)}</span>
         <span className="proposal-path mono">{proposal.target_field_path}</span>
-        <span className="proposal-scope">
-          {proposal.run_id === null
-            ? 'On the record'
-            : /* Falls back to the raw id when no label was resolved — see
-                 `ProposalsBrowser`'s fetch note. Never wrong, only less friendly. */
-              `On run ${runLabels[proposal.run_id] ?? proposal.run_id}`}
-        </span>
+        {(() => {
+          if (proposal.run_id === null) {
+            return <span className="proposal-scope">On the record</span>;
+          }
+          const resolvedLabel = runLabels[proposal.run_id];
+          // Falls back to the raw id when no label was resolved — see
+          // `ProposalsBrowser`'s fetch note. Never wrong, only less friendly,
+          // and never ambiguous (an id is unique by construction), so no
+          // disambiguation is needed in this branch.
+          const label = resolvedLabel ?? proposal.run_id;
+          /*
+           * r-ruling, INDEPENDENT REVIEW OF PR-D (post-merge). A scientist reads
+           * labels, so the label stays the primary text — but two runs CAN share
+           * one (labels carry no uniqueness constraint), and a scope line reading
+           * identically for two different runs is exactly the ambiguity this line
+           * exists to prevent. Disambiguate ONLY when it is actually needed: the
+           * id becomes a `title` (a hover/focus disclosure) and a `.sr-only`
+           * suffix (so it reaches assistive technology too) exactly when this
+           * run's label is one `duplicateRunLabels` says more than one loaded run
+           * carries. Every other case — including every case in this file's own
+           * trusted browser suite today — renders the label alone.
+           */
+          const ambiguous = resolvedLabel !== undefined && duplicateRunLabels.has(label);
+          if (!ambiguous) {
+            return <span className="proposal-scope">{`On run ${label}`}</span>;
+          }
+          return (
+            <span className="proposal-scope" title={proposal.run_id}>
+              {`On run ${label}`}
+              <span className="sr-only">{` (${proposal.run_id})`}</span>
+            </span>
+          );
+        })()}
         <span className="proposal-when">Proposed {proposal.proposed_utc}</span>
       </header>
 
