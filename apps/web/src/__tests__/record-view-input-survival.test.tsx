@@ -180,7 +180,14 @@ describe('the record view tabs keep unsaved text', () => {
     renderRecord({ [`GET ${BASE}/runs`]: { body: runsPage([RUN]) } });
     await screen.findByRole('button', { name: /Add Run/ });
     await act(async () => {
-      fireEvent.click(within(card()).getByRole('button', { name: /^Run \d/ }));
+      // ANCHORED ON THE VERB (fix round, review finding m-8): the compact
+      // row's own open control carries an `.sr-only` "Open " prefix ahead of
+      // the run's label (I-3), so its accessible name begins `Open Run 1 …`.
+      // Role + name, not a raw `.run-card-header` class query — that class
+      // also matches the FOCUSED editor's own plain `<h3>` heading
+      // (`RunCard.tsx`'s m-2 note), and this click is only ever made while
+      // compact.
+      fireEvent.click(within(card()).getByRole('button', { name: /^Open Run \d/ }));
     });
 
     const temperature = within(card()).getByLabelText('Temperature (K)');

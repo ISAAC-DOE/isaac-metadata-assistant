@@ -23,7 +23,7 @@
 
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
 import { configure, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { MemoryRouter, useLocation } from 'react-router-dom';
+import { MemoryRouter, useLocation, useSearchParams } from 'react-router-dom';
 
 import { RunsSection } from '../components/RunsSection';
 import {
@@ -107,6 +107,13 @@ function stubBackend(initial: Run[]) {
     version: VERSION_FIELDS.version,
     refuse: null as Refusal | null,
     calls: [] as Call[],
+    /**
+     * Held open until a test releases it — the m-7 mutation control needs a
+     * DELETE genuinely in flight while an unrelated query param changes
+     * underneath it, and nothing else in this file needs a controllable
+     * removal response.
+     */
+    holdRemoval: null as Promise<void> | null,
   };
 
   stubFetchRoutes({});
@@ -161,6 +168,7 @@ function stubBackend(initial: Run[]) {
 
       const removal = /^\/api\/experiments\/[^/]+\/runs\/([^/]+)\/remove$/.exec(bare);
       if (method === 'POST' && removal) {
+        if (state.holdRemoval !== null) await state.holdRemoval;
         if (state.refuse !== null) {
           const refusal = state.refuse;
           state.refuse = null;
@@ -203,6 +211,31 @@ function LocationProbe() {
   return <div data-testid="url">{`${location.pathname}${location.search}`}</div>;
 }
 
+/**
+ * A sibling in the SAME router, setting a query param `removeRun` never
+ * reads and never writes — m-7's own mutation control. It shares the one
+ * `useSearchParams` state react-router keeps per router, exactly as a real
+ * concurrent action on this screen (Compare, a filter, anything else that
+ * edits the URL) would, so clicking it while a removal is in flight is the
+ * same race `searchParamsRef` exists to survive, produced without needing a
+ * second real feature just to reach it.
+ */
+function UnrelatedParamButton() {
+  const [params, setParams] = useSearchParams();
+  return (
+    <button
+      type="button"
+      onClick={() => {
+        const next = new URLSearchParams(params);
+        next.set('unrelated', 'edited-mid-flight');
+        setParams(next, { replace: true });
+      }}
+    >
+      Edit an unrelated param
+    </button>
+  );
+}
+
 function renderAt(entry: string) {
   return render(
     <MemoryRouter
@@ -211,6 +244,7 @@ function renderAt(entry: string) {
     >
       <RunsSection experimentId={ID} />
       <LocationProbe />
+      <UnrelatedParamButton />
     </MemoryRouter>,
   );
 }
@@ -230,10 +264,28 @@ async function waitForList() {
   await waitFor(() => expect(document.querySelector('.runs-count')).not.toBeNull());
 }
 
-/** Open one run's card and return its Remove Run trigger. */
+/**
+ * A run's compact-row open control — anchored on the VERB now, not the run's
+ * own label. `RunCard`'s compact header carries an `.sr-only` "Open " prefix
+ * ahead of the label (fix round, review finding I-3), so the accessible name
+ * begins `Open <label> …` rather than `<label> …`; anchoring there also
+ * disambiguates it from `Compare`, the only other button a compact row
+ * renders. `label` is accepted and unused by the lookup itself (every call
+ * site still passes it) but is kept in the signature rather than dropped —
+ * several call sites read better naming which run they mean to open.
+ */
+function openControl(runId: string, _label: string): HTMLElement {
+  return within(cardFor(runId)).getByRole('button', { name: /^Open /i });
+}
+
+/**
+ * Open one run — master-detail (`RunsSection`'s own file header): clicking the
+ * compact row navigates to `?run=<id>` and mounts the one full editor, open by
+ * default, so the Remove trigger is reachable with no further click. Returns
+ * it.
+ */
 async function openRemove(runId: string, label: string): Promise<HTMLElement> {
-  const card = cardFor(runId);
-  fireEvent.click(within(card).getByRole('button', { expanded: false }));
+  fireEvent.click(openControl(runId, label));
   return within(cardFor(runId)).findByRole('button', {
     name: `Remove run ${label} from this record`,
   });
@@ -266,13 +318,16 @@ describe('the confirmation', () => {
     expect(trigger).toHaveAttribute('aria-expanded', 'false');
     fireEvent.click(trigger);
 
-    // The panel is open, its copy is on screen, and the run is still in the list.
+    // The panel is open, its copy is on screen, and the run is still open —
+    // RUN002 is not in the document at all while RUN001 is the one run open
+    // (master-detail), so this checks the OPEN run rather than asserting both
+    // cards render at once.
     expect(trigger).toHaveAttribute('aria-expanded', 'true');
     expect(
       within(cardFor('RUN001')).getByText(/takes this run out of the record/),
     ).toBeTruthy();
     expect(removalCalls(state)).toHaveLength(0);
-    expect(renderedIds()).toEqual(['RUN001', 'RUN002']);
+    expect(renderedIds()).toEqual(['RUN001']);
   });
 
   it('names what goes and what does not, and never claims a file was deleted', async () => {
@@ -451,6 +506,70 @@ describe('Focus Run recovery', () => {
       expect(url).toContain('RUN003');
     });
   });
+
+  /*
+   * PINS REVIEW FINDING I-4, DIRECTLY (fix round, review finding m-7).
+   * `removeRun` is a `useCallback` memoized on `[experimentId,
+   * experimentVersion, focusRunId, setSearchParams]` — none of which change
+   * when an UNRELATED query param is edited — so its closure is not
+   * recreated by that edit. Before the fix, the URL-editing code inside its
+   * `.then()` read the `searchParams` captured at the time the callback was
+   * LAST recreated, not the live URL; a concurrent edit landing on the URL
+   * while the DELETE request was still open would be silently reverted the
+   * moment the removal's own response arrived and rewrote the URL from that
+   * stale snapshot. Reading through `searchParamsRef.current` instead is
+   * the fix, and this is the test that would have caught its absence.
+   *
+   * MUTATION CONTROL: reverting the one line in `removeRun` from
+   * `new URLSearchParams(searchParamsRef.current)` back to
+   * `new URLSearchParams(searchParams)` turns this red — the surviving
+   * assertion (`unrelated=edited-mid-flight` still on the URL after the
+   * removal completes) fails, because the closure's stale snapshot has no
+   * such param to preserve.
+   */
+  it('a concurrent, UNRELATED URL edit made while the DELETE is pending survives the removal', async () => {
+    const state = stubBackend([mkRun(1), mkRun(2)]);
+    renderAt(`/record/${ID}?${RECORD_RUN_PARAM}=RUN001`);
+    await waitForList();
+
+    let releaseRemoval!: () => void;
+    state.holdRemoval = new Promise<void>((resolve) => {
+      releaseRemoval = resolve;
+    });
+
+    const trigger = await within(cardFor('RUN001')).findByRole('button', {
+      name: 'Remove run Run 1 from this record',
+    });
+    fireEvent.click(trigger);
+    fireEvent.click(
+      within(cardFor('RUN001')).getByRole('button', { name: 'Remove This Run' }),
+    );
+
+    // The DELETE is genuinely in flight — held open by `holdRemoval` — before
+    // anything else happens.
+    await waitFor(() =>
+      expect(
+        state.calls.some((c) => c.method === 'POST' && c.path.endsWith('/remove')),
+      ).toBe(true),
+    );
+
+    // A concurrent, UNRELATED edit lands on the URL while that request is
+    // still open — `removeRun`'s own closure was memoized before this
+    // happened, and does not depend on it.
+    fireEvent.click(screen.getByRole('button', { name: 'Edit an unrelated param' }));
+    await waitFor(() =>
+      expect(screen.getByTestId('url').textContent).toContain('unrelated=edited-mid-flight'),
+    );
+
+    releaseRemoval();
+    await waitFor(() => expect(renderedIds()).toEqual(['RUN002']));
+
+    // THE NEWER EDIT SURVIVES — read live, not from a stale closure.
+    expect(screen.getByTestId('url').textContent).toContain('unrelated=edited-mid-flight');
+    // And the removal's OWN edit (clearing `?run=`) still happened —
+    // reading live does not mean the fix stopped doing its own job.
+    expect(screen.getByTestId('url').textContent).not.toContain(RECORD_RUN_PARAM);
+  });
 });
 
 describe('list and search recovery', () => {
@@ -496,18 +615,53 @@ describe('list and search recovery', () => {
       within(cardFor('RUN001')).getByRole('button', { name: 'Remove This Run' }),
     );
 
-    await waitFor(() => expect(renderedIds()).toEqual([]));
-    expect(screen.getByText(/No run matches this search or these filters/)).toBeTruthy();
-    expect(screen.getByText(/This record has 1 run\./)).toBeTruthy();
-    expect(screen.queryByText(/No runs yet\./)).toBeNull();
-    // And the way out is offered rather than left to be guessed. There are TWO —
-    // the controls row keeps its own while filtering, and the empty state adds one
-    // where the reader is looking — so this asserts the pair rather than picking
-    // one and pretending the other is a duplicate.
-    expect(screen.getAllByRole('button', { name: 'Clear search and filters' })).toHaveLength(2);
+    /*
+     * FLAKY UNDER LOAD, AND THE FIX IS TWO WAITS, NOT ONE (fix round, review
+     * finding C-1). `openRemove` now navigates the reader INTO FOCUS first,
+     * so the focused view's own not-found branch ("No run with the id … is in
+     * this record") can render for one frame after the removal lands but
+     * before `?run=` clears — `removeRun` reads the reloaded list before its
+     * own URL edit necessarily commits ahead of it on a slower host. A single
+     * `waitFor(() => expect(renderedIds()).toEqual([]))` is satisfied by THAT
+     * transient state too (the focused view renders no compact rows either),
+     * so the very next line — a synchronous `getByText`, not wrapped in its
+     * own `waitFor` — could fire while the dead-end sentence is what is on
+     * screen, and fail intermittently depending on how the two microtask
+     * queues interleave on a given run. Waiting FIRST for the focused view's
+     * own exit door to be gone proves the transition is actually complete
+     * before anything else is asserted.
+     */
+    await waitFor(() =>
+      expect(screen.queryByRole('button', { name: 'Back to all runs' })).toBeNull(),
+    );
+    await waitFor(() => {
+      expect(renderedIds()).toEqual([]);
+      expect(screen.getByText(/No run matches this search or these filters/)).toBeTruthy();
+      expect(screen.getByText(/This record has 1 run\./)).toBeTruthy();
+      expect(screen.queryByText(/No runs yet\./)).toBeNull();
+      // And the way out is offered rather than left to be guessed. There are
+      // TWO — the controls row keeps its own while filtering, and the empty
+      // state adds one where the reader is looking — so this asserts the
+      // pair rather than picking one and pretending the other is a
+      // duplicate.
+      expect(screen.getAllByRole('button', { name: 'Clear search and filters' })).toHaveLength(2);
+    });
   });
 
-  it('moves the caret to the run below, so a keyboard reader is not dropped to the top', async () => {
+  /*
+   * MASTER-DETAIL REWRITE. "Moves the caret to the run below" pinned a
+   * successor branch that `removeRun` still carries but that the UI can no
+   * longer reach: Remove is offered only inside the OPEN editor now (the same
+   * destructive-action separation this surface always kept), so every
+   * removal through the product removes the FOCUSED run — `focusRunId ===
+   * run.id` is always true — and the caret goes to the section's own
+   * furniture (the search box), not to a "successor" row, exactly as it
+   * already does when a deep-linked run vanishes (see "Focus Run recovery").
+   * The property worth pinning is the one that still holds: the caret is
+   * never lost to the document body, and the reader lands back in the list,
+   * able to reach the run that is now in the position the removed one held.
+   */
+  it('after removing the (necessarily focused) run, the caret lands on the section’s own furniture, not the document body', async () => {
     stubBackend([mkRun(1), mkRun(2), mkRun(3)]);
     renderRecord();
     await waitForList();
@@ -517,11 +671,10 @@ describe('list and search recovery', () => {
     );
 
     await waitFor(() => expect(renderedIds()).toEqual(['RUN001', 'RUN003']));
-    await waitFor(() =>
-      expect(document.activeElement).toBe(
-        within(cardFor('RUN003')).getByRole('button', { expanded: false }),
-      ),
-    );
+    await waitFor(() => expect(document.activeElement).not.toBe(document.body));
+    expect(document.activeElement).toBe(screen.getByLabelText('Search runs'));
+    // RUN003 is reachable from here, in the position RUN002 held.
+    expect(openControl('RUN003', 'Run 3')).toBeInTheDocument();
   });
 
   it('stops holding autosave state for a run that no longer exists', async () => {
@@ -565,8 +718,12 @@ describe('a refused removal', () => {
     const alert = await within(cardFor('RUN001')).findByRole('alert');
     expect(alert.textContent).toContain('the run was not removed');
     expect(alert.textContent).toContain('can be your own edit elsewhere on this screen');
-    // The run is still there, and the panel stayed open over it.
-    expect(renderedIds()).toEqual(['RUN001', 'RUN002']);
+    // The run is still there, and the panel stayed open over it. RUN002 is not
+    // in the document at all — master-detail means it never was, while RUN001
+    // is the one run open — so this checks the OPEN run survives rather than
+    // asserting a DOM state (both cards rendered at once) that no longer
+    // exists under one-editor-at-a-time.
+    expect(renderedIds()).toEqual(['RUN001']);
     expect(cardFor('RUN001').querySelector('.run-card-remove')).not.toBeNull();
     // Reloading the section is the remedy, and it is a control rather than an
     // instruction to reload the page and lose everything else on screen.
@@ -663,8 +820,7 @@ describe('an exported run', () => {
     renderRecord();
     await waitForList();
 
-    const card = cardFor('RUN001');
-    fireEvent.click(within(card).getByRole('button', { expanded: false }));
+    fireEvent.click(openControl('RUN001', 'Run 1'));
     await waitFor(() =>
       expect(within(cardFor('RUN001')).getByText(/cannot be removed/)).toBeTruthy(),
     );
@@ -677,10 +833,12 @@ describe('an exported run', () => {
     expect(cardFor('RUN001').textContent).toContain('01EXPORTEDRECORD000000001');
     expect(cardFor('RUN001').textContent).toContain('never rewritten');
     // Nothing was sent, and the SIBLING that has not been exported still offers it:
-    // this is a per-run disclosure, not the control going missing.
+    // this is a per-run disclosure, not the control going missing. Master-detail
+    // means only one run is open at a time, so reaching the sibling means
+    // leaving focus first.
     expect(removalCalls(state)).toHaveLength(0);
-    const other = cardFor('RUN002');
-    fireEvent.click(within(other).getByRole('button', { expanded: false }));
+    fireEvent.click(screen.getByRole('button', { name: 'Back to all runs' }));
+    fireEvent.click(openControl('RUN002', 'Run 2'));
     expect(
       await within(cardFor('RUN002')).findByRole('button', {
         name: 'Remove run Run 2 from this record',

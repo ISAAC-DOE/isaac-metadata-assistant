@@ -836,9 +836,10 @@ test.describe('surface catalogue coverage', () => {
     expect(
       await page.locator('.run-card-compare').count(),
       'If run cards now render on a seeded example record, Compare Runs has become reachable ' +
-        'read-only and SHOULD be added to `../surfaces.ts` — plus `.run-card-focus` and ' +
-        '`.run-card-compare` (measured 52x23 and 69.5x23) become measurable by the target-size ' +
-        'probe, which currently cannot see them. Delete this test when that happens.'
+        'read-only and SHOULD be added to `../surfaces.ts` — plus `.run-card-compare` ' +
+        '(measured 69.5x23) becomes measurable by the target-size probe, which currently ' +
+        'cannot see it (`.run-card-focus` no longer exists — fix round, PR-C, review ' +
+        'finding I-3). Delete this test when that happens.'
     ).toBe(0);
   });
 });

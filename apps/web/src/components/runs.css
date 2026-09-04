@@ -59,6 +59,85 @@
 }
 
 /*
+ * THE FOCUSED TOOLBAR'S OWN BUTTON GROUP — "Back to all runs" plus Next/
+ * Previous run (review finding I-5). A flex row nested inside `.runs-toolbar`
+ * rather than three loose buttons, so the group wraps as one unit at narrow
+ * widths instead of the count line inserting itself between "Back to all
+ * runs" and the two navigation buttons that belong beside it.
+ */
+.runs-focus-nav {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/*
+ * PREVIOUS/NEXT'S DISABLED STATE HAD NO VISUAL HALF — review finding I-7.
+ * `aria-disabled` communicates the refusal to assistive tech; sighted, it
+ * communicated nothing at all, because `.btn-secondary`'s own hover fill
+ * (`base.css:224-227`) still lit up on a click that would refuse — a hovered,
+ * unreachable Previous/Next was pixel-identical to an enabled one. Same
+ * idiom as `.run-card-compare[aria-disabled='true']` below: muted text, a
+ * `not-allowed` cursor, and hover reset back to the RESTING look rather than
+ * `.btn-secondary`'s own hover treatment. The reset targets differ from
+ * Compare's own (`border-color: transparent`) only because the two controls
+ * have different resting borders — `.btn-secondary` starts from
+ * `var(--border-strong)`, Compare from a transparent one — the PATTERN
+ * (every hover-affected property reset to its own resting value) is the
+ * same.
+ */
+.runs-focus-nav .btn[aria-disabled='true'] {
+  color: var(--text-muted);
+  cursor: not-allowed;
+}
+
+.runs-focus-nav .btn[aria-disabled='true']:hover {
+  border-color: var(--border-strong);
+  background: var(--surface);
+  color: var(--text-muted);
+}
+
+/*
+ * THE LEAVE CONFIRMATION — review finding I-1. Amber/`needsyou`, never the
+ * fail palette: leaving a run with unsent text is a caution the reader can
+ * still back out of, not a refusal or a broken write, and `StatusChip`'s own
+ * rule is that amber is for exactly this ("a human has to look"), red for an
+ * actual failure. Otherwise the same shape as `.run-card-remove` a few
+ * hundred lines down — text, then two peer buttons — because it is the same
+ * kind of decision in a different place.
+ *
+ * `flex-basis: 100%` (review findings C-2/I-8) — it now renders INSIDE
+ * `.runs-focus-nav`'s flex row, between Back and Previous/Next, so it sits
+ * before them in DOM/tab order (see `RunsSection.tsx`'s own note on why).
+ * `.runs-focus-nav` already wraps, so this forces the confirmation onto its
+ * own line and pushes Previous/Next below it rather than beside a dialog
+ * that, while open, is the only thing worth interacting with.
+ */
+.runs-leave-confirm {
+  flex-basis: 100%;
+  margin: 0 0 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--needsyou-border);
+  border-radius: 6px;
+  background: var(--needsyou-bg);
+}
+
+.runs-leave-confirm-text {
+  margin: 0 0 10px;
+  max-width: 66ch;
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+}
+
+.runs-leave-confirm-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/*
  * THE BROWSER CONTROLS — a search box and two filters, on one line at desk width
  * and wrapping to as many as they need below it. No new token, no new control
  * shape: the box and the two selects are `.run-input`, which is the input this
@@ -107,6 +186,25 @@
   font-size: 12px;
   line-height: 1.5;
   color: var(--text-slate);
+}
+
+/*
+ * `.runs-leave-note` IS ALWAYS MOUNTED, EMPTY UNTIL "LEAVE ANYWAY" FILLS IT
+ * — review finding m-10. Same reasoning as `.run-card-save[data-save-
+ * status='idle']` in this file: a live region that arrives ALREADY carrying
+ * its content is not reliably announced, so it exists in the accessibility
+ * tree before there is anything to say. `:empty` collapses `.runs-note`'s
+ * own box (padding/border/background) to nothing, so the always-present
+ * node costs no vertical space and paints no empty card while it has
+ * nothing to announce.
+ */
+.runs-leave-note:empty {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  height: 0;
+  overflow: hidden;
 }
 
 /* Load More, with the honesty note about offset paging beside it rather than
@@ -169,10 +267,13 @@
 }
 
 /*
- * The header LINE: the accordion heading, and — in the list, never in the focused
- * view — the Focus control beside it. A flex wrapper rather than a control tucked
- * inside the heading's button, because a button inside a button is not valid
- * markup and the accordion button already spans the row.
+ * The header LINE: the compact row's open button (or the focused view's plain
+ * heading), and — in the list only — Compare beside it. A flex wrapper rather
+ * than a control tucked inside the row's own button, because a button inside a
+ * button is not valid markup and that button already spans the row. A
+ * standalone Focus control briefly lived here too and is gone (fix round,
+ * review finding I-3): two 52×24 targets for one act, and 73px of extra row
+ * height once they wrapped at 320px. The row's own click does what it did.
  */
 .run-card-top {
   display: flex;
@@ -189,39 +290,11 @@
 }
 
 /*
- * Quiet by default and unmistakable on focus. `--text-slate` is 5.46:1 against a
- * card's `--surface` #ffffff, so this is demoted by weight and size rather than by
- * contrast — the same rule the chevron note above states.
- */
-.run-card-focus {
-  flex: none;
-  margin-right: 10px;
-  padding: 4px 8px;
-  background: none;
-  border: 1px solid transparent;
-  border-radius: var(--radius-control);
-  font-family: var(--font-ui);
-  font-size: 11.5px;
-  font-weight: 600;
-  color: var(--text-slate);
-  cursor: pointer;
-}
-
-.run-card-focus:hover {
-  border-color: var(--border-strong);
-  color: var(--text-primary);
-}
-
-.run-card-focus:focus-visible {
-  outline: none;
-  border-color: var(--action);
-  box-shadow: var(--ring-active);
-  color: var(--text-primary);
-}
-
-/*
- * THE COMPARE TOGGLE, beside Focus and styled from it — one visual family for the
- * two controls that both act on "which run(s) is this screen about".
+ * THE COMPARE TOGGLE — one visual family with the compact row's own open
+ * button, for two controls that both act on "which run(s) is this screen
+ * about". It used to be styled FROM Focus, a sibling control this fix round
+ * removed (see the note on `.run-card-top` above); the declarations are
+ * unchanged, only the sibling they were once compared to is gone.
  *
  * PRESSED IS NOT CARRIED BY COLOUR. The button's own word changes ("Compare" →
  * "Comparing"), `aria-pressed` changes, and the surface gains a filled background
@@ -289,19 +362,39 @@
 }
 
 /*
+ * THE FOCUSED VIEW'S PLAIN HEADING gets NEITHER of the two rules above (fix
+ * round, review finding m-2): it is no longer a `<button>` and nothing in it
+ * discloses anything, so a hover highlight that implies clickability would be
+ * a false affordance, and the pointer cursor with it. `.run-card-header`'s own
+ * geometry (flex/gap/padding) is still shared — this only subtracts the
+ * interactive affordances, the same relationship `.run-card-header-compact`
+ * below has to the base rule, in the opposite direction.
+ */
+.run-card-header-static {
+  cursor: default;
+}
+
+.run-card-header-static:hover {
+  background: none;
+}
+
+/*
  * NOT `--text-quaternary`. It is #9aa4af — **2.53:1 against a run card's own
  * background**, which is `--surface` #ffffff, not the `--surface-subtle` #fbfcfd the
  * first version of this comment quoted a 2.46:1 figure against. Same verdict either
  * way, and `--text-slate` clears WCAG 1.4.11's 3:1 for a graphical object at 5.46:1
  * on white — but a ratio is only evidence if it names the pair it was computed over.
  * It is the token `chrome.css` describes in this same commit as failing AA "at ANY
- * size, large-text 3.0:1 included" — and this chevron is the card's only visual
- * expand/collapse
- * affordance, so WCAG 1.4.11 applies to it as a graphical object. `aria-hidden`
- * exempts it from name computation, not from contrast, and axe's `color-contrast`
- * rule does not scan SVG, so no baseline in this repository would ever have caught
- * it. Introducing a new use of a token while documenting it as broken is a
- * particularly poor look.
+ * size, large-text 3.0:1 included" — and this chevron is a graphical object, so
+ * WCAG 1.4.11 applies to it regardless of what it affords. `aria-hidden` exempts it
+ * from name computation, not from contrast, and axe's `color-contrast` rule does not
+ * scan SVG, so no baseline in this repository would ever have caught it. Introducing
+ * a new use of a token while documenting it as broken is a particularly poor look.
+ *
+ * SCOPED TO THE COMPACT ROW ONLY, now (m-2): the focused view's own heading no
+ * longer renders a chevron at all — it never discloses anything in place, so
+ * there was nothing for a chevron to signal there. `.run-card-chevron` is used
+ * exactly once per card now, by whichever branch is on screen, never both.
  */
 .run-card-chevron {
   color: var(--text-slate);
@@ -313,6 +406,33 @@
   font-weight: 650;
   color: var(--text-primary);
   flex: none;
+}
+
+/*
+ * THE COMPACT ROW'S ORDINAL — the run's stable numeric position, distinct from
+ * its (possibly renamed) label. Mono, matching the conditions line's own
+ * "this is a reading, not prose" treatment, and demoted: `--text-slate` is
+ * 5.46:1 on a card's `--surface` #ffffff, so the demotion is weight and size,
+ * never a contrast shortfall.
+ */
+.run-card-ordinal {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-slate);
+  flex: none;
+}
+
+/*
+ * THE COMPACT ROW'S OWN HEADER — `.run-card-header`'s padding, flex and hover
+ * are inherited (both classes are applied together); this adds nothing new
+ * visually, and exists only so a rule can target the compact case without
+ * re-declaring the shared geometry. `cursor: pointer` is explicit because this
+ * button navigates rather than disclosing in place, and the base rule leaves
+ * cursor to the browser default for a `<button>`, which is already `pointer`
+ * — stated anyway so the intent is not left to be inferred from a UA default.
+ */
+.run-card-header-compact {
+  cursor: pointer;
 }
 
 /* The identity line. Mono because it is a reading, not prose. */
@@ -1093,6 +1213,38 @@
 /* ---- narrow widths ------------------------------------------------------ */
 
 @media (max-width: 640px) {
+  /*
+   * REVIEW FINDING m-9, AND ITS OWN CLAIM CORRECTED BY MEASUREMENT (review
+   * finding m-11). `.run-card-top` is the OUTER row — the compact row's own
+   * open control (or the focused heading) SIDE BY SIDE with `Compare` — and
+   * it did not wrap at narrow widths even though `.run-card-header` (the
+   * button/heading's OWN content, one level in) already did. THIS COMMENT
+   * USED TO CLAIM that left `Compare` forced to shrink or overlap rather
+   * than drop to its own line — reasoned, never measured. `jsdom` cannot
+   * measure layout at all, so the unit suite could only ever assert the
+   * rule exists, never that it did anything; `e2e/mutation/run-card-
+   * responsive.spec.ts`'s "a compact row carrying every value still fits at
+   * 320" is the one place in this repository that can actually watch it
+   * fire, and removing this rule there — with the longest plausible
+   * condition line this app renders, at 320px, the narrowest width this
+   * screen supports — did NOT reproduce the predicted failure: `Compare`
+   * kept its natural ~70x24 size and stayed inside the card either way.
+   * The likely reason is `.run-card-header`'s OWN wrap, a few lines below:
+   * once the button's content wraps internally, the button grows TALLER
+   * without needing to grow WIDER, so `Compare` (a `flex: none` sibling)
+   * never has to compete with it for the same line in the first place —
+   * making this rule's own effect, if any, HARMLESS AND UNMEASURED rather
+   * than the fix the deleted claim described. Kept as a reasonable
+   * defensive rule (a wrapping outer row is never wrong once its own
+   * content wraps), not because a failure without it was ever confirmed.
+   * `.run-card-progress-scope` (the fields-on-this-screen denominator's own
+   * disclosure) is deliberately NOT hidden to make room here regardless —
+   * a completion-adjacent number with no stated scope is a worse defect
+   * than a taller row.
+   */
+  .run-card-top {
+    flex-wrap: wrap;
+  }
   .run-card-header {
     flex-wrap: wrap;
   }

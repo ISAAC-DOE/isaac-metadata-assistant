@@ -43,10 +43,10 @@
  */
 
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
-import { act, configure, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, configure, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 
-import { RunsSection, RUNS_PAGE_SIZE } from '../components/RunsSection';
+import { RunsSection, RUNS_PAGE_SIZE, RUN_SEARCH_DEBOUNCE_MS } from '../components/RunsSection';
 import type { RecordChangeSummary } from '../lib/recordChanges';
 import { RUN_LIST_LIMIT_MAX } from '../lib/runPaging';
 import { __resetRunAutosaveStore } from '../lib/runAutosaveStore';
@@ -120,19 +120,42 @@ function stubRunsBackend(initial: { runs: Run[]; version: string }) {
   const queue: Array<() => void> = [];
   const calls: string[] = [];
 
-  const respond = () => ({
-    ok: true,
-    status: 200,
-    headers: { get: () => null },
-    json: async () => ({
-      runs: box.runs,
-      experiment_version: box.version,
-      total: box.runs.length,
-      matched: box.runs.length,
-      returned: box.runs.length,
-      offset: 0,
-    }),
-  });
+  /*
+   * HONOURS `limit`/`offset` LIKE `routes.py` DOES — review finding C-3.
+   * This fixture used to answer every request with the WHOLE `box`
+   * regardless of what was asked for, which let a test assert a shape the
+   * real backend can never produce: a run created AFTER the reader's own
+   * bounded reload (`limit = received`, `triggerBoundedSilentReload`)
+   * rendering anyway, because the fixture handed back runs the request
+   * never requested — invisible here, and exactly the shape PR #229's own
+   * rewrite of this function (on the branch this merges into) turns red.
+   * `stubPagedRunsBackend` below already got this right for the I2/I3
+   * tests it was built for; this merges the same slicing into THIS stub
+   * too, so the property holds for every test in the file that uses it,
+   * not only the ones that happened to reach for the paged one — and
+   * `hold`/`release`/`outstanding`, which several tests below still need,
+   * are unaffected.
+   */
+  const respond = (path: string) => {
+    const params = new URLSearchParams(path.split('?')[1] ?? '');
+    const limitParam = params.get('limit');
+    const limit = limitParam === null ? box.runs.length : Number(limitParam);
+    const offset = Number(params.get('offset') ?? '0');
+    const page = box.runs.slice(offset, offset + limit);
+    return {
+      ok: true,
+      status: 200,
+      headers: { get: () => null },
+      json: async () => ({
+        runs: page,
+        experiment_version: box.version,
+        total: box.runs.length,
+        matched: box.runs.length,
+        returned: page.length,
+        offset,
+      }),
+    };
+  };
 
   stubFetchRoutes({});
   const inner = globalThis.fetch as unknown as (
@@ -151,9 +174,9 @@ function stubRunsBackend(initial: { runs: Run[]; version: string }) {
         method === 'GET' && (path === `${BASE}/runs` || path.startsWith(`${BASE}/runs?`));
       if (!isListing) return inner(input, init);
       calls.push(path);
-      if (!hold) return respond() as unknown as Response;
+      if (!hold) return respond(path) as unknown as Response;
       return new Promise<Response>((resolve) => {
-        queue.push(() => resolve(respond() as unknown as Response));
+        queue.push(() => resolve(respond(path) as unknown as Response));
       });
     }),
   );
@@ -226,7 +249,26 @@ afterEach(() => {
 // ---------------------------------------------------------------------------
 
 describe('a run that arrived through the change feed (fast path)', () => {
-  it('a created run becomes visible after a signal', async () => {
+  /*
+   * REWRITTEN, NOT DELETED (fix round, review finding C-3). This used to
+   * assert that a run CREATED after this section's own bounded reload
+   * (`limit = received`) rendered anyway — a shape the real backend can
+   * never produce: `received` is 2 here, so the reload's own request asks
+   * for exactly 2, and a third run appended after the two already loaded is
+   * outside that page by construction. It only ever passed because
+   * `stubRunsBackend` ignored `limit` and answered with the whole box
+   * regardless of what was asked for — fixed above, in the fixture itself.
+   *
+   * The property worth proving is the one this describe block is actually
+   * about — that a CREATED run's signal (as opposed to an edit to an
+   * existing one, the sibling test below) triggers the fast path AT ALL,
+   * exactly once — and that this section reports the truth about what it
+   * could read rather than silently fabricating a third row.
+   * `I3 — a colleague adds a run while every match already loaded` covers
+   * the fuller Load-More recovery from this same shape in depth; this test
+   * stays about the fast path's own trigger.
+   */
+  it('a created run signal triggers exactly one bounded reload, honestly reflecting what it could read', async () => {
     const backend = stubRunsBackend({ runs: [mkRun(1), mkRun(2)], version: '1.0' });
     const { rerender } = render(<Harness activity={null} />);
     await waitForList();
@@ -239,7 +281,14 @@ describe('a run that arrived through the change feed (fast path)', () => {
     rerender(<Harness activity={summary({ runIds: ['RUN003'], runRev: 1 })} />);
 
     await waitFor(() => expect(backend.calls).toHaveLength(2));
-    await waitFor(() => expect(renderedIds()).toEqual(['RUN001', 'RUN002', 'RUN003']));
+    // THE BOUNDED REQUEST ASKED FOR EXACTLY WHAT WAS ON SCREEN, never the
+    // server's new total — so the two rows already loaded still dedupe to
+    // exactly themselves, and the honest "2 of 3" replaces the stale
+    // "2 of 2" rather than a fabricated third row appearing.
+    await waitFor(() => expect(renderedIds()).toEqual(['RUN001', 'RUN002']));
+    await waitFor(() =>
+      expect(document.querySelector('.runs-count')?.textContent).toBe('Showing 2 of 3 runs'),
+    );
   });
 
   it('an updated run changes in place', async () => {
@@ -437,7 +486,7 @@ describe('remount hygiene', () => {
 });
 
 describe('what a silent reload must not disturb', () => {
-  it('search text and expanded state survive the SIGNAL-driven silent reload', async () => {
+  it('search text and focus survive the SIGNAL-driven silent reload, and the editor stays open', async () => {
     /*
      * I4 — THE PREVIOUS VERSION OF THIS TEST WAS VACUOUS, AND AN INDEPENDENT
      * REVIEW CAUGHT IT. Typing into the search box starts its OWN 300ms
@@ -469,15 +518,38 @@ describe('what a silent reload must not disturb', () => {
     await waitFor(() => expect(backend.calls).toHaveLength(2));
     await waitFor(() => expect(renderedIds()).toEqual(['RUN001', 'RUN002']));
 
-    // The accordion header specifically — `.run-card-focus` and `.run-card-compare`
-    // also carry "Run 1" in their accessible name, so a role/name query is ambiguous
-    // here in a way it is not for the rest of this suite. Captured only now,
-    // AFTER the search reload's own (non-silent) remount has already happened.
+    /*
+     * MASTER-DETAIL: a compact row's own open control carries no
+     * `aria-expanded` at all (see `run-browser.test.tsx`'s "is reachable on
+     * a collapsed card" test). THE FOCUSED EDITOR NO LONGER HAS ONE EITHER
+     * (fix round, review finding m-2: the only open editor on screen must
+     * not be able to collapse into nothing), so the persistent state a
+     * silent reload must not disturb is down to ONE thing — which run is
+     * focused (the URL) — and the property worth proving about the editor
+     * itself is that it STAYS OPEN across the reload, not that some toggled
+     * state survives it (there is no longer a toggle to survive).
+     */
+    const compactCard = document.querySelector('[data-run-id="RUN001"]');
+    if (compactCard === null) throw new Error('RUN001 row not rendered');
+    /*
+     * ANCHORED ON THE VERB (fix round, review finding m-8): the compact
+     * row's own open control carries an `.sr-only` "Open " prefix ahead of
+     * the run's label (I-3), so its accessible name begins `Open Run 1 …`.
+     * Role + name, not a raw `.run-card-header` class query — that class
+     * also matches the FOCUSED editor's own plain `<h3>` heading
+     * (`RunCard.tsx`'s m-2 note), and this click is only ever made while
+     * compact.
+     */
+    fireEvent.click(
+      within(compactCard as HTMLElement).getByRole('button', { name: /^Open Run \d/ }),
+    );
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Back to all runs' })).toBeTruthy());
+
     const card = document.querySelector('[data-run-id="RUN001"]');
-    if (card === null) throw new Error('RUN001 card not rendered');
-    const toggle = card.querySelector('.run-card-header') as HTMLElement;
-    fireEvent.click(toggle);
-    expect(toggle.getAttribute('aria-expanded')).toBe('true');
+    if (card === null) throw new Error('RUN001 card not rendered once focused');
+    // It opens with its field panel already present — the reader just asked
+    // for this one run, and it can no longer be collapsed at all.
+    expect(card.querySelector('.run-card-body')).not.toBeNull();
 
     backend.setRuns([mkRun(1), mkRun(2)], '1.1');
     rerender(<Harness activity={summary({ runIds: ['RUN001'], runRev: 1 })} />);
@@ -486,8 +558,29 @@ describe('what a silent reload must not disturb', () => {
     await waitFor(() => expect(backend.calls).toHaveLength(3));
     await flush();
 
-    expect(search.value).toBe('Run 1');
-    expect(toggle.getAttribute('aria-expanded')).toBe('true');
+    // THE EDITOR STAYED OPEN across the reload — the invariant m-2 exists to
+    // guarantee, checked here rather than assumed.
+    const cardAfter = document.querySelector('[data-run-id="RUN001"]');
+    expect(cardAfter?.querySelector('.run-card-body')).not.toBeNull();
+    // RUN001 is still the focused run — the reload did not bounce the reader
+    // back to the list.
+    expect(screen.getByRole('button', { name: 'Back to all runs' })).toBeTruthy();
+
+    /*
+     * AND THE SEARCH TEXT — NOW CHECKED BY LEAVING FOCUS, NOT BY READING A
+     * STALE DETACHED NODE. The search box is withheld entirely while a run is
+     * focused (`RunsSection`'s own controls gate), so `search.value` on the
+     * variable captured before focusing would still read "Run 1" even if the
+     * criteria state had been reset — a detached DOM node's `.value` property
+     * does not change on its own, so that read would be vacuous. Leaving
+     * focus and querying the box FRESH is what actually proves the criteria
+     * survived, on screen, rather than merely surviving in an object nobody
+     * can see.
+     */
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Back to all runs' }));
+    });
+    expect((screen.getByLabelText('Search runs') as HTMLInputElement).value).toBe('Run 1');
   });
 });
 
@@ -697,7 +790,20 @@ function parsePagedQuery(url: string): PagedRunsQuery {
  * whether the response actually reflects it, so a backend that cannot
  * distinguish "asked for 50" from "asked for 100" cannot pin the fix.
  */
+/**
+ * A REAL, OFFSET-AWARE runs backend that also HONOURS A LIVE UPDATE —
+ * `setRuns`, added for the "2 of 2 loaded, a colleague adds a third" case
+ * (I3 below). It could not be proven against `stubPagedRunsBackend`'s
+ * original, immutable `all` array: that fixture answered every `limit`
+ * correctly but could never change what it held after construction, so a
+ * test could not represent "the record now has one more run than this
+ * screen has loaded" without rebuilding the whole backend (and losing the
+ * call log). `box` makes the held set mutable, matching `stubRunsBackend`'s
+ * own `setRuns` shape one section up — the two fixtures now differ only in
+ * whether they honour `limit`/`offset`, which is exactly the axis I3 needs.
+ */
 function stubPagedRunsBackend(all: Run[], version: string) {
+  let box = { all, version };
   const calls: PagedRunsQuery[] = [];
   stubFetchRoutes({});
   const inner = globalThis.fetch as unknown as (
@@ -717,24 +823,29 @@ function stubPagedRunsBackend(all: Run[], version: string) {
       if (!isListing) return inner(input, init);
       const q = parsePagedQuery(path);
       calls.push(q);
-      const limit = q.limit ?? all.length;
-      const page = all.slice(q.offset, q.offset + limit);
+      const limit = q.limit ?? box.all.length;
+      const page = box.all.slice(q.offset, q.offset + limit);
       return {
         ok: true,
         status: 200,
         headers: { get: () => null },
         json: async () => ({
           runs: page,
-          experiment_version: version,
-          total: all.length,
-          matched: all.length,
+          experiment_version: box.version,
+          total: box.all.length,
+          matched: box.all.length,
           returned: page.length,
           offset: q.offset,
         }),
       } as unknown as Response;
     }),
   );
-  return { calls };
+  return {
+    calls,
+    setRuns: (next: Run[], nextVersion: string) => {
+      box = { all: next, version: nextVersion };
+    },
+  };
 }
 
 async function clickLoadMore() {
@@ -841,4 +952,238 @@ describe('I2 — over the cap, this section refuses to guess and asks the reader
       screen.queryByText('Runs changed elsewhere. Refresh to see the current list.'),
     ).toBeNull();
   }, 60_000);
+});
+
+// ---------------------------------------------------------------------------
+// I3 — live refresh against the PR-C master-detail slice: `received === matched`,
+// a proposal-driven run change, no duplicate rows from a redundant signal, no
+// request from an unrelated one, and no leaked timer/subscription on unmount.
+// Each is proven with a mutation control — see the report for the exact break
+// and the failing assertion it produced.
+// ---------------------------------------------------------------------------
+
+describe('I3 — a colleague adds a run while every match already loaded (received === matched)', () => {
+  it('shows "Showing 2 of 3", offers Load More, and does not duplicate the two already-loaded rows', async () => {
+    /*
+     * THE CASE THE OTHER SIGNAL TESTS DO NOT COVER. Every existing fast-path
+     * test either starts under `RUNS_PAGE_SIZE` (so `received === matched`
+     * trivially, with room to spare) or is the I2 over-the-cap case. This is
+     * the boundary between them: the reader has loaded EXACTLY what matched
+     * (2 of 2, Load More absent), and a colleague adds a THIRD run — so the
+     * silent reload's own bounded request (`limit = received`, per
+     * `triggerBoundedSilentReload`) asks for 2 while the server now HAS 3.
+     * The honest answer is "2 of 3, Load More is back", never a request for
+     * a run this section did not ask for and never a duplicated row.
+     */
+    const backend = stubPagedRunsBackend([mkRun(1), mkRun(2)], '1.0');
+    const { rerender } = render(<Harness activity={null} />);
+    await waitForList();
+    await waitFor(() => expect(renderedIds()).toEqual(['RUN001', 'RUN002']));
+    expect(backend.calls).toHaveLength(1);
+    expect(backend.calls[0]).toEqual({ limit: RUNS_PAGE_SIZE, offset: 0 });
+    // received === matched === total: Load More is honestly absent.
+    expect(screen.queryByRole('button', { name: 'Load more runs' })).toBeNull();
+    expect(document.querySelector('.runs-count')?.textContent).toBe('Showing 2 of 2 runs');
+
+    backend.setRuns([mkRun(1), mkRun(2), mkRun(3)], '1.1');
+    rerender(<Harness activity={summary({ runIds: ['RUN003'], runRev: 1 })} />);
+
+    await waitFor(() => expect(backend.calls).toHaveLength(2));
+    // THE BOUNDED REQUEST ASKED FOR EXACTLY WHAT WAS ON SCREEN — 2, never the
+    // server's new total and never the plain first-page size.
+    expect(backend.calls[1]).toEqual({ limit: 2, offset: 0 });
+
+    await waitFor(() =>
+      expect(document.querySelector('.runs-count')?.textContent).toBe('Showing 2 of 3 runs'),
+    );
+    // The two already-loaded runs did not duplicate — still exactly one row
+    // each, in canonical order — and the third is honestly NOT claimed to be
+    // on screen: Load More is back, because a bounded 2-run request cannot
+    // also fetch the run it does not yet know exists.
+    expect(renderedIds()).toEqual(['RUN001', 'RUN002']);
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Load more runs' })).toBeInTheDocument(),
+    );
+
+    await clickLoadMore();
+    await waitFor(() => expect(renderedIds()).toEqual(['RUN001', 'RUN002', 'RUN003']));
+    expect(screen.queryByRole('button', { name: 'Load more runs' })).toBeNull();
+  });
+});
+
+describe('I3 — an accepted run-scoped proposal reads the same way a direct edit does', () => {
+  it("the target run's row re-reads once the acceptance's own signal arrives", async () => {
+    /*
+     * THE WIRE CANNOT DISTINGUISH THE TWO, AND THAT IS THE POINT — see this
+     * file's own header on `runRev`/`activity`: a run entry in the change
+     * feed names a run that moved, never WHY it moved. Accepting an
+     * ingestion proposal that targets a run is, from this section's own
+     * fetch, indistinguishable from a scientist editing the run directly —
+     * both produce a `RecordChangeSummary` naming the run's id at an
+     * advanced `runRev`. So the fast path this file already pins for a
+     * direct edit is EXACTLY the mechanism a proposal acceptance relies on;
+     * this test names that scenario explicitly rather than leaving it
+     * implicit in a differently-titled test.
+     */
+    const backend = stubRunsBackend({
+      runs: [mkRun(1, { fields: { 'context.temperature_K': { value: 298, status: 'verified', evidence: [] } } })],
+      version: '1.0',
+    });
+    const { rerender } = render(<Harness activity={null} />);
+    await waitForList();
+    await screen.findByText('Run 1');
+    expect(document.querySelector('[data-run-id="RUN001"]')?.textContent).toContain('298 K');
+
+    // The proposal acceptance wrote the run's temperature and advanced the
+    // record — the section reads it back through the SAME bounded reload
+    // path a direct edit's signal triggers.
+    backend.setRuns(
+      [mkRun(1, { fields: { 'context.temperature_K': { value: 310, status: 'verified', evidence: [] } } })],
+      '1.1',
+    );
+    rerender(<Harness activity={summary({ runIds: ['RUN001'], runRev: 1 })} />);
+
+    await waitFor(() => expect(backend.calls).toHaveLength(2));
+    await waitFor(() =>
+      expect(document.querySelector('[data-run-id="RUN001"]')?.textContent).toContain('310 K'),
+    );
+    // Still one row, not two — the accepted proposal's target re-READS, it
+    // does not duplicate.
+    expect(renderedIds()).toEqual(['RUN001']);
+  });
+});
+
+describe('I3 — a duplicate signal does not duplicate rows, and an unrelated one issues no request', () => {
+  /*
+   * REWRITTEN, NOT DELETED (fix round, review finding C-3). This used to
+   * start with ONE run loaded and have a colleague ADD a second, then assert
+   * both rendered after the signal — the exact structurally-impossible shape
+   * named above: `received` is 1 at the moment of the signal, so the bounded
+   * reload's own request asks for exactly 1, and a run created after it is
+   * outside that page by construction. It only ever passed because
+   * `stubRunsBackend` ignored `limit`; the fixture is fixed above, and this
+   * test is now about the property its own title names — dedupe — with the
+   * signal an EDIT to an EXISTING run, which is reachable through a bounded
+   * reload honestly.
+   */
+  it('a duplicate signal produces no third request, and exactly one node per run', async () => {
+    const backend = stubRunsBackend({ runs: [mkRun(1), mkRun(2)], version: '1.0' });
+    const { rerender } = render(<Harness activity={null} />);
+    await waitForList();
+    await waitFor(() => expect(renderedIds()).toEqual(['RUN001', 'RUN002']));
+    expect(backend.calls).toHaveLength(1);
+
+    // A colleague edits RUN002 IN PLACE — no run count change.
+    backend.setRuns([mkRun(1), mkRun(2, { label: 'Run 2 — recalibrated' })], '1.1');
+    const sig = summary({ runIds: ['RUN002'], runRev: 1 });
+    rerender(<Harness activity={sig} />);
+    await waitFor(() => expect(backend.calls).toHaveLength(2));
+    await screen.findByText('Run 2 — recalibrated');
+    expect(renderedIds()).toEqual(['RUN001', 'RUN002']);
+
+    // The IDENTICAL signal object, delivered again — the dedupe key must
+    // swallow it: no third request, and critically, no duplicate row from a
+    // list that got re-applied on top of itself.
+    rerender(<Harness activity={sig} />);
+    await flush();
+    expect(backend.calls).toHaveLength(2);
+    expect(renderedIds()).toEqual(['RUN001', 'RUN002']);
+    // Not merely two ids — exactly ONE DOM node per run. A dedupe defect
+    // that re-triggered the reload without a NEW request (impossible here,
+    // but the shape a rendering-side duplicate would take) would still be
+    // caught by counting nodes rather than trusting the id array's own
+    // length.
+    expect(document.querySelectorAll('[data-run-id="RUN001"]')).toHaveLength(1);
+    expect(document.querySelectorAll('[data-run-id="RUN002"]')).toHaveLength(1);
+  });
+
+  it('a signal naming no run news (proposal-only) makes no request at all', async () => {
+    const backend = stubRunsBackend({ runs: [mkRun(1)], version: '1.0' });
+    const { rerender } = render(<Harness activity={null} />);
+    await waitForList();
+    expect(backend.calls).toHaveLength(1);
+
+    // `runIds: []` is the producer's own contract for "no RUN news" — see
+    // `RunsSection`'s file header. A proposal-only batch, an other-kind-only
+    // batch, or simply nothing having changed all take this shape.
+    rerender(
+      <Harness activity={summary({ proposalIds: ['P1'], proposalRev: 4, highestRev: 4 })} />,
+    );
+    await flush();
+    expect(backend.calls).toHaveLength(1);
+  });
+});
+
+describe('I3 — timers and subscriptions do not outlive the component', () => {
+  it('unmounting while the search debounce is pending clears the timer, not merely fires no request', async () => {
+    /*
+     * THE SEARCH BOX'S OWN 300ms DEBOUNCE (`RUN_SEARCH_DEBOUNCE_MS`) is a
+     * `setTimeout` this section owns. If its cleanup effect ever dropped the
+     * `clearTimeout`, a keystroke followed immediately by leaving the record
+     * screen would leave a timer callback scheduled against an unmounted
+     * component — invisible to every test that lets the debounce elapse
+     * before moving on, which is every other search test in this file.
+     *
+     * ASSERTING "NO REQUEST FOLLOWED" IS NOT ENOUGH, and an earlier version
+     * of this test did only that — it passed even with the `clearTimeout`
+     * deliberately removed (mutation-tested), because the timer's callback
+     * is `setQuery(trimmed)`, and React 18 silently no-ops a state update
+     * dispatched against an unmounted fiber: no request follows, no
+     * `console.error`, nothing to observe from outside. So a real regression
+     * would be invisible to this test. Fake timers close it: `vi.getTimerCount()`
+     * reads the scheduler directly, independent of what React does with a
+     * timer's callback once it fires — it is sensitive to the mutation the
+     * request-count form was not.
+     */
+    const backend = stubRunsBackend({ runs: [mkRun(1)], version: '1.0' });
+    const { unmount } = render(<Harness activity={null} />);
+    await waitForList();
+    expect(backend.calls).toHaveLength(1);
+
+    vi.useFakeTimers();
+    fireEvent.change(screen.getByLabelText('Search runs'), { target: { value: 'Run 1' } });
+    const withPendingDebounce = vi.getTimerCount();
+    expect(withPendingDebounce, 'the debounce must have scheduled a timer').toBeGreaterThan(0);
+
+    unmount();
+    expect(
+      vi.getTimerCount(),
+      'a timer survived unmount — the debounce effect did not clear it',
+    ).toBe(withPendingDebounce - 1);
+
+    // And, as a corollary rather than the load-bearing assertion: advancing
+    // past the debounce window now fires nothing, because there is no timer
+    // left to fire.
+    await vi.advanceTimersByTimeAsync(RUN_SEARCH_DEBOUNCE_MS + 50);
+    expect(backend.calls).toHaveLength(1);
+    vi.useRealTimers();
+  });
+
+  it('unmounting while a signal-driven reload is in flight settles with no state update and no act warning', async () => {
+    /*
+     * THE SAME PROPERTY `coalescing while a reload is in flight` PROVES FOR A
+     * MID-FLIGHT UNMOUNT, restated here beside the other cleanup guarantees
+     * this describe block collects, and pinned against the signal path
+     * specifically (the other unmount test above covers the debounce path).
+     */
+    const backend = stubRunsBackend({ runs: [mkRun(1)], version: '1.0' });
+    const { rerender, unmount } = render(<Harness activity={null} />);
+    await waitForList();
+
+    backend.setHold(true);
+    rerender(<Harness activity={summary({ runIds: ['RUN002'], runRev: 1 })} />);
+    await waitFor(() => expect(backend.outstanding()).toBe(1));
+
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    unmount();
+    backend.setRuns([mkRun(1), mkRun(2)], '1.1');
+    backend.release();
+    await flush();
+
+    const actWarning = errorSpy.mock.calls.some((args) =>
+      String(args[0]).includes('not wrapped in act'),
+    );
+    expect(actWarning).toBe(false);
+    errorSpy.mockRestore();
+  });
 });

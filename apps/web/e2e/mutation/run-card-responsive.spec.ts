@@ -28,9 +28,15 @@
  * ── What is asserted, and what is deliberately NOT ──────────────────────────
  *
  * ASSERTED, scoped to `section.runs-section`: no nested overflow, no clipped
- * text, no obscured control, at six widths and at 200% zoom, with TWO runs open
- * (the pressure case — two expanded cards, each with five fields, a save-status
- * chip, a progress line and a conditions line).
+ * text, no obscured control, at six widths and at 200% zoom.
+ *
+ * THE PRESSURE CASE IS TWO CASES, NOT ONE — a master-detail (PR-C) consequence
+ * this header did not originally anticipate: "two expanded cards on screen
+ * together" is now structurally unreachable, because exactly one run's full
+ * editor is ever open. So the width sweep measures both surfaces that replaced
+ * it — two COMPACT ROWS stacked (where a row's own collision would appear),
+ * then the ONE OPEN editor (five fields, a save-status region, a progress
+ * line, an inherited panel) — rather than the one state that no longer exists.
  *
  * THE DOCUMENT IS MEASURED BOTH WAYS, and the first version of this file measured
  * only one of them on a premise a reviewer showed to be false. It said an absolute
@@ -86,7 +92,13 @@
  * auto-use `scope` fixture only reaches the fixture-provided page.
  */
 
-import { expect as pwExpect, test as base, type BrowserContext, type Page } from '@playwright/test';
+import {
+  expect as pwExpect,
+  test as base,
+  type BrowserContext,
+  type Locator,
+  type Page,
+} from '@playwright/test';
 import { MUT_API_BASE, MUT_API_ROUTE_GLOB, MUT_BASE_URL, SEED } from './env';
 import { applyWorkedExampleScope, disposeWorkedExampleSession } from '../worked-example';
 import { activeElementFocusInfo } from '../helpers/focus';
@@ -120,33 +132,83 @@ const SHOT_DIR = 'test-results/run-card-responsive';
 
 /* ── the pressure case ─────────────────────────────────────────────────────── */
 
-const addRun = (page: Page) => page.getByRole('button', { name: 'Add Run' });
-const runCards = (page: Page) => page.locator('article.run-card');
-
-/**
- * Open the record, add two runs, and leave BOTH expanded.
+/*
+ * MASTER-DETAIL (PR-C), AND WHY THE PRESSURE CASE IS TWO CASES NOW, NOT ONE.
  *
- * Two, not one: a single card cannot show a run-to-run collision, and the
- * `.run-save-status` chip and the header's controls sit on the same line as the
- * label — which is where a narrow-width collision would appear.
+ * This file's whole premise used to be "two run cards, BOTH expanded, on
+ * screen together" — the densest state the old accordion-in-list interaction
+ * could produce, and the shape most likely to collide at a narrow width.
+ * Master-detail makes that state UNREACHABLE by design: exactly one run's
+ * full editor is ever open, addressed by `?run=`, and the compact list is
+ * replaced by it rather than sitting beside it. So the one pressure case
+ * splits into the two surfaces that now exist, and both are measured:
  *
- * A newly added card is expanded by the component (focus moves to its header), so
- * this asserts the expanded state rather than assuming it: if that changes, this
- * spec must fail loudly rather than quietly measure two collapsed strips.
+ *   1. THE COMPACT LIST, with two or more rows stacked — where a row's own
+ *      collision (label, ordinal, conditions, chips, the fields-on-this-
+ *      screen count, Compare, all on one line) would appear, and where the
+ *      width sweep's earlier premise ("two cards on screen together") is
+ *      now genuinely proven, because two compact rows really are on screen
+ *      at once. A standalone Focus control briefly sat here too and is gone
+ *      (fix round, review finding I-3): two 52×24 targets for one act, and
+ *      73px of extra row height once they wrapped at 320px. This file's own
+ *      probes (overflow, clipping, obscured controls, card-too-wide) do not
+ *      assert an absolute row height, so that number is not repeated here as
+ *      a regression guard — it was measured directly against a running dev
+ *      server as part of the fix round and is reported in that slice's own
+ *      report, not pinned as a test in this file.
+ *   2. THE ONE OPEN EDITOR, field-dense exactly as before — five fields, a
+ *      save-status region, a progress line, an inherited panel — which is
+ *      where every field-level, save-status and override-form measurement
+ *      in this file still applies unchanged in substance.
+ *
+ * Neither replaces the other; a regression that only shows up in one would
+ * have been invisible if this file measured only the other.
  */
-async function twoOpenRuns(page: Page) {
+const addRun = (page: Page) => page.getByRole('button', { name: 'Add Run' });
+/** Every run in the COMPACT list. */
+const runRows = (page: Page) => page.locator('article.run-card[data-compact="true"]');
+/** The ONE run's full editor, present only while a run is open. */
+const openRunCard = (page: Page) => page.locator('article.run-card:not([data-compact])');
+
+/** Open the record and add two runs, leaving them as two COMPACT ROWS. */
+async function twoCompactRows(page: Page) {
   await openRecord(page, SEED.partial);
   await pwExpect(page.getByRole('heading', { name: 'Runs', exact: true })).toBeVisible();
   await pwExpect(addRun(page)).toBeEnabled();
 
   await addRun(page).click();
-  await pwExpect(runCards(page)).toHaveCount(1);
+  await pwExpect(runRows(page)).toHaveCount(1);
   await addRun(page).click();
-  await pwExpect(runCards(page)).toHaveCount(2);
+  await pwExpect(runRows(page)).toHaveCount(2);
+}
 
-  // Both cards' bodies present — the state under measurement, asserted not assumed.
-  await pwExpect(page.locator('article.run-card .run-card-body')).toHaveCount(2);
-  await pwExpect(page.locator('article.run-card .run-field')).not.toHaveCount(0);
+/**
+ * Add two runs (so the record is not artificially sparse), then OPEN THE
+ * FIRST — the field-dense state every per-field, save-status and
+ * override-form measurement in this file needs. The second run stays a
+ * compact row, off screen while the first is open (master-detail), which is
+ * the honest state a reader would actually be in.
+ *
+ * A newly created run is NOT auto-opened — Add Run lands it as a compact row
+ * with keyboard focus on the row's own control, never silently jumping the
+ * reader into a full-screen form — so this clicks that control once,
+ * explicitly, and asserts the editor actually opened rather than assuming it.
+ */
+async function oneOpenRun(page: Page): Promise<Locator> {
+  await twoCompactRows(page);
+  await runRows(page).first().locator('button.run-card-header').click();
+  const card = openRunCard(page);
+  await pwExpect(card).toBeVisible();
+  // The body present — the state under measurement, asserted not assumed.
+  await pwExpect(card.locator('.run-card-body')).toHaveCount(1);
+  await pwExpect(card.locator('.run-field')).not.toHaveCount(0);
+  return card;
+}
+
+/** Leave the open editor, back to the compact list. */
+async function backToAllRuns(page: Page) {
+  await page.getByRole('button', { name: 'Back to all runs' }).click();
+  await pwExpect(openRunCard(page)).toHaveCount(0);
 }
 
 /* ── the measurement, shared by the width sweep and the zoom case ──────────── */
@@ -315,21 +377,35 @@ async function probeRuns(page: Page): Promise<Findings> {
   };
 }
 
-/** Every control a scientist needs on this card must be operable, not merely present. */
+/**
+ * Every control a scientist needs on the OPEN run must be operable, not merely
+ * present. Call this while a run is open (`openRunCard(page)` visible).
+ */
 async function assertOperable(page: Page) {
-  // Add Run stays discoverable — it is how the workspace grows, and it sits in a
-  // toolbar that is the first thing a narrow width compresses.
-  await pwExpect(addRun(page)).toBeVisible();
-  await pwExpect(addRun(page)).toBeEnabled();
+  const first = openRunCard(page);
+  await pwExpect(first).toBeVisible();
 
-  // The accordion still toggles. Collapse the first card and re-expand it, through
-  // the header button a reader would use.
-  const first = runCards(page).first();
-  const header = first.locator('button.run-card-header');
-  await pwExpect(header).toBeVisible();
-  await header.click();
-  await pwExpect(first.locator('.run-card-body')).toHaveCount(0);
-  await header.click();
+  // The way out stays discoverable — master-detail withholds Add Run while a
+  // run is open (Remove is the destructive control offered there instead, not
+  // a second Add), so "reachable, without losing this state" now means "Back
+  // to all runs" rather than "Add Run" — asserted, then actually exercised
+  // and returned from, so the check does not merely read an attribute.
+  const back = page.getByRole('button', { name: 'Back to all runs' });
+  await pwExpect(back).toBeVisible();
+  await pwExpect(back).toBeEnabled();
+
+  /*
+   * THE ACCORDION IS GONE, NOT MERELY UNTESTED (fix round, review finding
+   * m-2). This used to collapse the open card and re-expand it through its
+   * header button; that button no longer exists here — the heading is a
+   * plain, non-disclosing `<h3>` — because the only open editor on screen
+   * must not be able to collapse into nothing. What is asserted instead is
+   * the invariant that replaced the toggle: the heading carries no
+   * `aria-expanded`, and the body it labels is unconditionally present.
+   */
+  const heading = first.locator('h3.run-card-header');
+  await pwExpect(heading).toBeVisible();
+  await pwExpect(heading).not.toHaveAttribute('aria-expanded');
   await pwExpect(first.locator('.run-card-body')).toHaveCount(1);
 
   /*
@@ -348,13 +424,22 @@ async function assertOperable(page: Page) {
    * "focus changes what the user sees". Its honest limit applies: it proves an
    * indicator exists, not that it meets WCAG 2.4.11 contrast or area.
    */
-  const reached = await tabTo(page, 'button.run-card-header');
-  pwExpect(reached, 'no number of Tab presses reached a run card header').toBe(true);
+  /*
+   * THE TAB TARGET MOVED FROM THE HEADER TO A FIELD (m-2). The open editor's
+   * heading is `tabIndex={-1}` now — a valid `.focus()` target for
+   * `focusOnMount` and for Next/Previous run, but deliberately NOT a stop in
+   * the ordinary Tab order, because it discloses nothing for a keyboard user
+   * to reach it for. The first run field is the nearest still-tabbable
+   * control this function's own purpose ("every control a scientist needs
+   * on the OPEN run must be operable") is actually about.
+   */
+  const reached = await tabTo(page, '.run-card-body .run-input');
+  pwExpect(reached, 'no number of Tab presses reached a run field').toBe(true);
   const focus = await activeElementFocusInfo(page);
-  pwExpect(focus, 'nothing was focused after tabbing to the run card header').not.toBeNull();
+  pwExpect(focus, 'nothing was focused after tabbing to a run field').not.toBeNull();
   pwExpect(
     focus!.visible,
-    `focused run card header paints no perceptible focus indicator — ` +
+    `focused run field paints no perceptible focus indicator — ` +
       `changed: [${focus!.changed.join(', ')}], perceptible: [${focus!.indicators.join(', ')}], ` +
       `outline: ${focus!.outline}, box-shadow: ${focus!.boxShadow}`
   ).toBe(true);
@@ -388,12 +473,33 @@ test.describe('run card — narrow widths', () => {
       page,
     }, testInfo) => {
       await page.setViewportSize({ width, height: 812 });
-      await twoOpenRuns(page);
 
       testInfo.annotations.push({
         type: 'rendered-font',
         description: `${width}px: ${await renderedFontFamily(page)}`,
       });
+
+      // SURFACE 1 — THE COMPACT LIST. Two rows stacked is the state a reader
+      // spends most of their time in, and it is where a row's own collision
+      // (label, ordinal, conditions, chips, Focus, Compare on one line) would
+      // appear — a state the old accordion-in-list interaction this replaces
+      // never isolated on its own.
+      await twoCompactRows(page);
+      const listFindings = await probeRuns(page);
+      await page.screenshot({ path: `${SHOT_DIR}/run-card-list-${width}.png`, fullPage: true });
+      const listFailures = [
+        listFindings.overflow && `OVERFLOW inside the runs list:\n${listFindings.overflow}`,
+        listFindings.clipped && `TEXT LOST inside the runs list:\n${listFindings.clipped}`,
+        listFindings.obscured && `CONTROLS OBSCURED inside the runs list:\n${listFindings.obscured}`,
+        listFindings.tooWide && `A ROW DOES NOT FIT ITS CONTAINER:\n${listFindings.tooWide}`,
+      ].filter(Boolean);
+      expect(listFailures.join('\n\n'), `compact run list at ${width}px`).toBe('');
+
+      // SURFACE 2 — THE ONE OPEN EDITOR, field-dense exactly as this file
+      // always measured: five fields, a save-status region, a progress line,
+      // an inherited panel.
+      await runRows(page).first().locator('button.run-card-header').click();
+      await pwExpect(openRunCard(page)).toBeVisible();
 
       const findings = await probeRuns(page);
       await page.screenshot({
@@ -432,9 +538,8 @@ test.describe('run card — narrow widths', () => {
   for (const width of [390, 320] as const) {
     test(`@runs-layout the save-status chip does not collide at ${width}`, async ({ page }) => {
       await page.setViewportSize({ width, height: 812 });
-      await twoOpenRuns(page);
+      const first = await oneOpenRun(page);
 
-      const first = runCards(page).first();
       const temperature = first.locator(
         '.run-field:has(.run-field-path:text-is("context.temperature_K")) input'
       );
@@ -464,24 +569,27 @@ test.describe('run card — narrow widths', () => {
   }
 
   /**
-   * A COLLAPSED CARD CARRYING EVERY VALUE — the case the sweep above cannot reach.
+   * A COMPACT ROW CARRYING EVERY VALUE — the case the sweep above cannot reach.
    *
-   * Every measurement in this file so far runs with both cards EXPANDED, so the
-   * `.run-card-conditions` line — mono, tabular, on the collapsed header, joined with
-   * ` · ` — has never been measured. It is the one element on this surface whose length
-   * grows with the field set: widening the workspace from three writable fields to five
-   * makes that line up to two segments longer, on the narrowest header in the product.
+   * Every measurement in this file so far runs against a FRESH run, so the
+   * `.run-card-conditions` line — mono, tabular, on the compact row, joined with
+   * ` · ` — has never been measured full. It is the one element on this surface
+   * whose length grows with the field set: widening the workspace from three
+   * writable fields to five makes that line up to two segments longer, on the
+   * narrowest row in the product.
    *
-   * The values are entered through the UI, not the API, because the line is built from
-   * what the card holds and a fixture write would prove less. They are typed into ONE
-   * card, which is then collapsed — two collapsed cards would only repeat the
-   * measurement at the same width.
+   * MASTER-DETAIL, REWRITTEN FROM "collapsed": the values are typed into the
+   * OPEN editor (the only place fields exist), then the reader LEAVES FOCUS —
+   * not merely collapses the editor's own accordion — because that is what
+   * turns this run back into the compact row this test is actually about. The
+   * `.run-card-conditions` markup is shared between the compact row and the
+   * open editor's own header, so this measures the row a reader spends most of
+   * their time looking at.
    */
-  test('@runs-layout a collapsed card carrying every value still fits at 320', async ({ page }) => {
+  test('@runs-layout a compact row carrying every value still fits at 320', async ({ page }) => {
     await page.setViewportSize({ width: 320, height: 812 });
-    await twoOpenRuns(page);
+    const first = await oneOpenRun(page);
 
-    const first = runCards(page).first();
     const type = async (path: string, value: string) => {
       const box = first.locator(
         `.run-field:has(.run-field-path:text-is("${path}")) input, ` +
@@ -500,17 +608,62 @@ test.describe('run card — narrow widths', () => {
     await type('timestamps.acquired_start_utc', '2026-01-31T09:00:00Z');
     await type('timestamps.acquired_end_utc', '2026-01-31T17:45:00Z');
 
-    // Let the debounced saves settle, then collapse so the conditions line renders.
+    // Let the debounced saves settle, then leave focus so the row renders.
     await pwExpect(first.locator('.run-save-status')).toContainText(/Saved/, { timeout: 20_000 });
-    await first.locator('button.run-card-header').click();
-    await pwExpect(first.locator('.run-card-body')).toHaveCount(0);
+    await backToAllRuns(page);
+    const compact = runRows(page).first();
 
-    const conditions = first.locator('.run-card-conditions');
+    const conditions = compact.locator('.run-card-conditions');
     await pwExpect(conditions).toBeVisible();
     // Asserted, not assumed: a line that rendered none of the values would pass every
     // geometric check below while proving nothing.
     await pwExpect(conditions).toContainText('operando');
     await pwExpect(conditions).toContainText('5% H2 in Ar');
+
+    /*
+     * REVIEW FINDING m-11. jsdom cannot measure layout at all, so the unit
+     * suite can only ever assert `.run-card-top { flex-wrap: wrap }`
+     * (`runs.css`'s narrow-widths block) exists, never that it does
+     * anything — this is the one place in the repository that can watch it
+     * fire, with the longest plausible condition line this app renders
+     * (every writable path filled with its longest realistic value), at
+     * 320px, the narrowest width this screen supports.
+     *
+     * MEASURED, NOT ASSUMED: removing that rule here does NOT reproduce the
+     * failure `runs.css`'s own (corrected) comment on it used to predict —
+     * `Compare` stays its natural size either way, because
+     * `.run-card-header`'s OWN wrap (the button/heading's content, one
+     * level in) already absorbs the overflow by growing the button TALLER
+     * rather than needing `.run-card-top` to grow WIDER. So this assertion
+     * is kept as a REGRESSION GUARD on the outcome — `Compare` must stay
+     * legible and inside the card at this width regardless of mechanism —
+     * not as proof that the outer wrap rule is what produces it. See
+     * `runs.css`'s own corrected comment for the full account.
+     */
+    const compareBtn = compact.locator('.run-card-compare');
+    await pwExpect(compareBtn).toBeVisible();
+    const compareBox = await compareBtn.boundingBox();
+    if (compareBox === null) throw new Error('Compare has no box at 320px');
+    const cardBox = await compact.boundingBox();
+    if (cardBox === null) throw new Error('the compact row has no box at 320px');
+    // Compare kept its own natural ~70x24 size (measured elsewhere in this
+    // repository, `base.css`'s WCAG 2.5.8 note, as 69.5 x 23.0) rather than
+    // being squeezed to fit on the same line as a header that ran long — 1px
+    // tolerance for sub-pixel layout rounding.
+    expect(
+      compareBox.width,
+      `Compare shrank to ${compareBox.width}px instead of wrapping to its own line`,
+    ).toBeGreaterThanOrEqual(69);
+    expect(
+      compareBox.height,
+      `Compare shrank to ${compareBox.height}px instead of wrapping to its own line`,
+    ).toBeGreaterThanOrEqual(23);
+    // And, at its natural size, it still fits inside the card — the wrap
+    // gave it a line of its own rather than merely a taller shared one.
+    expect(
+      compareBox.x + compareBox.width,
+      'Compare overflows its own card at 320px'
+    ).toBeLessThanOrEqual(cardBox.x + cardBox.width + 1);
 
     const findings = await probeRuns(page);
     await page.screenshot({ path: `${SHOT_DIR}/run-card-collapsed-full-320.png`, fullPage: true });
@@ -538,19 +691,23 @@ test.describe('run card — narrow widths', () => {
     await openRecord(page, SEED.partial);
     await pwExpect(page.getByRole('heading', { name: 'Runs', exact: true })).toBeVisible();
     await pwExpect(addRun(page)).toBeEnabled();
-    await pwExpect(runCards(page)).toHaveCount(0);
+    await pwExpect(runRows(page)).toHaveCount(0);
     const before = await horizontalPageScroll(page);
 
+    // Two compact rows, then the first OPEN — the densest state now reachable
+    // (master-detail: never two open cards at once).
     await addRun(page).click();
-    await pwExpect(runCards(page)).toHaveCount(1);
+    await pwExpect(runRows(page)).toHaveCount(1);
     await addRun(page).click();
-    await pwExpect(runCards(page)).toHaveCount(2);
-    await pwExpect(page.locator('article.run-card .run-card-body')).toHaveCount(2);
+    await pwExpect(runRows(page)).toHaveCount(2);
+    await runRows(page).first().locator('button.run-card-header').click();
+    await pwExpect(openRunCard(page)).toBeVisible();
+    await pwExpect(page.locator('article.run-card .run-card-body')).toHaveCount(1);
     const after = await horizontalPageScroll(page);
 
     expect(
       after.docScrollWidth,
-      `two open run cards widened the document from ${before.docScrollWidth} to ` +
+      `an open run card widened the document from ${before.docScrollWidth} to ` +
         `${after.docScrollWidth} at 320px (clientWidth ${after.docClientWidth}). ` +
         'Whatever the screen shell already overflows by, the run card must add nothing.'
     ).toBeLessThanOrEqual(before.docScrollWidth);
@@ -582,11 +739,9 @@ test.describe('run card — narrow widths', () => {
   for (const width of [390, 320] as const) {
     test(`@runs-layout the override form fits at ${width}`, async ({ page }) => {
       await page.setViewportSize({ width, height: 812 });
-      await twoOpenRuns(page);
+      const opened = await oneOpenRun(page);
 
-      const row = runCards(page)
-        .first()
-        .locator('[data-address="field:sample.composition.CuO2_mass_fraction"]');
+      const row = opened.locator('[data-address="field:sample.composition.CuO2_mass_fraction"]');
       // The LONGEST overridable path the canonical record carries — measured against
       // the seed, not assumed, so this is the worst case rather than a typical one.
       await pwExpect(row).toBeVisible();
@@ -636,7 +791,7 @@ test.describe('run card — narrow widths', () => {
     page,
   }) => {
     await page.setViewportSize({ width: 320, height: 812 });
-    await twoOpenRuns(page);
+    await oneOpenRun(page);
 
     // Clean to start with — otherwise the assertions below prove nothing.
     expect((await probeRuns(page)).clipped, 'the surface must be clean before planting').toBe('');
@@ -735,7 +890,7 @@ base('@runs-layout run card at 200% zoom (640x400 @ DPR2) stays usable', async (
     pwExpect(emulation.innerWidth).toBe(640);
     pwExpect(emulation.dpr).toBe(2);
 
-    await twoOpenRuns(page);
+    await oneOpenRun(page);
 
     const findings = await probeRuns(page);
     await page.screenshot({ path: `${SHOT_DIR}/run-card-zoom-200.png`, fullPage: true });
