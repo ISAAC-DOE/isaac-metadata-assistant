@@ -51,6 +51,54 @@ once you are inside the walkthrough.
 
 ---
 
+## 1b. Record workspaces — the 2026-09-03 redesign (10 min)
+
+Open any record (`/krish/record/<id>`, from `/krish/experiments` or the worked example
+per §2b). The single long record page is gone; the record sidebar now lists four
+**Workspaces** beneath the (unchanged, server-derived) workflow spine: **Record Fields**
+(the default — what `/record/<id>` still resolves to bare), **Runs**, **Capture &
+Proposals**, **Graph**. Each is a real link (`?view=fields|runs|capture|graph`), so you
+can middle-click, bookmark, and use Back/Forward normally — try Back after following one;
+it should land you on the workspace you left, not at the top of the record.
+
+**Runs (master-detail).** The list is compact rows (label, ordinal, condition summary,
+"N of M run fields", override/exported/save-state chips). Click a row — its whole header
+is the control, there is no separate "Focus" button — and exactly one run's full editor
+opens, replacing the list. Previous/Next move between loaded runs without leaving the
+editor. **Type something unparseable into a field, then click Back or another row**: a
+real confirmation dialog should appear (focus moves into it, Escape = Stay) before any
+navigation happens. This is the one interaction most likely to regress silently.
+
+**Capture & Proposals.** The entry button now reads **"Capture Experiment Notes"** (not
+"Start a capture"). Open it, and check the panel shows exactly one primary action for
+whatever state it's in (idle / recording / held / processing / proposals ready / error) —
+never two competing calls to action. A finalized capture should produce open proposals
+below, listed **oldest-first by default** (the server's own default — a review queue
+reads chronologically); use **Show Newest** or the order control to bring a just-arrived
+proposal into the first window. Accepting one should feel like the same review flow §4
+already exercises.
+
+**Assistant (desktop ≥1025px).** A **Collapse Assistant** control should shrink the panel
+to a labelled 44px strip and back; do this while mid-typing a question and confirm the
+draft survives collapse and a workspace switch (it should — the panel is never
+unmounted). The Assistant's own copy should name the workspace you're on (e.g. "You are
+on Runs.").
+
+**Narrow widths (≤1024px).** The four workspaces become a wrapping pill row. The
+workflow spine becomes a single-row compact stepper (same five steps, no re-derivation —
+if a step's blocking reason has changed from what you'd expect on wide, that is a
+regression to report). The Assistant reverts to the existing slide-over drawer behaviour
+— confirm Tab does not escape it while open (a keyboard trap here was found and fixed in
+review; re-check it once, since it's exactly the kind of thing a later change could
+reintroduce silently).
+
+Nothing above changes what gets exported or what counts as valid — this section is
+IA/interaction only. If a control's *location* surprises you but its *behaviour* is
+correct, that's expected: this was a reorganisation, not a rewrite of the underlying
+record/run/proposal model.
+
+---
+
 ## 2. Standalone Validator — all 18 files (20 min)
 
 Route: **`/krish/governance` → Validator tab**.
