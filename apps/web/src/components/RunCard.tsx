@@ -772,17 +772,31 @@ export function RunCard({
           autosave.status === 'failed' ||
           autosave.status === 'conflict') && (
         <p className="run-card-session-note">
-          Changes this tab has not finished saving live in this browser tab only. Moving
-          between this record’s views keeps them. If you close the browser tab or reload,
-          anything still unsent is lost — and anything already sent may or may not have
-          been saved.
+          Changes this tab has not finished saving live in this browser tab only. Switching
+          to this record’s other workspaces — Record Fields, Capture &amp; Proposals, Graph
+          — and back keeps them. If you close the browser tab or reload, anything still
+          unsent is lost — and anything already sent may or may not have been saved.
         </p>
       )}
+      {/*
+        "this record's OTHER workspaces", not "this record's views" — a design review
+        finding, 2026-09. "Runs" is itself one of this record's four workspaces
+        (`RECORD_WORKSPACES` in `RecordWorkspaceNav.tsx`), so the old wording — "moving
+        between this record's views keeps it" — did not say which side of the line
+        switching RUNS falls on, and the leave-confirmation dialog below (in
+        `RunsSection.tsx`) separately says leaving THIS run loses it. Read a few hundred
+        pixels apart, those read as opposite conclusions about the same action. They are
+        not: the two sentences are about different destinations (this record's other
+        SCREENS vs. a different RUN within this same screen), and this rewrite names both
+        destinations explicitly, with the identical verb ("switching to…"), so neither
+        sentence has to be inferred from the other.
+      */}
       {!compact && heldInvalid && (
         <p className="run-card-session-note">
           Text this screen could not read has not been sent anywhere, and is held in this
-          card only. Moving between this record’s views keeps it; leaving this run, paging,
-          searching or filtering the runs list, or reloading the page, does not.
+          card only. Switching to this record’s other workspaces — Record Fields, Capture
+          &amp; Proposals, Graph — and back keeps it; leaving this run, paging, searching or
+          filtering the runs list, or reloading the page, does not.
         </p>
       )}
 

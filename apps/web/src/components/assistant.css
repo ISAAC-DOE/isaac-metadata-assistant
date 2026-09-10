@@ -1941,7 +1941,11 @@ button.assistant-source-chip-nav:focus-visible {
 .structured-label {
   font-size: 11.5px;
   color: var(--text-tertiary);
-  text-transform: uppercase;
+  /* No text-transform here: labels can render meaning-bearing glyphs (e.g. the Greek
+     sigma in "Uncertainty (σ)") whose uppercase form is a DIFFERENT symbol (Σ,
+     summation) with a different meaning than the lowercase (σ, standard deviation).
+     Author label text in the casing the design system wants (Title Case) rather than
+     letting CSS case-map it. */
   letter-spacing: 0.04em;
 }
 /* The required marker. `abbr[title]` gives it an accessible name ("required") instead

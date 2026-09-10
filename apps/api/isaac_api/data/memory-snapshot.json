@@ -10340,7 +10340,7 @@
       },
       {
         "path": "apps/web/src/__tests__/completion-export.test.tsx",
-        "sha256": "c8e6aae65ce79f4b2e7905a96d75983a77357a615dba7ae70a70b951c05a7758"
+        "sha256": "3e9d25702ad7516ffb9255858f9233765f9601ee4f82eecb773b3085fee88428"
       },
       {
         "path": "apps/web/src/__tests__/evidence.test.tsx",
@@ -10432,7 +10432,7 @@
       },
       {
         "path": "apps/web/src/components/ExperimentRow.tsx",
-        "sha256": "476baaa52293043821e6ce57ab836e4d2593e0f3ea9e384be62f4a9ae3624561"
+        "sha256": "7866aa6f8c752c99ca042cf4923071a93851d3d8c64753f55652b7dc094509b6"
       },
       {
         "path": "apps/web/src/components/FetchStates.tsx",
@@ -10552,7 +10552,7 @@
       },
       {
         "path": "apps/web/src/screens/GuidedCompletion.tsx",
-        "sha256": "3a3f85361c9c3fe8916f224c27a3ff0228adf215cd6b0de3e6b213e6ab91d814"
+        "sha256": "83885814519c8b252d0e5653c0d1e9caa47a51f9ccebf8e86a757afaaddeab6b"
       },
       {
         "path": "apps/web/src/screens/LoadMaterials.tsx",
@@ -11012,7 +11012,7 @@
       }
     ],
     "served_file_count": 200,
-    "served_manifest_fingerprint": "0c07877d56e1c2e27942460017b9b2f866012b03255bb10539ed8efeb2126386"
+    "served_manifest_fingerprint": "1461c386c62529be9ec03b2213be6bedc4da1a9c5966c8b8afd2876b59c170cd"
   },
   "overview": {
     "built_at_commit": "caab1d0a69c1733524bda5dde495623bc4b7bad1",

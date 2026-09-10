@@ -516,3 +516,52 @@ describe('the entry editor opens on the value it is editing', () => {
     expect(confirmButton()).toBeDisabled();
   });
 });
+
+// ---------------------------------------------------------------------------
+// σ is not Σ — a case-mapping defect found by independent design review, 2026-09.
+// ---------------------------------------------------------------------------
+//
+// WHAT WAS WRONG: `.structured-label` carried `text-transform: uppercase`, and CSS
+// case-mapping is codepoint-level, not meaning-aware — it turned the SOURCE text
+// "Uncertainty (σ)" (U+03C3, GREEK SMALL LETTER SIGMA — standard deviation) into the
+// RENDERED text "UNCERTAINTY (Σ)" (U+03A3, GREEK CAPITAL LETTER SIGMA — summation).
+// Those are different symbols with different physical meanings, and `innerText` —
+// what a screen reader announces — is the case-mapped one. The helper text two lines
+// below still read "Leaving σ blank...", so one screen showed both glyphs for one
+// quantity. Fixed by removing the transform (assistant.css) and authoring the label
+// in Title Case directly (no transform needed to reach the approved casing).
+//
+// This pins BOTH halves so either regressing alone fails the test: the SOURCE text
+// staying the lowercase sigma, and the CSS rule staying without a case transform
+// that would corrupt it downstream (jsdom does not apply real layout/CSSOM the way a
+// browser does, so this reads the raw stylesheet rather than a computed style — the
+// same idiom `tutorial-a11y.test.tsx` uses for `pointer-events`, chosen so the
+// assertion cannot pass by accident).
+const cssFiles = import.meta.glob('../components/*.css', {
+  query: '?raw',
+  import: 'default',
+  eager: true,
+}) as Record<string, string>;
+
+describe('the uncertainty label renders σ (standard deviation), never Σ (summation)', () => {
+  it('the source text is the lowercase sigma', () => {
+    renderEntry('descriptor');
+    const label = screen.getByText('Uncertainty (σ)', { selector: '.structured-label' });
+    expect(label.textContent).toBe('Uncertainty (σ)');
+    expect(label.textContent).not.toContain('Σ');
+  });
+
+  it('the accompanying helper text still reads σ, so the two do not diverge', () => {
+    renderEntry('descriptor');
+    expect(screen.getByText(/Leaving σ blank/)).toBeInTheDocument();
+  });
+
+  it('MUTATION CONTROL — .structured-label carries no case transform that would ' +
+    're-map σ into Σ (or any other letter whose case-mapped form changes meaning)', () => {
+    const css = cssFiles['../components/assistant.css'];
+    expect(css).toBeDefined();
+    const rule = css!.match(/\.structured-label\s*\{[^}]*\}/);
+    expect(rule).toBeTruthy();
+    expect(rule![0]).not.toMatch(/text-transform:\s*(uppercase|capitalize)/);
+  });
+});
