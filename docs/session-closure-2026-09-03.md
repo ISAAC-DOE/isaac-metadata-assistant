@@ -26,14 +26,18 @@ verified with `git merge-base --is-ancestor 6ce3f5c origin/main`) to `ec945d7`
 
 Merge order was NOT PR-A→B→C→D→E→#232 in a straight line: PR-C merged before
 PR-D and PR-E's final (re-merged) heads, and #232 (a flake fix that had
-started blocking PR-C's own CI) landed between PR-E and PR-D. The exact
-sequence, from this session's own orchestration log
-(`orchestration-plan.md`, quoted verbatim for the ordering claim): PR-A →
-PR-B → PR-C → PR-E → #232 → PR-D. Each of PR-D and PR-E was re-merged with
-`main` and re-verified (typecheck + full suite + the trusted/mutation e2e
-specs that share code with what had just landed) after every PR that merged
-ahead of it — this is why PR-D's own branch head moved three times
-(`8ea7d5d` → `c542f5f` → `3aa6e95`) before its final merge.
+started blocking PR-C's own CI) landed between PR-E and PR-D. **Corrected
+2026-09-09:** this paragraph previously cited `orchestration-plan.md` — a
+working file that lived only in a session scratchpad and was never
+committed to this repository, so the citation dangled for any later reader.
+The exact sequence is not lost: it is reproduced exactly by the `Merged at
+(UTC)` column in the table above, which this repository does carry. The
+sequence, re-derived from that column rather than from the uncommitted log:
+PR-A → PR-B → PR-C → PR-E → #232 → PR-D. Each of PR-D and PR-E was
+re-merged with `main` and re-verified (typecheck + full suite + the
+trusted/mutation e2e specs that share code with what had just landed) after
+every PR that merged ahead of it — this is why PR-D's own branch head moved
+three times (`8ea7d5d` → `c542f5f` → `3aa6e95`) before its final merge.
 
 **CI run ids**, one row per SHA that actually ran CI (`gh run list --commit
 <sha>`, re-run at doc-write time):
@@ -254,9 +258,14 @@ accepted.
 
 ## 6. Premises from the session brief that proved false
 
-Quoted from this session's own orchestration log
-(`orchestration-plan.md` §"Premises from the prompt that proved false"),
-verified again here rather than only trusted from the log:
+Drawn from this session's own working orchestration notes — a file named
+`orchestration-plan.md`, kept only in a session scratchpad and never
+committed to this repository (**corrected 2026-09-09**: an earlier revision
+of this paragraph cited that file directly, which dangles for any later
+reader). Nothing below rests on the uncommitted file: each item is
+independently re-verified against a committed source in place — a `git`
+command, a `gh` query, or another file in this repository — rather than
+trusted from the log:
 
 1. **"`main` was `504c2ee`."** False — `git merge-base --is-ancestor 6ce3f5c
    origin/main` at session start confirmed `main` was `6ce3f5c` (v0.0.213),
