@@ -26,14 +26,18 @@ verified with `git merge-base --is-ancestor 6ce3f5c origin/main`) to `ec945d7`
 
 Merge order was NOT PR-A→B→C→D→E→#232 in a straight line: PR-C merged before
 PR-D and PR-E's final (re-merged) heads, and #232 (a flake fix that had
-started blocking PR-C's own CI) landed between PR-E and PR-D. The exact
-sequence, from this session's own orchestration log
-(`orchestration-plan.md`, quoted verbatim for the ordering claim): PR-A →
-PR-B → PR-C → PR-E → #232 → PR-D. Each of PR-D and PR-E was re-merged with
-`main` and re-verified (typecheck + full suite + the trusted/mutation e2e
-specs that share code with what had just landed) after every PR that merged
-ahead of it — this is why PR-D's own branch head moved three times
-(`8ea7d5d` → `c542f5f` → `3aa6e95`) before its final merge.
+started blocking PR-C's own CI) landed between PR-E and PR-D. **Corrected
+2026-09-09:** this paragraph previously cited `orchestration-plan.md` — a
+working file that lived only in a session scratchpad and was never
+committed to this repository, so the citation dangled for any later reader.
+The exact sequence is not lost: it is reproduced exactly by the `Merged at
+(UTC)` column in the table above, which this repository does carry. The
+sequence, re-derived from that column rather than from the uncommitted log:
+PR-A → PR-B → PR-C → PR-E → #232 → PR-D. Each of PR-D and PR-E was
+re-merged with `main` and re-verified (typecheck + full suite + the
+trusted/mutation e2e specs that share code with what had just landed) after
+every PR that merged ahead of it — this is why PR-D's own branch head moved
+three times (`8ea7d5d` → `c542f5f` → `3aa6e95`) before its final merge.
 
 **CI run ids**, one row per SHA that actually ran CI (`gh run list --commit
 <sha>`, re-run at doc-write time):
@@ -254,9 +258,14 @@ accepted.
 
 ## 6. Premises from the session brief that proved false
 
-Quoted from this session's own orchestration log
-(`orchestration-plan.md` §"Premises from the prompt that proved false"),
-verified again here rather than only trusted from the log:
+Drawn from this session's own working orchestration notes — a file named
+`orchestration-plan.md`, kept only in a session scratchpad and never
+committed to this repository (**corrected 2026-09-09**: an earlier revision
+of this paragraph cited that file directly, which dangles for any later
+reader). Nothing below rests on the uncommitted file: each item is
+independently re-verified against a committed source in place — a `git`
+command, a `gh` query, or another file in this repository — rather than
+trusted from the log:
 
 1. **"`main` was `504c2ee`."** False — `git merge-base --is-ancestor 6ce3f5c
    origin/main` at session start confirmed `main` was `6ce3f5c` (v0.0.213),
@@ -456,6 +465,68 @@ pass, found by the real-second-browser proof (§7b, finding F-1):**
 the same Capture & Proposals screen appears only after a manual reload,
 while the proposals minted by that same save appear live in Ingestion
 Proposals. Not fixed here; named as residue.
+
+### 8b. First hosted OBSERVATION, 2026-09-09 — not a sign-off, and not a substitute for one
+
+Everything in §8's "Krish / authenticated human" list above is unchanged by
+this subsection. `HOSTED QA PENDING` remains the correct status for the
+**subjective approval / 200%-zoom sign-off** — nobody but Krish can give
+either — but the repository now has its first hosted read-only
+**observation**, made through Krish's own authenticated browser session, and
+it is recorded here with its exact limits so it cannot later be mistaken for
+that sign-off.
+
+**How it was made.** Observed 2026-09-09 through an authenticated browser
+session belonging to the project owner. No credential was entered by any
+agent, and no state-changing control was used — navigation, presentation-only
+toggles, screenshots, and same-origin GET reads only.
+
+**Which image is live, and what that implies.** `/krish/api/health` reported
+`status: ok`, `mode: synthetic-only`,
+`commit: 30ac6115e73cb601918ba326f69b15274581ce6e`; `/krish/api/about`
+reported `app_version: 0.1.0`, `build_commit: 30ac611…`,
+`record_schema_version: 1.05`, `runtime_mode: synthetic-only`,
+`persistence: durable`. `git rev-list -n1 v0.0.220` resolves to `30ac611`, so
+the live image is **v0.0.220** — the hosted app carries every application
+slice of this 2026-09-03 session, and **not** the later docs-only commits
+that followed it on `main`.
+
+**Storage/database fields, read only — no conclusion drawn.**
+`experiment_storage`: `backend: postgres`, `durable: true`,
+`run_projection.authoritative: true`, `last_pass: {complete: 0, stale: 0,
+never_projected: 0, unavailable: 3, mismatch: 0}`. `database`:
+`configured: true`, `classification: isolated-app-postgres`,
+`contains_production_derived_records: true`, `record_display: closed`.
+These are reported as read; no conclusion is drawn about `isaac_runs` Stage
+2b or about gate **G2** — both remain the operator's to decide, unchanged by
+this observation.
+
+**Rendered and confirmed hosted, by navigation and screenshot only:** the
+WORKSPACES group (Record Fields / Runs / Capture & Proposals / Graph)
+beneath the WORKFLOW spine with the Evidence Trail link, and the old top tab
+bar absent; compact Runs rows whose control reads "Open Run …" with a
+single-run editor and Back / Previous run / Next run; the collapsed capture
+panel's single entry action "Capture Experiment Notes"; the proposals empty
+state naming its three producers; the experiment graph; the Assistant rail's
+"Collapse Assistant" / "Expand Assistant" control; the 768 px drawer opening
+from a floating trigger and closing with Escape; and, at 1024 px and 768 px,
+a single-row compact workflow spine, a wrapping workspace pill row, and
+`scrollWidth - clientWidth == 0`.
+
+**Not verified, and why.** 390 px and 320 px viewports could not be reached
+hosted — the browser tooling used for this observation clamps the window to
+a **603 px minimum width** in this environment, so the narrow-width pill wrap
+and spine behaviour remain unobserved **hosted** (they are covered locally by
+the axe/responsive suites and by measurement, which is a different claim from
+a hosted observation). Two transient `503`s were seen on
+`GET /api/experiments/<id>` (78 of 80 requests returned 200; the same
+endpoint returned 200 in between) — these were not diagnosed, and no agent
+may investigate the hosted database. The **200% browser-zoom gate and the
+hosted sign-off itself remain Krish's**, exactly as §8 states above.
+
+**Also confirmed as part of this observation:** the mode chip's visible
+label read **"Workspace"**, not "Example workspace" — see `CLAUDE.md` §11's
+2026-09-09 correction, which this observation's DOM read triggered.
 
 ---
 
