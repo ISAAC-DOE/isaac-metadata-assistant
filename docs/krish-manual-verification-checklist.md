@@ -99,6 +99,66 @@ record/run/proposal model.
 
 ---
 
+## 1c. Voice capture and Unmapped Notes — the 2026-09-10 slice (8 min)
+
+Everything here is on a record's **Capture & Proposals** workspace
+(`/record/<id>?view=capture`). Do it in a real browser with a real microphone —
+that is the whole point of this section, because the parts only you can check are
+the ones the operating system owns.
+
+**What is already automated, so you do NOT need to re-check it.** Six specs in
+`apps/web/e2e/mutation/capture-microphone.spec.ts` drive a real Chromium with
+Chromium's synthetic audio device and a genuine permission decision: recording
+establishes, Stop and Discard release the microphone, a refusal is reported
+honestly, and **no request carries audio** over HTTP, WebRTC or a WebSocket.
+Those passed. What follows is what a synthetic device and a scripted browser
+cannot tell us.
+
+1. **The orphan case — the one that matters most.** Press **Start Recording**,
+   and while the browser is still asking for permission, navigate away from the
+   record (click another workspace's record, or use Back). Then look at
+   **Chrome's own tab microphone indicator** and your OS microphone indicator.
+   *Expected:* both go dark. Before this slice, a track stayed `live` with the
+   application unable to stop it — we measured `readyState: live` for a full 15
+   seconds with zero `stop()` calls. The automated test asserts the track object
+   ends; **only you can confirm the browser and the OS agree.**
+2. **Close while recording.** Start Recording, then press **Close Capture**
+   (the panel's own disclosure, not navigation). Reopen it. *Expected:* it reads
+   **Start Recording**, not "Stop Recording" over a `Recording · 0:00` timer with
+   a dead microphone. That was real before this slice.
+3. **Permission denied is not one sentence.** Deny the microphone in Chrome's
+   permission UI, then Start Recording. *Expected:* a specific explanation, not a
+   generic one, and the **Transcript** textarea still works. Optionally repeat
+   with the microphone physically unplugged or claimed by another app — those are
+   different messages by design.
+4. **Typing needs no microphone.** With permission denied, type into
+   **Transcript**, pick a run under **Run These Notes Describe**, and press
+   **Finalize and Read**. *Expected:* the panel names how many proposals were
+   minted and how many notes were stored, and nothing claims a value was written.
+5. **Your own words appear without a reload — this is the F-1 fix.** Immediately
+   after that Finalize, look at **Unmapped Notes** *without refreshing the page*.
+   *Expected:* the segments you typed are listed there. Before this slice the
+   proposals appeared instantly and the notes did not appear until you reloaded,
+   which was the wrong signal from the feature whose whole job is that nothing
+   you said is lost.
+6. **Read the audio-privacy sentence and tell me if you believe it.** In the open
+   Voice Capture section: *"Audio stays in this tab's memory. It is never
+   uploaded, never written to disk, and is discarded when you clear it, leave this
+   record, or reload the page. This application declares no multipart form
+   anywhere, and its one upload route refuses every request outright — so nothing
+   in this capture path has anywhere to send it."* Every clause is verified
+   against the code. The previous version said the application "declares no upload
+   endpoint", which was **false** — `POST /api/uploads` exists and answers 403.
+   This is a judgement call about wording, and it is yours.
+
+**Known and deliberately not built** (so you are not looking for them): there is
+**no Pause/Resume** while recording, and **no way to play back** what you
+recorded. Recorded audio cannot become text in any deployment, because no
+approved transcription provider is configured — **"Request a Transcript" will
+always refuse**, and that refusal is honest, not a bug.
+
+---
+
 ## 2. Standalone Validator — all 18 files (20 min)
 
 Route: **`/krish/governance` → Validator tab**.
