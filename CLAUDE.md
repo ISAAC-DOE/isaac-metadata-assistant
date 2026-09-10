@@ -541,8 +541,23 @@ Current state:
     workspace, own dev server, `workers: 1`, `retries: 0`. Do NOT fold it into the read-only suite —
     that one asserts canonical seed CONTENT across five parallel projects and would break.
   - **Guided tutorial** with browser-local versioned completion; replay never calls
-    `POST /api/demo/reset`. The mode chip reads **"Example workspace"** and its *accessible name*
-    carries the three claims the word "Synthetic" used to carry. `/api/health`'s
+    `POST /api/demo/reset`. ~~The mode chip reads **"Example workspace"** and its *accessible
+    name* carries the three claims the word "Synthetic" used to carry.~~ — **corrected
+    2026-09-09: the "Example workspace" literal was itself retired the very next day, in
+    `709af2a4` ("feat(tutorial): rehome the reset into worked-example chrome; scope-truthful
+    chip", 2026-08-04), which this file never recorded.** The visible label is now
+    scope-dependent — `LABELS.modeOrdinaryWorkspace = 'Workspace'` on an ordinary screen,
+    `LABELS.modeWorkedExample = 'Worked Example'` inside a guided-walkthrough session
+    (`apps/web/src/lib/labels.ts:208,218`) — and the accessible name (`chipAriaLabel`,
+    `apps/web/src/components/TopBar.tsx:262-267`) still opens with that visible text and still
+    carries the claims, worded per scope. Measured on the ordinary scope, hosted at image
+    `v0.0.220` / commit `30ac611` (2026-09-09, read-only observation, see §11's 2026-09-03
+    session entry and the closure doc) and confirmed identical in source at `origin/main`:
+    "Workspace — nothing in this build adds a built-in example record to this workspace — they
+    are created only inside a guided-walkthrough session; file upload is refused, and no
+    official institutional record is shown. This deployment is also configured to run a
+    protected, read-only diagnostic against an isolated test database; it returns sanitized
+    aggregate results only, and no database records are displayed." `/api/health`'s
     `mode: synthetic-only` is UNCHANGED — presentation moved, contract did not.
   - **STILL OPEN — RE-MEASURED 2026-08-26, and FOUR OF THE SIX WERE ALREADY CLOSED.** The list is
     corrected in place rather than replaced, because a stale "still open" list is worse than no

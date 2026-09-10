@@ -466,6 +466,68 @@ the same Capture & Proposals screen appears only after a manual reload,
 while the proposals minted by that same save appear live in Ingestion
 Proposals. Not fixed here; named as residue.
 
+### 8b. First hosted OBSERVATION, 2026-09-09 — not a sign-off, and not a substitute for one
+
+Everything in §8's "Krish / authenticated human" list above is unchanged by
+this subsection. `HOSTED QA PENDING` remains the correct status for the
+**subjective approval / 200%-zoom sign-off** — nobody but Krish can give
+either — but the repository now has its first hosted read-only
+**observation**, made through Krish's own authenticated browser session, and
+it is recorded here with its exact limits so it cannot later be mistaken for
+that sign-off.
+
+**How it was made.** Observed 2026-09-09 through an authenticated browser
+session belonging to the project owner. No credential was entered by any
+agent, and no state-changing control was used — navigation, presentation-only
+toggles, screenshots, and same-origin GET reads only.
+
+**Which image is live, and what that implies.** `/krish/api/health` reported
+`status: ok`, `mode: synthetic-only`,
+`commit: 30ac6115e73cb601918ba326f69b15274581ce6e`; `/krish/api/about`
+reported `app_version: 0.1.0`, `build_commit: 30ac611…`,
+`record_schema_version: 1.05`, `runtime_mode: synthetic-only`,
+`persistence: durable`. `git rev-list -n1 v0.0.220` resolves to `30ac611`, so
+the live image is **v0.0.220** — the hosted app carries every application
+slice of this 2026-09-03 session, and **not** the later docs-only commits
+that followed it on `main`.
+
+**Storage/database fields, read only — no conclusion drawn.**
+`experiment_storage`: `backend: postgres`, `durable: true`,
+`run_projection.authoritative: true`, `last_pass: {complete: 0, stale: 0,
+never_projected: 0, unavailable: 3, mismatch: 0}`. `database`:
+`configured: true`, `classification: isolated-app-postgres`,
+`contains_production_derived_records: true`, `record_display: closed`.
+These are reported as read; no conclusion is drawn about `isaac_runs` Stage
+2b or about gate **G2** — both remain the operator's to decide, unchanged by
+this observation.
+
+**Rendered and confirmed hosted, by navigation and screenshot only:** the
+WORKSPACES group (Record Fields / Runs / Capture & Proposals / Graph)
+beneath the WORKFLOW spine with the Evidence Trail link, and the old top tab
+bar absent; compact Runs rows whose control reads "Open Run …" with a
+single-run editor and Back / Previous run / Next run; the collapsed capture
+panel's single entry action "Capture Experiment Notes"; the proposals empty
+state naming its three producers; the experiment graph; the Assistant rail's
+"Collapse Assistant" / "Expand Assistant" control; the 768 px drawer opening
+from a floating trigger and closing with Escape; and, at 1024 px and 768 px,
+a single-row compact workflow spine, a wrapping workspace pill row, and
+`scrollWidth - clientWidth == 0`.
+
+**Not verified, and why.** 390 px and 320 px viewports could not be reached
+hosted — the browser tooling used for this observation clamps the window to
+a **603 px minimum width** in this environment, so the narrow-width pill wrap
+and spine behaviour remain unobserved **hosted** (they are covered locally by
+the axe/responsive suites and by measurement, which is a different claim from
+a hosted observation). Two transient `503`s were seen on
+`GET /api/experiments/<id>` (78 of 80 requests returned 200; the same
+endpoint returned 200 in between) — these were not diagnosed, and no agent
+may investigate the hosted database. The **200% browser-zoom gate and the
+hosted sign-off itself remain Krish's**, exactly as §8 states above.
+
+**Also confirmed as part of this observation:** the mode chip's visible
+label read **"Workspace"**, not "Example workspace" — see `CLAUDE.md` §11's
+2026-09-09 correction, which this observation's DOM read triggered.
+
 ---
 
 ## 9. CI resolution for the two runs that were pending at hand-off — BOTH NOW RESOLVED
