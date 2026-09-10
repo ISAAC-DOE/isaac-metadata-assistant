@@ -1263,7 +1263,9 @@ function LoadedCompletion({
     <>
       {liveNotes}
       <div className="completion-header">
-        <h1 className="completion-title">Answer {total} Questions to Finish This Record</h1>
+        <h1 className="completion-title">
+          Answer {total} {total === 1 ? 'Question' : 'Questions'} to Finish This Record
+        </h1>
         <span className="completion-counter">
           {answered.length} / {total}
         </span>

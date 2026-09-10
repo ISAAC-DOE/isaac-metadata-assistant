@@ -723,8 +723,14 @@ describe('autosave', () => {
       /Text this screen could not read has not been sent anywhere/,
     );
     expect(note).toBeInTheDocument();
-    // It must NOT claim a view switch loses it — that is what the change fixed.
-    expect(note.textContent).toMatch(/Moving between this record’s views keeps it/);
+    // It must NOT claim a view switch loses it — that is what the change fixed. Also
+    // pinned, byte-for-byte, in `run-browser.test.tsx`, which is where the
+    // 2026-09 design-review rewrite (naming the three other workspaces explicitly, so
+    // this sentence and the Runs leave-confirmation dialog can no longer be read as
+    // opposite conclusions) is pinned end to end.
+    expect(note.textContent).toMatch(
+      /Switching to this record’s other workspaces — Record Fields, Capture & Proposals, Graph — and back keeps it/,
+    );
     // ...and it must still name what DOES lose it, rather than implying nothing does.
     expect(note.textContent).toMatch(/paging, searching or filtering the runs list, or reloading/);
   });
@@ -1965,9 +1971,15 @@ describe('PHASE 2 — save state that outlives the card', () => {
     // lost, in-flight is unknown. An earlier version asserted loss for both.
     expect(cardFor('RUNAAA').textContent ?? '').toMatch(/anything still unsent is lost/);
     expect(cardFor('RUNAAA').textContent ?? '').toMatch(/may or may not have been saved/);
-    // And it no longer carries the old ambiguous phrasing, in either direction.
+    // And it no longer carries the old ambiguous phrasing, in either direction. Nor the
+    // 2026-09 "this record's views" wording, replaced because "Runs" is itself one of
+    // this record's four workspaces and did not say which side of that line a run
+    // switch fell on — see the same rewrite pinned in `run-browser.test.tsx`.
     expect(cardFor('RUNAAA').textContent ?? '').not.toMatch(/saving live here only/);
-    expect(cardFor('RUNAAA').textContent ?? '').toMatch(/Moving between this record.s views keeps them/);
+    expect(cardFor('RUNAAA').textContent ?? '').not.toMatch(/this record.s views/);
+    expect(cardFor('RUNAAA').textContent ?? '').toMatch(
+      /Switching to this record.s other workspaces — Record Fields, Capture & Proposals, Graph — and back keeps them/,
+    );
 
     // AND IT STAYS UP WHILE THE REQUEST IS IN FLIGHT. Gating on `pendingCount` hid it
     // for that whole window, because `send()` empties the pending map before dispatching

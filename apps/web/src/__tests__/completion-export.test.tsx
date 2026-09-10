@@ -16,6 +16,7 @@ import {
   exportSuccess,
   exportedReadyRoutes,
   pendingResponse,
+  pendingRoutes,
   seriesDemoValue,
   stubFetchDown,
   stubFetchRoutes,
@@ -1106,5 +1107,38 @@ describe('S4 · Complete Missing Fields — grounded assistant (P25.6)', () => {
     const { container, findByText } = renderAt('/record/demo/complete');
     await findByText('Backend Not Running');
     expect(container.querySelector('.assistant')).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The heading pluralizes on the record's real total — a defect found by
+// independent design review, 2026-09: with exactly one outstanding question the
+// heading read "Answer 1 Questions to Finish This Record".
+// ---------------------------------------------------------------------------
+describe('the heading pluralizes "Question(s)" on the record\'s pending total', () => {
+  // `total = answered.length + pendingTotal` and the branch above this one — the
+  // early `remaining === 0` return rendering "All Fields Resolved" instead — is what
+  // keeps 0 from ever reaching this heading; `exportReadyRoutes` above is exactly
+  // that branch, and it renders a different heading entirely. So only 1 and 2 are
+  // exercised here.
+  it('singular (1) reads "Answer 1 Question to Finish This Record"', async () => {
+    const base = `/api/experiments/demo`;
+    stubFetchRoutes({
+      ...bundleRoutes('demo'),
+      ...pendingRoutes(base, { pending: pendingResponse.pending.slice(0, 1) }),
+    });
+    const { findByText, queryByText } = renderAt('/record/demo/complete');
+    await findByText('Answer 1 Question to Finish This Record');
+    expect(queryByText(/Answer 1 Questions\b/)).toBeNull();
+  });
+
+  it('plural (2) reads "Answer 2 Questions to Finish This Record"', async () => {
+    const base = `/api/experiments/demo`;
+    stubFetchRoutes({
+      ...bundleRoutes('demo'),
+      ...pendingRoutes(base, { pending: pendingResponse.pending.slice(0, 2) }),
+    });
+    const { findByText } = renderAt('/record/demo/complete');
+    await findByText('Answer 2 Questions to Finish This Record');
   });
 });
