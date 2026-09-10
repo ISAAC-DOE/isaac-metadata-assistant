@@ -1027,7 +1027,14 @@ const STATES: readonly VisualState[] = [
     async reach({ page, app }) {
       await app.gotoExample(`/record/${SEED.review}/export`);
       await settled(page);
-      const heading = page.getByRole('heading', { name: 'Would Not Validate Yet' });
+      /*
+       * ADDRESSED BY LEVEL. The screen's `<h1>` now states the record's state
+       * rather than a fixed screen name, and on this record that state IS
+       * `Would Not Validate Yet` — so an unlevelled name match resolves to two
+       * headings (the h1 and this card's h2) and fails strict mode. Narrowing to
+       * level 2 keeps this state pointing at the card it photographs.
+       */
+      const heading = page.getByRole('heading', { level: 2, name: 'Would Not Validate Yet' });
       await expect(heading).toBeVisible({ timeout: 20_000 });
       return heading;
     },

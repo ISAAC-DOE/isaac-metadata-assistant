@@ -1225,9 +1225,15 @@ function LoadedCompletion({
           <span className="dot dot-progress" aria-hidden="true" />
           <div>
             <div className="completion-done-title">Nothing is left for you to confirm.</div>
+            {/* THE DESTINATION IS NAMED BY `LABELS.screenExport`, not by a literal.
+                Both strings here read `Ready to Export` — the destination screen's
+                old name — and that name has been retired precisely because it was
+                a readiness claim rather than a place (see `lib/labels.ts`). Left as
+                literals they would have gone on naming a screen that no longer
+                calls itself that, one navigation away. */}
             <p className="completion-done-text">
               Every blocker the system refused to guess is now confirmed or resolved. The official
-              schema check runs next, on the Ready to Export screen.
+              schema check runs next, on the {LABELS.screenExport} screen.
             </p>
           </div>
         </div>
@@ -1237,7 +1243,7 @@ function LoadedCompletion({
             className="btn btn-primary"
             onClick={() => navigate(ROUTES.export(id))}
           >
-            Go to Ready to Export →
+            Go to {LABELS.screenExport} →
           </button>
           <button
             type="button"

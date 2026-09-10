@@ -10,6 +10,7 @@ import {
   NODE_KIND_LABELS,
   applyExperimentGraphAction,
   buildExperimentGraph,
+  drawTally,
   expandableNodeIds,
   fitExperimentViewport,
   initialExperimentGraphState,
@@ -20,6 +21,7 @@ import {
   visibleNodeIds,
   visibleTruncated,
   type ExperimentGraph,
+  type ExperimentGraphDrawTally,
   type ExperimentGraphAction,
   type ExperimentGraphNode,
   type ExperimentGraphViewState,
@@ -188,6 +190,109 @@ function placedLabelIds(
     placed.add(id);
   }
   return placed;
+}
+
+/**
+ * EVERY NUMBER THIS SURFACE PUBLISHES SAYS WHAT IT COUNTS, and each is built
+ * here from `drawTally` rather than assembled inline beside the markup.
+ *
+ * MEASURED BEFORE, in one 400px band on `?view=graph` of a record created over
+ * HTTP: the count line read `9 of 22 nodes drawn · 8 of 21 relationships`; the
+ * `SHOW` chips summed to 21 (`Section 6` + `Structured Block 3` + `Evidence 3`
+ * + `Your Confirmation 3` + `Workflow Step 5` + `Advisory Warning 1`);
+ * `document.querySelectorAll('.expgraph-canvas text')` found 8 labels over 9
+ * marks; and `Workflow Step 5` sat above a canvas holding exactly ONE
+ * workflow-step node. Every one of those four numbers was correct about a
+ * different set, none of them said which set, and the one node with no label
+ * (`NO_MEASUREMENT_SERIES` in the reviewed instance) looked like a rendering
+ * fault rather than a deliberate collision drop.
+ *
+ * Nothing is deleted and nothing is invented: the same model values are
+ * published, each under a label naming its set, plus the ONE figure the surface
+ * was missing — how many nodes are not drawn, and why.
+ */
+function totalSentence(tally: ExperimentGraphDrawTally, edgeTotal: number): string {
+  return `In this record's graph: ${tally.total} node${tally.total === 1 ? '' : 's'} · ${edgeTotal} relationship${edgeTotal === 1 ? '' : 's'}.`;
+}
+
+/**
+ * Drawn NOW — and deliberately not "at this zoom". `visibleNodeIds` reads the
+ * expansion, the kind filters and `MAX_VISIBLE_NODES`; it does not read
+ * `state.view.scale` at all, so a figure attributed to zoom would have been a
+ * fourth wrong label rather than a fix.
+ */
+function drawnSentence(drawn: number, drawnEdges: number): string {
+  return `Drawn on the canvas now: ${drawn} node${drawn === 1 ? '' : 's'} · ${drawnEdges} relationship${drawnEdges === 1 ? '' : 's'} (both ends drawn).`;
+}
+
+/**
+ * WHY A DRAWN NODE CAN CARRY NO VISIBLE LABEL, stated on the surface instead of
+ * leaving the reader to count marks against glyphs.
+ *
+ * The node is never dropped — only the glyph, and only when it would land on
+ * one already placed (`placedLabelIds`). Both of the ways to read it anyway are
+ * named, and both are real: every node carries an `aria-label`, and an
+ * unlabelled one additionally carries an SVG `<title>`, which is what makes the
+ * hover half of this sentence true rather than aspirational.
+ */
+function labelSentence(labelled: number, drawn: number): string {
+  if (drawn === 0) return 'No node is drawn, so no label is placed.';
+  if (labelled === drawn) {
+    return `All ${drawn} drawn node${drawn === 1 ? '' : 's'} carr${drawn === 1 ? 'ies' : 'y'} a visible label.`;
+  }
+  const bare = drawn - labelled;
+  return `${labelled} of ${drawn} drawn nodes carry a visible label; ${bare} ${bare === 1 ? 'is' : 'are'} unlabelled because the label would overlap one already placed — hover or select the node to read its name.`;
+}
+
+/**
+ * The withheld count, with the reason, because the reasons are DIFFERENT
+ * CONTROLS. A single "13 not drawn" would send a reader to the wrong one.
+ */
+function undrawnSentence(tally: ExperimentGraphDrawTally): string {
+  const missing = tally.total - tally.drawn;
+  if (missing === 0) return "Every node in this record's graph is drawn.";
+  const parts: string[] = [];
+  if (tally.notOpened > 0) {
+    parts.push(
+      `${tally.notOpened} not opened yet — select a node and press Enter, or use Expand in the detail pane`,
+    );
+  }
+  if (tally.hiddenByFilter > 0) {
+    parts.push(`${tally.hiddenByFilter} hidden by a Show filter above`);
+  }
+  if (tally.overCap > 0) {
+    parts.push(`${tally.overCap} past the ${MAX_VISIBLE_NODES}-node limit on one view`);
+  }
+  return `${missing} node${missing === 1 ? '' : 's'} not drawn: ${parts.join(' · ')}.`;
+}
+
+/**
+ * What the `SHOW` chip numbers count, said once, next to them.
+ *
+ * They are per-kind totals for the WHOLE record (`graph.counts`, built in
+ * `finalize`), not counts of what is drawn — which is why `Workflow Step 5`
+ * could stand above a canvas holding one. The chips are not renumbered: a
+ * filter control whose number changed as you expanded would be useless for
+ * deciding what to hide.
+ */
+const KIND_COUNT_SCOPE = "in this record's graph";
+
+/**
+ * The chip row's own arithmetic, DERIVED rather than asserted.
+ *
+ * A first draft of this sentence said the chips "total one less than the node
+ * count above", reasoning that the anchor has no chip. That is a GUESS, and it
+ * is wrong on an exported record, whose graph carries BOTH an `experiment` node
+ * and a `record` node — neither of which is in `FILTERABLE_KINDS`, so the gap
+ * is two. Publishing an unchecked arithmetic claim beside the numbers it is
+ * about is the defect this whole change exists to remove, so the gap is now
+ * measured from `graph.counts` and printed.
+ */
+function kindScopeSentence(chipTotal: number, total: number): string {
+  const base = `Each number is how many of that kind exist ${KIND_COUNT_SCOPE} — not how many are drawn.`;
+  const withoutChip = total - chipTotal;
+  if (withoutChip <= 0) return base;
+  return `${base} ${withoutChip} node${withoutChip === 1 ? '' : 's'} ha${withoutChip === 1 ? 's' : 've'} no chip and can never be hidden, so these numbers total ${chipTotal}, not ${total}.`;
 }
 
 export interface ExperimentGraphPanelProps {
@@ -365,7 +470,20 @@ function LoadedExperimentGraph({ graph }: { graph: ExperimentGraph }) {
   };
 
   const counts = graph.counts;
-  const drawnLabel = `${visible.length} of ${graph.nodes.length} nodes drawn · ${edges.length} of ${graph.edges.length} relationships`;
+  const tally = useMemo(() => drawTally(state, graph), [state, graph]);
+  const lineTotal = totalSentence(tally, graph.edges.length);
+  const lineDrawn = drawnSentence(tally.drawn, edges.length);
+  const lineLabels = labelSentence(labelled.size, tally.drawn);
+  const lineUndrawn = undrawnSentence(tally);
+  // The chip row's own total, from the SAME `graph.counts` the chips render, so
+  // the sentence under the legend cannot disagree with the chips above it.
+  const chipTotal = FILTERABLE_KINDS.filter((k) => counts[k] > 0).reduce(
+    (sum, k) => sum + counts[k],
+    0,
+  );
+  // ONE sentence for the canvas's accessible name, from the same four values —
+  // a second string here is how the visible line and the announced one drift.
+  const canvasSummary = `${lineTotal} ${lineDrawn} ${lineUndrawn} ${lineLabels}`;
 
   return (
     <section className="expgraph" aria-labelledby="expgraph-heading">
@@ -379,9 +497,20 @@ function LoadedExperimentGraph({ graph }: { graph: ExperimentGraph }) {
           it sits in. Every line is drawn from a recorded fact; nothing is inferred from
           resemblance.
         </p>
-        <p className="expgraph-counts" data-testid="expgraph-counts">
-          {drawnLabel}
-        </p>
+        <div className="expgraph-counts" data-testid="expgraph-counts">
+          <p className="expgraph-count-line" data-testid="expgraph-count-total">
+            {lineTotal}
+          </p>
+          <p className="expgraph-count-line" data-testid="expgraph-count-drawn">
+            {lineDrawn}
+          </p>
+          <p className="expgraph-count-line" data-testid="expgraph-count-undrawn">
+            {lineUndrawn}
+          </p>
+          <p className="expgraph-count-line" data-testid="expgraph-count-labels">
+            {lineLabels}
+          </p>
+        </div>
       </header>
 
       {graph.notes.length > 0 && (
@@ -465,6 +594,9 @@ function LoadedExperimentGraph({ graph }: { graph: ExperimentGraph }) {
 
         <fieldset className="expgraph-kinds">
           <legend className="expgraph-kinds-legend">Show</legend>
+          <p className="expgraph-kinds-hint" data-testid="expgraph-kinds-hint">
+            {kindScopeSentence(chipTotal, tally.total)}
+          </p>
           <div className="expgraph-kinds-row">
             {FILTERABLE_KINDS.filter((k) => counts[k] > 0).map((k) => {
               const on = !state.hiddenKinds.includes(k);
@@ -479,7 +611,16 @@ function LoadedExperimentGraph({ graph }: { graph: ExperimentGraph }) {
                 >
                   <span className="expgraph-kind-swatch" data-kind={k} aria-hidden="true" />
                   {NODE_KIND_LABELS[k]}
-                  <span className="expgraph-kind-count">{counts[k]}</span>
+                  {/* The scope rides INSIDE the count rather than as an
+                      `aria-label` on the button: an `aria-label` would replace
+                      the accessible name, and `Section — 6 …` no longer
+                      contains the visible `Section 6` (WCAG 2.5.3
+                      label-in-name). Appended visually-hidden, the name reads
+                      `Section 6 in this record's graph` and still contains it. */}
+                  <span className="expgraph-kind-count">
+                    {counts[k]}
+                    <span className="sr-only"> {KIND_COUNT_SCOPE}</span>
+                  </span>
                 </button>
               );
             })}
@@ -495,7 +636,7 @@ function LoadedExperimentGraph({ graph }: { graph: ExperimentGraph }) {
             viewBox={viewBoxFor(state.view, box)}
             preserveAspectRatio="xMidYMid meet"
             role="application"
-            aria-label={`Experiment graph. ${drawnLabel}. Use arrow keys to move between nodes and Enter to open one.`}
+            aria-label={`Experiment graph. ${canvasSummary} Use arrow keys to move between nodes and Enter to open one.`}
             onPointerDown={onSurfacePointerDown}
             onPointerMove={onSurfacePointerMove}
             onPointerUp={endDrag}
@@ -689,6 +830,11 @@ function CanvasNode({
           aria-hidden="true"
         />
       )}
+      {/* The label was DROPPED for collision, not because the node is nameless.
+          `aria-label` above already names it to assistive tech; this makes the
+          same name reachable with a pointer, which is what the counts block's
+          "hover or select the node to read its name" promises. */}
+      {!showLabel && <title>{node.label}</title>}
       {showLabel && (
         <text
           className="expgraph-node-label"

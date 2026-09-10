@@ -166,7 +166,7 @@ test.describe('R4 · export, repaired and refused', () => {
     expect((await server.read(SEED.partial)).pendingIds, 'the repair must close both questions').toEqual([]);
 
     // Back to the gate through the screen's own route.
-    await page.getByRole('button', { name: 'Go to Ready to Export →' }).click();
+    await page.getByRole('button', { name: 'Go to Review Export Readiness →' }).click();
     await expect(page.locator('.preexport-ready')).toBeVisible();
     await expect(exportButton(page)).toBeEnabled();
     await exportButton(page).click();
