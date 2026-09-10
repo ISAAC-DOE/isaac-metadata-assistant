@@ -131,10 +131,39 @@ export const CAPTURE_COPY = {
   voiceUnsupported:
     'This browser does not offer audio recording, so the voice controls are not ' +
     'shown. Typing or pasting a transcript below does the same work.',
+  /*
+   * R1b — CORRECTED, INDEPENDENT REVIEW, TWICE. This used to end "This
+   * application declares no upload endpoint for it to reach," which is
+   * false: `POST /api/uploads` IS declared (`apps/api/isaac_api/routes.py`).
+   *
+   * The FIRST correction replaced it with "...so there is nowhere for it to
+   * be sent even by mistake" — still false, in a subtler way an independent
+   * review caught: that is an application-wide existential negative inferred
+   * from a fact about ONE route. Refusing `/uploads` establishes nothing
+   * about `/api/transcription`, whose `audio_ref` field is a free `str` with
+   * no length or content constraint (`routes.py:14671`) — nothing but
+   * `isinstance` stops a future bug in this panel from putting a data URL
+   * there. "Even by mistake" is exactly a claim about what a mistake could
+   * do, and this build does not support it.
+   *
+   * This version instead states the ONE fact that genuinely is
+   * application-wide, and that `/api/transcription`'s own description
+   * already asserts about itself: "this application declares no multipart
+   * form anywhere" (`routes.py:14620`). Paired with the one upload route's
+   * unconditional refusal, that is the strongest true claim available: no
+   * multipart body exists anywhere in this build, and the one route that
+   * might otherwise take one refuses outright — so there is nowhere in this
+   * capture path for audio to be sent, full stop, with no route-specific
+   * inference needed. See `__tests__/upload-claim-parity.test.tsx` §5, which
+   * bans the retired existential-negative shape across all five upload-claim
+   * sites and pins the affirmative claim tolerantly.
+   */
   voiceAudioHandling:
     'Audio stays in this tab’s memory. It is never uploaded, never written to ' +
     'disk, and is discarded when you clear it, leave this record, or reload the ' +
-    'page. This application declares no upload endpoint for it to reach.',
+    'page. This application declares no multipart form anywhere, and its one ' +
+    'upload route refuses every request outright — so nothing in this capture ' +
+    'path has anywhere to send it.',
 
   // -- primary/secondary controls, per voice state --------------------------
   voiceRecord: 'Start Recording',

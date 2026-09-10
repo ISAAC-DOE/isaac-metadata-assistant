@@ -15,9 +15,18 @@ measurement is the design. Three of the four parts were already here:
 
 What was genuinely absent is exactly one thing: **the valued half of a proposal did
 not survive the request.** ``providers/extraction.py``'s ``FieldCandidate`` is a
-valued proposal that is deliberately never stored, and there was no
-accept-a-stored-value operation anywhere. :class:`IngestionProposal` is the
-destination that now exists.
+valued proposal that ~~is deliberately never stored~~ — **CORRECTED 2026-09-10:
+false of this type in general, since 2026-09-03.** ``transcript_capture.py``
+imports this exact ``FieldCandidate`` (not a lookalike), and ``routes.py``'s
+``_mint_transcript_proposals`` now stores ``proposed_value=candidate.proposed_value``
+into a durable, OPEN :class:`IngestionProposal`, inside the same record lock and
+``save_versioned`` as the notes that cite it. The sentence remains true only of a
+``FieldCandidate`` the ``capture_extraction`` provider seam produces on its own
+path — that seam is still unconsumed by any route, by design (see
+``providers/extraction.py``'s module docstring and ``transcript_capture.py``'s own
+explanation of why it is deliberately NOT that seam). There was no
+accept-a-stored-value operation anywhere before this module. :class:`IngestionProposal`
+is the destination that now exists.
 
 WHY A SIBLING TYPE AND NOT A FIELD ON ``Note``
 ==============================================

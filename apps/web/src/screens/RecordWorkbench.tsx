@@ -424,6 +424,7 @@ export function RecordWorkbench() {
       activity={session.activity}
       proposalActivity={session.proposalActivity}
       runActivity={session.runActivity}
+      notesActivity={session.notesActivity}
       agentContext={session.context}
       agentDegraded={session.degraded}
       onManualRefresh={bundle.reload}
@@ -501,6 +502,7 @@ function LoadedWorkbench({
   activity,
   proposalActivity,
   runActivity,
+  notesActivity,
   agentContext,
   agentDegraded,
   onManualRefresh,
@@ -536,6 +538,18 @@ function LoadedWorkbench({
    * which is computed against the run list's own floor for precisely this.
    */
   runActivity: RecordChangeSummary | null;
+  /**
+   * THE SAME FEED AGAIN, ASKED WHETHER THE NOTES LIST'S OWN READ IS STALE — a FOURTH
+   * prop, for `runActivity`'s reason: `UnmappedNotesPanel` self-fetches
+   * (`GET .../notes`), and a record bundle refetch adopts none of it.
+   *
+   * IT IS A DELIBERATELY IMPRECISE SIGNAL — see `useRecordSession.notesActivity` for
+   * why (no dedicated `note` change-feed kind exists; this rides on the record's own
+   * `experiment` entry, which also fires for a title edit, a run edit or a proposal
+   * act). The panel bounds the cost to at most one redundant read per such event,
+   * never zero of them.
+   */
+  notesActivity: RecordChangeSummary | null;
   agentContext: AgentContext | undefined;
   agentDegraded: boolean;
   onManualRefresh: () => void;
@@ -1100,7 +1114,7 @@ function LoadedWorkbench({
             `apps/web/e2e/mutation/proposals.spec.ts`.
           */}
           <TranscriptCapturePanel experimentId={id} />
-          <UnmappedNotesPanel experimentId={id} />
+          <UnmappedNotesPanel experimentId={id} activity={notesActivity} />
           <IngestionProposalsPanel experimentId={id} activity={proposalActivity} />
         </section>
       )}

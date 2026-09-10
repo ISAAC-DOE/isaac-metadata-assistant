@@ -767,21 +767,41 @@ test.describe('two scientists, two real browsers, one record', () => {
         ).toBeTruthy();
 
         /*
-         * ── B RELOADS ITS OWN PAGE HERE, AND THAT IS A MEASURED PRODUCT FINDING
-         * ── RATHER THAN A CONVENIENCE ────────────────────────────────────────
+         * ── B RELOADS ITS OWN PAGE HERE, AND THAT WAS A MEASURED PRODUCT FINDING
+         * ── RATHER THAN A CONVENIENCE, ON 2026-09-03 ────────────────────────────
          *
-         * `UnmappedNotesPanel` fetches the record's notes ONCE per mount and takes no
-         * live-refresh input at all: its props are `{ experimentId }` and nothing
+         * ~~`UnmappedNotesPanel` fetches the record's notes ONCE per mount and takes
+         * no live-refresh input at all: its props are `{ experimentId }` and nothing
          * else, so it has no equivalent of the `activity` summary
-         * `IngestionProposalsPanel` receives. Finalizing a transcript stores notes and
-         * proposals in the SAME save, and on this screen the proposals appear on their
-         * own while the notes — sitting one panel above them — do not, until the page
-         * is reloaded. Measured: without this reload the card for a note the server is
-         * already serving is simply not in the DOM (`element(s) not found`).
+         * `IngestionProposalsPanel` receives.~~ — **CORRECTED 2026-09-10: the panel
+         * now takes a fourth prop, `activity` (`RecordChangeSummary | null`, from
+         * `useRecordSession.notesActivity`), threaded through `RecordWorkbench`
+         * exactly as `proposalActivity`/`runActivity` are, and silently reloads its
+         * notes when that summary's record revision advances past its own floor.**
+         * The signal is DELIBERATELY IMPRECISE: there is no `note` kind on the wire
+         * (`change_feed.py`'s `RECORD_COLLECTORS` serves exactly `experiment`, `run`,
+         * `proposal`), so it rides on the record's own `experiment` entry and would
+         * also fire on, e.g., a title edit — see `notesActivity`'s own doc comment in
+         * `useRecordSession.ts`. It is not scoped to "a note changed".
+         *
+         * Finalizing a transcript stores notes and proposals in the SAME save, and on
+         * 2026-09-03 the proposals appeared on their own while the notes — sitting one
+         * panel above them — did not, until the page was reloaded. Measured then:
+         * without this reload the card for a note the server was already serving was
+         * simply not in the DOM (`element(s) not found`).
+         *
+         * WHETHER THE RELOAD BELOW IS NOW STRICTLY NECESSARY IS UNMEASURED, NOT
+         * ASSUMED CLOSED. The live refresh above depends on the change-feed poller
+         * observing this same save on its own interval, which this test does not wait
+         * out before the assertions right after the reload; the reload keeps this
+         * step deterministic and fast regardless. Do not remove it on the strength of
+         * this comment — that would need its own measurement, left as a named
+         * follow-up rather than acted on here.
          *
          * It is B's page, not A's. A's document is untouched, so every "without a
-         * reload" claim about A in steps 4-8 is unaffected — and this reload is itself
-         * an honest depiction of what a scientist has to do today to reach the second
+         * reload" claim about A in steps 4-8 is unaffected — and this reload is still
+         * an honest depiction of what a scientist doing the same thing today, faster
+         * than one poll interval, would need to do to reach the second
          * proposal-producing surface after using the first.
          */
         await bPage.reload();

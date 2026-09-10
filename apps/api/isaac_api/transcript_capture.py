@@ -51,10 +51,16 @@ case is recorded in :data:`AMBIGUITY_POLICY`:
 
 **(4) Scientist-entered text is never silently discarded.** EVERY segment of a
 finalized transcript becomes an Unmapped Note, including the segments that DID
-produce a candidate. That is the deliberate, slightly redundant choice: a
-candidate is not stored anywhere, so if notes were captured only for the unmatched
-segments, then rejecting a candidate — or failing to accept one — would destroy the
-words it came from. Capturing every segment makes text survival independent of
+produce a candidate. That is the deliberate, slightly redundant choice: ~~a
+candidate is not stored anywhere~~ — **CORRECTED 2026-09-10: since the transcript
+producer shipped, a candidate's VALUE is stored, as the ``proposed_value`` of a
+durable ``IngestionProposal`` minted by ``routes._mint_transcript_proposals`` in the
+same write as these notes. The candidate object itself is still stored nowhere, and
+the reasoning below is UNCHANGED and is why: a proposal is not a durable home for
+the scientist's words, because it can be rejected, superseded or withdrawn, and
+neither of those acts returns the sentence it came from** — so if notes were
+captured only for the unmatched segments, then rejecting a candidate — or failing to
+accept one — would destroy the words it came from. Capturing every segment makes text survival independent of
 what the reader proposed and of whether any acceptance ever succeeded.
 
 WHY THE PROPOSED VALUE IS ALWAYS A QUOTE

@@ -50,6 +50,18 @@
  * remains the backstop for newly written data claims. It also reads
  * `apps/web/src` only: backend-served copy (`routes.py`'s refusal reason, the
  * OpenAPI descriptions the Endpoint Explorer renders) is invisible to it.
+ *
+ * A FIFTH SITE, ADDED LATER, AND DELIBERATELY KEPT OUT OF §§2–4. Found by
+ * review: `lib/transcriptCaptureContent.ts`'s `voiceAudioHandling` claimed
+ * "This application declares no upload endpoint for it to reach" — false;
+ * `POST /api/uploads` IS declared (`apps/api/isaac_api/routes.py`). That is a
+ * DIFFERENT false-claim shape from the four above — an existence claim about
+ * the upload ROUTE, not a reading claim about the validator or the CSV
+ * preview — and the sentence is not about either reader at all, so forcing it
+ * into `SITES`/`SHARED_CLAIM` would fail on correct copy rather than catch
+ * anything. §5 below pins the narrower, real invariant it needs: no site may
+ * claim the upload route does not exist; the true and stronger claim is that
+ * the one route that exists refuses every request it gets.
  */
 
 import { existsSync, readFileSync } from 'node:fs';
@@ -64,6 +76,7 @@ import { LoadMaterials } from '../screens/LoadMaterials';
 import { ConnectYourAgentPanel } from '../screens/settings/ConnectYourAgent';
 import { settingsConcepts } from '../lib/settingsContent';
 import { MCP_CAPABILITIES_REFUSED } from '../lib/mcpConnectContent';
+import { CAPTURE_COPY } from '../lib/transcriptCaptureContent';
 
 afterEach(cleanup);
 
@@ -418,5 +431,187 @@ describe('R1b §4 · the guard rejects the exact strings that shipped', () => {
     ]) {
       expect(absoluteClaims(scoped), scoped).toEqual([]);
     }
+  });
+});
+
+// --- §5 no site anywhere claims the upload ROUTE does not exist -------------
+//
+// `lib/transcriptCaptureContent.ts`'s `voiceAudioHandling` is about audio, not
+// about the validator or the CSV preview, so it does not belong in `SITES`/
+// `SHARED_CLAIM` above (§2 requires naming both readers, which an
+// audio-privacy sentence has no business doing) — see the file header. The
+// false shape it shipped was an EXISTENCE claim about the upload route
+// ("declares no upload endpoint for it to reach"), not a reading claim, so it
+// needs its own ban and its own polarity proof rather than reuse of §3/§3b,
+// which are about a different sentence entirely.
+//
+// THE BAN ITSELF NEEDS NO READER VOCABULARY, so unlike the claim-parity check
+// above it is not scoped to one site. It runs over all FIVE surfaces that
+// discuss the upload path (the original four `SITES` plus the capture site),
+// AND over every string value `CAPTURE_COPY` currently holds, so a future key
+// making the same mistake is caught without anyone remembering to list it.
+//
+// PATTERN HISTORY: the first version of this ban shipped with two patterns
+// that missed 7 of 8 plausible phrasings an independent review tried against
+// it — including a one-word edit ("route" for "endpoint") of the very
+// sentence it was written to catch. The widened set below was re-measured
+// against the same eight phrasings; see the probe at the bottom of this
+// section, which is a real test and fails if any of the eight goes uncaught.
+
+function captureVoiceAudioHandling(): string {
+  return CAPTURE_COPY.voiceAudioHandling;
+}
+
+/**
+ * Four shapes of "the upload route does not exist / cannot receive
+ * anything", covering declarative ("X declares no route"), existential
+ * ("there is no route"), passive ("no route is declared"), and capability
+ * ("nothing can receive an upload") phrasings. None of the four needs the
+ * word "upload" to precede "endpoint/route/api" — `(upload\s+)?` is optional
+ * throughout, and endpoint/route/api all take an optional plural `s?`.
+ */
+const ABSOLUTE_NO_ENDPOINT: [string, RegExp][] = [
+  [
+    'declares/has/exposes no (upload) endpoint/route/api',
+    /\b(declares|declared|has|exposes|expose)\s+no\s+(upload\s+)?(endpoint|route|api)s?\b/i,
+  ],
+  [
+    'there is/are no (upload) endpoint/route/api',
+    /\bthere\s+(is|are)\s+no\s+(upload\s+)?(endpoint|route|api)s?\b/i,
+  ],
+  [
+    'no (upload) endpoint/route/api is/are declared/exposed',
+    /\bno\s+(upload\s+)?(endpoint|route|api)s?\s+(is|are)\s+(declared|exposed)\b/i,
+  ],
+  [
+    'nothing/no-X can receive or accept an upload',
+    /\b(nothing|no\s+\S+)\b[^.,]{0,40}\b(receive|receives|accept|accepts)\b[^.,]{0,30}\bupload\b/i,
+  ],
+];
+
+/** The exact sentence that shipped, before this slice's first correction.
+ *  Kept verbatim as the primary polarity fixture. */
+const RETIRED_CAPTURE_ABSOLUTE =
+  'Audio stays in this tab’s memory. It is never uploaded, never written to ' +
+  'disk, and is discarded when you clear it, leave this record, or reload the ' +
+  'page. This application declares no upload endpoint for it to reach.';
+
+/**
+ * Eight plausible future phrasings of the same false existence claim, used
+ * by an independent review to show the first pattern set caught only one of
+ * them. Re-measured here on every change to `ABSOLUTE_NO_ENDPOINT` — this is
+ * the "re-run the probe yourself" requirement, not a one-time note.
+ */
+const PLAUSIBLE_NO_ENDPOINT_PHRASINGS = [
+  'There is no endpoint here that accepts an upload.',
+  'This application exposes no route that accepts a file.',
+  'Nothing in this build can receive an upload.',
+  'No upload API is declared.',
+  'This application declares no endpoint for uploads.',
+  'The application has no upload endpoints.',
+  'There is no upload route for it to reach.',
+  'This application declares no upload route.',
+];
+
+function noEndpointClaims(text: string): string[] {
+  return ABSOLUTE_NO_ENDPOINT.filter(([, pattern]) => pattern.test(text)).map(([label]) => label);
+}
+
+describe('R1b §5 · no upload-claim site, and no CAPTURE_COPY string, claims the route does not exist', () => {
+  it('flags the retired sentence as an absolute no-endpoint claim', () => {
+    expect(
+      noEndpointClaims(RETIRED_CAPTURE_ABSOLUTE),
+      'the retired sentence ("This application declares no upload endpoint for ' +
+        'it to reach") shipped false — POST /api/uploads is declared — and this ' +
+        'assertion is the polarity proof: if it fails, the pattern set below has ' +
+        'gone quiet and would not have caught the defect it was written for.',
+    ).not.toHaveLength(0);
+  });
+
+  it('the eight-phrasing probe: every plausible future false phrasing is caught', () => {
+    const missed = PLAUSIBLE_NO_ENDPOINT_PHRASINGS.filter((s) => noEndpointClaims(s).length === 0);
+    expect(
+      missed,
+      'one or more plausible false phrasings of "the upload route does not ' +
+        'exist" is not caught by ABSOLUTE_NO_ENDPOINT. Widen the pattern set — ' +
+        'do not narrow this list to make the test pass.',
+    ).toEqual([]);
+  });
+
+  it('the corrected capture copy does not trip any pattern', () => {
+    expect(noEndpointClaims(captureVoiceAudioHandling()), captureVoiceAudioHandling()).toEqual([]);
+  });
+
+  describe('applies to all five upload-claim surfaces, not just the capture site', () => {
+    const ALL_FIVE: [string, () => string][] = [...SITES, ['transcript capture: voiceAudioHandling', captureVoiceAudioHandling]];
+    for (const [site, text] of ALL_FIVE) {
+      it(`${site} does not claim the route does not exist`, () => {
+        // Hoisted to ONE call: `text()` renders for three of the five sites,
+        // and `cleanup` runs between TESTS, not between calls — a second call
+        // in the same test (e.g. as a would-be assertion message) renders the
+        // site twice with no cleanup in between, which trips `getByRole`/
+        // `getByText`'s "multiple elements found" as a false failure. Same
+        // harness artefact §4b already documents for `policyTabText`.
+        const rendered = text();
+        expect(noEndpointClaims(rendered), rendered).toEqual([]);
+      });
+    }
+  });
+
+  it('no string value anywhere in CAPTURE_COPY claims the route does not exist', () => {
+    const offenders: string[] = [];
+    for (const [key, value] of Object.entries(CAPTURE_COPY)) {
+      if (typeof value !== 'string') continue; // functions (e.g. summaryStored) are excluded — see below
+      if (noEndpointClaims(value).length > 0) offenders.push(key);
+    }
+    expect(
+      offenders,
+      'a CAPTURE_COPY string other than voiceAudioHandling now claims the ' +
+        'upload route does not exist. Note: string-returning FUNCTIONS in ' +
+        'CAPTURE_COPY (summaryStored, runTargetsRun, etc.) are not scanned by ' +
+        'this loop, because it iterates typeof === "string" values only — a ' +
+        'future key of that shape needs its own assertion.',
+    ).toEqual([]);
+  });
+});
+
+/**
+ * §5b — the affirmative claim, pinned TOLERANTLY (per `SHARED_CLAIM`'s own
+ * rule at :222, "What is pinned is the CLAIM, not the sentence"). The ban
+ * above is satisfied by deleting the sentence outright, so an affirmative
+ * pin is still needed to keep the reassurance from being silently dropped —
+ * but a literal-phrase pin (`/upload route/i` + `/refuses every request/i`)
+ * would fail a truthful reword like "its single upload endpoint declines all
+ * requests", which the independent review used as its own example. Only the
+ * capture site makes this specific two-part claim (no multipart form
+ * anywhere; the one route refuses everything), so — unlike the ban above —
+ * this is scoped to that one site rather than run over all five.
+ */
+const CAPTURE_AFFIRMATIVE_CLAIM: [string, RegExp][] = [
+  [
+    'no multipart form exists anywhere in this application',
+    /\bno\s+multipart\s+form\b[^.,]{0,40}\b(anywhere|declared|exists)\b/i,
+  ],
+  [
+    'the one upload route/endpoint refuses or declines every/all requests',
+    /\bupload\s+(route|endpoint)\b[^.,]{0,60}\b(refuses|refused|reject(s)?|declin(es|ed)|den(ies|ied))\b[^.,]{0,30}\b(every|all|any)\b[^.,]{0,20}\brequests?\b/i,
+  ],
+];
+
+describe('R1b §5b · the capture site states the affirmative claim, tolerant of wording', () => {
+  it.each(CAPTURE_AFFIRMATIVE_CLAIM)('states %s', (_what, pattern) => {
+    expect(captureVoiceAudioHandling()).toMatch(pattern);
+  });
+
+  it('a truthful reword still satisfies the tolerant pattern (regression fixture)', () => {
+    const reword =
+      'Audio stays in this tab’s memory. This application declares no multipart ' +
+      'form anywhere, and its single upload endpoint declines all requests, so ' +
+      'nothing in this capture path has anywhere to send it.';
+    for (const [, pattern] of CAPTURE_AFFIRMATIVE_CLAIM) {
+      expect(reword).toMatch(pattern);
+    }
+    // ...and the reword must still pass the ban above.
+    expect(noEndpointClaims(reword)).toEqual([]);
   });
 });

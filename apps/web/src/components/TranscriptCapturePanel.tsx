@@ -2,23 +2,34 @@
  * Transcript capture — the scientist workflow, and a voice surface that tells the
  * truth about itself.
  *
- * PR-D (2026-09-03) MADE THIS A STATE-DRIVEN INTERFACE. Nine states, each with ONE
- * clear primary action, matching `ia-brief.md` §6's required shape (which itself
- * matches the orchestrating brief's own enumeration). Three are new relative to the
- * PR-A build this replaces (marked NEW below); the rest keep their existing meaning
- * and most keep their existing copy verbatim.
+ * PR-D (2026-09-03) MADE THIS A STATE-DRIVEN INTERFACE. The table below has NINE
+ * ROWS, matching `ia-brief.md` §6's required shape (which itself matches the
+ * orchestrating brief's own enumeration). Three are new relative to the PR-A build
+ * this replaces (marked NEW below); the rest keep their existing meaning and most
+ * keep their existing copy verbatim.
  *
- * | State                  | Shown                                  | Primary                | Secondary                                  | Announcement (`role="status"`) |
- * |-------------------------|-----------------------------------------|-------------------------|----------------------------------------------|----------------------------------|
- * | idle                    | run selector (or its own empty state), textarea, seam status | Start Recording | run selector; textarea; Create a Run (0 runs only) | "Not recording." |
- * | requesting-permission NEW| Start button disabled + busy-labeled    | *(none — busy)*         | textarea remains usable                        | "Requesting microphone access…" |
- * | recording                | live indicator + elapsed time           | Stop Recording          | textarea remains editable in parallel          | "Recording. Audio is being held in this tab." |
- * | held                     | Request/Discard both enabled            | Type What Was Said      | Request a Transcript; Discard Audio            | "Recording stopped. Audio is held in this tab and has not been sent." |
- * | permission-denied        | same as idle + persistent notice        | Type What Was Said      | Try Recording Again                            | `voicePermissionRefused` (same sentence, persistent AND announced once) |
- * | unsupported               | voice controls absent; textarea only    | *(typing is the only path)* | none                                        | `voiceUnsupported` (static, not live) |
- * | processing NEW           | Finalize disabled + busy-labeled; the rest of the form disables | *(none — busy, no cancel)* | none | "Reading transcript…" |
- * | proposals-ready          | a compact summary card, replacing the old inline candidate list; text stays in the box | Review N Proposals | Capture Another Note; Discard This Transcript | "Finalized. N segment(s) stored…, M value(s) proposed." |
- * | recoverable-error        | the specific `FALLBACK.*` sentence      | Try Again (re-invokes the same action) | every unaffected control stays live | the `FALLBACK.*` string, reused verbatim |
+ * NINE ROWS IS NOT NINE STATES, AND THIS HEADER USED TO SAY IT WAS. `type
+ * VoiceState` below has exactly SIX members; the other three rows are DERIVED
+ * booleans computed from `busyKind`, `reading` and `error`/`retryTag`. The
+ * distinction is load-bearing rather than pedantic: the six are mutually exclusive
+ * by construction (`voice` is one value), while a derived row can be true AT THE
+ * SAME TIME as one of the six — a reader can be recording while a finalize error
+ * is on screen. That is exactly why the primary-action slot has to be COMPUTED in
+ * priority order (see `showErrorPrimary` and its comment below) and cannot be read
+ * off this table row by row. The file conceded the mismatch in that comment while
+ * this header still claimed nine states; the `Kind` column is the fix.
+ *
+ * | State                  | Kind | Shown                                  | Primary                | Secondary                                  | Announcement (`role="status"`) |
+ * |-------------------------|------|-----------------------------------------|-------------------------|----------------------------------------------|----------------------------------|
+ * | idle                    | `VoiceState` | run selector (or its own empty state), textarea, seam status | Start Recording | run selector; textarea; Create a Run (0 runs only) | "Not recording." |
+ * | requesting-permission NEW| `VoiceState` | Start button disabled + busy-labeled    | *(none — busy)*         | textarea remains usable                        | "Requesting microphone access…" |
+ * | recording                | `VoiceState` | live indicator + elapsed time           | Stop Recording          | textarea remains editable in parallel          | "Recording. Audio is being held in this tab." |
+ * | held                     | `VoiceState` | Request/Discard both enabled            | Type What Was Said      | Request a Transcript; Discard Audio            | "Recording stopped. Audio is held in this tab and has not been sent." |
+ * | permission-denied        | `VoiceState` | same as idle + persistent notice        | Type What Was Said      | Try Recording Again                            | `voicePermissionRefused` (same sentence, persistent AND announced once) |
+ * | unsupported               | `VoiceState` | voice controls absent; textarea only    | *(typing is the only path)* | none                                        | `voiceUnsupported` (static, not live) |
+ * | processing NEW           | DERIVED: `busyKind === 'finalize'` (`formLocked`) | Finalize disabled + busy-labeled; the rest of the form disables | *(none — busy, no cancel)* | none | "Reading transcript…" |
+ * | proposals-ready          | DERIVED: `reading !== null && !formLocked` | a compact summary card, replacing the old inline candidate list; text stays in the box | Review N Proposals | Capture Another Note; Discard This Transcript | "Finalized. N segment(s) stored…, M value(s) proposed." |
+ * | recoverable-error        | DERIVED: `error !== null && retryTag !== null` | the specific `FALLBACK.*` sentence      | Try Again (re-invokes the same action) | every unaffected control stays live | the `FALLBACK.*` string, reused verbatim |
  *
  * THREE THINGS THIS COMPONENT WILL NOT DO
  * =======================================
@@ -99,7 +110,8 @@ import { DiscardStaged } from './DiscardStaged';
 import { DISCARD_COPY } from '../lib/discardContent';
 import './transcriptCapture.css';
 
-/** The nine states this panel's header table names. */
+/** The SIX voice states — the six `VoiceState` rows of this panel's header table.
+ *  The table's other three rows are derived, not members here; see the header. */
 type VoiceState =
   | 'unsupported'
   | 'idle'
@@ -264,9 +276,89 @@ export function TranscriptCapturePanel({ experimentId }: { experimentId: string 
   const runSelectRef = useRef<HTMLSelectElement | null>(null);
   const elapsedIntervalRef = useRef<number | null>(null);
   const loadGenerationRef = useRef(0);
+  /**
+   * THE RECORD GENERATION, bumped whenever this component is told to show a
+   * different record. Every `await` here is a place that can happen.
+   *
+   * WHAT THIS ACTUALLY RESCUES, MEASURED IN REAL CHROMIUM — THE PENDING-
+   * PERMISSION ORPHAN. Press Start Recording and leave the record before the
+   * browser resolves the permission prompt. The panel unmounts (see the reset
+   * effect below for why), its cleanup runs `dropAudio()` and finds
+   * `streamRef.current === null` because no stream exists yet, and THEN
+   * `getUserMedia` resolves into the closure of a dead component: it assigns
+   * the stream and calls `recorder.start()`. Nothing holds a reference to
+   * either, so nothing can ever stop them. Measured at `0650bd46` with an
+   * instrumented `MediaStreamTrack.prototype.stop` and a real fake audio
+   * device: the track stayed `live` for a full 15-second poll with ZERO
+   * `stop()` calls. With the guard in `startRecording` it is `ended`, stopped
+   * by the stale-generation branch. Spec:
+   * `apps/web/e2e/mutation/capture-microphone.spec.ts`.
+   *
+   * WHY THE GENERATION BUMPS AT ALL WHEN THE PANEL IS ABOUT TO UNMOUNT, which
+   * is the non-obvious part: react-router commits the new `:id` BEFORE the
+   * bundle hook sets `loading`, so there is exactly one commit in which this
+   * panel is mounted carrying the NEW `experimentId`. That commit runs the
+   * reset effect and bumps this counter, which is what the already-in-flight
+   * `getUserMedia` then compares itself against.
+   *
+   * THE OTHER FOUR PATHS ARE HAZARD-CLASS DEFENCE, NOT REPRODUCED DEFECTS —
+   * stated rather than implied; see {@link recordScope}.
+   */
+  const recordGenerationRef = useRef(0);
+  /**
+   * Mirrors `voice` for the record-change reset below, which must READ the
+   * current voice to decide whether to keep it — but must NOT re-run when voice
+   * changes, or every stop/discard would drop the audio a second time. A ref
+   * kept in sync by its own effect is how it reads without depending.
+   */
+  const voiceRef = useRef<VoiceState>(voice);
+  /** The record the reset effect below last ran for, so it can tell a genuine
+   *  record CHANGE from its own first run. See that effect for why mount must
+   *  not be treated as a change. */
+  const lastRecordRef = useRef(experimentId);
 
   /** `processing` — the ONE state that locks the whole form, not only its own button. */
   const formLocked = busyKind === 'finalize';
+
+  /**
+   * OPENS A RECORD SCOPE FOR ONE ASYNCHRONOUS ACTION. Call it BEFORE the first
+   * `await`; the predicate it returns answers "is this still the record I was
+   * started for?" afterwards. See {@link recordGenerationRef} for what goes
+   * wrong without it.
+   *
+   * ONE HELPER RATHER THAN FIVE COPIES, DELIBERATELY. The check is two lines,
+   * so four repetitions would not be long — but they would be four independent
+   * chances to capture the generation in the wrong place (after the `await`,
+   * where it always matches and the guard is inert), and an inert guard is
+   * indistinguishable from a working one until a record change is actually
+   * raced. Making "capture" and "compare" a single call means the mistake
+   * cannot be written: there is nowhere to put the capture except before the
+   * await, because the predicate does not exist until it has happened.
+   *
+   * `loadRuns` deliberately does NOT use this helper and inlines the same two
+   * lines instead: it is a `useCallback`, and depending on a function redefined
+   * every render would either break its memoisation or need an exhaustive-deps
+   * suppression. Refs need no dependency.
+   *
+   * WHAT EACH USE IS WORTH, MEASURED RATHER THAN ASSERTED. `startRecording`'s
+   * use fixes a defect a real browser reproduces (see
+   * {@link recordGenerationRef}). The four uses in `requestTranscript`,
+   * `finalize`, `createRun` and `loadRuns` are HAZARD-CLASS DEFENCE and are
+   * NOT known to fix anything reachable in this application: measured in
+   * jsdom through the caller's real mount sequence, a record switch unmounts
+   * this panel, React 18 no-ops a `setState` on an unmounted component, and
+   * the next record gets a FRESH instance — so a late response cannot reach
+   * it. Removing `requestTranscript`'s guard and re-running that measurement
+   * left the next record's transcript box empty either way. They are kept
+   * because a stale callback writing into a live component is a real hazard
+   * class, the guard costs one comparison, and a future caller that keeps this
+   * panel mounted would make every one of them load-bearing at once. They are
+   * not kept because they were observed to fix something.
+   */
+  function recordScope(): () => boolean {
+    const opened = recordGenerationRef.current;
+    return () => recordGenerationRef.current === opened;
+  }
 
   /* ---- elapsed timer, owned entirely here, cleared on every exit from `recording` --- */
 
@@ -314,9 +406,73 @@ export function TranscriptCapturePanel({ experimentId }: { experimentId: string 
     stopElapsedTimer();
   }, [stopElapsedTimer]);
 
-  // Unmount and record change both drop audio. Leaving a record must not leave a
-  // live microphone or a buffer behind, and the panel says the audio is gone.
+  /*
+   * UNMOUNT DROPS AUDIO — and ONLY unmount, because `dropAudio`'s identity is
+   * stable (its one dependency, `stopElapsedTimer`, is `useCallback(…, [])`) and
+   * `experimentId` appears nowhere in that chain.
+   *
+   * THIS IS THE EFFECT THAT ACTUALLY RELEASES THE MICROPHONE WHEN A SCIENTIST
+   * LEAVES A RECORD IN THE APPLICATION, and it did so before this slice existed.
+   * `RecordWorkbench` mounts this panel only while its bundle has data, so a
+   * record switch deletes the subtree and lands here — captured in real Chromium
+   * inside `commitPassiveUnmountInsideDeletedTreeOnFiber`. The record-change
+   * reset below is a SECOND, caller-independent path to the same guarantee, not
+   * the one an in-app switch takes. An earlier version of this comment claimed
+   * both were needed for that; see the reset effect for the correction.
+   *
+   * The one case unmount CANNOT cover is a `getUserMedia` that has not resolved
+   * yet: there is no stream to stop when this runs. That gap is closed by the
+   * generation guard in `startRecording`, not here.
+   */
   useEffect(() => () => dropAudio(), [dropAudio]);
+
+  /*
+   * Keeps {@link voiceRef} current, so the two resets below can READ the voice
+   * without DEPENDING on it — depending on it would re-run them on every
+   * stop/discard and drop the audio a second time.
+   *
+   * AN EARLIER VERSION OF THIS COMMENT CLAIMED THE DECLARATION ORDER WAS
+   * LOAD-BEARING ("declared BEFORE the record-change reset so that…"). An
+   * independent review MEASURED that false: moving this effect below the reset
+   * leaves the whole suite green, and it does so for a reason, not by luck.
+   * The order would only matter if `voice` and `experimentId` changed in the
+   * SAME commit, and they cannot: `voice` is this component's own state and
+   * `experimentId` is a prop, so a commit that changes the record carries no
+   * pending voice change and the ref is already correct whichever effect runs
+   * first. The order below is defensive habit, NOT a correctness requirement,
+   * and it is written down that way because a comment asserting a load-bearing
+   * invariant invites a future reader to build on one that does not exist.
+   */
+  useEffect(() => {
+    voiceRef.current = voice;
+  }, [voice]);
+
+  /**
+   * THE ONE PLACE THAT DECIDES WHICH VOICE STATES SURVIVE LEAVING.
+   *
+   * Both ways of leaving — changing record, and closing the panel — drop the
+   * audio, and both must then say something true about what is left. Four of
+   * the six states describe THIS session's audio (`idle`,
+   * `requesting-permission`, `recording`, `held`) and are meaningless once it
+   * is gone, so they return to `idle`. `unsupported` and `permission-denied`
+   * describe THE BROWSER AND ITS DEVICES, not the session: `unsupported` means
+   * no `MediaRecorder`/`getUserMedia` exists at all (resetting it would render
+   * a "Start Recording" button that cannot work), and `permission-denied`
+   * records a real `getUserMedia` refusal classified from an actual
+   * `DOMException`. Neither fact is changed by leaving, and asserting
+   * otherwise would be a guess. `permission-denied` keeps its own "Try
+   * Recording Again", so nothing is stuck.
+   *
+   * Shared by both callers so the two ways of leaving cannot drift apart —
+   * they already had, which is how a panel honest about changing record stayed
+   * dishonest about closing.
+   */
+  const resetVoiceAfterLeaving = useCallback(() => {
+    const left = voiceRef.current;
+    if (left === 'unsupported' || left === 'permission-denied') return;
+    setVoice('idle');
+    setVoiceLive(CAPTURE_COPY.voiceIdleLive);
+  }, []);
 
   /*
    * CLOSING THE PANEL RELEASES THE MICROPHONE — a deliberate act distinct from
@@ -324,10 +480,23 @@ export function TranscriptCapturePanel({ experimentId }: { experimentId: string 
    * `visibilitychange`). "Close Capture" does not unmount this component, only
    * its body, and the Stop/Discard controls and the recording live region all
    * live inside that body.
+   *
+   * I3, INDEPENDENT REVIEW — IT RELEASED THE MICROPHONE AND LEFT `voice` SAYING
+   * `recording`. This effect dropped the audio and never touched the state, so
+   * reopening the panel showed "Stop Recording", an elapsed indicator reading
+   * `Recording · 0:00`, and a live region still saying "Recording. Audio is
+   * being held in this tab." — with no stream, no recorder and no buffer behind
+   * any of it. That is the same defect class as leaving a record by navigating,
+   * one effect away: the panel would have been honest about one way of leaving
+   * and dishonest about the other. Nothing is announced by the reset, because
+   * the live region lives inside the body this branch has just unmounted.
    */
   useEffect(() => {
-    if (!open) dropAudio();
-  }, [open, dropAudio]);
+    if (!open) {
+      dropAudio();
+      resetVoiceAfterLeaving();
+    }
+  }, [open, dropAudio, resetVoiceAfterLeaving]);
 
   useEffect(() => {
     if (!audioRecordingAvailable()) setVoice('unsupported');
@@ -335,8 +504,21 @@ export function TranscriptCapturePanel({ experimentId }: { experimentId: string 
 
   /* ---- reads ------------------------------------------------------------- */
 
+  /*
+   * THE GUARD LIVES HERE, INSIDE THE READ, so all three callers get it from one
+   * place — the panel's own load, `finalize`'s refresh, and `createRun`'s.
+   *
+   * HAZARD-CLASS DEFENCE, AND SCOPED HONESTLY. If this panel is ever held
+   * mounted across a record change, a late response would show the wrong runs
+   * AND hand the next write another record's `If-Match` token — which is why
+   * the guard is worth its one comparison. But no caller in this application
+   * does that: a record switch unmounts the panel, so in the shipped app this
+   * has no defect to prevent. Do not cite it as a fix.
+   */
   const loadRuns = useCallback(async () => {
+    const opened = recordGenerationRef.current;
     const listed = await api.listRuns(experimentId);
+    if (recordGenerationRef.current !== opened) return;
     setRuns(listed.runs);
     setExperimentVersion(listed.experiment_version);
   }, [experimentId]);
@@ -345,10 +527,18 @@ export function TranscriptCapturePanel({ experimentId }: { experimentId: string 
    *  call — never a stale generation's error clobbering a newer attempt's state. */
   const loadRunsAttempt = useCallback(() => {
     const generation = ++loadGenerationRef.current;
+    const opened = recordGenerationRef.current;
     setError(null);
     setRetryTag(null);
     loadRuns().catch((cause: unknown) => {
       if (loadGenerationRef.current !== generation) return;
+      // TWO DIFFERENT GENERATIONS, AND BOTH ARE NEEDED. `loadGenerationRef`
+      // separates attempts at the SAME record, so an older attempt's failure
+      // cannot clobber a newer one's. This one separates RECORDS: `FALLBACK.runs`
+      // says "This record's runs could not be read", which would be a failure
+      // reported about a record the reader is no longer looking at — and it
+      // would leave a `Try Again` on screen for it.
+      if (recordGenerationRef.current !== opened) return;
       setError(mutationFailureCopy(cause, FALLBACK.runs));
       setRetryTag('runs');
     });
@@ -361,12 +551,156 @@ export function TranscriptCapturePanel({ experimentId }: { experimentId: string 
    * transcript the moment a reader collapsed the panel to scroll.
    */
   useEffect(() => {
+    /*
+     * MOUNT IS NOT A CHANGE, and skipping it is required rather than tidy. On
+     * mount every value this effect writes is ALREADY its initial value, so the
+     * writes are no-ops — except one. The `audioRecordingAvailable()` effect
+     * above is declared earlier and therefore runs earlier in the same commit;
+     * its `setVoice('unsupported')` and this effect's `setVoice('idle')` batch
+     * together, and the later write wins. Running on mount would silently undo
+     * unsupported-browser detection on every mount (measured: the voice controls
+     * reappeared in jsdom, which has no `MediaRecorder`). This effect exists for
+     * a record CHANGE; a ref is what lets it tell one from its own first run.
+     */
+    const changed = lastRecordRef.current !== experimentId;
+    lastRecordRef.current = experimentId;
+    if (!changed) return;
+
+    /*
+     * A RECORD CHANGE DROPS AUDIO — AND THE ORIGINAL JUSTIFICATION FOR THIS WAS
+     * WRONG, MEASURED IN A REAL BROWSER. It is corrected here rather than
+     * quietly reworded, because the wrong version was this slice's own headline
+     * claim and this file exists to stop exactly that.
+     *
+     * WHAT WAS CLAIMED: that `RecordWorkbench` renders this panel with no `key`
+     * under a single `/record/:id` route, so an in-app record switch re-uses
+     * this instance and left a live `MediaRecorder`, an open microphone track
+     * and the previous record's buffer in place. The hook-chain reading behind
+     * that was correct in every particular (`dropAudio`'s identity IS stable, so
+     * the unmount cleanup fires on unmount alone) and still reached the wrong
+     * conclusion, because it was a component-level reading of a SCREEN-level
+     * fact.
+     *
+     * WHAT IS MEASURED: `RecordWorkbench.tsx:397-412` renders the panel only
+     * while `bundle.status === 'data'`. A record switch refetches, status goes
+     * `'loading'`, and the whole subtree is DELETED — so this panel unmounts and
+     * the pre-existing unmount cleanup already released the microphone. In real
+     * Chromium at `0650bd46`, with an instrumented
+     * `MediaStreamTrack.prototype.stop`, the stop was captured inside
+     * `commitPassiveUnmountInsideDeletedTreeOnFiber`. THE IN-APP RECORD SWITCH
+     * WAS NEVER LEAKING. Spec: `apps/web/e2e/mutation/capture-microphone.spec.ts`
+     * — whose in-app-switch test passes at `0650bd46` too, and is labelled an
+     * invariant guard rather than a regression guard for that reason.
+     *
+     * WHY THE TEARDOWN STAYS ANYWAY, and it is not sunk cost. (1) The panel
+     * PUBLISHES the claim — `CAPTURE_COPY.voiceAudioHandling` says the audio is
+     * discarded when you "leave this record" — and a component should keep its
+     * own promise without depending on a screen it does not control to unmount
+     * it. A caller holding it mounted is not hypothetical in kind: every test in
+     * this file is one. (2) It is what BUMPS THE GENERATION, and that is load-
+     * bearing for a defect a real browser does reproduce — see
+     * {@link recordGenerationRef} for the pending-permission orphan, which is
+     * the one thing here that was measured broken and measured fixed.
+     *
+     * So: the bump must precede `dropAudio()`, and the honest summary of the
+     * two lines below is "this panel is correct independently of its caller,
+     * and this is where the generation moves" — not "this stops a leak".
+     *
+     * M3, INDEPENDENT REVIEW — `setElapsedSec(0)` USED TO BE HERE AND IS GONE.
+     * It was unobservable and its comment asserted an effect that cannot
+     * occur: `formatElapsed` renders only inside `voice === 'recording'`, and
+     * the only entry to `recording` is `startRecording`, which calls
+     * `startElapsedTimer()` — that zeroes the count in the same batch as
+     * `setVoice('recording')`, so no render can ever show a carried-over
+     * duration. A write nobody can see, defended by a comment describing an
+     * unreachable state, is worse than no write.
+     */
+    recordGenerationRef.current += 1;
+    dropAudio();
+
     setReading(null);
     setSelectedRun('');
     setText('');
     setError(null);
     setRetryTag(null);
-  }, [experimentId]);
+    /*
+     * The refusal card is cleared because its own words stop being true. It ends
+     * with `voiceAfterRefusal` — "The audio is still held in this tab and was not
+     * sent anywhere" — and the audio has just been dropped. Same reason for the
+     * finalize announcement: `reading` is reset one line above, so leaving the
+     * "Finalized. N segment(s) stored…" sentence in a live region would have it
+     * describing a reading whose card is no longer on screen, about a record the
+     * reader has left. Clearing to `''` announces nothing.
+     */
+    setRefusal(null);
+    setAnnouncement('');
+
+    /*
+     * I1 / I2, INDEPENDENT REVIEW — THREE MORE, AND THE OMISSION WAS THE POINT.
+     * An earlier version of this enumeration listed what it reset and why, and
+     * silently left these three out. In a comment whose whole value is being
+     * exhaustive, an omission reads as "considered and excluded" when it was
+     * "not considered". All three are reset, and the reasons are different:
+     *
+     * `busyKind` — under a caller that keeps this panel mounted, a record
+     * change during `finalize` leaves the next record's ENTIRE FORM LOCKED
+     * (submit reading "Reading…", `aria-busy="true"`, textarea and run select
+     * disabled) while nothing is being read for it. Observed through a
+     * rerender, which is not what this application does — the panel unmounts
+     * and the next record's form is new and unlocked — so this is the same
+     * caller-independence argument as the rest of this effect, not a shipped
+     * defect. It is safe to clear only because every asynchronous path above
+     * now checks `recordScope()` before writing, including in its `finally`;
+     * clearing it without those guards would unlock a form that a stale
+     * response could then write into.
+     *
+     * `runs` and `experimentVersion` — both are record-scoped facts, and the
+     * second is the token the next write sends as `If-Match`. Held mounted,
+     * the previous record's run list stays rendered until the new record's
+     * fetch resolves, so on a slow connection a scientist could select ANOTHER
+     * RECORD'S RUN on this record's screen while holding another record's
+     * version token — a wrong-target write rather than cosmetic staleness.
+     * Same scoping as `busyKind`: that window does not exist in the shipped
+     * app, because the panel unmounts.
+     *
+     * WHAT CLEARING `runs` COSTS, STATED RATHER THAN GLOSSED: for the length of
+     * B's fetch the panel renders its zero-runs branch, which tells the reader
+     * this record has no runs — not yet known to be true. That claim is NOT
+     * introduced here. `runs` initialises to `[]`, so every first open of every
+     * record already shows it for exactly the same window; this makes a record
+     * change behave like a fresh open instead of like another record. Removing
+     * it altogether needs a third "not read yet" rendering state and a string
+     * for it, which is a copy change outside this slice.
+     *
+     * DELIBERATELY NOT RESET, so the next reader knows these were considered:
+     * `capabilities` (a deployment fact — whether a transcription provider is
+     * configured does not vary by record); `open` and `guidanceOpen` (panel
+     * furniture belonging to the reader, not the record — and collapsing or
+     * re-expanding the panel under someone mid-navigation is exactly the churn
+     * the "never keyed on `open`" note above exists to prevent); and `voice`,
+     * which is not unconditional and is handled just below.
+     */
+    setBusyKind(null);
+    setRuns([]);
+    setExperimentVersion('');
+
+    /*
+     * WHICH VOICE STATES SURVIVE IS DECIDED IN ONE PLACE, shared with the
+     * close-the-panel path — see {@link resetVoiceAfterLeaving} for why
+     * `unsupported` and `permission-denied` are kept and the other four are not.
+     *
+     * ACCESSIBILITY, AND IT IS SPECIFIC TO THIS CALLER. The panel is OPEN here,
+     * so the live region is mounted and a change to its text really is spoken.
+     * The two preserved states keep their sentence unchanged, so a record change
+     * announces nothing at all for them — a live region announces a change, and
+     * there is none. The resetting branch says "Not recording.", which is true of
+     * the record now on screen; it deliberately does NOT reuse
+     * `voiceDiscardedLive` ("Audio discarded."), which would announce, to
+     * somebody who has just navigated, an event belonging to the record they
+     * left.
+     */
+    resetVoiceAfterLeaving();
+  }, [experimentId, dropAudio, resetVoiceAfterLeaving]);
 
   useEffect(() => {
     if (!open) return undefined;
@@ -409,8 +743,24 @@ export function TranscriptCapturePanel({ experimentId }: { experimentId: string 
     setVoiceLive(CAPTURE_COPY.voiceRequestingLive);
     setRefusal(null);
     setVoiceDenialReason(null);
+    // THE RECORD THIS REQUEST BELONGS TO. Anything after the `await` below must
+    // check it before touching shared state — see `recordGenerationRef`.
+    const isSameRecord = recordScope();
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      if (!isSameRecord()) {
+        /*
+         * The reader left this record while the browser was still deciding.
+         * Release THIS stream's own tracks and return without touching
+         * `streamRef`, `recorderRef` or any state: the record now on screen may
+         * have started its own recording in the meantime, and adopting — or
+         * dropping — anything on its behalf would be acting for a record that
+         * did not ask. Nothing is announced, because nothing happened to the
+         * record the reader is now looking at.
+         */
+        stream.getTracks().forEach((track) => track.stop());
+        return;
+      }
       streamRef.current = stream;
       const recorder = new MediaRecorder(stream);
       recorderRef.current = recorder;
@@ -432,6 +782,16 @@ export function TranscriptCapturePanel({ experimentId }: { experimentId: string 
       // "permission" refusal. ANNOUNCED ONCE, in the status region only — the
       // persistent notice below (`voice === 'permission-denied'`) renders the
       // SAME sentence as plain text, not a second live region.
+      if (!isSameRecord()) {
+        /*
+         * Same staleness check as the success path, and it matters MORE here:
+         * `dropAudio()` below operates on the SHARED refs, so a refusal arriving
+         * after the reader moved on would tear down a recording the NEW record
+         * had legitimately started. There is nothing to release — the browser
+         * granted no stream — so returning is the whole of the correct handling.
+         */
+        return;
+      }
       dropAudio();
       const reason = classifyGetUserMediaError(cause);
       setVoice('permission-denied');
@@ -468,15 +828,42 @@ export function TranscriptCapturePanel({ experimentId }: { experimentId: string 
     setRefusal(null);
     setError(null);
     setRetryTag(null);
+    /*
+     * C1 — RAISED AS "ONE RECORD'S DICTATION LANDS IN ANOTHER'S BOX", AND THAT
+     * IS NOT REACHABLE IN THIS APPLICATION. Recorded as a correction because it
+     * is the more serious claim and it was nearly committed.
+     *
+     * It was produced by re-rendering ONE panel instance with a new
+     * `experimentId`. No caller does that: a record switch unmounts the panel
+     * (see the record-change reset), React 18 no-ops a `setState` on an
+     * unmounted component, and the next record is served by a FRESH instance
+     * with its own empty `text`. Measured through the caller's real mount
+     * sequence, with this guard REMOVED, the next record's transcript box was
+     * still empty — so the guard is not what makes that true; the unmount is.
+     *
+     * KEPT AS HAZARD-CLASS DEFENCE, not as a fix. Were the panel ever held
+     * mounted across a record change, this line is what would stop a scientist
+     * being handed words they never said on this record — one Finalize away
+     * from being stored as its notes and proposals. That is worth one
+     * comparison. It is not worth a comment claiming it happens.
+     */
+    const isSameRecord = recordScope();
     try {
       // AN OPAQUE HANDLE, MINTED HERE, NAMING AUDIO THIS TAB HOLDS. No bytes, no
       // blob, no object URL that a server could dereference — the handle is
       // meaningful only to a provider that this deployment would have to be
       // configured with, and there is none.
       const result = await api.requestTranscription({ audioRef: `held-in-tab:${heldChunks}` });
+      if (!isSameRecord()) return;
       setText(result.text);
       transcriptRef.current?.focus();
     } catch (cause: unknown) {
+      // The refusal branch needs the guard just as much as the success one: the
+      // refusal card ends with `voiceAfterRefusal` — "The audio is still held in
+      // this tab" — which the record change has already made false, and the
+      // focus move would yank the caret into a box on a record the reader did
+      // not ask about.
+      if (!isSameRecord()) return;
       const stated = providerRefusalOf(cause);
       if (stated) {
         setRefusal(stated);
@@ -488,7 +875,12 @@ export function TranscriptCapturePanel({ experimentId }: { experimentId: string 
         setRetryTag('transcribe');
       }
     } finally {
-      setBusyKind(null);
+      // `finally` RUNS AFTER AN EARLY `return`, so it needs its own guard. The
+      // record-change reset has already cleared `busyKind` for the record now
+      // on screen; clearing it again here would clear a DIFFERENT request that
+      // the new record had legitimately started in the meantime, unlocking a
+      // form whose write is still in flight.
+      if (isSameRecord()) setBusyKind(null);
     }
   }
 
@@ -500,22 +892,45 @@ export function TranscriptCapturePanel({ experimentId }: { experimentId: string 
     setError(null);
     setRetryTag(null);
     setAnnouncement(CAPTURE_COPY.processingLive);
+    /*
+     * C2 — SAME CORRECTION AS C1, SAME REASON. It was raised as "a stale
+     * finalize announces one record's result on another's screen and swaps in
+     * its runs and version token", reproduced by re-rendering one instance with
+     * a new `experimentId`. In the shipped application the panel unmounts on a
+     * record switch, so none of those writes can reach the next record.
+     *
+     * The guard stays: it is the same one comparison, and the consequence it
+     * would prevent under a mounted-across-switch caller is the worst on this
+     * panel — `experiment_version` is the token the NEXT write sends as
+     * `If-Match`, so adopting another record's would aim a write at another
+     * record's concurrency token. Defence against a hazard class, not a
+     * reproduced defect.
+     */
+    const isSameRecord = recordScope();
     try {
       const payload = await api.captureTranscript(experimentId, {
         experimentVersion,
         text,
         ...(selectedRun ? { runId: selectedRun } : {}),
       });
-      setReading(payload);
-      setExperimentVersion(payload.experiment_version);
       // SAME-TAB COURTESY, NOT A SERVER FACT. So `IngestionProposalsPanel`'s
       // arrival note (built for a colleague's change) does not fire for the
       // proposals THIS finalize just minted, on the same screen. See
       // `lib/selfMintedProposals.ts` for exactly what this can and cannot know.
+      //
+      // DELIBERATELY OUTSIDE THE GUARD BELOW, and this is the one call here that
+      // belongs outside it. It closes over `experimentId` — record A, the record
+      // these proposals were actually minted on — so it is correct wherever the
+      // reader has gone, and it is what stops A's own arrival note firing when
+      // the reader returns to A. Everything after the guard writes into THIS
+      // PANEL, which is now showing someone else.
       markSelfMintedProposals(
         experimentId,
         payload.proposals.map((entry) => entry.proposal.proposal_id),
       );
+      if (!isSameRecord()) return;
+      setReading(payload);
+      setExperimentVersion(payload.experiment_version);
       /*
        * I7, INDEPENDENT REVIEW OF PR-D — BOTH NUMBERS, AS THE BUILD THIS
        * REPLACES ALWAYS SAID. The summary used to name only what was STORED,
@@ -536,12 +951,17 @@ export function TranscriptCapturePanel({ experimentId }: { experimentId: string 
       );
       await loadRuns();
     } catch (cause: unknown) {
+      // `FALLBACK.finalize` reads "This transcript was NOT stored … Your text is
+      // still in the box above" — two claims about a record the reader has left,
+      // the second of which is false here because the reset emptied the box.
+      if (!isSameRecord()) return;
       setError(mutationFailureCopy(cause, FALLBACK.finalize));
       setRetryTag('finalize');
       setAnnouncement('');
       if (cause instanceof ApiError && cause.status === 412) await loadRuns();
     } finally {
-      setBusyKind(null);
+      // See `requestTranscript`'s `finally` for why this is guarded.
+      if (isSameRecord()) setBusyKind(null);
     }
   }
 
@@ -597,18 +1017,30 @@ export function TranscriptCapturePanel({ experimentId }: { experimentId: string 
     setBusyKind('createRun');
     setError(null);
     setRetryTag(null);
+    /*
+     * The run is created on the record this call names, and creating it is not
+     * undone by the reader navigating — but SELECTING it, announcing it, and
+     * adopting its version token are all claims about the panel's CURRENT
+     * record. Unguarded, "Created Run 3. It is now selected." would appear on a
+     * record that has no Run 3, with `selectedRun` holding another record's run
+     * id and focus yanked into its dropdown.
+     */
+    const isSameRecord = recordScope();
     try {
       const created = await api.createRun(experimentId, { experimentVersion });
+      if (!isSameRecord()) return;
       setExperimentVersion(created.experiment_version);
       await loadRuns();
       setSelectedRun(created.run.id);
       runSelectRef.current?.focus();
       setAnnouncement(`Created ${created.run.label}. It is now selected.`);
     } catch (cause: unknown) {
+      if (!isSameRecord()) return;
       setError(mutationFailureCopy(cause, FALLBACK.createRun));
       setRetryTag('createRun');
     } finally {
-      setBusyKind(null);
+      // See `requestTranscript`'s `finally` for why this is guarded.
+      if (isSameRecord()) setBusyKind(null);
     }
   }
 

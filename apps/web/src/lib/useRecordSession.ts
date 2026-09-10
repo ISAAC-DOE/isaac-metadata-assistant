@@ -288,6 +288,38 @@ export interface RecordSession {
    * stateless and why it does not apply here.
    */
   runActivity: RecordChangeSummary | null;
+  /**
+   * THE SAME SUMMARY, ASKED A FOURTH QUESTION: did something the record's OWN entry
+   * covers move, relative to where the NOTES read stands? — `null` when the latest
+   * notes-floored summary named none.
+   *
+   * IT IS NOT `activity`, AND FOR THE SAME REASON `proposalActivity`/`runActivity` ARE
+   * NOT. `UnmappedNotesPanel` self-fetches (`GET .../notes`); the record bundle does
+   * not carry what it holds. So a record refetch adopts no notes-list state, and on
+   * the ordinary ordering the record floor would rise past the entry before the feed
+   * delivered it — the same defect `proposalFloorRef`/`runFloorRef` exist to avoid, in
+   * the one remaining consumer that had no floor of its own.
+   *
+   * THIS IS A DELIBERATELY IMPRECISE SIGNAL, STATED RATHER THAN HIDDEN. There is no
+   * `note` kind on the wire — `change_feed.py`'s `RECORD_COLLECTORS` serves exactly
+   * `experiment`, `run` and `proposal` — so this is keyed on `recordMoved`: the
+   * record's OWN entry, which fires for every write `_authoritative_signature`
+   * covers (title, draft, runs, proposals, notes), not only a note write. A colleague
+   * editing the title will make this fire and cost `UnmappedNotesPanel` one
+   * redundant, harmless `GET .../notes`. A dedicated `note` kind would remove that
+   * false-positive rate; adding one is a backend change this slice does not make.
+   *
+   * WHAT IS BOUNDED, GIVEN THAT: FREQUENCY, NOT PRECISION. The floor advances once a
+   * signal is delivered (see `handleFeed`), so the SAME record revision is never
+   * reported twice — including this panel's own writes observed coming back around
+   * the feed. The worst case is at most one extra `GET .../notes` per record revision
+   * that was never a note change, which is strictly better than the one poll interval
+   * this signal cannot exceed; it is NOT zero false positives.
+   *
+   * IDS AND A POSITION. NO NOTE CONTENT, EVER — the `experiment` entry this rides on
+   * carries none, so a consumer must re-read through the route that owns the list.
+   */
+  notesActivity: RecordChangeSummary | null;
   /** The CHANGE FEED poller's degraded state — separate from `syncDegraded`. */
   feedDegraded: boolean;
 }
@@ -442,6 +474,14 @@ export function useRecordSession(
    */
   const [latestRun, setLatestRun] = useState<RecordChangeSummary | null>(null);
 
+  /*
+   * THE LATEST NOTES-FLOORED SUMMARY — a THIRD raw summary over the SAME entries,
+   * `latestRun`'s reason: `latest`/`activity` is keyed to the RECORD floor and drives
+   * an announced sentence; this is keyed to `notesFloorRef` and feeds only
+   * `notesActivity`, which nothing announces.
+   */
+  const [latestNotes, setLatestNotes] = useState<RecordChangeSummary | null>(null);
+
   // The P29.1 session snapshot. Re-read imperatively after a change/refresh so a
   // proposal marked stale by a revision change is immediately visible.
   const [session, setSession] = useState(() => loadSession(id));
@@ -530,6 +570,30 @@ export function useRecordSession(
     runFloorRef.current.rev = recordRev;
   }
 
+  /*
+   * WHERE THE NOTES LIST READ STANDS — a fourth floor, for the reason `runFloorRef`
+   * has one: `UnmappedNotesPanel` fetches `GET .../notes` itself, so a record refetch
+   * adopts none of it, and keying on the RECORD floor would drop a notes-only change
+   * the instant the record poller won the ordinary race.
+   *
+   * SEEDED FROM `recordRev`, ONCE PER RECORD, for `proposalFloorRef`'s reason: the
+   * notes panel mounts and issues its own first read independently, so every note at
+   * or below that revision is already on screen by the time this hook could report
+   * otherwise.
+   *
+   * IT ADVANCES, LIKE `runFloorRef` AND UNLIKE `proposalFloorRef` — nothing renders a
+   * sentence from `notesActivity`, so a replayed batch narrowing it announces nothing
+   * and costs nothing to guard against with a live floor.
+   */
+  const notesFloorRef = useRef<{ id: string; rev: number | undefined }>({
+    id,
+    rev: undefined,
+  });
+  if (notesFloorRef.current.id !== id) notesFloorRef.current = { id, rev: undefined };
+  if (notesFloorRef.current.rev === undefined && recordRev !== undefined) {
+    notesFloorRef.current.rev = recordRev;
+  }
+
   // Latest onChange without re-subscribing the poller effect.
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
@@ -550,6 +614,8 @@ export function useRecordSession(
     // Same argument, same reason, for the run-floored summary: its ids name runs that
     // belong to the record being left.
     setLatestRun(null);
+    // Same argument again, for the notes-floored summary.
+    setLatestNotes(null);
   }, [id]);
 
   // Fetch the AgentContext inputs (pending + evidence classification). Keyed on
@@ -710,6 +776,30 @@ export function useRecordSession(
         setLatestRun(runSummary);
       }
 
+      /*
+       * THE NOTES SURFACE'S OWN QUESTION, over the SAME entries, with the notes list's
+       * own floor — see `notesFloorRef`. Asked BEFORE the early return below for the
+       * same reason the run summary is: a batch in which the record poller has
+       * already filtered the `experiment` entry against the RECORD floor produces
+       * `summary === null` while this can still be real news to a consumer that has
+       * not adopted it through any other read.
+       */
+      const notesSummary = summariseChanges(entries, {
+        record: notesFloorRef.current.rev,
+        proposal: proposalFloorRef.current.rev,
+        run: runFloorRef.current.rev,
+      });
+      if (notesSummary && notesSummary.recordMoved) {
+        // DELIVERED ONCE, `runFloorRef`'s reason: nothing here announces a sentence a
+        // replayed, narrower batch could change. This is what bounds the false-positive
+        // signal to at most one extra read per genuinely new record revision, rather
+        // than once per poll for as long as that revision remains the latest.
+        if (notesSummary.highestRev > (notesFloorRef.current.rev ?? -1)) {
+          notesFloorRef.current.rev = notesSummary.highestRev;
+        }
+        setLatestNotes(notesSummary);
+      }
+
       if (!summary) return; // nothing newer than what is on screen — say nothing
 
       /*
@@ -862,6 +952,12 @@ export function useRecordSession(
      * run edit arrived on the ordinary ordering — which is the whole defect.
      */
     runActivity: latestRun !== null && latestRun.runIds.length > 0 ? latestRun : null,
+    /*
+     * FROM `latestNotes`, NOT FROM `latest`/`activity`, for the same reason
+     * `proposalActivity`/`runActivity` are not: `UnmappedNotesPanel` self-fetches, so
+     * the record read catching up says nothing about whether ITS read has.
+     */
+    notesActivity: latestNotes !== null && latestNotes.recordMoved ? latestNotes : null,
     feedDegraded,
   };
 }

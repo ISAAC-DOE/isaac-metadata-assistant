@@ -1481,6 +1481,121 @@ Current state:
     behind an Authentik edge this environment cannot authenticate to, so the honest status is
     `HOSTED QA PENDING (Krish)` for every image `v0.0.214` and later.
 
+- **Session of 2026-09-10 — five slices over the capture workflow, and the session's own
+  through-line was that TWO ORCHESTRATOR PREMISES WERE OVERTURNED BY MEASUREMENT.** PR
+  [#241](https://github.com/ISAAC-DOE/isaac-metadata-assistant/pull/241), branch
+  `fix/capture-lifecycle-and-notes-liveness`, commit `5437fa1`, based on `0650bd46`. Backend
+  **7156 → 7161** passed / 45 skipped (main checkout); frontend **204 files / 5344 → 205 / 5388**.
+  Every slice: one implementer, one independent reviewer that did not implement it — and **every
+  review found a defect the slice's own suite had passed**. Nothing about the hosted deployment,
+  the external authorizations, gates **G2**/**G3**, or Dean's **D1–D9** deferral changed, and no
+  agent touched a database. What a future session must not re-derive:
+
+  **THE ORPHANED MICROPHONE IS REAL, AND IT IS NOT THE ONE THE SESSION WENT LOOKING FOR.** Press
+  Start Recording and leave the record *before the browser resolves the permission*: the panel
+  unmounts, `dropAudio()` runs while `streamRef` is still `null`, then `getUserMedia` resolves into
+  a dead component's closure, assigns the stream and calls `recorder.start()`. Nothing holds a
+  reference, so **nothing can ever stop it**. Measured in real Chromium with an instrumented
+  `MediaStreamTrack.prototype.stop`: at `0650bd46` the track stayed `readyState: live` for a full
+  15 s poll with **0** `stop()` calls; on the fix it is `ended`. Pinned by
+  `apps/web/e2e/mutation/capture-microphone.spec.ts` — **the first spec in this repository that
+  ever drove `getUserMedia`/`MediaRecorder` in a real browser** (before it, every microphone test
+  was jsdom against a hand-written `FakeMediaRecorder`). Six specs, real Chromium
+  (`channel: 'chromium'` is MANDATORY — the headless shell rejects `getUserMedia({audio:true})`
+  with `NotSupportedError`), Chromium's synthetic device, and a REAL permission refusal
+  (`--use-fake-ui-for-media-stream` deliberately NOT passed).
+
+  ~~**An in-app record switch leaves a live microphone, and `voiceAudioHandling`'s "leave this
+  record" clause is false.**~~ — **WITHDRAWN THE SAME DAY, BY MEASUREMENT, AND KEPT STRUCK BECAUSE
+  IT WAS THE ORCHESTRATOR'S OWN FRAMING AND TWO AGENTS ACTED ON IT.** `RecordWorkbench` renders
+  `<LoadedWorkbench>` only while `bundle.status === 'data'` (`:397-412`), so a record switch flips
+  it to `'loading'` and **deletes the subtree** — the pre-existing unmount cleanup already released
+  the microphone, captured at `commitPassiveUnmountInsideDeletedTreeOnFiber`. **The hook-chain
+  reading behind the claim was correct in every particular and still reached the wrong conclusion,
+  because it was a component-level reading of a screen-level fact.** That is the transferable
+  lesson, and it generalises past this file: *a defect argued from a component's hooks is not
+  established until someone checks whether the caller keeps that component mounted.*
+
+  **AND THE REVIEW'S TWO "CRITICAL" FINDINGS INHERITED THE SAME FLAW.** An independent review
+  reproduced record A's dictation appearing in record B's textarea (C1) and a stale finalize
+  adopting record A's version and runs (C2) — both through a **rerender of one instance with a new
+  `experimentId`, which no caller performs.** Re-measured against the real mount sequence: with the
+  C1 guard REMOVED the box is still empty, because React no-ops the late `setText` and the next
+  record is served by a fresh instance. The guards are kept as **hazard-class defence and are
+  labelled as such**; all 14 rerender-driven tests are titled `INVARIANT GUARD, not a regression
+  guard`, visible in CI output rather than buried in a docstring. **Do not re-file C1/C2 as
+  reproduced defects.**
+
+  **F-1 IS CLOSED — `UnmappedNotesPanel` refreshes live.** After Finalize the machine's proposals
+  appeared instantly while the scientist's own words appeared to have gone nowhere until a manual
+  reload — the wrong signal from the feature that IS the losslessness guarantee
+  (`transcript_capture.py` stores EVERY segment as a note precisely so the words survive rejection).
+  Fixed through the **ONE existing** change-feed subscription (`useChangeFeed` call sites 1 → 1,
+  measured), as a fourth derived summary `notesActivity` beside `proposalActivity`/`runActivity`.
+  **There is no `note` kind** — `change_feed.RECORD_COLLECTORS` serves exactly `experiment`, `run`,
+  `proposal` — so it keys on the `experiment` kind and therefore fires on ANY authoritative record
+  change, not only a note change. That imprecision is stated in the code, not hidden; a `note` kind
+  is the precise answer and is **named residue, not built**. Notes reach the feed at all only
+  because they are hashed into `_authoritative_signature` (`workspace.py:1832`).
+
+  **A SILENT REFRESH THAT FAILED DESTROYED THE SCIENTIST'S TYPED TEXT — the fix's own new hazard,
+  caught by review.** The panel's comment promised a background reload "never blanks it, so a
+  half-typed rewrite … stays exactly where it is", while the fetch effect's `.catch` set
+  `{status:'error'}` regardless of silence, replacing the whole list with `BackendDown` beside a
+  **stale** count. Before this change a failure was always the consequence of something the reader
+  did; the live refresh made the loss reachable with **no user action at all**. Now a silent
+  failure leaves the list untouched and discloses inline. `IngestionProposalsPanel.tsx:786` has the
+  **identical shape and is unfixed** — named residue.
+
+  **A FALSE PRIVACY DISCLOSURE, AND THE GUARD THAT SHOULD HAVE CAUGHT IT DID NOT COVER IT.**
+  `voiceAudioHandling` told scientists *"This application declares no upload endpoint for it to
+  reach."* `POST /api/uploads` **is** declared (`routes.py:20807`) and answers an unconditional
+  403. The capture site was outside `upload-claim-parity.test.tsx` — the guard that exists for
+  exactly this claim class. **The first repair replaced it with a subtler false claim** ("nowhere
+  for it to be sent even by mistake" — an app-wide existential negative inferred from one route,
+  with `POST /api/transcription`'s unconstrained `audio_ref: str` as a live counterexample), and
+  **the first widened guard caught 1 of 8 plausible rephrasings** — a one-word edit of the retired
+  sentence walked straight through. Both were caught by review and re-measured: the ban now runs
+  over all five surfaces and catches **8 of 8**.
+
+  **`If-Match: *` IS ACCEPTED BY THE PROPOSAL CREATE AND REVIEW ROUTES — measured over HTTP, not
+  read.** The contract claimed `409 wildcard_precondition_refused`; no wildcard refusal exists on
+  either route (`_wildcard_precondition_refused` is **400**, never 409, with exactly one caller —
+  the discard route). **THE SEVERITY WAS OVERSTATED TWICE, IN OPPOSITE DIRECTIONS, AND BOTH
+  CORRECTIONS ARE KEPT IN THE CONTRACT SO A READER SEES THE SEQUENCE.** (i) "a caller can land a
+  field write it never read the record to authorize" — **false**: `accept` re-reads `target_digest`
+  inside the critical section and answers `409 proposal_stale` **identically** for `*` and for a
+  current ETag (both arms now committed as a test). (ii) "reject/supersede/withdraw are real and
+  unguarded" — **overstated**: `proposal_not_open` (`routes.py:13688`) runs before `_check_if_match`
+  and makes clobbering a decided proposal impossible, and this is the **API-wide deliberate**
+  behaviour `test_mcp_if_match_wildcard.py` already pins, not a proposals-specific gap. In a build
+  with no trusted authentication boundary, `*` removes a concurrency safeguard, not an
+  authorization one. **`routes.py` changed by comments only**, proven by token-stream equality
+  (51,634 tokens identical with comments excluded).
+
+  **FOUR FILES STILL DENIED THAT A TRANSCRIPT CANDIDATE IS EVER STORED** — false since
+  `_mint_transcript_proposals` shipped on 2026-09-03. `proposals.py`, `providers/extraction.py`,
+  `transcript_capture.py` and a `routes.py` comment block, all struck and dated. The `routes.py`
+  block was the sixth instance of §15's recurring pattern: the slice published *"this was the last
+  place in this file still saying so"* while **the unstruck opening paragraph of the same block,
+  four lines above, was a second instance.** `inferability.py:111` reads similarly and is **NOT**
+  the same claim — it is about inferability suggestions and remains true; do not "correct" it.
+
+  **Named rather than implied, and still not done:** a `note` kind in the change feed (the precise
+  signal); `IngestionProposalsPanel`'s identical destructive-silent-failure shape; pinning an
+  open-form note across ANY refetch (the reader's own write-success reload reproduces the same
+  unmount, so gating only the `activity` trigger would look closed and not be); **pause/resume
+  during recording**, which `MediaRecorder` supports and this build does not offer — deliberately
+  deprioritised because recorded audio cannot become text in any deployment; **local playback of
+  held audio**, which would make the Record control useful today within every privacy boundary and
+  does not exist (no `<audio>`, no `createObjectURL` anywhere in the capture path); and
+  **`requestTranscript` sends `audio_ref: "held-in-tab:<chunkCount>"` — an integer, dereferenceable
+  by no provider that could ever be configured**, so the control cannot succeed under any
+  configuration, though its 501 refusal does tell the reader to type instead. Voice→text remains
+  blocked on an approved provider (Dean's D1–D9); **the Web Speech API is NOT the workaround** — in
+  Chrome it routes scientist speech to a third party, which §7's egress boundary forbids. Hosted QA
+  of this PR's image is `HOSTED QA PENDING (Krish)`.
+
 - Current repository status is summarized in README.md and docs/mentor-brief.md; see git history for the exact commit state.
 - Start any further phase (beyond the completed Phase 36 / Phase 36R slices) only after explicit user approval.
 
