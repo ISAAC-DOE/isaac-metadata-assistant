@@ -64,6 +64,7 @@ import { mutationFailureCopy, staleWriteCurrentVersion } from '../lib/mutationEr
 import { markSelfMintedProposals } from '../lib/selfMintedProposals';
 import { RUN_FIELDS, parseRunField, type RunFieldSpec } from '../lib/runFields';
 import { RUNS_PAGE_SIZE } from '../lib/runPaging';
+import type { RecordChangeSummary } from '../lib/recordChanges';
 import type { ApiNote, ApiNoteState, ApiNotesResponse, ApiRunView } from '../lib/types';
 import { BackendDown, LoadingPanel } from './FetchStates';
 import { DiscardStaged } from './DiscardStaged';
@@ -235,7 +236,39 @@ function stableValueDigest(value: unknown): string {
   return (hash >>> 0).toString(16);
 }
 
-export function UnmappedNotesPanel({ experimentId }: { experimentId: string }) {
+/**
+ * `activity` — F-1, THE MISSING LIVE REFRESH, CLOSED HERE.
+ *
+ * `docs/session-closure-2026-09-03.md` §8 named this as residue: a note minted by a
+ * Finalize on `TranscriptCapturePanel` — a SIBLING on this same screen — appeared on
+ * this panel only after a manual reload, while the proposals that same Finalize
+ * mints appear live on `IngestionProposalsPanel`. The cause was structural, not a
+ * missing line: this panel had no `activity` prop at all to react to.
+ *
+ * THE SIGNAL IS `useRecordSession.notesActivity`, THREADED THE SAME WAY
+ * `proposalActivity`/`runActivity` ARE — one shared `useChangeFeed` subscription per
+ * record screen (`RecordWorkbench`), never a second poller instantiated here. See
+ * that field's own doc comment for the full argument; in short, there is no `note`
+ * kind on the wire (`change_feed.py`'s `RECORD_COLLECTORS` serves exactly
+ * `experiment`, `run`, `proposal`), so this rides on the record's own `experiment`
+ * entry — a DELIBERATELY IMPRECISE signal that also fires for a title edit, an
+ * answered question, a run edit or a proposal act, and costs this panel one
+ * redundant, harmless `GET .../notes` for each. `useRecordSession` bounds that to at
+ * most once per genuinely new record revision; it does not and cannot make it exact
+ * without a backend change this slice does not make.
+ *
+ * `activity` DEFAULTS TO `undefined` rather than being required, so a caller that
+ * has not been updated to thread it (any test rendering this panel directly, or a
+ * future mount this screen does not own) degrades to the pre-fix behaviour — a
+ * manual reload only — rather than crashing.
+ */
+export function UnmappedNotesPanel({
+  experimentId,
+  activity,
+}: {
+  experimentId: string;
+  activity?: RecordChangeSummary | null;
+}) {
   return (
     <section className="notes-section" aria-labelledby="unmapped-notes-heading">
       <div className="notes-head">
@@ -250,12 +283,18 @@ export function UnmappedNotesPanel({ experimentId }: { experimentId: string }) {
       </div>
       {/* Keyed on the record so switching records rebuilds this panel's state
           rather than showing one record's notes under another's heading. */}
-      <NotesBrowser key={experimentId} experimentId={experimentId} />
+      <NotesBrowser key={experimentId} experimentId={experimentId} activity={activity ?? null} />
     </section>
   );
 }
 
-function NotesBrowser({ experimentId }: { experimentId: string }) {
+function NotesBrowser({
+  experimentId,
+  activity,
+}: {
+  experimentId: string;
+  activity: RecordChangeSummary | null;
+}) {
   const [list, setList] = useState<ListState>({ status: 'loading' });
   const [filter, setFilter] = useState<'all' | ApiNoteState>('all');
   const [version, setVersion] = useState<string | null>(null);
@@ -274,13 +313,42 @@ function NotesBrowser({ experimentId }: { experimentId: string }) {
   const generationRef = useRef(0);
   /** Suppresses the loading blank on a reload this panel caused itself. */
   const silentRef = useRef(false);
+  /**
+   * I-2, INDEPENDENT REVIEW. A SILENT reload that FAILS, disclosed rather than
+   * destructive.
+   *
+   * `list` is a small enum, and before this fix its `'error'` branch was reached
+   * from BOTH a loud first load AND a silent background one — the fetch effect's
+   * `.catch` did not read `silentRef` at all. A loud failure replacing the whole
+   * panel with `BackendDown` is correct: there is nothing on screen yet to protect.
+   * A SILENT failure replacing it is not: it is reachable with no reader action at
+   * all (a colleague's edit, or this panel's own `activity` prop, both call
+   * `reload(true)`), and it took an open *Edit wording* box, its typed rewrite, and
+   * every other note card down with it — the exact class `CLAUDE.md` §11 records
+   * three times, newly reachable here because before F-1 this panel had no
+   * background reload of ANY kind to fail silently.
+   *
+   * THE FIX READS `wasSilent` FROM A LOCAL, NOT FROM `silentRef` INSIDE `.catch` —
+   * for `useChangeFeed`'s own reason: `silentRef.current` is reset to `false`
+   * synchronously, before the request even starts, so by the time a response
+   * resolves the ref no longer describes THIS request. Capturing it at the top of
+   * the effect is what makes the flag survive to the callback that needs it.
+   *
+   * ON A SILENT FAILURE, `list` IS LEFT UNTOUCHED. Not reset, not replaced — the
+   * effect simply does not call `setList` on this path, so whatever was on screen
+   * (the notes, every open form, everything typed into `CaptureNote`) stays exactly
+   * as it was. `backgroundRefreshError` carries the disclosure and is rendered
+   * beside the list rather than instead of it.
+   */
+  const [backgroundRefreshError, setBackgroundRefreshError] = useState<string | null>(null);
 
   const filterId = useId();
 
   useEffect(() => {
     let alive = true;
     const generation = ++generationRef.current;
-    if (!silentRef.current) setList({ status: 'loading' });
+    const wasSilent = silentRef.current;
+    if (!wasSilent) setList({ status: 'loading' });
     silentRef.current = false;
 
     api
@@ -289,9 +357,19 @@ function NotesBrowser({ experimentId }: { experimentId: string }) {
         if (!alive || generation !== generationRef.current) return;
         setList({ status: 'data', loaded });
         setVersion(loaded.experiment_version);
+        // A later success clears an earlier silent-failure disclosure — the read
+        // it complained about has since been superseded by one that worked.
+        setBackgroundRefreshError(null);
       })
       .catch((err: unknown) => {
         if (!alive || generation !== generationRef.current) return;
+        if (wasSilent) {
+          setBackgroundRefreshError(
+            'A background refresh of this list did not complete, so what is shown ' +
+              'may be out of date. Nothing you have open or typed here was affected.',
+          );
+          return;
+        }
         setList({ status: 'error', error: asApiError(err) });
       });
 
@@ -304,6 +382,87 @@ function NotesBrowser({ experimentId }: { experimentId: string }) {
     silentRef.current = silent;
     setReloadNonce((n) => n + 1);
   }, []);
+
+  /*
+   * F-1 — THE CHANGE-FEED HOOK-UP, AND THE TWO PROPERTIES THAT MAKE IT SAFE. Modelled
+   * directly on `IngestionProposalsPanel`'s own change-feed effect; see that panel's
+   * comment for the fuller argument. The two properties both hold here too:
+   *
+   * (1) IT IS SILENT. `reload(true)` refreshes the list in place; it never blanks it,
+   *     so a half-typed rewrite, dismissal reason, or "propose a value" form stays
+   *     exactly where it is — and so does whatever is in `CaptureNote`'s own textarea,
+   *     which is a SEPARATE component this reload never touches at all.
+   * (2) IT RAISES NO NOTICE OF ITS OWN. The existing `aria-live="polite"` count line
+   *     already speaks the new total once the reload lands; a second, separate
+   *     "N notes arrived" sentence would be two notices for one fact, and — unlike
+   *     `IngestionProposalsPanel`'s proposal count — this repository has no per-note
+   *     server signal precise enough to build that second sentence honestly (see the
+   *     imprecision this panel's own `activity` doc comment names).
+   *
+   * KEYED ON `activity.highestRev`, DEDUPED AGAINST THE LAST ONE HANDLED. The prop
+   * reference from `useRecordSession` is already stable across renders that did not
+   * deliver a new summary (React state, not a fresh object every render), but this
+   * guard is kept anyway so a duplicate delivery — or a future caller that does not
+   * hold that guarantee — costs nothing.
+   *
+   * GATED ON `version !== null`: nothing to refresh silently before this panel's own
+   * first read has completed, and no revision to compare a delivered summary against
+   * yet either.
+   *
+   * NO SELF-MINTED SUPPRESSION, UNLIKE `IngestionProposalsPanel`'S. That mechanism
+   * exists to stop THIS reader's own just-created proposal from being announced back
+   * to them as a colleague's arrival. Nothing here is announced as anyone's arrival —
+   * see (2) — so there is no claim to protect. The scientist's own actions on THIS
+   * panel already call `reload(true)` directly from their own success handlers
+   * (`review`, `capture`, `proposeValue` below); this effect firing again shortly
+   * afterwards, once that same write is observed coming back around the shared feed,
+   * is a second silent read of an unchanged list — bounded to at most one per write,
+   * by the same `notesFloorRef` in `useRecordSession` that bounds a colleague's
+   * unrelated record edit — not a defect worth new machinery to suppress.
+   */
+  const lastHandledActivityRevRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (activity === null || version === null) return;
+    if (lastHandledActivityRevRef.current === activity.highestRev) return;
+    lastHandledActivityRevRef.current = activity.highestRev;
+    reload(true);
+  }, [activity, version, reload]);
+
+  /*
+   * M-1, INDEPENDENT REVIEW — CONSIDERED AND DECLINED FOR THIS SLICE, NAMED RATHER
+   * THAN SILENTLY LEFT OPEN.
+   *
+   * THE HAZARD. If the CURRENT filter is narrower than "All" and a colleague
+   * changes the state of the SPECIFIC note a reader has an Edit/Dismiss/Propose
+   * form open on, a reload that lands while that form is open can filter that note
+   * out of `list.loaded.notes` — its `<NoteCard>` unmounts, and the unsaved
+   * rewrite it held is lost with no warning. Under the default filter, "All", this
+   * cannot happen: a note is never excluded by state alone.
+   *
+   * THE SUGGESTED FIX DOES NOT ACTUALLY CLOSE IT, which is why it is not built
+   * here. "Defer the reload this effect issues while any form on this panel holds
+   * unsaved input" only defers the ONE trigger that happens to be under discussion
+   * — the reader's OWN successful review/capture/propose call (`review`,
+   * `capture`, `proposeValue` above) reloads unconditionally, on its own success
+   * path, regardless of what any OTHER card is doing, and a 412 recovery does too.
+   * Any one of those can reveal the same colleague's change and unmount the same
+   * card. A fix that deferred only the `activity`-triggered call would look closed
+   * and would not be: the failure mode this repository's own §11 record keeps
+   * finding is exactly a claim a comment makes that a test cannot see is false.
+   *
+   * A fix that DOES close it — pinning a note that is currently open in a form so
+   * it survives being filtered out of a refetched response, by falling back to its
+   * last-known copy and disclosing that the pinned copy may be stale — is a real,
+   * separate feature (a merge step between the fetched list and whatever is
+   * locally open, plus its own disclosure and its own tests), not a one-line
+   * deferral, and it touches the same rendering path this slice already changed
+   * for I-2. It is left as a named residue rather than attempted under this
+   * slice's own review cycle.
+   *
+   * THE NARROW, ALREADY-AVAILABLE MITIGATION: the "All" filter — this panel's own
+   * documented default (rule 2, module header) — is immune to this hazard by
+   * construction, because nothing is ever excluded by state under it.
+   */
 
   /**
    * Turn a refused write into a state a reader can act from — see `STALE_REVIEW_COPY`.
@@ -615,6 +774,24 @@ function NotesBrowser({ experimentId }: { experimentId: string }) {
             Reload This Section
           </button>
         </div>
+      )}
+
+      {/*
+        I-2 — A SILENT BACKGROUND REFRESH THAT FAILED, disclosed WITHOUT replacing
+        anything. Gated on `list.status === 'data'` so it can never render beside
+        the full `BackendDown` panel — that branch is for a LOUD failure, which
+        already means there is nothing here to protect. `aria-live="polite"`
+        without an explicit `role` — matching the count line above, deliberately
+        NOT `role="status"`, so this stays a second, distinct live region rather
+        than colliding with the act-announcement region's `getByRole('status')`.
+      */}
+      {backgroundRefreshError !== null && list.status === 'data' && (
+        <p className="notes-background-refresh-notice" aria-live="polite">
+          {backgroundRefreshError}{' '}
+          <button type="button" className="btn btn-secondary" onClick={() => reload(true)}>
+            Try Again
+          </button>
+        </p>
       )}
 
       <CaptureNote

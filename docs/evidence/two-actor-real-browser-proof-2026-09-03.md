@@ -131,15 +131,23 @@ The transcript is written against `apps/api/isaac_api/transcript_capture.py`'s c
 read rather than guessed, and **names no run in its words** — `_RUN_REFERENCE` would produce a run
 clarification, and the run is chosen in the panel's own selector, which is the behaviour under test.
 
-**FINDING F-1 (measured, and it forced a step into the spec).** `UnmappedNotesPanel` fetches the
-record's notes **once per mount** and takes no live-refresh input at all — its props are
-`{ experimentId }`, with no equivalent of the `activity` summary `IngestionProposalsPanel`
-receives. Finalizing a transcript stores notes and proposals **in the same save**, and on that
-screen the proposals appear on their own while the notes, one panel above them, do not. Measured:
-without a reload the card for a note the server is already serving is not in the DOM at all
-(`element(s) not found`). The spec therefore reloads **B's** page before B's second act, with the
-finding written into the code beside it. A's document is untouched, so no "without a reload" claim
-about A is affected.
+**FINDING F-1 (measured on 2026-09-03, and it forced a step into the spec).** ~~`UnmappedNotesPanel`
+fetches the record's notes **once per mount** and takes no live-refresh input at all — its props
+are `{ experimentId }`, with no equivalent of the `activity` summary `IngestionProposalsPanel`
+receives.~~ — **CLOSED 2026-09-10, struck rather than deleted because this was TRUE on the date
+measured and is superseded, not wrong.** `UnmappedNotesPanel` now takes a fourth prop, `activity`
+(`RecordChangeSummary | null`, from the new `useRecordSession.notesActivity`), threaded through
+`RecordWorkbench` the same way `proposalActivity`/`runActivity` already were, and silently
+reloads its notes when that summary advances. The signal is deliberately imprecise (there is no
+`note` kind on the change feed; it rides on the record's own `experiment` entry, so it also fires
+on unrelated record writes) — see `useRecordSession.ts`'s own doc comment on `notesActivity`.
+Finalizing a transcript stores notes and proposals **in the same save**, and on 2026-09-03 the
+proposals appeared on their own while the notes, one panel above them, did not. Measured then:
+without a reload the card for a note the server was already serving was not in the DOM at all
+(`element(s) not found`). The spec still reloads **B's** page before B's second act — that line was
+NOT removed by the fix above, because whether the live refresh alone would land in time is
+unmeasured; the spec's own comment beside the reload was corrected in the same change as this
+document. A's document is untouched, so no "without a reload" claim about A is affected.
 
 ### Step 4 — A is told once, and was not told about what was already there
 
@@ -498,7 +506,7 @@ Named rather than implied, and none of it is closed by anything above.
 
 | Id | What | Where it is recorded |
 |---|---|---|
-| **F-1** | `UnmappedNotesPanel` has no live refresh: notes minted by a finalize on the same screen do not appear until the page is reloaded, while the proposals from the same save do. | §3 step 3; a comment in the spec beside the reload it forced |
+| **F-1** | ~~`UnmappedNotesPanel` has no live refresh: notes minted by a finalize on the same screen do not appear until the page is reloaded, while the proposals from the same save do.~~ — **CLOSED 2026-09-10**: the panel now takes a `notesActivity` change-feed summary and silently reloads on it (imprecise signal, no dedicated `note` kind); the forced reload is unchanged, its necessity now unmeasured. | §3 step 3; a comment in the spec beside the reload it forced (comment corrected 2026-09-10) |
 | **F-2** | The app does not move focus into a workspace region on activating its sidebar link. Not a defect on its own (DOM order + skip link), but the brief assumed otherwise. | §3 step 11; a comment in the spec |
 | **C-1** | *Correct the Value, Then Accept* **writes** the corrected value and accepts the same proposal — it does not supersede, does not mint a new proposal, and does not leave canonical unchanged. The brief said all three. | §3 step 6; a comment in the spec |
 | **C-2** | This build has **no** `Submit` control anywhere. The finalizing act is *Export Official Record + Sidecar*. | §3 step 10 |

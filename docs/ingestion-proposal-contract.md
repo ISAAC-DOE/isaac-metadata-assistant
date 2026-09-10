@@ -237,9 +237,140 @@ per-proposal validator**: a second concurrency scheme with no consumer is a trap
 |---|---|---|---|
 | List | `GET /api/experiments/{id}/proposals` | none; returns `ETag` | `404 experiment_not_found`; `422 unknown_cursor`; **`422 cursor_order_mismatch`** (added 2026-09-02, see below); `503 experiment_storage_unavailable` |
 | Read one | `GET .../proposals/{proposal_id}` | none; returns `ETag` | `404 proposal_not_found` (new, modelled on `note_not_found`, `routes.py:9751-9767` — "the record was read successfully and holds no such thing") |
-| Create | `POST .../proposals` | **required** | `422 unrecognized_field` (unknown body key, or a target outside the permitted set); `422 unknown_run`; `422 invalid_field_value`; `422 unrepresentable_value` (value JSON cannot round-trip); `422 unsupported_proposal` (model refusal relayed, never a 500 — `routes.py:10110-10115`); `422 too_many_proposals`; **`422 proposals_too_large`** (added 2026-08-30, see below); `428 precondition_required`; `400 malformed_if_match`; `412 stale_write`; `409 wildcard_precondition_refused` (`If-Match: *`) |
-| Review | `POST .../proposals/{id}/review` — `{confirmed_by_user, action: accept\|reject\|supersede\|withdraw, value?, accepted_from?, reason?}` | **required** | `422 confirmation_required`; `422 unknown_proposal_action`; `422 not_an_allowed_value` (enum target); `409 human_actor_required` (§5); `422 no_write_path_for_field` (§6); `409 target_run_removed` (new — see below); **`409 target_scope_mismatch`** (added 2026-08-30, see below); `412 stale_write`; `409 proposal_stale` (new — ~~`base_rev` moved~~ **the TARGET DIGEST moved; `base_rev` is not the staleness key and never was — see §10 DEC-1, which supersedes this parenthetical and was written after it**; the accept re-reads and refuses rather than overwriting) |
+| Create | `POST .../proposals` | ~~**required**~~ — **see the correction below the table, dated 2026-09-10: `If-Match: *` is measured to PROCEED and write, not to be refused** | `422 invalid_body` (not a JSON object — missing from this row before 2026-09-10); ~~`422 unrecognized_field` (unknown body key, or a target outside the permitted set)~~ — **CORRECTED 2026-09-10: an unmapped body key IS `unrecognized_field`, but "a target outside the permitted set" is TWO different codes depending on which set — see the next two entries, which this row omitted entirely before this correction**; `422 unrecognized_field` (unknown body key, or `target_field_path` outside `NOTE_MAPPABLE_FIELD_PATHS` — the path this build cannot even map a note to); `422 no_write_path_for_field` (`target_field_path` IS mappable but is one of "the seven" with no write route, §6 — this is a create-time refusal too, not only review's); `422 unknown_note`; `422 unknown_run`; `422 target_requires_a_run`; `422 target_is_record_scoped`; `422 invalid_rule`; ~~`422 invalid_field_value`~~ — **CORRECTED 2026-09-10: this code does not exist on this route. Measured in `routes.py`'s `post_proposal`: the value refusal is `422 invalid_proposed_value`, including for a null value** — `422 invalid_proposed_value`; `422 unrepresentable_value` (value nested too deep, or JSON cannot round-trip); `422 value_too_large` (missing from this row before 2026-09-10); `422 invalid_span`; `422 invalid_client_request_key`; `422 unsupported_proposal` (model refusal relayed, never a 500 — `routes.py:13245-13252`, and this citation is corrected 2026-09-10; it previously pointed at `10110-10115`, which is nowhere near `post_proposal`, itself at `12895`); `422 too_many_proposals`; **`422 proposals_too_large`** (added 2026-08-30, see below); `428 precondition_required`; `400 malformed_if_match`; `412 stale_write`; ~~`409 wildcard_precondition_refused` (`If-Match: *`)~~ — **CORRECTED 2026-09-10, MEASURED OVER HTTP, NOT REASONED FROM SOURCE: this route has no wildcard refusal at all.** `_wildcard_precondition_refused` answers `400`, never `409`, and has exactly ONE caller in the whole file — the discard route. `post_proposal` calls only `_check_if_match`, which treats `*` as RFC 9110's "matches iff the resource exists" and returns `None`, i.e. proceed. A create sent with `If-Match: *` answers `200` and the proposal IS stored. See the correction below the table for the measured behaviour on Review too, and for the re-derived residual risk — which is narrower than "this is a real gap" states, and lands on a different action than Create. |
+| Review | `POST .../proposals/{id}/review` — `{confirmed_by_user, action: accept\|reject\|supersede\|withdraw, value?, accepted_from?, reason?}` | ~~**required**~~ — **see the same correction below the table: `If-Match: *` also proceeds here, for every action including `accept`** | **AUDITED AND REWRITTEN 2026-09-10, mechanically over `post_proposal_review` (`routes.py:13580-13960`), the same method the reviewer used on Create — this row was previously an UNAUDITED partial list carrying one code the route does not emit at all.** `422 invalid_body` (not a JSON object); `422 unrecognized_field` (unknown body key — AND, separately, `reason` sent with `accept`, or `value`/`accepted_from` sent with anything but `accept`: three distinct sites, one code); `422 unknown_proposal_action`; `422 confirmation_required`; `422 proposal_not_open` (missing before this audit — refused for EVERY action once `state != open`, checked before `If-Match`, §5); ~~`422 not_an_allowed_value` (enum target)~~ — **CORRECTED 2026-09-10: this code is never emitted by this route. Measured: `not_an_allowed_value` occurs nowhere in `post_proposal_review`'s body; it belongs to the record answer/edit routes, not to proposal review. What review actually checks on `accepted_from`/`value` is the four entries immediately following**; `422 invalid_reason`; `422 unrepresentable_value` (a `reason`, or an `accepted_from: "edited"` `value`, too large or containing something JSON cannot represent); `422 unknown_accepted_from`; `422 value_is_not_the_candidate`; `422 invalid_value` (missing or null `value` under `accepted_from: "edited"`); `409 target_run_removed`; **`409 target_scope_mismatch`** (added 2026-08-30, see below); `422 no_write_path_for_field` (§6 — `accept`-only, inside `_apply_accepted_proposal`); `422 unsupported_proposal` (model refusal relayed, never a 500 — two sites, one for `accept` and one shared by `reject`/`supersede`/`withdraw`); `409 human_actor_required` (§5, `accept`-only); `428 precondition_required`; `400 malformed_if_match`; `412 stale_write`; `409 proposal_stale` (new — ~~`base_rev` moved~~ **the TARGET DIGEST moved; `base_rev` is not the staleness key and never was — see §10 DEC-1, which supersedes this parenthetical and was written after it**; the accept re-reads and refuses rather than overwriting) — **this row never claimed a wildcard refusal, and it was right not to: none exists here either, see below** |
 | — | **There is no DELETE, and there will not be one.** `routes.py:10254-10259` | | |
+
+**Citations in this section are point-in-time.** `routes.py` line numbers move as the file grows;
+re-derive with `grep -n` rather than trusting a cited line, per this file's own convention
+elsewhere. This note does not excuse the corrections below — those were wrong claims about
+*behaviour*, not stale line numbers.
+
+**`If-Match: *` on Create and Review — CORRECTED 2026-09-10, measured over HTTP with
+`fastapi.testclient.TestClient`, not reasoned from source.** This document previously said Create
+answers `409 wildcard_precondition_refused` for `If-Match: *` and said nothing about Review, which
+read as "Review has no wildcard question." Both readings are wrong, and the same way:
+
+* **Create.** `POST .../proposals` with `If-Match: *` answers **`200`** and the proposal is
+  **stored** — a fresh proposal id, `state: "open"`, on the record. Measured directly: a real create
+  request against a freshly-built experiment, sent with `If-Match: *`, returned `200` with a new
+  `proposal_id` in the body, and the record's own store held it afterward.
+* **Review.** `POST .../proposals/{id}/review` with `If-Match: *` answers **`200`** and the review
+  is applied — measured for `reject` (the proposal's `state` moved `open` → `rejected` in the store,
+  with `reason: "wildcard probe"` recorded in its history) and, **under the fixture identity
+  verifier** (`ISAAC_EDGE_TRUST_VERIFIER=test_fixture`, so `409 human_actor_required` does not
+  intervene first), for `accept` (the proposed value was written onto the run through
+  `run_override`, `state` moved to `accepted`, `applied: true`).
+
+**Why: there is no wildcard-specific refusal on either route.** `_wildcard_precondition_refused`
+(`400`, never `409` — the original citation of `409` was also wrong about the status family, not
+only about which routes emit it) has exactly **one** caller in the whole file, the discard route.
+Both `post_proposal` and `post_proposal_review` call only `_check_if_match`, whose own docstring
+states the rule this document had not caught up to: `*` "matches iff the resource exists", i.e. it
+is accepted, exactly as RFC 9110 permits and as `test_mcp_if_match_wildcard.py` pins as a contract
+for every OTHER route in this API. Proposals never opted out of that shared behaviour; nothing
+routes a proposal request through the discard route's pre-check.
+
+~~**Is this a real defect? Judged here as yes, and left unfixed per this correction's own scope —
+see the code review that produced this entry for the reasoning it is not this document's place to
+resolve.** `*` is RFC 9110's idiom for "I hold no validator, act only if the resource still exists at
+all." Discard's own comment block (immediately above `_wildcard_precondition_refused` in
+`routes.py`) argues that idiom is fine for run-removal and asset-removal, because both are
+recoverable by re-adding, and wrong for discard, because discard is not. Review's `accept` action is
+the same shape as discard on that axis, not the same shape as run-removal: it writes a scientific
+value onto a run through the same writer manual entry uses, and it is not undone by "review the
+proposal again" — the value is already on the run, and the proposal's own state machine has no
+transition back to `open` from `accepted`. A caller that holds no validator at all — the exact
+population `*` exists to serve — can therefore land a field write it never read the record's current
+state to authorize, and can do so while the record's own contract for **every other** mutating
+proposal action (§4's "required" CAS column, until this correction) claimed no such caller could
+reach the write. Reject/supersede/withdraw are lower-stakes but share the same gap: a caller with no
+validator can move a proposal's state and record a `reason` in its permanent history without having
+read the record it is reasoning about.~~ —
+
+**CORRECTED 2026-09-10, SAME SESSION: THE PARAGRAPH ABOVE OMITTED A SECOND GUARD THAT ONLY `accept`
+HAS, AND IT OVERSTATED `accept`'S RISK BY MISSING IT.** `post_proposal_review` checks `If-Match`
+(`_check_if_match`, `routes.py:13858-13860`) and THEN, for `accept` only, re-reads the target's
+current content **inside the same lock, before any write** and compares it to the digest the
+proposal was minted against (`routes.py:13862-13886`, "THE CRITICAL SECTION"): if the target moved,
+it answers `409 proposal_stale` and writes nothing. **This check does not read `If-Match` at all —
+`*` does not touch it.** So the two preconditions bypass differently: `If-Match: *` bypasses the
+RECORD-level version check (`_check_if_match`), which is what the previous paragraph called "no
+validator at all" — but it does **not** bypass the target-level digest check, which is strictly
+narrower (one field, not the whole record) but is the check that actually decides whether `accept`'s
+write proceeds. Concretely: a caller sending `If-Match: *` on `accept` **cannot** land a lost update
+on the field being accepted — if that field changed since the proposal was minted, `409
+proposal_stale` fires and nothing is written, exactly as it would for a caller holding a real,
+current `ETag`.
+
+**MEASURED 2026-09-10, not reasoned about — this paragraph previously said the decisive case
+"would be expected to" hold and is corrected because that is the opposite of a measurement.**
+`test_wildcard_and_current_etag_refuse_a_stale_accept_identically` runs the actual variant: ONE
+proposal, its target moved through the ordinary override route after the proposal was minted, then
+reviewed twice — once with `If-Match: *`, once with the record's real, CURRENT `ETag` (re-fetched
+immediately beforehand, so it is genuinely current and not merely well-formed). Both arms answer
+**`409 proposal_stale`**, byte-identical in status and `error`, and neither writes: the stored
+override value is unchanged and the proposal stays `open` after both. (The pre-existing
+`test_wildcard_if_match_accepts_a_proposal_and_writes_the_value` is a DIFFERENT, narrower
+measurement — it shows the wildcard-accept SUCCEEDING when the target has NOT moved; on its own it
+says nothing about the staleness case, and citing it for that case is exactly the "would be expected
+to" gap this correction closes.)
+
+~~**Re-derived residual risk, stated plainly rather than restating the original framing.** `accept`'s
+own write is not the exposed case: the digest re-read protects the target field identically whether
+the caller sent `*` or the record's current `ETag`, because that check was never wired to
+`If-Match` in the first place. What genuinely has **no** guard at all is `reject`/`supersede`/
+`withdraw` (the `else` branch beside the critical section, `routes.py:13911-13920`): none of the
+three touches `target_digest`, because none of them writes a target value — but that also means
+none of them has *any* check, beyond the now-bypassable record `ETag`, on whether the caller ever
+read anything. A caller holding no validator at all can move a proposal's `state` and write a
+permanent `reason` into its history — durable audit-trail content, never a scientific field value —
+without having confirmed it holds a current view of the record or the proposal. That is real and
+unguarded; it is a smaller claim than the one this paragraph made before the correction, and it
+names the opposite action as the one actually exposed.~~ —
+
+**CORRECTED 2026-09-10, SAME SESSION: THE PARAGRAPH ABOVE OVERSTATED THE `reject`/`supersede`/
+`withdraw` EXPOSURE BY OMITTING A GUARD THAT ALREADY COVERS THE ONLY SCENARIO THAT WOULD MATTER, AND
+BY TREATING PROPOSALS AS AN EXCEPTION TO A CONTRACT THIS API HOLDS EVERYWHERE.** Three corrections,
+each measured:
+
+1. **`proposal_not_open` makes clobbering an already-decided proposal impossible, `*` or not.**
+   `routes.py:13688` refuses `422 proposal_not_open` for ANY review action — including `accept` —
+   the moment `proposal.state != STATE_OPEN`, and this check runs FIRST, before `_check_if_match` is
+   even reached, for every one of the four actions. Measured directly: reject a proposal, then send
+   a SECOND review of the same proposal with a stale-but-real `ETag` and, separately, with `*` — both
+   answer **422 `proposal_not_open`, byte-identical**, because the state check never looks at
+   `If-Match` at all. "None of them has any check on whether the caller ever read anything" was true
+   in isolation but omitted the one guard that makes the clobbering case this paragraph worried about
+   structurally unreachable.
+2. **This is the API-wide contract, not a proposals-specific gap.** `test_mcp_if_match_wildcard.py
+   ::test_the_HTTP_api_still_accepts_the_wildcard_because_that_is_deliberate` pins the identical
+   acceptance of `*` on `POST .../runs` (run creation), and the same file's own comments name run
+   removal and asset removal. The "Why" paragraph above already says proposals "never opted out of
+   that shared behaviour"; this residual-risk paragraph then treated the shared behaviour as though
+   it were a defect discovered here, which contradicts the paragraph directly above it.
+3. **The record `ETag` is a lost-update control here, not an authorization control**, because this
+   build has no trusted authentication boundary (`CLAUDE.md` §15): anyone who can `POST` a review can
+   `GET` a current `ETag` for free, immediately beforehand, with no credential this application
+   checks. "A caller holding no validator at all" is therefore not a distinct adversary class from
+   "a caller that just re-read" — the two are indistinguishable to this server. Measured, over a race
+   against a write that does NOT touch this proposal's own state (an unrelated note capture, so
+   `proposal_not_open` does not apply): a caller holding a genuinely STALE `ETag` from before that
+   write is refused `412 stale_write`; a caller sending `*` proceeds and its review succeeds — a REAL
+   difference, but the identical outcome to `*` is available to that same stale-ETag caller for free,
+   by re-`GET`-ing first, exactly as this test suite's own `_review` helper does by default. `*` grants
+   no capability a legitimate re-read does not already grant.
+
+**The residual risk, re-derived a second time and now the narrower of the two:** `reject`,
+`supersede` and `withdraw` still carry no target-level check analogous to `accept`'s digest re-read
+— there is nothing to re-read, since none of them writes a value — but `proposal_not_open` closes
+the one case that would matter (overwriting a decision already made), and the record-`ETag` gap is
+the same one every other mutating route in this API deliberately accepts. What is left is exactly
+what §4's original "required" CAS language should have said all along: a `reject`/`supersede`/
+`withdraw` sent with `*` against a still-OPEN proposal writes a `state` change and a permanent
+`reason` without the caller having proven a prior read — which is true of `*` on every other route
+in this API too, and is this API's documented, deliberate design rather than a proposals-specific
+defect.
 
 **Every operation takes `scope: TutorialScopeDep` as its first parameter**, exactly as `post_note`
 and `post_note_review` do, and every write holds `ws.record_lock(experiment_id, session_id=scope)`

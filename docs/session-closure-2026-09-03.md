@@ -397,10 +397,17 @@ same proposal with a corrected `accepted_value` (the proof's finding C-1);
 **this build has no `Submit` control anywhere** — the finalizing act is
 *Export Official Record + Sidecar* on the export screen, and on a
 not-yet-ready record that control is **absent**, not disabled (findings
-C-2/C-3, §3 step 10); and **`UnmappedNotesPanel` has no live refresh** —
+C-2/C-3, §3 step 10); and ~~**`UnmappedNotesPanel` has no live refresh** —
 notes minted by a finalize on the same screen appear only after a reload,
 while the proposals from that same save appear live (finding F-1, §3 step 3
-— added to the residue list below).
+— added to the residue list below).~~ — **CLOSED 2026-09-10, and struck
+rather than deleted because this was TRUE when written, on 2026-09-03, and
+a reader must be able to see that it was overtaken rather than wrong.**
+`UnmappedNotesPanel` now takes a fourth prop, `activity`
+(`RecordChangeSummary | null`, from the new `useRecordSession.notesActivity`),
+threaded through `RecordWorkbench` the same way `proposalActivity`/
+`runActivity` already were, and silently reloads its notes when that
+summary advances — see §8's residue entry, corrected in the same change.
 
 ---
 
@@ -459,12 +466,25 @@ the proposal-only bundle-refetch residue is **still open**; the
 `RUN_LIST_LIMIT_MAX`/`RUN_PAGE_MAX` drift and the feed's poison-page
 semantics are **now closed and tested**, both by PR-A (#228); Export
 Readiness's unbounded `/pending` per poll remains deliberate; `isaac_runs`
-Stage 2b remains gated on the operator's completeness queries. **New this
+Stage 2b remains gated on the operator's completeness queries. ~~**New this
 pass, found by the real-second-browser proof (§7b, finding F-1):**
 `UnmappedNotesPanel` has no live refresh — a note minted by a finalize on
 the same Capture & Proposals screen appears only after a manual reload,
 while the proposals minted by that same save appear live in Ingestion
-Proposals. Not fixed here; named as residue.
+Proposals. Not fixed here; named as residue.~~ — **CLOSED 2026-09-10.** Kept
+struck rather than deleted: it was an accurate residue statement on
+2026-09-03 and is superseded, not wrong. `UnmappedNotesPanel` now silently
+reloads its notes off the same shared change-feed subscription
+`IngestionProposalsPanel` already used, via a new `notesActivity` summary
+in `useRecordSession`. The signal is DELIBERATELY IMPRECISE, not a
+dedicated "a note changed" event: there is no `note` kind on the wire
+(`change_feed.py`'s `RECORD_COLLECTORS` serves exactly `experiment`, `run`,
+`proposal`), so it rides on the record's own `experiment` entry and also
+fires on, e.g., a title edit or a run edit — bounded to at most one extra
+`GET .../notes` per such event, not zero of them. The forced manual
+`bPage.reload()` at real-browser-proof §3 step 3 is left in place (see that
+spec's own corrected comment); whether it remains strictly necessary given
+the live refresh is unmeasured and not claimed here.
 
 ### 8b. First hosted OBSERVATION, 2026-09-09 — not a sign-off, and not a substitute for one
 

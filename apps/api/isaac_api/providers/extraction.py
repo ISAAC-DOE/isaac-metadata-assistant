@@ -43,7 +43,19 @@ Through the contract that already exists: ``POST /experiments/{id}/answers`` wit
 ``confirmed_by_user: true`` and a matching ``If-Match``, applied by
 ``isaac_records.complete.apply_answers`` under the per-record lock, and recorded
 as ``user_confirmation`` evidence. That path is untouched by this slice and is
-not imported here. A candidate nobody confirms leaves no trace at all.
+not imported here. ~~A candidate nobody confirms leaves no trace at all.~~ —
+**CORRECTED 2026-09-10: false in general, since 2026-09-03, for a candidate this
+module's own type reaches through a different producer.** ``transcript_capture.py``
+imports :class:`FieldCandidate` unchanged and ``routes.py``'s
+``_mint_transcript_proposals`` stores each one's ``proposed_value`` into a durable,
+OPEN ``isaac_api.proposals.IngestionProposal`` — a trace that survives even a
+candidate nobody ever confirms, and that a rejection cannot erase (the note behind
+it is immutable; see ``proposals.py`` invariant **I6**). It remains true only of a
+``FieldCandidate`` this module's own ``capture_extraction`` seam produces: that
+seam is unconsumed by any route, deliberately (see this module's docstring above
+and ``transcript_capture.py``'s explanation of why it is NOT that seam), so a
+candidate reaching a caller only through ``capture_extraction`` still leaves no
+trace if nobody confirms it.
 
 WHY A CANDIDATE CARRIES NO ``source_type``
 ==========================================

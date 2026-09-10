@@ -3398,3 +3398,195 @@ def test_the_contract_no_longer_claims_a_proposal_act_creates_a_revision():
     # And the §7 enumeration now names the one place a proposal DOES travel durably.
     assert "isaac_experiment_revisions.state" in contract
     assert "submission_store.py:504" in contract
+
+
+# --- `If-Match: *` on proposal create/review — CORRECTED 2026-09-10 -----------
+#
+# The contract used to say Create answers `409 wildcard_precondition_refused` for
+# `If-Match: *`, and said nothing about Review. Both readings were wrong the same
+# way: measured over HTTP, below, `*` is accepted by BOTH routes and the mutation
+# lands. `test_mcp_if_match_wildcard.py` already establishes, for `create_proposal`
+# alone, that this is a DELIBERATE, unchanged property of the HTTP layer — the
+# refusal it pins lives at the MCP client, which the review/accept route is not
+# reachable through at all. These two tests are the behavioural pin this file's own
+# established convention calls for (see `test_the_contract_no_longer_claims_a_
+# proposal_act_creates_a_revision` above for the doc-text half of that convention):
+# if a future change tightens either route's wildcard handling, these go red and the
+# corrected doc entry must be revisited rather than silently rotting back to false.
+
+
+def test_wildcard_if_match_creates_a_proposal(client, experiment):
+    """`If-Match: *` on Create answers 200 and STORES the proposal.
+
+    MUTATION-EQUIVALENT CHECK: this is the exact scenario the doc's superseded
+    `409 wildcard_precondition_refused` claim asserted could not happen. Asserting
+    it here, against the real route, is what caught the doc's claim as false rather
+    than merely reasoned-about.
+    """
+    body = {
+        "note_id": experiment.notes[0].id,
+        "target_field_path": OVERRIDE_PATH,
+        "proposed_value": "Cu2O",
+        "rule": "the token after `the pellet was` matched a material label",
+        "run_id": experiment.runs[0].id,
+    }
+    response = client.post(
+        f"/api/experiments/{experiment.id}/proposals",
+        json=body,
+        headers={"If-Match": "*"},
+    )
+    assert response.status_code == 200, response.text
+    proposal_id = response.json()["proposal"]["proposal_id"]
+    stored = _stored(experiment.id)
+    assert any(p.proposal_id == proposal_id for p in stored.proposals)
+
+
+def test_wildcard_if_match_reviews_a_proposal_with_no_validator_at_all(
+    client, experiment
+):
+    """`If-Match: *` on Review (`reject`) answers 200 and the state change lands,
+    for a caller that held no validator — never read the record — at all.
+    """
+    proposal = _created(client, experiment)
+    response = _review(
+        client,
+        experiment.id,
+        proposal["proposal_id"],
+        if_match="*",
+        action="reject",
+        reason="wildcard probe",
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["proposal"]["state"] == "rejected"
+    stored = _stored(experiment.id)
+    landed = next(p for p in stored.proposals if p.proposal_id == proposal["proposal_id"])
+    assert landed.state == "rejected"
+
+
+def test_wildcard_if_match_accepts_a_proposal_and_writes_the_value(
+    armed_client, experiment
+):
+    """`If-Match: *` on Review (`accept`) answers 200 and WRITES the proposed value
+    onto the run through the ordinary writer — a scientific-content mutation, from a
+    caller that presented no validator for the record it is mutating.
+
+    `armed_client` (the fixture identity verifier) is required so this reaches the
+    precondition check at all: in a default-configured deployment `accept` answers
+    `409 human_actor_required` before `If-Match` is ever examined (I4), which is a
+    different gate and does not depend on this one.
+    """
+    proposal = _created(armed_client, experiment)
+    response = _review(
+        armed_client,
+        experiment.id,
+        proposal["proposal_id"],
+        if_match="*",
+        action="accept",
+        accepted_from="candidate",
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()["proposal"]
+    assert body["state"] == "accepted"
+    assert body["applied"] is True
+    stored = _stored(experiment.id)
+    landed = next(p for p in stored.proposals if p.proposal_id == proposal["proposal_id"])
+    assert landed.state == "accepted"
+    assert landed.applied
+
+
+def test_wildcard_and_current_etag_refuse_a_stale_accept_identically(
+    armed_client, experiment
+):
+    """I2, MEASURED — not reasoned. The digest-staleness guard on `accept`
+    (`routes.py`'s "THE CRITICAL SECTION") is not wired to `If-Match` at all, so a
+    caller sending `If-Match: *` and a caller sending the record's real, CURRENT
+    `ETag` meet the identical refusal when the target has moved: `409
+    proposal_stale`, nothing written, either way. Before this test the contract's
+    correction said this "would be expected to" happen; this is the run that settles
+    it, and both arms are asserted against the SAME proposal and the SAME stale
+    condition so the comparison is exact rather than merely similar.
+
+    The proposal survives the first refusal in `STATE_OPEN` (contract DEC-1), which
+    is what lets one proposal answer both arms — a second, independent proposal
+    would leave open the question of whether some OTHER difference between the two
+    explained a different outcome.
+    """
+    proposal = _created(armed_client, experiment, path=OVERRIDE_PATH, value="Cu2O")
+
+    # Somebody else writes the target through the ordinary route, staling the
+    # proposal's digest.
+    exp = _stored(experiment.id)
+    override = _override(armed_client, experiment.id, exp.runs[0].id, OVERRIDE_PATH, "CuO")
+    assert override.status_code in (200, 201), override.text
+
+    # ARM 1 — no validator at all.
+    wildcard_response = _review(
+        armed_client,
+        experiment.id,
+        proposal["proposal_id"],
+        if_match="*",
+        action="accept",
+        accepted_from="candidate",
+    )
+    assert wildcard_response.status_code == 409, wildcard_response.text
+    assert wildcard_response.json()["error"] == "proposal_stale"
+    assert _stored(experiment.id).get_proposal(proposal["proposal_id"]).state == (
+        proposals.STATE_OPEN
+    )
+
+    # ARM 2 — a real, CURRENT `ETag`. `_review`'s default `if_match=...` re-fetches
+    # it immediately before this call, so it is genuinely current and not merely a
+    # tag that happens to be well-formed.
+    current_response = _review(
+        armed_client,
+        experiment.id,
+        proposal["proposal_id"],
+        action="accept",
+        accepted_from="candidate",
+    )
+    assert current_response.status_code == 409, current_response.text
+    assert current_response.json()["error"] == "proposal_stale"
+
+    # IDENTICAL outcome across both arms, and nothing written by either.
+    assert wildcard_response.status_code == current_response.status_code
+    assert wildcard_response.json()["error"] == current_response.json()["error"]
+    after = _stored(experiment.id)
+    assert (
+        after.runs[0].overrides[ws.field_address(OVERRIDE_PATH)].payload["value"]
+        == "CuO"
+    ), "a stale accept overwrote a newer value under one of the two If-Match arms"
+    assert after.get_proposal(proposal["proposal_id"]).state == proposals.STATE_OPEN
+
+
+def test_the_contract_no_longer_claims_a_wildcard_refusal_on_create_or_review():
+    """The corrected wildcard claim is pinned as TEXT, same convention as DEC-10's
+    test above: the false clause must survive only as a struck correction, and the
+    corrected claim must be present. A negative control alone would pass on a
+    document that had simply deleted the row.
+    """
+    contract = (
+        Path(routes.__file__).resolve().parents[3]
+        / "docs"
+        / "ingestion-proposal-contract.md"
+    ).read_text(encoding="utf-8")
+    assert "~~`409 wildcard_precondition_refused` (`If-Match: *`)~~" in contract
+    assert "CORRECTED 2026-09-10, MEASURED OVER HTTP" in contract
+    assert "this route has no wildcard refusal at all" in contract
+    assert "A create sent with `If-Match: *` answers `200`" in contract
+
+    # M1, added on review: every assertion above lives on the Create table row
+    # (line 240) alone. The ~75-line correction BELOW the table — the Review
+    # measurement, the reversal to "accept is not the exposed case", and the
+    # re-derived residual-risk analysis — could be deleted entirely and the
+    # assertions above would still pass. These anchor INSIDE that block, so
+    # deleting or silently rewriting it fails this test too.
+    assert "test_wildcard_and_current_etag_refuse_a_stale_accept_identically" in contract
+    assert "MEASURED 2026-09-10, not reasoned about" in contract
+    assert "`proposal_not_open` makes clobbering an already-decided proposal impossible" in contract
+    assert "The record `ETag` is a lost-update control here, not an authorization control" in contract
+    # And the earlier, overstated framing must survive only as a struck correction —
+    # not merely be absent, which a silent rewrite would also achieve.
+    assert (
+        "~~**Re-derived residual risk, stated plainly rather than restating the "
+        "original framing.**"
+    ) in contract

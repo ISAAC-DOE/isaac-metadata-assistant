@@ -30,6 +30,7 @@ import { render, screen, fireEvent, within, waitFor } from '@testing-library/rea
 import { MemoryRouter } from 'react-router-dom';
 
 import { UnmappedNotesPanel } from '../components/UnmappedNotesPanel';
+import type { RecordChangeSummary } from '../lib/recordChanges';
 import {
   noteFixture,
   notesEmpty,
@@ -74,15 +75,31 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-function renderPanel() {
+function renderPanel(activity: RecordChangeSummary | null = null) {
   return render(
     <MemoryRouter
       initialEntries={['/']}
       future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
     >
-      <UnmappedNotesPanel experimentId={EXP} />
+      <UnmappedNotesPanel experimentId={EXP} activity={activity} />
     </MemoryRouter>,
   );
+}
+
+/** A `recordMoved` summary at the given position — the shape `useRecordSession`
+ *  delivers as `notesActivity`. No run/proposal ids: this panel's own effect
+ *  reads only `recordMoved` and `highestRev`. */
+function recordMovedActivityFor(highestRev: number): RecordChangeSummary {
+  return {
+    recordMoved: true,
+    runIds: [],
+    proposalIds: [],
+    proposalStates: [],
+    otherKinds: [],
+    highestRev,
+    runRev: -1,
+    proposalRev: -1,
+  };
 }
 
 /** Every POST this panel made, with its parsed body and `If-Match`. */
@@ -1555,5 +1572,294 @@ describe('propose a value from this note', () => {
 
     const calls = (globalThis.fetch as Mock).mock.calls as [string, RequestInit?][];
     expect(calls.some(([url]) => String(url).includes('/runs'))).toBe(false);
+  });
+});
+
+// --- F-1: a note minted elsewhere on this screen appears without a manual reload --
+//
+// `docs/session-closure-2026-09-03.md` §8 named this residue: a note minted by a
+// Finalize on `TranscriptCapturePanel` — a SIBLING panel on the same screen — used
+// to appear here only after a manual reload, while the proposals that same
+// Finalize mints appeared live on `IngestionProposalsPanel`. `activity` is the
+// shared `useChangeFeed` summary threaded from `RecordWorkbench` via
+// `useRecordSession.notesActivity` — never a second poller instantiated by this
+// panel. See `UnmappedNotesPanel`'s own doc comment on the prop for the full
+// argument, including why the underlying signal is a deliberately IMPRECISE one
+// (there is no `note` change-feed kind; this rides on the record's own
+// `experiment` entry).
+describe('F-1: a change-feed record-moved entry refreshes the notes list', () => {
+  /*
+   * INDEPENDENT REVIEW (I-1): THE "REPRODUCTION" TEST THAT USED TO OPEN THIS BLOCK
+   * IS REMOVED, NOT RENAMED. It asserted that a component given NO signal issues
+   * no second read — true by construction of the prop contract, and true on the
+   * FIXED build exactly as it would have been on a hypothetical unfixed one, so it
+   * could never fail and was not a reproduction. F-1 is a defect in the SCREEN's
+   * wiring (`RecordWorkbench` never threaded a prop for this panel to react to at
+   * all), and only a test that mounts the real screen can fail on the unfixed
+   * shape and pass on the fixed one — see
+   * `apps/web/src/__tests__/notes-live-refresh-integration.test.tsx`, modelled on
+   * `runs-live-refresh-integration.test.tsx`'s own header for exactly this
+   * distinction ("a colleague's run edit moved no pixel... neither branch's tests
+   * mount the screen that wires them").
+   */
+  it('THE FIX: a record-moved entry refreshes the list, updates it visibly, and does NOT destroy a half-typed capture', async () => {
+    let reads = 0;
+    stubFetchRoutes({
+      [NOTES]: () => {
+        reads += 1;
+        return {
+          body:
+            reads === 1
+              ? notesPage([noteFixture()], { total: 1 })
+              : notesPage([noteFixture(), noteFixture({ id: 'second-note' })], { total: 2 }),
+        };
+      },
+    });
+    const view = renderPanel(null);
+    await screen.findByText(/1 note on this record/);
+
+    // A scientist is mid-way through typing an unrelated note when the arrival
+    // happens — this is the exact promise `CLAUDE.md` §11 records this repository
+    // breaking three times: an input must survive a background refresh.
+    fireEvent.change(screen.getByLabelText('Capture a note'), {
+      target: { value: 'half-typed note about the beam' },
+    });
+
+    // The change-feed delivers a `recordMoved` summary — the shape
+    // `useRecordSession.notesActivity` produces.
+    view.rerender(
+      <MemoryRouter
+        initialEntries={['/']}
+        future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+      >
+        <UnmappedNotesPanel experimentId={EXP} activity={recordMovedActivityFor(9)} />
+      </MemoryRouter>,
+    );
+
+    // VISIBLY UPDATED: the count line moves to what the second read reported.
+    await screen.findByText(/2 notes on this record/);
+    expect(reads).toBe(2);
+
+    // AND THE LIVE VALUE OF THE REAL TEXTAREA IS UNTOUCHED.
+    expect(
+      (screen.getByLabelText('Capture a note') as HTMLTextAreaElement).value,
+    ).toBe('half-typed note about the beam');
+    view.unmount();
+  });
+
+  it('raises no notice of its own — the existing live count line already speaks the new total', async () => {
+    stubFetchRoutes({ [NOTES]: { body: notesPage([noteFixture()], { total: 1 }) } });
+    const view = renderPanel(null);
+    await screen.findByText(/1 note on this record/);
+
+    view.rerender(
+      <MemoryRouter
+        initialEntries={['/']}
+        future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+      >
+        <UnmappedNotesPanel experimentId={EXP} activity={recordMovedActivityFor(9)} />
+      </MemoryRouter>,
+    );
+    await waitFor(() => {
+      const calls = (globalThis.fetch as Mock).mock.calls as [string, RequestInit?][];
+      expect(calls.filter(([url]) => String(url).endsWith('/notes')).length).toBe(2);
+    });
+
+    // Two notices for one fact would be the defect; this panel refreshes silently
+    // and the sr-only act-announcement region stays exactly what it was — empty.
+    expect(screen.queryByRole('alert')).toBeNull();
+    const status = screen.getByRole('status');
+    expect(status.textContent).toBe('');
+    view.unmount();
+  });
+
+  it('does not re-read when the same position is reported twice', async () => {
+    let reads = 0;
+    stubFetchRoutes({
+      [NOTES]: () => {
+        reads += 1;
+        return { body: notesPage([noteFixture()]) };
+      },
+    });
+    const view = renderPanel(null);
+    await screen.findByText(noteFixture().text);
+    expect(reads).toBe(1);
+
+    const same = recordMovedActivityFor(9);
+    for (const activity of [same, { ...same }]) {
+      view.rerender(
+        <MemoryRouter
+          initialEntries={['/']}
+          future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+        >
+          <UnmappedNotesPanel experimentId={EXP} activity={activity} />
+        </MemoryRouter>,
+      );
+    }
+
+    await waitFor(() => expect(reads).toBe(2));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(reads).toBe(2); // the duplicate delivered no news, so no second read
+    view.unmount();
+  });
+
+  it('re-reads when the record moves again at a later position', async () => {
+    let reads = 0;
+    stubFetchRoutes({
+      [NOTES]: () => {
+        reads += 1;
+        return { body: notesPage([noteFixture()]) };
+      },
+    });
+    const view = renderPanel(null);
+    await screen.findByText(noteFixture().text);
+
+    for (const rev of [9, 11]) {
+      view.rerender(
+        <MemoryRouter
+          initialEntries={['/']}
+          future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+        >
+          <UnmappedNotesPanel experimentId={EXP} activity={recordMovedActivityFor(rev)} />
+        </MemoryRouter>,
+      );
+    }
+
+    await waitFor(() => expect(reads).toBe(3));
+    view.unmount();
+  });
+
+  it('a caller that never threads the prop at all (activity omitted) behaves exactly as `activity={null}`', async () => {
+    // `activity` is optional on `UnmappedNotesPanel` itself (not just on
+    // `NotesBrowser`), so a mount that predates this change — or a test that never
+    // updates its call site — degrades to manual-reload-only rather than crashing.
+    stubFetchRoutes({ [NOTES]: { body: notesPage([noteFixture()]) } });
+    render(
+      <MemoryRouter
+        initialEntries={['/']}
+        future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+      >
+        <UnmappedNotesPanel experimentId={EXP} />
+      </MemoryRouter>,
+    );
+    await screen.findByText(noteFixture().text);
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  /*
+   * THE NEGATIVE CONTROL, and it is part of the guarantee rather than decoration.
+   *
+   * Without it a passing suite cannot distinguish "the input is protected" from
+   * "the refresh never happened", and the second reads identically to the first.
+   * The only way a test can destroy state owned by `CaptureNote` from outside is
+   * to unmount it — a blanking (non-silent) reload would do exactly that — so the
+   * control performs that unmount and proves the positive assertion above FAILS
+   * against it.
+   */
+  it('NEGATIVE CONTROL: the same assertion fails when the panel is unmounted', async () => {
+    stubFetchRoutes({ [NOTES]: { body: notesPage([noteFixture()]) } });
+    const view = renderPanel(null);
+    fireEvent.change(await screen.findByLabelText('Capture a note'), {
+      target: { value: 'half-typed note about the beam' },
+    });
+
+    view.unmount();
+    renderPanel(null);
+    await screen.findByText(noteFixture().text);
+
+    // The box is not even on screen with its old value — this is what the positive
+    // test above would look like on a build that blanked the panel to refresh.
+    expect(
+      (screen.getByLabelText('Capture a note') as HTMLTextAreaElement).value,
+    ).toBe('');
+  });
+
+  /*
+   * I-2, INDEPENDENT REVIEW. Before this fix, `UnmappedNotesPanel.tsx`'s fetch
+   * effect set `{status: 'error'}` on ANY failure, silent or not — so a background
+   * reload that failed replaced the whole `<ul>` with `BackendDown`, taking an
+   * open "Edit wording" box and its rewrite down with it, reachable with no
+   * reader action at all. The comment directly above the change-feed effect
+   * claimed this could not happen ("never blanks it"); the reviewer measured that
+   * the claim was false for the failure path. This test is what makes the claim
+   * true: a silent reload that fails must leave everything open and typed exactly
+   * where it was, in BOTH places that hold unsaved input — the composer and an
+   * open editor — and must disclose the failure without destroying anything.
+   */
+  it('I-2: a background reload that FAILS does not destroy an open editor or the composer', async () => {
+    let reads = 0;
+    stubFetchRoutes({
+      [NOTES]: () => {
+        reads += 1;
+        // First read (mount) succeeds; every read after that — which is the
+        // activity-triggered background one — fails.
+        if (reads === 1) return { body: notesPage([noteFixture()]) };
+        return { status: 503, body: { error: 'experiment_storage_unavailable' } };
+      },
+    });
+    const view = renderPanel(null);
+    await screen.findByText(noteFixture().text);
+
+    // Unsaved input in TWO places: the always-visible composer, and an open
+    // per-note form.
+    fireEvent.change(screen.getByLabelText('Capture a note'), {
+      target: { value: 'half-typed note about the beam' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Edit wording' }));
+    fireEvent.change(screen.getByLabelText('Corrected wording'), {
+      target: { value: 'a half-written rewrite, not yet saved' },
+    });
+
+    // The change feed delivers a record-moved summary — the same trigger the
+    // positive `THE FIX` test above uses — and this read is stubbed to fail.
+    view.rerender(
+      <MemoryRouter
+        initialEntries={['/']}
+        future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+      >
+        <UnmappedNotesPanel experimentId={EXP} activity={recordMovedActivityFor(9)} />
+      </MemoryRouter>,
+    );
+    await waitFor(() => expect(reads).toBe(2));
+
+    // NOTHING WAS DESTROYED. The original note is still on screen (not replaced
+    // by `BackendDown`), and both unsaved inputs survive verbatim.
+    expect(screen.getByText(noteFixture().text)).toBeTruthy();
+    expect(
+      (screen.getByLabelText('Capture a note') as HTMLTextAreaElement).value,
+    ).toBe('half-typed note about the beam');
+    expect(
+      (screen.getByLabelText('Corrected wording') as HTMLTextAreaElement).value,
+    ).toBe('a half-written rewrite, not yet saved');
+
+    // AND THE FAILURE IS DISCLOSED, not silent about being silent.
+    expect(
+      await screen.findByText(/A background refresh of this list did not complete/),
+    ).toBeInTheDocument();
+    view.unmount();
+  });
+
+  /*
+   * THE NEGATIVE CONTROL for I-2 — without it, a build that (wrongly) treated
+   * every failure as loud would ALSO leave `noteFixture().text` findable, because
+   * `BackendDown` renders its own text and the assertion above never looks for
+   * `BackendDown`'s own marker. This proves the destructive path really does
+   * destroy what the positive test checks, by forcing exactly that path.
+   */
+  it('NEGATIVE CONTROL: a LOUD failure (the first read itself) shows BackendDown, not the note', async () => {
+    stubFetchRoutes({
+      [NOTES]: { status: 503, body: { error: 'experiment_storage_unavailable' } },
+    });
+    renderPanel(null);
+
+    await screen.findByText(/Backend Not Running/);
+    // The list content is gone — replaced by `BackendDown`, not disclosed beside
+    // it. `CaptureNote` itself is unconditionally rendered even here (D2's own
+    // rule: nothing removes the box while `version` is unknown; its SUBMIT button
+    // is disabled instead), so the meaningful absence is the note's OWN text, not
+    // the composer's presence.
+    expect(screen.queryByText(noteFixture().text)).toBeNull();
+    fireEvent.change(screen.getByLabelText('Capture a note'), { target: { value: 'x' } });
+    expect(screen.getByRole('button', { name: 'Capture Note' })).toBeDisabled();
   });
 });

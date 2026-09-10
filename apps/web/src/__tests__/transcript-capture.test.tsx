@@ -1665,3 +1665,892 @@ describe('the panel toggle and the recorder lifecycle', () => {
     expect(FakeMediaRecorder.instances[0].state).toBe('inactive');
   });
 });
+
+// --- 14. LEAVING A RECORD: WHICH MECHANISM ACTUALLY DOES IT ------------------
+//
+// READ THIS BEFORE ADDING A TEST HERE, because the section's original premise
+// was measured FALSE in a real browser and the correction is the useful part.
+//
+// CLAIMED: `RecordWorkbench` renders `<TranscriptCapturePanel experimentId={id} />`
+// with no `key` under a single `/record/:id` route, therefore an in-app record
+// switch re-uses this component instance and leaves a live microphone behind.
+//
+// MEASURED (real Chromium, instrumented `MediaStreamTrack.prototype.stop`, real
+// fake audio device — `apps/web/e2e/mutation/capture-microphone.spec.ts`):
+// `RecordWorkbench.tsx:397-412` renders the panel ONLY while
+// `bundle.status === 'data'`. A switch refetches, status goes `'loading'`, the
+// subtree is DELETED, the panel UNMOUNTS, and the pre-existing unmount cleanup
+// releases the microphone — at `0650bd46`, before any of this work. The in-app
+// record switch was never leaking.
+//
+// SO WHAT ARE THESE TESTS? Almost all of them drive a state that is reached
+// ONLY by re-rendering one instance with a new `experimentId`, WHICH NO CALLER
+// IN THIS APPLICATION DOES. They are INVARIANT guards, not regression guards:
+// they pin that the component honours `CAPTURE_COPY.voiceAudioHandling`'s
+// "leave this record" promise on its own, without depending on a screen it does
+// not control to unmount it. Several of them pass at `0650bd46` too. Each says
+// which it is.
+//
+// THE EXCEPTIONS — the two tests at the end of this section, under the
+// `RealMountPattern` harness. Those drive the caller's ACTUAL sequence and one
+// of them is a genuine regression guard for a defect a real browser reproduces.
+
+describe('leaving a record: the panel keeps its own promise, whoever the caller is', () => {
+  const OTHER = 'other-record';
+  const OTHER_RUNS = `GET /api/experiments/${OTHER}/runs`;
+  const OTHER_ROUTES: Record<string, unknown> = {
+    ...BASE_ROUTES,
+    [OTHER_RUNS]: { body: runsPage },
+  };
+
+  function panelFor(id: string) {
+    return (
+      <MemoryRouter
+        initialEntries={['/']}
+        future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+      >
+        <TranscriptCapturePanel experimentId={id} />
+      </MemoryRouter>
+    );
+  }
+
+  /** Renders record A's panel, opens it, and returns the render handle. */
+  async function renderOpenedFor(id: string) {
+    const rendered = render(panelFor(id));
+    fireEvent.click(screen.getByRole('button', { name: CAPTURE_COPY.entryOpen }));
+    return rendered;
+  }
+
+  it('the panel MAKES the claim these tests defend, and makes it on screen', async () => {
+    /*
+     * The link between the sentence and the behaviour, in one place. Nothing
+     * else in this suite asserted `voiceAudioHandling`'s content, so the "leave
+     * this record" clause could have been quietly weakened — the cheaper way to
+     * make a false claim true — and every behaviour test above would still pass
+     * while defending a promise the panel no longer makes. This fails in that
+     * case, which is the point.
+     */
+    expect(CAPTURE_COPY.voiceAudioHandling).toContain('leave this record');
+    installRecorder(vi.fn(async () => ({ getTracks: () => [{ stop: vi.fn() }] })));
+    stubFetchRoutes(OTHER_ROUTES as never);
+    await renderOpenedFor(EXP);
+    expect(await screen.findByText(CAPTURE_COPY.voiceAudioHandling)).toBeInTheDocument();
+  });
+
+  it('held mounted across a record change, the panel releases the microphone itself — INVARIANT GUARD, not a regression guard: this state is reached by a rerender no caller performs — see the section header.', async () => {
+    const stop = vi.fn();
+    installRecorder(vi.fn(async () => ({ getTracks: () => [{ stop }] })));
+    stubFetchRoutes(OTHER_ROUTES as never);
+    const rendered = await renderOpenedFor(EXP);
+    await act(async () => {
+      fireEvent.click(await screen.findByRole('button', { name: CAPTURE_COPY.voiceRecord }));
+      await Promise.resolve();
+    });
+    await waitFor(() => expect(FakeMediaRecorder.instances).toHaveLength(1));
+    const recorder = FakeMediaRecorder.instances[0];
+    await screen.findByRole('button', { name: CAPTURE_COPY.voiceStop });
+
+    // The one act under test: the SAME instance, a different record.
+    await act(async () => {
+      rendered.rerender(panelFor(OTHER));
+      await Promise.resolve();
+    });
+
+    expect(stop).toHaveBeenCalled();
+    expect(recorder.state).toBe('inactive');
+    // The handler is detached BEFORE `stop()`, so the final asynchronous chunk
+    // cannot refill a buffer the panel has just declared empty.
+    expect(recorder.ondataavailable).toBeNull();
+    // And the panel no longer offers to stop a recording that is over.
+    expect(screen.queryByRole('button', { name: CAPTURE_COPY.voiceStop })).toBeNull();
+    expect(await screen.findByRole('button', { name: CAPTURE_COPY.voiceRecord })).toBeInTheDocument();
+  });
+
+  it('held mounted across a record change, the previous record’s chunk count is not carried over — INVARIANT GUARD, not a regression guard: this state is reached by a rerender no caller performs — see the section header.', async () => {
+    /*
+     * The held-chunk count is never rendered — it exists only to build the
+     * opaque handle the transcription request carries. That handle is therefore
+     * the one place the buffer is OBSERVABLE from outside, which is why this
+     * asserts on it rather than reaching into the component.
+     */
+    installRecorder(vi.fn(async () => ({ getTracks: () => [{ stop: vi.fn() }] })));
+    stubFetchRoutes({
+      ...OTHER_ROUTES,
+      [TRANSCRIBE]: { status: 501, body: { detail: 'no provider' } },
+    } as never);
+    const rendered = await renderOpenedFor(EXP);
+    await act(async () => {
+      fireEvent.click(await screen.findByRole('button', { name: CAPTURE_COPY.voiceRecord }));
+      await Promise.resolve();
+    });
+    await waitFor(() => expect(FakeMediaRecorder.instances).toHaveLength(1));
+    // Two real chunks arrive on record A.
+    await act(async () => {
+      FakeMediaRecorder.instances[0].ondataavailable?.({ data: new Blob(['a']) });
+      FakeMediaRecorder.instances[0].ondataavailable?.({ data: new Blob(['b']) });
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      rendered.rerender(panelFor(OTHER));
+      await Promise.resolve();
+    });
+
+    // A fresh recording on record B, with NO chunk delivered.
+    await act(async () => {
+      fireEvent.click(await screen.findByRole('button', { name: CAPTURE_COPY.voiceRecord }));
+      await Promise.resolve();
+    });
+    await screen.findByRole('button', { name: CAPTURE_COPY.voiceStop });
+
+    /*
+     * EVERYTHING FROM HERE IS SYNCHRONOUS, DELIBERATELY. `FakeMediaRecorder.stop()`
+     * emits its final chunk on a `setTimeout(…, 0)` — modelling the real API — and
+     * an `await` between the two clicks lets that macrotask run, so record B's own
+     * final chunk lands and the handle reads `held-in-tab:1` whatever record A did.
+     * Using the synchronous `getByRole` keeps the count attributable: the handle is
+     * minted before ANY chunk of record B's exists, so the number it carries can
+     * only have come from record A. It also models the ordinary case of stopping
+     * and asking for a transcript straight away.
+     */
+    fireEvent.click(screen.getByRole('button', { name: CAPTURE_COPY.voiceStop }));
+    fireEvent.click(screen.getByRole('button', { name: CAPTURE_COPY.voiceTranscribe }));
+
+    await waitFor(() => {
+      const sent = writes().filter((entry) => entry.key === TRANSCRIBE);
+      expect(sent).toHaveLength(1);
+      // `held-in-tab:2` here would mean record A's buffer survived into record B.
+      expect(sent[0].body.audio_ref).toBe('held-in-tab:0');
+    });
+  });
+
+  it('held mounted across a record change, held audio is not offered to the next record — INVARIANT GUARD, not a regression guard: this state is reached by a rerender no caller performs — see the section header.', async () => {
+    // The user-facing half of the test above: record A's audio must not still be
+    // sitting behind "Request a Transcript"/"Discard Audio" on record B's screen.
+    installRecorder(vi.fn(async () => ({ getTracks: () => [{ stop: vi.fn() }] })));
+    stubFetchRoutes(OTHER_ROUTES as never);
+    const rendered = await renderOpenedFor(EXP);
+    await act(async () => {
+      fireEvent.click(await screen.findByRole('button', { name: CAPTURE_COPY.voiceRecord }));
+      await Promise.resolve();
+    });
+    fireEvent.click(await screen.findByRole('button', { name: CAPTURE_COPY.voiceStop }));
+    await screen.findByRole('button', { name: CAPTURE_COPY.voiceDiscard });
+
+    await act(async () => {
+      rendered.rerender(panelFor(OTHER));
+      await Promise.resolve();
+    });
+
+    expect(screen.queryByRole('button', { name: CAPTURE_COPY.voiceDiscard })).toBeNull();
+    expect(screen.queryByRole('button', { name: CAPTURE_COPY.voiceTranscribe })).toBeNull();
+    expect(await screen.findByRole('button', { name: CAPTURE_COPY.voiceRecord })).toBeInTheDocument();
+  });
+
+  it('a pending permission prompt never becomes the next record’s microphone (rerender form; the REAL-PATH form of this is the regression guard at the end of this section)', async () => {
+    let resolveGetUserMedia: (v: unknown) => void = () => {};
+    const gate = new Promise((resolve) => {
+      resolveGetUserMedia = resolve;
+    });
+    const stop = vi.fn();
+    installRecorder(vi.fn(() => gate));
+    stubFetchRoutes(OTHER_ROUTES as never);
+    const rendered = await renderOpenedFor(EXP);
+    fireEvent.click(await screen.findByRole('button', { name: CAPTURE_COPY.voiceRecord }));
+    await screen.findByRole('button', { name: CAPTURE_COPY.voiceRequesting });
+
+    await act(async () => {
+      rendered.rerender(panelFor(OTHER));
+      await Promise.resolve();
+    });
+    // The browser only NOW grants the request the previous record made.
+    await act(async () => {
+      resolveGetUserMedia({ getTracks: () => [{ stop }] });
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    // The stream is released rather than adopted, and record B is not recording.
+    expect(stop).toHaveBeenCalled();
+    expect(screen.queryByRole('button', { name: CAPTURE_COPY.voiceStop })).toBeNull();
+    expect(await screen.findByRole('button', { name: CAPTURE_COPY.voiceRecord })).toBeInTheDocument();
+  });
+
+  it('held mounted across a record change, a stale transcription refusal is cleared — its own sentence stops being true — INVARIANT GUARD, not a regression guard: this state is reached by a rerender no caller performs — see the section header.', async () => {
+    // `voiceAfterRefusal` says "The audio is still held in this tab" — which the
+    // record change has just made false. The refusal card must not survive it.
+    installRecorder(vi.fn(async () => ({ getTracks: () => [{ stop: vi.fn() }] })));
+    stubFetchRoutes({
+      ...OTHER_ROUTES,
+      [TRANSCRIBE]: {
+        status: 501,
+        body: {
+          refused: true,
+          seam: 'transcription',
+          reason: 'no_provider_configured',
+          missing: ['an approved transcription provider (decision D9)'],
+          message: 'This build cannot transcribe speech: no provider is configured.',
+          decision_reference: 'docs/ai-integration-decision-packet.md',
+        },
+      },
+    } as never);
+    const rendered = await renderOpenedFor(EXP);
+    await act(async () => {
+      fireEvent.click(await screen.findByRole('button', { name: CAPTURE_COPY.voiceRecord }));
+      await Promise.resolve();
+    });
+    fireEvent.click(await screen.findByRole('button', { name: CAPTURE_COPY.voiceStop }));
+    fireEvent.click(await screen.findByRole('button', { name: CAPTURE_COPY.voiceTranscribe }));
+    await screen.findByText('This build cannot transcribe speech: no provider is configured.');
+
+    await act(async () => {
+      rendered.rerender(panelFor(OTHER));
+      await Promise.resolve();
+    });
+
+    expect(
+      screen.queryByText('This build cannot transcribe speech: no provider is configured.'),
+    ).toBeNull();
+    expect(screen.queryByText(CAPTURE_COPY.voiceAfterRefusal)).toBeNull();
+  });
+
+  it('`permission-denied` SURVIVES a record change — it is a fact about the browser', async () => {
+    installRecorder(vi.fn(async () => {
+      throw new DOMException('synthetic, for this test only', 'NotAllowedError');
+    }));
+    stubFetchRoutes(OTHER_ROUTES as never);
+    const rendered = await renderOpenedFor(EXP);
+    await act(async () => {
+      fireEvent.click(await screen.findByRole('button', { name: CAPTURE_COPY.voiceRecord }));
+      await Promise.resolve();
+    });
+    const { container } = rendered;
+    await waitFor(() => expect(container.querySelector('.capture-note-warn')).not.toBeNull());
+
+    await act(async () => {
+      rendered.rerender(panelFor(OTHER));
+      await Promise.resolve();
+    });
+
+    expect(container.querySelector('.capture-note-warn')?.textContent).toBe(
+      CAPTURE_COPY.voicePermissionRefused,
+    );
+    expect(screen.getByRole('button', { name: CAPTURE_COPY.voiceTryAgain })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: CAPTURE_COPY.voiceRecord })).toBeNull();
+    // The live region still holds the SAME sentence, so the record change fired
+    // no second announcement about a record the reader has already left.
+    const live = container.querySelectorAll('[role="status"]');
+    expect(
+      Array.from(live).some((el) => el.textContent === CAPTURE_COPY.voicePermissionRefused),
+    ).toBe(true);
+  });
+
+  it('`unsupported` SURVIVES a record change — it is a fact about the browser', async () => {
+    // No `installRecorder()`: jsdom's own baseline has no `MediaRecorder`.
+    stubFetchRoutes(OTHER_ROUTES as never);
+    const rendered = await renderOpenedFor(EXP);
+    await screen.findByText(CAPTURE_COPY.voiceUnsupported);
+
+    await act(async () => {
+      rendered.rerender(panelFor(OTHER));
+      await Promise.resolve();
+    });
+
+    expect(screen.getByText(CAPTURE_COPY.voiceUnsupported)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: CAPTURE_COPY.voiceRecord })).toBeNull();
+  });
+
+  /* ------------------------------------------------------------------------
+   * C1 / C2 — IN-FLIGHT REQUESTS, AND A CLAIM THAT WAS SCOPED DOWN.
+   *
+   * The reset above cleans up what the previous record LEFT BEHIND; it can do
+   * nothing about what the previous record is STILL WAITING FOR. Every handler
+   * is a plain function closing over the render that started it, so a response
+   * landing after the record changed would write one record's facts onto
+   * another's screen. These tests gate a response open, change record
+   * underneath it, and release it.
+   *
+   * THEY DO NOT DEMONSTRATE A DEFECT IN THIS APPLICATION, and saying so is the
+   * point. C1 and C2 were both raised as reproduced cross-record leaks — one
+   * record's dictation in another's transcript box, one record's finalize
+   * announced on another's screen. Both were produced by re-rendering ONE
+   * instance with a new `experimentId`. Measured through the caller's real
+   * mount sequence (see `RealMountPattern` at the end of this section), the
+   * panel UNMOUNTS, React 18 no-ops the `setState`, and the next record gets a
+   * fresh instance: with `requestTranscript`'s guard REMOVED, the next record's
+   * transcript box was still empty. The guards are hazard-class defence — one
+   * comparison each, load-bearing the moment any caller keeps this panel
+   * mounted — and the tests below pin them as such, not as fixes.
+   * --------------------------------------------------------------------- */
+
+  /** A route that answers only once `open()` is called. */
+  function gated(result: unknown) {
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = () => resolve();
+    });
+    return {
+      route: async () => {
+        await gate;
+        return result as { body: unknown };
+      },
+      release: async () => {
+        await act(async () => {
+          release();
+          await Promise.resolve();
+          await Promise.resolve();
+          await Promise.resolve();
+        });
+      },
+    };
+  }
+
+  const RUN_B = runFixture({ id: 'run-b1', label: 'Run B1', version: 'rb1.0', fields: {} });
+  const otherRunsPage = {
+    ...runsPage,
+    runs: [RUN_B],
+    experiment_version: 'gB.1',
+  };
+
+  it('C1 (HAZARD-CLASS, NOT REPRODUCIBLE IN THIS APP): held mounted, a stale transcript does not land in the next record’s box', async () => {
+    const transcribe = gated({
+      body: {
+        refused: false,
+        text: 'Synthetic dictation belonging to record A only.',
+        segments: [],
+        produced_by: 'test-double',
+        verbatim: true,
+        language: null,
+      },
+    });
+    installRecorder(vi.fn(async () => ({ getTracks: () => [{ stop: vi.fn() }] })));
+    stubFetchRoutes({
+      ...OTHER_ROUTES,
+      [OTHER_RUNS]: { body: otherRunsPage },
+      [TRANSCRIBE]: transcribe.route,
+    } as never);
+    const rendered = await renderOpenedFor(EXP);
+    await act(async () => {
+      fireEvent.click(await screen.findByRole('button', { name: CAPTURE_COPY.voiceRecord }));
+      await Promise.resolve();
+    });
+    fireEvent.click(await screen.findByRole('button', { name: CAPTURE_COPY.voiceStop }));
+    fireEvent.click(await screen.findByRole('button', { name: CAPTURE_COPY.voiceTranscribe }));
+
+    await act(async () => {
+      rendered.rerender(panelFor(OTHER));
+      await Promise.resolve();
+    });
+    await transcribe.release();
+
+    // The scientist must never be handed words they did not say on this record:
+    // they are one Finalize away from being stored as B's notes and proposals.
+    const box = (await screen.findByLabelText('Transcript')) as HTMLTextAreaElement;
+    expect(box.value).toBe('');
+    expect(screen.queryByText(/Synthetic dictation belonging to record A/)).toBeNull();
+  });
+
+  it('C1 (HAZARD-CLASS, NOT REPRODUCIBLE IN THIS APP): held mounted, a stale transcription refusal does not render on the next record', async () => {
+    const transcribe = gated({
+      status: 501,
+      body: {
+        refused: true,
+        seam: 'transcription',
+        reason: 'no_provider_configured',
+        missing: ['an approved transcription provider (decision D9)'],
+        message: 'This build cannot transcribe speech: no provider is configured.',
+        decision_reference: 'docs/ai-integration-decision-packet.md',
+      },
+    });
+    installRecorder(vi.fn(async () => ({ getTracks: () => [{ stop: vi.fn() }] })));
+    stubFetchRoutes({
+      ...OTHER_ROUTES,
+      [OTHER_RUNS]: { body: otherRunsPage },
+      [TRANSCRIBE]: transcribe.route,
+    } as never);
+    const rendered = await renderOpenedFor(EXP);
+    await act(async () => {
+      fireEvent.click(await screen.findByRole('button', { name: CAPTURE_COPY.voiceRecord }));
+      await Promise.resolve();
+    });
+    fireEvent.click(await screen.findByRole('button', { name: CAPTURE_COPY.voiceStop }));
+    fireEvent.click(await screen.findByRole('button', { name: CAPTURE_COPY.voiceTranscribe }));
+
+    await act(async () => {
+      rendered.rerender(panelFor(OTHER));
+      await Promise.resolve();
+    });
+    await transcribe.release();
+
+    // The card ends with `voiceAfterRefusal` — "The audio is still held in this
+    // tab" — which the record change has already made false.
+    expect(
+      screen.queryByText('This build cannot transcribe speech: no provider is configured.'),
+    ).toBeNull();
+    expect(screen.queryByText(CAPTURE_COPY.voiceAfterRefusal)).toBeNull();
+  });
+
+  it('C2 (HAZARD-CLASS, NOT REPRODUCIBLE IN THIS APP): held mounted, a stale finalize announces nothing, renders nothing, and imports no runs', async () => {
+    const capture = gated({ body: reading() });
+    stubFetchRoutes({
+      ...OTHER_ROUTES,
+      [OTHER_RUNS]: { body: otherRunsPage },
+      [TRANSCRIPT]: capture.route,
+    } as never);
+    const rendered = await renderOpenedFor(EXP);
+    const box = await screen.findByLabelText('Transcript');
+    fireEvent.change(box, { target: { value: 'Temperature was 300 K.' } });
+    fireEvent.change(await screen.findByLabelText(CAPTURE_COPY.runLabel), {
+      target: { value: 'run-1' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: CAPTURE_COPY.finalize }));
+
+    await act(async () => {
+      rendered.rerender(panelFor(OTHER));
+      await Promise.resolve();
+    });
+    // Record B's own runs resolve FIRST — the un-gated route — so the ordering
+    // below is deterministic rather than a race the test happens to win.
+    await screen.findByRole('option', { name: 'Run B1' });
+    await capture.release();
+
+    const { container } = rendered;
+    const status = container.querySelector('[role="status"]');
+    expect(status?.textContent ?? '').not.toMatch(/Finalized/);
+    expect(screen.queryByText(CAPTURE_COPY.summaryStored(1, 1))).toBeNull();
+    // Record A's run must not be selectable on record B's screen.
+    expect(screen.queryByRole('option', { name: 'Run 1' })).toBeNull();
+    expect(screen.getByRole('option', { name: 'Run B1' })).toBeInTheDocument();
+  });
+
+  it('C2 (HAZARD-CLASS, NOT REPRODUCIBLE IN THIS APP): held mounted, a stale finalize does not hand the next record another record’s version token', async () => {
+    /*
+     * The half of C2 with consequences past the screen: `experiment_version` is
+     * what the next write sends as `If-Match`, so adopting record A's would aim
+     * record B's write at another record's concurrency token.
+     */
+    const capture = gated({ body: reading() }); // carries experiment_version 'g1.5'
+    const OTHER_TRANSCRIPT = `POST /api/experiments/${OTHER}/transcript`;
+    stubFetchRoutes({
+      ...OTHER_ROUTES,
+      [OTHER_RUNS]: { body: otherRunsPage }, // carries experiment_version 'gB.1'
+      [TRANSCRIPT]: capture.route,
+      [OTHER_TRANSCRIPT]: { body: reading() },
+    } as never);
+    const rendered = await renderOpenedFor(EXP);
+    fireEvent.change(await screen.findByLabelText('Transcript'), {
+      target: { value: 'Temperature was 300 K.' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: CAPTURE_COPY.finalize }));
+
+    await act(async () => {
+      rendered.rerender(panelFor(OTHER));
+      await Promise.resolve();
+    });
+    await screen.findByRole('option', { name: 'Run B1' });
+    await capture.release();
+
+    // Now write on record B and read the token off the wire.
+    fireEvent.change(await screen.findByLabelText('Transcript'), {
+      target: { value: 'A note typed on record B.' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: CAPTURE_COPY.finalize }));
+    await waitFor(() => {
+      const sent = writes().filter((entry) => entry.key === OTHER_TRANSCRIPT);
+      expect(sent).toHaveLength(1);
+      // The token really is on the wire as `If-Match`, which is the whole point:
+      // `"g1.5"` here would be record A's version aimed at record B's write.
+      expect(sent[0].ifMatch).toBe('"gB.1"');
+    });
+  });
+
+  it('I1 (HAZARD-CLASS): held mounted, a record change mid-finalize does not leave the next record’s form locked', async () => {
+    const capture = gated({ body: reading() });
+    stubFetchRoutes({
+      ...OTHER_ROUTES,
+      [OTHER_RUNS]: { body: otherRunsPage },
+      [TRANSCRIPT]: capture.route,
+    } as never);
+    const rendered = await renderOpenedFor(EXP);
+    fireEvent.change(await screen.findByLabelText('Transcript'), {
+      target: { value: 'Temperature was 300 K.' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: CAPTURE_COPY.finalize }));
+    // Record A really is locked.
+    expect(await screen.findByRole('button', { name: /Reading/ })).toBeDisabled();
+
+    await act(async () => {
+      rendered.rerender(panelFor(OTHER));
+      await Promise.resolve();
+    });
+
+    // Record B has nothing in flight, so nothing about it may be reported busy.
+    expect(screen.queryByRole('button', { name: /Reading/ })).toBeNull();
+    expect(await screen.findByLabelText('Transcript')).not.toBeDisabled();
+    await capture.release();
+    expect(await screen.findByLabelText('Transcript')).not.toBeDisabled();
+  });
+
+  it('held mounted, the stale finalize announcement is cleared by the record change itself — INVARIANT GUARD, not a regression guard: this state is reached by a rerender no caller performs — see the section header.', async () => {
+    /*
+     * Pins `setAnnouncement('')` in the reset, which survived an independent
+     * reviewer's mutation. This is the completed-finalize case (no gate): the
+     * card is gone because `reading` is cleared, and the sentence describing it
+     * must not be left in a live region on someone else's record.
+     */
+    stubFetchRoutes({
+      ...OTHER_ROUTES,
+      [OTHER_RUNS]: { body: otherRunsPage },
+      [TRANSCRIPT]: { body: reading() },
+    } as never);
+    const rendered = await renderOpenedFor(EXP);
+    await typeAndFinalize();
+    await screen.findByText(CAPTURE_COPY.summaryStored(1, 1));
+    const { container } = rendered;
+    expect(container.querySelector('[role="status"]')?.textContent).toMatch(/Finalized/);
+
+    await act(async () => {
+      rendered.rerender(panelFor(OTHER));
+      await Promise.resolve();
+    });
+
+    expect(container.querySelector('[role="status"]')?.textContent).toBe('');
+    expect(screen.queryByText(CAPTURE_COPY.summaryStored(1, 1))).toBeNull();
+  });
+
+  it('held mounted, a stale permission refusal neither accuses the next record nor stops its recording — INVARIANT GUARD, not a regression guard: this state is reached by a rerender no caller performs — see the section header.', async () => {
+    /*
+     * Pins the CATCH-path generation guard, which survived an independent
+     * reviewer's mutation. It matters more than the success path: `dropAudio()`
+     * operates on the SHARED refs, so a refusal arriving late would tear down a
+     * recording the new record had legitimately started — the stale response
+     * reaching in and stopping a live microphone that is not its own.
+     */
+    let rejectFirst: (cause: unknown) => void = () => {};
+    const firstAttempt = new Promise((_resolve, reject) => {
+      rejectFirst = reject;
+    });
+    const secondTrack = { stop: vi.fn() };
+    const getUserMedia = vi
+      .fn()
+      .mockImplementationOnce(() => firstAttempt)
+      .mockImplementation(async () => ({ getTracks: () => [secondTrack] }));
+    installRecorder(getUserMedia);
+    stubFetchRoutes({ ...OTHER_ROUTES, [OTHER_RUNS]: { body: otherRunsPage } } as never);
+
+    const rendered = await renderOpenedFor(EXP);
+    fireEvent.click(await screen.findByRole('button', { name: CAPTURE_COPY.voiceRecord }));
+    await screen.findByRole('button', { name: CAPTURE_COPY.voiceRequesting });
+
+    await act(async () => {
+      rendered.rerender(panelFor(OTHER));
+      await Promise.resolve();
+    });
+    // Record B starts its own, successful recording.
+    await act(async () => {
+      fireEvent.click(await screen.findByRole('button', { name: CAPTURE_COPY.voiceRecord }));
+      await Promise.resolve();
+    });
+    await screen.findByRole('button', { name: CAPTURE_COPY.voiceStop });
+
+    // Only NOW does record A's permission prompt come back refused.
+    await act(async () => {
+      rejectFirst(new DOMException('synthetic, for this test only', 'NotAllowedError'));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const { container } = rendered;
+    expect(container.querySelector('.capture-note-warn')).toBeNull();
+    // Record B is still recording, and its microphone was not stopped.
+    expect(screen.getByRole('button', { name: CAPTURE_COPY.voiceStop })).toBeInTheDocument();
+    expect(secondTrack.stop).not.toHaveBeenCalled();
+  });
+
+  /* ------------------------------------------------------------------------
+   * I3 — THE OTHER WAY OF LEAVING, AND THE ONE THAT WAS REALLY BROKEN ON SCREEN.
+   *
+   * Unlike everything above, this needs no rerender and no held-mounted caller:
+   * "Close Capture" is a real control a scientist presses, and it was
+   * reproduced through it. Closing already released the microphone and already
+   * dropped the buffer — it just never said so, leaving "Stop Recording", an
+   * elapsed indicator reading `Recording · 0:00`, and a live region claiming
+   * audio was being held, with no stream, recorder or buffer behind any of it.
+   * These two tests ARE regression guards.
+   * --------------------------------------------------------------------- */
+
+  it('I3: CLOSING THE PANEL MID-RECORDING LEAVES NO "RECORDING" CLAIM BEHIND', async () => {
+    const stop = vi.fn();
+    installRecorder(vi.fn(async () => ({ getTracks: () => [{ stop }] })));
+    stubFetchRoutes(OTHER_ROUTES as never);
+    const { container } = await renderOpenedFor(EXP);
+    await act(async () => {
+      fireEvent.click(await screen.findByRole('button', { name: CAPTURE_COPY.voiceRecord }));
+      await Promise.resolve();
+    });
+    await screen.findByRole('button', { name: CAPTURE_COPY.voiceStop });
+
+    fireEvent.click(screen.getByRole('button', { name: CAPTURE_COPY.entryClose }));
+    await waitFor(() => expect(stop).toHaveBeenCalled());
+    fireEvent.click(screen.getByRole('button', { name: CAPTURE_COPY.entryOpen }));
+
+    // Reopened: there is no stream, no recorder and no buffer, so nothing on
+    // screen may say otherwise.
+    expect(await screen.findByRole('button', { name: CAPTURE_COPY.voiceRecord })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: CAPTURE_COPY.voiceStop })).toBeNull();
+    expect(container.querySelector('.capture-elapsed')).toBeNull();
+    const live = container.querySelectorAll('[aria-live="polite"]');
+    expect(Array.from(live).some((el) => el.textContent === CAPTURE_COPY.voiceIdleLive)).toBe(true);
+    expect(
+      Array.from(live).some((el) => el.textContent === CAPTURE_COPY.voiceRecordingLive),
+    ).toBe(false);
+  });
+
+  it('I3: `permission-denied` SURVIVES CLOSING THE PANEL, for the same reason it survives a record change', async () => {
+    installRecorder(vi.fn(async () => {
+      throw new DOMException('synthetic, for this test only', 'NotAllowedError');
+    }));
+    stubFetchRoutes(OTHER_ROUTES as never);
+    const { container } = await renderOpenedFor(EXP);
+    await act(async () => {
+      fireEvent.click(await screen.findByRole('button', { name: CAPTURE_COPY.voiceRecord }));
+      await Promise.resolve();
+    });
+    await waitFor(() => expect(container.querySelector('.capture-note-warn')).not.toBeNull());
+
+    fireEvent.click(screen.getByRole('button', { name: CAPTURE_COPY.entryClose }));
+    fireEvent.click(screen.getByRole('button', { name: CAPTURE_COPY.entryOpen }));
+
+    expect(container.querySelector('.capture-note-warn')?.textContent).toBe(
+      CAPTURE_COPY.voicePermissionRefused,
+    );
+    expect(screen.queryByRole('button', { name: CAPTURE_COPY.voiceRecord })).toBeNull();
+  });
+
+  /* ------------------------------------------------------------------------
+   * I2 — THE RUN LIST AND THE VERSION TOKEN, WHICH NEED A SLOW FETCH TO SEE.
+   * Both tests gate a runs response open. Without a gate the window in which
+   * one record's runs could be shown on another's screen is zero, and a
+   * mutation removing either guard passes the whole suite — measured: it did.
+   * Hazard-class like C1/C2: in the shipped app the panel unmounts, so the
+   * window does not exist there either. The `If-Match` consequence is why they
+   * are worth keeping anyway.
+   * --------------------------------------------------------------------- */
+
+  it('I2 (HAZARD-CLASS): held mounted, the previous record’s runs are gone before the next record’s arrive', async () => {
+    const otherRuns = gated({ body: otherRunsPage });
+    stubFetchRoutes({
+      ...OTHER_ROUTES,
+      [OTHER_RUNS]: otherRuns.route,
+    } as never);
+    const rendered = await renderOpenedFor(EXP);
+    await screen.findByRole('option', { name: 'Run 1' });
+
+    await act(async () => {
+      rendered.rerender(panelFor(OTHER));
+      await Promise.resolve();
+    });
+
+    // THE WINDOW. Record B's runs have not arrived. Record A's must not be
+    // selectable here: choosing one would aim record B's write at another
+    // record's run id, holding another record's version token.
+    expect(screen.queryByRole('option', { name: 'Run 1' })).toBeNull();
+    // THE DOCUMENTED COST OF CLEARING, pinned so it stays a known trade-off and
+    // not a discovery: for the length of the fetch the panel shows its
+    // zero-runs branch, exactly as it already does on every first open.
+    expect(screen.getByRole('button', { name: CAPTURE_COPY.runCreate })).toBeInTheDocument();
+
+    await otherRuns.release();
+    expect(await screen.findByRole('option', { name: 'Run B1' })).toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: 'Run 1' })).toBeNull();
+  });
+
+  it('I2 (HAZARD-CLASS): held mounted, a runs response for the previous record does not overwrite the next record’s list', async () => {
+    /*
+     * The success-path guard inside `loadRuns`. `loadRunsAttempt` has always had
+     * a generation check, but only around its CATCH — a successful read for the
+     * record just left went straight through to `setRuns`/`setExperimentVersion`.
+     */
+    const firstRuns = gated({ body: runsPage });
+    stubFetchRoutes({
+      ...OTHER_ROUTES,
+      [RUNS]: firstRuns.route,
+      [OTHER_RUNS]: { body: otherRunsPage },
+    } as never);
+    const rendered = await renderOpenedFor(EXP);
+
+    await act(async () => {
+      rendered.rerender(panelFor(OTHER));
+      await Promise.resolve();
+    });
+    await screen.findByRole('option', { name: 'Run B1' });
+
+    // Record A's runs arrive LAST, and must be discarded rather than displayed.
+    await firstRuns.release();
+    expect(screen.queryByRole('option', { name: 'Run 1' })).toBeNull();
+    expect(screen.getByRole('option', { name: 'Run B1' })).toBeInTheDocument();
+  });
+
+  /* ------------------------------------------------------------------------
+   * THE REAL MOUNT SEQUENCE — the only two tests in this section that drive
+   * what the application actually does, and the only place a regression guard
+   * for this work lives.
+   *
+   * `RecordWorkbench.tsx:397-412` renders this panel ONLY while
+   * `bundle.status === 'data'`. A record switch refetches, so the sequence is:
+   * react-router commits the new `:id` FIRST (one commit, panel still mounted,
+   * carrying the NEW id), then the bundle flips to `'loading'` and the whole
+   * subtree is deleted. That single mounted commit is what bumps the record
+   * generation, and it is why the guard in `startRecording` is reachable at all
+   * for a panel that is about to unmount.
+   * --------------------------------------------------------------------- */
+
+  /** Mimics the caller's gating faithfully: the panel exists only on `'data'`. */
+  function RealMountPattern({
+    state,
+  }: {
+    state: { id: string; status: 'data' | 'loading' };
+  }) {
+    return (
+      <MemoryRouter
+        initialEntries={['/']}
+        future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+      >
+        {state.status === 'data' ? (
+          <TranscriptCapturePanel experimentId={state.id} />
+        ) : (
+          <p>Loading the record from the ISAAC API…</p>
+        )}
+      </MemoryRouter>
+    );
+  }
+
+  it('REGRESSION GUARD (real path): leaving mid-permission-prompt does not orphan a microphone nothing can stop', async () => {
+    /*
+     * THE ONE DEFECT IN THIS SECTION A REAL BROWSER REPRODUCES. Press Start
+     * Recording, leave before the browser resolves the prompt: the panel
+     * unmounts, its cleanup runs `dropAudio()` and finds no stream to stop
+     * because none exists yet, and THEN `getUserMedia` resolves into a dead
+     * component's closure — assigning the stream and calling `recorder.start()`
+     * with nothing left holding a reference to either.
+     *
+     * Measured in real Chromium at `0650bd46` (instrumented
+     * `MediaStreamTrack.prototype.stop`, real fake audio device): the track
+     * stayed `live` for a 15-second poll with ZERO `stop()` calls. The same
+     * sequence here, with `startRecording`'s stale-generation branch removed,
+     * measures 0 stops and 1 constructed recorder; with it, 1 stop and 0
+     * recorders. Spec: `apps/web/e2e/mutation/capture-microphone.spec.ts`.
+     */
+    let grant: (value: unknown) => void = () => {};
+    const prompt = new Promise((resolve) => {
+      grant = resolve;
+    });
+    const track = { stop: vi.fn() };
+    installRecorder(vi.fn(() => prompt));
+    stubFetchRoutes({ ...OTHER_ROUTES, [OTHER_RUNS]: { body: otherRunsPage } } as never);
+
+    const rendered = render(<RealMountPattern state={{ id: EXP, status: 'data' }} />);
+    fireEvent.click(screen.getByRole('button', { name: CAPTURE_COPY.entryOpen }));
+    fireEvent.click(await screen.findByRole('button', { name: CAPTURE_COPY.voiceRecord }));
+    await screen.findByRole('button', { name: CAPTURE_COPY.voiceRequesting });
+
+    // The caller's real two-step: new id commits while still mounted, THEN the
+    // subtree is deleted. Collapsing these into one step would skip the commit
+    // that bumps the generation and quietly make this test prove nothing.
+    await act(async () => {
+      rendered.rerender(<RealMountPattern state={{ id: OTHER, status: 'data' }} />);
+      await Promise.resolve();
+    });
+    await act(async () => {
+      rendered.rerender(<RealMountPattern state={{ id: OTHER, status: 'loading' }} />);
+      await Promise.resolve();
+    });
+    expect(screen.queryByRole('button', { name: CAPTURE_COPY.entryOpen })).toBeNull();
+
+    // Only now does the browser answer the prompt, into a dead closure.
+    await act(async () => {
+      grant({ getTracks: () => [track] });
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(track.stop).toHaveBeenCalled();
+    // And no recorder was ever constructed from the orphaned stream.
+    expect(FakeMediaRecorder.instances).toHaveLength(0);
+  });
+
+  it('INVARIANT GUARD (real path): an in-app record switch cannot carry content between records, because the panel unmounts', async () => {
+    /*
+     * PINS THE MECHANISM, AND PASSES WITHOUT ANY GUARD IN THIS SLICE — measured:
+     * with `requestTranscript`'s generation check removed, the next record's
+     * transcript box is still empty. That is the whole finding. C1 was raised as
+     * a reproduced cross-record content leak and is not one in this application:
+     * the switch deletes the subtree, React 18 no-ops the late `setText`, and
+     * the next record is served by a fresh instance with its own empty state.
+     *
+     * It is kept because the mechanism is load-bearing and invisible. If a
+     * future screen keeps this panel mounted across a record change — a `key`
+     * removed, a workspace that hides instead of unmounting — this test still
+     * passes only because of the guards, and their value stops being
+     * hypothetical. It is labelled an invariant guard so nobody cites it as
+     * proof that this slice fixed something.
+     */
+    let release: () => void = () => {};
+    const answered = new Promise<void>((resolve) => {
+      release = () => resolve();
+    });
+    installRecorder(vi.fn(async () => ({ getTracks: () => [{ stop: vi.fn() }] })));
+    stubFetchRoutes({
+      ...OTHER_ROUTES,
+      [OTHER_RUNS]: { body: otherRunsPage },
+      [TRANSCRIBE]: async () => {
+        await answered;
+        return {
+          body: {
+            refused: false,
+            text: 'Synthetic dictation belonging to the first record only.',
+            segments: [],
+            produced_by: 'test-double',
+            verbatim: true,
+            language: null,
+          },
+        };
+      },
+    } as never);
+
+    const rendered = render(<RealMountPattern state={{ id: EXP, status: 'data' }} />);
+    fireEvent.click(screen.getByRole('button', { name: CAPTURE_COPY.entryOpen }));
+    await act(async () => {
+      fireEvent.click(await screen.findByRole('button', { name: CAPTURE_COPY.voiceRecord }));
+      await Promise.resolve();
+    });
+    fireEvent.click(await screen.findByRole('button', { name: CAPTURE_COPY.voiceStop }));
+    fireEvent.click(await screen.findByRole('button', { name: CAPTURE_COPY.voiceTranscribe }));
+
+    // Switch, unmount, and land on the next record — the caller's real path.
+    await act(async () => {
+      rendered.rerender(<RealMountPattern state={{ id: OTHER, status: 'data' }} />);
+      await Promise.resolve();
+    });
+    await act(async () => {
+      rendered.rerender(<RealMountPattern state={{ id: OTHER, status: 'loading' }} />);
+      await Promise.resolve();
+    });
+    await act(async () => {
+      rendered.rerender(<RealMountPattern state={{ id: OTHER, status: 'data' }} />);
+      await Promise.resolve();
+    });
+    fireEvent.click(await screen.findByRole('button', { name: CAPTURE_COPY.entryOpen }));
+
+    await act(async () => {
+      release();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const box = (await screen.findByLabelText('Transcript')) as HTMLTextAreaElement;
+    expect(box.value).toBe('');
+    expect(screen.queryByText(/Synthetic dictation belonging to the first record/)).toBeNull();
+  });
+});

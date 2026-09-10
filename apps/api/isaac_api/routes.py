@@ -11754,15 +11754,47 @@ def post_note_review(
 # TARGET half of a proposal — `candidate_field_path` plus `candidate_rule` — and
 # deliberately carries no value: "a mapped note says 'this belongs there'; a person
 # still says what the value is". `providers/extraction.py`'s `FieldCandidate` is the
-# VALUED half, and it is deliberately never stored, so a candidate nobody confirms
-# within one request leaves no trace at all. These operations are the destination
+# VALUED half. ~~and it is deliberately never stored, so a candidate nobody confirms
+# within one request leaves no trace at all.~~ — **CORRECTED 2026-09-10: FALSE OF
+# THIS TYPE IN GENERAL, since 2026-09-03, and this was a SECOND, independent instance
+# of the same false claim the paragraph below also carried — found by review after
+# this file's own first correction pass claimed completeness.** `transcript_capture.py`
+# imports this exact `FieldCandidate` (not a lookalike), and `_mint_transcript_
+# proposals` stores `proposed_value=candidate.proposed_value` (`routes.py:14287`)
+# inside the SAME `record_lock`/`save_versioned` as the notes it stores. An
+# unconfirmed transcript candidate now leaves exactly the trace this sentence denies:
+# a durable OPEN proposal. It remains true only of a `FieldCandidate` `extraction.py`
+# produces on ITS OWN path (`unrecognised_labels`), which still has no producer —
+# see below. These operations are the destination
 # that now exists for the valued half, and nothing else about either changes.
 #
-# NOTHING WAS REWIRED TO FEED THEM. There is no automatic producer: the transcript
+# ~~NOTHING WAS REWIRED TO FEED THEM. There is no automatic producer: the transcript
 # reader still returns its `candidates` unstored, `extraction.py` still discards its
 # `unrecognised_labels`, and CSV ingest still reconciles rather than applies. Reading
 # this vocabulary as evidence that a producer exists is the misreading `notes.py`'s
-# own header is worded to prevent, and it is repeated here for the same reason.
+# own header is worded to prevent, and it is repeated here for the same reason.~~ —
+# **CORRECTED 2026-09-10: FALSE FOR ONE OF THE THREE SINCE 2026-09-03.** ~~THIS WAS
+# THE LAST PLACE IN THIS FILE STILL SAYING SO~~ — **that completeness claim was ITSELF
+# false the moment it was written: the opening paragraph immediately above said the
+# identical thing about the same underlying type and was not yet corrected. Both are
+# fixed in this one change. Narrowed claim, checked rather than asserted: this and
+# the paragraph above were the only two places in this file asserting it; grep for
+# `"leaves no trace at all"` and `"candidates` unstored"` confirms neither string
+# survives uncorrected after this edit.** (The MCP half of this same section, below,
+# was already struck and dated; these two transcript clauses were not, which read as
+# freshly reviewed rather than stale.) `_mint_transcript_proposals` (defined later in
+# this module) is called by `post_transcript` inside the SAME `record_lock` and the
+# SAME `save_versioned` as the notes it stores, so the transcript reader's
+# `candidates` are no longer merely returned in the response — they are minted as
+# durable proposals, atomically with the notes that cite them.
+# `docs/ingestion-proposal-contract.md` §11.0 records this; this comment lagged it.
+#
+# WHAT REMAINS TRUE OF THE OTHER TWO. `extraction.py`'s `FieldCandidate` residue
+# (`unrecognised_labels`) still has no producer at all, and CSV ingest still
+# reconciles rather than applies — the CSV apply route is a committed human decision
+# (contract §8.6), not residual work. Reading the proposal vocabulary as evidence
+# that EVERY producer now exists is still the misreading `notes.py`'s own header is
+# worded to prevent; it is now true of two of the three rather than all three.
 #
 # WHAT THEY ARE NOT. A proposal is not a value, not evidence and not a confirmation.
 # `isaac_api.proposals.IngestionProposal` cannot even REPRESENT a confirmed value:
