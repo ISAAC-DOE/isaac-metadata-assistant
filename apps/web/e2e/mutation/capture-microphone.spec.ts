@@ -586,6 +586,38 @@ test('already recording: leaving a record in-app releases the microphone', async
 
   await switchRecordThroughTheSearchPalette(page, OTHER_RECORD_TITLE, SEED.ready);
 
+  /*
+   * POLL, DO NOT SAMPLE ONCE — CORRECTED 2026-09-10, after this line made
+   * `main` RED on the very next merge.
+   *
+   * The release that ends the track is a React PASSIVE-EFFECT cleanup, which
+   * runs on a later task than the navigation this test just awaited. A single
+   * `readProbe` immediately after `switchRecordThroughTheSearchPalette`
+   * therefore samples a race: it won locally and on this PR's own CI run, and
+   * lost on the next run — a docs-only merge to `main`, where nothing about
+   * this code had changed. The failure read
+   * `the microphone obtained for the record the reader LEFT is still live`,
+   * which is exactly the honest message, describing a test defect rather than
+   * a product one.
+   *
+   * WHAT THE POLL DOES AND DOES NOT WEAKEN. It bounds how long the release may
+   * take; it does not make the outcome true by construction. If the track never
+   * ends, `expect.poll` fails with the sentence below, which is the same claim
+   * the one-shot assertion made. The negative controls that give this test its
+   * meaning — the unchanged `documentToken`, the track-array length, and
+   * `isConnected` on record A's own node — are read AFTER the poll and are
+   * unaffected by it: none of them can be satisfied by simply waiting.
+   */
+  await expect
+    .poll(
+      async () => (await readProbe(page)).trackStates.join(','),
+      {
+        message:
+          'the microphone obtained for the record the reader LEFT is still live',
+      },
+    )
+    .toBe('ended');
+
   const afterSwitch = await readProbe(page);
 
   /*
@@ -620,7 +652,17 @@ test('already recording: leaving a record in-app releases the microphone', async
     afterSwitch.trackStates,
     'the microphone obtained for the record the reader LEFT is still live',
   ).toEqual(['ended']);
-  expect(afterSwitch.recorderStates).toEqual(['inactive']);
+  /*
+   * The recorder settles in the same cleanup as the track, but assert it with a
+   * poll rather than off `afterSwitch`: the two are read in separate
+   * `page.evaluate` round trips, so a one-shot read here would re-introduce a
+   * narrower version of the race the poll above exists to remove.
+   */
+  await expect
+    .poll(async () => (await readProbe(page)).recorderStates.join(','), {
+      message: 'the recorder for the record the reader LEFT is not inactive',
+    })
+    .toBe('inactive');
 
   /*
    * WHY IT CURRENTLY HOLDS, PINNED SO IT CANNOT CHANGE SILENTLY.
