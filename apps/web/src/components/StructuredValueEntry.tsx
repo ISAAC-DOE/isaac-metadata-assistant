@@ -380,7 +380,7 @@ export function DescriptorForm({ value, onChange, idPrefix }: DescriptorFormProp
         </label>
 
         <label className="structured-field" htmlFor={`${idPrefix}-sigma-unit`}>
-          <span className="structured-label">Uncertainty unit</span>
+          <span className="structured-label">Uncertainty Unit</span>
           <input
             id={`${idPrefix}-sigma-unit`}
             className="input"
@@ -391,7 +391,7 @@ export function DescriptorForm({ value, onChange, idPrefix }: DescriptorFormProp
         </label>
 
         <label className="structured-field" htmlFor={`${idPrefix}-basis`}>
-          <span className="structured-label">Uncertainty basis</span>
+          <span className="structured-label">Uncertainty Basis</span>
           <input
             id={`${idPrefix}-basis`}
             className="input"

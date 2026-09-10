@@ -1921,9 +1921,11 @@ function RunsBrowser({
                   </p>
                   <p className="runs-leave-confirm-text" id={leaveConfirmTextId}>
                     This run holds text this screen could not read, and it has not
-                    been sent anywhere. Leaving this run now — including moving to
-                    another run, reloading, paging, searching or filtering the runs
-                    list — loses it, and it cannot be recovered.
+                    been sent anywhere. Leaving this run now — including switching to
+                    a different run, reloading, paging, searching or filtering the
+                    runs list — loses it, and it cannot be recovered. Switching to
+                    this record&rsquo;s other workspaces — Record Fields, Capture
+                    &amp; Proposals, Graph — keeps it.
                   </p>
                   <div className="runs-leave-confirm-actions">
                     <button

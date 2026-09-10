@@ -94,6 +94,27 @@ describe('ExperimentRow — D2/C1 right side', () => {
     expect(trailing?.textContent).toContain('5 Fields Need You');
   });
 
+  // Found by independent design review, 2026-09: the row rendered "1 Fields Need You"
+  // for a record with exactly one outstanding field — wrong on both the noun (Fields
+  // vs Field) and the verb (Need vs Needs). `pending_count > 0` is the only route to
+  // this chip (`workspace.py`: "pending > 0 -> needs_attention"), so 0 never reaches
+  // it and is not asserted here.
+  it('singular (1) reads "1 Field Needs You", not "1 Fields Need You"', () => {
+    const one: ExperimentSummary = { ...draftNeedsAttention, trailing: { needsYouCount: 1 } };
+    const { container } = renderRow(one);
+    const trailing = container.querySelector('.exp-trailing');
+    expect(trailing?.textContent).toContain('1 Field Needs You');
+    expect(trailing?.textContent).not.toContain('1 Fields');
+    expect(trailing?.textContent).not.toContain('Need You');
+  });
+
+  it('plural (2) reads "2 Fields Need You"', () => {
+    const two: ExperimentSummary = { ...draftNeedsAttention, trailing: { needsYouCount: 2 } };
+    const { container } = renderRow(two);
+    const trailing = container.querySelector('.exp-trailing');
+    expect(trailing?.textContent).toContain('2 Fields Need You');
+  });
+
   it('Done shows NO status chip on the right — chevron only (Exported is a lifecycle badge, not a right chip)', () => {
     const { container } = renderRow(exportedDone);
     const trailing = container.querySelector('.exp-trailing');
@@ -122,6 +143,23 @@ describe('ExperimentRow — accessible name parity (CQ-10 invariant preserved)',
     expect(label).toContain('Draft');
     expect(label).toContain('Needs Attention');
     expect(label).toContain('5 fields need you');
+  });
+
+  // The accessible name builds the same count phrase as the visible chip
+  // (`describeAccessibleName`'s `countPart`), and had the identical singular/verb
+  // defect — a screen reader would have announced "1 field need you".
+  it('singular (1) accessible name reads "1 field needs you"', () => {
+    const one: ExperimentSummary = { ...draftNeedsAttention, trailing: { needsYouCount: 1 } };
+    const label = renderRow(one).getByRole('link').getAttribute('aria-label') ?? '';
+    expect(label).toContain('1 field needs you');
+    expect(label).not.toContain('1 fields');
+    expect(label).not.toContain('field need you');
+  });
+
+  it('plural (2) accessible name reads "2 fields need you"', () => {
+    const two: ExperimentSummary = { ...draftNeedsAttention, trailing: { needsYouCount: 2 } };
+    const label = renderRow(two).getByRole('link').getAttribute('aria-label') ?? '';
+    expect(label).toContain('2 fields need you');
   });
 
   it('Done: name carries lifecycle + group state, never "undefined" or stray coverage', () => {

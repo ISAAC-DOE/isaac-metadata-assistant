@@ -1276,6 +1276,57 @@ describe('the leave confirmation, and Next / Previous run', () => {
   });
 
   /*
+   * THE COPY THIS DIALOG SHOWS AND THE COPY `RunCard` SHOWS ~250px BELOW IT WERE MEASURED
+   * BY AN INDEPENDENT DESIGN REVIEW (2026-09) AS GIVING OPPOSITE CONCLUSIONS.
+   *
+   * This dialog said "leaving this run … loses it"; `RunCard`'s held-invalid note said
+   * "moving between this record's views keeps it" — and "Runs" is itself one of this
+   * record's four workspaces (`RECORD_WORKSPACES` in `RecordWorkspaceNav.tsx`), so
+   * neither sentence said which side of the line a RUN switch fell on. A reader could
+   * not tell, from either sentence alone, whether the two were describing the same
+   * action with opposite verdicts or two different actions — because neither one named
+   * its destination.
+   *
+   * The rewrite names both destinations explicitly, with the identical verb
+   * ("switching to…"), in the SAME dialog: leaving this run (a different run, paging,
+   * searching, filtering, reloading) loses it; switching to this record's other
+   * workspaces (Record Fields, Capture & Proposals, Graph) keeps it. Both claims are
+   * true and neither is deleted — this test pins the "keeps it" sentence being
+   * PRESENT here, not the "loses it" sentence being removed.
+   */
+  it('the leave-confirmation dialog states BOTH outcomes, so it does not read as a ' +
+    'contradiction of the RunCard note ~250px below it', async () => {
+    const all = [mkRun(1), mkRun(2)];
+    stubBackend((q) => serveRuns(all, q));
+    renderRecord();
+    await waitForList();
+    await waitFor(() => expect(renderedIds()).toHaveLength(2));
+
+    await openCompactRow('RUN001');
+    const card = () => document.querySelector('[data-run-id="RUN001"]') as HTMLElement;
+    fireEvent.change(within(card()).getByLabelText('Temperature (K)'), { target: { value: 'abc' } });
+    await waitFor(() => expect(within(card()).getByRole('status').textContent).toBe('Change not sent'));
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Back to all runs' }));
+    });
+    const dialog = await screen.findByRole('alertdialog');
+    const text = dialog.textContent ?? '';
+
+    // The "loses it" half — unchanged in substance, "moving to" -> "switching to" for
+    // the same verb as the "keeps it" half below.
+    expect(text).toMatch(
+      /Leaving this run now — including switching to a different run, reloading, paging, searching or filtering the runs list — loses it, and it cannot be recovered\./,
+    );
+    // The "keeps it" half — new: this dialog previously said nothing about what is
+    // SAFE, leaving a reader to infer it (wrongly, per the finding above) from a
+    // different paragraph on a different component.
+    expect(text).toMatch(
+      /Switching to this record’s other workspaces — Record Fields, Capture & Proposals, Graph — keeps it\./,
+    );
+  });
+
+  /*
    * REVIEW FINDING I-9. `aria-modal="true"` was declared before this test
    * existed; nothing enforced it. MUTATION CONTROL: deleting the
    * document-level keydown effect in `RunsSection.tsx` (the one that both

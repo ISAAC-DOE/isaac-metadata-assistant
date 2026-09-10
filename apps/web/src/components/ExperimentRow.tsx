@@ -81,7 +81,12 @@ export function ExperimentRow({ exp }: ExperimentRowProps) {
 
       <div className="exp-trailing">
         {t.needsYouCount !== undefined && (
-          <StatusChip kind="needsYou" label={`${t.needsYouCount} Fields Need You`} />
+          <StatusChip
+            kind="needsYou"
+            label={`${t.needsYouCount} Field${t.needsYouCount === 1 ? '' : 's'} Need${
+              t.needsYouCount === 1 ? 's' : ''
+            } You`}
+          />
         )}
         <ChevronRight className="exp-chevron" size={18} strokeWidth={2} aria-hidden="true" />
       </div>
@@ -94,7 +99,10 @@ function describeAccessibleName(exp: ExperimentSummary): string {
   const lifecycleLabel = LIFECYCLE_LABEL[exp.lifecycle];
   const groupStateLabel = GROUP_STATE_LABEL[exp.group];
   const count = t.needsYouCount;
-  const countPart = count !== undefined ? `, ${count} field${count === 1 ? '' : 's'} need you` : '';
+  const countPart =
+    count !== undefined
+      ? `, ${count} field${count === 1 ? '' : 's'} need${count === 1 ? 's' : ''} you`
+      : '';
   // The scenario label joins the accessible name so a screen-reader user can tell
   // the five identically-titled canonical seeds apart. Omitted entirely when the
   // record has none, so the name never contains a stray separator or "undefined".
