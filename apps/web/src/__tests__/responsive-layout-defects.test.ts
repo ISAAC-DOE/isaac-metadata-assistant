@@ -353,6 +353,7 @@ describe('F5 · pointer targets clear the WCAG 2.5.8 floor of 24px', () => {
     ['.graph-cmd-help', '77.0 x 23.0'],
     ['.api-copy-btn', '63.6 x 21.0'],
     ['.api-samples-tabs-tab', '50.8 x 21.0'],
+    ['.proposal-history-toggle', '120.0 x 19.0 — "Show history (1 act)"'],
     ['.record-title-link', 'x 21.7 — the breadcrumb record title'],
   ];
 

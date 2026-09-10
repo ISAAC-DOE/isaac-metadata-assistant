@@ -40,7 +40,7 @@ import {
   type ViewportBox,
   type ViewportRect,
 } from '../../lib/evidenceGraph';
-import { screenBoundedUnits, type GraphPoint } from '../../lib/graphModel';
+import { pointerHitRadius, screenBoundedUnits, type GraphPoint } from '../../lib/graphModel';
 import type { ApiProvenanceResponse } from '../../lib/api';
 import type {
   ApiAssetsResponse,
@@ -1253,6 +1253,15 @@ function CanvasNode({
   onActivate: () => void;
 }) {
   const r = screenBoundedUnits(KIND_RADII[node.kind], scale);
+  // Pointer hit radius only — see `pointerHitRadius` in `lib/graphModel`. This
+  // canvas is `aria-hidden` (see the note below) and its `<g>` carries no
+  // `role`/`tabIndex`/keyboard handler at all, so growing this does not fix a
+  // keyboard or screen-reader accessibility gap — the structure tree beside
+  // the canvas is the accessible equivalent for that. It only enlarges the
+  // MOUSE/touch click area for the sighted-pointer affordance this canvas
+  // already offers, to the same floor `ExperimentGraphPanel` uses, so the two
+  // structurally identical canvases do not diverge on pointer ergonomics.
+  const hitR = pointerHitRadius(KIND_RADII[node.kind], scale);
   const font = screenBoundedUnits(LABEL_PX, scale, LABEL_PX_MIN, LABEL_PX_MAX);
   const shape = KIND_SHAPES[node.kind];
   const classes = ['evgraph-node', isAnchor ? 'anchor' : '', isSelected ? 'selected' : '', isExpanded ? 'expanded' : '']
@@ -1275,6 +1284,11 @@ function CanvasNode({
           the SVG is `aria-hidden` and the structure tree already carries the
           name in full — so this is an affordance, not the record of it. */}
       <title>{node.label}</title>
+      {hitR > r && (
+        // Invisible pointer/touch hit area only — painted, not `fill="none"`,
+        // so it IS hit-testable, but at alpha 0 so it adds no visible weight.
+        <circle className="evgraph-node-hit" r={hitR} fill="transparent" aria-hidden="true" />
+      )}
       {shape === 'circle' && (
         <circle className="evgraph-node-shape" r={r} vectorEffect="non-scaling-stroke" />
       )}
