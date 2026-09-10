@@ -11,6 +11,7 @@
  */
 
 import { VERSION_BADGE } from './runtimeContext';
+import { canonicalStepLabel } from './workflowSteps';
 
 // Technical identifiers that must render exactly as written (never re-cased).
 export const TECHNICAL: readonly string[] = [
@@ -121,7 +122,32 @@ export const LABELS = {
   screenReview: 'Review Record',
   screenComplete: 'Complete Missing Fields',
   screenEvidence: 'Evidence & File Preview',
-  screenExport: 'Ready to Export',
+  /*
+   * THE DESTINATION'S NAME, TAKEN FROM THE STEP IT IS — never authored here.
+   *
+   * This read `'Ready to Export'`, and that was a READINESS CLAIM wearing a
+   * screen name. Measured over HTTP on a record `GET /api/experiments/{id}`
+   * reported as `status: needs_attention`, `pending_count: 3`, with a failing
+   * dry run: `/record/{id}/export` rendered `Ready to Export` as the breadcrumb
+   * leaf AND as the page `<h1>`, directly above its own body saying `3 items
+   * need your attention` / `3 fields still block export`. The loudest
+   * typographic position on the screen asserted the one thing the screen had
+   * just measured to be false.
+   *
+   * It was also a SECOND NAME for one destination: the workflow spine, reading
+   * the server's `ordered_steps`, calls the same place `Review Export
+   * Readiness` (`apps/api/isaac_api/workflow.py` CANONICAL_LABELS). Rather than
+   * invent a third string, the screen now IS the step — derived, so a rename in
+   * `workflow.py` (mirrored in `lib/workflowSteps.ts`) moves both at once and
+   * they cannot drift.
+   *
+   * `groupReady` below keeps the words `Ready to Export`, deliberately: it is a
+   * QUEUE GROUP for records whose status really is `ready_to_export`, and it is
+   * rendered on this screen only inside branches gated on `pending === 0` and a
+   * passing dry run. A truthful readiness claim is not the defect; an
+   * unconditional one is.
+   */
+  screenExport: canonicalStepLabel('review_export_readiness'),
 
   // Queue groups
   groupNeedsAttention: 'Needs Attention',

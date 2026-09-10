@@ -192,11 +192,20 @@ describe('the graph draws an experiment, and explains itself', () => {
   });
 
   it('draws a NEIGHBOURHOOD first, not everything at once', async () => {
+    /* The count block is now FOUR labelled lines rather than one string, because
+       the single line published four numbers that counted four different sets
+       without naming any of them (see `experiment-graph-counts.test.tsx`). This
+       test asks the same question of the two figures it was always about, read
+       from the lines that now own them. */
     const view = await openGraph();
-    const counts = view.getByTestId('expgraph-counts').textContent ?? '';
-    const [, drawn, total] = /(\d+) of (\d+) nodes drawn/.exec(counts) ?? [];
-    expect(Number(drawn)).toBeGreaterThan(1);
-    expect(Number(drawn)).toBeLessThan(Number(total));
+    const drawn = Number(
+      /(\d+) nodes/.exec(view.getByTestId('expgraph-count-drawn').textContent ?? '')?.[1],
+    );
+    const total = Number(
+      /(\d+) nodes/.exec(view.getByTestId('expgraph-count-total').textContent ?? '')?.[1],
+    );
+    expect(drawn).toBeGreaterThan(1);
+    expect(drawn).toBeLessThan(total);
   });
 
   it('expands on demand — a field appears only after its section is opened', async () => {
@@ -372,10 +381,14 @@ describe('a large but plausible experiment stays usable', () => {
     const started = performance.now();
     const view = await openGraph(stressExperimentGraphBundle());
     const ms = performance.now() - started;
-    const counts = view.getByTestId('expgraph-counts').textContent ?? '';
-    const [, drawn, total] = /(\d+) of (\d+) nodes drawn/.exec(counts) ?? [];
-    expect(Number(drawn)).toBeLessThanOrEqual(240);
-    expect(Number(total)).toBeGreaterThan(Number(drawn));
+    const drawn = Number(
+      /(\d+) nodes/.exec(view.getByTestId('expgraph-count-drawn').textContent ?? '')?.[1],
+    );
+    const total = Number(
+      /(\d+) nodes/.exec(view.getByTestId('expgraph-count-total').textContent ?? '')?.[1],
+    );
+    expect(drawn).toBeLessThanOrEqual(240);
+    expect(total).toBeGreaterThan(drawn);
     expect(ms).toBeLessThan(12000);
   });
 });

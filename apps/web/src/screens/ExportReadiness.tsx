@@ -39,6 +39,7 @@ import { toAdvisoryResult, toAuditResult, toValidationResult } from '../lib/adap
 import { TUTORIAL_ANCHORS } from '../lib/tutorialSteps';
 import type {
   ApiExportResponse,
+  ApiWorkflow,
   ExportReadinessBundle,
   ValidationResult,
 } from '../lib/types';
@@ -55,6 +56,65 @@ import type {
  */
 const FAN_OUT_NO_SINGLE_PAIR =
   "This record's runs each export their own official record, so there is no single record file.";
+
+/**
+ * WHAT THIS SCREEN'S HEADING SAYS ABOUT THE RECORD IN FRONT OF IT.
+ *
+ * The heading used to be `LABELS.screenExport` unconditionally, which — while
+ * that label read `Ready to Export` — made the `<h1>` and the breadcrumb assert
+ * export-readiness on every record, including one whose own body, three
+ * elements lower, read `3 fields still block export`. Renaming the destination
+ * (see `lib/labels.ts`) removes the false claim from the DESTINATION; this
+ * removes the SILENCE that replaced it, by making the heading state the state.
+ *
+ * NOTHING IS RE-DERIVED HERE. The inputs are the two the body's own branches
+ * already switch on — `pendingCount` (the length of the server's pending list)
+ * and `dryRunOk` (`validate.dry_run && validate.ok`) — plus the SERVER's own
+ * readiness signal, read from `workflow.ordered_steps`, where the
+ * `review_export_readiness` step is `completed` exactly when
+ * `derive_workflow`'s `ready` is true (`apps/api/isaac_api/workflow.py`).
+ *
+ * The third input is not ceremony: the server's `ready` is
+ * `Experiment.export_ready`, which requires the export gate to pass for EVERY
+ * export unit (`apps/api/isaac_api/workspace.py`), while `dryRunOk` is the
+ * record-level `POST /validate` payload. On a record whose runs each export
+ * their own official record those are not the same predicate. So the
+ * affirmative requires all three to agree, and a disagreement reads as
+ * not-ready — never as ready.
+ *
+ * Every non-affirmative branch reuses the EXACT sentence the body renders for
+ * the same condition — `N field(s) still block export` from `.preexport-title`,
+ * `Would Not Validate Yet` from the blocked card's own `<h2>` — so the heading
+ * cannot say something the visible page contradicts.
+ */
+export function exportReadinessHeadingState(input: {
+  exported: boolean;
+  pendingCount: number;
+  dryRunOk: boolean;
+  workflow: ApiWorkflow | null | undefined;
+}): string | null {
+  if (input.exported) return 'Exported';
+  if (input.pendingCount > 0) {
+    return `${input.pendingCount} field${input.pendingCount === 1 ? '' : 's'} still block export`;
+  }
+  if (!input.dryRunOk) return 'Would Not Validate Yet';
+  const step = input.workflow?.ordered_steps.find((s) => s.id === 'review_export_readiness');
+  // The server has not said `ready`. Nothing is claimed — the heading falls back
+  // to the destination's bare name, which asserts nothing about this record.
+  if (step?.state !== 'completed') return null;
+  return LABELS.groupReady;
+}
+
+/** The `<h1>`: the destination, then what is true of THIS record, or nothing. */
+export function exportReadinessHeading(input: {
+  exported: boolean;
+  pendingCount: number;
+  dryRunOk: boolean;
+  workflow: ApiWorkflow | null | undefined;
+}): string {
+  const state = exportReadinessHeadingState(input);
+  return state === null ? LABELS.screenExport : `${LABELS.screenExport} — ${state}`;
+}
 
 type Load =
   | { name: 'loading' }
@@ -316,6 +376,14 @@ function LoadedExport({
   const dryRunOk = validate.dry_run && validate.ok;
   const exported = phase.name === 'done' || phase.name === 'fanout' || detail.exported;
   const canExport = pendingZero && validate.ok && !exported;
+  // The heading, from the same inputs the body's branches use. See
+  // `exportReadinessHeading` above for why the affirmative needs all three.
+  const heading = exportReadinessHeading({
+    exported,
+    pendingCount,
+    dryRunOk,
+    workflow: detail.workflow,
+  });
 
   const doExport = () => {
     setPhase({ name: 'exporting' });
@@ -523,7 +591,7 @@ function LoadedExport({
          is the honest state for a screen with nothing to opt in. */
       mainPad="pad"
     >
-      <h1 className="sr-only">{LABELS.screenExport}</h1>
+      <h1 className="sr-only">{heading}</h1>
       <RecordActivityNote activity={session.activity} onRefresh={onRefresh} />
       <LiveSyncNote
         degraded={degraded || session.feedDegraded}

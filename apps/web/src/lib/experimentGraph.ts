@@ -1659,6 +1659,24 @@ export function visibleNodeIds(
   state: ExperimentGraphViewState,
   graph: ExperimentGraph,
 ): string[] {
+  return [...reachableAllowed(state, graph)].sort(byIdAsc).slice(0, MAX_VISIBLE_NODES);
+}
+
+/**
+ * The set the current expansion REACHES and the kind filters ALLOW — before the
+ * `MAX_VISIBLE_NODES` cap is applied.
+ *
+ * Extracted because `visibleNodeIds`, `visibleTruncated` and `drawTally` were
+ * each computing it, and two of the three copies had already drifted:
+ * `visibleTruncated`'s omitted the selected node and the anchor, so it could
+ * answer "not truncated" about a set `visibleNodeIds` would have capped. One
+ * expression now, so a count published beside the canvas cannot disagree with
+ * the canvas.
+ */
+function reachableAllowed(
+  state: ExperimentGraphViewState,
+  graph: ExperimentGraph,
+): Set<string> {
   const hidden = new Set(state.hiddenKinds);
   const out = new Set<string>();
   const allow = (id: string): boolean => {
@@ -1679,24 +1697,65 @@ export function visibleNodeIds(
   if (state.selectedId && allow(state.selectedId)) out.add(state.selectedId);
   if (allow(graph.anchorId)) out.add(graph.anchorId);
 
-  return [...out].sort(byIdAsc).slice(0, MAX_VISIBLE_NODES);
+  return out;
 }
 
 export function visibleTruncated(
   state: ExperimentGraphViewState,
   graph: ExperimentGraph,
 ): boolean {
+  return reachableAllowed(state, graph).size > MAX_VISIBLE_NODES;
+}
+
+/**
+ * WHERE EVERY NODE OF THIS GRAPH IS, right now — an exact partition, not a
+ * summary.
+ *
+ * The panel used to publish one string, `"9 of 22 nodes drawn · 8 of 21
+ * relationships"`, beside a `SHOW` chip row whose numbers summed to 21 and a
+ * canvas carrying 9 marks and 8 labels. Four numbers in one 400px band, no two
+ * of which counted the same set, and nothing on the surface said what any of
+ * them counted or how to reach the ones that were missing.
+ *
+ * `total` is every node built for this record. The other four sum to it, and a
+ * test asserts that they do:
+ *
+ *   drawn          — on the canvas now (`visibleNodeIds(...).length`, exactly)
+ *   overCap        — reached and allowed, but past `MAX_VISIBLE_NODES`
+ *   hiddenByFilter — a `SHOW` chip is off for its kind (the anchor is exempt,
+ *                    so it is never counted here)
+ *   notOpened      — everything else: no expansion reaches it yet
+ *
+ * The partition is exact rather than approximate because each reason names a
+ * DIFFERENT control the reader would use, and a reader told "13 not drawn" with
+ * no reason has been given a number instead of an answer.
+ */
+export interface ExperimentGraphDrawTally {
+  total: number;
+  drawn: number;
+  notOpened: number;
+  hiddenByFilter: number;
+  overCap: number;
+}
+
+export function drawTally(
+  state: ExperimentGraphViewState,
+  graph: ExperimentGraph,
+): ExperimentGraphDrawTally {
+  const reachable = reachableAllowed(state, graph);
+  const drawn = Math.min(reachable.size, MAX_VISIBLE_NODES);
+  const overCap = reachable.size - drawn;
   const hidden = new Set(state.hiddenKinds);
-  const set = new Set<string>();
-  for (const id of state.expanded) {
-    const node = graph.byId.get(id);
-    if (node && (id === graph.anchorId || !hidden.has(node.kind))) set.add(id);
-    for (const adj of graph.adjacency.get(id) ?? []) {
-      const n = graph.byId.get(adj.id);
-      if (n && (adj.id === graph.anchorId || !hidden.has(n.kind))) set.add(adj.id);
-    }
-  }
-  return set.size > MAX_VISIBLE_NODES;
+  const hiddenByFilter = graph.nodes.filter(
+    (n) => n.id !== graph.anchorId && hidden.has(n.kind),
+  ).length;
+  return {
+    total: graph.nodes.length,
+    drawn,
+    notOpened: graph.nodes.length - drawn - overCap - hiddenByFilter,
+    hiddenByFilter,
+    overCap,
+  };
 }
 
 /** Edges whose BOTH endpoints are visible. An edge is never half-drawn. */

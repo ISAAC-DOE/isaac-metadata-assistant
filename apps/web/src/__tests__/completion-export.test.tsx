@@ -210,13 +210,17 @@ describe('S4 · Guided Completion (live)', () => {
     // official report fails, whatever the pending count is. The assertion now pins
     // the claim the empty pending list actually supports, and the negative below
     // pins that the panel makes no readiness claim at all. The forward BUTTON keeps
-    // "Ready to Export" because that is the destination screen's name, not a claim
+    // The destination is named by `LABELS.screenExport` — the workflow step's own
+    // label — rather than by a literal. It used to read "Ready to Export", which
+    // this comment defended as "the destination screen's name, not a claim"; the
+    // screen has since stopped calling itself that, exactly because the name WAS
+    // a claim, so the CTA follows the rename instead of outliving it.
     // about this record — which is why the negative is scoped to the panel.
     expect(await findByText('Nothing is left for you to confirm.')).toBeInTheDocument();
     const donePanel = document.querySelector('.completion-done') as HTMLElement;
     expect(donePanel).not.toBeNull();
     expect(donePanel.textContent).not.toMatch(/is ready to export/i);
-    expect(getByText('Go to Ready to Export →')).toBeInTheDocument();
+    expect(getByText('Go to Review Export Readiness →')).toBeInTheDocument();
     // non-zero total (1 question, now answered): the real counter still renders
     expect(getByText('1 / 1')).toBeInTheDocument();
     const posts = answerPosts();

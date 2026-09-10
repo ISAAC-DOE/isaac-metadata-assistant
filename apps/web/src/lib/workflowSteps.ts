@@ -35,3 +35,23 @@ export const CANONICAL_STEPS: readonly WorkflowStep[] = [
   { id: 'review_export_readiness', label: 'Review Export Readiness' },
   { id: 'export', label: 'Export' },
 ] as const;
+
+/**
+ * The backend's own Title Case label for a canonical step id.
+ *
+ * Exists so a SCREEN NAME can be the step's name rather than a third string
+ * authored beside it. `LABELS.screenExport` used to read `Ready to Export`
+ * while the spine — from the server — called the same destination `Review
+ * Export Readiness`, so the step had two names and the shorter one was a
+ * READINESS CLAIM standing in the breadcrumb and the page heading of records
+ * that were measurably not ready.
+ *
+ * Throws on an unknown id rather than returning a placeholder: a missing label
+ * is a mirror that has drifted from `workflow.py`, and a surface must not
+ * paper over that with a guess.
+ */
+export function canonicalStepLabel(id: string): string {
+  const step = CANONICAL_STEPS.find((s) => s.id === id);
+  if (!step) throw new Error(`unknown canonical workflow step: ${id}`);
+  return step.label;
+}

@@ -66,10 +66,32 @@
   color: var(--text-secondary);
 }
 
+/* FOUR LINES, NOT ONE. The single line published four irreconcilable numbers
+   in one string; each now states what it counts, so the block is a small stack
+   rather than a run-on. Mono is kept for the figures, and the palette token is
+   unchanged (`--text-tertiary`, repointed by A3 to #626c77 — 4.54:1 on the
+   worst ground in this app), so adding lines adds no contrast violation. */
 .expgraph-counts {
   margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
   font-family: var(--font-mono);
   font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--text-tertiary);
+}
+
+.expgraph-count-line {
+  margin: 0;
+}
+
+/* Sits between the `Show` legend and the chip row it explains. Not mono: it is
+   prose about the numbers, and the numbers are in the chips. */
+.expgraph-kinds-hint {
+  margin: 4px 0 0;
+  font-size: 11.5px;
+  line-height: 1.5;
   color: var(--text-tertiary);
 }
 
