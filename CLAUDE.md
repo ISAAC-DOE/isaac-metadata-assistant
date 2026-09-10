@@ -1374,6 +1374,98 @@ Current state:
   `commit under release`/`TAG=` lines; `git rev-list -n1 <tag>` cross-checked against each SHA).
   `main` at `fd179f2` is the last state this bullet describes.
 
+- **Session of 2026-09-03 — six PRs (#228–#233, all merged), a record-screen redesign into
+  four workspaces plus one flaky-test fix.** Closure record:
+  [`docs/session-closure-2026-09-03.md`](docs/session-closure-2026-09-03.md). Org `main` at
+  `ec945d7` (PR #231's merge, the last of the six). Released as **v0.0.214** (`a342175`, #228)
+  through **v0.0.217** (`7320b9c`, #233); #231 and #232's own release status is in the closure
+  doc, not repeated here because it was still resolving as this bullet was written — read the
+  doc's own re-derivation rather than trusting a number frozen at write time. What a future
+  session must not re-derive:
+  - **The record screen is four sidebar-navigated workspaces, not one long page.**
+    `?view=fields|runs|capture|graph` (`RECORD_VIEW_IDS`, `apps/web/src/lib/routes.ts`), pushed
+    via real `<Link>`s in `RecordWorkspaceNav` — never a second workflow spine; the spine stays
+    server-derived and gated, the workspace list is ungated and carries no completion state. Bare
+    `/record/<id>` still resolves to `fields`, so it stays the same URL a bookmark or a test
+    already used. Panels are lazily mounted then hidden-but-mounted (not unmounted) on switch, so
+    unsaved text in one workspace survives a trip through another.
+  - **Runs is master-detail, not a list-plus-editor-below.** A compact row's whole header is the
+    open control (`.run-card-header-compact`, pushes `?run=<id>`); the standalone `aria-label="Focus
+    run …"` button is **gone** — do not write a selector or a doc line assuming it still exists.
+    Exactly one run's editor is open at a time; opening one replaces the list rather than sitting
+    beside it. Leaving a run holding unparseable text asks first, in a real focus-trapped dialog,
+    and the same gate covers Back, Previous and Next.
+  - **Transcript capture mints durable proposals — it no longer writes run fields directly.**
+    Before PR #228, `TranscriptCapturePanel` applied candidates via `PATCH .../runs/{id}` from
+    component state alone; no surface in the build could create a persisted `POST /proposals`
+    (`docs/evidence/two-actor-workflow-proof-2026-09-02.md` §1, confirmed again at the start of
+    this session — this was the true premise, not a false one, contra the loose "convert transcript
+    into a structured proposal is not possible today" phrasing a prior brief used). Finalize now
+    calls `POST /experiments/{id}/transcript`, which mints one OPEN proposal per candidate inside
+    the same `record_lock` + `_save_versioned` write as the stored notes — atomic, not a
+    follow-up call. The entry button is now **"Capture Experiment Notes"**, not "Start a capture" —
+    the old string is gone from every RENDERED string (a script or doc hunting for it in the UI
+    will find nothing), but it survives in one docstring
+    (`transcriptCaptureContent.ts:59`, explaining what `entryOpen` replaced) — do not read that
+    comment as evidence the old copy still ships.
+  - **A proposal's scope line is `.proposal-scope`, and it names the run LABEL, not the id, except
+    when two loaded runs share one.** `IngestionProposalsPanel` reads `"On the record"` for a
+    record-scoped proposal or `"On run {label}"` for a run-scoped one; the run id is surfaced
+    (as a `title` + `.sr-only` suffix) only when `duplicateRunLabels` shows the label is ambiguous
+    among the runs currently loaded — never unconditionally, and never by comparing ids that are
+    unique by construction and so can never themselves collide.
+  - **The Impeccable skill's mechanical UI detector runs DEGRADED in this environment** (missing
+    `htmlparser2`/`css-select`/`css-tree`/`domutils`) **and returns `[]`, exit 0, even on
+    deliberately bad input** — found independently by two different PRs' reviewers this session
+    (#231, #233) by feeding it input it should have flagged. Every "0 findings" from that detector
+    in this session, and in every session before it that did not run this same check, is **not
+    evidence of a clean page** — it is a non-answer. Treat any historical "Impeccable: 0 findings"
+    claim in this repository's history the same way unless that session is independently shown to
+    have used its playbooks/measured checks instead, as this one's implementers did once the defect
+    was found.
+  - **A trusted suite exists beside the read-only, mutation and bench configs — four Playwright
+    configs total** (`playwright.config.ts`, `playwright.mutation.config.ts`,
+    `playwright.bench.config.ts`, `playwright.trusted.config.ts`). The trusted one runs under
+    `ISAAC_EDGE_TRUST_VERIFIER=test_fixture` (own backend, own workspace) and is the **only**
+    end-to-end walk that exercises proposal acceptance and the full two-actor workflow — everywhere
+    else, acceptance answers `409 human_actor_required` by design (§15, no trusted authentication
+    boundary exists). Do not fold it into the read-only or mutation suites, and do not read a
+    passing read-only/mutation run as having exercised acceptance at all. A parallel slice
+    (PR-F1) extended it from 6 to 8 tests with a REAL second browser context (not an HTTP client)
+    driving PR-A's and PR-D's proposal producers — see
+    `docs/evidence/two-actor-real-browser-proof-2026-09-03.md`. That proof also corrected three
+    things this bullet must not restate wrong: **Correct the Value, Then Accept does not supersede
+    or mint a new proposal** — it accepts the SAME proposal with a corrected `accepted_value`;
+    **this build has no `Submit` control anywhere** — the finalizing act is *Export Official Record
+    + Sidecar* on the export screen, absent (not disabled) when the record is not ready; and
+    **`UnmappedNotesPanel` has no live refresh** — a note minted by a finalize on the same screen
+    appears only after a reload, while the proposals from that same save appear live.
+  - **A stale accessibility-baseline entry was a probe artifact, not a real defect, and the fix was
+    to delete the entry rather than narrow it.** `LAYOUT-05` had recorded the Assistant trigger as
+    "clipped" because `findClippedText`'s containing-block walk did not know a `position: fixed`
+    element lays out against the viewport, not its DOM ancestor. Six containing-block properties are
+    now checked before an element is treated as clipped by an ancestor; each was proven to re-arm
+    the walk before the entry was removed.
+  - **`RUN_LIST_LIMIT_MAX`/`RUN_PAGE_MAX` literal duplication — closed differently than §6 of the
+    prior closure doc predicted.** `test_run_page_bound_parity.py` (added this session, cited in
+    PR #228) pins the Python constant, the FastAPI-served `limit` maximum, and the TypeScript
+    literal against each other. The **duplication** is not closed — `RunsSection`'s own
+    over-the-cap decision would need to change to read the bound from the server — but the
+    **drift** the prior entry warned about now fails a test instead of shipping silently.
+  - **Feed poison-page semantics are now tested at the producer side too.** `useChangeFeed` refuses
+    a page whose `changes` is not an array or whose `next_cursor` is missing (cursor held, marked
+    degraded, backoff applied) — this was previously examined only from the consumer's own state;
+    PR #228 adds seven tests pinning at-least-once delivery including duplicate-page redelivery.
+  - **Still open, unchanged by this session, and not to be read as newly closed by anything
+    above:** the proposal-only bundle-refetch residue from the prior closure doc's §6 (a proposal
+    act still costs one full record-bundle refetch; the server-side revision discriminator that
+    would fix it was investigated and specified, not built — see that doc, corrected in place
+    rather than re-litigated here); Export Readiness's unbounded `/pending` per poll (deliberate,
+    per §11's 2026-09-02 entry); `isaac_runs` Stage 2b; the genuine 200%-zoom sign-off (no CDP
+    method can drive it); personal-deploy retirement; and **every hosted QA** — `/krish` sits
+    behind an Authentik edge this environment cannot authenticate to, so the honest status is
+    `HOSTED QA PENDING (Krish)` for every image `v0.0.214` and later.
+
 - Current repository status is summarized in README.md and docs/mentor-brief.md; see git history for the exact commit state.
 - Start any further phase (beyond the completed Phase 36 / Phase 36R slices) only after explicit user approval.
 
