@@ -28,7 +28,7 @@ import {
   type ExperimentNodeKind,
   type ViewportBox,
 } from '../../lib/experimentGraph';
-import { screenBoundedUnits, type GraphPoint } from '../../lib/graphModel';
+import { pointerHitRadius, screenBoundedUnits, type GraphPoint } from '../../lib/graphModel';
 import type { ExperimentGraphBundle } from '../../lib/types';
 
 /**
@@ -87,6 +87,20 @@ const KIND_RADII: Readonly<Record<ExperimentNodeKind, number>> = Object.freeze({
   confirmation: 6,
   evidence_class: 6.5,
 });
+
+/*
+ * WCAG 2.5.8 pointer-target floor: every mark here is a real
+ * `<g role="button">` — focusable, and activated by both pointer and Enter
+ * (see `CanvasNode` below) — so it is a target, not a decoration, and the
+ * smaller `KIND_RADII` values (as low as 6px) render well under the 24 x 24
+ * floor `styles/base.css` documents for every other control in the app.
+ * `pointerHitRadius` (shared with `EvidenceGraphPanel`, see `lib/graphModel`
+ * for the full rationale and why the same mechanism does NOT extend to the
+ * Memory Graph) grows only the invisible pointer/touch hit area
+ * (`.expgraph-node-hit` below) to the floor — the VISIBLE mark keeps its
+ * `KIND_RADII` size exactly, so nothing about the diagram's information
+ * changes.
+ */
 
 /** Canvas label size, in CSS pixels. */
 const LABEL_PX = 11.5;
@@ -737,6 +751,10 @@ function CanvasNode({
   // the mark in SCREEN units is what makes zoom mean "see more", not "see
   // bigger".
   const r = screenBoundedUnits(KIND_RADII[node.kind], scale);
+  // Pointer/touch hit radius only — see `pointerHitRadius` in `lib/graphModel`.
+  // Never used for the visible shape, so it cannot change what the diagram's
+  // geometry conveys.
+  const hitR = pointerHitRadius(KIND_RADII[node.kind], scale);
   const font = screenBoundedUnits(LABEL_PX, scale, LABEL_PX_MIN, LABEL_PX_MAX);
   const shape = KIND_SHAPES[node.kind];
   const classes = [
@@ -776,6 +794,12 @@ function CanvasNode({
       }}
       onKeyDown={onKeyDown}
     >
+      {hitR > r && (
+        // Invisible pointer/touch hit area only (WCAG 2.5.8 floor) — painted,
+        // not `fill="none"`, so it IS hit-testable, but at alpha 0 so it adds
+        // no visible weight. See MIN_HIT_RADIUS_PX above.
+        <circle className="expgraph-node-hit" r={hitR} fill="transparent" aria-hidden="true" />
+      )}
       {shape === 'circle' && (
         <circle className="expgraph-node-shape" r={r} vectorEffect="non-scaling-stroke" />
       )}
