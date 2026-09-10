@@ -309,6 +309,7 @@ a:hover {
  *   77.0 x 23.0   button.graph-cmd-help
  *   63.6 x 21.0   button.api-copy-btn
  *   50.8 x 21.0   button.api-samples-tabs-tab
+ *  120.0 x 19.0   button.proposal-history-toggle    "Show history (1 act)"
  *
  * Four more `<summary>` toggles were measured under the floor and are recorded
  * further down as DELIBERATELY LEFT OPEN, with the measurement that decided it.
@@ -403,11 +404,13 @@ a:hover {
 .graph-cmd-help,
 .api-copy-btn,
 .api-samples-tabs-tab,
+.proposal-history-toggle,
 .record-title-link {
   min-height: 24px;
 }
-/* VERTICAL CENTRING INSIDE THE GROWN BOX IS FREE FOR ALL EIGHT (nine, until the
-   fix round that removed `.run-card-focus` — see its own struck note above) —
+/* VERTICAL CENTRING INSIDE THE GROWN BOX IS FREE FOR ALL NINE (eight until this
+   selector was added; nine until the fix round before it that removed
+   `.run-card-focus` — see its own struck note above) —
    and the reason is NOT the one this comment used to give.
 
    ~~"Vertical centring for the ones that are already flex containers is free.
@@ -430,9 +433,10 @@ a:hover {
      span,   display: inline-block                     top 4.0 / bottom 15.0
 
    Only the non-button shows the top-aligned asymmetry the review was looking
-   for. Two of these eight are not flex containers (`.run-card-compare` and
-   `.api-samples-tabs-tab` declare no `display`; `.run-card-focus` was a third
-   until the fix round removed the element) and are centred anyway.
+   for. Three of these nine are not flex containers (`.run-card-compare`,
+   `.api-samples-tabs-tab` and `.proposal-history-toggle` declare no
+   `display`; `.run-card-focus` was a fourth until the fix round removed the
+   element) and are centred anyway.
 
    `.gov-action` IS ALSO A `<button>`, so its `display: inline-flex;
    align-items: center; justify-content: center` in `components/chrome.css` is a

@@ -172,6 +172,42 @@ export function screenBoundedUnits(
   return bounded / clampScale(scale);
 }
 
+/** Half of the WCAG 2.5.8 24×24 CSS px floor. See {@link pointerHitRadius}. */
+export const MIN_HIT_RADIUS_PX = 12;
+
+/**
+ * WCAG 2.5.8 pointer-target floor, in the same CSS-pixel/user-unit-at-scale-1
+ * space as every `*_RADII` table in this codebase (`ExperimentGraphPanel`,
+ * `EvidenceGraphPanel`). Shared here rather than duplicated per panel, because
+ * the two consumers are the SAME mechanism, not two coincidentally similar
+ * ones: a real target whose visible mark is smaller than 24px gets an
+ * invisible pointer/touch hit area at the floor, and the visible mark keeps
+ * its own documented radius exactly.
+ *
+ * NOT applied to the Project/Memory graph (`GraphCanvas.tsx`). That canvas's
+ * nodes ARE real interactive targets (`role="button"`, keyboard-operable, in
+ * the accessibility tree — confirmed by reading the component) and its
+ * default view DOES render marks under this floor (measured: file circles
+ * 8.2×8.2 CSS px, concept diamonds 10.0×10.0 CSS px, in a 220-node graph).
+ * But unlike the two consumers below, that graph's nodes are frequently
+ * packed closer together than 24 CSS px — measured on the same 220-node view,
+ * 212 of 220 nodes (96%) have a nearest-neighbour centre-to-centre distance
+ * under 24px, with a minimum of 3.4px. Giving every node a uniform 24px
+ * invisible hit-circle there would make most nodes' effective click target
+ * overlap their neighbours', which is a regression in targeting precision,
+ * not a fix. A correct floor for that graph would need a density-aware
+ * hit-radius (bounded by each node's live nearest-neighbour spacing, not a
+ * fixed constant) — genuinely different and larger work than this helper, not
+ * an oversight in not reusing it there.
+ */
+export function pointerHitRadius(
+  radiusUnitsAtScale1: number,
+  scale: number,
+  min: number = MIN_HIT_RADIUS_PX,
+): number {
+  return screenBoundedUnits(Math.max(radiusUnitsAtScale1, min), scale);
+}
+
 /** Reference mark sizes, in user units at scale 1. `file` / `concept` are the
  *  P36R constants verbatim, so mark RADII at 100% are unchanged (see the stroke
  *  caveat above for what did change). */
