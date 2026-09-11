@@ -317,6 +317,21 @@ const VERDICT_ROUTE_TEXT =
 // while a read-only grounded query is resolving.
 const WORKING_LABEL = 'Working…';
 
+// A11Y FIX — shared verbatim between the archived `.assistant-msg-withheld`
+// paragraph and the sr-only agent-action announcer, so a reader who has the
+// transcript open and a reader who only hears the announcement are told the
+// SAME thing. `assistantSession`'s scrubber drops a message's `text` whole
+// (never a partial redaction — see its own docstring for why) when it
+// contains a credential, an absolute path, or a long hex digest; before this
+// existed the render was the only place this sentence lived, so an agent
+// action carrying a secret would have announced the RAW secret text to a
+// screen reader while the transcript correctly withheld it.
+const AGENT_MESSAGE_WITHHELD_TEXT =
+  'This message is not shown because it was not stored. It contained a file ' +
+  'path, a credential, or a long digest, which this browser transcript ' +
+  'withholds rather than keep. The answer you were given at the time was not ' +
+  'affected.';
+
 // P36R S2 — the resting-state guidance, shown ONLY in the empty state (there is
 // no conversation yet). It is deliberately distinct copy from the composer's
 // persistent helper (ASSISTANT_COMPOSER_HELPER) so the same sentence is never
@@ -538,6 +553,19 @@ export function AssistantPanel({
   const [liveQuestion, setLiveQuestion] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
+  // A11Y FIX — every Agent Action result and every Confirm outcome (ok /
+  // refused / stale-conflict / caught error) is appended straight into the
+  // conversation LOG via `appendAgentMessage` below, never through
+  // `liveAnswer`. The log is `aria-live="off"` BY DESIGN (archiving history
+  // must stay silent), so none of that output ever reached the ONE polite
+  // live region the free-form composer flow announces through
+  // (`.assistant-reply`, P34.5) — a screen-reader user who ran an agent
+  // action heard nothing, ever, through either mechanism. This is a SECOND,
+  // sr-only, permanently-mounted `role="status"` announcer dedicated to that
+  // one flow, fed by `announceAgentMessage` below — see its docstring for why
+  // `.assistant-reply` itself was rejected as the fix.
+  const [agentAnnouncement, setAgentAnnouncement] = useState('');
+
   // P34.2 — the composer input's LOCAL transient text (never persisted itself).
   // On submit it is sent to the READ-ONLY grounded resolver (POST /assistant/query)
   // and cleared; it is never written to the session/storage as raw input.
@@ -669,13 +697,57 @@ export function AssistantPanel({
     (msgs[msgs.length - 1] as HTMLElement | undefined)?.focus();
   }, [messages.length]);
 
+  /*
+   * Put a sentence into `agentAnnouncement` SO THAT IT IS ACTUALLY ANNOUNCED —
+   * the exact pattern `IngestionProposalsPanel.announce()` already uses, reused
+   * rather than reinvented. A `role="status"` region announces a CHANGE to its
+   * content; running "Explain the Current Step" twice in a row (or two Confirms
+   * that both refuse for the same reason) can produce a BYTE-IDENTICAL sentence,
+   * React would see no change, mutate no text node, and the second occurrence
+   * would be announced to nobody. The alternating trailing NO-BREAK SPACE
+   * guarantees the string differs from the one before it; it is whitespace, so
+   * it is never rendered visibly and never spoken.
+   */
+  const announceAgentMessage = useCallback((sentence: string) => {
+    setAgentAnnouncement((previous) =>
+      previous.endsWith('\u00A0') ? sentence : `${sentence}\u00A0`,
+    );
+  }, []);
+
   // Append a deterministic assistant message to the ephemeral session and reflect
   // it. Every write goes through `appendMessage`, whose P29.1 sanitizer scrubs
   // secrets/paths/verdict fields BEFORE persistence — so nothing unsafe is stored,
   // and the log is re-read from the sanitized session (nothing unsafe is rendered).
+  //
+  // THE ONE CHOKE POINT for agent-action results, every Confirm outcome, and
+  // Apply-to-Graph. It ALSO drives `announceAgentMessage` (above) so every one
+  // of those outputs — success, refusal, stale-conflict, or a caught error
+  // alike — reaches a screen reader once, politely, through the sr-only
+  // announcer rendered near `.assistant-log`. A refusal that is silent to a
+  // screen reader is the same defect wearing a different hat, so it is fixed
+  // here rather than at each of the six call sites individually.
+  //
+  // THE ANNOUNCEMENT USES THE SANITIZED MESSAGE, NEVER THE RAW `text` ARGUMENT.
+  // The first version of this fix announced the raw pre-sanitization `text` and
+  // reopened exactly the leak `assistantSession`'s P29.1 scrubber exists to
+  // close: `test_...leak-safe boundary...` caught an agent-intent result
+  // carrying a 40-char hex token landing, unredacted, in `container.textContent`
+  // via the announcer — the archived bubble correctly withheld it, the sr-only
+  // region did not. Re-reading the just-appended, already-sanitized entry from
+  // `loadSession` and announcing ITS `.text` (or the same withheld-message copy
+  // the render uses, via `AGENT_MESSAGE_WITHHELD_TEXT`, when the scrubber
+  // dropped it) closes that gap without weakening the scrubber itself.
   const appendAgentMessage = useCallback(
     (text: string, source: AssistantSource, rev: number | undefined) => {
       const cls = classifyAnswer(source, availability);
+      // Captured BEFORE the write so the announcement can find THIS entry by
+      // id rather than by array position. Matching on `messages[length - 1]`
+      // would announce the PREVIOUS message's (already-announced) text if the
+      // storage write itself were silently dropped (quota, private browsing) —
+      // consistent with the rendered log in that case, but a wrong text for a
+      // live region to speak. Matching by id instead makes that class of bug
+      // announce nothing rather than something stale.
+      const id = uid();
       appendMessage(experimentId, {
         role: 'assistant',
         text,
@@ -684,13 +756,20 @@ export function AssistantPanel({
         resultType: cls.resultType,
         authority: cls.authority,
         actionability: cls.actionability,
-        id: uid(),
+        id,
         timestamp: Date.now(),
       });
-      setMessages(loadSession(experimentId).messages);
+      const refreshed = loadSession(experimentId).messages;
+      setMessages(refreshed);
       focusNewestRef.current = true;
+      const stored = refreshed.find((m) => m.id === id);
+      const announceText =
+        stored && stored.textWithheld === true && stored.text === undefined
+          ? AGENT_MESSAGE_WITHHELD_TEXT
+          : stored?.text;
+      if (announceText) announceAgentMessage(announceText);
     },
-    [experimentId, availability],
+    [experimentId, availability, announceAgentMessage],
   );
 
   // Run ONE typed intent against the live context. Pure (no fetch, no mutation) —
@@ -1442,6 +1521,20 @@ export function AssistantPanel({
         </p>
       )}
 
+      {/* A11Y FIX — the sr-only announcer for every Agent Action result and every
+          Confirm outcome (ok / refused / stale-conflict / caught error). See
+          `announceAgentMessage`'s docstring for why this is a SECOND region
+          rather than routing that output through `.assistant-reply`.
+          Permanently mounted (never conditionally rendered) so its content can
+          be SWAPPED rather than the region remounted — a live region remounted
+          with its content is never announced, the same rule
+          `IngestionProposalsPanel` already documents for its own announcer.
+          Visible to nobody (`sr-only`); announced to everybody
+          (`role="status"` + `aria-live="polite"`). It never receives focus. */}
+      <p className="assistant-agent-announcer sr-only" role="status" aria-live="polite">
+        {agentAnnouncement}
+      </p>
+
       {/* P36R S2 — the BODY absorbs the rail height (flex:1 / min-height:0) so the
           conversation region can flex instead of being clipped by a fixed height. */}
       <div className="assistant-body">
@@ -1999,10 +2092,7 @@ function ConversationMessage({
           normally — only the archived copy is affected.
         */
         <p className="assistant-msg-text assistant-msg-withheld">
-          This message is not shown because it was not stored. It contained a file
-          path, a credential, or a long digest, which this browser transcript
-          withholds rather than keep. The answer you were given at the time was not
-          affected.
+          {AGENT_MESSAGE_WITHHELD_TEXT}
         </p>
       ) : (
         <p className="assistant-msg-text">{text}</p>

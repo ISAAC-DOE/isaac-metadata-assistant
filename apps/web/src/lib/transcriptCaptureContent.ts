@@ -122,6 +122,65 @@ export const CAPTURE_COPY = {
     'the record.',
 
   voiceHeading: 'Voice Capture',
+  /*
+   * THE STATE WORD ON THE RECORDING/HELD BAR — 2026-09-10.
+   *
+   * `voiceRecordingBadge` IS EXACTLY `'Recording'` AND MUST STAY SO. The bar
+   * renders `<state> · <m:ss>` inside `.capture-elapsed`, and
+   * `e2e/mutation/capture-microphone.spec.ts` asserts that element's text is
+   * `Recording · 0:01` (`:901`) and matches `/Recording · (?!0:00)\d+:\d\d/`
+   * (`:774`), and parses `/(\d+):(\d\d)\s*$/` off its `innerText` (`:510`).
+   * Those three are the reason the separator is a literal ` · ` and the time is
+   * LAST. Changing this word, the separator, or the order breaks a real-Chromium
+   * spec that this slice was fenced out of editing.
+   *
+   * `voiceHeldBadge` EXISTS BECAUSE `held` HAD NO VISIBLE STATE AT ALL. On Stop
+   * the elapsed indicator disappeared and the ONLY statement that audio was
+   * still held was the `sr-only` live region — so a screen-reader user was
+   * better informed than a sighted one, which is the inversion this fixes.
+   */
+  voiceRecordingBadge: 'Recording',
+  voiceHeldBadge: 'Held',
+  /** The persistent, VISIBLE held statement. Says what the live region says. */
+  voiceHeldPersistent:
+    'This audio is held in this tab’s memory and has not been sent anywhere. ' +
+    'Play it back below, type what was said, or discard it.',
+  /*
+   * LOCAL PLAYBACK — added 2026-09-10, and the two things it deliberately does
+   * NOT do are named here because both would falsify copy this panel ships.
+   *
+   * NO DOWNLOAD. Chrome's default `<audio controls>` overflow menu carries a
+   * Download item; the element sets `controlsList="nodownload …"` to suppress
+   * it, because `voiceAudioHandling` promises the audio is "never written to
+   * disk" and a download would make that false.
+   *
+   * NO REMOTE PLAYBACK. `noremoteplayback` plus the `disableRemotePlayback`
+   * property stop the browser offering to cast the clip to another device —
+   * which would be audio leaving this tab by a route no HTTP assertion watches.
+   */
+  voicePlaybackLabel: 'Play back the audio held in this tab',
+  /*
+   * I-3 — SCOPED TO THE BUILD, NOT TO THE BROWSER. This read "the player
+   * offers no download and no casting to another device", which is a claim
+   * about what every engine DOES. `controlsList` and `disableRemotePlayback`
+   * are Chromium features: Firefox supports neither, and an engine that
+   * ignores them shows its own native download control, at which point the
+   * sentence is simply false. This repository's browser tests run chromium
+   * only, so nothing here could have caught that.
+   *
+   * "is configured to offer" is a claim about what THIS BUILD ASKS FOR, which
+   * is true in every engine — the attributes are on the element whether or not
+   * a UA honours them. Same correction shape as the three scoped-not-deleted
+   * upload claims `CLAUDE.md` §11 records: narrow the claim to what is
+   * verifiable, do not delete the reassurance.
+   *
+   * The FIRST half is unconditional and stays unqualified: no request is made
+   * to play the audio, in any engine, because an object URL is a
+   * same-document reference and nothing here fetches anything.
+   */
+  voicePlaybackNote:
+    'Playback happens entirely in this tab: no request is made to play it, and ' +
+    'this player is configured to offer no download and no casting to another device.',
   voiceSeamUnreported:
     'Transcription: not reported. This deployment has not told the page whether a ' +
     'transcription provider is configured — the capability report has not been read, ' +
@@ -211,15 +270,77 @@ export const CAPTURE_COPY = {
     'The audio is still held in this tab and was not sent anywhere. Type or ' +
     'paste what was said, and finalize that instead.',
 
+  /*
+   * THE TRANSCRIPTION REFUSAL, LED IN THE SCIENTIST'S REGISTER — 2026-09-10.
+   *
+   * THE HONESTY IS UNCHANGED; THE AUDIENCE WAS WRONG. The server's own sentence
+   * names `decision D9`, `decision D4`, `decisions D6, D8` and a governance
+   * document — every word of it accurate, and the wrong first thing to hand
+   * somebody standing at a beamline mid-experiment. NOTHING THE SERVER SAID IS
+   * DELETED OR PARAPHRASED AWAY: its message, its `missing` list and its
+   * `decision_reference` all still render, verbatim, behind a `Why?` disclosure
+   * for the reader who needs them. What changes is which of the two a reader
+   * meets first.
+   *
+   * EACH LEAD IS SELECTED BY THE SERVER'S OWN `reason` CODE, never by this
+   * client guessing a cause — the same shape `voiceDenialCopy` already uses to
+   * turn a `DOMException.name` into a sentence. `voiceRefusalOther` is the
+   * FAIL-CLOSED default and names no cause at all, because `REFUSAL_REASONS`
+   * (`apps/api/isaac_api/providers/refusal.py`) can grow a reason this list does
+   * not know, and a lead that guessed would be exactly the invention §5 forbids.
+   *
+   * NONE OF THE THREE CLAIMS A PROVIDER EXISTS, is coming, or could be retried —
+   * the same prohibition `_FORBIDDEN_MESSAGE_SUBSTRINGS` puts on the server side.
+   */
+  voiceRefusalNoProvider:
+    'This installation cannot turn speech into text: it reports no transcription ' +
+    'service configured.',
+  voiceRefusalInputMissing:
+    'The transcription request had nothing to work with, so no text was produced.',
+  voiceRefusalOther: 'This installation did not turn the speech into text.',
+  voiceRefusalWhy: 'Why?',
+  voiceRefusalDetailIntro:
+    'Below is what this deployment itself said, unedited. This page adds nothing ' +
+    'to it and takes nothing away.',
+
   transcriptLabel: 'Transcript',
   transcriptHint:
     'Finalizing stores this text with the record and reads it. Editing it ' +
     'afterwards means finalizing again.',
   runLabel: 'Run These Notes Describe',
   runPlaceholder: 'Choose a run…',
+  /*
+   * "run-scoped" WAS DROPPED FROM THIS SENTENCE — 2026-09-10, AND THE REASON IS
+   * THAT THIS BUILD SHIPPED TWO STRINGS THAT COULD NOT BOTH BE TRUE.
+   *
+   * This hint and `runTargetsNone` said "only run-scoped values need a run
+   * chosen first", which tells a reader their values may not need one. The
+   * server's own `run_target_required` clarification said the opposite —
+   * "Every value this reader can propose belongs to a run". Both shipped.
+   *
+   * MEASURED, rather than argued, at `65f5ebd3`:
+   *
+   *     .venv/bin/python -c "import sys; sys.path.insert(0,'apps/api');
+   *       from isaac_api import transcript_capture as tc, routes;
+   *       print({p: routes._PROPOSAL_WRITER_SCOPE.get(routes._proposal_writer_for(p))
+   *              for p in sorted(tc.READABLE_FIELD_PATHS)})"
+   *
+   * All FIVE readable paths — `context.environment`, `context.temperature_K`,
+   * `context.thermodynamics.atmosphere`, `timestamps.acquired_start_utc`,
+   * `timestamps.acquired_end_utc` — resolve to writer `run_field`, scope `run`.
+   * The SERVER'S sentence was the true one; these two were the false ones.
+   *
+   * THE REPLACEMENT DELIBERATELY DOES NOT RESTATE THE SERVER'S CLAIM. It states
+   * the BEHAVIOUR instead — nothing is proposed without a run — because that
+   * rests on a stronger and simpler invariant that cannot drift: with no run,
+   * `read_transcript` inserts a `run_target_required` clarification, `settled`
+   * is False, and the candidate loop is skipped whole (`if not settled:
+   * continue`). That holds even if a record-scoped readable path is ever added,
+   * whereas "every value belongs to a run" would silently become false.
+   */
   runHint:
-    'Required before a run-scoped value can be proposed. It is never chosen for ' +
-    'you, even when the record has exactly one run.',
+    'Required before any value can be proposed from a transcript. It is never ' +
+    'chosen for you, even when the record has exactly one run.',
   /*
    * "CREATE A RUN" IS NOW THE RUN SELECTOR'S OWN EMPTY STATE, NOT A PERMANENT
    * BUTTON BESIDE IT. Capturing notes never strictly requires a run — a
@@ -231,15 +352,31 @@ export const CAPTURE_COPY = {
   runEmptySuffix: ', or capture notes without one.',
   /** Said when a run IS selected — states what proposals from THIS capture will target. */
   runTargetsRun: (label: string) => `Proposals from this transcript will target ${label}.`,
-  /** Said when NO run is selected. Never implies a run is required. */
+  /*
+   * Said when NO run is selected. The old wording — "Proposals from this
+   * transcript will target the record itself — only run-scoped values need a
+   * run chosen first" — was wrong twice over: no proposal is minted at all
+   * without a run, and none of the five readable paths is record-scoped. See
+   * the measurement recorded on `runHint` above.
+   */
   runTargetsNone:
-    'No run is selected. Proposals from this transcript will target the record ' +
-    'itself — only run-scoped values need a run chosen first.',
+    'No run is selected. Nothing will be proposed from this transcript until ' +
+    'you choose one — the text itself is still stored with the record as notes.',
 
   finalize: 'Finalize and Read',
   finalizeHint:
     'Reading happens only when you press this. Text you are still typing is ' +
     'never read and never stored.',
+  /*
+   * THE PRE-FLIGHT BESIDE THE BUTTON, not a reason to disable it. Finalizing
+   * with no run stores every word as notes, which is genuinely valuable and is
+   * the whole reason the run selector is allowed to stay empty. What was
+   * missing was any warning at the point of action that THIS press proposes
+   * nothing — a reader previously found out from a summary card reading
+   * "Nothing was proposed from this transcript."
+   */
+  finalizePreflightNoRun:
+    'No run selected — this will be stored as notes only, and will propose nothing.',
   /** NEW — the `processing` state's own announcement, distinct from a generic busy. */
   processingLive: 'Reading transcript…',
 

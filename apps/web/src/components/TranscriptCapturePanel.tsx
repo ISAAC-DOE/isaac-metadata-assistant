@@ -199,6 +199,23 @@ function voiceDenialCopy(reason: VoiceDenialReason): string {
   return CAPTURE_COPY.voiceStartFailed;
 }
 
+/**
+ * The scientist-facing lead for a transcription refusal, chosen by the SERVER's
+ * own `reason` code — never by this client inspecting the message text or
+ * guessing a cause. Same shape as {@link voiceDenialCopy}.
+ *
+ * The default is deliberate and fail-closed: `REFUSAL_REASONS`
+ * (`apps/api/isaac_api/providers/refusal.py`) is frozen but can grow, and a
+ * lead that invented a cause for an unknown code would be the guess CLAUDE.md
+ * §5 forbids. The server's own full sentence is always rendered too, behind the
+ * `Why?` disclosure, so nothing is lost when this falls through.
+ */
+function voiceRefusalLead(reason: string): string {
+  if (reason === 'no_provider_configured') return CAPTURE_COPY.voiceRefusalNoProvider;
+  if (reason === 'input_not_supplied') return CAPTURE_COPY.voiceRefusalInputMissing;
+  return CAPTURE_COPY.voiceRefusalOther;
+}
+
 /*
  * THE FALLBACK SENTENCE FOR EACH FAILURE, and each one states WHAT WAS NOT DONE.
  *
@@ -268,6 +285,23 @@ export function TranscriptCapturePanel({ experimentId }: { experimentId: string 
   const [refusal, setRefusal] = useState<ApiProviderRefusal | null>(null);
   const [heldChunks, setHeldChunks] = useState(0);
   const [elapsedSec, setElapsedSec] = useState(0);
+  /**
+   * THE OBJECT URL FOR THE HELD AUDIO — `null` whenever there is nothing to
+   * play, which is every state but `held`.
+   *
+   * WHY THIS EXISTS. Until 2026-09-10 a scientist could record audio and never
+   * hear it: the only two exits from a recording were *Request a Transcript*
+   * (which refuses in every deployment) and *Discard Audio*. There was no
+   * `<audio>`, no `createObjectURL` and no `new Audio()` anywhere in the
+   * capture path, so the Record button's whole value was contingent on a
+   * transcription provider that does not exist.
+   *
+   * IT IS NOT SENT, AND NOT SAVED. An object URL is a same-document reference
+   * to a `Blob` this tab already holds — creating one starts no request, makes
+   * no copy the page can read back, and reaches no server. It is revoked on
+   * every exit; see the effect below for the enumeration.
+   */
+  const [playbackUrl, setPlaybackUrl] = useState<string | null>(null);
 
   const recorderRef = useRef<MediaRecorder | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -275,6 +309,10 @@ export function TranscriptCapturePanel({ experimentId }: { experimentId: string 
   const transcriptRef = useRef<HTMLTextAreaElement | null>(null);
   const runSelectRef = useRef<HTMLSelectElement | null>(null);
   const elapsedIntervalRef = useRef<number | null>(null);
+  /** When the current recording started, in wall-clock ms. `null` when none is
+   *  running. See `startElapsedTimer` for why the count is derived from this
+   *  rather than accumulated from interval ticks. */
+  const elapsedStartedAtRef = useRef<number | null>(null);
   const loadGenerationRef = useRef(0);
   /**
    * THE RECORD GENERATION, bumped whenever this component is told to show a
@@ -367,14 +405,63 @@ export function TranscriptCapturePanel({ experimentId }: { experimentId: string 
       window.clearInterval(elapsedIntervalRef.current);
       elapsedIntervalRef.current = null;
     }
+    // Cleared so no later reading can be taken against a finished recording's
+    // start time. `settleElapsedTimer` reads the ref BEFORE calling this, which
+    // is what lets both live here without one defeating the other.
+    elapsedStartedAtRef.current = null;
   }, []);
 
+  /**
+   * THE ELAPSED COUNT IS READ OFF THE WALL CLOCK, NOT ACCUMULATED FROM TICKS —
+   * corrected 2026-09-10, and the defect was MEASURED in real Chrome rather
+   * than reasoned about.
+   *
+   * WHAT WAS WRONG. This was `setElapsedSec((s) => s + 1)` on a 1000 ms
+   * interval, i.e. a count of how many times the callback RAN. Browsers
+   * throttle background timers hard, so the two quantities come apart exactly
+   * when a scientist leaves the tab — which the panel's own header says is a
+   * supported thing to do ("a recording in progress KEEPS RUNNING"). Measured
+   * on a backgrounded tab at 127.0.0.1:5173: the indicator read **0:03** while
+   * the held clip decoded to **6.96 s** of 2-channel 44.1 kHz audio
+   * (`AudioContext.decodeAudioData` on the object URL's own bytes). The
+   * recorder kept recording; only the counter fell behind, and it fell behind
+   * SILENTLY and in the direction that understates.
+   *
+   * That was survivable while the number was a 12px grey aside. It is not
+   * survivable now that it is the panel's primary status signal at 22px and
+   * the figure the `held` bar carries after the clock stops. So the value is
+   * now `floor((now - start) / 1000)`: throttling can delay a REPAINT, but it
+   * can no longer change the NUMBER.
+   *
+   * WHY 250 ms AND NOT 1000. The value is whole seconds either way, and React
+   * bails out when `setElapsedSec` is handed the value it already holds, so
+   * three ticks in four cost nothing. What the faster tick buys is that every
+   * integer second is actually DISPLAYED: with a 1000 ms tick, one delayed
+   * callback makes the reading jump 0:00 -> 0:02, and
+   * `e2e/mutation/capture-microphone.spec.ts:901` asserts the exact text
+   * `Recording · 0:01`. Sampling four times a second makes skipping a whole
+   * second need a stall longer than a second.
+   */
   const startElapsedTimer = useCallback(() => {
     stopElapsedTimer();
+    const startedAt = Date.now();
+    elapsedStartedAtRef.current = startedAt;
     setElapsedSec(0);
     elapsedIntervalRef.current = window.setInterval(() => {
-      setElapsedSec((seconds) => seconds + 1);
-    }, 1000);
+      setElapsedSec(Math.floor((Date.now() - startedAt) / 1000));
+    }, 250);
+  }, [stopElapsedTimer]);
+
+  /**
+   * The last reading, taken at the moment the clock stops, so the `held` bar
+   * shows the real duration even if the final tick was throttled away. Without
+   * it the number frozen into `held` would be whatever the last tick that
+   * managed to run happened to say.
+   */
+  const settleElapsedTimer = useCallback(() => {
+    const startedAt = elapsedStartedAtRef.current;
+    stopElapsedTimer();
+    if (startedAt !== null) setElapsedSec(Math.floor((Date.now() - startedAt) / 1000));
   }, [stopElapsedTimer]);
 
   useEffect(() => () => stopElapsedTimer(), [stopElapsedTimer]);
@@ -425,6 +512,73 @@ export function TranscriptCapturePanel({ experimentId }: { experimentId: string 
    * generation guard in `startRecording`, not here.
    */
   useEffect(() => () => dropAudio(), [dropAudio]);
+
+  /**
+   * THE PLAYBACK URL'S WHOLE LIFE, IN ONE EFFECT — created here, revoked here,
+   * nowhere else.
+   *
+   * WHY IT IS KEYED ON `heldChunks` AND NOT BUILT INSIDE `stopRecording`.
+   * `recorder.stop()` emits its final `dataavailable` ASYNCHRONOUSLY, on a
+   * later task — `dropAudio`'s own comment is about the same fact — and a
+   * `MediaRecorder` started without a timeslice emits exactly ONE chunk, at
+   * stop. So a URL built synchronously in `stopRecording` would be built from
+   * an EMPTY buffer, every time. `ondataavailable` already bumps `heldChunks`,
+   * so keying on it means the URL is (re)built the moment the buffer is
+   * complete, and again if a timesliced recording ever adds to it.
+   *
+   * EVERY EXIT REVOKES, and they are enumerated rather than assumed, because a
+   * revoke that only fires on the obvious path is the leak:
+   *   · Discard Audio      — `dropAudio()` zeroes `heldChunks` and `voice`
+   *                          becomes `idle`; both deps change, cleanup runs.
+   *   · Start Recording    — `voice` leaves `held` for `requesting-permission`.
+   *   · Close Capture      — the `!open` effect drops audio and resets voice.
+   *   · record change      — the reset effect does the same.
+   *   · unmount            — React runs this cleanup.
+   * There is no sixth way to leave `held`; `voice` is a single value and the
+   * five above are every transition out of it.
+   *
+   * THERE IS NO `pause()` HERE, AND AN EARLIER VERSION OF THIS COMMENT GAVE A
+   * FALSE REASON FOR ONE. It said "a DETACHED `HTMLMediaElement` KEEPS PLAYING
+   * in a real browser" and called the call load-bearing. Independent review
+   * measured all three halves of that wrong, and the correction is recorded
+   * rather than quietly dropped because this file's whole style is that a
+   * measured claim is measured:
+   *
+   *   1. THE UA PAUSES IT ITSELF. Measured in real Chrome:
+   *      `advancedWhileAttached: true` (0.727 -> 1.530), `pausedAfterRemove:
+   *      true`, `advancedWhileDetached: false` (1.531 -> 1.531). That is the
+   *      HTML spec's "removed from a Document" -> internal pause steps, not a
+   *      Chrome courtesy.
+   *   2. THE CALL COULD NEVER HAVE RUN ANYWAY. React 18.3.1 detaches a removed
+   *      host ref in the MUTATION phase and runs passive cleanup after, so the
+   *      ref read at teardown was already `null` (`ref cb DETACH(null)` then
+   *      `effect CLEANUP ref=null`). All five exits remove the `<audio>` in the
+   *      same commit that changes these deps.
+   *   3. Replacing it with `void 0` left 152 tests passing — an equivalent
+   *      mutant, i.e. a guard no test could see.
+   *
+   * The outcome was always safe; what was wrong was the explanation. A dead
+   * guard defended by a false browser fact is worse than no guard, because the
+   * next reader builds on the fact.
+   */
+  useEffect(() => {
+    if (voice !== 'held' || heldChunks === 0) return undefined;
+    if (typeof URL === 'undefined' || typeof URL.createObjectURL !== 'function') return undefined;
+    const parts = chunksRef.current.slice();
+    if (parts.length === 0) return undefined;
+    // The recorder stamps each chunk with the container it produced; reusing it
+    // is reading the blob's own declaration, never guessing a codec.
+    const url = URL.createObjectURL(new Blob(parts, { type: parts[0].type || '' }));
+    setPlaybackUrl(url);
+    return () => {
+      // M-1: guarded symmetrically with the `createObjectURL` check above. An
+      // environment that provides one and not the other is not one this app
+      // meets, but an asymmetric pair reads as though the risk were different
+      // at the two ends, and it is not.
+      if (typeof URL.revokeObjectURL === 'function') URL.revokeObjectURL(url);
+      setPlaybackUrl(null);
+    };
+  }, [voice, heldChunks]);
 
   /*
    * Keeps {@link voiceRef} current, so the two resets below can READ the voice
@@ -806,7 +960,8 @@ export function TranscriptCapturePanel({ experimentId }: { experimentId: string 
     if (recorder && recorder.state !== 'inactive') recorder.stop();
     streamRef.current?.getTracks().forEach((track) => track.stop());
     streamRef.current = null;
-    stopElapsedTimer();
+    // A final wall-clock reading before the clock stops — see `settleElapsedTimer`.
+    settleElapsedTimer();
     setVoice('held');
     setVoiceLive(CAPTURE_COPY.voiceHeldLive);
   }
@@ -817,6 +972,19 @@ export function TranscriptCapturePanel({ experimentId }: { experimentId: string 
     setRefusal(null);
     setVoiceLive(CAPTURE_COPY.voiceDiscardedLive);
   }
+
+  /**
+   * Sets `disableRemotePlayback` on the player as it mounts. React 18 does not
+   * recognise that attribute as a JSX prop (it warns and drops it), so the
+   * property has to be assigned to the element directly — and memoising the
+   * callback keeps React from detaching and re-attaching the ref on every
+   * render (N-1).
+   */
+  const adoptPlayer = useCallback((element: HTMLAudioElement | null) => {
+    if (element === null) return;
+    (element as HTMLAudioElement & { disableRemotePlayback?: boolean }).disableRemotePlayback =
+      true;
+  }, []);
 
   function focusTranscript() {
     transcriptRef.current?.focus();
@@ -1220,6 +1388,87 @@ export function TranscriptCapturePanel({ experimentId }: { experimentId: string 
         ) : (
           <>
             <p className="capture-note">{CAPTURE_COPY.voiceAudioHandling}</p>
+            {/*
+              THE STATE BAR — ABOVE THE CONTROLS, NOT INSIDE THEM.
+              ====================================================
+
+              WHAT IT REPLACES, and why the old arrangement failed a scientist
+              standing at a beamline. `recording` differed from `idle` by a VERB
+              SWAP INSIDE THE SAME BLUE PILL ("Start Recording" -> "Stop
+              Recording") plus `Recording · 0:06` set in 12px `--text-muted`,
+              inline in the button row. Nothing was tinted, nothing was marked,
+              and the one number that matters was the smallest thing on the
+              panel. `held` was worse: the elapsed indicator was removed
+              entirely and the ONLY statement that audio was still in the tab
+              was an `sr-only` live region — so a screen-reader user was better
+              informed than a sighted one.
+
+              THE STATE IS NEVER CARRIED BY COLOUR ALONE, which is
+              `transcriptCapture.css`'s own standing rule. Three signals move
+              together and any one of them is sufficient: the WORD (`Recording`
+              / `Held`), the MARK's SHAPE (a disc while live, a square while
+              held), and the tint. A reader with no colour, or with
+              `prefers-reduced-motion` stopping the pulse, loses nothing.
+
+              `.capture-elapsed`'S TEXT IS A CONTRACT WITH A FENCED SPEC. It
+              must read `<state> · <m:ss>` with the time LAST —
+              `e2e/mutation/capture-microphone.spec.ts` asserts `Recording ·
+              0:01` (`:901`), matches `/Recording · (?!0:00)\d+:\d\d/` (`:774`)
+              and parses `/(\d+):(\d\d)\s*$/` off `innerText` (`:510`). The
+              separator is therefore a literal, and the element is NOT a flex
+              container — flex items can have `innerText` newlines inserted
+              between them. The size difference is carried by the two inner
+              spans, which changes no character of the text.
+            */}
+            {(voice === 'recording' || voice === 'held') && (
+              <div className="capture-live" data-state={voice}>
+                <span className="capture-live-mark" aria-hidden="true" />
+                <p className="capture-elapsed">
+                  <span className="capture-elapsed-state">
+                    {voice === 'recording'
+                      ? CAPTURE_COPY.voiceRecordingBadge
+                      : CAPTURE_COPY.voiceHeldBadge}
+                  </span>
+                  {' · '}
+                  <span className="capture-elapsed-time">{formatElapsed(elapsedSec)}</span>
+                </p>
+              </div>
+            )}
+            {voice === 'held' && (
+              <>
+                <p className="capture-held-line">{CAPTURE_COPY.voiceHeldPersistent}</p>
+                {playbackUrl !== null && (
+                  <>
+                    {/*
+                      IN-TAB PLAYBACK. `controlsList` suppresses Chrome's
+                      default Download item — `voiceAudioHandling` promises the
+                      audio is "never written to disk", and a download would
+                      make that false — and `noremoteplayback`, reinforced by
+                      the `disableRemotePlayback` property below, stops the
+                      browser offering to cast it, which is audio leaving the
+                      tab by a channel no HTTP assertion watches.
+
+                      THE PROPERTY IS SET THROUGH THE REF because React 18 does
+                      not know `disableRemotePlayback` as a JSX prop and would
+                      warn rather than forward it. The callback is memoised
+                      (N-1) so it is not detached and re-attached on every
+                      render — an inline arrow makes React run it twice per
+                      commit for no reason.
+                    */}
+                    <audio
+                      className="capture-playback"
+                      src={playbackUrl}
+                      controls
+                      preload="metadata"
+                      controlsList="nodownload noplaybackrate noremoteplayback"
+                      aria-label={CAPTURE_COPY.voicePlaybackLabel}
+                      ref={adoptPlayer}
+                    />
+                    <p className="capture-note">{CAPTURE_COPY.voicePlaybackNote}</p>
+                  </>
+                )}
+              </>
+            )}
             <div className="capture-voice-controls">
               {voice === 'idle' && (
                 <button
@@ -1242,31 +1491,27 @@ export function TranscriptCapturePanel({ experimentId }: { experimentId: string 
                 </button>
               )}
               {voice === 'recording' && (
-                <>
-                  <button
-                    type="button"
-                    className={primaryClass(showVoicePrimary)}
-                    onClick={stopRecording}
-                    disabled={formLocked}
-                  >
-                    {CAPTURE_COPY.voiceStop}
-                  </button>
-                  {/*
-                    m5, INDEPENDENT REVIEW OF PR-D — NOT `aria-hidden` ANY MORE.
-                    The one-shot live announcement on entering `recording`
-                    ("Recording. Audio is being held in this tab.") never repeats
-                    as the clock ticks — that would be noise — but a screen-reader
-                    user who tabs to or reads this element AFTER that moment used
-                    to find nothing here at all: `aria-hidden="true"` removed both
-                    the state and the elapsed time from the accessibility tree.
-                    The text now names both, so navigating to it answers "am I
-                    still recording, and for how long" without waiting for a live
-                    region that already fired once.
-                  */}
-                  <span className="capture-elapsed">
-                    Recording · {formatElapsed(elapsedSec)}
-                  </span>
-                </>
+                /*
+                  STOP MUST NOT LOOK LIKE START, and until 2026-09-10 it was the
+                  identical blue pill with a different verb — the only
+                  difference between "live" and "not live" on the whole panel.
+                  `capture-stop` repaints it on the alert ramp. `.btn-primary`
+                  STAYS IN THE CLASS LIST deliberately: it is still this state's
+                  one primary action, and the "exactly one primary per state"
+                  guard counts `.btn-primary` nodes.
+
+                  The elapsed indicator that used to sit beside it has moved
+                  into the state bar above — see that block's comment for the
+                  `.capture-elapsed` text contract.
+                */
+                <button
+                  type="button"
+                  className={`${primaryClass(showVoicePrimary)} capture-stop`}
+                  onClick={stopRecording}
+                  disabled={formLocked}
+                >
+                  {CAPTURE_COPY.voiceStop}
+                </button>
               )}
               {voice === 'held' && (
                 <>
@@ -1278,11 +1523,37 @@ export function TranscriptCapturePanel({ experimentId }: { experimentId: string 
                   >
                     {CAPTURE_COPY.voiceTypeWhatWasSaid}
                   </button>
+                  {/*
+                    DISARMED ONCE IT HAS REFUSED — 2026-09-10. This operation
+                    cannot succeed in any deployment (`501
+                    no_provider_configured`, and Dean's D4/D6/D8/D9 are
+                    DEFERRED), yet it used to return to its enabled resting
+                    state after refusing, so the same wall could be summoned
+                    forever. `refusal` is cleared by Start Recording, Discard
+                    Audio and a record change, so a NEW recording arms it again
+                    — the seam stays discoverable, it simply stops offering a
+                    second identical refusal for the same audio.
+
+                    NOT disabled from the start, though `capabilities` already
+                    reports the seam unconfigured: pressing it once is how a
+                    reader learns what is missing, and the refusal card is that
+                    answer. Focus has already moved to the transcript box by
+                    the time this disables, so nothing is trapped on it.
+
+                    KNOWN CONFLICT, NAMED RATHER THAN LEFT TO CI:
+                    `e2e/mutation/capture-microphone.spec.ts:909` asserts this
+                    button is still ENABLED right after the click, as a
+                    synchronisation barrier before reading its probe. That line
+                    will fail and needs to wait on `.capture-refusal` instead —
+                    a stricter barrier anyway, since it waits for the response
+                    rather than for a button state. That file was outside this
+                    slice's edit scope.
+                  */}
                   <button
                     type="button"
-                    className="btn btn-secondary"
+                    className="btn btn-secondary capture-transcribe"
                     onClick={requestTranscript}
-                    disabled={formLocked || busyKind !== null}
+                    disabled={formLocked || busyKind !== null || refusal !== null}
                   >
                     {CAPTURE_COPY.voiceTranscribe}
                   </button>
@@ -1332,19 +1603,52 @@ export function TranscriptCapturePanel({ experimentId }: { experimentId: string 
                 {voiceDenialCopy(voiceDenialReason ?? 'unknown')}
               </p>
             )}
+            {/*
+              THE REFUSAL, LED IN THE SCIENTIST'S REGISTER AND COMPLETE BEHIND
+              A DISCLOSURE.
+              ====================================================================
+
+              WHAT SHIPPED BEFORE: `refusal.message` verbatim as the first and
+              largest thing — "This build cannot transcribe speech: no provider
+              is configured for the transcription seam. Missing: an approved
+              transcription provider (decision D9), an institutional credential
+              for it (decision D4), approved egress for speech leaving SLAC
+              (decisions D6, D8). These are institutional decisions recorded in
+              docs/ai-integration-decision-packet.md; …" — a governance
+              changelog handed to somebody mid-experiment.
+
+              NOTHING IS WITHHELD AND NOTHING IS PARAPHRASED. The server's full
+              message, its `missing` list and its `decision_reference` are all
+              still here, character for character, inside `<details>`. Only the
+              ORDER changed: a reader now meets one sentence about what they
+              can do, and reaches the decision record in one press if they want
+              it. The disclosure is `open={false}` by default and is a native
+              `<details>`, so it is keyboard-reachable and announced as a
+              disclosure without a line of script.
+
+              `role="alert"` STAYS ON THE CONTAINER, so the lead is announced.
+              The `<details>` body is inside it but is not separately live — a
+              disclosure that announced its own contents on open would say the
+              whole governance paragraph twice.
+            */}
             {refusal !== null && (
               <div className="capture-refusal" role="alert">
-                <p className="capture-refusal-message">{refusal.message}</p>
-                <p className="capture-guidance-label">Missing:</p>
-                <ul className="capture-guidance-list">
-                  {refusal.missing.map((item) => (
-                    <li key={item}>{item}</li>
-                  ))}
-                </ul>
+                <p className="capture-refusal-message">{voiceRefusalLead(refusal.reason)}</p>
                 <p className="capture-note">{CAPTURE_COPY.voiceAfterRefusal}</p>
-                <p className="capture-note">
-                  Recorded in <code>{refusal.decision_reference}</code>.
-                </p>
+                <details className="capture-refusal-why">
+                  <summary>{CAPTURE_COPY.voiceRefusalWhy}</summary>
+                  <p className="capture-note">{CAPTURE_COPY.voiceRefusalDetailIntro}</p>
+                  <p className="capture-refusal-server">{refusal.message}</p>
+                  <p className="capture-guidance-label">Missing:</p>
+                  <ul className="capture-guidance-list">
+                    {refusal.missing.map((item) => (
+                      <li key={item}>{item}</li>
+                    ))}
+                  </ul>
+                  <p className="capture-note">
+                    Recorded in <code>{refusal.decision_reference}</code>.
+                  </p>
+                </details>
               </div>
             )}
           </>
@@ -1451,11 +1755,46 @@ export function TranscriptCapturePanel({ experimentId }: { experimentId: string 
         <p className="capture-hint" id={`${transcriptId}-hint`}>
           {CAPTURE_COPY.transcriptHint} {CAPTURE_COPY.finalizeHint}
         </p>
+        {/*
+          THE PRE-FLIGHT, AND FINALIZE STAYS ENABLED.
+          ==========================================
+
+          Finalizing with no run selected used to run straight into a summary
+          card reading "Nothing was proposed from this transcript." — a dead
+          end discovered only after the write. It is not an error: every word
+          is stored as notes, which is worth doing, and the run selector's
+          never-default discipline is correct and stays. So the button stays
+          enabled and the consequence is stated at the point of action instead.
+
+          M-3: GATED ON THERE BEING TEXT. It used to render the moment the
+          panel opened, warning about a press that was not yet possible —
+          Finalize is `disabled` while `text.trim() === ''`. A warning that
+          precedes the action it describes is noise on first open, and noise
+          is what a reader learns to skip. It now appears exactly when the
+          button it describes becomes pressable, and the `aria-describedby`
+          is bound on the same condition so it never points at a missing id.
+
+          MEASURED, not assumed: `read_transcript` inserts a
+          `run_target_required` clarification when `selected_run is None`,
+          which makes `settled` False, which skips the candidate loop whole
+          (`if not settled: continue`) — so ZERO candidates, hence zero
+          proposals, independent of what the transcript says. See
+          `runHint`'s comment in `transcriptCaptureContent.ts` for the
+          per-path scope measurement behind the copy this replaced.
+        */}
+        {selectedRun === '' && text.trim() !== '' && (
+          <p className="capture-preflight" id={`${transcriptId}-preflight`}>
+            {CAPTURE_COPY.finalizePreflightNoRun}
+          </p>
+        )}
         <button
           type="submit"
           className={primaryClass(showFinalizePrimary)}
           disabled={busyKind !== null || text.trim() === ''}
           aria-busy={busyKind === 'finalize'}
+          aria-describedby={
+            selectedRun === '' && text.trim() !== '' ? `${transcriptId}-preflight` : undefined
+          }
         >
           {busyKind === 'finalize' ? 'Reading…' : CAPTURE_COPY.finalize}
         </button>

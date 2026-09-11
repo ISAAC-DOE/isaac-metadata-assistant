@@ -906,7 +906,18 @@ test('no request carries audio — over HTTP, WebRTC or a WebSocket', async ({ p
   // `501 no_provider_configured` in every deployment; what matters here is what
   // its REQUEST carried.
   await page.getByRole('button', { name: 'Request a Transcript' }).click();
-  await expect(page.getByRole('button', { name: 'Request a Transcript' })).toBeEnabled();
+  /*
+   * WAIT ON THE REFUSAL, NOT ON THE BUTTON — corrected 2026-09-11.
+   *
+   * This barrier read `…toBeEnabled()`, which stopped being true by design: the
+   * control is now DISABLED once it has refused, because a control that can never
+   * succeed should not stay armed for a reader to press again. The assertion was
+   * only ever a synchronisation barrier before `readProbe`, and waiting for the
+   * refusal itself is the stricter one — `toBeEnabled` could pass before the
+   * request had even resolved, whereas `.capture-refusal` cannot appear until the
+   * server has answered.
+   */
+  await expect(page.locator('.capture-refusal')).toBeVisible();
 
   const probe = await readProbe(page);
 
