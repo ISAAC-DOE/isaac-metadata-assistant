@@ -526,6 +526,134 @@ describe('the order control', () => {
     expect(screen.queryByText(/newest first/)).toBeNull();
   });
 
+  /*
+   * DEFECT, FOUND WHILE FIXING THE EQUIVALENT BUG IN `UnmappedNotesPanel` AND
+   * VERIFIED HERE BEFORE THE FIX: retrying a failed view-change read degrades
+   * to the WRONG sentence.
+   *
+   * `viewChangeRef` was set at each view-changing call site and consumed (read
+   * once, then reset to `false`) at the TOP of every fetch-effect run — including
+   * the run started by "Try Again", which calls `reload(true)` and sets no such
+   * ref. So: (1) the reader changes Order, the read fails, and the correct
+   * VIEW-CHANGE sentence is shown; (2) the reader clicks "Try Again", which
+   * re-issues the SAME still-unapplied read; if IT also fails, `wasViewChange`
+   * is `false` for that attempt (the ref was already consumed and reset by the
+   * first failure), so the disclosure degrades to the generic
+   * `BACKGROUND_REFRESH_ERROR` — "what is shown may be out of date" — for the
+   * exact same unapplied view change. The sentence gets LESS accurate the more
+   * the reader retries.
+   *
+   * Reproduced against the pre-fix code (this test was run once against it):
+   * after the retry, `screen.queryByText(/could not be applied/, {selector:
+   * 'p.proposals-background-refresh-notice'})` was `null` and
+   * `screen.getByText(/what is shown may be out of date/)` was present instead
+   * — i.e. the assertions below FAILED, proving the defect. The fix replaces
+   * `viewChangeRef` with `loadedViewRef`, a record of the (filter, order,
+   * cursor) triple as of the last SUCCESSFUL load, compared against the
+   * triple the in-flight request was made with — a comparison of STATE, not of
+   * how the request was triggered, so it holds across any number of retries.
+   */
+  it(
+    'DEFECT/FIX: retrying a failed view-change read keeps the view-change ' +
+      'sentence, not the generic staleness one',
+    async () => {
+      let attempts = 0;
+      stubFetchRoutes({
+        [LIST]: { body: page([proposalFixture()], { total: 61, returned: 1 }) },
+        [`${LIST}?order=newest_first`]: () => {
+          attempts += 1;
+          // Both the original view-change read AND its retry fail.
+          return { status: 503, body: {} };
+        },
+      });
+      renderPanel();
+
+      await screen.findByText(/Showing 1 of 61 proposals on this record · oldest first/);
+      fireEvent.change(screen.getByLabelText('Order'), { target: { value: 'newest_first' } });
+      await waitFor(() => expect(attempts).toBe(1));
+
+      // First failure: the VIEW-CHANGE sentence, correctly.
+      await screen.findByText(/could not be applied, so it is still showing what it showed before/, {
+        selector: 'p.proposals-background-refresh-notice',
+      });
+
+      fireEvent.click(screen.getByRole('button', { name: 'Try Again' }));
+      await waitFor(() => expect(attempts).toBe(2));
+
+      // THE ASSERTION THIS TEST EXISTS FOR: the retry's OWN failure — for the
+      // exact same still-unapplied "newest first" view — must keep the
+      // view-change sentence, not fall back to the generic one.
+      expect(
+        await screen.findByText(
+          /could not be applied, so it is still showing what it showed before/,
+          { selector: 'p.proposals-background-refresh-notice' },
+        ),
+      ).toBeInTheDocument();
+      expect(screen.queryByText(/what is shown may be out of date/)).toBeNull();
+    },
+  );
+
+  /*
+   * THE OTHER HALF OF THE SAME MECHANISM, AND AN EQUIVALENT-MUTANT GUARD FOR IT.
+   * `loadedViewRef` has to be written on every SUCCESSFUL load — not merely
+   * compared against on a failure — or a view change that has already
+   * SUCCEEDED would be misread as still-unapplied forever afterwards. Measured:
+   * deleting the `loadedViewRef.current = { filter, order, cursor }` write in
+   * the `.then` branch passes every other test in this file (including the
+   * "DEFECT/FIX" test above, since that scenario never gets a successful load
+   * of the CHANGED view) — it is only caught by exercising exactly this
+   * sequence: change the view, let it SUCCEED, then have a later, unrelated
+   * silent reload (the change-feed signal, not a further view change) fail.
+   */
+  it(
+    'a background failure AFTER a successful view change reports plain staleness, ' +
+      'not a view change that already landed',
+    async () => {
+      let orderReads = 0;
+      stubFetchRoutes({
+        [LIST]: { body: page([proposalFixture()], { total: 61, returned: 1 }) },
+        [`${LIST}?order=newest_first`]: () => {
+          orderReads += 1;
+          // The order change itself succeeds…
+          if (orderReads === 1) {
+            return { body: page([proposalFixture()], { total: 61, returned: 1, order: 'newest_first' }) };
+          }
+          // …and only the LATER, unrelated background refresh fails.
+          return { status: 503, body: {} };
+        },
+      });
+      const view = renderPanel(null);
+      await screen.findByText(/Showing 1 of 61 proposals on this record · oldest first/);
+
+      fireEvent.change(screen.getByLabelText('Order'), { target: { value: 'newest_first' } });
+      await screen.findByText(/Showing 1 of 61 proposals on this record · newest first/);
+
+      // A colleague's unrelated change arrives over the feed; this silent
+      // reload (same, already-applied "newest first" view) fails.
+      view.rerender(
+        <MemoryRouter
+          initialEntries={['/']}
+          future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+        >
+          <IngestionProposalsPanel experimentId={EXP} activity={activityFor(['P1'], 9)} />
+        </MemoryRouter>,
+      );
+      await waitFor(() => expect(orderReads).toBe(2));
+
+      // PLAIN STALENESS, because "newest first" is exactly what is already on
+      // screen — the view is not unapplied, only possibly out of date.
+      expect(
+        await screen.findByText(/A background refresh of this list did not complete/, {
+          selector: 'p.proposals-background-refresh-notice',
+        }),
+      ).toBeInTheDocument();
+      expect(
+        screen.queryByText(/could not be applied, so it is still showing what it showed before/),
+      ).toBeNull();
+      view.unmount();
+    },
+  );
+
   it('does not change the clause IN FLIGHT — it moves when the response lands, not when the control does', async () => {
     let release: (() => void) | null = null;
     stubFetchRoutes({
@@ -580,6 +708,106 @@ describe('the order control', () => {
       expect(urls().some((u) => u.endsWith('?order=newest_first'))).toBe(true),
     );
     expect(screen.getByText('Proposed value')).toBeTruthy();
+  });
+});
+
+// --- 2c. the OTHER TWO view dimensions ------------------------------------------
+//
+// THE GAP, AND HOW IT WAS FOUND. `IngestionProposalsPanel.tsx`'s `viewChanged`
+// compares THREE dimensions against `loadedViewRef` — `filter`, `order`, `cursor` —
+// and its own comment says so ("THREE FIELDS, NOT ONE … a single comparison would
+// silently ignore a stale order or cursor"). Every test that exercised the mechanism
+// lived under `describe('the order control')`, so only ONE of the three was actually
+// pinned. Driven against the 78-test file, one mutation per conjunct:
+//
+//   | mutation                            | result before this block |
+//   |-------------------------------------|--------------------------|
+//   | delete `filter !== …`               | 78/78 PASS — SURVIVED    |
+//   | delete `cursor !== …`               | 78/78 PASS — SURVIVED    |
+//   | delete `order  !== …`               | 2 RED                    |
+//   | stop writing `loadedViewRef` on ok  | 1 RED                    |
+//
+// NEITHER SURVIVOR IS EQUIVALENT, and the filter one is the worse of the two because
+// it is the panel's most common path: on page 1 (`cursor` already `null`) with the
+// order untouched, dropping the `filter` conjunct makes `viewChanged` `false` for
+// EVERY failed filter change, so the panel prints "what is shown may be out of date"
+// about a filter it never applied — the exact defect `VIEW_CHANGE_REFRESH_ERROR`
+// exists to fix, on the path a reader hits first.
+//
+// THE COMPONENT IS CORRECT AND IS NOT CHANGED BY THIS BLOCK — it was verified live in
+// a browser. These two tests are coverage for behaviour that already holds, mirroring
+// the order-control pair above so the three dimensions are pinned the same way.
+//
+// Each asserts the VIEW-CHANGE sentence in the VISIBLE notice (scoped by selector,
+// because the same text also reaches the sr-only status region) AND the absence of
+// the generic staleness one — a build that rendered both would otherwise pass.
+
+describe('a failed view change is named as unapplied for every view dimension', () => {
+  it('DEFECT/COVERAGE: a FILTER change whose read fails says it was never applied, not that it is stale', async () => {
+    stubFetchRoutes({
+      [LIST]: { body: page([proposalFixture()], { total: 61, returned: 1 }) },
+      // The filter change is the only read that fails, and it fails from the
+      // FIRST window — `cursor` is already `null` and `order` is untouched, so
+      // `filter` is the ONLY dimension that differs from the loaded view. That
+      // is what makes this test specific to the `filter` conjunct rather than
+      // passing on the strength of one of its siblings.
+      [`${LIST}?state=open`]: { status: 503, body: {} },
+    });
+    renderPanel();
+
+    await screen.findByText(/Showing 1 of 61 proposals on this record · oldest first/);
+    fireEvent.change(screen.getByLabelText('Show'), { target: { value: 'open' } });
+
+    expect(
+      await screen.findByText(
+        /could not be applied, so it is still showing what it showed before/,
+        { selector: 'p.proposals-background-refresh-notice' },
+      ),
+    ).toBeInTheDocument();
+    // NOT the generic staleness sentence: the "open" view the reader asked for was
+    // never applied at all, which is more specific and more actionable than "may be
+    // out of date". MUTANT (measured): deleting `filter !== loadedViewRef.current
+    // .filter` from `viewChanged` makes this assertion the one that fails.
+    expect(screen.queryByText(/what is shown may be out of date/)).toBeNull();
+    // …and this was a SILENT reload, so the list is protected rather than replaced
+    // by the full `BackendDown` panel.
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect((screen.getByLabelText('Show') as HTMLSelectElement).value).toBe('open');
+  });
+
+  it('DEFECT/COVERAGE: a PAGER step whose read fails says it was never applied, not that it is stale', async () => {
+    stubFetchRoutes({
+      [LIST]: {
+        body: page([proposalFixture({ proposal_id: 'P1' })], {
+          total: 2,
+          returned: 1,
+          has_more: true,
+          next_cursor: 'P1',
+        }),
+      },
+      // Only the SECOND page fails. `filter` is still 'all' and `order` is still the
+      // default, so `cursor` is the only dimension that differs — this test is
+      // specific to the `cursor` conjunct for the same reason the one above is
+      // specific to `filter`.
+      [`${LIST}?after=P1`]: { status: 503, body: {} },
+    });
+    renderPanel();
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Next Page' }));
+    await waitFor(() => expect(urls().some((u) => u.endsWith('?after=P1'))).toBe(true));
+
+    expect(
+      await screen.findByText(
+        /could not be applied, so it is still showing what it showed before/,
+        { selector: 'p.proposals-background-refresh-notice' },
+      ),
+    ).toBeInTheDocument();
+    // MUTANT (measured): deleting `cursor !== loadedViewRef.current.cursor` makes
+    // this assertion the one that fails — the panel would claim the page it is
+    // showing "may be out of date" when in fact the page the reader asked for was
+    // never fetched, and page 1 is exactly as current as it ever was.
+    expect(screen.queryByText(/what is shown may be out of date/)).toBeNull();
+    expect(screen.queryByRole('alert')).toBeNull();
   });
 });
 

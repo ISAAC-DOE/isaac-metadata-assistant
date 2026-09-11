@@ -3,7 +3,7 @@ import { useId } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { LABELS } from '../lib/labels';
 import { RECORD_VIEW_PARAM, type RecordViewId } from '../lib/routes';
-import type { CaptureSummary } from '../lib/useCaptureSummary';
+import type { ApiCaptureSummary } from '../lib/types';
 
 /**
  * THE RECORD'S FOUR LOCAL DESTINATIONS, IN THE RECORD'S OWN SIDEBAR.
@@ -30,7 +30,9 @@ import type { CaptureSummary } from '../lib/useCaptureSummary';
  * ── ONE OF THE FOUR IS PROMOTED, AND IT IS STILL NOT A STEP ────────────────
  *
  * `capture` is rendered above the other three, under its own `Data Capture`
- * eyebrow, as a card carrying the record's live note and open-proposal counts.
+ * eyebrow, as a card carrying the record's note and open-proposal counts — read
+ * off the record's OWN detail payload (`capture_summary`), so the card costs no
+ * request of its own and can never disagree with the bundle it was drawn from.
  * The reason is the one the project owner gave: the spine describes the
  * record-COMPLETION lifecycle, and the scientist's actual first act — writing
  * down what just happened at the instrument — had no place in it and was
@@ -104,17 +106,17 @@ const PROMOTED: RecordViewId = 'capture';
  *  3. Nothing here is a verdict. "2 to review" is a count of open proposals,
  *     not a claim that the record is incomplete, behind, or ready.
  */
-export function captureSummaryLine(summary: CaptureSummary | null): string | null {
+export function captureSummaryLine(summary: ApiCaptureSummary | null): string | null {
   if (summary === null) return null;
   const parts: string[] = [];
-  if (summary.notesTotal > 0) {
-    parts.push(`${summary.notesTotal} ${summary.notesTotal === 1 ? 'note' : 'notes'}`);
+  if (summary.notes_total > 0) {
+    parts.push(`${summary.notes_total} ${summary.notes_total === 1 ? 'note' : 'notes'}`);
   }
-  if (summary.proposalsOpen > 0) parts.push(`${summary.proposalsOpen} to review`);
-  if (summary.unreadableEntries > 0) {
+  if (summary.proposals_open > 0) parts.push(`${summary.proposals_open} to review`);
+  if (summary.unreadable_entries > 0) {
     parts.push(
-      `${summary.unreadableEntries} unreadable ${
-        summary.unreadableEntries === 1 ? 'entry' : 'entries'
+      `${summary.unreadable_entries} unreadable ${
+        summary.unreadable_entries === 1 ? 'entry' : 'entries'
       }`,
     );
   }
@@ -125,12 +127,19 @@ interface RecordWorkspaceNavProps {
   /** The workspace currently rendered — already resolved, never re-derived here. */
   active: RecordViewId;
   /**
-   * The server's own capture totals, or `null` while they are unknown — before
-   * the first read lands, and after one that failed. Optional so a caller with
-   * no capture context (there is none today) renders the destination without a
-   * summary rather than inventing one.
+   * The server's own capture totals, straight off the record's detail payload, or
+   * `null` when they are not known — an API build that does not serve the block, or
+   * a caller with no capture context. Optional for the same reason: a caller
+   * without one renders the destination and no summary rather than inventing one.
+   *
+   * THE WIRE SHAPE IS PASSED THROUGH UNADAPTED, which is a deliberate exception to
+   * this codebase's adapt-at-the-boundary habit. There is nothing to adapt: three
+   * server-owned integers, rendered as three integers. An adapter would be a second
+   * place for them to live and a second place to get one wrong, and the surrounding
+   * rule — `CLAUDE.md` §11's four surfaces that stated a number they had not derived
+   * from what they claimed to describe — is exactly about extra copies.
    */
-  captureSummary?: CaptureSummary | null;
+  captureSummary?: ApiCaptureSummary | null;
   /**
    * Called immediately before the navigation happens, with the workspace being
    * left. The screen uses it to flush held run edits; this component knows

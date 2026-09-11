@@ -750,18 +750,48 @@ function ProposalsBrowser({
   const listStatusRef = useRef(list.status);
   listStatusRef.current = list.status;
   /**
-   * I3, INDEPENDENT REVIEW. True only while the read about to run was triggered
-   * by the READER'S OWN change to the filter, order or page — as opposed to a
-   * colleague's change arriving over the feed, this reader's own review act, or
-   * a 412 recovery. Set at the same call sites that set `silentRef.current =
-   * true` directly (the filter `onChange`, `changeOrder`, the pager, and
-   * `EmptyProposals`' rewind/clear-filter) — never at a `reload(true)` call site,
-   * because none of those change what view is being asked for. Read once at the
-   * top of the fetch effect and reset immediately, the same pattern
-   * `arrivalReloadRef` uses. See `VIEW_CHANGE_REFRESH_ERROR` for why this needs
-   * its own sentence rather than sharing `BACKGROUND_REFRESH_ERROR`'s.
+   * WHICH (filter, order, cursor) TRIPLE THE LIST ON SCREEN WAS LOADED UNDER —
+   * the input to choosing between `BACKGROUND_REFRESH_ERROR` and
+   * `VIEW_CHANGE_REFRESH_ERROR`.
+   *
+   * DELIBERATELY NOT THE FIRST VERSION'S MECHANISM (`viewChangeRef`), and the
+   * divergence is the point — `UnmappedNotesPanel`'s own `loadedFilterRef` names
+   * the identical shape of bug this replaces. `viewChangeRef` was set at each
+   * view-changing call site and consumed (read once, then reset) at the TOP of
+   * the fetch effect, which answers "did the READER just change the view?".
+   * That is true for exactly one request: `reload(true)` — what "Try Again"
+   * calls — sets no such ref, so a retry of a still-unapplied view change was
+   * read as an ordinary background refresh and disclosed the generic staleness
+   * sentence for the very same unapplied view. Measured (this file's own
+   * "DEFECT/FIX" test, run once against the `viewChangeRef` version): after
+   * changing Order and having BOTH that read and its "Try Again" retry fail,
+   * the second failure showed `BACKGROUND_REFRESH_ERROR` — "what is shown may
+   * be out of date" — which is a worse (less accurate) claim about the exact
+   * same still-unapplied "newest first" request the first failure had
+   * correctly named. The sentence got LESS accurate the more the reader tried.
+   *
+   * SO THE QUESTION ASKED IS THE ONE THAT MATTERS TO THE READER — not "what
+   * caused this request?" but "does the control disagree with what is on
+   * screen?". `filter`/`order`/`cursor` are the view being requested; this ref
+   * is the view that was last successfully loaded. When any of the three
+   * differs, the view the reader asked for is not applied, however many
+   * attempts it took to get here, and the sentence says so. When all three
+   * agree, nothing on screen is misdescribed and the honest claim is plain
+   * staleness.
+   *
+   * THREE FIELDS, NOT ONE — this panel has three view dimensions
+   * (`UnmappedNotesPanel`'s sibling fix only needed `filter`), and a single
+   * comparison would silently ignore a stale order or cursor. Compared as a
+   * small record rather than three separate refs so the three can never be
+   * read out of sync with each other.
+   *
+   * Only ever written on a SUCCESSFUL read (in the fetch effect's `.then`),
+   * which is what makes it describe what is rendered rather than what was
+   * attempted.
    */
-  const viewChangeRef = useRef(false);
+  const loadedViewRef = useRef<{ filter: string; order: ApiProposalOrder; cursor: string | null }>(
+    { filter, order, cursor },
+  );
 
   /*
    * ARRIVAL DETECTION — WHY IT READS `by_state.open` RATHER THAN DIFFING THE WINDOW.
@@ -825,8 +855,6 @@ function ProposalsBrowser({
      * flag survive to the `.catch` below that needs it.
      */
     const wasSilent = silentRef.current;
-    const wasViewChange = viewChangeRef.current;
-    viewChangeRef.current = false;
     if (!wasSilent) setList({ status: 'loading' });
     silentRef.current = false;
 
@@ -842,6 +870,10 @@ function ProposalsBrowser({
         if (!alive || generation !== generationRef.current) return;
         setList({ status: 'data', loaded });
         setVersion(loaded.experiment_version);
+        // The view on screen is now the view that was requested — see
+        // `loadedViewRef`. `filter`/`order`/`cursor` are this request's own,
+        // closed over.
+        loadedViewRef.current = { filter, order, cursor };
         // A later success clears an earlier silent-failure disclosure — the read
         // it complained about has since been superseded by one that worked.
         setBackgroundRefreshError(null);
@@ -905,7 +937,15 @@ function ProposalsBrowser({
          * no recovery control — worse than the `BackendDown` it replaced.
          */
         if (wasSilent && listStatusRef.current === 'data') {
-          const sentence = wasViewChange ? VIEW_CHANGE_REFRESH_ERROR : BACKGROUND_REFRESH_ERROR;
+          // Does the control disagree with what is on screen? — see
+          // `loadedViewRef`'s own comment for why this replaces a
+          // request-triggered flag with a comparison against loaded state,
+          // and why all three dimensions are compared rather than one.
+          const viewChanged =
+            filter !== loadedViewRef.current.filter ||
+            order !== loadedViewRef.current.order ||
+            cursor !== loadedViewRef.current.cursor;
+          const sentence = viewChanged ? VIEW_CHANGE_REFRESH_ERROR : BACKGROUND_REFRESH_ERROR;
           setBackgroundRefreshError(sentence);
           /*
            * M2, INDEPENDENT REVIEW. The SAME sentence twice in a row (e.g. two
@@ -1173,7 +1213,6 @@ function ProposalsBrowser({
    */
   const changeOrder = useCallback((next: ApiProposalOrder) => {
     silentRef.current = true;
-    viewChangeRef.current = true;
     setCursor(null);
     setBack([]);
     setOrder(next);
@@ -1203,7 +1242,6 @@ function ProposalsBrowser({
                  selection. A visibly transient number is a better trade than a
                  silently destroyed value. */
               silentRef.current = true;
-              viewChangeRef.current = true;
               setCursor(null);
               setBack([]);
               setFilter(e.target.value);
@@ -1412,13 +1450,11 @@ function ProposalsBrowser({
              */
             onRewind={() => {
               silentRef.current = true;
-              viewChangeRef.current = true;
               setCursor(null);
               setBack([]);
             }}
             onClearFilter={() => {
               silentRef.current = true;
-              viewChangeRef.current = true;
               setCursor(null);
               setBack([]);
               setFilter('all');
@@ -1453,13 +1489,11 @@ function ProposalsBrowser({
               canGoBack={back.length > 0}
               onNext={(next) => {
                 silentRef.current = true;
-                viewChangeRef.current = true;
                 setBack((stack) => [...stack, cursor]);
                 setCursor(next);
               }}
               onPrevious={() => {
                 silentRef.current = true;
-                viewChangeRef.current = true;
                 setBack((stack) => {
                   setCursor(stack.length > 0 ? stack[stack.length - 1] : null);
                   return stack.slice(0, -1);

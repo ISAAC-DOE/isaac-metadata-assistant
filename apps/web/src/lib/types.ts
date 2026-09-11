@@ -764,6 +764,71 @@ export interface ApiExperimentDetail extends ApiExperimentSummary, VersionFields
   source_files: string[];
   workflow: ApiWorkflow;
   artifact: ApiArtifactState;
+  /**
+   * How much captured material this record holds, on the record's own payload.
+   *
+   * OPTIONAL, AND THE `undefined` CASE IS A REAL ONE RATHER THAN A TYPE ESCAPE. It
+   * means "this server did not say", which the one surface that reads it renders as
+   * NOTHING — never as zero. Those are different claims: `{0, 0, 0}` says the record
+   * holds no captured material, and absence says this client does not know. A
+   * fixture written before the server served this field keeps type-checking, and so
+   * does a client talking to an API build without it.
+   */
+  capture_summary?: ApiCaptureSummary;
+}
+
+/**
+ * THE RECORD'S CAPTURE COUNTS, SERVED WITH THE RECORD — never fetched separately.
+ *
+ * ── WHAT REPLACED WHAT ──────────────────────────────────────────────────────
+ *
+ * These three numbers used to be assembled client-side by `lib/useCaptureSummary.ts`
+ * (deleted), which issued `GET .../notes?state=dismissed` and `GET .../proposals
+ * ?limit=1` on every record load of three of the four record workspaces, plus a
+ * repeat on every forward change-feed step. `GET .../notes` has no `limit`, so that
+ * read was unbounded and the `state` filter was there only to shrink a payload whose
+ * rows were thrown away. Measured over HTTP on 2026-09-11, on a record holding 10
+ * notes and 3 open proposals: the pair as issued cost 4,281 B, the same pair
+ * unfiltered 11,073 B, and the block that replaced them is 79 B on a response the
+ * screen already fetches.
+ *
+ * ── WHY SERVING THEM HERE IS MORE THAN A SAVING ─────────────────────────────
+ *
+ * They arrive CONSISTENT WITH THE REST OF THE BUNDLE by construction — same record,
+ * same revision, same read — which is a property no pair of independent reads can
+ * have. The old hook needed a change-feed key, a stale guard and a record-id guard
+ * for exactly that reason; none of them is needed now.
+ *
+ * ── THEY ARE THE SERVER'S TOTALS, AND NOTHING HERE MAY RECOMPUTE THEM ───────
+ *
+ * `notes_total` is how many notes the record HOLDS, dismissed ones included (that is
+ * `GET .../notes`'s own definition: dismissing is a review state, not a deletion,
+ * and this API has no operation that deletes a note). `proposals_open` is counted
+ * server-side over the whole record. `CLAUDE.md` §11 records four separate surfaces
+ * that shipped a count taken off a fetched array; there is no array here to take one
+ * from, and no client-side arithmetic may reintroduce the hazard.
+ *
+ * ── AND NONE OF THEM IS A VERDICT ───────────────────────────────────────────
+ *
+ * `apps/api/isaac_api/workflow.py` keeps capture out of the workflow spine because a
+ * step state needs a criterion the record's own signals can DECIDE, and "the
+ * scientist has finished capturing" is not one. These are facts about what is
+ * stored. Copy built on them must never say whether it is enough.
+ */
+export interface ApiCaptureSummary {
+  /** Notes the record HOLDS, whatever any list request returned. Dismissed included. */
+  notes_total: number;
+  /** Proposals awaiting a person's judgement, counted over the whole record. */
+  proposals_open: number;
+  /**
+   * Stored entries neither list could present, summed across notes and proposals.
+   *
+   * COUNTED RATHER THAN DROPPED, for the reason both list payloads count their own:
+   * the server preserves them verbatim and can neither say what they contain nor
+   * discard them. Reporting zero while the record holds some would let "3 notes"
+   * read as the whole of what was captured when it is not.
+   */
+  unreadable_entries: number;
 }
 
 /**

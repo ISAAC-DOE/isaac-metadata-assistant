@@ -46,6 +46,11 @@ const PROPOSALS = `GET /api/experiments/${EXP}/proposals`;
 const CREATE_PROPOSAL = `POST /api/experiments/${EXP}/proposals`;
 const RUNS = `GET /api/experiments/${EXP}/runs`;
 
+/** The VISIBLE silent-refresh disclosure. Every assertion on its sentence needs
+ *  this selector, because the same sentence is deliberately also pushed into the
+ *  permanently-mounted `role="status"` region — see section 15. */
+const NOTICE = '.notes-background-refresh-notice';
+
 /** `GET .../proposals`'s served capability vocabulary — the two sets PR-D's
  *  "Propose a value from this note" form reads and never transcribes. */
 function proposalsCapabilities(over: Partial<Record<string, unknown>> = {}) {
@@ -1832,10 +1837,18 @@ describe('F-1: a change-feed record-moved entry refreshes the notes list', () =>
       (screen.getByLabelText('Corrected wording') as HTMLTextAreaElement).value,
     ).toBe('a half-written rewrite, not yet saved');
 
-    // AND THE FAILURE IS DISCLOSED, not silent about being silent.
+    // AND THE FAILURE IS DISCLOSED, not silent about being silent — visibly, and
+    // (since the C1 fix below) spoken through the permanently-mounted
+    // `role="status"` region too, which is why the sentence is now matched with a
+    // selector: it is deliberately on screen in two places at once.
     expect(
-      await screen.findByText(/A background refresh of this list did not complete/),
+      await screen.findByText(/A background refresh of this list did not complete/, {
+        selector: NOTICE,
+      }),
     ).toBeInTheDocument();
+    expect(screen.getByRole('status').textContent).toMatch(
+      /A background refresh of this list did not complete/,
+    );
     view.unmount();
   });
 
@@ -1861,5 +1874,364 @@ describe('F-1: a change-feed record-moved entry refreshes the notes list', () =>
     expect(screen.queryByText(noteFixture().text)).toBeNull();
     fireEvent.change(screen.getByLabelText('Capture a note'), { target: { value: 'x' } });
     expect(screen.getByRole('button', { name: 'Capture Note' })).toBeDisabled();
+  });
+});
+
+// --- 15. C1 — the silent branch must not swallow a failure it has nothing to protect ---
+
+/*
+ * THE DEFECT, AND WHY IT IS FILED HERE A SECOND TIME.
+ *
+ * I-2 above stopped a failing SILENT reload from replacing the whole panel with
+ * `BackendDown`. `IngestionProposalsPanel` was then given the same fix, modelled
+ * explicitly on this one — and its independent review (C1) found that the fix, as
+ * written in both files, carried a Critical regression. It was fixed in the sibling
+ * and left standing here.
+ *
+ * `wasSilent` is the INTENT of a request ("do not blank the list while this runs").
+ * It is NOT evidence that anything is currently on screen to protect. A silent
+ * reload can begin while the very first, LOUD load is still in flight;
+ * `generationRef` then discards the loud response; and if the silent one fails, the
+ * `.catch` returned with no `setList` call at all — leaving `list` at
+ * `{status: 'loading'}` FOREVER. The disclosure is suppressed too, because the
+ * notice renders only over a loaded list. A permanent spinner, no error, no retry,
+ * no recovery short of navigating away.
+ *
+ * WHICH TRIGGERS ARE REACHABLE **HERE** — measured on this panel, not inherited from
+ * the sibling's report, because the two panels differ:
+ *
+ *   - THE `Show` FILTER: REACHABLE. The toolbar and its `<select>` render during
+ *     `'loading'` and are not disabled. Measured before the fix:
+ *     `{spinner: true, alert: false, notice: false, buttons: ['Capture Note']}`.
+ *   - A CHANGE-FEED `activity` SIGNAL: **NOT** reachable, unlike in the sibling.
+ *     This panel's activity effect is gated on `version !== null`, and `version` is
+ *     set only alongside `{status: 'data'}` — so no feed signal can start a reload
+ *     before the first load has succeeded. Pinned by its own test below.
+ */
+describe('C1: a silent reload that fails before anything has ever loaded', () => {
+  it(
+    'REPRODUCTION: a Show-filter change that supersedes an in-flight FIRST load, and ' +
+      'then fails, shows BackendDown rather than a permanent silent spinner',
+    async () => {
+      let failed = 0;
+      stubFetchRoutes({
+        [PROPOSALS]: { body: proposalsCapabilities() },
+        // The first, LOUD load never resolves — it is still in flight when the
+        // reader touches the filter, and `generationRef` discards it afterwards.
+        [NOTES]: () => new Promise(() => {}) as never,
+        [`${NOTES}?state=mapped`]: () => {
+          failed += 1;
+          return { status: 503, body: { error: 'experiment_storage_unavailable' } };
+        },
+      });
+      const view = renderPanel(null);
+      await screen.findByText(/Loading this record's unmapped notes/);
+
+      // The reader changes `Show` before that first load has resolved. This is a
+      // SILENT reload (see the `onChange` comment) and it supersedes the first.
+      fireEvent.change(screen.getByLabelText('Show'), { target: { value: 'mapped' } });
+      await waitFor(() => expect(failed).toBe(1));
+
+      // NOT a permanent spinner. The full `BackendDown` panel appears, because
+      // `listStatusRef.current` was `'loading'` — nothing had ever succeeded, so
+      // there was nothing to protect and this correctly took the LOUD path.
+      expect(await screen.findByText(/Backend Not Running/)).toBeTruthy();
+      expect(screen.queryByText(/Loading this record's unmapped notes/)).toBeNull();
+      expect(screen.getByRole('button', { name: 'Retry' })).toBeTruthy();
+      // And the non-destructive notice is NOT also showing beside it — the two are
+      // mutually exclusive by design.
+      expect(
+        screen.queryByText(/A background refresh of this list did not complete/),
+      ).toBeNull();
+      expect(screen.queryByText(/could not be applied, so it is still showing/)).toBeNull();
+      view.unmount();
+    },
+  );
+
+  it(
+    'the OTHER trigger is closed here by the version gate: a feed signal during an ' +
+      'in-flight first load issues no second read at all',
+    async () => {
+      /*
+       * This is a property of THIS panel, and it is the reason the sibling's PROBE
+       * does not reproduce here. If the `version !== null` gate on the activity
+       * effect is ever removed, this test fails — and the reproduction above is
+       * then what keeps the removal from reintroducing the permanent spinner,
+       * because `listStatusRef` catches the trigger whatever set it in motion.
+       */
+      let reads = 0;
+      stubFetchRoutes({
+        [PROPOSALS]: { body: proposalsCapabilities() },
+        [NOTES]: () => {
+          reads += 1;
+          return new Promise(() => {}) as never;
+        },
+      });
+      const view = renderPanel(null);
+      await screen.findByText(/Loading this record's unmapped notes/);
+
+      view.rerender(
+        <MemoryRouter
+          initialEntries={['/']}
+          future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+        >
+          <UnmappedNotesPanel experimentId={EXP} activity={recordMovedActivityFor(9)} />
+        </MemoryRouter>,
+      );
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      expect(reads).toBe(1);
+      view.unmount();
+    },
+  );
+});
+
+// --- 16. a failed Show-filter change says the filter was not applied -----------
+
+describe('a Show-filter change that fails', () => {
+  /*
+   * MEASURED BEFORE THIS CHANGE: after a failing change to `Mapped`, the `<select>`
+   * read `mapped` while the unfiltered note was still on screen, and the only
+   * disclosure said the list "may be out of date". Both halves were wrong — the
+   * list is exactly as up to date as it was, and the view the reader asked for was
+   * never applied at all.
+   */
+  it('names the filter as unapplied, keeps the previous list, and offers a retry', async () => {
+    let mappedReads = 0;
+    stubFetchRoutes({
+      [PROPOSALS]: { body: proposalsCapabilities() },
+      [NOTES]: { body: notesPage([noteFixture()]) },
+      [`${NOTES}?state=mapped`]: () => {
+        mappedReads += 1;
+        return { status: 503, body: { error: 'experiment_storage_unavailable' } };
+      },
+    });
+    renderPanel(null);
+    await screen.findByText(noteFixture().text);
+
+    fireEvent.change(screen.getByLabelText('Show'), { target: { value: 'mapped' } });
+    await waitFor(() => expect(mappedReads).toBe(1));
+
+    // THE SENTENCE IS THE VIEW-CHANGE ONE, not the generic staleness one.
+    expect(
+      await screen.findByText(/Show filter could not be applied, so it is still showing/, {
+        selector: NOTICE,
+      }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText(/A background refresh of this list did not complete/),
+    ).toBeNull();
+
+    // NOTHING WAS DESTROYED, and the control is deliberately NOT reverted — so
+    // "Try Again" retries the view the reader actually asked for.
+    expect(screen.getByText(noteFixture().text)).toBeTruthy();
+    expect((screen.getByLabelText('Show') as HTMLSelectElement).value).toBe('mapped');
+    expect(screen.getByRole('button', { name: 'Try Again' })).toBeTruthy();
+  });
+
+  it('THE RETRY CONTROL IS REAL: Try Again re-issues the CURRENT view and clears the notice', async () => {
+    /*
+     * Pinned because in the sibling panel, deleting the equivalent control
+     * entirely passed every test in its file. Deleting `Try Again` here, or
+     * pointing it at `reload(false)`, or having it re-request the pre-change
+     * filter, each fails this test.
+     */
+    let mappedReads = 0;
+    stubFetchRoutes({
+      [PROPOSALS]: { body: proposalsCapabilities() },
+      [NOTES]: { body: notesPage([noteFixture()]) },
+      [`${NOTES}?state=mapped`]: () => {
+        mappedReads += 1;
+        if (mappedReads === 1) {
+          return { status: 503, body: { error: 'experiment_storage_unavailable' } };
+        }
+        return {
+          body: notesPage(
+            [
+              noteFixture({
+                id: 'mapped-note',
+                text: 'a mapped note',
+                display_text: 'a mapped note',
+                state: 'mapped',
+              }),
+            ],
+            { total: 1 },
+          ),
+        };
+      },
+    });
+    renderPanel(null);
+    await screen.findByText(noteFixture().text);
+
+    fireEvent.change(screen.getByLabelText('Show'), { target: { value: 'mapped' } });
+    await screen.findByText(/Show filter could not be applied/, { selector: NOTICE });
+
+    // Something typed, to prove the retry is silent and destroys nothing.
+    fireEvent.change(screen.getByLabelText('Capture a note'), {
+      target: { value: 'half-typed note about the beam' },
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Try Again' }));
+    // IT RETRIED `?state=mapped`, i.e. the view the reader asked for, not the one
+    // that was on screen — and the read that succeeded cleared the disclosure.
+    await waitFor(() => expect(mappedReads).toBe(2));
+    expect(await screen.findByText('a mapped note')).toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.queryByText(/Show filter could not be applied/, { selector: NOTICE })).toBeNull(),
+    );
+    expect(
+      (screen.getByLabelText('Capture a note') as HTMLTextAreaElement).value,
+    ).toBe('half-typed note about the beam');
+  });
+
+  it('the disclosure is SPOKEN through the permanently-mounted region, not by the notice itself', async () => {
+    /*
+     * A conditionally-mounted `aria-live` region is never announced — this panel's
+     * own `.notes-count` comment states that rule, and the first version of this
+     * notice broke it. So the notice element must carry no `aria-live` and no
+     * `role`, and the sentence must reach the `role="status"` region that is
+     * mounted from first paint.
+     */
+    stubFetchRoutes({
+      [PROPOSALS]: { body: proposalsCapabilities() },
+      [NOTES]: { body: notesPage([noteFixture()]) },
+      [`${NOTES}?state=mapped`]: {
+        status: 503,
+        body: { error: 'experiment_storage_unavailable' },
+      },
+    });
+    const { container } = renderPanel(null);
+    await screen.findByText(noteFixture().text);
+
+    const live = screen.getByRole('status');
+    expect(live.textContent).toBe('');
+
+    fireEvent.change(screen.getByLabelText('Show'), { target: { value: 'mapped' } });
+    const notice = await screen.findByText(/Show filter could not be applied/, {
+      selector: NOTICE,
+    });
+
+    // The VISIBLE notice is not itself a live region.
+    const noticeEl = notice.closest('.notes-background-refresh-notice');
+    expect(noticeEl).toBeTruthy();
+    expect(noticeEl?.getAttribute('aria-live')).toBeNull();
+    expect(noticeEl?.getAttribute('role')).toBeNull();
+
+    // The SPOKEN half reached the already-mounted region — which is the same node
+    // as before, not a remount.
+    await waitFor(() =>
+      expect(screen.getByRole('status').textContent).toMatch(
+        /Show filter could not be applied/,
+      ),
+    );
+    expect(screen.getByRole('status')).toBe(live);
+    expect(container.querySelectorAll('p[role="status"]').length).toBe(1);
+  });
+
+  it('the SAME sentence twice in a row still changes the spoken region', async () => {
+    /*
+     * Two failed attempts produce a byte-identical string; a `role="status"`
+     * region announces a CHANGE to its content, so without the alternating marker
+     * the second failure is announced to nobody.
+     */
+    stubFetchRoutes({
+      [PROPOSALS]: { body: proposalsCapabilities() },
+      [NOTES]: { body: notesPage([noteFixture()]) },
+      [`${NOTES}?state=mapped`]: {
+        status: 503,
+        body: { error: 'experiment_storage_unavailable' },
+      },
+    });
+    renderPanel(null);
+    await screen.findByText(noteFixture().text);
+
+    fireEvent.change(screen.getByLabelText('Show'), { target: { value: 'mapped' } });
+    await screen.findByText(/Show filter could not be applied/, { selector: NOTICE });
+    const first = screen.getByRole('status').textContent;
+
+    fireEvent.click(screen.getByRole('button', { name: 'Try Again' }));
+    await waitFor(() => expect(screen.getByRole('status').textContent).not.toBe(first));
+    // Asserted as an INEQUALITY between two observed contents, not as the presence
+    // of a marker character: any mechanism that makes the region change passes.
+    //
+    // AND THE SENTENCE IS STILL THE VIEW-CHANGE ONE. This is where the sibling's
+    // `viewChangeRef` mechanism silently degraded: "Try Again" is `reload(true)`
+    // and sets no such flag, so the SECOND failure for the SAME unapplied view
+    // reported plain staleness while the `<select>` still disagreed with the list.
+    // Deciding by `filter` vs `loadedFilterRef` is what keeps it true across a
+    // retry — revert that comparison and this assertion fails.
+    expect(screen.getByRole('status').textContent).toMatch(
+      /Show filter could not be applied/,
+    );
+    expect(
+      screen.getByText(/Show filter could not be applied/, { selector: NOTICE }),
+    ).toBeInTheDocument();
+  });
+
+  it('the notice never renders over a blanked list: Show All Notes is LOUD and hides it', async () => {
+    /*
+     * THE RENDER-TIME `list.status === 'data'` GATE IS STILL LOAD-BEARING HERE,
+     * unlike in `IngestionProposalsPanel` where the equivalent is now only
+     * defensive. `backgroundRefreshError` is cleared only by a later SUCCESSFUL
+     * read, and `Show All Notes` in the empty state issues a LOUD reload — so the
+     * sentence is still set while `list` moves to `'loading'`. Removing the
+     * conjunct renders "Nothing you have open or typed here was affected" over the
+     * spinner of a list that has just been blanked. This test kills that mutation.
+     */
+    let allReads = 0;
+    stubFetchRoutes({
+      [PROPOSALS]: { body: proposalsCapabilities() },
+      [NOTES]: () => {
+        allReads += 1;
+        // The first, loud mount read succeeds; the later loud read caused by
+        // `Show All Notes` never resolves, so the spinner stays up to be observed.
+        if (allReads === 1) return { body: notesPage([noteFixture()], { total: 1 }) };
+        return new Promise(() => {}) as never;
+      },
+      // The filtered view is EMPTY but SUCCEEDS, which is what renders `EmptyNotes`
+      // and its `Show All Notes` control.
+      [`${NOTES}?state=mapped`]: {
+        body: notesPage([], { total: 1, by_state: { mapped: 0 } }),
+      },
+    });
+    const view = renderPanel(null);
+    await screen.findByText(noteFixture().text);
+
+    fireEvent.change(screen.getByLabelText('Show'), { target: { value: 'mapped' } });
+    const clear = await screen.findByRole('button', { name: 'Show All Notes' });
+
+    // A background refresh now fails while that empty filtered view is on screen.
+    // `?state=mapped` is re-requested by the activity reload and still succeeds, so
+    // force the failure by pointing the feed reload at a failing response.
+    stubFetchRoutes({
+      [PROPOSALS]: { body: proposalsCapabilities() },
+      [NOTES]: () => new Promise(() => {}) as never,
+      [`${NOTES}?state=mapped`]: {
+        status: 503,
+        body: { error: 'experiment_storage_unavailable' },
+      },
+    });
+    view.rerender(
+      <MemoryRouter
+        initialEntries={['/']}
+        future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+      >
+        <UnmappedNotesPanel experimentId={EXP} activity={recordMovedActivityFor(9)} />
+      </MemoryRouter>,
+    );
+    expect(
+      await screen.findByText(/A background refresh of this list did not complete/, {
+        selector: NOTICE,
+      }),
+    ).toBeInTheDocument();
+
+    // Now the LOUD reload. The list blanks, and the notice must go with it.
+    fireEvent.click(clear);
+    expect(await screen.findByText(/Loading this record's unmapped notes/)).toBeTruthy();
+    expect(
+      screen.queryByText(/A background refresh of this list did not complete/, {
+        selector: NOTICE,
+      }),
+    ).toBeNull();
+    view.unmount();
   });
 });
