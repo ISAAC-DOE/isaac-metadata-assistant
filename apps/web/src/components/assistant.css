@@ -1449,7 +1449,14 @@ button.assistant-source-chip-nav:focus-visible {
   font-size: 11.5px;
   font-weight: 600;
   color: var(--text-primary);
-  background: var(--surface-sunken, var(--surface));
+  /* `--surface` directly. This read `var(--surface-sunken, var(--surface))` and
+     `--surface-sunken` is declared nowhere, so the fallback always won — the
+     same shape this file already records twice below, at
+     `.structured-entry-error` and `.guided-verdict-set`. Rendered value is
+     UNCHANGED (#ffffff); what is gone is a name that read as theme-aware while
+     being nothing of the kind, and that would have silently restyled this box if
+     anything ever declared it. 2026-09-10. */
+  background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-inner);
   overflow-wrap: anywhere;

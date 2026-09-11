@@ -357,22 +357,56 @@
  * should not have to learn two shapes for one idea. It is NOT error-coloured: a
  * colleague editing a record is normal.
  *
- * TWO OF THE THREE TOKENS BELOW DO NOT EXIST, AND THE FALLBACKS ARE LOAD-BEARING
+ * ~~TWO OF THE THREE TOKENS BELOW DO NOT EXIST, AND THE FALLBACKS ARE LOAD-BEARING
  * RATHER THAN DEFENSIVE. `--surface-raised` and `--border-subtle` are defined nowhere
- * in this repository (`rg -- '--surface-raised|--border-subtle' apps/web/src` finds
- * only uses, never a declaration), so what actually renders is `#f7f9fb` and
- * `#d8dee6` — the literals, every time. The names are pre-existing rather than
- * invented here: `transcriptCapture.css` uses both at nine sites with NO fallback at
- * all (so there they resolve to nothing), and `assistant.css` already records
- * `--border-subtle` as undefined. This rule is the only one that supplies a value.
+ * in this repository ... so what actually renders is `#f7f9fb` and `#d8dee6` — the
+ * literals, every time ... a future dark-mode pass must DEFINE these two in
+ * `tokens.css` and not assume they already respond.~~
  *
- * It is written down rather than silently tidied for two reasons. The contrast claim
- * this note makes rests on the FALLBACK, not on a token, so deleting a fallback would
- * change the rendered colour rather than merely simplify the rule — and the pair reads
- * as theme-aware while being nothing of the kind, so a future dark-mode pass must
- * DEFINE these two in `tokens.css` and not assume they already respond. `--text-muted`
- * is the one that IS defined (`styles/tokens.css`, `#5b6570`), which is why its
- * fallback is the same value rather than a guess.
+ * RESOLVED 2026-09-10, THE OTHER WAY ROUND: the two names are GONE rather than
+ * defined. Everything the struck paragraph measured was true — and its "nine sites
+ * with NO fallback" undercounted `transcriptCapture.css`, which had TWENTY-TWO
+ * unresolvable references across five phantom properties and was therefore
+ * rendering its transcript textarea and run `<select>` with `border-style: none`
+ * and `background: rgba(0, 0, 0, 0)`, measured in Chrome. Defining the names in
+ * `tokens.css` would have added synonyms for tokens that already exist; the
+ * references are repointed at the real ones instead, here and there, so `tokens.css`
+ * is untouched and a future dark-mode pass inherits theme-aware tokens for free.
+ *
+ * THIS RULE IS THE ONE SITE WHERE THAT CHANGES A RENDERED COLOUR, because it was the
+ * only one whose fallback resolved. Both deltas are stated rather than left to be
+ * discovered, and both are small:
+ *
+ *   border      #d8dee6 -> --border-input   #e0e6ec   (+8/+8/+6 per channel)
+ *   background  #f7f9fb -> --surface-subtle #fbfcfd   (+4/+3/+2 per channel)
+ *
+ * `--border-input` is the system's token for a 1px inset/control boundary and is what
+ * `transcriptCapture.css` and `unmappedNotes.css` now both use; `--surface-subtle` is
+ * `.notes-capture`'s quiet inset fill. The alternative for the border was
+ * `--cover-border` #d5dde5, which is NEARER to the discarded literal (-3/-1/-1) — it
+ * was not chosen because one phantom name resolving to two different tokens in two
+ * files is the thing this change exists to stop. THE PAIRING IS A VISUAL JUDGEMENT
+ * AND IS FLAGGED AS ONE.
+ *
+ * The contrast claim survives the move and was COMPUTED, not estimated: `--text-muted`
+ * #5b6570 reads 5.62:1 on the discarded #f7f9fb and 5.77:1 on the new #fbfcfd, so the
+ * note's text got marginally MORE legible, not less. (An earlier revision of this
+ * comment published 5.38 and 5.51 — the right direction, both magnitudes wrong,
+ * written before either was run through the formula. Corrected here rather than
+ * quietly replaced, because a number nobody re-derived is the defect this file's
+ * neighbours keep recording.) `--text-muted` is the one token here that was always
+ * defined, which is why its fallback below repeats its own value rather than
+ * guessing; the fallback is now redundant and is kept only so this rule's three
+ * declarations read alike.
+ *
+ * THE BORDER IS NOT A 3:1 BOUNDARY AND WAS NOT ONE BEFORE EITHER — #e0e6ec is 1.22:1
+ * on #fbfcfd where #d8dee6 was 1.28:1 on #f7f9fb. Both are far under WCAG 1.4.11, and
+ * so is every other 1px separator in this app (`--border-input` at 38 sites,
+ * `--border-strong` on the `.input` primitive at 1.41:1 on white). That figure read
+ * 1.44:1 for one commit and was never computed: 1.44 is `--text-disabled`'s ratio on
+ * `--assist-tint` in `styles/tokens.css`, transcribed from the wrong row. That is a
+ * pre-existing app-wide palette question, not something this rule introduced or can
+ * settle; it is named here so the move is not mistaken for having addressed it.
  */
 .record-activity-note {
   display: flex;
@@ -381,9 +415,9 @@
   flex-wrap: wrap;
   margin: 0 0 12px;
   padding: 10px 14px;
-  border: 1px solid var(--border-subtle, #d8dee6);
+  border: 1px solid var(--border-input);
   border-radius: 6px;
-  background: var(--surface-raised, #f7f9fb);
+  background: var(--surface-subtle);
 }
 
 .record-activity-note-text {

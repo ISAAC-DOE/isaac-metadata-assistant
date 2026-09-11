@@ -1592,7 +1592,25 @@ test.describe('two scientists, two real browsers, one record', () => {
           await tabUntil(
             page,
             `step 11: the ${workspace} workspace link`,
-            (active) => active.tag === 'A' && active.text === workspace,
+            /*
+             * MATCH THE ACCESSIBLE NAME, NOT THE RAW TEXT — corrected 2026-09-10.
+             *
+             * This read `active.text === workspace` and broke the moment Capture &
+             * Proposals was promoted out of this row into its own `DATA CAPTURE`
+             * card: the card's anchor wraps a label AND a live count line, so its
+             * `textContent` became `Capture & Proposals3 notes · 2 to review` and an
+             * exact-text match could never succeed again. The walk then exhausted its
+             * 150-press bound and threw — correctly, and this spec is what caught the
+             * change.
+             *
+             * The accessible name is the right thing to walk by, and the component
+             * says so itself: it sets `aria-label` to the destination and puts the
+             * counts in `aria-describedby`, with a comment explaining that a name
+             * which grows whenever a colleague captures a note is "a poor thing to
+             * navigate by and a poor thing to write a test against." A keyboard
+             * reader hears the name; so should this walk.
+             */
+            (active) => active.tag === 'A' && (active.ariaLabel ?? active.text) === workspace,
           );
           await page.keyboard.press('Enter');
           await expect(

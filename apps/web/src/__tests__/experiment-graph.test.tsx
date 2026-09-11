@@ -157,16 +157,36 @@ describe('the graph lives inside the record, and is linkable', () => {
        IT USED TO BE STRIPPED FROM EVERY CALL, which let a query through on EVERY
        endpoint: a future `…/evidence?since=…` or `…/runs?limit=…` would have matched a
        bare registered key and passed unnoticed. Measured, exactly one of the nineteen
-       calls this surface makes carries a query, so the allowance is written as the
-       single endpoint it is. */
-    const BOUNDED_READ = `GET ${base}/pending`;
+       calls this surface made carried a query, so the allowance was written as the
+       single endpoint it was.
+
+       TWO MORE ARE NOW ALLOWED, AND THEY ARE ENUMERATED RATHER THAN RELAXED.
+       Both belong to the sidebar's promoted capture destination
+       (`useCaptureSummary`), and in both the parameter exists to make the response
+       SMALLER, never to ask a different question:
+
+         · `…/proposals?limit=1` — one row; the open count it renders is the
+           server's `by_state`, computed over the whole record whatever the window.
+         · `…/notes?state=dismissed` — `GET …/notes` has no `limit`, and
+           `_notes_payload` computes `total`, `by_state` and `unreadable_entries`
+           over the WHOLE record regardless of `state`, so the filter caps the row
+           array while leaving every number this hook reads identical. Measured
+           against the running API: 7,544 B -> 2,023 B on an 8-note record.
+
+       The list stays an explicit enumeration so a fourth parameterized read has to
+       be added here deliberately, by someone who has to write down why. */
+    const BOUNDED_READS = [
+      `GET ${base}/pending`,
+      `GET ${base}/proposals`,
+      `GET ${base}/notes`,
+    ];
     for (const call of calls) {
       const [path, query] = call.split('?');
       if (query !== undefined) {
         expect(
-          path,
-          `${call} carries a query string, and only ${BOUNDED_READ} may`,
-        ).toBe(BOUNDED_READ);
+          BOUNDED_READS,
+          `${call} carries a query string, and only ${BOUNDED_READS.join(' / ')} may`,
+        ).toContain(path);
       }
       expect(registered).toContain(path);
     }

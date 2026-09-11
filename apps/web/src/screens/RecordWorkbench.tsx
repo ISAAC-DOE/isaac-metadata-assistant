@@ -40,6 +40,7 @@ import { api } from '../lib/api';
 import { useFetch } from '../lib/useFetch';
 import { useRecordSession } from '../lib/useRecordSession';
 import { useWorkspaceScope, useWorkspaceScopeChanged } from '../lib/workspaceScope';
+import { useCaptureSummary } from '../lib/useCaptureSummary';
 import { TUTORIAL_ANCHORS } from '../lib/tutorialSteps';
 import type { AgentContext } from '../lib/assistantAgent';
 import {
@@ -594,6 +595,35 @@ function LoadedWorkbench({
       : 'fields';
 
   /*
+   * THE CAPTURE DESTINATION'S LIVE COUNTS, for the promoted sidebar row.
+   *
+   * THE ARGUMENT IS THE CHANGE FEED'S POSITION, NOT THE RECORD'S VERSION, and
+   * the two feed summaries this screen already holds are the source: `-1` while
+   * the feed has reported nothing. See `useCaptureSummary` for why the version
+   * would be the wrong key (it would issue a read on every answered question)
+   * and for what the summary does when a read fails.
+   *
+   * THE COST, STATED RATHER THAN BURIED: on the three workspaces that are NOT
+   * capture, this is two additional requests per record load — the same
+   * `GET .../notes` the capture panel issues when it mounts, plus a one-row
+   * `GET .../proposals` — on a screen whose panels are deliberately lazy. It
+   * buys a count the sidebar can show before the reader has opened anything.
+   * The cheaper end-state is for the record's own detail payload to carry these
+   * totals, which is a server change and a separate decision.
+   *
+   * ON THE CAPTURE WORKSPACE IT COSTS NOTHING, because it is switched off there:
+   * `activeView !== 'capture'`. The panels are on screen stating their own
+   * counts from their own reads, so a second pair of requests would restate a
+   * number already visible and could disagree with it for a poll interval. The
+   * summary line is absent there rather than frozen — see `useCaptureSummary`.
+   */
+  const captureSummary = useCaptureSummary(
+    id,
+    Math.max(notesActivity?.highestRev ?? -1, proposalActivity?.highestRev ?? -1),
+    activeView !== 'capture',
+  );
+
+  /*
    * THE SWITCH FLUSHES THE RUNS' HELD EDITS. It used to get that for free: the
    * fields panel was a conditional branch, so every `RunCard` unmounted and each
    * card's teardown called `flushPending`. The panels now stay mounted (see the
@@ -759,8 +789,18 @@ function LoadedWorkbench({
         leaves this screen for a separately-routed, spine-gated surface; these four
         stay on it. Presenting a route change as a fifth workspace would make one of
         the five behave unlike the other four with nothing on screen saying so.
+
+        AND ONE OF THE FOUR — `capture` — IS RENDERED FIRST, UNDER ITS OWN
+        `Data Capture` EYEBROW, carrying the record's live note and open-proposal
+        counts. Still inside this one navigation landmark, still ungated, still
+        `aria-current="page"`; the component's header explains why it is promoted
+        and why it must never acquire a step's semantics.
       */}
-      <RecordWorkspaceNav active={activeView} onNavigate={flushHeldRunEdits} />
+      <RecordWorkspaceNav
+        active={activeView}
+        captureSummary={captureSummary}
+        onNavigate={flushHeldRunEdits}
+      />
       <button
         type="button"
         className="evidence-trail-link"

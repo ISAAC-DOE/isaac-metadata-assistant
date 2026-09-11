@@ -466,6 +466,19 @@ describe('the order control', () => {
    * cosmetic into an honesty defect: the one utterance a screen reader receives is
    * the one made while the claim is false, and there is no second utterance when it
    * becomes true because by then the text no longer changes.
+   *
+   * UPDATED for the I-2-shaped fix: an order change is issued through
+   * `changeOrder`, which is a SILENT reload (`silentRef.current = true`) AND a
+   * VIEW CHANGE (`viewChangeRef.current = true`). A silent reload that fails no
+   * longer replaces the list with the full `BackendDown` panel (`role="alert"`)
+   * — it leaves the list untouched and surfaces the smaller, non-destructive
+   * `.proposals-background-refresh-notice`, with the VIEW-CHANGE wording (I3,
+   * independent review) rather than the generic background one, because the
+   * Order control now shows "Newest first" while every number beside it still
+   * describes the oldest-first window that actually loaded. The substantive
+   * claim this test exists for — that the count line keeps describing the last
+   * window that actually loaded, never the request — is unchanged and is
+   * asserted the same way.
    */
   it('an order change whose read FAILS leaves the line describing the last window that loaded', async () => {
     stubFetchRoutes({
@@ -477,13 +490,39 @@ describe('the order control', () => {
     await screen.findByText(/Showing 1 of 61 proposals on this record · oldest first/);
     fireEvent.change(screen.getByLabelText('Order'), { target: { value: 'newest_first' } });
 
-    await waitFor(() => expect(screen.getByRole('alert')).toBeTruthy());
-    // MUTANT: `orderClause(order)` — the line reads "· newest first" over zero
-    // cards, and keeps reading it until Retry. Nothing was read in that direction,
-    // so nothing may be described in it.
+    // I3: a VIEW-CHANGE failure, not a plain background one — the same text
+    // reaches both the sr-only status region and the visible notice, so this is
+    // scoped to the visible one by selector.
+    await screen.findByText(/could not be applied, so it is still showing what it showed before/, {
+      selector: 'p.proposals-background-refresh-notice',
+    });
+    // NOT the full BackendDown panel — this was a silent reload, and there is
+    // something on screen worth protecting.
+    expect(screen.queryByRole('alert')).toBeNull();
+    /*
+     * THIS ASSERTION'S OWN GUARANTEE, STATED ACCURATELY — M3, INDEPENDENT
+     * REVIEW. The previous version of this comment named a "MUTANT"
+     * (`orderClause(order)` in place of `orderClause(loaded.order)`) as
+     * something THIS test would catch. Measured (reverting `loaded.order` to
+     * `order` and re-running this exact test): it does not — the mutant
+     * survives. `countLine` is a `useMemo` keyed on `[loaded]`, so on this
+     * failure `loaded` never changes and the memo is never recomputed at all;
+     * whichever variable the body reads, the string on screen is whatever was
+     * last actually computed from a successful response. And on the eventual
+     * successful retry, `order` state and the new `loaded.order` are equal by
+     * construction, so the swap is unobservable there either. What this test
+     * actually pins is the claim above: a failed order change leaves the count
+     * line exactly as the last successful response described it, never a value
+     * assembled from the request that just failed.
+     */
     expect(
       screen.getByText(/Showing 1 of 61 proposals on this record · oldest first/),
     ).toBeTruthy();
+    // N1: the ORIGINAL, wider regex — not narrowed to `/· newest first/`. The
+    // wider form asserts the stronger claim (the word pair "newest first" is
+    // not present ANYWHERE, not merely not present with its leading separator)
+    // and still passes: the always-rendered `<option>Newest first</option>` is
+    // capitalised and this regex has no `/i` flag, so it does not collide.
     expect(screen.queryByText(/newest first/)).toBeNull();
   });
 
@@ -1691,6 +1730,385 @@ describe('a background change-feed update', () => {
     // positive test above would look like on a build that blanked the list to refresh.
     expect(screen.queryByLabelText('The corrected value, as JSON')).toBeNull();
   });
+
+  /*
+   * I-2, THE DEFECT THIS SLICE CLOSES. Before the fix, the fetch effect's `.catch`
+   * set `{status: 'error'}` on ANY failure, silent or not — so a background reload
+   * triggered by `activity` that FAILED replaced the whole `<ul>` with `BackendDown`,
+   * taking an open "Correct the Value" JSON editor and the "More Actions" disclosure
+   * that reveals it down with it, reachable with no reader action at all. This test
+   * is what makes the module header's rule 5 ("IT NEVER DESTROYS WHAT IS BEING
+   * TYPED") true for the failure path specifically: both must survive a silent
+   * reload that fails, and the failure must be disclosed without destroying anything.
+   */
+  it(
+    'I-2: a background reload that FAILS does not destroy an open correction editor ' +
+      'or the More Actions disclosure',
+    async () => {
+      let reads = 0;
+      stubFetchRoutes({
+        [LIST]: () => {
+          reads += 1;
+          // First read (mount) succeeds; the second (activity-triggered
+          // background) read fails; the third (this reader's own "Try Again")
+          // succeeds.
+          if (reads === 2) {
+            return { status: 503, body: { error: 'experiment_storage_unavailable' } };
+          }
+          return { body: page([proposalFixture()], { total: 1 }) };
+        },
+      });
+      const view = renderPanel(null);
+
+      fireEvent.click(await screen.findByRole('button', { name: 'More Actions' }));
+      fireEvent.click(
+        screen.getByRole('button', { name: 'Correct the Value, Then Accept' }),
+      );
+      fireEvent.change(screen.getByLabelText('The corrected value, as JSON'), {
+        target: { value: '"half-typed-by-a-scien' },
+      });
+      await screen.findByText(/Showing 1 of 1 proposal on this record/);
+
+      // The change feed delivers a proposal-moved summary — the same trigger the
+      // SUCCEEDING background-refresh test above uses — and this read is stubbed
+      // to fail.
+      view.rerender(
+        <MemoryRouter
+          initialEntries={['/']}
+          future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+        >
+          <IngestionProposalsPanel experimentId={EXP} activity={activityFor(['P1'], 9)} />
+        </MemoryRouter>,
+      );
+      await waitFor(() => expect(reads).toBe(2));
+
+      // NOTHING WAS DESTROYED. The card, the editor and its typed text, and the
+      // More Actions disclosure that reveals it are all still exactly as they were
+      // — not replaced by `BackendDown`.
+      expect(screen.queryByRole('alert')).toBeNull();
+      expect(screen.getByText('Proposed value')).toBeTruthy();
+      expect(screen.getByRole('button', { name: 'Fewer Actions' })).toBeTruthy();
+      expect(
+        (screen.getByLabelText('The corrected value, as JSON') as HTMLTextAreaElement)
+          .value,
+      ).toBe('"half-typed-by-a-scien');
+
+      // THE COUNT LINE IS UNCHANGED, NOT STALE. `list` was never touched on this
+      // failure, so the count still comes from the same successful load it always
+      // did — not from a re-fetched array whose length would understate anything.
+      expect(
+        screen.getByText(/Showing 1 of 1 proposal on this record/),
+      ).toBeTruthy();
+
+      // AND THE FAILURE IS DISCLOSED, not silent about being silent. The same
+      // sentence also reaches the sr-only status region (`announce()`), so this
+      // is scoped to the VISIBLE notice by selector.
+      expect(
+        await screen.findByText(/A background refresh of this list did not complete/, {
+          selector: 'p.proposals-background-refresh-notice',
+        }),
+      ).toBeInTheDocument();
+
+      /*
+       * I2, INDEPENDENT REVIEW — "Try Again" WAS COMPLETELY UNPINNED: deleting
+       * the button entirely passed every test in this file. Clicking it must
+       * issue a real re-read, and a SUCCEEDING retry must clear the notice —
+       * both asserted here rather than merely the button's presence.
+       */
+      fireEvent.click(screen.getByRole('button', { name: 'Try Again' }));
+      await waitFor(() => expect(reads).toBe(3));
+      await waitFor(() =>
+        expect(
+          screen.queryByText(/A background refresh of this list did not complete/, {
+            selector: 'p.proposals-background-refresh-notice',
+          }),
+        ).toBeNull(),
+      );
+      // AND WHAT WAS TYPED IS STILL THERE — the retry that finally recovers is
+      // silent too, so it must not destroy on its way back up any more than the
+      // failure did on its way down.
+      expect(
+        (screen.getByLabelText('The corrected value, as JSON') as HTMLTextAreaElement)
+          .value,
+      ).toBe('"half-typed-by-a-scien');
+      view.unmount();
+    },
+  );
+
+  /*
+   * THE SAME GUARANTEE, FOR THE SECOND FORM THIS CARD CAN HOLD OPEN — a
+   * refusing act's reason box (Reject, Supersede, Withdraw). Reject's editor is
+   * a TOP-LEVEL control (module comment: "Reject's own editor lives in the
+   * top-level row"), so this exercises a different branch of `OpenEditor` than
+   * the test above, which is exactly why the brief asks for at least two.
+   */
+  it('I-2: a background reload that FAILS does not destroy an open reason box (Reject)', async () => {
+    let reads = 0;
+    stubFetchRoutes({
+      [LIST]: () => {
+        reads += 1;
+        if (reads === 1) return { body: page([proposalFixture()]) };
+        return { status: 503, body: { error: 'experiment_storage_unavailable' } };
+      },
+    });
+    const view = renderPanel(null);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Reject…' }));
+    fireEvent.change(screen.getByLabelText('Reason (optional)'), {
+      target: { value: 'the sheet actually says Cu2O, not CuO' },
+    });
+
+    view.rerender(
+      <MemoryRouter
+        initialEntries={['/']}
+        future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+      >
+        <IngestionProposalsPanel experimentId={EXP} activity={activityFor(['P1'], 9)} />
+      </MemoryRouter>,
+    );
+    await waitFor(() => expect(reads).toBe(2));
+
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(
+      (screen.getByLabelText('Reason (optional)') as HTMLInputElement).value,
+    ).toBe('the sheet actually says Cu2O, not CuO');
+    expect(
+      await screen.findByText(/A background refresh of this list did not complete/, {
+        selector: 'p.proposals-background-refresh-notice',
+      }),
+    ).toBeInTheDocument();
+    view.unmount();
+  });
+
+  /*
+   * THE NEGATIVE CONTROL for both tests above — without it, a build that (wrongly)
+   * treats every failure as silent would ALSO leave `'Proposed value'` findable and
+   * the alert role absent, because nothing here forces the destructive branch to be
+   * reachable at all. A LOUD failure — the very FIRST read, before there is anything
+   * on screen to protect — must still show the full `BackendDown` panel: that branch
+   * is correct and this fix must not touch it.
+   */
+  it('NEGATIVE CONTROL: a LOUD failure (the first read itself) shows BackendDown, not the list', async () => {
+    stubFetchRoutes({
+      [LIST]: { status: 503, body: { error: 'experiment_storage_unavailable' } },
+    });
+    renderPanel(null);
+
+    expect(await screen.findByRole('alert')).toBeTruthy();
+    // The list content never appeared — replaced by `BackendDown`, not disclosed
+    // beside it.
+    expect(screen.queryByText('Proposed value')).toBeNull();
+    expect(screen.queryByText(/A background refresh of this list did not complete/)).toBeNull();
+  });
+
+  /*
+   * A later SUCCESSFUL silent reload clears the disclosure — the read it
+   * complained about has since been superseded by one that worked, so the
+   * notice must not linger describing a failure that is no longer current.
+   */
+  it('a later successful silent reload clears the background-refresh disclosure', async () => {
+    let reads = 0;
+    stubFetchRoutes({
+      [LIST]: () => {
+        reads += 1;
+        if (reads === 2) return { status: 503, body: { error: 'experiment_storage_unavailable' } };
+        return { body: page([proposalFixture()]) };
+      },
+    });
+    const view = renderPanel(null);
+    await screen.findByText('Proposed value');
+
+    const rerenderWith = (activity: RecordChangeSummary) =>
+      view.rerender(
+        <MemoryRouter
+          initialEntries={['/']}
+          future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+        >
+          <IngestionProposalsPanel experimentId={EXP} activity={activity} />
+        </MemoryRouter>,
+      );
+
+    rerenderWith(activityFor(['P1'], 9));
+    await screen.findByText(/A background refresh of this list did not complete/, {
+      selector: 'p.proposals-background-refresh-notice',
+    });
+
+    rerenderWith(activityFor(['P1'], 11));
+    await waitFor(() => expect(reads).toBe(3));
+    await waitFor(() =>
+      expect(
+        screen.queryByText(/A background refresh of this list did not complete/, {
+          selector: 'p.proposals-background-refresh-notice',
+        }),
+      ).toBeNull(),
+    );
+    view.unmount();
+  });
+
+  /*
+   * M1, INDEPENDENT REVIEW. `isArrivalReload` is consumed (and the ref reset to
+   * `false`) at the TOP of the fetch effect, on the assumption that this
+   * attempt will resolve the arrival question one way or the other. A failed
+   * silent attempt resolves nothing — nothing was read — so a colleague's
+   * arrival is exactly as unannounced-for as it was before this attempt. If the
+   * ref is not restored, the reader's own successful "Try Again" retry — which
+   * DOES carry the news — is not recognised as an arrival reload, and the
+   * announcement this whole mechanism exists to make is silently swallowed.
+   */
+  it('M1: an arrival announcement survives a failed silent attempt and fires on the retry that succeeds', async () => {
+    let reads = 0;
+    stubFetchRoutes({
+      [LIST]: () => {
+        reads += 1;
+        if (reads === 1) return { body: page([proposalFixture()], { total: 1 }) };
+        if (reads === 2) {
+          return { status: 503, body: { error: 'experiment_storage_unavailable' } };
+        }
+        // The retry: a SECOND proposal has arrived from elsewhere (`open` rose).
+        return {
+          body: page([proposalFixture(), proposalFixture({ proposal_id: 'P2' })], {
+            total: 2,
+            by_state: { open: 2, accepted: 0, rejected: 0, superseded: 0, withdrawn: 0 },
+          }),
+        };
+      },
+    });
+    const view = renderPanel(null);
+    await screen.findByText(/Showing 1 of 1 proposal on this record/);
+
+    // A colleague's change arrives over the feed; the resulting silent reload
+    // fails.
+    view.rerender(
+      <MemoryRouter
+        initialEntries={['/']}
+        future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+      >
+        <IngestionProposalsPanel experimentId={EXP} activity={activityFor(['P1'], 9)} />
+      </MemoryRouter>,
+    );
+    await screen.findByText(/A background refresh of this list did not complete/, {
+      selector: 'p.proposals-background-refresh-notice',
+    });
+    // No arrival note yet — nothing was actually read.
+    expect(screen.queryByText(/ready to review/)).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Try Again' }));
+    await waitFor(() => expect(reads).toBe(3));
+
+    // THE RETRY IS RECOGNISED AS AN ARRIVAL RELOAD, so the increase in `open`
+    // (1 -> 2) is announced — proving `arrivalReloadRef` survived the failed
+    // attempt in between rather than being permanently cleared by it.
+    expect(
+      await screen.findByText(/ready to review/, { selector: '.proposals-arrival-note-text' }),
+    ).toBeInTheDocument();
+    view.unmount();
+  });
+
+  /*
+   * C1, INDEPENDENT REVIEW — CRITICAL REGRESSION IN THE FIX ABOVE, FOUND BEFORE
+   * MERGE. `wasSilent` is the INTENT of a request ("do not blank the list while
+   * this runs"); it is NOT evidence that anything is currently on screen to
+   * protect. A silent reload can be triggered — by `activity`, or by the reader
+   * changing the order — WHILE THE VERY FIRST, LOUD load is still in flight.
+   * `generationRef` then makes that silent request the current one, so when the
+   * original loud request eventually settles it is discarded. If THAT silent
+   * request then fails, branching on `wasSilent` alone swallowed the failure
+   * with no `setList` call at all — and since `list` had never left
+   * `{status: 'loading'}` in the first place, the result was not "protected",
+   * it was a PERMANENT SPINNER with no disclosure and no recovery control,
+   * strictly worse than the `BackendDown` it replaced (a failure hidden behind
+   * a false progress state, rather than reported).
+   *
+   * PROBE3, AS MEASURED BY THE REVIEWER: the reader changes Order while the
+   * first load is in flight — the toolbar (and its `<select>`) renders during
+   * `'loading'` and is not disabled. `listStatusRef` (read live, not captured at
+   * the top of the effect the way `wasSilent` is) is what distinguishes this
+   * case: it reads `'loading'`, not `'data'`, so the failure correctly falls
+   * through to the loud path instead of the silent one.
+   */
+  it(
+    'C1 (PROBE3): an order change that supersedes an in-flight FIRST load, and then ' +
+      'fails, shows BackendDown rather than a permanent silent spinner',
+    async () => {
+      let calls = 0;
+      stubFetchRoutes({
+        [LIST]: () => new Promise(() => {}), // the first load — never resolves
+        [`${LIST}?order=newest_first`]: () => {
+          calls += 1;
+          return { status: 503, body: { error: 'experiment_storage_unavailable' } };
+        },
+      });
+      renderPanel(null);
+
+      // The first (loud) load is still in flight — nothing has ever succeeded.
+      await screen.findByText(/Loading this record's ingestion proposals/);
+
+      // The reader changes Order before that first load has resolved. This is a
+      // SILENT, VIEW-CHANGE reload (`changeOrder`), and it supersedes the first
+      // one via `generationRef` — the first request's eventual (never-arriving)
+      // resolution is now irrelevant.
+      fireEvent.change(screen.getByLabelText('Order'), { target: { value: 'newest_first' } });
+      await waitFor(() => expect(calls).toBe(1));
+
+      // NOT a permanent spinner: the full `BackendDown` panel appears, because
+      // `listStatusRef.current` was `'loading'` (nothing had ever succeeded) at
+      // the moment this failure was handled — there was nothing to protect, so
+      // this correctly took the LOUD path.
+      expect(await screen.findByRole('alert')).toBeTruthy();
+      expect(screen.queryByText(/Loading this record's ingestion proposals/)).toBeNull();
+      // And the non-destructive notice must NOT ALSO be showing beside it — the
+      // two are mutually exclusive by design (see the render-time comment on
+      // `backgroundRefreshError`'s gate).
+      expect(
+        screen.queryByText(/could not be applied, so it is still showing what it showed before/),
+      ).toBeNull();
+      expect(
+        screen.queryByText(/A background refresh of this list did not complete/),
+      ).toBeNull();
+    },
+  );
+
+  /*
+   * THE SAME HAZARD, THE OTHER TRIGGER (PROBE, AS MEASURED BY THE REVIEWER): a
+   * change-feed `activity` signal arrives while the first load is still in
+   * flight, and the reader does nothing at all — no click, no selection change.
+   * `IngestionProposalsPanel`'s activity effect has no `version !== null` gate
+   * (unlike `UnmappedNotesPanel`'s), so it can fire before any load has ever
+   * succeeded.
+   */
+  it(
+    'C1 (PROBE): a colleague\'s change-feed signal that supersedes an in-flight ' +
+      'FIRST load, and then fails, shows BackendDown rather than a permanent spinner',
+    async () => {
+      let calls = 0;
+      stubFetchRoutes({
+        [LIST]: () => {
+          calls += 1;
+          if (calls === 1) return new Promise(() => {}); // the first load — never resolves
+          return { status: 503, body: { error: 'experiment_storage_unavailable' } };
+        },
+      });
+      const view = renderPanel(null);
+      await screen.findByText(/Loading this record's ingestion proposals/);
+
+      view.rerender(
+        <MemoryRouter
+          initialEntries={['/']}
+          future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+        >
+          <IngestionProposalsPanel experimentId={EXP} activity={activityFor(['P1'], 9)} />
+        </MemoryRouter>,
+      );
+      await waitFor(() => expect(calls).toBe(2));
+
+      expect(await screen.findByRole('alert')).toBeTruthy();
+      expect(screen.queryByText(/Loading this record's ingestion proposals/)).toBeNull();
+      expect(
+        screen.queryByText(/A background refresh of this list did not complete/),
+      ).toBeNull();
+      view.unmount();
+    },
+  );
 });
 
 // --- 9b. the live region, and the paging control that must not reset a filter ----

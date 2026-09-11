@@ -342,6 +342,42 @@ const STALE_REVIEW_COPY =
   'picked up the current version and what you typed is still here, so try again.';
 
 /**
+ * A SILENT reload that FAILED, for a reader who was not the one who caused it —
+ * a colleague's change arriving over the change feed, this reader's own
+ * successful review act refreshing, or a 412 recovery. Distinguished from
+ * `VIEW_CHANGE_REFRESH_ERROR` below because the CLAIM differs: this one is
+ * about staleness (what is shown may be out of date); that one is about a
+ * request that never landed at all.
+ */
+const BACKGROUND_REFRESH_ERROR =
+  'A background refresh of this list did not complete, so what is shown may be ' +
+  'out of date. Nothing you have open or typed here was affected.';
+
+/**
+ * I3, INDEPENDENT REVIEW. A SILENT reload that FAILED after the reader
+ * themselves changed the filter, order or page.
+ *
+ * THE HAZARD THIS NAMES. `changeOrder`, the filter `onChange` and the pager's
+ * handlers all update `filter`/`order`/`cursor` BEFORE the read they trigger
+ * resolves — so on a failure, the control (e.g. the Order `<select>`) already
+ * shows the reader's newly chosen value while `loaded` — and therefore the
+ * count line and the cards on screen — still describe the PREVIOUS one.
+ * `BACKGROUND_REFRESH_ERROR`'s "may be out of date" underclaims what happened:
+ * the view the reader just asked for was never applied at all, which is a more
+ * specific and more actionable fact than plain staleness.
+ *
+ * THE CONTROL ITSELF IS DELIBERATELY NOT REVERTED. Retrying (`reload(true)`,
+ * via "Try Again" below) re-issues the read with the CURRENT `filter`/`order`/
+ * `cursor` state — i.e. it retries the view the reader actually asked for, not
+ * a silent reversion to the one before it. Reverting the control would make
+ * "Try Again" retry the wrong thing.
+ */
+const VIEW_CHANGE_REFRESH_ERROR =
+  'The change you just made to this list\u2019s filter, order or page could not be ' +
+  'applied, so it is still showing what it showed before. Nothing you have open or ' +
+  'typed here was affected.';
+
+/**
  * The sentence for each refusal this operation can produce.
  *
  * EACH IS THE SERVER'S OWN DISTINCTION, KEPT. Four different conditions arrive as
@@ -663,6 +699,69 @@ function ProposalsBrowser({
   const generationRef = useRef(0);
   /** Suppresses the loading blank on a reload this panel caused itself. */
   const silentRef = useRef(false);
+  /**
+   * A SILENT reload that FAILS, disclosed rather than destructive — modelled
+   * directly on `UnmappedNotesPanel`'s own fix for the identical shape.
+   *
+   * Before this, the fetch effect's `.catch` set `{status: 'error'}` on ANY
+   * failure, silent or not — so a background refresh triggered by this panel's
+   * OWN `activity` prop, a filter change, an order change, or a page turn could
+   * fail and replace the whole `<ul>` of proposal cards with the full
+   * `BackendDown` panel, taking an open "Correct the Value" JSON editor, a
+   * Reject/Supersede/Withdraw reason box, and the "More Actions" disclosure
+   * state down with it — reachable with no reader action at all when the
+   * trigger is a colleague's change arriving over the feed. The module header's
+   * rule 5 ("IT NEVER DESTROYS WHAT IS BEING TYPED") and the change-feed effect's
+   * own comment ("never blanks the list") both already claimed this could not
+   * happen; it was false for the failure path specifically.
+   *
+   * ON A SILENT FAILURE WITH SOMETHING TO PROTECT, `list` IS LEFT UNTOUCHED — no
+   * `setList` call at all, so whatever was on screen (every card, every open
+   * editor) stays exactly as it was. This carries the disclosure instead, and is
+   * rendered beside the list rather than instead of it. See `listStatusRef`
+   * immediately below for what "something to protect" means and why `wasSilent`
+   * alone is not sufficient to decide it.
+   */
+  const [backgroundRefreshError, setBackgroundRefreshError] = useState<string | null>(null);
+  /**
+   * C1, INDEPENDENT REVIEW — THE CONDITION THAT MUST GATE THE SILENT BRANCH, AND
+   * WHY `wasSilent` ALONE IS NOT IT.
+   *
+   * `silentRef` records INTENT ("do not blank the list while this request is in
+   * flight"); it says nothing about whether there is currently anything ON
+   * SCREEN worth protecting. A silent reload can be triggered (by `activity`, or
+   * by the reader changing the order/filter) WHILE THE VERY FIRST, LOUD load is
+   * still in flight. `generationRef` then makes the silent request the current
+   * one, so when the ORIGINAL loud request later settles it is discarded — and
+   * if the SILENT one then fails, the naive fix (branch on `wasSilent` alone)
+   * swallowed the failure with no `setList` call at all. Since `list` had never
+   * left `{status: 'loading'}` in the first place, the result was not
+   * "protected" — it was a permanent spinner with no disclosure and no way out,
+   * which is worse than the `BackendDown` it replaced: that failure is now
+   * hidden behind a false progress state instead of reported.
+   *
+   * THE FIX READS THE STATUS AS OF THE LAST RENDER, not a value captured at the
+   * top of this effect (the way `wasSilent` is). Updated unconditionally on every
+   * render, beside `lastLoadedRef` below, so by the time `.catch` runs it
+   * reflects whatever is CURRENTLY on screen — `'data'` only once a load has
+   * actually succeeded. A silent request that fails before any load has ever
+   * succeeded correctly falls through to the loud path.
+   */
+  const listStatusRef = useRef(list.status);
+  listStatusRef.current = list.status;
+  /**
+   * I3, INDEPENDENT REVIEW. True only while the read about to run was triggered
+   * by the READER'S OWN change to the filter, order or page — as opposed to a
+   * colleague's change arriving over the feed, this reader's own review act, or
+   * a 412 recovery. Set at the same call sites that set `silentRef.current =
+   * true` directly (the filter `onChange`, `changeOrder`, the pager, and
+   * `EmptyProposals`' rewind/clear-filter) — never at a `reload(true)` call site,
+   * because none of those change what view is being asked for. Read once at the
+   * top of the fetch effect and reset immediately, the same pattern
+   * `arrivalReloadRef` uses. See `VIEW_CHANGE_REFRESH_ERROR` for why this needs
+   * its own sentence rather than sharing `BACKGROUND_REFRESH_ERROR`'s.
+   */
+  const viewChangeRef = useRef(false);
 
   /*
    * ARRIVAL DETECTION — WHY IT READS `by_state.open` RATHER THAN DIFFING THE WINDOW.
@@ -718,7 +817,17 @@ function ProposalsBrowser({
     const generation = ++generationRef.current;
     const isArrivalReload = arrivalReloadRef.current;
     arrivalReloadRef.current = false;
-    if (!silentRef.current) setList({ status: 'loading' });
+    /*
+     * READ INTO A LOCAL BEFORE THE RESET — `UnmappedNotesPanel`'s own reason
+     * applies verbatim: `silentRef.current` is reset to `false` synchronously,
+     * before the request even starts, so by the time a response resolves the
+     * ref no longer describes THIS request. Capturing it here is what makes the
+     * flag survive to the `.catch` below that needs it.
+     */
+    const wasSilent = silentRef.current;
+    const wasViewChange = viewChangeRef.current;
+    viewChangeRef.current = false;
+    if (!wasSilent) setList({ status: 'loading' });
     silentRef.current = false;
 
     api
@@ -733,6 +842,9 @@ function ProposalsBrowser({
         if (!alive || generation !== generationRef.current) return;
         setList({ status: 'data', loaded });
         setVersion(loaded.experiment_version);
+        // A later success clears an earlier silent-failure disclosure — the read
+        // it complained about has since been superseded by one that worked.
+        setBackgroundRefreshError(null);
 
         const openNow = loaded.by_state.open ?? 0;
         const previousOpen = lastOpenCountRef.current;
@@ -783,6 +895,40 @@ function ProposalsBrowser({
       })
       .catch((err: unknown) => {
         if (!alive || generation !== generationRef.current) return;
+        /*
+         * C1, INDEPENDENT REVIEW — THE SECOND CONJUNCT IS THE FIX. `wasSilent`
+         * alone is the INTENT of this request; `listStatusRef.current === 'data'`
+         * is whether there is anything on screen right now worth protecting by
+         * suppressing `setList`. Without it, a silent request that fails before
+         * any load has ever succeeded (see `listStatusRef`'s own comment) left
+         * `list` stuck at `{status: 'loading'}` forever, with no disclosure and
+         * no recovery control — worse than the `BackendDown` it replaced.
+         */
+        if (wasSilent && listStatusRef.current === 'data') {
+          const sentence = wasViewChange ? VIEW_CHANGE_REFRESH_ERROR : BACKGROUND_REFRESH_ERROR;
+          setBackgroundRefreshError(sentence);
+          /*
+           * M2, INDEPENDENT REVIEW. The SAME sentence twice in a row (e.g. two
+           * failed "Try Again" attempts) is a byte-identical announcement, which
+           * `announce()`'s own alternating-marker trick (:645-648) exists to make
+           * audible anyway — reused here rather than re-invented.
+           */
+          announce(sentence);
+          /*
+           * M1, INDEPENDENT REVIEW. `isArrivalReload` was already consumed (and
+           * the ref reset to `false`) at the top of this effect, on the
+           * assumption that THIS attempt would resolve the question one way or
+           * the other. It did not: nothing was read, so whether a colleague's
+           * change is still waiting to be counted is exactly as unresolved as it
+           * was before this attempt started. Restoring it means the NEXT attempt
+           * (this reader's own "Try Again", or a later signal) still treats
+           * itself as arrival-eligible, rather than permanently swallowing a
+           * colleague's arrival notice because one read attempt in the middle
+           * happened to fail.
+           */
+          arrivalReloadRef.current = arrivalReloadRef.current || isArrivalReload;
+          return;
+        }
         setList({ status: 'error', error: asApiError(err) });
       });
 
@@ -1027,6 +1173,7 @@ function ProposalsBrowser({
    */
   const changeOrder = useCallback((next: ApiProposalOrder) => {
     silentRef.current = true;
+    viewChangeRef.current = true;
     setCursor(null);
     setBack([]);
     setOrder(next);
@@ -1056,6 +1203,7 @@ function ProposalsBrowser({
                  selection. A visibly transient number is a better trade than a
                  silently destroyed value. */
               silentRef.current = true;
+              viewChangeRef.current = true;
               setCursor(null);
               setBack([]);
               setFilter(e.target.value);
@@ -1204,6 +1352,43 @@ function ProposalsBrowser({
         </div>
       )}
 
+      {/*
+        A SILENT BACKGROUND REFRESH THAT FAILED, disclosed WITHOUT replacing
+        anything.
+
+        I1, INDEPENDENT REVIEW — NO `aria-live` HERE, DELIBERATELY, UNLIKE THE
+        FIRST VERSION OF THIS ELEMENT. A conditionally-MOUNTED live region is
+        never announced to begin with — `.proposals-count` above is `aria-live`
+        for exactly the opposite reason, that it stays mounted in every state
+        and is blanked instead of removed. Rather than restructure this element
+        to also stay permanently mounted, the spoken announcement is carried by
+        the ALREADY-mounted `role="status"` region above, via `announce()` in
+        the `.catch` branch that sets `backgroundRefreshError` — the same
+        division of labour `arrivalNote` already uses below (a conditionally
+        mounted, non-live VISIBLE note, plus a separate always-mounted sr-only
+        announcement for the same fact), which is why this needs no `role`
+        either: giving it one would announce the sentence a second time.
+
+        THE `list.status === 'data'` CONJUNCT IS NOW DEFENSIVE, NOT
+        LOAD-BEARING, and that is stated rather than left to look like the
+        opposite. `backgroundRefreshError` is only ever SET inside the fetch
+        effect's `.catch` behind the identical `listStatusRef.current === 'data'`
+        check (see that comment for why `wasSilent` alone was not sufficient —
+        C1, independent review), so by the time this renders, `list.status`
+        already reflects a load that had succeeded before this failure. This
+        conjunct is kept anyway as a second, textually obvious guarantee that it
+        can never render beside the full `BackendDown` panel below, which is
+        for a LOUD failure — one where there is nothing here to protect.
+      */}
+      {backgroundRefreshError !== null && list.status === 'data' && (
+        <p className="proposals-background-refresh-notice">
+          {backgroundRefreshError}{' '}
+          <button type="button" className="btn btn-secondary" onClick={() => reload(true)}>
+            Try Again
+          </button>
+        </p>
+      )}
+
       {list.status === 'loading' && (
         <LoadingPanel label="Loading this record's ingestion proposals…" />
       )}
@@ -1227,11 +1412,13 @@ function ProposalsBrowser({
              */
             onRewind={() => {
               silentRef.current = true;
+              viewChangeRef.current = true;
               setCursor(null);
               setBack([]);
             }}
             onClearFilter={() => {
               silentRef.current = true;
+              viewChangeRef.current = true;
               setCursor(null);
               setBack([]);
               setFilter('all');
@@ -1266,11 +1453,13 @@ function ProposalsBrowser({
               canGoBack={back.length > 0}
               onNext={(next) => {
                 silentRef.current = true;
+                viewChangeRef.current = true;
                 setBack((stack) => [...stack, cursor]);
                 setCursor(next);
               }}
               onPrevious={() => {
                 silentRef.current = true;
+                viewChangeRef.current = true;
                 setBack((stack) => {
                   setCursor(stack.length > 0 ? stack[stack.length - 1] : null);
                   return stack.slice(0, -1);

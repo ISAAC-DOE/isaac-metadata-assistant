@@ -99,10 +99,23 @@ describe('the record workspace list', () => {
     await screen.findByRole('link', { name: 'Record Fields' });
 
     const links = within(nav()).getAllByRole('link');
-    expect(links.map((l) => l.textContent)).toEqual([
+    /*
+     * CAPTURE IS FIRST, AND OUTSIDE THE LIST. It is rendered above the other
+     * three under its own `Data Capture` eyebrow — the record's data-acquisition
+     * destination, promoted so the act of writing down what happened at the
+     * instrument is not the third row of a secondary list. It is STILL one of
+     * the four, still in this one landmark, and still ungated; see the
+     * `aria-current` test below, which asserts the anti-goals over every link
+     * here including this one.
+     *
+     * Compared by ACCESSIBLE NAME rather than `textContent`, because the
+     * promoted row also renders a live count line beneath its label and the
+     * name is deliberately the destination alone (`aria-label` on the link).
+     */
+    expect(links.map((l) => l.getAttribute('aria-label') ?? l.textContent)).toEqual([
+      'Capture & Proposals',
       'Record Fields',
       'Runs',
-      'Capture & Proposals',
       'Graph',
     ]);
     /* DERIVED FROM THE ROUTE CONTRACT, not from a second hand-written list: a
