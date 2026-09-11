@@ -28,6 +28,93 @@
   border-top: 1px solid var(--border-faint);
 }
 
+/* ---- the promoted capture destination ------------------------------------
+ *
+ * ONE ROW OF THE FOUR, RENDERED AS A CARD. It reuses `.evidence-trail-link`'s
+ * exact card vocabulary from `screens/screens.css` — `--surface` on the
+ * sidebar's `--surface-subtle`, a 1px `--border`, `--radius-inner` — because
+ * that is the shipped idiom for "a weightier destination in this column", and
+ * its active state reuses `.workspace-nav-item.active`'s tint + label colour.
+ * NO NEW HUE, RADIUS, SHADOW OR CUSTOM PROPERTY; every value below is a token
+ * this stylesheet's neighbours already paint.
+ *
+ * THE ONE THING IT ADDS IS A TYPE STEP, and that is the point rather than
+ * decoration. The record screen was measured with ~90% of its text inside an
+ * 11-13px band, so nothing told the eye what mattered; a 14px/600 label over an
+ * 11.5px summary is two ranks where the rest of this column has one, which is
+ * what makes the row read as a destination instead of a fourth list item.
+ *
+ * IT MUST NEVER GROW A STATE GLYPH. No disc, no tick, no lock, no connector —
+ * see the component header. The spine one region up owns all of those, and the
+ * difference in row shape is how a reader tells a gated pipeline from an
+ * always-reachable destination without reading either.
+ */
+.capture-nav-link {
+  display: block;
+  padding: 10px 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-inner);
+  text-decoration: none;
+  transition: background 0.14s ease, border-color 0.14s ease;
+}
+
+.capture-nav-link:hover {
+  background: var(--border-faint);
+}
+
+/* Tint + border + label colour, exactly as `.workspace-nav-item.active` does
+   it. Never colour alone: `aria-current="page"` carries the state for anyone
+   who is not reading the tint. */
+.capture-nav-link.active {
+  background: var(--action-tint);
+  border-color: var(--action-selected-border);
+}
+
+.capture-nav-link:focus-visible {
+  outline: 2px solid var(--action);
+  outline-offset: 2px;
+}
+
+.capture-nav-label {
+  display: block;
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: -0.005em;
+  color: var(--text-primary);
+}
+
+.capture-nav-link.active .capture-nav-label {
+  color: var(--action-hover);
+}
+
+/* The live counts, in `--text-tertiary`.
+ *
+ * ~~"5.34:1 on `--surface` and 4.78:1 on the `--action-tint`"~~ — THE SECOND
+ * FIGURE WAS WRONG AND IS CORRECTED IN PLACE rather than replaced, because the
+ * number a future palette change is weighed against is the whole point of
+ * writing it down. Recomputed from the token values with the sRGB relative
+ * luminance formula (`#626c77`, `tokens.css:212`):
+ *
+ *     on --surface      #ffffff   5.343:1
+ *     on --action-tint  #e8f0f8   4.643:1   <- was published as 4.78
+ *     on --border-faint #eef2f6   4.749:1   (the :hover ground)
+ *
+ * 4.78 reproduces under no input: `#eaf1fa`, the alternate named in
+ * `--action-tint`'s own comment, gives 4.697. THE CONCLUSION IS UNCHANGED — the
+ * line clears AA in every state this row can be in — but the HEADROOM on the
+ * active state is 0.14, not 0.28, on a token A3 already pushed to its floor
+ * (`tokens.css` header: #626c77 is the lightest value clearing 4.5:1 on all
+ * nineteen measured grounds). A future nudge has half the margin the old
+ * comment implied. Re-derive rather than trusting this block. */
+.capture-nav-summary {
+  display: block;
+  margin-top: 3px;
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--text-tertiary);
+}
+
 .workspace-nav-list {
   list-style: none;
   margin: 0;

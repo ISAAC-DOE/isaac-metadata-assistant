@@ -198,8 +198,16 @@
    * written as a literal in a component stylesheet instead of as a token is not
    * a token and is not seen; a token whose value is not a 6-digit hex cannot be
    * assessed; and a custom property declared NOWHERE cannot be resolved at all
-   * — that last class is reported by its own test, with a named, dated
-   * exemption for the one file that has them.
+   * — that last class is reported by ITS OWN TWO TESTS, since 2026-09-10: one
+   * asks whether anything RENDERS from the reference (a resolving fallback is
+   * enough), the other asks whether the NAME is declared at all (a fallback is
+   * not enough). ~~with a named, dated exemption for the one file that has
+   * them~~ — there is no exemption any more. `components/transcriptCapture.css`
+   * had five such properties across 22 unresolvable references, which is why
+   * the exemption existed; they were repointed at tokens that already exist and
+   * the exemption was retired with them. NOTHING IN THIS FILE CHANGED FOR THAT
+   * WORK — the five names were deleted rather than aliased here, deliberately,
+   * so that no second name for an existing colour entered this palette.
    */
 
   /* text — informational ink (>= 4.5:1 on every ground; may carry meaning) */

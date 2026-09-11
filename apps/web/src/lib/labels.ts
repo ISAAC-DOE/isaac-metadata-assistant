@@ -177,6 +177,43 @@ export const LABELS = {
   workspaceRuns: 'Runs',
   workspaceCapture: 'Capture & Proposals',
   workspaceGraph: 'Graph',
+
+  /*
+   * DATA CAPTURE — the group label above the promoted capture destination.
+   *
+   * WHY CAPTURE IS PULLED OUT OF THE FOUR RATHER THAN LEFT AMONG THEM. The
+   * spine above describes the record-COMPLETION lifecycle; the scientist's own
+   * first act — writing down what just happened at the instrument — is not a
+   * rung on it, and it was reaching the reader as the third row of a secondary
+   * list. Its own group gives it the weight the act has without giving it the
+   * SEMANTICS of a step.
+   *
+   * AND IT IS STILL NOT A STEP. It has no completion state, no tick, no lock,
+   * no reason text, no `aria-current="step"` and no position relative to the
+   * five the spine derives. `workflow.py` keeps submission out of
+   * `CANONICAL_ORDER` because a step state needs a criterion the record's own
+   * signals can decide, and capture has none: "the scientist has finished
+   * capturing" is not derivable from any count, and a criterion invented here
+   * (`notes >= 1`, say) would nag every legitimate record that needs no notes.
+   * So this destination carries live COUNTS — which are facts — and never a
+   * verdict about whether enough has been captured.
+   */
+  recordCaptureEyebrow: 'Data Capture',
+  /*
+   * What the summary line says when the server's own totals are all zero. It is
+   * a statement about what the record HOLDS, not about what it needs, and it is
+   * rendered only when every total is zero — while the counts are unknown the
+   * line is absent entirely, which is a different thing and must stay one.
+   *
+   * ~~'Nothing captured yet'~~ — CORRECTED, because "yet" is a soft version of
+   * exactly the claim this destination is built to avoid making. The argument
+   * for keeping capture out of the workflow spine is that no criterion decides
+   * when capture is finished, so a record that legitimately needs no notes must
+   * not be nagged; "yet" quietly tells that record it is behind. The
+   * replacement states the fact and forecasts nothing.
+   */
+  captureNavEmpty: 'No notes or proposals',
+
   // The eyebrow that separates the record's own identity/reference sections
   // from the scientific draft blocks above them (audit P2: eight structurally
   // different rows read as one undifferentiated list).

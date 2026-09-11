@@ -10512,7 +10512,7 @@
       },
       {
         "path": "apps/web/src/lib/labels.ts",
-        "sha256": "9b6b303c6d8f37c96c50396263625f8868a7e9c7a7c0921162af42c0134ccd65"
+        "sha256": "cc7d697715946d2475ea3945d6d02b8453465fb5c1c34d26477e78c83dd4b033"
       },
       {
         "path": "apps/web/src/lib/routes.ts",
@@ -10564,7 +10564,7 @@
       },
       {
         "path": "apps/web/src/screens/RecordWorkbench.tsx",
-        "sha256": "aa3a11d0e6a02120d505bc47c593f6241a51ecda5f82b9f35a0a1f8bd8d46dfa"
+        "sha256": "383975fa73431a6cdad30a49cbf028ad15f459a583fa9a3b0409ffcb853336a2"
       },
       {
         "path": "apps/web/src/screens/SettingsPage.tsx",
@@ -11012,7 +11012,7 @@
       }
     ],
     "served_file_count": 200,
-    "served_manifest_fingerprint": "79001f72b6213df3883d4a1822ecb6b9dd927fa470a0300330c0489588d9c4a2"
+    "served_manifest_fingerprint": "6f5c844f901f56616f2972afa86bb61dfea3d422ff0243b7d387e3a2d3a2a07b"
   },
   "overview": {
     "built_at_commit": "caab1d0a69c1733524bda5dde495623bc4b7bad1",

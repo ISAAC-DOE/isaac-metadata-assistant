@@ -741,6 +741,35 @@ function jsxTags(src: string): string[] {
 /** Every JSX opening tag in the app's TS/TSX sources. */
 const JSX_TAGS: readonly string[] = Object.values(tsxSources).flatMap((src) => jsxTags(src));
 
+/*
+ * A KNOWN LIMIT OF EVERY GUARD BELOW, recorded so the next reader does not mistake
+ * their silence for coverage: THE SCANNER READS `.css` ONLY.
+ *
+ * `SHEETS` is built from an `import.meta.glob` of stylesheets, so a `var()` written
+ * in a TS/TSX inline `style={{ ... }}` is invisible to all three guards — the
+ * unsatisfiable scan, the declared-somewhere scan, and the retired-phantom scan. A
+ * phantom introduced there would render exactly the same way (background
+ * transparent, border none, colour inherited) and no test here would see it.
+ *
+ * MEASURED 2026-09-10, so the limit is bounded rather than merely admitted: SIX such
+ * references exist, in four files — `screens/ExportReadiness.tsx:714` and
+ * `components/EvidenceTrailPanel.tsx:34` (`--text-slate`),
+ * `screens/ProjectMemory.tsx:245` and `EvidenceTrailPanel.tsx:136`
+ * (`--text-tertiary`), and `components/TopBar.tsx:354,373` (`--text-disabled`). All
+ * three tokens are declared in `styles/tokens.css`, all six resolve today, and none
+ * names a retired phantom. A `rg` for `var\(--` over the same files returns ELEVEN
+ * hits; the other five are prose inside comments (`GuidedCompletion.tsx:815`,
+ * `RecordWorkbench.tsx:164`, `StatusBar.tsx:18`, `AppShell.tsx:15,23`) and paint
+ * nothing — the distinction is stated because the raw grep count is the number a
+ * future session will reach for first.
+ *
+ * EXTENDING THE SCANNER TO TS/TSX WAS CONSIDERED AND DEFERRED, not forgotten. It
+ * needs a parse that can tell an inline style from a comment and from a string
+ * literal, which is a different piece of machinery from the brace-matcher below,
+ * and six resolving references do not justify it today. If inline `var()` ever
+ * becomes common, this is the gap to close first.
+ */
+
 /* ── the undeclared-custom-property scan ───────────────────────────────────── */
 
 interface VarReference {
@@ -806,44 +835,99 @@ function referenceIsSatisfiable(ref: VarReference): boolean {
 }
 
 /**
- * NAMED, DATED, AND DELIBERATELY NARROW. `components/transcriptCapture.css`
+ * ~~NAMED, DATED, AND DELIBERATELY NARROW. `components/transcriptCapture.css`
  * paints with five custom properties that NOTHING in this repository declares —
  * 21 references with no fallback at all (`--text-body` x11, `--surface-raised`
  * x5, `--border-subtle` x4, `--surface-base` x1) plus `--text-link`, whose
- * fallback is `var(--text-body)` and so resolves no better.
+ * fallback is `var(--text-body)` and so resolves no better ... It is recorded
+ * rather than fixed because fixing it is a VISUAL decision, not a token-level
+ * one ... It needs its own slice.~~
  *
- * The panel is SHIPPED AND UNGATED — `screens/RecordWorkbench.tsx` mounts
- * `TranscriptCapturePanel` with no flag — so this is live, not dead code. Every
- * one of those declarations is invalid at computed-value time: the backgrounds
- * render transparent, the borders render none, and the text colours inherit
- * whatever the panel's ancestor set. It is PRE-EXISTING, introduced with the
- * panel itself in `72e2206` (2026-08-17) and present at `bebf4e2`, and it is
- * NOT caused by the A3 palette change, which touched no file under
- * `components/`.
+ * THE SLICE RAN, 2026-09-10, AND THE EXEMPTION IS RETIRED. `UNDECLARED_EXEMPTIONS`
+ * is gone rather than emptied: an exemption list with nothing in it is an
+ * invitation, and the guard below is now unconditional.
  *
- * It is recorded rather than fixed because fixing it is a VISUAL decision, not a
- * token-level one: choosing which shared token each of the five should have been
- * is choosing what the panel looks like, and nothing in the repository says. It
- * needs its own slice. What this exemption buys is that the defect can no longer
- * be re-introduced silently anywhere else, and that this one cannot widen — the
- * second test below fails if a sixth property joins it OR if these five are
- * fixed and the exemption is left standing.
+ * TWO CORRECTIONS TO THE STRUCK PARAGRAPH, because the numbers it published were
+ * the basis on which the defect was deferred and both understated it.
+ *
+ *   (1) "21 references" was the count of matching LINES. The count of
+ *       REFERENCES is 22 — `var(--text-link, var(--text-body))` is one line
+ *       carrying two. The per-token tallies were right.
+ *   (2) "it needs its own slice" rested on nothing in the repository saying what
+ *       the five should be. Something did. `transcriptCapture.css`'s own header
+ *       says its cards are `.note-card`'s, and `unmappedNotes.css` — the sibling
+ *       panel, on the same screen — already had a token for every one of the five
+ *       roles. The mapping was a lookup, not a design decision.
+ *
+ * WHAT IT LOOKED LIKE, measured in Chrome on the running app before the fix, and
+ * recorded because a test file can otherwise only assert that a name is missing
+ * and not that it mattered: `.capture-textarea` — the primary input of the whole
+ * capture surface — and `select.capture-control` both reported `border-style:
+ * none`, `border-width: 0px` and `background: rgba(0, 0, 0, 0)`. A scientist saw
+ * the word "Transcript", then void, then a lone resize grip.
+ *
+ * THE FIVE NAMES WERE DELETED, NOT ALIASED, and `styles/tokens.css` is untouched.
+ * Declaring `--text-body: var(--text-primary)` would have been the smaller diff
+ * and was rejected: it adds synonyms to a palette whose header records the
+ * deliberate retirement of a redundant tier, and `resolveHex` above throws on one
+ * colour with two values for that same reason. `RETIRED_PHANTOMS` below is the
+ * ratchet that keeps them gone — in BOTH directions, so re-introducing one of the
+ * names anywhere fails, including by declaring it in `tokens.css`.
  */
-const UNDECLARED_EXEMPTIONS: readonly {
+const RETIRED_PHANTOMS: readonly { readonly token: string; readonly nowUses: string }[] = [
+  { token: '--text-body', nowUses: '--text-primary' },
+  { token: '--text-link', nowUses: '--action' },
+  { token: '--surface-base', nowUses: '--surface' },
+  { token: '--surface-raised', nowUses: '--surface-subtle' },
+  { token: '--border-subtle', nowUses: '--border-input' },
+];
+
+/**
+ * PHANTOM PROPERTIES THAT A FALLBACK RESCUES — a DIFFERENT defect from the one
+ * above, and the reason this list exists rather than being folded into it.
+ *
+ * `var(--danger, var(--border-strong))` renders correctly today: `--danger` is
+ * declared nowhere, so the fallback wins, every time. Nothing is transparent and
+ * no border is missing. What is wrong is subtler and is what the guard below is
+ * for: the rule READS as theme-aware while being nothing of the kind, and the
+ * moment anybody declares `--danger` for its obvious purpose, this border silently
+ * turns red in a file nobody edited. `assistant.css` records that exact hazard
+ * twice, in prose, at `.structured-entry-error` and `.guided-verdict-set` — both
+ * of which were once written this way and are now pointed at real tokens.
+ *
+ * ALL THREE SIT IN FILES OUTSIDE THE 2026-09-10 SLICE'S EDIT SCOPE, which is the
+ * only reason they survive it. The fix is mechanical and identical in each case:
+ * delete the phantom name and keep the fallback's token. Whoever next opens
+ * `record-description.css` or `tutorial.css` should take it.
+ *
+ * THIS LIST IS A RATCHET, NOT A WAIVER, and it is asserted by SET EQUALITY: a new
+ * phantom anywhere fails, and fixing one of these three without deleting its entry
+ * also fails. `rescuedBy` is checked to resolve, so an entry can never be the
+ * cover for a reference that renders nothing.
+ */
+const FALLBACK_RESCUED_PHANTOMS: readonly {
   readonly file: string;
-  readonly tokens: readonly string[];
+  readonly token: string;
+  readonly rescuedBy: string;
   readonly recorded: string;
 }[] = [
   {
-    file: 'components/transcriptCapture.css',
-    tokens: [
-      '--border-subtle',
-      '--surface-base',
-      '--surface-raised',
-      '--text-body',
-      '--text-link',
-    ],
-    recorded: '2026-09-01',
+    file: 'components/record-description.css',
+    token: '--danger',
+    rescuedBy: '--border-strong',
+    recorded: '2026-09-10',
+  },
+  {
+    file: 'components/record-description.css',
+    token: '--surface-muted',
+    rescuedBy: '--surface',
+    recorded: '2026-09-10',
+  },
+  {
+    file: 'components/tutorial.css',
+    token: '--surface-alt',
+    rescuedBy: '--surface',
+    recorded: '2026-09-10',
   },
 ];
 
@@ -921,7 +1005,9 @@ describe('A3 · informational ink clears WCAG AA on every ground it can sit on',
     // ink. `resolveHex` reads every stylesheet, so a component-scoped fill is now
     // judged like any other. It still returns `null` for a custom property
     // NOTHING declares; that class cannot be assessed at all and has its own test
-    // below, with a named, dated exemption for the one file that has them.
+    // below — two of them, since 2026-09-10: one unconditional guard on whether
+    // anything RENDERS from the reference, and one on whether the NAME is
+    // declared at all, which is the weaker condition and the earlier warning.
     const light = [...backgroundTokens()].filter((t) => {
       const hex = resolveHex(t);
       return hex !== null && relativeLuminance(hex) >= 0.6;
@@ -1168,15 +1254,15 @@ describe('A3 · nothing paints with a custom property the repository never decla
     ),
   ];
 
-  it('finds no unexcused undeclared property', () => {
+  it('finds no undeclared property that no fallback rescues — anywhere, no exemptions', () => {
     // Vacuity: the scanner must be finding references at all.
     expect(VAR_REFERENCES.length, 'no var() reference was found — the scan is broken')
       .toBeGreaterThanOrEqual(1000);
-    const exempt = new Set(
-      UNDECLARED_EXEMPTIONS.flatMap((e) => e.tokens.map((t) => `${e.file} | ${t}`)),
-    );
+    // UNCONDITIONAL since 2026-09-10. There is no exemption parameter to widen:
+    // the last entry was retired when the defect it named was fixed, and an empty
+    // exemption list would only be a slot for the next one.
     expect(
-      unsatisfiable().filter((k) => !exempt.has(k)).sort(),
+      [...unsatisfiable()].sort(),
       'a stylesheet paints with a custom property that nothing declares and no fallback ' +
         'rescues. At computed-value time that is not "a slightly wrong colour": an inherited ' +
         'property falls back to `inherit` and every other one to its initial value, so a ' +
@@ -1185,32 +1271,117 @@ describe('A3 · nothing paints with a custom property the repository never decla
     ).toEqual([]);
   });
 
-  it('the recorded exemption is exactly as wide as the defect, in both directions', () => {
-    // A ratchet on the exemption itself. It fails if a SIXTH property joins the
-    // list, and it fails if the five are fixed and the exemption is left behind
-    // asserting a defect that no longer exists.
-    const declared = UNDECLARED_EXEMPTIONS.flatMap((e) => e.tokens.map((t) => `${e.file} | ${t}`));
+  /*
+   * THE GUARD THE ONE ABOVE COULD NOT BE, and the reason the 2026-09-10 defect
+   * was able to sit for three weeks after being found.
+   *
+   * The guard above keys on RENDERING: a reference is fine the moment some
+   * fallback resolves. That is the right bar for "is anything invisible right
+   * now", and it is the wrong bar for "can a name that nothing declares still
+   * enter this codebase" — because the first phantom in a family always arrives
+   * with a fallback, reads as harmless, and is then copied into a file that
+   * writes it WITHOUT one. That is the measured history here: `--border-subtle`
+   * and `--surface-raised` entered `workflow.css` with literal fallbacks, and
+   * `transcriptCapture.css` then used the same two names bare.
+   *
+   * So this second guard keys on the NAME. Every token any `var()` names must be
+   * declared somewhere, fallback or no fallback. It is a SET EQUALITY against an
+   * enumerated, dated list, so it fails in both directions — a new phantom fails
+   * even though it renders correctly, and fixing a listed one without deleting
+   * its entry fails too.
+   */
+  it('every custom property any var() names is declared somewhere, fallback or not', () => {
+    const declaredSomewhere = new Set(DECLARATIONS.keys());
+    const measured = [
+      ...new Set(
+        VAR_REFERENCES.filter((r) => !declaredSomewhere.has(r.token)).map(
+          (r) => `${r.file} | ${r.token}`,
+        ),
+      ),
+    ].sort();
+    const enumerated = FALLBACK_RESCUED_PHANTOMS.map((e) => `${e.file} | ${e.token}`).sort();
     expect(
-      [...unsatisfiable()].sort(),
-      'the undeclared-property exemption no longer matches what is measured. If the defect was ' +
-        'fixed, RETIRE the exemption in the same change; if it grew, the new one needs its own ' +
-        'named, dated entry and its own reason.',
-    ).toEqual([...declared].sort());
+      measured,
+      'a `var()` names a custom property that NOTHING in this repository declares. If a ' +
+        'fallback rescues it, it renders correctly today and will keep doing so until somebody ' +
+        'declares that name for its obvious purpose, at which point a file nobody edited ' +
+        'silently changes colour. Point the rule at the token you actually mean. If it genuinely ' +
+        'has to stay, add a named, dated entry to FALLBACK_RESCUED_PHANTOMS with the token its ' +
+        'fallback resolves to — and if you FIXED one, delete its entry in the same change.',
+    ).toEqual(enumerated);
   });
 
-  it('the exempted file is still shipped, so the exemption is about live code', () => {
-    // If the panel were ever un-mounted the honest record would be different, and
-    // the reason to fix it would be weaker. Asserted rather than assumed.
-    const mounts = JSX_TAGS.filter((t) => /TranscriptCapturePanel/.test(t));
+  it('each recorded phantom really is rescued, and by a token that exists', () => {
+    // An entry must never be the cover for a reference that renders nothing. If a
+    // `rescuedBy` stopped resolving, the first guard would already be red — this
+    // one says so in the entry's own terms rather than leaving it to be inferred.
+    expect(FALLBACK_RESCUED_PHANTOMS.length, 'the phantom list is empty — delete the machinery')
+      .toBeGreaterThan(0);
+    // AND IT MAY NOT GROW. Without this the list has the exact weakness the old
+    // exemption had: an author whose new phantom trips the guard above can go
+    // green by ADDING AN ENTRY rather than fixing the reference, and nothing
+    // says no. Three is the measured population on 2026-09-10. Raising this
+    // number is a deliberate ratchet bump and should be argued for in the same
+    // change; the intended direction is down, to zero.
     expect(
-      mounts.length,
-      'TranscriptCapturePanel is no longer mounted — re-read the undeclared-property exemption, ' +
-        'which is written on the basis that the defect is live',
-    ).toBeGreaterThanOrEqual(1);
-    for (const entry of UNDECLARED_EXEMPTIONS) {
-      expect(entry.recorded, `${entry.file} exemption must carry the date it was recorded`)
+      FALLBACK_RESCUED_PHANTOMS.length,
+      'the fallback-rescued phantom list has GROWN. It is a ratchet, not a parking space: ' +
+        'point the new reference at the token you actually mean, or argue here for raising ' +
+        'the cap.',
+    ).toBeLessThanOrEqual(3);
+    for (const entry of FALLBACK_RESCUED_PHANTOMS) {
+      expect(entry.recorded, `${entry.file} ${entry.token} must carry the date it was recorded`)
         .toMatch(/^\d{4}-\d{2}-\d{2}$/);
+      expect(
+        DECLARATIONS.has(entry.rescuedBy),
+        `${entry.token} is recorded as rescued by ${entry.rescuedBy}, which is not declared either`,
+      ).toBe(true);
+      const refs = VAR_REFERENCES.filter((r) => r.file === entry.file && r.token === entry.token);
+      expect(refs.length, `${entry.file} no longer references ${entry.token} — delete the entry`)
+        .toBeGreaterThan(0);
+      for (const ref of refs) {
+        expect(
+          referenceIsSatisfiable(ref),
+          `${entry.file} uses ${entry.token} with no resolving fallback — that is the OTHER ` +
+            'defect and it has no exemption list',
+        ).toBe(true);
+      }
     }
+  });
+
+  it('the five phantoms retired on 2026-09-10 are gone from every stylesheet', () => {
+    // A named regression guard, kept beside the general ones rather than trusted
+    // to them, because these five have a copy-paste history: `--border-subtle`
+    // and `--surface-raised` were each used in two files before anyone noticed.
+    // This fails on re-introduction EITHER WAY — writing `var(--text-body)` again,
+    // or "fixing" it by declaring `--text-body` in `tokens.css`, which would make
+    // the general guards green while restoring the synonym the slice removed.
+    for (const { token, nowUses } of RETIRED_PHANTOMS) {
+      expect(
+        VAR_REFERENCES.filter((r) => r.token === token).map((r) => r.file),
+        `${token} was retired on 2026-09-10 in favour of ${nowUses} and has come back`,
+      ).toEqual([]);
+      expect(
+        DECLARATIONS.has(token),
+        `${token} was retired on 2026-09-10, deliberately NOT aliased. Declaring it re-creates ` +
+          `a second name for ${nowUses} — see this file's header on one colour, two values.`,
+      ).toBe(false);
+      expect(
+        DECLARATIONS.has(nowUses),
+        `${token}'s replacement ${nowUses} is not declared — the retirement record is stale`,
+      ).toBe(true);
+    }
+  });
+
+  it('the panel the retirement was about is still shipped', () => {
+    // If `TranscriptCapturePanel` were ever un-mounted the record above would be
+    // about dead code and would read as more consequential than it was. Asserted
+    // rather than assumed, exactly as it was while the defect was open.
+    expect(
+      JSX_TAGS.filter((t) => /TranscriptCapturePanel/.test(t)).length,
+      'TranscriptCapturePanel is no longer mounted — re-read the 2026-09-10 retirement record, ' +
+        'which is written on the basis that the defect it fixed was live',
+    ).toBeGreaterThanOrEqual(1);
   });
 });
 
