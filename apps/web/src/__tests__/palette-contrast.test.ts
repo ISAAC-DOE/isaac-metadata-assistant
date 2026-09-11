@@ -326,6 +326,17 @@ interface SemanticInk {
   /** Required for `text`, `inverse-on-solid` and `dark-canvas`; forbidden otherwise. */
   readonly grounds?: readonly string[];
   readonly why: string;
+  /**
+   * OPTIONAL. When `why` publishes a specific total `var(token)` reference
+   * count — as `--advisory-icon`'s prose did, twice, and went stale twice —
+   * declare it here instead of trusting the sentence. `the published reference
+   * count is measured, not asserted` below checks every entry that sets this
+   * against the same raw count `rg -a -o "var\(TOKEN" | wc -l` would report, so
+   * the next change to a count-bearing token's stylesheets fails a test instead
+   * of quietly rotting a sentence. Deliberately general: any entry may adopt it,
+   * not only `--advisory-icon`.
+   */
+  readonly count?: number;
 }
 
 const SEMANTIC_INK: readonly SemanticInk[] = [
@@ -357,6 +368,7 @@ const SEMANTIC_INK: readonly SemanticInk[] = [
   {
     token: '--advisory-icon',
     role: 'graphic-anywhere',
+    count: 10,
     why:
       'Amber icon stroke. ~~six declarations~~ ~~TEN … `.guided-dontknow svg` in FOUR states~~ ' +
       '— **TEN is right; the rest of that 2026-09-11 correction was WRONG, and is re-corrected ' +
@@ -377,7 +389,11 @@ const SEMANTIC_INK: readonly SemanticInk[] = [
       'rewritten the same day because `no-vertical-rail.test.ts` — a system-wide guard with no ' +
       'exemption mechanism — rejects a coloured `border-left`/`border-right`.** Re-derive with ' +
       '`rg -a -o "var\\(--advisory-icon" apps/web/src | wc -l` rather than trusting this ' +
-      'sentence — nothing enforces the number, which is why it went stale twice. **All ten are ' +
+      'sentence — ~~nothing enforces the number, which is why it went stale twice~~ **the `count: ' +
+      '10` field above is now checked mechanically, by `the published reference count is measured, ' +
+      "not asserted`, against the same raw count that command reports, so the NUMBER can't rot " +
+      'silently again — only this prose enumeration still can, which is why it stays prose. All ' +
+      'ten are ' +
       'graphical**, so none is subject to the 4.5:1 text bar: icons, an `aria-hidden` mark drawn ' +
       'with an inset `box-shadow`, a card border, and a focus ring. ~~All ten sit on `--advisory-bg`~~ — **nine do ' +
       '(3.21:1); the `:focus-visible` outline has `outline-offset: 2px` and so paints on ' +
@@ -894,17 +910,32 @@ function referenceIsSatisfiable(ref: VarReference): boolean {
  * colour with two values for that same reason. `RETIRED_PHANTOMS` below is the
  * ratchet that keeps them gone — in BOTH directions, so re-introducing one of the
  * names anywhere fails, including by declaring it in `tokens.css`.
+ *
+ * EXTENDED 2026-09-11 with the three names `FALLBACK_RESCUED_PHANTOMS` used to
+ * hold (`--danger`, `--surface-muted`, `--surface-alt`). That list is retired —
+ * see its own header below — because the same mechanical fix applies: delete the
+ * phantom name, keep the fallback's token. `record-description.css` and
+ * `tutorial.css` now read `var(--border-strong)` and `var(--surface)` directly,
+ * measured in Chrome against the live app to confirm the computed colour did not
+ * move (`--border-strong` #d3dae2, `--surface` #ffffff, before and after).
  */
-const RETIRED_PHANTOMS: readonly { readonly token: string; readonly nowUses: string }[] = [
-  { token: '--text-body', nowUses: '--text-primary' },
-  { token: '--text-link', nowUses: '--action' },
-  { token: '--surface-base', nowUses: '--surface' },
-  { token: '--surface-raised', nowUses: '--surface-subtle' },
-  { token: '--border-subtle', nowUses: '--border-input' },
+const RETIRED_PHANTOMS: readonly {
+  readonly token: string;
+  readonly nowUses: string;
+  readonly recorded: string;
+}[] = [
+  { token: '--text-body', nowUses: '--text-primary', recorded: '2026-09-10' },
+  { token: '--text-link', nowUses: '--action', recorded: '2026-09-10' },
+  { token: '--surface-base', nowUses: '--surface', recorded: '2026-09-10' },
+  { token: '--surface-raised', nowUses: '--surface-subtle', recorded: '2026-09-10' },
+  { token: '--border-subtle', nowUses: '--border-input', recorded: '2026-09-10' },
+  { token: '--danger', nowUses: '--border-strong', recorded: '2026-09-11' },
+  { token: '--surface-muted', nowUses: '--surface', recorded: '2026-09-11' },
+  { token: '--surface-alt', nowUses: '--surface', recorded: '2026-09-11' },
 ];
 
 /**
- * PHANTOM PROPERTIES THAT A FALLBACK RESCUES — a DIFFERENT defect from the one
+ * ~~PHANTOM PROPERTIES THAT A FALLBACK RESCUES — a DIFFERENT defect from the one
  * above, and the reason this list exists rather than being folded into it.
  *
  * `var(--danger, var(--border-strong))` renders correctly today: `--danger` is
@@ -924,33 +955,22 @@ const RETIRED_PHANTOMS: readonly { readonly token: string; readonly nowUses: str
  * THIS LIST IS A RATCHET, NOT A WAIVER, and it is asserted by SET EQUALITY: a new
  * phantom anywhere fails, and fixing one of these three without deleting its entry
  * also fails. `rescuedBy` is checked to resolve, so an entry can never be the
- * cover for a reference that renders nothing.
+ * cover for a reference that renders nothing.~~
+ *
+ * RETIRED 2026-09-11, AND THE MACHINERY IS DELETED RATHER THAN LEFT AT AN EMPTY
+ * CAP. All three sites were fixed the mechanical way the struck paragraph above
+ * describes: `record-description.css`'s `.rdesc-input[aria-invalid='true']` and
+ * `.rdesc-input:disabled`, and `tutorial.css`'s `.tutorial-session-bar`, now name
+ * `--border-strong` / `--surface` directly instead of a phantom with that
+ * fallback. Measured in Chrome against the live app before and after: the
+ * computed `border-color`/`background-color` did not move (`rgb(211, 218, 226)`
+ * = `--border-strong` #d3dae2; `rgb(255, 255, 255)` = `--surface` #ffffff, both
+ * unchanged). The three retired names moved into `RETIRED_PHANTOMS` above, which
+ * already asserts the two-way ratchet this list existed to provide — gone from
+ * every `var()` AND refused if re-declared in `tokens.css` — so no replacement
+ * machinery is needed. An empty exemption list is an invitation, not a safeguard;
+ * deleting it is the same judgement `UNDECLARED_EXEMPTIONS` made above.
  */
-const FALLBACK_RESCUED_PHANTOMS: readonly {
-  readonly file: string;
-  readonly token: string;
-  readonly rescuedBy: string;
-  readonly recorded: string;
-}[] = [
-  {
-    file: 'components/record-description.css',
-    token: '--danger',
-    rescuedBy: '--border-strong',
-    recorded: '2026-09-10',
-  },
-  {
-    file: 'components/record-description.css',
-    token: '--surface-muted',
-    rescuedBy: '--surface',
-    recorded: '2026-09-10',
-  },
-  {
-    file: 'components/tutorial.css',
-    token: '--surface-alt',
-    rescuedBy: '--surface',
-    recorded: '2026-09-10',
-  },
-];
 
 /* ── 1 · the classification is total ───────────────────────────────────────── */
 
@@ -1195,6 +1215,42 @@ describe('A3 · semantic ink meets the bar its own usage owes', () => {
       }
     }
   });
+
+  /*
+   * `--advisory-icon`'s `why` published a total-reference count twice in one
+   * day and was wrong both times, corrected by hand each time. The entry says
+   * so itself: "nothing enforces the number". This closes that gap — GENERALLY,
+   * not only for `--advisory-icon`, so the next token whose prose wants to
+   * publish a count has somewhere to put it besides a sentence.
+   *
+   * Deliberately does NOT re-derive or hardcode the prose's SITE-BY-SITE
+   * enumeration (which selector, which state, how many) — that list is exactly
+   * what rotted twice, because a stylesheet edit changes it in ways a fixed
+   * assertion cannot anticipate. What is checked is the one thing that IS a
+   * property of the stylesheets today and stays checkable tomorrow: the total
+   * count of `var(token)` references, the same quantity `rg -a -o
+   * "var\(TOKEN" apps/web/src | wc -l` reports and the same quantity
+   * `VAR_REFERENCES` already tracks for the phantom-property guards above.
+   */
+  it('the published reference count is measured, not asserted', () => {
+    const counted = SEMANTIC_INK.filter((e) => e.count !== undefined);
+    // Vacuity: at least the token this guard was built for must use the field.
+    expect(
+      counted.map((e) => e.token),
+      'no SEMANTIC_INK entry declares `count` — the field this guard checks is unused',
+    ).toContain('--advisory-icon');
+    for (const entry of counted) {
+      const measured = VAR_REFERENCES.filter((r) => r.token === entry.token).length;
+      expect(
+        measured,
+        `${entry.token} is referenced by var() ${measured} time(s), but its entry declares ` +
+          `count: ${entry.count}. Re-derive with ` +
+          `\`rg -a -o "var\\(${entry.token}" apps/web/src | wc -l\` and update BOTH the count ` +
+          "field and the entry's prose in the same change — this guard catches the number " +
+          'drifting from the code; it cannot catch the prose drifting from the number.',
+      ).toBe(entry.count);
+    }
+  });
 });
 
 /* ── 2b · the tinted status pairs ──────────────────────────────────────────── */
@@ -1306,10 +1362,14 @@ describe('A3 · nothing paints with a custom property the repository never decla
    * `transcriptCapture.css` then used the same two names bare.
    *
    * So this second guard keys on the NAME. Every token any `var()` names must be
-   * declared somewhere, fallback or no fallback. It is a SET EQUALITY against an
-   * enumerated, dated list, so it fails in both directions — a new phantom fails
-   * even though it renders correctly, and fixing a listed one without deleting
-   * its entry fails too.
+   * declared somewhere, fallback or no fallback.
+   *
+   * UNCONDITIONAL since 2026-09-11 — there used to be an exemption list here too
+   * (`FALLBACK_RESCUED_PHANTOMS`, retired above), covering `--danger`,
+   * `--surface-muted` and `--surface-alt`. All three were fixed the same way the
+   * defect above was, so there is nothing left to exempt: this now asserts, with
+   * no carve-out, that no `var()` anywhere names a property nothing declares —
+   * fallback or not.
    */
   it('every custom property any var() names is declared somewhere, fallback or not', () => {
     const declaredSomewhere = new Set(DECLARATIONS.keys());
@@ -1320,71 +1380,36 @@ describe('A3 · nothing paints with a custom property the repository never decla
         ),
       ),
     ].sort();
-    const enumerated = FALLBACK_RESCUED_PHANTOMS.map((e) => `${e.file} | ${e.token}`).sort();
     expect(
       measured,
       'a `var()` names a custom property that NOTHING in this repository declares. If a ' +
         'fallback rescues it, it renders correctly today and will keep doing so until somebody ' +
         'declares that name for its obvious purpose, at which point a file nobody edited ' +
-        'silently changes colour. Point the rule at the token you actually mean. If it genuinely ' +
-        'has to stay, add a named, dated entry to FALLBACK_RESCUED_PHANTOMS with the token its ' +
-        'fallback resolves to — and if you FIXED one, delete its entry in the same change.',
-    ).toEqual(enumerated);
+        'silently changes colour. Point the rule at the token you actually mean, or give it a ' +
+        'fallback that itself resolves to a declared token — there is no exemption list left to ' +
+        'add to.',
+    ).toEqual([]);
   });
 
-  it('each recorded phantom really is rescued, and by a token that exists', () => {
-    // An entry must never be the cover for a reference that renders nothing. If a
-    // `rescuedBy` stopped resolving, the first guard would already be red — this
-    // one says so in the entry's own terms rather than leaving it to be inferred.
-    expect(FALLBACK_RESCUED_PHANTOMS.length, 'the phantom list is empty — delete the machinery')
-      .toBeGreaterThan(0);
-    // AND IT MAY NOT GROW. Without this the list has the exact weakness the old
-    // exemption had: an author whose new phantom trips the guard above can go
-    // green by ADDING AN ENTRY rather than fixing the reference, and nothing
-    // says no. Three is the measured population on 2026-09-10. Raising this
-    // number is a deliberate ratchet bump and should be argued for in the same
-    // change; the intended direction is down, to zero.
-    expect(
-      FALLBACK_RESCUED_PHANTOMS.length,
-      'the fallback-rescued phantom list has GROWN. It is a ratchet, not a parking space: ' +
-        'point the new reference at the token you actually mean, or argue here for raising ' +
-        'the cap.',
-    ).toBeLessThanOrEqual(3);
-    for (const entry of FALLBACK_RESCUED_PHANTOMS) {
-      expect(entry.recorded, `${entry.file} ${entry.token} must carry the date it was recorded`)
-        .toMatch(/^\d{4}-\d{2}-\d{2}$/);
-      expect(
-        DECLARATIONS.has(entry.rescuedBy),
-        `${entry.token} is recorded as rescued by ${entry.rescuedBy}, which is not declared either`,
-      ).toBe(true);
-      const refs = VAR_REFERENCES.filter((r) => r.file === entry.file && r.token === entry.token);
-      expect(refs.length, `${entry.file} no longer references ${entry.token} — delete the entry`)
-        .toBeGreaterThan(0);
-      for (const ref of refs) {
-        expect(
-          referenceIsSatisfiable(ref),
-          `${entry.file} uses ${entry.token} with no resolving fallback — that is the OTHER ` +
-            'defect and it has no exemption list',
-        ).toBe(true);
-      }
-    }
-  });
-
-  it('the five phantoms retired on 2026-09-10 are gone from every stylesheet', () => {
+  it('every retired phantom is gone from every stylesheet, in both directions', () => {
     // A named regression guard, kept beside the general ones rather than trusted
-    // to them, because these five have a copy-paste history: `--border-subtle`
-    // and `--surface-raised` were each used in two files before anyone noticed.
-    // This fails on re-introduction EITHER WAY — writing `var(--text-body)` again,
-    // or "fixing" it by declaring `--text-body` in `tokens.css`, which would make
-    // the general guards green while restoring the synonym the slice removed.
-    for (const { token, nowUses } of RETIRED_PHANTOMS) {
+    // to them, because these have a copy-paste history: `--border-subtle` and
+    // `--surface-raised` were each used in two files before anyone noticed, and
+    // `--danger` / `--surface-muted` / `--surface-alt` sat rescued by a fallback
+    // for a recorded stretch before being fixed. This fails on re-introduction
+    // EITHER WAY — writing `var(--text-body)` again, or "fixing" it by declaring
+    // `--text-body` in `tokens.css`, which would make the general guards green
+    // while restoring the synonym the slice removed.
+    expect(RETIRED_PHANTOMS.length, 'the retired-phantom list is empty — the scan is broken')
+      .toBeGreaterThanOrEqual(5);
+    for (const { token, nowUses, recorded } of RETIRED_PHANTOMS) {
       expect(
         VAR_REFERENCES.filter((r) => r.token === token).map((r) => r.file),
-        `${token} was retired on 2026-09-10 in favour of ${nowUses} and has come back`,
+        `${token} was retired on ${recorded} in favour of ${nowUses} and has come back`,
       ).toEqual([]);
       expect(
         DECLARATIONS.has(token),
-        `${token} was retired on 2026-09-10, deliberately NOT aliased. Declaring it re-creates ` +
+        `${token} was retired on ${recorded}, deliberately NOT aliased. Declaring it re-creates ` +
           `a second name for ${nowUses} — see this file's header on one colour, two values.`,
       ).toBe(false);
       expect(
