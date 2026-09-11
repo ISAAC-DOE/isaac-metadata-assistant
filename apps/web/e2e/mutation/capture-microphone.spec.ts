@@ -869,6 +869,113 @@ test('a browser that refuses the microphone is reported honestly, and typing sti
 });
 
 /* ------------------------------------------------------------------------ */
+/* 4b · pause and resume, against a real MediaRecorder                       */
+/* ------------------------------------------------------------------------ */
+
+/*
+ * WHY THIS EXISTS EVEN THOUGH THE JSDOM SUITE COVERS PAUSE THOROUGHLY. This
+ * file is the ONLY place a real `MediaRecorder` runs, driven by Chromium's own
+ * fake audio device. Everything the unit suite proves about `paused` rests on
+ * a double that this repository wrote — including the two claims that matter
+ * most and that a double cannot settle: that the ENGINE honours `pause()` at
+ * all, and that pausing does NOT release the microphone.
+ *
+ * That second one is a claim the panel PUBLISHES in visible copy ("The
+ * microphone is still open — Stop Recording is what releases it"), so it is
+ * checked here against a real `MediaStreamTrack.readyState` rather than
+ * against a spy.
+ */
+test('pause suspends the recorder WITHOUT releasing the microphone, and Stop from paused releases it', async ({
+  page,
+  context,
+}) => {
+  await context.grantPermissions(['microphone'], { origin: MUT_BASE_URL });
+  await openCapture(page, SEED.fresh);
+  await startRecordingThroughTheUi(page);
+  await expect(elapsed(page)).toHaveText(/Recording · (?!0:00)\d+:\d\d/, { timeout: 10_000 });
+
+  const pauseButton = page.getByRole('button', { name: 'Pause Recording' });
+  // The control only renders when the constructed recorder carries BOTH
+  // `pause` and `resume`. Chromium does, so its absence here would be a real
+  // regression rather than an environment difference.
+  await expect(pauseButton).toBeVisible();
+  await pauseButton.click();
+  await expect(page.getByRole('button', { name: 'Resume Recording' })).toBeVisible();
+
+  const paused = await readProbe(page);
+  /*
+   * THE TWO FACTS, READ FROM THE ENGINE AT THE SAME MOMENT THE APP CLAIMS
+   * THEM. The recorder is suspended; the device is NOT released. A `paused`
+   * state built by stopping the tracks would pass every jsdom test in this
+   * repository and fail exactly here.
+   */
+  expect(paused.recorderStates).toEqual(['paused']);
+  expect(paused.trackStates).toEqual(['live']);
+  await expect(page.locator('.capture-live')).toHaveAttribute('data-state', 'paused');
+  await expect(
+    page.getByText('The microphone is still open — Stop Recording is what releases it.', {
+      exact: false,
+    }),
+  ).toBeVisible();
+
+  /*
+   * THE CLOCK IS STOPPED, MEASURED AGAINST REAL WALL TIME. Asserted as "the
+   * same string three seconds later" rather than as a literal, so it cannot
+   * pass by the reading happening to be what the test guessed.
+   */
+  const atPause = await elapsed(page).innerText();
+  /*
+   * CASE-INSENSITIVE, AND THE REASON IS NOT PEDANTRY — corrected 2026-09-11, on
+   * this test's FIRST execution.
+   *
+   * It was written as `/^Paused · \d+:\d\d$/` and failed with
+   * `Received string: "PAUSED · 0:01"`. `innerText` returns the RENDERED text, and
+   * the state bar's label is uppercased by CSS (`text-transform`), not in the
+   * source — so a source-shaped regex can never match what a reader sees. This
+   * repository has already been bitten by the same seam from the other side: CSS
+   * case-mapping turned a lowercase sigma into `Σ` on the uncertainty field
+   * (`d5fbb66`).
+   *
+   * The casing is a presentation decision that may change; the STOPPED CLOCK is
+   * the claim. So match the shape case-insensitively and let the assertion below
+   * — same string three seconds of real wall time later — carry the meaning.
+   */
+  expect(atPause).toMatch(/^paused · \d+:\d\d$/i);
+  await page.waitForTimeout(3000);
+  expect(
+    await elapsed(page).innerText(),
+    'the elapsed indicator advanced while the recorder was paused — paused time is not recorded time',
+  ).toBe(atPause);
+
+  // Resuming continues the SAME take rather than starting a new one.
+  await page.getByRole('button', { name: 'Resume Recording' }).click();
+  await expect(page.locator('.capture-live')).toHaveAttribute('data-state', 'recording');
+  const resumed = await readProbe(page);
+  expect(resumed.recorderStates).toEqual(['recording']);
+  expect(resumed.trackStates).toEqual(['live']);
+  // One recorder and one track for the whole session — no second `getUserMedia`,
+  // no orphaned first recorder still holding the device.
+  expect(resumed.gumCalls).toBe(1);
+
+  await pauseButton.click();
+  await expect(page.getByRole('button', { name: 'Resume Recording' })).toBeVisible();
+
+  // AND STOP WORKS FROM `paused`, which is where the microphone is actually
+  // released. A dead Stop here would strand a scientist with an open device.
+  await stopButton(page).click();
+  await expect(discardButton(page)).toBeVisible();
+
+  const stopped = await readProbe(page);
+  expect(stopped.trackStates).toEqual(['ended']);
+  expect(stopped.recorderStates).toEqual(['inactive']);
+  // The take survived the pause: real bytes, from one recorder, across two
+  // recorded segments.
+  expect(stopped.chunkEvents).toBeGreaterThan(0);
+  expect(stopped.audioBytes).toBeGreaterThan(0);
+  await expect(page.locator('.capture-live')).toHaveAttribute('data-state', 'held');
+});
+
+/* ------------------------------------------------------------------------ */
 /* 5 · no audio ever leaves the browser                                      */
 /* ------------------------------------------------------------------------ */
 

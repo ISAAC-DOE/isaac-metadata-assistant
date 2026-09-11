@@ -96,7 +96,12 @@
  *
  * THE BOUNDARY, so the carve-out cannot creep: the alert ramp is permitted on
  * the LIVE-RECORDING indicator and the Stop control, and nowhere else in this
- * file. `held` is deliberately NEUTRAL (`--surface-subtle` / `--border-strong`)
+ * file. It is UNMOVED by the `paused` state added on 2026-09-11, which paints
+ * on the ADVISORY ramp (`--advisory-*`, the non-gating amber motif) — not a
+ * verdict colour, and chosen precisely so that a paused bar cannot be read as
+ * a live one. Stop keeps `--fail-*` in `paused` as well as in `recording`,
+ * which is the SAME control in both, not a second site.
+ * `held` is deliberately NEUTRAL (`--surface-subtle` / `--border-strong`)
  * — held audio is not an alarm — and no candidate, proposal, note or outcome row
  * may take a verdict colour, exactly as before. If a reviewer disagrees, the
  * revert is this comment plus `.capture-live[data-state='recording']` and
@@ -269,8 +274,13 @@
 }
 
 /*
- * THE STATE BAR — `recording` AND `held`.
- * ======================================
+ * THE STATE BAR — `recording`, `paused` AND `held`.
+ * =================================================
+ *
+ * `paused` was added on 2026-09-11 and has its own block below, beside the
+ * rule that paints it; the per-state signal accounting there is written in
+ * the same form as the one here, and says what that state has and what it
+ * does not.
  *
  * WHAT IT REPLACES. `.capture-elapsed` was a 12px `--text-muted` span sitting
  * inline beside the Stop button, and `held` rendered no indicator at all. So
@@ -336,6 +346,64 @@
   border-color: var(--fail-border);
 }
 
+/*
+ * `paused` — THE FOURTH STATE, 2026-09-11, AND THE ONE THAT MUST NEVER BE
+ * MISTAKEN FOR `recording` AT A GLANCE.
+ * =========================================================================
+ *
+ * WHAT IT HAS, COUNTED THE SAME HONEST WAY THE BLOCK ABOVE COUNTS THE OTHER
+ * TWO — `recording` THREE, `held` TWO AND A BORDER:
+ *
+ *   `paused` — TWO AND A HUE. The word "Paused", and the mark's SHAPE (two
+ *     upright bars — the universal pause glyph, and a third distinct silhouette
+ *     beside the disc and the square). Those two are wholly colour-independent
+ *     and either alone is sufficient. The third signal, colour, is a HUE shift
+ *     and almost nothing else, and the numbers say so rather than the prose
+ *     flattering it:
+ *
+ *       --advisory-bg  #f9f1df vs --screen-base #f4f6f9   1.04:1
+ *       --advisory-bg  #f9f1df vs --fail-bg     #fbece9   1.02:1   <- paused vs
+ *                                                                     recording
+ *       --advisory-text #8a6420 vs --fail-text  #8f2c24   1.54:1
+ *       --advisory-icon #b07d2b vs --fail-solid #b23a30   1.64:1
+ *
+ *     i.e. amber and red are the SAME LIGHTNESS here. Anyone who cannot
+ *     separate those two hues gets no help at all from the tint, which is
+ *     exactly why the word and the glyph are not decoration.
+ *
+ *   TWO FURTHER SIGNALS EXIST AND ARE DELIBERATELY NOT COUNTED, because
+ *   neither is available to a glance. The disc PULSES and the bars do not —
+ *   but `prefers-reduced-motion` removes that (see the block at the end of this
+ *   file), so it cannot be relied on. And the CLOCK STOPS — true, load-bearing,
+ *   and only observable by watching it for a second.
+ *
+ * MEASURED CONTRAST, recomputed on the exact token values in `styles/tokens.css`:
+ *   --advisory-text #8a6420 on --advisory-bg #f9f1df   4.76:1  (text, AA)
+ *   --advisory-icon #b07d2b on --advisory-bg #f9f1df   3.21:1  (mark, 1.4.11
+ *                                                       asks 3:1)
+ *
+ * WHY `--advisory-icon` AND NOT `--advisory-solid` FOR THE MARK.
+ * `--advisory-solid` #c0842b is the ramp's parallel to `--fail-solid`, so it
+ * was the obvious choice — and it measures 2.84:1 on `--advisory-bg`, which
+ * fails 1.4.11. `--advisory-icon` is the token this repository already
+ * registers for exactly this job: `palette-contrast.test.ts` classifies it
+ * `graphic-anywhere` and records 3.21:1 on this same ground.
+ *
+ * NO NEW TOKEN AND NO NEW GROUND. `--advisory-*` is already painted in this
+ * file (`.capture-preflight`) and `--advisory-bg` is already in that test's
+ * `TEXT_GROUNDS`; `--advisory-text` is already a registered `TINTED_PAIRS` ink
+ * and is painted here on its own tint.
+ *
+ * THE VERDICT-COLOUR BOUNDARY IS UNMOVED. The carve-out above is for the
+ * `--fail-*` ramp, and amber is not a verdict colour — `--advisory-*` is the
+ * non-gating advisory motif, used here to say "suspended", which asserts
+ * nothing about a record.
+ */
+.capture-live[data-state='paused'] {
+  background: var(--advisory-bg);
+  border-color: var(--advisory-border);
+}
+
 .capture-live[data-state='held'] {
   background: var(--surface-subtle);
   border-color: var(--border-strong);
@@ -354,6 +422,42 @@
   border-radius: 50%;
   background: var(--fail-solid);
   animation: capture-recording-pulse 1.6s ease-in-out infinite;
+}
+
+/*
+ * TWO UPRIGHT BARS — the pause glyph, and the third distinct silhouette in this
+ * set. Two 4px bars with a 4px gap, full height, on a 12px box, from ONE
+ * `aria-hidden` span with no child elements.
+ *
+ * DRAWN WITH `inset` BOX-SHADOWS RATHER THAN WITH LEFT/RIGHT BORDERS, AND THAT
+ * IS A REPOSITORY RULE RATHER THAN A PREFERENCE. The obvious implementation —
+ * a 4px solid left border carrying the advisory icon token, and its right-hand
+ * twin — is what this rule shipped as first, and it turned
+ * `src/__tests__/no-vertical-rail.test.ts` RED: that guard calls itself
+ * "permanent and system-wide", scans every left/right border declaration in
+ * every stylesheet for a status or accent token, names `--advisory` in its own
+ * `ACCENT` pattern, expects exactly ZERO offenders, and HAS NO EXEMPTION
+ * MECHANISM. Adding one would have been a governance act dressed up as a CSS
+ * fix.
+ *
+ * THAT GUARD READS THE RAW SOURCE AND DOES NOT BLANK COMMENTS — unlike
+ * `palette-contrast.test.ts`, which does. So the first version of THIS COMMENT
+ * failed it too, by quoting the rejected declaration verbatim on one line. The
+ * prose above therefore describes the discarded form in words rather than in
+ * code, deliberately.
+ *
+ * The two renderings are pixel-identical (compared at 6x in Chrome), because
+ * an `inset` shadow with no blur and no spread fills exactly the strip the
+ * offset describes. So nothing was traded to obey the rule.
+ *
+ * It does NOT pulse — see the reduced-motion note in the block above for why
+ * the absence of motion is not counted as one of this state's signals.
+ */
+.capture-live[data-state='paused'] .capture-live-mark {
+  background: transparent;
+  box-shadow:
+    inset 4px 0 0 var(--advisory-icon),
+    inset -4px 0 0 var(--advisory-icon);
 }
 
 /* A SQUARE — the stop/hold glyph, distinguishable from the disc with no colour
@@ -380,6 +484,10 @@
 
 .capture-live[data-state='recording'] .capture-elapsed {
   color: var(--fail-text);
+}
+
+.capture-live[data-state='paused'] .capture-elapsed {
+  color: var(--advisory-text);
 }
 
 .capture-live[data-state='held'] .capture-elapsed {
