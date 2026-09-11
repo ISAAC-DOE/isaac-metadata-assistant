@@ -822,8 +822,20 @@ describe('semantic zoom — level changes reach a screen reader', () => {
     await waitFor(() => expect(announced()).toMatch(/unavailable in this deployment/));
     expect(announced()).toContain('stays on the file projection');
     // There is exactly ONE status region on the canvas — the loading note's
-    // separate `role="status"` was folded into this one.
-    expect(document.querySelectorAll('[role="status"]').length).toBe(1);
+    // separate `role="status"` was folded into this one — PLUS the Assistant
+    // panel's own sr-only agent-action/Confirm announcer, which `ProjectMemory`
+    // mounts alongside this canvas via `AssistantDrawer` and which stays empty
+    // here because nothing in this test runs an agent action or a Confirm (see
+    // `AssistantPanel`'s `announceAgentMessage` for what feeds it). Named
+    // explicitly, rather than widened to `toBeGreaterThan`, so a THIRD
+    // unaccounted status region still fails this test.
+    const status = Array.from(document.querySelectorAll('[role="status"]'));
+    expect(status.length).toBe(2);
+    expect(status).toContain(statusRegion());
+    const agentAnnouncer = status.find((el) => el !== statusRegion())!;
+    expect(agentAnnouncer.classList.contains('assistant-agent-announcer')).toBe(true);
+    expect(agentAnnouncer.classList.contains('sr-only')).toBe(true);
+    expect(agentAnnouncer.textContent).toBe('');
   });
 });
 

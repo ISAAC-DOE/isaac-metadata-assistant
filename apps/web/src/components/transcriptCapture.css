@@ -72,11 +72,36 @@
  * time inherits from the PARENT rather than yielding to the loser. So it rendered
  * #1b2430 before and renders #1b2430 now. Verified, not reasoned.
  *
- * NO VERDICT COLOUR ANYWHERE. `--pass-*` / `--fail-*` are reserved for a
- * validator's ruling about a record, and a proposal is not a ruling. Painting an
- * accepted proposal green would say, in the one language a reader cannot help
- * absorbing, that the value has been checked against the schema. It has not; it
- * has been confirmed by a person, which is a different claim.
+ * NO VERDICT COLOUR ON ANYTHING THAT MAKES A CLAIM ABOUT A RECORD. `--pass-*` /
+ * `--fail-*` are reserved for a validator's ruling, and a proposal is not a
+ * ruling. Painting an accepted proposal green would say, in the one language a
+ * reader cannot help absorbing, that the value has been checked against the
+ * schema. It has not; it has been confirmed by a person, which is a different
+ * claim.
+ *
+ * THAT RULE READ "NO VERDICT COLOUR ANYWHERE" UNTIL 2026-09-10, AND IS NARROWED
+ * RATHER THAN BROKEN QUIETLY — the carve-out is exactly one state and the reason
+ * is stated so a future reader can disagree with it on the merits.
+ *
+ * `.capture-live[data-state='recording']` paints on the `--fail-*` ramp: a
+ * `--fail-solid` disc, a `--fail-bg` fill, a `--fail-border` edge and
+ * `--fail-text` ink. It asserts NOTHING about a record — it says a microphone is
+ * live in this tab right now, and it exists only while that is true. The
+ * rationale the original sentence gives ("that the value has been checked
+ * against the schema") has no purchase on it: there is no value, and nothing has
+ * been checked. What the ramp buys is the one convention a scientist reads
+ * without thinking, at a beamline, possibly gloved, under time pressure — and
+ * before this change the ONLY difference between recording and not recording was
+ * a verb swap inside the same blue pill plus 12px of `--text-muted`.
+ *
+ * THE BOUNDARY, so the carve-out cannot creep: the alert ramp is permitted on
+ * the LIVE-RECORDING indicator and the Stop control, and nowhere else in this
+ * file. `held` is deliberately NEUTRAL (`--surface-subtle` / `--border-strong`)
+ * — held audio is not an alarm — and no candidate, proposal, note or outcome row
+ * may take a verdict colour, exactly as before. If a reviewer disagrees, the
+ * revert is this comment plus `.capture-live[data-state='recording']` and
+ * `.capture-stop`; the word, the mark's shape and the tint move together
+ * (see below), so dropping the tint costs no information.
  *
  * STATUS IS NEVER CARRIED BY COLOUR ALONE. Every state that is tinted also
  * carries a word — "Stored. Waiting in Ingestion Proposals.", the server's own
@@ -244,22 +269,240 @@
 }
 
 /*
- * THE ELAPSED-TIME INDICATOR.
+ * THE STATE BAR — `recording` AND `held`.
+ * ======================================
  *
- * m5, INDEPENDENT REVIEW OF PR-D — CORRECTED: it is NOT `aria-hidden` any more.
- * The ticking count is still not re-announced every second in the LIVE region
- * (that would be noise; the one live announcement for `recording` stays
- * "Recording. Audio is being held in this tab." — `voiceLive`, fired once on
- * entry) — but the element's own text ("Recording · 0:12") is now in the
- * accessibility tree, so a screen-reader user who navigates to it afterwards
- * still gets both the state and the time, rather than nothing at all.
+ * WHAT IT REPLACES. `.capture-elapsed` was a 12px `--text-muted` span sitting
+ * inline beside the Stop button, and `held` rendered no indicator at all. So
+ * the panel's two most consequential states were signalled by a verb swap in
+ * an unchanged blue pill, and by the disappearance of a small grey label.
+ *
+ * THE SIGNALS, AND AN EARLIER VERSION OF THIS COMMENT OVERCOUNTED THEM.
+ * It claimed "three independent signals, any one sufficient" for BOTH states.
+ * Measured against the ground these bars actually sit on (`--screen-base`
+ * #f4f6f9, not white):
+ *
+ *   recording  fill   --fail-bg     #fbece9  1.06:1   <- a HUE shift, not a
+ *              border --fail-border #f0c5be  1.44:1      lightness one
+ *   held       fill   --surface-subtle #fbfcfd 1.05:1 <- no tint worth the name
+ *              border --border-strong  #d3dae2 1.30:1
+ *
+ * So the honest account is per state:
+ *   `recording` — THREE: the word "Recording"; the disc's SHAPE and its pulse;
+ *     and colour, carried mostly by the INK (`--fail-text`, 7.16:1 on the bar)
+ *     and by the fill's HUE rather than by its lightness.
+ *   `held` — TWO AND A BORDER: the word "Held" and the square mark. Its fill is
+ *     1.05:1 against the page and is effectively not a tint; the hairline
+ *     border is what separates the bar from the page. That is deliberate —
+ *     held audio is not an alarm, and the state is fully carried by the two
+ *     signals that do not depend on colour at all — but it is two, not three.
+ *
+ * Either way the file's "status is never carried by colour alone" rule holds,
+ * which is the property that matters: remove all colour and both states still
+ * read. The mark is `aria-hidden` because its meaning is entirely carried by
+ * the adjacent word, which is the exemption basis `palette-contrast.test.ts`
+ * recognises.
+ *
+ * MEASURED CONTRAST, recomputed for this change on the exact token values in
+ * `styles/tokens.css` rather than estimated:
+ *   recording  --fail-text  #8f2c24 on --fail-bg       #fbece9   7.16:1  (text)
+ *              --fail-solid #b23a30 on --fail-bg       #fbece9   5.16:1  (mark,
+ *                                                      1.4.11 asks 3:1)
+ *   held       --text-primary #1b2430 on --surface-subtle #fbfcfd 15.24:1 (text)
+ *              --text-muted   #5b6570 on --surface-subtle #fbfcfd  5.77:1 (mark)
+ *   Stop       #fff on --fail-solid #b23a30                        5.93:1
+ *              #fff on --fail-text  #8f2c24 (hover/active)         8.22:1
+ *
+ * `.capture-elapsed` IS NOT A FLEX CONTAINER, AND THAT IS LOAD-BEARING.
+ * `e2e/mutation/capture-microphone.spec.ts` reads this element's `innerText`
+ * and parses `/(\d+):(\d\d)\s*$/` off it (`:510`), and asserts the text is
+ * `Recording · 0:01` (`:901`). Flex items can have `innerText` newlines
+ * inserted between them. The two inner spans are inline, so the size step
+ * changes not one character of the text.
  */
-.capture-elapsed {
-  font-size: 12px;
-  font-variant-numeric: tabular-nums;
-  color: var(--text-muted);
-  align-self: center;
+.capture-live {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px;
+  padding: 8px 12px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  max-width: 68ch;
 }
+
+.capture-live[data-state='recording'] {
+  background: var(--fail-bg);
+  border-color: var(--fail-border);
+}
+
+.capture-live[data-state='held'] {
+  background: var(--surface-subtle);
+  border-color: var(--border-strong);
+}
+
+.capture-live-mark {
+  flex: none;
+  width: 12px;
+  height: 12px;
+}
+
+/* A DISC, and it pulses — see the reduced-motion block at the end of this file,
+   which stops the animation without hiding the mark (the base state is opaque,
+   so `animation: none` leaves it fully visible rather than mid-fade). */
+.capture-live[data-state='recording'] .capture-live-mark {
+  border-radius: 50%;
+  background: var(--fail-solid);
+  animation: capture-recording-pulse 1.6s ease-in-out infinite;
+}
+
+/* A SQUARE — the stop/hold glyph, distinguishable from the disc with no colour
+   at all. */
+.capture-live[data-state='held'] .capture-live-mark {
+  border-radius: 2px;
+  background: var(--text-muted);
+}
+
+@keyframes capture-recording-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.4;
+  }
+}
+
+.capture-elapsed {
+  margin: 0;
+  line-height: 1.15;
+}
+
+.capture-live[data-state='recording'] .capture-elapsed {
+  color: var(--fail-text);
+}
+
+.capture-live[data-state='held'] .capture-elapsed {
+  color: var(--text-primary);
+}
+
+.capture-elapsed-state {
+  font-size: 12px;
+  font-weight: 650;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+/* READABLE FROM TWO FEET, which is the whole brief for this number: 22px,
+   tabular so the digits do not shuffle as the seconds tick. */
+.capture-elapsed-time {
+  font-size: 22px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The persistent, VISIBLE held statement — the fact that used to live only in
+   the `sr-only` live region. */
+.capture-held-line {
+  margin: 8px 0 0;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--text-primary);
+  max-width: 68ch;
+}
+
+/* Local playback of the held audio. Native controls, deliberately: a
+   hand-rolled transport would be a new interaction to learn and a new
+   accessibility surface to get right, for no gain over the one every browser
+   already ships. Width is capped to the form's own 68ch measure. */
+.capture-playback {
+  display: block;
+  width: 100%;
+  max-width: 68ch;
+  margin-top: 10px;
+}
+
+/*
+ * STOP DOES NOT LOOK LIKE START.
+ * =============================
+ *
+ * THE STATE RULES DARKEN WITH A TOKEN-FREE `filter`, AND THAT IS NOT A STYLE
+ * CHOICE — IT IS HOW THIS REPOSITORY ALREADY ANSWERED THIS EXACT QUESTION.
+ * `src/__tests__/interaction-states.test.ts` ("P22C · no green/red hex or
+ * pass/fail token in ANY interaction-state rule") scans EVERY `:hover`/
+ * `:active`/`:focus` rule in every stylesheet and rejects `--pass-*`,
+ * `--fail-*`, the words red/green, and any hex literal. It does NOT scan
+ * resting rules, which is why the base repaint below is permitted and the
+ * state rules may not name the ramp.
+ *
+ * `.btn-danger` in `styles/base.css` hit this first and its own comment says
+ * so: "Solid fail fill in the RESTING state (armed); hover/active darken via a
+ * token-free filter (no reserved-hue token in a state rule)". This block is
+ * that idiom, applied. A first version of this slice put `var(--fail-text)` in
+ * both state rules and turned the guard red; the fix is to follow the
+ * precedent, NOT to widen a repo-wide invariant for one hover shade. The
+ * rendered result is the same darkening either way, so nothing was traded for
+ * it.
+ *
+ * WHY A DESCENDANT SELECTOR RATHER THAN `.btn.capture-stop`. The resting fill
+ * has to beat `.btn-primary:hover`'s `background: var(--action-hover)` (0,2,0)
+ * — otherwise hovering a live recording's Stop turns it BLUE — and it has to
+ * do so without the state rules naming a colour. `.capture-voice-controls .btn
+ * .capture-stop` is (0,3,0), wins on specificity rather than on bundling
+ * order, and is not a state rule so the guard never sees it. It is scoped to
+ * the container rather than to `.btn-primary` deliberately: when a finished
+ * reading is on screen the primary slot belongs to Review Proposals, so a LIVE
+ * recording's Stop can render `btn btn-secondary capture-stop`, and it must
+ * stay unmistakable there too.
+ */
+.capture-voice-controls .btn.capture-stop {
+  background: var(--fail-solid);
+  border-color: var(--fail-solid);
+  color: #fff;
+}
+
+.btn.capture-stop:hover:not(:disabled) {
+  filter: brightness(0.93);
+  box-shadow: none;
+}
+
+.btn.capture-stop:active:not(:disabled) {
+  filter: brightness(0.86);
+  box-shadow: none;
+}
+
+/*
+ * A DISABLED STOP THAT LOOKS DISABLED — the same defect as
+ * `.capture-transcribe:disabled` below, one rule away, and it was introduced
+ * by this slice rather than inherited.
+ *
+ * MEASURED IN CHROME: `formLocked` (a finalize in flight) makes
+ * `showVoicePrimary` false, so a DISABLED Stop rendered `btn btn-secondary
+ * capture-stop` — and since `.btn-secondary` declares no `:disabled` state and
+ * the repaint above wins anyway, it came out `rgb(178,58,48)` on `#fff` with
+ * `cursor: pointer`: byte-identical to a live, armed Stop. Reachable by typing
+ * a transcript while recording and pressing Finalize. `:not(:disabled)` on the
+ * two state rules above is the other half — without it the hover filter still
+ * animated a control that cannot be pressed.
+ *
+ * It is given the SAME treatment as the disabled Request a Transcript beside
+ * it, rather than `.btn-danger:disabled`'s `--fail-border`-on-`--fail-bg`
+ * (~1.3:1, taken under WCAG 1.4.3's inactive-control exception): two disabled
+ * controls in one button row should read as one thing, and #626c77 on
+ * `--border-faint` #eef2f6 is 4.75:1 — no exception needed, and no new entry
+ * required in `palette-contrast.test.ts`'s `EXEMPT_SITES`, which this slice is
+ * not scoped to edit.
+ */
+.capture-voice-controls .btn.capture-stop:disabled {
+  background: var(--border-faint);
+  border-color: var(--border-strong);
+  color: var(--text-tertiary);
+  cursor: not-allowed;
+  box-shadow: none;
+  transform: none;
+  filter: none;
+}
+
 
 /* ---- the run selector's own empty state (0 runs) ---- */
 
@@ -299,11 +542,40 @@
   background: var(--surface-subtle);
 }
 
+/*
+ * THE REFUSAL LEAD — one scientist-facing sentence, set a step larger than the
+ * body around it because it is the thing to read first. The server's own
+ * governance paragraph is not deleted; it sits in `.capture-refusal-server`
+ * inside the `Why?` disclosure below.
+ */
 .capture-refusal-message {
   margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.5;
+  color: var(--text-primary);
+  max-width: 68ch;
+}
+
+.capture-refusal-why {
+  margin: 8px 0 0;
+  font-size: 12px;
+  max-width: 68ch;
+}
+
+.capture-refusal-why > summary {
+  cursor: pointer;
+  font-weight: 600;
+  color: var(--action);
+}
+
+/* The server's own words, verbatim. Quiet, because a reader who opened the
+   disclosure is already looking for them. */
+.capture-refusal-server {
+  margin: 6px 0 0;
   font-size: 12px;
   line-height: 1.55;
-  color: var(--text-primary);
+  color: var(--text-muted);
   max-width: 68ch;
 }
 
@@ -488,8 +760,41 @@
   margin-top: 10px;
 }
 
+/*
+ * THE PRE-FLIGHT BESIDE FINALIZE, on the advisory ramp rather than the alert
+ * one — `--advisory-*` is this palette's declared "soft amber, NON-GATING"
+ * signal, and finalizing with no run is exactly that: permitted, valuable
+ * (every word is still stored as notes), and not what the reader may expect.
+ * It is deliberately NOT the `--fail-*` ramp: nothing is wrong.
+ *
+ * `--advisory-text` #8a6420 on `--advisory-bg` #f9f1df is an existing
+ * registered pair in `palette-contrast.test.ts`'s `TINTED_PAIRS` and clears
+ * 4.5:1 there; no new token, no new ground.
+ */
+.capture-preflight {
+  margin: 8px 0 0;
+  padding: 6px 10px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--advisory-text);
+  background: var(--advisory-bg);
+  border: 1px solid var(--advisory-border);
+  border-radius: 6px;
+  max-width: 68ch;
+}
+
+/*
+ * `animation` WAS NOT IN THIS BLOCK AND HAD TO BE ADDED WITH THE PULSE. The
+ * rule covered `transition` only, so the recording indicator's `@keyframes`
+ * would have run regardless of the preference — the exact failure this media
+ * query exists to prevent. Stopping it costs no information: the base state of
+ * `.capture-live-mark` is fully opaque, so `animation: none` leaves a solid,
+ * visible mark rather than freezing it mid-fade, and the state is carried by
+ * the word and the mark's shape in any case.
+ */
 @media (prefers-reduced-motion: reduce) {
   .capture-section * {
     transition: none !important;
+    animation: none !important;
   }
 }

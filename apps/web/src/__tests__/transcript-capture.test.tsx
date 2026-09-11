@@ -701,6 +701,38 @@ class FakeMediaRecorder {
   }
 }
 
+/**
+ * OBJECT-URL BOOKKEEPING, installed beside the recorder double rather than as a
+ * second one — jsdom implements NEITHER `URL.createObjectURL` nor
+ * `URL.revokeObjectURL`, so without this the playback effect's own
+ * `typeof URL.createObjectURL !== 'function'` guard would short-circuit and
+ * every playback assertion below would pass vacuously by never running the
+ * code it is about.
+ *
+ * BOTH SIDES ARE RECORDED, because the create is the easy half. A leak is a URL
+ * created and never revoked, and only `revoked` can see that.
+ *
+ * INSTALLED AT MODULE SCOPE, NOT TORN DOWN IN `afterEach` — and that is a
+ * correction, not a shortcut. Deleting these in an `afterEach` beside the
+ * `MediaRecorder` teardown made TWELVE tests fail with `URL.revokeObjectURL is
+ * not a function`: testing-library's own auto-`cleanup` hook unmounts the tree
+ * AFTER this file's hooks run, so the component's revoke-on-unmount reached a
+ * global that had already been removed. A real browser never withdraws these
+ * two mid-teardown, so neither does this double.
+ */
+const objectUrls: { created: string[]; revoked: string[] } = { created: [], revoked: [] };
+let objectUrlsMinted = 0;
+
+(URL as unknown as Record<string, unknown>).createObjectURL = () => {
+  objectUrlsMinted += 1;
+  const url = `blob:isaac-test/${objectUrlsMinted}`;
+  objectUrls.created.push(url);
+  return url;
+};
+(URL as unknown as Record<string, unknown>).revokeObjectURL = (url: string) => {
+  objectUrls.revoked.push(url);
+};
+
 function installRecorder(getUserMedia: Mock) {
   FakeMediaRecorder.instances = [];
   (globalThis as never as Record<string, unknown>).MediaRecorder = FakeMediaRecorder;
@@ -710,6 +742,8 @@ function installRecorder(getUserMedia: Mock) {
     configurable: true,
     value: { getUserMedia },
   });
+  objectUrls.created = [];
+  objectUrls.revoked = [];
 }
 
 afterEach(() => {
@@ -766,7 +800,7 @@ describe('voice state machine', () => {
     await screen.findByRole('button', { name: CAPTURE_COPY.voiceStop });
   });
 
-  it('recording: elapsed time ticks and is cleared on stop', async () => {
+  it('recording: elapsed time ticks, and on stop the bar says HELD rather than vanishing', async () => {
     /*
      * FAKE TIMERS ARE ENABLED BEFORE THE CLICK, and everything after is driven by
      * explicit `act()`/`advanceTimersByTimeAsync` rather than `findBy*`/`waitFor`
@@ -793,7 +827,24 @@ describe('voice state machine', () => {
     // gets both facts.
     const elapsed = container.querySelector('.capture-elapsed');
     expect(elapsed).not.toHaveAttribute('aria-hidden');
+    /*
+     * THE EXACT TEXT IS A CONTRACT WITH A SPEC THIS FILE CANNOT SEE.
+     * `e2e/mutation/capture-microphone.spec.ts` asserts `Recording · 0:01`
+     * (`:901`), matches `/Recording · (?!0:00)\d+:\d\d/` (`:774`) and parses
+     * `/(\d+):(\d\d)\s*$/` off this element's `innerText` (`:510`). The 2026-09-10
+     * bar redesign splits the state and the time into two differently-sized
+     * spans; asserting the concatenation here is what proves the split changed
+     * no character of the text those three depend on.
+     */
     expect(elapsed?.textContent).toBe('Recording · 0:00');
+    // The state word and the time are separately addressable, so the time can be
+    // set large without touching the string above.
+    expect(container.querySelector('.capture-elapsed-state')?.textContent).toBe('Recording');
+    expect(container.querySelector('.capture-elapsed-time')?.textContent).toBe('0:00');
+    expect(container.querySelector('.capture-live')?.getAttribute('data-state')).toBe('recording');
+    // The mark carries no information a sighted reader does not also get from
+    // the word beside it, which is the whole basis for hiding it.
+    expect(container.querySelector('.capture-live-mark')).toHaveAttribute('aria-hidden', 'true');
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(5000);
@@ -802,8 +853,20 @@ describe('voice state machine', () => {
 
     fireEvent.click(screen.getByRole('button', { name: CAPTURE_COPY.voiceStop }));
     expect(screen.getByRole('button', { name: CAPTURE_COPY.voiceTypeWhatWasSaid })).toBeInTheDocument();
-    // `held` renders no elapsed indicator at all — it belongs to `recording` only.
-    expect(container.querySelector('.capture-elapsed')).toBeNull();
+    /*
+     * THIS ASSERTION USED TO READ `toBeNull()`, AND THE BEHAVIOUR IT PINNED WAS
+     * THE DEFECT. On Stop the elapsed indicator disappeared and NOTHING VISIBLE
+     * said audio was still held — the only statement was the `sr-only` live
+     * region, so a screen-reader user was better informed than a sighted one.
+     * The bar now persists, says `Held`, and keeps the duration; the clock has
+     * stopped, which is what the unchanged `0:05` five seconds later proves.
+     */
+    expect(container.querySelector('.capture-live')?.getAttribute('data-state')).toBe('held');
+    expect(container.querySelector('.capture-elapsed')?.textContent).toBe('Held · 0:05');
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5000);
+    });
+    expect(container.querySelector('.capture-elapsed')?.textContent).toBe('Held · 0:05');
     vi.useRealTimers();
   });
 
@@ -2552,5 +2615,554 @@ describe('leaving a record: the panel keeps its own promise, whoever the caller 
     const box = (await screen.findByLabelText('Transcript')) as HTMLTextAreaElement;
     expect(box.value).toBe('');
     expect(screen.queryByText(/Synthetic dictation belonging to the first record/)).toBeNull();
+  });
+});
+
+// --- 14. local playback of the held audio -------------------------------------
+//
+// ADDED 2026-09-10. Before this, a scientist could record audio and never hear
+// it: the only exits from a recording were *Request a Transcript* (which
+// refuses in every deployment) and *Discard Audio*. There was no `<audio>`, no
+// `createObjectURL` and no `new Audio()` anywhere in the capture path, so the
+// Record button's entire value was contingent on a transcription provider that
+// does not exist.
+//
+// EVERY TEST HERE DRIVES THE SHIPPED `FakeMediaRecorder`/`installRecorder`
+// DOUBLES. No second double is introduced: `installRecorder` gained the
+// object-URL bookkeeping the playback path needs, because jsdom implements
+// neither `createObjectURL` nor `revokeObjectURL` and the component's own
+// `typeof` guard would otherwise skip the code these tests are about.
+
+describe('local playback of the held audio', () => {
+  /**
+   * Record, stop, and FLUSH THE FINAL CHUNK.
+   *
+   * The flush is the whole reason this helper exists rather than three inline
+   * lines. `FakeMediaRecorder.stop()` emits its `dataavailable` on a
+   * `setTimeout(…, 0)` — reproducing the real API, whose final chunk arrives
+   * asynchronously — and a `MediaRecorder` started with no timeslice emits
+   * exactly ONE chunk, at stop. So immediately after the Stop click the buffer
+   * is still EMPTY, and a test that asserted here would be asserting that no
+   * player exists, for the wrong reason.
+   */
+  async function recordAndHold() {
+    installRecorder(vi.fn(async () => ({ getTracks: () => [{ stop: vi.fn() }] })));
+    stubFetchRoutes(BASE_ROUTES as never);
+    const rendered = await renderPanel();
+    await act(async () => {
+      fireEvent.click(await screen.findByRole('button', { name: CAPTURE_COPY.voiceRecord }));
+      await Promise.resolve();
+    });
+    fireEvent.click(await screen.findByRole('button', { name: CAPTURE_COPY.voiceStop }));
+    // The buffer is empty until the asynchronous final chunk lands.
+    expect(rendered.container.querySelector('audio')).toBeNull();
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    return rendered;
+  }
+
+  const player = (container: HTMLElement) =>
+    container.querySelector('audio') as
+      | (HTMLAudioElement & { disableRemotePlayback?: boolean })
+      | null;
+
+  it('offers a player for the held audio, from an object URL this tab minted', async () => {
+    const { container } = await recordAndHold();
+    const audio = player(container);
+    expect(audio, 'no player was rendered for held audio').not.toBeNull();
+    // Vacuity: the double really was reached, and the src really is the URL it
+    // handed back — not some other string that merely looks like one.
+    expect(objectUrls.created).toHaveLength(1);
+    expect(audio!.getAttribute('src')).toBe(objectUrls.created[0]);
+    expect(audio!.hasAttribute('controls')).toBe(true);
+    expect(audio!).toHaveAttribute('aria-label', CAPTURE_COPY.voicePlaybackLabel);
+    expect(objectUrls.revoked).toEqual([]);
+  });
+
+  it('the player offers no download and no casting — two ways audio could leave', () => {
+    /*
+     * NOT A STYLE PREFERENCE, EITHER OF THEM.
+     *
+     * `nodownload` — Chrome's default `<audio controls>` overflow menu carries
+     * a Download item. `CAPTURE_COPY.voiceAudioHandling` promises the audio is
+     * "never written to disk"; a download control would make a shipped claim
+     * false.
+     *
+     * `noremoteplayback` + `disableRemotePlayback` — remote playback would
+     * stream the clip to a Cast device. That is audio leaving the tab over a
+     * channel no HTTP assertion in this repository watches, including
+     * `e2e/mutation/capture-microphone.spec.ts`'s request sweep.
+     */
+    return recordAndHold().then(({ container }) => {
+      const audio = player(container)!;
+      const list = audio.getAttribute('controlsList') ?? '';
+      expect(list.split(/\s+/)).toContain('nodownload');
+      expect(list.split(/\s+/)).toContain('noremoteplayback');
+      expect(audio.disableRemotePlayback).toBe(true);
+    });
+  });
+
+  it('rendering the player issues NO request of any kind', async () => {
+    const { container } = await recordAndHold();
+    expect(player(container)).not.toBeNull();
+    /*
+     * The premise this rests on: the only requests in the log are the two the
+     * panel makes when it OPENS. Playback added neither a third nor a body.
+     * Stated as an exact set rather than as "no audio key", because a new
+     * request with no audio in it would still be a request this claim denies.
+     */
+    expect(requests()).toEqual([`GET /api/experiments/${EXP}/runs`, 'GET /api/providers/capabilities']);
+    expect(writes()).toEqual([]);
+  });
+
+  it('Discard Audio revokes the object URL and removes the player', async () => {
+    const { container } = await recordAndHold();
+    const minted = objectUrls.created[0];
+    expect(player(container)).not.toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: CAPTURE_COPY.voiceDiscard }));
+
+    expect(objectUrls.revoked).toEqual([minted]);
+    expect(player(container)).toBeNull();
+    // And nothing new was minted on the way out — a revoke followed by a
+    // re-create would leak on the next transition instead of this one.
+    expect(objectUrls.created).toHaveLength(1);
+  });
+
+  it('unmounting revokes the object URL', async () => {
+    const { unmount } = await recordAndHold();
+    const minted = objectUrls.created[0];
+    expect(objectUrls.revoked).toEqual([]);
+    unmount();
+    expect(objectUrls.revoked).toEqual([minted]);
+  });
+
+  it('closing the panel revokes it too — the other way of leaving', async () => {
+    const { container } = await recordAndHold();
+    const minted = objectUrls.created[0];
+    fireEvent.click(screen.getByRole('button', { name: CAPTURE_COPY.entryClose }));
+    expect(objectUrls.revoked).toEqual([minted]);
+    expect(player(container)).toBeNull();
+  });
+
+  it('a SECOND recording mints a fresh URL, never reusing the revoked one', async () => {
+    /*
+     * THE ONLY WAY BACK TO `idle` FROM `held` IS DISCARD, and that is measured
+     * rather than assumed: `Start Recording` renders in `voice === 'idle'`
+     * alone, so a held recording cannot be restarted over the top of itself.
+     * The four other exits from `held` (Close Capture, a record change, an
+     * unmount, and this discard) each have their own test above.
+     */
+    const { container } = await recordAndHold();
+    const first = objectUrls.created[0];
+    expect(screen.queryByRole('button', { name: CAPTURE_COPY.voiceRecord })).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: CAPTURE_COPY.voiceDiscard }));
+    expect(objectUrls.revoked).toEqual([first]);
+    expect(player(container)).toBeNull();
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: CAPTURE_COPY.voiceRecord }));
+      await Promise.resolve();
+    });
+    fireEvent.click(screen.getByRole('button', { name: CAPTURE_COPY.voiceStop }));
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(objectUrls.created).toHaveLength(2);
+    expect(player(container)!.getAttribute('src')).toBe(objectUrls.created[1]);
+    expect(player(container)!.getAttribute('src')).not.toBe(first);
+    // Exactly one live URL at any moment: two minted, one revoked.
+    expect(objectUrls.revoked).toHaveLength(1);
+  });
+});
+
+// --- 15. the held state is visible, and the refusal speaks to a scientist ------
+
+describe('held is visible to a sighted reader, not only to a screen reader', () => {
+  async function hold() {
+    installRecorder(vi.fn(async () => ({ getTracks: () => [{ stop: vi.fn() }] })));
+    stubFetchRoutes({
+      ...BASE_ROUTES,
+      [TRANSCRIBE]: {
+        status: 501,
+        body: {
+          refused: true,
+          seam: 'transcription',
+          reason: 'no_provider_configured',
+          missing: [
+            'an approved transcription provider (decision D9)',
+            'an institutional credential for it (decision D4)',
+          ],
+          message:
+            'This build cannot transcribe speech: no provider is configured for the ' +
+            'transcription seam. These are institutional decisions recorded in ' +
+            'docs/ai-integration-decision-packet.md.',
+          decision_reference: 'docs/ai-integration-decision-packet.md',
+        },
+      },
+    } as never);
+    const rendered = await renderPanel();
+    await act(async () => {
+      fireEvent.click(await screen.findByRole('button', { name: CAPTURE_COPY.voiceRecord }));
+      await Promise.resolve();
+    });
+    fireEvent.click(await screen.findByRole('button', { name: CAPTURE_COPY.voiceStop }));
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    return rendered;
+  }
+
+  it('states in VISIBLE text that audio is held — not only in the sr-only region', async () => {
+    const { container } = await hold();
+    /*
+     * THE DEFECT THIS PINS. Before 2026-09-10 the only statement that audio was
+     * held after Stop was the `aria-live` region, which a sighted reader never
+     * sees — an inversion of the usual accessibility failure. The assertion is
+     * therefore specifically that the sentence exists OUTSIDE `.sr-only`.
+     */
+    const held = screen.getByText(CAPTURE_COPY.voiceHeldPersistent);
+    expect(held.closest('.sr-only')).toBeNull();
+    expect(container.querySelector('.capture-live[data-state="held"]')).not.toBeNull();
+  });
+
+  it('I-2: a Stop that cannot be pressed is disabled AND carries its disabled styling hook', async () => {
+    /*
+     * THE DEFECT THIS PINS WAS INTRODUCED BY THIS SLICE, one rule away from
+     * the one it was fixing. `formLocked` (a finalize in flight) makes
+     * `showVoicePrimary` false, so a DISABLED Stop renders `btn btn-secondary
+     * capture-stop` — and `.btn-secondary` declares no `:disabled` state while
+     * the `.capture-stop` repaint wins anyway. Measured in Chrome before the
+     * fix: `rgb(178,58,48)` on `#fff` with `cursor: pointer`, byte-identical
+     * to a live armed Stop.
+     *
+     * REACHABLE, not theoretical: type a transcript while recording, press
+     * Finalize. That is exactly what this test does. jsdom computes no
+     * stylesheet, so the class is what is checkable here; the rule it hooks
+     * (`.capture-voice-controls .btn.capture-stop:disabled`, plus
+     * `:not(:disabled)` on the two state rules) lives in `transcriptCapture.css`
+     * with its measured ratio.
+     */
+    installRecorder(vi.fn(async () => ({ getTracks: () => [{ stop: vi.fn() }] })));
+    /*
+     * THE ROUTE IS A FUNCTION THAT AWAITS, NOT A `delay` OPTION — the shape
+     * `apiFixtures.ts:117` warns about. A first version of this test wrote
+     * `{ body: reading(), delay: gate }`; `delay` is not a fixture key, the
+     * stub answered IMMEDIATELY, and `formLocked` was never true, so the
+     * assertion below ran against an ordinary enabled Stop and failed for a
+     * reason that had nothing to do with the defect.
+     */
+    const gateHandle: { resolve: (() => void) | null } = { resolve: null };
+    const gate = new Promise<void>((resolve) => {
+      gateHandle.resolve = () => resolve();
+    });
+    stubFetchRoutes({
+      ...BASE_ROUTES,
+      [TRANSCRIPT]: async () => {
+        await gate;
+        return { body: reading() };
+      },
+    } as never);
+    await renderPanel();
+    await act(async () => {
+      fireEvent.click(await screen.findByRole('button', { name: CAPTURE_COPY.voiceRecord }));
+      await Promise.resolve();
+    });
+    const stop = screen.getByRole('button', { name: CAPTURE_COPY.voiceStop });
+    expect(stop).toBeEnabled();
+
+    fireEvent.change(screen.getByLabelText('Transcript'), { target: { value: 'still recording' } });
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: CAPTURE_COPY.finalize }));
+      await Promise.resolve();
+    });
+
+    const locked = screen.getByRole('button', { name: CAPTURE_COPY.voiceStop });
+    expect(locked).toBeDisabled();
+    expect(locked).toHaveClass('capture-stop');
+    // It is NOT primary in this state, which is the whole reason the plain
+    // `.btn-secondary` fallback left it looking armed.
+    expect(locked).toHaveClass('btn-secondary');
+    gateHandle.resolve?.();
+    await screen.findByText(CAPTURE_COPY.summaryStored(1, 1));
+  });
+
+  it('the refusal leads with one scientist-facing sentence and keeps every server word', async () => {
+    await hold();
+    fireEvent.click(screen.getByRole('button', { name: CAPTURE_COPY.voiceTranscribe }));
+
+    // The lead, chosen by the SERVER's own `reason` code.
+    const lead = await screen.findByText(CAPTURE_COPY.voiceRefusalNoProvider);
+    expect(lead).toHaveClass('capture-refusal-message');
+    // Nothing the server said is dropped: its message, its missing items and
+    // its decision reference are all still rendered, behind the disclosure.
+    expect(screen.getByText(/This build cannot transcribe speech/)).toBeInTheDocument();
+    expect(
+      screen.getByText('an approved transcription provider (decision D9)'),
+    ).toBeInTheDocument();
+    // `getAllBy`: the reference appears twice by design — once inside the
+    // server's own sentence, and once as the `<code>` pointer beneath it.
+    expect(screen.getAllByText(/docs\/ai-integration-decision-packet\.md/)).toHaveLength(2);
+    // …and they are behind it, rather than beside it — which is the change.
+    const why = screen.getByText(CAPTURE_COPY.voiceRefusalWhy).closest('details');
+    expect(why).not.toBeNull();
+    expect(why!.open).toBe(false);
+    expect(why!.contains(screen.getByText(/This build cannot transcribe speech/))).toBe(true);
+    expect(why!.contains(lead)).toBe(false);
+  });
+
+  it('the held state, the player and the refusal disclosure are all accessible', async () => {
+    /*
+     * THE STATE THE EXISTING AXE TEST DOES NOT REACH. `accessibility` above
+     * scans the POST-FINALIZE tree; every element this slice added — the state
+     * bar, the `<audio>` player, the `<details>` disclosure — lives in `held`,
+     * which that scan never enters. Same rule set, so the two are comparable.
+     */
+    const { container } = await hold();
+    fireEvent.click(screen.getByRole('button', { name: CAPTURE_COPY.voiceTranscribe }));
+    await screen.findByText(CAPTURE_COPY.voiceRefusalNoProvider);
+    // Vacuity: the scan must actually be looking at the new markup.
+    expect(container.querySelector('audio')).not.toBeNull();
+    expect(container.querySelector('details')).not.toBeNull();
+    expect(container.querySelector('.capture-live[data-state="held"]')).not.toBeNull();
+
+    const results = await axe.run(container, {
+      runOnly: {
+        type: 'rule',
+        values: [
+          'button-name',
+          'label',
+          'aria-allowed-attr',
+          'aria-allowed-role',
+          'aria-required-attr',
+          'aria-valid-attr-value',
+          'select-name',
+        ],
+      },
+      resultTypes: ['violations'],
+    });
+    expect(results.violations).toEqual([]);
+  });
+
+  it('Request a Transcript is disarmed once it has refused, and re-armed by a new recording', async () => {
+    await hold();
+    const request = () => screen.getByRole('button', { name: CAPTURE_COPY.voiceTranscribe });
+    expect(request()).toBeEnabled();
+    fireEvent.click(request());
+    await screen.findByText(CAPTURE_COPY.voiceRefusalNoProvider);
+    /*
+     * A CONTROL THAT CAN NEVER SUCCEED MUST NOT STAY ARMED. This operation is
+     * refused `501 no_provider_configured` in every deployment, and it used to
+     * return to its enabled resting state so the same wall could be summoned
+     * forever.
+     */
+    expect(request()).toBeDisabled();
+    /*
+     * AND IT LOOKS DISABLED. `.btn-secondary` declares no `:disabled` state
+     * anywhere in `styles/base.css`, so without `capture-transcribe` this
+     * button renders PIXEL-IDENTICAL to the live `Discard Audio` beside it —
+     * measured in Chrome: both `rgb(255,255,255)` / border
+     * `rgb(211,218,226)` / `color: rgb(70,81,95)` / `cursor: pointer`. jsdom
+     * computes no stylesheet, so the class is what this can check; the rule
+     * it hooks is in `transcriptCapture.css` with its own measured ratios.
+     */
+    expect(request()).toHaveClass('capture-transcribe');
+    // The audio is NOT discarded by a refusal, so the other two stay live.
+    expect(screen.getByRole('button', { name: CAPTURE_COPY.voiceDiscard })).toBeEnabled();
+    expect(screen.getByRole('button', { name: CAPTURE_COPY.voiceTypeWhatWasSaid })).toBeEnabled();
+
+    /*
+     * THE SEAM STAYS DISCOVERABLE: a NEW recording clears the refusal and
+     * re-arms the control. Discard is the one way back to `idle` from `held`,
+     * and it is clicked OUTSIDE `act` — nesting a `findBy*` inside an
+     * `act(async …)` makes testing-library's own async wrapper wait on a
+     * flush the outer `act` is holding.
+     */
+    fireEvent.click(screen.getByRole('button', { name: CAPTURE_COPY.voiceDiscard }));
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: CAPTURE_COPY.voiceRecord }));
+      await Promise.resolve();
+    });
+    fireEvent.click(screen.getByRole('button', { name: CAPTURE_COPY.voiceStop }));
+    expect(request()).toBeEnabled();
+    // …and the wall is gone with it, rather than lingering beside an armed control.
+    expect(screen.queryByText(CAPTURE_COPY.voiceRefusalNoProvider)).toBeNull();
+  });
+});
+
+// --- 16. finalizing with no run is warned about, not blocked -------------------
+
+describe('the no-run pre-flight', () => {
+  it('warns beside Finalize that nothing will be proposed, and leaves it enabled', async () => {
+    stubFetchRoutes(BASE_ROUTES as never);
+    await renderPanel();
+    const box = await screen.findByLabelText('Transcript');
+    fireEvent.change(box, { target: { value: 'Temperature was 300 K.' } });
+
+    const preflight = screen.getByText(CAPTURE_COPY.finalizePreflightNoRun);
+    expect(preflight).toBeInTheDocument();
+    const finalize = screen.getByRole('button', { name: CAPTURE_COPY.finalize });
+    /*
+     * ENABLED IS THE POINT. Notes are still stored with the record and that is
+     * genuinely valuable; the defect was that the consequence was discovered
+     * only afterwards, from a summary card reading "Nothing was proposed from
+     * this transcript."
+     */
+    expect(finalize).toBeEnabled();
+    expect(finalize.getAttribute('aria-describedby')).toBe(preflight.id);
+  });
+
+  it('clears the warning once a run is chosen', async () => {
+    stubFetchRoutes(BASE_ROUTES as never);
+    await renderPanel();
+    /*
+     * THE TEXT IS TYPED FIRST, AND THAT IS NOT SETUP NOISE. After M-3 the
+     * warning is gated on `text.trim() !== ''` as well as on the empty run,
+     * so a version of this test that never typed would find it absent for
+     * the WRONG REASON and pass whatever the run selector did — a guard that
+     * cannot fail. The positive assertion below is what makes the negative
+     * one mean something.
+     */
+    const box = await screen.findByLabelText('Transcript');
+    fireEvent.change(box, { target: { value: 'Temperature was 300 K.' } });
+    expect(screen.getByText(CAPTURE_COPY.finalizePreflightNoRun)).toBeInTheDocument();
+
+    fireEvent.change(await screen.findByLabelText(CAPTURE_COPY.runLabel), {
+      target: { value: 'run-1' },
+    });
+    expect(screen.queryByText(CAPTURE_COPY.finalizePreflightNoRun)).toBeNull();
+    expect(
+      screen.getByRole('button', { name: CAPTURE_COPY.finalize }).getAttribute('aria-describedby'),
+    ).toBeNull();
+  });
+
+  it('M-3: says nothing before there is anything to finalize', async () => {
+    /*
+     * The warning used to render the moment the panel opened — describing a
+     * press that is not yet possible, since Finalize is `disabled` while the
+     * box is empty. It now appears with the action it describes.
+     */
+    stubFetchRoutes(BASE_ROUTES as never);
+    await renderPanel();
+    await screen.findByLabelText('Transcript');
+    expect(screen.queryByText(CAPTURE_COPY.finalizePreflightNoRun)).toBeNull();
+    expect(screen.getByRole('button', { name: CAPTURE_COPY.finalize })).toBeDisabled();
+
+    fireEvent.change(screen.getByLabelText('Transcript'), { target: { value: 'a note' } });
+    expect(screen.getByText(CAPTURE_COPY.finalizePreflightNoRun)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: CAPTURE_COPY.finalize })).toBeEnabled();
+  });
+
+  it('I-3: no CAPTURE_COPY string promises a browser BEHAVIOUR this build cannot enforce', () => {
+    /*
+     * `voicePlaybackNote` shipped "the player offers no download and no
+     * casting to another device" — a claim about what every engine DOES.
+     * `controlsList` and `disableRemotePlayback` are Chromium-only; Firefox
+     * honours neither, and there the native player DOES offer a download. The
+     * browser suites here run chromium only, so nothing could have caught it.
+     *
+     * The ban is on the ASSERTIVE shape ("the player offers no…", "no download
+     * is offered"), not on the reassurance: "is configured to offer no…" is a
+     * claim about this build's own markup and is true in every engine. Same
+     * correction shape as the scoped-not-deleted upload claims in CLAUDE.md
+     * §11.
+     */
+    const UNCONDITIONAL_UA_CLAIM =
+      /\b(the\s+)?player\s+(offers|provides|has|shows)\s+no\b|\bno\s+(download|casting)\s+(is|will\s+be)\s+(offered|shown|provided)\b/i;
+    const offenders = Object.entries(CAPTURE_COPY)
+      .filter(([, v]) => typeof v === 'string' && UNCONDITIONAL_UA_CLAIM.test(v as string))
+      .map(([k]) => k);
+    expect(offenders).toEqual([]);
+    // Polarity: the retired phrasing really is caught, and the corrected one is not.
+    expect(
+      UNCONDITIONAL_UA_CLAIM.test('the player offers no download and no casting to another device'),
+    ).toBe(true);
+    expect(UNCONDITIONAL_UA_CLAIM.test(CAPTURE_COPY.voicePlaybackNote)).toBe(false);
+    // …and the reassurance is still made, rather than deleted to satisfy the ban.
+    expect(CAPTURE_COPY.voicePlaybackNote).toMatch(/configured to offer no download/i);
+  });
+
+  it('no shipped string implies a value might not need a run — the two used to contradict', () => {
+    /*
+     * MEASURED AT `65f5ebd3`, over the server rather than assumed:
+     *
+     *   .venv/bin/python -c "import sys; sys.path.insert(0,'apps/api');
+     *     from isaac_api import transcript_capture as tc, routes;
+     *     print({p: routes._PROPOSAL_WRITER_SCOPE.get(routes._proposal_writer_for(p))
+     *            for p in sorted(tc.READABLE_FIELD_PATHS)})"
+     *
+     * All five readable paths resolve to scope `run`. So the panel's "only
+     * run-scoped values need a run chosen first" was false, and the server's
+     * "Every value this reader can propose belongs to a run" was true — and
+     * BOTH shipped, on the same screen, one before finalize and one after.
+     *
+     * This guard bans the shape rather than the sentence, because the sentence
+     * is the thing most likely to be reworded back into the same error.
+     */
+    const IMPLIES_OPTIONAL = /only\s+run-scoped[^.]*\bneed\b/i;
+    const offenders = Object.entries(CAPTURE_COPY)
+      .filter(([, v]) => typeof v === 'string' && IMPLIES_OPTIONAL.test(v as string))
+      .map(([k]) => k);
+    expect(offenders).toEqual([]);
+    // Polarity: the retired sentence really is caught, so the guard cannot go
+    // quiet and read as a pass.
+    expect(
+      IMPLIES_OPTIONAL.test(
+        'No run is selected. Proposals from this transcript will target the record ' +
+          'itself — only run-scoped values need a run chosen first.',
+      ),
+    ).toBe(true);
+  });
+});
+
+// --- 17. the elapsed count is wall-clock, not a tick count --------------------
+
+describe('the elapsed indicator survives a throttled timer', () => {
+  it('reads the wall clock, so a tab that was backgrounded does not understate', async () => {
+    /*
+     * THE DEFECT THIS PINS WAS MEASURED IN REAL CHROME, NOT REASONED ABOUT.
+     * The count used to be `setElapsedSec((s) => s + 1)` on a 1000 ms
+     * interval — a count of CALLBACK RUNS. Browsers throttle background
+     * timers hard, and this panel's own header says a recording is expected
+     * to keep running while hidden. Measured on a backgrounded tab at
+     * 127.0.0.1:5173: the indicator read `0:03` while the held clip decoded
+     * (via `AudioContext.decodeAudioData` on the object URL's own bytes) to
+     * 6.96 s of 2-channel 44.1 kHz audio. It understated, and silently.
+     *
+     * `vi.setSystemTime` moves `Date.now()` WITHOUT firing pending timers,
+     * which is exactly the shape of throttling: wall time passes, callbacks
+     * do not run. A tick-counting implementation reads 0:00 here.
+     */
+    vi.useFakeTimers();
+    installRecorder(vi.fn(async () => ({ getTracks: () => [{ stop: vi.fn() }] })));
+    stubFetchRoutes(BASE_ROUTES as never);
+    const { container } = await renderPanel();
+    const start = Date.now();
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: CAPTURE_COPY.voiceRecord }));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(container.querySelector('.capture-elapsed')?.textContent).toBe('Recording · 0:00');
+
+    // Seven seconds of wall time; ONE tick allowed to run.
+    vi.setSystemTime(start + 7000);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(250);
+    });
+    expect(container.querySelector('.capture-elapsed')?.textContent).toBe('Recording · 0:07');
+
+    /*
+     * AND THE FINAL READING IS TAKEN AT STOP. Five more seconds pass with no
+     * tick at all, then Stop is pressed: without `settleElapsedTimer` the
+     * `held` bar would freeze whatever the last tick that managed to run had
+     * said — here 0:07 for twelve seconds of audio.
+     */
+    vi.setSystemTime(start + 12_000);
+    fireEvent.click(screen.getByRole('button', { name: CAPTURE_COPY.voiceStop }));
+    expect(container.querySelector('.capture-elapsed')?.textContent).toBe('Held · 0:12');
+    vi.useRealTimers();
   });
 });

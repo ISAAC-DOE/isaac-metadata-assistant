@@ -149,7 +149,33 @@ describe('P34.5 accessible names', () => {
 });
 
 describe('P34.5 single live region', () => {
-  it('exactly one polite live region announces loading → answer; the history log is aria-live="off"', async () => {
+  /*
+   * UPDATED for the agent-action/Confirm announcer fix (see `AssistantPanel`'s
+   * `announceAgentMessage`). This describe block is about the FREE-FORM
+   * composer's question/answer flow, and that flow still has exactly ONE
+   * polite region — `.assistant-reply` — completely unchanged by the fix.
+   *
+   * A SECOND polite region now exists permanently in the DOM:
+   * `.assistant-agent-announcer`, a dedicated sr-only `role="status"`
+   * announcer for Agent Action results and Confirm outcomes, which never go
+   * through `.assistant-reply` (they are appended straight into the archived
+   * log, which stays `aria-live="off"`). Nothing in THIS describe block
+   * triggers an agent action or a Confirm, so that second region stays
+   * mounted and empty throughout — asserted explicitly below rather than
+   * just changing `1` to `2`, so a future reader sees WHY there are two.
+   */
+  function assertExactlyTheseLiveRegions(container: HTMLElement, reply: HTMLElement) {
+    const polite = Array.from(container.querySelectorAll('[aria-live="polite"]'));
+    expect(polite.length).toBe(2);
+    expect(polite).toContain(reply);
+    const announcer = polite.find((el) => el !== reply)!;
+    expect(announcer.classList.contains('assistant-agent-announcer')).toBe(true);
+    // it is sr-only and, in this Q&A-only flow, never populated
+    expect(announcer.classList.contains('sr-only')).toBe(true);
+    expect(announcer.textContent).toBe('');
+  }
+
+  it('exactly one polite live region announces the Q&A loading → answer flow; the history log is aria-live="off"; the agent-action announcer is a separate, silent-here, region', async () => {
     vi.spyOn(api, 'askAssistant').mockResolvedValue(answerResponse());
     const { getByRole, container } = panel();
 
@@ -158,13 +184,10 @@ describe('P34.5 single live region', () => {
     const log = getByRole('log');
     expect(log.getAttribute('aria-live')).toBe('off');
 
-    // exactly ONE polite live region exists (the reply <p>) — no second noisy one
-    const polite = container.querySelectorAll('[aria-live="polite"]');
-    expect(polite.length).toBe(1);
-    const reply = polite[0] as HTMLElement;
-    expect(reply.classList.contains('assistant-reply')).toBe(true);
+    const reply = container.querySelector('.assistant-reply') as HTMLElement;
+    assertExactlyTheseLiveRegions(container, reply);
 
-    // loading is announced first, in that one region, with aria-busy
+    // loading is announced first, in the Q&A region, with aria-busy
     await submit(getByRole, 'what is this record?');
     expect(reply.getAttribute('aria-busy')).toBe('true');
     expect(reply.textContent).toMatch(/working/i);
@@ -172,17 +195,18 @@ describe('P34.5 single live region', () => {
     // then the resolved answer replaces it in the SAME region (busy clears)
     await waitFor(() => expect(reply.textContent).toMatch(/Cu K-edge XANES draft/i));
     expect(reply.getAttribute('aria-busy')).toBeNull();
-    // still exactly one polite region after resolve
-    expect(container.querySelectorAll('[aria-live="polite"]').length).toBe(1);
+    // still exactly the same two regions after resolve; the agent-action one
+    // is still untouched because no agent action ran
+    assertExactlyTheseLiveRegions(container, reply);
   });
 
-  it('an error answer is announced in the SAME single live region (not a new one)', async () => {
+  it('an error answer is announced in the SAME Q&A live region (not a new one)', async () => {
     vi.spyOn(api, 'askAssistant').mockRejectedValue(new ApiError('down', { unreachable: true }));
     const { getByRole, container } = panel();
     await submit(getByRole, 'anything');
     const reply = container.querySelector('.assistant-reply') as HTMLElement;
     await waitFor(() => expect(reply.textContent).toContain(ASSISTANT_UNAVAILABLE));
-    expect(container.querySelectorAll('[aria-live="polite"]').length).toBe(1);
+    assertExactlyTheseLiveRegions(container, reply);
     expect(reply.getAttribute('aria-busy')).toBeNull();
   });
 });

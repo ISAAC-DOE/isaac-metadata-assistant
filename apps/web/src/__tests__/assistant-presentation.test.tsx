@@ -410,8 +410,16 @@ describe('P36V S-A · the assistant answer bubble', () => {
     const reply = bubble.querySelector('.assistant-reply') as HTMLElement;
     expect(reply.getAttribute('aria-live')).toBe('polite');
     expect(reply.textContent).toMatch(/Cu K-edge/);
-    // still exactly one polite live region overall (no second announcer added)
-    expect(container.querySelectorAll('[aria-live="polite"]').length).toBe(1);
+    // exactly one polite live region for the Q&A flow (this reply), plus the
+    // separate sr-only agent-action/Confirm announcer added by the a11y fix
+    // (see `AssistantPanel`'s `announceAgentMessage`) — untouched and empty
+    // here since no agent action or Confirm ran.
+    const polite = Array.from(container.querySelectorAll('[aria-live="polite"]'));
+    expect(polite.length).toBe(2);
+    expect(polite).toContain(reply);
+    const announcer = polite.find((el) => el !== reply)!;
+    expect(announcer.classList.contains('assistant-agent-announcer')).toBe(true);
+    expect(announcer.textContent).toBe('');
     // the bubble is left-aligned, never a chat message in the log's message list
     expect(bubble.classList.contains('assistant-msg')).toBe(false);
   });

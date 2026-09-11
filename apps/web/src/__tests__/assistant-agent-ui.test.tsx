@@ -532,6 +532,117 @@ describe('P29.4b unconfirmed proposal card', () => {
 });
 
 // ---------------------------------------------------------------------------
+// A screen-reader user who triggers an Agent Action or Confirm must hear the
+// result. `.assistant-log` is `aria-live="off"` BY DESIGN (P34.5 — archiving
+// history into it must stay silent), and `appendAgentMessage` — the ONE choke
+// point behind every agent-action result, every Confirm outcome (ok / refused
+// / stale-conflict / caught error), and Apply-to-Graph — writes straight into
+// that silent log. It never touches `liveAnswer`, so the ONE polite live
+// region the free-form composer flow announces through (`.assistant-reply`)
+// never sees these either. Before this, an agent action or a Confirm result
+// was accessible to a sighted/keyboard reader (focus moves to the newest
+// log entry) but announced to NOBODY using a screen reader that relies on
+// live-region content rather than a focus event on a plain, name-less `div`.
+//
+// The fix mirrors an EXISTING in-repo pattern rather than inventing one:
+// `IngestionProposalsPanel` already carries two `aria-live="polite"` regions
+// for the same reason (its own comments: a `role="status"` counts line for
+// one fact, a SEPARATE `role="status"` sr-only region — fed by an
+// alternating-marker `announce()` — for "the ACT announcement, separate from
+// the counts"). `.assistant-reply` was deliberately NOT reused here: it is
+// entangled with the visible "live turn" bubble (source line, provenance
+// chips, technical-details disclosure, stale banner, the P36.1 "no chrome at
+// rest" collapse) that exists for the composer's question/answer turn only —
+// forcing agent-action text through it would either duplicate that chrome for
+// output already shown in the log below, or require quietly bypassing the
+// P36.1 "empty at rest" contract non-visually. A second, sr-only,
+// permanently-mounted `role="status"` region — visible to nobody, announced
+// to everybody — is the narrower, lower-risk fix and matches the repo's own
+// precedent for "a second, structurally different kind of assistant output
+// needs its own announcer."
+// ---------------------------------------------------------------------------
+describe('agent output is announced to a screen reader', () => {
+  function announcer(container: HTMLElement): HTMLElement {
+    return container.querySelector('.assistant-agent-announcer') as HTMLElement;
+  }
+
+  it('the announcer exists, is sr-only, permanently mounted, and starts empty', () => {
+    const { container } = panel();
+    const region = announcer(container);
+    expect(region).not.toBeNull();
+    expect(region.getAttribute('role')).toBe('status');
+    expect(region.getAttribute('aria-live')).toBe('polite');
+    expect(region.classList.contains('sr-only')).toBe(true);
+    expect(region.textContent?.trim()).toBe('');
+  });
+
+  it('an agent action result reaches the announcer, not just the silent log', () => {
+    const { getByText, container } = panel();
+    fireEvent.click(getByText('Explain the Current Step'));
+    // the silent log is unchanged — archiving history must stay silent
+    expect(container.querySelector('.assistant-log')!.getAttribute('aria-live')).toBe('off');
+    // but the SAME result is now also spoken
+    expect(announcer(container).textContent).toContain('Complete Metadata');
+  });
+
+  it('two agent actions producing byte-identical text still re-announce (alternating marker)', () => {
+    const { getByText, container } = panel();
+    fireEvent.click(getByText('Explain the Current Step'));
+    const first = announcer(container).textContent ?? '';
+    fireEvent.click(getByText('Explain the Current Step'));
+    const second = announcer(container).textContent ?? '';
+    // React must see a genuinely different string or it will not touch the DOM
+    // node at all, and a screen reader announces nothing for an unchanged region.
+    expect(second).not.toBe(first);
+    // but the SPOKEN sentence (the marker is a trailing NBSP, never rendered
+    // visibly and never read aloud) is identical both times.
+    expect(second.trim()).toBe(first.trim());
+    expect(second.trim()).toContain('Complete Metadata');
+  });
+
+  it('a successful Confirm summary is announced', async () => {
+    vi.spyOn(api, 'submitAnswer').mockResolvedValue({ version: 'gen.6', pending: [] } as never);
+    const { getByRole, container } = panel({ proposal: pendingProposal(), onRefresh: vi.fn() });
+    fireEvent.click(getByRole('button', { name: /^confirm$/i }));
+    await waitFor(() => expect(announcer(container).textContent).toMatch(/confirmed/i));
+  });
+
+  it('a REFUSED Confirm (422 unstorable) is announced — a silent refusal is the same defect wearing a different hat', async () => {
+    vi.spyOn(api, 'editField').mockRejectedValue(
+      Object.assign(new Error('unstorable'), {
+        status: 422,
+        body: { error: 'invalid_field_value', key: 'sample.material', keys: ['sample.material'] },
+      }),
+    );
+    const { getByRole, container } = panel({
+      proposal: pendingProposal({ field: 'sample.material', value: 'CuO2' }),
+      onRefresh: vi.fn(),
+    });
+    fireEvent.click(getByRole('button', { name: /^confirm$/i }));
+    await waitFor(() =>
+      expect(announcer(container).textContent).toMatch(/could not be confirmed/i),
+    );
+  });
+
+  it('a 412 stale-conflict Confirm outcome is announced too', async () => {
+    vi.spyOn(api, 'submitAnswer').mockRejectedValue(
+      Object.assign(new Error('stale'), { status: 412 }),
+    );
+    const { getByRole, container } = panel({ proposal: pendingProposal(), onRefresh: vi.fn() });
+    fireEvent.click(getByRole('button', { name: /^confirm$/i }));
+    await waitFor(() =>
+      expect(announcer(container).textContent).toMatch(/changed since it was proposed/i),
+    );
+  });
+
+  it('activating an agent action never steals keyboard/AT focus onto the announcer', () => {
+    const { getByText, container } = panel();
+    fireEvent.click(getByText('Explain the Current Step'));
+    expect(document.activeElement).not.toBe(announcer(container));
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Degraded — honest, manual-first
 // ---------------------------------------------------------------------------
 
