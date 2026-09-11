@@ -358,10 +358,31 @@ const SEMANTIC_INK: readonly SemanticInk[] = [
     token: '--advisory-icon',
     role: 'graphic-anywhere',
     why:
-      'Amber icon stroke, six declarations, EVERY one a graphical object: the `.guided-dontknow` ' +
-      'svg in three states, `.wf-progress-icon` and `.needsyou-icon` (both `aria-hidden="true"` ' +
-      'lucide icons), and `.spine-step.reopened .spine-disc`, whose numeral is `aria-hidden` with ' +
-      'the step name beside it. All six sit on `--advisory-bg` (3.21:1); the 3:1 bar holds on ' +
+      'Amber icon stroke. ~~six declarations~~ ~~TEN … `.guided-dontknow svg` in FOUR states~~ ' +
+      '— **TEN is right; the rest of that 2026-09-11 correction was WRONG, and is re-corrected ' +
+      'the same day after independent review. It is kept struck because a correction that ' +
+      'introduces its own errors is exactly the failure it was written to fix.** The measured ' +
+      'ten: `.guided-dontknow` in **three** svg states — `:hover`, `:active`, `:focus-visible` ' +
+      '(the BASE svg is `--text-tertiary`, not this token, `assistant.css:1707`) — plus that ' +
+      "button's `:focus-visible` **outline** (`:1722`), which the first correction miscounted as " +
+      'a fourth svg; `.wf-progress-icon` and `.needsyou-icon` (both `aria-hidden="true"` lucide ' +
+      'icons); `.spine-step.reopened .spine-disc`, which renders a lucide `TriangleAlert` ' +
+      '(`WorkflowSpine.tsx:43`) and ~~whose numeral is `aria-hidden`~~ **has no numeral — that ' +
+      'clause predates both corrections and survived a pass that called itself site-by-site**; ' +
+      'the `.agent-proposal-inferred, .agent-proposal-conflicting` card BORDER, never enumerated ' +
+      'here and the reason the original six was low; and the paused glyph added 2026-09-11 — ' +
+      '~~two `.capture-live-mark` declarations~~ **ONE `box-shadow` declaration carrying TWO ' +
+      '`var()` references (`transcriptCapture.css:459-460`), which is why the reference count ' +
+      'is still ten. It was two `border-*` declarations for part of 2026-09-11 and was ' +
+      'rewritten the same day because `no-vertical-rail.test.ts` — a system-wide guard with no ' +
+      'exemption mechanism — rejects a coloured `border-left`/`border-right`.** Re-derive with ' +
+      '`rg -a -o "var\\(--advisory-icon" apps/web/src | wc -l` rather than trusting this ' +
+      'sentence — nothing enforces the number, which is why it went stale twice. **All ten are ' +
+      'graphical**, so none is subject to the 4.5:1 text bar: icons, an `aria-hidden` mark drawn ' +
+      'with an inset `box-shadow`, a card border, and a focus ring. ~~All ten sit on `--advisory-bg`~~ — **nine do ' +
+      '(3.21:1); the `:focus-visible` outline has `outline-offset: 2px` and so paints on ' +
+      "`--surface` at 3.61:1.** The claim that actually carries this entry is the hedge below, " +
+      'which the suite enforces mechanically rather than in prose: the 3:1 bar holds on ' +
       'every ground in the app, worst 3.07:1. It does NOT clear 4.5:1 anywhere — 3.61:1 on white ' +
       '— which is exactly why the role is recorded rather than the token being called text.',
   },

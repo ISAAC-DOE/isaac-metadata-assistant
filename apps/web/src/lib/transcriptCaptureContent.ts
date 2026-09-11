@@ -141,10 +141,47 @@ export const CAPTURE_COPY = {
    */
   voiceRecordingBadge: 'Recording',
   voiceHeldBadge: 'Held',
+  /*
+   * `voicePausedBadge` — THE FOURTH STATE WORD, added 2026-09-11.
+   *
+   * It is the ONLY signal on the bar that is fully independent of both colour
+   * and shape, which is why it is a word and not a glyph. `Paused` must not be
+   * a synonym of `Held`: `Held` means the microphone is CLOSED and a finished
+   * clip is in the tab; `Paused` means the microphone is STILL OPEN and the
+   * recorder will add to the same clip when it resumes. Those are different
+   * facts about a device, and the panel says which one is true.
+   *
+   * It follows the same `<state> · <m:ss>` shape as the other two, so the
+   * fenced real-Chromium spec's parse (`/(\d+):(\d\d)\s*$/`, `:510`) keeps
+   * working in this state as well — it was never state-specific.
+   */
+  voicePausedBadge: 'Paused',
   /** The persistent, VISIBLE held statement. Says what the live region says. */
   voiceHeldPersistent:
     'This audio is held in this tab’s memory and has not been sent anywhere. ' +
     'Play it back below, type what was said, or discard it.',
+  /*
+   * THE VISIBLE `paused` STATEMENT — and the one thing about pausing that a
+   * scientist is most likely to get wrong.
+   *
+   * `MediaRecorder.pause()` DOES NOT RELEASE THE MICROPHONE. The spec suspends
+   * the recorder; the `MediaStream`'s tracks stay `live`, and in a browser that
+   * shows a recording indicator that indicator STAYS ON. Somebody who pauses in
+   * order to have a private conversation at the instrument would be wrong about
+   * what this control did for them, and no other surface in this panel would
+   * correct them. So the sentence names the release act explicitly: Stop is what
+   * closes the device.
+   *
+   * It deliberately does NOT promise that the clip resumes "seamlessly" or
+   * "without a gap" — the recorder concatenates what it captured, so the pause
+   * is simply absent from the audio, and describing the join in any more detail
+   * than that would be a claim about a container this code never inspects.
+   */
+  voicePausedPersistent:
+    'Nothing is being captured while this says Paused. The microphone is still ' +
+    'open — Stop Recording is what releases it. What was recorded before the ' +
+    'pause is held in this tab and has not been sent anywhere; resuming adds to ' +
+    'the same recording, and the paused time is not part of it.',
   /*
    * LOCAL PLAYBACK — added 2026-09-10, and the two things it deliberately does
    * NOT do are named here because both would falsify copy this panel ships.
@@ -228,6 +265,19 @@ export const CAPTURE_COPY = {
   voiceRecord: 'Start Recording',
   voiceRequesting: 'Requesting…',
   voiceStop: 'Stop Recording',
+  /*
+   * PAUSE/RESUME — 2026-09-11. Both labels carry the noun, for the same reason
+   * every other control here does: "Pause" and "Resume" alone are ambiguous on
+   * a screen that also plays audio back, and an accessible name read out of
+   * context ("Resume") should still say what resumes.
+   *
+   * NEITHER IS RENDERED UNLESS THE RECORDER THIS BROWSER ACTUALLY BUILT CARRIES
+   * BOTH METHODS — see `pauseSupported` in the panel. A control that does
+   * nothing is worse than no control, and `MediaRecorder.pause` is well
+   * supported but not universal.
+   */
+  voicePause: 'Pause Recording',
+  voiceResume: 'Resume Recording',
   voiceDiscard: 'Discard Audio',
   voiceTranscribe: 'Request a Transcript',
   /** The `held`/`permission-denied` primary: focuses the textarea. No request. */
@@ -241,6 +291,79 @@ export const CAPTURE_COPY = {
   /** NEW — the `requesting-permission` state's own announcement. */
   voiceRequestingLive: 'Requesting microphone access…',
   voiceHeldLive: 'Recording stopped. Audio is held in this tab and has not been sent.',
+  /*
+   * THE `paused` AND RESUMED ANNOUNCEMENTS — polite, through the ONE existing
+   * status region, exactly as every other state change here is.
+   *
+   * `voicePausedLive` repeats the microphone fact rather than assuming the
+   * reader saw the visible line: a live region announces a CHANGE, and the
+   * change a screen-reader user most needs at this moment is that the device
+   * is still open.
+   *
+   * `voiceResumedLive` is its own sentence rather than a reuse of
+   * `voiceRecordingLive`. Two reasons, and the second is mechanical. (1)
+   * "resumed" is the fact — a reader who hears "Recording." cannot tell whether
+   * their Resume press worked or whether they are hearing the start of a NEW
+   * recording that lost the first part. (2) `e2e/mutation/capture-microphone.spec.ts:526`
+   * asserts the exact sentence `voiceRecordingLive` appears EXACTLY ONCE on the
+   * page; keeping resume's text distinct means a resumed recording cannot
+   * introduce a second copy of a string a fenced spec counts.
+   */
+  voicePausedLive:
+    'Recording paused. Nothing is being captured; the microphone is still open. ' +
+    'The audio so far is held in this tab.',
+  voiceResumedLive: 'Recording resumed. Audio is being held in this tab.',
+  /*
+   * THE TWO REFUSAL SENTENCES, AND THEY ARE NOT DECORATION.
+   *
+   * `pause()`/`resume()` can throw `InvalidStateError`, and a UA is free to
+   * leave the recorder's `state` unchanged. The panel VERIFIES the transition
+   * by re-reading `recorder.state` rather than assuming the call worked, so
+   * there is a real branch in which the press did nothing — and the only
+   * dishonest thing available at that point would be to paint the bar `Paused`
+   * over a recorder that is still capturing. Each sentence therefore states
+   * what is still true, not what was attempted.
+   */
+  voicePauseRefusedLive:
+    'This browser did not pause the recording, so it is still recording. Stop ' +
+    'Recording still works.',
+  voiceResumeRefusedLive:
+    'This browser did not resume the recording, so it is still paused. Stop ' +
+    'Recording still works.',
+  /*
+   * THE RECORDING ENDED WITHOUT ANYONE PRESSING STOP — added after independent
+   * review measured `voicePausedPersistent` making a claim a real browser can
+   * falsify.
+   *
+   * MEASURED IN CHROME: pause, then end the track (unplug the device, or have
+   * the OS revoke it). `recorder.state` becomes `inactive` and
+   * `track.readyState` becomes `ended`, while the bar still says `Paused` and
+   * the visible line still says "The microphone is still open". Both false at
+   * that moment, and the old resume refusal made it worse by insisting the
+   * recording was "still paused".
+   *
+   * This sentence is what the panel says instead, and it is paired with an
+   * actual transition to `held` — announcing an ended recording while leaving
+   * the microphone-still-open paragraph on screen would have replaced one
+   * false claim with a self-contradiction.
+   */
+  voiceRecordingEndedLive:
+    'This recording has ended — the microphone is no longer available to this ' +
+    'tab. What was recorded is held here and has not been sent anywhere.',
+  /*
+   * THE TWO CAPABILITY REFUSALS. Neither is reachable in a browser that
+   * carries both methods, and neither is reachable through the rendered
+   * controls in one that carries neither — `pauseSupported` requires BOTH, so
+   * no Pause is offered at all. They exist because the alternative at those
+   * two early returns was a SILENT `return`: a control that does nothing and
+   * says nothing, which is the one outcome this panel's own header forbids.
+   */
+  voicePauseUnavailableLive:
+    'This browser cannot pause a recording, so nothing changed. It is still ' +
+    'recording, and Stop Recording still works.',
+  voiceResumeUnavailableLive:
+    'This browser cannot resume a paused recording, so nothing changed. Stop ' +
+    'Recording keeps what was recorded before the pause.',
   voiceDiscardedLive: 'Audio discarded.',
   /*
    * I8 — FOUR REASONS `getUserMedia` CAN FAIL, EACH ITS OWN SENTENCE, INDEPENDENT

@@ -9,11 +9,13 @@
  * keep their existing copy verbatim.
  *
  * NINE ROWS IS NOT NINE STATES, AND THIS HEADER USED TO SAY IT WAS. `type
- * VoiceState` below has exactly SIX members; the other three rows are DERIVED
+ * VoiceState` below has exactly SEVEN members (SIX until `paused` was added on
+ * 2026-09-11 — the count is written out because a stale one is what the
+ * paragraph below exists to stop); the other three rows are DERIVED
  * booleans computed from `busyKind`, `reading` and `error`/`retryTag`. The
- * distinction is load-bearing rather than pedantic: the six are mutually exclusive
+ * distinction is load-bearing rather than pedantic: the seven are mutually exclusive
  * by construction (`voice` is one value), while a derived row can be true AT THE
- * SAME TIME as one of the six — a reader can be recording while a finalize error
+ * SAME TIME as one of the seven — a reader can be recording while a finalize error
  * is on screen. That is exactly why the primary-action slot has to be COMPUTED in
  * priority order (see `showErrorPrimary` and its comment below) and cannot be read
  * off this table row by row. The file conceded the mismatch in that comment while
@@ -23,7 +25,8 @@
  * |-------------------------|------|-----------------------------------------|-------------------------|----------------------------------------------|----------------------------------|
  * | idle                    | `VoiceState` | run selector (or its own empty state), textarea, seam status | Start Recording | run selector; textarea; Create a Run (0 runs only) | "Not recording." |
  * | requesting-permission NEW| `VoiceState` | Start button disabled + busy-labeled    | *(none — busy)*         | textarea remains usable                        | "Requesting microphone access…" |
- * | recording                | `VoiceState` | live indicator + elapsed time           | Stop Recording          | textarea remains editable in parallel          | "Recording. Audio is being held in this tab." |
+ * | recording                | `VoiceState` | live indicator + elapsed time           | Stop Recording          | Pause Recording (only if the recorder carries `pause`/`resume`); textarea remains editable in parallel | "Recording. Audio is being held in this tab." |
+ * | paused NEW 2026-09-11    | `VoiceState` | the same bar, reading `Paused · m:ss` with a STOPPED clock, plus the visible microphone-still-open line | Resume Recording | Stop Recording | `voicePausedLive` / `voiceResumedLive` |
  * | held                     | `VoiceState` | Request/Discard both enabled            | Type What Was Said      | Request a Transcript; Discard Audio            | "Recording stopped. Audio is held in this tab and has not been sent." |
  * | permission-denied        | `VoiceState` | same as idle + persistent notice        | Type What Was Said      | Try Recording Again                            | `voicePermissionRefused` (same sentence, persistent AND announced once) |
  * | unsupported               | `VoiceState` | voice controls absent; textarea only    | *(typing is the only path)* | none                                        | `voiceUnsupported` (static, not live) |
@@ -110,13 +113,22 @@ import { DiscardStaged } from './DiscardStaged';
 import { DISCARD_COPY } from '../lib/discardContent';
 import './transcriptCapture.css';
 
-/** The SIX voice states — the six `VoiceState` rows of this panel's header table.
- *  The table's other three rows are derived, not members here; see the header. */
+/** The SEVEN voice states — the seven `VoiceState` rows of this panel's header
+ *  table. The table's other three rows are derived, not members here; see the
+ *  header.
+ *
+ *  `paused` IS A STATE AND NOT A FLAG ON `recording`, deliberately. The whole
+ *  value of this slice is that a reader can never mistake one for the other, and
+ *  a boolean beside `recording` would leave every `voice === 'recording'` test
+ *  in the file — and every such branch in this component — silently true while
+ *  paused. Making it a seventh member means the compiler asks about it at each
+ *  of those sites. */
 type VoiceState =
   | 'unsupported'
   | 'idle'
   | 'requesting-permission'
   | 'recording'
+  | 'paused'
   | 'held'
   | 'permission-denied';
 
@@ -250,6 +262,22 @@ function formatElapsed(totalSeconds: number): string {
   return `${minutes}:${String(seconds).padStart(2, '0')}`;
 }
 
+/**
+ * The word the state bar carries, per state that has one.
+ *
+ * A MAP RATHER THAN THE NESTED TERNARY THIS REPLACES. With two states a
+ * ternary was readable; with three it stops being, and — the reason that
+ * matters here — a ternary has a fall-through arm, so a fourth state added
+ * later would silently inherit some other state's word. This is keyed by the
+ * exact three `VoiceState` members the bar renders for, so adding a fourth is
+ * a type error rather than a mislabelled bar.
+ */
+const STATE_BADGE: Record<Extract<VoiceState, 'recording' | 'paused' | 'held'>, string> = {
+  recording: CAPTURE_COPY.voiceRecordingBadge,
+  paused: CAPTURE_COPY.voicePausedBadge,
+  held: CAPTURE_COPY.voiceHeldBadge,
+};
+
 export function TranscriptCapturePanel({ experimentId }: { experimentId: string }) {
   const ids = useId();
   const transcriptId = `${ids}-transcript`;
@@ -286,6 +314,25 @@ export function TranscriptCapturePanel({ experimentId }: { experimentId: string 
   const [heldChunks, setHeldChunks] = useState(0);
   const [elapsedSec, setElapsedSec] = useState(0);
   /**
+   * WHETHER THE RECORDER THIS BROWSER ACTUALLY BUILT CAN PAUSE — asked of the
+   * instance, never assumed, and `false` until one exists.
+   *
+   * `MediaRecorder.pause()`/`.resume()` are well supported and are NOT
+   * universal, and this is the panel that already refuses to claim a capability
+   * a deployment does not have. The check is made against the constructed
+   * recorder rather than against `MediaRecorder.prototype`, because the object
+   * the page is handed is the object the button will call: a polyfill, a test
+   * double, or a UA that ships the constructor without the methods all answer
+   * correctly this way and only some of them answer correctly the other way.
+   *
+   * A `false` here renders NO Pause control at all, rather than a disabled one.
+   * A disabled button is a promise that the capability exists and is
+   * temporarily unavailable; absence is the truthful shape for a capability
+   * this browser does not have. (It is the same decision `voice ===
+   * 'unsupported'` already makes for the whole voice block.)
+   */
+  const [pauseSupported, setPauseSupported] = useState(false);
+  /**
    * THE OBJECT URL FOR THE HELD AUDIO — `null` whenever there is nothing to
    * play, which is every state but `held`.
    *
@@ -309,10 +356,28 @@ export function TranscriptCapturePanel({ experimentId }: { experimentId: string 
   const transcriptRef = useRef<HTMLTextAreaElement | null>(null);
   const runSelectRef = useRef<HTMLSelectElement | null>(null);
   const elapsedIntervalRef = useRef<number | null>(null);
-  /** When the current recording started, in wall-clock ms. `null` when none is
-   *  running. See `startElapsedTimer` for why the count is derived from this
-   *  rather than accumulated from interval ticks. */
+  /** When the CURRENT RUNNING SEGMENT started, in wall-clock ms. `null` whenever
+   *  the clock is not running — which is now two different situations, stopped
+   *  and paused. See `startElapsedTimer` for why the count is derived from this
+   *  rather than accumulated from interval ticks, and `pauseElapsedTimer` for
+   *  why one timestamp is no longer enough on its own. */
   const elapsedStartedAtRef = useRef<number | null>(null);
+  /**
+   * MILLISECONDS ALREADY RECORDED IN EARLIER SEGMENTS — 0 until the first pause.
+   *
+   * WHY IT HAD TO EXIST THE MOMENT PAUSE DID. The count was `floor((now -
+   * startedAt) / 1000)`, read straight off the wall clock, which is correct for
+   * a recording that never pauses and is a LIE the instant one does: wall time
+   * keeps running while `MediaRecorder` is suspended, so a 40-second take with
+   * a 40-second pause in it would have displayed `1:20`. That is the same class
+   * of defect as the throttled-tick undercount the wall clock was introduced to
+   * fix — a number that does not describe the audio — and it points the other
+   * way, which is worse: it OVERSTATES what was captured.
+   *
+   * The invariant, in one line: **the displayed count is the time
+   * `MediaRecorder` spent in `recording`, and nothing else.**
+   */
+  const elapsedAccumulatedMsRef = useRef(0);
   const loadGenerationRef = useRef(0);
   /**
    * THE RECORD GENERATION, bumped whenever this component is told to show a
@@ -400,16 +465,44 @@ export function TranscriptCapturePanel({ experimentId }: { experimentId: string 
 
   /* ---- elapsed timer, owned entirely here, cleared on every exit from `recording` --- */
 
+  /**
+   * THE ONE PLACE THE ELAPSED VALUE IS COMPUTED — recorded time in ms, which is
+   * whatever earlier segments accumulated plus however long the current segment
+   * has been running. Returns the accumulated total unchanged while paused,
+   * which is the whole point: `Date.now()` moves during a pause and this does
+   * not.
+   */
+  const readElapsedMs = useCallback(() => {
+    const startedAt = elapsedStartedAtRef.current;
+    return elapsedAccumulatedMsRef.current + (startedAt === null ? 0 : Date.now() - startedAt);
+  }, []);
+
+  /** Stops the clock AND forgets it. Both refs, because a stale accumulator is
+   *  exactly as wrong as a stale start time — a second recording that inherited
+   *  the first one's paused-segment total would start at the wrong number. */
   const stopElapsedTimer = useCallback(() => {
     if (elapsedIntervalRef.current !== null) {
       window.clearInterval(elapsedIntervalRef.current);
       elapsedIntervalRef.current = null;
     }
     // Cleared so no later reading can be taken against a finished recording's
-    // start time. `settleElapsedTimer` reads the ref BEFORE calling this, which
-    // is what lets both live here without one defeating the other.
+    // start time. `settleElapsedTimer` reads the value BEFORE calling this,
+    // which is what lets both live here without one defeating the other.
     elapsedStartedAtRef.current = null;
+    elapsedAccumulatedMsRef.current = 0;
   }, []);
+
+  /** Starts (or restarts) the repaint tick. Reads the refs rather than closing
+   *  over a timestamp, so ONE implementation serves both the first segment and
+   *  every resumed one — a resumed interval that closed over its own start
+   *  would have to re-add the accumulator itself, and that is the arithmetic
+   *  this file would then have in two places. */
+  const runElapsedTicker = useCallback(() => {
+    if (elapsedIntervalRef.current !== null) window.clearInterval(elapsedIntervalRef.current);
+    elapsedIntervalRef.current = window.setInterval(() => {
+      setElapsedSec(Math.floor(readElapsedMs() / 1000));
+    }, 250);
+  }, [readElapsedMs]);
 
   /**
    * THE ELAPSED COUNT IS READ OFF THE WALL CLOCK, NOT ACCUMULATED FROM TICKS —
@@ -444,25 +537,78 @@ export function TranscriptCapturePanel({ experimentId }: { experimentId: string 
    */
   const startElapsedTimer = useCallback(() => {
     stopElapsedTimer();
-    const startedAt = Date.now();
-    elapsedStartedAtRef.current = startedAt;
+    elapsedStartedAtRef.current = Date.now();
     setElapsedSec(0);
-    elapsedIntervalRef.current = window.setInterval(() => {
-      setElapsedSec(Math.floor((Date.now() - startedAt) / 1000));
-    }, 250);
-  }, [stopElapsedTimer]);
+    runElapsedTicker();
+  }, [stopElapsedTimer, runElapsedTicker]);
+
+  /**
+   * BANKS THE CURRENT SEGMENT AND STOPS COUNTING — the honest half of pause.
+   *
+   * The ticker is cleared as well as the timestamp: while paused the value
+   * cannot change, so a tick would be four repaints a second computing the
+   * number it already shows. It is restarted by {@link resumeElapsedTimer}.
+   */
+  const pauseElapsedTimer = useCallback(() => {
+    const total = readElapsedMs();
+    if (elapsedIntervalRef.current !== null) {
+      window.clearInterval(elapsedIntervalRef.current);
+      elapsedIntervalRef.current = null;
+    }
+    elapsedAccumulatedMsRef.current = total;
+    elapsedStartedAtRef.current = null;
+    setElapsedSec(Math.floor(total / 1000));
+  }, [readElapsedMs]);
+
+  /** Opens a NEW segment against the current wall clock. The paused interval is
+   *  never added, because nothing between the two timestamps is ever read. */
+  const resumeElapsedTimer = useCallback(() => {
+    elapsedStartedAtRef.current = Date.now();
+    runElapsedTicker();
+  }, [runElapsedTicker]);
 
   /**
    * The last reading, taken at the moment the clock stops, so the `held` bar
    * shows the real duration even if the final tick was throttled away. Without
    * it the number frozen into `held` would be whatever the last tick that
    * managed to run happened to say.
+   *
+   * THE GUARD IS "WAS THERE A CLOCK AT ALL" RATHER THAN "IS ONE RUNNING", AND
+   * — CORRECTED AFTER INDEPENDENT REVIEW — THAT FIXES NO REACHABLE DEFECT
+   * TODAY. The claim this comment originally made is recorded and withdrawn
+   * rather than quietly reworded, because this file's own precedent, written
+   * one slice earlier, is that *a dead guard defended by a false fact is worse
+   * than no guard, since the next reader builds on the fact.*
+   *
+   * WHAT WAS CLAIMED: that the narrower `elapsedStartedAtRef.current !== null`
+   * guard would skip a paused clock, so stopping from `paused` would freeze
+   * `held` at the last tick before the pause — `0:00` for a pause taken inside
+   * the first second.
+   *
+   * WHAT IS MEASURED: the two are behaviourally EQUIVALENT, on every path this
+   * component has. Reverting this line to the narrow form leaves all 126 tests
+   * in `transcript-capture.test.tsx` green, INCLUDING one that stops directly
+   * from `paused` and asserts the exact displayed number. The mechanism is
+   * that `settleElapsedTimer` has ONE caller (`stopRecording`), the only case
+   * in which the two guards differ is stop-from-`paused`, and by then
+   * `pauseElapsedTimer` has ALREADY written `setElapsedSec(floor(total /
+   * 1000))` with the identical value — and nothing moves it while paused. So
+   * the skipped write would have written what was already on screen.
+   *
+   * WHY IT STAYS: it is robustness against a future edit to
+   * `pauseElapsedTimer`, not a fix. The moment that function stops banking the
+   * displayed value — which is one plausible simplification away — the narrow
+   * guard starts losing the whole reading and this one does not. It costs one
+   * `||`. It is NOT evidence that anything was broken, and no report should
+   * cite it as such.
    */
   const settleElapsedTimer = useCallback(() => {
-    const startedAt = elapsedStartedAtRef.current;
+    const hadClock =
+      elapsedStartedAtRef.current !== null || elapsedAccumulatedMsRef.current > 0;
+    const total = readElapsedMs();
     stopElapsedTimer();
-    if (startedAt !== null) setElapsedSec(Math.floor((Date.now() - startedAt) / 1000));
-  }, [stopElapsedTimer]);
+    if (hadClock) setElapsedSec(Math.floor(total / 1000));
+  }, [stopElapsedTimer, readElapsedMs]);
 
   useEffect(() => () => stopElapsedTimer(), [stopElapsedTimer]);
 
@@ -477,6 +623,12 @@ export function TranscriptCapturePanel({ experimentId }: { experimentId: string 
       // handler, so this ordering is what stops a discarded recording refilling
       // its own buffer a tick later.
       recorder.ondataavailable = null;
+      // `!== 'inactive'` RATHER THAN `=== 'recording'`, and that is what makes
+      // this correct for a PAUSED recorder: `MediaRecorder.state` has three
+      // values and a paused one is still holding the device. Every teardown
+      // path in this component funnels through here, so this one comparison is
+      // what makes Discard, Close Capture, a record change and unmount all
+      // release a paused microphone.
       if (recorder.state !== 'inactive') {
         try {
           recorder.stop();
@@ -488,6 +640,15 @@ export function TranscriptCapturePanel({ experimentId }: { experimentId: string 
     recorderRef.current = null;
     chunksRef.current = [];
     setHeldChunks(0);
+    // UNOBSERVABLE TODAY, AND NAMED AS SUCH — independent review measured that
+    // removing it changes nothing, because `startRecording` rewrites
+    // `pauseSupported` from the new instance on every entry and it is read
+    // nowhere else. It stays because the alternative is a capability claim
+    // that outlives the object it was measured on, which is the kind of stale
+    // status this panel exists not to render — and because the next reader
+    // adding a surface that consults it outside `recording` should find it
+    // already correct.
+    setPauseSupported(false);
     streamRef.current?.getTracks().forEach((track) => track.stop());
     streamRef.current = null;
     stopElapsedTimer();
@@ -605,10 +766,13 @@ export function TranscriptCapturePanel({ experimentId }: { experimentId: string 
    * THE ONE PLACE THAT DECIDES WHICH VOICE STATES SURVIVE LEAVING.
    *
    * Both ways of leaving — changing record, and closing the panel — drop the
-   * audio, and both must then say something true about what is left. Four of
-   * the six states describe THIS session's audio (`idle`,
-   * `requesting-permission`, `recording`, `held`) and are meaningless once it
-   * is gone, so they return to `idle`. `unsupported` and `permission-denied`
+   * audio, and both must then say something true about what is left. Five of
+   * the seven states describe THIS session's audio (`idle`,
+   * `requesting-permission`, `recording`, `paused`, `held`) and are meaningless
+   * once it is gone, so they return to `idle` — `paused` included, and it is
+   * the one that would read worst if it were preserved: a bar saying the
+   * microphone is still open, over a stream whose tracks `dropAudio` has just
+   * ended. `unsupported` and `permission-denied`
    * describe THE BROWSER AND ITS DEVICES, not the session: `unsupported` means
    * no `MediaRecorder`/`getUserMedia` exists at all (resetting it would render
    * a "Start Recording" button that cannot work), and `permission-denied`
@@ -841,7 +1005,7 @@ export function TranscriptCapturePanel({ experimentId }: { experimentId: string 
     /*
      * WHICH VOICE STATES SURVIVE IS DECIDED IN ONE PLACE, shared with the
      * close-the-panel path — see {@link resetVoiceAfterLeaving} for why
-     * `unsupported` and `permission-denied` are kept and the other four are not.
+     * `unsupported` and `permission-denied` are kept and the other FIVE are not.
      *
      * ACCESSIBILITY, AND IT IS SPECIFIC TO THIS CALLER. The panel is OPEN here,
      * so the live region is mounted and a change to its text really is spoken.
@@ -892,7 +1056,24 @@ export function TranscriptCapturePanel({ experimentId }: { experimentId: string 
    */
 
   async function startRecording() {
-    if (voice === 'recording' || voice === 'requesting-permission' || formLocked) return;
+    // `paused` IS UNREACHABLE HERE, AND IS SAID SO RATHER THAN IMPLIED —
+    // corrected after independent review, which measured that removing it
+    // leaves the suite green. `startRecording` is bound to exactly two
+    // controls, rendered only while `voice` is `idle` or `permission-denied`,
+    // so no press can arrive in `paused`. It is kept as hazard-class defence,
+    // beside the `recording` arm it copies: a stray call while paused would
+    // build a SECOND recorder over the first, and the first — still holding
+    // the microphone — would no longer be reachable from `recorderRef` for
+    // anything to stop it. That is worth one comparison. It is not evidence
+    // that anything can reach it.
+    if (
+      voice === 'recording' ||
+      voice === 'paused' ||
+      voice === 'requesting-permission' ||
+      formLocked
+    ) {
+      return;
+    }
     setVoice('requesting-permission');
     setVoiceLive(CAPTURE_COPY.voiceRequestingLive);
     setRefusal(null);
@@ -926,6 +1107,17 @@ export function TranscriptCapturePanel({ experimentId }: { experimentId: string 
         }
       };
       recorder.start();
+      /*
+       * THE CAPABILITY IS READ HERE, OFF THE INSTANCE, AND NOWHERE ELSE.
+       * Both methods are required: a recorder that can pause but not resume
+       * would strand a scientist mid-take, which is worse than never offering
+       * the control. `typeof` on the object the button will actually call —
+       * not a `'pause' in MediaRecorder.prototype`, not a UA string, not an
+       * assumption.
+       */
+      setPauseSupported(
+        typeof recorder.pause === 'function' && typeof recorder.resume === 'function',
+      );
       setVoice('recording');
       setVoiceLive(CAPTURE_COPY.voiceRecordingLive);
       startElapsedTimer();
@@ -954,8 +1146,137 @@ export function TranscriptCapturePanel({ experimentId }: { experimentId: string 
     }
   }
 
+  /**
+   * PAUSE — SUSPENDS THE RECORDER, AND VERIFIES THAT IT DID.
+   *
+   * THE STATE IS NOT SET UNTIL `recorder.state` AGREES. `pause()` is specified
+   * to throw `InvalidStateError` when the recorder is inactive, and a UA that
+   * ships the method is not thereby promising it will work in every situation.
+   * Painting the bar `Paused` over a recorder that is still capturing would be
+   * the exact inversion this panel's state bar exists to prevent — a scientist
+   * would believe the microphone was idle while it was recording them. So the
+   * transition is CONFIRMED by re-reading the recorder, and the failure branch
+   * says what is still true instead.
+   *
+   * NOTE WHAT IS DELIBERATELY NOT DONE HERE: the stream's tracks are NOT
+   * stopped. Pausing is not releasing — `MediaRecorder.pause()` suspends the
+   * recorder and leaves the device open so `resume()` can continue the SAME
+   * recording, and stopping a track would end the take. The visible line and
+   * the announcement both say so, because a reader who pauses in order to have
+   * a private word at the instrument would otherwise be wrong about what this
+   * control did.
+   */
+  function pauseRecording() {
+    if (voice !== 'recording' || formLocked) return;
+    const recorder = recorderRef.current;
+    if (!recorder) return;
+    if (typeof recorder.pause !== 'function') {
+      // NEVER A SILENT `return`. Unreachable through the rendered controls —
+      // `pauseSupported` gates the button on this exact method — but a
+      // control that does nothing and says nothing is the one outcome this
+      // panel's header forbids, and a stray call must still leave a true
+      // sentence behind.
+      setVoiceLive(CAPTURE_COPY.voicePauseUnavailableLive);
+      return;
+    }
+    try {
+      recorder.pause();
+    } catch {
+      /* handled by the state checks below — a throw and a silent no-op are the
+         same fact to a reader, and both must leave a true sentence on screen */
+    }
+    // THE TAKE MAY HAVE ENDED WITHOUT ANYONE PRESSING STOP — see
+    // `resumeRecording` for the measurement. Checked before the refusal branch,
+    // because "this browser did not pause it, so it is still recording" is
+    // FALSE of an `inactive` recorder, not merely unhelpful.
+    if (recorder.state === 'inactive') {
+      endTakeWithoutStopping();
+      return;
+    }
+    if (recorder.state !== 'paused') {
+      setVoiceLive(CAPTURE_COPY.voicePauseRefusedLive);
+      return;
+    }
+    pauseElapsedTimer();
+    setVoice('paused');
+    setVoiceLive(CAPTURE_COPY.voicePausedLive);
+  }
+
+  /**
+   * RESUME — the mirror of {@link pauseRecording}, confirmed the same way, with
+   * one extra branch that pause shares.
+   *
+   * THE RECORDING CAN END WHILE PAUSED, WITHOUT ANYONE PRESSING STOP, AND THE
+   * PANEL USED TO INSIST OTHERWISE. Measured in real Chrome by ending the
+   * track under a paused recorder (unplugging the device, or an OS revoke):
+   * `recorder.state` becomes `inactive` and `track.readyState` becomes
+   * `ended`, while the bar still read `Paused` and the visible line still
+   * said "The microphone is still open — Stop Recording is what releases it."
+   * Resuming then announced "…so it is still paused." Three false statements
+   * about a device, one of which this slice had just introduced.
+   *
+   * The fix is a TRANSITION, not a different sentence. Announcing that the
+   * recording ended while leaving `voicePausedPersistent` on screen would
+   * have swapped one false claim for a self-contradiction, so this moves to
+   * `held` — which is exactly what the state means: the microphone is closed
+   * and what was captured is in the tab.
+   *
+   * SCOPED HONESTLY: the RECORDING analogue is pre-existing and is NOT fixed
+   * here. A track that ends while the bar says `Recording` still leaves the
+   * clock counting, because nothing listens for `onstop` or for a track's
+   * `ended` event. That is a wider change with its own tests; what is closed
+   * here is the specific, falsifiable DEVICE claim this slice added.
+   */
+  function resumeRecording() {
+    if (voice !== 'paused' || formLocked) return;
+    const recorder = recorderRef.current;
+    if (!recorder) return;
+    if (typeof recorder.resume !== 'function') {
+      // See `pauseRecording`'s twin of this branch. Reaching it means the
+      // reader is stuck in `paused` with a dead button, so the sentence names
+      // the control that still works.
+      setVoiceLive(CAPTURE_COPY.voiceResumeUnavailableLive);
+      return;
+    }
+    try {
+      recorder.resume();
+    } catch {
+      /* see `pauseRecording` */
+    }
+    if (recorder.state === 'inactive') {
+      endTakeWithoutStopping();
+      return;
+    }
+    if (recorder.state !== 'recording') {
+      setVoiceLive(CAPTURE_COPY.voiceResumeRefusedLive);
+      return;
+    }
+    // The clock restarts BEFORE the state flips, so no render can show a bar
+    // labelled `Recording` over a clock that is not running.
+    resumeElapsedTimer();
+    setVoice('recording');
+    setVoiceLive(CAPTURE_COPY.voiceResumedLive);
+  }
+
+  /**
+   * The recorder went `inactive` on its own. Lands in `held` through
+   * `stopRecording`, so the clock is settled and the tracks are released by
+   * the ONE function that already knows how — `stopRecording` guards its own
+   * `recorder.stop()` on `state !== 'inactive'`, so calling it here stops
+   * nothing twice — and then replaces its announcement, because this did not
+   * happen because anybody pressed Stop.
+   */
+  function endTakeWithoutStopping() {
+    stopRecording();
+    setVoiceLive(CAPTURE_COPY.voiceRecordingEndedLive);
+  }
+
   function stopRecording() {
-    if (voice !== 'recording') return;
+    // STOPPABLE FROM `paused` AS WELL AS `recording`. `MediaRecorder.stop()` is
+    // valid in both, and flushes the whole take either way. Leaving this guard
+    // at `!== 'recording'` would have made Stop a dead control in the one state
+    // where the microphone is open and the reader most wants it closed.
+    if (voice !== 'recording' && voice !== 'paused') return;
     const recorder = recorderRef.current;
     if (recorder && recorder.state !== 'inactive') recorder.stop();
     streamRef.current?.getTracks().forEach((track) => track.stop());
@@ -1420,19 +1741,25 @@ export function TranscriptCapturePanel({ experimentId }: { experimentId: string 
               between them. The size difference is carried by the two inner
               spans, which changes no character of the text.
             */}
-            {(voice === 'recording' || voice === 'held') && (
+            {(voice === 'recording' || voice === 'paused' || voice === 'held') && (
               <div className="capture-live" data-state={voice}>
                 <span className="capture-live-mark" aria-hidden="true" />
                 <p className="capture-elapsed">
-                  <span className="capture-elapsed-state">
-                    {voice === 'recording'
-                      ? CAPTURE_COPY.voiceRecordingBadge
-                      : CAPTURE_COPY.voiceHeldBadge}
-                  </span>
+                  <span className="capture-elapsed-state">{STATE_BADGE[voice]}</span>
                   {' · '}
                   <span className="capture-elapsed-time">{formatElapsed(elapsedSec)}</span>
                 </p>
               </div>
+            )}
+            {/*
+              THE VISIBLE `paused` STATEMENT, in the same slot `held` uses for
+              `voiceHeldPersistent` and for the same reason: the state's most
+              consequential fact must not live only in an `sr-only` live region,
+              where a sighted reader never meets it. Here that fact is that the
+              MICROPHONE IS STILL OPEN — see `voicePausedPersistent`.
+            */}
+            {voice === 'paused' && (
+              <p className="capture-held-line">{CAPTURE_COPY.voicePausedPersistent}</p>
             )}
             {voice === 'held' && (
               <>
@@ -1512,6 +1839,58 @@ export function TranscriptCapturePanel({ experimentId }: { experimentId: string 
                 >
                   {CAPTURE_COPY.voiceStop}
                 </button>
+              )}
+              {/*
+                PAUSE IS SECONDARY AND ONLY EXISTS IF THE RECORDER CAN DO IT.
+
+                Secondary, because Stop is still this state's one primary
+                action — the exclusivity guard counts `.btn-primary` nodes and
+                `recording` must keep exactly one. Rendered conditionally on
+                `pauseSupported`, which was read off the constructed recorder
+                (see that state's comment): absence is the truthful shape for
+                a capability this browser does not have, and a disabled button
+                would claim one that is merely unavailable right now.
+              */}
+              {voice === 'recording' && pauseSupported && (
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={pauseRecording}
+                  disabled={formLocked}
+                >
+                  {CAPTURE_COPY.voicePause}
+                </button>
+              )}
+              {voice === 'paused' && (
+                <>
+                  <button
+                    type="button"
+                    className={primaryClass(showVoicePrimary)}
+                    onClick={resumeRecording}
+                    disabled={formLocked}
+                  >
+                    {CAPTURE_COPY.voiceResume}
+                  </button>
+                  {/*
+                    STOP KEEPS `capture-stop` WHILE PAUSED, and keeps the alert
+                    ramp with it. The ramp is on the CONTROL, not on the state:
+                    it is the same act — close the device, end the take — and
+                    the reason `.capture-stop` exists is that it must never be
+                    mistaken for Start. The bar two elements above is amber and
+                    says `Paused`, so nothing here says a recording is live.
+                    `transcriptCapture.css` already anticipated Stop rendering
+                    `btn btn-secondary capture-stop`; this is the second state
+                    in which it does.
+                  */}
+                  <button
+                    type="button"
+                    className={`${primaryClass(false)} capture-stop`}
+                    onClick={stopRecording}
+                    disabled={formLocked}
+                  >
+                    {CAPTURE_COPY.voiceStop}
+                  </button>
+                </>
               )}
               {voice === 'held' && (
                 <>

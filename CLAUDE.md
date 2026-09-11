@@ -1596,6 +1596,132 @@ Current state:
   Chrome it routes scientist speech to a third party, which §7's egress boundary forbids. Hosted QA
   of this PR's image is `HOSTED QA PENDING (Krish)`.
 
+- **Session of 2026-09-10/11, rounds 2 and 3 — the capture surface was reviewed with the
+  Impeccable `critique` command and scored 17/40, and the two lowest-scoring heuristics were
+  each carrying a real defect.** PRs [#244](https://github.com/ISAAC-DOE/isaac-metadata-assistant/pull/244)
+  (`65f5ebd3`, **v0.0.229**) and [#245](https://github.com/ISAAC-DOE/isaac-metadata-assistant/pull/245)
+  (`ec458d77`, **v0.0.230**). Backend **7190** passed / 45 skipped; frontend **206 files / 5437**.
+  Every slice independently reviewed by an agent that did not implement it. Nothing about the hosted
+  deployment, the external authorizations, gates **G2**/**G3**, or Dean's **D1–D9** deferral changed,
+  and no agent touched a database. What a future session must not re-derive:
+
+  **THE PRIMARY INPUT OF THE CAPTURE SURFACE WAS INVISIBLE, AND THE REPOSITORY HAD FILED IT AS A
+  TASTE QUESTION.** Nine custom properties were declared nowhere; five unrescued, so every
+  declaration using them was dropped at computed-value time. Measured in Chrome:
+  `.capture-textarea` and `select.capture-control` both computed `border-style: none`,
+  `border-width: 0px`, `background: rgba(0,0,0,0)`. §11's own 2026-08-31 entry had listed "the five
+  undeclared custom properties … **repointing them is a visual decision**" as still-open. **It was
+  not a visual decision** — `unmappedNotes.css`, the sibling panel on the same screen, already had a
+  token for every role, so the mapping was a lookup. The deferral's premise was false and the cost
+  was that the box a scientist types into had no border for an unknown number of releases.
+  **The durable lesson: "this needs a human's taste" is itself a checkable claim, and nobody had
+  checked it.** The true count was **nine**, not the four found by inspection nor the five the
+  repo's own ratchet listed.
+
+  **`--text-body → --text-strong` WAS WRONG, AND THE BROWSER SETTLED IT.** With the property
+  undeclared the text *inherited* `#1b2430` = `--text-primary`; `--text-strong` `#33404e` would have
+  silently lightened ten sites. The new guard keys on the **name**, not on whether something renders,
+  because the measured history is that the first phantom in a family arrives with a harmless fallback
+  and is then copied into a file that writes it bare. Six negative controls, including the
+  fallback-rescued case the old guard passed and the case where someone later declares `--danger`
+  for its obvious purpose.
+
+  **CAPTURE IS A SIDEBAR DESTINATION AND DELIBERATELY NOT A SIXTH WORKFLOW STEP.** The project owner
+  asked for the data-acquisition area to be "another step in the sidebar". `workflow.py:128-149` had
+  already argued this exact case for submission — it is "a DECLARATION BY A PERSON", so no honest
+  step state exists. Capture is the same: there is **no derivable criterion for "capture is
+  finished"**, and `notes >= 1` would nag every record that legitimately needs none, inventing a
+  completion criterion nobody defined (§5). So a `DATA CAPTURE` group stating facts, with no tick, no
+  lock, no ordering, no `aria-current="step"`. **Do not re-file this as a missing workflow step.**
+
+  **RECORDING WAS A VERB SWAP IN A BLUE PILL, AND YOU COULD RECORD AUDIO YOU COULD NEVER HEAR.**
+  Recording differed from idle by the word on a button plus a 12px grey timer; on Stop the timer
+  vanished and **nothing visible** said audio was held — so a screen-reader user was better informed
+  than a sighted one. And the only exits from a recording were a transcript request that always
+  refuses and Discard: no `<audio>`, no `createObjectURL`, nowhere in the capture path. Both closed.
+  Playback is **in-tab only** — no download (the copy promises "never written to disk"), no casting,
+  **no request of any kind**, pinned by a real-Chromium sweep over HTTP, WebRTC and WebSockets.
+
+  **A CLAIM THIS FILE'S OWN STYLE FORBIDS WAS PUBLISHED AND THEN WITHDRAWN.** The first playback
+  implementation paused the `<audio>` before revoking its object URL, defended by a comment asserting
+  *"a DETACHED `HTMLMediaElement` KEEPS PLAYING in a real browser."* Measured three ways: it does not
+  (`advancedWhileDetached: false` — the HTML spec's removal pause steps); React 18.3.1 detaches the
+  ref in the **mutation** phase so the pause never fired at all; and `void 0` was an **equivalent
+  mutant** across 152 tests. The dead guard is gone and the comment records all three measurements.
+
+  **A REPO-WIDE GUARD EXISTS THAT NEITHER THE IMPLEMENTER NOR THE ORCHESTRATOR KNEW ABOUT, AND THE
+  REPOSITORY HAD ALREADY ANSWERED THE QUESTION.** Repainting Stop tripped
+  `src/__tests__/interaction-states.test.ts` — *"P22C · no green/red hex or pass/fail token in ANY
+  interaction-state rule"* (it bans the raw hex too, so that is not an escape). The orchestrator
+  offered two routes, widen the guard or drop the colour; **both were worse than the third the
+  implementer found**: `base.css`'s `.btn-danger` already darkens with `filter: brightness()`
+  precisely so no reserved hue appears in a state rule. Same rendered result, guard **unedited**,
+  10/10. Note the corollary it forced: `filter` alone does not stop `.btn-primary:hover` turning a
+  live Stop blue, so the resting fill moved to a container-scoped `(0,3,0)` selector.
+
+  **TWO SHIPPED STRINGS CONTRADICTED EACH OTHER ABOUT WHETHER A RUN IS REQUIRED.** The panel said
+  *"only run-scoped values need a run chosen first"*; the server's post-finalize clarification said
+  *"every value this reader can propose belongs to a run."* Measured — all five
+  `READABLE_FIELD_PATHS` resolve to scope `run` — so the **server's was true and the panel's was
+  false**. The replacement states the **behaviour** rather than restating the server's taxonomy,
+  because that rests on an invariant that cannot drift: no run → `run_target_required` → `settled is
+  False` → the candidate loop is skipped whole.
+
+  **THE ASSISTANT WAS SILENT TO SCREEN READERS ON EVERY AGENT ACTION AND EVERY CONFIRM OUTCOME.**
+  `.assistant-log` is `role="log" aria-live="off"` and `.assistant-reply` stayed empty. Fixed with a
+  second permanently-mounted `sr-only` announcer reusing `IngestionProposalsPanel.announce()`'s
+  alternating-NBSP idiom. **Its first version announced the RAW pre-sanitization text** and an
+  existing leak-safety test caught a 40-char token reaching the DOM; it now announces the sanitized
+  stored value on every path including the withheld one. Two "exactly one live region" assertions
+  became "exactly these two, named and shape-checked" — **stronger, not weaker**, proven by mutation.
+  A **third**, `graph-semantic-zoom.test.tsx:826`, was missed because it keys on `role="status"`
+  rather than `aria-live`; a sweep of all **19** files asserting that invariant (1,090 tests)
+  confirmed there is no fourth. **The lesson: sweep for the INVARIANT, not for the attribute you are
+  adding.**
+
+  ***A FOURTH MEASUREMENT TRAP IN THE HIDDEN-TAB FAMILY, AND IT IS THE ONE MOST LIKELY TO MISLEAD A
+  FUTURE SESSION.*** **Every tab the Chrome browser-automation tooling drives reports
+  `document.visibilityState === "hidden"`.** Three independent consequences were measured today:
+  1. **`useChangeFeed` polls only when visible** (`useChangeFeed.ts:248`), so **nothing driven by the
+     change feed ever updates in a driven tab.** An independent design review reported "the panels
+     never refresh after finalize" as a **P0** on this basis; it is **not a defect** — a fresh load
+     shows the data. **Do not re-file it.**
+  2. **CSS transitions do not advance**, so a changed element keeps computing its *old* colour while
+     a non-transitioned property (e.g. `cursor`) flips correctly. Measure a freshly-inserted element
+     or inject `transition: none` first.
+  3. **Chrome defers media loading**, so an `<audio>` element's transport may never reach
+     `readyState > 0` even though its bytes decode correctly.
+  Also unchanged and worth restating: **`resize_window` reports success but the rendered viewport
+  does not follow** — narrow widths must be exercised through a same-origin iframe, and no hosted
+  narrow-width observation is possible with this tooling.
+
+  **THE IMPECCABLE MECHANICAL DETECTOR IS NON-FUNCTIONAL HERE, CONFIRMED BY NEGATIVE CONTROL.** It
+  returned `[]` exit 0 on a file containing an unlabelled `<img>`, a clickable `<div>` with no role,
+  8px text and a nested interactive element; `htmlparser2`/`css-select`/`css-tree`/`domutils` are
+  missing. It was reported as **"deterministic scan unavailable"**, never as "0 findings". Its
+  **in-browser overlay is a different code path and does work** (13 elements / 16 findings). §11's
+  2026-09-03 entry said to treat any historical "0 findings" as a non-answer; that still holds, and
+  the negative control is how you tell.
+
+  **Named rather than implied, and still not done:** **pause/resume during recording** (this
+  session's last unbuilt item at the time of writing); a `capture_summary` on the record detail
+  payload, which would delete `useCaptureSummary.ts` entirely and remove the two extra requests the
+  sidebar now makes on three of four workspaces (the `?state=dismissed` trick cuts the notes payload
+  **73%** — `_notes_payload`'s totals ignore the filter — but does not remove the request);
+  `IngestionProposalsPanel`'s and `UnmappedNotesPanel`'s remaining latent in-flight-first-load case;
+  the three fallback-rescued phantoms in `record-description.css` and `tutorial.css`; the native
+  player showing `0:00 / 0:00` (MediaRecorder webm carries no duration header — the seek hack was
+  deliberately declined); the human live-microphone check, true 200%-zoom sign-off and hosted
+  narrow widths, **none of which this tooling can perform**; and every hosted QA.
+
+  **Two process failures, recorded because both could have been expensive:** an agent ran **`git
+  stash`** on the shared working tree while four slices held uncommitted work in it, against an
+  explicit prohibition (nothing was lost — verified: empty stash list, all files present); and the
+  orchestrator **merged a flaky test that turned `main` red** (PR #243 fixed it) — a real-browser
+  assertion that sampled a React passive-effect cleanup once instead of polling, which won locally
+  and on its own PR's CI and lost on the next run. **The release gate refused to publish the red
+  commit**, which is the second time this session it did its job.
+
 - Current repository status is summarized in README.md and docs/mentor-brief.md; see git history for the exact commit state.
 - Start any further phase (beyond the completed Phase 36 / Phase 36R slices) only after explicit user approval.
 

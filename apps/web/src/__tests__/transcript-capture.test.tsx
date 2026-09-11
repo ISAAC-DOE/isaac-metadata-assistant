@@ -684,16 +684,88 @@ describe('voice capture: honesty', () => {
 
 class FakeMediaRecorder {
   static instances: FakeMediaRecorder[] = [];
+  state: 'inactive' | 'recording' | 'paused' = 'inactive';
+  ondataavailable: ((event: { data: Blob }) => void) | null = null;
+  /**
+   * HOW LONG THIS RECORDER WAS ACTUALLY IN `recording`, IN MS — the double's
+   * own independent measurement, kept so a test can compare the DISPLAYED
+   * elapsed time against the REAL recorded duration rather than against the
+   * number the test itself expected. Accumulated off `Date.now()`, which
+   * `vi.useFakeTimers()` controls, so it advances exactly as the panel's own
+   * wall-clock reading does and neither can drift from the other by accident.
+   *
+   * A test that asserted `0:07` because it advanced the clock by 7,000 ms in
+   * the recording segments would be asserting its own arithmetic. Asserting
+   * against THIS is asserting against the recorder.
+   */
+  private recordedTotal = 0;
+  private segmentStartedAt: number | null = null;
+  /**
+   * A GETTER, NOT A FIELD, AND THE DIFFERENCE IS A DEFECT THIS DOUBLE ALREADY
+   * HAD ONCE. As a field updated only at pause/stop it read 4,000 while the
+   * recorder had been running for 7,000 — so an assertion taken mid-segment
+   * compared the panel against a stale measurement and failed a correct panel.
+   * Reading the open segment live is what makes it answerable at any moment.
+   */
+  get recordedMs(): number {
+    return (
+      this.recordedTotal + (this.segmentStartedAt === null ? 0 : Date.now() - this.segmentStartedAt)
+    );
+  }
+  constructor(_stream: unknown) {
+    FakeMediaRecorder.instances.push(this);
+  }
+  private closeSegment() {
+    if (this.segmentStartedAt !== null) {
+      this.recordedTotal += Date.now() - this.segmentStartedAt;
+      this.segmentStartedAt = null;
+    }
+  }
+  start() {
+    this.state = 'recording';
+    this.recordedTotal = 0;
+    this.segmentStartedAt = Date.now();
+  }
+  /** Suspends without releasing the device, per the `MediaRecorder` spec — the
+   *  tracks are the caller's and this never touches them. */
+  pause() {
+    if (this.state !== 'recording') throw new Error('InvalidStateError');
+    this.closeSegment();
+    this.state = 'paused';
+  }
+  resume() {
+    if (this.state !== 'paused') throw new Error('InvalidStateError');
+    this.state = 'recording';
+    this.segmentStartedAt = Date.now();
+  }
+  /** `stop()` emits its final `dataavailable` ASYNCHRONOUSLY — see `dropAudio`'s
+   *  own comment in the panel for the ordering hazard this reproduces. Valid
+   *  from `paused` as well as from `recording`, exactly as the spec says. */
+  stop() {
+    this.closeSegment();
+    this.state = 'inactive';
+    const emit = this.ondataavailable;
+    setTimeout(() => emit?.({ data: new Blob(['audio-bytes']) }), 0);
+  }
+}
+
+/**
+ * A RECORDER WITH NO `pause`/`resume` — a browser that ships the constructor
+ * and not the two methods. `delete`-ing them off the prototype of the class
+ * above would poison every other test in the file, so this is a separate
+ * class that simply never declares them; the panel's `typeof recorder.pause
+ * === 'function'` probe is what has to notice, and it reads the instance.
+ */
+class PauselessMediaRecorder {
+  static instances: PauselessMediaRecorder[] = [];
   state: 'inactive' | 'recording' = 'inactive';
   ondataavailable: ((event: { data: Blob }) => void) | null = null;
   constructor(_stream: unknown) {
-    FakeMediaRecorder.instances.push(this);
+    PauselessMediaRecorder.instances.push(this);
   }
   start() {
     this.state = 'recording';
   }
-  /** `stop()` emits its final `dataavailable` ASYNCHRONOUSLY — see `dropAudio`'s
-   *  own comment in the panel for the ordering hazard this reproduces. */
   stop() {
     this.state = 'inactive';
     const emit = this.ondataavailable;
@@ -733,9 +805,46 @@ let objectUrlsMinted = 0;
   objectUrls.revoked.push(url);
 };
 
-function installRecorder(getUserMedia: Mock) {
+/**
+ * A RECORDER THAT CAN PAUSE AND CANNOT RESUME — the case `PauselessMediaRecorder`
+ * cannot cover, and the one that makes the `&& typeof recorder.resume` half of
+ * the panel's capability probe load-bearing.
+ *
+ * WHY IT MATTERS, measured: with only the `pause` half checked, Pause renders,
+ * pausing works, and then `resumeRecording` hits `typeof recorder.resume !==
+ * 'function'` — a scientist stuck in `paused` with a dead button. Requiring
+ * BOTH methods is what makes the control never appear in the first place.
+ */
+class PauseOnlyMediaRecorder {
+  static instances: PauseOnlyMediaRecorder[] = [];
+  state: 'inactive' | 'recording' | 'paused' = 'inactive';
+  ondataavailable: ((event: { data: Blob }) => void) | null = null;
+  constructor(_stream: unknown) {
+    PauseOnlyMediaRecorder.instances.push(this);
+  }
+  start() {
+    this.state = 'recording';
+  }
+  pause() {
+    this.state = 'paused';
+  }
+  stop() {
+    this.state = 'inactive';
+    const emit = this.ondataavailable;
+    setTimeout(() => emit?.({ data: new Blob(['audio-bytes']) }), 0);
+  }
+}
+
+function installRecorder(
+  getUserMedia: Mock,
+  /** The constructor to install. Defaults to the full double; the pauseless one
+   *  is the browser that ships no `pause`/`resume`. */
+  recorderClass: unknown = FakeMediaRecorder,
+) {
   FakeMediaRecorder.instances = [];
-  (globalThis as never as Record<string, unknown>).MediaRecorder = FakeMediaRecorder;
+  PauselessMediaRecorder.instances = [];
+  PauseOnlyMediaRecorder.instances = [];
+  (globalThis as never as Record<string, unknown>).MediaRecorder = recorderClass;
   (globalThis as never as Record<string, unknown>).Blob =
     (globalThis as never as Record<string, unknown>).Blob ?? class {};
   Object.defineProperty(globalThis.navigator, 'mediaDevices', {
@@ -1172,6 +1281,630 @@ describe('I1: Try Again dispatches through a tag, never a captured closure', () 
 });
 
 // --- 7c. I2 — exactly one primary action per state ----------------------------
+
+// --- 6b. PAUSE AND RESUME ------------------------------------------------------
+//
+// Added 2026-09-11. The two things these tests exist to stop, both of which a
+// naive implementation gets wrong and neither of which any earlier test here
+// could see:
+//
+//   1. A `paused` bar that a scientist could mistake for `recording` at a
+//      glance — or, worse, the inverse: a bar still saying `Recording` over a
+//      recorder the browser refused to pause.
+//   2. An elapsed count that keeps running while the recorder is suspended.
+//      The count was changed to a wall-clock reading precisely because a
+//      throttled background tab UNDERSTATED it (0:03 for 6.96 s of audio);
+//      reading the wall clock is what makes paused time OVERSTATE it, which is
+//      the same class of lie pointing the other way.
+//
+// Every assertion about duration below is checked against the double's own
+// `recordedMs` — the time the recorder was really in `recording` — rather than
+// against a literal the test computed for itself.
+
+describe('pause and resume', () => {
+  /** Drives the panel into `recording` with fake timers already installed, and
+   *  hands back the single recorder instance the panel built. */
+  async function startRecordingWithFakeClock() {
+    vi.useFakeTimers();
+    const trackStop = vi.fn();
+    installRecorder(vi.fn(async () => ({ getTracks: () => [{ stop: trackStop }] })));
+    stubFetchRoutes(BASE_ROUTES as never);
+    const rendered = await renderPanel();
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: CAPTURE_COPY.voiceRecord }));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(screen.getByRole('button', { name: CAPTURE_COPY.voiceStop })).toBeInTheDocument();
+    return { ...rendered, recorder: FakeMediaRecorder.instances[0], trackStop };
+  }
+
+  const bar = (container: HTMLElement) => container.querySelector('.capture-live');
+  const elapsedText = (container: HTMLElement) =>
+    container.querySelector('.capture-elapsed')?.textContent;
+  const liveTexts = (container: HTMLElement) =>
+    Array.from(container.querySelectorAll('[aria-live="polite"]')).map((el) => el.textContent);
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('paused is a FOURTH state, and carries a word and a shape of its own — never `recording` with a flag', async () => {
+    const { container, recorder, trackStop } = await startRecordingWithFakeClock();
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: CAPTURE_COPY.voicePause }));
+    });
+
+    // 1. THE RECORDER REALLY IS SUSPENDED — the app's claim and the fact, read
+    //    at the same moment, which is the discipline the real-Chromium spec uses.
+    expect(recorder.state).toBe('paused');
+
+    // 2. THE BAR. A distinct `data-state` (so the CSS can give it its own tint
+    //    and its own mark shape), and a distinct WORD — the one signal that
+    //    survives with no colour and no shapes at all.
+    expect(bar(container)?.getAttribute('data-state')).toBe('paused');
+    expect(container.querySelector('.capture-elapsed-state')?.textContent).toBe(
+      CAPTURE_COPY.voicePausedBadge,
+    );
+    expect(CAPTURE_COPY.voicePausedBadge).not.toBe(CAPTURE_COPY.voiceRecordingBadge);
+    expect(CAPTURE_COPY.voicePausedBadge).not.toBe(CAPTURE_COPY.voiceHeldBadge);
+    // The mark stays decorative: its meaning is entirely in the word beside it,
+    // which is the exemption basis `palette-contrast.test.ts` recognises.
+    expect(container.querySelector('.capture-live-mark')).toHaveAttribute('aria-hidden', 'true');
+    // The `<state> · <m:ss>` shape the fenced real-Chromium spec parses is
+    // unchanged in this state — only the word differs.
+    expect(elapsedText(container)).toMatch(/^Paused · \d+:\d\d$/);
+
+    // 3. THE MICROPHONE IS STILL OPEN, AND THE PANEL SAYS SO IN BOTH CHANNELS.
+    //    This is the fact a reader is most likely to get wrong about pausing,
+    //    and the track spy is what proves the sentence is true rather than
+    //    merely reassuring.
+    expect(trackStop).not.toHaveBeenCalled();
+    expect(screen.getByText(CAPTURE_COPY.voicePausedPersistent)).toBeInTheDocument();
+    expect(CAPTURE_COPY.voicePausedPersistent).toMatch(/microphone is still\s+open/);
+    expect(liveTexts(container)).toContain(CAPTURE_COPY.voicePausedLive);
+
+    // 4. THE CONTROLS. Resume and Stop; no second Start, and no Pause to press
+    //    twice.
+    expect(screen.getByRole('button', { name: CAPTURE_COPY.voiceResume })).toBeEnabled();
+    expect(screen.getByRole('button', { name: CAPTURE_COPY.voiceStop })).toBeEnabled();
+    expect(screen.queryByRole('button', { name: CAPTURE_COPY.voicePause })).toBeNull();
+    expect(screen.queryByRole('button', { name: CAPTURE_COPY.voiceRecord })).toBeNull();
+  });
+
+  it('MUTATION-GUARDED: the elapsed count is the RECORDED duration, not the wall clock — paused time is not counted', async () => {
+    /*
+     * THE MEASUREMENT. Four seconds recorded, ten paused, three more recorded.
+     * Wall clock across the whole thing: 17 s. Recorded: 7 s.
+     *
+     * The assertion is against `recorder.recordedMs`, which the double
+     * accumulates from its OWN `Date.now()` readings across its `recording`
+     * segments — so this compares the panel's displayed number with an
+     * independently-measured duration, not with the test's own arithmetic.
+     * Reverting `pauseElapsedTimer` to leave the clock running (the defect)
+     * displays `0:17` here while `recordedMs` still reads 7,000.
+     */
+    const { container, recorder } = await startRecordingWithFakeClock();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(4000);
+    });
+    expect(elapsedText(container)).toBe('Recording · 0:04');
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: CAPTURE_COPY.voicePause }));
+    });
+    expect(elapsedText(container)).toBe('Paused · 0:04');
+
+    // TEN SECONDS OF WALL TIME IN WHICH NOTHING IS RECORDED. The reading must
+    // not move by one digit.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10_000);
+    });
+    expect(elapsedText(container)).toBe('Paused · 0:04');
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: CAPTURE_COPY.voiceResume }));
+    });
+    expect(recorder.state).toBe('recording');
+    expect(liveTexts(container)).toContain(CAPTURE_COPY.voiceResumedLive);
+    // Resuming continues the SAME count — it does not restart at zero, which
+    // would lose the first segment just as surely as counting the pause would
+    // invent time that was never recorded.
+    expect(elapsedText(container)).toBe('Recording · 0:04');
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(3000);
+    });
+
+    // THE COMPARISON. Displayed, versus what the recorder measured.
+    const displayed = elapsedText(container);
+    expect(displayed).toBe('Recording · 0:07');
+    expect(recorder.recordedMs).toBe(7000);
+    expect(displayed).toBe(`Recording · 0:${String(Math.floor(recorder.recordedMs / 1000)).padStart(2, '0')}`);
+    // And the vacuity guard: 17 s of wall time really did pass, so a
+    // wall-clock reading would have been visibly, badly different.
+    expect(Math.floor(recorder.recordedMs / 1000)).toBe(7);
+
+    // Stopping settles to the same recorded duration, and the clock is dead.
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: CAPTURE_COPY.voiceStop }));
+    });
+    expect(elapsedText(container)).toBe('Held · 0:07');
+    expect(recorder.recordedMs).toBe(7000);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5000);
+    });
+    expect(elapsedText(container)).toBe('Held · 0:07');
+  });
+
+  it('a sub-second first segment is carried across the pause and counted at Stop', async () => {
+    /*
+     * WHAT THIS DOES AND DOES NOT PIN — corrected after independent review,
+     * because the docstring it replaces named a regression that does not
+     * exist.
+     *
+     * IT DOES PIN: that the 900 ms recorded BEFORE the pause is not rounded
+     * away and then lost. The accumulator carries 900 ms across the pause and
+     * the resumed 2,200 ms lands on top of it, so the recorder's own
+     * measurement is 3,100 ms and the bar reads `0:03` — a naive
+     * "restart the clock on resume" reads `0:02`, and that is what fails here.
+     *
+     * IT DOES NOT PIN `settleElapsedTimer`'s widened guard, which the old
+     * docstring claimed. That guard is equivalent to the narrow one on every
+     * reachable path (see its own comment in the panel, and the case below
+     * that stops directly from `paused`), and this test resumes before
+     * stopping, so it never even takes the branch in question.
+     */
+    const { container, recorder } = await startRecordingWithFakeClock();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(900);
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: CAPTURE_COPY.voicePause }));
+    });
+    expect(elapsedText(container)).toBe('Paused · 0:00');
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: CAPTURE_COPY.voiceResume }));
+      await vi.advanceTimersByTimeAsync(2200);
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: CAPTURE_COPY.voiceStop }));
+    });
+    expect(recorder.recordedMs).toBe(3100);
+    expect(elapsedText(container)).toBe('Held · 0:03');
+  });
+
+  it('MUTATION-GUARDED: Stop works from `paused`, releases the microphone, and keeps the audio', async () => {
+    const { container, recorder, trackStop } = await startRecordingWithFakeClock();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2000);
+      fireEvent.click(screen.getByRole('button', { name: CAPTURE_COPY.voicePause }));
+    });
+    expect(recorder.state).toBe('paused');
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: CAPTURE_COPY.voiceStop }));
+      // `FakeMediaRecorder.stop()` emits its last chunk on a later task.
+      await vi.advanceTimersByTimeAsync(1);
+    });
+
+    // Leaving `stopRecording`'s guard at `voice !== 'recording'` makes Stop a
+    // DEAD CONTROL here — the state stays `paused`, the recorder stays open
+    // and the track is never stopped.
+    expect(recorder.state).toBe('inactive');
+    expect(trackStop).toHaveBeenCalled();
+    expect(bar(container)?.getAttribute('data-state')).toBe('held');
+    expect(liveTexts(container)).toContain(CAPTURE_COPY.voiceHeldLive);
+    expect(screen.getByRole('button', { name: CAPTURE_COPY.voiceDiscard })).toBeEnabled();
+    /*
+     * THE NUMBER SURVIVES A STOP TAKEN FROM `paused`, which is the only path
+     * on which `settleElapsedTimer`'s two possible guards could differ.
+     * STATED PLAINLY BECAUSE IT WAS OVERSTATED ONCE: this assertion passes
+     * under BOTH guards — measured — so it is a statement about the displayed
+     * value, not a mutation guard on that line. See the panel's own comment.
+     */
+    expect(elapsedText(container)).toBe('Held · 0:02');
+    expect(recorder.recordedMs).toBe(2000);
+  });
+
+  it('MUTATION-GUARDED: a browser whose recorder has no pause() is offered no Pause control at all', async () => {
+    /*
+     * NOT a disabled button. A disabled control promises the capability exists
+     * and is momentarily unavailable; this browser does not have it. Dropping
+     * the `pauseSupported &&` condition renders a Pause that throws on click.
+     */
+    installRecorder(
+      vi.fn(async () => ({ getTracks: () => [{ stop: vi.fn() }] })),
+      PauselessMediaRecorder,
+    );
+    stubFetchRoutes(BASE_ROUTES as never);
+    const { container } = await renderPanel();
+    await act(async () => {
+      fireEvent.click(await screen.findByRole('button', { name: CAPTURE_COPY.voiceRecord }));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(PauselessMediaRecorder.instances[0].state).toBe('recording');
+    expect(bar(container)?.getAttribute('data-state')).toBe('recording');
+    // The whole recording state still works — only the pause affordance is absent.
+    expect(screen.getByRole('button', { name: CAPTURE_COPY.voiceStop })).toBeEnabled();
+    expect(screen.queryByRole('button', { name: CAPTURE_COPY.voicePause })).toBeNull();
+    expect(screen.queryByRole('button', { name: CAPTURE_COPY.voiceResume })).toBeNull();
+  });
+
+  it('MUTATION-GUARDED: a pause the browser refuses leaves the bar saying `Recording`, and says why', async () => {
+    /*
+     * THE INVERSION THIS PREVENTS. `pause()` may throw `InvalidStateError`, or
+     * a UA may simply not honour it. Setting `voice` optimistically would paint
+     * `Paused` over a recorder that is still capturing — telling a scientist
+     * the microphone is idle while it is recording them. The panel re-reads
+     * `recorder.state` and only then commits.
+     */
+    const { container, recorder } = await startRecordingWithFakeClock();
+    // A recorder that accepts the call and does nothing — the silent-no-op UA.
+    recorder.pause = () => {};
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2000);
+      fireEvent.click(screen.getByRole('button', { name: CAPTURE_COPY.voicePause }));
+    });
+
+    expect(recorder.state).toBe('recording');
+    expect(bar(container)?.getAttribute('data-state')).toBe('recording');
+    expect(container.querySelector('.capture-elapsed-state')?.textContent).toBe(
+      CAPTURE_COPY.voiceRecordingBadge,
+    );
+    expect(liveTexts(container)).toContain(CAPTURE_COPY.voicePauseRefusedLive);
+    // The clock was never banked, so it is still counting real recorded time.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2000);
+    });
+    expect(elapsedText(container)).toBe('Recording · 0:04');
+    // And Stop, which the refusal sentence points at, still works.
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: CAPTURE_COPY.voiceStop }));
+    });
+    expect(bar(container)?.getAttribute('data-state')).toBe('held');
+  });
+
+  it('a resume the browser refuses leaves the bar saying `Paused`, and the clock stopped', async () => {
+    const { container, recorder } = await startRecordingWithFakeClock();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2000);
+      fireEvent.click(screen.getByRole('button', { name: CAPTURE_COPY.voicePause }));
+    });
+    recorder.resume = () => {};
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: CAPTURE_COPY.voiceResume }));
+    });
+
+    expect(recorder.state).toBe('paused');
+    expect(bar(container)?.getAttribute('data-state')).toBe('paused');
+    expect(liveTexts(container)).toContain(CAPTURE_COPY.voiceResumeRefusedLive);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5000);
+    });
+    expect(elapsedText(container)).toBe('Paused · 0:02');
+  });
+
+  it('exactly one .btn-primary in `recording` (with Pause on screen) and in `paused`', async () => {
+    const { container } = await startRecordingWithFakeClock();
+    const primaries = () => Array.from(container.querySelectorAll('.btn-primary'));
+
+    // `recording`: Stop keeps the slot; Pause is secondary.
+    expect(primaries()).toHaveLength(1);
+    expect(primaries()[0].textContent).toBe(CAPTURE_COPY.voiceStop);
+    expect(screen.getByRole('button', { name: CAPTURE_COPY.voicePause })).toHaveClass(
+      'btn-secondary',
+    );
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: CAPTURE_COPY.voicePause }));
+    });
+
+    // `paused`: Resume takes the slot — it is the act that continues the
+    // workflow — and Stop keeps its own alert-ramp class while going secondary.
+    expect(primaries()).toHaveLength(1);
+    expect(primaries()[0].textContent).toBe(CAPTURE_COPY.voiceResume);
+    const stop = screen.getByRole('button', { name: CAPTURE_COPY.voiceStop });
+    expect(stop).toHaveClass('btn-secondary');
+    expect(stop).toHaveClass('capture-stop');
+  });
+
+  it('a finalize in flight disables Pause and Resume, exactly as it disables Stop', async () => {
+    vi.useRealTimers();
+    const trackStop = vi.fn();
+    installRecorder(vi.fn(async () => ({ getTracks: () => [{ stop: trackStop }] })));
+    const gateHandle: { resolve: (() => void) | null } = { resolve: null };
+    const gate = new Promise<void>((resolve) => {
+      gateHandle.resolve = () => resolve();
+    });
+    stubFetchRoutes({
+      ...BASE_ROUTES,
+      [TRANSCRIPT]: async () => {
+        await gate;
+        return { body: reading() };
+      },
+    } as never);
+    await renderPanel();
+    await act(async () => {
+      fireEvent.click(await screen.findByRole('button', { name: CAPTURE_COPY.voiceRecord }));
+      await Promise.resolve();
+    });
+    fireEvent.change(await screen.findByLabelText('Transcript'), {
+      target: { value: 'Typed while the microphone is live.' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: CAPTURE_COPY.finalize }));
+    await screen.findByRole('button', { name: /Reading/ });
+
+    expect(screen.getByRole('button', { name: CAPTURE_COPY.voicePause })).toBeDisabled();
+    expect(screen.getByRole('button', { name: CAPTURE_COPY.voiceStop })).toBeDisabled();
+
+    gateHandle.resolve?.();
+    await screen.findByText(CAPTURE_COPY.summaryStored(1, 1));
+  });
+
+  /*
+   * EVERY TEARDOWN PATH, WITH A PAUSED RECORDER.
+   * ===========================================
+   *
+   * The panel's playback effect enumerates five exits from `held` and this is
+   * the same discipline for `paused`: a paused recorder is still holding the
+   * microphone, so every way of leaving must release it. They are written as
+   * separate cases rather than a loop because the MECHANISM differs at each
+   * one — an effect keyed on `open`, an effect keyed on the record, and React's
+   * own unmount cleanup — and a loop would hide which of the three broke.
+   */
+  it('Close Capture, while paused, stops the recorder and releases the microphone', async () => {
+    const { recorder, trackStop } = await startRecordingWithFakeClock();
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: CAPTURE_COPY.voicePause }));
+    });
+    expect(recorder.state).toBe('paused');
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: CAPTURE_COPY.entryClose }));
+    });
+
+    expect(recorder.state).toBe('inactive');
+    expect(trackStop).toHaveBeenCalled();
+    // Reopening must not show a paused session that no longer exists.
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: CAPTURE_COPY.entryOpen }));
+    });
+    expect(screen.getByRole('button', { name: CAPTURE_COPY.voiceRecord })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: CAPTURE_COPY.voiceResume })).toBeNull();
+  });
+
+  it('a record change, while paused, stops the recorder and releases the microphone', async () => {
+    vi.useRealTimers();
+    const trackStop = vi.fn();
+    installRecorder(vi.fn(async () => ({ getTracks: () => [{ stop: trackStop }] })));
+    stubFetchRoutes(BASE_ROUTES as never);
+    const { rerender } = render(
+      <MemoryRouter
+        initialEntries={['/']}
+        future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+      >
+        <TranscriptCapturePanel experimentId={EXP} />
+      </MemoryRouter>,
+    );
+    fireEvent.click(screen.getByRole('button', { name: CAPTURE_COPY.entryOpen }));
+    await act(async () => {
+      fireEvent.click(await screen.findByRole('button', { name: CAPTURE_COPY.voiceRecord }));
+      await Promise.resolve();
+    });
+    await act(async () => {
+      fireEvent.click(await screen.findByRole('button', { name: CAPTURE_COPY.voicePause }));
+    });
+    const recorder = FakeMediaRecorder.instances[0];
+    expect(recorder.state).toBe('paused');
+
+    await act(async () => {
+      rerender(
+        <MemoryRouter
+          initialEntries={['/']}
+          future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+        >
+          <TranscriptCapturePanel experimentId="01OTHERRECORD0000000000000" />
+        </MemoryRouter>,
+      );
+    });
+
+    expect(recorder.state).toBe('inactive');
+    expect(trackStop).toHaveBeenCalled();
+    expect(await screen.findByRole('button', { name: CAPTURE_COPY.voiceRecord })).toBeInTheDocument();
+  });
+
+  it('unmount, while paused, stops the recorder and releases the microphone', async () => {
+    vi.useRealTimers();
+    const trackStop = vi.fn();
+    installRecorder(vi.fn(async () => ({ getTracks: () => [{ stop: trackStop }] })));
+    stubFetchRoutes(BASE_ROUTES as never);
+    const { unmount } = await renderPanel();
+    await act(async () => {
+      fireEvent.click(await screen.findByRole('button', { name: CAPTURE_COPY.voiceRecord }));
+      await Promise.resolve();
+    });
+    await act(async () => {
+      fireEvent.click(await screen.findByRole('button', { name: CAPTURE_COPY.voicePause }));
+    });
+    const recorder = FakeMediaRecorder.instances[0];
+    expect(recorder.state).toBe('paused');
+
+    await act(async () => {
+      unmount();
+    });
+
+    expect(recorder.state).toBe('inactive');
+    expect(trackStop).toHaveBeenCalled();
+  });
+
+  it('MUTATION-GUARDED: a recorder that can pause but NOT resume is offered no Pause control either', async () => {
+    /*
+     * BOTH METHODS OR NEITHER. Dropping the `resume` half of the panel's
+     * capability probe leaves every other test here green — the pauseless
+     * double has neither method, so it cannot see the difference. This double
+     * has exactly one, and it is the shape that strands a reader: Pause
+     * renders, pausing works, and Resume is then a dead button.
+     */
+    installRecorder(
+      vi.fn(async () => ({ getTracks: () => [{ stop: vi.fn() }] })),
+      PauseOnlyMediaRecorder,
+    );
+    stubFetchRoutes(BASE_ROUTES as never);
+    const { container } = await renderPanel();
+    await act(async () => {
+      fireEvent.click(await screen.findByRole('button', { name: CAPTURE_COPY.voiceRecord }));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(PauseOnlyMediaRecorder.instances[0].state).toBe('recording');
+    expect(bar(container)?.getAttribute('data-state')).toBe('recording');
+    expect(screen.queryByRole('button', { name: CAPTURE_COPY.voicePause })).toBeNull();
+    expect(screen.getByRole('button', { name: CAPTURE_COPY.voiceStop })).toBeEnabled();
+  });
+
+  it('neither capability refusal is silent — each leaves a true sentence behind', async () => {
+    /*
+     * The two `typeof` early returns are unreachable through the rendered
+     * controls, by construction. They are exercised directly because the
+     * defect they replace is SILENCE: a press that changes nothing and says
+     * nothing. Driving the functions through a stray call is the only way to
+     * see which of those two a future edit would produce.
+     */
+    const { container, recorder } = await startRecordingWithFakeClock();
+    const realPause = recorder.pause.bind(recorder);
+    (recorder as unknown as { pause?: unknown }).pause = undefined;
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: CAPTURE_COPY.voicePause }));
+    });
+    expect(bar(container)?.getAttribute('data-state')).toBe('recording');
+    expect(liveTexts(container)).toContain(CAPTURE_COPY.voicePauseUnavailableLive);
+
+    (recorder as unknown as { pause: () => void }).pause = realPause;
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: CAPTURE_COPY.voicePause }));
+    });
+    expect(bar(container)?.getAttribute('data-state')).toBe('paused');
+
+    (recorder as unknown as { resume?: unknown }).resume = undefined;
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: CAPTURE_COPY.voiceResume }));
+    });
+    expect(bar(container)?.getAttribute('data-state')).toBe('paused');
+    expect(liveTexts(container)).toContain(CAPTURE_COPY.voiceResumeUnavailableLive);
+  });
+
+  it('MUTATION-GUARDED: a take that ENDS while paused stops claiming the microphone is open', async () => {
+    /*
+     * MEASURED IN REAL CHROME, AND IT FALSIFIED COPY THIS SLICE ADDED. End the
+     * track under a paused recorder (unplug the device, or an OS revoke):
+     * `recorder.state` goes `inactive` while the bar still says `Paused` and
+     * `voicePausedPersistent` still says "The microphone is still open".
+     * Pressing Resume then announced "…so it is still paused."
+     *
+     * The panel must leave `paused` — announcing an ended recording under the
+     * microphone-still-open paragraph would be a self-contradiction rather
+     * than a fix. Removing either `recorder.state === 'inactive'` branch
+     * fails here.
+     */
+    const { container, recorder } = await startRecordingWithFakeClock();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(3000);
+      fireEvent.click(screen.getByRole('button', { name: CAPTURE_COPY.voicePause }));
+    });
+    expect(bar(container)?.getAttribute('data-state')).toBe('paused');
+    expect(screen.getByText(CAPTURE_COPY.voicePausedPersistent)).toBeInTheDocument();
+
+    // The device goes away. Nothing in the app did this and nothing observed it.
+    recorder.state = 'inactive';
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: CAPTURE_COPY.voiceResume }));
+      await vi.advanceTimersByTimeAsync(1);
+    });
+
+    expect(bar(container)?.getAttribute('data-state')).toBe('held');
+    expect(liveTexts(container)).toContain(CAPTURE_COPY.voiceRecordingEndedLive);
+    // The falsified sentence is GONE, which is the point — not merely
+    // contradicted by a newer one somewhere else on the panel.
+    expect(screen.queryByText(CAPTURE_COPY.voicePausedPersistent)).toBeNull();
+    expect(liveTexts(container)).not.toContain(CAPTURE_COPY.voiceResumeRefusedLive);
+    // What was recorded before the take ended is still counted and still here.
+    expect(elapsedText(container)).toBe('Held · 0:03');
+  });
+
+  it('a take that ends while PAUSED is caught by the Pause button too, not only by Resume', async () => {
+    const { container, recorder } = await startRecordingWithFakeClock();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2000);
+    });
+    recorder.state = 'inactive';
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: CAPTURE_COPY.voicePause }));
+      await vi.advanceTimersByTimeAsync(1);
+    });
+    expect(bar(container)?.getAttribute('data-state')).toBe('held');
+    expect(liveTexts(container)).toContain(CAPTURE_COPY.voiceRecordingEndedLive);
+    // NOT the "did not pause, so it is still recording" sentence, which would
+    // be false of an inactive recorder.
+    expect(liveTexts(container)).not.toContain(CAPTURE_COPY.voicePauseRefusedLive);
+  });
+
+  it('Pause and Resume are named, keyboard-reachable, and raise no axe violation', async () => {
+    /*
+     * REAL TIMERS, DELIBERATELY, AND IT IS NOT A STYLE CHOICE. `axe.run` waits
+     * on its own timers internally; under `vi.useFakeTimers()` its promise
+     * never settles, the test times out at 5,000 ms — and, worse, axe is left
+     * mid-run, so the NEXT two tests in this file that call it fail with "Axe
+     * is already running". Measured: three failures from this one mistake, two
+     * of them in sections this slice never touched.
+     */
+    vi.useRealTimers();
+    const trackStop = vi.fn();
+    installRecorder(vi.fn(async () => ({ getTracks: () => [{ stop: trackStop }] })));
+    stubFetchRoutes(BASE_ROUTES as never);
+    const { container } = await renderPanel();
+    await act(async () => {
+      fireEvent.click(await screen.findByRole('button', { name: CAPTURE_COPY.voiceRecord }));
+      await Promise.resolve();
+    });
+    await screen.findByRole('button', { name: CAPTURE_COPY.voiceStop });
+    // Native `<button type="button">`: reachable by Tab with no `tabindex` of
+    // its own, and its accessible name is its text. Both asserted rather than
+    // assumed, because a `<div role="button">` would satisfy `getByRole`.
+    const pause = screen.getByRole('button', { name: CAPTURE_COPY.voicePause });
+    expect(pause.tagName).toBe('BUTTON');
+    expect(pause).not.toHaveAttribute('tabindex');
+    expect(pause).not.toHaveAttribute('aria-hidden');
+
+    await act(async () => {
+      fireEvent.click(pause);
+    });
+    const resume = screen.getByRole('button', { name: CAPTURE_COPY.voiceResume });
+    expect(resume.tagName).toBe('BUTTON');
+    expect(resume).not.toHaveAttribute('tabindex');
+
+    // FOCUS IS NOT STOLEN. Pausing is a state change, not a navigation; moving
+    // the caret out of the transcript box mid-dictation would be its own defect.
+    expect(document.activeElement).not.toBe(resume);
+
+    const results = await axe.run(container, {
+      runOnly: {
+        type: 'rule',
+        values: ['button-name', 'label', 'aria-allowed-attr', 'aria-valid-attr-value'],
+      },
+      resultTypes: ['violations'],
+    });
+    expect(results.violations.map((v) => v.id)).toEqual([]);
+  });
+});
 
 describe('I2: exactly one .btn-primary is ever visible', () => {
   function primaries(container: HTMLElement): HTMLElement[] {
