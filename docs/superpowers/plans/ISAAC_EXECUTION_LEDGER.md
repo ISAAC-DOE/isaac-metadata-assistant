@@ -41,7 +41,7 @@ ORCHESTRATOR:          Opus 5 (claude-opus-5[1m]) — **DISCLOSED FALLBACK.** DE
                        orchestrator. No other model silently substituted.
 SUBORDINATE AGENTS:    4 implementers dispatched (DOC-007, UX-001/002, UX-003/004, CAP-001/009);
                        1 slot RESERVED for independent review. Ceiling 5 total, nested = forbidden.
-CURRENT PHASE:         Phase 0 COMPLETE · DOC-007 + Phase A + CAP-001 IN PROGRESS
+CURRENT PHASE:         Phase 0 COMPLETE · DOC-007 COMPLETE (4552de54) · Phase A + CAP-001 IN FLIGHT
 CURRENT TASK:          DOC-007 (docs truth alignment) · UX-001/UX-002 · UX-003/UX-004 · CAP-001/CAP-009
 LAST COMPLETED TASK:   REC-001 … REC-012, DOC-001 … DOC-006, the six-pass plan review, and
                        the 2026-09-12 revision reconciliation into all six artifacts
@@ -94,7 +94,7 @@ next session to build what already exists.
 **GATE CLEARED 2026-09-12 — implementation authorized.** External-owner, security, migration and
 data-governance boundaries are unchanged.
 
-### DOC-007 — documentation truth alignment · IN PROGRESS
+### DOC-007 — documentation truth alignment · **COMPLETE** (`4552de54`)
 - **Workstream** DOC · **Owner** Sonnet implementer · **Reviewer** reserved Opus slot
 - **Objective** correct the measured-stale claims in `CLAUDE.md` and `docs/` so they stop steering
   future sessions wrong. Nine items, each independently re-derived by the implementer before edit.
@@ -106,7 +106,23 @@ data-governance boundaries are unchanged.
 - **Verification** `pytest apps/api/tests/test_about_and_openapi.py`; snapshot drift check with
   **both** `--out` and `--detail-out` — **`CLAUDE.md` IS in the served manifest, so this slice WILL
   drift the snapshot and must regenerate in the same commit.**
-- **Next action** orchestrator review, then commit to its own branch.
+- **Outcome** 4 claims corrected (`CLAUDE.md` ×3 + `docs/` ×2); **5 needed no edit — already
+  corrected in-repo**; **2 items in my brief were MY OWN errors and are withdrawn.**
+- **The finding that matters most:** my brief said A11Y-01 was closed. **It is not** —
+  `e2e/a11y-baseline.ts:634` and `:3562` both say so in terms, and A3 closed one of three causes.
+  **The implementer refused the instruction** rather than writing a new false claim into a served
+  document, and added dated additions recording what A3 actually fixed. The brief was the defect.
+- **My second error:** "~41 plans files is stale, it is 44". `git ls-tree -r main` gives **41**; the
+  directory reads 47 today only because **six are files I created this session**. I measured a
+  directory while adding to it, and a prior agent had flagged that exact caveat.
+- **Vantage point added to the hosted 404:** it was observed in the owner's **authenticated**
+  session; an unauthenticated request gets **302** at the Authentik edge. Both true, different
+  questions — only the authenticated 404 proves the request reached the application.
+- **Snapshot deliberately deferred.** `CLAUDE.md` is manifest-listed so this slice drifts it, and a
+  concurrent slice is editing manifest-listed CSS. **One regeneration after all slices settle.**
+- **Residue, named not fixed:** `migration-approval-packet-0002.md` cites the phantom
+  "contract §8 D7" unflagged, while the Stage-2 contract and `CLAUDE.md` both already flag it.
+- **Next action** none — slice closed. Independent review folded into the integrated-diff review.
 
 ---
 
@@ -240,10 +256,39 @@ data-governance boundaries are unchanged.
 | UX-012 | Redundancy collapse | PLANNED | UX-011 | **validation stated in 9 places; next-action in 6 on one screen; pending counts in 5.** `WorkflowProgressBanner`'s `excludeSteps` prop must become unnecessary, not load-bearing |
 | VAL-001 | Validator **presentation** only | PLANNED | UX-012 | `schema_ok` stays visible; exactness findings in their own list, **never** as official-schema errors; advisory can **never** flip PASS→FAIL; no CLI transcript |
 | UX-013 | Assistant 5 mounts → 1–2, collapsed by default | PLANNED | UX-010 | **not a directory delete** — 6 lib modules have non-Assistant consumers, `assistant.css` shared with `GuidedPrompt`; `ASSISTANT_NO_MODEL_CLAIM` preserved on every surviving mount |
-| EVG-001 | **Close the `derived_from` CHAIN gap only** (scope reduced — see below) | PLANNED | — | ~~`GET /experiments/{id}/provenance` loses its only frontend caller, and `derived_from` chains would go invisible~~ — **OVERSTATED IN TWO WAYS; CORRECTED 2026-09-12 by first-hand measurement, and kept struck because it was driving a mandatory PR ordering.** (1) **The fetcher is not the graph.** `api.getProvenance(id)` is called from `screens/EvidenceExplorer.tsx:709`; `screens/graph/EvidenceGraphPanel.tsx:398` merely receives `provenance?: EvidenceSubFetch<…>` as a **prop**. Removing the graph removes a prop *consumer*, not the *caller*. (2) **Provenance is ALREADY readable outside the graph.** `components/EvidenceTrailPanel.tsx:163-175` renders a two-chip pair — origin + review state — computed client-side by the pure functions in `lib/provenance.ts`, with its own comment stating the design: *"THE SERVER IS AUTHORITATIVE. `GET .../provenance` computes the same two dimensions from the same stored content; these helpers exist so this panel — which already holds the trail — does not need a second request."* **The residual is narrower and is the only thing EVG-001 must now close:** the chips give **per-entry** origin, not a **multi-hop `derived_from` chain**. Verify whether any surface renders the chain; if none does, that — and only that — is the prerequisite for EVG-002. **I published this claim second-hand from a planning agent and did not verify it; the ordering constraint survives, but the slice is much smaller than stated.** |
-| EVG-002 | Evidence Graph out of primary navigation (**DEC-04**) | PLANNED | **EVG-001** | 6,169 lines, 123 tests, **0 backend routes, 0 backend tests, 0 other consumers, 0 a11y baseline cells**; `?view=graph` bookmarks safe (`list` is the fallback); depth = **DEC-11** |
+| EVG-001 | ~~Close the `derived_from` CHAIN gap~~ **WITHDRAWN — there is no chain; see the note below the table** | **WITHDRAWN** | — | ~~`GET /experiments/{id}/provenance` loses its only frontend caller, and `derived_from` chains would go invisible~~ — **OVERSTATED IN TWO WAYS; CORRECTED 2026-09-12 by first-hand measurement, and kept struck because it was driving a mandatory PR ordering.** (1) **The fetcher is not the graph.** `api.getProvenance(id)` is called from `screens/EvidenceExplorer.tsx:709`; `screens/graph/EvidenceGraphPanel.tsx:398` merely receives `provenance?: EvidenceSubFetch<…>` as a **prop**. Removing the graph removes a prop *consumer*, not the *caller*. (2) **Provenance is ALREADY readable outside the graph.** `components/EvidenceTrailPanel.tsx:163-175` renders a two-chip pair — origin + review state — computed client-side by the pure functions in `lib/provenance.ts`, with its own comment stating the design: *"THE SERVER IS AUTHORITATIVE. `GET .../provenance` computes the same two dimensions from the same stored content; these helpers exist so this panel — which already holds the trail — does not need a second request."* **The residual is narrower and is the only thing EVG-001 must now close:** the chips give **per-entry** origin, not a **multi-hop `derived_from` chain**. Verify whether any surface renders the chain; if none does, that — and only that — is the prerequisite for EVG-002. **I published this claim second-hand from a planning agent and did not verify it; the ordering constraint survives, but the slice is much smaller than stated.** |
+| EVG-002 | Evidence Graph out of primary navigation (**DEC-04**) | PLANNED | ~~EVG-001~~ — **no build dependency.** `DEC-11` step 4's dependency recheck still applies at removal time | 6,169 lines, 123 tests, **0 backend routes, 0 backend tests, 0 other consumers, 0 a11y baseline cells**; `?view=graph` bookmarks safe (`list` is the fallback); depth = **DEC-11** |
 | UX-014 | Scientist-facing labels; schema path under disclosure | PLANNED | UX-010 | today `reduced_spectrum`, `qc_status`, `required_for_evidence_record`, `Environment & Context context` are product copy; the path is **never removed** — it is how a curator maps a field |
 | UX-015 | **RAISED, NOT ACTIONED — Project Memory** | PROPOSED | — | ~7,800 lines, **578 test cases (largest single test mass in the app)**, one of five top-level slots, for a graph of **this repository's own source code** shown to scientists. **Not named in the authorizing directive** → Krish's call |
+
+
+> ### EVG-001 IS DISSOLVED — measured 2026-09-12, third and final correction to this claim
+>
+> My mandatory ordering *"EVG-001 must land before EVG-002"* rested on a `derived_from` **chain**
+> that does not exist. Measured first-hand:
+>
+> * **`derived_from` is not a provenance chain.** It is one of the official schema's
+>   **`links[].rel`** relation values — a record-to-record link. `workspace.py:2678` says it in
+>   terms: *"`derived_from` — nothing in the model records that one run was derived from"*.
+> * **It is already rendered, outside the graph.** The Relationships / Record Info surface renders
+>   `links[]` today — pinned by `apps/web/src/__tests__/record-info-and-links.test.tsx:271-298`,
+>   which calls `renderLinks({ links: [{ rel: 'derived_from', target: … }] })`. The live record
+>   screen shows it as the **`Relationships links`** section.
+> * **The graph explicitly does not own it.** Its single mention is a comment at
+>   `EvidenceGraphPanel.tsx:89` saying `derived_from` links *"cannot be edges of a tree"* — i.e. the
+>   graph **excludes** them from its layout.
+>
+> So there is **no prerequisite slice**. `EVG-001` is withdrawn; `EVG-002` has no build dependency.
+> **What still binds:** `DEC-11` step 4's dependency recheck must be clean *at removal time*, and
+> §38's rule stands — provenance is not removed to simplify the UI. Nothing here weakens either.
+>
+> **Three readings of one claim, kept in sequence because the sequence is the lesson:**
+> (i) *"`/provenance` loses its only frontend caller and `derived_from` chains go invisible"* —
+> second-hand, unverified, and it created a mandatory ordering;
+> (ii) *"overstated twice; the residual is the multi-hop chain"* — a real correction, still wrong
+> about the residual;
+> (iii) **there is no chain.** Each step was closer, and only the third came from reading the code
+> that defines the term.
 
 ---
 

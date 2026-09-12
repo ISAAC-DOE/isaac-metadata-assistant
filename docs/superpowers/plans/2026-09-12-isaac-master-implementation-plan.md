@@ -243,12 +243,28 @@ total, never `array.length`.
      same two dimensions from the same stored content; these helpers exist so this panel — which
      already holds the trail — does not need a second request."*
 
-  **The residual prerequisite, and the whole of EVG-001:** those chips give **per-entry** origin, not
-  a **multi-hop `derived_from` chain**. Verify whether any surface renders the chain; if none does,
-  closing that — and only that — gates EVG-002. The §38 rule still binds: do not remove provenance
-  to simplify the UI. There is no backend to remove (zero routes, zero backend tests, zero other
-  consumers of its lib or CSS), and old `?view=graph` bookmarks cannot break because `list` is
-  already the fallback.
+  ~~**The residual prerequisite, and the whole of EVG-001:** those chips give per-entry origin, not
+  a multi-hop `derived_from` chain; closing that gates EVG-002.~~ — **ALSO WRONG. THERE IS NO
+  CHAIN. `EVG-001` IS DISSOLVED, measured 2026-09-12.** `derived_from` is not a provenance chain at
+  all: it is one of the official schema's **`links[].rel`** relation values, a record-to-record
+  link, and `workspace.py:2678` says so in terms — *"`derived_from` — nothing in the model records
+  that one run was derived from"*. It is **already rendered outside the graph** by the
+  Relationships / Record Info surface (pinned by
+  `apps/web/src/__tests__/record-info-and-links.test.tsx:271-298`; visible on the live record
+  screen as the `Relationships links` section), and the graph **explicitly excludes** it — its one
+  mention, `EvidenceGraphPanel.tsx:89`, is a comment saying `derived_from` links *"cannot be edges
+  of a tree"*.
+
+  **So `EVG-002` has NO build prerequisite.** What still binds, unweakened: `DEC-11` step 4's
+  dependency recheck must be clean **at removal time**, and §38's rule that provenance is never
+  removed to simplify the UI. There is no backend to remove (zero routes, zero backend tests, zero
+  other consumers of its lib or CSS), and old `?view=graph` bookmarks cannot break because `list`
+  is already the fallback.
+
+  **Three readings of one claim, kept in sequence because the sequence is the lesson:** (i)
+  second-hand and unverified, and it created a mandatory ordering; (ii) a real correction that was
+  still wrong about the residual; (iii) there is no chain. Only the third came from reading the
+  code that defines the term.
 - **C7** Scientist-facing labels with schema paths under disclosure — never removed, because the
   path is how a curator maps a field. Today the product prints `reduced_spectrum`, `qc_status`,
   `required_for_evidence_record`, and `Environment & Context context` as copy.
@@ -411,8 +427,8 @@ that implemented none of it.
 | 11 | Redundancy collapse (9 validation sites → 1 per context) | C3 | 10 | no | Opus | Opus |
 | 12 | Validator presentation | C4 | 11 | no | Opus | Opus |
 | 13 | Assistant 5 mounts → 1–2 | C5 | 9 | no | Sonnet | Opus |
-| 14 | **Evidence List provenance read-out** (unblocks 15) | C6a | — | no | Opus | Opus |
-| 15 | Evidence Graph out of primary navigation | C6b | **14** | no | Sonnet | Opus |
+| 14 | ~~Evidence List provenance read-out (unblocks 15)~~ **WITHDRAWN — no chain exists; see C6** | C6a | — | — | — | — |
+| 15 | Evidence Graph out of primary navigation | C6b | ~~14~~ **none** | no | Sonnet | Opus |
 | 16 | Scientist-facing labels + schema path disclosure | C7 | 9 | no | Sonnet | Opus |
 | 17 | **`search` → `finditer` + ambiguity acceptance suite** | D1 | — | no | Opus | Opus |
 | 18 | Persist the grouping | D2 | 17 | no | Opus | Opus |
