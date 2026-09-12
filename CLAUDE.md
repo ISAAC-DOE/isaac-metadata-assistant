@@ -753,8 +753,20 @@ Current state:
   51435e7 32fe7a3` confirms that commit was already in history when this paragraph was written.
   `POST /api/transcription` shipped earlier still, in `72e2206` (2026-08-17). Both answer **`501`
   `no_provider_configured`** in every deployment, `POST /api/experiments/{id}/transcript` answers
-  **`200`** with no provider involved at all, and `/api/assistant/ask` is one of the ~~69~~ **71** operations (re-measured 2026-08-30; the test's
-  own comments record 68→69 assistant/ask, 69→70 rename, 70→71 discard)
+  **`200`** with no provider involved at all, and `/api/assistant/ask` is one of the ~~69~~ ~~**71**
+  operations (re-measured 2026-08-30; the test's own comments record 68→69 assistant/ask, 69→70
+  rename, 70→71 discard)~~ **77 — re-measured and corrected 2026-09-12.** `_operations()` in
+  `test_about_and_openapi.py` has always yielded one `(path, method)` pair per operation, so
+  `checked` has always been a METHOD-OPERATION count, not a path count; 69 and 71 were both
+  earlier readings of that same growing count, not a different metric. The assertion now reads
+  `assert checked == 77, f"expected 77 documented operations, found {checked}"`
+  (`test_about_and_openapi.py:684`), confirmed by running the suite. **A coincidence worth naming
+  so it is not conflated with the figure above:** the live `/api/openapi` document today also
+  happens to have **69 PATHS** (`len(schema["paths"])`, verified by hitting the route directly) —
+  the same number the operations count read at an earlier commit, for an unrelated reason (a path
+  can carry more than one HTTP method, so paths ≤ method-operations; today paths=69,
+  method-operations=77). Quote **77** for "documented operations", and say "paths" explicitly if
+  that is the count meant.
   `test_about_and_openapi.py` pins. So the sentence was not describing a gap; it was describing
   absent *routes* that existed. **The true residue, which is what the clause was reaching for and
   what still holds: no product screen advertises the assistant seam** — deliberately, per
@@ -1220,6 +1232,19 @@ Current state:
   column, not a platform difference. Measured: **zero declarations qualify for the 3:1
   large-text exemption** (max font-size 13px), so the old palette's "smaller text → lighter
   grey" was backwards, and meaningful scientific content sat at **2.53:1**.
+
+  ***RE-MEASURED 2026-09-12: BOTH FIGURES IN THIS BULLET HAVE MOVED, AND THE PLATFORM SPLITS
+  THIS BULLET SAYS "COLLAPSED" HAVE REAPPEARED — from later, unrelated churn, not from A3
+  regressing.*** `apps/web/e2e/a11y-baseline.ts`'s `A11Y_BASELINE_TOTAL_NODES` now reads
+  **darwin 877, linux 877** (both moved together, not a new split), and there are **70**
+  recorded cells, matching "161 cells → 70" above exactly. **Two platform splits exist again,
+  both on `settings-explorer`** — `settings-explorer@mobile-375x812: { darwin: 20, linux: 21 }`
+  and `settings-explorer@width-390: { darwin: 21, linux: 20 }` — which is not a contradiction of
+  "All 7 platform splits collapsed" above (that sentence described the state immediately after
+  A3) but a later, separately-caused movement: the file's own contemporaneous note already
+  flagged `settings-explorer` as "ONE KNOWN, ALREADY-SCHEDULED MOVEMENT" because that surface
+  renders from the live `/api/openapi` document, so its node count tracks the API's own growth,
+  not the palette. Do not quote 871/871 or "0 splits" as current; quote the live constants.
 
   **THE PRESERVED WIP OF TWO SLICES WAS AUDITED RATHER THAN TRUSTED, AND BOTH WERE BROKEN.**
   A prior session left work uncommitted in two worktrees; it was committed first (nothing
@@ -2012,9 +2037,18 @@ Out of scope unless explicitly approved:
   scope extension, not a pre-existing permission written down late.**
 
   **What listing those five covers, precisely:** creating them, by an owner-applied migration, and
-  writing them through `submission_store.py`'s append-only `INSERT`s. It covers **no** read surface
-  over the history, **no** change to `records`, and — per the hard stop below — **no hosted
-  application of `0003` or `0004`**.
+  writing them through `submission_store.py`'s append-only `INSERT`s. ~~It covers **no** read
+  surface over the history~~ — **STALE, corrected 2026-09-12: a read surface over the history now
+  exists.** `apps/api/isaac_api/revision_history.py` — "The READ path over the append-only
+  submission history. SELECTs only." — shipped later (`e85efa64`, 2026-08-17) and carries **nine**
+  `SELECT` statements across all five of these tables, re-measured this session
+  (`grep -c SELECT apps/api/isaac_api/revision_history.py`). It is a separate module for exactly
+  this reason (its own docstring: growing `submission_store` with a read surface "would blur what
+  the module is *for*"), reuses `db_write.write_transaction` unchanged, and adds no new table and
+  no new connection path — so this correction narrows what "covers no read surface" meant without
+  reopening `db_write.OWNED_TABLES` or the append-only guarantee, which are both unaffected. It
+  covers **no** change to `records`, and — per the hard stop below — **no hosted application of
+  `0003` or `0004`**.
 
   ***APPROVAL STATUS CHANGED 2026-08-17, and only one of the two halves moved.*** The sentence above
   used to end *"both of which remain NOT APPROVED and NOT APPLIED anywhere"*, and it is corrected

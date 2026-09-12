@@ -43,6 +43,36 @@ Verified in the hosted deployment on 2026-08-27 (authenticated session, read-onl
 **Consequence for the reader: nothing is half-open.** There is no misconfiguration to correct
 and no exposure to close. The work below is greenfield.
 
+**2026-09-12 — reported observed in an authenticated read-only session as `404`, body
+`{"detail":"Not Found"}`; re-checked here separately, unauthenticated, and read `302` to
+Authentik instead — both are consistent with §1, and the difference is auth state, not a
+disagreement.** This document's own body is ISAAC's literal
+(`apps/api/isaac_api/spa.py:46-47`, `raise HTTPException(status_code=404, detail="Not Found")`
+inside `spa_fallback`), which — when it is what a caller sees — means the request **reached the
+application and the application declined it**, excluding an Authentik-routing explanation for
+that particular response; it is the expected shape of "not registered at all" from §1. An
+UNauthenticated caller instead meets the edge first and is redirected before ever reaching the
+app (`curl -s -o /dev/null -w '%{http_code}' https://isaac.slac.stanford.edu/krish/api/mcp` from
+this environment, run 2026-09-12, printed `302`) — consistent with the standing note that hosted
+endpoints are edge-gated and read differently depending on the caller's auth state, not a new
+finding. `_mcp_is_requested()` gates registration at `apps/api/isaac_api/app.py:313` on the
+`ISAAC_MCP_DEPLOYMENT` env var, and `Dockerfile`'s `ENV` block (currently around lines 64-67)
+sets `PYTHONUNBUFFERED`, `ISAAC_BASE_PATH`, `ISAAC_STATIC_DIR` and `ISAAC_BUILD_COMMIT` — never
+`ISAAC_MCP_DEPLOYMENT` — so the image never requests the route be mounted; mounting it is a
+deploy-time operator action (setting that env var), not a code change. For a caller that reaches
+the application (i.e. is already past the edge), the status code alone distinguishes the
+possibilities:
+
+| Status | Meaning |
+|---|---|
+| `404` | not mounted (current state) |
+| `405` | mounted, wrong HTTP method tried |
+| `403` | mounted on the `local-loopback` binding, request had a non-loopback peer |
+| `401` | mounted with `oauth-resource-server` configured, no token presented |
+
+A `200`/other success would mean either OAuth is not yet armed on a mounted `local-loopback`
+binding from a loopback peer, or a misconfiguration; neither is expected from outside the cluster.
+
 ---
 
 ## 2. The one genuinely new networking requirement
