@@ -226,13 +226,29 @@ total, never `array.length`.
 - **C5** Assistant to 1–2 mounts, collapsed by default, contextual. **Not a directory delete** —
   six lib modules have non-Assistant consumers and `assistant.css` is shared with `GuidedPrompt`.
   `ASSISTANT_NO_MODEL_CLAIM` is preserved **verbatim in substance** on every surviving mount.
-- **C6** Evidence Graph out of primary navigation (**DEC-04**). **Ordering is mandatory:** the
-  Evidence List must grow a provenance read-out **first**, because
+- **C6** Evidence Graph out of primary navigation (**DEC-04**, depth per **DEC-11**).
+  **Ordering is still mandatory, but the prerequisite is much smaller than this plan first
+  claimed.** ~~The Evidence List must grow a provenance read-out first, because
   `GET /experiments/{id}/provenance` loses its only frontend caller and `derived_from` chains would
-  otherwise become invisible — removing provenance to simplify the UI, which §38 forbids. Depth of
-  removal is **DEC-11**; there is no backend to remove (zero routes, zero backend tests, zero other
-  consumers of its lib or CSS). Old `?view=graph` bookmarks cannot break; `list` is already the
-  fallback.
+  otherwise become invisible.~~ — **CORRECTED 2026-09-12 by first-hand measurement, and kept struck
+  because it was driving a mandatory PR ordering. I published it second-hand from a planning agent
+  without verifying it.** Two things are wrong with it:
+  1. **The fetcher is not the graph.** `api.getProvenance(id)` is called from
+     `screens/EvidenceExplorer.tsx:709`. `screens/graph/EvidenceGraphPanel.tsx:398` merely receives
+     `provenance?: EvidenceSubFetch<…>` as a **prop** — so removing the graph removes a prop
+     *consumer*, not the *caller*.
+  2. **Provenance is already rendered outside the graph.** `components/EvidenceTrailPanel.tsx:163-175`
+     renders an origin + review-state chip pair, computed client-side by `lib/provenance.ts`, and its
+     own comment gives the design: *"THE SERVER IS AUTHORITATIVE. `GET .../provenance` computes the
+     same two dimensions from the same stored content; these helpers exist so this panel — which
+     already holds the trail — does not need a second request."*
+
+  **The residual prerequisite, and the whole of EVG-001:** those chips give **per-entry** origin, not
+  a **multi-hop `derived_from` chain**. Verify whether any surface renders the chain; if none does,
+  closing that — and only that — gates EVG-002. The §38 rule still binds: do not remove provenance
+  to simplify the UI. There is no backend to remove (zero routes, zero backend tests, zero other
+  consumers of its lib or CSS), and old `?view=graph` bookmarks cannot break because `list` is
+  already the fallback.
 - **C7** Scientist-facing labels with schema paths under disclosure — never removed, because the
   path is how a curator maps a field. Today the product prints `reduced_spectrum`, `qc_status`,
   `required_for_evidence_record`, and `Environment & Context context` as copy.

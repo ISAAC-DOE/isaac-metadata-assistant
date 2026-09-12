@@ -164,9 +164,25 @@ data-governance boundaries are unchanged.
 
 ### LIB-001 — Extend `GET /api/experiments`  **(API before screen)**
 - **Status** PLANNED · **Depends** none · **Owner** Opus + Opus reviewer
-- **Evidence** the payload is exactly `id · title · scenario · status · created_utc ·
-  pending_count · evidenced_field_count · exported · record_id`. **No `updated_utc`, so "sort by
-  Last Updated" is not implementable.** No run count. No technique/beamline.
+- **Evidence** the served payload is exactly `id · title · scenario · status · created_utc ·
+  pending_count · evidenced_field_count · exported · record_id` (`routes.py:1260`). No run count,
+  no technique/beamline.
+- **`Last Updated` IS honestly available — DEC-07's open sub-question is RESOLVED, 2026-09-12, and
+  my planning note was wrong.** I wrote *"no `updated_utc`, so sort by Last Updated is not
+  implementable."* That was true of the **served payload** and false of the **model**. Measured:
+  `Experiment`/`Run` both carry a **stored** `updated_utc` (`workspace.py:1232`, documented
+  *"Never derived — it is stored"*); `__post_init__` anchors it to `created_utc` **only when it is
+  empty**, i.e. for legacy documents; `isaac_experiments` has an `updated_utc timestamptz NOT NULL`
+  column since `0001_experiments` (**already applied hosted**); and the change feed reads
+  `exp.updated_utc` on the wire today (`change_feed.py:509`).
+- **Two constraints that must travel with it, or the column becomes a lie.** (1) It is formatted to
+  **whole seconds** (`_now_iso`), so two writes in one second are indistinguishable by it — which
+  is precisely the **measured defect** that made the change feed abandon it as a sort key in favour
+  of `changed_at_rev`. (2) The feed's own contract says it is *"still published because clients
+  display it, and it is no longer load-bearing for correctness."* **So: display it, sort the list by
+  it, and never use it for a correctness decision.** Do not reach for a sub-second timestamp — the
+  feed rejected that deliberately as a repo-wide storage change trading a proven defect for an
+  unproven assumption.
 - **Acceptance** the Library can render every column it shows from one request; counts are the
   server's totals, never `array.length`; no per-record scientific content is added beyond what the
   list must show; response shape pinned by test.
@@ -224,7 +240,7 @@ data-governance boundaries are unchanged.
 | UX-012 | Redundancy collapse | PLANNED | UX-011 | **validation stated in 9 places; next-action in 6 on one screen; pending counts in 5.** `WorkflowProgressBanner`'s `excludeSteps` prop must become unnecessary, not load-bearing |
 | VAL-001 | Validator **presentation** only | PLANNED | UX-012 | `schema_ok` stays visible; exactness findings in their own list, **never** as official-schema errors; advisory can **never** flip PASS→FAIL; no CLI transcript |
 | UX-013 | Assistant 5 mounts → 1–2, collapsed by default | PLANNED | UX-010 | **not a directory delete** — 6 lib modules have non-Assistant consumers, `assistant.css` shared with `GuidedPrompt`; `ASSISTANT_NO_MODEL_CLAIM` preserved on every surviving mount |
-| EVG-001 | **Evidence List provenance read-out** | PLANNED | — | **must land before EVG-002**: `GET /experiments/{id}/provenance` loses its only frontend caller, and `derived_from` chains would go invisible — removing provenance to simplify UI, which §38 forbids |
+| EVG-001 | **Close the `derived_from` CHAIN gap only** (scope reduced — see below) | PLANNED | — | ~~`GET /experiments/{id}/provenance` loses its only frontend caller, and `derived_from` chains would go invisible~~ — **OVERSTATED IN TWO WAYS; CORRECTED 2026-09-12 by first-hand measurement, and kept struck because it was driving a mandatory PR ordering.** (1) **The fetcher is not the graph.** `api.getProvenance(id)` is called from `screens/EvidenceExplorer.tsx:709`; `screens/graph/EvidenceGraphPanel.tsx:398` merely receives `provenance?: EvidenceSubFetch<…>` as a **prop**. Removing the graph removes a prop *consumer*, not the *caller*. (2) **Provenance is ALREADY readable outside the graph.** `components/EvidenceTrailPanel.tsx:163-175` renders a two-chip pair — origin + review state — computed client-side by the pure functions in `lib/provenance.ts`, with its own comment stating the design: *"THE SERVER IS AUTHORITATIVE. `GET .../provenance` computes the same two dimensions from the same stored content; these helpers exist so this panel — which already holds the trail — does not need a second request."* **The residual is narrower and is the only thing EVG-001 must now close:** the chips give **per-entry** origin, not a **multi-hop `derived_from` chain**. Verify whether any surface renders the chain; if none does, that — and only that — is the prerequisite for EVG-002. **I published this claim second-hand from a planning agent and did not verify it; the ordering constraint survives, but the slice is much smaller than stated.** |
 | EVG-002 | Evidence Graph out of primary navigation (**DEC-04**) | PLANNED | **EVG-001** | 6,169 lines, 123 tests, **0 backend routes, 0 backend tests, 0 other consumers, 0 a11y baseline cells**; `?view=graph` bookmarks safe (`list` is the fallback); depth = **DEC-11** |
 | UX-014 | Scientist-facing labels; schema path under disclosure | PLANNED | UX-010 | today `reduced_spectrum`, `qc_status`, `required_for_evidence_record`, `Environment & Context context` are product copy; the path is **never removed** — it is how a curator maps a field |
 | UX-015 | **RAISED, NOT ACTIONED — Project Memory** | PROPOSED | — | ~7,800 lines, **578 test cases (largest single test mass in the app)**, one of five top-level slots, for a graph of **this repository's own source code** shown to scientists. **Not named in the authorizing directive** → Krish's call |
