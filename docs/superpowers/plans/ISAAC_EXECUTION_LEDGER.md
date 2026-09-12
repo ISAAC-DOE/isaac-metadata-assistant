@@ -41,14 +41,27 @@ ORCHESTRATOR:          Opus 5 (claude-opus-5[1m]) — **DISCLOSED FALLBACK.** DE
                        orchestrator. No other model silently substituted.
 SUBORDINATE AGENTS:    4 implementers dispatched (DOC-007, UX-001/002, UX-003/004, CAP-001/009);
                        1 slot RESERVED for independent review. Ceiling 5 total, nested = forbidden.
-CURRENT PHASE:         Phase 0 COMPLETE · DOC-007 (4552de54) + UX-003/004 (43544c6c) COMPLETE
-                       · UX-001/002 + CAP-001/009 IN FLIGHT
+CURRENT PHASE:         Phase 0 COMPLETE · PHASE A COMPLETE · CAP-001/009 COMPLETE
+                       DOC-007 4552de54 · UX-003/004 43544c6c · UX-001/002 19c04692
+                       integration fix 34398813 · CAP-001/009 47fdbe30
+                       Impeccable critique: NON-DEGRADED (dual isolated assessment)
 CURRENT TASK:          DOC-007 (docs truth alignment) · UX-001/UX-002 · UX-003/UX-004 · CAP-001/CAP-009
 LAST COMPLETED TASK:   REC-001 … REC-012, DOC-001 … DOC-006, the six-pass plan review, and
                        the 2026-09-12 revision reconciliation into all six artifacts
-NEXT EXECUTABLE TASK:  integrate + independently review the four in-flight slices, then LIB-001
-UNVERIFIED WIP:        four in-flight implementation slices in the SHARED working tree, scoped to
-                       disjoint file sets; all git operations are the orchestrator's
+NEXT EXECUTABLE TASK:  LIB-001 (extend GET /api/experiments) — unblocked, no migration.
+                       Then UX-019/020/021 from the critique (below), then LIB-002/003.
+UNVERIFIED WIP:        none. All slices committed; snapshot regenerated once after settling.
+VERIFIED ON THE INTEGRATED TREE (main checkout, exit codes captured not piped):
+  backend   .venv/bin/pytest -q -rs   -> 7239 passed, 45 skipped, exit 0 (558.32 s)
+                                        baseline 7203/45 -> +36 tests, skips UNCHANGED
+  frontend  npx vitest run            -> 208 files / 5525 tests, exit 0 (113.70 s)
+                                        baseline 206/5465 -> +2 files, +60 tests
+  types     npx tsc -b                -> exit 0
+  snapshot  build_memory_snapshot --check (both --out and --detail-out) -> exit 0, no drift
+NOT RUN, AND WHY:       playwright (read-only, mutation, trusted, bench) — no slice touched a
+                       browser-suite surface contract, and the a11y baseline needs a LINUX CI
+                       round-trip that cannot be produced here. UX-002's expectation of zero new
+                       failing axe nodes is REASONING, not measurement, and is open.
 EXTERNAL BLOCKERS:     EXT-01 … EXT-12 (see ISAAC_PRODUCT_DECISIONS.md §C and the blockers doc)
 PENDING KRISH DECISIONS: NONE BLOCKING. DEC-05, DEC-09, DEC-11 and DEC-13 were all RESOLVED by the
                        2026-09-12 revision; DEC-19 … DEC-24 were added, two of them overriding the
@@ -338,7 +351,7 @@ data-governance boundaries are unchanged.
 
 | ID | Objective | Status | Depends | Key evidence / acceptance |
 |---|---|---|---|---|
-| CAP-001 | `search` → `finditer` + ambiguity acceptance suite | PLANNED | — | **Acceptance is the motivating case verbatim:** one sentence, `"around 425, maybe 430"` → **two candidates, neither preferred, item explicitly unresolved.** A negative control must prove the old behaviour red |
+| CAP-001 | **COMPLETE (`47fdbe30`)** — two-pass match: `finditer` **+ a restatement read** | **IMPLEMENTED AND VERIFIED** | — | **Acceptance met on the motivating case.** ~~`search`→`finditer`~~ alone does **not** fix the owner's sentence — the rule is anchored on the word *temperature*, said once there. **Three of my briefed claims were wrong** (see the master plan's struck F4): the two-sentence variant yields **one** candidate not two, the boundary is the **label occurrence** not the sentence, and the owner's **unitless** words produce **zero** candidates because kelvin is required. **No existing test pinned the old behaviour** — all 127 pre-existing tests pass unchanged, because every existing multi-value fixture repeats the label, so the single-sentence case was entirely uncovered. Negative control recorded verbatim both directions; **five-mutation matrix**, each guard individually load-bearing. Two of the implementer's **own** test defects were caught by measurement: a ULID-substring flake (**0.19 % of ULIDs contain "425"**, measured over 200k) and two **vacuous** assertions exposed by a positive control. CAP-009: **none skipped** — case 2 satisfied, cases 3 and 5 are named GAPS, and case 5 costs more than it looks (an operational utterance leaves the run unsettled, **withholding every candidate in the transcript**) |
 | CAP-002 | Persist the conflict grouping | PLANNED | CAP-001 | `review_required` appears **once** in `routes.py` (:15273) and **zero** times in `notes.py`/`proposals.py` — computed, served once, never stored |
 | CAP-003 | Sibling proposals + **derived** grouping (Option B) | PLANNED | CAP-002 | extending `proposed_value` would break `IMMUTABLE_PROPOSAL_FIELDS`, falsify wire-serialized `PROPOSAL_TARGET_SCOPE`, change `accept_proposal`'s signature and `ACCEPTED_FROM_VALUES`, and leave OpenAPI **and** MCP contracts wrong. Option B changes **none** of the 24 fields |
 | CAP-004 | Explicit `unresolved` read | PLANNED | CAP-003 | `open` conflates "unreviewed" with "deliberately undecided"; `conflict_resolution`'s `deferred` is the precedent |
@@ -456,6 +469,35 @@ Recorded here so the ledger and the plan cannot disagree. Full rationale in the 
   `experiment` event and causes a bundle refetch on every open client.** It is the same cost a
   rename already pays, and it is a second, independent reason to defer folder rename (O(N) writes
   would be O(N) events).
+
+---
+
+## TASKS FROM THE NON-DEGRADED IMPECCABLE CRITIQUE (2026-09-12, post-Phase-A)
+
+Method: two isolated assessments — a source-only design review in a sub-agent, and
+rendered+overlay evidence gathered separately. Neither saw the other. Full synthesis in
+[`2026-09-12-isaac-ux-ia-plan.md`](2026-09-12-isaac-ux-ia-plan.md) Part 10. Score **26/40**, up
+from 24; cognitive load **5 of 8 still FAIL → HIGH**.
+
+**The finding that governs the next slice, reached independently by both assessments:** the design
+**system** improved and the rendered **surface** did not. Source: **0.83%** of literals migrated
+(36 references vs ~4,293), 4 of ~40 stylesheets, 20 numeric sizes still live. Rendered: distinct
+sizes **9 → 9**, share ≤13.5px **94.7% → 94.8%**, exactly one element above 14px.
+
+| ID | Objective | Priority | Status | Notes |
+|---|---|---|---|---|
+| `UX-019` | **Resolve the live duplicate-title conflict.** Demote `.record-title` to `font-weight: 500` + `var(--text-secondary)` — two properties, no new rung, and the idiom already exists (`chrome.css` does exactly this to `.record-surface` at ≤1024px). **Keep both elements**: `.topbar` is `flex: none` while the `h1` scrolls inside `.screen-main`, so on a 3,116px column the crumb is the only place identity survives a scroll. | **P2** | PLANNED | A rendered-output change, so it needs its own review. Deliberately **not** smuggled into the comment correction that found it. |
+| `UX-020` | **Fix the eyebrow's CONTENT, not its treatment.** The containment is **inverted** — every other `.eyebrow` pair puts the *broader* category above, this puts a *narrower sub-view* above the object. Put **state** there (`DRAFT · 12 TO CONFIRM`; both values are already on the screen) and move the workspace into the crumb via `TopBar`'s **existing unused `surface` prop**. Zero new vocabulary. | **P2** | PLANNED | Also removes the **third** visible statement of the workspace from the page's best slot. |
+| `UX-021` | **Help regressed 89% and is the clearest thing that got worse today**: 208 → 392 body words, 5 → 7 sections, ~511 rendered words in a 340×560px scroll, **no link to the guided walkthrough one route away**, and developer jargon (`^…$`, *"Python's `$` also matches before a trailing newline"*) on a **scientist's** surface. Cap at four sections, relocate the jargon, add the walkthrough link. | **P1** | PLANNED | The truth fixes were right; the volume was the cost. |
+| `UX-022` | **Migrate ONE surface end-to-end, starting with `fields.css`** (zero token references today). It holds the sharpest inversion in the app: **`.field-label` 13.5px/600 above `.field-value` 14px/500** — the value is larger and one weight *lighter* than its own label, and **on Linux the pair inverts entirely** (500 and 400 both → 400, 600 → 700). | **P1** | PLANNED | **Hard prerequisite:** fix `palette-contrast.test.ts` first — it reads a *numeric* font-size and cannot resolve a `var()`, so tokenizing a tertiary-painted rule **silently shrinks a safety check**. Budget a Linux-CI round-trip. |
+| `UX-023` | **`nested-cards` ×9** — every `section.field-group` is a card inside the page card. **This contradicts my own critique**, which scored *Grouping* a PASS. Reconcile rather than average: decide whether the inner cards earn their border/shadow. | **P2** | PLANNED | Found only by the overlay; invisible to source reading and to `detect.mjs`. |
+| `UX-024` | **`transition: width, height` on `body`** animates layout properties. Cheap fix, real cost. | **P3** | PLANNED | Overlay-only finding. |
+| `UX-025` | **`line-length ~107 chars` on the amber banner's explanation** — the product's strongest asset (its honest copy) rendered too wide to read comfortably. | **P3** | PLANNED | Aim <80. |
+| `A11Y-02` | **Help's `role="dialog"` has no focus trap.** | **P1** | PLANNED | Accessibility defect, found by the persona pass. |
+| `A11Y-03` | **The mode chip's ~90-word disclosure exists in `aria-label` ONLY**, so a screen-reader user is better informed than a sighted colleague. | **P2** | PLANNED | The inverse of the usual defect, and it concerns a governance disclosure. |
+| `QA-016` | **No a11y baseline round-trip for the two new record-screen elements.** UX-002's expectation of zero new failing axe nodes is **reasoning** (both use tokens already proven compliant on every ground), explicitly **not** a measurement. Clipping and visual-sweep cells may still move. | **P1** | **OPEN** | Needs **Linux CI**; `grep -rn 'macos\|darwin' .github/workflows/` returns nothing, so the darwin column must be measured locally and never carried forward. |
+| `QA-017` | **`TopBar variant="record"` mounts without `recordId`**, so the breadcrumb is `[logo] › [record title]` — **one segment, the page's own name** — with the ancestor reachable only by clicking what reads as a logo. Add `My Experiments` as a linked crumb. | **P2** | PLANNED | Gives the bar a job the `h1` cannot do; composes with `UX-019`. |
+
 
 ---
 

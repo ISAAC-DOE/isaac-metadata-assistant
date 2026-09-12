@@ -38,7 +38,28 @@
  * `class="sr-only"` (1x1px, `clip: rect(0,0,0,0)`), while Project Memory,
  * Governance, Statistics and Settings each render a visible 22px `.page-title`.
  * So the primary work surface was the one without a heading anchor, and the
- * record's own name appeared only as a ~12px crumb in the top bar.
+ * record's own name appeared only in the top bar.
+ *
+ * CORRECTION, 2026-09-12, found by an independent design review of this very
+ * comment: an earlier revision of this paragraph said the name appeared "only as
+ * a ~12px crumb". THAT WAS FALSE, and wrong in kind as well as in size.
+ * `chrome.css` `.record-title` is `font-size: 14px; font-weight: 600; color:
+ * var(--text-heading)` — the SAME weight and the SAME heading colour as the
+ * `.record-page-title` added here, at 14px rather than 12px. It was never a
+ * quiet crumb; it reads as a title, and `chrome.css` says so on purpose:
+ * "keep it looking like the title (visual polish is a later slice)".
+ *
+ * The consequence is a real one and is recorded rather than smoothed over: this
+ * change converted that deferred decision into a LIVE CONFLICT. The record's
+ * name is now stated twice, ~100px apart, in two elements of the same weight
+ * and colour. The defence for keeping both is measured and holds — `.topbar` is
+ * `flex: none` while this `h1` sits inside a scrolling `.screen-main`, so after
+ * one screen of scroll the bar is the ONLY place the record's identity exists —
+ * but "both" only works once they look like different things. Demoting
+ * `.record-title` to `font-weight: 500` / `var(--text-secondary)` is the fix
+ * (the idiom already exists — `chrome.css` does exactly that to
+ * `.record-surface` at <=1024px). It is a rendered-output change and so needs
+ * its own review; it is tracked as UX-019 rather than smuggled in here.
  *
  * AND THAT HIDDEN `<h1>` READ `Review Record` ON ALL FOUR WORKSPACES, including
  * `?view=runs`, `?view=capture` and `?view=graph`. A screen-reader user was

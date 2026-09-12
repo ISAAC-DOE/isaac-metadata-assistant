@@ -10240,7 +10240,7 @@
       },
       {
         "path": "CLAUDE.md",
-        "sha256": "e7c46af41de841b5dddbbdd56c1b0178191e31da8900a076a540a1b29ebce0c8"
+        "sha256": "ea03acb75924cc53ec75a6df66f624e678efa4a1f693841a80bde34d9aca2cab"
       },
       {
         "path": "CONTRIBUTING.md",
@@ -10348,7 +10348,7 @@
       },
       {
         "path": "apps/web/src/__tests__/help-and-honesty.test.tsx",
-        "sha256": "cbbdfde20dfc7388d077f075525314b3ed3149fc140175a83949a07d118b2699"
+        "sha256": "4c0b06427d20282bb75d3b2b8e06823ad133f838d2c0ddef796d3dfc67206470"
       },
       {
         "path": "apps/web/src/__tests__/interaction-states.test.ts",
@@ -10460,7 +10460,7 @@
       },
       {
         "path": "apps/web/src/components/HelpPanel.tsx",
-        "sha256": "828a3f3ef32404f3e51775f8308d8662478e48559942c11e73c9188ec3c28d7f"
+        "sha256": "e16e846ff175ebe1029b7ec5eec01383fa61b8a73f39d0e80f8f459f3f871043"
       },
       {
         "path": "apps/web/src/components/LeftNav.tsx",
@@ -10484,7 +10484,7 @@
       },
       {
         "path": "apps/web/src/components/TopBar.tsx",
-        "sha256": "f0cbd5eff7e982d2024d599ffb64e533d0431cc963f441e9f310ffb42ffaf863"
+        "sha256": "37d07db643b02338b847ffa18146a3e006e0a1fff98ac00a22e667833857513e"
       },
       {
         "path": "apps/web/src/components/VerdictCard.tsx",
@@ -10512,7 +10512,7 @@
       },
       {
         "path": "apps/web/src/lib/labels.ts",
-        "sha256": "cc7d697715946d2475ea3945d6d02b8453465fb5c1c34d26477e78c83dd4b033"
+        "sha256": "52da7a3c1ee73c6080f8b3c32192b48d0cd73df4c272117d088a598ec1916bdf"
       },
       {
         "path": "apps/web/src/lib/routes.ts",
@@ -10564,7 +10564,7 @@
       },
       {
         "path": "apps/web/src/screens/RecordWorkbench.tsx",
-        "sha256": "40c6522f1b52d70affefc32209968a1153cca2d5e31f18707cf0f76862508baa"
+        "sha256": "07765669fc84cf824753c068047591d537295058bf0c58e55de6b67cecde2e24"
       },
       {
         "path": "apps/web/src/screens/SettingsPage.tsx",
@@ -11012,7 +11012,7 @@
       }
     ],
     "served_file_count": 200,
-    "served_manifest_fingerprint": "e683e34d06e3c09ed5d15e9911fa8a0f58ece7db0c45a02266098226861bb701"
+    "served_manifest_fingerprint": "8c321dda8516dc7d5b85e1a274e295b1b61ffe79549353668d0b1b96354317a2"
   },
   "overview": {
     "built_at_commit": "caab1d0a69c1733524bda5dde495623bc4b7bad1",

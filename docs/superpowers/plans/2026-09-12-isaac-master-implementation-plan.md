@@ -60,23 +60,43 @@ Compounding it: only **5 run field paths** (temperature, environment, atmosphere
 **2 record enums** can be asserted over MCP at all. **Pressure has no path.** Composition, sample
 identity, instrument and facility are proposal-only. **Free-text observation is impossible.**
 
-### F4 — The ambiguity requirement is one line of code away, and the machinery already exists
-Reproduced: `read_transcript("The temperature was around 425 K, maybe 430 K.")` →
-**one candidate, 425, `review_required: []`. 430 silently lost.** The *two-sentence* variant
-produces **two candidates plus a `conflicting_values_for_one_field` grouping**. The boundary is the
-**sentence, not the field**, and the cause is a single line:
-`rule.pattern.search(segment.text)` (`transcript_capture.py:810`) returns only the first match.
+### F4 — ~~The ambiguity requirement is one line of code away~~ — **WRONG IN THREE WAYS; CORRECTED 2026-09-12 AT IMPLEMENTATION**
+The fix shipped (`47fdbe30`), and implementing it disproved three of the claims that motivated it.
+Kept struck because F4 was one of the six findings this plan's whole sequencing rested on.
 
-Three things already exist: `AMBIGUITY_POLICY` already declares this exact case with
-`outcome: needs_review`; the grouping is already computed; and `candidate_for_segment` already
-anticipates one segment producing two, its comment noting that *"recording one of two proposals
-would state a preference this reader does not hold."*
+~~Reproduced: `read_transcript("The temperature was around 425 K, maybe 430 K.")` → one candidate,
+425, 430 silently lost. The two-sentence variant produces two candidates plus a
+`conflicting_values_for_one_field` grouping. The boundary is the **sentence, not the field**, and the
+cause is a single line: `rule.pattern.search(...)`. **So the minimal change is `search` →
+`finditer`**, which lights up correct machinery that is already there.~~
 
-**So the minimal change is `search` → `finditer`**, which lights up correct machinery that is
-already there. The real work is at the proposal layer, and it is three narrow things: the grouping
-is **computed but never persisted** (`review_required` appears **once** in `routes.py` and **zero**
-times in `notes.py`/`proposals.py`); sibling proposals carry **no group link**; and `open` conflates
-"unreviewed" with "deliberately undecided" while `conflict_resolution` already has `deferred`.
+| My claim | Measured truth |
+|---|---|
+| `search` → `finditer` is the minimal fix | **It does not fix the owner's sentence at all.** `_TEMPERATURE_K` is anchored on the literal word *temperature*; that sentence says it once, so `finditer` returns exactly **one** match |
+| The two-sentence variant yields two candidates **+ the grouping** | `"…425 K. Maybe 430 K."` yields **one** candidate and **no** grouping. **The boundary is the LABEL OCCURRENCE, not the sentence** — the behaviour I described needs the label *repeated* |
+| The owner's literal words lose 430 | **They produce ZERO candidates.** Kelvin is required, so `"Temperature is around 425, maybe 430."` proposes nothing. The silent preference was only ever reachable in the **unit-bearing** form |
+
+**The real fix is two halves.** `finditer` *is* load-bearing — but **not for completeness**: mutation
+M1 (`finditer`→`search`) left every value assertion **green**, because the second half covers them.
+What it actually prevents is worse than the original defect: with `search`,
+`"started A and ended B and started C and ended D"` proposes the instant explicitly labelled
+**"ended"** as an acquisition **START** — a silent *assertion* rather than a silent omission. The
+second half is a **restatement read**: a per-rule value-only pattern applied only after the
+label-anchored rule matched in the same segment, guarded by cross-rule value-span overlap, a digit
+boundary and per-(segment, rule) dedupe.
+
+**A third defect of the same family was found on the way:** the non-kelvin guard asked *"any kelvin
+reading in this segment?"*, so `"Temperature was 425 K, maybe 430 C."` produced candidate 425 and
+**no abstention at all** — `430 C` vanished silently too.
+
+**And no existing test pinned the old behaviour** — all 127 pre-existing transcript/capture/proposal
+tests pass **unchanged**, because every existing multi-value fixture uses two sentences with the
+label repeated. The single-sentence case was **entirely uncovered**. That is why the plan's
+prediction that tests would need inverting did not materialise.
+
+**What survived intact:** `AMBIGUITY_POLICY` already declared this case, the grouping was already
+computed, and `candidate_for_segment`'s comment already refused to prefer one of two. Those three
+are the reason the fix is ~200 lines rather than a new model.
 
 ### F5 — The multi-source historical disagreement model ALREADY EXISTS and is export-correct
 For a value already in the draft, README-425 / spreadsheet-430 / `.mac`-430 is representable
@@ -276,7 +296,7 @@ developer/authoring tool in prime scientist navigation. It was **not** named in 
 directive, so it is surfaced for Krish rather than triaged here.
 
 ### Phase D — Ambiguity model + capture provenance *(unblocked; the scientific core)*
-- **D1** `search` → `finditer` at `transcript_capture.py:810`, plus the ambiguity acceptance suite.
+- **D1** **DONE** (`47fdbe30`) — `finditer` **plus a restatement read** (two halves — see the master plan's F4; `finditer` alone does NOT fix the owner's sentence, because the rule is anchored on the word *temperature*, which that sentence says once), plus the ambiguity acceptance suite.
   **Acceptance is the exact motivating case:** one sentence, `"around 425, maybe 430"` → **two
   candidates, neither preferred, item explicitly unresolved.** A negative control must prove the old
   behaviour is red.
@@ -430,7 +450,7 @@ that implemented none of it.
 | 14 | ~~Evidence List provenance read-out (unblocks 15)~~ **WITHDRAWN — no chain exists; see C6** | C6a | — | — | — | — |
 | 15 | Evidence Graph out of primary navigation | C6b | ~~14~~ **none** | no | Sonnet | Opus |
 | 16 | Scientist-facing labels + schema path disclosure | C7 | 9 | no | Sonnet | Opus |
-| 17 | **`search` → `finditer` + ambiguity acceptance suite** | D1 | — | no | Opus | Opus |
+| 17 | **DONE `47fdbe30`** — two-pass match (`finditer` + restatement read) + 36-test acceptance suite | D1 | — | no | Opus | Opus |
 | 18 | Persist the grouping | D2 | 17 | no | Opus | Opus |
 | 19 | Sibling proposals + derived grouping (Option B) | D3 | 18 | no | Opus | Opus |
 | 20 | `unresolved` read + offered supersession | D4/D5 | 19 | no | Opus | Opus |

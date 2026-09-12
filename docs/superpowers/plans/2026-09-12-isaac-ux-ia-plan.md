@@ -675,3 +675,122 @@ a removal.
   53 controls at 1440 px) differ because they measure different records at different widths on
   different dates. **Neither supersedes the other; both need their vantage point quoted.** The
   conclusion is identical either way: the graph is the densest view of a record.
+
+---
+
+## Part 10 — Impeccable critique, post-Phase-A · **NON-DEGRADED**
+
+**Method: dual-assessment, isolated.** Assessment A (design review) ran in a sub-agent that saw
+**no** browser and **no** detector output. Assessment B (rendered + overlay evidence) was gathered
+independently by the orchestrator. Neither saw the other before synthesis. **This is the first
+non-degraded critique in this repository's history** — the earlier one carried a
+`⚠️ DEGRADED: single-context` banner because the agent ceiling was spent.
+
+### 10.1 They converged on the central point by two different mechanisms
+
+> **The design SYSTEM improved. The rendered SURFACE did not.**
+
+| | Assessment A (source) | Assessment B (rendered) |
+|---|---|---|
+| Evidence | **36 token references against ~4,293 literals = 0.83%**, across **4 of ~40 stylesheets**, with **20 distinct numeric font sizes still live**; a token sits four rules from a bare `14px` in `screens.css:232` | **distinct font sizes 9 → 9**; **share ≤13.5px 94.7% → 94.8%**; the 0.5px ladder intact; **exactly one** element above 14px |
+| Conclusion | *"the scale is a contract, not a state"* | *"one new heading, otherwise the same undifferentiated 10.5–14px field"* |
+
+Two independent methods, one verdict. **Do not read the Consistency improvement as evidence the
+scale changed anything on screen.**
+
+### 10.2 Design Health Score — **26/40**, up from 24. Two rows moved.
+
+| # | Heuristic | Was → Now | Why it moved, or did not |
+|---|---|:-:|---|
+| 4 | **Consistency** | **1 → 2** | **For VOCABULARY and STRUCTURAL reasons, not typographic.** Two five-step workflows shipped in one product, both called "the workflow"; one is deleted and the survivor derives from `lib/workflowSteps.ts` and **throws** on drift. In a workflow tool that is the worst inconsistency available. Structurally, four screens already rendered `eyebrow + visible h1`; the primary work surface was the exception, and five now share one idiom. |
+| 6 | **Recognition over recall** | **2 → 3** | The work surface names itself; the `sr-only` `h1` stopped lying on 3 of 4 workspaces; Help is reachable where its questions arise. |
+| 8 | **Aesthetic / minimalist** | **1 → 1** | **Did not move.** Net on the record screen: **+1 element, +1 eyebrow, +1 entry point, 0 removed.** Validation still in 9 places, next-action in 6, three blocked spine steps still print one identical sentence. The only minimalism gain is invisible (five dead `LABELS`); the only visible change is **Help growing 89%**. |
+| 2 | Match real world | **2 → 2** | **Moved both ways and cancelled.** Gain: five invented step words gone. Loss: `^…$`, *"anchored-pattern exactness check"* and *"Python's `$` also matches before a trailing newline"* landed in a **scientist's** popover. |
+| 1·3·5·7·9·10 | — | unchanged | 5 (Error prevention) stays **4** — today *added* a guard and removed none. |
+
+**Cognitive load: 5 of 8 still FAIL → HIGH.** Same count, different composition — **chunking** and
+**working memory** now pass. Working memory passing is the strongest defence of UX-002: a reader
+returning from another tab is finally told which record and workspace they are on, which an
+`sr-only` `h1` could never do for a sighted reader. *Honestly flagged by A as a re-classification
+rather than a regression:* one-thing-at-a-time did not change today, A simply does not think it
+passed before.
+
+**Visual hierarchy still fails, and the reason is sharp:** today gave the screen its first genuine
+size rank and **spent it on the record's name — orientation, not importance.** The most important
+thing on screen remains a 14px/600 amber banner.
+
+### 10.3 The duplicate title — **verdict: keep both, fix the styling.** Two measurements decide it.
+
+1. **The bar is persistent; the `h1` scrolls away.** `.topbar { flex: none }`, `h1` inside
+   `.screen-main { overflow-y: auto }`, on a column measured at **3,116px**. After one screen of
+   scroll **the crumb is the only place the record's identity exists.** Different jobs: persistent
+   identity vs. page anchor. So deleting the crumb's title would regress a 3,000px page.
+2. **They look identical, and the codebase already knew.** `.record-title` is **14px / 600 /
+   `--text-heading`** — the *same* weight and colour as the new `h1` — and `chrome.css:242-243`
+   says so deliberately: *"keep it looking like the title (visual polish is a later slice)."*
+   **Today converted a harmless deferred decision into a live conflict.**
+
+**And a measurement published in our own slice's comment was false.** `screens.css:41` said the name
+appeared *"only as a ~12px crumb"*. It is **14px/600/`--text-heading`** — wrong by ~17% **and wrong
+in kind**. Corrected in place, with the live-conflict consequence recorded rather than smoothed over.
+
+**Also found: the crumb is degenerate.** `TopBar variant="record"` mounts without `recordId`, so the
+trail is `[logo] › [record title]` — **one segment, the page's own name** — with the ancestor
+reachable only by clicking what reads as a logo.
+
+### 10.4 The eyebrow — **right treatment, wrong content**
+
+It reads as a label, not chrome (14 `.eyebrow` sites, four above an `h1`), and 22px over 13px is
+1.69× — comfortably enough. Three objections to the *content*:
+
+- **The containment is INVERTED.** On all four prior pairs the eyebrow is the **broader** category
+  (`DATA GOVERNANCE / Governance`). Here it is a **narrower sub-view inside** the object below it, so
+  a reader who learned the pattern parses `RECORD FIELDS / Cu K-edge XANES…` as *"this record belongs
+  to the Record Fields category"*. Reused correctly in CSS, incorrectly in semantics.
+- **It is the third visible statement of the workspace, in the page's best slot** — already stated by
+  the lit rail, by the Assistant (*"You are on Record Fields."*) and by the landmark name — while the
+  two facts a reader needs (draft/exported, how much outstanding) sit off the reading axis.
+- It is the **fourth** small-caps mono label in one viewport, and `.eyebrow` now means two things.
+
+**Recommendation:** put **state** in the eyebrow (`DRAFT · 12 TO CONFIRM` — both values already on
+the screen) and move the workspace into the crumb via `TopBar`'s **existing unused `surface` prop**.
+Zero new vocabulary.
+
+### 10.5 The mechanical evidence — the overlay works, and found what source reading did not
+
+`detect.mjs` is structurally useless here (Part 0). The **in-browser overlay** is a different code
+path and it ran: injection confirmed, 31 overlay nodes, findings logged. **Header said `16
+anti-patterns`; 17 finding lines were logged — both numbers recorded rather than one silently
+chosen**, per this repository's own precedent for that discrepancy class.
+
+| Rule | n | What it found |
+|---|---:|---|
+| **`nested-cards`** | **9** | *"Card inside card"* on every `section.field-group`. **This contradicts my own critique**, which scored *Grouping* a **PASS** — the grouping is doubled |
+| **`tiny-text`** | 5 | 11px and 11.5px body text — **including the 11px floor the token slice just chose**, so `--font-size-meta` is itself a finding by Impeccable's rule |
+| `line-length` | 1 | **~107 chars/line** on the amber banner's explanation — the product's strongest copy rendered too wide to read comfortably |
+| `layout-transition` | 1 | `transition: width, height` on `body` — animating layout properties |
+| `overused-font` | 1 | primary font 80% of text |
+
+**No user-visible overlay is claimed** — injection and execution are proven; the capture shows no
+painted markers. The live server was stopped before reporting.
+
+### 10.6 What got WORSE today — stated plainly
+
+1. **Help grew 89%**: 208 → 392 body words, 5 → 7 sections, ~511 rendered words in a 340×560px
+   scroll, with **no link to the guided walkthrough one route away**. The clearest regression.
+2. **Developer jargon reached the novice surface** (the Python-`$` sentence).
+3. **The duplicate-title conflict went live**, exactly as `chrome.css:243` predicted.
+4. **A third workspace statement in the page's best slot**, inverting the pattern it reuses.
+5. **Two type systems now coexist in adjacent rules of one file**, plus the live `var()`-resolution
+   trap in `palette-contrast.test.ts`.
+6. **A published measurement was false** (`~12px` → 14px/600) — now corrected.
+7. **No accessibility-baseline round-trip** for either new element. Correctly disclosed as reasoning
+   rather than measurement, still open.
+
+### 10.7 The untouched defect both assessments point at
+
+`fields.css` has **zero token references** and contains the sharpest remaining inversion:
+**`.field-label` 13.5px/600 above `.field-value` 14px/500** — the value is larger and one weight
+**lighter** than its own label. And per this session's own resolution table, **on Linux that pair
+inverts entirely**, because 500 and 400 both resolve to 400 while 600 resolves to 700. `fields.css`
+is where the next migration slice should start.
