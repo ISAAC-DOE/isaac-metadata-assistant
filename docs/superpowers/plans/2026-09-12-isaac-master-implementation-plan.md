@@ -1,6 +1,6 @@
 # ISAAC Master Implementation Plan — Scope V2
 
-**Status:** PROPOSED — awaiting Krish's approval. **No implementation is authorized by this document.**
+**Status:** **APPROVED — IMPLEMENTATION AUTHORIZED 2026-09-12.**
 **Created:** 2026-09-12 · **Base:** `main` @ `2f9a1133` (= `v0.0.232`, = hosted `commit`)
 **Parent:** [`2026-09-12-isaac-product-scope-v2.md`](2026-09-12-isaac-product-scope-v2.md) ·
 **Tracker:** [`ISAAC_EXECUTION_LEDGER.md`](ISAAC_EXECUTION_LEDGER.md) ·
@@ -9,6 +9,14 @@
 **Blockers/Risks:** [`2026-09-12-isaac-blockers-and-risks.md`](2026-09-12-isaac-blockers-and-risks.md)
 
 ---
+
+> ## STATUS CHANGED 2026-09-12 — IMPLEMENTATION AUTHORIZED
+> Krish approved moving from planning into implementation. The planning gate is **CLEARED**.
+> Every external-owner, security, migration and data-governance boundary in this document is
+> **UNCHANGED**. Decision statuses are reconciled in
+> [`ISAAC_PRODUCT_DECISIONS.md`](ISAAC_PRODUCT_DECISIONS.md) — read that first where it disagrees
+> with prose written before the gate cleared. Source: `2026-09-12-plan-review-and-revisions.md`.
+
 
 ## 1. The six findings that determine the plan's shape
 
@@ -177,10 +185,17 @@ the screen**, because the screen cannot be honest without it.
 - **B2** Library screen: search, sort, status facets, and a row that distinguishes records. The
   shipped worked example has **five records all titled `XANES Example — CuO (Cu K-edge)`**; that is
   the acceptance case.
-- **B3** Folders per **F6**: a top-level `folder` state key in `_authoritative_signature`.
-  Ship **create / move / delete**; **defer rename**, because rename is **O(N) non-atomic writes**.
-  Two costs to state in the PR, not discover: a move bumps `rev` and invalidates held ETags (as
-  `title` already does) but **does not** move `content_signature`.
+- **B3** Folders per **F6** and **DEC-20**: a migration-free **virtual nested path-label** on the
+  experiment state document, in `_authoritative_signature`. **A path materializes when at least one
+  Experiment is assigned to it — there is no durable folder entity.** v1 **must** support
+  assign/create-on-create/move/import, nested paths, breadcrumbs, browse, cross-folder search and
+  clear/move. v1 **must not pretend** to have durable empty folders, ACLs, sharing, folder
+  ownership, or **atomic rename** — and must not ship UI implying any of them. ~~Ship create /
+  move / delete; defer rename.~~ struck: with no durable entity there is nothing to *delete*, which
+  is why the owner narrowed this. Two costs to state in the PR, not discover: an assignment bumps
+  `rev` and invalidates held ETags (as `title` already does) but **does not** move
+  `content_signature`; and because the change feed keys on the authoritative signature, **every
+  assignment emits an `experiment` event and refetches the bundle on every open client**.
 - **B4** Breadcrumbs, cross-folder search, destination choice on create and on import.
 - **B5** Reopen-and-continue: land on a record and immediately understand state and next action.
 
@@ -288,11 +303,16 @@ Ordered so that every item proceeds while **all** external gates stay shut.
   destroy typed text with **no user action at all**. `UnmappedNotesPanel` has the fixed version;
   this one does not.
 
-**What ISAAC can decide that it currently hasn't:** an **authless remote MCP server is explicitly
-permitted by the vendor** (auth type `none`, documented "Supported"). ISAAC *chooses* OAuth. That
-makes the OAuth requirement ISAAC's decision rather than a vendor gate — a stronger, cheaper
-argument to put to Dean, and free, since ISAAC already built OAuth. **Note this does not close the
-identity question:** an OAuth bearer yields a `ServicePrincipal`, so **EXT-01 survives EXT-02**.
+~~**What ISAAC can decide that it currently hasn't:** an authless remote MCP server is explicitly
+permitted by the vendor, so the OAuth requirement is ISAAC's decision rather than a vendor gate — a
+stronger, cheaper argument to put to Dean.~~ — **REJECTED BY THE OWNER 2026-09-12 (DEC-23), and
+kept struck rather than deleted because it is the kind of shortcut a future session would re-derive
+and re-propose.** The vendor fact is true and stays on the record: auth type `none` is documented
+"Supported". **It is not a reason to drop authentication.** Production ISAAC **rejects authless MCP
+for real SLAC scientific data** because **trusted attribution is load-bearing**. Authless mode is
+permitted **only** for explicitly approved local/synthetic/non-sensitive smoke testing (which is
+what `MCP-019` uses), and never as a governance workaround. **And the identity point still holds
+either way:** an OAuth bearer yields a `ServicePrincipal`, so **EXT-01 survives EXT-02**.
 
 ### Phase F — Remote connector + live-capture demonstration *(externally blocked)*
 Order deliberately: **text chat first, voice second.** Prove identity, authorization, run scope,
@@ -394,14 +414,18 @@ that implemented none of it.
 | 30 | Import review surface + merge into Library | G4/G5 | 29 | no | Opus | Opus |
 | 31 | Gold-standard evaluation harness | G6 | 30 | no | Opus | Opus |
 
-**Zero migrations across the entire sequence.** That is a deliberate design outcome, not luck: the
+**Zero migrations across the entire sequence — as a TARGET, not a promise (DEC-24).** That is a
+deliberate design intent, not luck: the
 folder recommendation, the ambiguity recommendation and the revision reinterpretation were each
 chosen partly *because* they avoid one. A migration would mean the feature does not work until two
 humans act, which is a hard stop no agent can lift.
 
-**If any slice discovers it needs a new table or statement class**, it stops and reports. It needs
-a **new committed sentence in `CLAUDE.md` §15**, an owner-approved packet, and an operator action —
-and this repository records **five** occasions on which that discipline failed.
+**The target must never become pressure to force a requirement into an unsuitable existing
+structure.** If any slice discovers it needs a new table or statement class, it **stops**, documents
+the evidence, adds a **new committed sentence in `CLAUDE.md` §15**, prepares forward/rollback/test
+evidence and an operator packet, **does not apply the migration itself**, and moves to other
+unblocked work. This repository records **five** occasions on which that discipline failed. Never
+rewrite an applied migration.
 
 ---
 
@@ -430,9 +454,15 @@ entity and no lineage pointer beyond `revision_no`. The blocker is hard:
 `reason text NOT NULL CHECK (reason IN ('submission'))`, and `ALTER` is a forbidden verb in the
 write policy.
 
-**Recommendation:** reinterpret the UX-visible operation as **"keep editing, then submit again"** —
-which is migration-free and is what the system already does — and defer a true draft-revision entity
-until a read surface over history exists at all. **One trap the UI must surface rather than hide:**
+~~**Recommendation:** reinterpret the UX-visible operation as "keep editing, then submit again".~~
+— **CORRECTED BY THE OWNER 2026-09-12 (DEC-21).** The mechanics of that recommendation are right
+and unchanged — it is migration-free and it is what the system already does — but **describing it
+that way understates the modelling requirement**, so the wording is struck. The approved model:
+**a submitted snapshot is IMMUTABLE**, and the Experiment workspace may accumulate **`Current
+Working Changes`** which later become the next immutable snapshot. The UI must **visibly
+distinguish `Last Submitted Revision` from `Current Working Changes`** and expose revision history
+(`REV-001`, `REV-002`). **Never describe the historical submitted revision as mutable.** A true
+draft-revision *entity* remains deferred; the *state distinction* is not. **One trap the UI must surface rather than hide:**
 a rename does **not** move `content_signature`, so submit → rename → resubmit yields
 `409 already_submitted`.
 

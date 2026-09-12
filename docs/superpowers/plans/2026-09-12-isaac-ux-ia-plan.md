@@ -1,11 +1,19 @@
 # ISAAC UX / Information-Architecture Plan — Scope V2
 
-**Status:** PROPOSED — awaiting Krish's approval. No redesign is implemented by this document.
+**Status:** **APPROVED — IMPLEMENTATION AUTHORIZED 2026-09-12.**
 **Created:** 2026-09-12 · **Measured against:** `main` @ `2f9a1133`, local dev stack
 (API `127.0.0.1:8000`, Vite `127.0.0.1:5173`), and the authenticated hosted deployment.
 **Parent:** [`2026-09-12-isaac-product-scope-v2.md`](2026-09-12-isaac-product-scope-v2.md)
 
 ---
+
+> ## STATUS CHANGED 2026-09-12 — IMPLEMENTATION AUTHORIZED
+> Krish approved moving from planning into implementation. The planning gate is **CLEARED**.
+> Every external-owner, security, migration and data-governance boundary in this document is
+> **UNCHANGED**. Decision statuses are reconciled in
+> [`ISAAC_PRODUCT_DECISIONS.md`](ISAAC_PRODUCT_DECISIONS.md) — read that first where it disagrees
+> with prose written before the gate cleared. Source: `2026-09-12-plan-review-and-revisions.md`.
+
 
 ## Part 0 — Provenance of this critique
 

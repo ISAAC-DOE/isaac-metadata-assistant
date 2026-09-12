@@ -1,6 +1,6 @@
 # ISAAC Product Scope V2 — North Star
 
-**Status:** PROPOSED — awaiting Krish's approval. Nothing in this document authorizes implementation.
+**Status:** **APPROVED — IMPLEMENTATION AUTHORIZED 2026-09-12.**
 **Created:** 2026-09-12
 **Authorizing instruction:** project-owner planning directive of 2026-09-12 ("ISAAC PRODUCT SCOPE V2"),
 relayed in-session. This is an owner instruction, not an artifact this repository can witness — the
@@ -14,6 +14,14 @@ confirm that.**
 [`2026-09-12-isaac-blockers-and-risks.md`](2026-09-12-isaac-blockers-and-risks.md)
 
 ---
+
+> ## STATUS CHANGED 2026-09-12 — IMPLEMENTATION AUTHORIZED
+> Krish approved moving from planning into implementation. The planning gate is **CLEARED**.
+> Every external-owner, security, migration and data-governance boundary in this document is
+> **UNCHANGED**. Decision statuses are reconciled in
+> [`ISAAC_PRODUCT_DECISIONS.md`](ISAAC_PRODUCT_DECISIONS.md) — read that first where it disagrees
+> with prose written before the gate cleared. Source: `2026-09-12-plan-review-and-revisions.md`.
+
 
 ## 0. Verified state this document was written against
 

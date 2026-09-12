@@ -34,14 +34,24 @@ VERIFIED BASELINE AT HEAD (main checkout, measured this session, exit codes capt
   snapshot  build_memory_snapshot --check (both --out and --detail-out) -> exit 0, no drift
   a11y      A11Y_BASELINE_TOTAL_NODES = 877 darwin / 877 linux · 70 cells
             · 2 platform splits (both settings-explorer, net zero) · DARWIN_CARRIED_FORWARD = []
-CURRENT PHASE:         Phase 0 — recover truth (COMPLETE)
-CURRENT TASK:          none in flight
-LAST COMPLETED TASK:   REC-001 … REC-012, DOC-001 … DOC-006, and the six-pass plan review
-NEXT EXECUTABLE TASK:  *** BLOCKED ON KRISH'S APPROVAL OF THE PLAN ***
-                       first task after approval: UX-001 (token axes) — see §Phase A
-UNVERIFIED WIP:        none
+ORCHESTRATOR:          Opus 5 (claude-opus-5[1m]) — **DISCLOSED FALLBACK.** DEC-17 makes Fable 5.1
+                       primary; Fable was not available to this session and Krish approved the
+                       substitution. Orchestrator-only discipline preserved: plan, delegate,
+                       review, integrate, verify, commit — no production code written by the
+                       orchestrator. No other model silently substituted.
+SUBORDINATE AGENTS:    4 implementers dispatched (DOC-007, UX-001/002, UX-003/004, CAP-001/009);
+                       1 slot RESERVED for independent review. Ceiling 5 total, nested = forbidden.
+CURRENT PHASE:         Phase 0 COMPLETE · DOC-007 + Phase A + CAP-001 IN PROGRESS
+CURRENT TASK:          DOC-007 (docs truth alignment) · UX-001/UX-002 · UX-003/UX-004 · CAP-001/CAP-009
+LAST COMPLETED TASK:   REC-001 … REC-012, DOC-001 … DOC-006, the six-pass plan review, and
+                       the 2026-09-12 revision reconciliation into all six artifacts
+NEXT EXECUTABLE TASK:  integrate + independently review the four in-flight slices, then LIB-001
+UNVERIFIED WIP:        four in-flight implementation slices in the SHARED working tree, scoped to
+                       disjoint file sets; all git operations are the orchestrator's
 EXTERNAL BLOCKERS:     EXT-01 … EXT-12 (see ISAAC_PRODUCT_DECISIONS.md §C and the blockers doc)
-PENDING KRISH DECISIONS: DEC-05, DEC-09, DEC-11, DEC-13  + approval of this plan
+PENDING KRISH DECISIONS: NONE BLOCKING. DEC-05, DEC-09, DEC-11 and DEC-13 were all RESOLVED by the
+                       2026-09-12 revision; DEC-19 … DEC-24 were added, two of them overriding the
+                       plan's own recommendation (see ISAAC_PRODUCT_DECISIONS.md §B2)
 ```
 
 **Update this header after every substantive milestone, and immediately before any
@@ -81,7 +91,22 @@ next session to build what already exists.
 | DOC-005 | This ledger | IMPLEMENTED | `ISAAC_EXECUTION_LEDGER.md` |
 | DOC-006 | Blocker matrix + risk register + verification strategy | IMPLEMENTED | `2026-09-12-isaac-blockers-and-risks.md` |
 
-**GATE — Krish's approval of the plan. Nothing below starts without it.**
+**GATE CLEARED 2026-09-12 — implementation authorized.** External-owner, security, migration and
+data-governance boundaries are unchanged.
+
+### DOC-007 — documentation truth alignment · IN PROGRESS
+- **Workstream** DOC · **Owner** Sonnet implementer · **Reviewer** reserved Opus slot
+- **Objective** correct the measured-stale claims in `CLAUDE.md` and `docs/` so they stop steering
+  future sessions wrong. Nine items, each independently re-derived by the implementer before edit.
+- **Acceptance** the operation count (71 → **77**), the a11y total (871 → **877**), the plans-file
+  count (~41 → **44**), two §15 "nothing reads it" claims, the phantom
+  `isaac-runs-stage-2-contract.md` §8 citation, `browser-accessibility-testing.md`'s stale A11Y-01
+  status, every `/krish/api/mcp`-as-live citation, and the "immutable at the database level" claim
+  class are all corrected **in place with the old wording preserved** per house style.
+- **Verification** `pytest apps/api/tests/test_about_and_openapi.py`; snapshot drift check with
+  **both** `--out` and `--detail-out` — **`CLAUDE.md` IS in the served manifest, so this slice WILL
+  drift the snapshot and must regenerate in the same commit.**
+- **Next action** orchestrator review, then commit to its own branch.
 
 ---
 
@@ -151,21 +176,32 @@ next session to build what already exists.
 - **Acceptance** the shipped worked example's **five records all titled `XANES Example — CuO
   (Cu K-edge)`** are distinguishable in the list. That is the test.
 
-### LIB-003 — Folders: `folder` state key, create / move / delete
-- **Status** PLANNED · **Depends** LIB-001 · **Owner** Opus + Opus reviewer
-- **Design** top-level `folder` key in the experiment state document, **included in
+### LIB-003 — Folders: migration-free VIRTUAL NESTED PATH-LABEL model  (revised per DEC-20)
+- **Status** PLANNED · **Depends** LIB-001 · **Owner** Opus + independent Opus reviewer
+- **Design** a top-level `folder` **path label** on the experiment state document, **included in
   `_authoritative_signature`**. Precedent: `title` — assistant-side, mutable, organizational,
   reaching neither the official record nor `content_signature`.
-- **Migration verdict** **NO new table, NO migration, NO `OWNED_TABLES` change, NO new §15
-  sentence for the location** — cite the 2026-08-07 lift's *"normal application state"*, exactly as
-  `ingestion-proposal-contract.md` §8.1 does for proposals.
+- **A path MATERIALIZES when at least one Experiment is assigned to it.** There is no durable
+  folder entity.
+- **v1 MUST support** assign/create a folder path while creating, moving or importing · nested
+  paths · breadcrumbs · browse · cross-folder search · clear/move.
+- **v1 MUST NOT PRETEND to have** durable empty folder entities · folder ACLs · sharing · folder
+  ownership · **atomic folder rename**. Those need a separate persistence/identity decision *if
+  later shown necessary*. **Do not ship UI that implies any of them exist.**
+- **Migration verdict** **NO new table, NO migration, NO `OWNED_TABLES` change, NO new §15 sentence
+  for the location** — cite the 2026-08-07 lift's *"normal application state"*, exactly as
+  `ingestion-proposal-contract.md` §8.1 does for proposals. If implementation evidence proves this
+  cannot work, **DEC-24 applies: stop the slice and surface the dependency; do not force it.**
 - **Mechanical trap** `save_versioned()` returns `False` **writing nothing** when
   `_authoritative_signature` is unchanged, and `from_state` drops unknown keys. So `folder` must be
-  a real dataclass field **and** join that signature, or the move is silently discarded.
-- **Costs to state in the PR** a move bumps `rev` and invalidates held ETags (as `title` already
-  does) but does **not** move `content_signature`. **Rename is O(N) non-atomic writes — deferred.**
-- **Acceptance** a test proves a folder move changes **no** scientific metadata, **no** record
-  identity, **no** run value, **no** validation result, and does **not** move `content_signature`.
+  a real dataclass field **and** join that signature, or the assignment is silently discarded.
+- **Costs to state in the PR** an assignment bumps `rev` and invalidates held ETags (as `title`
+  already does) but does **not** move `content_signature`; and because the change feed keys on the
+  authoritative signature, **every folder assignment emits an `experiment` event and causes a
+  bundle refetch on every open client**.
+- **Acceptance** `LIB-003a` — a test proves a folder assignment changes **no** scientific metadata,
+  **no** record identity, **no** run value, **no** validation result, does **not** move
+  `content_signature`, and that `folder` reaches **no** exported record and **no** sidecar.
 - **Not in scope** ownership, sharing, ACLs — blocked by the absent trusted authentication
   boundary. Four forward-compatibility rules: label-not-container; never a permission boundary;
   never derived from a person; any owner stamp server-set at an ingestion boundary with a
@@ -263,6 +299,33 @@ is never truth; proposals reviewable; source image referenced; scientist decides
 · `QA-004` release provenance · `QA-005` hosted QA · **`QA-006` true 200% zoom (HUMAN — no CDP
 method can drive it)** · **`QA-007` narrow widths (HUMAN — `resize_window` reports success while the
 rendered viewport does not follow)** · **`QA-008` real-microphone + OS-indicator check (HUMAN)**.
+
+---
+
+## TASKS ADDED BY THE 2026-09-12 REVISION
+
+| ID | Objective | Phase | Status | Depends / blocked |
+|---|---|---|---|---|
+| `DOC-007` | Documentation truth alignment — nine measured-stale claims in `CLAUDE.md` and `docs/`. **Do this first: stale instructions steer implementation.** | 0 | **IN PROGRESS** | — |
+| `UX-018` | **Project Memory demoted** to `Settings → Advanced/Developer` per **DEC-19**. **Capability and tests PRESERVED** — this is a navigation change, not a deletion. Measured stake: ~7,800 lines and 578 test cases, the largest single test mass in the app. *(I inferred this ID from the revision note, which lists `UX-018` without defining it. If Krish meant a different task by `UX-018`, correct this row rather than building the wrong thing.)* | C | PLANNED | UX-010 |
+| `REV-001` | **Revision-state modelling** per **DEC-21**: a submitted snapshot is immutable; the workspace may hold `Current Working Changes` for the next snapshot. Expose revision history. **Never describe a submitted revision as mutable.** | C | PLANNED | UX-010 |
+| `REV-002` | **Revision-state UI**: visibly distinguish **`Last Submitted Revision`** from **`Current Working Changes`**, show the path to the next submission, and **surface the rename trap rather than hiding it** — a rename does not move `content_signature`, so submit → rename → resubmit yields `409 already_submitted`. | C | PLANNED | REV-001 |
+| `MCP-019` | **Local/synthetic end-to-end MCP proof** — `MCP client → create note → proposal/candidate → change-feed event → website Review → accept/edit/reject under an explicitly-enabled trusted TEST identity → deterministic validation`. Also prove: duplicate/retry protection, payload/read bounds enforced, provenance identifies the source channel, ambiguity stays unresolved when appropriate, **MCP cannot final Submit**, and **no production provider, account or data is needed**. **Must be green BEFORE the operator is asked to mount the production endpoint.** | E | PLANNED | MCP-001, MCP-002, CAP-004 |
+| `HIST-003a` | **Provider-neutral semantic-reconstruction contract**, exercised with a **deterministic fake** over synthetic/authorized fixtures. Prove semantic output enters the shared proposal/ambiguity/conflict Review pipeline and **cannot become record truth automatically**. | G | **PLANNED — UNBLOCKED** | HIST-001 |
+| `HIST-003b` | **Real BL15-2 Claude/model reconstruction.** | G | **BLOCKED** | **EXT-10** (corpus) **AND** institutional provider/data-egress approval (**DEC-22**) |
+
+### Two rules the revision hardened, recorded here because they reverse the plan's own advice
+
+- **`MCP-009` is REJECTED as a production route (DEC-23).** I had surfaced vendor-permitted
+  **authless** remote MCP as *"a stronger, cheaper argument to put to Dean."* The owner rejected
+  that: **trusted attribution is load-bearing**, so vendor permission is not a reason to drop it.
+  Authless mode survives **only** for explicitly approved local/synthetic/non-sensitive smoke
+  testing — never as a governance shortcut, and never for real SLAC scientific data.
+- **"Zero migrations" is a TARGET, not a promise (DEC-24).** The plan's "zero migrations across all
+  31 PRs, by design rather than luck" stands as intent but must never become pressure to force a
+  requirement into an unsuitable existing structure. A slice that genuinely needs persistence
+  **stops, documents, adds the authorization sentence, prepares the operator packet, does not
+  apply it, and moves to other unblocked work.**
 
 ---
 
