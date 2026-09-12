@@ -2064,9 +2064,14 @@ Out of scope unless explicitly approved:
   writing them through `submission_store.py`'s append-only `INSERT`s. ~~It covers **no** read
   surface over the history~~ — **STALE, corrected 2026-09-12: a read surface over the history now
   exists.** `apps/api/isaac_api/revision_history.py` — "The READ path over the append-only
-  submission history. SELECTs only." — shipped later (`e85efa64`, 2026-08-17) and carries **nine**
-  `SELECT` statements across all five of these tables, re-measured this session
-  (`grep -c SELECT apps/api/isaac_api/revision_history.py`). It is a separate module for exactly
+  submission history. SELECTs only." — shipped later (`e85efa64`, 2026-08-17) and carries **nine
+  named `Q_*` query constants** covering all five of these tables. ~~nine `SELECT` statements
+  (`grep -c SELECT …`)~~ — **the COMMAND was wrong and is corrected the same day it was published,
+  found by an independent review**: `grep -c SELECT apps/api/isaac_api/revision_history.py` returns
+  **15**, because the word also appears in subqueries and prose. **Nine** is right for the query
+  constants, which is what the claim means; re-derive with
+  `grep -c '^Q_[A-Z_]* = ' apps/api/isaac_api/revision_history.py`. The figure held; the way I told
+  a reader to check it did not, which is the more useful kind of error to record. It is a separate module for exactly
   this reason (its own docstring: growing `submission_store` with a read surface "would blur what
   the module is *for*"), reuses `db_write.write_transaction` unchanged, and adds no new table and
   no new connection path — so this correction narrows what "covers no read surface" meant without

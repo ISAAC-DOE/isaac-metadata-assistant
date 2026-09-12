@@ -41,15 +41,20 @@ ORCHESTRATOR:          Opus 5 (claude-opus-5[1m]) — **DISCLOSED FALLBACK.** DE
                        orchestrator. No other model silently substituted.
 SUBORDINATE AGENTS:    4 implementers dispatched (DOC-007, UX-001/002, UX-003/004, CAP-001/009);
                        1 slot RESERVED for independent review. Ceiling 5 total, nested = forbidden.
-CURRENT PHASE:         Phase 0 COMPLETE · PHASE A COMPLETE · CAP-001/009 COMPLETE
+BRANCH VERDICT:        *** DO NOT MERGE — MERGE-after-fixes. 4 BLOCKING findings. ***
+                       Independent review (implemented none of it) found 2 Critical + 2 Important.
+                       `main` is UNTOUCHED at 2f9a1133 and this branch is UNPUSHED, so nothing
+                       harmful is shipped. See "INDEPENDENT REVIEW" below before doing anything.
+CURRENT PHASE:         Phase 0 COMPLETE · PHASE A implemented, UNDER REMEDIATION
                        DOC-007 4552de54 · UX-003/004 43544c6c · UX-001/002 19c04692
                        integration fix 34398813 · CAP-001/009 47fdbe30
                        Impeccable critique: NON-DEGRADED (dual isolated assessment)
 CURRENT TASK:          DOC-007 (docs truth alignment) · UX-001/UX-002 · UX-003/UX-004 · CAP-001/CAP-009
 LAST COMPLETED TASK:   REC-001 … REC-012, DOC-001 … DOC-006, the six-pass plan review, and
                        the 2026-09-12 revision reconciliation into all six artifacts
-NEXT EXECUTABLE TASK:  LIB-001 (extend GET /api/experiments) — unblocked, no migration.
-                       Then UX-019/020/021 from the critique (below), then LIB-002/003.
+NEXT EXECUTABLE TASK:  *** FIX C-1 FIRST. It is a §5 violation — the product now proposes
+                       scientific values the transcript does not state. *** Then C-2, I-1, I-2.
+                       Only after those: LIB-001, then UX-019/020/021.
 UNVERIFIED WIP:        none. All slices committed; snapshot regenerated once after settling.
 VERIFIED ON THE INTEGRATED TREE (main checkout, exit codes captured not piped):
   backend   .venv/bin/pytest -q -rs   -> 7239 passed, 45 skipped, exit 0 (558.32 s)
@@ -469,6 +474,109 @@ Recorded here so the ledger and the plan cannot disagree. Full rationale in the 
   `experiment` event and causes a bundle refetch on every open client.** It is the same cost a
   rename already pays, and it is a second, independent reason to defer folder rename (O(N) writes
   would be O(N) events).
+
+---
+
+## INDEPENDENT REVIEW OF THE INTEGRATED PHASE A — **MERGE-after-fixes**
+
+Reviewer implemented none of the work. It **re-derived every reported number exactly** (backend
+7239/45 exit 0; frontend 208/5525 exit 0; `tsc -b` 0; snapshot clean on both artifacts) and then
+found four blocking defects the suites passed.
+
+### C-1 · CRITICAL · §5 VIOLATION — the fix makes the product INVENT scientific values
+`apps/api/isaac_api/transcript_capture.py` — the restatement pass scans **the whole remainder of the
+segment** for a bare `<number> K`, with **no clause bound and no adjacency test**, while
+`_TEMPERATURE_K` itself deliberately refuses to cross `.;:`. **Confirmed independently by the
+orchestrator, executing `read_transcript` directly:**
+
+| Input | Proposed |
+|---|---|
+| `"The temperature was 425 K, ramped at 3 K/min"` | `temperature_K` = **425 and 3** — a ramp **rate** as a temperature |
+| `"The temperature was 425 K and the step size was 0.5 K"` | **425 and 0.5** |
+| `"Sample temperature 425 K, cryostat setpoint 80 K, base 4 K"` | **425, 80 and 4** — three |
+| `"The temperature was 425 K and the pressure was 3 K"` | **425 and 3** — a **pressure** as a temperature |
+| `"…started …01-01Z, ran until …01-02Z"` | the **end** instant as an alternative **start** |
+| `"…started …01-01Z and we will repeat it …02-01Z"` | a **future** scan's instant as the start |
+
+`main` proposes only the labelled value in every one of those. Each false candidate ships a `rule`
+string asserting *"the same sentence restates the temperature … read as an ALTERNATIVE value for the
+same field"* — **false about the transcript.**
+
+**This is STRICTLY WORSE than the defect it fixed.** The old defect was a silent *omission* (430
+lost). This is a silent *assertion* — and it is the exact inversion the slice itself identified as
+the reason `finditer` was needed, reproduced by its own second half. The cross-rule
+`claimed_value_spans` guard cannot see it: it only catches a value another rule matched **under its
+own label**, so `ran until`, `pressure`, `K/min` and `next scan` are invisible to it.
+
+**Fix (reviewer's, and it preserves the requirement):** gate the restatement on an **adjacent hedged
+connective** — `,? (or )?(maybe|perhaps|around|about|roughly|or|and again)`. The owner's sentence
+still reads; every row above stops. **Clause-bounding alone is insufficient** — two rows have no
+punctuation. Alternative: downgrade a non-adjacent second reading to a Clarification.
+
+### C-2 · CRITICAL · one legal transcript produces a 165 MB response inside `record_lock`
+Every candidate carries the whole segment **twice** (`quote` + `rule`), so cost is
+O(values × segment_length). Measured through the real route: a **27 KB single segment** →
+**165,834,285 bytes**, 3,001 candidates, 3,001 `unproposable` disclosures. A 250 KB segment (under
+the 256 KiB ceiling) → 27,776 candidates, **11.3 s inside `read_transcript`**, and the request did
+not return in 120 s. `main`: 1 candidate, 0.04 s, ~55 KB. `MAX_SEGMENTS=100` does not help — it is
+**one** segment, which is what punctuation-free ASR emits. The durable write is safe
+(`proposals_too_large`, 0 minted); the **response and the lock hold** are not.
+
+**And the test written for exactly this question is VACUOUS.**
+`test_the_reader_adds_no_ceiling_because_the_durable_write_already_has_one` argues about where the
+cost lies, then asserts only `isinstance(_MAX_PROPOSALS_PER_RECORD, int)` and `> 0` — it measures no
+size, no count and no time, **and its premise is wrong**: the write is not where the cost is.
+
+### I-1 · IMPORTANT · four `apps/web/e2e/` sites, and one spec now asserts the OPPOSITE of its title
+`'Review Record'` now exists as an `h1` **only** in the `bundle.status !== 'data'` branch. So
+`e2e/specs/workspace-scope.spec.ts:195` — *"the same canonical id DOES resolve"*, whose own comment
+warns it must not be satisfiable by a build where the record does not exist — **now passes only when
+the record has NOT resolved**, and `BackendDown` renders the same heading. Same inversion at
+`e2e/specs/tutorial.spec.ts:386,610`; `e2e/surfaces.ts:101`'s `record-detail` ready gate becomes a
+race. **This is the orchestrator's miss:** the identical reasoning was applied in jsdom
+(`tutorial-session-lifecycle.test.tsx` → `h1.record-page-title`) and `e2e/` was never swept, because
+no slice ran playwright.
+
+### I-2 · IMPORTANT · two NEW false claims replaced the two retired ones
+- *"file upload is refused"* is **unscoped**, in a build where `RecordValidator.tsx:241` is a button
+  labelled **"Upload JSON File"** that calls `file.text()` and POSTs the contents. §11 is explicit
+  that the refusal claim is true of **`POST /api/uploads` only**. The panel's own comment claims it
+  "names no file READER" — it names one (CSV) and omits the other (the validator), which is the
+  half-disclosure it says it avoided.
+- *"Two gates on export"* — `export_draft` has **three** refusal returns, and
+  `ExportReadiness.tsx:789-791` already says so in committed prose: *"it clears THREE gates, not
+  two."* The new Family B detector cannot see it: its vocabulary is `only|sole|single|one|nothing but`.
+
+### Non-blocking, and they matter for the guard work
+- **Family A catches 10/20 on the reviewer's corpus, not 12/12.** The hole is that `NEGATOR` is
+  clause-wide, so *"extracts field values from your spreadsheets **with no manual typing**"* escapes.
+  A verified adjunct-strip takes it to **13/20** with zero false positives on the existing
+  `CORRECT_COPY_FIXTURES`.
+- **Family B catches 2/12 — and its retired claim class is STILL SHIPPED** at
+  `GuidedCompletion.tsx:826`: *"the official ISAAC schema check … decides export."*
+- A visible 22px `h1` landed on four axe/layout-measured surfaces with `a11y-baseline.ts` untouched
+  and no e2e run. Probably fine (`--text-slate` is 4.64:1) but **reasoned, not measured** — `QA-016`.
+
+### The two places the reviewer looked hardest, and they HELD
+Recorded because a review that reports nothing without saying where it looked is not evidence.
+1. **The zero-pixel claim and the `palette-contrast` sample-shrink hazard.** All ~24 token
+   substitutions resolved against their literals — **every one identical**. The hazard is **real**
+   (`/font-size:\s*([\d.]+)px/` cannot read a `var()`, and the floor only applies `>= 20`), and
+   **237 numeric samples / 0 var-sized across all 41 sheets** confirm **no** tertiary-painted rule
+   was tokenized. The slice's routing-around was correct.
+2. **The ratchet's teeth.** All four header measurements reproduce exactly against `main`
+   (1073/20, 428/8, 423/16, 2406/32; the weight histogram to the unit; `17px` ×4), every ceiling
+   sits exactly on the measured value, and **six** ratchets were broken on mutated tree copies —
+   including the two-way floor (migrate 30 spacing literals → 2370 against a floor of 2375, RED).
+   Three backend mutations were re-run in-process: **12, 2 and 2** failures. **These guards are not
+   decoration.**
+
+### One more correction to my own published work
+`CLAUDE.md`'s new numbers all verify **except the verification command I gave**:
+`grep -c SELECT apps/api/isaac_api/revision_history.py` returns **15**, not nine, because the word
+appears in subqueries and prose. **Nine** is right for the `Q_*` query constants, which is what the
+claim means. Corrected in place — the figure held; the way I told a reader to check it did not.
+
 
 ---
 
