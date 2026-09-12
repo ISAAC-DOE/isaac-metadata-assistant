@@ -861,7 +861,19 @@ function LoadedWorkbench({
       }
       mainPad="pad"
     >
-      <h1 className="sr-only">{LABELS.screenReview}</h1>
+      {/*
+        UX-002 — A VISIBLE PAGE TITLE, AND A HEADING THAT NAMES THE WORKSPACE.
+        This replaced `<h1 className="sr-only">{LABELS.screenReview}</h1>`, which
+        was invisible on the product's primary work surface AND said "Review
+        Record" on all four workspaces — correct on one of four. Both halves come
+        from data this screen already holds; `screens.css` carries the full
+        reasoning next to `.record-page-title`. The loading branch above keeps the
+        `sr-only` form, because with no bundle there is no record title to name.
+      */}
+      <h1 className="record-page-title">
+        <span className="eyebrow record-page-title-view">{workspaceLabel(activeView)}</span>
+        <span className="record-page-title-name">{stripLifecycleSuffix(detail.title)}</span>
+      </h1>
       <RecordActivityNote activity={activity} onRefresh={onManualRefresh} />
       <LiveSyncNote
         degraded={degraded}
@@ -1194,6 +1206,23 @@ function LoadedWorkbench({
 const workspacePanelId = (id: RecordViewId) => `record-workspace-${id}`;
 
 /**
+ * THE WORKSPACE'S OWN NAME, read from the one registry that declares it.
+ *
+ * `RECORD_WORKSPACES` is the complete registry of the four — the sidebar renders
+ * from it, the assistant reads a label from it, and the panel landmarks below
+ * name themselves from it. The page heading reads it too rather than authoring a
+ * fifth vocabulary for the same four destinations.
+ *
+ * The fallback is the raw `view` id, which is unreachable today: `activeView` is
+ * resolved through `isRecordView`, so it is always one of `RECORD_VIEW_IDS`, and
+ * `RECORD_WORKSPACES` covers all four (asserted by `record-workspaces.test.tsx`).
+ * It exists so that adding a fifth id to `RECORD_VIEW_IDS` without adding it to
+ * `RECORD_WORKSPACES` degrades to a usable name instead of `undefined`.
+ */
+export const workspaceLabel = (view: RecordViewId): string =>
+  RECORD_WORKSPACES.find((w) => w.id === view)?.label ?? view;
+
+/**
  * THE ACCESSIBLE NAME OF A WORKSPACE PANEL, and why it is not just the label.
  *
  * Each panel is a `<section>` with an accessible name, so it is a landmark a
@@ -1205,8 +1234,7 @@ const workspacePanelId = (id: RecordViewId) => `record-workspace-${id}`;
  * disambiguating suffix: the sidebar list these panels belong to is headed
  * `Workspaces`, so the landmark list now reads the way the navigation does.
  */
-const workspaceRegionName = (view: RecordViewId) =>
-  `${RECORD_WORKSPACES.find((w) => w.id === view)?.label ?? view} workspace`;
+const workspaceRegionName = (view: RecordViewId) => `${workspaceLabel(view)} workspace`;
 
 /**
  * HOW MANY OWNER GROUPS THE NEEDS-YOU BANNER LISTS.

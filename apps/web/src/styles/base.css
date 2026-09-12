@@ -18,8 +18,8 @@ body,
 body {
   margin: 0;
   font-family: var(--font-ui);
-  font-size: 13px;
-  line-height: 1.55;
+  font-size: var(--font-size-body);
+  line-height: var(--line-height-normal);
   color: var(--text-primary);
   background: var(--app-canvas);
   -webkit-font-smoothing: antialiased;
@@ -68,8 +68,8 @@ a:hover {
 /* Section eyebrow — mono, uppercase, tracked. */
 .eyebrow {
   font-family: var(--font-mono);
-  font-size: 11px;
-  font-weight: 500;
+  font-size: var(--font-size-meta);
+  font-weight: var(--font-weight-medium);
   letter-spacing: 0.09em;
   text-transform: uppercase;
   color: var(--text-slate);
@@ -88,12 +88,13 @@ a:hover {
   left: -9999px;
   top: 0;
   z-index: 100;
-  padding: 8px 14px;
+  /* 14px is off-scale; the migration slice decides 12 or 16 (see tokens.css). */
+  padding: var(--space-sm) 14px;
   background: var(--surface);
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-control);
   color: var(--action);
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
 }
 .skip-link:focus {
   left: 12px;
@@ -116,7 +117,8 @@ a:hover {
   align-items: center;
   gap: 7px;
   border-radius: var(--radius-control);
-  font-weight: 500;
+  font-weight: var(--font-weight-medium);
+  /* 12.5px is off-scale: the migration slice decides meta (11) or body (13). */
   font-size: 12.5px;
   padding: 9px 15px;
   border: 1px solid transparent;
@@ -128,7 +130,7 @@ a:hover {
   background: var(--action);
   color: #fff;
   border-color: var(--action);
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
 }
 /* Primary: subtle lift + tint + shadow on hover; pressed settles back flat. */
 .btn-primary:hover {
@@ -172,7 +174,7 @@ a:hover {
   background: var(--action-tint);
   border-color: var(--action-selected-border);
   color: var(--action-hover);
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
 }
 .btn-action:hover {
   border-color: var(--action);
@@ -278,7 +280,7 @@ a:hover {
   background: var(--fail-solid);
   border-color: var(--fail-solid);
   color: #fff;
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
 }
 .btn-danger:hover {
   filter: brightness(0.93);

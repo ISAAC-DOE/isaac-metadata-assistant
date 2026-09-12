@@ -32,13 +32,15 @@ import { MemoryRouter, useLocation, useNavigate } from 'react-router-dom';
 import { AppRoutes } from '../App';
 import {
   bundleRoutes,
+  experimentDetail,
   pendingResponse,
   runFixture,
   runsPage,
   stubFetchRoutes,
 } from '../test/apiFixtures';
+import { RECORD_WORKSPACES } from '../components/RecordWorkspaceNav';
 import { RECORD_VIEW_IDS, ROUTES, type RecordViewId } from '../lib/routes';
-import { workspaceAgentPrompts } from '../screens/RecordWorkbench';
+import { workspaceAgentPrompts, workspaceLabel } from '../screens/RecordWorkbench';
 import * as runAutosaveStore from '../lib/runAutosaveStore';
 
 const ID = 'demo';
@@ -450,5 +452,95 @@ describe('the needs-you banner across the four workspaces', () => {
       expect(document.querySelector('.needsyou-more'), `${view} overflow line`).toBeNull();
       v.unmount();
     }
+  });
+});
+
+/*
+ * UX-002 — THE RECORD SCREEN'S HEADING. This is the regression guard for a
+ * measured defect, not a style preference, and it has two halves.
+ *
+ * (a) THE PRIMARY WORK SURFACE HAD NO VISIBLE PAGE TITLE. The record screen's
+ *     only `<h1>` was `class="sr-only"` — 1x1px, `clip: rect(0,0,0,0)` — while
+ *     Project Memory, Governance, Statistics and Settings each render a visible
+ *     22px `.page-title`. A sighted scientist got no heading anchor on the one
+ *     screen they do all their work on.
+ *
+ * (b) THAT HIDDEN `<h1>` SAID `Review Record` ON ALL FOUR WORKSPACES. A
+ *     screen-reader user on `?view=runs` was told they were on "Review Record".
+ *     It was correct on exactly one of four.
+ *
+ * So the assertions below are: the heading is VISIBLE, its accessible name
+ * names the workspace, the name DIFFERS across all four `?view=` values, and
+ * the old single string is gone. The last one is asserted explicitly rather
+ * than left implied by the others, because "Review Record" returning as the
+ * heading is precisely the regression, and a test that only checked "contains
+ * the workspace label" would pass on `Review Record — Runs`.
+ */
+describe("UX-002 · the record screen's h1", () => {
+  const h1 = () => document.querySelector<HTMLHeadingElement>('h1')!;
+
+  it('is VISIBLE — not the 1x1px sr-only heading it replaced', async () => {
+    renderAt(`/record/${ID}`);
+    await screen.findByRole('link', { name: 'Record Fields' });
+    const heading = h1();
+    /* jsdom applies no layout, so this asserts the CLASS CONTRACT rather than a
+       measured pixel: `.sr-only` is what clipped it to 1x1, and `screens.css`
+       gives `.record-page-title` a real font-size and no clipping. A pixel
+       measurement of this is a browser job. */
+    expect(heading.className).not.toMatch(/\bsr-only\b/);
+    expect(heading.className).toMatch(/\brecord-page-title\b/);
+  });
+
+  it('names the RECORD, from the record\'s own data and no new authored string', async () => {
+    renderAt(`/record/${ID}`);
+    await screen.findByRole('link', { name: 'Record Fields' });
+    expect(h1().querySelector('.record-page-title-name')!.textContent).toBe(
+      experimentDetail.title,
+    );
+  });
+
+  it('has an accessible name that DIFFERS on all four ?view= values and names the workspace', async () => {
+    const seen = new Map<RecordViewId, string>();
+    for (const view of RECORD_VIEW_IDS) {
+      const v = renderAt(`/record/${ID}?view=${view}`);
+      await screen.findByRole('link', { name: 'Record Fields' });
+      const label = RECORD_WORKSPACES.find((w) => w.id === view)!.label;
+      const name = h1().textContent ?? '';
+
+      // The workspace the reader is actually in is named in the heading…
+      expect(name, `?view=${view} heading does not name "${label}"`).toContain(label);
+      // …and the string the defect shipped is gone. `Review Record` was correct
+      // on one of four; it must not come back on any of them.
+      expect(name, `?view=${view} heading has reverted to the old single string`).not.toContain(
+        'Review Record',
+      );
+      seen.set(view, name);
+      v.unmount();
+    }
+
+    // FOUR DISTINCT NAMES, asserted by set size rather than pairwise, so adding
+    // a fifth workspace cannot pass by colliding with an existing one.
+    expect(seen.size).toBe(RECORD_VIEW_IDS.length);
+    expect(new Set(seen.values()).size, `two workspaces share one heading: ${[...seen]}`).toBe(
+      RECORD_VIEW_IDS.length,
+    );
+  });
+
+  it('is still exactly ONE h1 on the screen', async () => {
+    // `heading-outline.test.tsx` owns this app-wide; it is restated here because
+    // this change swapped the element that carries it, and promoting a hidden
+    // heading to a visible one is exactly the edit that leaves two behind.
+    renderAt(`/record/${ID}?view=capture`);
+    await screen.findByRole('link', { name: 'Record Fields' });
+    expect(document.querySelectorAll('h1')).toHaveLength(1);
+  });
+
+  it('reads the workspace name from the ONE registry, never a second vocabulary', () => {
+    // `workspaceLabel` is what the heading renders. If a future change gives the
+    // heading its own copy of the four names, this fails — which is the point:
+    // the sidebar, the panel landmarks and the heading must all read
+    // `RECORD_WORKSPACES`, or the product grows a fifth name for one place.
+    for (const w of RECORD_WORKSPACES) expect(workspaceLabel(w.id)).toBe(w.label);
+    expect(RECORD_WORKSPACES.map((w) => w.id).sort()).toEqual([...RECORD_VIEW_IDS].sort());
   });
 });

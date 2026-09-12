@@ -9,17 +9,18 @@
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 16px;
+  gap: var(--space-lg);
+  /* 22px is off-scale; the migration slice decides 16 or 24 (see tokens.css). */
   margin-bottom: 22px;
 }
 .page-title {
-  font-size: 22px;
-  font-weight: 600;
+  font-size: var(--font-size-heading-lg);
+  font-weight: var(--font-weight-semibold);
   letter-spacing: -0.01em;
   color: var(--text-heading);
 }
 .page-subcount {
-  margin-top: 4px;
+  margin-top: var(--space-xs);
   font-size: 12.5px;
   color: var(--text-tertiary);
 }
@@ -27,6 +28,63 @@
   display: flex;
   gap: 10px;
   flex: none;
+}
+
+/*
+ * ---- UX-002 · THE RECORD SCREEN'S PAGE TITLE -----------------------------
+ *
+ * THE DEFECT THIS CLOSES. The record screen — the one surface a scientist does
+ * all of their work on — rendered NO visible page title. Its only `<h1>` was
+ * `class="sr-only"` (1x1px, `clip: rect(0,0,0,0)`), while Project Memory,
+ * Governance, Statistics and Settings each render a visible 22px `.page-title`.
+ * So the primary work surface was the one without a heading anchor, and the
+ * record's own name appeared only as a ~12px crumb in the top bar.
+ *
+ * AND THAT HIDDEN `<h1>` READ `Review Record` ON ALL FOUR WORKSPACES, including
+ * `?view=runs`, `?view=capture` and `?view=graph`. A screen-reader user was
+ * told they were on "Review Record" while they were in Runs. It was correct on
+ * exactly one of four.
+ *
+ * SO THE HEADING IS `<workspace> / <record title>`, in that order, and the
+ * order is the design: WHERE first (it is what changed), WHAT second (it is
+ * what persists). Both halves come from data that already exists on this
+ * screen — `RECORD_WORKSPACES`' own label, which the sidebar and the panel
+ * landmarks already read, and `stripLifecycleSuffix(detail.title)`, which the
+ * top bar already renders. No new authored string was introduced anywhere.
+ *
+ * The workspace line reuses `.eyebrow` from `styles/base.css` — the same
+ * mono/uppercase/tracked idiom `WorkflowSpine` uses for `Workflow` and
+ * `.record-identity-eyebrow` uses beneath it — rather than inventing a second
+ * treatment for "a small label above a heading".
+ */
+.record-page-title {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2xs);
+  margin-bottom: var(--space-lg);
+  /*
+   * STATED, NOT INHERITED. `base.css` resets an `h1`'s margin but not its size,
+   * so an un-styled `h1` renders at the UA's `2em` / `bold` — 26px/700, a size
+   * and a weight nothing else in this product uses. (Part 1.5 of the UX plan
+   * measured exactly that: "26px — and it is `sr-only`".) Both are put on the
+   * scale here rather than left at a browser default, and `.record-page-title-name`
+   * inherits them instead of repeating them. `.eyebrow` declares its own size,
+   * weight, family, tracking and colour on the span, so the workspace line is
+   * unaffected by any of this.
+   */
+  font-size: var(--font-size-heading-lg);
+  font-weight: var(--font-weight-semibold);
+  line-height: var(--line-height-tight);
+  letter-spacing: -0.01em;
+  color: var(--text-heading);
+}
+.record-page-title-view {
+  line-height: var(--line-height-snug);
+}
+.record-page-title-name {
+  /* A record title is a scientific string that may carry no spaces at all
+     (an id, a path fragment); it must wrap rather than widen the column. */
+  overflow-wrap: anywhere;
 }
 
 /* ---- record left aside (WorkflowSpine + Evidence Trail link) -------- */
@@ -72,8 +130,11 @@
 }
 .evidence-trail-link-count {
   flex: none;
+  /* font-size stays a literal: `palette-contrast.test.ts` reads a NUMERIC
+     font-size out of every rule painting --text-tertiary to prove none of them
+     reaches the WCAG large-text threshold, and it cannot resolve a var(). */
   font-size: 11px;
-  font-weight: 400;
+  font-weight: var(--font-weight-regular);
   color: var(--text-tertiary);
 }
 
@@ -151,7 +212,7 @@
  * decoration).
  */
 .record-identity {
-  margin-top: 24px;
+  margin-top: var(--space-xl);
 }
 .record-identity-eyebrow {
   padding-top: 14px;
@@ -164,10 +225,14 @@
   display: flex;
   align-items: baseline;
   justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 12px;
+  gap: var(--space-md);
+  margin-bottom: var(--space-md);
 }
-.completion-title { font-size: 17px; font-weight: 600; color: var(--text-heading); }
+.completion-title {
+  font-size: var(--font-size-heading-md);
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-heading);
+}
 .completion-counter { font-family: var(--font-mono); font-size: 13px; color: var(--text-tertiary); }
 /* Prose (e.g. "No open questions.") isn't a numeric ratio — render it in the
    UI font, not the mono font meant for digit/slash counters. */
@@ -220,8 +285,8 @@
   max-width: var(--content-max, 640px);
 }
 .placeholder > h1 {
-  font-size: 22px;
-  font-weight: 600;
+  font-size: var(--font-size-heading-lg);
+  font-weight: var(--font-weight-semibold);
   color: var(--text-heading);
   letter-spacing: -0.01em;
 }
@@ -520,8 +585,8 @@
   margin-top: 18px;
 }
 .source-index-heading {
-  font-size: 15px;
-  font-weight: 600;
+  font-size: var(--font-size-heading-sm);
+  font-weight: var(--font-weight-semibold);
   color: var(--text-heading);
 }
 .source-index-subtitle {
@@ -742,8 +807,8 @@
   margin-top: 18px;
 }
 .concept-lookup-heading {
-  font-size: 15px;
-  font-weight: 600;
+  font-size: var(--font-size-heading-sm);
+  font-weight: var(--font-weight-semibold);
   color: var(--text-heading);
 }
 .concept-lookup-subtitle {
@@ -1698,8 +1763,8 @@
   color: var(--text-slate);
 }
 .settings-card-head h2 {
-  font-size: 15px;
-  font-weight: 600;
+  font-size: var(--font-size-heading-sm);
+  font-weight: var(--font-weight-semibold);
   color: var(--text-heading);
 }
 .settings-card-sub {

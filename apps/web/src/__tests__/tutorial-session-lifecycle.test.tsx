@@ -1242,8 +1242,23 @@ describe('worked-example session — the boot window after a reload', () => {
     });
     expect(overlay.getAttribute('data-tutorial-step')).toBe('record-readiness');
 
-    // Still on the record. The redirect this replaces landed on My Experiments.
-    expect(view.getByRole('heading', { name: LABELS.screenReview })).toBeInTheDocument();
+    /*
+     * Still on the record. The redirect this replaces landed on My Experiments.
+     *
+     * ASSERTED ON THE RECORD'S OWN HEADING ELEMENT, not on the string
+     * `LABELS.screenReview`, and the change is UX-002's rather than a
+     * loosening: that string used to be the record screen's `sr-only` `<h1>` on
+     * all four workspaces — which was the defect, because it named "Review
+     * Record" while the reader was in Runs. The heading now names the workspace
+     * and the record, so there is no one string to match. `.record-page-title`
+     * is rendered ONLY by the loaded record body, so this is a stronger claim
+     * than the name match was: it proves the record screen rendered, not merely
+     * that some heading somewhere carried a literal.
+     */
+    expect(
+      view.container.querySelector('h1.record-page-title'),
+      'the reader is not on a loaded record screen',
+    ).not.toBeNull();
     expect(view.queryByRole('heading', { level: 1, name: LABELS.screenExperiments })).toBeNull();
     // The same session, at the stored step — no second session minted.
     expect(getTutorialState().sessionId).toBe(TUTORIAL_SESSION_ID);
