@@ -41,7 +41,20 @@ case is recorded in :data:`AMBIGUITY_POLICY`:
 * :class:`ReviewRequired` — two statements propose different values for the same
   field. BOTH candidates are returned; neither is dropped and neither is
   preferred. Picking one would be a guess, and dropping both would lose a thing
-  the scientist said twice.
+  the scientist said twice. **CORRECTED 2026-09-12: until then this outcome was
+  unreachable from a SINGLE sentence**, because every rule was matched with
+  ``re.search`` — which returns the first match and nothing else. *"The temperature
+  was around 425 K, maybe 430 K"* therefore produced one candidate of 425 and an
+  empty ``review_required``, and **430 was lost in silence**: no candidate, no
+  clarification, no abstention, no grouping. The text survived as a note, so
+  nothing was destroyed; what was lost was the reading, and with it the
+  scientist's chance to accept either value. Two changes were needed, not one —
+  ``finditer`` for a sentence that repeats the LABEL, and a restatement read for a
+  sentence that repeats only the VALUE, which is the form people actually speak.
+  Note what is still refused: ``[425, 430]`` is never constructed. That asserts a
+  continuous interval nobody stated, and the official schema's only uncertainty
+  representation is ``$.descriptors.outputs[].descriptors[].uncertainty``, which
+  ``context.temperature_K`` has no sibling of.
 * :class:`Abstention` — the reading recognises the subject and declines to
   propose anything, because a proposal would require a conversion or a schema
   decision nobody made. Nothing is asked, because there is no alternative to
@@ -227,11 +240,13 @@ AMBIGUITY_POLICY: tuple[dict[str, str], ...] = (
         "kind": "conflicting_values_for_one_field",
         "outcome": OUTCOME_NEEDS_REVIEW,
         "rule": (
-            "Two statements propose different values for the same field. Both "
-            "candidates are returned and grouped, so the scientist resolves the "
-            "contradiction. Choosing the later one would be a guess dressed as a "
-            "convention, and dropping both would lose something that was said "
-            "twice."
+            "Two statements propose different values for the same field — in two "
+            "sentences, or inside ONE sentence such as 'around 425 K, maybe 430 "
+            "K'. Both candidates are returned and grouped, so the scientist "
+            "resolves the contradiction. Choosing the later one would be a guess "
+            "dressed as a convention, and dropping both would lose something that "
+            "was said twice. The same value restated inside one sentence is not a "
+            "contradiction and produces one candidate."
         ),
     },
     {
@@ -471,6 +486,25 @@ _TEMPERATURE_K = re.compile(
     rf"\btemperatures?\b[^.;:]{{0,40}}?{_NUMBER}\s*(?:K\b|kelvin\b)", re.IGNORECASE
 )
 
+#: The KELVIN VALUE FORM ALONE — the same value the rule above reads, without the
+#: label in front of it.
+#:
+#: WHY A SECOND PATTERN EXISTS AT ALL. ``_TEMPERATURE_K`` is anchored on the literal
+#: word ``temperature``, and a scientist states a second value without saying the
+#: word again: *"the temperature was around 425 K, maybe 430 K"*. Matching the rule
+#: repeatedly over that sentence finds ONE match, because there is one label — so
+#: ``finditer`` alone left 430 unread, which is the silent loss this whole reader
+#: exists to refuse. This pattern is what a restatement of an already-labelled
+#: quantity looks like, and :func:`read_transcript` will only apply it AFTER the
+#: label-anchored rule has matched in the same segment. A bare number is still never
+#: read: the unit is required here exactly as it is required above.
+#:
+#: ``(?<![\d.])`` keeps a scan that resumes mid-number from reading ``30`` out of
+#: ``430``.
+_TEMPERATURE_K_RESTATED = re.compile(
+    rf"(?<![\d.]){_NUMBER}\s*(?:K\b|kelvin\b)", re.IGNORECASE
+)
+
 #: temperature ... N <any other unit>. Matched only to ABSTAIN, never to propose.
 _TEMPERATURE_OTHER = re.compile(
     rf"\btemperatures?\b[^.;:]{{0,40}}?{_NUMBER}\s*(?:°\s*)?"
@@ -506,6 +540,13 @@ _ACQUIRED_END = re.compile(
     rf"\b(?:ended|end|finished|stopped)\b[^.;:]{{0,40}}?{_INSTANT}", re.IGNORECASE
 )
 
+#: The instant form ALONE, for the same reason ``_TEMPERATURE_K_RESTATED`` exists:
+#: *"the run started 2026-01-01T00:00:00Z, or maybe 2026-01-02T00:00:00Z"* says the
+#: start word once. A full UTC instant is self-identifying, so a restatement of one
+#: cannot be mistaken for something else — which is exactly why the phrase rules
+#: below get no restatement pattern.
+_INSTANT_RESTATED = re.compile(_INSTANT)
+
 #: The absorbing element / absorption edge, which this build records as implicit,
 #: sidecar-only content because the official schema has no native field for them.
 _IMPLICIT_ONLY = re.compile(
@@ -539,13 +580,30 @@ _NOT_A_RUN_NAME: frozenset[str] = frozenset(
 
 @dataclass(frozen=True, slots=True)
 class _Rule:
-    """One entry of the closed table: a pattern, a path, and how to read a value."""
+    """One entry of the closed table: a pattern, a path, and how to read a value.
+
+    ``restatement`` is the rule's value form WITHOUT its label, and it is ``None``
+    for every rule whose value is a free phrase. That is a decision, not an
+    omission: ``430 K`` and ``2026-01-02T00:00:00Z`` carry a unit or a format that
+    says what they are, so a second one in the same sentence is recognisably another
+    statement of the same quantity. A bare phrase carries nothing — a second phrase
+    after ``atmosphere was dry nitrogen`` could be about anything, and reading it as
+    another atmosphere would be a guess. The phrase rules are also anchored to the
+    end of the segment and so can match at most once regardless.
+
+    ``restated_sentence`` exists because a candidate's ``rule`` is how a scientist
+    checks WHY a value was read. ``sentence`` claims the label and the value appeared
+    in one clause, which is not true of a restatement, so a restatement must not
+    borrow it.
+    """
 
     name: str
     pattern: re.Pattern[str]
     field_path: str
     numeric: bool
     sentence: str
+    restatement: re.Pattern[str] | None = None
+    restated_sentence: str | None = None
 
 
 _RULES: tuple[_Rule, ...] = (
@@ -559,6 +617,14 @@ _RULES: tuple[_Rule, ...] = (
             "in one clause; the number is read as written and the unit is not "
             "converted"
         ),
+        restatement=_TEMPERATURE_K_RESTATED,
+        restated_sentence=(
+            "the same sentence restates the temperature with a further number "
+            "followed by K or kelvin, after the one the word 'temperature' "
+            "introduced; it is read as an ALTERNATIVE value for the same field — "
+            "not a correction, not a preference, and NOT a range or an interval, "
+            "neither of which anybody stated"
+        ),
     ),
     _Rule(
         name="acquisition_start",
@@ -569,6 +635,13 @@ _RULES: tuple[_Rule, ...] = (
             "a start word and a full UTC instant appear in one clause; the instant "
             "is taken exactly as written and is never completed or reformatted"
         ),
+        restatement=_INSTANT_RESTATED,
+        restated_sentence=(
+            "the same sentence restates the start with a further full UTC instant, "
+            "after the one the start word introduced; it is read as an ALTERNATIVE "
+            "value for the same field, taken exactly as written — not a correction "
+            "and not a range"
+        ),
     ),
     _Rule(
         name="acquisition_end",
@@ -578,6 +651,13 @@ _RULES: tuple[_Rule, ...] = (
         sentence=(
             "an end word and a full UTC instant appear in one clause; the instant "
             "is taken exactly as written and is never completed or reformatted"
+        ),
+        restatement=_INSTANT_RESTATED,
+        restated_sentence=(
+            "the same sentence restates the end with a further full UTC instant, "
+            "after the one the end word introduced; it is read as an ALTERNATIVE "
+            "value for the same field, taken exactly as written — not a correction "
+            "and not a range"
         ),
     ),
     _Rule(
@@ -613,6 +693,11 @@ READABLE_FIELD_PATHS: frozenset[str] = frozenset(rule.field_path for rule in _RU
 def _read_number(raw: str) -> Any:
     """``int`` when the text has no decimal point, else ``float``. Never rounded."""
     return float(raw) if "." in raw else int(raw)
+
+
+def _spans_overlap(left: tuple[int, int], right: tuple[int, int]) -> bool:
+    """Whether two half-open character spans share any character."""
+    return left[0] < right[1] and right[0] < left[1]
 
 
 # --- run reference resolution -------------------------------------------------
@@ -788,8 +873,32 @@ def read_transcript(
                     segment_index=segment.index,
                 )
             )
-        other_unit = _TEMPERATURE_OTHER.search(segment.text)
-        if other_unit is not None and not _TEMPERATURE_K.search(segment.text):
+        # THE NON-KELVIN DISCLOSURE, SPAN-GUARDED RATHER THAN SEGMENT-GUARDED.
+        #
+        # ~~`if other_unit is not None and not _TEMPERATURE_K.search(segment.text)`~~
+        # — CORRECTED, because it asked "does this sentence contain ANY kelvin
+        # reading?" and a kelvin reading ANYWHERE suppressed the disclosure for a
+        # non-kelvin statement ELSEWHERE in the same sentence. Measured on the old
+        # code: "Temperature was 425 K, maybe 430 C." proposed 425 and produced NO
+        # abstention at all, so `430 C` vanished from the reading exactly as `430 K`
+        # did — the same silent loss, reached through the guard instead of through
+        # `search`.
+        #
+        # The narrow and correct question is whether THIS non-kelvin statement is
+        # the one the kelvin rule already read, and the VALUE spans answer it. The
+        # value spans rather than the whole-match spans, because `_TEMPERATURE_OTHER`
+        # starts at the same `temperature` label and therefore always overlaps the
+        # kelvin rule's whole match — comparing those would suppress every
+        # disclosure and would look like it was working.
+        kelvin_value_spans = [
+            match.span(1) for match in _TEMPERATURE_K.finditer(segment.text)
+        ]
+        for other_unit in _TEMPERATURE_OTHER.finditer(segment.text):
+            if any(
+                _spans_overlap(other_unit.span(1), claimed)
+                for claimed in kelvin_value_spans
+            ):
+                continue
             abstentions.append(
                 Abstention(
                     kind="temperature_not_in_kelvin",
@@ -806,38 +915,100 @@ def read_transcript(
         if not settled:
             continue
         produced: list[int] = []
-        for rule in _RULES:
-            match = rule.pattern.search(segment.text)
-            if match is None:
+
+        # PASS ONE — EVERY label-anchored match of every rule, not just the first.
+        #
+        # ~~`match = rule.pattern.search(segment.text)`~~ — CORRECTED. `search`
+        # returns the FIRST match and nothing else, so a sentence that names the
+        # label twice ("the temperature was 425 K and the temperature at the end was
+        # 430 K") proposed one value and lost the other in silence: no candidate, no
+        # clarification, no abstention, no `review_required` row. The transcript
+        # survived as a note, so nothing was destroyed — what was lost was the
+        # READING, and with it the scientist's chance to accept either value.
+        labelled = [list(rule.pattern.finditer(segment.text)) for rule in _RULES]
+
+        # The VALUE spans every label-anchored match of every rule has claimed.
+        # ACROSS rules, which is what stops pass two from reading a value another
+        # rule read under its own label: "started X and ended Y" states two
+        # DIFFERENT fields, and a restatement scan that saw only "another instant
+        # after the start word" would propose Y as a second acquisition START,
+        # contradicting the word "ended" sitting in front of it. Value spans rather
+        # than whole-match spans for the reason the abstention guard above gives.
+        claimed_value_spans = [
+            match.span(1) for matches in labelled for match in matches
+        ]
+
+        for rule, matches in zip(_RULES, labelled, strict=True):
+            if not matches:
                 continue
-            raw = match.group(1).strip()
-            if not raw:
-                continue
-            value = _read_number(raw) if rule.numeric else raw
-            candidates.append(
-                FieldCandidate(
-                    field_path=rule.field_path,
-                    proposed_value=value,
-                    quote=segment.text,
-                    start_char=segment.start_char,
-                    end_char=segment.end_char,
-                    origin=ORIGIN_TRANSCRIPT,
-                    produced_by=PRODUCED_BY,
-                    rule=(
-                        f"in the sentence {segment.text.strip()!r}, {rule.sentence}; "
-                        f"the value is quoted from the transcript, not interpreted"
-                    ),
-                    provenance=MappingProxyType(
-                        {
-                            "reader_rule": rule.name,
-                            "run_id": selected_run,
-                            "segment_index": segment.index,
-                            "matched_text": match.group(0),
-                        }
-                    ),
+            # `(match, restated)`, label-anchored readings first so a field's
+            # candidates stay contiguous and in the order they were said.
+            readings: list[tuple[re.Match[str], bool]] = [
+                (match, False) for match in matches
+            ]
+
+            # PASS TWO — the same sentence restating the quantity WITHOUT restating
+            # the label. Gated on pass one having matched, so a bare number is never
+            # read; scanned only from the end of the last label-anchored match, so
+            # the label still PRECEDES the value exactly as the rule's own pattern
+            # requires ("At 300 K the temperature was 425 K" reads 425 alone).
+            if rule.restatement is not None:
+                resume = max(match.end() for match in matches)
+                for extra in rule.restatement.finditer(segment.text, resume):
+                    if any(
+                        _spans_overlap(extra.span(1), claimed)
+                        for claimed in claimed_value_spans
+                    ):
+                        continue
+                    readings.append((extra, True))
+
+            # ONE VALUE STATED TWICE IN ONE SENTENCE IS ONE CANDIDATE.
+            # "425 K, and again 425 K" is emphasis, not disagreement. Two identical
+            # candidates would mint two durable proposals — `routes`'
+            # `_mint_transcript_proposals` keys on the candidate INDEX, so they do
+            # not collapse — giving one fact two independently acceptable rows.
+            # SCOPED TO ONE SEGMENT, deliberately: two sentences are two statements,
+            # and `test_the_same_value_said_twice_is_not_a_conflict` pins that as two
+            # candidates. The equality is `repr`, the same one the grouping below
+            # uses, so the two cannot disagree about what "the same value" means.
+            seen: set[str] = set()
+            for match, restated in readings:
+                raw = match.group(1).strip()
+                if not raw:
+                    continue
+                value = _read_number(raw) if rule.numeric else raw
+                if repr(value) in seen:
+                    continue
+                seen.add(repr(value))
+                candidates.append(
+                    FieldCandidate(
+                        field_path=rule.field_path,
+                        proposed_value=value,
+                        quote=segment.text,
+                        start_char=segment.start_char,
+                        end_char=segment.end_char,
+                        origin=ORIGIN_TRANSCRIPT,
+                        produced_by=PRODUCED_BY,
+                        rule=(
+                            f"in the sentence {segment.text.strip()!r}, "
+                            f"{rule.restated_sentence if restated else rule.sentence}; "
+                            f"the value is quoted from the transcript, not interpreted"
+                        ),
+                        provenance=MappingProxyType(
+                            {
+                                "reader_rule": rule.name,
+                                "run_id": selected_run,
+                                "segment_index": segment.index,
+                                "matched_text": match.group(0),
+                                # A RESTATEMENT SAYS SO. Its `rule` sentence already
+                                # explains it in prose; this is the same fact where a
+                                # surface can branch on it without parsing English.
+                                "restated_in_same_sentence": restated,
+                            }
+                        ),
+                    )
                 )
-            )
-            produced.append(len(candidates) - 1)
+                produced.append(len(candidates) - 1)
         # Exactly one, or none. See `candidate_for_segment`.
         if len(produced) == 1:
             candidate_by_segment[segment.index] = produced[0]
