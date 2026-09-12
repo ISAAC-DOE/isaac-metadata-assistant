@@ -41,7 +41,8 @@ ORCHESTRATOR:          Opus 5 (claude-opus-5[1m]) — **DISCLOSED FALLBACK.** DE
                        orchestrator. No other model silently substituted.
 SUBORDINATE AGENTS:    4 implementers dispatched (DOC-007, UX-001/002, UX-003/004, CAP-001/009);
                        1 slot RESERVED for independent review. Ceiling 5 total, nested = forbidden.
-CURRENT PHASE:         Phase 0 COMPLETE · DOC-007 COMPLETE (4552de54) · Phase A + CAP-001 IN FLIGHT
+CURRENT PHASE:         Phase 0 COMPLETE · DOC-007 (4552de54) + UX-003/004 (43544c6c) COMPLETE
+                       · UX-001/002 + CAP-001/009 IN FLIGHT
 CURRENT TASK:          DOC-007 (docs truth alignment) · UX-001/UX-002 · UX-003/UX-004 · CAP-001/CAP-009
 LAST COMPLETED TASK:   REC-001 … REC-012, DOC-001 … DOC-006, the six-pass plan review, and
                        the 2026-09-12 revision reconciliation into all six artifacts
@@ -155,7 +156,48 @@ data-governance boundaries are unchanged.
   that workspace; a test asserts the `h1` text differs per `?view=`; a11y baseline re-transcribed
   from **Linux CI** with the darwin column **measured locally**, never carried forward.
 
-### UX-003 — Two false Help strings, fixed and pinned
+### UX-003 + UX-004 — **COMPLETE** (`43544c6c`) · both false claims retired, plus two defects the brief did not know about
+- **Owner** Opus implementer · **Reviewer** reserved Opus slot (integrated-diff review)
+- **Delivered** both false claims replaced with text proven true by code citation; Help reachable
+  from the record screen (`TopBar` `record` variant); a new 36-test `help-claim-parity` guard.
+- **A SECOND site of the same defect was found, and the brief named only one.** Besides step 4,
+  `HelpPanel.tsx:139-140` called Official Validation *"the only signal that gates export"* —
+  a stronger version of the claim. Fixing step 4 alone would have left it shipping.
+- **A TEST WAS REQUIRING THE FALSE CLAIM.** `help-and-honesty.test.tsx:95` asserted
+  `getByText(/the only signal that gates export/i)`, so the repository mechanically enforced the
+  defect while reading as evidence of honesty — the same shape as §15's *"No PostgreSQL has ever
+  executed this file"*. **Inverted, not deleted.**
+- **The DEC-05-adjacent judgement, and it beat both options I offered.** The retired five words were
+  neither the server spine nor "the CLI lifecycle": `cli.py` declares exactly **four** subcommands
+  (`validate`, `export`, `audit`, `new-id`) — **there is no `isaac draft` and no `isaac complete`**.
+  The five were a **union**: `Draft`/`Complete` are Claude Code *skills*, `Validate`/`Export`/`Audit`
+  are *CLI* subcommands, and `Audit` has no skill. **And none of the five is reachable from the
+  deployed product** — no terminal, no CLI invocation, skills run in Claude Code. Documenting them in
+  a hosted help popover is §15's *"build nothing that implies any of it exists"* on a different
+  subject. So the vocabulary is **retired from the frontend** and the list derives from
+  `lib/workflowSteps.ts`, the committed mirror of `workflow.py`. **Exactly one five-step workflow
+  now ships**, verified: the only surviving `step*` hits are the guard's ban-list and a retirement
+  comment.
+- **Guard quality** is the point of the slice: a **clause-local affirmative detector**, not a
+  literal ban — so the correct copy's *negated* form of the same sentence passes while the
+  affirmative form cannot. Polarity proven (3 failed / 33 passed with the claims reintroduced, each
+  failure quoting the offending clause). Rephrasing **measured**: **12/12** extraction corpus,
+  **10/10** schema-gate corpus. What it cannot catch is stated in the file.
+- **Why a sibling guard rather than extending `upload-claim-parity`:** that guard pins four sites and
+  `HelpPanel` is in none — **and that is the finding.** Its banned family is the *refusal/reader*
+  claim; this defect was an affirmative *capability* claim, a shape its patterns could never match.
+- **Verification** `tsc -b` 0 · `help-claim-parity` 36/36 · eight focused honesty files **476/476**
+  exit 0 · 84-file blast radius **1,999/2,001**, both failures proven to belong to the concurrent
+  UX-001/002 slice (reproduced with all of this slice's files reverted to HEAD).
+- **Residue named, not fixed:** `[^.]{0,N}` is a broken sentence proxy here because copy contains
+  `v1.05`, and several existing guards use that window over such copy — **worth a sweep**. RTL's
+  `getNodeText` reads only direct text children, so a pattern spanning `<em>`/`<strong>` children
+  never matches however correct the copy. HelpPanel's *"Every field links to its evidence trail"* is
+  **UNMEASURED** — this slice did not check it.
+- **Operational trap:** `npx vitest run` with 84 filter args silently reports *"No test files found,
+  exiting with code 1"* — a filter-count limit, neither a pass nor a failure. Batch.
+
+### ~~UX-003 — Two false Help strings, fixed and pinned~~ (original brief, superseded above)
 - **Status** PLANNED · **Depends** none · **Owner** Sonnet + Opus reviewer
 - **Evidence** `HelpPanel.tsx:7` promises draft extraction *"from your files"* while
   `POST /api/uploads` is an unconditional **403** and no path turns a file into a draft.
@@ -414,6 +456,24 @@ Recorded here so the ledger and the plan cannot disagree. Full rationale in the 
   `experiment` event and causes a bundle refetch on every open client.** It is the same cost a
   rename already pays, and it is a second, independent reason to defer folder rename (O(N) writes
   would be O(N) events).
+
+---
+
+## NAMED RESIDUE — measured this session, deliberately NOT fixed
+
+Each is a real finding with its measurement. None is in this session's scope; each is a ledger row
+so it is not re-derived.
+
+| ID | Finding | Measurement | Why deferred |
+|---|---|---|---|
+| `QA-010` | **Three negative guard assertions use a dot-excluding window and have no polarity test, so they may be unfireable.** A `not.toMatch(/…[^.]{0,N}…/)` passes **vacuously** if the copy it guards carries a period inside the window — and `[^.]` is only a sentence proxy, which breaks on `v1.05`-style version numbers. | `record-verification.test.tsx:840` · `revision-history.test.tsx:319` · `:320`. **Sharpened from the original flag:** the *positive* uses of the same window (`upload-claim-parity.test.tsx:235,239`) are **self-detecting** — an unfireable positive assertion FAILS rather than passing, and they currently pass — so they are **not** at risk. Only the three negatives are. The new `help-claim-parity.test.tsx:230-233` already records the hazard in a comment and uses `[\s\S]` where the copy contains `v1.05`. | Each needs a constructed false version to polarity-test, which is per-guard work in files this session did not own. **"A test that cannot fail is not evidence"** — these three are unproven either way, which is not the same as broken. |
+| `QA-011` | **RTL's `getNodeText` reads only DIRECT text children**, so a regex spanning a paragraph's `<em>`/`<strong>`/`.mono` children never matches however correct the copy is. | Hit and recorded in `help-and-honesty.test.tsx` during UX-003/004. | A codebase-wide sweep of text-matching guards; not scoped here. |
+| `QA-012` | **`npx vitest run` with ~84 filter arguments silently reports *"No test files found, exiting with code 1"*.** A filter-count limit — **neither a pass nor a failure**, and it looks like a failure. | Measured during UX-003/004's blast-radius run; batching in halves of 42 was required. | Operational; recorded in the measurement rules below rather than fixed. |
+| `QA-013` | **`HelpPanel`'s claim *"Every field links to its evidence trail in the record"* is UNMEASURED.** | Outside UX-003/004's scope; the implementer explicitly declined to let the slice imply it had been checked. | Needs its own verification against the evidence-trail path. **Do not read UX-003/004 as having validated it.** |
+| `QA-014` | **`migration-approval-packet-0002.md` cites the phantom "contract §8 D7" unflagged**, while `docs/isaac-runs-stage-2-contract.md` (which has no §8) and `CLAUDE.md` both already flag it. | Found by DOC-007, out of its file scope. | One-line docs fix; batch with the next docs slice. |
+| `QA-015` | **Two `settings-explorer` accessibility platform splits remain**, and the cause is known: that surface renders from the **live OpenAPI document**, so its cell count tracks API prose rather than a platform difference. | `a11y-baseline.ts`, confirmed during DOC-007. A3 did **not** regress. | Expected behaviour of a live-document surface, not a defect to chase. |
+| `A11Y-01` | **NOT CLOSED.** A3 closed **one of three** causes. | `e2e/a11y-baseline.ts:634` and `:3562` say so in terms; `:2221`/`:3479`/`:3491` still describe live palette debt. | A palette decision, and two causes remain — including ancestor-`opacity` composites A3 cannot reach without destroying the ramp. |
+
 
 ---
 
