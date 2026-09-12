@@ -33,7 +33,43 @@
 |---|---|---|
 | Skill + playbooks | **AVAILABLE** at `~/.claude-slac/skills/impeccable` | `critique.md` (806 lines), `operate.md`, `shape.md` etc. read and applied |
 | Session context (`context.mjs`) | **RAN** | reported `NO_PRODUCT_MD` / `NO DESIGN.md`; per its own routing, a scoped Evaluate command proceeds on the code as visual authority |
-| **Mechanical detector (`detect.mjs`)** | **NON-FUNCTIONAL — deterministic scan unavailable** | **negative control**: fed a `.tsx` file containing an unlabelled `<img>`, a clickable `<div>` with no role, 8px text, and an `<a>` nested inside a `<button>`; it returned no findings and **exit 0**. `htmlparser2`, `css-select`, `css-tree` and `domutils` all resolve as MISSING. |
+| **Mechanical detector (`detect.mjs`)** | **NON-FUNCTIONAL FOR THIS CODEBASE — AND NOT BECAUSE OF THE DEPENDENCIES.** See the finding below; this is now repaired for `.html` and **structurally unfixable for `.tsx`**. | **negative control**: fed a `.tsx` file containing an unlabelled `<img>`, a clickable `<div>` with no role, 8px text, and an `<a>` nested inside a `<button>`; it returned no findings and **exit 0**, with **empty stderr**. |
+
+> ### THE DETECTOR CANNOT MEANINGFULLY SCAN THIS APPLICATION, AND THE REASON IS NOT MISSING PACKAGES
+>
+> A dedicated repair pass (2026-09-12) fixed the dependency failure and then measured that **the fix
+> changes nothing for ISAAC.** Both halves matter:
+>
+> **What was repaired.** The four unresolvable imports (`htmlparser2`, `css-select`, `css-tree`,
+> `domutils` — traced to a single `Promise.all` at
+> `detector/engines/static-html/detect-html.mjs:127-135`, and that list is complete) were installed
+> into a **sidecar** and injected with Node's `module.register()` + a `resolve` hook. Nothing in the
+> skill install or this repository was modified. `NODE_PATH` and running with cwd inside the sidecar
+> were both **tested and do not work** — ESM ignores them. Negative control after the repair: a bad
+> `.html` fixture now returns **exit 2** with two findings; a clean fixture returns **exit 0**. The
+> recipe is durable in the scratchpad (`impeccable-detector/RECIPE.md`), Node here is **v24.15.0**,
+> and the skill pins no versions (no `package.json` anywhere in it).
+>
+> **Why that does not help ISAAC.** Those four packages gate `detectHtml`, which runs **only** for
+> `.html`/`.htm`. A `.tsx`/`.jsx` file is routed unconditionally to a **separate regex engine that
+> never imports them** — verified by re-running the identical bad `.tsx` fixture *with* the sidecar
+> loaded: still **exit 0, zero findings, byte-identical**. That regex engine has **no ARIA or
+> accessibility ruleset at all** — no missing-alt check, no clickable-`div`-role check, no
+> nested-interactive check — and even its copy rules (`em-dash-overuse`, `marketing-buzzword`) fire
+> only for `.html`/`.astro`/`.vue`/`.svelte`.
+>
+> **ISAAC's UI is entirely `.tsx`.** So a mechanical `detect.mjs` scan of this application is
+> **structurally incapable** of reporting the defect classes it is usually cited for, repaired or
+> not. Every historical *"Impeccable: 0 findings"* claim in this repository's history was a
+> non-answer for **two** reasons, not one — and the second reason survives the fix.
+>
+> **Consequence for Assessment B, stated so it is not re-derived:** for a `.tsx` codebase,
+> mechanical evidence must come from the **in-browser overlay** (a different code path, which does
+> work) plus live-browser measurement. `detect.mjs` is the right tool for `.html` output and the
+> wrong tool here. One nuance worth keeping: on `.html` input the un-repaired detector *does* print
+> a one-time `DEGRADED — HTML parser modules unavailable` line to **stderr**, so a caller checking
+> only stdout or the exit code would miss it — which is presumably how this went unnoticed.
+
 
 **Assessment B therefore rests on live-browser measurement, not on the detector.** Every number
 below was measured in a real Chrome session this session. **No "0 findings" claim is made from the

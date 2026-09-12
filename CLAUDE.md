@@ -1728,6 +1728,30 @@ Current state:
   2026-09-03 entry said to treat any historical "0 findings" as a non-answer; that still holds, and
   the negative control is how you tell.
 
+  ***THE DEPENDENCY DIAGNOSIS WAS RIGHT AND INCOMPLETE, AND THE SECOND REASON SURVIVES THE FIX —
+  measured 2026-09-12 by a dedicated repair pass.*** The four missing packages were installed into a
+  **sidecar** and injected with Node's `module.register()` + a `resolve` hook (`NODE_PATH` and a
+  cwd-inside-sidecar were both **tested and do NOT work** — ESM ignores them); nothing in the skill
+  install or this repository was modified, and the negative control then passed on `.html`: **exit 2
+  with two findings**, and a clean fixture **exit 0**. **And it changed NOTHING for ISAAC.** Those
+  four packages gate `detectHtml`, which runs **only** for `.html`/`.htm`
+  (`detector/engines/static-html/detect-html.mjs:127-135` — a single `Promise.all`, and that import
+  list is the complete set anywhere in the detector). A `.tsx`/`.jsx` file is routed unconditionally
+  to a **separate regex engine that never imports them**, proven by re-running the identical bad
+  `.tsx` fixture **with the sidecar loaded**: still `[]`, still exit 0, **byte-identical**. That
+  regex engine has **no ARIA or accessibility ruleset at all** — no missing-alt, no
+  clickable-`div`-role, no nested-interactive check — and even its copy rules
+  (`em-dash-overuse`, `marketing-buzzword`) fire only for `.html`/`.astro`/`.vue`/`.svelte`.
+  **This application's UI is entirely `.tsx`, so a mechanical `detect.mjs` scan of it is
+  STRUCTURALLY INCAPABLE of reporting the defect classes it is cited for — repaired or not.** Every
+  historical "0 findings" claim here was a non-answer for **two** reasons, and only the first is
+  fixable. **Consequence: for this codebase, mechanical design evidence must come from the
+  in-browser overlay (a different code path, which works) plus live-browser measurement — never from
+  `detect.mjs`.** One nuance that explains how this went unnoticed: on `.html` input the unrepaired
+  detector *does* print a one-time `DEGRADED — HTML parser modules unavailable` line to **stderr**,
+  so a caller reading only stdout or the exit code sees silence. Node here is **v24.15.0**; the skill
+  pins no versions (it has no `package.json`).
+
   **Named rather than implied, and still not done:** **pause/resume during recording** (this
   session's last unbuilt item at the time of writing); a `capture_summary` on the record detail
   payload, which would delete `useCaptureSummary.ts` entirely and remove the two extra requests the
