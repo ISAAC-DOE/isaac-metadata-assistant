@@ -92,7 +92,21 @@ describe('P22D · Help is a real, working popover', () => {
 
     expect(getByText(/filled only from evidence or your explicit confirmation/i)).toBeInTheDocument();
     expect(getByText(/"I don't know" is always a safe answer/)).toBeInTheDocument();
-    expect(getByText(/the only signal that gates export/i)).toBeInTheDocument();
+    // Was `/the only signal that gates export/i`, from "Official Validation is the
+    // ISAAC v1.05 schema verdict — the only signal that gates export." That was
+    // FALSE: `ok = schema_ok AND exactness_ok`, and `export.export_draft` refuses on
+    // `check_exactness` (`export.py:339`) before `validate_official` is reached at
+    // `:345`. The replacement pins the two-gate statement and, separately, that the
+    // audit and advisory tiers gate nothing — which is the half of the retired
+    // sentence that was true and was doing the work here.
+    // Full claim coverage lives in `help-claim-parity.test.tsx` §2.
+    // Both patterns are chosen to lie inside ONE direct text run of the paragraph:
+    // RTL's default matcher reads `getNodeText`, which concatenates only an
+    // element's direct text-node children, so a pattern spanning the `<em>`,
+    // `.mono` or `<strong>` children of this paragraph would never match however
+    // correct the copy was.
+    expect(getByText(/anchored-pattern exactness check/i)).toBeInTheDocument();
+    expect(getByText(/Neither the evidence audit nor advisory review gates anything/i)).toBeInTheDocument();
     expect(getByText(/never blocks or authorizes anything/i)).toBeInTheDocument();
     // Was `/synthetic demo data only/i`, from the sentence "This prototype runs
     // on synthetic demo data only — no real experiment data." That was a flat

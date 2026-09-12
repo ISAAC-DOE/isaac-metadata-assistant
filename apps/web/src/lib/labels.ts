@@ -155,12 +155,38 @@ export const LABELS = {
   groupReady: 'Ready to Export',
   groupDone: 'Done',
 
-  // Workflow steps
-  stepDraft: 'Draft',
-  stepComplete: 'Complete',
-  stepExport: 'Export',
-  stepValidate: 'Validate',
-  stepAudit: 'Audit',
+  /*
+   * RETIRED — a SECOND five-step workflow vocabulary, deleted rather than
+   * renamed. It read:
+   *
+   *     stepDraft: 'Draft',  stepComplete: 'Complete',  stepExport: 'Export',
+   *     stepValidate: 'Validate',  stepAudit: 'Audit',
+   *
+   * and its ONLY consumer was `components/HelpPanel.tsx`'s "How it works" list
+   * (measured: `grep -arn 'stepDraft\|stepComplete\|stepValidate\|stepAudit'
+   * apps/web/src` returned that file and this declaration, nothing else). So a
+   * first-time scientist opening Help was taught these five words, while every
+   * per-record surface in the same product showed the server-derived spine —
+   * Load Record · Complete Metadata · Review Evidence · Review Export Readiness
+   * · Export (`apps/api/isaac_api/workflow.py:17,26`). Two five-step sequences,
+   * both presented as "the workflow", neither naming the other.
+   *
+   * WHY DELETED AND NOT ALIGNED. These five are not a worse wording of the
+   * server's five; they are a DIFFERENT SEQUENCE describing a DIFFERENT
+   * ARTIFACT — the agent-side authoring toolchain. Two of them are Claude Code
+   * skills (`.claude/skills/isaac-draft`, `isaac-complete`), three are `isaac`
+   * subcommands (`src/isaac_records/cli.py:131,144,151` declare exactly
+   * `validate`, `export`, `audit`, `new-id` — there is no `isaac draft` and no
+   * `isaac complete`). None of the five is reachable from the deployed web
+   * application, which has no terminal and invokes no CLI
+   * (`components/VerdictCard.tsx:20` — "no CLI is ever invoked"). Renaming them
+   * to the server's labels would have produced five true-looking step names for
+   * a pipeline the reader cannot run; keeping them under an honest heading would
+   * have documented a developer toolchain inside a scientist's help popover.
+   * Neither is Help's job, so the vocabulary leaves the frontend entirely and
+   * `lib/workflowSteps.ts` (the server mirror) is the one remaining source of
+   * step wording. Pinned by `__tests__/help-claim-parity.test.tsx` §3.
+   */
   workflowEyebrow: 'Workflow',
 
   // Record workspaces — the record screen's four local destinations, and the
