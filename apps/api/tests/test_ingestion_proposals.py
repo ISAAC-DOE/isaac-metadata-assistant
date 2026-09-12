@@ -1742,6 +1742,70 @@ def test_DEC7_proposals_are_absent_from_the_mcp_reachable_detail_payload(
 
     MUTATION: added ``"proposals": [...]`` to the detail route's payload. This went
     RED; every other test in the file stayed green.
+
+    ~~``assert proposals.STATE_KEY not in json.dumps(body)``~~ — **NARROWED 2026-09-11
+    TO THE INVARIANT IT EXISTS FOR, AND THE OLD LINE IS KEPT STRUCK RATHER THAN DELETED
+    BECAUSE A WEAKENED GUARD IS EXACTLY WHAT A FUTURE READER MUST BE ABLE TO SEE.** The
+    detail payload now carries ``capture_summary.proposals_open`` — an INTEGER count,
+    of the same class as the ``pending_count`` and ``evidenced_field_count`` this
+    payload has always carried — so a raw substring scan for ``"proposals"`` fires on a
+    field name while the decision it guards is untouched.
+
+    **WHAT DEC-7 ACTUALLY FORBIDS, AND WHAT IS ASSERTED IN ADDITION.** Its own words
+    are that *"a new ``proposals`` key would widen external-agent reads with no
+    reviewed decision"* — i.e. proposal CONTENT, the rows. So a RECURSIVE walk is
+    added: no dict anywhere in the response, at any depth, may carry the state key,
+    and no minted id may appear.
+
+    ~~*That is STRONGER than the substring scan in the way that matters, because it
+    catches a nested container the flat scan would have needed the exact spelling to
+    see, and it does not fire on a count.*~~ — **WITHDRAWN 2026-09-11, STRUCK IN PLACE
+    RATHER THAN DELETED, BECAUSE A GUARD THAT WAS WEAKENED ON A FALSE JUSTIFICATION IS
+    EXACTLY WHAT A FUTURE READER MUST BE ABLE TO SEE.** Both halves of that sentence
+    were wrong, and the second clause is factually impossible: ``json.dumps``
+    serialises every container at every depth, so the flat scan ALREADY saw every
+    nested key — there is no dimension on which the walk is stronger, and the walk
+    replacing the scan was a strict LOSS of coverage.
+
+    **THE LOSS WAS DRIVEN, NOT ARGUED.** An independent reviewer planted this in
+    ``_detail``::
+
+        "capture_proposals": [
+            {k: v for k, v in pr.to_state().items() if k != "proposal_id"}
+            for pr in exp.proposals
+        ],
+
+    and the file stayed **182/182 GREEN**. Reproduced independently here before this
+    fix was written: the same mutation passes, the leaked rows carry **28** content
+    keys (``note_id``, ``run_id``, ``target_field_path``, ``proposed_value``, ``rule``,
+    ``source``, ``base_rev``, ``target_digest``, ``history``, …), and the retired
+    substring assertion measured against that same body gives
+    ``OLD_GUARD_PASSES: False``. **The old guard caught it; the walk does not.** The
+    ``stored.proposal_id`` scan below is the only other backstop and is defeated by
+    omitting exactly one key, which is what the mutation does.
+
+    **TWO DECISIONS WERE CONFLATED, AND THE ORCHESTRATOR RATIFIED THE CONFLATION.**
+    Permitting the new COUNT FIELD is justified (see the next paragraph, which is
+    measured and stands). Surrendering the substring scan is a separate decision that
+    nothing justified. The slice made them as one, the orchestrator reviewing it
+    ratified that narrowing, and **the ratification was wrong** — recorded here rather
+    than quietly repaired, because "a reviewer approved it" is the kind of claim a
+    future session leans on.
+
+    **SO BOTH LIVE HERE NOW:** the recursive walk (kept — it costs nothing and states
+    the invariant structurally) AND the substring ratchet (restored), the latter scoped
+    by an explicit allowlist of the exact JSON key spellings this payload is permitted
+    to carry that happen to contain the state key. An ALLOWLIST rather than a bare
+    ``.replace()`` so that a second legitimate field later is a deliberate edit to a
+    named list — the same conflation cannot happen twice silently — and each entry is
+    asserted PRESENT before it is exempted, so a spelling that stops being served
+    fails here instead of sitting as a dead exemption that reads like protection.
+
+    **AND THE COUNT WIDENS NOTHING, MEASURED RATHER THAN ARGUED.** ``list_proposals`` is
+    already an MCP-reachable operation at ``Scope.READ`` (asserted below), and its body
+    already carries ``by_state.open`` derived over the WHOLE record. An agent could read
+    this number with one allowlisted call before this change; serving it here saves the
+    call and reveals nothing new. No row, no id, no text, no target path.
     """
     from isaac_api.mcp import policy
 
@@ -1754,13 +1818,62 @@ def test_DEC7_proposals_are_absent_from_the_mcp_reachable_detail_payload(
     _created(client, experiment)
     body = client.get(f"/api/experiments/{experiment.id}").json()
     assert "proposals" not in body
-    assert proposals.STATE_KEY not in json.dumps(body)
+
+    def _containers(node):
+        """Every dict in the response, at every depth — the walk the flat scan was a
+        weaker proxy for."""
+        if isinstance(node, dict):
+            yield node
+            for value in node.values():
+                yield from _containers(value)
+        elif isinstance(node, list):
+            for value in node:
+                yield from _containers(value)
+
+    walked = list(_containers(body))
+    # The walk must actually have walked: a `_containers` that returned nothing would
+    # make every assertion below vacuous, which is the failure mode this repository
+    # has caught itself shipping.
+    assert len(walked) > 1, walked
+    for container in walked:
+        assert proposals.STATE_KEY not in container, container
+
+    # THE SUBSTRING RATCHET, RESTORED — see the docstring for what was withdrawn and
+    # why. Every permitted spelling is asserted present before it is exempted (a dead
+    # exemption is a guard that reads like protection and protects nothing), and the
+    # placeholder it is replaced with deliberately does not contain the state key.
+    permitted_spellings = ('"proposals_open"',)
+    scoped = json.dumps(body)
+    for spelling in permitted_spellings:
+        assert spelling in scoped, (
+            f"dead exemption: {spelling} is allowlisted here but is not served — "
+            "remove it from `permitted_spellings` rather than leaving a hole open "
+            "for a key that no longer exists"
+        )
+        scoped = scoped.replace(spelling, '"<PERMITTED_COUNT_FIELD>"')
+    assert proposals.STATE_KEY not in scoped, scoped[:400]
+
     # A SUBSTRING SCAN FOR "proposal" WOULD FAIL FOR THE WRONG REASON, and saying so
     # is part of the test: `system.configuration.proposal_id` is one of the official
     # schema's own field paths and appears in the fixture's draft. What must be absent
     # is the state KEY and every id this feature mints.
     for stored in _stored(experiment.id).proposals:
         assert stored.proposal_id not in json.dumps(body)
+
+    # THE COUNT IS WHAT IT CLAIMS AND NOTHING MORE: one open proposal was just
+    # created, and the payload states one — a number, beside no content at all.
+    assert body["capture_summary"]["proposals_open"] == 1
+    assert set(body["capture_summary"]) == {
+        "notes_total",
+        "proposals_open",
+        "unreadable_entries",
+    }
+    assert all(isinstance(value, int) for value in body["capture_summary"].values())
+
+    # ...and the operation that already published this number to an agent is reachable
+    # at READ scope, which is why serving it here is a saving rather than a widening.
+    list_op = policy.OPERATIONS["list_proposals"]
+    assert list_op.scope is policy.Scope.READ and list_op.mutates is False
 
     listed = client.get("/api/experiments").json()
     assert proposals.STATE_KEY not in json.dumps(listed)

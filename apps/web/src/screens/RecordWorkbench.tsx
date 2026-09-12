@@ -40,7 +40,6 @@ import { api } from '../lib/api';
 import { useFetch } from '../lib/useFetch';
 import { useRecordSession } from '../lib/useRecordSession';
 import { useWorkspaceScope, useWorkspaceScopeChanged } from '../lib/workspaceScope';
-import { useCaptureSummary } from '../lib/useCaptureSummary';
 import { TUTORIAL_ANCHORS } from '../lib/tutorialSteps';
 import type { AgentContext } from '../lib/assistantAgent';
 import {
@@ -595,33 +594,45 @@ function LoadedWorkbench({
       : 'fields';
 
   /*
-   * THE CAPTURE DESTINATION'S LIVE COUNTS, for the promoted sidebar row.
+   * THE CAPTURE DESTINATION'S COUNTS, for the promoted sidebar row.
    *
-   * THE ARGUMENT IS THE CHANGE FEED'S POSITION, NOT THE RECORD'S VERSION, and
-   * the two feed summaries this screen already holds are the source: `-1` while
-   * the feed has reported nothing. See `useCaptureSummary` for why the version
-   * would be the wrong key (it would issue a read on every answered question)
-   * and for what the summary does when a read fails.
+   * ── IT IS A FIELD ON THE BUNDLE NOW, AND `useCaptureSummary` IS GONE ───────
    *
-   * THE COST, STATED RATHER THAN BURIED: on the three workspaces that are NOT
-   * capture, this is two additional requests per record load — the same
-   * `GET .../notes` the capture panel issues when it mounts, plus a one-row
-   * `GET .../proposals` — on a screen whose panels are deliberately lazy. It
-   * buys a count the sidebar can show before the reader has opened anything.
-   * The cheaper end-state is for the record's own detail payload to carry these
-   * totals, which is a server change and a separate decision.
+   * These three numbers used to be assembled here by a hook that issued
+   * `GET .../notes?state=dismissed` and `GET .../proposals?limit=1` on every
+   * record load of the three non-capture workspaces, and again on every forward
+   * change-feed step. `GET .../notes` has no `limit`, so that read was unbounded
+   * and the filter existed only to shrink a payload whose rows were discarded.
+   * Measured over HTTP on 2026-09-11, on a record holding 10 notes and 3 open
+   * proposals: the pair the client actually issued was 4,281 B (2,026 + 2,255),
+   * and the same pair unfiltered 11,073 B — to render two integers.
+   * The server now serves them on the record's own detail payload, which this
+   * screen already fetches, so the count costs nothing and cannot disagree with
+   * the bundle it came from. No change-feed key, no stale guard, no record-id
+   * guard: the bundle already refetches on a live event and already belongs to
+   * exactly one record.
    *
-   * ON THE CAPTURE WORKSPACE IT COSTS NOTHING, because it is switched off there:
-   * `activeView !== 'capture'`. The panels are on screen stating their own
-   * counts from their own reads, so a second pair of requests would restate a
-   * number already visible and could disagree with it for a poll interval. The
-   * summary line is absent there rather than frozen — see `useCaptureSummary`.
+   * `?? null` IS LOAD-BEARING AND IS NOT DEFENSIVE PADDING. `undefined` means the
+   * server did not say, and `captureSummaryLine` renders NOTHING for `null` —
+   * never "0". "No notes or proposals" is a claim about the RECORD; absence is a
+   * claim about this client's knowledge, and a surface that printed a zero for
+   * the second would be asserting the first.
+   *
+   * ── THE CAPTURE-WORKSPACE GATE IS KEPT, AND ITS REASON HAS NARROWED TO ONE ─
+   *
+   * The gate had two reasons and only one survives, which is worth stating rather
+   * than leaving a future reader to re-derive. The COST reason is gone: nothing is
+   * fetched either way, so switching it off saves no request and turning it on
+   * spends none. The CONSISTENCY reason holds, and on this workspace it is the
+   * whole argument. `UnmappedNotesPanel` and `IngestionProposalsPanel` read their
+   * own lists and update themselves the instant a person dismisses a note or
+   * rejects a proposal; this number moves only when the BUNDLE refetches, which is
+   * a change-feed poll away. So on the one workspace where both are visible at
+   * once, a sidebar line would restate — less precisely, and for a few seconds
+   * wrongly — a number the panel beside it has already corrected. Absent is not a
+   * degradation there: the panels state their own counts in more detail.
    */
-  const captureSummary = useCaptureSummary(
-    id,
-    Math.max(notesActivity?.highestRev ?? -1, proposalActivity?.highestRev ?? -1),
-    activeView !== 'capture',
-  );
+  const captureSummary = activeView === 'capture' ? null : (detail.capture_summary ?? null);
 
   /*
    * THE SWITCH FLUSHES THE RUNS' HELD EDITS. It used to get that for free: the

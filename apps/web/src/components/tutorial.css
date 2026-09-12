@@ -252,7 +252,10 @@
   align-items: flex-start;
   gap: 10px;
   padding: 10px 18px;
-  background: var(--surface-alt, var(--surface));
+  /* `--surface-alt` was never declared, so the fallback always won. Retired
+     2026-09-11 (see palette-contrast.test.ts on FALLBACK_RESCUED_PHANTOMS):
+     keep the token this rule actually renders with. */
+  background: var(--surface);
   border-bottom: 1px solid var(--border);
 }
 

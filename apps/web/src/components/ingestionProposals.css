@@ -505,3 +505,31 @@
 .proposals-error-text {
   max-width: 78ch;
 }
+
+/*
+ * A SILENT BACKGROUND REFRESH THAT FAILED — advisory, not a refusal. Nothing was
+ * written and nothing on screen was destroyed; the read simply did not complete.
+ * Reusing `.proposals-error`'s `--border-strong` / `--text-primary` treatment
+ * would read as a fault in the record or in what the reader did, which this is
+ * not — so this takes the same amber-adjacent `--advisory-*` tokens
+ * `.proposal-unavailable` already uses above for the identical reason (a fact
+ * that is not a failure). `--advisory-text` on `--advisory-bg` is 4.76:1,
+ * clearing WCAG AA at this element's font size (recomputed: #8a6420 on #f9f1df).
+ * No new custom property: all three tokens are declared in `styles/tokens.css`
+ * and already painted elsewhere in this file.
+ */
+.proposals-background-refresh-notice {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  padding: 8px 12px;
+  border: 1px solid var(--advisory-border);
+  border-radius: 6px;
+  background: var(--advisory-bg);
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--advisory-text);
+  max-width: 78ch;
+}

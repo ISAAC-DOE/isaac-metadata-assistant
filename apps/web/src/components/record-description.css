@@ -132,11 +132,16 @@
 }
 
 .rdesc-input[aria-invalid='true'] {
-  border-color: var(--danger, var(--border-strong));
+  /* `--danger` was never declared, so the fallback always won. Retired
+     2026-09-11 (see palette-contrast.test.ts on FALLBACK_RESCUED_PHANTOMS):
+     keep the token this rule actually renders with. */
+  border-color: var(--border-strong);
 }
 
 .rdesc-input:disabled {
-  background: var(--surface-muted, var(--surface));
+  /* `--surface-muted` was never declared, so the fallback always won.
+     Retired 2026-09-11, same reason as --danger above. */
+  background: var(--surface);
   color: var(--text-secondary);
 }
 

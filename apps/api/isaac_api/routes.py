@@ -1393,6 +1393,111 @@ def _shared_dry_run(exp: Experiment, *, units: list[ExportUnit] | None) -> bool 
     return exp.dry_run_verdict(units=units)
 
 
+# --- how much captured material a record holds --------------------------------
+#
+# FOUR COUNTS, ONE EXPRESSION EACH, AND THAT IS THE WHOLE POINT OF THIS SECTION.
+#
+# Each of these is read by TWO surfaces — the capture list route that owns it, and
+# the record's own ``capture_summary`` below — and a count stated in two places by
+# two expressions is a count that eventually disagrees with itself. `CLAUDE.md` §11
+# records four separate surfaces that shipped a number they had not derived from
+# what they claimed to be describing; this is the cheapest available structural
+# defence against the fifth. ``test_capture_summary_on_detail.py`` additionally
+# pins the two surfaces against each other over HTTP, so the sharing is proved at
+# the wire and not only by reading this file.
+#
+# NONE OF THEM PERFORMS I/O. ``notes``, ``unreadable_notes``, ``proposals`` and
+# ``unreadable_proposals`` are ordinary list fields on ``Experiment``, filled once
+# by ``workspace._hydrate_notes`` / ``_hydrate_proposals`` when the document was
+# loaded. Counting them is arithmetic over lists already in memory — no document
+# is re-read, no draft is composed, no unit is dry-run. That is measured rather
+# than merely stated here: the detail route's call counters
+# (``test_detail_route_composes_each_run_once.py``) are unmoved by this block, and
+# ``test_capture_summary_on_detail.py`` runs it under spies on every composition,
+# dry run and filesystem read and requires all of them to be zero.
+
+
+def _notes_total(exp: Experiment) -> int:
+    """How many notes this record HOLDS — never how many a request returned."""
+    return len(exp.notes)
+
+
+def _unreadable_note_count(exp: Experiment) -> int:
+    """Stored note entries this build could not present. Counted, never dropped."""
+    return len(exp.unreadable_notes)
+
+
+def _unreadable_proposal_count(exp: Experiment) -> int:
+    """Stored proposal entries this build could not present. Same rule."""
+    return len(exp.unreadable_proposals)
+
+
+def _proposal_state_counts(exp: Experiment) -> dict[str, int]:
+    """Every proposal state, counted over the WHOLE record.
+
+    The zero-filled seed matters as much as the loop: a state with no proposals is
+    reported as ``0`` rather than being absent, so a client reading ``open`` never
+    has to decide whether a missing key means none or means the server did not say.
+    """
+    counts = {state: 0 for state in proposals.PROPOSAL_STATES}
+    for proposal in exp.proposals:
+        counts[proposal.state] = counts.get(proposal.state, 0) + 1
+    return counts
+
+
+def _capture_summary(exp: Experiment) -> dict:
+    """The three integers the record's capture destination states, on the record's
+    own detail payload.
+
+    **WHY IT IS HERE AND NOT LEFT TO THE TWO LIST ROUTES.** The record sidebar
+    promotes capture to a destination of its own and states how much is behind it
+    ("3 notes · 2 to review"). Until this block existed the only way a client could
+    learn those numbers was to issue ``GET .../notes`` and ``GET .../proposals`` —
+    two extra requests per record load, on three of the four record workspaces, on
+    a screen whose panels are deliberately lazy so that a reader who never opens
+    capture pays nothing. The notes read is unbounded — ``GET .../notes`` has no
+    ``limit`` — so the client had resorted to ``?state=dismissed`` purely to shrink
+    a payload whose rows it then threw away.
+
+    MEASURED 2026-09-11 over HTTP, on a record holding 10 notes and 3 open
+    proposals: ``GET .../notes`` **8,818 B**, the same read filtered to
+    ``dismissed`` **2,026 B** (the fixed envelope — this route's three served path
+    lists and its vocabularies — which the unfiltered form adds ~680 B per note to,
+    unbounded), ``GET .../proposals?limit=1`` **2,255 B**. So the pair the client
+    actually issued was **4,281 B**, and the honest unfiltered pair **11,073 B**,
+    to render two integers. This whole block is **79 B** on a response that was
+    already being fetched: the detail body measured **1,571 B** with it.
+
+    Serving them here costs ZERO additional requests, and the numbers arrive
+    CONSISTENT WITH THE REST OF THE BUNDLE by construction — same experiment, same
+    revision, same read — which is a property no pair of independent reads can
+    have.
+
+    **IT IS ADDITIVE AND CHANGES NOTHING.** ``GET .../notes`` and
+    ``GET .../proposals`` are untouched and remain the detailed surfaces; this is a
+    summary, and the four helpers above are the single expression each number has.
+
+    **WHAT IT DELIBERATELY IS NOT.** It is not a verdict and carries no notion of
+    "enough". ``apps/api/isaac_api/workflow.py`` keeps capture out of the workflow
+    spine because a step state needs a criterion the record's own signals can
+    DECIDE, and "the scientist has finished capturing" is not one. These are facts
+    about what is stored; nothing here says whether that is sufficient.
+
+    ``unreadable_entries`` sums the two kinds — a stored note entry and a stored
+    proposal entry this build cannot present — because a summary that reported zero
+    while the record held some would let "3 notes" read as the whole of what was
+    captured when it is not. The two list routes each disclose their own separately
+    and remain the place to find out which.
+    """
+    return {
+        "notes_total": _notes_total(exp),
+        "proposals_open": _proposal_state_counts(exp).get(proposals.STATE_OPEN, 0),
+        "unreadable_entries": (
+            _unreadable_note_count(exp) + _unreadable_proposal_count(exp)
+        ),
+    }
+
+
 def _detail(exp: Experiment) -> dict:
     # ONE COMPOSITION FOR THE WHOLE RESPONSE — see `_shared_units` for the measurement
     # and for why this is an argument rather than a cache.
@@ -1435,6 +1540,10 @@ def _detail(exp: Experiment) -> dict:
             "artifact_refs": artifact_refs,
             "source_files": (exp.source or {}).get("files") or [],
             "workflow": workflow,
+            # HOW MUCH CAPTURED MATERIAL THIS RECORD HOLDS — three integers, no
+            # I/O, and no second request for a client that wants to state them.
+            # See `_capture_summary`.
+            "capture_summary": _capture_summary(exp),
             # Derived exported-artifact freshness (P28.2): none | current | stale.
             "artifact": dependencies.artifact_state(exp, units=units),
         }
@@ -2651,7 +2760,15 @@ def create_experiment_route(
         "the draft passes the no-guessing checks, the exported artifact filenames "
         "(basenames only, never a server path), the source files it was extracted "
         "from, the derived workflow progression, the exported-artifact freshness "
-        "state, and the current revision metadata.\n\n"
+        "state, how much captured material the record holds (`capture_summary`: "
+        "`notes_total`, `proposals_open`, and `unreadable_entries` — stored note "
+        "and proposal entries this build could not present, summed; the SAME "
+        "numbers `GET /api/experiments/{experiment_id}/notes` and `GET "
+        "/api/experiments/{experiment_id}/proposals` report as their own totals, "
+        "served here so a client need not issue either list request to state a "
+        "count, and facts about what is stored rather than a verdict about "
+        "whether enough has been captured), and the current revision "
+        "metadata.\n\n"
         "The response carries the record's current `ETag`. Send it back as "
         "`If-None-Match` to receive `304` while the record is unchanged. "
         "Read-only."
@@ -11243,7 +11360,11 @@ def _notes_payload(exp: Experiment, *, selected: list["notes.Note"]) -> dict:
         # rule `GET .../runs` follows: `total` is how many notes this record holds,
         # NOT how many were returned, so a client filtering to `unreviewed` still
         # states the record's true size rather than implying the rest are gone.
-        "total": len(exp.notes),
+        #
+        # IT IS THE SAME EXPRESSION THE RECORD'S OWN `capture_summary` SERVES — see
+        # `_notes_total`. Two surfaces now state this number and they must not be
+        # able to disagree.
+        "total": _notes_total(exp),
         "returned": len(selected),
         "by_state": by_state,
         # A DISCLOSURE OF WHAT THIS BUILD CANNOT PRESENT AS A NOTE. Two kinds, and
@@ -11254,8 +11375,10 @@ def _notes_payload(exp: Experiment, *, selected: list["notes.Note"]) -> dict:
         # save; both are counted here rather than rendered, because this server can
         # neither say what a refused entry contains without inventing it nor say
         # which of two entries an id names. Reporting zero when there are some would
-        # be the silent discard this feature exists to end.
-        "unreadable_entries": len(exp.unreadable_notes),
+        # be the silent discard this feature exists to end. `_unreadable_note_count`
+        # for the same one-expression reason as `total` above: the record's own
+        # `capture_summary` sums this with the proposals list's equivalent.
+        "unreadable_entries": _unreadable_note_count(exp),
         # THE SERVER'S OWN ANSWER TO "WHERE MAY I MAP THIS?", for the reason
         # `_run_view`'s `overridable` flag exists: the alternative is transcribing a
         # classification into the frontend bundle, where it is free to drift from the
@@ -12310,9 +12433,9 @@ def _proposals_payload(
     order: str,
 ) -> dict:
     """The list body. ``total`` counts what EXISTS, never what was returned."""
-    by_state = {state: 0 for state in proposals.PROPOSAL_STATES}
-    for proposal in exp.proposals:
-        by_state[proposal.state] = by_state.get(proposal.state, 0) + 1
+    # ONE EXPRESSION, shared with the record's own `capture_summary`, which reads
+    # `open` out of exactly this dict — see `_proposal_state_counts`.
+    by_state = _proposal_state_counts(exp)
     notes_by_id = {note.id: note for note in exp.notes}
     return {
         "proposals": [
@@ -12352,8 +12475,9 @@ def _proposals_payload(
         # server can neither say what a refused entry contains without inventing it
         # nor drop it. Both kinds — an entry the model refused, and an entry whose id
         # another proposal already holds — are preserved in the record verbatim and
-        # written back out on every save.
-        "unreadable_entries": len(exp.unreadable_proposals),
+        # written back out on every save. One expression, shared with the record's
+        # own `capture_summary` — see `_unreadable_proposal_count`.
+        "unreadable_entries": _unreadable_proposal_count(exp),
         # THE SERVER'S OWN VOCABULARIES AND ITS OWN ANSWER TO "WHAT MAY I TARGET?",
         # for the reason the notes list serves `mappable_field_paths`: the
         # alternative is transcribing four closed sets and a derived path set into a

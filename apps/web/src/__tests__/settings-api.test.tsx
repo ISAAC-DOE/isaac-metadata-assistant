@@ -2221,7 +2221,31 @@ describe('the Full Description rule over the REAL generated contract', () => {
     // array -> the same two numbers. Internal consistency as a CHECK, not the
     // derivation: raw sum 134,063 minus 2 per `\n\n` separator (254 x 2 = 508) =
     // 133,555. The entry was re-transcribed from `create_app().openapi()` by script.
-    expect(total).toBe(133555);
+    // ── CAPTURE COUNTS ON THE RECORD PAYLOAD, 2026-09-11. 133,555 -> 134,064 (+509),
+    // and BOTH the operation count (77) and the POST-LEAD PARAGRAPH COUNT (254) hold.
+    // `GET /api/experiments/{experiment_id}` now serves `capture_summary`, so its
+    // description had to name the block; the sentences were written INTO the lead
+    // paragraph's own enumeration of what the bundle carries rather than appended as
+    // a new paragraph, which is the same editorial decision the entries above make
+    // and for the same stated reason: the Endpoint Explorer renders each post-lead
+    // paragraph as its own `<p class="api-docs-description">`, so appending would
+    // re-baseline the `settings-explorer` accessibility cells on two platforms and
+    // that needs a CI round-trip this change does not otherwise need. A number that
+    // had moved to 255 would mean the prose had been appended instead.
+    //
+    // Per operation, re-derived rather than apportioned:
+    // `GET /api/experiments/{experiment_id}` 473 -> 982 (+509), the whole delta.
+    // Every other entry is byte-identical, and
+    // `test_contract_description_parity.py` proves that in both directions.
+    //
+    // Derived two ways that agree, neither an increment: the splitPurpose rule
+    // transcribed into Python over `create_app().openapi()`, restricted to the 77
+    // named operations -> 134,064 / 254; and the same rule over the transcribed
+    // array read back out of `apiFixtures.ts` as text -> the same two numbers.
+    // Internal consistency as a CHECK, not the derivation: raw sum 134,572 minus 2
+    // per `\n\n` separator (254 x 2 = 508) = 134,064. The entry was re-transcribed
+    // from `create_app().openapi()` by script, never hand-edited.
+    expect(total).toBe(134064);
     // 104,045 -> 114,959 (+10,914): the four new operations, and NO existing
     // description changed — `test_contract_description_parity.py` proves that rather
     // than leaving it asserted here. RE-DERIVED from the served document and never

@@ -166,6 +166,49 @@ const STALE_REVIEW_COPY =
   'be your own edit elsewhere on this screen. Nothing was lost: this section has picked ' +
   'up the current version and what you typed is still here, so try again.';
 
+/**
+ * A SILENT background refresh that failed while there was something on screen to
+ * protect. Hoisted to a module constant so the sentence the `.catch` SETS and the
+ * sentence the live region SPEAKS cannot drift apart.
+ *
+ * Kept distinct from `VIEW_CHANGE_REFRESH_ERROR` below because the CLAIM differs:
+ * this one is about staleness (what is shown may be out of date); that one is
+ * about a view the reader asked for that was never applied at all.
+ */
+const BACKGROUND_REFRESH_ERROR =
+  'A background refresh of this list did not complete, so what is shown may be ' +
+  'out of date. Nothing you have open or typed here was affected.';
+
+/**
+ * THE SAME FAILURE, AFTER THE READER THEMSELVES CHANGED THE `Show` FILTER — and it
+ * needs its own sentence because `BACKGROUND_REFRESH_ERROR` UNDERCLAIMS what
+ * happened.
+ *
+ * MEASURED, NOT ARGUED. The filter `<select>`'s `onChange` calls `setFilter` before
+ * the read it triggers resolves, so on a failure the control already shows the
+ * reader's newly chosen state while `loaded` — and therefore the count line, the
+ * per-state counts in the `<option>`s, and every card on screen — still describe the
+ * PREVIOUS one. Probed on this panel at `72bdf135`: after a failing change to
+ * `Mapped`, `select.value === 'mapped'` while the unfiltered note was still rendered
+ * and the only disclosure said "may be out of date". "Out of date" is true of neither
+ * half: the list is exactly as up to date as it was, and the view the reader asked
+ * for was never applied.
+ *
+ * THE CONTROL IS DELIBERATELY NOT REVERTED, for `IngestionProposalsPanel`'s reason:
+ * "Try Again" re-issues the read with the CURRENT `filter`, i.e. it retries the view
+ * the reader actually asked for. Reverting the `<select>` would make Try Again retry
+ * the wrong thing.
+ *
+ * AND IT SURVIVES THAT RETRY, which the sibling's mechanism does not — see
+ * `loadedFilterRef` for the measurement and for why this panel decides the sentence
+ * by comparing the requested view against the loaded one rather than by flagging the
+ * request that caused it.
+ */
+const VIEW_CHANGE_REFRESH_ERROR =
+  'The change you just made to this list\u2019s Show filter could not be applied, so ' +
+  'it is still showing what it showed before. Nothing you have open or typed here ' +
+  'was affected.';
+
 type ListState =
   | { status: 'loading' }
   | { status: 'error'; error: ApiError }
@@ -338,9 +381,104 @@ function NotesBrowser({
    * effect simply does not call `setList` on this path, so whatever was on screen
    * (the notes, every open form, everything typed into `CaptureNote`) stays exactly
    * as it was. `backgroundRefreshError` carries the disclosure and is rendered
-   * beside the list rather than instead of it.
+   * beside the list rather than instead of it. See `listStatusRef` immediately
+   * below for what "something on screen" means and why `wasSilent` alone cannot
+   * decide it.
    */
   const [backgroundRefreshError, setBackgroundRefreshError] = useState<string | null>(null);
+  /**
+   * THE CONDITION THAT MUST GATE THE SILENT BRANCH, AND WHY `wasSilent` ALONE IS
+   * NOT IT. Carried over from `IngestionProposalsPanel`'s C1 — an independent
+   * review found this exact regression there, in a fix that had been modelled on
+   * THIS panel's I-2. The defect therefore lived on here, unfiled, until it was
+   * re-measured on this file; the sibling's fix is followed rather than reinvented.
+   *
+   * `silentRef` records INTENT ("do not blank the list while this request is in
+   * flight"); it says nothing about whether there is currently anything ON SCREEN
+   * worth protecting by suppressing `setList`. A silent reload can begin WHILE THE
+   * VERY FIRST, LOUD load is still in flight — on this panel the reachable trigger
+   * is the `Show` filter, whose `<select>` renders during `'loading'` and is not
+   * disabled. `generationRef` then makes the silent request the current one, so the
+   * original loud request's eventual response is discarded; and if the silent one
+   * then FAILS, branching on `wasSilent` alone returned with no `setList` call at
+   * all. Since `list` had never left `{status: 'loading'}`, the result was not
+   * "protected" — it was a PERMANENT SPINNER with no error, no disclosure (the
+   * notice below renders only over a loaded list) and no recovery control short of
+   * navigating away. That is strictly worse than the `BackendDown` it replaced: a
+   * failure hidden behind a false progress state rather than reported.
+   *
+   * MEASURED ON THIS PANEL before the fix, at `72bdf135`:
+   *   filter change during the first load → `{spinner: true, alert: false,
+   *   notice: false, buttons: ['Capture Note']}`; after it → `BackendDown`.
+   *
+   * THE FIX READS THE STATUS AS OF THE LAST RENDER, not a value captured at the top
+   * of the effect the way `wasSilent` is — updated unconditionally on every render,
+   * beside `lastLoadedRef` below, so by the time `.catch` runs it reflects whatever
+   * is CURRENTLY on screen. A silent request that fails before any load has ever
+   * succeeded correctly falls through to the loud path.
+   *
+   * AND THAT LAST DISTINCTION IS CURRENTLY UNTESTABLE HERE, WHICH IS SAID RATHER
+   * THAN LEFT TO LOOK LOAD-BEARING. Replacing this ref with `const capturedStatus =
+   * list.status` at the top of the effect passes all 74 tests in
+   * `unmapped-notes.test.tsx` — an EQUIVALENT MUTANT for this panel, because the
+   * only thing that can move `list` out of `'data'` while a silent read is in
+   * flight is a LOUD read, and a loud read bumps `reloadNonce`, which bumps
+   * `generationRef`, which discards the silent response before `.catch` consults
+   * anything. The live read is kept anyway, for parity with the sibling and because
+   * it stays correct if a future trigger breaks that coincidence; it is not claimed
+   * to be doing work a test can see today.
+   *
+   * THE OTHER TRIGGER THE SIBLING HAS IS NOT REACHABLE HERE, and that is a property
+   * of this panel worth stating rather than assuming: a change-feed `activity`
+   * signal cannot start a reload before the first load has succeeded, because this
+   * panel's activity effect is gated on `version !== null` and `version` is set only
+   * alongside `{status: 'data'}` (`IngestionProposalsPanel`'s has no such gate).
+   * Probed: delivering an `activity` summary during an in-flight first load issues
+   * no second read at all. So the filter is the ONE way in — which is exactly why
+   * the gate must be a live status read and not a list of known triggers.
+   */
+  const listStatusRef = useRef(list.status);
+  listStatusRef.current = list.status;
+  /**
+   * WHICH FILTER THE LIST CURRENTLY ON SCREEN WAS FETCHED UNDER — the input to
+   * choosing between the two disclosure sentences.
+   *
+   * DELIBERATELY NOT `IngestionProposalsPanel`'s MECHANISM, and the divergence is
+   * the point. That panel sets a `viewChangeRef` at each view-changing call site
+   * and reads it at the top of the fetch effect, which answers "did the READER just
+   * change the view?". Written that way here, a failed filter change disclosed
+   * correctly and then its own "Try Again" — which is `reload(true)`, and sets no
+   * such ref — disclosed the GENERIC staleness sentence for the very same
+   * unapplied view: measured, `'A background refresh of this list did not
+   * complete'` while the `<select>` still read `mapped` over an unfiltered list.
+   * The second failure re-introduced exactly the defect the first one had just
+   * been fixed for.
+   *
+   * SO THE QUESTION ASKED IS THE ONE THAT MATTERS TO THE READER — not "what caused
+   * this request?" but "does the control disagree with what is on screen?".
+   * `filter` is the view being requested; this ref is the view that was last
+   * successfully loaded. When they differ, the view the reader asked for is not
+   * applied, however many attempts it took to get here, and the sentence says so.
+   * When they agree, nothing on screen is misdescribed and the honest claim is
+   * plain staleness.
+   *
+   * Only ever written on a SUCCESSFUL read, which is what makes it describe what is
+   * rendered rather than what was attempted.
+   */
+  const loadedFilterRef = useRef<'all' | ApiNoteState>(filter);
+
+  /**
+   * Push a sentence into the panel's one permanently-mounted `role="status"`
+   * region. The trailing marker alternates so that the SAME sentence twice in a row
+   * — two failed "Try Again" attempts produce a byte-identical string — still
+   * changes the region's content and is therefore still announced. Borrowed
+   * verbatim from `IngestionProposalsPanel.announce`.
+   */
+  const announce = useCallback((sentence: string) => {
+    setAnnouncement((previous) =>
+      previous.endsWith('\u00A0') ? sentence : `${sentence}\u00A0`,
+    );
+  }, []);
 
   const filterId = useId();
 
@@ -357,17 +495,40 @@ function NotesBrowser({
         if (!alive || generation !== generationRef.current) return;
         setList({ status: 'data', loaded });
         setVersion(loaded.experiment_version);
+        // The view on screen is now the view that was requested — see
+        // `loadedFilterRef`. `filter` is this request's own, closed over.
+        loadedFilterRef.current = filter;
         // A later success clears an earlier silent-failure disclosure — the read
         // it complained about has since been superseded by one that worked.
         setBackgroundRefreshError(null);
       })
       .catch((err: unknown) => {
         if (!alive || generation !== generationRef.current) return;
-        if (wasSilent) {
-          setBackgroundRefreshError(
-            'A background refresh of this list did not complete, so what is shown ' +
-              'may be out of date. Nothing you have open or typed here was affected.',
-          );
+        /*
+         * THE SECOND CONJUNCT IS THE FIX. `wasSilent` alone is the INTENT of this
+         * request; `listStatusRef.current === 'data'` is whether there is anything
+         * on screen right now worth protecting by suppressing `setList`. Without
+         * it, a silent request that fails before any load has ever succeeded left
+         * `list` stuck at `{status: 'loading'}` forever — no error, no disclosure,
+         * no recovery control. See `listStatusRef`'s own comment for the measured
+         * trigger and the probe output.
+         */
+        if (wasSilent && listStatusRef.current === 'data') {
+          const sentence =
+            filter === loadedFilterRef.current
+              ? BACKGROUND_REFRESH_ERROR
+              : VIEW_CHANGE_REFRESH_ERROR;
+          setBackgroundRefreshError(sentence);
+          /*
+           * SPOKEN THROUGH THE ALREADY-MOUNTED REGION, because the visible notice
+           * below is conditionally mounted and a live region created together with
+           * its content is never announced — this panel's own `.notes-count`
+           * comment states that rule, and the first version of the notice broke it
+           * by carrying `aria-live` on an element that does not exist until there
+           * is something to say. The same division of labour the count line and
+           * the act-announcement region already use.
+           */
+          announce(sentence);
           return;
         }
         setList({ status: 'error', error: asApiError(err) });
@@ -376,7 +537,9 @@ function NotesBrowser({
     return () => {
       alive = false;
     };
-  }, [experimentId, filter, reloadNonce]);
+    // `announce` is a `useCallback` with an empty dependency list, so it is stable
+    // across renders and adding it here re-runs nothing.
+  }, [experimentId, filter, reloadNonce, announce]);
 
   const reload = useCallback((silent: boolean) => {
     silentRef.current = silent;
@@ -726,6 +889,13 @@ function NotesBrowser({
                * counts beside each filter still describe the PREVIOUS selection. That
                * is a visibly transient number, which is a better trade than a silently
                * destroyed paragraph.
+               *
+               * AND IT IS A VIEW CHANGE, not a background refresh, which the
+               * disclosure has to distinguish if the read fails. Nothing is flagged
+               * here to record that: the disclosure compares this state against
+               * `loadedFilterRef` at the moment of failure, which stays true across
+               * a retry in a way a per-request flag did not — see
+               * `VIEW_CHANGE_REFRESH_ERROR` and `loadedFilterRef`.
                */
               silentRef.current = true;
               setFilter(e.target.value as 'all' | ApiNoteState);
@@ -778,15 +948,33 @@ function NotesBrowser({
 
       {/*
         I-2 — A SILENT BACKGROUND REFRESH THAT FAILED, disclosed WITHOUT replacing
-        anything. Gated on `list.status === 'data'` so it can never render beside
-        the full `BackendDown` panel — that branch is for a LOUD failure, which
-        already means there is nothing here to protect. `aria-live="polite"`
-        without an explicit `role` — matching the count line above, deliberately
-        NOT `role="status"`, so this stays a second, distinct live region rather
-        than colliding with the act-announcement region's `getByRole('status')`.
+        anything.
+
+        NO `aria-live` HERE, DELIBERATELY, UNLIKE THE FIRST VERSION OF THIS
+        ELEMENT — which carried `aria-live="polite"` while being CONDITIONALLY
+        MOUNTED, and a live region created together with its content is never
+        announced. `.notes-count` above is `aria-live` for exactly the opposite
+        reason: it stays mounted in every state and is BLANKED rather than
+        removed. Rather than restructure this element to stay permanently
+        mounted, the spoken half is carried by the already-mounted `role="status"`
+        region above, via `announce()` in the `.catch` that sets this state.
+        Giving this element a `role` or an `aria-live` as well would say the
+        sentence twice.
+
+        THE `list.status === 'data'` CONJUNCT IS STILL LOAD-BEARING HERE, unlike in
+        `IngestionProposalsPanel` where the equivalent is only defensive — stated
+        because the difference is easy to get wrong in the other direction.
+        `backgroundRefreshError` is now only ever SET behind the identical
+        `listStatusRef.current === 'data'` check, so it can never appear beside the
+        full `BackendDown` panel by that route; but it is CLEARED only by a
+        subsequent successful read, and `Show All Notes` in the empty state issues
+        a LOUD reload, which moves `list` to `'loading'` (and, if that read fails,
+        to `'error'`) with this sentence still set. Without the conjunct the notice
+        would render over the spinner, and over `BackendDown`, claiming "nothing
+        you have open was affected" about a list that had just been blanked.
       */}
       {backgroundRefreshError !== null && list.status === 'data' && (
-        <p className="notes-background-refresh-notice" aria-live="polite">
+        <p className="notes-background-refresh-notice">
           {backgroundRefreshError}{' '}
           <button type="button" className="btn btn-secondary" onClick={() => reload(true)}>
             Try Again
@@ -834,6 +1022,16 @@ function NotesBrowser({
             total={list.loaded.total}
             unreadable={list.loaded.unreadable_entries}
             filtering={filter !== 'all'}
+            /*
+             * DELIBERATELY LOUD, unlike the `Show` filter above, and it sets no
+             * `viewChangeRef`. This control exists only inside `EmptyNotes`, which
+             * renders when the current view holds NO note cards — so there is no
+             * open Map/Edit/Dismiss/Propose form to unmount and nothing typed into
+             * one to destroy, and `CaptureNote`'s own textarea is a sibling this
+             * reload never touches in either mode. With nothing to protect, the
+             * honest behaviour for a failed read is the full `BackendDown` panel
+             * with its retry, not a disclosure beside a list that is not there.
+             */
             onClear={() => setFilter('all')}
           />
         ) : (

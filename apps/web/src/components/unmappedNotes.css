@@ -331,3 +331,31 @@
   font-size: 12px;
   color: var(--text-primary);
 }
+
+/*
+ * A SILENT BACKGROUND REFRESH THAT FAILED — advisory, not a refusal. Nothing
+ * was written and nothing on screen was destroyed; the read simply did not
+ * complete, so this must not read as an error the way `.notes-error` above
+ * does. Same `--advisory-*` treatment `IngestionProposalsPanel`'s sibling
+ * notice uses for the identical reason (its own
+ * `.proposals-background-refresh-notice`, `ingestionProposals.css`).
+ * `--advisory-text` on `--advisory-bg` is 4.76:1, clearing WCAG AA at this
+ * element's font size (recomputed: #8a6420 on #f9f1df). No new custom
+ * property: both tokens are declared in `styles/tokens.css` and already
+ * classified there as a tinted status pair.
+ */
+.notes-background-refresh-notice {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--advisory-border);
+  border-radius: 6px;
+  background: var(--advisory-bg);
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--advisory-text);
+  max-width: 78ch;
+}

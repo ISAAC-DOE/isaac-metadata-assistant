@@ -895,21 +895,103 @@ def test_isaac_get_experiment_still_carries_no_proposals(proposer, experiment):
     ``isaac_get_experiment`` reaches it and ``mcp/client.py`` is bound to the operation
     allowlist rather than to a response shape. The two are deliberately different acts,
     and this asserts the second did not happen alongside the first.
+
+    **THIS GUARD WAS DEFEATED, MEASURED RATHER THAN ARGUED, 2026-09-11.** The old body
+    checked only ``f'"{STATE_KEY}":' not in rendered`` — a substring anchored on BOTH
+    sides, requiring ``"proposals"`` to be the entire key. Planted in ``_detail``::
+
+        "capture_proposals": [
+            {k: v for k, v in pr.to_state().items() if k != "proposal_id"}
+            for pr in exp.proposals
+        ],
+
+    and reproduced independently here before this fix was written (backing up
+    ``routes.py`` by sha, planting the mutation, restoring it by sha afterward):
+    **``test_mcp_proposals.py`` stayed 38/38 GREEN.** The key ``"capture_proposals"``
+    does not satisfy a leading-quote anchor (the character before ``proposals`` is
+    ``_``, not a quote), so the old guard never saw it, and the leaked rows carry 28
+    content keys including ``target_field_path`` and ``proposed_value`` — everything
+    but the one key (``proposal_id``) the mutation drops, which is also all the
+    per-id backstop below ever checked.
+
+    **THE SAME DAY, THE SAME FINDING, IN THE SIBLING FILE.** This is one of TWO
+    committed assertions of DEC-7; the other is
+    ``test_ingestion_proposals.py::test_DEC7_proposals_are_absent_from_the_mcp_reachable_detail_payload``,
+    which was independently found defeated by the identical mutation and was restored
+    the same day as a recursive dict-key walk plus a substring ratchet scoped by an
+    explicit, presence-asserted allowlist. **These two guards are a pair and must move
+    together** — a future change to one's shape without the other is exactly the kind
+    of silent divergence this repository has caught itself in before.
+
+    **WHY THIS FILE'S RATCHET IS SHAPED SLIGHTLY DIFFERENTLY, AND WHY THAT IS
+    DELIBERATE RATHER THAN A SECOND INVENTION.** The sibling's fixture title does not
+    contain the word "proposals"; THIS fixture's does — ``experiment.title`` is
+    literally ``"MCP proposals fixture"``, and a BARE, unanchored substring scan (the
+    sibling's shape) would fire on ``"title": "MCP proposals fixture"`` and be a false
+    positive unrelated to DEC-7. So the anchor here is **suffix-only** —
+    ``f'{STATE_KEY}":'`` (state key immediately followed by close-quote-colon, no
+    required leading quote) — which still catches ``"capture_proposals":`` (the
+    character run ``proposals":`` sits inside it verbatim) because JSON syntax never
+    places a colon immediately after a VALUE's closing quote (only after a KEY's), so
+    the pattern cannot match inside ``"MCP proposals fixture"``: the text following
+    ``proposals`` there is `` fixture"``, not an immediate ``":``. A useful side effect,
+    verified below rather than assumed: this anchor already excludes the legitimate
+    ``"proposals_open":`` count field without needing the sibling's allowlist
+    machinery, because ``proposals_open":`` does not end in ``proposals":`` either
+    (the character after ``proposals`` there is ``_``, not a quote).
+
+    **AND A THIRD, SPELLING-INDEPENDENT CHECK, PER THE REVIEW THAT ORDERED THIS FIX.**
+    A spelling-anchored scan — this one or the sibling's — only ever catches a leak
+    that reuses the word "proposals" in its key. Nothing stops a future mutation from
+    hanging the same rows off ``"ingestion.items"`` or a bare unlabelled list. So the
+    walk below additionally asserts, on every container found at any depth, that no
+    object carries BOTH ``target_field_path`` and ``proposed_value`` — the two keys
+    every proposal this codebase mints always carries together, and that nothing else
+    in either payload legitimately carries at all (verified: the unmutated baseline
+    run of this test, below, is the proof — it stays green with the walk armed).
     """
     from isaac_api import proposals as proposals_module
+
+    def _containers(node):
+        """Every dict in ``node``, at any depth — the same walk the sibling guard
+        in ``test_ingestion_proposals`` uses, kept the same shape on purpose."""
+        if isinstance(node, dict):
+            yield node
+            for value in node.values():
+                yield from _containers(value)
+        elif isinstance(node, list):
+            for value in node:
+                yield from _containers(value)
+
+    #: The pair of keys a proposal always carries together, in this or any other
+    #: container name. Spelling-independent by design — see the docstring above.
+    proposal_content_keys = {"target_field_path", "proposed_value"}
 
     propose(proposer, experiment)
     detail = payload(proposer, "isaac_get_experiment", experiment_id=experiment.id)
     assert "proposals" not in detail["data"]
-    # A BARE SUBSTRING SCAN WOULD FAIL FOR THE WRONG REASON, and saying so is part of
-    # the test: this fixture's own TITLE is "MCP proposals fixture". What must be absent
-    # is the state key and every id this feature mints — the same distinction
-    # `test_ingestion_proposals` draws for `system.configuration.proposal_id`.
-    for rendered in (
-        json.dumps(detail),
-        json.dumps(payload(proposer, "isaac_list_experiments")["data"]),
-    ):
-        assert f'"{proposals_module.STATE_KEY}":' not in rendered
+    listed = payload(proposer, "isaac_list_experiments")["data"]
+
+    bodies = {"isaac_get_experiment": detail["data"], "isaac_list_experiments": listed}
+    for label, body in bodies.items():
+        walked = list(_containers(body))
+        # The walk must actually have walked: a `_containers` that returned nothing
+        # would make every assertion below vacuous, which is the failure mode this
+        # repository has caught itself shipping before.
+        assert len(walked) > 1, (label, walked)
+        for container in walked:
+            assert proposals_module.STATE_KEY not in container, (label, container)
+            assert not proposal_content_keys <= container.keys(), (label, container)
+
+    # THE SUBSTRING RATCHET — suffix-anchored rather than the sibling's bare/allowlisted
+    # form, for the reason in the docstring: this fixture's own title contains the word
+    # "proposals". Verified non-vacuous in both directions below.
+    rendered_detail = json.dumps(detail)
+    rendered_listed = json.dumps(listed)
+    assert experiment.title in rendered_detail  # the collision this anchor must dodge
+    assert '"proposals_open":' in rendered_detail  # the count field it must not trip
+    for rendered in (rendered_detail, rendered_listed):
+        assert f'{proposals_module.STATE_KEY}":' not in rendered, rendered[:400]
         for held in stored(experiment.id).proposals:
             assert held.proposal_id not in rendered
 

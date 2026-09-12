@@ -160,26 +160,40 @@ describe('the graph lives inside the record, and is linkable', () => {
        calls this surface made carried a query, so the allowance was written as the
        single endpoint it was.
 
-       TWO MORE ARE NOW ALLOWED, AND THEY ARE ENUMERATED RATHER THAN RELAXED.
-       Both belong to the sidebar's promoted capture destination
-       (`useCaptureSummary`), and in both the parameter exists to make the response
-       SMALLER, never to ask a different question:
+       ~~TWO MORE ARE NOW ALLOWED … `…/proposals?limit=1` … `…/notes?state=dismissed`~~
+       — **ONE OF THE TWO IS WITHDRAWN, 2026-09-11, AND THE LIST IS TIGHTENED RATHER
+       THAN LEFT PERMISSIVE.** Both belonged to the sidebar's promoted capture
+       destination, which assembled its counts client-side in `lib/useCaptureSummary.ts`.
+       That hook is DELETED: the counts now arrive on the record's own detail payload
+       (`capture_summary`), so neither read happens for the sidebar any more, and on
+       this screen `…/notes?state=dismissed` is not issued at all.
 
-         · `…/proposals?limit=1` — one row; the open count it renders is the
-           server's `by_state`, computed over the whole record whatever the window.
-         · `…/notes?state=dismissed` — `GET …/notes` has no `limit`, and
-           `_notes_payload` computes `total`, `by_state` and `unreadable_entries`
-           over the WHOLE record regardless of `state`, so the filter caps the row
-           array while leaving every number this hook reads identical. Measured
-           against the running API: 7,544 B -> 2,023 B on an 8-note record.
+       An allowlist is a ceiling, not a floor, so leaving `notes` in it would have
+       stayed green while permitting a read nothing makes — which is how a
+       permission outlives its reason. Measured on the graph screen after the change:
+       the only query-carrying calls are `…/pending?limit=…` and `…/proposals?limit=…`.
 
-       The list stays an explicit enumeration so a fourth parameterized read has to
+         · `…/proposals?limit=…` — STILL ISSUED, by `IngestionProposalsPanel` itself
+           rather than by the sidebar. The parameter makes the response smaller and
+           never asks a different question: the counts in the body are the server's
+           `by_state`, computed over the whole record whatever the window.
+
+       The list stays an explicit enumeration so a third parameterized read has to
        be added here deliberately, by someone who has to write down why. */
     const BOUNDED_READS = [
       `GET ${base}/pending`,
       `GET ${base}/proposals`,
-      `GET ${base}/notes`,
     ];
+    /* THE LOOP BELOW IS CONDITIONAL, SO IT HAS TO BE SHOWN NON-VACUOUS FIRST.
+       Its `if (query !== undefined)` branch never runs on a surface that sends no
+       query at all, and a suite in which it never runs reads as an enforced
+       allowlist while enforcing nothing. This slice REMOVED one of the two
+       query-carrying reads, so the count moving to zero is now a reachable
+       outcome rather than a theoretical one. */
+    const queried = calls.filter((c) => c.includes('?'));
+    expect(queried.length, 'no call carried a query, so the allowlist below is vacuous')
+      .toBeGreaterThan(0);
+
     for (const call of calls) {
       const [path, query] = call.split('?');
       if (query !== undefined) {
