@@ -1260,8 +1260,18 @@ guided-walkthrough session — the 2026-08-03 tutorial-scope decision), and on a
 record screen renders **102 visible text nodes** with next-action appearing **twice**, not six
 times. **Two of the three counts are therefore unreproducible here, so reducing them would have
 been editing against numbers I could not verify** — which is the failure mode this ledger records
-most often. One real duplication WAS measured and is left named rather than fixed:
-`"3 fields · none recorded yet"` renders **twice** on the record screen.
+most often.
+
+**AND THE ONE DUPLICATION I THOUGHT I HAD MEASURED WAS NOT ONE — withdrawn the same day, before
+it could become a task.** I recorded that `"3 fields · none recorded yet"` renders **twice** on the
+record screen and offered it as the one reproducible member of `UX-012`'s class. It does render
+twice, and that is **correct**: `adapt.summarize` (`adapt.ts:209`) is a **per-SECTION** summary, so
+two draft sections that each hold three unrecorded fields necessarily produce the same sentence
+about two different subjects. Reading a repeated string as a repeated CLAIM is the same mistake as
+reading a repeated count as a redundancy — and it is the mistake `UX-012` itself has to avoid,
+because "validation stated in 9 places" is only a defect where the nine are one claim rather than
+nine subjects. **Nothing was changed.** Kept rather than deleted because a plausible-looking
+defect note is exactly what a future session would act on.
 
 ### `UX-013` — **MEASURED AND SPECIFIED, DELIBERATELY NOT SHIPPED. The blocker is verification, not difficulty.**
 
