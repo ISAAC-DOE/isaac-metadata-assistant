@@ -3391,7 +3391,20 @@ class MoveExperimentRequest(BaseModel):
 
     folder: str | None = Field(
         ...,
-        max_length=ws.FOLDER_MAX_PATH_LENGTH,
+        # *** NO `max_length`, AND ITS ABSENCE IS THE FIX. Found by independent
+        # review, 2026-09-13. *** `max_length=ws.FOLDER_MAX_PATH_LENGTH` used to sit
+        # here and SHADOWED `workspace.normalize_folder_path`'s own
+        # `folder_path_too_long` refusal: Pydantic validated first and answered
+        # `{"detail": [{"type": "string_too_long", ...}]}` with **no `error` key at
+        # all**, so one of the five refusal tokens this operation's own description
+        # promises was UNREACHABLE over HTTP. Measured: a 301-character path returned
+        # the Pydantic shape, never the typed one.
+        #
+        # Removing it is safe rather than permissive: `normalize_folder_path` refuses
+        # anything over `FOLDER_MAX_PATH_LENGTH` immediately, before the value is
+        # stored or joined, and it does so with a sentence that names the limit AND
+        # the actual length and ends "Nothing was changed." That is strictly more
+        # useful than `string_too_long`, and it is the sentence the frontend renders.
         description=(
             "The folder path label to file this experiment under, e.g. "
             "`Cu K-edge/2026 campaign`. `null` or `\"\"` unfiles it. Required — an "
@@ -3463,10 +3476,21 @@ class MoveExperimentRequest(BaseModel):
         422: {
             "description": (
                 "The folder path is not one this server will store, and NOTHING WAS "
-                "CHANGED. The typed `error` says which: `invalid_folder` (not text), "
+                "CHANGED. **FOUR of these carry a typed `error`; the fifth is the "
+                "framework's, and the difference is stated rather than smoothed "
+                "over** (corrected 2026-09-13 after an independent review measured "
+                "that this list promised five and delivered three). A typed `error` "
+                "plus a `message` ending “Nothing was changed.” is returned for "
                 "`invalid_folder_segment` (a level called `.`/`..`, or one carrying a "
-                "control character), `folder_segment_too_long`, `folder_too_deep`, or "
-                "`folder_path_too_long`. The value is never truncated to fit. This "
+                "control character), `folder_segment_too_long`, `folder_too_deep` and "
+                "`folder_path_too_long`. A `folder` that is **not text** is refused "
+                "first by request validation, as `{\"detail\": [{\"type\": "
+                "\"string_type\", \"loc\": [\"body\", \"folder\"], …}]}` — it names the "
+                "field and the expected type, which is more useful than a hand-rolled "
+                "equivalent, so it is left to the framework and NOT re-raised as "
+                "`invalid_folder`. (`invalid_folder` still exists in "
+                "`workspace.normalize_folder_path` for internal callers, which is why "
+                "it is named here at all.) The value is never truncated to fit. This "
                 "status is also what the request layer returns for a body with no "
                 "`folder` key at all, or with any other key — an absent key is "
                 "refused rather than read as either “leave it” or “unfile it”."

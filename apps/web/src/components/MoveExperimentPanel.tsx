@@ -2,7 +2,7 @@ import './rename-experiment.css';
 import './library.css';
 import { useEffect, useId, useRef, useState } from 'react';
 import { ChevronDown, ChevronRight } from './icons';
-import { api } from '../lib/api';
+import { api, ApiError } from '../lib/api';
 import { LABELS } from '../lib/labels';
 import { statusOf } from '../lib/mutationErrors';
 import type { ApiExperimentDetail } from '../lib/types';
@@ -153,14 +153,38 @@ export function MoveExperimentPanel({
         onSaved();
         return;
       }
-      // Whatever the API layer could establish, unreinterpreted. For a 422 that is
-      // the server's own typed sentence, which names the rule and ends "Nothing was
-      // changed." — a move that failed for an unknown reason must not be described as
-      // one that failed for a known one.
+      /*
+       * *** THE SERVER'S OWN SENTENCE, WHICH THIS PANEL CLAIMED TO SHOW AND DID
+       * NOT. Found by independent review, 2026-09-13. ***
+       *
+       * The comment here used to say "For a 422 that is the server's own typed
+       * sentence, which names the rule and ends 'Nothing was changed.'" Measured
+       * over HTTP: a scientist saw **`"Request failed (422)."`** for every folder
+       * refusal, and the "Nothing was changed." fallback below was dead code.
+       *
+       * The cause is a division of labour in `lib/api.ts` that reads correctly
+       * until you follow it: `mutationError` DOES read the refusal body, but it
+       * puts it on `err.body` and leaves `err.message` as the generic
+       * `Request failed (<status>).` from `httpError`. So `err.message` is a
+       * STATUS, never a reason, and reading it was always going to print one.
+       *
+       * `err.body.message` is preferred when it is a non-empty string, which is
+       * exactly the shape every typed refusal on this route uses
+       * (`{ error, message }`, the message ending "Nothing was changed."). The
+       * status-only message remains the fallback, because a refusal shape this
+       * panel does not recognise must not be dressed up as one it does.
+       */
+      const typed =
+        err instanceof ApiError &&
+        typeof (err.body as { message?: unknown } | undefined)?.message === 'string' &&
+        ((err.body as { message: string }).message.trim().length > 0)
+          ? (err.body as { message: string }).message
+          : null;
       setError(
-        err instanceof Error && err.message
-          ? err.message
-          : 'The folder could not be changed. Nothing was changed.',
+        typed ??
+          (err instanceof Error && err.message
+            ? err.message
+            : 'The folder could not be changed. Nothing was changed.'),
       );
     }
   };
