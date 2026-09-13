@@ -57,31 +57,56 @@ THE FIX, AND A REJECTED FIX THAT IS WORTH RECORDING
 2. the unit must be complete: the character after the match must be end-of-segment,
    whitespace, or one of a small closed punctuation set (``_UNIT_TERMINATORS``).
 
-**A TERMINAL RULE WAS IMPLEMENTED FIRST, MEASURED, AND WITHDRAWN.** It required the
-restatement to END the statement or continue a hedged chain. It is recorded here
-with its measurements because it looked obviously right, it closes cases this gate
-does not, and it was refuted on three counts:
+3. **ADDED 2026-09-12, SECOND PASS** — a restatement behind a hedge that stands
+   ALONE (no ``or`` in front of it) must END the statement: no WORD may follow it,
+   unless what follows is another hedge bridge introducing a restatement that was
+   itself ACCEPTED. ``_STATEMENT_END`` and ``_statement_ends_after``.
 
-* **it does not close the defect** — ``"425 K, about 3 K."`` is terminal, and read
-  3; ``"425 K, about 3 K or 400 K."`` read 3 AND 400;
-* **it costs six natural sentences their restatement** — all six are pinned below
-  as still working, and the worst is ``"…maybe 430 K and the atmosphere was dry
-  nitrogen"``, where the segment-end-anchored atmosphere rule's own text is the
-  non-terminal tail;
+**THE TERMINAL RULE WAS IMPLEMENTED FIRST, MEASURED, WITHDRAWN — AND THEN ADOPTED
+IN A NARROWER FORM.** The withdrawal is kept in full below, struck where it has
+expired and marked where it still holds, because it was refuted on three counts and
+the three did not all survive:
+
+* ~~**it does not close the defect** — ``"425 K, about 3 K."`` is terminal, and
+  read 3; ``"425 K, about 3 K or 400 K."`` read 3 AND 400~~ — **EXPIRED, not
+  answered.** Both were measured against a gate in which ``about`` bridged BARE.
+  Since correction 1 it does not, so both are refused by the FIRST condition and
+  the first is a row of ``FALSE_RESTATEMENTS`` today. The objection was correct
+  when it was written and is no longer about a reachable state;
+* **it costs six natural sentences their restatement** — **STILL TRUE of the
+  UNIVERSAL rule, and true of FIVE of the six under the narrowed one.** All five
+  use a bare ``maybe``; the sixth uses ``or maybe`` and is untouched. The five are
+  pinned below as ACCEPTED LOSSES, each with the disclosure that is the condition
+  on which the loss was accepted — including ``"…maybe 430 K and the atmosphere was
+  dry nitrogen"``, where the atmosphere value itself still reads;
 * **it silently breaks an unrelated C-2 proof** — ``_bytes_only()`` needs FIVE
-  candidates to exceed ``MAX_CANDIDATE_QUOTE_BYTES``; the terminal rule takes it to
-  four (999,996 B against a 1,048,576 B cap), so the byte-ceiling test stops firing.
+  candidates to exceed ``MAX_CANDIDATE_QUOTE_BYTES``; the UNIVERSAL rule takes it to
+  ~~four (999,996 B against a 1,048,576 B cap)~~ **THREE (750,000 B against a
+  1,048,576 B cap) — the inherited pair was measured against a gate without the
+  chain-continuation clause, and is corrected here from a fresh mutation run**, so
+  the byte-ceiling test stops firing.
   **The C-1 gate and the C-2 proof are coupled and nobody expected that**; it is
   pinned below so the next person to touch either finds out from a test.
+  **THE NARROWED RULE DOES NOT BREAK IT, AND THAT IS MEASURED HERE RATHER THAN
+  REASONED**: that payload's ``430 K`` is followed by another accepted restatement
+  and its ``435 K`` sits behind an explicit ``or``, so the fixture still reads FIVE.
 
-ONE CLASS IS STILL OPEN, AND IT IS PINNED AS OPEN
-=================================================
-A BARE hedge followed by a complete unit and then a modifying phrase still reads:
-``"425 K, maybe 3 K of drift"`` proposes 3. ``_RESTATEMENT_RESIDUE`` carries the
-four measured sentences and the argument that closing it is a DECISION between
-error classes rather than a patch. The tests below assert the defect still occurs,
-deliberately, so that closing it requires deleting a row rather than discovering a
-surprise.
+THE FOUR MEASURED RESIDUE SENTENCES ARE CLOSED; A NARROWER CLASS IS STILL OPEN
+=============================================================================
+``"425 K, maybe 3 K of drift"`` and its three siblings proposed 3 with **no
+abstention at all**. All four now read 425 alone and each raises a
+``trailing_text_after_further_values`` abstention; they are pinned as CLOSED in
+``tc._RESTATEMENT_RESIDUE_CLOSED`` rather than deleted, so "the residue is closed"
+stays a checkable claim.
+
+**WHAT IS STILL OPEN IS THE SAME SHAPE BEHIND AN EXPLICIT ``or``** —
+``"425 K or 3 K of drift"``, ``"425 K, or about 3 K of drift"`` and three more,
+measured AFTER the fix and now carried by ``tc._RESTATEMENT_RESIDUE``. The tests
+below assert that defect still occurs, deliberately, so that closing it requires
+deleting a row rather than discovering a surprise. Why it was not also closed is in
+that constant's own comment: extending condition 3 to the ``or`` branch disarms
+C-2, and extending it to the bare-``or`` branch alone is a split whose only
+justification would be which branch a fixture happens to use.
 
 Everything here is synthetic. Nothing connects to a database and no network call is
 made.
@@ -353,9 +378,20 @@ def test_a_genuine_hedged_restatement_IS_still_read(sentence, expected, field_pa
     # the previous two versions of that string each stated a gate smaller than the
     # one in force.
     for candidate in _read(sentence).candidates[1:]:
-        assert "TWO conditions" in candidate.rule
+        # ~~`assert "TWO conditions" in candidate.rule`~~ — the gate has THREE
+        # conditions since 2026-09-12 (second pass), and a `rule` string claiming
+        # two would be the third version of this string to understate the gate it
+        # describes. The module's `_Rule` docstring records all three corrections.
+        assert "THREE conditions" in candidate.rule
+        assert "TWO conditions" not in candidate.rule
         assert "HEDGING WORD" in candidate.rule
         assert "immediately between" in candidate.rule
+        # The third condition is stated, and stated WITH ITS SCOPE — a string that
+        # said "must end the statement" without "stood ALONE" would describe a gate
+        # stricter than the one in force, which is the mirror of the two errors
+        # already recorded.
+        assert "ENDED the statement" in candidate.rule
+        assert "stood ALONE" in candidate.rule
 
 
 def test_a_bare_or_is_alternation_and_still_bridges_even_before_an_instant():
@@ -380,67 +416,114 @@ def test_a_bare_or_is_alternation_and_still_bridges_even_before_an_instant():
 # 3. THE REJECTED TERMINAL RULE. Its cost, measured, so it is not re-proposed.
 # =============================================================================
 
-#: Natural sentences whose restatement a TERMINAL rule would have refused. Each
-#: reads both values today, and that is asserted — so a future slice that adopts a
-#: terminal rule finds out from a test what it costs, rather than from a scientist.
-TERMINAL_RULE_WOULD_HAVE_LOST: tuple[tuple[str, str, list, str], ...] = (
+#: Natural sentences whose restatement a TERMINAL rule refuses. Each USED to read
+#: both values; five of the six now read one, and the fifth element of each row is
+#: what the slice that adopted the narrowed rule accepted losing.
+#:
+#: ~~"Each reads both values today, and that is asserted — so a future slice that
+#: adopts a terminal rule finds out from a test what it costs, rather than from a
+#: scientist."~~ — **the future slice was the next one, it did find out from this
+#: test, and the cost is now the SUBJECT of the test rather than a warning about
+#: it.** Five rows are ACCEPTED LOSSES and one is untouched, and the distinguishing
+#: fact is mechanical: the untouched row bridges with ``or maybe``, so condition 3
+#: does not reach it.
+#:
+#: **EVERY LOSS IS ASSERTED TO BE DISCLOSED.** That is the whole of why the trade
+#: was takeable under §5 — *"If a value is not supported by evidence: leave it
+#: missing, mark it needs_confirmation, ask a targeted question"* — and if a
+#: refusal here could be silent the trade does not hold. The fourth row also
+#: asserts that the ATMOSPHERE value it states still reads, because the loss must
+#: be the restatement and not the sentence.
+TERMINAL_RULE_WOULD_HAVE_LOST: tuple[tuple[str, str, list, str, list], ...] = (
     (
         "a trailing aside",
         "The temperature was 425 K, maybe 430 K, I am not sure",
-        [425, 430],
+        [425],
         TEMPERATURE,
+        ["trailing_text_after_further_values"],
     ),
     (
         "a trailing prepositional phrase",
         "The temperature was 425 K, maybe 430 K at the end",
-        [425, 430],
+        [425],
         TEMPERATURE,
+        ["trailing_text_after_further_values"],
     ),
     (
         "a trailing attribution",
         "The temperature was 425 K, maybe 430 K according to the log",
-        [425, 430],
+        [425],
         TEMPERATURE,
+        ["trailing_text_after_further_values"],
     ),
     (
         "a second field in the same sentence",
         "The temperature was 425 K, maybe 430 K and the atmosphere was dry nitrogen",
-        [425, 430],
+        [425],
         TEMPERATURE,
+        ["trailing_text_after_further_values"],
     ),
     (
         "a trailing scan reference",
         "The temperature was 425 K, maybe 430 K on the second scan",
-        [425, 430],
+        [425],
         TEMPERATURE,
+        ["trailing_text_after_further_values"],
     ),
     (
-        "a trailing aside after an instant",
+        "a trailing aside after an instant, behind an explicit or — UNTOUCHED",
         "The scan started 2026-01-01T00:00:00Z, or maybe 2026-01-02T00:00:00Z, I "
         "would have to check",
         ["2026-01-01T00:00:00Z", "2026-01-02T00:00:00Z"],
         START,
+        [],
     ),
 )
 
 
 @pytest.mark.parametrize(
-    "label,sentence,expected,field_path",
+    "label,sentence,expected,field_path,expected_abstentions",
     TERMINAL_RULE_WOULD_HAVE_LOST,
     ids=[row[0] for row in TERMINAL_RULE_WOULD_HAVE_LOST],
 )
-def test_the_rejected_terminal_rule_would_have_lost_these(
-    label, sentence, expected, field_path
+def test_the_terminal_rule_loses_these_and_DISCLOSES_every_loss(
+    label, sentence, expected, field_path, expected_abstentions
 ):
-    """Six sentences that read correctly and would not under a terminal rule.
+    """Six sentences that read both values before the narrowed terminal rule. Five
+    now read one, and every one of the five says so.
 
-    The fourth is the one that settles it: a sentence stating a temperature
-    alternative AND an atmosphere loses the alternative, because ``_ATMOSPHERE`` is
-    anchored to the end of the segment and its own text is therefore the
-    non-terminal tail. A gate cannot require a restatement to end the sentence in a
-    reader whose other rules require their value to end the sentence.
+    The fourth is the one that was argued hardest, and it is still the interesting
+    one: a sentence stating a temperature alternative AND an atmosphere loses the
+    alternative, because ``_ATMOSPHERE`` is anchored to the end of the segment and
+    its own text is therefore the non-terminal tail. The previous slice read that as
+    a refutation — *"a gate cannot require a restatement to end the sentence in a
+    reader whose other rules require their value to end the sentence"* — and it is
+    instead the PRICE, paid knowingly: the atmosphere value still reads, the
+    temperature alternative is reported as withheld, and the sentence survives
+    verbatim as a note.
+
+    MUTATION: removing the disclosure leaves the five VALUE assertions green and
+    turns the five ABSTENTION assertions red, which is the point — a silent refusal
+    passes the first half of this test and the trade does not hold without the
+    second.
     """
     assert _values(sentence, field_path) == expected
+    reading = _read(sentence)
+    assert [entry.kind for entry in reading.abstentions] == expected_abstentions
+    if expected_abstentions:
+        # The reason must be TRUE of this refusal, which is why it is not the
+        # `unhedged_further_values` sentence: the hedge was present.
+        disclosure = reading.abstentions[0]
+        assert "behind a hedging word" in disclosure.reason
+        assert "does not\nstop there" not in disclosure.reason
+        assert "ENDS the" in disclosure.reason
+        assert field_path in disclosure.reason
+        assert disclosure.segment_index == 0
+    if label == "a second field in the same sentence":
+        # THE LOSS IS THE RESTATEMENT, NOT THE SENTENCE.
+        assert _values(sentence, "context.thermodynamics.atmosphere") == [
+            "dry nitrogen"
+        ]
 
 
 def test_the_C1_GATE_AND_THE_C2_BYTE_CEILING_PROOF_ARE_COUPLED():
@@ -482,42 +565,92 @@ def test_the_C1_GATE_AND_THE_C2_BYTE_CEILING_PROOF_ARE_COUPLED():
 # =============================================================================
 
 
+@pytest.mark.parametrize("sentence", tc._RESTATEMENT_RESIDUE_CLOSED)
+def test_the_four_recorded_residue_SENTENCES_ARE_NOW_CLOSED(sentence):
+    """The §5 defect the previous slice measured and referred. **CLOSED.**
+
+    ~~"A KNOWN-OPEN §5 defect, asserted to still occur. THIS TEST IS DELIBERATELY
+    THE WRONG WAY ROUND … Asserting the defect means that closing it requires
+    DELETING a row here — a reviewed change — rather than discovering that a
+    documented open item quietly went away."~~ — the reviewed change is this one.
+    The rows were NOT deleted; they moved to ``_RESTATEMENT_RESIDUE_CLOSED`` and
+    the assertion was inverted, which keeps the four sentences themselves as the
+    evidence that the class is shut rather than merely unmentioned.
+
+    Each now reads ONE value and DISCLOSES the one it withheld. Both halves are
+    asserted, because a silent refusal here would close the false positive and open
+    a silent discard — rule (4) of the module docstring — in its place.
+    """
+    assert _values(sentence) == [425], (
+        "if this reads TWO values again the residue has REOPENED; the second value "
+        "is a drift, an offset or a rate, not a temperature"
+    )
+    assert [entry.kind for entry in _read(sentence).abstentions] == [
+        "trailing_text_after_further_values"
+    ]
+
+
 @pytest.mark.parametrize("sentence", tc._RESTATEMENT_RESIDUE)
-def test_the_recorded_residue_is_still_a_FALSE_POSITIVE(sentence):
-    """A KNOWN-OPEN §5 defect, asserted to still occur.
+def test_the_residue_THAT_REMAINS_is_still_a_FALSE_POSITIVE(sentence):
+    """A KNOWN-OPEN §5 defect, asserted to still occur. **NOT rounded down.**
 
-    **THIS TEST IS DELIBERATELY THE WRONG WAY ROUND, and that is the point.** A
-    bare hedge followed by a complete unit and then a modifying phrase still reads,
-    so ``_RESTATEMENT_RESIDUE``'s four sentences each propose a value the transcript
-    does not state for that field. Asserting the defect means that closing it
-    requires DELETING a row here — a reviewed change — rather than discovering that
-    a documented open item quietly went away, or that a documented open item is
-    still being published after it was fixed.
+    Condition 3 is scoped to the BARE-hedge branch, so the same shape behind an
+    explicit ``or`` still proposes a drift figure as a temperature, and still does
+    it silently. These five sentences were measured AFTER the fix, in-process, and
+    are not inherited from the previous slice's corpus — which contained none of
+    them, because it was assembled from sentences a scientist might plausibly say
+    and none of these is one. That is an argument about likelihood, not about
+    correctness, and it is recorded as such in ``_RESTATEMENT_RESIDUE``'s comment
+    rather than used to call the class closed.
 
-    ``_RESTATEMENT_RESIDUE``'s own comment carries the four mechanical proxies that
-    were measured and rejected, and the reason this is a decision between error
-    classes rather than a patch.
+    Asserting the defect means that closing it requires DELETING a row here — a
+    reviewed change — rather than discovering that a documented open item quietly
+    went away, or that a documented open item is still being published after it was
+    fixed.
     """
     assert len(_values(sentence)) == 2, (
         "if this now reads ONE value the residue is CLOSED — delete the row from "
         "_RESTATEMENT_RESIDUE and say so, do not weaken this assertion"
     )
     assert _rows(sentence)[1][1] is True
+    # AND IT IS SILENT, which is the half that makes it a §5 defect rather than a
+    # disclosed omission. Pinned so that a future slice which makes it merely
+    # disclosed has to come through here.
+    assert _read(sentence).abstentions == ()
 
 
-def test_the_residue_list_is_a_two_way_ratchet():
+def test_the_residue_lists_are_two_way_ratchets():
     """A test that iterates the list it checks cannot see a REMOVAL from that list.
 
     This repository has been caught by exactly that: deleting ``"approximately"``
     from ``_HEDGE_CONNECTIVES`` left 176 transcript tests GREEN, because the only
     test that checked it walked the list.
+
+    Both lists are ratcheted, and the CLOSED one matters more: a slice that deleted
+    a row from it would delete the evidence that the row is closed, and the
+    parametrised test above would then pass by iterating fewer cases.
     """
-    assert len(tc._RESTATEMENT_RESIDUE) == 4
-    assert "The temperature was 425 K, maybe 3 K of drift" in tc._RESTATEMENT_RESIDUE
+    assert len(tc._RESTATEMENT_RESIDUE_CLOSED) == 4
+    assert (
+        "The temperature was 425 K, maybe 3 K of drift"
+        in tc._RESTATEMENT_RESIDUE_CLOSED
+    )
     assert (
         "The temperature was 425 K, alternatively 3 K per minute"
+        in tc._RESTATEMENT_RESIDUE_CLOSED
+    ), "the one closed row that uses a connective other than maybe/perhaps"
+
+    assert len(tc._RESTATEMENT_RESIDUE) == 5
+    assert "The temperature was 425 K or 3 K of drift" in tc._RESTATEMENT_RESIDUE
+    assert (
+        "The temperature was 425 K, or perhaps 2 K of scatter"
         in tc._RESTATEMENT_RESIDUE
-    ), "the one residue row that uses a connective other than maybe/perhaps"
+    ), "the open row that pairs a bare hedge WITH an or, which is what exempts it"
+    # The two lists are disjoint: a sentence cannot be both closed and open, and an
+    # edit that moved one without removing it from the other would say it is.
+    assert not (
+        set(tc._RESTATEMENT_RESIDUE) & set(tc._RESTATEMENT_RESIDUE_CLOSED)
+    )
 
 
 def test_the_defect_corpus_and_the_must_pass_corpus_are_both_ratcheted():
@@ -618,6 +751,83 @@ def test_a_cross_rule_overlap_is_NOT_disclosed_as_a_withheld_value():
     assert reading.abstentions == ()
 
 
+def test_the_chain_LOSES_ITS_TAIL_AND_NOT_A_LINK():
+    """The cascade. A ``while``, not an ``if``, and this is the difference.
+
+    Condition 3 says a bare-hedged restatement is read when it ends the statement
+    OR when another ACCEPTED restatement follows it. So dropping the last link can
+    make the one before it non-terminal too, and the walk has to continue. With a
+    single pass, *"425 K, maybe 430 K, and again 3 K of drift"* keeps 430 — whose
+    only claim to being terminal is a restatement that was just refused.
+
+    MUTATION: ``while`` -> ``if`` in ``_segment_readings`` turns the second case RED
+    and leaves every other test in this file green.
+    """
+    # THE WALK STOPS AT THE FIRST SURVIVING LINK, which is what makes it a walk
+    # inward from the tail and not a rule about the chain. 3 is dropped for its own
+    # trailing phrase; 430 sits behind an explicit `or`, so condition 3 never
+    # reaches it and it survives even though something now follows it.
+    assert _values(
+        "The temperature was 425 K, or perhaps 430 K, and again 3 K of drift"
+    ) == [425, 430]
+    # A BARE-hedged link cannot survive that, and the difference is only the
+    # connective: with `maybe` in place of `or perhaps`, dropping 3 makes 430
+    # non-terminal too.
+    # TWO refusals cascading: 3 goes for its trailing phrase, and 430 goes because
+    # what follows IT is now a bridge to a refusal rather than to a reading.
+    assert _values(
+        "The temperature was 425 K, maybe 430 K, and again 3 K of drift"
+    ) == [425]
+    # The chain is never broken in the MIDDLE: a link behind an explicit `or`
+    # survives, and everything before it is terminal-by-chain.
+    assert _values(
+        "The temperature was 425 K, maybe 430 K, or perhaps 435 K"
+    ) == [425, 430, 435]
+
+
+def test_both_refusal_kinds_can_fire_for_one_rule_in_one_sentence():
+    """Two different things were withheld, so two different things are said.
+
+    The refusal map is keyed on ``(rule, kind)`` rather than on ``rule``, because a
+    sentence can both state an unhedged further value AND hedge one that does not
+    end the statement — and a single entry would report one of them and drop the
+    other, which is the silent-refusal defect this disclosure exists to end.
+
+    The order is ``_RULES`` order then kind order, never the order the gates
+    happened to fire in, so the list is deterministic.
+
+    MUTATION: keying ``refused`` on ``rule.name`` alone turns this RED.
+    """
+    reading = _read("The temperature was 425 K, maybe 430 K at the end, then 500 K")
+    assert [candidate.proposed_value for candidate in reading.candidates] == [425]
+    assert [entry.kind for entry in reading.abstentions] == [
+        "unhedged_further_values",
+        "trailing_text_after_further_values",
+    ]
+
+
+@pytest.mark.parametrize("sentence", tc._RESTATEMENT_RESIDUE_CLOSED)
+def test_the_new_disclosure_asserts_nothing_about_the_withheld_VALUE(sentence):
+    """Same discipline as ``unhedged_further_values``: not a count, not a value, not
+    a classification. Not knowing what it is IS why it was withheld.
+
+    The reason deliberately carries no numeric example either — see
+    ``_REFUSAL_REASONS`` — because every digit that would read naturally there
+    appears in these very sentences, so an example would be indistinguishable from
+    a leak.
+    """
+    disclosure = _read(sentence).abstentions[0]
+    assert disclosure.kind == "trailing_text_after_further_values"
+    withheld = next(token for token in ("3 K", "2 K") if token in sentence)
+    assert withheld not in disclosure.reason
+    assert withheld not in disclosure.quote
+    assert withheld[0] not in disclosure.reason
+    # The quote is the LABEL-ANCHORED statement, not the segment: short, and it
+    # identifies the sentence without reproducing it.
+    assert disclosure.quote == "temperature was 425 K"
+    assert len(disclosure.quote) < len(sentence)
+
+
 def test_a_clean_sentence_raises_no_disclosure():
     """The disclosure must not fire on a sentence with nothing to disclose,
     or it becomes noise a reader learns to ignore."""
@@ -657,6 +867,15 @@ def test_the_unit_check_measures_from_the_UNIT_and_not_from_the_NUMBER():
     assert ok is not None and ok.group(1) == "430"
     assert good[ok.end() :] == ""
     assert tc._unit_is_complete(good, ok) is True
+
+    # AND THE SAME TRAP FOR CONDITION 3, which reads from the same offset and
+    # whose docstring claims a test pins both. ``end(1)`` leaves ``" K"`` in the
+    # remainder, and ``K`` is a letter, so the predicate would call every
+    # legitimate restatement non-terminal and condition 3 would refuse the whole
+    # product requirement — green on the defect corpus, which is why it is pinned.
+    assert tc._statement_ends_after(good, ok.end()) is True
+    assert tc._statement_ends_after(good, ok.end(1)) is False
+    assert tc._statement_ends_after(bad, match.end()) is False
 
 
 def test_alternation_order_cannot_change_whether_a_gap_bridges():
@@ -709,29 +928,120 @@ def test_the_unit_terminator_set_is_an_ALLOWLIST_and_is_ratcheted():
         assert composer not in tc._UNIT_TERMINATORS, composer
 
 
-@pytest.mark.parametrize(
-    "tail,complete",
-    [
-        ("", True),
-        (" and the atmosphere was dry nitrogen", True),
-        (".", True),
-        (",", True),
-        (";", True),
-        (")", True),
-        (" more text", True),
-        ("/min", False),
-        ("-edge", False),
-        ("^-1", False),
-        ("·s", False),
-    ],
-    ids=lambda value: repr(value) if isinstance(value, str) else str(value),
+#: ``(tail, unit_is_complete, statement_ends)``. The two predicates are pinned
+#: SEPARATELY and then against the reading, because three rows disagree between
+#: them and an outcome two guards could produce says nothing about either one.
+#:
+#: ~~`(" and the atmosphere was dry nitrogen", True)`, and the non-breaking-space
+#: text row~~ —
+#: those rows asserted the READING, and the reading changed: the unit is still
+#: complete (that is what the second column now says) and condition 3 refuses the
+#: restatement anyway. Splitting the columns is what makes the change visible as
+#: "a different guard refuses it" rather than as "the unit check broke".
+UNIT_TAILS: tuple[tuple[str, bool, bool], ...] = (
+    ("", True, True),
+    (" and the atmosphere was dry nitrogen", True, False),
+    (".", True, True),
+    (",", True, True),
+    (";", True, True),
+    (")", True, True),
+    (" more text", True, False),
+    ("/min", False, False),
+    ("-edge", False, False),
+    ("^-1", False, False),
+    ("·s", False, False),
 )
-def test_what_may_follow_a_complete_unit(tail, complete):
-    """Stated over whole sentences, not only over the predicate, so the allowlist is
-    connected to the behaviour it decides."""
+
+
+@pytest.mark.parametrize(
+    "tail,unit_complete,statement_ends",
+    UNIT_TAILS,
+    ids=[repr(row[0]) for row in UNIT_TAILS],
+)
+def test_what_may_follow_a_complete_unit(tail, unit_complete, statement_ends):
+    """Stated over whole sentences AND over each predicate, so the allowlists are
+    each connected to the behaviour they decide.
+
+    A bare-hedged restatement is read only when BOTH columns are true, which is why
+    the two punctuation-only tails — a trailing comma and a trailing bracket — are
+    the interesting rows: they are the two that a first, tighter
+    ``_STATEMENT_END`` (whitespace plus at most ONE sentence terminator) refused
+    for no §5 gain, and they are the measurement that widened it.
+    """
     sentence = f"The temperature was 425 K, maybe 430 K{tail}"
-    expected = [425, 430] if complete else [425]
+    match = tc._TEMPERATURE_K_RESTATED.search(sentence, sentence.index("maybe"))
+    assert match is not None and match.group(1) == "430"
+    assert tc._unit_is_complete(sentence, match) is unit_complete, sentence
+    assert tc._statement_ends_after(sentence, match.end()) is statement_ends, sentence
+    expected = [425, 430] if (unit_complete and statement_ends) else [425]
     assert _values(sentence) == expected, sentence
+
+
+def test_the_statement_end_set_is_the_unit_terminator_set():
+    """One reviewed punctuation allowlist, used by two predicates. See
+    ``_STATEMENT_END``.
+
+    Pinned character by character rather than by comparing two expressions, so a
+    slice that re-spells either one has to come through here. The ``\n``
+    exclusion is asserted too: a hedge or a tail on the far side of a line break is
+    not "immediately after", and ``_H_SPACE`` exists for exactly that.
+    """
+    for character in tc._UNIT_TERMINATORS:
+        assert tc._statement_ends_after(f"X{character}", 1) is True, character
+    for character in " \t\xa0":
+        assert tc._statement_ends_after(f"X{character}", 1) is True, repr(character)
+    assert tc._statement_ends_after("X\n", 1) is False
+    # ``\r`` IS admitted, and that is stated rather than left to be discovered: the
+    # module's whitespace class is ``_H_SPACE`` = ``[^\S\n]``, which excludes the
+    # line FEED and nothing else, and this predicate reuses it unchanged. A bare
+    # ``\r`` with no word after it withholds nothing, so it is not a hole — but a
+    # test asserting it were refused would be asserting a rule the module does not
+    # have.
+    assert tc._statement_ends_after("X\r", 1) is True
+    assert tc._statement_ends_after("X\rmore text", 1) is False
+    # And the composers the unit ratchet refuses are refused here too, which is the
+    # coupling being defence in depth rather than a weakening.
+    for composer in "/*^-·×%":
+        assert tc._statement_ends_after(f"X{composer}", 1) is False, composer
+
+
+def test_the_bare_hedge_bridge_is_exactly_branch_two():
+    """``_BARE_HEDGE_BRIDGE`` admits a gap iff ``_HEDGE_BRIDGE`` does AND the
+    connective came from ``_BARE_HEDGES`` with no ``or`` in front of it.
+
+    Asserted in BOTH directions over every reviewed connective, because the whole
+    load-bearing use of this pattern is deciding which branch admitted a gap, and a
+    pattern that merely admitted MORE would silently widen condition 3 into the
+    ``or`` branch — the exact extension ``_RESTATEMENT_RESIDUE`` records as NOT
+    taken.
+
+    MUTATION: building it from ``_HEDGE_CONNECTIVES`` instead of ``_BARE_HEDGES``
+    turns this RED on six rows.
+    """
+    for connective in tc._HEDGE_CONNECTIVES:
+        bare_gap = f", {connective} "
+        or_gap = f", or {connective} "
+        bare_admitted = tc._HEDGE_BRIDGE.fullmatch(bare_gap) is not None
+        assert bare_admitted is (connective in tc._BARE_HEDGES + (tc._BARE_OR,)), (
+            connective
+        )
+        # `_BARE_OR` is skipped here, and the skip is the measurement: `", or or "`
+        # is NOT admitted (branch 1 requires a HEDGE after the `or`, and `or` is not
+        # one), so an unconditional assertion over `_HEDGE_CONNECTIVES` would be
+        # asserting something false about the reviewed set rather than about this
+        # pattern.
+        if connective != tc._BARE_OR:
+            assert tc._HEDGE_BRIDGE.fullmatch(or_gap) is not None, connective
+            # An `or` in front always takes it out of branch 2, including for a
+            # connective that would have bridged bare.
+            assert tc._BARE_HEDGE_BRIDGE.fullmatch(or_gap) is None, connective
+
+        assert (tc._BARE_HEDGE_BRIDGE.fullmatch(bare_gap) is not None) is (
+            connective in tc._BARE_HEDGES
+        ), connective
+    # A bare `or` is NOT branch 2, and that is the exemption the residue rests on.
+    assert tc._BARE_HEDGE_BRIDGE.fullmatch(" or ") is None
+    assert tc._HEDGE_BRIDGE.fullmatch(" or ") is not None
 
 
 # =============================================================================
@@ -739,35 +1049,51 @@ def test_what_may_follow_a_complete_unit(tail, complete):
 # =============================================================================
 
 
-def test_the_density_ceilings_still_do_not_bound_the_DISCLOSURES():
-    """A pre-existing defect this slice deliberately did NOT close, pinned with its
-    measurements so the next slice does not have to rediscover it.
+def test_the_referred_disclosure_gap_is_CLOSED_by_MAX_DISCLOSURES():
+    """The pre-existing defect the previous slice measured and referred. **CLOSED.**
 
-    ``abstentions`` and ``clarifications`` are appended per regex MATCH, above the
-    ``if not settled: continue`` that feeds the ceiling accumulators, so neither
-    ceiling sees them and ``MAX_SEGMENTS`` does not bind because the payload is one
-    segment. ``_DISCLOSURE_CEILING_GAP`` carries the specification for the fix and
-    the reason per-segment deduplication is NOT one.
+    ~~"A pre-existing defect this slice deliberately did NOT close … Asserted as the
+    defect, like the residue above: if a future slice bounds these, this test goes
+    RED and must be inverted, which is the reviewed change."~~ — this is the
+    reviewed change. Both payloads now RAISE, and the exact counts the previous
+    slice measured are re-measured here from the refusal rather than quoted from its
+    comment: **16,384** abstentions and **17,476** clarifications, on one segment
+    each, at the transcript byte ceiling.
 
-    **Asserted as the defect, like the residue above**: if a future slice bounds
-    these, this test goes RED and must be inverted, which is the reviewed change.
+    The reason they were unbounded is unchanged and is why a third ceiling was
+    needed rather than a widening of the first two: ``abstentions`` and
+    ``clarifications`` are appended per regex MATCH, above the ``if not settled:
+    continue`` that feeds the candidate accumulators, and ``MAX_SEGMENTS`` does not
+    bind because the payload is ONE segment.
+
+    MUTATION: removing ``MAX_DISCLOSURES`` from the ceiling check turns both
+    ``pytest.raises`` RED; raising it above 17,476 turns both RED.
     """
-    assert "not bounded by either density ceiling" in tc._DISCLOSURE_CEILING_GAP
+    assert "CLOSED" in tc._DISCLOSURE_CEILING_GAP
+    assert "not bounded by either density ceiling" not in tc._DISCLOSURE_CEILING_GAP
 
     unit = "temperature 1 C "
     text = unit * (routes._MAX_TRANSCRIPT_BYTES // len(unit))
     assert len(text.encode("utf-8")) <= routes._MAX_TRANSCRIPT_BYTES
-    reading = _read(text)
-    assert len(reading.segments) == 1
-    assert len(reading.abstentions) == 16384
-    assert reading.candidates == ()
+    assert len(tc.segment_transcript(text)) == 1
+    with pytest.raises(tc.TranscriptTooDense) as raised:
+        _read(text)
+    assert raised.value.disclosures == 16384
+    assert raised.value.maximum_disclosures == tc.MAX_DISCLOSURES
+    # The two OLDER ceilings are inside their limits on this payload, which is the
+    # whole reason the third one had to exist and is asserted rather than implied.
+    assert raised.value.candidates == 0
+    assert raised.value.candidate_quote_bytes == 0
 
     unit = "run zzz at 1 K "
     text = unit * (routes._MAX_TRANSCRIPT_BYTES // len(unit))
     assert len(text.encode("utf-8")) <= routes._MAX_TRANSCRIPT_BYTES
-    reading = _read(text)
-    assert len(reading.segments) == 1
-    assert len(reading.clarifications) == 17476
+    assert len(tc.segment_transcript(text)) == 1
+    with pytest.raises(tc.TranscriptTooDense) as raised:
+        _read(text)
+    assert raised.value.disclosures == 17476
+    assert raised.value.candidates == 0
+    assert raised.value.candidate_quote_bytes == 0
 
 
 def test_the_cap_comment_no_longer_claims_an_arithmetic_link_it_does_not_have():

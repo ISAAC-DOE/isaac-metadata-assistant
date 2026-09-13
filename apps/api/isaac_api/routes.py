@@ -15217,6 +15217,34 @@ def post_transcript(
         # reason a client is told, never whether it is refused. `MAX_CANDIDATES`
         # (500) sits above `MAX_SEGMENTS` (100) times a realistic per-sentence
         # count, so an ordinarily-long transcript still gets the segment reason.
+        #
+        # THERE ARE THREE DENSITY CEILINGS, NOT TWO, since 2026-09-12: candidate
+        # COUNT, candidate QUOTED BYTES, and DISCLOSURE count (`tc.MAX_DISCLOSURES`
+        # — abstentions plus clarifications). The third exists because the first
+        # two are fed from inside the reader's `if not settled: continue` and so
+        # could never see a disclosure. MEASURED THROUGH THIS ROUTE at `bce43f19`,
+        # on a single segment filled to the largest size this route accepts
+        # (`_MAX_TRANSCRIPT_BYTES - 2`, because `_is_storable_value` measures the
+        # RENDERED bytes and a JSON string adds its two quotes):
+        #
+        #   `"temperature 1 C "` x 16,383  ->  **200**, 5,872,502 B, 16,383
+        #                                      abstentions, 1 note stored
+        #   `"run zzz at 1 K "`  x 17,476  ->  **200**, 5,477,376 B, 17,476
+        #                                      clarifications, 1 note stored
+        #
+        # with neither existing ceiling firing, all of it serialised inside
+        # `record_lock`. Both are now **422** at **455 B**, and nothing is stored.
+        # (The referring slice's figures — ~5.1 MB and ~4.3 MB — were in-process
+        # measurements of the disclosure lists alone, not of the response; they are
+        # the same defect measured one layer down and are not corrections of
+        # these.) All three share ONE error
+        # (`transcript_too_dense`) and ONE refusal, deliberately: they are the same
+        # decision — this transcript states more than one capture can read and
+        # report on, refuse it whole and keep every word — and a client that
+        # branches on the reason rather than on the numbers would have to learn a
+        # third name to do nothing different. The response carries all three
+        # measured counts beside all three ceilings, so which one bound is
+        # readable from the body rather than from the name.
         try:
             reading = tc.read_transcript(
                 raw_text, selected_run=run_id, known_runs=known_runs
@@ -15225,8 +15253,9 @@ def post_transcript(
             return _transcript_refusal(
                 "transcript_too_dense",
                 (
-                    "This transcript states more values than one capture may "
-                    "read. It is REFUSED whole rather than partly read, because a "
+                    "This transcript states more than one capture may read and "
+                    "report on. It is REFUSED whole rather than partly read, "
+                    "because a "
                     "partly read transcript proposes some of what was said and "
                     "silently drops the rest. Nothing was stored; finalize it in "
                     "smaller pieces."
@@ -15237,6 +15266,8 @@ def post_transcript(
                 maximum_candidate_quote_bytes=(
                     refusal.maximum_candidate_quote_bytes
                 ),
+                disclosures=refusal.disclosures,
+                maximum_disclosures=refusal.maximum_disclosures,
             )
         if len(reading.segments) > tc.MAX_SEGMENTS:
             return _transcript_refusal(

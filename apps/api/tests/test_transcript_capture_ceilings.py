@@ -442,10 +442,29 @@ def test_no_FieldCandidate_is_constructed_for_a_transcript_that_blows_a_ceiling(
         ),
         # A near-full-size transcript at two candidates per segment: 2 x 256 KiB of
         # quotes, which is the worst legitimate BYTE case the comment names.
+        #
+        # ~~`"temperature 1 K, maybe 2 K " + "cd " * 860 + "x."`~~ — **THE PADDING
+        # MOVED IN FRONT OF THE LABEL, 2026-09-12 (second pass), and the row below
+        # records what it measured before it moved.** The third restatement
+        # condition (`_STATEMENT_END`) refuses a BARE-hedged restatement that does
+        # not end the statement, and 2,580 bytes of `cd ` sat after `2 K`, so that
+        # payload dropped from 200 candidates to 100. It was still ADMITTED — the
+        # ceiling did not move — but `MAX_CANDIDATE_QUOTE_BYTES`' own derivation
+        # names "a transcript that fills it and reads two candidates per segment"
+        # as the worst legitimate case, and a worst case that has become
+        # unreachable is a ceiling whose headroom nobody is measuring any more. So
+        # the shape is preserved by putting the padding where a scientist's
+        # unpunctuated preamble would be, and the OLD shape is kept as its own row
+        # so the third condition's cost on a byte-heavy payload stays measured.
         (
             "a near-full-size transcript at 2 candidates per segment",
-            " ".join(["temperature 1 K, maybe 2 K " + "cd " * 860 + "x."] * 100),
+            " ".join(["cd " * 860 + "temperature 1 K, maybe 2 K."] * 100),
             200,
+        ),
+        (
+            "the same bytes with the padding AFTER the restatement",
+            " ".join(["temperature 1 K, maybe 2 K " + "cd " * 860 + "x."] * 100),
+            100,
         ),
     ],
     ids=lambda value: value if isinstance(value, str) and len(value) < 60 else "",
@@ -563,3 +582,219 @@ def test_the_refusal_payload_names_both_ceilings_and_both_measurements():
     text = str(refusal)
     assert "600" in text and "42600" in text
     assert str(tc.MAX_CANDIDATES) in text
+
+
+# =============================================================================
+# 6. THE THIRD CEILING — DISCLOSURES. Added 2026-09-12 (second pass).
+# =============================================================================
+#
+# `MAX_CANDIDATES` and `MAX_CANDIDATE_QUOTE_BYTES` are fed from inside
+# `read_transcript`'s `if not settled: continue`, so neither has ever seen an
+# abstention or a clarification. `MAX_SEGMENTS` does not help: punctuation-free ASR
+# emits ONE segment. The measurements below are the previous slice's, re-measured
+# here from the refusal rather than quoted from a comment.
+
+
+def _disclosure_flood(unit: str) -> str:
+    """ONE segment — no `.`, `!`, `?` or newline — repeating `unit` up to the
+    largest size the ROUTE accepts.
+
+    **THE `- 2` IS NOT A FUDGE AND IT IS WHY THE ROUTE NUMBER IS ONE LESS THAN THE
+    IN-PROCESS ONE.** `_is_storable_value` measures the RENDERED bytes, and
+    rendering a JSON string adds its two quote characters — so a transcript of
+    exactly `_MAX_TRANSCRIPT_BYTES` characters renders to `+ 2` and is refused as
+    `unrepresentable_value` before the reader is ever called. The sibling
+    in-process test in `test_transcript_capture_hedge_and_unit_gate.py` calls
+    `read_transcript` directly and therefore keeps the previous slice's exact
+    figures, 16,384 and 17,476; through the route the same unit fits 16,383 times.
+    Both numbers are right about different boundaries and neither is a correction
+    of the other.
+    """
+    return unit * ((routes._MAX_TRANSCRIPT_BYTES - 2) // len(unit))
+
+
+@pytest.mark.parametrize(
+    "label,unit,expected_disclosures,kind",
+    [
+        ("abstentions", "temperature 1 C ", 16383, "abstentions"),
+        ("clarifications", "run zzz at 1 K ", 17476, "clarifications"),
+    ],
+    ids=["abstentions", "clarifications"],
+)
+def test_the_disclosure_ceiling_refuses_the_whole_transcript_and_stores_nothing(
+    client, experiment_id, label, unit, expected_disclosures, kind
+):
+    """Through the real route, and the response is a few hundred bytes.
+
+    Before this ceiling both payloads returned **200**, and the figures are the
+    route's own rather than the referring slice's in-process ones: measured at
+    `bce43f19` against the pre-fix reader, `"temperature 1 C "` x 16,383 returned
+    **5,872,502 B** and `"run zzz at 1 K "` x 17,476 returned **5,477,376 B**,
+    assembled and serialised inside `record_lock`, each storing one note. Both are
+    now 422 at 455 B with nothing stored. Every number asserted below is measured
+    in this test.
+
+    MUTATION: removing `MAX_DISCLOSURES` from the ceiling check, or raising it above
+    17,476, turns this RED at the status assertion.
+    """
+    run = _make_run(client, experiment_id)
+    text = _disclosure_flood(unit)
+    # A legal transcript: one segment, inside the byte ceiling.
+    assert len(_encode(text)) <= routes._MAX_TRANSCRIPT_BYTES
+    assert len(tc.segment_transcript(text)) == 1
+
+    started = time.perf_counter()
+    response = _finalize(client, experiment_id, text, run_id=run["id"])
+    elapsed = time.perf_counter() - started
+
+    assert response.status_code == 422, response.text
+    body = response.json()
+    assert body["error"] == "transcript_too_dense"
+    assert "finalize it in smaller pieces" in body["message"]
+    # THE EXACT NUMBER, not "at least".
+    assert body["disclosures"] == expected_disclosures
+    assert body["maximum_disclosures"] == tc.MAX_DISCLOSURES
+    # THE TWO OLDER CEILINGS ARE INSIDE THEIR LIMITS HERE, which is the whole
+    # reason a third one had to exist. Asserted, not implied.
+    assert body["candidates"] == 0
+    assert body["candidate_quote_bytes"] == 0
+
+    # RESPONSE SIZE — the measurement that is the point of the ceiling.
+    assert len(response.content) < 2048, len(response.content)
+    # And a smoke bound on the lock hold, written loose for the reason the C-2
+    # equivalent is: this is a shared machine, not a benchmark.
+    assert elapsed < 5.0, elapsed
+    # REFUSED WHOLE. No note, no proposal.
+    assert _notes(client, experiment_id) == []
+    assert _proposals(client, experiment_id) == []
+
+
+def test_the_disclosure_ceiling_is_reached_by_ABSTENTIONS_AND_CLARIFICATIONS_TOGETHER():
+    """One combined count, so neither axis can be filled to just under its own
+    share and then the other.
+
+    ``routes._MAX_PROPOSALS_PER_RECORD``'s comment names this failure shape: *"a
+    bound on rows that a client can defeat by making each row large is not a
+    bound"*. The same applies to two bounds on two halves of one list.
+
+    MUTATION: checking ``len(abstentions) > MAX_DISCLOSURES or len(clarifications) >
+    MAX_DISCLOSURES`` instead of the sum turns this RED.
+    """
+    # ONE segment — so `MAX_SEGMENTS` cannot be what refuses it — holding 1,100
+    # non-kelvin temperatures and 1,100 references to a run this record does not
+    # have. Each half is comfortably UNDER the ceiling; the sum is over it.
+    half = 1100
+    text = ("temperature 1 C " * half) + ("run zzz here " * half)
+    assert len(_encode(text)) <= routes._MAX_TRANSCRIPT_BYTES
+    assert len(tc.segment_transcript(text)) == 1
+    with pytest.raises(tc.TranscriptTooDense) as raised:
+        _read(text)
+    refusal = raised.value
+    # Neither half reaches the ceiling; the sum passes it.
+    assert half < tc.MAX_DISCLOSURES
+    assert refusal.disclosures == 2 * half == 2200
+    assert refusal.disclosures > tc.MAX_DISCLOSURES
+    # And it is the DISCLOSURE ceiling that bound, not one of the other two.
+    assert refusal.candidates <= tc.MAX_CANDIDATES
+    assert refusal.candidate_quote_bytes <= tc.MAX_CANDIDATE_QUOTE_BYTES
+
+
+def test_the_worst_legitimate_disclosure_load_is_admitted():
+    """The case `MAX_DISCLOSURES`' own comment names as the headroom it must keep.
+
+    A transcript at the SEGMENT ceiling whose every sentence is maximally
+    ambiguous: an absorption-edge mention, a non-kelvin temperature, and BOTH
+    refusal kinds for two of the three rules that can refuse one. Six disclosures a
+    sentence, 600 in total, ADMITTED.
+
+    It also reads exactly `MAX_CANDIDATES` candidates, which is admitted by the
+    narrowest possible margin on a DIFFERENT axis. That is a coincidence of this
+    fixture and is asserted so it is visible rather than surprising.
+
+    MUTATION: lowering `MAX_DISCLOSURES` to 600 turns this RED, which is the
+    headroom being real rather than asserted.
+    """
+    sentence = (
+        "the temperature was 425 K, maybe 430 K at the end, then 500 K and "
+        "the temperature was 20 C at the K-edge and "
+        "the scan started 2026-01-01T00:00:00Z, maybe 2026-01-02T00:00:00Z at the "
+        "end, then 2026-01-03T00:00:00Z and it ended 2026-02-01T00:00:00Z, "
+        "maybe 2026-02-02T00:00:00Z at the end, then 2026-02-03T00:00:00Z."
+    )
+    one = _read(sentence)
+    assert len(tc.segment_transcript(sentence)) == 1
+    assert len(one.abstentions) == 6
+    assert sorted({entry.kind for entry in one.abstentions}) == [
+        "implicit_only_subject",
+        "temperature_not_in_kelvin",
+        "trailing_text_after_further_values",
+        "unhedged_further_values",
+    ]
+
+    text = " ".join([sentence] * 100)
+    assert len(_encode(text)) <= routes._MAX_TRANSCRIPT_BYTES
+    assert len(tc.segment_transcript(text)) == tc.MAX_SEGMENTS
+    reading = _read(text)
+    assert len(reading.abstentions) + len(reading.clarifications) == 600
+    assert 600 <= tc.MAX_DISCLOSURES
+    assert len(reading.candidates) == tc.MAX_CANDIDATES == 500
+
+
+def test_the_three_ceilings_share_one_error_and_all_three_counts_are_always_served(
+    client, experiment_id
+):
+    """One refusal, one error string, three measured counts beside three ceilings.
+
+    A client that branches on the reason rather than on the numbers would have to
+    learn a third error name in order to do nothing different — all three are the
+    same decision and the same remedy. What it must be able to do is see WHICH
+    ceiling bound, and that is readable from the body.
+
+    MUTATION: omitting `disclosures`/`maximum_disclosures` from the candidate-ceiling
+    refusal turns this RED.
+    """
+    run = _make_run(client, experiment_id)
+    keys = {
+        "error",
+        "message",
+        "candidates",
+        "maximum_candidates",
+        "candidate_quote_bytes",
+        "maximum_candidate_quote_bytes",
+        "disclosures",
+        "maximum_disclosures",
+    }
+    # (1) the COUNT ceiling, (2) the BYTE ceiling, (3) the DISCLOSURE ceiling.
+    for label, text in (
+        ("count", _one_segment(", maybe ")),
+        ("bytes", _bytes_only()),
+        ("disclosures", _disclosure_flood("temperature 1 C ")),
+    ):
+        response = _finalize(client, experiment_id, text, run_id=run["id"])
+        assert response.status_code == 422, (label, response.text)
+        body = response.json()
+        assert body["error"] == "transcript_too_dense", label
+        assert set(body) == keys, (label, sorted(set(body) ^ keys))
+        # Every count is a measured integer, including the ones inside their limit.
+        for name in ("candidates", "candidate_quote_bytes", "disclosures"):
+            assert isinstance(body[name], int), (label, name)
+        assert body["maximum_candidates"] == tc.MAX_CANDIDATES
+        assert body["maximum_candidate_quote_bytes"] == tc.MAX_CANDIDATE_QUOTE_BYTES
+        assert body["maximum_disclosures"] == tc.MAX_DISCLOSURES
+        # Exactly the ceiling this payload was built to breach is over its limit.
+        over = {
+            name
+            for name, ceiling in (
+                ("candidates", tc.MAX_CANDIDATES),
+                ("candidate_quote_bytes", tc.MAX_CANDIDATE_QUOTE_BYTES),
+                ("disclosures", tc.MAX_DISCLOSURES),
+            )
+            if body[name] > ceiling
+        }
+        assert over == {
+            "count": {"candidates", "candidate_quote_bytes"},
+            "bytes": {"candidate_quote_bytes"},
+            "disclosures": {"disclosures"},
+        }[label], (label, over)
+    assert _notes(client, experiment_id) == []
+    assert _proposals(client, experiment_id) == []

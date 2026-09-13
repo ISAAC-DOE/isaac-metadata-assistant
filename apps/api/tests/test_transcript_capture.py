@@ -537,6 +537,12 @@ def test_every_ambiguity_kind_is_covered_by_the_published_policy():
         "temperature_not_in_kelvin",
         "implicit_only_subject",
         "unhedged_further_values",
+        # The THIRD restatement condition's own kind, added 2026-09-12 (second
+        # pass). It is a SIBLING and not a reuse of `unhedged_further_values`
+        # because that reason says the value was unhedged, and a terminal refusal's
+        # value IS hedged — serving it would publish a reason contradicted by the
+        # quote beside it.
+        "trailing_text_after_further_values",
         "unmatched_text",
     } == published
 

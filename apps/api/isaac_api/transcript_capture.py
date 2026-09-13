@@ -58,10 +58,22 @@ case is recorded in :data:`AMBIGUITY_POLICY`:
   run's instant as alternative values for the labelled field — each with a
   ``rule`` string asserting the sentence had restated the quantity. **That is
   strictly worse than the omission it replaced: an omission loses a reading, an
-  assertion invents one**, and §5 forbids the second in terms. The gate is
+  assertion invents one**, and §5 forbids the second in terms. ~~The gate is
   :data:`_HEDGE_BRIDGE`, and the invariant is that a hedging connective from a
   closed list must sit immediately between the two values with nothing else in
-  the gap.
+  the gap.~~ — **that was ONE of the gate's conditions, and the gate has had
+  THREE since 2026-09-12 (second pass).** Each was added because the previous set
+  was measured admitting a fabrication: (1) :data:`_HEDGE_BRIDGE`, a hedging
+  connective from a closed list immediately between the two values with nothing
+  else in the gap, six of the eleven admitted only behind an explicit ``or``;
+  (2) :data:`_UNIT_TERMINATORS`, the unit is the whole unit, so ``3 K/min`` is
+  never read as 3 kelvin; (3) :data:`_STATEMENT_END`, a restatement behind a BARE
+  hedge must END the statement, so ``maybe 3 K of drift`` is not read as a
+  temperature. **A refusal by any of the three is DISCLOSED** — the first two as
+  ``unhedged_further_values``, the third as
+  ``trailing_text_after_further_values`` — which is what makes the omission
+  §5-acceptable where the assertion was not. What all three leave open is
+  measured and named in :data:`_RESTATEMENT_RESIDUE`, and is NOT claimed closed.
   Note what is still refused: ``[425, 430]`` is never constructed. That asserts a
   continuous interval nobody stated, and the official schema's only uncertainty
   representation is ``$.descriptors.outputs[].descriptors[].uncertainty``, which
@@ -109,6 +121,7 @@ __all__ = [
     "AMBIGUITY_POLICY",
     "MAX_CANDIDATES",
     "MAX_CANDIDATE_QUOTE_BYTES",
+    "MAX_DISCLOSURES",
     "MAX_SEGMENTS",
     "OUTCOME_ABSTENTION",
     "OUTCOME_CLARIFICATION",
@@ -144,11 +157,17 @@ class TranscriptTooDense(Exception):
     idiom: ``notes.UnsupportedNote`` is raised by the model and becomes a typed
     ``422`` at the route.
 
-    It carries the EXACT numbers rather than "at least" ones. Both are known
+    It carries the EXACT numbers rather than "at least" ones. All THREE are known
     exactly before any candidate is constructed, because locating the matches and
     de-duplicating the values is cheap and building
     :class:`~.providers.extraction.FieldCandidate` objects is not — see
     :func:`_segment_readings`.
+
+    **IT IS RAISED WHEN ANY ONE OF THE THREE CEILINGS IS EXCEEDED, AND IT ALWAYS
+    CARRIES ALL THREE MEASURED COUNTS**, including the two that are inside their
+    ceilings. That is not padding: a client told only the number that bound cannot
+    tell a transcript that is marginal on one axis from one that is far over on
+    another, and every one of the three is measured by then anyway.
     """
 
     def __init__(
@@ -156,18 +175,23 @@ class TranscriptTooDense(Exception):
         *,
         candidates: int,
         candidate_quote_bytes: int,
+        disclosures: int,
         maximum_candidates: int,
         maximum_candidate_quote_bytes: int,
+        maximum_disclosures: int,
     ) -> None:
         self.candidates = candidates
         self.candidate_quote_bytes = candidate_quote_bytes
+        self.disclosures = disclosures
         self.maximum_candidates = maximum_candidates
         self.maximum_candidate_quote_bytes = maximum_candidate_quote_bytes
+        self.maximum_disclosures = maximum_disclosures
         super().__init__(
             f"this transcript reads {candidates} candidates carrying "
-            f"{candidate_quote_bytes} quoted bytes; the ceilings are "
-            f"{maximum_candidates} candidates and "
-            f"{maximum_candidate_quote_bytes} quoted bytes"
+            f"{candidate_quote_bytes} quoted bytes and reports {disclosures} "
+            f"disclosures; the ceilings are {maximum_candidates} candidates, "
+            f"{maximum_candidate_quote_bytes} quoted bytes and "
+            f"{maximum_disclosures} disclosures"
         )
 
 #: Named on every candidate this module produces. It is NOT
@@ -251,6 +275,67 @@ MAX_CANDIDATES = 500
 #: an import would be the circularity, and hard-coding ``1048576`` would lose the
 #: derivation a reader needs.
 MAX_CANDIDATE_QUOTE_BYTES = 4 * 256 * 1024
+
+#: The largest number of DISCLOSURES — abstentions plus clarifications — one
+#: finalized transcript may report.
+#:
+#: **THE THIRD CEILING, AND IT EXISTS BECAUSE THE FIRST TWO MEASURABLY DID NOT
+#: BOUND IT.** Both bound the CANDIDATE list, and they are fed from inside
+#: ``read_transcript``'s ``if not settled: continue`` — so neither has ever seen an
+#: abstention or a clarification, which are appended one per regex MATCH.
+#: ``MAX_SEGMENTS`` does not help, because punctuation-free ASR emits ONE segment.
+#: Measured at ``bce43f19``, on legal single-segment transcripts sized at exactly
+#: ``routes._MAX_TRANSCRIPT_BYTES``:
+#:
+#: ==================================  ========  =====================  ==========
+#: payload                             bytes     disclosures            serialised
+#: ==================================  ========  =====================  ==========
+#: ``"temperature 1 C "`` x 16,384     262,144   16,384 abstentions     ~5.1 MB
+#: ``"run zzz at 1 K "`` x 17,476      262,140   17,476 clarifications  ~4.3 MB
+#: ==================================  ========  =====================  ==========
+#:
+#: So the 165 MB the first two ceilings closed became ~5 MB, still assembled and
+#: serialised inside ``record_lock``. Smaller is not bounded.
+#:
+#: **THE NUMBER IS A JUDGEMENT, NOT A MEASUREMENT, AND SAYING SO IS PART OF IT** —
+#: the same disclosure ``MAX_CANDIDATES`` and ``routes._MAX_PROPOSALS_PER_RECORD``
+#: make, for the same reason. Nothing here has measured a response-assembly or
+#: lock-hold cost at any disclosure count on the deployed pod, so no figure in this
+#: comment is derived from one.
+#:
+#: What it IS derived from is the worst LEGITIMATE case it must still admit, and
+#: that case is MEASURED rather than reasoned
+#: (``test_the_worst_legitimate_disclosure_load_is_admitted``): a transcript at the
+#: segment ceiling whose every sentence is maximally ambiguous — an absorption-edge
+#: mention, a non-kelvin temperature, and BOTH refusal kinds for two of the three
+#: rules that can refuse — reports **6 disclosures per sentence and 600 in total**,
+#: and is ADMITTED. (That transcript also reads **500** candidates, which is
+#: ``MAX_CANDIDATES`` exactly, so it is admitted by the narrowest possible margin on
+#: a different axis. The coincidence is named rather than relied on.)
+#:
+#: **THE 600 IS NOT A BOUND BY CONSTRUCTION AND MUST NOT BE READ AS ONE.** The two
+#: RESTATEMENT-refusal kinds are deduplicated per segment per rule, so those are
+#: bounded at ``MAX_SEGMENTS`` × 3 restatement-carrying rules × 2 kinds = 600
+#: whatever a transcript says. ``temperature_not_in_kelvin`` and every run
+#: clarification are **not**: they are appended one per regex MATCH, which is
+#: exactly how the 16,384 and 17,476 above arise. A sentence stating six
+#: temperatures in celsius reports six. So the total has no construction bound at
+#: all, and this constant is the only thing standing where one is needed.
+#:
+#: **WHAT IT DOES NOT BOUND, NAMED SO THE NEXT SLICE DOES NOT HAVE TO FIND IT.** It
+#: bounds the COUNT, not the per-entry SIZE. An abstention's ``reason`` is a shared
+#: literal and its ``quote`` is a short label-anchored match, but a
+#: ``Clarification`` carries ``options`` — one entry per run of the record — so the
+#: served size of a clarification grows with the record's run count, which this
+#: constant cannot see. At the ceiling with a heavily-run record that is a larger
+#: response than the arithmetic above suggests. It is a bound, and it is not the
+#: only bound that axis would want.
+#:
+#: **PER-SEGMENT DEDUPLICATION WAS CONSIDERED AND IS NOT THIS FIX**, and the reason
+#: is worth keeping: it takes the first payload above to one disclosure, and
+#: ``"temperature 1 C temperature 2 C …"`` with distinct numbers still yields
+#: ~16,000. It reduces without bounding, and it would read as a bound.
+MAX_DISCLOSURES = 2000
 
 OUTCOME_CLARIFICATION = "clarification"
 OUTCOME_NEEDS_REVIEW = "needs_review"
@@ -403,18 +488,41 @@ AMBIGUITY_POLICY: tuple[dict[str, str], ...] = (
         "rule": (
             "A sentence states more than one value of the same form for one "
             "field, and only the labelled one was read. A second value is read "
-            "as an alternative for the same field only when BOTH hold: a hedging "
-            "word from a closed list links it to the first with nothing else in "
-            "the gap — 'maybe', 'perhaps', 'and again', 'alternatively', a bare "
-            "'or', or an approximation behind an explicit 'or' such as 'or "
-            "about' — and the value is not part of a larger unit such as K/min. "
-            "Without both, a later value of the same form is usually a different "
+            "as an alternative for the same field only when THREE things hold, "
+            "and this row is the first two of them: a hedging word from a closed "
+            "list links it to the first with nothing else in the gap — 'maybe', "
+            "'perhaps', 'and again', 'alternatively', a bare 'or', or an "
+            "approximation behind an explicit 'or' such as 'or about' — and the "
+            "value is not part of a larger unit such as K/min. Without those "
+            "two, a later value of the same form is usually a different "
             "quantity: 'about 3 K above target' is an offset and 'or 3 K/min' is "
             "a ramp rate, and reading either as a temperature would invent a "
-            "value the transcript does not give. The withheld values are NOT "
+            "value the transcript does not give. The third condition has its own "
+            "row below. The withheld values are NOT "
             "quoted, counted or classified here, because not knowing what they "
             "are is the reason they were withheld; the sentence is reported so "
             "the scientist can read it and state any value they want recorded."
+        ),
+    },
+    {
+        "kind": "trailing_text_after_further_values",
+        "outcome": OUTCOME_ABSTENTION,
+        "rule": (
+            "The THIRD condition, and it is scoped: a further value linked by a "
+            "hedging word that stands ALONE — 'maybe 430 K', not 'or maybe 430 "
+            "K' — is read only when it ENDS the statement. Either the sentence "
+            "finishes after it, or the only thing following is another hedged "
+            "value that was itself read. When something else follows, the value "
+            "is not read: '425 K, maybe 3 K of drift' states a drift and not a "
+            "second temperature, and the difference between that and '425 K, "
+            "maybe 430 K and the atmosphere was dry nitrogen' is a judgement "
+            "about English that no rule here can make. So the same proxy refuses "
+            "both, and this disclosure is why that is acceptable — a value that "
+            "was not read is REPORTED, never dropped in silence, and the "
+            "sentence itself is kept verbatim as a note. Behind an explicit 'or' "
+            "this condition does not apply, because 'or' coordinates the new "
+            "value with the old one and so marks it as an alternative for the "
+            "same quantity grammatically rather than by position."
         ),
     },
     {
@@ -927,6 +1035,21 @@ _HEDGE_BRIDGE = re.compile(
     re.IGNORECASE,
 )
 
+#: THE SAME GAP, NARROWED TO BRANCH 2 — a bare hedge with no ``or`` in front of it.
+#:
+#: It exists so the THIRD condition below can ask WHICH BRANCH admitted a gap
+#: without picking apart a match object. Both are built from the one call
+#: ``_alternation(_BARE_HEDGES)``, so they cannot disagree about MEMBERSHIP; the
+#: surrounding shape is written twice, and
+#: ``test_the_bare_hedge_bridge_is_exactly_branch_two`` pins that the two agree, in
+#: BOTH directions, on every reviewed connective — a gap bridges here if and only
+#: if ``_HEDGE_BRIDGE`` admits it AND the connective came from ``_BARE_HEDGES``
+#: without an ``or``.
+_BARE_HEDGE_BRIDGE = re.compile(
+    rf",?{_H_SPACE}*(?:" + _alternation(_BARE_HEDGES) + rf"){_H_SPACE}*",
+    re.IGNORECASE,
+)
+
 #: THE SECOND HALF OF THE GATE: THE UNIT MUST BE THE WHOLE UNIT.
 #:
 #: A restatement pattern ends at its unit — ``3 K`` for the kelvin rule, the
@@ -964,61 +1087,290 @@ _HEDGE_BRIDGE = re.compile(
 #: patch.
 _UNIT_TERMINATORS: frozenset[str] = frozenset(",.;:!?)]}\"'")
 
-#: THE ONE FALSE-POSITIVE CLASS THIS GATE DOES NOT CLOSE, WRITTEN DOWN BECAUSE IT
-#: IS A §5 DEFECT AND A SILENT ONE.
+#: THE THIRD CONDITION: A RESTATEMENT BEHIND A **BARE** HEDGE MUST END THE
+#: STATEMENT. Added 2026-09-12 (second pass). It is the decision
+#: ``_RESTATEMENT_RESIDUE`` referred rather than took, and it is TAKEN here.
 #:
-#: A hedge from ``_BARE_HEDGES`` followed by a value with a complete unit and then
-#: a phrase that MODIFIES that value still reads. Measured at this head:
+#: **WHAT IT CLOSES.** A bare hedge, a COMPLETE unit, and then a phrase that
+#: MODIFIES the value — ``", maybe 3 K of drift"`` — satisfied both earlier
+#: conditions and proposed a drift figure as an absolute temperature, **with no
+#: abstention at all**. Four such sentences were measured; all four are now refused
+#: AND disclosed. They are pinned as CLOSED in
+#: ``test_transcript_capture_hedge_and_unit_gate.py``.
 #:
-#: ==========================================================  ==============
-#: sentence                                                    reads
-#: ==========================================================  ==============
-#: ``The temperature was 425 K, maybe 3 K of drift``           425 AND **3**
-#: ``The temperature was 425 K, maybe 3 K above target``       425 AND **3**
-#: ``The temperature was 425 K, perhaps 2 K of scatter``       425 AND **2**
+#: **TERMINAL MEANS ONE OF TWO THINGS, AND THE SECOND IS WHAT KEEPS CHAINING
+#: ALIVE.** After the value and its complete unit, either
+#:
+#: 1. NO WORD follows — the remainder of the segment is horizontal whitespace and
+#:    punctuation only — this predicate; or
+#: 2. another hedge bridge follows, introducing a further restatement that was
+#:    itself ACCEPTED. That is not a predicate over text, so it is not spelled
+#:    here: it is enforced in :func:`_segment_readings` as a walk inward from the
+#:    TAIL of the accepted chain, which is the only place the second clause is
+#:    decidable. A chain therefore survives whole or loses its tail; it is never
+#:    broken in the middle.
+#:
+#: **SCOPED TO THE BARE-HEDGE BRANCH, AND THE SCOPE IS THE WHOLE TRADE.** A
+#: UNIVERSAL terminal rule was implemented, measured and withdrawn by the previous
+#: slice on three counts. Scoping answers two of them and the third has since
+#: expired, which is why this is the same proxy with a smaller domain rather than a
+#: reversal of a reviewed decision:
+#:
+#: * ~~"it does not close the defect — ``425 K, about 3 K.`` is terminal and read
+#:   3"~~ — **EXPIRED, not answered.** That sentence was measured against a gate in
+#:   which ``about`` bridged BARE. It no longer does (``_OR_REQUIRED_HEDGES``), so
+#:   the row is refused by the FIRST condition and is in ``FALSE_RESTATEMENTS``
+#:   today. The objection was correct when it was written.
+#: * it cost SIX natural sentences their restatement. Scoped to bare hedges it
+#:   costs **five of those six** — all five use a bare ``maybe``; the sixth,
+#:   *"started A, or maybe B, I would have to check"*, sits behind an explicit
+#:   ``or`` and is untouched. **Those five are accepted losses**, on one condition
+#:   that is part of the decision rather than a bonus: every one of them is now
+#:   DISCLOSED (``trailing_text_after_further_values``) rather than silently
+#:   dropped. §5 ranks a disclosed omission above an assertion nobody made; it
+#:   ranks neither above a silent one.
+#: * it disarmed the C-2 byte-ceiling proof by taking ``_bytes_only()`` from five
+#:   candidates to ~~four~~ THREE — see :data:`_RESTATEMENT_RESIDUE` for the
+#:   corrected measurement. **Scoped, it does not, and that was MEASURED rather
+#:   than reasoned**: that payload's ``430 K`` is followed by ``", or perhaps "`` —
+#:   clause 2 above — and its ``435 K`` sits behind an explicit ``or``, so neither
+#:   is subject to this condition. The fixture still reads FIVE and
+#:   ``test_the_C1_GATE_AND_THE_C2_BYTE_CEILING_PROOF_ARE_COUPLED`` still fires.
+#:
+#: **THE PREDICATE IS "NO WORD FOLLOWS", NOT "AT MOST ONE TERMINATOR FOLLOWS",
+#: AND THE DIFFERENCE WAS MEASURED RATHER THAN CHOSEN.** The first spelling was
+#: ``{_H_SPACE}*[.;:!?]?{_H_SPACE}*`` — whitespace and at most one sentence
+#: terminator — and it refused two rows of
+#: ``test_what_may_follow_a_complete_unit``: ``"…maybe 430 K,"`` and
+#: ``"…maybe 430 K)"``, a trailing comma and a trailing bracket with **nothing
+#: after them**. Those cost a legitimate restatement and buy nothing, because what
+#: turns a hedged value into a different quantity is a PHRASE — *of drift*, *above
+#: target*, *per minute* — and punctuation alone carries none. So the set is the
+#: punctuation allowlist and the predicate is that the remainder holds no word.
+#:
+#: **THE PUNCTUATION SET IS :data:`_UNIT_TERMINATORS` ITSELF, REUSED DELIBERATELY
+#: AND NOT COPIED.** The two answer different questions — "is the unit complete?"
+#: over ONE following character, and "does the statement end here?" over the whole
+#: remainder — but both are asking which characters are not part of a claim about
+#: the value, and two hand-maintained copies of that answer would drift.
+#: ``test_the_statement_end_set_is_the_unit_terminator_set`` pins the identity, so
+#: widening one is visible as widening both. Note the direction of the risk is
+#: benign here: a character added to the set can only make this predicate ADMIT
+#: more, and the ratchet on ``_UNIT_TERMINATORS`` already refuses ``/``, ``^``,
+#: ``-``, ``·``, ``*``, ``×`` and ``%``.
+_STATEMENT_END = re.compile(
+    rf"(?:{_H_SPACE}|[" + re.escape("".join(sorted(_UNIT_TERMINATORS))) + r"])*"
+)
+
+
+def _statement_ends_after(text: str, position: int) -> bool:
+    """Whether nothing but horizontal whitespace and punctuation follows.
+
+    ``fullmatch``, never ``$``, for the reason :data:`_HEDGE_BRIDGE` gives: ``$``
+    also matches before a trailing newline, and the entire content of this
+    predicate is *"there is nothing after this"*.
+
+    ``position`` is :meth:`re.Match.end` — the end of the value AND its unit — not
+    ``end(1)``, which is the end of the number. The wrong one refuses every
+    restatement, because ``" K"`` is not a terminator either; a test pins both
+    offsets, exactly as it does for :func:`_unit_is_complete`.
+    """
+    return _STATEMENT_END.fullmatch(text[position:]) is not None
+
+#: The two kinds of restatement refusal this reader discloses, named rather than
+#: written as literals at the three sites that must agree: the gate that records
+#: them, the abstention that serves them, and :data:`AMBIGUITY_POLICY`.
+#:
+#: **THEY ARE TWO KINDS AND NOT ONE, BECAUSE ONE OF THEM WOULD HAVE BEEN A FALSE
+#: SENTENCE.** ``unhedged_further_values`` says a hedging word was missing, or the
+#: unit was not the whole unit. Neither is true of a terminal refusal: the hedge is
+#: present, the unit IS complete, and what withheld the value is the text that
+#: FOLLOWS it. Reusing the name would have published a reason contradicted by the
+#: quote sitting beside it, which is the defect class this module keeps finding.
+_KIND_UNHEDGED = "unhedged_further_values"
+_KIND_TRAILING = "trailing_text_after_further_values"
+
+#: The reason served for each, keyed by kind so the gate cannot record one and
+#: serve the other's sentence. ``{field_path}`` is the only substitution.
+#:
+#: **NEITHER REASON QUOTES, COUNTS, CLASSIFIES OR NAMES A UNIT FOR THE WITHHELD
+#: VALUES**, because not knowing what they are is the reason they were withheld.
+#: Note the second reason carries NO NUMERIC EXAMPLE, deliberately: every digit
+#: that would read naturally there ("3 K of drift") also appears in the measured
+#: sentences this closes, so an example would look like a leak of the withheld
+#: value and a test asserting it was not one would be asserting a coincidence.
+_REFUSAL_REASONS: dict[str, str] = {
+    _KIND_UNHEDGED: (
+        "This sentence states further values of the same form for {field_path}, "
+        "and they were not read. A second value is read only when a hedging word "
+        "links it to the first — 'maybe', 'perhaps', 'or maybe', 'or about' and "
+        "the like — and when it is not part of a larger unit such as K/min. "
+        "Without both, a later value of the same form is usually a different "
+        "quantity: a ramp rate, a step size, an offset from a setpoint. Nothing "
+        "is guessed and nothing is proposed for them; read the sentence and state "
+        "any value you want recorded on its own."
+    ),
+    _KIND_TRAILING: (
+        "This sentence states a further value of the same form for {field_path} "
+        "behind a hedging word, and it was not read because the sentence does not "
+        "stop there. A hedged second value is read only when it ENDS the "
+        "statement: either the sentence finishes after it, or the only thing "
+        "following is another hedged value that was itself read. Here something "
+        "else follows, and a value with a phrase after it is usually that "
+        "phrase's quantity — a drift, an offset from a target, a rate per minute "
+        "— rather than another statement of this field. Nothing is guessed and "
+        "nothing is proposed for it; read the sentence and state any value you "
+        "want recorded on its own."
+    ),
+}
+
+#: THE FALSE-POSITIVE CLASS THAT REMAINS AFTER ALL THREE CONDITIONS, WRITTEN DOWN
+#: BECAUSE IT IS A §5 DEFECT AND A SILENT ONE.
+#:
+#: ~~THE ONE FALSE-POSITIVE CLASS THIS GATE DOES NOT CLOSE … A hedge from
+#: ``_BARE_HEDGES`` followed by a value with a complete unit and then a phrase that
+#: MODIFIES that value still reads:~~
+#:
+#: ========================================================== ================
+#: sentence                                                   read at bce43f19
+#: ========================================================== ================
+#: ``The temperature was 425 K, maybe 3 K of drift``          425 AND **3**
+#: ``The temperature was 425 K, maybe 3 K above target``      425 AND **3**
+#: ``The temperature was 425 K, perhaps 2 K of scatter``      425 AND **2**
 #: ``The temperature was 425 K, alternatively 3 K per minute`` 425 AND **3**
-#: ==========================================================  ==============
+#: ========================================================== ================
 #:
-#: **IT IS STRUCTURAL, NOT AN OVERSIGHT, AND THE ARGUMENT IS WORTH KEEPING.** The
-#: difference between ``", maybe 3 K of drift"`` and ``", maybe 430 K and the
-#: atmosphere was dry nitrogen"`` is that the first phrase modifies the value and
-#: the second begins a new clause. That is a SEMANTIC distinction, and every
-#: mechanical proxy for it was measured and rejected:
+#: **CLOSED 2026-09-12 (second pass). All four now read 425 ALONE and each raises a
+#: ``trailing_text_after_further_values`` abstention**, and the four sentences are
+#: pinned as CLOSED — not deleted — in
+#: ``test_transcript_capture_hedge_and_unit_gate.py``, so nothing can quietly
+#: reopen them. The decision that closed them is
+#: :data:`_STATEMENT_END`'s second bullet: the SECOND of the four proxies below, the
+#: one the previous revision of this comment measured and then referred. It is
+#: struck rather than deleted because the proxies it rejected are still the reason
+#: the class below stays open.
 #:
-#: * **requiring the restatement to END the statement** closes all four rows, and
-#:   costs six natural sentences their restatement (*"…maybe 430 K, I am not
-#:   sure."*, *"…maybe 430 K at the end."*, *"…maybe 430 K according to the log."*,
-#:   *"…maybe 430 K and the atmosphere was dry nitrogen."*, *"…maybe 430 K on the
-#:   second scan."*, *"started A, or maybe B, I would have to check."*). It also
-#:   silently weakens an unrelated proof: ``_bytes_only()`` in
+#: **THE ARGUMENT FOR WHY IT WAS A DECISION AND NOT A PATCH IS UNCHANGED AND IS
+#: KEPT IN FULL.** The difference between ``", maybe 3 K of drift"`` and ``", maybe
+#: 430 K and the atmosphere was dry nitrogen"`` is that the first phrase modifies
+#: the value and the second begins a new clause. That is a SEMANTIC distinction,
+#: and every mechanical proxy for it was measured:
+#:
+#: * **requiring the restatement to END the statement, UNIVERSALLY** closes all
+#:   four rows, and costs six natural sentences their restatement (*"…maybe 430 K,
+#:   I am not sure."*, *"…maybe 430 K at the end."*, *"…maybe 430 K according to
+#:   the log."*, *"…maybe 430 K and the atmosphere was dry nitrogen."*, *"…maybe
+#:   430 K on the second scan."*, *"started A, or maybe B, I would have to
+#:   check."*). It also silently weakens an unrelated proof: ``_bytes_only()`` in
 #:   ``test_transcript_capture_ceilings.py`` needs FIVE candidates to exceed
-#:   ``MAX_CANDIDATE_QUOTE_BYTES`` and the terminal rule takes it to four
-#:   (999,996 B against a 1,048,576 B cap), so **the C-2 byte-ceiling test stops
-#:   firing** — the two fixes are coupled, which nobody expected;
+#:   ``MAX_CANDIDATE_QUOTE_BYTES`` and the universal rule takes it to ~~four
+#:   (999,996 B against a 1,048,576 B cap)~~ **THREE (750,000 B against a
+#:   1,048,576 B cap)**, so **the C-2 byte-ceiling test stops
+#:   firing** — the two fixes are coupled, which nobody expected. **STILL TRUE,
+#:   and still the reason the rule was not adopted universally**;
+#: * **THE INHERITED FIGURE IS NOT REPRODUCIBLE AT THIS HEAD AND IS CORRECTED
+#:   RATHER THAN CARRIED.** Measured 2026-09-12 by applying the mutation — drop
+#:   the bare-hedge scope, run the fixture — the universal rule takes
+#:   ``_bytes_only()`` to **THREE candidates and 750,000 quoted bytes**, not four
+#:   and 999,996. Both links of that payload's chain go: ``435 K`` for its own
+#:   trailing clause, and ``430 K`` because what follows it is then a bridge to a
+#:   refusal. **Why the earlier pair read four is NOT established here** — the
+#:   implementation it was measured on is not in this repository, so any account
+#:   of it would be a reconstruction. The CONCLUSION is unchanged, which is why
+#:   the figure matters less than the correction: three and four are both under
+#:   the 1,048,576 B cap, so the C-2 byte-ceiling proof stops firing either way.
 #: * **requiring terminality only behind a BARE hedge** closes all four rows and
-#:   keeps five of those six false negatives, because they all use bare ``maybe``;
+#:   keeps five of those six false negatives, because they all use bare ``maybe``.
+#:   **ADOPTED**, re-measured: it loses FIVE of the six (the sixth uses ``or
+#:   maybe``), every loss is disclosed, and ``_bytes_only()`` still reads five;
 #: * **a clause-break rule keyed on punctuation or a conjunction** admits
 #:   ``", maybe 3 K, ramping"``, measured — punctuation does not distinguish a new
-#:   clause from a trailing modifier;
+#:   clause from a trailing modifier. Not adopted;
 #: * **a denylist of modifier tails** (``of``, ``above``, ``per``, ``than``, …)
 #:   FAILS OPEN, which is the failure mode this reader has already shipped twice,
-#:   and would not even catch ``"colder than before"``.
+#:   and would not even catch ``"colder than before"``. Not adopted.
 #:
-#: So closing it is a DECISION about which error to prefer, not a patch, and it is
-#: recorded here rather than taken quietly. ``AMBIGUITY_POLICY``'s
-#: ``unhedged_further_values`` row does NOT disclose these, and cannot: a value was
-#: read, so nothing was withheld to report. What a scientist sees instead is the
-#: candidate's own ``rule`` string, which states both gate conditions, so the
-#: proposal can be recognised and rejected.
+#: ~~``AMBIGUITY_POLICY``'s ``unhedged_further_values`` row does NOT disclose
+#: these, and cannot: a value was read, so nothing was withheld to report.~~ —
+#: that was the state of affairs it described, and it is now a
+#: ``trailing_text_after_further_values`` row of its own. Reusing the old kind
+#: would have served a reason saying the value was UNHEDGED beside a quote showing
+#: it hedged.
+#:
+#: =========================================================================
+#: WHAT IS STILL OPEN, AND IT IS NOT ROUNDED DOWN
+#: =========================================================================
+#:
+#: The third condition is scoped to the BARE-hedge branch, so **the same shape
+#: behind an explicit ``or`` still fabricates.** Measured in-process after the fix,
+#: which is how these five got here — they are not inherited:
+#:
+#: ============================================================== ==============
+#: sentence                                                       still reads
+#: ============================================================== ==============
+#: ``The temperature was 425 K or 3 K of drift``                  425 AND **3**
+#: ``The temperature was 425 K or 3 K above target``              425 AND **3**
+#: ``The temperature was 425 K, or about 3 K of drift``           425 AND **3**
+#: ``The temperature was 425 K, or maybe 3 K of drift``           425 AND **3**
+#: ``The temperature was 425 K, or perhaps 2 K of scatter``       425 AND **2**
+#: ============================================================== ==============
+#:
+#: **THE HONEST STATEMENT IS THAT THE CLASS IS NARROWED, NOT CLOSED**, and one
+#: qualification cuts each way. Against: every row above is a §5 false positive of
+#: exactly the shape the four closed rows were, and it is silent — no abstention.
+#: For: all five were CONSTRUCTED here to probe the boundary, and none is natural
+#: dictation, which is why the previous slice's corpus — assembled from sentences a
+#: scientist might actually say — contained none of them. *"425 K, maybe 3 K of
+#: drift"* is something a person says; *"425 K, or about 3 K of drift"* is barely
+#: English. That is an argument about LIKELIHOOD and not about correctness, and it
+#: is recorded as such.
+#:
+#: **WHY IT WAS NOT ALSO CLOSED, stated so the next slice does not re-derive it —
+#: AND ONE OF THE TWO REASONS TURNED OUT TO BE WEAKER THAN IT LOOKED.**
+#:
+#: * Extending condition 3 to the ``or``-PREFIXED-HEDGE branch (``or about``, ``or
+#:   maybe``, …) disarms C-2: measured by mutation, ``_bytes_only()`` drops from
+#:   five candidates to THREE. That closes rows 3–5 and is the first bullet above.
+#:   **This one is a real obstacle and it is a fixture coupling, not a product
+#:   fact** — solve the coupling first.
+#: * Extending it to the BARE-``or`` branch ALONE is **CHEAPER THAN THE FIRST
+#:   REVISION OF THIS PARAGRAPH SAID, and the measurement is recorded because the
+#:   paragraph dismissed it on a reason that does not hold.** ~~"a split whose only
+#:   justification would be which branch a test fixture happens to use"~~ —
+#:   measured by mutation (add a bare-``or`` bridge to condition 3's scope, 2026-09-12):
+#:   rows 1 and 2 CLOSE and disclose, rows 3–5 are untouched, *"The temperature was
+#:   425 K or 430 K"* still reads both values, and **``_bytes_only()`` still reads
+#:   FIVE** — so C-2 is not involved at all. Its real cost is the shape *"425 K or
+#:   430 K at the end"*, which would become a disclosed omission, and its real
+#:   objection is that the resulting rule is ASYMMETRIC: a bare hedge and a bare
+#:   ``or`` would require terminality while ``or`` + hedge would not, for no reason
+#:   a reader could state. **It was not taken because it is outside the decision
+#:   this slice was given, not because it is expensive**, and that distinction is
+#:   the point of recording it.
 _RESTATEMENT_RESIDUE: tuple[str, ...] = (
+    "The temperature was 425 K or 3 K of drift",
+    "The temperature was 425 K or 3 K above target",
+    "The temperature was 425 K, or about 3 K of drift",
+    "The temperature was 425 K, or maybe 3 K of drift",
+    "The temperature was 425 K, or perhaps 2 K of scatter",
+)
+
+#: The four sentences ``_RESTATEMENT_RESIDUE`` carried until 2026-09-12 (second
+#: pass), kept so that "the residue is closed" is a checkable claim rather than an
+#: absence. Each reads ONE value and raises one
+#: ``trailing_text_after_further_values`` abstention; a test asserts exactly that,
+#: and a second test asserts this tuple has not shrunk.
+_RESTATEMENT_RESIDUE_CLOSED: tuple[str, ...] = (
     "The temperature was 425 K, maybe 3 K of drift",
     "The temperature was 425 K, maybe 3 K above target",
     "The temperature was 425 K, perhaps 2 K of scatter",
     "The temperature was 425 K, alternatively 3 K per minute",
 )
 
-#: A SEPARATE, PRE-EXISTING DEFECT THIS SLICE DELIBERATELY DID NOT FIX, with the
-#: measurements, so the next slice does not have to find it again.
+#: A SEPARATE, PRE-EXISTING DEFECT, **CLOSED 2026-09-12 (second pass) BY
+#: :data:`MAX_DISCLOSURES`.** The measurements are kept in full, because they are
+#: what the ceiling is set against and because the reasoning for referring it is
+#: the more instructive half.
 #:
 #: ``MAX_CANDIDATES`` and ``MAX_CANDIDATE_QUOTE_BYTES`` bound the CANDIDATE list
 #: only. ``abstentions`` and ``clarifications`` are appended per regex MATCH, above
@@ -1038,27 +1390,44 @@ _RESTATEMENT_RESIDUE: tuple[str, ...] = (
 #: the 165 MB the ceilings closed became ~5 MB, which is smaller and is **not a
 #: bound**.
 #:
-#: **WHY IT IS REFERRED AND NOT FIXED HERE.** It is a resource bound, not a §5
-#: honesty defect, so it does not belong in the same slice as the gate; a correct
-#: fix needs a third count folded into the pre-construction check (or its own
-#: ``MAX_DISCLOSURES``) with the same refuse-whole semantics, which means a new
-#: field on ``TranscriptTooDense`` and therefore an edit to the 422 body in
-#: ``routes.py`` — a manifest-listed file whose snapshot this slice must not drift.
+#: **BOTH NUMBERS REPRODUCED EXACTLY** when this ceiling was built — 16,384 and
+#: 17,476 on the same two payloads at the same byte ceiling — which is the reason
+#: the ceiling could be set against them rather than against a guess.
+#:
+#: ~~**WHY IT IS REFERRED AND NOT FIXED HERE.** It is a resource bound, not a §5
+#: honesty defect, so it does not belong in the same slice as the gate;~~ — the
+#: separation held for exactly one slice. The specification it then gave was
+#: followed to the letter and is worth keeping as the record of a referral that
+#: worked: *"a third count folded into the pre-construction check (or its own*
+#: ``MAX_DISCLOSURES``) *with the same refuse-whole semantics, which means a new
+#: field on* ``TranscriptTooDense`` *and therefore an edit to the 422 body in*
+#: ``routes.py`` *— a manifest-listed file whose snapshot this slice must not
+#: drift."* All four of those are what shipped; the snapshot drift is reported
+#: rather than regenerated, by the same reasoning.
+#:
 #: **Per-segment deduplication was considered and is NOT the fix**: it takes the
 #: first payload to one disclosure, but ``"temperature 1 C temperature 2 C …"`` with
 #: distinct numbers still yields ~16,000, so it reduces without bounding and would
-#: read as a fix.
+#: read as a fix. **It was not adopted, not even as an optimisation beside the
+#: bound**, because a reduction sitting next to a ceiling is the thing a future
+#: reader mistakes for the ceiling.
 #:
-#: **This slice does not enlarge it.** The one disclosure class added here,
-#: ``unhedged_further_values``, is deduplicated to at most one entry per segment per
-#: rule and is therefore bounded by ``MAX_SEGMENTS`` x ``len(_RULES)`` = 500 by
-#: construction, independent of transcript content.
+#: **Neither slice enlarged it.** The two restatement-refusal classes —
+#: ``unhedged_further_values`` and ``trailing_text_after_further_values`` — are
+#: deduplicated to at most one entry per segment per rule per KIND and are
+#: therefore bounded by ``MAX_SEGMENTS`` × the 3 restatement-carrying rules × 2
+#: kinds = 600 by construction, independent of transcript content.
+#: ``MAX_SEGMENTS`` × ``len(_RULES)`` = 500 was the looser figure quoted here
+#: before; both are upper bounds and neither is the measured worst legitimate
+#: total, which is also 600 and is composed differently — see
+#: :data:`MAX_DISCLOSURES`.
 _DISCLOSURE_CEILING_GAP = (
-    "abstentions and clarifications are not bounded by either density ceiling; "
-    "measured at 16,384 abstentions (~5.1 MB) and 17,476 clarifications (~4.3 MB) "
-    "on single-segment transcripts at the transcript byte ceiling. Referred, not "
-    "fixed: see this constant's own comment for the specification and for why "
-    "per-segment deduplication is not a bound."
+    "CLOSED 2026-09-12 by MAX_DISCLOSURES, which refuses the whole transcript at "
+    "the route before any note is stored. It was measured OPEN at 16,384 "
+    "abstentions (~5.1 MB) and 17,476 clarifications (~4.3 MB) on single-segment "
+    "transcripts at the transcript byte ceiling, with neither density ceiling "
+    "firing; both figures reproduced exactly when the bound was built. See this "
+    "constant's own comment for why per-segment deduplication was not the fix."
 )
 
 #: The absorbing element / absorption edge, which this build records as implicit,
@@ -1108,19 +1477,23 @@ class _Rule:
     ``restated_sentence`` exists because a candidate's ``rule`` is how a scientist
     checks WHY a value was read. ``sentence`` claims the label and the value appeared
     in one clause, which is not true of a restatement, so a restatement must not
-    borrow it. **And it must state the MECHANISM, not just the conclusion** — BOTH
-    conditions: that a qualifying hedging word sat immediately between the two
-    values, and that the unit was the whole unit. Together those are the whole of
-    why the second value was readable. These strings have been wrong twice, and
-    both corrections are recorded because each was a claim about the transcript the
+    borrow it. **And it must state the MECHANISM, not just the conclusion** — ALL
+    THREE conditions: that a qualifying hedging word sat immediately between the
+    two values, that the unit was the whole unit, and — when that hedging word
+    stood alone rather than behind an explicit ``or`` — that the restatement ended
+    the statement. Together those are the whole of why the second value was
+    readable. These strings have been wrong THREE times, and every correction is
+    recorded because each was a claim about the transcript the
     reader had not checked: the first version asserted only that "the same sentence
     restates the …", false on six measured sentences; the second added the hedge and
     called it "the ONLY reason", which was true of a gate half the size of the real
     one and false on eleven further measured sentences — eight of them through
     ``about``/``around``/``roughly``/``approximately``/``possibly``/``again``, which
-    modify what FOLLOWS them, and three through a compound unit. See
-    :data:`_HEDGE_BRIDGE`, :data:`_OR_REQUIRED_HEDGES` and
-    :data:`_UNIT_TERMINATORS`.
+    modify what FOLLOWS them, and three through a compound unit; the third said
+    "TWO conditions" and was false on the four sentences ``_RESTATEMENT_RESIDUE``
+    used to carry. See
+    :data:`_HEDGE_BRIDGE`, :data:`_OR_REQUIRED_HEDGES`,
+    :data:`_UNIT_TERMINATORS` and :data:`_STATEMENT_END`.
     """
 
     name: str
@@ -1145,8 +1518,9 @@ _RULES: tuple[_Rule, ...] = (
         ),
         restatement=_TEMPERATURE_K_RESTATED,
         restated_sentence=(
-            "the same sentence restates the temperature, and TWO conditions both "
-            "held. First, a HEDGING WORD sits immediately between the number the "
+            "the same sentence restates the temperature, and THREE conditions "
+            "all held. First, a HEDGING WORD sits immediately between the number "
+            "the "
             "word 'temperature' introduced and this one, with nothing else at all "
             "in the gap — 'maybe', 'perhaps', 'alternatively' or 'and again' on "
             "their own, a bare 'or', or an approximation behind an explicit 'or' "
@@ -1155,9 +1529,15 @@ _RULES: tuple[_Rule, ...] = (
             "modify what follows them rather than hedging what came before: "
             "'about 3 K above target' states an offset, not a temperature. "
             "Second, K or kelvin is the WHOLE unit — '3 K/min' is a ramp rate and "
-            "is not read, however it is introduced. Without both conditions a "
+            "is not read, however it is introduced. Third, when that hedging word "
+            "stood ALONE rather than behind an explicit 'or', this value ENDED the "
+            "statement — the sentence finished after it, or the only thing "
+            "following was another hedged value that was itself read — because "
+            "'maybe 3 K of drift' states a drift and not a temperature. Without "
+            "all three a "
             "later number followed by K is a different quantity — a ramp rate, a "
-            "step size, a setpoint — and is not read. It is not a correction, not "
+            "step size, a setpoint, an offset — and is not read. It is not a "
+            "correction, not "
             "a preference, and NOT a range or an interval, neither of which "
             "anybody stated"
         ),
@@ -1173,7 +1553,8 @@ _RULES: tuple[_Rule, ...] = (
         ),
         restatement=_INSTANT_RESTATED,
         restated_sentence=(
-            "the same sentence restates the start, and TWO conditions both held. "
+            "the same sentence restates the start, and THREE conditions all "
+            "held. "
             "First, a HEDGING WORD sits immediately between the instant the start "
             "word introduced and this one, with nothing else at all in the gap — "
             "'maybe', 'perhaps', 'alternatively' or 'and again' on their own, a "
@@ -1182,7 +1563,11 @@ _RULES: tuple[_Rule, ...] = (
             "it most naturally means the scan was REPEATED, which is a different "
             "run's instant; nor is a bare 'about', which introduces an "
             "arithmetic base rather than a start. Second, the instant is complete "
-            "and stands on its own. Without both conditions a later instant "
+            "and stands on its own. Third, when that hedging word stood ALONE "
+            "rather than behind an explicit 'or', this instant ENDED the "
+            "statement — the sentence finished after it, or the only thing "
+            "following was another hedged instant that was itself read. Without "
+            "all three a later instant "
             "belongs to something else — the end of this run, or another run "
             "entirely — and is not read. It is taken exactly as written, and it "
             "is not a correction and not a range"
@@ -1199,14 +1584,18 @@ _RULES: tuple[_Rule, ...] = (
         ),
         restatement=_INSTANT_RESTATED,
         restated_sentence=(
-            "the same sentence restates the end, and TWO conditions both held. "
+            "the same sentence restates the end, and THREE conditions all held. "
             "First, a HEDGING WORD sits immediately between the instant the end "
             "word introduced and this one, with nothing else at all in the gap — "
             "'maybe', 'perhaps', 'alternatively' or 'and again' on their own, a "
             "bare 'or', or an approximation behind an explicit 'or' such as 'or "
             "about'. A BARE 'again' or 'about' is NOT enough, for the reason the "
             "start rule gives. Second, the instant is complete and stands on its "
-            "own. Without both conditions a later instant belongs to something "
+            "own. Third, when that hedging word stood ALONE rather than behind an "
+            "explicit 'or', this instant ENDED the statement — the sentence "
+            "finished after it, or the only thing following was another hedged "
+            "instant that was itself read. Without all three a later instant "
+            "belongs to something "
             "else and is not read. It is taken exactly as written, and it is not "
             "a correction and not a range"
         ),
@@ -1286,7 +1675,7 @@ class _Reading:
 
 def _segment_readings(
     segment: Segment,
-) -> tuple[list["_Reading"], tuple[tuple[str, str], ...]]:
+) -> tuple[list["_Reading"], tuple[tuple[str, str, str], ...]]:
     """Every value one segment states, plus the rules whose restatements it REFUSED.
 
     Pure and cheap. It allocates no candidate and formats no ``rule`` sentence,
@@ -1305,11 +1694,17 @@ def _segment_readings(
     the silent discard rule (4) exists to end, reached through the fix instead of
     through the defect.
 
-    It reports, per rule, ONE short quote — the rule's own label-anchored match,
-    the statement whose field had further values withheld. Deduplicated to at most
-    one entry per segment per rule, so the disclosure is bounded by
-    ``MAX_SEGMENTS`` × the rule count by construction and cannot be inflated by a
-    transcript that repeats a refusable phrase.
+    It reports, per rule and per REFUSAL KIND, ONE short quote — the rule's own
+    label-anchored match, the statement whose field had further values withheld.
+    Deduplicated to at most one entry per segment per rule per kind, so the
+    disclosure is bounded by ``MAX_SEGMENTS`` × the rules that HAVE a restatement
+    × 2 = 600 by construction and cannot be inflated by a transcript that repeats a
+    refusable phrase. (Three of the five rules carry a ``restatement``; a rule
+    without one can refuse nothing. ``MAX_SEGMENTS`` × ``len(_RULES)`` = 500 is the
+    looser bound this comment used to give, and it is also true — a bound that
+    ignores the per-kind factor and the restatement-less rules happens to land
+    between the two. Both are stated because the reader below serves the
+    ``MAX_DISCLOSURES`` ceiling and a bound nobody can re-derive is not a bound.)
 
     **THE QUOTE IS THE LABELLED MATCH AND NOT THE SEGMENT, AND AN EXISTING TEST IS
     WHY.** The first version quoted ``segment.text``, which on the 27,025-byte
@@ -1322,7 +1717,7 @@ def _segment_readings(
     does NOT include the withheld values — this reader does not know what they are,
     which is the whole reason they were withheld.
     """
-    refused: dict[str, str] = {}
+    refused: dict[tuple[str, str], str] = {}
     # PASS ONE — EVERY label-anchored match of every rule, not just the first.
     #
     # ~~`match = rule.pattern.search(segment.text)`~~ — CORRECTED. `search`
@@ -1367,25 +1762,35 @@ def _segment_readings(
         # the label still PRECEDES the value exactly as the rule's own pattern
         # requires ("At 300 K the temperature was 425 K" reads 425 alone).
         #
-        # AND GATED ON TWO CONDITIONS, BOTH REQUIRED, which together are the
-        # correction of 2026-09-12. Ungated, this scan read the whole remainder of
+        # AND GATED ON THREE CONDITIONS, ALL REQUIRED, which together are the
+        # corrections of 2026-09-12 (first and second pass). Ungated, this scan
+        # read the whole remainder of
         # the segment for a bare value form and proposed a ramp rate, a step size,
         # a pressure, a cryostat setpoint, an END instant and a FUTURE run's
         # instant as alternatives for the labelled field. The FIRST gate closed
         # those six and left thirteen more, because six of the eleven connectives
         # modify what FOLLOWS them rather than hedging what came before, and
-        # because `K\b` treats `K/` as a word boundary:
+        # because `K\b` treats `K/` as a word boundary; the SECOND closed those
+        # and left four, because a bare hedge in front of a complete unit says
+        # nothing about the phrase behind it:
         #
-        #   (1) `_HEDGE_BRIDGE`     — a qualifying connective, and nothing else,
-        #                             between the two values. The six ambiguous
-        #                             ones bridge only behind an explicit `or`.
-        #   (2) `_unit_is_complete` — the unit is the WHOLE unit, so `3 K/min` is
-        #                             not read as 3 kelvin however it is introduced.
+        #   (1) `_HEDGE_BRIDGE`       — a qualifying connective, and nothing else,
+        #                               between the two values. The six ambiguous
+        #                               ones bridge only behind an explicit `or`.
+        #   (2) `_unit_is_complete`   — the unit is the WHOLE unit, so `3 K/min` is
+        #                               not read as 3 kelvin however it is
+        #                               introduced.
+        #   (3) `_statement_ends_after` — behind a BARE hedge, the restatement ends
+        #                               the statement, or is followed by another
+        #                               restatement that was itself accepted.
         #
-        # `_OR_REQUIRED_HEDGES` and `_UNIT_TERMINATORS` carry the two measured
-        # tables, and `_RESTATEMENT_RESIDUE` carries the one class still open.
-        # A refusal by EITHER gate is disclosed (`unhedged_further_values`); the
-        # overlap skip above is not, because it withholds nothing.
+        # `_OR_REQUIRED_HEDGES`, `_UNIT_TERMINATORS` and `_STATEMENT_END` carry the
+        # three measured tables, and `_RESTATEMENT_RESIDUE` carries the class still
+        # open after all three. A refusal by ANY of the three is disclosed —
+        # `unhedged_further_values` for (1) and (2), which are both "this is not a
+        # restatement of that quantity", and `trailing_text_after_further_values`
+        # for (3), which is a different sentence and so is a different kind. The
+        # overlap skip above is disclosed by neither, because it withholds nothing.
         #
         # `fullmatch`, NOT `$`. The bridge must be the WHOLE gap, and `$` also
         # matches before a trailing newline — the exact laxity this repository
@@ -1395,6 +1800,11 @@ def _segment_readings(
         # it does not become one if segmentation ever changes.
         if rule.restatement is not None:
             anchor = max(match.end() for match in matches)
+            #: `(match, bridged_by_a_BARE_hedge)` per ACCEPTED restatement, in text
+            #: order. Held separately from `readings` because the third condition
+            #: is decided over the chain and not over one restatement: see the
+            #: tail walk below.
+            accepted: list[tuple[re.Match[str], bool]] = []
             for extra in rule.restatement.finditer(segment.text, anchor):
                 if any(
                     _spans_overlap(extra.span(1), claimed)
@@ -1403,22 +1813,25 @@ def _segment_readings(
                     # NOT recorded as a refusal, deliberately. This value WAS
                     # read — by another rule, under its own label — so nothing
                     # was withheld from the scientist and a disclosure saying
-                    # "a value here was not read" would be false. Only the two
+                    # "a value here was not read" would be false. Only the three
                     # gates below withhold a reading.
                     continue
-                if _HEDGE_BRIDGE.fullmatch(segment.text[anchor : extra.start(1)]) is None:
-                    refused.setdefault(rule.name, matches[0].group(0))
+                gap = segment.text[anchor : extra.start(1)]
+                if _HEDGE_BRIDGE.fullmatch(gap) is None:
+                    refused.setdefault((rule.name, _KIND_UNHEDGED), matches[0].group(0))
                     continue
-                # THE SECOND HALF OF THE GATE. The connective is sound and the
+                # THE SECOND CONDITION. The connective is sound and the
                 # unit may still not be this rule's unit: `3 K/min` is a ramp
                 # rate, and `K\b` treats `K/` as a word boundary. See
                 # `_UNIT_TERMINATORS` for the measured table and for why the
                 # check is an allowlist over ONE following character rather than
                 # a rule about the rest of the sentence.
                 if not _unit_is_complete(segment.text, extra):
-                    refused.setdefault(rule.name, matches[0].group(0))
+                    refused.setdefault((rule.name, _KIND_UNHEDGED), matches[0].group(0))
                     continue
-                readings.append((extra, True))
+                accepted.append(
+                    (extra, _BARE_HEDGE_BRIDGE.fullmatch(gap) is not None)
+                )
                 # THE ANCHOR ADVANCES ONLY ON AN ACCEPTED RESTATEMENT, so the
                 # chain is a chain of hedges rather than a chain of positions:
                 # "425 K, maybe 430 K, or perhaps 435 K" reads all three, while
@@ -1429,7 +1842,39 @@ def _segment_readings(
                 # drops as an identical value, deliberately: adjacency is a fact
                 # about the TEXT, so "425 K, maybe 425 K, or perhaps 430 K" still
                 # reads 430.
+                #
+                # AND IT ADVANCES BEFORE THE THIRD CONDITION IS APPLIED, which is
+                # not an oversight: the third condition's clause 2 asks whether a
+                # further restatement was accepted, so it cannot be decided until
+                # the whole chain is known. A restatement dropped below therefore
+                # never retroactively re-anchors the gap of one after it — the
+                # chain loses a TAIL, not a link.
                 anchor = extra.end()
+
+            # THE THIRD CONDITION, WALKED INWARD FROM THE TAIL. See
+            # `_STATEMENT_END`. A restatement bridged by a BARE hedge must END the
+            # statement, and "another accepted restatement follows it" counts as
+            # ending it — which is exactly "it is not the last surviving link",
+            # because a link is only accepted when a hedge bridge sits immediately
+            # in front of it. So the predicate is decidable only at the tail, and
+            # dropping the tail can expose a new one. Measured:
+            # "425 K, maybe 430 K, and again 3 K of drift" loses BOTH — `3` for
+            # its own trailing phrase, `430` because what follows it is now a
+            # bridge to a refusal rather than to a reading.
+            #
+            # A restatement behind an explicit `or` is never popped: that branch
+            # carries a grammatical alternation marker, and the previous slice's
+            # own argument for it is unrefuted. What that leaves open is named,
+            # measured and pinned in `_RESTATEMENT_RESIDUE` — it is NOT claimed
+            # closed here.
+            while (
+                accepted
+                and accepted[-1][1]
+                and not _statement_ends_after(segment.text, accepted[-1][0].end())
+            ):
+                accepted.pop()
+                refused.setdefault((rule.name, _KIND_TRAILING), matches[0].group(0))
+            readings.extend((extra, True) for extra, _ in accepted)
 
         # ONE VALUE STATED TWICE IN ONE SENTENCE IS ONE CANDIDATE.
         # "425 K, and again 425 K" is emphasis, not disagreement. Two identical
@@ -1457,7 +1902,10 @@ def _segment_readings(
     # must not depend on which gate happened to refuse first. `_RULES` is the
     # module's own canonical order.
     return found, tuple(
-        (rule.name, refused[rule.name]) for rule in _RULES if rule.name in refused
+        (rule.name, kind, refused[(rule.name, kind)])
+        for rule in _RULES
+        for kind in (_KIND_UNHEDGED, _KIND_TRAILING)
+        if (rule.name, kind) in refused
     )
 
 
@@ -1689,26 +2137,18 @@ def read_transcript(
         # because the whole reason they were withheld is that this reader does not
         # know what they are.
         #
-        # BOUNDED BY CONSTRUCTION at `MAX_SEGMENTS` x len(_RULES) = 300, which is
-        # why it is safe to add to an accumulator the density ceilings do not see.
-        # That pre-existing gap is real and is NOT closed here — see
-        # `_DISCLOSURE_CEILING_GAP`.
-        for rule_name, refused_quote in refused_rules:
+        # BOUNDED BY CONSTRUCTION at `MAX_SEGMENTS` x the three rules that HAVE a
+        # restatement x the two refusal KINDS = 600. The pre-existing gap that made
+        # that bound load-bearing — neither density ceiling could see an
+        # accumulator this one feeds — is CLOSED by `MAX_DISCLOSURES` below; see
+        # `_DISCLOSURE_CEILING_GAP` for the measurements that closed it.
+        for rule_name, refusal_kind, refused_quote in refused_rules:
             rule = next(entry for entry in _RULES if entry.name == rule_name)
             abstentions.append(
                 Abstention(
-                    kind="unhedged_further_values",
-                    reason=(
-                        "This sentence states further values of the same form for "
-                        f"{rule.field_path}, and they were not read. A second value "
-                        "is read only when a hedging word links it to the first — "
-                        "'maybe', 'perhaps', 'or maybe', 'or about' and the like — "
-                        "and when it is not part of a larger unit such as K/min. "
-                        "Without both, a later value of the same form is usually a "
-                        "different quantity: a ramp rate, a step size, an offset "
-                        "from a setpoint. Nothing is guessed and nothing is "
-                        "proposed for them; read the sentence and state any value "
-                        "you want recorded on its own."
+                    kind=refusal_kind,
+                    reason=_REFUSAL_REASONS[refusal_kind].format(
+                        field_path=rule.field_path
                     ),
                     quote=refused_quote,
                     segment_index=segment.index,
@@ -1742,15 +2182,35 @@ def read_transcript(
     # nothing — and the byte total is exact, not an estimate: `quote_bytes` equals
     # `sum(len(candidate.quote.encode()))` over the candidates that would have been
     # built, measured identical at 135,120,025.
+    #
+    # THE THIRD COUNT IS THE DISCLOSURES, AND IT IS CHECKED HERE RATHER THAN IN ITS
+    # OWN PLACE FOR ONE REASON: this is the last point before the response's cost
+    # is committed, and all three numbers are EXACT here. See `MAX_DISCLOSURES`
+    # for what it bounds, what it does not, and the worst legitimate case it still
+    # admits.
+    #
+    # THE DISCLOSURES ARE CONSTRUCTED AND THEN COUNTED, WHERE THE CANDIDATES ARE
+    # COUNTED AND THEN CONSTRUCTED, AND THE ASYMMETRY IS DELIBERATE. A candidate
+    # carries the whole segment TWICE, so building the ones the ceiling then
+    # refuses costs O(values x segment length) — 137 MB, measured. A disclosure
+    # carries a shared reason string and a short label-anchored quote, and there
+    # can be at most one per regex match in a 256 KiB input, so building them is
+    # O(transcript size) and bounded by the input ceiling that already exists. What
+    # was NOT bounded, and is what this closes, is the RESPONSE: 16,384 abstentions
+    # serialise to ~5.1 MB inside `record_lock`.
+    disclosure_count = len(abstentions) + len(clarifications)
     if (
         candidate_count > MAX_CANDIDATES
         or quote_bytes > MAX_CANDIDATE_QUOTE_BYTES
+        or disclosure_count > MAX_DISCLOSURES
     ):
         raise TranscriptTooDense(
             candidates=candidate_count,
             candidate_quote_bytes=quote_bytes,
+            disclosures=disclosure_count,
             maximum_candidates=MAX_CANDIDATES,
             maximum_candidate_quote_bytes=MAX_CANDIDATE_QUOTE_BYTES,
+            maximum_disclosures=MAX_DISCLOSURES,
         )
 
     for segment, found in located:
