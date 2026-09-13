@@ -314,6 +314,29 @@ NOTE_SOURCES: frozenset[str] = frozenset(
         #: is a fact the server observes about itself rather than a fact a caller
         #: asserts, and that is why the MCP tool has no ``source`` argument.
         "connected_agent",
+        #: A LINE A DETERMINISTIC PARSER READ OUT OF A HISTORICAL SOURCE FILE
+        #: during a Historical Import — the surface the product calls "Historical
+        #: Import", which is why the member is named after what it is rather than
+        #: after a format.
+        #:
+        #: IT IS A SEVENTH MEMBER BECAUSE NONE OF THE SIX ABOVE IS TRUE OF IT, and
+        #: that is the same argument ``connected_agent`` rests on rather than a new
+        #: one. ``typed_note`` asserts a person typed it into this application.
+        #: ``csv_column`` asserts a CSV column *nothing in the ingest recognised* —
+        #: an import statement is one the parser DID read. ``file_listing_line``
+        #: asserts a raw-file *listing* line that *matched no asset rule*.
+        #: ``extraction_residue`` asserts a label the extractor *refused to guess
+        #: at*. ``transcript`` and ``connected_agent`` are a different channel
+        #: entirely. Choosing any of them would put a false claim in the one field a
+        #: reviewer uses to decide how much to trust what they are reading.
+        #:
+        #: WHAT IT DOES NOT SAY. It does not say the value is correct, and it does
+        #: not say the file was authoritative — a parser read a line; whether the
+        #: line is right is the scientist's judgement, which is why the content
+        #: arrives as an OPEN proposal and never as a value. It names no actor: the
+        #: import surface stamps nobody, because no trusted authentication boundary
+        #: exists in this build.
+        "historical_source_line",
     }
 )
 

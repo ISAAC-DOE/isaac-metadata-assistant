@@ -40,17 +40,56 @@ test.describe('@interaction the ordinary workspace', () => {
     // alone, so replacing the copy with something that over-promises fails here.
     await expect(page.getByRole('heading', { name: 'Start your first experiment' })).toBeVisible();
     /*
-     * THE PROMISE-IT-CANNOT-KEEP ASSERTION, REDERIVED. This required the sentence
-     * "This deployment cannot yet create or import a record". That sentence became
-     * FALSE when `POST /api/experiments` shipped, so requiring it would make this
-     * test demand a lie. It is now asserted ABSENT, and the half that is still true
-     * — there is no import, `POST /api/uploads` is an unconditional 403 — is
-     * asserted directly.
+     * THE PROMISE-IT-CANNOT-KEEP ASSERTION, REDERIVED TWICE — and the second
+     * rederivation is 2026-09-13's.
+     *
+     * ROUND ONE. It required the sentence "This deployment cannot yet create or
+     * import a record". That became FALSE when `POST /api/experiments` shipped,
+     * so requiring it would have made this test demand a lie. It is still
+     * asserted ABSENT, below, and that half is unchanged.
+     *
+     * ROUND TWO, AND THE ASSERTION THAT HAD TO CHANGE:
+     * ~~`await expect(page.locator('.queue-empty-state')).not.toContainText(/import/i)`~~
+     *
+     * Its stated warrant was *"the half that is still true — there is no import,
+     * `POST /api/uploads` is an unconditional 403"*. **The first clause of that
+     * warrant is now false.** `HIST-001`/`HIST-004`/`HIST-003a` shipped an import
+     * path: nine operations over an import session, a review surface at
+     * `/imports`, and a deterministic reconstruction whose candidates enter the
+     * existing proposal pipeline. So a blanket ban on the WORD would now forbid
+     * the empty state from mentioning a capability this build genuinely has —
+     * which is the same class of defect the round-one correction fixed, in the
+     * opposite direction.
+     *
+     * **THE PROPERTY IT PROTECTS IS UNCHANGED AND IS WHAT IS ASSERTED INSTEAD:
+     * this screen may promise nothing it cannot keep.** The two things the build
+     * still cannot do are UPLOAD a file and take a DROPPED one — `POST
+     * /api/uploads` is an unconditional 403, and Historical Import records where
+     * a file is without opening it — so those are banned by name, as behaviours
+     * rather than as a topic. The capability that DOES exist is then asserted
+     * POSITIVELY, so this test protects the offer instead of merely tolerating
+     * it: deleting the card fails here.
+     *
+     * `src/__tests__/historical-import.test.tsx` §6 holds the same two bans over
+     * the LABEL STRINGS, which is the half a rendered-text assertion cannot see
+     * when a screen stops rendering them at all.
      */
     await expect(page.locator('.queue-empty-state')).not.toContainText(
       /cannot yet create or import a record/i
     );
-    await expect(page.locator('.queue-empty-state')).not.toContainText(/import/i);
+    await expect(page.locator('.queue-empty-state')).not.toContainText(/upload/i);
+    await expect(page.locator('.queue-empty-state')).not.toContainText(/drag|drop/i);
+    /*
+     * AND THE OFFER IS THERE, as a real anchor. A LINK and not a button on
+     * purpose: it goes to a destination in the primary navigation, and a button
+     * that navigates cannot be middle-clicked, bookmarked or opened in a new tab.
+     * `UX-016`'s import half is exactly this — a scientist with zero experiments
+     * who wants to RECOVER rather than CREATE had nowhere to go from the one
+     * screen they land on.
+     */
+    const importOffer = page.getByRole('link', { name: 'Open Historical Import' });
+    await expect(importOffer).toBeVisible();
+    await expect(importOffer).toHaveAttribute('href', /\/imports$/);
     // The create control is real and it is the primary.
     const create = page.getByRole('button', { name: 'Create Experiment' });
     await expect(create).toBeEnabled();

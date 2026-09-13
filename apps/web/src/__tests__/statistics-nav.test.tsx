@@ -145,14 +145,40 @@ describe('sidebar destinations', () => {
    * demote and Governance is in neither that list nor the three named top-level
    * destinations, so removing it would be a product decision nobody took.
    */
-  it('renders exactly the three primary destinations, in the specified order', () => {
+  /*
+   * *** THREE BECAME FOUR ON 2026-09-13, AND THAT IS NOT THE LIST GROWING BACK.
+   * The assertion is corrected in place, with the previous expectation struck,
+   * because a stale expectation here reads as the intended design. ***
+   *
+   * ~~['My Experiments', 'Governance & Safety', 'Settings & API']~~
+   *
+   * `Historical Import` was ADDED, and it is the SECOND of the three top-level
+   * destinations the authorizing direction names (`Experiments`,
+   * `Historical Import`, `Settings`). `LeftNav.tsx` had deliberately withheld it
+   * — its own comment said so, and the reason was correct: §15's "build nothing
+   * that implies any of it exists" forbids offering the slot before the
+   * destination exists. The destination now exists (`HIST-001`, `HIST-004`,
+   * `HIST-003a`), so the condition the decline named is met, and that comment is
+   * struck in place there rather than deleted.
+   *
+   * SO THE COUNT IS FOUR AND NOT THREE, for the reason the block above already
+   * gives: `Governance & Safety` stays. Three of the four are the direction's own
+   * three; the fourth is a scientist-facing honesty surface the direction
+   * enumerates in neither list, and removing it would still be a product decision
+   * nobody took.
+   *
+   * ORDER IS THE PRODUCT'S: the two scientist-facing pillars first, then
+   * Governance, then Settings last (asserted separately below).
+   */
+  it('renders exactly the four primary destinations, in the specified order', () => {
     stubFetchDown();
     const { container } = renderAt('/governance');
 
-    // One ordered read of the rendered DOM — not three independent lookups,
+    // One ordered read of the rendered DOM — not four independent lookups,
     // which would pass for any order at all.
     expect(navLinks(container).map((a) => a.textContent)).toEqual([
       'My Experiments',
+      'Historical Import',
       'Governance & Safety',
       'Settings & API',
     ]);
@@ -180,7 +206,7 @@ describe('sidebar destinations', () => {
     const { container } = renderAt('/governance');
     const links = navLinks(container);
 
-    expect(links).toHaveLength(3);
+    expect(links).toHaveLength(4);
     for (const link of links) {
       expect(link.tagName).toBe('A');
       expect(link).toHaveAttribute('href');
@@ -195,7 +221,12 @@ describe('sidebar destinations', () => {
 
     // The basename is applied ONCE, by the <BrowserRouter> in App.tsx; under
     // MemoryRouter there is none, so a '/krish' here could only be a literal.
-    expect(hrefs).toEqual([ROUTES.experiments, ROUTES.governance, ROUTES.settings]);
+    expect(hrefs).toEqual([
+      ROUTES.experiments,
+      ROUTES.imports,
+      ROUTES.governance,
+      ROUTES.settings,
+    ]);
     for (const href of hrefs) {
       expect(href).not.toContain('/krish');
     }

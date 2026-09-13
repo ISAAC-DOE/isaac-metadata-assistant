@@ -184,7 +184,7 @@ describe('My Experiments · the empty state', () => {
     expect(section.textContent).toContain(LABELS.emptyExperimentsBody);
   });
 
-  it('leads with the three actions and no architecture paragraph', async () => {
+  it('leads with the four actions and no architecture paragraph', async () => {
     await openEmptyState(EPHEMERAL);
     const section = panel();
     for (const name of [
@@ -194,6 +194,16 @@ describe('My Experiments · the empty state', () => {
     ]) {
       expect(within(section).getByRole('button', { name })).toBeInTheDocument();
     }
+    /*
+     * THE FOURTH IS A LINK, NOT A BUTTON, and it is asserted as one rather than
+     * folded into the loop above. Historical Import goes to a destination that
+     * exists in the nav; the other three act in place. A button that navigates is
+     * one a reader cannot middle-click, bookmark or open in a new tab, so the
+     * distinction is real and the assertion keeps it.
+     */
+    expect(
+      within(section).getByRole('link', { name: LABELS.actionOpenHistoricalImport }),
+    ).toBeInTheDocument();
     /*
      * THE RETIRED SENTENCE, ASSERTED ABSENT. "This deployment cannot yet create or
      * import a record" was true when it was written and became false the moment
@@ -205,7 +215,7 @@ describe('My Experiments · the empty state', () => {
     expect(section.textContent).not.toMatch(/Or, without starting the walkthrough/i);
   });
 
-  it('gives Create Experiment the strongest treatment and the other two a real one', async () => {
+  it('gives Create Experiment the strongest treatment and the other three a real one', async () => {
     await openEmptyState(EPHEMERAL);
     const section = panel();
 
@@ -246,8 +256,18 @@ describe('My Experiments · the empty state', () => {
      * carries the same card, the same heading level and the same description slot
      * as the guided demo, so nothing about it reads as a trailing footnote.
      */
+    /*
+     * ~~expect(cards).toHaveLength(3)~~ — FOUR SINCE 2026-09-13, and corrected in
+     * place because a stale count here reads as the intended design.
+     *
+     * `Historical Import` was added as `UX-016`'s import half: a scientist with
+     * zero experiments who wants to RECOVER rather than CREATE had nowhere to go
+     * from the one screen they land on. It is a peer card with the same heading,
+     * the same description slot and a non-primary treatment, so the hierarchy the
+     * assertion below protects is unchanged — one primary, three peers.
+     */
     const cards = section.querySelectorAll('.queue-empty-action');
-    expect(cards).toHaveLength(3);
+    expect(cards).toHaveLength(4);
     for (const card of cards) {
       expect(card.querySelector('.queue-empty-action-title')).not.toBeNull();
       expect(card.querySelector('.queue-empty-hint')).not.toBeNull();

@@ -1,0 +1,473 @@
+/*
+ * HISTORICAL IMPORT — the review surface's own styles.
+ *
+ * EVERY COLOUR IS A DECLARED TOKEN. `palette-contrast.test.ts` keys the phantom
+ * guard on the NAME, not on whether something renders, so a `var()` naming an
+ * undeclared property fails a test rather than silently dropping the whole
+ * declaration at computed-value time — which is what happened to the capture
+ * panel's textarea, whose border and background were invisible for an unknown
+ * number of releases. No new token is introduced here and no raw hex is written.
+ *
+ * NO STATUS COLOUR IS USED FOR A VERDICT. `interaction-states.test.ts` bans a
+ * green/red hex or a pass/fail token in ANY interaction-state rule, and this
+ * surface has no verdicts to render anyway: "read", "held as a pointer" and
+ * "could not be read" are facts about what happened, not judgements about
+ * whether a value is right. They are distinguished by WEIGHT and by their own
+ * text, never by a colour a reader would decode as approval.
+ */
+
+.hi-lead {
+  font-size: var(--font-size-body);
+  line-height: var(--line-height-relaxed);
+  color: var(--text-secondary);
+  max-width: var(--content-max);
+  margin: var(--space-sm) 0 0;
+}
+
+.hi-h2 {
+  font-size: var(--font-size-heading-md);
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-heading);
+  margin: 0 0 var(--space-sm);
+}
+
+.hi-h3 {
+  font-size: var(--font-size-heading-sm);
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-heading);
+  margin: 0 0 var(--space-xs);
+}
+
+.hi-h4 {
+  font-size: var(--font-size-body);
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-strong);
+  margin: var(--space-md) 0 var(--space-2xs);
+}
+
+.hi-body,
+.hi-note,
+.hi-counts,
+.hi-sub {
+  line-height: var(--line-height-relaxed);
+  max-width: var(--content-max);
+  margin: 0 0 var(--space-xs);
+}
+
+.hi-body {
+  font-size: var(--font-size-body);
+  color: var(--text-secondary);
+}
+
+/*
+ * A NOTE IS NOT A WARNING. `--text-muted` rather than an advisory tint: these
+ * paragraphs carry the honesty claims (what a reference is, that no checksum is
+ * computed, that no beamline convention is applied), and painting them as
+ * cautions would tell a reader something is wrong when the surface is simply
+ * being precise.
+ */
+.hi-note {
+  font-size: var(--font-size-meta);
+  color: var(--text-muted);
+}
+
+.hi-counts {
+  font-size: var(--font-size-meta);
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.hi-sub {
+  font-size: var(--font-size-meta);
+  color: var(--text-muted);
+  display: block;
+}
+
+/* --- the workflow strip ---------------------------------------------------- */
+
+.hi-steps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-xs);
+  list-style: none;
+  margin: var(--space-sm) 0;
+  padding: 0;
+}
+
+.hi-step {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  padding: var(--space-2xs) var(--space-sm);
+  background: var(--surface-subtle);
+  font-size: var(--font-size-meta);
+  color: var(--text-secondary);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2xs);
+  max-width: 22rem;
+}
+
+.hi-step.reached {
+  border-color: var(--action-selected-border);
+  background: var(--action-tint);
+  color: var(--text-strong);
+  font-weight: var(--font-weight-medium);
+}
+
+/*
+ * THE UNBUILT STEP IS DIMMED AND STILL READABLE. `--text-muted` clears AA on
+ * every ground this app paints, so the sentence explaining why the step is not
+ * built is informational ink and not decoration — a reader must be able to read
+ * the reason, which is the whole point of showing the step at all.
+ */
+.hi-step.unbuilt {
+  border-style: dashed;
+  background: var(--surface);
+  color: var(--text-muted);
+}
+
+.hi-step-label {
+  font-weight: var(--font-weight-medium);
+}
+
+.hi-step-note {
+  font-size: var(--font-size-meta);
+  color: var(--text-muted);
+  line-height: var(--line-height-snug);
+}
+
+/* --- the list -------------------------------------------------------------- */
+
+.hi-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.hi-list-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-sm);
+  padding: var(--space-sm) 0;
+  border-bottom: 1px solid var(--border-hair);
+}
+
+.hi-list-main {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2xs);
+  min-width: 0;
+}
+
+.hi-list-title {
+  font-size: var(--font-size-body);
+  font-weight: var(--font-weight-medium);
+  color: var(--text-strong);
+}
+
+.hi-list-meta {
+  font-size: var(--font-size-meta);
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.hi-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-xs);
+  padding: var(--space-lg) 0;
+  color: var(--text-muted);
+}
+
+.hi-empty strong {
+  font-size: var(--font-size-heading-sm);
+  color: var(--text-strong);
+}
+
+.hi-empty p {
+  margin: 0;
+  font-size: var(--font-size-body);
+  color: var(--text-secondary);
+  max-width: var(--content-max);
+  line-height: var(--line-height-relaxed);
+}
+
+.hi-empty-inline {
+  color: var(--text-muted);
+}
+
+/* --- the manifest table ---------------------------------------------------- */
+
+.hi-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: var(--space-sm) 0;
+  font-size: var(--font-size-meta);
+}
+
+.hi-table th {
+  text-align: left;
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-strong);
+  border-bottom: 1px solid var(--border-strong);
+  padding: var(--space-2xs) var(--space-xs) var(--space-2xs) 0;
+}
+
+.hi-table td {
+  vertical-align: top;
+  border-bottom: 1px solid var(--border-hair);
+  padding: var(--space-xs) var(--space-xs) var(--space-xs) 0;
+  color: var(--text-secondary);
+}
+
+.hi-filename {
+  font-family: var(--font-mono);
+  color: var(--text-strong);
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.hi-reference {
+  font-family: var(--font-mono);
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+
+/*
+ * THE PARSE STATE IS A WORD, NOT A COLOUR. All four variants share one style and
+ * are distinguished by their own text plus the per-entry sentence beneath. A
+ * colour here would be read as a verdict on the SOURCE, and "held as a pointer"
+ * is not a failure — it is the honest state of a reference in this build.
+ */
+.hi-parse {
+  font-weight: var(--font-weight-medium);
+  color: var(--text-strong);
+  display: block;
+}
+
+.hi-parse-no_content_path,
+.hi-parse-unparsed,
+.hi-parse-failed,
+.hi-parse-parsed {
+  color: var(--text-strong);
+}
+
+.hi-warn,
+.hi-refusal,
+.hi-blocked,
+.hi-sent {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2xs);
+  font-size: var(--font-size-meta);
+  line-height: var(--line-height-relaxed);
+  max-width: var(--content-max);
+  margin: var(--space-xs) 0 0;
+}
+
+.hi-warn,
+.hi-refusal {
+  color: var(--advisory-text);
+  background: var(--advisory-bg);
+  border: 1px solid var(--advisory-border);
+  border-radius: var(--radius-inner);
+  padding: var(--space-xs);
+}
+
+.hi-blocked {
+  color: var(--text-secondary);
+  background: var(--missing-bg);
+  border: 1px solid var(--missing-border);
+  border-radius: var(--radius-inner);
+  padding: var(--space-xs);
+}
+
+.hi-sent {
+  color: var(--text-secondary);
+}
+
+/* --- forms ----------------------------------------------------------------- */
+
+.hi-forms {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-lg);
+  margin-top: var(--space-md);
+}
+
+.hi-form {
+  flex: 1 1 18rem;
+  min-width: 16rem;
+}
+
+.hi-field {
+  display: block;
+  margin: 0 0 var(--space-xs);
+}
+
+.hi-field-label {
+  display: block;
+  font-size: var(--font-size-meta);
+  font-weight: var(--font-weight-medium);
+  color: var(--text-strong);
+  margin-bottom: var(--space-2xs);
+}
+
+.hi-input {
+  width: 100%;
+  box-sizing: border-box;
+  font-family: var(--font-ui);
+  font-size: var(--font-size-body);
+  color: var(--text-primary);
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-control);
+  padding: var(--space-2xs) var(--space-xs);
+}
+
+.hi-input:focus-visible {
+  outline: 2px solid var(--ring-active);
+  outline-offset: 1px;
+}
+
+/* --- parse output ---------------------------------------------------------- */
+
+.hi-parsed {
+  margin-top: var(--space-md);
+  padding-top: var(--space-sm);
+  border-top: 1px solid var(--border-faint);
+}
+
+.hi-statements,
+.hi-skipped,
+.hi-support,
+.hi-disagreement,
+.hi-unmapped {
+  list-style: none;
+  margin: var(--space-xs) 0 0;
+  padding: 0;
+  font-size: var(--font-size-meta);
+}
+
+.hi-statements li,
+.hi-support li,
+.hi-unmapped li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-xs);
+  align-items: baseline;
+  padding: var(--space-2xs) 0;
+}
+
+.hi-skipped li,
+.hi-disagreement li {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2xs);
+  padding: var(--space-2xs) 0;
+  color: var(--text-muted);
+}
+
+.hi-key {
+  font-family: var(--font-mono);
+  color: var(--text-strong);
+  overflow-wrap: anywhere;
+}
+
+.hi-value {
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+
+.hi-locator {
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* --- candidates ------------------------------------------------------------ */
+
+.hi-group {
+  margin-top: var(--space-md);
+  padding-top: var(--space-sm);
+  border-top: 1px solid var(--border-faint);
+}
+
+.hi-candidate {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-inner);
+  background: var(--surface);
+  padding: var(--space-sm);
+  margin: var(--space-xs) 0;
+  max-width: var(--content-max);
+}
+
+.hi-candidate-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-xs);
+}
+
+.hi-candidate-target {
+  font-family: var(--font-mono);
+  font-size: var(--font-size-meta);
+  color: var(--text-strong);
+  overflow-wrap: anywhere;
+}
+
+/*
+ * READ versus INFERRED. Two neutral chips, and neither is a verdict: an inferred
+ * candidate is not WORSE than a read one, it is differently warranted, and a
+ * reader has to be able to tell which without being told which to prefer.
+ * `--inferred-*` is the existing tinted pair for exactly this distinction in the
+ * draft's own field rows, reused rather than a new colour.
+ */
+.hi-determinism {
+  font-size: var(--font-size-meta);
+  font-weight: var(--font-weight-medium);
+  border-radius: var(--radius-pill);
+  padding: var(--space-2xs) var(--space-xs);
+  white-space: nowrap;
+}
+
+.hi-determinism-deterministic {
+  color: var(--confirmed-text);
+  background: var(--confirmed-bg);
+  border: 1px solid var(--confirmed-border);
+}
+
+.hi-determinism-inferred {
+  color: var(--inferred-text);
+  background: var(--inferred-bg);
+  border: 1px solid var(--inferred-border);
+}
+
+.hi-candidate-value {
+  font-size: var(--font-size-body);
+  font-weight: var(--font-weight-medium);
+  color: var(--text-primary);
+  margin: var(--space-2xs) 0;
+  overflow-wrap: anywhere;
+}
+
+.hi-candidate-none {
+  font-weight: var(--font-weight-regular);
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.hi-rule {
+  font-size: var(--font-size-meta);
+  color: var(--text-secondary);
+  line-height: var(--line-height-relaxed);
+  margin: 0;
+}
+
+.hi-send {
+  margin-top: var(--space-sm);
+  padding-top: var(--space-sm);
+  border-top: 1px solid var(--border-hair);
+}

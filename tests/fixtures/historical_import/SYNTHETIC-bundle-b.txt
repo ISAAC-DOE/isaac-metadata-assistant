@@ -1,0 +1,13 @@
+# SYNTHETIC FIXTURE - NOT REAL EXPERIMENTAL DATA, NOT FROM ANY BEAMLINE.
+#
+# The DISAGREEING half of the pair. It AGREES with SYNTHETIC-bundle-a.txt about
+# `system.technique` and states a DIFFERENT `sample.material.name`, on purpose:
+# the import review surface needs one agreed value and one real source-level
+# disagreement to render, and the reconstruction provider needs a case in which
+# it must choose NOTHING.
+#
+# Same caveats as bundle A: every value is fictional, the format is this
+# fixture's own, and no beamline convention is encoded anywhere.
+
+system.technique = XAS
+sample.material.name = SYNTHETIC-CuO-FAKE-002

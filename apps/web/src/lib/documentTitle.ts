@@ -135,6 +135,11 @@ export function routeDocumentTitle(pathname: string, search: string): string | n
       return composeDocumentTitle([LABELS.screenExperiments]);
     case '/load':
       return composeDocumentTitle([LABELS.screenLoad]);
+    case '/imports':
+      // `navImports`, the SAME string the nav item and the page `<h1>` read.
+      // A title authored here would be a second name for a destination that
+      // already has one — the defect this module's header records.
+      return composeDocumentTitle([LABELS.navImports]);
     case '/memory':
       return composeDocumentTitle([LABELS.navMemory]);
     case '/governance':

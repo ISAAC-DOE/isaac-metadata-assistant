@@ -85,6 +85,18 @@ export const NOTE_SOURCE_ORIGIN: Readonly<Record<string, ProvenanceOrigin>> = {
    * paragraph recording that.
    */
   connected_agent: 'assistant',
+  /*
+   * A LINE A DETERMINISTIC PARSER READ OUT OF A HISTORICAL SOURCE FILE during a
+   * Historical Import. `file` for the same reason `csv_column`,
+   * `file_listing_line` and `extraction_residue` are: the words were lifted out
+   * of an artifact this application read.
+   *
+   * NOT `assistant`. The reading is a registered parser over a committed
+   * synthetic fixture — no model, no provider, no network call is in that path —
+   * so `assistant` would claim a machine INTERPRETED the words when a parser
+   * READ them. And not `manual`: nobody typed it here.
+   */
+  historical_source_line: 'file',
 };
 
 /**

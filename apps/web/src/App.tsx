@@ -2,6 +2,7 @@ import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
 import { DocumentTitle } from './lib/useDocumentTitle';
 import { ROUTE_PATTERNS, ROUTES } from './lib/routes';
 import { ExperimentsHome } from './screens/ExperimentsHome';
+import { HistoricalImport } from './screens/HistoricalImport';
 import { LoadMaterials } from './screens/LoadMaterials';
 import { RecordWorkbench } from './screens/RecordWorkbench';
 import { GuidedCompletion } from './screens/GuidedCompletion';
@@ -33,6 +34,7 @@ export function AppRoutes() {
       <Routes>
         <Route path="/" element={<Navigate to={ROUTES.experiments} replace />} />
         <Route path={ROUTE_PATTERNS.experiments} element={<ExperimentsHome />} />
+        <Route path={ROUTE_PATTERNS.imports} element={<HistoricalImport />} />
         <Route path={ROUTE_PATTERNS.load} element={<LoadMaterials />} />
         <Route path={ROUTE_PATTERNS.record} element={<RecordWorkbench />} />
         <Route path={ROUTE_PATTERNS.complete} element={<GuidedCompletion />} />

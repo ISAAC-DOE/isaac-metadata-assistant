@@ -95,6 +95,41 @@ export const SURFACES: readonly Surface[] = [
   },
   {
     /*
+     * HISTORICAL IMPORT — the second of the three primary destinations, added
+     * 2026-09-13 with the destination itself.
+     *
+     * ORDINARY SCOPE, and this is the one that matters for this surface. An
+     * import session has NOTHING to do with the worked-example records, and the
+     * ordinary workspace is where a reader actually meets it: on a fresh
+     * deployment it holds no sessions, so this surface measures the REAL
+     * first-run state — the empty list, the workflow strip, the durability
+     * sentence and the Start control. That is what a reader of this deployment
+     * sees, so it is what is swept.
+     *
+     * THE READY GATE IS THE LIST's OWN `<h2>`, NOT THE PAGE `<h1>`, and the
+     * distinction is the race `record-detail`'s comment documents at length. The
+     * `<h1>` renders unconditionally — it is outside the fetch branch — so a gate
+     * on it would resolve while `role="status"`/`Loading imports…` was still on
+     * screen, and axe, the width sweep, the layout probes and the 200% pass would
+     * all measure a skeleton and report it as this surface. `Imports` is inside
+     * the `status === 'data'` branch and cannot render before the fetch settles.
+     *
+     * WHAT THIS SURFACE DELIBERATELY DOES NOT COVER: an OPEN session. Reaching
+     * one needs a POST (`Start an Import` creates a working area), and this suite
+     * is read-only by construction — `playwright.mutation.config.ts` exists for
+     * exactly that reason and has its own backend and its own workspace. So the
+     * sweep covers the list state, and the session state is covered by the
+     * component tests (`src/__tests__/historical-import.test.tsx`, 37 cases).
+     * Stated rather than left as an unexplained gap.
+     */
+    id: 'imports',
+    name: 'Historical Import (ordinary, no sessions)',
+    path: '/imports',
+    scope: 'ordinary',
+    ready: { role: 'heading', name: 'Imports' },
+  },
+  {
+    /*
      * THE READY GATE IS THE PAGE `h1`'s WORKSPACE LINE, AND IT USED TO BE A RACE.
      *
      * It read `{ role: 'heading', name: 'Review Record' }`. That heading is

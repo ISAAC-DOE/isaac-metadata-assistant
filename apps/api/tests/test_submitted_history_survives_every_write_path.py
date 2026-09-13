@@ -362,6 +362,56 @@ def test_no_shipped_write_route_mutates_a_submitted_records_history(client, db):
             proposal_id["id"] = response.json()["proposal"]["proposal_id"]
         return response
 
+    def propose_from_an_import():
+        """Send an IMPORT candidate to review on this submitted record.
+
+        A NAMED FUNCTION AND NOT A LAMBDA, for `propose`'s reason one block up:
+        it needs a session and a reconstruction before it can address a candidate,
+        and the sweep runs its attempts in order.
+
+        **SWEPT RATHER THAN EXEMPTED, and that is the whole reason it is here.**
+        Eight of the nine Historical Import operations are addressed to an IMPORT
+        SESSION and are listed in `not_addressed_to_a_record` with reasons. This
+        one is different: it names an experiment in its body and it REWRITES that
+        experiment's document — one note plus one open proposal, in one
+        `record_lock` and one `save_versioned`. So the question this file exists
+        to ask, *does this route move a row of a submitted record's history*, is
+        exactly as live for it as for `POST /notes`, and "it only writes
+        `state['notes']` and `state['proposals']`" is a claim about the code
+        rather than an answer. This is `PATCH /folder`'s argument, applied to the
+        one import operation it fits.
+
+        THE TARGET IS `system.technique`, which is RECORD-scoped, so no `run_id`
+        is sent and no run's draft is touched. Its value comes from the committed
+        example source, which states `XAS` — and the record this sweep submits
+        already holds a technique, so accepting would overwrite an equal-or-valid
+        enum member and cannot open a required-sibling hole. Nothing here accepts
+        it: the attempt is the CREATE, and acceptance is already swept separately
+        by `POST /proposals/{id}/review`.
+        """
+        created = client.post("/api/imports", json={"label": "sweep"})
+        if created.status_code >= 300:  # pragma: no cover - the create cannot refuse
+            return created
+        import_id = created.json()["import"]["import_id"]
+        client.post(
+            f"/api/imports/{import_id}/sources",
+            json={"kind": "synthetic_fixture", "fixture_name": "SYNTHETIC-bundle-a.txt"},
+        )
+        client.post(f"/api/imports/{import_id}/parse")
+        reconstructed = client.post(f"/api/imports/{import_id}/reconstruct")
+        if reconstructed.status_code >= 300:  # pragma: no cover
+            return reconstructed
+        candidate = next(
+            c
+            for c in reconstructed.json()["import"]["reconstruction"]["candidates"]
+            if c["target_field_path"] == "system.technique"
+        )
+        return client.post(
+            f"/api/imports/{import_id}/candidates/{candidate['candidate_id']}/propose",
+            json={"experiment_id": eid},
+            headers={"If-Match": _etag(client, eid)},
+        )
+
     attempts: list[tuple[str, object, object]] = [
         (
             "PATCH /experiments/{id}",
@@ -548,6 +598,14 @@ def test_no_shipped_write_route_mutates_a_submitted_records_history(client, db):
             "POST /proposals",
             ACCEPTED,
             propose,
+        ),
+        (
+            # THE IMPORT PRODUCER OF THE SAME PAIR. See
+            # `propose_from_an_import` for why this one is swept while the other
+            # eight Historical Import operations are exempted with reasons.
+            "POST /imports/{id}/candidates/{id}/propose",
+            ACCEPTED,
+            propose_from_an_import,
         ),
         (
             # ACCEPTED, AND THE ACCEPTANCE REALLY WRITES. This app fixture sets the
@@ -1047,6 +1105,41 @@ def test_the_sweep_covers_every_mutating_route_this_api_publishes(app):
         ),
         ("POST", "/api/transcription"): "the provider seam; 501 in every deployment",
         ("POST", "/api/validate/record"): "validates a posted document; names no record",
+        # ── HISTORICAL IMPORT: EIGHT OF NINE NAME NO EXPERIMENT ────────────────
+        #
+        # Each writes an IMPORT SESSION — a working area stored under `_imports/`,
+        # which `workspace._experiment_dirs` skips unconditionally, so no
+        # experiment read can reach it and no experiment document is rewritten.
+        # None of them takes an experiment id, in the path or in the body, so none
+        # can name a submitted record to damage.
+        #
+        # THE NINTH IS NOT HERE, DELIBERATELY. `POST
+        # .../candidates/{candidate_id}/propose` names an experiment in its body
+        # and rewrites that experiment's document, so it is SWEPT above as
+        # `POST /imports/{id}/candidates/{id}/propose` rather than exempted —
+        # `PATCH /folder`'s argument, and for its reason: an exemption reading
+        # "it only writes a session" would have been true of the eight and FALSE
+        # of the ninth.
+        ("POST", "/api/imports"): "creates an import session; names no experiment",
+        ("DELETE", "/api/imports/{import_id}"): (
+            "discards an import session's working area; every proposal it sent stays "
+            "on the record it was sent to, and the five append-only history tables "
+            "refuse a DELETE mechanically (db_write._APPEND_ONLY_TABLES)"
+        ),
+        ("POST", "/api/imports/{import_id}/sources"): (
+            "records one entry in an import session's manifest — metadata about a "
+            "file this build never opened; names no experiment"
+        ),
+        ("DELETE", "/api/imports/{import_id}/sources/{source_id}"): (
+            "removes one manifest entry and the session's own derived reading; names "
+            "no experiment"
+        ),
+        ("POST", "/api/imports/{import_id}/parse"): (
+            "reads the session's readable sources into the session; names no experiment"
+        ),
+        ("POST", "/api/imports/{import_id}/reconstruct"): (
+            "writes candidates into the session; applies nothing and names no experiment"
+        ),
     }
 
     spec = app.openapi()
@@ -1111,6 +1204,10 @@ def test_the_sweep_covers_every_mutating_route_this_api_publishes(app):
         ("POST", "/api/experiments/{experiment_id}/export"): "POST /export",
         ("POST", "/api/experiments/{experiment_id}/discard"): "POST /discard",
         ("POST", "/api/experiments/{experiment_id}/submit"): "POST /submit (again)",
+        (
+            "POST",
+            "/api/imports/{import_id}/candidates/{candidate_id}/propose",
+        ): "POST /imports/{id}/candidates/{id}/propose",
     }
 
     unaccounted = sorted(
