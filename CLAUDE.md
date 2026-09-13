@@ -2451,11 +2451,40 @@ holds under static review; note this is code review, **not** a runtime observati
 has still never run**~~ — **corrected 2026-08-01:** the scan **has** run, once, against image
 `v0.0.38` (`ceea656`), observed by Krish in an authenticated session and reported as no leaks, four
 matching allowlists, zero schema drift, 30/30. That is **operator testimony, not a captured artifact**
-(the endpoint keeps its result in process memory only, by design), so the masking claim above is still
+(the endpoint keeps its result in process memory only, by design), ~~so the masking claim above is still
 backed by code review rather than by an inspected response body — the caveat stands, its reason
-changes. See `docs/superpowers/plans/2026-07-31-baseline-completion-matrix.md` §0, Entry 2. **Never
+changes.~~ — **DISCHARGED 2026-09-13: the response body HAS now been inspected, in this environment,
+and is a captured artifact.** Evidence:
+[`docs/evidence/hosted-observation-2026-09-13.md`](docs/evidence/hosted-observation-2026-09-13.md).
+Read read-only from an already-authenticated browser tab the project owner said was signed in; **no
+credential was entered and no agent connected to any database** — the pod opened its own connection,
+which is the deployment-mediated design, so the `:48-52` prohibition on a laptop- or CI-originating
+connection is untouched. What the body shows: `dataset` carries **sixteen** keys and **not one** of
+the five is among them, `withheld_pending_visibility_decision` names exactly those five and nothing
+else, and `vocabulary_cache_present: true` is the boolean that replaced the withheld cardinality.
+The scan mutated nothing and says so on the wire — `ddl_statements_issued: 0`,
+`dml_statements_issued: 0`, `rows_before: 30`, `rows_after: 30`, `rows_modified: 0`,
+`transaction_read_only: true`, `schema_stable_across_run: true`, with all six preflight gates `true`
+and `refusal_class: null` — and official validation reads **30 passing / 0 failing / 0 issues**,
+agreeing with the 2026-08-08 operator-relayed figures while no longer depending on them.
+**`server_version_major` is 18**, so the hosted engine's major version matches CI's `postgres:18`
+container; that removes one way the CI-to-hosted inference could have been wrong and **does not**
+weaken §15's caveat that CI still does not prove behaviour against the real data, roles and grants.
+**MY FIRST LEAK CHECK WAS A FALSE POSITIVE OF MY OWN MAKING and the next person will write the same
+one:** `JSON.stringify(payload).includes('"'+key+'"')` returned **all five**, because it matched
+**the withheld list itself**, which necessarily names them as strings — the designed behaviour and
+its own violation have the identical signature under a flat-text search. *Enumerate the block's
+keys; never grep the serialized payload.* **G3 IS NOT CLOSED BY THIS** — it confirms the
+withholding is implemented, not that any of the five may be restored, which is still only Dean's to
+say; and **G2 is untouched**, `record_display` reading `closed` on the wire.
+**One recorded limitation is NARROWED, not lifted:** the 2026-08-08 entry's *"no database row was
+re-read and compared after the sweep"* remains true **of the private verification mode**, a
+different path — this route reports `rows_before`, `rows_after` and `rows_modified`, and the two must
+not be conflated.
+See `docs/superpowers/plans/2026-07-31-baseline-completion-matrix.md` §0, Entry 2. **Never
 write "the deployed database has never been contacted"**; the accurate form is "no database connection
-was opened during this session".
+was opened during this session" — **and that form is NOT available for 2026-09-13**: a connection
+was opened by the pod, at this agent's request, under Slice 2A's authorization.
 
 **They are no longer served.** The baseline-closure slice withheld all five from the HTTP response
 and names them in `dataset.withheld_pending_visibility_decision`; `vocabulary_term_count` is replaced
