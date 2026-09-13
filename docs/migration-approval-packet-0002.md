@@ -285,6 +285,41 @@ deliberate, reviewable act that lets a later slice write the table.
 approve, harder to roll back, and creates tables nothing will write for months. A test pins their
 absence.
 
+> **"CONTRACT §8 D7" IS A PHANTOM CITATION — flagged 2026-09-12 (`QA-014`), and this packet was the
+> last of the three places citing it that did not say so.** It is cited **four times** in this file
+> (here, §12B, §12C, §13) and is **committed nowhere**.
+> [`isaac-runs-stage-2-contract.md`](isaac-runs-stage-2-contract.md) — the document being cited —
+> **has no §8**; its last section is **§7.7**. That contract flags the citation itself (§"When a
+> reader is eventually moved onto `isaac_runs`": *"cited by several files here and **committed to
+> none of them**"*), and so does `CLAUDE.md` §15. **An operator packet was the one copy still
+> presenting it as authority**, which is the wrong way round. Re-derive rather than trusting this
+> note: `grep -n '^## ' isaac-runs-stage-2-contract.md | tail -1`.
+>
+> **AND THE LIST IT SUPPOSEDLY CAME FROM DOES NOT MATCH WHAT WAS BUILT — in BOTH directions, which
+> is the stronger reason not to treat it as a specification.** Measured 2026-09-12 over
+> `apps/api/isaac_api/migrations/*.sql` and `db_write.OWNED_TABLES` (9 tables):
+>
+> | The "five deferred" above | What actually happened |
+> |---|---|
+> | `isaac_experiment_revisions` | **created** by `0003_revisions` |
+> | `isaac_run_revisions` | **created** by `0003_revisions` |
+> | `isaac_submissions` | **created** by `0004_submissions` |
+> | `isaac_assets` | **never created**, and absent from `OWNED_TABLES` |
+> | `isaac_run_assets` | **never created**, and absent from `OWNED_TABLES` |
+>
+> And **two tables the list never mentioned were created anyway** — `isaac_revision_changes`
+> (`0003`) and `isaac_submission_runs` (`0004`) — plus `isaac_run_projection` (`0005`). So the
+> phantom's own enumeration was wrong about three of five, and silent about three that shipped.
+> Re-derive with
+> `grep -ioh 'create table if not exists [a-z_]*' apps/api/isaac_api/migrations/*.sql | sort -u`.
+>
+> **NONE OF THIS CHANGES WHAT `0002` DID, WHICH IS ALL THIS PACKET AUTHORIZES.** `0002` still
+> creates exactly `isaac_runs` and one index, and the test that pins that is still correct — but
+> read what it pins precisely: `test_0002_creates_only_the_run_table_and_its_one_index`
+> (`apps/api/tests/test_experiment_repository.py:2643`) asserts those names are absent **from
+> `0002`'s own two statements**. It has never asserted, and must not be read as asserting, that any
+> of them is absent from the repository or from a database.
+
 **The `records` table — the production-derived 30-row sample — is not named anywhere** in the
 forward migration, the rollback, or the owned-table set. It is neither read, written, altered, nor
 referenced in a constraint. Three independent guards, as in 0001: `OWNED_TABLES` excludes it;
@@ -777,8 +812,11 @@ remains the operator's job and is not pre-answered by this.
   this database.
 - **The `ordinal`/`rev`/`generation` columns are unenforced projections** of the document (§2). No
   test and no constraint will catch a future writer that sets one inconsistently.
-- **Nothing here is a schema for run *revisions*, assets, or submissions.** Contract §8 D7's other
-  five tables are deferred and will each need their own migration and their own packet.
+- **Nothing here is a schema for run *revisions*, assets, or submissions.** ~~Contract §8 D7's
+  other five tables are deferred and will each need their own migration and their own packet.~~
+  **The first sentence is still exactly true of `0002`. The second is stale and its citation is a
+  phantom — see the flag in §2 (`QA-014`, 2026-09-12).** Three of those five were created by
+  `0003`/`0004`, and each did get its own migration and its own packet, which is the part that held.
 
 ### 12C. HOSTED APPLICATION — 2026-08-12, and what it changes in §12B
 
@@ -816,8 +854,15 @@ remains the operator's job and is not pre-answered by this.
   **still unknown**, and now also un-counted either side of the apply.
 - *"The `ordinal`/`rev`/`generation` columns are unenforced projections"* — unchanged, and it becomes
   live the moment a writer exists.
-- *"Nothing here is a schema for run revisions, assets, or submissions"* — unchanged. Five tables from
-  contract §8 D7 remain uncreated, and a test still pins their absence.
+- *"Nothing here is a schema for run revisions, assets, or submissions"* — unchanged, and it is
+  still true of `0002`. ~~Five tables from contract §8 D7 remain uncreated, and a test still pins
+  their absence.~~ **BOTH HALVES OF THAT SENTENCE ARE NOW FALSE, and it is struck rather than
+  edited because "remain uncreated" is the kind of claim an operator acts on.** Measured
+  2026-09-12: three of the five (`isaac_experiment_revisions`, `isaac_run_revisions`,
+  `isaac_submissions`) are created by `0003`/`0004`; and the test pins their absence **from `0002`'s
+  own statements only**, never from the repository. Full measurement and the phantom-citation flag
+  are in §2. **What is unchanged, and is what §12C is actually about: `0003` and `0004` are
+  owner-approved but applied to NO database anywhere, and applying them is the operator's act.**
 
 **§11 is still live.** The rollback procedure is not obsolete because the migration succeeded; it is
 now the *only* way back. Its "what rolling back costs" answer is still **nothing**, because the table
@@ -826,8 +871,11 @@ is empty and no code writes it — and that stops being true the moment the run 
 ## 13. What this packet does not cover
 
 - **When to run it.** Timing is yours.
-- **Whether Runs should be relational at all.** That is contract §8 DECISION D7, already recorded;
-  this packet covers the mechanics.
+- **Whether Runs should be relational at all.** ~~That is contract §8 DECISION D7, already
+  recorded;~~ **the citation is a phantom and "already recorded" is therefore unsupported — see §2
+  (`QA-014`, 2026-09-12).** The decision may well have been taken; what can be said from inside
+  this repository is that **no committed document records it**. This packet covers the mechanics
+  either way, which is why the correction does not change its scope.
 - **The run write path.** No code writes this table. The upsert, the per-run compare-and-swap, and
   the backfill of runs out of the experiment document are later slices, each independently reviewed.
 - **Any subsequent migration.** `0003` and later need their own packets.
