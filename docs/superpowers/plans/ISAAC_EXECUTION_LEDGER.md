@@ -1432,6 +1432,57 @@ against a deterministic fake provider. `HIST-000`'s data request is **prepared a
 `docs/bl15-2-data-request-2026-09-12.md`; sending it is Krish's act and it gates only `HIST-002`,
 `HIST-003b`, `BL15-001`, `BL15-002` and `HIST-006` — **not** the three slices above.
 
+### ORCHESTRATOR ERRORS THIS RUN — every one caught by a lane or a reviewer, recorded in place
+
+**EIGHT briefed claims were measured false by the lanes I briefed**, and the pattern is the same one
+this ledger has recorded twice before: an orchestrator asserting a fact about a tree it did not
+re-measure in the lane's own checkout.
+
+1. *** I TOLD A LANE TO USE TOKENS THAT DO NOT EXIST IN ITS TREE — the SAME phantom-custom-property
+   defect I had been caught committing myself EARLIER IN THIS SESSION. *** Finding the UX-001
+   ratchet overflow in the test-merge, I instructed the MCP lane to replace its raw literals with
+   `--space-sm`, `--font-weight-semibold`, `--line-height-normal` and `--font-size-meta`. Measured:
+   `git show 2f9a1133:apps/web/src/styles/tokens.css` declares **ZERO** type or spacing tokens; the
+   branch declares **19**. UX-001's scale landed on the BRANCH, and that lane was based on `main`.
+   **Following my instruction would have written four phantoms** — §11's nine-phantom class, the one
+   that left the capture surface's primary input borderless.
+   **The lane refused and did something better:** it shared the BYTE-IDENTICAL sibling rule instead
+   of duplicating declarations, giving **net new literals ZERO on all four axes** (1039→1039,
+   403→403, 420→420, 2362→2362) rather than merely token-substituting. My finding was right; my
+   prescription was wrong twice over — wrong tokens, and a weaker fix than the one available.
+2. **`MCP-008` was ALREADY FIXED, more thoroughly than the sibling I told it to copy from.**
+   `IngestionProposalsPanel` guards on **three** view dimensions where `UnmappedNotesPanel` needed
+   one — and **line 786, which my brief cited as the defect, is a COMMENT SAYING SO.** I cited a
+   line without reading it.
+3. **`PROPOSAL_SOURCES` enumerates FIVE intake classes, not four, and none was an agent channel** —
+   so "reuse it, do not add a fifth vocabulary" was **unsatisfiable as written**. Without a new
+   member an MCP note had to claim `typed_note` — *"a person typed this"* — over model-derived
+   text, which is the exact false attribution `CAP-006` exists to close.
+4. **I had the Library lane's base SHA wrong** (`782082bb`, actually `2f9a1133`), so `LIB-001`
+   appeared nowhere in its tree. It rebased before writing code.
+5. **The `LIB-002` acceptance premise — the ledger's OWN test — is false as stated.** The five
+   worked examples have **five DISTINCT titles** on the wire; the collision is manufactured by
+   `adapt.stripLifecycleSuffix` in the CLIENT. True of the screen, false of the payload.
+6. **My Defect-B ramp design would have destroyed four legitimate readings** (`"425 K, still 425 K
+   at the end"`, `"ramped at 3 K/min"`, `"cryostat setpoint 80 K"`, `"and the pressure was 3 K"`).
+7. **My §10 target-behaviour framing omitted half the class:** `"The temperature was 3 K above
+   target."` proposed `3` silently, and the label DOES assert the value — the TAIL disqualifies it.
+   A second entrance needing a second grammar.
+8. **I told the MCP lane its tests were flag-gated on `ISAAC_MCP_DEPLOYMENT`.** They construct
+   bindings directly; nothing there is CI-only.
+
+**And two of my own published claims were withdrawn after measurement rather than by a reviewer:**
+the `UX-012` "duplication" that is a correct per-section summary, and the `settings-api` figures —
+where I initially reasoned the merge could take one lane's number, before measuring that **neither
+lane's was correct for the union** and re-deriving.
+
+**The durable lesson, and it is not "measure more": a brief written from the ORCHESTRATOR'S tree is
+a claim about a tree the lane cannot see.** Six of the eight errors above are exactly that — a
+fact true at the branch head and false at the lane's base. A brief should either name the base it
+was measured against, or tell the lane to re-derive before acting. **Nine lanes across this
+programme have now correctly refused an orchestrator instruction with evidence, and not one has
+been wrong to.**
+
 ### OPEN QUESTIONS FOR KRISH RAISED BY THIS RUN — decisions, not defects
 
 1. **Does `Governance & Safety` stay in the primary navigation?** It was KEPT, deliberately: the
