@@ -8,16 +8,19 @@ the repository — never from remembered chat context.
 ## SESSION HEADER
 
 ```
-LAST UPDATED:          2026-09-12 (planning run)
+LAST UPDATED:          2026-09-12 (REMEDIATION run — the four blocking findings are being fixed)
 CANONICAL REPO:        /Users/krishverma/Documents/ISAAC
                        origin = https://github.com/ISAAC-DOE/isaac-metadata-assistant.git
                        personal = https://github.com/Krish-Verma/isaac-metadata-assistant.git (historical mirror)
-BRANCH:                main
-HEAD:                  2f9a1133bcda7f45e1d751110641d1322586f60e
-UPSTREAM DIVERGENCE:   0 ahead / 0 behind
-DIRTY STATE:           SIX untracked planning artifacts under docs/superpowers/plans/
-                       (four 2026-09-12-*.md + ISAAC_EXECUTION_LEDGER.md + ISAAC_PRODUCT_DECISIONS.md)
-                       — no tracked file modified; no code touched
+BRANCH:                docs/product-scope-v2-planning  — UNPUSHED. `main` is UNTOUCHED.
+HEAD:                  0a1c7434 (was 97c44c84 at the start of the remediation run)
+                       `main` = `origin/main` = 2f9a1133 = v0.0.232, and NOTHING has been merged to it.
+UPSTREAM DIVERGENCE:   this branch has no upstream; `main` is 0 ahead / 0 behind `origin/main`
+DIRTY STATE:           THREE remediation slices are editing this ONE working tree concurrently, in
+                       disjoint file sets (see REMEDIATION IN FLIGHT below). Expect a dirty tree
+                       across `apps/api/`, `apps/web/e2e/` and `apps/web/src/`; `docs/` is the
+                       orchestrator's lane. Snapshot regeneration is deliberately DEFERRED to ONE
+                       run after all three settle — `routes.py` is manifest-listed and will drift it.
                        snapshot drift: NONE (exit 0, both artifacts) — verified after writing all six
 OPEN PRS:              none
 LATEST VERIFIED RELEASE: v0.0.232  (git rev-list -n1 v0.0.232 -> 2f9a1133…)
@@ -39,13 +42,57 @@ ORCHESTRATOR:          Opus 5 (claude-opus-5[1m]) — **DISCLOSED FALLBACK.** DE
                        substitution. Orchestrator-only discipline preserved: plan, delegate,
                        review, integrate, verify, commit — no production code written by the
                        orchestrator. No other model silently substituted.
-SUBORDINATE AGENTS:    4 implementers dispatched (DOC-007, UX-001/002, UX-003/004, CAP-001/009);
-                       1 slot RESERVED for independent review. Ceiling 5 total, nested = forbidden.
+SUBORDINATE AGENTS:    **THE AGENT BUDGET WAS MISUNDERSTOOD BY THE PLANNING RUN AND IS CORRECTED
+                       HERE, 2026-09-12, on the project owner's instruction.** It is **7 total**:
+                       **5 implementation slots** plus **2 slots reserved EXCLUSIVELY for
+                       Impeccable**, which may not be spent on implementation. ~~"Ceiling 5
+                       total"~~ was the planning run's reading and is struck rather than deleted
+                       because it is why that run reported hitting a "7-agent ceiling" while also
+                       confessing to twelve agents — it was measuring against the wrong partition.
+                       **AND THE MODEL TIER FOR EACH OF THE 5 IS THE ORCHESTRATOR'S CHOICE** —
+                       haiku / sonnet / opus, matched to the risk tier in `CLAUDE.md` §10 — not a
+                       question to bring back to the owner. Nested agents remain FORBIDDEN.
+                       Remediation run: 3 of 5 implementation slots in use (all `opus`, all three
+                       tasks being truth-adjacent, honesty-critical or test-correctness work);
+                       2 implementation slots free; both Impeccable slots free.
 BRANCH VERDICT:        *** DO NOT MERGE — MERGE-after-fixes. 4 BLOCKING findings. ***
                        Independent review (implemented none of it) found 2 Critical + 2 Important.
                        `main` is UNTOUCHED at 2f9a1133 and this branch is UNPUSHED, so nothing
                        harmful is shipped. See "INDEPENDENT REVIEW" below before doing anything.
-CURRENT PHASE:         Phase 0 COMPLETE · PHASE A implemented, UNDER REMEDIATION
+CURRENT PHASE:         Phase 0 COMPLETE · PHASE A implemented, UNDER ACTIVE REMEDIATION
+
+REMEDIATION IN FLIGHT (2026-09-12, all four findings re-derived FIRST-HAND before dispatch — the
+                       C-1 table, the C-2 165 MB measurement, the I-1 heading inversion and both
+                       I-2 claims were each reproduced by the orchestrator, not taken on trust):
+  slice R1 · C-1 + C-2 · `opus` · owns `apps/api/isaac_api/transcript_capture.py`,
+             `apps/api/isaac_api/routes.py`, `apps/api/tests/**`
+  slice R2 · I-1 + the darwin half of QA-016 · `opus` · owns `apps/web/e2e/**`
+  slice R3 · I-2 + the third site of the same claim class (`GuidedCompletion.tsx:826`) + the two
+             measured guard holes + QA-013 · `opus` · owns `apps/web/src/components/HelpPanel.tsx`,
+             `apps/web/src/components/GuidedCompletion.tsx`, `apps/web/src/__tests__/**`
+  orchestrator lane · `docs/**` only · QA-014 CLOSED (`0a1c7434`), this header, and the
+             single post-settle snapshot regeneration. The orchestrator writes no production code.
+
+CLOSED DURING REMEDIATION:
+  QA-014 · **CLOSED** (`0a1c7434`) — and it was NOT the "one-line docs fix" the row predicted.
+           "contract §8 D7" is cited FOUR times in `migration-approval-packet-0002.md` and the
+           contract has no §8 (last section §7.7). Worse, the list it carries disagrees with what
+           shipped IN BOTH DIRECTIONS: of the "five deferred", THREE were created (`0003`/`0004`)
+           and two (`isaac_assets`, `isaac_run_assets`) never were and are absent from
+           `OWNED_TABLES`; while two tables the list never mentioned shipped anyway
+           (`isaac_revision_changes`, `isaac_submission_runs`). So §12C's "Five tables … remain
+           uncreated, and a test still pins their absence" was false in BOTH halves — the test
+           pins absence from `0002`'S OWN TWO STATEMENTS, never from the repository. An operator
+           packet was the last copy presenting a phantom as authority, which is the wrong way
+           round. `0002` itself is unaffected and `0003`/`0004` remain applied NOWHERE.
+  QA-013 · **MEASURED AND FOUND FALSE** by the orchestrator, then handed to slice R3 to fix.
+           `HelpPanel.tsx:351` "Every field links to its evidence trail in the record" fails three
+           ways: `EvidenceRow.tsx` contains ZERO `<a>`/`href`/`Link`/`button`/`onClick` — it is an
+           inline citation, so nothing LINKS; `FieldRow.tsx:81` gates the block on
+           `field.evidence.length > 0`, and `:68` renders `'honestly missing'`, so the product
+           deliberately ships fields with no trail; and the same condition's `&& !needsYou`
+           suppresses the citation even where evidence EXISTS. The row's warning — "do not read
+           UX-003/004 as having validated it" — was right to be there.
                        DOC-007 4552de54 · UX-003/004 43544c6c · UX-001/002 19c04692
                        integration fix 34398813 · CAP-001/009 47fdbe30
                        Impeccable critique: NON-DEGRADED (dual isolated assessment)
@@ -619,8 +666,8 @@ so it is not re-derived.
 | `QA-010` | **Three negative guard assertions use a dot-excluding window and have no polarity test, so they may be unfireable.** A `not.toMatch(/…[^.]{0,N}…/)` passes **vacuously** if the copy it guards carries a period inside the window — and `[^.]` is only a sentence proxy, which breaks on `v1.05`-style version numbers. | `record-verification.test.tsx:840` · `revision-history.test.tsx:319` · `:320`. **Sharpened from the original flag:** the *positive* uses of the same window (`upload-claim-parity.test.tsx:235,239`) are **self-detecting** — an unfireable positive assertion FAILS rather than passing, and they currently pass — so they are **not** at risk. Only the three negatives are. The new `help-claim-parity.test.tsx:230-233` already records the hazard in a comment and uses `[\s\S]` where the copy contains `v1.05`. | Each needs a constructed false version to polarity-test, which is per-guard work in files this session did not own. **"A test that cannot fail is not evidence"** — these three are unproven either way, which is not the same as broken. |
 | `QA-011` | **RTL's `getNodeText` reads only DIRECT text children**, so a regex spanning a paragraph's `<em>`/`<strong>`/`.mono` children never matches however correct the copy is. | Hit and recorded in `help-and-honesty.test.tsx` during UX-003/004. | A codebase-wide sweep of text-matching guards; not scoped here. |
 | `QA-012` | **`npx vitest run` with ~84 filter arguments silently reports *"No test files found, exiting with code 1"*.** A filter-count limit — **neither a pass nor a failure**, and it looks like a failure. | Measured during UX-003/004's blast-radius run; batching in halves of 42 was required. | Operational; recorded in the measurement rules below rather than fixed. |
-| `QA-013` | **`HelpPanel`'s claim *"Every field links to its evidence trail in the record"* is UNMEASURED.** | Outside UX-003/004's scope; the implementer explicitly declined to let the slice imply it had been checked. | Needs its own verification against the evidence-trail path. **Do not read UX-003/004 as having validated it.** |
-| `QA-014` | **`migration-approval-packet-0002.md` cites the phantom "contract §8 D7" unflagged**, while `docs/isaac-runs-stage-2-contract.md` (which has no §8) and `CLAUDE.md` both already flag it. | Found by DOC-007, out of its file scope. | One-line docs fix; batch with the next docs slice. |
+| ~~`QA-013`~~ | ~~**`HelpPanel`'s claim *"Every field links to its evidence trail in the record"* is UNMEASURED.**~~ **MEASURED 2026-09-12 AND THE CLAIM IS FALSE — three ways.** Struck rather than deleted because "unmeasured" and "false" are different states and the row was right to withhold the second. | **(1)** `EvidenceRow.tsx` contains **zero** `<a>`, `href`, `Link`, `button` or `onClick` — it renders `<div className="ev-row">` and `<span>`s (`:44-65`), and its own docstring calls it "the compact citation on S3 field rows". **Nothing links.** **(2)** `FieldRow.tsx:81` gates the evidence block on `field.evidence && field.evidence.length > 0`, and `:68` renders the literal `'honestly missing'` — so **fields with no trail ship BY DESIGN** (CLAUDE.md §5). **(3)** the same condition's `&& !needsYou` suppresses the citation **even where evidence exists**. | **Handed to remediation slice R3**, which owns `HelpPanel.tsx`. The second sentence of the claim (the export sidecar) is probably true and was deliberately NOT asserted here — R3 verifies it from `export.py`. **The row's warning "do not read UX-003/004 as having validated it" was right to be there.** |
+| ~~`QA-014`~~ | **CLOSED 2026-09-12, `0a1c7434`.** ~~`migration-approval-packet-0002.md` cites the phantom "contract §8 D7" unflagged~~ — true, and **understated**: it is cited **FOUR** times (§2, §12B, §12C, §13), in the one document an operator reads before applying a migration. | The contract's last section is **§7.7** — there is no §8. **And the list the phantom carries disagrees with what shipped IN BOTH DIRECTIONS:** of the "five deferred", **three** were created (`isaac_experiment_revisions`, `isaac_run_revisions` by `0003`; `isaac_submissions` by `0004`) and **two** never were and are absent from `OWNED_TABLES` (`isaac_assets`, `isaac_run_assets`); while **two the list never mentioned shipped anyway** (`isaac_revision_changes`, `isaac_submission_runs`), plus `isaac_run_projection`. So §12C's *"Five tables … remain uncreated, and a test still pins their absence"* was false in **both** halves — `test_0002_creates_only_the_run_table_and_its_one_index` pins those names as absent from **`0002`'s own two statements**, never from the repository or a database. | ~~"One-line docs fix"~~ — **the estimate was wrong, and that is the transferable lesson: the SIZE of a correction is itself a checkable claim.** Fixed in place, old wording struck, per house style. `0002` is unaffected; `0003`/`0004` remain owner-approved and applied **nowhere**; applying them is still the operator's act. This file is not manifest-listed, so no snapshot drift. |
 | `QA-015` | **Two `settings-explorer` accessibility platform splits remain**, and the cause is known: that surface renders from the **live OpenAPI document**, so its cell count tracks API prose rather than a platform difference. | `a11y-baseline.ts`, confirmed during DOC-007. A3 did **not** regress. | Expected behaviour of a live-document surface, not a defect to chase. |
 | `A11Y-01` | **NOT CLOSED.** A3 closed **one of three** causes. | `e2e/a11y-baseline.ts:634` and `:3562` say so in terms; `:2221`/`:3479`/`:3491` still describe live palette debt. | A palette decision, and two causes remain — including ancestor-`opacity` composites A3 cannot reach without destroying the ramp. |
 
