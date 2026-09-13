@@ -3996,11 +3996,40 @@ def _segment_readings(
             # two gates above quote it, and so deliberately does NOT include the
             # pre-label words that caused the refusal: `match.group(0)` starts at
             # the label. Extending the quote backwards was considered and declined
-            # — every other disclosure in this module quotes a match, a scientist
+            # — every other disclosure in this module quotes a match, ~~a scientist
             # reading "the setpoint temperature was 425 K" sees the whole sentence
-            # beside the reason anyway, and a quote whose span does not correspond
+            # beside the reason anyway~~, and a quote whose span does not correspond
             # to a match would break the offset round-trip the quotes' honesty
             # rests on.
+            #
+            # *** THE STRUCK CLAUSE IS FALSE AT THE RENDERING LAYER, and it was the
+            # only one of the three reasons that was about the SCIENTIST rather than
+            # about this module's internals. Measured 2026-09-13 after an independent
+            # review raised the quote (A-4). ***
+            #
+            # `TranscriptCapturePanel.tsx` renders `“{entry.quote}” — {entry.reason}`
+            # and NOTHING ELSE. The reading's wire shape carries `segments` as a
+            # COUNT, not as texts, so the panel cannot show the sentence even if it
+            # wanted to. What a scientist actually sees is:
+            #
+            #     "temperature was 425 K" — ... the words in FRONT of the label are
+            #     ones this reader does not recognise ...
+            #
+            # a quote containing no words in front of the label, beside a reason
+            # blaming the words in front of the label. They are pointed at something
+            # they cannot see.
+            #
+            # THE REMAINING REASON STILL HOLDS AND IS WHY THIS IS NOT FIXED HERE: a
+            # quote whose span does not correspond to a match breaks the offset
+            # round-trip, which is a structural invariant and not a preference. So
+            # the two viable repairs both live elsewhere — serve the segment TEXT
+            # alongside the abstention (a wire-shape change), or give the abstention
+            # a second, separately-named span for the pre-label words so the
+            # round-trip is preserved for `quote` itself.
+            #
+            # Left open and named rather than guessed at. What is fixed here is the
+            # JUSTIFICATION: a decision resting on three reasons, one of which is
+            # false, is not the decision it appears to be.
             if not _label_is_the_subject(rule, segment.text, match):
                 gate_refusals.append(
                     (rule.name, _KIND_NOT_THIS_SUBJECT, match.group(0), match.span(1))

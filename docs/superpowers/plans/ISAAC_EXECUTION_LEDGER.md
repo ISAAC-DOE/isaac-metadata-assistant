@@ -2839,8 +2839,19 @@ defect).
 `admitted <= every` is asserted above it) credited by its docstring with real work · `B-3` a
 docstring naming an `exported` field the interface does not have · `B-4` a comment naming rows `b`
 and `c` where they are `a` and `c` — **the number was right and the named rows were wrong, which is
-the more misleading of the two**. **`A-4` is NOT fixed and is named:** the gate-4 abstention's
-`quote` excludes the offending pre-label words its own reason names.
+the more misleading of the two**. **`A-4` — MEASURED FURTHER, and the decline was resting on a FALSE premise.** The
+abstention's `quote` excludes the offending pre-label words its own reason names. The code declined
+to extend it for three stated reasons, and **the only one of the three that was about the SCIENTIST
+is false**: it said *"a scientist … sees the whole sentence beside the reason anyway"*. Measured —
+`TranscriptCapturePanel.tsx` renders `“{quote}” — {reason}` and nothing else, and the reading's wire
+shape carries `segments` as a **COUNT, not as texts**, so the panel *cannot* show the sentence. What
+a scientist sees is a quote containing **no words in front of the label**, beside a reason blaming
+the words in front of the label — pointed at something they cannot see. The remaining reason holds
+and is why it is still not fixed: a quote whose span does not correspond to a match **breaks the
+offset round-trip**, a structural invariant. The two viable repairs both live elsewhere — serve the
+segment TEXT with the abstention, or give it a second, separately-named span. **What was fixed is
+the JUSTIFICATION: a decision resting on three reasons, one of them false, is not the decision it
+appears to be.**
 
 ### What the reviewer attacked and could NOT break — as valuable as the findings
 
