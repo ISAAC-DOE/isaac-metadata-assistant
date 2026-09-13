@@ -1332,6 +1332,60 @@ aborts), and `--app-dir apps/api` is **relative**, so launching uvicorn from `ap
 record created for manual measurement must be discarded or the backend restarted on a fresh
 `ISAAC_UI_WORKSPACE` first.
 
+### THE PRINCIPAL REMAINING **EXECUTABLE** APPLICATION-SIDE WORK — Historical Import's shell
+
+**Stated plainly because §38 requires it: safely executable application-side work REMAINS, so this
+programme is not complete, and the reason is the session's agent budget rather than a blocker.**
+
+`HIST-001` (Import Session + Source Bundle + source manifest), `HIST-003a` (the provider-neutral
+semantic-reconstruction contract exercised against a deterministic fake) and `HIST-004` (the import
+review surface) are **UNBLOCKED and authorized** — the 2026-08-29 application-side grant covers
+them, `DEC-22` says real-data reconstruction is *"BLOCKED pending institutional approval — not
+rejected"* and explicitly directs building the seam and the synthetic path **now**, and none of the
+three needs a migration, a provider, a credential or a byte of real data.
+
+**What it would build on, surveyed 2026-09-13 against the live `/api/openapi` rather than from
+memory.** The primitives already exist and the shell should reuse them rather than mint a parallel
+world: four asset operations over **metadata about files, `NO BYTES, EVER`**
+(`routes.py:15447`) — which is exactly the pointer-only discipline a Source Bundle manifest needs;
+`POST/GET .../notes` and `.../notes/{id}/review`; `POST/GET .../proposals` and
+`.../proposals/{id}/review` — the shared review pipeline candidates must enter; and
+`POST .../ingestion/csv/preview`, which by **committed human decision** has no apply route and must
+not be given one.
+
+**What must NOT be built, and this is the constraint that decides the slice's shape.** `BL15-001`
+(the `.mac` parser) and `BL15-002` (the Beamline Profile's actual conventions) stay **BLOCKED**:
+there is no representative file anywhere in reach (`REC-009` measured **zero** `.mac` and zero
+`.xlsx`/`.xls` in the tree), and §5 forbids designing against assumptions. So the shell ships
+parser *interfaces* plus **synthetic** fixtures, and a Beamline Profile *interface* that encodes no
+convention at all.
+
+**AND THE HONESTY TRAP IS ALREADY MEASURED, by the Library lane rather than predicted here.**
+`UX-016`'s import half was **deliberately not built and not mocked**: `POST /api/uploads` is an
+unconditional 403, no import route exists, and §15's *"build nothing that implies any of it
+exists"* binds. That lane shipped the create side and **added no upload or import claim string at
+all**, noting that `upload-claim-parity.test.tsx` bans absolute no-read phrasings so a new
+disclosure is a new false-disclosure surface. **Any Historical Import shell inherits that
+constraint**: a destination that can accept a bundle but can neither parse nor apply must say so,
+and `HIST-004`'s own banned pattern is *"Upload → Spinner → Mysterious JSON"*.
+
+**Why it was not attempted here, stated as a budget fact rather than a technical one.** It needs
+`routes.py` and `workspace.py`, and both were in flight across two concurrent lanes for the whole
+session; starting it would have guaranteed conflict churn on the two files three lanes already
+share. More decisively, **the session's five agent slots were spent** — one on the §9 review gate,
+one on the §5 extraction core, two on the Library and MCP lanes, and **one is reserved for the
+independent review of everything above, including the orchestrator's own six unreviewed slices.**
+Building this last would have meant either landing a large slice unreviewed or spending the review
+slot on it, and an unreviewed slice is worth less than a reviewed programme: this session's own
+review gate found a **Critical** defect in eight commits that had already passed two reviews and a
+green suite.
+
+**The exact next action for the next session:** `HIST-001` first (Import Session + Source Bundle +
+manifest, reusing `assets[]`' pointer-only rule), then `HIST-004`'s shell over it, then `HIST-003a`
+against a deterministic fake provider. `HIST-000`'s data request is **prepared and unsent** at
+`docs/bl15-2-data-request-2026-09-12.md`; sending it is Krish's act and it gates only `HIST-002`,
+`HIST-003b`, `BL15-001`, `BL15-002` and `HIST-006` — **not** the three slices above.
+
 ### OPEN QUESTIONS FOR KRISH RAISED BY THIS RUN — decisions, not defects
 
 1. **Does `Governance & Safety` stay in the primary navigation?** It was KEPT, deliberately: the
