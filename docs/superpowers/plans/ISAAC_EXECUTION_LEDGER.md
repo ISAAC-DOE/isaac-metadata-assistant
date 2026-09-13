@@ -698,7 +698,7 @@ data-governance boundaries are unchanged.
 | ID | Objective | Status | Depends | Key evidence / acceptance |
 |---|---|---|---|---|
 | CAP-001 | **COMPLETE (`47fdbe30`)** — two-pass match: `finditer` **+ a restatement read** | **IMPLEMENTED AND VERIFIED** | — | **Acceptance met on the motivating case.** ~~`search`→`finditer`~~ alone does **not** fix the owner's sentence — the rule is anchored on the word *temperature*, said once there. **Three of my briefed claims were wrong** (see the master plan's struck F4): the two-sentence variant yields **one** candidate not two, the boundary is the **label occurrence** not the sentence, and the owner's **unitless** words produce **zero** candidates because kelvin is required. **No existing test pinned the old behaviour** — all 127 pre-existing tests pass unchanged, because every existing multi-value fixture repeats the label, so the single-sentence case was entirely uncovered. Negative control recorded verbatim both directions; **five-mutation matrix**, each guard individually load-bearing. Two of the implementer's **own** test defects were caught by measurement: a ULID-substring flake (**0.19 % of ULIDs contain "425"**, measured over 200k) and two **vacuous** assertions exposed by a positive control. CAP-009: **none skipped** — case 2 satisfied, cases 3 and 5 are named GAPS, and case 5 costs more than it looks (an operational utterance leaves the run unsettled, **withholding every candidate in the transcript**) |
-| CAP-002 | Persist the conflict grouping | PLANNED | CAP-001 | `review_required` appears **once** in `routes.py` (:15273) and **zero** times in `notes.py`/`proposals.py` — computed, served once, never stored |
+| CAP-002 | Persist the conflict grouping | **PLANNED — RE-MEASURED 2026-09-13 AND GENUINELY STILL OPEN.** Recorded as a checked negative, because in this session four other `PLANNED` rows turned out stale and "I assumed it was still open" is not a status. | CAP-001 | `review_required` is now a real typed field (`transcript_capture.py:729`, built at `:3998`) and is served (`routes.py:16267`) — so the row's original "appears once" evidence has moved — **but it still reaches NEITHER `workspace.py`, `notes.py` NOR `proposals.py`** (`grep` over all three: zero hits). It is computed per reading and served, never stored, which is exactly what the row asks to change. The verdict is unchanged; only its evidence needed re-deriving |
 | CAP-003 | Sibling proposals + **derived** grouping (Option B) | PLANNED | CAP-002 | extending `proposed_value` would break `IMMUTABLE_PROPOSAL_FIELDS`, falsify wire-serialized `PROPOSAL_TARGET_SCOPE`, change `accept_proposal`'s signature and `ACCEPTED_FROM_VALUES`, and leave OpenAPI **and** MCP contracts wrong. Option B changes **none** of the 24 fields |
 | CAP-004 | Explicit `unresolved` read | PLANNED | CAP-003 | `open` conflates "unreviewed" with "deliberately undecided"; `conflict_resolution`'s `deferred` is the precedent |
 | CAP-005 | *Offered*, never automatic, sibling supersession | PLANNED | CAP-004 | today accepting one sibling leaves the other open and silently stale |
@@ -904,9 +904,9 @@ rendered viewport does not follow)** · **`QA-008` real-microphone + OS-indicato
 | ID | Objective | Phase | Status | Depends / blocked |
 |---|---|---|---|---|
 | `DOC-007` | Documentation truth alignment — nine measured-stale claims in `CLAUDE.md` and `docs/`. **Do this first: stale instructions steer implementation.** | 0 | **IN PROGRESS** | — |
-| `UX-018` | **Project Memory demoted** to `Settings → Advanced/Developer` per **DEC-19**. **Capability and tests PRESERVED** — this is a navigation change, not a deletion. Measured stake: ~7,800 lines and 578 test cases, the largest single test mass in the app. *(I inferred this ID from the revision note, which lists `UX-018` without defining it. If Krish meant a different task by `UX-018`, correct this row rather than building the wrong thing.)* | C | PLANNED | UX-010 |
-| `REV-001` | **Revision-state modelling** per **DEC-21**: a submitted snapshot is immutable; the workspace may hold `Current Working Changes` for the next snapshot. Expose revision history. **Never describe a submitted revision as mutable.** | C | PLANNED | UX-010 |
-| `REV-002` | **Revision-state UI**: visibly distinguish **`Last Submitted Revision`** from **`Current Working Changes`**, show the path to the next submission, and **surface the rename trap rather than hiding it** — a rename does not move `content_signature`, so submit → rename → resubmit yields `409 already_submitted`. | C | PLANNED | REV-001 |
+| `UX-018` | **Project Memory demoted** to `Settings → Advanced/Developer` per **DEC-19**. **Capability and tests PRESERVED** — this is a navigation change, not a deletion. Measured stake: ~7,800 lines and 578 test cases, the largest single test mass in the app. *(I inferred this ID from the revision note, which lists `UX-018` without defining it. If Krish meant a different task by `UX-018`, correct this row rather than building the wrong thing.)* | C | **DONE — row was stale, measured 2026-09-13.** `lib/routes.ts:11` reads *"THE PRIMARY DESTINATIONS — THREE, down from five (2026-09-13)"*; Project Memory and Statistics are demoted to Settings (`89d9f07c`, `UX-015`/`UX-017`), capability and tests preserved as the row required. | UX-010 |
+| `REV-001` | **Revision-state modelling** per **DEC-21**: a submitted snapshot is immutable; the workspace may hold `Current Working Changes` for the next snapshot. Expose revision history. **Never describe a submitted revision as mutable.** | C | **DONE — row was stale, measured 2026-09-13.** `lib/revisionHistory.ts` (452 lines) models the states; the three-way `RevisionHistoryState` distinction (`available` / `unknown` / `not_applicable`) is now an exhaustive `switch`, so a fourth state fails to compile. | UX-010 |
+| `REV-002` | **Revision-state UI**: visibly distinguish **`Last Submitted Revision`** from **`Current Working Changes`**, show the path to the next submission, and **surface the rename trap rather than hiding it** — a rename does not move `content_signature`, so submit → rename → resubmit yields `409 already_submitted`. | C | **DONE — row was stale, measured 2026-09-13.** `components/RevisionHistoryPanel.tsx` + `revision-history.css` ship it. **AND ITS TWO CRITICALS ARE THE REASON THIS ROW IS WORTH RE-READING RATHER THAN JUST RE-STATUSING:** the final review of PR #248 found `C-3` (this slice reported `not_applicable` — which the server's own description calls *"a fact rather than an inability"*, served **200** — as *"could not read the submission history"*) and `C-4` (it rendered **`Last Submitted Revision · None`** about a history that had **not been read**, breaking this module's own Rule 1, *"ABSENCE IS NOT A VALUE"*). Both fixed in `f8bb87db`. **The reason a five-mutant sweep missed both: `PGHOST` is unset in every shipped deployment, so `unknown` is the only render path that SHIPS — and it had no rendering coverage at all.** Every mutant killed had been on an unreachable branch. | REV-001 |
 | `MCP-019` | **Local/synthetic end-to-end MCP proof** — `MCP client → create note → proposal/candidate → change-feed event → website Review → accept/edit/reject under an explicitly-enabled trusted TEST identity → deterministic validation`. Also prove: duplicate/retry protection, payload/read bounds enforced, provenance identifies the source channel, ambiguity stays unresolved when appropriate, **MCP cannot final Submit**, and **no production provider, account or data is needed**. **Must be green BEFORE the operator is asked to mount the production endpoint.** | E | PLANNED | MCP-001, MCP-002, CAP-004 |
 | `HIST-003a` | **Provider-neutral semantic-reconstruction contract**, exercised with a **deterministic fake** over synthetic/authorized fixtures. Prove semantic output enters the shared proposal/ambiguity/conflict Review pipeline and **cannot become record truth automatically**. | G | **PLANNED — UNBLOCKED** | HIST-001 |
 | `HIST-003b` | **Real BL15-2 Claude/model reconstruction.** | G | **BLOCKED** | **EXT-10** (corpus) **AND** institutional provider/data-egress approval (**DEC-22**) |
@@ -2343,6 +2343,100 @@ S2 note said a raised timeout would cost.
 that iterates a growing catalogue is a latent failure with a countdown on it.** It does not fail
 when it is introduced; it fails for whoever adds the item that crosses the line, and it fails
 looking like their defect. Quote the headroom, not just the pass.
+
+### `MCP-019` AND `MCP-001a` — **MEASURED AS ALREADY DONE. NOTHING WAS BUILT, and that is the result.**
+
+Both rows read `PLANNED`. The directive's §25 says *"If already complete, reproduce the important
+evidence rather than rebuilding it."* Reproduced: `apps/api/tests/test_mcp_note_pathway_end_to_end.py`
+is **1,246 lines / 20 tests**, and `.venv/bin/pytest -q` over it → **20 passed, exit 0**
+(main checkout, exit code from a redirect).
+
+**This is the FOURTH stale-row finding of this session** — after the four residue items withdrawn
+from the Library brief and `LIB-004`'s "GENUINELY OPEN" verdict. The row survived for the ordinary
+reason: the work shipped and nobody re-statused it.
+
+**§25's checklist, mapped to the test that drives it** — every one behavioural, driving the real
+`McpServer` over real JSON-RPC into the real FastAPI app:
+
+| §25 / §24 requirement | test |
+|---|---|
+| the whole loop: note → proposal → feed → review → accept, with no provider/account/database | `test_the_whole_loop_runs_with_no_provider_no_account_and_no_database` |
+| retries do not duplicate | `test_a_retry_with_the_same_key_stores_nothing_and_returns_the_same_note` · `test_a_retry_carrying_the_pre_first_attempt_etag_is_refused_not_duplicated` |
+| read bounds hold | `test_the_agents_reads_are_bounded_and_the_counts_are_still_the_servers` |
+| provenance identifies the source channel | `test_the_note_and_its_proposal_both_identify_the_agent_channel` · `test_the_agent_cannot_choose_the_channel_it_is_recorded_under` |
+| ambiguity stays unresolved | `test_ambiguous_prose_becomes_a_note_and_no_value_is_invented` |
+| **MCP cannot final Submit** | `test_STRUCTURAL_no_finalising_authority_exists_at_any_scope` · `test_the_agent_is_refused_the_review_route_even_holding_every_scope` |
+| no production provider needed | `test_every_provider_seam_refuses_and_the_loop_does_not_need_one` |
+| no production DB touched | `test_STRUCTURAL_the_loop_opens_no_database_connection_and_reads_no_credential` |
+| **`MCP-006`** deep links | `test_the_capture_and_the_proposal_each_return_a_usable_relative_deep_link` · `test_a_deduplicated_capture_links_to_the_note_that_exists` |
+| **`MCP-003`/`MCP-004`** disclosure | `test_the_mcp_state_is_disclosed_and_names_the_external_decisions` |
+| **`MCP-001a` size and rate bounds** — the row this closes as a side effect | `test_a_record_refuses_notes_past_its_ceiling_rather_than_evicting_one` · `test_the_real_ceilings_are_in_place_and_are_not_the_test_values` · `test_an_over_long_note_is_refused_rather_than_truncated` |
+
+**THREE PROPERTIES OF THAT FILE WORTH CARRYING FORWARD, because they are the standard rather than
+this feature's detail:**
+
+1. **It drives BOTH identity legs, and that is the point rather than a detail.** `accept` answers
+   **409 `human_actor_required`** in every default-configured deployment, because no trusted
+   authentication boundary exists — a **CONFIGURATION fact, not a build defect**, which no
+   application change can close. The file asserts the refusal AND the success leg reached only
+   through the fixture verifier, which `test_deploy_config.py` pins to no shipped deploy artifact.
+   Nothing in it weakens the 409 or adds a bypass.
+2. **It names what it does NOT prove**, so it cannot be read as broader than it is: no hosted
+   anything, no browser (that is `playwright.trusted.config.ts`), no model — and the loop is green
+   without one, *asserted rather than assumed*.
+3. **Its header explains why every assertion is behavioural**, citing the slice in `CLAUDE.md` §11
+   whose central claim was pinned by string presence and whose 25 tests a **fabricating seam** also
+   passed. Claims that can only be structural are labelled `STRUCTURAL` **in the test name**, so the
+   distinction is visible in CI output rather than buried in a docstring.
+
+**So the honest status of §24/§25 is: the application-side MCP contract is complete and proven
+locally, and the only remaining blocker to a real remote demonstration is the operator's mounting
+step.** That is exactly the claim the directive wanted established, and it did not need code.
+
+**`MCP-020`/`MCP-021`/`SEC-001` stay BLOCKED** on `EXT-02`; nothing here touches an external gate.
+
+### *** STALE-ROW SWEEP, ROUND TWO: ELEVEN MORE, ONE DAY AFTER A SWEEP THAT FOUND ELEVEN ***
+
+The previous continuation run swept fourteen `PLANNED` rows and found **twelve already done**,
+and wrote: *"A ledger read at face value would have sent a session to rebuild the MCP note
+pathway, the Library screen, the folder model and the type scale."* **I read that sweep, and then
+reproduced the failure inside twenty-four hours** — by writing a lane brief from the NAMED RESIDUE
+section, which that sweep had not covered.
+
+| # | Row / item | Verdict | Measured by |
+|---|---|---|---|
+| 1–4 | the four folder/Settings/citation residue items in my Library brief | **already fixed on the branch** | `0177364c`, `8ce85a87`, `e46c0a6b` — found by accident, reviewing the same commits for the §9 gate minutes later |
+| 5 | `LIB-004` — recorded **"GENUINELY OPEN"** | **already largely done** | `components/LibraryFolders.tsx` implements breadcrumbs; cross-folder search is the DEFAULT (`exactFolder` never set). Only the import half is absent, and that is a committed human decision |
+| 6 | `LIB-003a` | **already asserted** | `test_experiment_folders.py`'s folder-reaches-no-export / no-sidecar tests |
+| 7 | `MCP-019` | **done** | 1,246 lines / **20 tests**, `pytest` → 20 passed exit 0 |
+| 8 | `MCP-001a` | **done**, as a side effect of the same file | three ceiling/over-long-note tests |
+| 9 | `REV-001` | **done** | `lib/revisionHistory.ts`, 452 lines, exhaustive `switch` over the three states |
+| 10 | `REV-002` | **done** | `RevisionHistoryPanel.tsx` + `revision-history.css` |
+| 11 | `UX-018` | **done** | `lib/routes.ts:11` — *"THE PRIMARY DESTINATIONS — THREE, down from five"* |
+| — | `UX-021`'s developer-jargon third | **already done** | the grep hits that look like live jargon are JSX comments DOCUMENTING its removal |
+| — | `UX-024` | **DOES NOT REPRODUCE** | `body` declares no transition; the tree's only width/height transition is a `position: fixed`, `pointer-events: none` highlight ring where it is the correct tool |
+| — | `CAP-002` | **CHECKED, GENUINELY STILL OPEN** | `review_required` is typed and served but reaches none of `workspace.py`/`notes.py`/`proposals.py` |
+
+**THE `CAP-002` ROW IS THE ONE TO COPY.** Four rows in a row turning out stale makes "I assumed it
+was still open" indistinguishable from a measurement — so a row confirmed OPEN now carries the check
+that confirmed it, and the note that its original evidence had moved even though its verdict had not.
+
+**TWO THINGS THAT MAKE THIS RECUR, stated as mechanisms rather than as scolding:**
+
+1. **A residue section is a DATED MEASUREMENT, and nothing marks it as one.** It reads like a
+   backlog. Briefing a lane from it without re-deriving is the same act as quoting a stale test
+   count — which this file forbids in §38 and which its own §17 table has been caught doing twice.
+2. **`UX-021`'s jargon and `MCP-008` before it both survived because a `grep` matched the COMMENT
+   DOCUMENTING THE FIX.** That is now three instances of one mechanism. A `file:line` citation in a
+   ledger row decays faster than the claim it supports, because the line moves and the row does not
+   — and a comment describing a defect is indistinguishable, to `grep`, from the defect.
+
+**THE PRACTICE THAT WOULD HAVE CAUGHT ALL ELEVEN takes about a minute per row and is now stated as
+a rule: before building anything from a row, check the ARTIFACT — a symbol, a collected test count,
+a payload key, a rendered string — never the row, never a commit message, and never a grep for a
+word you guessed.** `MCP-002`'s false negative earlier in this programme is the counter-example that
+makes the last clause necessary: a zero-hit grep for an invented constant name reads as "not built"
+and measures only your guess about the name.
 
 ### RESIDUE NAMED THIS RUN, measured and deliberately not fixed
 
