@@ -1280,7 +1280,33 @@ def _evidenced_field_value(exp: Experiment, path: str) -> str | None:
     value = entry.get("value")
     if not isinstance(value, str):
         return None
-    return value.strip() or None
+    if not value.strip():
+        return None
+    # *** AND IT MUST ACTUALLY BE EVIDENCED, which this function did not check
+    # despite its name. Found by independent review, 2026-09-13. ***
+    #
+    # It withheld `needs_confirmation`, non-strings and blanks, and then returned any
+    # remaining value — so a Library row could report `technique: "HERFD-XAS"` beside
+    # `evidenced_field_count: 0`, two columns of the same row disagreeing about
+    # whether the same field is established. `Experiment.evidenced_field_count`'s own
+    # definition is "a non-null value AND at least one evidence entry"; this is now
+    # the same criterion, so the row cannot contradict itself.
+    #
+    # IT ALSO REPAIRS THIS FUNCTION'S OWN ARGUMENT FOR ADMITTING `inferred`. The
+    # docstring above says `inferred` is admissible because §5 permits a value
+    # inferred by a documented rule and "the envelope carries that rule in its own
+    # `evidence` array" — a justification that silently assumed the array is there.
+    # Without this check the justification held for the cases that have evidence and
+    # was simply absent for the ones that do not.
+    #
+    # MEASURED BEFORE CHANGING IT, so this costs no real column: all five seeded
+    # records carry `evidence` of length 1 for BOTH `system.technique` and
+    # `system.facility.beamline`, at `status: verified`. Nothing that was being
+    # displayed stops being displayed.
+    evidence = entry.get("evidence")
+    if not isinstance(evidence, list) or not evidence:
+        return None
+    return value.strip()
 
 
 def _summary(

@@ -582,15 +582,77 @@ def test_a_needs_confirmation_field_is_withheld_from_the_list(client):
         e for e in client.get("/api/experiments").json()["experiments"] if e["id"] == created["id"]
     )
     assert row["technique"] is None
-    # AND THE GUARD IS NOT VACUOUS: the same value with an established status IS
-    # reported, so the `None` above is the status rule firing rather than the lookup
-    # failing for some other reason.
+
+    # AND THE GUARD IS NOT VACUOUS: the same value with an established status AND
+    # evidence IS reported, so the `None` above is the status rule firing rather than
+    # the lookup failing for some other reason.
+    #
+    # *** `evidence` IS NOW SUPPLIED HERE, AND ITS ABSENCE USED TO MAKE THIS ARM
+    # PROVE THE WRONG THING. *** The fixture flipped only `status` and left
+    # `evidence: []`, which was harmless while `_evidenced_field_value` ignored
+    # evidence entirely — and which meant this arm isolated the status rule using a
+    # record that could never have been reported anyway. When the evidence check was
+    # added (independent review, 2026-09-13: a row could say `technique:
+    # "HERFD-XAS"` beside `evidenced_field_count: 0`), this arm failed, correctly,
+    # and that is how the weakness surfaced.
     exp.draft["fields"]["system.technique"]["status"] = "verified"
+    exp.draft["fields"]["system.technique"]["evidence"] = [
+        {"kind": "user_confirmation", "detail": "fixture"}
+    ]
     exp.save()
     row = next(
         e for e in client.get("/api/experiments").json()["experiments"] if e["id"] == created["id"]
     )
     assert row["technique"] == "HERFD-XAS"
+
+
+def test_an_unevidenced_field_is_withheld_from_the_list(client):
+    """A value with NO evidence is not reported, even at an established status.
+
+    *** THE SECOND HALF OF THE SAME RULE, added after an independent review found
+    the first half was the only one enforced. *** `_evidenced_field_value` withheld
+    `needs_confirmation`, non-strings and blanks and then returned whatever was
+    left — so a Library row could report a technique beside
+    `evidenced_field_count: 0`, two columns of one row disagreeing about whether
+    the same field is established.
+
+    `Experiment.evidenced_field_count`'s definition is "a non-null value AND at
+    least one evidence entry". This asserts the list column now applies the same
+    criterion, and asserts the two agree on the SAME row rather than each
+    separately — a row that contradicts itself is the defect, not either column
+    alone.
+
+    It also repairs this function's own argument for admitting `inferred`: the
+    docstring says `inferred` is fine because "the envelope carries that rule in
+    its own `evidence` array", which silently assumed the array was there.
+    """
+    created = _create(client, "Unevidenced")
+    exp = ws.load_experiment(created["id"], session_id=None)
+    assert exp is not None
+    exp.draft.setdefault("fields", {})["system.technique"] = {
+        "value": "HERFD-XAS",
+        "status": "verified",
+        "evidence": [],
+    }
+    exp.save()
+
+    row = next(
+        e for e in client.get("/api/experiments").json()["experiments"] if e["id"] == created["id"]
+    )
+    assert row["technique"] is None, "an unevidenced value must not be reported"
+    # THE TWO COLUMNS AGREE ON THIS ROW, which is the property that matters.
+    assert row["evidenced_field_count"] == 0, row["evidenced_field_count"]
+
+    # NOT VACUOUS: one evidence entry is the only difference, and it flips both.
+    exp.draft["fields"]["system.technique"]["evidence"] = [
+        {"kind": "user_confirmation", "detail": "fixture"}
+    ]
+    exp.save()
+    row = next(
+        e for e in client.get("/api/experiments").json()["experiments"] if e["id"] == created["id"]
+    )
+    assert row["technique"] == "HERFD-XAS"
+    assert row["evidenced_field_count"] >= 1, row["evidenced_field_count"]
 
 
 @pytest.mark.parametrize(
