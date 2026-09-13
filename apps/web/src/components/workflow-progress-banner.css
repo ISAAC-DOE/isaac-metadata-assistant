@@ -49,11 +49,23 @@
 .wf-progress-banner--attention .wf-progress-heading { color: var(--advisory-text); }
 .wf-progress-banner--ready .wf-progress-heading { color: var(--action-hover); }
 
+/* UX-025 — MEASURE, not width. This paragraph is the product's strongest asset
+   (its honest explanation of what is blocking the record) and it was rendering at
+   ~107 characters per line on a wide window, because `.wf-progress-body` is
+   `flex: 1 1 auto` and nothing capped the text inside it. Long measures cost
+   return-sweep accuracy: the eye loses its place going back to the left edge, and
+   this is the one sentence on the screen a reader most needs to finish.
+
+   `74ch` is not a new number — `screens.css` already uses 68/74/80/96ch, and 74 is
+   the rung its sibling explanatory paragraphs use. The cap is on the TEXT, not on
+   the banner: the row keeps its full width so the action button stays right-aligned
+   where the layout puts it, and only the measure is bounded. */
 .wf-progress-text {
   margin: 2px 0 0;
   font-size: 12.5px;
   color: var(--text-secondary);
   line-height: 1.4;
+  max-width: 74ch;
 }
 
 .wf-progress-action { flex: none; }

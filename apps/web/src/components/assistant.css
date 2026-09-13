@@ -1791,6 +1791,32 @@ button.assistant-source-chip-nav:focus-visible {
 }
 .edit-impact-reason { font-size: 13px; font-weight: 600; color: var(--text-primary); }
 .edit-impact-note { margin: 4px 0 0; font-size: 12.5px; color: var(--text-muted); }
+/* A11Y-01 cause (b), ONE OF THREE CLOSED — the ancestor `opacity` is GONE.
+   `opacity: 0.72` used to sit here and it dragged this row's text below AA by
+   compositing: `--text-secondary` #46515f (6.86:1 on white) rendered as
+   #777f8a, and `--text-quaternary` -> `--text-tertiary` #626c77 rendered as
+   #8b939b (2.87:1 on #f4f6f9). Both were `serious` axe `color-contrast`
+   failures on a scientist-facing surface.
+
+   REMOVING IT IS THE WHOLE FIX, AND THAT IS WHY NO COLOUR CHANGED. The tokens
+   this row already paints both clear AA uncomposited; the opacity was piling
+   de-emphasis on top of ink that was ALREADY de-emphasised, and it is the only
+   one of the two mechanisms that is invisible to a palette audit.
+   `__tests__/palette-contrast.test.ts` had already proved the alternative
+   impossible: composited at .72, a neutral grey only clears 4.5:1 down to
+   #414141, which is darker than `--text-secondary` two rungs above it — so a
+   compliant "tertiary" here would have had to be darker than the tiers it
+   exists to sit below. The opacity had to go, and the ramp does the work.
+
+   WHAT CARRIES THE RECESSION NOW: the faint border, the outlined number disc,
+   and the token ramp itself (secondary label, tertiary path, against the
+   primary ink active rows use). That is how every other de-emphasised surface
+   in this app already does it — this row was the outlier.
+
+   THE OTHER TWO SITES ARE STILL OPEN and are deliberately not touched here:
+   `queue.css .exp-row.done` (.82) and `signals.css .advisory-nongating` (.85).
+   They are named as residue rather than swept, because each moves accessibility
+   baseline cells on both platforms and needs its own Linux-CI round-trip. */
 .upcoming-row {
   display: flex;
   align-items: center;
@@ -1798,7 +1824,6 @@ button.assistant-source-chip-nav:focus-visible {
   padding: 12px 16px;
   border: 1px solid var(--border-faint);
   border-radius: var(--radius-inner);
-  opacity: 0.72;
 }
 .upcoming-num {
   width: 22px;

@@ -1,7 +1,9 @@
 import './help.css';
 import { useEffect, useId, useRef, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { CircleHelp, X } from './icons';
 import { LABELS } from '../lib/labels';
+import { ROUTES } from '../lib/routes';
 import { CANONICAL_STEPS } from '../lib/workflowSteps';
 
 /*
@@ -167,12 +169,63 @@ export function HelpPanel() {
   const headingId = useId();
   const wasOpen = useRef(false);
 
-  // Escape + click-outside close while open.
+  /*
+   * A11Y-02 — Escape, click-outside, AND Tab containment.
+   *
+   * THE TRAP IS WHAT MAKES `role="dialog"` HONEST HERE. This panel has
+   * announced itself as a dialog (and the trigger as `aria-haspopup="dialog"`)
+   * since it shipped, and focus moved INTO it on open and back to the trigger
+   * on close — but Tab from the last control inside walked straight out into
+   * the page behind, which the dialog is visually covering. A screen-reader or
+   * keyboard user therefore landed in content they could not see, with no way
+   * to tell they had left. `aria-modal="true"` is added in the SAME change and
+   * deliberately not before it: that attribute tells assistive technology the
+   * rest of the page is inert, which was FALSE while Tab could reach it. Trap
+   * and attribute are one decision, so neither ships without the other.
+   *
+   * The shape is copied deliberately from `SearchDialog` and `ResetDemoDialog`,
+   * which hand-roll the identical containment — capture-phase listener, a
+   * freshly-queried focusable list on every keystroke (the panel's content is
+   * conditional, so a list captured once goes stale), `preventDefault` so focus
+   * can never leave, and wraparound in both directions. Reading like the
+   * surrounding code was preferred over extracting a shared hook: the two
+   * existing copies are in dialogs whose behaviour is pinned by their own
+   * suites, and one of them is the DESTRUCTIVE reset path. Extracting the hook
+   * is real and is named as residue rather than smuggled into an accessibility
+   * fix.
+   */
   useEffect(() => {
     if (!open) return;
+    const panel = panelRef.current;
+    if (!panel) return;
+
+    const focusable = () =>
+      Array.from(
+        panel.querySelectorAll<HTMLElement>(
+          'a[href], button:not([disabled]), textarea, input:not([disabled]), select, [tabindex]:not([tabindex="-1"])',
+        ),
+      );
 
     function onKeyDown(e: KeyboardEvent) {
-      if (e.key === 'Escape') setOpen(false);
+      if (e.key === 'Escape') {
+        setOpen(false);
+        return;
+      }
+      if (e.key !== 'Tab') return;
+      e.preventDefault();
+      const items = focusable();
+      if (items.length === 0) {
+        // The panel itself is `tabIndex={-1}` and focusable programmatically,
+        // so there is always somewhere for focus to rest. Without this branch a
+        // content-less panel would swallow Tab and leave focus nowhere.
+        panel!.focus();
+        return;
+      }
+      const active = document.activeElement as HTMLElement | null;
+      const idx = active ? items.indexOf(active) : -1;
+      const delta = e.shiftKey ? -1 : 1;
+      const next = items[(idx + delta + items.length) % items.length] ?? items[0];
+      next.focus();
     }
     function onPointerDown(e: MouseEvent) {
       const target = e.target as Node;
@@ -180,10 +233,10 @@ export function HelpPanel() {
       if (buttonRef.current?.contains(target)) return;
       setOpen(false);
     }
-    document.addEventListener('keydown', onKeyDown);
+    document.addEventListener('keydown', onKeyDown, true);
     document.addEventListener('mousedown', onPointerDown);
     return () => {
-      document.removeEventListener('keydown', onKeyDown);
+      document.removeEventListener('keydown', onKeyDown, true);
       document.removeEventListener('mousedown', onPointerDown);
     };
   }, [open]);
@@ -217,6 +270,7 @@ export function HelpPanel() {
           ref={panelRef}
           className="help-panel"
           role="dialog"
+          aria-modal="true"
           aria-labelledby={headingId}
           tabIndex={-1}
         >
@@ -244,6 +298,41 @@ export function HelpPanel() {
                   </li>
                 ))}
               </ol>
+              {/*
+                UX-021 — THE WALKTHROUGH POINTER. The Impeccable critique named
+                "no link to the guided walkthrough one route away" as part of
+                this surface's P1 regression: Help explained the workflow in
+                prose while the product's one interactive teaching path was
+                reachable only by knowing where to look.
+
+                THE DESTINATION IS SETTINGS, NOT MY EXPERIMENTS, AND THAT IS A
+                CORRECTNESS POINT RATHER THAN A PREFERENCE. The obvious pointer
+                — "press Launch Guided Demo on My Experiments" — is FALSE for
+                any reader who has already finished the walkthrough: that
+                control is gated on the queue and, per
+                `ExperimentsHome.tsx`'s own note, "disappears for good once the
+                walkthrough is finished", with the replay control living in
+                Settings & API -> Help & Tutorial. `lib/routes.ts:19` already
+                calls that tab "the one permanent home of the guided
+                walkthrough". So the only pointer that is true for every reader
+                is the permanent one, and a Help surface is exactly where a
+                first-time-only claim would do the most damage.
+
+                ZERO NEW VOCABULARY: `LABELS.actionGoToHelpAndTutorial` and
+                `ROUTES.settingsTab('help')` both already exist and are already
+                used for this destination elsewhere. A real `<Link>` rather than
+                a button, so it is middle-clickable, bookmarkable and reachable
+                by the keyboard walk — and it is now the first focusable item
+                inside the trapped dialog, which is why the trap above had to
+                land in the same change.
+              */}
+              <p className="help-walkthrough-pointer">
+                Prefer to be shown? The guided walkthrough opens a worked example and
+                steps through this in the product.{' '}
+                <Link to={ROUTES.settingsTab('help')}>
+                  {LABELS.actionGoToHelpAndTutorial}
+                </Link>
+              </p>
             </section>
 
             <section className="help-section">

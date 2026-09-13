@@ -1600,7 +1600,7 @@ describe('A3 · the guards above can actually fail', () => {
 
 /* ── 5 · the residue this change cannot close ──────────────────────────────── */
 
-describe('A3 · the opacity residue is still open, and says so with numbers', () => {
+describe('A3 · the opacity residue is PARTLY CLOSED — one of three fixed, two still open, all with numbers', () => {
   /*
    * Cause (b) of FINDING A11Y-01. Three rules put an ancestor `opacity` over
    * text, and compositing drags a PASSING colour below AA.
@@ -1629,18 +1629,6 @@ describe('A3 · the opacity residue is still open, and says so with numbers', ()
       why: '`.exp-row` declares `background: var(--surface)`, so the row composites onto white.',
     },
     {
-      file: 'components/assistant.css',
-      selector: '.upcoming-row',
-      alpha: 0.72,
-      ink: '--text-tertiary',
-      backdrop: '--surface',
-      composite: '#8e959d',
-      why:
-        '`.upcoming-row` declares no fill of its own. `--surface` is the lightest ground it can ' +
-        'sit on and therefore the most FAVOURABLE assumption available — the site fails even ' +
-        'there, which is what makes the residue claim safe rather than lucky.',
-    },
-    {
       file: 'components/signals.css',
       selector: '.advisory-nongating',
       alpha: 0.85,
@@ -1655,8 +1643,51 @@ describe('A3 · the opacity residue is still open, and says so with numbers', ()
     },
   ] as const;
 
-  it('all three ancestor-opacity rules are still present at the recorded strength', () => {
-    expect(OPACITY_SITES.length).toBe(3);
+  /*
+   * `.upcoming-row` WAS THE THIRD SITE AND IS NOW CLOSED — `components/assistant.css`
+   * no longer sets an `opacity` on it. Recorded here rather than deleted, because
+   * "three sites" is quoted in `e2e/a11y-baseline.ts`, in `styles/tokens.css` and in
+   * `src/test/contrast.ts`, and a reader who finds two where the prose says three needs
+   * to be able to tell a FIX from an omission.
+   *
+   * WHAT CLOSING IT REQUIRED, AND WHY IT IS NOT A PRECEDENT FOR THE OTHER TWO: nothing
+   * but deleting the declaration. The tokens the row already painted —
+   * `--text-secondary` and `--text-quaternary` — both clear AA uncomposited, so the
+   * opacity was the entire defect and the ramp already carried the hierarchy. The two
+   * remaining sites are not obviously the same shape: `.exp-row.done` dims a row that
+   * also carries borders and a disc, and `.advisory-nongating` dims a SATURATED ink on
+   * a tinted ground, which no neutral-ramp reasoning reaches in either direction.
+   *
+   * It was closed because `UX-013` (the Assistant rail default) widened the main column
+   * on Guided Completion and made a SECOND node of this defect visible — the baseline's
+   * recorded `1` had been measuring a partially-hidden failure. The choice was to fix it
+   * or to transcribe a `serious` violation upward, and transcribing a defect one's own
+   * change made worse is the trade this repository has been caught making before.
+   */
+  const CLOSED_OPACITY_SITES = [
+    { file: 'components/assistant.css', selector: '.upcoming-row', wasAlpha: 0.72 },
+  ] as const;
+
+  it('a closed site has NOT quietly reacquired its opacity', () => {
+    // A TWO-WAY RATCHET. The `it` below guards the sites that are still open;
+    // without this one, re-adding `opacity: .72` to `.upcoming-row` would make
+    // every test in this file pass again while restoring a `serious` failure —
+    // the guard would have become a guard against FIXING it only.
+    expect(CLOSED_OPACITY_SITES.length).toBe(1);
+    for (const site of CLOSED_OPACITY_SITES) {
+      const rule = RULES.find((r) => r.file === site.file && r.selector === site.selector);
+      expect(rule, `${site.file} ${site.selector} not found`).toBeDefined();
+      expect(
+        /(?:^|[\s;])opacity:\s*([\d.]+)/.exec(rule!.decls),
+        `${site.selector} has an ancestor opacity again (it was ${site.wasAlpha} and was ` +
+          'removed to close one site of A11Y-01 cause (b)). Compositing drags its text below ' +
+          'AA; de-emphasise with the token ramp, not with opacity.',
+      ).toBeNull();
+    }
+  });
+
+  it('the two still-open ancestor-opacity rules are present at the recorded strength', () => {
+    expect(OPACITY_SITES.length).toBe(2);
     for (const site of OPACITY_SITES) {
       const rule = RULES.find((r) => r.file === site.file && r.selector === site.selector);
       expect(rule, `${site.file} ${site.selector} not found`).toBeDefined();
@@ -1731,6 +1762,9 @@ describe('A3 · the opacity residue is still open, and says so with numbers', ()
      */
     const white = declaredHex('--surface');
     const THRESHOLDS = [
+      // .72 is KEPT after `.upcoming-row` was fixed, because this block's whole
+      // argument is that darkening the ink could not have fixed it — retiring the
+      // row would delete the evidence for the decision that was actually taken.
       [0.72, '#414141'],
       [0.82, '#585858'],
       [0.85, '#5e5e5e'],

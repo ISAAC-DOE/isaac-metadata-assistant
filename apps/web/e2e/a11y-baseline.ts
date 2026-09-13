@@ -398,13 +398,18 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
       'i.e. as TEXT at 11.5px, 110 occurrences. (b) Ancestor `opacity` compositing tokens ' +
       'that PASS at full strength down below 4.5:1: --text-muted #5b6570 (5.93:1) renders ' +
       '#777f89 and --text-slate #5b6b7d (5.46:1) renders #778493 under ' +
-      '`queue.css:63 .exp-row.done { opacity: .82 }`; --text-secondary #46515f (8.07:1) ' +
-      'renders #777f8a and --text-quaternary renders #b3bbc4 (1.79:1) under ' +
-      '`assistant.css:1557 .upcoming-row { opacity: .72 }`; --advisory-text #8a6420 (5.35:1, ' +
+      '`queue.css:63 .exp-row.done { opacity: .82 }`; --advisory-text #8a6420 (5.35:1, ' +
       'itself darkened in P23C expressly for AA) renders #9b793d under ' +
       '`signals.css:199 .advisory-nongating { opacity: .85 }`; --text-tertiary renders ' +
-      '#8e98a2 under the same .done rule. Darkening the tokens will NOT fix these five — the ' +
-      'opacity has to go. (c) Two saturated category/status colours that land just under AA ' +
+      '#8e98a2 under the same .done rule. Darkening the tokens will NOT fix these — the ' +
+      'opacity has to go. *** AND ON 2026-09-13 ONE OF THE THREE SITES WENT: ' +
+      '`assistant.css .upcoming-row { opacity: .72 }` is REMOVED, so --text-secondary no ' +
+      'longer renders #777f8a there and --text-quaternary no longer renders #b3bbc4/#8b939b. ' +
+      'Deleting the declaration was the entire fix — both tokens clear AA uncomposited, so no ' +
+      'colour changed and the token ramp carries the recession. Two sites of cause (b) remain, ' +
+      'and they are NOT the same shape: .exp-row.done also dims borders and a disc, and ' +
+      '.advisory-nongating dims a SATURATED ink on a tinted ground that no neutral-ramp ' +
+      'reasoning reaches. *** (c) Two saturated category/status colours that land just under AA ' +
       'at small sizes: --verified-text #2f7d78 on the #e6f1f0 chip tint ' +
       '(4.2:1, 265 occurrences) and --src-derivation #7a6bb0 (4.25:1, 15). ' +
       'Measured range across all 43 (fg, bg, size) combinations: 1.56:1 to 4.25:1, all ' +
@@ -429,9 +434,21 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
       '#8e98a2', // --text-tertiary   @ opacity .82  (.exp-row.done)
       '#777f89', // --text-muted      @ opacity .82  (.exp-row.done)
       '#778493', // --text-slate      @ opacity .82  (.exp-row.done)
-      '#777f8a', // --text-secondary  @ opacity .72  (.upcoming-row)
-      '#b3bbc4', // --text-quaternary @ opacity .72  (.upcoming-row)
       '#9b793d', // --advisory-text   @ opacity .85  (.advisory-nongating)
+      // ── REMOVED 2026-09-13, A11Y-01 cause (b), ONE SITE CLOSED. Three entries
+      //    left this list, and REMOVING them makes the guard STRICTER rather than
+      //    looser: `foregrounds` is an allowlist of colours axe is permitted to
+      //    report, so a colour that is no longer reachable must not stay on it —
+      //    if it ever reappears, that is a regression and this guard should say so.
+      //      '#777f8a'  --text-secondary                    @ opacity .72
+      //      '#b3bbc4'  --text-quaternary (pre-A3 #9aa4af)  @ opacity .72
+      //      '#8b939b'  --text-quaternary -> --text-tertiary @ opacity .72
+      //    All three were `assistant.css` `.upcoming-row`, whose `opacity: 0.72`
+      //    is GONE — see the comment on that rule. The tokens it paints both clear
+      //    AA uncomposited, so deleting the declaration was the entire fix and no
+      //    colour changed. The OTHER TWO sites of cause (b) are untouched and
+      //    their composites remain above: `.exp-row.done` (.82) and
+      //    `.advisory-nongating` (.85).
       // ── ADDED 2026-09-01, A3 NEUTRAL-INK PALETTE. Both are the NEW
       //    --text-tertiary #626c77 (which --text-quaternary now aliases) composited
       //    under an ancestor `opacity` — cause (b) in the `note` above, which this
@@ -440,8 +457,8 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
       //    fg, bg, ratio and size are all read out of `node.any[].data`, not computed:
       '#7c858e', // --text-quaternary -> --text-tertiary @ opacity .82
                  //   (queue.css:140 `.exp-row.done`) on #fdfdfe = 3.68:1 at 11.5px
-      '#8b939b', // --text-quaternary -> --text-tertiary @ opacity .72
-                 //   (assistant.css:1770 `.upcoming-row`) on #f4f6f9 = 2.87:1 at 11px
+                 // (the `.upcoming-row` @ .72 sibling of this line, '#8b939b' on
+                 //  #f4f6f9 = 2.87:1 at 11px, is REMOVED — that opacity is gone)
     ],
     /*
      * ── 2026-09-01: TWO COLOURS ADDED, THE REST DELIBERATELY LEFT — AND THE REASON
@@ -917,8 +934,6 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
          seeded record and the one node that stopped failing is not identified,
          because this suite records counts and CI's IMPROVED message names none.
          Lowered rather than left stale: a high number re-admits the defect. */
-      'guided-completion@desktop-1280x800': 1,
-      'guided-completion@laptop-1024x768': 2,
       // Linux 11 -> 10, MEASURED by CI run 30691557697 on `7e9a387`: a genuine
       // IMPROVEMENT on Linux only, lowered rather than left stale. darwin stays
       // 11 (measured locally, unchanged), so the entry splits.
@@ -951,7 +966,6 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
       // `.guided-inferability` while Linux did. The two platforms have therefore
       // CONVERGED at 11, which is why the split that existed for the 11/10
       // difference is no longer carrying any information and is removed.
-      'guided-completion@tablet-768x1024': 2,
       // Was `{ darwin: 7, linux: 8 }`; darwin caught up to Linux on 2026-08-01
       // and the split is no longer needed. `.guided-suggestion-not` moved from
       // axe's `incomplete` bucket into `violations` after the C1/I4 fix removed
@@ -966,8 +980,6 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
       // at 3.64:1, the same token as four already-baselined nodes on this
       // surface), not a regression. Fixing the token is a separate, wider
       // change: it would move counts on many surfaces at once.
-      'guided-completion@mobile-375x812': 2,
-      'guided-completion@zoom-200': 2,
       /*
        * ── THE REFLOW FIX MADE A PRE-EXISTING AA FAILURE MEASURABLE, 2026-08-25 ──
        *
@@ -2085,8 +2097,6 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
       'export-readiness-done@width-390': 1,
       'export-readiness@width-320': 1,
       'export-readiness@width-390': 1,
-      'guided-completion@width-320': 2,
-      'guided-completion@width-390': 2,
       // COLLAPSED to a scalar 2026-08-25: linux 2 -> 1 joined darwin's 1, and the
       // guard rejects a pair whose halves are equal. See the `load@desktop-1280x800`
       // note for the layout-concealing-a-contrast-defect sequence.
@@ -3740,16 +3750,32 @@ export const A11Y_BASELINE_TOTAL_NODES: Readonly<Record<BaselinePlatform, number
   // faces with the same remainder. Do NOT read the empty split set as "splits are
   // over" — change the TEXT on any of these surfaces and they come back.
   //
-  // ── WHAT THE REMAINING 871 ARE, so nobody reads this as A11Y-01 closed ──────
+  // ── WHAT THE REMAINING 857 ARE, so nobody reads this as A11Y-01 closed ──────
   //
-  // Ten surfaces survive, seven cells each, and the debt is concentrated:
+  // RE-MEASURED 2026-09-13 by parsing this file's own entry map rather than by
+  // subtracting from the previous figure, and THREE of the old rows were stale, not
+  // one. The old block read "Ten surfaces ... total 871" and is corrected wholesale:
   //
-  //   evidence               7 x 68 = 476        guided-completion   1-2 each =  13
-  //   record-detail          7 x 25 = 175        export-readiness       7 x 1 =   7
-  //   settings-explorer   16/19/20 = 130         export-readiness-done  7 x 1 =   7
+  //   guided-completion  13 -> GONE (the `.upcoming-row` opacity fix, this commit)
+  //   experiments-example 21 -> 14  (the 3 -> 2 `queue.css` change, 2026-09-13)
+  //   settings-explorer  130 -> 136 (the live-OpenAPI surface, which tracks API prose)
+  //
+  // So "871 minus 13" would have given 858 and been WRONG, because the table it
+  // subtracted from was already two changes out of date. NINE surfaces survive, seven
+  // cells each -- 63 cells, not 70 -- and the debt is concentrated:
+  //
+  //   evidence               7 x 68 = 476        export-readiness       7 x 1 =   7
+  //   record-detail          7 x 25 = 175        export-readiness-done  7 x 1 =   7
+  //   settings-explorer  20/21 mix  = 136        settings-api           7 x 1 =   7
   //   memory                  7 x 4 =  28        statistics-example     7 x 1 =   7
-  //   experiments-example     7 x 3 =  21        settings-api           7 x 1 =   7
-  //                                                                    total   871
+  //   experiments-example     7 x 2 =  14
+  //                                                                    total   857
+  //
+  // Both platform columns sum to 857 independently. `settings-explorer` holds the only
+  // two per-platform pairs in the file (`{darwin:20,linux:21}` at mobile-375x812 and
+  // `{darwin:21,linux:20}` at width-390), which cancel -- so the two totals agree
+  // WITHOUT the platforms agreeing cell-for-cell. Do not read one as evidence of the
+  // other. Re-derive rather than quoting this table; it has now been stale twice.
   //
   // These are causes (b) and (c) as `src/styles/tokens.css` enumerates them — text
   // composited under an ancestor `opacity`, and `--verified-text` /
@@ -3796,7 +3822,39 @@ export const A11Y_BASELINE_TOTAL_NODES: Readonly<Record<BaselinePlatform, number
   // constant by 7 in the same commit -- the guard compares this number against the
   // column sum, and a previous slice learned that the hard way by lowering keys and
   // leaving the constant stale.
-  darwin: 870,
+  // ── 2026-09-13 · 870 -> 857, A11Y-01 CAUSE (b): ONE OF THE THREE ANCESTOR-OPACITY
+  //    SITES IS CLOSED, AND BOTH COLUMNS MOVE BY ARITHMETIC RATHER THAN BY REASONING ──
+  //
+  // `assistant.css` `.upcoming-row { opacity: 0.72 }` is GONE. All SEVEN
+  // `guided-completion` cells of the `color-contrast` entry are DELETED, not lowered:
+  // measured on darwin, that rule now does not fire on that surface AT ALL at any
+  // viewport. 1 + 2 + 2 + 2 + 2 + 2 + 2 = 13, and 870 - 13 = 857.
+  //
+  // WHY BOTH COLUMNS MOVE, STATED PRECISELY, BECAUSE THIS FILE'S STANDING RULE IS THAT
+  // THE LINUX HALF IS NEVER REASONED ABOUT. All seven were SCALARS, so each counted
+  // once in each platform's sum, and `A11Y_BASELINE_TOTAL_NODES` is asserted to EQUAL
+  // the sum of the recorded entries (`invariants/baseline-aggregate.invariant.test.ts`).
+  // Deleting a scalar therefore moves both totals as a matter of arithmetic over the
+  // DECLARED map. That is not a claim that linux was measured -- it was not.
+  //
+  // WHAT MAKES THE LINUX HALF FALSIFIABLE RATHER THAN ASSUMED: deleting the cells
+  // asserts ZERO on both platforms, so if linux still reports those nodes, CI reports
+  // NEW/GREW on `guided-completion` and REDS the run, and the remedy is to restore the
+  // cells as `{ darwin: 0, linux: n }` per-platform pairs. A lowered-but-present cell
+  // would have been the weaker choice: it would have hidden a linux disagreement inside
+  // a number that still looked deliberate. LINUX CI IS THE AUTHORITY; this darwin run
+  // predicts nothing.
+  //
+  // `DARWIN_CARRIED_FORWARD` stays `[]` -- every darwin cell in this file remains
+  // measured, and this change only removed cells.
+  //
+  // THE OTHER TWO SITES OF CAUSE (b) ARE UNTOUCHED and their composites remain in
+  // `foregrounds`: `queue.css .exp-row.done` (.82) and `signals.css
+  // .advisory-nongating` (.85). They are not the same shape -- the first also dims
+  // borders and a numbered disc, the second dims a SATURATED ink on a TINTED ground
+  // that no neutral-ramp reasoning reaches -- so this is one site closed, not a
+  // precedent for sweeping the other two.
+  darwin: 857,
   // ── MERGED: PROPOSALS + CHANGE FEED, 2026-08-30: darwin 2282 -> 2289. ──
   //
   // TWO SLICES MOVED THE SAME SEVEN CELLS FROM THE SAME BASE, and this file now
@@ -4279,7 +4337,11 @@ export const A11Y_BASELINE_TOTAL_NODES: Readonly<Record<BaselinePlatform, number
   // baseline", head 91290da6): `IMPROVED ... fell from 3 to 2` at all seven. Both
   // columns now read 870 and the cells are SCALARS, not splits — the split I
   // recorded while the linux half was unmeasured is struck at those cells.
-  linux: 870,
+  // 2026-09-13 · 870 -> 857. See the block on `darwin` above: the seven deleted
+  // `guided-completion` cells were SCALARS, so they counted in this sum too. The
+  // figure follows the declared entries; a LINUX RUN HAS NOT MEASURED IT, and CI
+  // will red the build if linux disagrees.
+  linux: 857,
   // 2026-08-30, ROUND TWO — CI's linux figures for the merged tree: 2287 -> 2291.
   //
   //   desktop-1280x800   59 -> 60   (+1)      laptop-1024x768   59 -> 60   (+1)
