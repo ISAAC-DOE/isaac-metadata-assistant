@@ -1286,8 +1286,24 @@ Current state:
   ***RE-MEASURED 2026-09-12: BOTH FIGURES IN THIS BULLET HAVE MOVED, AND THE PLATFORM SPLITS
   THIS BULLET SAYS "COLLAPSED" HAVE REAPPEARED — from later, unrelated churn, not from A3
   regressing.*** `apps/web/e2e/a11y-baseline.ts`'s `A11Y_BASELINE_TOTAL_NODES` now reads
-  **darwin 877, linux 877** (both moved together, not a new split), and there are **70**
-  recorded cells, matching "161 cells → 70" above exactly. **Two platform splits exist again,
+  ~~**darwin 877, linux 877**~~ **— 870/870 as of 2026-09-13; see below** (both moved
+  together, not a new split), and there are **70**
+  recorded cells, matching "161 cells → 70" above exactly.
+
+  ***AND THE 877 WENT STALE THE SAME WAY, ONE DAY LATER, BY A CHANGE I MADE MYSELF — recorded
+  because this bullet's own instruction is "quote the live constants", and the figure in it was
+  the one that drifted.*** `A11Y_BASELINE_TOTAL_NODES` now reads **darwin 870, linux 870**.
+  The cause is arithmetic and checkable rather than mysterious: **seven `experiments-example@*`
+  cells moved `3` → `2`** when `queue.css` stopped painting the completed-row metadata in
+  `--text-tertiary`, and 877 − 7 = **870**. They are recorded as **scalars, not splits**, because
+  Linux CI independently measured 2 — which is also a correction worth keeping: I had first
+  carried forward the last recorded linux value of `3` on the reasoning that the just-measured 6
+  was the defect. *The reasoning was sound and the number was wrong*, and the a11y job caught it
+  by reporting `IMPROVED`. **`DARWIN_CARRIED_FORWARD` is `[]`**, so no half of any cell is
+  reasoned rather than measured. The two `settings-explorer` splits below are **unchanged and
+  still present**, and `70` is still the cell count — so of the three figures in this paragraph,
+  exactly one moved. Verified at this head: `baseline-aggregate.invariant.test.ts` → **47
+  passed**, and the full seven-viewport run → **582 passed, 0 movements**. **Two platform splits exist again,
   both on `settings-explorer`** — `settings-explorer@mobile-375x812: { darwin: 20, linux: 21 }`
   and `settings-explorer@width-390: { darwin: 21, linux: 20 }` — which is not a contradiction of
   "All 7 platform splits collapsed" above (that sentence described the state immediately after

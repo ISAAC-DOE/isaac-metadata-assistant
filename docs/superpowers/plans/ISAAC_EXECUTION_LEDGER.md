@@ -49,11 +49,55 @@ DIRTY STATE:           2026-09-13: CLEAN at session open; then THREE lanes editi
                        orchestrator's lane. Snapshot regeneration is deliberately DEFERRED to ONE
                        run after all three settle — `routes.py` is manifest-listed and will drift it.~~
                        snapshot drift at session open: NONE (exit 0, both artifacts)
-OPEN PRS:              none
+OPEN PRS:              **#248** — `docs/product-scope-v2-planning`, opened this session.
+                       ~~none~~ was true at session open and is corrected rather than replaced so
+                       the header reads as a record and not a snapshot.
+COMMIT COUNT (FINAL):  **95** at `4980d3e7` (`git rev-list --count main..HEAD`), up from the 38
+                       recorded at the top of this header. 141 files, +35,446 / -679.
+                       `main` has NOT moved: merge-base == `origin/main` == 2f9a1133, behind by 0,
+                       so **exact-head CI describes the merge result** and the merge-result rule
+                       adds nothing here — stated because it is normally mandatory.
+FINAL VERIFICATION:    backend **7672 passed / 45 skipped / 0 FAILED** (665.79s, MAIN CHECKOUT —
+                       a worktree reads +2 because `graphify-out/graph.json` is gitignored);
+                       frontend **212 files / 5755 tests, EXIT=0**; a11y axe+narrow+structure
+                       across **all 7 viewports 582 passed, 0 movements**; `tsc -b` and
+                       `tsc -p e2e/tsconfig.json` both exit 0; snapshot `--check` on BOTH
+                       artifacts exit 0, **201 served / 200 manifest** intact;
+                       `baseline-aggregate.invariant.test.ts` 47 passed.
+                       **AND THE TRUSTED PLAYWRIGHT SUITE WAS RUN, which the PR body had
+                       explicitly disclaimed: 8 passed, EXIT=0 (2.3m)** across
+                       `proposals-run-scoped`, `two-actor-real-browser` and `two-actor-workflow`.
+                       This is the ONLY end-to-end walk that exercises proposal ACCEPTANCE —
+                       everywhere else `accept` answers `409 human_actor_required` by design — and
+                       it matters for this branch specifically because `EVG-002` removed the Graph
+                       link from the record sidebar and these specs reach links by **tabbing and
+                       matching accessible name**, which is exactly what an earlier `getByRole`
+                       sweep of mine failed to see. Two real browser contexts, a colleague minting
+                       proposals judged **without a reload**, acceptance writing ONE run with the
+                       sibling proven document-identical, rejection leaving both untouched,
+                       attribution bound to the subject the deployment vouches for, and the arrival
+                       card legible from 1280 down to **320**. Run with
+                       `E2E_UVICORN=.venv/bin/uvicorn` from `apps/web`; the first attempt failed on
+                       cwd and reported a launcher "exit code 0" over a real `EXIT=1`.
+                       Every exit code read from a redirect, never through a pipe. **One near-miss
+                       recorded: a backgrounded launcher reported "exit code 0" twice while the
+                       real runs were unfinished and EXIT=1 respectively** — gate on your own
+                       `EXIT=` marker, never on the task notification.
+GOVERNANCE (FULL BRANCH): truth path EMPTY; any `src/` change EMPTY; migrations / `db_migrate.py` /
+                       `db_write.py` EMPTY; no packet APPROVED/APPLIED status moved;
+                       `OWNED_TABLES` unchanged; `examples/` staged 0; secret-shaped strings 0
+                       across 5 patterns; tracked mode-120000 symlinks **0** (the `.venv` guard).
 LATEST VERIFIED RELEASE: v0.0.232  (git rev-list -n1 v0.0.232 -> 2f9a1133…)
 CI FOR HEAD:           run 34709792004, conclusion success
 GHCR PUBLISH:          run 34711838575, conclusion success
-HOSTED COMMIT:         2f9a1133…  (observed read-only at /krish/api/health, 2026-09-12)
+HOSTED COMMIT:         2f9a1133…  — **re-observed read-only 2026-09-13, and this time the recon
+                       RESPONSE BODY was inspected rather than the health commit alone.** Hosted is
+                       running **exactly current `main`**. The session was already authenticated;
+                       no credential was entered and no agent connected to any database (the pod
+                       opened its own connection — Slice 2A). Discharges a CLAUDE.md §15 caveat
+                       standing since 2026-08-01. **G2 and G3 unchanged and still Dean's**; nothing
+                       from PR #248 is deployed, so every image stays `HOSTED QA PENDING (Krish)`.
+                       Evidence: `docs/evidence/hosted-observation-2026-09-13.md`.
 HOSTED MODE:           synthetic-only · storage postgres/durable · record_display closed
 VERIFIED BASELINE AT HEAD (main checkout, measured this session, exit codes captured not piped):
   backend   .venv/bin/pytest -q -rs        -> 7203 passed, 45 skipped, exit 0 (563.52 s)
