@@ -15218,11 +15218,18 @@ def post_transcript(
         # (500) sits above `MAX_SEGMENTS` (100) times a realistic per-sentence
         # count, so an ordinarily-long transcript still gets the segment reason.
         #
-        # THERE ARE THREE DENSITY CEILINGS, NOT TWO, since 2026-09-12: candidate
-        # COUNT, candidate QUOTED BYTES, and DISCLOSURE count (`tc.MAX_DISCLOSURES`
-        # — abstentions plus clarifications). The third exists because the first
+        # THERE ARE ~~THREE~~ **FOUR** DENSITY CEILINGS, NOT TWO, since 2026-09-12:
+        # candidate
+        # COUNT, candidate QUOTED BYTES, DISCLOSURE count (`tc.MAX_DISCLOSURES`
+        # — abstentions plus clarifications) and the RUN OPTIONS those disclosures
+        # carry (`tc.MAX_DISCLOSURE_OPTIONS`). The third exists because the first
         # two are fed from inside the reader's `if not settled: continue` and so
-        # could never see a disclosure. MEASURED THROUGH THIS ROUTE at `bce43f19`,
+        # could never see a disclosure; the FOURTH exists because the third bounds
+        # the disclosure COUNT while a `Clarification` carries one option per run of
+        # `known_runs` above, which is EVERY run and not a page — measured 200 at
+        # 143,998,672 B on a 29,985-byte transcript against a 1,000-run record.
+        #
+        # MEASURED THROUGH THIS ROUTE at `bce43f19`,
         # on a single segment filled to the largest size this route accepts
         # (`_MAX_TRANSCRIPT_BYTES - 2`, because `_is_storable_value` measures the
         # RENDERED bytes and a JSON string adds its two quotes):
@@ -15268,6 +15275,19 @@ def post_transcript(
                 ),
                 disclosures=refusal.disclosures,
                 maximum_disclosures=refusal.maximum_disclosures,
+                # THE FOURTH CEILING, added 2026-09-12 (fourth pass). See
+                # `tc.MAX_DISCLOSURE_OPTIONS`: `MAX_DISCLOSURES` bounds the COUNT
+                # of disclosures, and a `Clarification` carries one `options` entry
+                # per run of the record — `known_runs` above is EVERY run, not a
+                # page — so a transcript inside all three earlier ceilings served a
+                # 200 whose body grew without bound in the record's run count.
+                # Measured through this route at `22d794a5`, on ONE segment of
+                # `"run zzz at 1 K " * 1999` (29,985 B, 1,999 disclosures <= 2,000,
+                # 0 candidates, 0 quoted bytes): **200** at **143,998,672 B** with
+                # 1,000 runs and **735,702,672 B** with 5,000, all of it serialised
+                # inside `record_lock`. Now **422**, with nothing stored.
+                disclosure_options=refusal.disclosure_options,
+                maximum_disclosure_options=refusal.maximum_disclosure_options,
             )
         if len(reading.segments) > tc.MAX_SEGMENTS:
             return _transcript_refusal(

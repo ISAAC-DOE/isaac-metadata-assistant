@@ -48,6 +48,9 @@ made.
 
 from __future__ import annotations
 
+import itertools
+import re
+
 import pytest
 
 import isaac_api.transcript_capture as tc
@@ -1106,7 +1109,20 @@ HEDGED_RESTATEMENTS: tuple[tuple[str, list], ...] = (
     ("The temperature was around 425 K, maybe 430 K", [425, 430]),
     ("The temperature was 425 K or perhaps 430 K", [425, 430]),
     ("The temperature was 425 K, or maybe 430 K", [425, 430]),
-    ("The temperature was 425 K and again 430 K", [425, 430]),
+    # ~~("The temperature was 425 K and again 430 K", [425, 430]),~~ —
+    # **WITHDRAWN 2026-09-12 (fourth pass) by independent review, and kept struck
+    # for the same reason as the `about` row below: it was a MUST-PASS and a future
+    # session would otherwise read its absence as an oversight.** `and again` has
+    # moved to `_OR_REQUIRED_HEDGES`, because it is a REPEAT marker and not a
+    # hedge — the same reason bare `again` was already there, only stronger. Left
+    # in the bare list it minted a durable OPEN proposal for a second acquisition
+    # instant nobody stated:
+    #   "The scan started 2026-01-01T00:00:00Z, and again 2026-01-02T00:00:00Z."
+    #     -> acquired_start_utc = 01-01 AND 01-02, restated, with NO abstention.
+    # The temperature form now reads 425 alone and DISCLOSES the withholding as
+    # `unhedged_further_values`; it is expected residue, pinned as such in
+    # `test_transcript_capture_hedge_and_unit_gate.py`.
+    ("The temperature was 425 K, or and again 430 K", [425, 430]),
     # ~~("The temperature was about 425 K, about 430 K", [425, 430]),~~ —
     # **WITHDRAWN 2026-09-12 by the project owner's own instruction, and kept here
     # struck rather than deleted because it was a MUST-PASS and a future session
@@ -1173,20 +1189,34 @@ def test_a_hedged_second_value_IS_read_as_a_restatement(sentence, expected):
 def test_bare_and_is_not_a_hedge_because_it_is_conjunctive():
     """``and`` joins two quantities as readily as it restates one.
 
-    Half the measured defect table is a bare ``and``. ``and again`` IS admitted,
-    because ``again`` is what makes it one quantity said twice.
+    Half the measured defect table is a bare ``and``.
+
+    ~~"``and again`` IS admitted, because ``again`` is what makes it one quantity
+    said twice."~~ — **WITHDRAWN 2026-09-12 (fourth pass). It is the OPPOSITE of
+    true, and the module's own comment said so one paragraph away** (bare ``again``
+    was in ``_OR_REQUIRED_HEDGES`` *because* before a full instant it means the scan
+    was REPEATED). ``and again`` is the STRONGER repeat marker; it has moved to
+    ``_OR_REQUIRED_HEDGES``, so it no longer bridges on its own. It is STILL a
+    member of ``_HEDGE_CONNECTIVES`` — the union is unchanged, which is the point of
+    the split being the thing a test pins separately.
 
     MUTATION: adding ``and`` to ``_HEDGE_CONNECTIVES`` turns this RED, and would
-    reopen "425 K and the pressure was 3 K".
+    reopen "425 K and the pressure was 3 K". Moving ``and again`` back into
+    ``_BARE_HEDGES`` turns the last two assertions RED.
     """
     assert "and" not in tc._HEDGE_CONNECTIVES
     assert "and again" in tc._HEDGE_CONNECTIVES
+    assert "and again" in tc._OR_REQUIRED_HEDGES
+    assert "and again" not in tc._BARE_HEDGES
     assert tc._HEDGE_BRIDGE.fullmatch(" and ") is None
-    assert tc._HEDGE_BRIDGE.fullmatch(" and again ") is not None
+    assert tc._HEDGE_BRIDGE.fullmatch(" and again ") is None
+    assert tc._HEDGE_BRIDGE.fullmatch(" or and again ") is not None
     assert _values(_read("The temperature was 425 K and 430 K"), TEMPERATURE) == [425]
-    assert _values(
-        _read("The temperature was 425 K and again 430 K"), TEMPERATURE
-    ) == [425, 430]
+    # The withholding is DISCLOSED rather than silent, which is the trade §5 ranks
+    # the right way round and is what makes losing this reading acceptable.
+    bare = _read("The temperature was 425 K and again 430 K")
+    assert _values(bare, TEMPERATURE) == [425]
+    assert [entry.kind for entry in bare.abstentions] == ["unhedged_further_values"]
 
 
 def test_a_BARE_or_bridges_on_its_own():
@@ -1225,10 +1255,20 @@ def test_a_BARE_or_bridges_on_its_own():
 #: BOTH directions rather than a list that checks itself.
 #:
 #: **RE-ORDERED 2026-09-12, MEMBERSHIP UNCHANGED, and that distinction is the whole
-#: point of keeping this literal.** All eleven connectives are still admitted. Six
+#: point of keeping this literal.** All eleven connectives are still admitted.
+#: ~~Six~~ **SEVEN (2026-09-12, fourth pass)**
 #: of them — ``about``, ``around``, ``roughly``, ``approximately``, ``possibly``,
-#: ``again`` — moved from bridging BARE to bridging only behind a mandatory ``or``,
-#: because they modify what FOLLOWS them rather than hedging what came before. The
+#: ``again`` and now ``and again`` — moved from bridging BARE to bridging only
+#: behind a mandatory ``or``.
+#: The first six moved
+#: because they modify what FOLLOWS them rather than hedging what came before; the
+#: seventh moved for the reason bare ``again`` was already in that branch — it is a
+#: REPEAT marker, so it says the quantity was stated a SECOND TIME rather than that
+#: it might instead be the second value. Measured before the move: *"The scan
+#: started 2026-01-01T00:00:00Z, and again 2026-01-02T00:00:00Z."* proposed BOTH
+#: instants as ``timestamps.acquired_start_utc``, silently, with a ``rule`` sentence
+#: asserting the sentence restated the start — a §5 assertion, minting a durable
+#: OPEN proposal. The
 #: module now DERIVES this union from ``_BARE_HEDGES + _OR_REQUIRED_HEDGES +
 #: ("or",)`` so it cannot disagree with the pattern about membership; the SPLIT is
 #: the thing a test has to pin separately, and ``REVIEWED_BARE_HEDGES`` /
@@ -1247,13 +1287,14 @@ REVIEWED_HEDGE_CONNECTIVES = (
     "maybe",
     "perhaps",
     "alternatively",
-    "and again",
     "about",
     "around",
     "roughly",
     "approximately",
     "possibly",
     "again",
+    # MOVED here from position 3 on 2026-09-12 (fourth pass). Still eleven members.
+    "and again",
     "or",
 )
 
@@ -1261,7 +1302,7 @@ REVIEWED_HEDGE_CONNECTIVES = (
 #: ``tc._BARE_HEDGES`` cannot see a connective that has MOVED out of it, and moving
 #: one is exactly the change that widens or narrows the set of sentences a
 #: scientific value is read out of.
-REVIEWED_BARE_HEDGES = ("maybe", "perhaps", "alternatively", "and again")
+REVIEWED_BARE_HEDGES = ("maybe", "perhaps", "alternatively")
 REVIEWED_OR_REQUIRED_HEDGES = (
     "about",
     "around",
@@ -1269,6 +1310,7 @@ REVIEWED_OR_REQUIRED_HEDGES = (
     "approximately",
     "possibly",
     "again",
+    "and again",
 )
 
 
@@ -1299,9 +1341,14 @@ def test_the_hedge_list_is_exactly_the_reviewed_closed_set():
     **equivalent mutant** — inverting it to shortest-first left all 249 transcript
     tests GREEN — so the sort was removed rather than kept with a false rationale.
 
-    The assertions below therefore pin BEHAVIOUR, not order: ``and again`` bridges
-    while bare ``again`` does not, which is a property of the SPLIT and is the thing
-    that actually matters.
+    The assertions below therefore pin BEHAVIOUR, not order.
+
+    ~~"``and again`` bridges while bare ``again`` does not, which is a property of
+    the SPLIT and is the thing that actually matters."~~ — **the property was
+    correctly chosen and its DIRECTION was wrong, corrected 2026-09-12 (fourth
+    pass).** Neither bridges bare now: ``and again`` is the stronger repeat marker,
+    not the hedge that rescues ``again``. The behaviour pinned below is that BOTH
+    need an explicit ``or``, which is the property of the split that matters.
 
     MUTATION: adding OR removing any connective turns this RED; so does MOVING one
     between the bare and the ``or``-required branch, which is the change that
@@ -1319,11 +1366,14 @@ def test_the_hedge_list_is_exactly_the_reviewed_closed_set():
     assert set(tc._BARE_HEDGES) | set(tc._OR_REQUIRED_HEDGES) | {"or"} == set(
         tc._HEDGE_CONNECTIVES
     )
-    # The property that replaced the retired index assertion: `and again` bridges
-    # while bare `again` does not. That is the SPLIT, and it is what a reader of
-    # this tuple actually needs to know.
-    assert tc._HEDGE_BRIDGE.fullmatch(" and again ") is not None
+    # The property that replaced the retired index assertion. ~~`and again` bridges
+    # while bare `again` does not~~ — CORRECTED 2026-09-12 (fourth pass): NEITHER
+    # bridges bare, and both bridge behind an explicit `or`. That is the SPLIT, and
+    # it is what a reader of this tuple actually needs to know.
+    assert tc._HEDGE_BRIDGE.fullmatch(" and again ") is None
     assert tc._HEDGE_BRIDGE.fullmatch(" again ") is None
+    assert tc._HEDGE_BRIDGE.fullmatch(" or and again ") is not None
+    assert tc._HEDGE_BRIDGE.fullmatch(" or again ") is not None
 
 
 def test_every_declared_connective_actually_bridges():
@@ -1518,3 +1568,317 @@ def test_the_restatement_still_requires_the_label_to_come_first():
 def test_a_hedged_value_with_no_labelled_match_at_all_reads_nothing():
     """Pass two is still gated on pass one. A bare hedged number is never read."""
     assert _read("It was around 425 K, maybe 430 K").candidates == ()
+
+
+# =============================================================================
+# THE FOURTH PASS (2026-09-12). Pass two now scans ONE REGION PER LABEL MATCH,
+# a refusal another rule's pass two already read is dropped, and the quote is
+# the region's own statement.
+# =============================================================================
+
+
+START = "timestamps.acquired_start_utc"
+END = "timestamps.acquired_end_utc"
+
+
+@pytest.mark.parametrize(
+    "sentence,field_path,expected",
+    [
+        (
+            "The temperature was 425 K, maybe 428 K, and the temperature was 430 K.",
+            TEMPERATURE,
+            [425, 430],
+        ),
+        (
+            "The scan started 2026-01-01T00:00:00Z, maybe 2026-01-02T00:00:00Z, "
+            "and the scan started 2026-01-03T00:00:00Z.",
+            START,
+            ["2026-01-01T00:00:00Z", "2026-01-03T00:00:00Z"],
+        ),
+    ],
+    ids=["temperature", "acquisition start"],
+)
+def test_a_restatement_BETWEEN_two_label_matches_is_no_longer_silent(
+    sentence, field_path, expected
+):
+    """A restatement sandwiched between two labels was never even EVALUATED.
+
+    **THE DEFECT.** Pass two anchored at `max(match.end() for match in matches)` —
+    the end of the LAST label-anchored match — so a hedged restatement lying between
+    the first and the last was never scanned, therefore never refused, therefore
+    never disclosed. Measured at `22d794a5`: the first sentence read `[425, 430]`
+    with `abstentions == ()`, and 428 vanished without a trace.
+
+    **WHY IT MATTERED MORE THAN THE VALUE.** It is an OMISSION, not an assertion, so
+    §5 ranks it above the `and again` fabrication — and it was NOT a regression
+    (`main` loses both 428 and 430). What it falsified is the claim the whole
+    three-condition trade rests on: *"a refusal by any of the three is DISCLOSED —
+    which is what makes the omission §5-acceptable where the assertion was not."*
+    That was true only of single-label sentences, which is the only shape the
+    476-cell grid covers.
+
+    **THE FIX ADDS DISCLOSURES AND CANNOT ADD A CANDIDATE**, and that is a property
+    rather than an observation: `_statement_ends_after` looks at the whole remaining
+    text, and the remainder after a restatement in a NON-FINAL region always
+    contains the next label match, so condition 3 can never hold there. The middle
+    value is refused as `trailing_text_after_further_values` — asserted below —
+    and the two label-anchored values are unchanged.
+
+    MUTATION: restoring `anchor = max(match.end() for match in matches)` turns the
+    abstention assertion RED while leaving the value assertion GREEN, which is
+    exactly the shape of the defect.
+    """
+    reading = _read(sentence)
+    assert _values(reading, field_path) == expected
+    assert [entry.kind for entry in reading.abstentions] == [
+        "trailing_text_after_further_values"
+    ]
+    assert field_path in reading.abstentions[0].reason
+
+
+def test_the_last_region_is_byte_identical_to_the_old_single_walk():
+    """The change adds regions; it does not move the one that already existed.
+
+    A sentence with ONE label match has exactly one region, `[match.end(), len)`,
+    which is what `max(match.end() for match in matches)` computed. So every
+    single-label reading — which is every sentence in the must-pass corpus — is
+    untouched by the region split, and that is asserted here rather than inferred
+    from the corpus staying green.
+
+    MUTATION: bounding the LAST region at anything short of `len(segment.text)`
+    turns this RED.
+    """
+    # One label, a hedged chain, and a refusal after it: the whole of pass two's
+    # behaviour inside a single region.
+    reading = _read("The temperature was 425 K, maybe 430 K, or perhaps 435 K.")
+    assert _values(reading, TEMPERATURE) == [425, 430, 435]
+    assert reading.abstentions == ()
+    # And the region really does run to the end of the segment: a refusable tail
+    # after the chain is still seen.
+    trailing = _read("The temperature was 425 K, maybe 430 K, cryostat at 80 K.")
+    assert _values(trailing, TEMPERATURE) == [425]
+    # BOTH kinds, and the second is the documented chain-loses-a-tail behaviour
+    # rather than a surprise: 80 K is refused as unhedged, which leaves 430 K with a
+    # bridge to a REFUSAL in front of nothing accepted, so condition 3 pops it too.
+    # Asserted as measured — a first draft of this test expected one kind.
+    assert [entry.kind for entry in trailing.abstentions] == [
+        "unhedged_further_values",
+        "trailing_text_after_further_values",
+    ]
+
+
+def test_a_value_another_rule_READ_is_never_reported_as_withheld():
+    """The overlap skip's own principle, extended to pass two. See `_segment_readings`.
+
+    **THE FALSE DISCLOSURE.** `claimed_value_spans` held LABEL-anchored spans only,
+    so a value accepted by another rule's RESTATEMENT scan escaped it. Measured at
+    `22d794a5`:
+
+        "The scan started A and ended B, or maybe C."
+          -> acquired_start=A, acquired_end=B, acquired_end=C (restated, correct)
+          -> AND an `unhedged_further_values` abstention telling the scientist that
+             further values for `timestamps.acquired_start_utc` "were not read" --
+             while BOTH B and C were read, as `acquired_end_utc`.
+
+    The module already states the governing principle at the overlap skip: a
+    disclosure claiming a value was not read when another rule read it *"would be
+    false"*, which is why that skip is deliberately silent. It could only see pass
+    ONE. The refusal decision is now taken after every rule's readings are located,
+    because it DEPENDS on what later rules accept and `_RULES` order is arbitrary
+    with respect to which rule reads a given span.
+
+    MUTATION: emitting refusals inside the per-rule loop (i.e. dropping
+    `accepted_value_spans` from the filter) turns this RED.
+    """
+    sentence = (
+        "The scan started 2026-01-01T00:00:00Z and ended 2026-01-05T00:00:00Z, "
+        "or maybe 2026-01-06T00:00:00Z."
+    )
+    reading = _read(sentence)
+    assert _values(reading, START) == ["2026-01-01T00:00:00Z"]
+    assert _values(reading, END) == ["2026-01-05T00:00:00Z", "2026-01-06T00:00:00Z"]
+    # The third candidate IS the restatement, so the span really was read by pass
+    # two and not by a second label match.
+    restated = [
+        candidate.provenance["restated_in_same_sentence"]
+        for candidate in reading.candidates
+        if candidate.field_path == END
+    ]
+    assert restated == [False, True]
+    # NOTHING was withheld, so NOTHING is disclosed. A disclosure here would name
+    # `acquired_start_utc` and be false.
+    assert reading.abstentions == ()
+    # And the refusal is DROPPED, not merely relabelled: it is not hiding under the
+    # other rule's name either.
+    assert [entry.kind for entry in reading.abstentions] == []
+
+
+def test_a_refusal_that_withholds_something_is_STILL_reported():
+    """The negative control for the filter above, which would otherwise be a mute.
+
+    A filter that dropped every refusal would pass the test above and would be the
+    silent-withholding defect with a new cause. Same shape of sentence, except the
+    later value is one NO rule reads — so it really is withheld, and it is disclosed.
+
+    MUTATION: dropping every pending refusal unconditionally turns this RED.
+    """
+    reading = _read(
+        "The scan started 2026-01-01T00:00:00Z and ended 2026-01-05T00:00:00Z, "
+        "then we waited until 2026-01-06T00:00:00Z."
+    )
+    assert _values(reading, START) == ["2026-01-01T00:00:00Z"]
+    assert [entry.kind for entry in reading.abstentions] == [
+        "unhedged_further_values",
+        "unhedged_further_values",
+    ]
+    assert {entry.reason for entry in reading.abstentions} != set()
+    # BOTH instant rules withheld it, and both say so: 2026-01-06 was read by
+    # neither, so neither disclosure is false.
+    reasons = " ".join(entry.reason for entry in reading.abstentions)
+    assert START in reasons and END in reasons
+
+
+def test_the_refusal_quotes_the_statement_the_withheld_value_SITS_BESIDE():
+    """`matches[0]` pointed at the FIRST label match whatever the region.
+
+    **THE DEFECT.** All three refusal sites used `matches[0].group(0)`, while the
+    anchor the refusal was measured from belonged to a later match. Measured at
+    `22d794a5`:
+
+        "The temperature was 300 K and the temperature was 425 K, ramped at 3 K/min"
+          -> quote = 'temperature was 300 K'
+
+    The withheld value (`3 K/min`) sits beside 425 K, and the whole purpose of the
+    quote is to tell a scientist WHICH statement to check — so `_segment_readings`'
+    own docstring claim that it reports *"the statement whose field had further
+    values withheld"* was false. Each refusal now carries the label match whose
+    region the refused restatement was found in.
+
+    `matches[-1]` would also fix this ROW and is deliberately not what is used: with
+    one region per label match, the region's own match is right for EVERY region and
+    the last match is right only for the last one — asserted by the second half of
+    this test, where the refusal belongs to the FIRST of two regions.
+
+    MUTATION: `matches[0].group(0)` turns the first assertion RED; `matches[-1].
+    group(0)` turns the second RED.
+    """
+    last = _read(
+        "The temperature was 300 K and the temperature was 425 K, ramped at 3 K/min"
+    )
+    assert _values(last, TEMPERATURE) == [300, 425]
+    assert [entry.quote for entry in last.abstentions] == ["temperature was 425 K"]
+
+    # THE OTHER DIRECTION: the refusal belongs to the FIRST region, so `matches[-1]`
+    # would quote the wrong clause here.
+    first = _read(
+        "The temperature was 425 K, maybe 428 K, and the temperature was 430 K."
+    )
+    assert [entry.quote for entry in first.abstentions] == ["temperature was 425 K"]
+
+
+#: The connectives this sweep varies: three that bridge bare, two `or` forms, and
+#: the four repeat/approximation markers that must NOT bridge bare. Written out
+#: rather than derived from the module, so a slice that changes the split cannot
+#: quietly change what the sweep exercises.
+_SWEEP_CONNECTIVES: tuple[str, ...] = (
+    "maybe",
+    "perhaps",
+    "alternatively",
+    "or",
+    "or maybe",
+    "or about",
+    "again",
+    "and again",
+    "about",
+    "possibly",
+)
+
+
+def test_NO_withholding_IS_SILENT_on_a_MULTI_LABEL_sentence():
+    """1,300 cells over the shape every other sweep in this repository misses.
+
+    **WHY THIS EXISTS.** `test_the_WHOLE_CROSS_PRODUCT_...` (476 cells) and
+    `test_the_INSTANT_AND_EMPTY_TAIL_SWEEP_...` (1,134 cells) both build sentences
+    with ONE label-anchored match. Pass two anchored at the end of the LAST label
+    match, so a restatement between two labels was never evaluated, never refused
+    and never disclosed — and no sweep of single-label sentences can see that.
+
+    **THE PROPERTY, and it names no mechanism.** Every kelvin figure (or instant)
+    the sentence states is either PROPOSED, or the reading carries at least one
+    disclosure. Nothing about hedges, regions or anchors appears in it, so it
+    cannot be satisfied by re-deriving the implementation.
+
+    **MEASURED BOTH WAYS.** Against the module at `22d794a5`: **670** of 900
+    kelvin cells and **200** of 400 instant cells withheld a stated value with
+    `abstentions == ()` — 870 silent withholdings. Against this head: **0** and
+    **0**.
+
+    Cells raising a run clarification are skipped, not counted: an unsettled run
+    target withholds EVERY candidate, which would satisfy nothing and count as
+    everything. A first draft of a sibling sweep was flattered by exactly that.
+
+    MUTATION: restoring `anchor = max(match.end() for match in matches)` turns this
+    RED at 870 cells.
+    """
+    number_and_kelvin = re.compile(r"(?<![\d.])(\d+(?:\.\d+)?)\s*K\b")
+    instant = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z")
+
+    silent: list[tuple[str, list]] = []
+    kelvin_checked = 0
+    for first, second in itertools.product(_SWEEP_CONNECTIVES, repeat=2):
+        for tail in ("", " of drift", " per minute"):
+            for sentence in (
+                # TWO labels, a restatement in the FIRST (middle) region.
+                f"The temperature was 425 K, {first} 428 K, and the temperature "
+                f"was 430 K{tail}.",
+                # TWO labels, a restatement in BOTH regions.
+                f"The temperature was 425 K, {first} 428 K, and the temperature "
+                f"was 430 K, {second} 432 K{tail}.",
+                # THREE labels, restatements in two MIDDLE regions.
+                f"The temperature was 425 K, {first} 426 K, and the temperature "
+                f"was 430 K, {second} 431 K, and the temperature was 440 K{tail}.",
+            ):
+                kelvin_checked += 1
+                reading = _read(sentence)
+                if reading.clarifications:
+                    continue
+                stated = {
+                    float(match.group(1))
+                    for match in number_and_kelvin.finditer(sentence)
+                }
+                proposed = {
+                    float(candidate.proposed_value)
+                    for candidate in reading.candidates
+                    if candidate.field_path == TEMPERATURE
+                }
+                if (stated - proposed) and not reading.abstentions:
+                    silent.append((sentence, sorted(stated - proposed)))
+    assert kelvin_checked == 900, kelvin_checked
+
+    instant_checked = 0
+    for first, second in itertools.product(_SWEEP_CONNECTIVES, repeat=2):
+        for tail in ("", " after the restart"):
+            for sentence in (
+                f"The scan started 2026-01-01T00:00:00Z, {first} "
+                f"2026-01-02T00:00:00Z, and the scan started "
+                f"2026-01-03T00:00:00Z{tail}.",
+                f"The scan started 2026-01-01T00:00:00Z, {first} "
+                f"2026-01-02T00:00:00Z, and it ended 2026-02-01T00:00:00Z, "
+                f"{second} 2026-02-02T00:00:00Z{tail}.",
+            ):
+                instant_checked += 1
+                reading = _read(sentence)
+                if reading.clarifications:
+                    continue
+                stated = set(instant.findall(sentence))
+                proposed = {
+                    candidate.proposed_value
+                    for candidate in reading.candidates
+                    if candidate.field_path.startswith("timestamps.")
+                }
+                if (stated - proposed) and not reading.abstentions:
+                    silent.append((sentence, sorted(stated - proposed)))
+    assert instant_checked == 400, instant_checked
+    assert kelvin_checked + instant_checked == 1300
+
+    assert silent == [], (len(silent), silent[:5])

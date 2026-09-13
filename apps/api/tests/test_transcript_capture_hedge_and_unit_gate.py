@@ -221,10 +221,20 @@ FALSE_RESTATEMENTS: tuple[tuple[str, str, str, str], ...] = (
         "unit",
     ),
     (
+        # ~~"unit"~~ -> **"both" (2026-09-12, fourth pass), and a THIRD label was
+        # added rather than the row relabelled "hedge".** `and again` moved to
+        # `_OR_REQUIRED_HEDGES`, so condition 1 now refuses this row as well as
+        # condition 2 — the unit is `K/min`, which was always incomplete. Calling it
+        # "hedge" would have asserted `unit_complete is True`, which is FALSE here
+        # (measured), and calling it "unit" asserts `bridged is True`, which is now
+        # false. Only "both" is true of it, and a label that overstates which guard
+        # does the work is exactly what this parametrisation exists to prevent. The
+        # row is kept because it is one of the thirteen measured rows and
+        # `test_every_one_of_the_thirteen_was_admitted_by_the_FIRST_gate` needs it.
         "a ramp rate behind and again",
         "The temperature was 425 K and again 3 K/min",
         TEMPERATURE,
-        "unit",
+        "both",
     ),
     (
         "a ramp rate behind alternatively",
@@ -307,9 +317,18 @@ def test_which_HALF_of_the_gate_refuses_each_row(label, sentence, field_path, re
         assert bridged is False, "the hedge half must be the one refusing this row"
         # The unit half would NOT have caught it, which is why both are needed.
         assert unit_complete is True
-    else:
-        assert refused_by == "unit"
+    elif refused_by == "unit":
         assert bridged is True, "the connective here is a perfectly good one"
+        assert unit_complete is False
+    else:
+        # THE THIRD LABEL, added 2026-09-12 (fourth pass). A row BOTH halves refuse
+        # says nothing about either one on its own, which is why it is named rather
+        # than filed under whichever half is checked first — see the row's own
+        # comment in `FALSE_RESTATEMENTS`. It is still worth a row: it is one of the
+        # thirteen measured sentences, and `test_every_one_of_the_thirteen_was_
+        # admitted_by_the_FIRST_gate` proves the pre-correction bridge admitted it.
+        assert refused_by == "both", refused_by
+        assert bridged is False
         assert unit_complete is False
 
 
@@ -354,7 +373,15 @@ TRUE_RESTATEMENTS: tuple[tuple[str, list, str], ...] = (
     ("The temperature was around 425 K, maybe 430 K", [425, 430], TEMPERATURE),
     ("The temperature was 425 K or perhaps 430 K", [425, 430], TEMPERATURE),
     ("The temperature was 425 K, or maybe 430 K", [425, 430], TEMPERATURE),
-    ("The temperature was 425 K and again 430 K", [425, 430], TEMPERATURE),
+    # ~~("The temperature was 425 K and again 430 K", [425, 430], TEMPERATURE),~~
+    # **WITHDRAWN 2026-09-12 (fourth pass), and kept struck because it was a
+    # MUST-PASS.** `and again` is a REPEAT marker, not a hedge, and left in the bare
+    # branch it silently proposed a second acquisition instant for
+    # `"...started 2026-01-01T00:00:00Z, and again 2026-01-02T00:00:00Z."` — minting
+    # a durable OPEN proposal on a `timestamps` field. The temperature form now
+    # reads 425 alone and DISCLOSES the withholding; it is pinned as residue in
+    # `AND_AGAIN_RESIDUE` below.
+    ("The temperature was 425 K, or and again 430 K", [425, 430], TEMPERATURE),
     ("The temperature was 425 K, alternatively 430 K", [425, 430], TEMPERATURE),
     ("The temperature was 425 K or 430 K", [425, 430], TEMPERATURE),
     # The withdrawn bare-`about` form, admitted behind an explicit `or`.
@@ -773,12 +800,31 @@ def test_the_residue_lists_are_two_way_ratchets():
     # coverage this repository has been caught by before. The open-class test is
     # repointed at `_LABEL_OVERREACH_RESIDUE` instead.
     assert not hasattr(tc, "_RESTATEMENT_RESIDUE")
-    assert len(tc._LABEL_OVERREACH_RESIDUE) == 7
-    assert len(set(tc._LABEL_OVERREACH_RESIDUE)) == 7
+    # ~~7~~ **13 (2026-09-12, fourth pass).** Six rows of the identical class were
+    # measured by independent review and added; the class is described, not closed,
+    # and the OPEN-class test below still asserts every row STILL fabricates.
+    assert len(tc._LABEL_OVERREACH_RESIDUE) == 13
+    assert len(set(tc._LABEL_OVERREACH_RESIDUE)) == 13
     assert "The temperature drift was 3 K" in tc._LABEL_OVERREACH_RESIDUE
     assert (
         "temperature resolution 0.5 K" in tc._LABEL_OVERREACH_RESIDUE
     ), "the row with no copula, which a 'require a copula' proxy would not reach"
+    # The six added in the fourth pass, named individually for the reason the
+    # third pass's five are: a slice that dropped them while editing this test
+    # would delete the evidence that the class is wider than seven rows.
+    for row in (
+        "The temperature uncertainty was 2 K",
+        "The temperature offset was 4 K",
+        "The temperature fell by 12 K",
+        "temperature stability 0.2 K",
+        "The temperature gradient was 5 K",
+        "We corrected the temperature by 7 K",
+    ):
+        assert row in tc._LABEL_OVERREACH_RESIDUE, row
+    # `fell by` and `corrected ... by` are the two shapes no earlier row had: a
+    # DECREASE, and a label that is not the subject of the sentence.
+    assert "The temperature fell by 12 K" in tc._LABEL_OVERREACH_RESIDUE
+    assert "We corrected the temperature by 7 K" in tc._LABEL_OVERREACH_RESIDUE
     # The two lists are disjoint: a sentence cannot be both closed and open, and an
     # edit that moved one without removing it from the other would say it is.
     assert not (
@@ -799,8 +845,15 @@ def test_the_defect_corpus_and_the_must_pass_corpus_are_both_ratcheted():
     # The row that refutes the terminal rule on its own terms.
     assert "The temperature was 425 K, about 3 K." in sentences
     # Both halves are exercised, so neither parametrisation can become vacuous.
-    assert {row[3] for row in FALSE_RESTATEMENTS} == {"hedge", "unit"}
-    assert sum(row[3] == "unit" for row in FALSE_RESTATEMENTS) == 3
+    # ~~{"hedge", "unit"}~~ — a THIRD label `"both"` arrived 2026-09-12 (fourth
+    # pass) when `and again` moved branch and its row became one both halves refuse.
+    assert {row[3] for row in FALSE_RESTATEMENTS} == {"hedge", "unit", "both"}
+    assert sum(row[3] == "both" for row in FALSE_RESTATEMENTS) == 1
+    # ~~3~~ **2**: the third of the three ramp-rate rows is the `and again` one,
+    # which is now `"both"`. 2 + 1 = 3, so the three ramp-rate rows asserted above
+    # are all still present and only their LABELS moved.
+    assert sum(row[3] == "unit" for row in FALSE_RESTATEMENTS) == 2
+    assert sum(row[3] in {"unit", "both"} for row in FALSE_RESTATEMENTS) == 3
 
 
 # =============================================================================
@@ -1004,9 +1057,29 @@ _MODIFIER_TAILS: tuple[str, ...] = (
 def test_the_WHOLE_CROSS_PRODUCT_fabricates_nothing_and_refuses_nothing_in_silence():
     """The step that found the five ``or``-branch rows, run again over a wider grid.
 
-    ``len(_ALL_CONNECTIVES)`` x ``len(_MODIFIER_TAILS)`` x two separators = **510**
+    ``len(_ALL_CONNECTIVES)`` x ``len(_MODIFIER_TAILS)`` x two separators =
+    ~~**510**~~ **476 (2026-09-12, fourth pass)**
     constructed sentences, each stating a labelled 425 K and then a 3 K figure that
-    a trailing phrase makes into a drift, an offset, a rate or a tolerance. Two
+    a trailing phrase makes into a drift, an offset, a rate or a tolerance.
+
+    **WHY THE NUMBER WENT DOWN, AND WHY THAT IS NOT A LOSS OF COVERAGE.**
+    ``_ALL_CONNECTIVES`` is DERIVED from the module's own split, and ``and again``
+    moved from ``_BARE_HEDGES`` to ``_OR_REQUIRED_HEDGES``, so the grid lost the row
+    ``"425 K, and again 3 K <tail>"`` and kept ``"425 K, or and again 3 K <tail>"``
+    (17 tails x 2 separators = 34 cells). The bare form is now covered by
+    ``test_the_INSTANT_AND_EMPTY_TAIL_SWEEP_fabricates_nothing_in_silence``, which
+    exercises every non-bridging bare connective explicitly — the shape this grid
+    structurally cannot reach, because it only ever builds forms that DO bridge.
+
+    **THE SCOPE OF THIS GRID, STATED BESIDE ITS NUMBER, because a sweep whose shape
+    excludes a rule cannot clear that rule and 510 read as though it had.** Every
+    cell is ``f"The temperature was 425 K{separator}{connective} 3 K {tail}"``: ONE
+    rule of five, and a NON-EMPTY tail in every cell. So the two INSTANT rules and
+    the terminal (empty-tail) case are both structurally outside it — which is
+    exactly how the ``and again`` fabrication reached ``main`` with this grid green.
+    The sibling sweep named above covers both.
+
+    Two
     properties, and the second is as load-bearing as the first:
 
     1. **NOTHING but 425 is proposed.** A second value here would be a §5 assertion
@@ -1026,7 +1099,7 @@ def test_the_WHOLE_CROSS_PRODUCT_fabricates_nothing_and_refuses_nothing_in_silen
     (six ``or`` + approximation, four ``or`` + bare hedge, one bare ``or``) x 17
     tails x 2 separators, which is the whole of what the scope exempted.
     """
-    assert len(_ALL_CONNECTIVES) == 15
+    assert len(_ALL_CONNECTIVES) == 14
     assert len(_MODIFIER_TAILS) == 17
     fabricated: list[tuple[str, list]] = []
     silent: list[str] = []
@@ -1043,7 +1116,7 @@ def test_the_WHOLE_CROSS_PRODUCT_fabricates_nothing_and_refuses_nothing_in_silen
                     fabricated.append((sentence, values))
                 elif not _read(sentence).abstentions:
                     silent.append(sentence)
-    assert checked == 510, checked
+    assert checked == 476, checked
     assert fabricated == [], fabricated[:5]
     assert silent == [], silent[:5]
 
@@ -1245,23 +1318,44 @@ def test_the_statement_end_set_is_the_unit_terminator_set():
     ``_STATEMENT_END``.
 
     Pinned character by character rather than by comparing two expressions, so a
-    slice that re-spells either one has to come through here. The ``\n``
-    exclusion is asserted too: a hedge or a tail on the far side of a line break is
-    not "immediately after", and ``_H_SPACE`` exists for exactly that.
+    slice that re-spells either one has to come through here.
+
+    ~~"The ``\n`` exclusion is asserted too: a hedge or a tail on the far side of a
+    line break is not 'immediately after', and ``_H_SPACE`` exists for exactly
+    that."~~ — **WITHDRAWN 2026-09-12 (fourth pass). THE TWO PREDICATES ASK
+    OPPOSITE QUESTIONS ABOUT A LINE BREAK AND SHARING ONE CLASS WAS A
+    COINCIDENCE.** ``_HEDGE_BRIDGE`` asks whether the connective is IMMEDIATELY
+    BETWEEN two values, where a line break means it is not; this asks whether the
+    statement ENDS, where a line break means it plainly does. While ``_H_SPACE``
+    was ``[^\\S\\n]`` the disagreement was visible only for ``\\n`` and cost nothing;
+    narrowing it to all TEN line-boundary characters turned it into a false
+    refusal — ``"...maybe 430 K\r"`` withheld 430. ``_STATEMENT_END`` now uses
+    ``\\s``.
+
+    **BOTH ROWS BELOW ARE THEREFORE INVERTED, and ``\n`` is the one worth naming**:
+    ``_statement_ends_after("X\n", 1)`` is now ``True``. That is the right answer
+    and not an accepted cost — a value followed by nothing but a newline ends its
+    statement as plainly as one followed by a full stop. It is also inert:
+    ``_SEGMENT_BOUNDARY`` splits on ``\n+``, so no segment contains one.
+
+    MUTATION: putting ``_H_SPACE`` back into ``_STATEMENT_END`` turns the ``\r``
+    row RED, which is the live half.
     """
     for character in tc._UNIT_TERMINATORS:
         assert tc._statement_ends_after(f"X{character}", 1) is True, character
     for character in " \t\xa0":
         assert tc._statement_ends_after(f"X{character}", 1) is True, repr(character)
-    assert tc._statement_ends_after("X\n", 1) is False
-    # ``\r`` IS admitted, and that is stated rather than left to be discovered: the
-    # module's whitespace class is ``_H_SPACE`` = ``[^\S\n]``, which excludes the
-    # line FEED and nothing else, and this predicate reuses it unchanged. A bare
-    # ``\r`` with no word after it withholds nothing, so it is not a hole — but a
-    # test asserting it were refused would be asserting a rule the module does not
-    # have.
-    assert tc._statement_ends_after("X\r", 1) is True
-    assert tc._statement_ends_after("X\rmore text", 1) is False
+    # EVERY line-boundary character ends a statement, including the nine that no
+    # longer bridge a hedge. The two sets are asserted against each other below.
+    for character in tc._LINE_BREAKS:
+        assert tc._statement_ends_after(f"X{character}", 1) is True, repr(character)
+        assert tc._statement_ends_after(f"X{character}more text", 1) is False, repr(
+            character
+        )
+    # And NONE of them bridges a hedge, which is the other half of the split.
+    for character in tc._LINE_BREAKS:
+        assert tc._HEDGE_BRIDGE.fullmatch(f",{character}maybe ") is None, repr(character)
+    assert tc._HEDGE_BRIDGE.fullmatch(",\xa0maybe ") is not None
     # And the composers the unit ratchet refuses are refused here too, which is the
     # coupling being defence in depth rather than a weakening.
     for composer in "/*^-·×%":
@@ -1377,3 +1471,319 @@ def test_the_cap_comment_no_longer_claims_an_arithmetic_link_it_does_not_have():
     assert "would be circular" in source
     # The invariant itself, re-derived rather than quoted.
     assert tc.MAX_CANDIDATE_QUOTE_BYTES == 4 * routes._MAX_TRANSCRIPT_BYTES
+
+
+# =============================================================================
+# 9. THE FOURTH PASS (2026-09-12). `and again`, the line-break class, and a
+#    sweep whose SHAPE reaches the two rules and the terminal case the 476-cell
+#    grid above structurally cannot.
+# =============================================================================
+
+
+#: The sentences `and again` used to read a second value out of, with the field the
+#: second value was falsely proposed for. Ratcheted: a slice that put `and again`
+#: back into `_BARE_HEDGES` turns every row red.
+AND_AGAIN_RESIDUE: tuple[tuple[str, str, object], ...] = (
+    (
+        "The scan started 2026-01-01T00:00:00Z, and again 2026-01-02T00:00:00Z.",
+        START,
+        "2026-01-01T00:00:00Z",
+    ),
+    (
+        "The scan ended 2026-01-01T00:00:00Z, and again 2026-01-02T00:00:00Z.",
+        END,
+        "2026-01-01T00:00:00Z",
+    ),
+    (
+        "The scan started 2026-01-01T00:00:00Z, and again 2026-01-02T00:00:00Z, "
+        "and again 2026-01-03T00:00:00Z.",
+        START,
+        "2026-01-01T00:00:00Z",
+    ),
+    ("The temperature was 425 K, and again 430 K.", TEMPERATURE, 425),
+)
+
+
+@pytest.mark.parametrize(
+    "sentence,field_path,only",
+    AND_AGAIN_RESIDUE,
+    ids=["started", "ended", "chain of three", "temperature"],
+)
+def test_a_BARE_and_again_reads_one_value_and_DISCLOSES_the_rest(
+    sentence, field_path, only
+):
+    """`and again` is a REPEAT marker, so a second value is a second EVENT.
+
+    **THE DEFECT THIS PINS SHUT.** `and again` sat in `_BARE_HEDGES` while bare
+    `again` sat in `_OR_REQUIRED_HEDGES` *because* before a full instant `again`
+    means the scan was REPEATED — two justifications, one module, opposite
+    conclusions about the same word, with `and again` the STRONGER marker. Measured
+    at `22d794a5`, the first two rows proposed BOTH instants as one field's value,
+    `restated_in_same_sentence is True`, with `abstentions == ()`. `routes.
+    _mint_transcript_proposals` mints one durable OPEN proposal per candidate, so a
+    scientist could accept a `timestamps` value nobody stated into a record that
+    reaches an official export. §5 forbids an assertion in terms.
+
+    **AND THE COST IS NAMED RATHER THAN HIDDEN.** The temperature row was a
+    MUST-PASS in `TRUE_RESTATEMENTS` and is withdrawn: a legitimate-looking
+    temperature restatement is now lost. It is lost as a DISCLOSED omission, which
+    is the trade §5 ranks the right way round — asserted below, not claimed.
+
+    MUTATION: moving `and again` back into `_BARE_HEDGES` turns every row RED on
+    the value assertion. Dropping the disclosure turns every row RED on the
+    abstention assertion.
+    """
+    reading = _read(sentence)
+    assert [
+        candidate.proposed_value
+        for candidate in reading.candidates
+        if candidate.field_path == field_path
+    ] == [only]
+    # Nothing else was proposed for any other field either.
+    assert [candidate.field_path for candidate in reading.candidates] == [field_path]
+    # THE WITHHOLDING IS DISCLOSED. Exactly the field that withheld is named.
+    assert [entry.kind for entry in reading.abstentions] == [
+        "unhedged_further_values"
+    ]
+    assert field_path in reading.abstentions[0].reason
+    # And the words survive whatever the reader proposed — rule (4).
+    assert [segment.text for segment in reading.segments] == [sentence]
+
+
+def test_an_explicit_or_still_rescues_and_again():
+    """The reason it was PARKED in `_OR_REQUIRED_HEDGES` and not deleted.
+
+    `or` coordinates the new value WITH the old one, so an approximation modifier or
+    a repeat marker behind it is scoped inside an alternative for the same quantity
+    — the same argument `_OR_REQUIRED_HEDGES` already rests on for `or about`.
+    `or and again` is not idiomatic English, so this is rare rather than
+    theoretical; refusing it would be a second, smaller omission for no gain.
+
+    MUTATION: deleting `and again` from `_HEDGE_CONNECTIVES` altogether turns this
+    RED, which is what distinguishes parking it from removing it.
+    """
+    assert _values("The temperature was 425 K, or and again 430 K") == [425, 430]
+    assert _read("The temperature was 425 K, or and again 430 K").abstentions == ()
+
+
+def test_H_SPACE_excludes_exactly_the_line_boundary_whitespace():
+    """`_LINE_BREAKS` is re-derived from `str.splitlines()`, never trusted as a list.
+
+    **THE DOCUMENTED INVARIANT WAS FALSE FOR NINE OF TEN CHARACTERS.** `_H_SPACE`
+    was `[^\\S\\n]` under a comment reading *"every whitespace character EXCEPT a
+    line break"*, because *"a hedge on the far side of a line break is not
+    'immediately between' two values."* It excluded ONE. Measured at `22d794a5` on
+    `f"The temperature was 425 K,{c}maybe 430 K."`, all nine of `\\r`, `\\v`, `\\f`,
+    `\\x1c`, `\\x1d`, `\\x1e`, `\\x85`, U+2028 and U+2029 bridged and read a second
+    value SILENTLY; only `\\n` refused, and only because `_SEGMENT_BOUNDARY` splits
+    the sentence in two before the gate is reached.
+
+    **THEY WERE LIVE OVER HTTP, not hypothetical.** `_SEGMENT_BOUNDARY` splits on
+    `\\n+` and on `\\s+` only after `[.!?]`, so a lone `\\r` survives inside one
+    segment, and the transcript route applies no control-character filter — proved
+    by the segment assertion below.
+
+    A LIST WOULD HAVE BEEN GUESSED WRONG: a first attempt named five characters and
+    the answer is ten. So the set is derived here from a definition rather than
+    compared against a literal.
+
+    MUTATION: restoring `[^\\S\\n]` turns this RED on nine characters. Adding
+    `\\xa0` to `_LINE_BREAKS` turns the NBSP assertion RED.
+    """
+    whitespace = [
+        chr(point) for point in range(0x110000) if re.fullmatch(r"\s", chr(point))
+    ]
+    boundaries = [c for c in whitespace if len(f"a{c}b".splitlines()) == 2]
+    assert len(whitespace) == 29
+    assert tuple(boundaries) == tuple(sorted(tc._LINE_BREAKS, key=ord))
+    assert len(tc._LINE_BREAKS) == 10
+
+    pattern = re.compile(tc._H_SPACE)
+    for character in tc._LINE_BREAKS:
+        assert pattern.fullmatch(character) is None, repr(character)
+    assert sum(pattern.fullmatch(c) is not None for c in whitespace) == 19
+
+    # END TO END, through the reader, on every one of the ten.
+    for character in tc._LINE_BREAKS:
+        sentence = f"The temperature was 425 K,{character}maybe 430 K."
+        reading = _read(sentence)
+        values = [
+            candidate.proposed_value
+            for candidate in reading.candidates
+            if candidate.field_path == TEMPERATURE
+        ]
+        assert values == [425], (repr(character), values)
+        if character == "\n":
+            # The only one segmentation reaches: two sentences, so the second has no
+            # label and there is nothing for this rule to withhold.
+            assert len(reading.segments) == 2
+            assert reading.abstentions == ()
+        else:
+            # THE NINE THAT WERE LIVE. One segment — so the route really did hand
+            # this to the gate — and the withholding is disclosed.
+            assert len(reading.segments) == 1, repr(character)
+            assert [entry.kind for entry in reading.abstentions] == [
+                "unhedged_further_values"
+            ], repr(character)
+
+    # NBSP IS NOT A LINE BOUNDARY AND STILL BRIDGES, deliberately: dictated text
+    # contains it and the sentence is one line and one statement.
+    assert "\xa0" not in tc._LINE_BREAKS
+    assert _values("The temperature was 425 K,\xa0maybe 430 K.") == [425, 430]
+
+
+#: Every connective form that must NOT bridge on its own — the shape the 476-cell
+#: grid above structurally cannot build, because it only ever constructs forms that
+#: DO bridge. Derived, so a connective that changes branch changes this set too.
+_NON_BRIDGING_BARE: tuple[str, ...] = tc._OR_REQUIRED_HEDGES
+
+#: Trailing phrases that make a following INSTANT belong to something else. Written
+#: out rather than generated, for the reason `_MODIFIER_TAILS` gives.
+#: **NO TAIL MAY NAME A RUN, and a first draft of this tuple did.** `" for the
+#: second run"` trips `_VAGUE_RUN`, which raises a clarification, which leaves the
+#: run target UNSETTLED, which withholds EVERY candidate — so 84 cells reported
+#: `values == []` and property (2) read as satisfied for a reason that had nothing to
+#: do with the tail. The sweep now asserts `clarifications == ()` on every cell, so
+#: the trap fails loudly instead of flattering the result.
+#: No leading space: the template below inserts one only for a non-empty tail, so
+#: the empty row really is terminal. A first draft carried the spaces here and
+#: `_MODIFIER_TAILS` does not, which produced `"430 Kof drift"` — a sentence no rule
+#: matches at all, in 714 cells that then read as silent withholdings.
+_INSTANT_TAILS: tuple[str, ...] = (
+    "",
+    "for the second acquisition",
+    "after the restart",
+    "in the previous scan",
+    "plus one day",
+)
+
+
+def test_the_INSTANT_AND_EMPTY_TAIL_SWEEP_fabricates_nothing_in_silence():
+    """The sweep the 476-cell grid's SHAPE excludes, and stating that is the fix.
+
+    **WHAT THE OTHER GRID CANNOT SEE.** Every one of its cells is
+    `f"The temperature was 425 K{sep}{connective} 3 K {tail}"` — ONE of the five
+    rules, and a NON-EMPTY tail in every cell, built only from connectives that DO
+    bridge. So the two INSTANT rules and the terminal (empty-tail) case are both
+    structurally outside it, and that is exactly how the `and again` fabrication
+    reached `main` with 510 cells green. A sweep whose shape excludes a rule cannot
+    clear that rule.
+
+    **THE SCOPE OF THIS ONE, STATED BESIDE ITS NUMBER.** Three rules (the three that
+    HAVE a restatement pattern), `_ALL_CONNECTIVES` + every non-bridging BARE form,
+    tails including the EMPTY one, two separators. The phrase rules
+    (`atmosphere`, `environment`) are absent because they carry no restatement and
+    can refuse nothing.
+
+    **THE THREE PROPERTIES, and none of them re-derives the implementation.**
+
+    1. **Nothing is invented.** Every proposed value appears verbatim in the
+       sentence.
+    2. **A trailing phrase always wins.** With a NON-EMPTY tail, only the FIRST
+       value is ever proposed — a later instant behind `for the second run` is
+       another run's, and a later kelvin figure behind `of drift` is a drift.
+    3. **A non-bridging BARE connective never yields a second value**, whatever the
+       tail. This is the `and again` property, generalised over all seven.
+    4. **No withholding is silent.** If the second stated value was not proposed,
+       the reading discloses.
+
+    MUTATION: moving any member of `_OR_REQUIRED_HEDGES` into `_BARE_HEDGES` turns
+    property 3 RED. Scoping condition 3 back to the bare-hedge branch turns property
+    2 RED. Deleting either refusal `pending.append` turns property 4 RED.
+    """
+    grid = (
+        (TEMPERATURE, "The temperature was 425 K", "430 K", 425, 430, _MODIFIER_TAILS),
+        (
+            START,
+            "The scan started 2026-01-01T00:00:00Z",
+            "2026-01-02T00:00:00Z",
+            "2026-01-01T00:00:00Z",
+            "2026-01-02T00:00:00Z",
+            _INSTANT_TAILS,
+        ),
+        (
+            END,
+            "The scan ended 2026-01-01T00:00:00Z",
+            "2026-01-02T00:00:00Z",
+            "2026-01-01T00:00:00Z",
+            "2026-01-02T00:00:00Z",
+            _INSTANT_TAILS,
+        ),
+    )
+    connectives = _ALL_CONNECTIVES + _NON_BRIDGING_BARE
+    assert len(connectives) == 21
+    invented: list[tuple[str, list]] = []
+    read_behind_a_tail: list[tuple[str, list]] = []
+    read_behind_a_bare_repeat: list[tuple[str, list]] = []
+    silent: list[str] = []
+    checked = 0
+    for field_path, head, second, first_value, second_value, tails in grid:
+        for connective in connectives:
+            for tail in tails:
+                for separator in (", ", " "):
+                    spaced = f" {tail}" if tail else ""
+                    sentence = f"{head}{separator}{connective} {second}{spaced}."
+                    checked += 1
+                    reading = _read(sentence)
+                    # NOT A PROPERTY UNDER TEST — a GUARD ON THE FIXTURE. A run
+                    # clarification withholds every candidate, so a cell that
+                    # accidentally names a run satisfies properties 2 and 3
+                    # vacuously. See `_INSTANT_TAILS`.
+                    assert reading.clarifications == (), sentence
+                    values = [
+                        candidate.proposed_value
+                        for candidate in reading.candidates
+                        if candidate.field_path == field_path
+                    ]
+                    assert values, sentence
+                    # (1) nothing invented
+                    if any(str(value) not in sentence for value in values):
+                        invented.append((sentence, values))
+                    # (2) a trailing phrase always wins
+                    if tail and values != [first_value]:
+                        read_behind_a_tail.append((sentence, values))
+                    # (3) a non-bridging BARE connective never yields a second value
+                    if connective in _NON_BRIDGING_BARE and values != [first_value]:
+                        read_behind_a_bare_repeat.append((sentence, values))
+                    # (4) no withholding is silent
+                    if second_value not in values and not reading.abstentions:
+                        silent.append(sentence)
+    assert checked == 21 * 2 * (len(_MODIFIER_TAILS) + 2 * len(_INSTANT_TAILS))
+    assert checked == 1134, checked
+    assert invented == [], invented[:5]
+    assert read_behind_a_tail == [], read_behind_a_tail[:5]
+    assert read_behind_a_bare_repeat == [], read_behind_a_bare_repeat[:5]
+    assert silent == [], silent[:5]
+
+
+def test_the_option_ceilings_derivation_is_held_by_this_test_not_by_arithmetic():
+    """`MAX_DISCLOSURE_OPTIONS` is a bare literal and its comment says a TEST holds
+    the derivation. This is that test.
+
+    The same shape as
+    `test_the_cap_comment_no_longer_claims_an_arithmetic_link_it_does_not_have`
+    above, and for the same reason: the constant CANNOT reference `routes`, because
+    `routes` imports this module. So the derivation it claims —
+    `MAX_SEGMENTS` x `routes.RUN_PAGE_MAX`, a transcript at the segment ceiling
+    naming one unresolvable run per sentence on a record at the largest run page
+    this application serves — is not enforced by the expression and has to be
+    enforced here.
+
+    **THIS TEST EXISTS BECAUSE A MUTANT SURVIVED.** Changing the constant
+    20,000 -> 20,001 left all 305 transcript tests GREEN: the boundary test's
+    admitted/refused pair only pins the interval (19,990, 21,989], because its
+    margin is one RUN and a run is worth 1,999 options. An interval that wide is not
+    a pinned constant, and a comment claiming a derivation nothing checks is the
+    "guard with a false rationale" this module has already had to delete once.
+
+    MUTATION: any change to `MAX_DISCLOSURE_OPTIONS`, `MAX_SEGMENTS` or
+    `routes.RUN_PAGE_MAX` that breaks the product turns this RED.
+    """
+    assert tc.MAX_DISCLOSURE_OPTIONS == tc.MAX_SEGMENTS * routes.RUN_PAGE_MAX
+    assert tc.MAX_DISCLOSURE_OPTIONS == 20_000
+    # And it is NOT redundant with the disclosure ceiling in either direction: it is
+    # far above it (so a bounded disclosure count does not imply a bounded option
+    # total only because the numbers happen to be close) and far below the product
+    # of the two (so it is not merely `MAX_DISCLOSURES` restated).
+    assert tc.MAX_DISCLOSURE_OPTIONS > tc.MAX_DISCLOSURES
+    assert tc.MAX_DISCLOSURE_OPTIONS < tc.MAX_DISCLOSURES * routes.RUN_PAGE_MAX

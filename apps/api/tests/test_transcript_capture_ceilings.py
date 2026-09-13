@@ -838,15 +838,38 @@ def test_the_worst_legitimate_disclosure_load_is_admitted():
 
     A transcript at the SEGMENT ceiling whose every sentence is maximally
     ambiguous: an absorption-edge mention, a non-kelvin temperature, and BOTH
-    refusal kinds for two of the three rules that can refuse one. Six disclosures a
-    sentence, 600 in total, ADMITTED.
+    refusal kinds for ~~two~~ **all three** of the three rules that can refuse one.
+    ~~Six~~ **SEVEN** disclosures a sentence, ~~600~~ **700** in total, ADMITTED.
+
+    **THE SIXTH BECAME A SEVENTH ON 2026-09-12 (fourth pass), AND THE NEW ONE IS
+    THIS FIXTURE FINDING A SILENT WITHHOLDING OF ITS OWN.** The numbers are updated
+    rather than the fixture, because the extra row is the fix working. Before, pass
+    two scanned only from the end of the LAST label-anchored match of a rule; this
+    sentence gives `acquisition_end` THREE label matches (`end, then 2026-01-03...`,
+    `ended 2026-02-01...`, `end, then 2026-02-03...`), so the hedged
+    `maybe 2026-02-02T00:00:00Z` sat between the second and the third and was never
+    evaluated, never refused and never disclosed. It is now
+    `trailing_text_after_further_values` quoting `ended 2026-02-01T00:00:00Z`.
+    Measured side by side against the module at `22d794a5`: 6 abstentions -> 7, and
+    **the five candidates are byte-identical** — which is the general property, since
+    a restatement in a non-final region can never satisfy
+    `_statement_ends_after` (the next label match is always in the remainder).
 
     It also reads exactly `MAX_CANDIDATES` candidates, which is admitted by the
     narrowest possible margin on a DIFFERENT axis. That is a coincidence of this
     fixture and is asserted so it is visible rather than surprising.
 
-    MUTATION: lowering `MAX_DISCLOSURES` to 600 turns this RED, which is the
-    headroom being real rather than asserted.
+    **AND IT IS THE CASE THAT SETTLES THE FOURTH CEILING'S MEASURE.** All 700
+    disclosures here are abstentions, so they carry **ZERO** run options — asserted
+    below. A `MAX_DISCLOSURE_OPTIONS` implemented as `disclosures x
+    len(known_runs)` would read 700 x 200 = 140,000 against a 20,000 ceiling and
+    refuse THIS transcript, the one the third ceiling exists to admit. The exact
+    served sum reads 0. That is why the measure is the sum and not the product.
+
+    MUTATION: lowering `MAX_DISCLOSURES` to 700 turns this RED, which is the
+    headroom being real rather than asserted. Replacing
+    `sum(len(entry.options) for entry in clarifications)` with
+    `disclosure_count * len(known_runs)` turns the options assertion RED.
     """
     sentence = (
         "the temperature was 425 K, maybe 430 K at the end, then 500 K and "
@@ -857,7 +880,7 @@ def test_the_worst_legitimate_disclosure_load_is_admitted():
     )
     one = _read(sentence)
     assert len(tc.segment_transcript(sentence)) == 1
-    assert len(one.abstentions) == 6
+    assert len(one.abstentions) == 7
     assert sorted({entry.kind for entry in one.abstentions}) == [
         "implicit_only_subject",
         "temperature_not_in_kelvin",
@@ -869,25 +892,73 @@ def test_the_worst_legitimate_disclosure_load_is_admitted():
     assert len(_encode(text)) <= routes._MAX_TRANSCRIPT_BYTES
     assert len(tc.segment_transcript(text)) == tc.MAX_SEGMENTS
     reading = _read(text)
-    assert len(reading.abstentions) + len(reading.clarifications) == 600
-    assert 600 <= tc.MAX_DISCLOSURES
+    assert len(reading.abstentions) + len(reading.clarifications) == 700
+    assert 700 <= tc.MAX_DISCLOSURES
     assert len(reading.candidates) == tc.MAX_CANDIDATES == 500
+    # THE FOURTH CEILING, on the case it must admit. Every disclosure here is an
+    # abstention, so the served option total is zero however many runs the record
+    # has — see this test's docstring for why the product measure would refuse it.
+    assert reading.clarifications == ()
+    assert sum(len(entry.options) for entry in reading.clarifications) == 0
+    assert 0 <= tc.MAX_DISCLOSURE_OPTIONS
 
 
-def test_the_three_ceilings_share_one_error_and_all_three_counts_are_always_served(
+#: How many runs the OPTION-ceiling payload needs, and why exactly this many.
+#:
+#: ``_disclosure_flood("run zzz at 1 K ")`` reports 17,476 clarifications
+#: in-process, which is already over ``MAX_DISCLOSURES`` — so the option ceiling
+#: needs a payload UNDER that one, or it proves nothing the third ceiling does not
+#: already prove. ``_option_flood`` below therefore uses 1,999 references (inside
+#: 2,000), and 1,999 x 11 = 21,989 > 20,000 while 1,999 x 10 = 19,990 does not. So
+#: **eleven runs is the smallest record that breaches the option ceiling on the
+#: largest disclosure load the third ceiling admits**, and the margin is one run.
+_OPTION_CEILING_RUNS = 11
+
+
+def _option_flood() -> str:
+    """ONE segment naming 1,999 unresolvable runs. Inside all three EARLIER ceilings.
+
+    No `.`, `!` or `?`, so it is one segment; no kelvin or instant form that any
+    rule reads, so zero candidates and zero quoted bytes; 1,999 references, so
+    1,999 clarifications — one BELOW `MAX_DISCLOSURES`. The only ceiling it can
+    breach is the option one.
+    """
+    return "run zzz at 1 K " * 1999
+
+
+def test_the_four_ceilings_share_one_error_and_all_four_counts_are_always_served(
     client, experiment_id
 ):
-    """One refusal, one error string, three measured counts beside three ceilings.
+    """One refusal, one error string, four measured counts beside four ceilings.
 
     A client that branches on the reason rather than on the numbers would have to
-    learn a third error name in order to do nothing different — all three are the
+    learn a ~~third~~ **fourth** error name in order to do nothing different — all
+    ~~three~~ four are the
     same decision and the same remedy. What it must be able to do is see WHICH
     ceiling bound, and that is readable from the body.
 
-    MUTATION: omitting `disclosures`/`maximum_disclosures` from the candidate-ceiling
-    refusal turns this RED.
+    **THE FOURTH IS `disclosure_options`, ADDED 2026-09-12 (fourth pass).**
+    `MAX_DISCLOSURES` bounds the disclosure COUNT and a `Clarification` carries one
+    `options` entry per run of the record, so a transcript inside all three earlier
+    ceilings served a **200** whose body grew without bound in the run count —
+    measured through this route at `22d794a5`: **143,998,672 B** at 1,000 runs and
+    **735,702,672 B** at 5,000, on a 29,985-byte transcript, all of it serialised
+    inside `record_lock`.
+
+    MUTATION: omitting `disclosures`/`maximum_disclosures` — or
+    `disclosure_options`/`maximum_disclosure_options` — from the candidate-ceiling
+    refusal turns this RED. So does dropping the
+    `disclosure_options > MAX_DISCLOSURE_OPTIONS` clause from the check, which takes
+    the `options` row to **200**.
     """
     run = _make_run(client, experiment_id)
+    # The option payload needs a many-run record and the other three do not, so the
+    # extra runs are created once here rather than in a separate fixture. They
+    # change nothing for the first three: none of those payloads names a run.
+    while len(client.get(f"/api/experiments/{experiment_id}/runs").json()["runs"]) < (
+        _OPTION_CEILING_RUNS
+    ):
+        _make_run(client, experiment_id)
     keys = {
         "error",
         "message",
@@ -897,12 +968,16 @@ def test_the_three_ceilings_share_one_error_and_all_three_counts_are_always_serv
         "maximum_candidate_quote_bytes",
         "disclosures",
         "maximum_disclosures",
+        "disclosure_options",
+        "maximum_disclosure_options",
     }
-    # (1) the COUNT ceiling, (2) the BYTE ceiling, (3) the DISCLOSURE ceiling.
+    # (1) the COUNT ceiling, (2) the BYTE ceiling, (3) the DISCLOSURE ceiling,
+    # (4) the OPTION ceiling.
     for label, text in (
         ("count", _one_segment(", maybe ")),
         ("bytes", _bytes_only()),
         ("disclosures", _disclosure_flood("temperature 1 C ")),
+        ("options", _option_flood()),
     ):
         response = _finalize(client, experiment_id, text, run_id=run["id"])
         assert response.status_code == 422, (label, response.text)
@@ -910,11 +985,17 @@ def test_the_three_ceilings_share_one_error_and_all_three_counts_are_always_serv
         assert body["error"] == "transcript_too_dense", label
         assert set(body) == keys, (label, sorted(set(body) ^ keys))
         # Every count is a measured integer, including the ones inside their limit.
-        for name in ("candidates", "candidate_quote_bytes", "disclosures"):
+        for name in (
+            "candidates",
+            "candidate_quote_bytes",
+            "disclosures",
+            "disclosure_options",
+        ):
             assert isinstance(body[name], int), (label, name)
         assert body["maximum_candidates"] == tc.MAX_CANDIDATES
         assert body["maximum_candidate_quote_bytes"] == tc.MAX_CANDIDATE_QUOTE_BYTES
         assert body["maximum_disclosures"] == tc.MAX_DISCLOSURES
+        assert body["maximum_disclosure_options"] == tc.MAX_DISCLOSURE_OPTIONS
         # Exactly the ceiling this payload was built to breach is over its limit.
         over = {
             name
@@ -922,13 +1003,61 @@ def test_the_three_ceilings_share_one_error_and_all_three_counts_are_always_serv
                 ("candidates", tc.MAX_CANDIDATES),
                 ("candidate_quote_bytes", tc.MAX_CANDIDATE_QUOTE_BYTES),
                 ("disclosures", tc.MAX_DISCLOSURES),
+                ("disclosure_options", tc.MAX_DISCLOSURE_OPTIONS),
             )
             if body[name] > ceiling
         }
         assert over == {
             "count": {"candidates", "candidate_quote_bytes"},
             "bytes": {"candidate_quote_bytes"},
+            # THE DISCLOSURE FLOOD BREACHES ONLY THE THIRD CEILING, and this line
+            # was written the other way round first and CORRECTED BY THE
+            # MEASUREMENT. `"temperature 1 C "` produces 16,383 ABSTENTIONS and
+            # zero clarifications, and an abstention carries no `options` at all —
+            # so `disclosure_options` is 0 here however many runs the record has.
+            # That is the same fact the worst-legitimate-load test turns on, and it
+            # is why the two ceilings are not redundant in either direction.
             "disclosures": {"disclosures"},
+            # THE OPTION CEILING ALONE. Nothing else is over its limit, which is
+            # what makes this a proof of the fourth ceiling rather than a second
+            # proof of the third.
+            "options": {"disclosure_options"},
         }[label], (label, over)
     assert _notes(client, experiment_id) == []
     assert _proposals(client, experiment_id) == []
+
+
+def test_the_option_ceiling_admits_the_largest_load_one_run_below_it(
+    client, experiment_id
+):
+    """The margin is ONE RUN, measured on both sides, so the ceiling is tight.
+
+    `_option_flood()` on a record with `_OPTION_CEILING_RUNS - 1` runs is ADMITTED
+    (1,999 x 10 = 19,990 <= 20,000) and on one with `_OPTION_CEILING_RUNS` is
+    REFUSED (21,989 > 20,000). Without the admitted half, a ceiling set to 1 would
+    pass the refusal half and this file would not notice.
+
+    MUTATION: changing `MAX_DISCLOSURE_OPTIONS` in either direction turns one half
+    of this RED.
+    """
+    run = _make_run(client, experiment_id)
+    while len(client.get(f"/api/experiments/{experiment_id}/runs").json()["runs"]) < (
+        _OPTION_CEILING_RUNS - 1
+    ):
+        _make_run(client, experiment_id)
+
+    admitted = _finalize(client, experiment_id, _option_flood(), run_id=run["id"])
+    assert admitted.status_code == 200, admitted.text
+    served = admitted.json()["clarifications"]
+    assert sum(len(entry["options"]) for entry in served) == 19990
+    assert 19990 <= tc.MAX_DISCLOSURE_OPTIONS
+
+    _make_run(client, experiment_id)
+    refused = _finalize(client, experiment_id, _option_flood(), run_id=run["id"])
+    assert refused.status_code == 422, refused.text
+    body = refused.json()
+    assert body["error"] == "transcript_too_dense"
+    assert body["disclosure_options"] == 21989
+    assert body["disclosures"] == 1999 <= tc.MAX_DISCLOSURES
+    assert body["candidates"] == 0
+    assert body["candidate_quote_bytes"] == 0
