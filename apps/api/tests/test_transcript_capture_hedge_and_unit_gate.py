@@ -2942,6 +2942,10 @@ def test_the_gate_ledger_constants_are_not_DEAD():
     # The two measured rates, as they are published.
     assert "1 of 15" in ledger
     assert "16 of 57" in ledger
+    # GATE (4)'s two rates, and the reviewer figure that corrects gate (1)'s.
+    assert "2 of 51" in ledger
+    assert "20 of 51 (39%)" in ledger
+    assert "28% (14 of 50)" in ledger
     assert "13 of 15 before the 2026-09-13 widening" in ledger
     # And the claim that makes the trade §5-acceptable at all.
     assert "Every loss is DISCLOSED" in ledger
@@ -2954,6 +2958,7 @@ def test_the_gate_ledger_constants_are_not_DEAD():
     for name, tup in (
         ("_PRE_LABEL_OVERREACH_CLOSED", tc._PRE_LABEL_OVERREACH_CLOSED),
         ("_RUN_MISATTRIBUTION_CLOSED", tc._RUN_MISATTRIBUTION_CLOSED),
+        ("_PRE_LABEL_RESIDUE", tc._PRE_LABEL_RESIDUE),
         ("_MODIFIER_OBJECT_OVERREACH_RESIDUE",
          tc._MODIFIER_OBJECT_OVERREACH_RESIDUE),
         ("_PARENTHETICAL_BRIDGE_RESIDUE", tc._PARENTHETICAL_BRIDGE_RESIDUE),

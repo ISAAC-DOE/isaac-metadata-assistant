@@ -1315,9 +1315,117 @@ _SIBLING_GAP = re.compile(
 #: read. Neither re-subjects anything: both locate. A per-rule list would be more
 #: precise and buys nothing measurable, and a fourth ``_Rule`` field for it would be
 #: carried by every future rule for no reason.
+#:
+#: **WIDENED FROM 11 ENTRIES TO THREE GROUPS, AFTER MEASURING THAT THE FIRST VERSION
+#: REFUSED 41% OF BENIGN PRE-LABEL FORMS.** 20 of 51 independently-written natural
+#: sentences were lost, and the module's own standard for that number is explicit:
+#: *"a reader that refuses most of the ways a person says a thing is not usable, and
+#: 'disclosed' is not a defence against that."* The three groups below take it to
+#: **2 of 51 (4%)**, and every remaining loss is named in
+#: :data:`_PRE_LABEL_RESIDUE`. Re-measured over all four corpora after widening.
+#:
+#: **GROUP 2 — THE APPARATUS — EXISTS BECAUSE MY OWN §5 ARGUMENT FOR EXCLUDING IT WAS
+#: WRONG, AND THE REFUTATION IS THE MOST USEFUL THING MEASURED HERE.** I first
+#: excluded ``cryostat``/``stage``/``chamber``/``sensor`` on the ground that admitting
+#: them would assert that the cryostat's temperature IS ``context.temperature_K`` — a
+#: scientific judgement §5 forbids. **That ground is unavailable, because the module
+#: has already made that exact call in the PREPOSITIONAL direction.**
+#: :data:`_LABEL_MODIFIER` admits ``of``/``on``/``in``/``at`` + a determiner, so all
+#: six of these read TODAY and did before this slice:
+#:
+#:     "The temperature of the cryostat was 80 K."   -> 80
+#:     "The temperature on the sensor was 425 K."    -> 425   <- a pinned MUST-READ
+#:     "The temperature in the chamber was 300 K."   -> 300
+#:     "The temperature of the furnace was 900 K."   -> 900
+#:     "The temperature at the stage was 300 K."     -> 300
+#:     "The temperature of the substrate was 700 K." -> 700
+#:
+#: Refusing *"The sensor temperature was 425 K"* while reading *"The temperature on
+#: the sensor was 425 K"* is an INCONSISTENCY between two phrasings of one claim, not
+#: a §5 position — and the second is in ``_BENIGN_BRIDGE_FORMS``, so the repository
+#: has committed to it. **The durable lesson: "admitting this would require a
+#: scientific judgement" has to be checked against what the code ALREADY admits.
+#: Mine was a judgement the module had made two screens away.** The compound list is
+#: also strictly NARROWER than the prepositional form it matches, which is closed on
+#: an arbitrary noun (:data:`_MODIFIER_OBJECT_OVERREACH_RESIDUE` records that *"The
+#: temperature of the DRIFT was 3 K"* still reads, and this list admits no such word).
+#:
+#: **GROUP 3 — REPORT PARTICIPLES — is safe for one structural reason, stated once:
+#: a past participle of a verb of REPORT says how the value was OBTAINED, never what
+#: quantity it is.** *"The measured temperature"* is the temperature; *"the measured
+#: drift"* is a drift, and ``drift`` is not in this list at any position. The verbs
+#: are the same closed set :data:`_PRE_LABEL_REPORT` already holds, so this widening
+#: introduces no new vocabulary and cannot outgrow the list it borrows.
+#:
+#: **GROUP 4 — AFFIRMING ADJECTIVES — are the exact ANTONYMS of the estimate family
+#: gate (4) refuses.** ``actual``/``real``/``true`` assert that the value is the one
+#: obtained, which is the opposite move from ``nominal``/``expected``/``estimated``.
+#: They affirm the label rather than re-subject it.
+#:
+#: **AND THE STACKING BOUND IS WHAT KEEPS ALL OF THIS CLOSED.** With three groups the
+#: slot became genuinely multi-word (*"the measured sample temperature"*), so
+#: :data:`_PRE_LABEL` allows at most **two** — enough for every measured form, and
+#: bounded rather than a ``*`` loop, so the grammar's reach is stated. Stacking is
+#: safe only because every member is vetted: two admitted words cannot compose into a
+#: re-subjecting phrase when neither re-subjects alone.
 _PRE_LABEL_NOUN = (
+    # (1) the measured thing, and the unit of work the instant rules subject.
     r"(?:samples?|specimens?|scans?|runs?|measurements?|acquisitions?"
-    r"|collections?|datasets?|exposures?|spectra|spectrum)"
+    r"|collections?|datasets?|exposures?|spectra|spectrum"
+    # (2) the apparatus. See the note above: the prepositional form of each of
+    #     these already reads, so this matches a decision rather than taking one.
+    r"|cryostats?|cryos|stages?|holders?|cells?|chambers?|furnaces?|ovens?"
+    r"|baths?|substrates?|sensors?|thermocouples?|probes?|pucks?|mounts?"
+    r"|windows?|beamlines?|monochromators?"
+    # (3) participles of the closed report-verb set: HOW the value was obtained.
+    r"|measured|recorded|logged|observed|reported|noted|read|found"
+    # (4) affirming adjectives: the antonyms of the estimate family.
+    r"|actual|real|true"
+    r")"
+)
+
+#: **THE PRE-LABEL FORMS STILL LOST, named rather than folded into the percentage** —
+#: the discipline :data:`_PARENTHETICAL_BRIDGE_RESIDUE` set for gate (1)'s one loss.
+#: Measured at **2 of 51** independently-written benign forms (4%) after the widening
+#: above, down from 20 of 51 (39%), both DISCLOSED with an instruction that works.
+#:
+#: (*The denominator moved 49 → 51 in the same session, when a mutation exposed that
+#: the stacking bound was an equivalent mutant and two two-modifier rows were added to
+#: the corpus that justified it. "5 of 49" below is quoted as it was written, not
+#: rebased onto the new denominator — a quoted wrong claim that silently acquires
+#: today's numbers stops being a record of anything.*)
+#:
+#: **THIS TUPLE READ "5 of 49" AND LISTED FIVE ROWS FOR ONE COMMIT AND THAT WAS
+#: WRONG — caught by re-running the measurement instead of trusting the sentence I
+#: had just written.** Three of the five (*"The FINAL temperature"*, *"The STARTING
+#: temperature"*, *"The INITIAL temperature"*) are **deliberate refusals, not
+#: benign losses**, and they are not in the benign corpus at all — they are in the
+#: adversarial corpus's must-refuse family. Counting a deliberate refusal as a
+#: false negative inflates the cost of the gate and, worse, implies someone intends
+#: to admit it. **The two classes are now kept apart**, because it is exactly the
+#: conflation §15 records this repository publishing before.
+#:
+#: **(a) THE GENUINE LOSSES — an OPEN class, which is why an allowlist cannot chase
+#: them.** ``anyway``, ``OK``, ``well``, ``anyhow``, ``like``, ``so anyway`` — spoken
+#: fillers, where the next one is unguessable by construction. Each is trivially
+#: recoverable and the fix is punctuation the speaker would probably use anyway: ``,``
+#: is a clause bound, so *"Anyway, the temperature was 425 K"* parses and reads. That
+#: recoverability is why the class is left open rather than chased with a list that
+#: would grow forever and still fail on the next filler.
+#:
+#: **(b) REFUSED DELIBERATELY, AND WOULD NOT BE ADMITTED EVEN IF IT WERE EASY —
+#: recorded here so a future slice does not "fix" it.** *"The FINAL temperature was
+#: 425 K"*, *"The STARTING temperature was 300 K"*, *"The INITIAL temperature was
+#: 300 K"*. Each states a temperature at ONE POINT of a progression, and which point
+#: ``context.temperature_K`` should hold is precisely the question
+#: :data:`_KIND_NONE_SELECTED` refuses to answer for *"300 K, then 350 K, then 400
+#: K"*. Admitting these would decide by PHRASING what the sequence gate declines to
+#: decide by MEASUREMENT — the same value, the same record, two opposite answers
+#: depending on whether the scientist said "initial" or "then". They are asserted as
+#: refused by the adversarial corpus, not listed below.
+_PRE_LABEL_RESIDUE: tuple[str, ...] = (
+    "Anyway the temperature was 425 K",
+    "OK the temperature was 425 K",
 )
 
 #: A bare adverbial that may OPEN the clause the label sits in: *"LATER the
@@ -1376,18 +1484,55 @@ _PRE_LABEL_PREP_PHRASE = (
 #: Anything that may precede the label's own noun phrase. Adjuncts only: nothing
 #: here can rename the label, because everything here is outside the phrase the
 #: label heads.
+#:
+#: ~~``|{_PRE_LABEL_PREP}``~~ — **A BARE PREPOSITION WITH NO OBJECT WAS AN ALTERNATIVE
+#: HERE AND WAS REMOVED AS A MEASURED EQUIVALENT MUTANT.** Dropping it left all 1,902
+#: tests GREEN, i.e. nothing in any corpus reaches it: every measured form that opens
+#: with a preposition supplies an object, so ``_PRE_LABEL_PREP_PHRASE`` already covers
+#: it (*"At the end <instant>"* parses as ``at`` + ``the``). It admitted ``"At "``
+#: alone. Removed rather than recorded-and-kept, because an unreachable alternative in
+#: an allowlist is reach nobody has measured, and removing it narrows the gate — the
+#: fail-closed direction.
 _PRE_LABEL_ADJUNCT = (
     rf"(?:{_PRE_LABEL_PREP_PHRASE}|{_PRE_LABEL_ADVERB}"
-    rf"|{_PRE_LABEL_SUBJECT}\s+{_PRE_LABEL_REPORT}|{_PRE_LABEL_SUBJECT}"
-    rf"|{_PRE_LABEL_PREP})"
+    rf"|{_PRE_LABEL_SUBJECT}\s+{_PRE_LABEL_REPORT}|{_PRE_LABEL_SUBJECT})"
 )
 
 #: **GATE (4).** The WHOLE text from the start of the label's clause to the label
-#: must be: clause-level adjuncts, then at most one determiner, then admitted
-#: locating nouns — in that order. ``fullmatch``, for the reason gate (1) gives.
+#: must be: clause-level adjuncts, then at most one determiner, then at most one
+#: admitted locating noun — in that order. ``fullmatch``, for the reason gate (1)
+#: gives.
+#:
+#: **TWO MORE EQUIVALENT MUTANTS WERE FOUND HERE AND BOTH BECAME SIMPLIFICATIONS
+#: RATHER THAN FOOTNOTES.**
+#:
+#: ~~``(?:{_PRE_LABEL_ADJUNCT}\s*[,)]?\s+)*``~~ — the optional ``[,)]`` is
+#: **STRUCTURALLY UNREACHABLE**, not merely unexercised, and that is worth more than
+#: the deletion. It was copied from :data:`_ASSERTION_BRIDGE`, where it earns its
+#: place. Here it cannot: ``,`` and ``)`` are both in :data:`_CLAUSE_BOUNDARY`, so
+#: :data:`_PRE_LABEL_CLAUSE_OPEN` cuts the pre-label text AFTER them before this
+#: pattern ever sees one. Measured — *"Later, the temperature was 425 K"* and
+#: *"(Later) the temperature was 425 K"* both present this gate with ``" the "``.
+#: **The lesson is about copying a sub-pattern between gates: the bridge has no
+#: clause bound and this gate is defined by one, so syntax that is load-bearing there
+#: is dead here.**
+#:
+#: ~~``(?:{_PRE_LABEL_NOUN}\s+)*``~~ → ~~``?``~~ → ``{0,2}``, **and the middle step
+#: is kept because it was RIGHT ON THE EVIDENCE IT HAD AND WRONG WITHIN THE HOUR.**
+#: The unbounded loop was an equivalent mutant when :data:`_PRE_LABEL_NOUN` held 11
+#: locator nouns and no measured sentence stacked two, so narrowing it to ``?``
+#: followed the rule stated above — reach exactly as far as something measures. The
+#: benign-form measurement then widened that constant to three groups, which made
+#: the slot genuinely multi-word (*"the MEASURED SAMPLE temperature"* is ordinary
+#: dictation), so ``?`` began costing readings. ``{0,2}`` is the measured need, and
+#: it stays BOUNDED rather than returning to ``*`` so the grammar's reach is stated
+#: rather than open. **The lesson is about equivalent mutants specifically: an
+#: equivalence is a property of the CORPUS AND THE LEXICON at one moment, not of the
+#: pattern — so widening a vocabulary can un-equivalence a mutation that was
+#: correctly removed.**
 _PRE_LABEL = re.compile(
-    rf"\s*(?:{_PRE_LABEL_ADJUNCT}\s*[,)]?\s+)*"
-    rf"(?:{_DETERMINER}\s+)?(?:{_PRE_LABEL_NOUN}\s+)*\s*",
+    rf"\s*(?:{_PRE_LABEL_ADJUNCT}\s+)*"
+    rf"(?:{_DETERMINER}\s+)?(?:{_PRE_LABEL_NOUN}\s+){{0,2}}\s*",
     re.IGNORECASE,
 )
 
@@ -3002,12 +3147,47 @@ _PARENTHETICAL_BRIDGE_RESIDUE: tuple[str, ...] = (
     "The temperature, measured carefully, was 425 K.",
 )
 
+#: **AND THE BRIDGE FIGURE IN IT WAS MEASURED ~3x TOO LOW, WHICH IS THE PART OF THIS
+#: LEDGER A FUTURE SLICE SHOULD LEARN FROM RATHER THAN THE NUMBERS.** An independent
+#: review put the overall benign-refusal rate at **28% (14 of 50)**, 10 of the 14
+#: being bridge refusals, against the published *"bridge: 1 of 15 (7%)"*. The cause
+#: is stated in :data:`_ASSERTION_AT_VERB` and is the same defect one level up: the
+#: 86%→7% widening was re-measured against *"an independently-written list of fifteen
+#: forms"* — **written by the same author as the grammar.** Fifteen forms from one
+#: head is not an independent sample of how people talk; it is a second draw from the
+#: distribution that produced the grammar. The module's *tail* figure (28%) matched
+#: the reviewer's rate almost exactly and is honest, which is the tell: the figure
+#: that came from a large corpus held up and the figure that came from a short
+#: hand-written list did not.
+#:
+#: **THE 7% IS LEFT UNCHANGED HERE AND IS NOT RE-MEASURED BY THIS SLICE, deliberately
+#: and with the limit stated.** It is gate (1)'s number, this slice changed no part of
+#: gate (1), and replacing a stale figure with one measured by a DIFFERENT author on a
+#: DIFFERENT corpus would silently change what the number means. The correction is
+#: recorded beside it instead, with the reviewer's figure, so a reader gets both and
+#: neither is presented as settled.
+#:
+#: **THE PRE-LABEL ROW BELOW CARRIES THE SAME DISCLOSURE ABOUT ITSELF, because the
+#: honest thing is to say so rather than to repeat the mistake one gate over.** Its 49
+#: forms were written by the author of gate (4) — before the grammar's vocabulary was
+#: widened, and without consulting it while writing, which reduces the coupling but
+#: does not remove it. **It is quoted beside two figures that ARE independent of this
+#: slice and are the stronger evidence:** 0 of 20 lost from ``_BENIGN_BRIDGE_FORMS``
+#: (written for gate (1), by a different slice, before gate (4) existed) and 0
+#: legitimate readings lost from the 232 sentences this repository's tests already
+#: contained. A single-author benign list should be read as a floor on the true loss
+#: rate, never as an estimate of it.
 _GATE_FALSE_NEGATIVES = (
     "bridge: 1 of 15 independently-written benign forms, a PARENTHETICAL (was 13 "
-    "of 15 before the 2026-09-13 widening); "
+    "of 15 before the 2026-09-13 widening) -- and an independent review measured "
+    "the overall benign-refusal rate at 28% (14 of 50), 10 of them bridge "
+    "refusals, so this 7% is a single-author figure and is understated; "
     "tail: 16 of 57 benign continuations, every one a bare adverb or a benignly-"
     "used relational preposition, none of which can be admitted without shielding "
-    "a qualifier behind it; 0 of 1,365 generated legitimate sentences and 0 of the "
+    "a qualifier behind it; "
+    "pre-label: 2 of 51 benign forms (4%), both spoken discourse markers, was 20 "
+    "of 51 (39%) before the apparatus/participle/affirming widening, and 0 of 20 "
+    "_BENIGN_BRIDGE_FORMS; 0 of 1,365 generated legitimate sentences and 0 of the "
     "156 in this repository's own tests. Every loss is DISCLOSED."
 )
 

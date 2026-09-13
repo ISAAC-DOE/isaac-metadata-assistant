@@ -677,3 +677,246 @@ def test_a_bad_pre_label_context_cannot_escape_through_the_RESTATEMENT_pass():
         reading = _read(sentence)
         assert reading.candidates == (), _explain(sentence)
         assert reading.abstentions != (), _explain(sentence)
+
+
+# --- the FALSE-NEGATIVE side, which is where a fail-closed gate does its damage ---
+
+#: Natural ways a scientist puts words in FRONT of the label, written **without
+#: consulting the grammar while writing them** and BEFORE `tc._PRE_LABEL_NOUN` was
+#: widened to its three groups.
+#:
+#: **THE INDEPENDENCE OF THIS LIST IS LIMITED AND THE LIMIT IS THE POINT.** The
+#: module records that gate (1)'s `86% -> 7%` widening was re-measured against *"an
+#: independently-written list of fifteen forms"* which was **written by the same
+#: author as the grammar**, and that an independent reviewer then measured the true
+#: rate at ~3x the published one. This list has the same weakness: one author, who
+#: also wrote gate (4). It is therefore **a FLOOR on the loss rate, never an estimate
+#: of it** — and it is quoted in `tc._GATE_FALSE_NEGATIVES` beside two figures that
+#: genuinely are independent of this slice (`_BENIGN_BRIDGE_FORMS`, written for gate
+#: (1) by an earlier slice; and this repository's own 232 pre-existing sentences).
+#:
+#: Measured on it: **20 of 51 lost (39%)** by the first version of the gate, **2 of 51
+#: (4%)** after the widening the 41% forced. Both numbers are in the ledger so neither
+#: reads as the other.
+BENIGN_PRE_LABEL: tuple[str, ...] = (
+    # nothing, or a bare determiner
+    "The temperature was 425 K.",
+    "Temperature 425 K.",
+    "Our temperature was 425 K.",
+    # the measured thing
+    "The sample temperature was 425 K.",
+    "Sample temperature 425 K.",
+    "The specimen temperature was 425 K.",
+    # the apparatus -- the group whose exclusion was measured INCONSISTENT with the
+    # prepositional forms the module already reads
+    "The cryostat temperature was 80 K.",
+    "The stage temperature was 300 K.",
+    "The cell temperature was 350 K.",
+    "The chamber temperature was 300 K.",
+    "The holder temperature was 300 K.",
+    "The substrate temperature was 700 K.",
+    "The furnace temperature was 900 K.",
+    "The bath temperature was 77 K.",
+    "The sensor temperature was 300 K.",
+    "The thermocouple temperature was 300 K.",
+    # clause-opening adverbials
+    "Later the temperature was 320 K.",
+    "Initially the temperature was 300 K.",
+    "Overnight the temperature was 300 K.",
+    "Throughout the temperature was 425 K.",
+    "Here the temperature was 425 K.",
+    "Anyway the temperature was 425 K.",
+    "OK the temperature was 425 K.",
+    "Right, the temperature was 425 K.",
+    "So the temperature was 425 K.",
+    "Then the temperature was 425 K.",
+    # opening prepositional phrases
+    "At the second scan the temperature was 425 K.",
+    "During the run the temperature was 425 K.",
+    "In the cryostat the temperature was 80 K.",
+    "For this scan the temperature was 425 K.",
+    "On the second scan the temperature was 425 K.",
+    "After the anneal the temperature was 425 K.",
+    # subject + report verb
+    "We recorded the temperature at 425 K.",
+    "I measured the temperature at 425 K.",
+    "They logged the temperature at 425 K.",
+    "We saw the temperature at 425 K.",
+    # participial pre-modifiers -- HOW the value was obtained
+    "The measured temperature was 425 K.",
+    "The recorded temperature was 425 K.",
+    "The observed temperature was 425 K.",
+    "The reported temperature was 425 K.",
+    "The logged temperature was 425 K.",
+    # affirming adjectives -- the antonyms of the estimate family
+    "The actual temperature was 425 K.",
+    "The real temperature was 425 K.",
+    "The true temperature was 425 K.",
+    # TWO stacked modifiers. Added after a mutation exposed that the `{0,2}` bound in
+    # `tc._PRE_LABEL` was an EQUIVALENT MUTANT -- the comment justifying it cited
+    # exactly this sentence and no corpus contained one, so the bound was asserted by
+    # prose and measured by nothing.
+    "The measured sample temperature was 425 K.",
+    "The recorded cryostat temperature was 80 K.",
+    # the instant rules
+    "The scan ended at 2026-01-01T00:00:00Z.",
+    "The measurement started at 2026-01-01T00:00:00Z.",
+    "It started at 2026-01-01T00:00:00Z.",
+    "We started at 2026-01-01T00:00:00Z.",
+    "Later the scan ended at 2026-01-01T00:00:00Z.",
+)
+
+
+def test_the_BENIGN_PRE_LABEL_loss_rate_is_MEASURED_and_RATCHETED():
+    """The other side of the ledger: what fail-closed actually costs, as a number.
+
+    **A GATE THAT REFUSES MOST OF HOW PEOPLE TALK IS NOT USABLE, and "every loss is
+    disclosed" is not a defence against that** — the module's own words about gate
+    (1)'s first version, which refused 86% of benign bridge forms and shipped
+    measuring 0.
+
+    Ratcheted rather than merely asserted: the rate may go DOWN freely and cannot go
+    UP without this test failing, and each surviving loss must be a NAMED row of
+    `tc._PRE_LABEL_RESIDUE` rather than an anonymous percentage point.
+
+    MUTATION: reverting any of the three widening groups in `tc._PRE_LABEL_NOUN`
+    turns this RED and prints every form it cost.
+    """
+    lost = [row for row in BENIGN_PRE_LABEL if not _values(row)]
+    assert len(lost) <= len(tc._PRE_LABEL_RESIDUE), (
+        f"benign pre-label loss rose to {len(lost)} of {len(BENIGN_PRE_LABEL)}; "
+        f"_PRE_LABEL_RESIDUE names {len(tc._PRE_LABEL_RESIDUE)}. Either the gate "
+        f"narrowed or a loss went unnamed:\n  "
+        + "\n  ".join(repr(row) for row in lost)
+    )
+    # And every surviving loss is a NAMED row, so the percentage can never hide one.
+    named = {row.rstrip(".") for row in tc._PRE_LABEL_RESIDUE}
+    for row in lost:
+        assert row.rstrip(".") in named, (
+            f"an UNNAMED benign loss: {row!r} — add it to _PRE_LABEL_RESIDUE or "
+            "widen the gate" + _explain(row)
+        )
+    # Every loss is DISCLOSED, which is the half that makes the trade §5-acceptable.
+    for row in lost:
+        assert _read(row).abstentions != (), _explain(row)
+
+
+@pytest.mark.parametrize("sentence", tc._PRE_LABEL_RESIDUE)
+def test_the_named_PRE_LABEL_residue_is_STILL_LOST(sentence):
+    """Asserted the WRONG WAY ROUND, the discipline this module holds every open item
+    to: closing one of these requires DELETING a row from `tc._PRE_LABEL_RESIDUE` — a
+    reviewed change — rather than discovering that a documented cost quietly went away.
+
+    These are spoken DISCOURSE MARKERS (`anyway`, `OK`), an OPEN class whose next
+    member is unguessable, which is exactly why an allowlist cannot chase them. Each
+    is recoverable with punctuation the speaker would probably use anyway, and the
+    negative control below measures that rather than asserting it.
+    """
+    assert _values(sentence) == [], (
+        "if this now reads, the discourse-marker cost is CLOSED — delete the row "
+        "from _PRE_LABEL_RESIDUE and say so, do not weaken this" + _explain(sentence)
+    )
+    assert _read(sentence).abstentions != (), _explain(sentence)
+    # THE RECOVERY, MEASURED: a comma is a clause bound, so the same words read.
+    marker, rest = sentence.split(" the ", 1)
+    recovered = f"{marker}, the {rest}"
+    assert _values(recovered) == [425], (
+        "the documented recovery must actually work" + _explain(recovered)
+    )
+
+
+@pytest.mark.parametrize(
+    "sentence",
+    (
+        "The final temperature was 425 K.",
+        "The starting temperature was 300 K.",
+        "The initial temperature was 300 K.",
+        "The ending temperature was 400 K.",
+    ),
+)
+def test_a_temperature_at_ONE_POINT_of_a_progression_is_refused_DELIBERATELY(sentence):
+    """**NOT residue. A decision, pinned so a future slice does not "fix" it.**
+
+    These were listed as benign losses for one commit and that was wrong — counting a
+    deliberate refusal as a false negative inflates the gate's cost and implies
+    somebody means to admit it.
+
+    Each states a temperature at ONE POINT of a progression, and which point
+    `context.temperature_K` should hold is precisely the question
+    `_KIND_NONE_SELECTED` refuses to answer for `"300 K, then 350 K, then 400 K"`.
+    Admitting these would decide by PHRASING what the sequence gate declines to decide
+    by MEASUREMENT: the same experiment would yield a value if the scientist said
+    "the initial temperature" and no value if they said "300 K, then 350 K".
+
+    MUTATION: adding `initial`/`final`/`starting`/`ending` to `tc._PRE_LABEL_NOUN`
+    turns this RED, which is the guard against exactly that "fix".
+    """
+    reading = _read(sentence)
+    assert reading.candidates == (), _explain(sentence)
+    assert [entry.kind for entry in reading.abstentions] == [
+        "words_before_the_label_name_something_else"
+    ], _explain(sentence)
+
+
+# --- RAMP / SEQUENCE SEMANTICS: measured as ALREADY SATISFIED, no code written ----
+
+
+@pytest.mark.parametrize(
+    "sentence",
+    (
+        "The temperature was 300 K, then 350 K, then 400 K.",
+        "Temperature 300 K, then 350 K, then 400 K.",
+        "The sample temperature was 300 K, then 350 K, then 400 K.",
+        "The temperature was 300 K, then 350 K.",
+    ),
+)
+def test_a_RAMP_is_neither_collapsed_nor_asserted_and_that_was_ALREADY_TRUE(sentence):
+    """**MEASURED AS ALREADY SATISFIED. NO CODE WAS WRITTEN FOR THIS, AND THAT IS THE
+    FINDING** — the `VAL-001` outcome, which this repository records as a legitimate
+    and valuable result rather than a slice that did nothing.
+
+    `CAP-001` and `4d6c74d9` claim the ramp/sequence work is done. Measured at
+    `d3473414` BEFORE gate (4) existed, and re-measured here after it: all five
+    required semantics already held, so this test pins them rather than implementing
+    them.
+
+    1. NOT silently collapsed to the first value — zero candidates, not `300`.
+    2. NOT all three emitted as simultaneous authoritative scalars — zero, not three.
+    3. The complete source statement is PRESERVED — the segment text round-trips
+       verbatim, and the segment produces no candidate so it becomes a note.
+    4. That a SEQUENCE was stated is preserved — the served reason says so in words.
+    5. An unresolved review item is exposed — as an ABSTENTION.
+
+    **(5) IS AN ABSTENTION AND NOT A `ReviewRequired`, AND THAT IS STRUCTURAL RATHER
+    THAN A SHORTFALL.** `ReviewRequired.candidate_indexes` indexes into
+    `TranscriptReading.candidates`, and its docstring is explicit that it *"groups
+    them, it never removes them"* — so a `ReviewRequired` over ZERO candidates would
+    be an empty grouping of nothing. The abstention is the unresolved item, it carries
+    the quote and the instruction, and it is surfaced on the same response.
+
+    **AND NO SCHEMA SEMANTICS WERE INVENTED, which `CAP-008` forbids.** No
+    `bounds: [300, 400]` and no uncertainty: the schema carries uncertainty at exactly
+    `$.descriptors.outputs[].descriptors[].uncertainty`, descriptor-only, and
+    `context.temperature_K` has no sibling — so an interval here would assert
+    something nobody stated.
+
+    MUTATION: this pins behaviour this slice did not change; removing gate (4)
+    entirely leaves it GREEN. That is the point — it isolates what was already true
+    from what this slice did.
+    """
+    reading = _read(sentence)
+    # (1) and (2)
+    assert reading.candidates == (), _explain(sentence)
+    # (3) the statement survives, verbatim, and becomes a note
+    assert [segment.text for segment in reading.segments] == [sentence]
+    assert reading.unmapped_segment_indexes == (0,), _explain(sentence)
+    # (4) and (5): disclosed, and the reason names the sequence in words
+    assert [entry.kind for entry in reading.abstentions] == [
+        "several_values_and_none_selected"
+    ], _explain(sentence)
+    reason = reading.abstentions[0].reason
+    assert "sequencing" in reason and "ONE value" in reason, reason
+    # ... and states no value, which is what "no value was selected" has to mean.
+    assert "300" not in reason and "350" not in reason and "400" not in reason, reason
+    # No ReviewRequired: there are no candidates to group. See the docstring.
+    assert reading.review_required == (), _explain(sentence)
