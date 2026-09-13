@@ -307,6 +307,31 @@ export const LABELS = {
     'export or changes a record.',
 
   /*
+   * THE SAME FOUR FIGURES WHEN THE SERVER SAYS THE READ WAS SHORT.
+   *
+   * `GET /api/experiments` can return an `incomplete` object, and its own response
+   * description says: "Treat a short list as evidence about this read, never as an
+   * inventory." The four figures are computed from that list, so when `incomplete`
+   * is non-null BOTH the heading above ("Workspace Statistics") and the note above
+   * ("the records in this workspace") describe something this read cannot see.
+   *
+   * The screen already renders `IncompleteListNote` (role="alert") above the strip,
+   * so a caveat IS on screen — but it is a general statement about "the list", not
+   * about these totals, and a reader scanning four large numbers under a heading
+   * that says "Workspace" has no reason to connect them. So the strip says it
+   * itself, which is the difference between a caveat being PRESENT and a figure
+   * being SCOPED.
+   *
+   * Found by independent review (B-2). The reviewer also measured that NO test
+   * covered the interaction — the strip never consulted `incomplete` at all.
+   */
+  libraryOverviewHeadingPartial: 'Statistics From This Read',
+  libraryOverviewNotePartial:
+    'Counts over the records this read returned, which is fewer than the workspace holds — ' +
+    'the notice above says why. Not a workspace total. Summary figures only; nothing here ' +
+    'gates export or changes a record.',
+
+  /*
    * RETIRED — a SECOND five-step workflow vocabulary, deleted rather than
    * renamed. It read:
    *

@@ -356,6 +356,14 @@ export function ExperimentsHome() {
     body = <BackendDown error={result.error} onRetry={result.reload} />;
   } else {
     const summaries = result.data.experiments;
+    /*
+     * B-2 — whether the SERVER declared this read short. `GET /api/experiments`'s own
+     * response description says to "treat a short list as evidence about this read,
+     * never as an inventory", and `libraryOverviewStats` computes from exactly this
+     * array — so the strip's heading and note must be scoped when it is non-null.
+     * Read here, beside `summaries`, so the two can never come from different reads.
+     */
+    const incompleteRead = result.data.incomplete !== null;
     subcount = queueSubcount(summaries);
     /*
      * `queueIsEmpty` IS ABOUT THE WORKSPACE, NOT ABOUT THE VIEW, and the
@@ -445,7 +453,12 @@ export function ExperimentsHome() {
           Statistics" strip while browsing one folder's contents would read as
           though it described that folder rather than everything in it.
         */}
-        {folder === '' && <LibraryOverview stats={libraryOverviewStats(summaries)} />}
+        {folder === '' && (
+          <LibraryOverview
+            stats={libraryOverviewStats(summaries)}
+            readIncomplete={incompleteRead}
+          />
+        )}
         <FolderBreadcrumbs folder={folder} onNavigate={setFolder} />
         <LibraryToolbar
           query={query}

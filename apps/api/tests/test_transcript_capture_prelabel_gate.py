@@ -583,13 +583,31 @@ def test_the_generated_corpus_is_an_ORACLE_and_not_a_SAMPLE():
     assert total >= 700, total
 
 
-def test_the_pre_label_gate_is_FAIL_CLOSED_and_that_is_asserted_not_argued():
-    """An unanticipated word before the label costs a READING, never a fabrication.
+def test_the_pre_label_gate_is_FAIL_CLOSED_IN_THE_DIRECT_FORM_and_that_is_asserted_not_argued():
+    """An unanticipated word DIRECTLY before the label costs a READING, not a value.
 
-    This is the whole argument for inverting the polarity of the proxy three
-    referrals rejected, and it is checkable rather than rhetorical: feed the gate
-    words that appear in NO list in the module and assert the outcome is a disclosed
-    refusal in every case.
+    *** THE TITLE AND THE CLAIM ARE BOTH NARROWED, 2026-09-13, AFTER AN INDEPENDENT
+    REVIEW FALSIFIED THE UNQUALIFIED VERSION. *** This read "An unanticipated word
+    before the label costs a READING, never a fabrication", with no qualifier, and
+    that is FALSE: put a prepositional phrase in front of it, or a bracketing
+    character between the modifier and the label, and the invented words below are
+    proposed SILENTLY. Measured, with the same five words this test already uses:
+
+        The zorblatt temperature was 425 K.            -> refused, 1 abstention
+        In our lab the zorblatt temperature was 425 K. -> PROPOSED 425, 0 abstentions
+
+    The rows below all pass and always did; the PROPERTY the docstring claimed is
+    what was wrong, because every row is a DIRECT form. A generator that never
+    crosses the preamble axis with the modifier axis cannot see the gap, and this
+    file's two corpora are exactly that: `_resubjecting_prelabel_rows` supplies no
+    preamble and `_positive_rows` supplies preambles but no re-subjecting modifier.
+    **Two axes, never crossed.**
+
+    The open class is pinned wrong-way-round in
+    `test_the_pre_label_gate_IS_BYPASSED_by_a_preamble_or_a_bracket_RESIDUE`, which
+    is where the measurement lives. Kept as a narrowed claim rather than deleted
+    because the direct-form property is real, is load-bearing for the 23 named
+    fabrications, and is what the mutation below actually proves.
 
     MUTATION: replacing `_PRE_LABEL_NOUN` with an open `[A-Za-z]+` turns this RED on
     every row — which is the failure `_LABEL_ADVERB`'s own comment predicts for an
@@ -604,6 +622,148 @@ def test_the_pre_label_gate_is_FAIL_CLOSED_and_that_is_asserted_not_argued():
             reading = _read(sentence)
             assert reading.candidates == (), _explain(sentence)
             assert reading.abstentions != (), _explain(sentence)
+
+
+_APPARATUS_NOUNS = (
+    "sample", "specimen", "cryostat", "stage", "holder", "cell", "chamber",
+    "furnace", "oven", "bath", "substrate", "sensor", "thermocouple", "probe",
+    "puck", "mount",
+)
+
+
+@pytest.mark.parametrize("noun", _APPARATUS_NOUNS)
+def test_THREE_PHRASINGS_OF_ONE_CLAIM_are_all_read_including_the_POSSESSIVE(noun):
+    """**A REGRESSION THIS GATE INTRODUCED, found by independent review (A-2).**
+
+    Gate (4) refused **16 of 16** apparatus possessives that the base commit
+    `d3473414` READ. Two independent causes, both fixed:
+
+    1. `_PRE_LABEL_NOUN` matched `samples?` but not `sample's` — the alternation now
+       carries an optional `['’]s`, attached to the GROUP so a noun added later
+       cannot be admitted without its possessive.
+    2. A straight apostrophe was in `_CLAUSE_BOUNDARY`, so `_pre_label_text` cut
+       *"The sample's temperature"* down to `"s "` before the gate saw it. The
+       pre-label boundary no longer contains it — an apostrophe is never a clause
+       boundary in English.
+
+    **ONE CHARACTER DECIDED IT, WHICH IS THE PART WORTH KEEPING.** The curly form
+    *"The sample’s"* read correctly the whole time, because U+2019 was never in the
+    class. An identical sentence was read or refused depending on which keyboard
+    typed it — and a transcript dictated through an OS keyboard or typed in a word
+    processor carries U+2019, so the corpus that would have caught this is the one
+    nobody writes by hand.
+
+    **THE TEST ASSERTS THE PROPERTY, NOT THE FIX:** all three phrasings of one claim
+    read. That is this gate's own GROUP-2 standard, quoted in its source — *"an
+    INCONSISTENCY between two phrasings of one claim, not a §5 position"* — applied
+    to itself. Any future narrowing that reads two of the three fails here.
+    """
+    for sentence in (
+        f"The {noun} temperature was 425 K.",
+        f"The temperature of the {noun} was 425 K.",
+        f"The {noun}'s temperature was 425 K.",      # U+0027
+        f"The {noun}\u2019s temperature was 425 K.",  # U+2019
+    ):
+        reading = _read(sentence)
+        assert reading.candidates != (), _explain(sentence)
+        assert reading.candidates[0].proposed_value == 425, _explain(sentence)
+
+
+def test_the_POSSESSIVE_admits_no_new_NOUN_which_is_what_keeps_it_safe():
+    """The possessive is a SUFFIX on the allowlist, not a hole in it.
+
+    Without this, "admit `'s`" could be read as "admit any word ending in `'s`",
+    which would reopen every fabrication the gate closes. A forbidden pre-modifier
+    stays forbidden in its possessive form.
+    """
+    for forbidden in ("setpoint", "maximum", "ambient", "target", "previous"):
+        for sentence in (
+            f"The {forbidden}'s temperature was 425 K.",
+            f"The {forbidden}\u2019s temperature was 425 K.",
+        ):
+            reading = _read(sentence)
+            assert reading.candidates == (), _explain(sentence)
+            assert reading.abstentions != (), _explain(sentence)
+
+
+def test_the_pre_label_gate_IS_BYPASSED_by_a_preamble_or_a_bracket_RESIDUE():
+    """**PINNED WRONG-WAY-ROUND: this asserts the DEFECT, so it is visible in CI.**
+
+    Found by an independent review of this lane, then re-measured here from scratch.
+    Gate (4) closes the 23 named fabrications in their DIRECT form and does not close
+    them behind either of two constructs. Both produce a candidate with **no
+    abstention at all** — a §5 fabrication with no disclosure, which is the worst
+    outcome this reader has.
+
+    TWO INDEPENDENT MECHANISMS, and they need separate fixes:
+
+    1. `_PRE_LABEL_PREP_PHRASE` ends in `(?:\s+[A-Za-z][A-Za-z0-9-]*){0,3}` — up to
+       three ARBITRARY words. They absorb the label's determiner and its forbidden
+       pre-modifier, so `_PRE_LABEL.fullmatch` succeeds over text the gate was built
+       to reject. Nothing allowlisted about that tail.
+    2. `_PRE_LABEL_CLAUSE_OPEN` inherits `_CLAUSE_BOUNDARY`, which contains `)`, `"`,
+       `'`, `:`, `;` and `]`. `_pre_label_text` returns only the text AFTER the last
+       boundary, so a bracketing character between the modifier and the label cuts
+       the modifier out of the string the gate inspects. `The (setpoint) temperature`
+       leaves the gate a single space.
+
+    **IT IS PRE-EXISTING, NOT A REGRESSION, and that is measured rather than
+    asserted.** At this lane's base commit `d3473414`, before gate (4) existed, the
+    direct form ALSO proposed silently — so the lane strictly reduced the class and
+    over-claimed its completeness. That distinction decides the remedy: the claims
+    are corrected here, and closing the class is a separate slice.
+
+    **WHY IT IS NOT FIXED IN THE SAME CHANGE, with the cost measured.** Replacing the
+    open tail with a bare determiner takes the transcript suites to **83 failed,
+    1807 passed** — the tail is load-bearing for legitimate forms like *"At the
+    second scan the temperature hit 500 K."* So the repair is an ALLOWLISTED tail,
+    and choosing its members is a scientific judgement about which position words
+    re-subject a measurement (`second`? `first`? — the MOMENT family is deliberately
+    refused elsewhere in this gate). §5 governs that choice, so it needs its own
+    adversarial corpus and its own independent review rather than a guess here.
+
+    **WHEN IT IS FIXED, THIS TEST MUST FAIL**, and its failure is the signal to
+    delete it. That is the point of pinning a defect: the alternative is a comment
+    nobody runs.
+    """
+    BYPASSES = (
+        # (label, sentence) — each is the SAME claim as a refused direct form
+        ("prepositional preamble", "In our lab the setpoint temperature was 425 K."),
+        ("preamble, other words", "During the run the maximum temperature was 425 K."),
+        ("numeric-object preamble", "At 300 K the ambient temperature was 425 K."),
+        ("parenthesis", "The (setpoint) temperature was 425 K."),
+        ("double quotes", 'The "setpoint" temperature was 425 K.'),
+        ("colon", "The setpoint: temperature was 425 K."),
+        ("semicolon", "The setpoint; temperature was 425 K."),
+        ("instant family, preamble", f"In the lab their scan ended at {INSTANT}."),
+        ("instant family, bracket", f"The previous (scan) ended at {INSTANT}."),
+        # the fail-closed property, falsified: a word in NO list in the module
+        ("invented word + preamble", "In our lab the zorblatt temperature was 425 K."),
+    )
+    for label, sentence in BYPASSES:
+        reading = _read(sentence)
+        assert reading.candidates != (), (
+            f"{label}: this bypass appears to be CLOSED. If that is a real fix, delete "
+            f"this test and narrow the residue note — do not weaken it. {_explain(sentence)}"
+        )
+        assert reading.abstentions == (), (
+            f"{label}: the bypass now DISCLOSES something, which is a real improvement. "
+            f"Re-measure and re-scope this residue. {_explain(sentence)}"
+        )
+
+    # THE CONTROL, and it is what keeps this test from being a statement that the
+    # gate does nothing: every sentence above, WITHOUT its preamble or bracket, is
+    # refused and disclosed.
+    for direct in (
+        "The setpoint temperature was 425 K.",
+        "The maximum temperature was 425 K.",
+        "The ambient temperature was 425 K.",
+        f"The previous scan ended at {INSTANT}.",
+        "The zorblatt temperature was 425 K.",
+    ):
+        reading = _read(direct)
+        assert reading.candidates == (), _explain(direct)
+        assert reading.abstentions != (), _explain(direct)
 
 
 def test_the_RUN_REFERENCE_rule_PRE_EMPTS_this_gate_and_that_is_PRE_EXISTING():
@@ -695,7 +855,9 @@ def test_a_bad_pre_label_context_cannot_escape_through_the_RESTATEMENT_pass():
 #: genuinely are independent of this slice (`_BENIGN_BRIDGE_FORMS`, written for gate
 #: (1) by an earlier slice; and this repository's own 232 pre-existing sentences).
 #:
-#: Measured on it: **20 of 51 lost (39%)** by the first version of the gate, **2 of 51
+#: Measured on it: **22 of 51 lost (43%)** by the first version of the gate (~~20 of 51
+#: (39%)~~ — corrected 2026-09-13; the 20 was a 49-row numerator rebased onto this
+#: 51-row denominator, and the two rows added later were both lost too), **2 of 51
 #: (4%)** after the widening the 41% forced. Both numbers are in the ledger so neither
 #: reads as the other.
 BENIGN_PRE_LABEL: tuple[str, ...] = (
@@ -1222,8 +1384,27 @@ def test_EVERY_determiner_is_classified_EXHAUSTIVELY_not_sampled():
 
     # The narrower set is a strict subset — it narrows, it does not diverge.
     assert admitted < every, sorted(admitted - every)
-    # And the union is the whole constant, so nothing is unclassified.
-    assert admitted | (every - admitted) == every
+    # ~~And the union is the whole constant, so nothing is unclassified.~~
+    # ~~assert admitted | (every - admitted) == every~~
+    #
+    # *** THAT ASSERTION WAS A TAUTOLOGY AND IS REPLACED, not deleted quietly.
+    # Found by independent review (A-5). `admitted | (every - admitted) == every`
+    # is true for ANY two sets once `admitted <= every`, which the line above has
+    # already asserted — it is set algebra, not a fact about this module, and the
+    # docstring credited it with "the union is the whole constant, so nothing is
+    # unclassified". ***
+    #
+    # The real property is that the classification is decided by the CONSTANT and
+    # not by this file: every member of `_DETERMINER` must be accounted for by the
+    # gate's own behaviour, so adding a determiner to the constant without
+    # classifying it fails here rather than shipping unclassified.
+    refused = every - admitted
+    assert admitted | refused == every  # (still trivially true; kept as the frame)
+    assert admitted & refused == set(), sorted(admitted & refused)
+    assert refused, "every determiner is admitted; the gate's narrowing is gone"
+    # THE NON-TRIVIAL HALF: the partition is re-derived from the module's own
+    # constant on every run, so a determiner added to `_DETERMINER` later lands in
+    # exactly one side by MEASUREMENT below, and never by this file's opinion.
 
     for determiner in sorted(every):
         reads_expected = determiner in admitted

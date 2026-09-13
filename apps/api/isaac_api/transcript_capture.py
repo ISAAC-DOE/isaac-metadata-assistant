@@ -1317,7 +1317,15 @@ _SIBLING_GAP = re.compile(
 #: carried by every future rule for no reason.
 #:
 #: **WIDENED FROM 11 ENTRIES TO THREE GROUPS, AFTER MEASURING THAT THE FIRST VERSION
-#: REFUSED 41% OF BENIGN PRE-LABEL FORMS.** 20 of 51 independently-written natural
+#: REFUSED 43% OF BENIGN PRE-LABEL FORMS.** ~~41%~~ ~~20 of 51~~ — **BOTH FIGURES
+#: WERE WRONG AND ARE CORRECTED 2026-09-13 AFTER AN INDEPENDENT REVIEW RE-DERIVED
+#: THEM. 22 of 51 (43%).** The error is worth keeping because it is the exact one the
+#: parenthetical below declares it is avoiding: `20` was measured over the **49**-row
+#: corpus (20/49 = 41%, which is where the other figure in this same sentence came
+#: from) and was then silently **rebased onto the 51-row denominator**. The two rows
+#: added later were BOTH lost pre-widening, so 20 + 2 = 22. Re-derived by running the
+#: shipped 51-row corpus against the pre-widening commit `66082dce` itself, not by
+#: arithmetic on a published number. 22 independently-written natural
 #: sentences were lost, and the module's own standard for that number is explicit:
 #: *"a reader that refuses most of the ways a person says a thing is not usable, and
 #: 'disclosed' is not a defence against that."* The three groups below take it to
@@ -1381,13 +1389,42 @@ _PRE_LABEL_NOUN = (
     r"|measured|recorded|logged|observed|reported|noted|read|found"
     # (4) affirming adjectives: the antonyms of the estimate family.
     r"|actual|real|true"
-    r")"
+    # (5) THE POSSESSIVE OF ANY OF THE ABOVE, closing a regression this gate
+    #     introduced. `_PRE_LABEL_NOUN` matched `samples?` but not `sample's`, so
+    #     gate (4) REFUSED 16 of 16 apparatus possessives that the base commit
+    #     `d3473414` READ — measured both ways, at both SHAs.
+    #
+    #     IT IS THE INCONSISTENCY THIS GATE'S OWN GROUP-2 ARGUMENT CONDEMNS, which
+    #     is why it is a defect and not a policy. Three phrasings of one claim, and
+    #     the gate read two of them and refused the third:
+    #
+    #         The sample temperature was 425 K.            -> read  (16/16)
+    #         The temperature of the sample was 425 K.     -> read  (16/16)
+    #         The sample's temperature was 425 K.          -> REFUSED (0/16)
+    #
+    #     That group's note says in terms: "Refusing 'The sensor temperature was
+    #     425 K' while reading 'The temperature on the sensor was 425 K' is an
+    #     INCONSISTENCY between two phrasings of one claim, not a §5 position."
+    #
+    #     Both apostrophes, because a transcript typed in a word processor or
+    #     dictated through an OS keyboard carries U+2019 and not U+0027, and a rule
+    #     that reads one and refuses the other is the same inconsistency one
+    #     character smaller. It attaches to the ALTERNATION rather than to each
+    #     member, so a noun added later cannot be admitted without its possessive.
+    #
+    #     It admits no new NOUN: `The setpoint's temperature` stays refused, because
+    #     `setpoint` is not in this allowlist in any form. Found by independent
+    #     review (A-2); the lane's "0 legitimate temperatures lost" did not cover it
+    #     because no possessive exists in its 51-row benign corpus.
+    r")(?:['’]s)?"
 )
 
 #: **THE PRE-LABEL FORMS STILL LOST, named rather than folded into the percentage** —
 #: the discipline :data:`_PARENTHETICAL_BRIDGE_RESIDUE` set for gate (1)'s one loss.
 #: Measured at **2 of 51** independently-written benign forms (4%) after the widening
-#: above, down from 20 of 51 (39%), both DISCLOSED with an instruction that works.
+#: above, down from ~~20 of 51 (39%)~~ **22 of 51 (43%)** — corrected 2026-09-13; see
+#: the note on the widening above for why the old numerator was a rebased 49-row
+#: figure. Both DISCLOSED with an instruction that works.
 #:
 #: (*The denominator moved 49 → 51 in the same session, when a mutation exposed that
 #: the stacking bound was an equivalent mutant and two two-modifier rows were added to
@@ -1590,8 +1627,29 @@ _PRE_LABEL = re.compile(
 #: class plus the conjunctions, which is the same boundary
 #: :data:`_CONTINUATION_WORD` treats as opening a new clause on the far side of the
 #: value — deliberately the same notion of "clause", read from the other direction.
+#: THE APOSTROPHE IS REMOVED FROM :data:`_CLAUSE_BOUNDARY` FOR THIS GATE ONLY, and
+#: it is a correction rather than a loosening. An apostrophe is never a clause
+#: boundary in English; it is a possessive or a contraction, and both sit INSIDE the
+#: noun phrase the label heads.
+#:
+#: Measured: with `'` treated as a boundary, ``_pre_label_text`` cut
+#: *"The sample's temperature was 425 K"* down to ``"s "`` and gate (4) refused it —
+#: 16 of 16 apparatus possessives, every one of which the base commit `d3473414`
+#: READ. The curly form *"The sample’s"* read correctly throughout, because U+2019
+#: was never in the class, so ONE CHARACTER decided whether an identical sentence
+#: was read or refused depending on which keyboard typed it.
+#:
+#: NOTHING ELSE LEAVES THE CLASS. `)`, `"`, `:`, `;` and `]` remain boundaries here,
+#: and they are the second mechanism of the bypass pinned by
+#: ``test_the_pre_label_gate_IS_BYPASSED_by_a_preamble_or_a_bracket_RESIDUE``.
+#: Removing them would close part of that bypass and is deliberately NOT done in the
+#: same change: they are genuine punctuation between clauses in other sentences, and
+#: deciding that costs its own corpus. This removal is safe precisely because the
+#: apostrophe is the one member that is never a clause boundary at all.
+_PRE_LABEL_BOUNDARY_CHARS = r"[,;.!?:)\]}\"—–]"
+
 _PRE_LABEL_CLAUSE_OPEN = re.compile(
-    _CLAUSE_BOUNDARY
+    _PRE_LABEL_BOUNDARY_CHARS
     + r"|\b(?:and|but|or|so|while|whilst|because|although|though|when|once"
     r"|until|which|as)\b",
     re.IGNORECASE,
@@ -2100,10 +2158,17 @@ AMBIGUITY_POLICY: tuple[dict[str, str], ...] = (
             "ended at ...' a different measurement's time. The two forward gates "
             "cannot see any of it — one reads label-to-value and the other "
             "value-to-end — so what may sit in front of the label is a THIRD "
-            "ALLOWLIST: clause-level adjuncts, one determiner, and a closed set of "
-            "words that LOCATE the quantity ('sample', 'cryostat', 'scan') or say "
-            "how it was obtained ('measured', 'recorded') rather than re-subject "
-            "it. The direction is the decision, for the third time in this reader: "
+            "ALLOWLIST: one determiner, and a closed set of words that LOCATE the "
+            "quantity ('sample', 'cryostat', 'scan') or say how it was obtained "
+            "('measured', 'recorded') rather than re-subject it. TWO KNOWN GAPS, "
+            "stated here rather than left for a reader to discover: a clause-level "
+            "adjunct such as an opening prepositional phrase is NOT closed (its "
+            "object may absorb an arbitrary word), and a bracketing character "
+            "between the modifier and the label — a parenthesis, a quotation mark, "
+            "a colon or a semicolon — ends the clause this gate inspects, so the "
+            "modifier falls outside it. In both, the sentence reads as though the "
+            "modifier were absent. The direction is the decision, for the third "
+            "time in this reader: "
             "a list of forbidden modifiers fails OPEN on the next one, while an "
             "allowlist costs a reading and DISCLOSES it. This outcome does NOT "
             "claim the value is not the field's — an ambient or a cryostat "
@@ -3352,8 +3417,10 @@ _GATE_FALSE_NEGATIVES = (
     "tail: 16 of 57 benign continuations, every one a bare adverb or a benignly-"
     "used relational preposition, none of which can be admitted without shielding "
     "a qualifier behind it; "
-    "pre-label: 2 of 51 benign forms (4%), both spoken discourse markers, was 20 "
-    "of 51 (39%) before the apparatus/participle/affirming widening, and 0 of 20 "
+    "pre-label: 2 of 51 benign forms (4%), both spoken discourse markers, was 22 "
+    "of 51 (43%) before the apparatus/participle/affirming widening (corrected "
+    "2026-09-13 from a published 20 of 51, which was a 49-row numerator rebased "
+    "onto this denominator), and 0 of 20 "
     "_BENIGN_BRIDGE_FORMS; 0 of 1,365 generated legitimate sentences and 0 of the "
     "156 in this repository's own tests. Every loss is DISCLOSED."
 )

@@ -346,7 +346,10 @@ export function isAmbiguousTitle(displayTitle: string, duplicates: Set<string>):
  * counts RECORDS matching a predicate (e.g. "records with at least one open
  * proposal"); `totalRuns` and `openProposals` below are SUMS across every
  * record — "how much has been captured", not "how many records need
- * attention". The other two (`total`, `exported`) are read straight off
+ * attention". The other two (`total`, `needsAttention`) — ~~`exported`~~, which is
+ * NOT a field on this interface; corrected 2026-09-13 after an independent review
+ * (B-3) caught the docstring naming a field the type does not have — are read
+ * straight off
  * `facetCounts` rather than recomputed, so the two surfaces can never disagree
  * about what they both claim to count.
  */

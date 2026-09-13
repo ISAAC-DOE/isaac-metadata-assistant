@@ -2944,8 +2944,41 @@ def test_the_gate_ledger_constants_are_not_DEAD():
     assert "16 of 57" in ledger
     # GATE (4)'s two rates, and the reviewer figure that corrects gate (1)'s.
     assert "2 of 51" in ledger
-    assert "20 of 51 (39%)" in ledger
+    assert "22 of 51 (43%)" in ledger
     assert "28% (14 of 50)" in ledger
+
+    #
+    # *** THIS BLOCK USED TO REQUIRE `"20 of 51 (39%)"`, AND THAT LITERAL WAS FALSE.
+    # Re-derived 2026-09-13 by an independent review and confirmed by running the
+    # shipped 51-row corpus against the pre-widening commit itself: the figure is
+    # **22 of 51 (43%)**. The `20` was a numerator measured over the earlier 49-row
+    # corpus (20/49 = 41%) and silently rebased onto the new denominator; the two
+    # rows added later were both lost pre-widening, so 20 + 2 = 22. ***
+    #
+    # THE DEFECT WAS NOT THE NUMBER — IT WAS THIS TEST'S SHAPE. A guard that
+    # REQUIRES a literal cements whatever that literal says, and its own docstring
+    # above claims the figures "cannot drift apart". `CLAUDE.md` §15 records the same
+    # pattern with the migration packets' *"No PostgreSQL has ever executed this
+    # file"*: a test that required a false sentence, and read as evidence of honesty.
+    #
+    # So the literals above are now joined by a check on the PROPERTY that a
+    # rebased numerator violates: every `N of M (P%)` triple this ledger publishes
+    # must be arithmetically self-consistent. `20 of 51 (39%)` satisfies that
+    # (20/51 = 39%), which is precisely why it survived — but `20 of 51 (41%)`, the
+    # form the sibling comment actually published, does not, and that is the shape
+    # the rebasing left behind two screens away.
+    #
+    triples = re.findall(r"(\d+)\s+of\s+(\d+)\s*\((\d+)%\)", ledger)
+    assert triples, "the ledger publishes no `N of M (P%)` triple; this check went blind"
+    for numerator, denominator, percent in triples:
+        n, m, pct = int(numerator), int(denominator), int(percent)
+        assert m > 0, f"zero denominator in `{numerator} of {denominator}`"
+        assert n <= m, f"`{n} of {m}` publishes a numerator larger than its denominator"
+        assert abs(round(100 * n / m) - pct) <= 1, (
+            f"`{n} of {m} ({pct}%)` is not self-consistent: {n}/{m} is "
+            f"{round(100 * n / m)}%. A numerator rebased onto a new denominator "
+            f"looks exactly like this."
+        )
     assert "13 of 15 before the 2026-09-13 widening" in ledger
     # And the claim that makes the trade §5-acceptable at all.
     assert "Every loss is DISCLOSED" in ledger

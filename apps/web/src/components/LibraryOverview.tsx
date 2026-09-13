@@ -4,6 +4,9 @@ import type { LibraryOverviewStats } from '../lib/library';
 
 interface LibraryOverviewProps {
   stats: LibraryOverviewStats;
+  /** `true` when `GET /api/experiments` declared the list `incomplete`.
+   *  Scopes the heading and the note; see the note in the component. */
+  readIncomplete?: boolean;
 }
 
 /**
@@ -32,11 +35,24 @@ interface LibraryOverviewProps {
  * every experiment, not counts of records matching a predicate. See
  * `lib/library.ts::libraryOverviewStats` for exactly what each counts.
  */
-export function LibraryOverview({ stats }: LibraryOverviewProps) {
+export function LibraryOverview({ stats, readIncomplete = false }: LibraryOverviewProps) {
+  /*
+   * B-2 — WHEN THE READ WAS SHORT, THESE ARE NOT WORKSPACE TOTALS, AND THE STRIP
+   * SAYS SO ITSELF. `libraryOverviewStats` computes from the list this read
+   * returned; `GET /api/experiments` may declare that list `incomplete`, and its own
+   * response description says to "treat a short list as evidence about this read,
+   * never as an inventory". Publishing four figures under "Workspace Statistics" in
+   * that state is a completeness claim the data does not support.
+   *
+   * The screen's `IncompleteListNote` (role="alert") already renders above this, so
+   * a caveat is on screen — but it speaks about "the list", not about these totals.
+   * Scoping the heading AND the note is what connects the two for a reader who is
+   * looking at the numbers rather than at the alert.
+   */
   return (
     <section className="library-overview" aria-labelledby="library-overview-heading">
       <h2 className="library-overview-heading" id="library-overview-heading">
-        {LABELS.libraryOverviewHeading}
+        {readIncomplete ? LABELS.libraryOverviewHeadingPartial : LABELS.libraryOverviewHeading}
       </h2>
       <dl className="library-overview-grid">
         <div className="library-overview-item">
@@ -56,7 +72,7 @@ export function LibraryOverview({ stats }: LibraryOverviewProps) {
           <dd className="library-overview-value mono">{stats.openProposals}</dd>
         </div>
       </dl>
-      <p className="library-overview-note">{LABELS.libraryOverviewNote}</p>
+      <p className="library-overview-note">{readIncomplete ? LABELS.libraryOverviewNotePartial : LABELS.libraryOverviewNote}</p>
     </section>
   );
 }

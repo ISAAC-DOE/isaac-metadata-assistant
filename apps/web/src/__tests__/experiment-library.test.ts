@@ -553,7 +553,10 @@ describe('UX-017 · libraryOverviewStats — workspace-wide totals, never person
     // 3 + 0 + 5, NOT "2 records have at least one run"
     expect(stats.totalRuns).toBe(8);
     // 2 + 0 + 1, NOT the `proposals` facet's "1 record has an open proposal"
-    // — that facet would count `b` and `c`'s records with count > 0, i.e. 2
+    // — that facet would count `a` and `c`'s records with count > 0, i.e. 2
+    //   (~~`b` and `c`~~ — corrected 2026-09-13, independent review B-4: `b` has
+    //   `open_proposal_count: 0`, so it is `a` and `c`. The NUMBER was right and
+    //   the named rows were wrong, which is the more misleading of the two.)
     // records, which is a DIFFERENT number from the true sum of 3.
     expect(stats.openProposals).toBe(3);
     const counts = facetCounts(rows);
