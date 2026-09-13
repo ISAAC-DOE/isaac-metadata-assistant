@@ -366,3 +366,42 @@ describe('§6 the two structural properties the mutation proofs depend on', () =
     ).toBeLessThan(routes);
   });
 });
+
+/* ── §7 · an empty parameter is absent, on BOTH halves of the run check ───── */
+
+describe('§7 resolveRecordView treats an empty parameter as absent', () => {
+  /*
+   * FOUND BY INDEPENDENT REVIEW, 2026-09-13. The two halves of the run-address
+   * check disagreed: `run` used `(get(...) ?? '') !== ''` (empty is absent —
+   * right), while `compare` used `getAll(...).length > 0`, and `getAll` returns
+   * `['']` for `?compare=`. So an EMPTY compare counted as a run address and an
+   * empty run did not.
+   *
+   * Small but real: a link carrying a valueless `?compare=` opened Runs with
+   * nothing selected, and out-ranked a `?proposal=` that did name something.
+   */
+  it('an empty compare is ignored, exactly as an empty run already was', () => {
+    expect(resolveRecordView('?run=&proposal=X')).toBe('capture');
+    // The defect: this used to be 'runs'.
+    expect(resolveRecordView('?compare=&proposal=X')).toBe('capture');
+    expect(resolveRecordView('?compare=')).toBe('fields');
+    expect(resolveRecordView('?run=')).toBe('fields');
+  });
+
+  it('a NON-empty compare still wins, so the fix did not disable the branch', () => {
+    expect(resolveRecordView('?compare=A&proposal=X')).toBe('runs');
+    expect(resolveRecordView('?run=A&proposal=X')).toBe('runs');
+    expect(resolveRecordView('?compare=A&compare=B')).toBe('runs');
+    // A mix of empty and real: the real one decides.
+    expect(resolveRecordView('?compare=&compare=B')).toBe('runs');
+  });
+
+  it('the title floor agrees, because it is the same function', () => {
+    expect(routeDocumentTitle('/record/demo', '?compare=&proposal=X')).toBe(
+      `${recordWorkspaceTitleSegment('capture')} · ${APP_TITLE}`,
+    );
+    expect(routeDocumentTitle('/record/demo', '?compare=A')).toBe(
+      `${recordWorkspaceTitleSegment('runs')} · ${APP_TITLE}`,
+    );
+  });
+});

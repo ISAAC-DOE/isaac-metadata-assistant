@@ -213,9 +213,28 @@ export function resolveRecordView(search: string | URLSearchParams): RecordViewI
   const params = typeof search === 'string' ? new URLSearchParams(search) : search;
   const requested = params.get(RECORD_VIEW_PARAM);
   if (isRecordView(requested)) return requested;
+  /*
+   * AN EMPTY PARAMETER IS ABSENT, AND BOTH HALVES NOW AGREE ON THAT.
+   *
+   * *** THE TWO CHECKS USED TO DISAGREE. Found by independent review,
+   * 2026-09-13. *** `run` was `(get(...) ?? '') !== ''`, which treats `?run=` as
+   * absent — correct. `compare` was `getAll(...).length > 0`, and `getAll`
+   * returns `['']` for `?compare=`, so an EMPTY compare counted as a run address
+   * while an empty run did not. Measured:
+   *
+   *     ?run=&proposal=X       -> capture     (empty run ignored — right)
+   *     ?compare=&proposal=X   -> runs        (empty compare honoured — wrong)
+   *     ?compare=              -> runs        (same, with nothing to compare)
+   *     ?run=                  -> fields
+   *
+   * The consequence was small and real: a link carrying a valueless `?compare=`
+   * opened Runs with nothing selected, and it out-ranked a `?proposal=` that did
+   * name something. Filtering empties makes the branch mean what it says — "this
+   * URL names a run" — rather than "this URL mentions the word compare".
+   */
   const hasRunAddress =
     (params.get(RECORD_RUN_PARAM) ?? '') !== '' ||
-    params.getAll(RECORD_COMPARE_PARAM).length > 0;
+    params.getAll(RECORD_COMPARE_PARAM).some((value) => value !== '');
   if (hasRunAddress) return 'runs';
   /*
    * BRANCH 3, ADDED AT MERGE TIME (2026-09-13) rather than by either lane alone.
