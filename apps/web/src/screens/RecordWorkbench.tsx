@@ -30,6 +30,7 @@ import { ExperimentGraphPanel } from './graph/ExperimentGraphPanel';
 import { LABELS } from '../lib/labels';
 import {
   RECORD_COMPARE_PARAM,
+  RECORD_PROPOSAL_PARAM,
   RECORD_RUN_PARAM,
   RECORD_VIEW_PARAM,
   ROUTES,
@@ -587,11 +588,32 @@ function LoadedWorkbench({
   const hasRunAddress =
     (searchParams.get(RECORD_RUN_PARAM) ?? '') !== '' ||
     searchParams.getAll(RECORD_COMPARE_PARAM).length > 0;
+  /*
+   * THE SAME RESOLUTION, FOR `?proposal=` — see `RECORD_PROPOSAL_PARAM`.
+   *
+   * A proposal is reviewed on the `capture` workspace, so a URL carrying only
+   * `?proposal=` would open Record Fields, where `IngestionProposalsPanel` is not
+   * mounted and the parameter is therefore silently inert. `ROUTES.recordProposal`
+   * mints `view=capture` so new links are self-describing; this covers every link
+   * it did not mint — including one built in another language against the relative
+   * path, which is the case the agent-facing deep link exists for.
+   *
+   * A RUN ADDRESS STILL WINS, and the order is a decision rather than an
+   * accident: `?run=`/`?compare=` resolved to `runs` before this parameter
+   * existed, and a URL carrying both must keep landing exactly where it landed
+   * yesterday. The proposal parameter is not lost in that case — it survives on
+   * the address and is honoured the moment the reader opens `capture`, because the
+   * two parameters are independent and `RecordWorkspaceNav` copies the whole query
+   * string.
+   */
+  const hasProposalAddress = (searchParams.get(RECORD_PROPOSAL_PARAM) ?? '') !== '';
   const activeView: RecordViewId = isRecordView(requestedView)
     ? requestedView
     : hasRunAddress
       ? 'runs'
-      : 'fields';
+      : hasProposalAddress
+        ? 'capture'
+        : 'fields';
 
   /*
    * THE CAPTURE DESTINATION'S COUNTS, for the promoted sidebar row.

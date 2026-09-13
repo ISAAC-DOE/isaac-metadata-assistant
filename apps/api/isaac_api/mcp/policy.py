@@ -78,6 +78,8 @@ __all__ = [
     "Scope",
     "changes_query_parameters",
     "forbidden_tool_reason",
+    "note_capture_ceilings",
+    "note_text_byte_ceiling",
     "parse_scope",
     "pending_query_parameters",
     "proposal_list_query_parameters",
@@ -121,10 +123,21 @@ class Scope(Enum):
     #: alongside. Contract §4: *"The model-derived channel gets the weakest scope
     #: that works."*
     #:
-    #: IT UNLOCKS EXACTLY ONE OPERATION, ``create_proposal``. It unlocks no read,
-    #: no draft write, and — permanently — no acceptance: reviewing a proposal is
-    #: not in :data:`OPERATIONS` at any scope, and ``accept`` is in
-    #: :data:`FORBIDDEN_TOOL_TOKENS`, so the name for it is an ``ImportError``.
+    #: ~~IT UNLOCKS EXACTLY ONE OPERATION, ``create_proposal``.~~ — **it unlocks
+    #: TWO since MCP-001 added ``create_note``, and the sentence is struck rather
+    #: than renumbered because this file has already been caught twice letting a
+    #: COUNT carry a guarantee that belongs to a PROPERTY.** The property is what
+    #: mattered and is unchanged: every operation this scope unlocks writes content
+    #: that is structurally inert to ``draft``, to export and to the submission
+    #: signature. ``create_note`` is the weaker of the two — a note cannot even name
+    #: a field — so admitting it does not widen what this scope can affect, only how
+    #: much prose it can add. See ``OPERATIONS``' ``create_note`` entry for why it
+    #: sits here rather than behind a fourth scope, and for the over-grant that
+    #: choice creates.
+    #:
+    #: It unlocks no read, no draft write, and — permanently — no acceptance:
+    #: reviewing a proposal is not in :data:`OPERATIONS` at any scope, and ``accept``
+    #: is in :data:`FORBIDDEN_TOOL_TOKENS`, so the name for it is an ``ImportError``.
     #:
     #: **IT IS GRANTED ALONGSIDE ``READ``, NOT INSTEAD OF IT, AND THAT IS A
     #: CORRECTION.** §4's table concludes *"a deployment granting only
@@ -602,6 +615,78 @@ def proposal_value_byte_ceiling() -> int:
     return _MAX_PROPOSAL_BYTES
 
 
+#: The window an MCP read is bounded to when the caller asks for no bound.
+#: **MCP-002.**
+#:
+#: **50, AND IT IS THE PRODUCT'S OWN NUMBER RATHER THAN A NEW ONE.**
+#: ``routes.PENDING_WINDOW`` is 50 and ``routes._PROPOSAL_WINDOW_DEFAULT`` is 50, both
+#: chosen for the same caller-cannot-see-what-it-did-not-fetch reason. A third figure
+#: here would be a third thing to reason about; it is transcribed rather than derived
+#: only because the two it matches are themselves independent constants, and a test
+#: pins all three together.
+#:
+#: WHY THIS EXISTS AS A VENDOR-COMPATIBILITY MATTER AND NOT A NICETY. The documented
+#: MCP tool-result ceiling is ≈150,000 characters. Measured over HTTP at the ROUTE on
+#: a record with **120 runs** — `len(response.content)`, not an in-process estimate,
+#: because this programme has published the in-process error:
+#:
+#: ===================  ==============  ==============  ===============
+#: route                unbounded       ``limit=50``    vs the ceiling
+#: ===================  ==============  ==============  ===============
+#: ``GET .../pending``  **212,443 B**   29,584 B        1.42x -> 0.20x
+#: ``GET .../runs``     50,888 B        21,236 B        0.34x -> 0.14x
+#: ===================  ==============  ==============  ===============
+#:
+#: So ``pending`` ALREADY EXCEEDS the ceiling at 120 runs, before anything anyone
+#: would call a large record. The bound is 86.1% of that response and 58.3% of the
+#: runs one.
+#:
+#: TWO MEASUREMENTS THAT CORRECTED AN ASSUMPTION, recorded because the obvious guess
+#: was wrong in both directions. ``GET /api/experiments/{id}`` is **1,565 B** and
+#: ``GET /api/experiments`` is **246 B** on that same record — the detail route is not
+#: the problem and bounding it would buy nothing. Neither accepts a ``limit`` anyway,
+#: so neither is bounded here, and saying so is part of the claim: **this constant
+#: bounds the two reads that needed it and not "MCP reads" in general.**
+MCP_READ_WINDOW = 50
+
+
+def note_text_byte_ceiling() -> int:
+    """The bytes ONE note's verbatim text may occupy, read off the route.
+
+    Read rather than transcribed, for the reason :func:`proposal_value_byte_ceiling`
+    gives: a second copy is free to drift from the one the route enforces, and a tool
+    schema that drifted LOW would refuse content this application would have stored,
+    while one that drifted HIGH would promise a capture that then fails.
+
+    USED AS AN UPPER BOUND ONLY, exactly as the proposal ceiling is. The route's check
+    is in BYTES and ``maxLength`` is a CHARACTER count; every UTF-8 string of *n*
+    characters occupies at least *n* bytes, so text longer than this many characters
+    cannot fit under the byte ceiling and publishing it as ``maxLength`` refuses
+    nothing the route would have taken. The exact check stays where it can be exact:
+    at the route, over the encoded bytes, together with the lone-surrogate test a
+    character count cannot perform.
+    """
+    from ..routes import _MAX_NOTE_BYTES  # local: keeps import order flexible
+
+    return _MAX_NOTE_BYTES
+
+
+def note_capture_ceilings() -> dict:
+    """The per-record note bounds, read off the route. **MCP-001a.**
+
+    Published in the capture tool's own description so an agent learns the ceilings
+    from the server rather than from a literal in its prompt — and so a refusal it
+    meets is one it was told about. Read rather than transcribed, for
+    :func:`note_text_byte_ceiling`'s reason.
+    """
+    from ..routes import (  # local: keeps import order flexible
+        _MAX_NOTES_PER_RECORD,
+        _MAX_NOTE_STATE_BYTES,
+    )
+
+    return {"max_per_record": _MAX_NOTES_PER_RECORD, "max_bytes": _MAX_NOTE_STATE_BYTES}
+
+
 def _bounds(query: object) -> tuple[int | None, int | None]:
     """``(ge, le)`` for a FastAPI ``Query``, wherever this version keeps them.
 
@@ -880,6 +965,58 @@ def _operations() -> tuple[Operation, ...]:
             summary="Record one suggested value for a record field, awaiting review.",
             requires_if_match=True,
         ),
+        # NOTE CAPTURE — **MCP-001**, and the largest gap this table ever had.
+        #
+        # `create_proposal` above REQUIRES a `note_id` naming a note the record
+        # already holds, and until this entry existed **no operation in this table
+        # created one**. The consequence, stated plainly because it is the reason
+        # this row exists: not one word of an agent conversation could enter ISAAC,
+        # with every external gate open, because the only write channel for
+        # model-derived content demanded an artifact no agent could make.
+        #
+        # WHY A NOTE IS THE SAFE ENTRY POINT AND A FIELD WRITE IS NOT — established,
+        # not re-argued here. A note is STRUCTURALLY inert to export: it lives at
+        # `state["notes"]`, OUTSIDE `draft`, and `export_draft` reads `draft`, so no
+        # note reaches an exported record or a submission signature. It also cannot
+        # name a value: `Note` has no value field, and its `status` / `verified` /
+        # `is_evidence` / `is_field_value` are read-only properties returning
+        # constants. So this operation admits prose for a person to judge and cannot
+        # admit a scientific claim, which is exactly the boundary
+        # `ai-integration-decision-packet.md` §6's "no model output in the truth
+        # path" draws.
+        #
+        # `PROPOSALS_WRITE`, NOT A FOURTH SCOPE, AND THE REASON IS THE SCOPE'S OWN
+        # DEFINITION RATHER THAN CONVENIENCE. `Scope.PROPOSALS_WRITE` earns its
+        # separation from `DRAFT_WRITE` by a PROPERTY — it "changes nothing a draft,
+        # an export or a submission reads", and that inertness "is precisely what
+        # makes this the safe channel for model-derived output". A note has that
+        # property more purely than a proposal does: same document location, same
+        # reviewer queue, and it cannot even name a field. The scope is defined by
+        # the property, so the noun in its name is a description of its first member
+        # rather than its boundary.
+        #
+        # **THE OVER-GRANT THIS CREATES IS NAMED RATHER THAN LEFT TO BE DISCOVERED.**
+        # A deployment that wants an agent to drop remarks and nothing else must now
+        # also grant it `create_proposal`, because one scope unlocks both. That is
+        # strictly more than least privilege requires, and the least-privilege fix —
+        # a fourth `isaac:notes.write` — is deliberately NOT taken here: it is a new
+        # OAuth scope string, i.e. a contract an eventual token issuer has to know,
+        # and `Scope`'s own docstring keeps that set closed on purpose. Splitting it
+        # later is purely additive. It is RESIDUE, and it is recorded as such.
+        Operation(
+            id="create_note",
+            method="POST",
+            path_template="/api/experiments/{experiment_id}/notes",
+            scope=Scope.PROPOSALS_WRITE,
+            # It mutates: the note is stored inside the experiment's own state
+            # document, so the record's `rev` and ETag move. `mutates` is about
+            # whether stored state changes, not about whether a scientific value
+            # does — `create_proposal`'s comment makes the same distinction, and
+            # conflating them is how a write ends up without a precondition.
+            mutates=True,
+            summary="Capture one piece of verbatim content against a record.",
+            requires_if_match=True,
+        ),
         Operation(
             id="get_changes",
             method="GET",
@@ -997,6 +1134,7 @@ PERMITTED_TOOL_NAMES = frozenset(
         # again over the registry by `test_mcp_boundaries`. The count discrepancy in
         # the contract's own heading is recorded above this frozenset, deliberately
         # OUTSIDE it — see the note there.
+        "isaac_capture_note",
         "isaac_propose_field_value",
         "isaac_list_proposals",
         "isaac_get_proposal",

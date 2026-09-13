@@ -71,6 +71,14 @@ _WILDCARD_CASES = (
     # `PROPOSALS_WRITE` rather than `DRAFT_WRITE`, which changes nothing here: the
     # wildcard refusal is `client._render_headers`', and it is scope-blind.
     ("create_proposal", {"experiment_id": _ID}),
+    # The EIGHTH write, added with MCP-001's `isaac_capture_note`. It is here for the
+    # reason the seventh is: this file's coverage assertion is DERIVED from
+    # `OPERATIONS`, so a write added without a case turns
+    # `test_every_mutating_operation_is_covered_by_this_file` red rather than shipping
+    # with an unguarded wildcard and a green suite. Like the seventh it costs
+    # `PROPOSALS_WRITE` rather than `DRAFT_WRITE`, which changes nothing here — the
+    # wildcard refusal is `client._render_headers`', and it is scope-blind.
+    ("create_note", {"experiment_id": _ID}),
 )
 
 
@@ -257,6 +265,10 @@ def test_every_tool_that_declares_if_match_says_the_wildcard_is_refused():
         # sentence, because the promise is about what the header may be, not about
         # which permission the caller holds.
         "isaac_propose_field_value",
+        # `isaac_capture_note` (MCP-001) is the second such tool and takes the
+        # RECORD's etag for the same reason: a note is stored inside the record's own
+        # state document, so capturing one moves the record's `rev`.
+        "isaac_capture_note",
     }, sorted(descriptions)
     for name, text in descriptions.items():
         assert "`*` is refused" in text, (name, text)

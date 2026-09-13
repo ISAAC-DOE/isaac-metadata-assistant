@@ -64,6 +64,27 @@ export const NOTE_SOURCE_ORIGIN: Readonly<Record<string, ProvenanceOrigin>> = {
   csv_column: 'file',
   file_listing_line: 'file',
   extraction_residue: 'file',
+  /*
+   * AN EXTERNAL AGENT HANDED THIS TO US over the machine-callable interface —
+   * MCP-001 / CAP-006, and the first source that reaches `assistant`.
+   *
+   * READ WHAT IT CLAIMS, BECAUSE IT IS WEAKER THAN THE WORD SUGGESTS. It does NOT
+   * assert a language model wrote the words: an agent note usually carries what a
+   * scientist *said*, relayed verbatim, and a deterministic script speaking the
+   * same protocol is the same channel. The server cannot tell those apart and does
+   * not try. What it does assert is the only thing the server observes — a machine
+   * handed us this prose — which is why `manual` would be wrong here: that would
+   * claim a person typed it into this application.
+   *
+   * It names a CHANNEL and never an ACTOR. No note is attributed to anybody, and
+   * this build establishes no identity for an agent call at all, so nothing keyed
+   * on this origin may render as "yours".
+   *
+   * `assistant` was an unreachable member of `PROVENANCE_ORIGINS` until this
+   * mapping existed; the backend's own constant carries the struck-through
+   * paragraph recording that.
+   */
+  connected_agent: 'assistant',
 };
 
 /**

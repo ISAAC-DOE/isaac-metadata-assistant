@@ -1686,6 +1686,25 @@ def _proposal_signature(proposal: IngestionProposal) -> str:
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()
 
 
+def _note_signature(note: "Note") -> str:
+    """A note's whole stored state, hashed. **MCP-005.**
+
+    THE SAME SHAPE AS :func:`_proposal_signature`, FOR THE SAME REASON, and it is a
+    separate function rather than a shared one only because the two answer questions
+    about different entities. A :class:`~.notes.Note` does not carry its own version
+    metadata — its sequence coordinate lives in :attr:`Experiment.note_change_revs`,
+    deliberately outside the entity — so the whole of ``to_state()`` is authoritative
+    content and hashing it whole cannot feed back into the stamp this hash decides.
+
+    ``to_state()`` INCLUDES THE HISTORY, which is what makes a review act move a
+    note's position. Mapping, editing, keeping and dismissing all append a transition,
+    so each is a change this reports; a title edit elsewhere on the record is not, and
+    therefore does not disturb any note's coordinate.
+    """
+    blob = json.dumps(note.to_state(), sort_keys=True, ensure_ascii=False)
+    return hashlib.sha256(blob.encode("utf-8")).hexdigest()
+
+
 def _hydrate_proposals(raw: object) -> tuple[list[IngestionProposal], list]:
     """``(proposals, unreadable raw entries)``. Never raises, AND NEVER DISCARDS.
 
@@ -3005,6 +3024,26 @@ class Experiment:
     #: else by ``save_versioned``'s failure branch, and PRUNED there to the ids the
     #: record actually holds so it cannot grow without bound.
     proposal_change_revs: dict[str, int] = field(default_factory=dict)
+    #: The same map for NOTES. **MCP-005.**
+    #:
+    #: WHY A SECOND MAP RATHER THAN ONE SHARED ONE: a note id and a proposal id are
+    #: both opaque ULIDs from the same minter, so a shared dict would be keyed by
+    #: values from two id spaces with nothing but convention keeping them apart, and a
+    #: collision would silently give one entity the other's feed position. Two maps
+    #: cost one more key in the document and make that unrepresentable.
+    #:
+    #: AN ABSENT ID MEANS 0, exactly as it does above: no versioned save has ever
+    #: recorded that note changing. That is the state of every note in a document
+    #: written before this map existed, and guessing the record's current ``rev``
+    #: instead would assert a revision the note may never have moved at.
+    #:
+    #: WRITTEN ONLY BY :meth:`_bump_changed_notes`, rolled back with everything else by
+    #: ``save_versioned``'s failure branch, and PRUNED there to the ids the record
+    #: actually holds. **The prune matters more here than for proposals**: this
+    #: application has no operation that removes a proposal, but ``_hydrate_notes``
+    #: can move an entry into ``unreadable_notes`` — an entity the feed can never name
+    #: — so a map that only grew would keep a coordinate for something unreportable.
+    note_change_revs: dict[str, int] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         # Legacy-safe default: a pre-P27.2 state file (or a bare construction)
@@ -3123,6 +3162,11 @@ class Experiment:
             "proposal_change_revs": {
                 pid: self.proposal_change_revs[pid]
                 for pid in sorted(self.proposal_change_revs)
+            },
+            # Outside `_authoritative_signature` for the identical reason, and sorted
+            # for the identical reason. **MCP-005.**
+            "note_change_revs": {
+                nid: self.note_change_revs[nid] for nid in sorted(self.note_change_revs)
             },
         }
 
@@ -3463,6 +3507,7 @@ class Experiment:
         candidate_rule: str | None = None,
         captured_utc: str | None = None,
         id: str | None = None,
+        client_request_key: str | None = None,
     ) -> "Note":
         """Append one note to this experiment IN MEMORY. Does not save.
 
@@ -3480,6 +3525,15 @@ class Experiment:
         stored rule. ``candidate_field_path`` stays ``None`` unless a deterministic
         producer supplied one together with the rule that produced it; ``notes.Note``
         refuses either half without the other.
+
+        ``client_request_key`` IS PASSED THROUGH AND NOT CONSULTED HERE. Looking it
+        up is the CALLER's, inside the record lock, exactly as it is for a proposal:
+        this method appends unconditionally, so a deduplicating caller must decide
+        before calling. Making the lookup implicit here would give every producer a
+        silent short-circuit — the transcript reader would stop minting a segment
+        because some earlier note happened to carry the same key — and would hide
+        from the route whether it minted anything, which is precisely the fact the
+        route has to report as ``deduplicated``.
         """
         note = notes_module.new_note(
             id=id or new_record_id(),
@@ -3490,6 +3544,7 @@ class Experiment:
             run_id=run_id,
             candidate_field_path=candidate_field_path,
             candidate_rule=candidate_rule,
+            client_request_key=client_request_key,
         )
         if self.get_note(note.id) is not None:  # pragma: no cover - ULID collision
             raise ValueError(f"note id {note.id!r} already exists on this experiment")
@@ -3889,6 +3944,33 @@ class Experiment:
         except (FileNotFoundError, json.JSONDecodeError, KeyError, TypeError, ValueError):
             return {}
 
+    def _persisted_note_state(self) -> dict[str, tuple[str, int]]:
+        """``{note_id: (signature, changed_at_rev)}`` of the on-disk notes. **MCP-005.**
+
+        EVERY PARAGRAPH OF :meth:`_persisted_proposal_state` APPLIES UNCHANGED, one
+        entity kind over, and they are not repeated here: the position is in the tuple
+        so an untouched note's coordinate can CLAMP rather than move backwards; ``{}``
+        on an absent or unreadable file fails open at the cost of one over-stamp; and
+        hydration goes through :func:`_hydrate_notes` rather than hashing the raw array
+        so that this and ``Experiment.from_state`` cannot disagree about which entries
+        are notes.
+
+        The UNREADABLE entries are deliberately not in the map, for the same reason:
+        they have no id this module is willing to read, and the feed does not serve
+        them either.
+        """
+        if not self.state_path.exists():
+            return {}
+        try:
+            state = json.loads(self.state_path.read_text(encoding="utf-8"))
+            hydrated, _unreadable = _hydrate_notes(state.get("notes"))
+            positions = _hydrate_change_revs(state.get("note_change_revs"))
+            return {
+                n.id: (_note_signature(n), positions.get(n.id, 0)) for n in hydrated
+            }
+        except (FileNotFoundError, json.JSONDecodeError, KeyError, TypeError, ValueError):
+            return {}
+
     def _bump_changed_proposals(self, next_rev: int) -> list[str]:
         """Stamp ``next_rev`` on each proposal whose stored state changed. Prunes.
 
@@ -3933,6 +4015,45 @@ class Experiment:
             live[pid] = next_rev
             stamped.append(pid)
         self.proposal_change_revs = live
+        return stamped
+
+    def _bump_changed_notes(self, next_rev: int) -> list[str]:
+        """Stamp ``next_rev`` on each note whose stored state changed. Prunes.
+        **MCP-005.**
+
+        The ONLY writer of :attr:`note_change_revs` — the invariant that makes the
+        map's absence from :func:`_authoritative_signature` sound, exactly as
+        :meth:`_bump_changed_proposals` being the only writer of
+        ``proposal_change_revs`` makes that map's absence sound. Every paragraph of
+        that method's docstring applies here unchanged and is not restated: the
+        MAX-not-in-memory clamp, the fail-open over-stamp for a note not found on
+        disk, and the prune-in-the-same-pass.
+
+        ONE DIFFERENCE WORTH NAMING, because it makes the prune load-bearing rather
+        than defensive. That method says *"this application has no operation that
+        removes a proposal … so the prune is defence against a document written
+        elsewhere"*. **Notes are not in that position.** ``_hydrate_notes`` moves an
+        entry it cannot represent into ``unreadable_notes``, so a note this build once
+        read and can no longer read leaves ``self.notes`` without any foreign writer
+        involved — and its coordinate would then name an entity the feed can never
+        emit. The prune is what stops the map keeping a position for something
+        unreportable.
+        """
+        on_disk = self._persisted_note_state()
+        stamped: list[str] = []
+        live: dict[str, int] = {}
+        for note in self.notes:
+            prior = on_disk.get(note.id)
+            if prior is not None and prior[0] == _note_signature(note):
+                # MAX, NOT THE IN-MEMORY VALUE — `_bump_changed_proposals`' reason: a
+                # stale in-memory map would otherwise regress this note's position,
+                # and a position that moves backwards is a change no cursor ahead of
+                # it will ever report.
+                live[note.id] = max(self.note_change_revs.get(note.id, 0), prior[1])
+                continue
+            live[note.id] = next_rev
+            stamped.append(note.id)
+        self.note_change_revs = live
         return stamped
 
     def _bump_changed_runs(self, next_rev: int) -> list[str]:
@@ -4083,6 +4204,11 @@ class Experiment:
             run.id: (run.rev, run.updated_utc, run.changed_at_rev) for run in self.runs
         }
         previous_proposal_revs = dict(self.proposal_change_revs)
+        # MCP-005. Captured here, restored in the failure branch below, for the reason
+        # this method's own docstring gives about `proposal_change_revs`: an
+        # un-rolled-back coordinate is a position a cursor can reach describing a
+        # change nobody is told about.
+        previous_note_revs = dict(self.note_change_revs)
         # COMPUTED BEFORE THE BUMPS, ASSIGNED AFTER THEM, and the split is the point.
         # The two ``_bump_changed_*`` calls need the rev this save will reach in order
         # to stamp it, and ``self.rev`` must not be advanced before the no-op decision
@@ -4100,6 +4226,7 @@ class Experiment:
         next_rev = max(self.rev, disk_rev, 0) + 1
         self._bump_changed_runs(next_rev)
         self._bump_changed_proposals(next_rev)
+        self._bump_changed_notes(next_rev)  # MCP-005
         self.rev = next_rev
         self.updated_utc = _now_iso()
         try:
@@ -4111,6 +4238,7 @@ class Experiment:
                 if prior is not None:
                     run.rev, run.updated_utc, run.changed_at_rev = prior
             self.proposal_change_revs = previous_proposal_revs
+            self.note_change_revs = previous_note_revs  # MCP-005
             raise
         return True
 
@@ -4211,6 +4339,10 @@ class Experiment:
         exp.proposal_change_revs = _hydrate_change_revs(
             state.get("proposal_change_revs")
         )
+        # MCP-005. `_hydrate_change_revs` is reused unchanged — a coordinate map is a
+        # coordinate map, and a second reader would be free to disagree about what a
+        # malformed one means.
+        exp.note_change_revs = _hydrate_change_revs(state.get("note_change_revs"))
         return exp
 
     # -- derived views --

@@ -1663,6 +1663,38 @@ def _build_commit() -> str | None:
     )
 
 
+def _mcp_disclosure() -> dict:
+    """The `mcp` block of `/api/health`. **MCP-003.** Fails closed, never raises.
+
+    A LOCAL IMPORT, for the reason `health`'s own comment gives: `app.py` gates the
+    whole `isaac_api.mcp` package behind `_mcp_is_requested()` so a deployment that
+    never asked for MCP executes none of it, and `deployment` is the one submodule
+    reachable from here without pulling in the transport, the server or any OAuth
+    code.
+
+    THE `except` IS THE POINT, AND IT IS NOT DEFENSIVE PADDING. This operation is the
+    container readiness-probe target. `mcp.deployment` imports `mcp.policy`, which
+    introspects `routes.list_runs` at module scope and can raise if that derivation
+    ever breaks — so an import-time defect in a DISCLOSURE would otherwise take the
+    health endpoint down and, with it, the pod. A seam that cannot describe itself is
+    a much smaller problem than a pod that will not go ready, so this reports the
+    failure IN the block and keeps the rest of the banner truthful. It reports
+    `posture: null` rather than `"unmounted"`, because "I could not determine this"
+    and "it is not mounted" are different facts and guessing the safe-sounding one
+    would be the conflation this block exists to end.
+    """
+    try:
+        from .mcp import deployment as mcp_deployment
+
+        return mcp_deployment.disclosure()
+    except Exception as exc:  # pragma: no cover - an import-time defect in a probe path
+        return {
+            "posture": None,
+            "error": "mcp_state_unavailable",
+            "detail": type(exc).__name__,
+        }
+
+
 @router.get(
     "/health",
     tags=[TAG_META],
@@ -1712,7 +1744,26 @@ def _build_commit() -> str | None:
         "configuration is all this operation looked at, so it never promises the "
         "write would land. It also reports the basis on which an author would be "
         "recorded, so a deployment attributing on a test-fixture basis says so here "
-        "rather than only in its manifest."
+        "rather than only in its manifest.\n\n"
+        "It states, in `mcp`, how the machine-callable (agent) interface is "
+        "configured in this process: which of four postures it is in — `unmounted`, "
+        "`local-only`, `oauth-mounted` or `remote-ready` — which binding produced "
+        "that, why that binding was selected rather than a working one, the selector "
+        "value the operator supplied so a typo is visible, the three configuration "
+        "flags the posture is derived from so a reader can re-derive it rather than "
+        "trust it, and the identifiers and statuses of the outstanding external "
+        "decisions that separate this deployment from a remote one. Derived from "
+        "configuration alone: it opens no socket, validates no token and fetches no "
+        "metadata document, so an agent-interface misconfiguration can never change "
+        "this operation's result. **It contains no secret and no deployment "
+        "topology** — no token, key, signature, audience or resource URI, no "
+        "caller's permission grant, and no description of the environment this "
+        "service runs in; what each decision ASKS is documentation rather than "
+        "state, and is deliberately not published by an operation that answers "
+        "without credentials. **It is not a reachability claim:** whether anything "
+        "can actually reach that path depends on how this service is exposed, which "
+        "this process cannot observe. It is what makes a probe of that path "
+        "interpretable, not a substitute for one."
     ),
     response_description="The liveness banner.",
 )
@@ -1746,6 +1797,36 @@ def health() -> dict:
         # APPLICATION'S OWN experiments are stored. A deployment can have the
         # second without the first ever being scanned.
         "experiment_storage": experiment_repository.storage_status(),
+        # A FOURTH BLOCK, ADJACENT TO THE OTHER THREE AND DELIBERATELY NOT PART OF
+        # ANY OF THEM. **MCP-003.** It answers a question none of them does: how is
+        # the machine-callable (agent) seam configured in THIS process?
+        #
+        # WHY IT WAS THE ONLY SEAM WITH NO BLOCK, which is the finding rather than
+        # the addition: `database`, `experiment_storage` and `submission` all
+        # disclose, so an operator meeting a `404` on the MCP path could not tell
+        # whether the route was unmounted, whether the edge had not forwarded it, or
+        # whether the binding had failed closed on a typo in its own selector. That
+        # was unresolvable BY CONSTRUCTION from outside the process.
+        #
+        # ZERO I/O, exactly like the three above — see `mcp.deployment.disclosure`,
+        # which resolves the binding from the environment and reads fields off it. No
+        # socket, no token validation, no metadata fetch. So an MCP misconfiguration
+        # cannot influence this operation's status code and cannot fail a readiness
+        # probe, which is the property every block here has to keep.
+        #
+        # IT EXPOSES NO SECRET, and that is enforced where it is derived rather than
+        # asserted here: no token, key, signature, audience, resource URI or caller
+        # scope grant is in the returned shape. The one operator-supplied value is
+        # the binding SELECTOR, which is a documented constant or a typo of one.
+        #
+        # IT IS IMPORTED LAZILY, AND THAT IS NOT A STYLE CHOICE. `app.py`'s
+        # `_mcp_is_requested` exists precisely so that a deployment which has not
+        # asked for MCP never executes a line of this package at import; `.mcp`'s
+        # `__init__` pulls in the transport and the server. `deployment` is the one
+        # module in it that is safe to reach from here — it imports no Starlette and
+        # no OAuth code, and `resolve_binding` defers the OAuth import to the branch
+        # that needs it — so this is a submodule import, never `from .mcp import`.
+        "mcp": _mcp_disclosure(),
         # A THIRD BLOCK, ADJACENT TO THE OTHER TWO AND DELIBERATELY NOT PART OF
         # EITHER. `database` is about the read-only diagnostic over the
         # production-derived sample; `experiment_storage` is about where this
@@ -3784,11 +3865,25 @@ _BOUNDED_PENDING_PARAGRAPH = (
 PENDING_PAGE_MAX: int = 500
 
 #: THE BOUND IS INTERPOLATED, NOT RETYPED — same reason as ``_RUN_LIMIT_DESC``.
+#: **WHAT "OMIT" MEANS DEPENDS ON THE TRANSPORT, AND THIS SENTENCE HAS TO SAY SO.**
+#: It is published VERBATIM into `isaac_list_questions`' tool schema — that
+#: verbatim-ness is the anti-drift property `test_the_descriptions_are_the_routes_own
+#: _words` exists to keep — so a sentence true only of HTTP is read by an agent for
+#: which it is false. MCP-002 made that concrete: the MCP tool now supplies a default
+#: `limit`, so "omit to return every open question" is exactly wrong there.
+#:
+#: The remedy is the one `_PENDING_RUN_ID_DESC` already settled on for `?run_id=`:
+#: **do not de-share the sentence — name which behaviour belongs to which transport**,
+#: so both readers are addressed and neither is misled.
 _PENDING_LIMIT_DESC = (
-    f"Maximum questions to return, 1–{PENDING_PAGE_MAX}. OMIT to return every open "
-    "question: this parameter bounds one response and is never a limit on how many "
-    "questions a record may have. When you send it, the response carries a "
-    "`pending_page` block reporting the total and how many were withheld."
+    f"Maximum questions to return, 1–{PENDING_PAGE_MAX}. This parameter bounds one "
+    "response and is never a limit on how many questions a record may have. OMITTING "
+    "IT MEANS DIFFERENT THINGS ON THE TWO TRANSPORTS: over HTTP the response is "
+    "complete and carries no `pending_page` block, while an MCP tool supplies its own "
+    "default window, so an MCP caller always gets a page and always gets a "
+    "`pending_page` block — raise this value, or walk `offset`, to see more. Whenever "
+    "a limit is in effect the response carries that block, reporting the total and "
+    "how many were withheld."
 )
 
 _PENDING_OFFSET_DESC = (
@@ -7919,10 +8014,17 @@ RUN_PAGE_MAX: int = 200
 #: a second copy of ``RUN_PAGE_MAX``, free to drift from it silently — and the copy
 #: that drifts is the one published in the OpenAPI document, where a reader has no way
 #: to check it against the constant. Changing the constant now changes the sentence.
+#: AND, like ``_PENDING_LIMIT_DESC``, IT NAMES BOTH TRANSPORTS. This sentence is
+#: published verbatim into ``isaac_list_runs``' tool schema, and MCP-002 gave that
+#: tool a default window, so an unqualified "omit to return every run" is true of
+#: HTTP and false of an agent. The route's own behaviour is UNCHANGED.
 _RUN_LIMIT_DESC = (
-    f"Maximum runs to return, 1–{RUN_PAGE_MAX}. OMIT to return every run: this "
-    "parameter bounds one response, and is never a limit on how many runs a record "
-    "may have. `total` always reports how many exist."
+    f"Maximum runs to return, 1–{RUN_PAGE_MAX}. This parameter bounds one response, "
+    "and is never a limit on how many runs a record may have. OMITTING IT MEANS "
+    "DIFFERENT THINGS ON THE TWO TRANSPORTS: over HTTP every run is returned, while "
+    "an MCP tool supplies its own default window and returns a page — raise this "
+    "value, or walk `offset`, to see more. `total` always reports how many exist, on "
+    "both, so a page is always distinguishable from the whole list."
 )
 
 _RUN_OFFSET_DESC = (
@@ -11164,6 +11266,77 @@ def capture_facts(paths) -> dict[str, dict]:
 _MAX_NOTE_BYTES = 256 * 1024
 
 
+#: The most notes ONE record may hold, and the most `state["notes"]` may serialise
+#: to for one record. **MCP-001a.**
+#:
+#: ***THEY DID NOT EXIST UNTIL THIS SLICE, AND `_MAX_PROPOSAL_STATE_BYTES`' OWN
+#: COMMENT SAYS SO IN PASSING:*** *"That matters here and not for notes because of
+#: what the document costs."* Re-measured before adding these: `_MAX_NOTE_BYTES`
+#: bounded ONE capture and **nothing bounded how many a record could hold** — no
+#: count ceiling, no document ceiling, no `too_many_notes` anywhere in this
+#: application. So the same arithmetic that comment performs for proposals ran for
+#: notes with no second factor at all: unbounded rows at 256 KiB each.
+#:
+#: WHY THE PROPOSAL COMMENT'S REASONING DOES NOT ACTUALLY EXEMPT NOTES, which is the
+#: finding rather than the constant. Its argument is about what the DOCUMENT costs —
+#: `load_experiment` parses the whole document on every read and
+#: `_authoritative_signature` sha256s the whole of it on every save. Notes live at
+#: `state["notes"]`, in the SAME document, and are hashed into that SAME signature
+#: (`workspace.py`'s `_authoritative_signature`). The cost is identical; only the
+#: bound was missing. The sentence was reasoning about which FEATURE needed a bound
+#: and read as though it had established which DATA was cheap.
+#:
+#: **WHAT MADE IT URGENT IS WHO CAN NOW REACH IT.** Note creation became an MCP
+#: operation in this slice, and with **EXT-01 open** — no trusted authentication
+#: boundary, Dean having reconfirmed the ClusterIP bypass on 2026-08-12 — an
+#: untrusted in-cluster caller can reach that operation. *Inert to export is not the
+#: same as harmless to the record*: a note cannot make a record un-exportable, and a
+#: document too large to parse makes it unreadable, which is worse.
+#:
+#: **THE NUMBERS ARE JUDGEMENTS, NOT MEASUREMENTS, AND SAYING SO IS PART OF THEM** —
+#: `_MAX_PROPOSALS_PER_RECORD` and `_MAX_PROPOSAL_STATE_BYTES` make the same
+#: disclosure for the same reason, and this constant deliberately copies their
+#: posture rather than inventing a more confident one. NOTHING HERE HAS MEASURED A
+#: PARSE OR A HASH COST at any document size, on this machine or on the deployed pod.
+#: The count matches `_MAX_PROPOSALS_PER_RECORD` because a record's notes and its
+#: proposals are the same order of thing to a reviewer, and the document bound is
+#: written as a multiple of `_MAX_NOTE_BYTES` so it follows that constant instead of
+#: drifting from it — the same expression `_MAX_PROPOSAL_STATE_BYTES` uses.
+#:
+#: **A CONSEQUENCE TO STATE RATHER THAN LET A CLIENT DISCOVER:** whichever binds
+#: first refuses, so a record whose notes are long meets the document ceiling BEFORE
+#: it reaches the count and never sees `too_many_notes`. The two carry different
+#: `error` values for exactly that reason, as the proposal pair does.
+#:
+#: **REFUSES, NEVER TRUNCATES, NEVER EVICTS.** Dropping the oldest note to make room
+#: would destroy a verbatim capture, which is invariant (1) of `notes.py` — the one
+#: thing the whole feature exists not to do. The record simply stops accepting new
+#: notes and says so, with both the ceiling and the measured value.
+#:
+#: **IT GATES `POST .../notes` ONLY, AND THAT SCOPE IS DELIBERATE.** The transcript
+#: reader is the other producer and already carries its own per-request bound
+#: (`transcript_capture.MAX_SEGMENTS`, 100), so it cannot mint an unbounded batch in
+#: one call; bringing it under this ceiling too is a real improvement and is NAMED
+#: RESIDUE rather than done here, because that route belongs to another slice in
+#: flight and a bound applied to half a producer set should not be described as a
+#: bound on the record. What this constant honestly claims is that the ONE route a
+#: connected agent reaches cannot grow a record without limit.
+_MAX_NOTES_PER_RECORD = 1000
+
+_MAX_NOTE_STATE_BYTES = _MAX_NOTE_BYTES * 16
+
+
+#: The largest a caller's own idempotency key may be. **MCP-001.**
+#:
+#: It is stored verbatim and echoed in no refusal, so the bound is about the
+#: DOCUMENT rather than about any parsing risk: an unbounded key would be an
+#: unbounded string a caller can write into the experiment state once per note.
+#: 128 is `proposals.py`'s figure for the identical field, transcribed deliberately
+#: rather than derived, because the two keys are the same concept and a client that
+#: generates one key format for both must not find one route stricter than the other.
+_MAX_CLIENT_REQUEST_KEY_LENGTH = 128
+
+
 #: The path parameter naming a note. One description, so the wording cannot drift.
 NoteId = Annotated[
     str,
@@ -11196,7 +11369,18 @@ _R_NOTE_NOT_FOUND: dict = {
 #: body reports `verified: false` while the caller believes otherwise. A note cannot
 #: be asked to be a value, not merely refused when it tries.
 _NOTE_CAPTURE_KEYS = frozenset(
-    {"text", "source", "run_id", "candidate_field_path", "candidate_rule"}
+    {
+        "text",
+        "source",
+        "run_id",
+        "candidate_field_path",
+        "candidate_rule",
+        # OPTIONAL HERE AND REQUIRED BY THE MCP TOOL, which is the same asymmetry
+        # `create_proposal` already carries and for the same stated reason: a person
+        # clicking a button can see whether their note landed, and an agent retrying
+        # a timed-out call cannot.
+        "client_request_key",
+    }
 )
 _NOTE_REVIEW_KEYS = frozenset(
     {"action", "confirmed_by_user", "field_path", "text", "reason"}
@@ -11330,6 +11514,93 @@ def _note_text_refusal(raw: object, *, what: str) -> JSONResponse | None:
                 "REFUSED rather than shortened: a truncated note misrepresents what "
                 "was written. Nothing was written."
             ),
+        )
+    return None
+
+
+def _note_capacity_refusal(exp: Experiment) -> JSONResponse | None:
+    """The two per-record note ceilings, or ``None``. **MCP-001a.**
+
+    See :data:`_MAX_NOTES_PER_RECORD` for why these exist and why the numbers are
+    judgements rather than measurements. Two things about the SHAPE of this check
+    rather than the numbers:
+
+    **THE DOCUMENT SIZE IS MEASURED, NOT ESTIMATED, AND THROUGH THE SAME HELPER THE
+    PROPOSAL CEILING USES** (:func:`_render_exactly_as_a_response_would`) rather than
+    a second encoding of my own. It serialises what is actually stored — every note's
+    own ``to_state()``, which is what ``save_versioned`` writes and what
+    ``_authoritative_signature`` hashes — rather than summing ``len(note.text)``. An
+    estimate would undercount the history, the transitions and the keys, i.e. exactly
+    the parts that grow when a record is reviewed a lot, so a record could pass an
+    estimate and still be the document this bound exists to prevent.
+
+    **IT MEASURES THE NOTES ALREADY STORED AND NOT THE INCOMING ONE**, so the true
+    ceiling is this bound plus one note, and the response key is ``stored_bytes``
+    rather than the proposal route's ``bytes`` precisely so the two are not read as
+    the same measurement. The proposal route can measure the projected list because
+    minting a proposal is pure; ``capture_note`` builds and appends in one step, so
+    the equivalent here would mean constructing the very note being refused. One
+    note of slack against a multi-megabyte bound is not the risk this protects
+    against — an unbounded sequence of them is.
+
+    **UNREADABLE STORED ENTRIES ARE DELIBERATELY OUTSIDE THE MEASUREMENT**, for the
+    reason the proposal ceiling gives: they are entries ``Note.from_state`` refused,
+    kept verbatim by ``_hydrate_notes`` so a save cannot discard them, and rendering
+    one to measure it would be this route choosing an encoding for content it has
+    already said it cannot read. They also cannot grow — nothing in this application
+    creates one. So the ceiling bounds what this feature can ADD, which is its job.
+
+    **IT FAILS CLOSED.** If the stored notes cannot be rendered at all, this refuses
+    rather than letting a ``TypeError`` escape a size check — unreachable through any
+    route, since every stored note's text passed :func:`_note_text_refusal`, but the
+    alternative to a refusal is a traceback, and fail-closed is the right direction
+    for a bound.
+
+    Both refusals name the ceiling and the measured value, so a client learns what it
+    is up against rather than only that it failed. Neither truncates and neither
+    evicts; see the constant's docstring.
+    """
+    if len(exp.notes) >= _MAX_NOTES_PER_RECORD:
+        return _note_refusal(
+            "too_many_notes",
+            (
+                "This record already holds the maximum number of notes. Notes are "
+                "not removed by reviewing them — dismissing is a state, not a "
+                "delete, and this API has no delete — so the bound is on how many "
+                "one record may ever hold. Nothing was written, and nothing "
+                "already captured was altered."
+            ),
+            max_per_record=_MAX_NOTES_PER_RECORD,
+            total=len(exp.notes),
+        )
+    try:
+        stored = _render_exactly_as_a_response_would(
+            [note.to_state() for note in exp.notes]
+        )
+    except (ValueError, TypeError, UnicodeEncodeError):  # pragma: no cover - see above
+        return _note_refusal(
+            "unrepresentable_value",
+            (
+                "This record already holds a note that could not be measured, so "
+                "the per-record ceiling could not be checked and nothing was "
+                "written."
+            ),
+        )
+    if len(stored) >= _MAX_NOTE_STATE_BYTES:
+        return _note_refusal(
+            "notes_too_large",
+            (
+                "This record's stored notes have reached the maximum size one "
+                "record's notes may occupy. The whole record document is parsed on "
+                "every read and hashed on every save, so an unbounded notes block "
+                "would make the record slow to read and eventually impossible to "
+                "read at all. This is a DIFFERENT bound from `too_many_notes`, "
+                "which counts rows: whichever binds first refuses. Nothing was "
+                "written, and nothing already captured was altered or shortened."
+            ),
+            max_bytes=_MAX_NOTE_STATE_BYTES,
+            stored_bytes=len(stored),
+            total=len(exp.notes),
         )
     return None
 
@@ -11516,6 +11787,16 @@ def list_notes(
         "produced its own output is not described by inventing a label for it. "
         "These are this feature's own vocabulary and are deliberately not ISAAC "
         "evidence source types, because a note is not evidence.\n\n"
+        "**`source` IS ASSERTED BY THE CALLER ON THIS ROUTE, AND IS THEREFORE NOT "
+        "PROOF OF ANYTHING.** That has always been true of every member — nothing "
+        "stops a program sending `typed_note` — and it is stated explicitly because "
+        "one member now names a channel rather than a format: `connected_agent` "
+        "means the content arrived through the machine-callable (agent) interface. "
+        "Where that claim IS trustworthy is the agent interface itself, which stamps "
+        "it server-side and accepts no `source` argument at all, so a caller there "
+        "cannot choose. Treat the value as what the producer said about itself, "
+        "never as an identity, and never as an actor: no member of this vocabulary "
+        "names a person, and nothing on a note is attributed to one.\n\n"
         "`run_id`, `candidate_field_path` and `candidate_rule` are optional and "
         "nothing supplies them on a caller's behalf. An omitted `run_id` means the "
         "note belongs to the record rather than to a run, and it is never filled "
@@ -11525,13 +11806,36 @@ def list_notes(
         "arrive with the `candidate_rule` that produced it — an unexplained "
         "proposal is a guess, and either half without the other is `422`. Absent "
         "is absent: an empty string is refused, not stored.\n\n"
+        "`client_request_key` is OPTIONAL and makes this operation exactly-once. "
+        "Send the SAME key again and the SAME note is returned with "
+        "`deduplicated: true` and a `200` rather than a `201`, and nothing is "
+        "captured; send a new key, or none, and you have captured a separate note. "
+        "The key is checked INSIDE the record lock and AFTER `If-Match`, so a retry "
+        "carrying the ETag held before the first attempt is refused `412` — re-read "
+        "the record and retry with the same key. A blank key is refused rather than "
+        "treated as absent, because a caller that sent one is relying on "
+        "exactly-once and silently ignoring it would quietly downgrade that to "
+        "at-least-once.\n\n"
+        "**READ `deduplicated` BEFORE REPORTING WHAT HAPPENED.** `false` means this "
+        "request captured the note in the body. `true` means a note with your key "
+        "was already on the record, so nothing was captured and the EXISTING one is "
+        "returned — its text, source and run may differ from what you just sent, "
+        "and it may already have been mapped, kept or dismissed by a person. Do not "
+        "describe a deduplicated result as content you just captured.\n\n"
+        "TWO PER-RECORD CAPACITY BOUNDS apply, and both REFUSE rather than evict: "
+        "`too_many_notes` counts rows and `notes_too_large` bounds how much one "
+        "record's notes may occupy, whichever binds first. Dropping the oldest note "
+        "to make room would destroy a verbatim capture, which is the one thing this "
+        "feature exists not to do. Both name their ceiling and the measured value. "
+        "They are checked AFTER deduplication, so a retry of a note the record "
+        "already holds is always answerable even at the ceiling.\n\n"
         "Any other body key is refused with `422` naming it. A note carries no "
         "status, no verification and no evidence, so a request that tries to set "
         "one is rejected rather than accepted and quietly ignored."
     ),
     response_description=(
-        "The stored note and the record's new revision, with the record's new "
-        "`ETag`."
+        "The stored note, whether this request captured it or returned one it had "
+        "already captured, and the record's revision, with the record's `ETag`."
     ),
     responses={**_R_STORAGE_UNAVAILABLE, **_R_UNAUTHORIZED, **_R_TUTORIAL_SCOPE, **_R_PRECONDITION},
 )
@@ -11545,8 +11849,9 @@ def post_note(
             "`{\"text\": \"<verbatim content>\", \"source\": \"<one of the "
             "reported sources>\", \"run_id\": \"<optional>\", "
             "\"candidate_field_path\": \"<optional>\", \"candidate_rule\": "
-            "\"<required with a candidate path>\"}`. Any other key is refused with "
-            "`422`."
+            "\"<required with a candidate path>\", \"client_request_key\": "
+            "\"<optional; retrying with the same key captures nothing and returns "
+            "the same note>\"}`. Any other key is refused with `422`."
         ),
     ),
     if_match: str | None = Header(
@@ -11635,9 +11940,83 @@ def post_note(
                 ),
                 key=candidate if isinstance(candidate, str) else None,
             )
+        # RESOLVED WITH THE REST OF THE BODY, BEFORE THE PRECONDITION, because a
+        # malformed key is the caller's to fix whatever version it holds. The KEY IS
+        # NEVER ECHOED in this refusal: it is a caller-supplied string, and
+        # `_note_refusal`'s own docstring records that this route's echo enumeration
+        # has been wrong twice. The ceiling and the measured length are enough to fix
+        # the request.
+        request_key = body.get("client_request_key")
+        if request_key is not None and (
+            not isinstance(request_key, str)
+            or not request_key.strip()
+            or len(request_key) > _MAX_CLIENT_REQUEST_KEY_LENGTH
+        ):
+            return _note_refusal(
+                "invalid_client_request_key",
+                (
+                    "`client_request_key` must be a non-blank string no longer than "
+                    "the published ceiling, or absent entirely. A blank key is "
+                    "REFUSED rather than treated as absent: a caller that sent one "
+                    "is relying on exactly-once, and silently ignoring it would turn "
+                    "that into at-least-once with nothing on the wire saying so. "
+                    "Nothing was written."
+                ),
+                max_length=_MAX_CLIENT_REQUEST_KEY_LENGTH,
+                length=len(request_key) if isinstance(request_key, str) else None,
+            )
         precondition = _check_if_match(if_match, exp)
         if precondition is not None:
             return precondition
+
+        # EXACTLY-ONCE, INSIDE THE LOCK, AND AFTER THE PRECONDITION — `create_proposal`'s
+        # ordering, adopted deliberately rather than re-argued, so a client that
+        # generates one key format for both routes meets one behaviour. Every write to
+        # one experiment holds this lock, so a key already present cannot be missed by
+        # a concurrent capture and no uniqueness constraint is needed. The EXISTING
+        # note is returned, with the id the FIRST attempt established, because a
+        # retrying client's whole requirement is to end up with one note and know
+        # which — and because a note's id is what a proposal cites, so handing a retry
+        # a different id would break the very loop this key exists to protect.
+        #
+        # A consequence, stated rather than discovered: a client retrying with the
+        # `ETag` it held before its first attempt meets `412`, because that first
+        # attempt advanced the record. It re-reads and retries, and it is that second
+        # attempt this branch answers. Exactly-once is unchanged and is now delivered
+        # by two mechanisms rather than one.
+        if request_key is not None:
+            existing = notes.find_by_client_request_key(exp.sorted_notes(), request_key)
+            if existing is not None:
+                # A `JSONResponse` of its own, so the injected `Response`'s headers
+                # would not be applied — the `ETag` is set here explicitly, and
+                # `response.headers` is deliberately NOT touched, for the reason
+                # `create_proposal`'s identical branch states.
+                #
+                # **`200`, NOT `201`** — and that is the honest code rather than a
+                # convenience. `201 Created` would assert this request created
+                # something; it created nothing. `deduplicated` in the body says which
+                # of the two happened, so a client never has to infer it from a status.
+                return JSONResponse(
+                    status_code=200,
+                    headers={"ETag": exp.etag()},
+                    content=jsonable_encoder(
+                        {
+                            "note": _note_view(existing),
+                            "deduplicated": True,
+                            "experiment_version": exp.version_token(),
+                        }
+                    ),
+                )
+
+        # THE TWO CAPACITY CEILINGS — see `_MAX_NOTES_PER_RECORD`. AFTER the
+        # deduplication branch on purpose: a retry of a note the record ALREADY holds
+        # adds nothing, so refusing it for want of capacity would make a record at its
+        # ceiling unable to answer a question it had already answered, and would leave
+        # a client that legitimately minted a note unable ever to confirm it did.
+        capacity = _note_capacity_refusal(exp)
+        if capacity is not None:
+            return capacity
+
         try:
             note = exp.capture_note(
                 text=body["text"],
@@ -11645,6 +12024,7 @@ def post_note(
                 run_id=run_id,
                 candidate_field_path=candidate,
                 candidate_rule=body.get("candidate_rule"),
+                client_request_key=request_key,
             )
         except notes.UnsupportedNote as refusal:
             # THE MODEL'S OWN REFUSALS REACH THE CLIENT AS A TYPED 422, NEVER A 500.
@@ -11658,7 +12038,15 @@ def post_note(
         # `_changed` is structurally always True here: a new note with a fresh id
         # cannot leave the authoritative signature equal.
         response.headers["ETag"] = exp.etag()
-        return {"note": _note_view(note), "experiment_version": exp.version_token()}
+        # `deduplicated: false` ALWAYS ON THIS PATH, and published rather than
+        # implied by the `201`. A client reads ONE key to learn what happened instead
+        # of branching on a status code, which is what lets the deduplicated answer
+        # above be a plain `200` without becoming ambiguous.
+        return {
+            "note": _note_view(note),
+            "deduplicated": False,
+            "experiment_version": exp.version_token(),
+        }
 
 
 @router.get(

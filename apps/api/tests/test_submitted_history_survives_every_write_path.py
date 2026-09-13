@@ -797,6 +797,15 @@ def test_no_mcp_write_reaches_a_submitted_records_history(client, app, db):
         # operation whose whole safety argument is "it touches nothing authoritative"
         # is precisely the one this sweep must exercise.
         "create_proposal",
+        # THE EIGHTH, added with MCP-001. `create_note` writes into `state["notes"]`,
+        # which is OUTSIDE `draft` exactly as `state["proposals"]` is — so it moves
+        # the record's `rev` and must still leave every submitted artifact and every
+        # history row precisely where they are. Driven below rather than exempted,
+        # for the seventh's reason: an operation whose whole safety argument is "it
+        # touches nothing authoritative" is the one this sweep most needs to
+        # exercise. It is also the operation an UNTRUSTED caller can now reach, so
+        # "it cannot disturb a submitted record" is the claim that matters about it.
+        "create_note",
     }, f"the MCP mutating surface changed: {sorted(mutating)}"
     for forbidden in (
         "submit",
@@ -905,6 +914,28 @@ def test_no_mcp_write_reaches_a_submitted_records_history(client, app, db):
                 )
             )(_a_note(client, eid)),
         ),
+        (
+            # A REAL NOTE CAPTURE THROUGH MCP, NOT A REFUSAL, for the reason the
+            # proposal case gives. It carries no `run_id` deliberately: a note with
+            # none belongs to the RECORD, which is the shape that touches the
+            # record document most directly and therefore the one worth driving
+            # against a submitted record.
+            #
+            # LAST IN THE TUPLE, so the etag it reads is the freshest — the ordering
+            # trap the `create_proposal` comment above records applies to every case
+            # here, and adding one in the middle would have handed the proposal case
+            # a stale validator.
+            "create_note",
+            lambda: (
+                {"experiment_id": eid},
+                _etag(client, eid),
+                {
+                    "text": "the operator noted the shutter stuck once",
+                    "source": "connected_agent",
+                    "client_request_key": "mcp-history-sweep-note-1",
+                },
+            ),
+        ),
     )
     reached = 0
     landed: set[str] = set()
@@ -933,6 +964,21 @@ def test_no_mcp_write_reaches_a_submitted_records_history(client, app, db):
     )
     assert ws.load_experiment(eid).proposals, (
         "the proposal was reported stored and is not"
+    )
+    # THE SAME NAMED CHECK FOR THE EIGHTH OPERATION, and not left to `reached`: this
+    # is the operation an untrusted caller can reach, so a version of this test that
+    # was green while the capture had been refused would be asserting the invariant
+    # over precisely the request it exists to cover.
+    assert "create_note" in landed, (
+        "the MCP note capture did not land, so the invariant is being asserted over "
+        "a refusal"
+    )
+    assert any(
+        note.source == "connected_agent"
+        for note in ws.load_experiment(eid).notes
+    ), (
+        "the note was reported stored, and no note on the record carries the agent "
+        "channel — so either nothing was stored or the channel was not stamped"
     )
     assert len(db.submissions) == len(history["submissions"]), (
         "no MCP operation may record a submission"

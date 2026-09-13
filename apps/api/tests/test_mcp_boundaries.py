@@ -104,10 +104,13 @@ def rpc(server, method, params=None, *, credential=None):
 
 def test_the_registry_is_exactly_the_permitted_set_in_both_directions():
     assert registered_tool_names() == PERMITTED_TOOL_NAMES
-    # 10 -> 14 on 2026-09-01: the four ingestion-proposal tools. The number is a
-    # tripwire for an ACCIDENTAL registration, not a claim about which tools are
-    # right; the names are asserted one line up, in both directions.
-    assert len(PERMITTED_TOOL_NAMES) == 14
+    # 10 -> 14 on 2026-09-01: the four ingestion-proposal tools. 14 -> 15 for
+    # MCP-001's `isaac_capture_note`, which is the operation that makes the other
+    # four reachable at all — `isaac_propose_field_value` requires a `note_id` and
+    # nothing here could create one. The number is a tripwire for an ACCIDENTAL
+    # registration, not a claim about which tools are right; the names are asserted
+    # one line up, in both directions.
+    assert len(PERMITTED_TOOL_NAMES) == 15
 
 
 def test_no_forbidden_capability_is_registered_under_any_name():

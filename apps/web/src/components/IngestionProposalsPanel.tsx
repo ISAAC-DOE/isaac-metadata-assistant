@@ -114,10 +114,12 @@
  * cannot strand the panel a revision behind for good.
  */
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 
 import { api, ApiError } from '../lib/api';
 import { mutationFailureCopy, staleWriteCurrentVersion, statusOf } from '../lib/mutationErrors';
 import type { RecordChangeSummary } from '../lib/recordChanges';
+import { RECORD_PROPOSAL_PARAM } from '../lib/routes';
 import { allProposalsSelfMinted } from '../lib/selfMintedProposals';
 import { RUNS_PAGE_SIZE } from '../lib/runPaging';
 import type {
@@ -376,6 +378,69 @@ const VIEW_CHANGE_REFRESH_ERROR =
   'The change you just made to this list\u2019s filter, order or page could not be ' +
   'applied, so it is still showing what it showed before. Nothing you have open or ' +
   'typed here was affected.';
+
+/*
+ * A DEEP LINK INTO THIS QUEUE — `?proposal=<id>`, read from the address and
+ * resolved against the window the SERVER returned. See `RECORD_PROPOSAL_PARAM`.
+ *
+ * WHY THERE ARE THREE SENTENCES AND NOT ONE, AND WHY NONE OF THEM SAYS "NO SUCH
+ * PROPOSAL". This list is a WINDOW — `_sorted_proposals` orders oldest first,
+ * `_PROPOSAL_WINDOW_DEFAULT` is 50, and there is no read-one-proposal route
+ * anywhere in this build. So a window that does not contain the linked id is
+ * evidence of exactly one thing: the id is not in THIS window. "The record does
+ * not hold it" is a DIFFERENT fact, and from one page these two are
+ * indistinguishable — the same distinction the module header's rule 2 makes about
+ * `null` versus `false`. A surface that collapsed them would tell a scientist a
+ * colleague's suggestion had vanished when it was two pages away.
+ *
+ * The one case where the stronger claim IS supportable is enumerated separately
+ * and over-determined — see `DEEP_LINK_WHOLE_RECORD_NOTE` and the four conditions
+ * its render site requires. Every other case gets the hedged sentence plus the
+ * control that widens the window.
+ */
+const DEEP_LINK_FOUND_NOTE = 'This link names the proposal outlined below.';
+
+/**
+ * THE SPOKEN HALF OF THE FOUND CASE, and it is deliberately NOT the same string.
+ *
+ * A sighted reader can see WHICH card the outline is on, so the visible sentence
+ * needs only to explain the outline. A screen-reader user cannot, so the spoken one
+ * names the field path — the same fact every act announcement on this panel already
+ * carries, and one the card it describes has already rendered, so this announces
+ * nothing new to the DOM. It is a schema address, never a value.
+ */
+function deepLinkFoundAnnouncement(fieldPath: string): string {
+  return `The proposal this link names is shown below \u2014 ${fieldPath}.`;
+}
+
+const DEEP_LINK_ABSENT_NOTE =
+  'This link names a proposal that is not in the window shown here. It may be on ' +
+  'another page of this record\u2019s proposals, or in a state the filter above is ' +
+  'hiding, or it may not be on this record at all \u2014 from one page this section ' +
+  'cannot tell those apart, so it does not guess. Nothing was changed by following ' +
+  'the link.';
+
+/**
+ * The one case where "this record does not hold it" is a claim this surface can
+ * actually make, and the four conditions are deliberately over-determined.
+ *
+ * `filter === 'all'` and `cursor === null` and `has_more === false` mean this window
+ * is the record's whole proposal list rather than a slice of it, and `returned ===
+ * total` is the server's own arithmetic saying the same thing a second way (`total`
+ * is `len(exp.proposals)`, the record's count, never the window's). The fourth,
+ * `unreadable_entries === 0`, is the one that is easy to forget and is why the other
+ * three are not sufficient: a stored entry this build could not present as a
+ * proposal is preserved on the record and is NOT counted in `total`, so it could
+ * carry the linked id while every other condition held.
+ */
+const DEEP_LINK_WHOLE_RECORD_NOTE =
+  'This link names a proposal this record does not hold. The window below is the ' +
+  'whole of this record\u2019s proposal list \u2014 no filter, no further page, and ' +
+  'nothing stored that could not be read \u2014 so the id is not here. Nothing was ' +
+  'changed by following the link.';
+
+/** The label the widening control carries. It names BOTH things it changes. */
+const DEEP_LINK_WIDEN_LABEL = 'Show All, Newest First';
 
 /**
  * The sentence for each refusal this operation can produce.
@@ -842,6 +907,31 @@ function ProposalsBrowser({
   const filterId = useId();
   const orderId = useId();
 
+  /*
+   * THE DEEP-LINKED PROPOSAL — `?proposal=<id>` — READ HERE AND NEVER WRITTEN.
+   *
+   * `useSearchParams` rather than a prop threaded down from `RecordWorkbench`: this
+   * panel is the only surface that can resolve the id (it is the only one holding a
+   * window of proposals), so the screen above would be passing a value straight
+   * through. The same reading `RunsSection` does for `?run=` and `?at=`.
+   *
+   * NOTHING HERE EVER SETS A SEARCH PARAM. The destructure deliberately takes only
+   * the first element: this panel has no control that changes the address, so a
+   * `setSearchParams` in scope would be an invitation to add one, and a surface that
+   * rewrote the link a colleague sent is not a behaviour anybody asked for. The
+   * widening control below moves this panel's OWN filter/order state, which is where
+   * the rest of this component already keeps a view.
+   *
+   * AN EMPTY VALUE IS AN ABSENT ONE. `?proposal=` with nothing after it is a URL a
+   * person can type and a string template can produce; it names no proposal, so it
+   * means "not focused" and no notice is rendered for it. NOT trimmed — an id is an
+   * opaque token, and trimming one would resolve a value the address did not carry.
+   */
+  const [searchParams] = useSearchParams();
+  const rawDeepLinkedId = searchParams.get(RECORD_PROPOSAL_PARAM);
+  const deepLinkedId =
+    rawDeepLinkedId !== null && rawDeepLinkedId !== '' ? rawDeepLinkedId : null;
+
   useEffect(() => {
     let alive = true;
     const generation = ++generationRef.current;
@@ -1173,6 +1263,92 @@ function ProposalsBrowser({
   if (list.status === 'data') lastLoadedRef.current = list.loaded;
   const loaded = list.status === 'data' ? list.loaded : lastLoadedRef.current;
 
+  /*
+   * WHAT THE LOADED WINDOW SAYS ABOUT THE DEEP-LINKED ID.
+   *
+   * `null` while there is no link, and ALSO while no window has ever loaded — the
+   * notice must not claim "not in the window shown here" before a window exists,
+   * which on a first paint or a failed first read would be a claim about nothing.
+   * It reads `loaded` (the last SUCCESSFUL window) rather than `list`, so a silent
+   * background reload does not make the notice flicker between its branches while a
+   * read is in flight; the CARD's own mark is taken from the rendered set at the map
+   * site below, and the two can only disagree while no card is rendered at all.
+   *
+   * `covered` IS THE OVER-DETERMINED WHOLE-RECORD TEST — see
+   * `DEEP_LINK_WHOLE_RECORD_NOTE` for what each conjunct rules out and why the
+   * fourth is the one that matters.
+   */
+  const deepLink = useMemo(() => {
+    if (deepLinkedId === null || loaded === null) return null;
+    const found = loaded.proposals.find((p) => p.proposal_id === deepLinkedId) ?? null;
+    const covered =
+      filter === 'all' &&
+      cursor === null &&
+      loaded.has_more === false &&
+      loaded.unreadable_entries === 0 &&
+      loaded.returned === loaded.total;
+    return { id: deepLinkedId, found, covered };
+  }, [deepLinkedId, loaded, filter, cursor]);
+
+  /*
+   * THE WIDENING CONTROL IS OFFERED ONLY WHEN IT WOULD ACTUALLY DO SOMETHING.
+   *
+   * It sets filter `all`, order `newest_first` and the first window. When the view
+   * already IS that, clicking it changes no state, issues no read, and therefore
+   * does nothing at all — a control that looks like an answer and is inert. Read off
+   * REQUEST state (`filter`/`order`/`cursor`) rather than `loaded`, so it disappears
+   * the moment the reader asks for that view rather than when the response lands.
+   *
+   * IT CLEARS THE FILTER RATHER THAN SETTING IT TO `open`, and that is the one place
+   * this differs from the arrival note's own control beside it. That control counts
+   * arrivals, which are always `open` by construction. A deep link is followed at an
+   * arbitrary later time and may name a proposal somebody has since accepted,
+   * rejected, superseded or withdrawn — so narrowing to `open` would hide exactly
+   * the case the link was most likely followed for.
+   */
+  const deepLinkWidenWouldChangeTheView =
+    filter !== 'all' || order !== 'newest_first' || cursor !== null;
+
+  /*
+   * ANNOUNCED ONCE PER (id, VERDICT) PAIR, THROUGH THE REGION THIS PANEL ALREADY
+   * OWNS.
+   *
+   * `announce()` rather than a live region of its own, for the reason every other
+   * announcement here gives: a second region for one fact says it twice, and a
+   * conditionally-mounted one is never announced at all.
+   *
+   * THE KEY CARRIES THE VERDICT AS WELL AS THE ID, so this is not a one-shot per
+   * link. A window that did not hold the id and then does — the reader widened the
+   * view, turned a page, or a colleague's act reordered it into view — is a real
+   * change of what this surface can say, and saying the found sentence then is the
+   * whole point of the widening control. What the key prevents is the sentence being
+   * repeated on every silent background reload, which would talk over a reader
+   * working through the queue.
+   */
+  const deepLinkAnnouncedRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (deepLink === null) return;
+    /*
+     * THREE VERDICTS IN THE KEY, NOT TWO. An earlier version keyed on
+     * present/absent, which made the two ABSENT sentences one verdict — so a
+     * reader who cleared the filter and turned the view into the whole record
+     * never heard the stronger, more useful claim, because the key had not
+     * moved. The verdict in the key is exactly the branch chosen below.
+     */
+    const verdict =
+      deepLink.found !== null ? 'present' : deepLink.covered ? 'whole-record' : 'absent';
+    const key = `${deepLink.id}|${verdict}`;
+    if (deepLinkAnnouncedRef.current === key) return;
+    deepLinkAnnouncedRef.current = key;
+    announce(
+      verdict === 'present'
+        ? deepLinkFoundAnnouncement((deepLink.found as ApiProposal).target_field_path)
+        : verdict === 'whole-record'
+          ? DEEP_LINK_WHOLE_RECORD_NOTE
+          : DEEP_LINK_ABSENT_NOTE,
+    );
+  }, [deepLink, announce]);
+
   const countLine = useMemo(() => {
     if (!loaded) return '';
     const total = `${loaded.total} ${loaded.total === 1 ? 'proposal' : 'proposals'} on this record`;
@@ -1379,6 +1555,95 @@ function ProposalsBrowser({
         </div>
       )}
 
+      {/*
+        THE VISIBLE HALF OF A DEEP LINK — `?proposal=<id>`.
+
+        NO `role`/`aria-live`, for the reason `arrivalNote` and the
+        background-refresh notice above both give: this element is
+        CONDITIONALLY MOUNTED, and a conditionally-mounted live region is never
+        announced to begin with, so giving it one would be decoration that reads
+        as a guarantee. The spoken half goes through the already-mounted
+        `role="status"` region above, via `announce()` in the effect that chose
+        this same branch — one region, one utterance, per verdict.
+
+        IT NEVER STEALS FOCUS AND NEVER REORDERS ANYTHING. The card, when it is
+        in the window, takes focus once (`ProposalCard`'s effect, bounded by its
+        `[linked]` dependency); this notice appears in place above the list, and
+        its one control is an ordinary tab stop.
+
+        THE ID IS RENDERED VERBATIM, in `mono`, exactly as `note_id` already is
+        on every card. It is the reader's only way to tell which link they
+        followed, and it is the one thing on this notice this surface did not
+        author — so it is shown as given rather than shortened, and the
+        stylesheet is what stops a long one from overflowing.
+
+        THE `list.status !== 'error'` CONJUNCT IS DEFENSIVE AND IS SAID TO BE,
+        rather than left looking load-bearing — the same disclosure the
+        background-refresh notice above makes about its own. `deepLink` reads
+        `loaded`, which falls back to the last SUCCESSFUL window, while a LOUD
+        failure replaces the cards with `BackendDown`; without this, "the
+        proposal outlined below" could stand over a panel with no cards under
+        it. Traced at this head, that combination is UNREACHABLE: after a first
+        success every reload this panel performs is silent, and the fetch
+        effect's `.catch` takes the disclose-without-replacing branch whenever
+        `listStatusRef.current === 'data'`, so `error` is reachable only from a
+        first read that never succeeded — where `loaded` is `null` and no notice
+        renders anyway. Kept because "unreachable today" is a property of two
+        other mechanisms rather than of this one, and because the claim it would
+        make if it ever became reachable is a false one about what is on screen.
+      */}
+      {deepLink !== null && list.status !== 'error' && (
+        <p className="proposals-deep-link-notice">
+          {/*
+            THE ID IS LABELLED AND COMES FIRST, and the first version of this
+            element had it last and bare — so the notice ended "…following the
+            link. P_LINKED", an opaque token dangling after a full stop with
+            nothing saying what it was. The label idiom is this file's own
+            (`.proposal-origin-label`, `.proposal-rule-label`), and putting the
+            target before the verdict is the order the reader needs it in: WHICH
+            link, then what became of it.
+          */}
+          <span className="proposals-deep-link-target">
+            <span className="proposals-deep-link-label">Link target: </span>
+            <span className="proposals-deep-link-id mono">{deepLink.id}</span>
+          </span>
+          <span className="proposals-deep-link-text">
+            {deepLink.found !== null
+              ? DEEP_LINK_FOUND_NOTE
+              : deepLink.covered
+                ? DEEP_LINK_WHOLE_RECORD_NOTE
+                : DEEP_LINK_ABSENT_NOTE}
+          </span>
+          {deepLink.found === null && !deepLink.covered && deepLinkWidenWouldChangeTheView && (
+            <>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => {
+                  /*
+                   * SILENT, AND THE CURSOR IS DROPPED — `changeOrder` does both and
+                   * says why. The filter is set through the same silent path the
+                   * filter control itself uses, so widening the view refreshes the
+                   * list in place and cannot take an open editor's typed text with
+                   * it (the module header's rule 5).
+                   *
+                   * IT IS NOT A GUARANTEE AND THE COPY BESIDE IT DOES NOT MAKE ONE.
+                   * The newest, unfiltered first window is where a recently minted
+                   * proposal is MOST LIKELY to be; on a record holding more than one
+                   * window of proposals the linked one can still be further in, which
+                   * is what the pager is for.
+                   */
+                  changeOrder('newest_first');
+                  setFilter('all');
+                }}
+              >
+                {DEEP_LINK_WIDEN_LABEL}
+              </button>
+            </>
+          )}
+        </p>
+      )}
+
       {refusal && (
         <div className="proposals-error" role="alert">
           <span className="proposals-error-text">{refusal}</span>
@@ -1477,6 +1742,14 @@ function ProposalsBrowser({
                     acceptedFromValues={list.loaded.accepted_from_values}
                     runLabels={runLabels}
                     duplicateRunLabels={duplicateRunLabels}
+                    /*
+                     * READ FROM THE RENDERED SET, not from `deepLink` — which falls
+                     * back to the last SUCCESSFUL window and so can name a card that
+                     * is not in the one being drawn. The comparison is against the
+                     * parameter itself, so the mark cannot be on a card the map is
+                     * not producing.
+                     */
+                    linked={deepLinkedId !== null && proposal.proposal_id === deepLinkedId}
                     busy={busyId === proposal.proposal_id || version === null}
                     onReview={review}
                   />
@@ -1657,6 +1930,7 @@ function ProposalCard({
   acceptedFromValues,
   runLabels,
   duplicateRunLabels,
+  linked,
   busy,
   onReview,
 }: {
@@ -1669,6 +1943,12 @@ function ProposalCard({
   runLabels: Record<string, string>;
   /** Labels shared by more than one loaded run — see the state's own comment. */
   duplicateRunLabels: Set<string>;
+  /**
+   * This is the proposal `?proposal=` names. Marks the card, and brings it into
+   * view and into focus ONCE — see the latch below. It changes nothing about what
+   * the card shows, offers or writes.
+   */
+  linked: boolean;
   busy: boolean;
   onReview: (
     proposal: ApiProposal,
@@ -1697,6 +1977,56 @@ function ProposalCard({
    * server recorded) discards it along with everything else in this component.
    */
   const [moreOpen, setMoreOpen] = useState(false);
+
+  /*
+   * BRING THE DEEP-LINKED CARD INTO VIEW AND INTO FOCUS, EXACTLY ONCE.
+   *
+   * Modelled on `RunsSection`'s `?at=` handling, with one difference that matters:
+   * that one queries the DOM for `[data-address]` and mutates an attribute, because
+   * the element belongs to a different component. This card IS the element, so the
+   * mark is a rendered attribute (`data-linked-proposal`) rather than an imperative
+   * `setAttribute`, and there is nothing to clean up when the link changes.
+   *
+   * WHAT BOUNDS IT TO ONCE IS THE DEPENDENCY ARRAY, AND THAT IS A CORRECTION.
+   *
+   * `ProposalsBrowser` re-renders this card on every silent background reload — a
+   * change-feed poll, a filter change, this reader's own act on another card — and
+   * an effect that focused on every one of those would yank the caret out of
+   * whatever the reader was typing, on a schedule they did not set. `[linked]` is
+   * what stops it: the effect re-runs only when that value CHANGES, and a silent
+   * reload of a window that still holds the linked card does not change it.
+   *
+   * ~~A `focusedForLinkRef` LATCH~~ — WRITTEN, MEASURED AS AN EQUIVALENT MUTANT,
+   * AND REMOVED. The first version of this effect carried a ref latch
+   * (`if (!linked || focusedForLinkRef.current) return;`) described as "the point".
+   * Removing it left all 25 tests in `__tests__/proposal-deep-link.test.tsx`
+   * PASSING, including the one written for exactly that property — so the latch
+   * was a second mechanism claiming to do what the dependency array already does,
+   * and the test that "proved" it was true by construction. The only state it
+   * could ever have suppressed is a `false -> true` transition on a card that
+   * stayed mounted, which is the one case where focusing is RIGHT: the link has
+   * just started naming this card. Recorded rather than quietly deleted, because
+   * this repository's measured history is that a dead guard reads as the reason a
+   * property holds and the real reason then goes unstated.
+   *
+   * FOCUS RATHER THAN SCROLL ALONE, because the card carries its own accessible
+   * name (see the `aria-label` below): focusing it is how a screen-reader user
+   * learns WHICH proposal the link was about, and it is the same mechanism
+   * `IngestionProposalsPanel`'s `tabIndex={-1}` heading already uses as a
+   * programmatic destination. `tabIndex` is set only while the card is linked, so
+   * an ordinary window adds no programmatic stops.
+   *
+   * `scrollIntoView` IS FEATURE-DETECTED because jsdom does not implement it, the
+   * same detection `RunsSection` makes for the same reason.
+   */
+  const cardRef = useRef<HTMLElement | null>(null);
+  useEffect(() => {
+    if (!linked) return;
+    const el = cardRef.current;
+    if (el === null) return;
+    if (typeof el.scrollIntoView === 'function') el.scrollIntoView({ block: 'center' });
+    el.focus();
+  }, [linked]);
 
   const editorId = useId();
   const moreId = useId();
@@ -1750,8 +2080,14 @@ function ProposalCard({
      * next — and not the proposal id, which is an opaque token nobody can act on.
      */
     <article
+      ref={cardRef}
       className="proposal-card"
       data-state={proposal.state}
+      /* `undefined` rather than `'false'`, so `[data-linked-proposal]` selects
+         exactly the linked card and a test asserting its absence asserts the
+         attribute's absence rather than a string. */
+      data-linked-proposal={linked ? 'true' : undefined}
+      tabIndex={linked ? -1 : undefined}
       aria-label={`Proposal for ${proposal.target_field_path} — ${stateLabel(proposal.state)}`}
     >
       <header className="proposal-card-head">

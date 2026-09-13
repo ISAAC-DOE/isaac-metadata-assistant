@@ -533,3 +533,90 @@
   color: var(--advisory-text);
   max-width: 78ch;
 }
+
+/*
+ * A DEEP LINK INTO THIS QUEUE — `?proposal=<id>`, and its two jobs are styled
+ * separately because they are two different kinds of statement.
+ *
+ * THE NOTICE takes the same amber-adjacent `--advisory-*` treatment
+ * `.proposals-background-refresh-notice` above already uses, for the identical
+ * reason stated there: it reports a FACT THAT IS NOT A FAILURE. A link naming a
+ * proposal that is not in this window is not a fault in the record, in the link,
+ * or in what the reader did — reusing `.proposals-error`'s `--border-strong` /
+ * `--text-primary` would read as one. `--advisory-text` on `--advisory-bg` is
+ * 4.76:1 (#8a6420 on #f9f1df), clearing WCAG AA at this element's font size. No
+ * new custom property: all three are declared in `styles/tokens.css` and already
+ * painted twice in this file.
+ *
+ * FLEX/WRAP ONLY, NO FIXED WIDTH, matching every other notice in this file — the
+ * sentence, the id and the widening button each wrap onto their own line at a
+ * narrow viewport rather than overflowing it.
+ */
+.proposals-deep-link-notice {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  padding: 8px 12px;
+  border: 1px solid var(--advisory-border);
+  border-radius: 6px;
+  background: var(--advisory-bg);
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--advisory-text);
+  max-width: 78ch;
+}
+
+/*
+ * THE TARGET AND THE VERDICT ARE TWO FLEX ITEMS, so the sentence wraps
+ * independently of "Link target: <id>" rather than the flex gap landing between
+ * the label and the token it names.
+ *
+ * DELIBERATELY NOT `white-space: nowrap`, which the first version carried: it
+ * would have kept the label and the id together by forbidding the id to wrap at
+ * all, which is the opposite of what `.proposals-deep-link-id` below exists for
+ * and would push a narrow viewport sideways on a long one. Being ONE flex item is
+ * already enough — inline content inside a single item breaks only where it must.
+ */
+.proposals-deep-link-label {
+  font-weight: 600;
+}
+
+.proposals-deep-link-text {
+  max-width: 78ch;
+}
+
+/*
+ * THE ID, VERBATIM. It is the one string on that notice this application did not
+ * author, so it is rendered as given rather than shortened — and `overflow-wrap`
+ * is what keeps a long or hand-typed one inside the notice instead of pushing a
+ * narrow viewport sideways. `anywhere` rather than `break-word` because an
+ * opaque token has no word boundaries to break at; the same choice
+ * `conflicts.css` and `assets.css` already make for identifiers.
+ */
+.proposals-deep-link-id {
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+
+/*
+ * THE MARK ON THE CARD THE LINK NAMES.
+ *
+ * An OUTLINE rather than a background or a border, for `run-compare.css`'s two
+ * reasons: an outline survives forced-colours mode, and it does not move the card
+ * by a pixel the way a border would. `offset` so it reads as a mark on the card
+ * and not as a focus ring on a control inside it — which matters more here than
+ * it does there, because this element is also given `tabIndex={-1}` and really is
+ * focused once, so the two must not be confusable.
+ *
+ * `--action` IS THE APPLICATION'S BLUE and is deliberately not a verdict hue. A
+ * deep link is navigation: it says "here", never "good" or "bad", and the reserved
+ * pass/fail tokens would say the second. This is not a `:hover`/`:active`/`:focus`
+ * rule, so `__tests__/interaction-states.test.ts` does not scan it — the choice is
+ * made on the same grounds that guard exists for rather than because it has to be.
+ */
+.proposal-card[data-linked-proposal='true'] {
+  outline: 2px solid var(--action);
+  outline-offset: 2px;
+}

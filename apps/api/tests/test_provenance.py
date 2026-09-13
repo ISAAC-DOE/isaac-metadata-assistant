@@ -518,19 +518,55 @@ def test_a_machine_candidate_path_is_not_treated_as_a_mapping():
 # =============================================================================
 
 
-def test_nothing_in_this_build_can_produce_an_assistant_origin():
-    """`assistant` is unreachable, and this is the mechanical proof.
+def test_the_assistant_origin_is_reachable_from_the_agent_channel_and_nothing_else():
+    """~~`test_nothing_in_this_build_can_produce_an_assistant_origin`~~ — **INVERTED
+    FOR MCP-001, NOT DELETED, BECAUSE IT WAS THE MECHANICAL PROOF OF A CLAIM THAT HAS
+    NOW CHANGED.**
 
-    There is no `assistant` member in either closed vocabulary a mapping reads,
-    so no evidence entry and no note can be read into it. The only remaining way
-    in would be a hand-written mapping, which the two exhaustiveness tests above
-    forbid.
+    It asserted *"`assistant` is unreachable … There is no `assistant` member in
+    either closed vocabulary a mapping reads, so no evidence entry and no note can be
+    read into it."* The reasoning was exactly right and one of its two premises
+    expired: `notes.NOTE_SOURCES` gained `connected_agent`, written by
+    `isaac_capture_note` when an external agent puts content into ISAAC over the
+    machine-callable interface. `provenance.ORIGIN_ASSISTANT`'s own docstring had
+    named that precondition — *"do not add a mapping to it without an actual
+    producer"* — and there is now a producer.
+
+    **THE HALF THAT SURVIVES IS THE HALF THAT MATTERS, AND IT IS WHAT THIS NOW PINS:
+    exactly ONE channel reaches it.** The old test's value was that nothing could
+    leak into the most alarming origin by accident; an inverted test that merely said
+    "it is reachable" would be strictly weaker. So the mapping is enumerated in both
+    directions — one note source in, no evidence source type at all — and a second
+    mapping added later turns this red rather than shipping.
+
+    `SOURCE_TYPES` IS STILL UNCHANGED AND THAT IS DELIBERATE. An MCP note is not
+    evidence; it cannot be, because a note has no field in which a value could sit.
+    So the EVIDENCE vocabulary must stay free of an `assistant` member — a note
+    reaching this origin says something about where prose came from, never that any
+    value is backed.
     """
+    # THE EVIDENCE SIDE IS UNCHANGED: no `assistant` source type, and no evidence
+    # mapping emits this origin. Both asserted, because the first alone would not
+    # catch a mapping from some other source type.
     assert "assistant" not in SOURCE_TYPES
-    assert "assistant" not in notes_module.NOTE_SOURCES
     assert "assistant" not in provenance.SOURCE_TYPE_ORIGIN.values()
-    assert "assistant" not in provenance.NOTE_SOURCE_ORIGIN.values()
+
+    # THE NOTE SIDE IS WHAT MOVED — and it is enumerated, not merely tested for
+    # non-emptiness, so a second producer cannot be added silently.
+    reaching = {
+        source
+        for source, origin in provenance.NOTE_SOURCE_ORIGIN.items()
+        if origin == provenance.ORIGIN_ASSISTANT
+    }
+    assert reaching == {"connected_agent"}, reaching
+    assert "connected_agent" in notes_module.NOTE_SOURCES
+    # The member is still in the vocabulary, which the old test also asserted and
+    # which is what makes the dimension describable as a whole.
     assert provenance.ORIGIN_ASSISTANT in provenance.ORIGINS
+    # AND THE OLD CLAIM'S REMAINING PREMISE IS ASSERTED AS RETIRED rather than left
+    # ambiguous: `assistant` is not itself a note source. The origin is what this
+    # build CONCLUDES from the channel, never a label a caller can send.
+    assert "assistant" not in notes_module.NOTE_SOURCES
 
 
 def test_the_assistant_origin_never_appears_over_the_committed_example_records(client):
