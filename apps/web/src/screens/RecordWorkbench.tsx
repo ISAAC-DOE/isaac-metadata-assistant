@@ -34,6 +34,7 @@ import { api } from '../lib/api';
 import { useDocumentTitle } from '../lib/useDocumentTitle';
 import { useFetch } from '../lib/useFetch';
 import { useRecordSession } from '../lib/useRecordSession';
+import { rememberRecordView } from '../lib/recordLastView';
 import { useWorkspaceScope, useWorkspaceScopeChanged } from '../lib/workspaceScope';
 import { TUTORIAL_ANCHORS } from '../lib/tutorialSteps';
 import type { AgentContext } from '../lib/assistantAgent';
@@ -600,6 +601,27 @@ function LoadedWorkbench({
    * frontend tests, `proposal-deep-link.test.tsx` included, pass unchanged.
    */
   const activeView: RecordViewId = resolveRecordView(searchParams);
+
+  /*
+   * LIB-005 — REOPEN-AND-CONTINUE. Remember, per browser and per record, which
+   * of the four workspaces the reader was most recently viewing, so leaving
+   * via the Library and reopening the SAME record lands them back where they
+   * left off rather than always resetting to `fields`. See
+   * `lib/recordLastView.ts` for the storage contract and its fail-safe
+   * direction.
+   *
+   * Runs on every `activeView` change (which already includes the initial
+   * mount), keyed also on `detail.id` so a reload onto a DIFFERENT id — the
+   * bundle swaps under the same mounted screen when a change-feed refetch
+   * lands mid-navigation — never attributes one record's workspace to
+   * another's stored entry. Writing here, rather than at the point a Library
+   * row is clicked, is deliberate: it records where the reader actually
+   * LANDED and stayed (including a deep link nobody clicked, e.g. one shared
+   * by the Assistant or MCP), not merely which link they followed.
+   */
+  useEffect(() => {
+    rememberRecordView(detail.id, activeView);
+  }, [detail.id, activeView]);
 
   /*
    * WCAG 2.4.2 - REFINE THE ROUTE-DERIVED TITLE WITH THE RECORD'S OWN NAME.

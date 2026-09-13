@@ -5,6 +5,7 @@ import { StatusChip } from './StatusChip';
 import { ROUTES } from '../lib/routes';
 import { LABELS } from '../lib/labels';
 import { TUTORIAL_ANCHORS } from '../lib/tutorialSteps';
+import { lastRecordView } from '../lib/recordLastView';
 import type { ExperimentSummary, QueueGroupKey } from '../lib/types';
 
 interface ExperimentRowProps {
@@ -45,9 +46,24 @@ const LIFECYCLE_LABEL: Record<ExperimentSummary['lifecycle'], string> = {
 export function ExperimentRow({ exp }: ExperimentRowProps) {
   const t = exp.trailing;
   const accessibleName = describeAccessibleName(exp);
+  /*
+   * LIB-005 — REOPEN-AND-CONTINUE. Route to the workspace this BROWSER last saw
+   * the reader viewing on THIS record, when one is remembered and it is not
+   * `fields` — a bare `ROUTES.record(id)` already opens `fields`
+   * (`resolveRecordView`'s own fallback), so there is nothing to change for the
+   * common case. See `lib/recordLastView.ts` for what is stored, why it is
+   * browser-local, and its fail-safe direction: every unreadable or absent
+   * entry resolves to `null` here and this row behaves exactly as it always
+   * has.
+   */
+  const rememberedView = lastRecordView(exp.id);
+  const to =
+    rememberedView && rememberedView !== 'fields'
+      ? ROUTES.recordView(exp.id, rememberedView)
+      : ROUTES.record(exp.id);
   return (
     <Link
-      to={ROUTES.record(exp.id)}
+      to={to}
       className={`exp-row${exp.group === 'done' ? ' done' : ''}`}
       aria-label={accessibleName}
       /* The guided walkthrough's anchor for "opening a record". EVERY row carries
