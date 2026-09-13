@@ -152,8 +152,28 @@ codes from a redirect, NEVER through a pipe): ***
   snapshot   --check with BOTH --out and --detail-out -> exit 0, no drift, **201 served paths /
                                                   200 manifest entries** intact, and not one
                                                   `"path"` line moved (22 sha256 changes only)
-  backend    .venv/bin/pytest -q -rs           -> IN FLIGHT at the time this header was written.
-                                                  **Reported separately rather than predicted.**
+  backend    .venv/bin/pytest -q -rs           -> **7650 passed, 45 skipped, 0 FAILED, exit 0**
+                                                  (547.92 s). Session-open baseline 7412 / 45 ->
+                                                  **+238 tests, skips UNCHANGED.** Zero `FAILED`
+                                                  and zero `ERROR` lines (`grep -cE '^(FAILED|ERROR)'`
+                                                  -> 0). The snapshot test PASSES, because the one
+                                                  regeneration above closed the drift every lane
+                                                  had correctly reported rather than fixed.
+                                                  **SKIP ARITHMETIC CHECKED, NOT ASSUMED:** 41
+                                                  `SKIPPED` lines whose `[N]` multipliers sum to
+                                                  exactly **45**, and all 45 are pre-existing
+                                                  gates — `test_run_row_parity` engine-parity
+                                                  flags (CI arms them with
+                                                  `ISAAC_RUN_REAL_ENGINE_PARITY` +
+                                                  `ISAAC_REQUIRE_REAL_ENGINE_PARITY`, so an absent
+                                                  engine FAILS there rather than skipping), the
+                                                  opt-in `ISAAC_PERF_BENCH` wall-clock benchmark,
+                                                  `test_db_recon`'s genuinely-absent-driver witness
+                                                  (proved unconditionally by a sibling), four
+                                                  strict-reader-tolerated malformed-document cases
+                                                  covered by the route tests, and the two
+                                                  graphify-gated ones. **No test became
+                                                  conditionally skipped by this session.**
   browser    playwright — **NOT RUN on the integrated tree.** The last read-only run
              (1040 passed / 557 skipped / 3 failed → the 3 were ONE real narrow-width defect,
              fixed in `8f961ed7`) predates TWO of the four lanes, so it does not describe this
