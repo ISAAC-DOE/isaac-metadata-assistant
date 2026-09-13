@@ -1263,6 +1263,65 @@ been editing against numbers I could not verify** — which is the failure mode 
 most often. One real duplication WAS measured and is left named rather than fixed:
 `"3 fields · none recorded yet"` renders **twice** on the record screen.
 
+### `UX-013` — **MEASURED AND SPECIFIED, DELIBERATELY NOT SHIPPED. The blocker is verification, not difficulty.**
+
+Measured 2026-09-13 from source:
+
+- **Five `<AssistantPanel>` mounts**, confirmed by `grep -rn`: `ExportReadiness.tsx:543`,
+  `GuidedCompletion.tsx:911`, `RecordWorkbench.tsx:775`, `ProjectMemory.tsx:182`,
+  `EvidenceExplorer.tsx:309`. One of those five — Project Memory — is **already out of a
+  scientist's path** as of this session's `UX-015` demotion, so the scientist-facing count is four.
+- **The desktop rail defaults to EXPANDED.** `AssistantDrawer.tsx:98` is
+  `useState(false)` for `collapsed`, with a per-browser preference
+  (`isaac.assistant-rail-collapsed`) applied in an effect after mount. Its comment explains why the
+  first render is unconditional — pre-hydration markup and first paint must agree — and that
+  reasoning is sound and is not what is wrong.
+
+**So §19's actual requirement — *"keep contextual/collapsed … do not permanently consume the main
+scientific workspace"* — is GENUINELY UNMET**, and the fix is nearly a one-line default flip plus
+its guards.
+
+**WHY IT WAS NOT DONE, and this is a verification limit rather than caution.** Flipping the default
+changes what is rendered at first paint on five screens, and the rail's contents are CSS-hidden in
+the collapsed band. The accessibility baseline asserts **exact violating-node counts per surface**,
+so a change in either direction fails it — and **Linux CI is the authority; a green macOS run is
+not evidence of one** (`grep -rn 'macos\|darwin' .github/workflows/` returns nothing). Shipping a
+default flip from here would mean shipping a change whose verification cannot be completed in this
+environment, which is the failure mode this ledger records most.
+
+**What it needs, precisely, so the next session does not re-derive it:** flip
+`AssistantDrawer.tsx:98` to `useState(true)`, keep the stored-preference effect exactly as it is
+(so a scientist who expands it once keeps it), preserve `ASSISTANT_NO_MODEL_CLAIM` on every
+surviving mount, then take a **Linux CI a11y round-trip** and re-transcribe the moved cells with
+the darwin column **measured locally, never carried forward**. Reducing the mount count is a
+SEPARATE and larger decision — the ledger's own row warns it is *"not a directory delete"*: six lib
+modules have non-Assistant consumers and `assistant.css` is shared with `GuidedPrompt`.
+
+### A SEVENTH E2E TRAP, MEASURED — **a browser suite run beside two full backend suites reports timeouts that read exactly like layout regressions**
+
+Recorded because it cost a diagnosis and would have cost a false report. Run alone against a
+locally-served build, the read-only Playwright suite gave **1040 passed / 557 skipped / 3 failed**
+against a 1043/557 baseline, and all three failures were ONE real defect naming its own culprit
+(`span.mono < dd.revhist-working-value`, right edge 406 vs 379, at widths 390/375/320). Re-run
+**while two worktree agents were executing full `pytest` suites**, the same tree produced **eight**
+`layout-widths` failures plus `charts`, `statistics-states` and `tutorial` — every one of them a
+**60-second test timeout** or a *"loading panel never settled"*, at 1.1m–2.6m durations, and one of
+them at width **1280**, where no narrow-width defect can exist.
+
+**The tell is the shape, not the count:** a genuine overflow failure prints the offending selector
+and its geometry; a starvation failure prints `expect(locator).toHaveCount(0)` against
+`div.fetch-state[role="status"]`. It also starved an agent into a stream-watchdog stall. Two
+consequences adopted: the browser suite is run **alone**, and it is run **once, on the integrated
+tree**, since a run that predates the merges is not the run that matters.
+
+Two further operational facts from the same session, both of which cost time: the read-only config
+**does not start a backend** (`global-setup.ts:173` only probes `127.0.0.1:8000/api/health` and
+aborts), and `--app-dir apps/api` is **relative**, so launching uvicorn from `apps/web` fails with
+`ModuleNotFoundError: No module named 'isaac_api'` and presents as an unreachable backend. A third:
+`global-setup` **correctly refuses** to run if the ordinary workspace holds any record, so a probe
+record created for manual measurement must be discarded or the backend restarted on a fresh
+`ISAAC_UI_WORKSPACE` first.
+
 ### OPEN QUESTIONS FOR KRISH RAISED BY THIS RUN — decisions, not defects
 
 1. **Does `Governance & Safety` stay in the primary navigation?** It was KEPT, deliberately: the
