@@ -562,6 +562,53 @@ errors are the most useful thing a slice reports.
    two readings. Recorded because a line-number "correction" that is really a moving file is worth
    distinguishing from an error, and this file has conflated the two before.
 
+### The contested sixth site — SETTLED, and it was false THREE ways
+
+`ValidateReview.tsx:420` is corrected. I retracted my "false positive" defence on the strength of
+two falsehoods; the slice that fixed it found a **third that nobody had named, and it is arguably
+the worst**:
+
+1. **Undercount** — *"ISAAC applies **one gate of its own**"*; `export_draft` has two of ISAAC's
+   own (`export.py:305`, `:343`) beside the upstream schema (`:347`).
+2. **Naming** — it named that one ("anchored-pattern exactness"), which
+   `lib/officialAttribution.ts:163-169` forbids in as many words, because `export.py:342` folds the
+   exactness findings into the draft report and returns `official_report=None`, so no surface can
+   know which of the two refused.
+3. **A PRE-DISCRIMINATOR PREMISE** — *"nothing below names the official ISAAC schema as the source
+   unless a written record was checked."* False since `official_validator_ran` shipped:
+   `_validate_unit`'s **dry-run** branch publishes
+   `official_validator_ran: result.official_report is not None` (`routes.py:19036`), so a
+   **candidate** record's findings are headed "Official ISAAC schema findings"
+   (`officialAttribution.ts:188`). **CLAUDE.md §11 already records the counterexample** — an
+   unanswered freshly-created record reports `official_validator_ran: true` with `'descriptors' is
+   a required property` — so the clause was false about *the commonest failing payload in the
+   product*, on the screen that reports it.
+
+**And "remove the exemption and let the detector cover the site" — my instruction — was not
+achievable by removal.** Family B **did not cover `ValidateReview` at all**: no source scan, no
+render scan. The "exemption" was a mask plus fixtures in a file that never read that component, so
+deleting it would have produced a **silently uncovered** site — worse than a named exemption. The
+slice added a §8 that *renders* the component, then proved the mask deletion load-bearing by
+reinstating it and watching §8 go red. **The general lesson: an exemption can be concealing an
+absence of coverage rather than an excess of it, and "delete the exemption" does not distinguish
+the two.**
+
+**A suite was proven red before being fixed, not assumed red.** With the retired string restored,
+`edit.spec.ts` failed with `locator.click: Test timeout … waiting for getByRole('button', { name:
+'← Back to Review Record' })`, exit 1. After the fix: **121 passed**.
+
+### MY OWN RETRACTED CLAIM WAS WRITTEN INTO SOURCE AS A STANDING INSTRUCTION — a fifth error, and the most dangerous kind
+
+`HelpPanel.tsx:76-82` and `:400-406` carry the retracted premise **verbatim, twice**, phrased as
+***"DO NOT 'HARMONISE' THIS WITH `components/ValidateReview.tsx:420` …"***. So the branch contained
+a **false instruction forbidding a fix that had already been made, quoting copy that no longer
+exists**, in a manifest-listed file. Neither block is rendered, so no guard failed and no user saw
+it — which is exactly why it would have survived. **The implementer transcribed an orchestrator
+addendum faithfully; the defect is mine, and the attribution matters because the lesson is about
+briefs, not transcription.** Being struck in place, dated, per house style — a `DO NOT` comment is
+the kind of sentence a future session obeys, so deleting it silently would lose the warning that
+it was once believed.
+
 ### What the slices found that the review did not
 
 - **The export-gate claim class had FIVE live sites, not two.** Beyond `HelpPanel.tsx:294` and
