@@ -618,9 +618,34 @@ def test_no_FieldCandidate_is_constructed_for_a_transcript_that_blows_a_ceiling(
         # the shape is preserved by putting the padding where a scientist's
         # unpunctuated preamble would be, and the OLD shape is kept as its own row
         # so the third condition's cost on a byte-heavy payload stays measured.
+        # ~~`"cd " * 860 + "temperature 1 K, maybe 2 K."`~~ — **THE PADDING GAINED
+        # ONE COMMA, 2026-09-13, AND THIS IS THE THIRD TIME A SEMANTIC GATE HAS
+        # BROKEN THIS RESOURCE PROOF.** GATE (4) (`tc._PRE_LABEL`) reads the text
+        # from the start of the label's CLAUSE to the label, and 2,580 unpunctuated
+        # characters of `cd ` IS that clause — so this payload went from 200
+        # candidates to **0**, and the byte ceiling silently stopped being exercised
+        # at all. Note the failure direction: the assertion went RED, but had the
+        # expectation been written as an inequality it would have passed while
+        # measuring nothing, which is how the previous instance went unnoticed.
+        #
+        # The module's own recorded rule decides which side gives way: **a
+        # resource-ceiling proof must not be hostage to a semantic gate** (see
+        # `_bytes_only`'s history, where this same coupling refuted a C-1 proposal
+        # and caused the `or`-branch exemption). So the FIXTURE moves, not the gate —
+        # and it moves because the old payload is no longer a LEGITIMATE case: an
+        # unpunctuated 2,580-character preamble in front of the label is precisely
+        # what gate (4) exists to refuse, and a "worst legitimate case" that the
+        # reader legitimately refuses measures no headroom.
+        #
+        # One comma restores it, and is what the previous move to a PREAMBLE was
+        # reaching for anyway: `"cd … cd, temperature 1 K, maybe 2 K."` is ordinary
+        # dictation. Measured: 260,899 bytes (was 260,799 — still inside
+        # `_MAX_TRANSCRIPT_BYTES`), 100 segments, **200 candidates**, 521,600 quote
+        # bytes. The worst BYTE case is preserved to within 100 bytes across the
+        # whole transcript, so the headroom this row exists to measure is unchanged.
         (
             "a near-full-size transcript at 2 candidates per segment",
-            " ".join(["cd " * 860 + "temperature 1 K, maybe 2 K."] * 100),
+            " ".join(["cd " * 859 + "cd, temperature 1 K, maybe 2 K."] * 100),
             200,
         ),
         (

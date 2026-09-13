@@ -543,16 +543,38 @@ def test_every_ambiguity_kind_is_covered_by_the_published_policy():
         # value IS hedged — serving it would publish a reason contradicted by the
         # quote beside it.
         "trailing_text_after_further_values",
-        # THE PASS-ONE ASSERTION GATE's three, added 2026-09-13, and three for the
-        # same reason the two above are two: each names a different fact about the
-        # sentence, so a shared name would publish a reason its own quote
+        # THE PASS-ONE ASSERTION GATE's ~~three~~ FOUR, added 2026-09-13, and four
+        # for the same reason the two above are two: each names a different fact
+        # about the sentence, so a shared name would publish a reason its own quote
         # contradicts. The first says the label did not assert this value ("the
         # temperature DRIFT was 3 K"); the second says it did and the following
         # words changed what the number measures ("3 K ABOVE TARGET"); the third
         # says the field was asserted more than once and no value could be
-        # selected ("300 K, then 350 K, then 400 K").
+        # selected ("300 K, then 350 K, then 400 K"); the FOURTH says the words in
+        # FRONT of the label named something else ("the SETPOINT temperature was
+        # 425 K", "the PREVIOUS scan ended at ...") — GATE (4), which neither
+        # forward gate can see because one reads label-to-value and the other
+        # value-to-end.
+        #
+        # **THIS TEST IS A GUARD THAT A SLICE CLAIMED DID NOT EXIST, and the
+        # correction is worth more than the row.** `32fd4189`'s message said "no
+        # guard could have caught it" about GATE (4) shipping without a served
+        # policy row. **That was too strong: this test IS a guard over
+        # `AMBIGUITY_POLICY`.** What is true, and is the accurate claim, is that it
+        # compares the policy to a HAND-WRITTEN LIST rather than to what the reader
+        # actually emits — so it catches a row added without updating the list (it
+        # caught exactly that, here) and CANNOT catch a kind the reader produces
+        # with no row at all, which was the defect. That is precisely one of the
+        # three weaker forms named in
+        # `test_every_abstention_kind_the_reader_can_PRODUCE_has_a_served_policy_row`'s
+        # own docstring — "a hand-written list of kinds — a third place to forget" —
+        # so the slice named the weakness and then asserted the guard's absence
+        # rather than its shape. **The two tests are complementary and both are
+        # kept:** this one ratchets the served set, the other measures what the
+        # reader emits. Neither subsumes the other.
         "label_does_not_assert_this_value",
         "value_qualified_by_what_follows",
+        "words_before_the_label_name_something_else",
         "several_values_and_none_selected",
         "unmatched_text",
     } == published
