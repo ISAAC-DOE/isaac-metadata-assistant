@@ -109,6 +109,30 @@
  * anything. §5 below pins the narrower, real invariant it needs: no site may
  * claim the upload route does not exist; the true and stronger claim is that
  * the one route that exists refuses every request it gets.
+ *
+ * AN EIGHTH SITE, AND THE ONLY ONE THAT WAS IN NO LIST AT ALL.
+ * `screens/settings/ConnectAnAgent.tsx`'s "Respect Read and Write Boundaries"
+ * row — Settings → API Access → Connect an Agent — ended "and file upload is
+ * refused outright", the refusal predicated of the APPLICATION.
+ *
+ * WHAT MAKES IT DIFFERENT FROM THE FIFTH, SIXTH AND SEVENTH, all of which were
+ * "held by the vocabulary-free bans but kept out of §2": this one was held by
+ * NOTHING. The guard that looks like it covers it — `SITES`' fourth member,
+ * `mcpNoUploadRow` — reads `lib/mcpConnectContent.ts`, a DIFFERENT module for a
+ * DIFFERENT surface whose name differs by one word ("Connect YOUR Agent", the
+ * MCP tab, versus "Connect AN Agent", the HTTP guide). Two near-identical names
+ * over two modules is how a whole surface stayed outside every list while
+ * looking covered, and it is why this claim class has now been miscounted three
+ * times on one branch — reported as two sites, then six, then seven.
+ *
+ * IT IS NOT FORCED INTO `SITES`/`SHARED_CLAIM`, for the seventh site's reason
+ * and one of its own. §2 requires both readers and both retention bounds; this
+ * is a table row in an operational contract, `UX-021` measured this product's
+ * Settings/Help surfaces at 89% over length, and an external agent cannot reach
+ * either reader (no agent tool does), so enumerating them here would add ~25
+ * words this audience cannot act on. §8 pins the narrower, real invariant — the
+ * refusal is scoped to the upload ROUTE — and the row IS a member of
+ * `ALL_BAN_SURFACES`, so §3, §3b, §4b and §5 hold it unchanged.
  */
 
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
@@ -121,6 +145,7 @@ import { MemoryRouter } from 'react-router-dom';
 import { HelpPanel } from '../components/HelpPanel';
 import { GovernancePage } from '../screens/GovernancePage';
 import { LoadMaterials } from '../screens/LoadMaterials';
+import { ConnectAnAgent, type ConnectAnAgentFacts } from '../screens/settings/ConnectAnAgent';
 import { ConnectYourAgentPanel } from '../screens/settings/ConnectYourAgent';
 import { settingsConcepts } from '../lib/settingsContent';
 import { MCP_CAPABILITIES_REFUSED } from '../lib/mcpConnectContent';
@@ -242,6 +267,53 @@ function mcpNoUploadRow(): string {
   return `${row.action} ${row.detail}`;
 }
 
+/**
+ * Facts for the Connect an Agent guide. They feed only "Send Structured
+ * Requests" and "Handle Errors", neither of which this file bans anything in,
+ * so they are HARNESS INPUT and not an assertion about the contract — do not
+ * read them as a claim that these are the media types or statuses the real
+ * document declares (`settings-page.test.tsx` derives those from it).
+ */
+const CONNECT_GUIDE_FACTS: ConnectAnAgentFacts = {
+  requestMediaTypes: ['application/json'],
+  errorCodes: ['401', '422'],
+};
+
+/**
+ * The EIGHTH site: Settings → API Access → Connect an Agent, whose "Respect
+ * Read and Write Boundaries" row stated the upload refusal UNSCOPED.
+ *
+ * RENDERED, not source-scanned, and the whole guide rather than the one row.
+ * Rendering is this file's stated preference (see `policyTabText`) because it
+ * proves the copy is on the surface a reader meets. The whole guide because the
+ * row is one of eight authored in the same array literal: a sibling row is the
+ * cheapest place for this claim class to reappear, and a scan of one row would
+ * not see it. The eight `body` strings are the component's own local constant,
+ * so there is no module to read them off the way `mcpNoUploadRow` does.
+ */
+function connectAnAgentGuideEl(): Element {
+  const { container } = render(
+    <ConnectAnAgent
+      facts={CONNECT_GUIDE_FACTS}
+      open
+      onOpenChange={() => {}}
+      summaryId="upload-claim-parity-connect-summary"
+      onOpenExplorer={() => {}}
+    />,
+  );
+  const guide = container.querySelector('details.api-connect');
+  if (guide === null) throw new Error('the Connect an Agent guide is not rendered');
+  // The row that makes the claim, asserted to be ON the surface rather than
+  // merely present in the module — the failure mode a constant-read misses.
+  // `getByRole` throws when absent, so this is a real assertion.
+  screen.getByRole('heading', { name: 'Respect Read and Write Boundaries', level: 4 });
+  return guide;
+}
+
+function connectAnAgentGuide(): string {
+  return connectAnAgentGuideEl().textContent ?? '';
+}
+
 const SITES: [string, () => string][] = [
   ['Governance → Policy', policyTabText],
   ['the Load Materials on-ramp warning', loadMaterialsWarnText],
@@ -265,6 +337,7 @@ const ALL_BAN_SURFACES: [string, () => string][] = [
   ...SITES,
   ['transcript capture: voiceAudioHandling', captureVoiceAudioHandling],
   ['Settings → Data & Privacy → synthetic-data-only', syntheticModeCard],
+  ['Settings → API Access → Connect an Agent (the guide)', connectAnAgentGuide],
 ];
 
 // --- §1 the readers this ban is justified by ---------------------------------
@@ -923,9 +996,16 @@ describe('R1b §6a · the Help "Where values come from" section names BOTH reade
  * period. `h3,p,li` rather than `*`: those are the blocks this popover authors
  * copy in, and a wildcard would also collect wrapper `<div>`s whose
  * `textContent` is the same glued string the bug is made of.
+ *
+ * The selector is a PARAMETER with that exact string as its default, added for
+ * §8 (the Connect an Agent guide authors its row headings as `h4`). Defaulted
+ * rather than widened for everyone, so §6b's and §6c's corpus is byte-for-byte
+ * what it was — widening it globally would silently change what §6c's polarity
+ * fixtures are measuring, which is the shrink-without-failing hazard §5's
+ * key-count pin exists for.
  */
-function unscopedUploadRefusalsInBlocks(root: Element): string[] {
-  const blocks = [...root.querySelectorAll('h3,p,li')];
+function unscopedUploadRefusalsInBlocks(root: Element, selector = 'h3,p,li'): string[] {
+  const blocks = [...root.querySelectorAll(selector)];
   // A section with no block children would make this vacuous in a second way,
   // so the absence is a failure rather than a pass.
   expect(blocks.length, 'the section has no h3/p/li blocks to scan').toBeGreaterThan(0);
@@ -1056,8 +1136,8 @@ describe('R1b §6c · the paragraph-boundary escape, measured both ways', () => 
 //
 // WHY THE UNSCOPED-REFUSAL BAN IS *NOT* ALSO RUN OVER `ALL_BAN_SURFACES`, and
 // this is MEASURED rather than assumed, because widening it is the obvious next
-// edit and it is the wrong one. Running `unscopedUploadRefusals` over all six
-// surfaces flags FOUR of them:
+// edit and it is the wrong one. Running `unscopedUploadRefusals` over all
+// ~~six~~ SEVEN surfaces flags FOUR of them:
 //
 //   Governance → Policy                      2 sentences
 //   the Load Materials on-ramp warning        1
@@ -1065,6 +1145,14 @@ describe('R1b §6c · the paragraph-boundary escape, measured both ways', () => 
 //   Settings → Connect Your Agent no-upload   1
 //   transcript capture: voiceAudioHandling    0
 //   Settings → synthetic-data-only            0
+//   Settings → Connect an Agent (the guide)   0   ← added with §8
+//
+// "six" is struck rather than replaced because a stale enumeration in THIS file
+// is the defect it exists to catch, and §15 of `CLAUDE.md` records that class
+// being published four times. The seventh entry is 0 for the same reason the
+// fifth and sixth are: §8 scopes its refusal to the upload ROUTE. THE TABLE IS
+// ALSO A TEST NOW — §8c re-measures this exact split on every run, so the next
+// surface added to `ALL_BAN_SURFACES` cannot make this comment quietly wrong.
 //
 // All four are the `SITES` members, and all four are CORRECT COPY: they scope
 // the refusal by stating the whole four-part claim in the same breath ("...and
@@ -1133,5 +1221,171 @@ describe('R1b §7 · the Settings synthetic-only MODE card scopes its refusal', 
     expect(SITES.map(([site]) => site)).not.toContain(
       'Settings → Data & Privacy → synthetic-data-only',
     );
+  });
+});
+
+// --- §8 the EIGHTH site: Settings → API Access → Connect an Agent -----------
+//
+// See the file header for why this is not a fifth member of `SITES`. It IS a
+// member of `ALL_BAN_SURFACES`, so §3, §3b, §5 and §4b hold it unchanged — and
+// unlike §6b's Help section and §7's mode card, it was in NO list at all. The
+// guard that looked like it covered it, `mcpNoUploadRow`, reads a DIFFERENT
+// module (`lib/mcpConnectContent.ts`), so this surface was not "weaker but
+// covered"; it was uncovered, which is why §8b's second direction matters.
+//
+// WHY THE UNSCOPED-REFUSAL BAN RUNS HERE AND STILL NOT OVER `ALL_BAN_SURFACES`.
+// §7's enumeration is the reason, and it is re-measured in §8c below rather
+// than inherited: the four `SITES` members state the whole four-part claim in
+// the same breath, which is a different and stronger scoping mechanism than
+// attaching `route` to the noun, and a widened loop would fire on their correct
+// copy. This guide does NOT state the four-part claim and is forbidden from
+// growing into it — `UX-021` measured this product's Settings/Help surfaces at
+// 89% over length and the row is a row in an operational contract — so it
+// belongs exactly where §6b's and §7's surfaces do: held by the narrow ban.
+//
+// The audience argument was weighed and is NOT a reason to leave it unscoped.
+// An external agent genuinely cannot reach `RecordValidator` or
+// `CsvReconcilePanel` (no agent tool does), so for a machine integrator the
+// unscoped claim had no counterexample. But this renders on a Settings screen a
+// human reads, the surrounding sentence is about what the API refuses, and a
+// reader of it had no way to learn that two in-app controls read a file they
+// pick. Scoping costs +2 words / +16 characters (measured: "file upload is
+// refused outright", 5 words / 31 chars → "the upload route refuses every
+// request outright", 7 / 47) and removes the app-wide reading; enumerating the
+// readers here would cost ~25 words for a fact this audience cannot act on.
+
+/** `screens/settings/ConnectAnAgent.tsx:102` at `31a220af`, verbatim — the
+ *  clause was "and file upload is refused outright", predicated of the
+ *  application. Kept as the polarity fixture. */
+const RETIRED_CONNECT_AGENT_BOUNDARIES =
+  "Read operations are safe to repeat. Writes change a record and require explicit user " +
+  "intent — an agent should never write on someone's behalf unless that person asked for " +
+  "that specific change. Several writes also require the record's current ETag, so a blind " +
+  'overwrite is refused rather than applied, and file upload is refused outright.';
+
+/**
+ * The SENTENCE `unscopedUploadRefusals` returns for the fixture above, not the
+ * clause. Written out because the first version of §8 expected the clause ("and
+ * file upload is refused outright.") and went red: the splitter is
+ * sentence-level by design (see its note — the scoping noun and the refusal verb
+ * are one predicate, so a comma-level window would flag correct copy). Asserting
+ * the exact span rather than `not.toHaveLength(0)` is what makes the polarity
+ * proof specific: a pattern that started matching something ELSE in the fixture
+ * would fail here instead of reading as a pass.
+ */
+const RETIRED_CONNECT_AGENT_FLAGGED_SENTENCE =
+  "Several writes also require the record's current ETag, so a blind overwrite is " +
+  'refused rather than applied, and file upload is refused outright.';
+
+/** Every block the guide authors copy in. `h4` is the row heading level here,
+ *  which the §6b default (`h3,p,li`) does not collect — see the note on
+ *  `unscopedUploadRefusalsInBlocks`. */
+const CONNECT_GUIDE_BLOCKS = 'h3,h4,p,li';
+
+describe('R1b §8 · the Connect an Agent guide scopes every upload refusal', () => {
+  it('no row, and no paragraph of the guide, refuses an upload unscoped', () => {
+    expect(
+      unscopedUploadRefusalsInBlocks(connectAnAgentGuideEl(), CONNECT_GUIDE_BLOCKS),
+      'a row of the Connect an Agent guide refuses an upload without scoping the ' +
+        'refusal to the upload ROUTE. CLAUDE.md §11 records that claim as true of ' +
+        'POST /api/uploads ONLY, and this build ships two controls that read a ' +
+        'user-picked file (§1) — components/RecordValidator.tsx:245 and ' +
+        'components/CsvReconcilePanel.tsx:226. Scope it the way ' +
+        'lib/transcriptCaptureContent.ts:261 does; do not delete the claim, and do ' +
+        'not enumerate the two readers here (UX-021).',
+    ).toEqual([]);
+  });
+
+  it('POLARITY: the clause that shipped IS flagged', () => {
+    expect(
+      unscopedUploadRefusals(RETIRED_CONNECT_AGENT_BOUNDARIES),
+      'the exact row that shipped is not flagged, so this ban would not have caught ' +
+        'the defect it was written for.',
+    ).toEqual([RETIRED_CONNECT_AGENT_FLAGGED_SENTENCE]);
+  });
+
+  it('POLARITY: the retired clause is caught THROUGH the rendered-guide path too', () => {
+    // §8's first test reads the DOM; this one proves the DOM path — not merely
+    // the bare-string predicate — would have gone red on the shipped copy. The
+    // guide's rows are one array literal, so the substitution is done on the
+    // rendered node: same corpus, same selector, same splitter.
+    const guide = connectAnAgentGuideEl();
+    const row = [...guide.querySelectorAll('section.api-connect-section')].find(
+      (el) => el.querySelector('h4')?.textContent === 'Respect Read and Write Boundaries',
+    );
+    expect(row, 'no "Respect Read and Write Boundaries" row in the guide').toBeTruthy();
+    const p = row!.querySelector('p');
+    expect(p, 'that row authors no paragraph').toBeTruthy();
+    p!.textContent = RETIRED_CONNECT_AGENT_BOUNDARIES;
+    expect(
+      unscopedUploadRefusalsInBlocks(guide, CONNECT_GUIDE_BLOCKS),
+      'reintroducing the shipped clause into the rendered guide does NOT trip this ' +
+        'ban, so §8 is vacuous: it would pass whether the copy were true or false.',
+    ).toEqual([RETIRED_CONNECT_AGENT_FLAGGED_SENTENCE]);
+  });
+
+  it('THE GAP WAS REAL: the pre-existing guard could not see this surface', () => {
+    // The claim this slice rests on, asserted rather than argued. `SITES`'
+    // fourth member is named "Connect Your Agent" and reads
+    // `lib/mcpConnectContent.ts`; the guide is "Connect an Agent" in
+    // `screens/settings/ConnectAnAgent.tsx`. Near-identical names, different
+    // modules — which is how a whole surface stayed outside every list while
+    // looking covered.
+    expect(SITES.map(([site]) => site)).not.toContain(
+      'Settings → API Access → Connect an Agent (the guide)',
+    );
+    expect(rawSource('lib/mcpConnectContent.ts')).not.toMatch(
+      /the upload route refuses every request outright/,
+    );
+    // And the surface IS in the one list every vocabulary-free ban loops over,
+    // which is the membership that was missing (§7 records the same shape).
+    expect(ALL_BAN_SURFACES.map(([site]) => site)).toContain(
+      'Settings → API Access → Connect an Agent (the guide)',
+    );
+  });
+
+  it('the scoped replacement is the in-repo form, not a newly coined one', () => {
+    // §3b's lesson: a guard that fires on true copy teaches the next reader to
+    // weaken it. The inverse also holds — a correction that coins its own
+    // phrasing is a seventh wording for one claim. This pins that the guide now
+    // uses the same words two other modules already use.
+    const shared = /the upload route refuses every request outright/;
+    expect(connectAnAgentGuide()).toMatch(shared);
+    expect(rawSource('lib/transcriptCaptureContent.ts')).toMatch(
+      /upload route refuses every request outright/,
+    );
+    expect(rawSource('lib/settingsContent.ts')).toMatch(shared);
+  });
+});
+
+// --- §8c the §7 enumeration, RE-MEASURED at seven surfaces ------------------
+//
+// §7's comment records a measured table over SIX surfaces and concludes the
+// unscoped ban must not be widened to all of them. Adding a seventh member to
+// `ALL_BAN_SURFACES` makes that table stale, and a stale enumeration in this
+// file is the exact defect `CLAUDE.md` §15 records being published four times.
+// So the table is a TEST rather than a comment: it fails if the split moves,
+// instead of quietly describing a tree that has changed.
+describe('R1b §8c · which surfaces the unscoped ban would fire on, measured', () => {
+  it('fires on exactly the four SITES members, and on none of the other three', () => {
+    // `cleanup()` BETWEEN accessors, not between tests. Four of the seven
+    // render, and `afterEach` is too late: two mounted surfaces in one document
+    // trip `screen.getByRole`/`getByText`'s "multiple elements found" as a
+    // false failure, which is the harness artefact §4b documents for
+    // `policyTabText` and the reason it loops one-test-per-site.
+    const firing: string[] = [];
+    for (const [site, text] of ALL_BAN_SURFACES) {
+      const rendered = text();
+      cleanup();
+      if (unscopedUploadRefusals(rendered).length > 0) firing.push(site);
+    }
+    expect(
+      firing,
+      'the set of surfaces the unscoped-refusal ban fires on has moved. If a SITES ' +
+        'member left the set, check it still states the four-part claim (§2). If a ' +
+        'NON-SITES member entered it, that surface has shipped an unscoped refusal ' +
+        'and needs scoping, not a narrower ban: §3b records that widening the loop ' +
+        'to fire on the four correct-copy SITES is worse than the gap it closes.',
+    ).toEqual(SITES.map(([site]) => site));
   });
 });
