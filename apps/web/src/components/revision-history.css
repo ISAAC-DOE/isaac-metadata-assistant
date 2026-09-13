@@ -309,3 +309,26 @@
   line-height: var(--line-height-normal);
   color: var(--text-muted);
 }
+
+/*
+ * THE SERVER'S SCOPE IDENTIFIER MUST BE ABLE TO WRAP.
+ *
+ * `export_unit_ids_drafts_and_conflict_decisions` is a 45-character unbroken
+ * token in a monospace face, and an unbroken token does not wrap: it forced
+ * `div.screen-card` into a sideways scroller at 390 / 375 / 320 px. Measured by
+ * `e2e/specs/layout-widths.spec.ts`, which named the culprit exactly —
+ * `span.mono < dd.revhist-working-value`, right edge 406 vs 379, scrollWidth 395
+ * vs clientWidth 368 — on `export-readiness` and `export-readiness-done`.
+ *
+ * FIXED RATHER THAN BASELINED. `e2e/layout-baseline.ts` exists to record known
+ * debt, and adding an entry would have made the suite green while leaving a
+ * scientist on a phone reading sideways. `overflow-wrap: anywhere` is the idiom
+ * this repository already uses for exactly this shape (`.settings-jump-btn`).
+ *
+ * Scoped to its own class rather than applied to `.mono`, because most `.mono`
+ * content in this app is a digest or an id where a mid-token break would make
+ * two different values look alike.
+ */
+.revhist-working-scope {
+  overflow-wrap: anywhere;
+}

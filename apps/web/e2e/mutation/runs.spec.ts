@@ -667,7 +667,15 @@ test.describe('R5 · the Run workspace', () => {
      * so the second edit still has to travel via the settle handler — which is exactly
      * what this spec is about, unchanged.
      */
-    await page.getByRole('link', { name: 'Graph' }).click();
+    /*
+     * ~~clicked the sidebar's `Graph` link~~ — the Graph left the record's
+     * workspace list on 2026-09-13 (`EVG-002`/`DEC-04`); `?view=graph` still
+     * opens it but nothing in the sidebar links to it. This spec's subject is
+     * LEAVING the Runs workspace and what that does to a held edit, and any
+     * other destination leaves it identically, so the click moves to `Record
+     * Fields` — the one workspace every record always has.
+     */
+    await page.getByRole('link', { name: 'Record Fields' }).click();
     // ATTACHED *AND* HIDDEN, and both halves are needed. Playwright reports a
     // non-existent element as hidden, so `toBeHidden()` alone passes whether the card
     // is hidden (the fixed behaviour) or unmounted (the defect) — it stopped

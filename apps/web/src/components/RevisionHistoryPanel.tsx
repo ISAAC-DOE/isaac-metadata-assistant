@@ -238,7 +238,7 @@ function SubmittedVersusWorking({ history }: { history: ApiRevisionHistory }) {
         <div className="revhist-working-row">
           <dt className="revhist-working-label">What a submission covers</dt>
           <dd className="revhist-working-value">
-            <span className="mono">{history.signature_scope}</span>
+            <span className="mono revhist-working-scope">{history.signature_scope}</span>
           </dd>
         </div>
       </dl>
