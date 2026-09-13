@@ -819,12 +819,12 @@ work, and nothing about it has been decided. `MCP-020`/`MCP-021`/`SEC-001` stay 
 | ID | Objective | Status | Depends |
 |---|---|---|---|
 | **HIST-000** | **Issue the BL15-2 data request.** This is the phase's first deliverable and its gate. | **PLANNED — do this immediately on approval; it costs nothing and unblocks everything else** | — |
-| HIST-001 | Import Session + Source Bundle + manifest, reusing `assets[]` pointer-only (`"NO BYTES, EVER"`) | PLANNED | CAP-003 |
+| HIST-001 | Import Session + Source Bundle + manifest, reusing `assets[]` pointer-only (`"NO BYTES, EVER"`) | **DONE 2026-09-13** — `apps/api/isaac_api/historical_import.py` + nine HTTP operations (78 → 87). Two source kinds: a POINTER this build records and does not open, and the committed example sources it reads because they ship inside the application. **No digest is ever computed**, not even for a file it does read. NO migration, NO new table, `db_write.OWNED_TABLES` unchanged — a session is one atomically-written JSON file under `_imports/`, which `workspace._experiment_dirs` skips unconditionally, so no experiment read can reach it. **It is therefore NOT durable, and the server says so on every response** (`durability`); DEC-24's write-`0006` route was deliberately NOT taken, because a working area that says it is a working area does not need one | CAP-003 |
 | HIST-002 | First-wave deterministic parsers (filenames, directories, spreadsheet cells — needs `openpyxl`, not currently a dependency — CSV, explicit key/value) | **BLOCKED on DEC-13** | HIST-000 |
 | BL15-001 | `.mac` parser | **BLOCKED — no representative file exists anywhere in reach.** §5 forbids designing against assumptions | HIST-000 |
 | HIST-003 | Semantic reconstruction into the **shared** Phase-D pipeline | BLOCKED on DEC-13 | HIST-002 |
-| HIST-004 | Import review surface. **Banned pattern: Upload → Spinner → Mysterious JSON** | PLANNED (shell) | HIST-001 |
-| HIST-005 | Merge into the ordinary Library | PLANNED | HIST-004, LIB-003 |
+| HIST-004 | Import review surface. **Banned pattern: Upload → Spinner → Mysterious JSON** | **DONE 2026-09-13 (shell)** — `apps/web/src/screens/HistoricalImport.tsx` at `/imports`, the SECOND primary destination. All three halves of the banned pattern refused and asserted: no file input (proven over the DOM, over the source with comments stripped, and over every request made — plus a control proving that predicate fires), no control for the one unbuilt step (not even a disabled one), and all NINE things the plan requires a scientist to see, each with its own test. 37 frontend tests, six mutation-verified. **Zero a11y baseline cells added** — `imports` passes `a11y-axe` and `structure` at all five viewports on darwin | HIST-001 |
+| HIST-005 | Merge into the ordinary Library | **PLANNED — and it is now the workflow's ONE unbuilt step, named on the surface rather than implied.** `historical_import.UNBUILT_STEP` is `add_to_experiments`; the review screen renders the server's own `UNBUILT_STEP_DISCLOSURE` beside it and **no control at all** — not a disabled one, which would say the act exists and is temporarily unavailable (`test_...offers_NO_control` is mutation-verified against exactly that). What a scientist can do instead is send each field candidate to review on an experiment they create themselves, which is `HIST-001`'s ninth operation. **Two structural candidates are therefore refused by name** with `candidate_not_proposable`: a proposal is about one value at one official field path, so "an experiment exists here" has no proposal shape | HIST-004, LIB-003 |
 | HIST-006 | Gold-standard evaluation; the headline metric is **fabricated-value rate**, not fields-filled. Every metric must name the artifact required to compute it | BLOCKED on DEC-13 | HIST-005 |
 | SRC-001 | **Already satisfied — do not rebuild.** Multi-source disagreement for a value in the draft is representable **today**: `evidence_classify.asserted_values` → `conflicting_evidence` at ≥2 values; `conflict_resolution` stores `competing_values` + set-digest with `deferred` first-class; `build_sidecar` copies the **whole** evidence list, so the record carries one value and the sidecar preserves the disagreement | CONFIRMED CURRENT | — |
 
@@ -853,7 +853,7 @@ rendered viewport does not follow)** · **`QA-008` real-microphone + OS-indicato
 | `REV-001` | **Revision-state modelling** per **DEC-21**: a submitted snapshot is immutable; the workspace may hold `Current Working Changes` for the next snapshot. Expose revision history. **Never describe a submitted revision as mutable.** | C | PLANNED | UX-010 |
 | `REV-002` | **Revision-state UI**: visibly distinguish **`Last Submitted Revision`** from **`Current Working Changes`**, show the path to the next submission, and **surface the rename trap rather than hiding it** — a rename does not move `content_signature`, so submit → rename → resubmit yields `409 already_submitted`. | C | PLANNED | REV-001 |
 | `MCP-019` | **Local/synthetic end-to-end MCP proof** — `MCP client → create note → proposal/candidate → change-feed event → website Review → accept/edit/reject under an explicitly-enabled trusted TEST identity → deterministic validation`. Also prove: duplicate/retry protection, payload/read bounds enforced, provenance identifies the source channel, ambiguity stays unresolved when appropriate, **MCP cannot final Submit**, and **no production provider, account or data is needed**. **Must be green BEFORE the operator is asked to mount the production endpoint.** | E | PLANNED | MCP-001, MCP-002, CAP-004 |
-| `HIST-003a` | **Provider-neutral semantic-reconstruction contract**, exercised with a **deterministic fake** over synthetic/authorized fixtures. Prove semantic output enters the shared proposal/ambiguity/conflict Review pipeline and **cannot become record truth automatically**. | G | **PLANNED — UNBLOCKED** | HIST-001 |
+| `HIST-003a` | **Provider-neutral semantic-reconstruction contract**, exercised with a **deterministic fake** over synthetic/authorized fixtures. Prove semantic output enters the shared proposal/ambiguity/conflict Review pipeline and **cannot become record truth automatically**. | G | **DONE 2026-09-13.** `ReconstructionProvider` is a Protocol given no network client, no credential and no model handle; the only implementation is `DeterministicFakeReconstructionProvider`. **The chain is proven END TO END over HTTP with nothing stubbed** — `test_the_whole_chain_from_a_parsed_source_to_a_validated_draft` walks parsed evidence → candidate → the shared proposal model → scientist review → the ISAAC draft → `isaac_records.draft_validator.validate_draft` with `report.errors == []`. **And the other half of the claim is a separate test:** acceptance answers `409 human_actor_required` in every default-configured deployment, so in anything shipped the chain STOPS at the open proposal. The mapping rule is verbatim-path-only — no alias table, no case folding — with a mutation control feeding it `System.Technique`/` system.technique`/`system_technique` and asserting ZERO candidates | HIST-001 |
 | `HIST-003b` | **Real BL15-2 Claude/model reconstruction.** | G | **BLOCKED** | **EXT-10** (corpus) **AND** institutional provider/data-egress approval (**DEC-22**) |
 
 ### Two rules the revision hardened, recorded here because they reverse the plan's own advice
@@ -877,7 +877,7 @@ Recorded here so the ledger and the plan cannot disagree. Full rationale in the 
 
 | ID | Objective | Phase | Status | Depends / blocked |
 |---|---|---|---|---|
-| `UX-016` | Create-vs-import fork; Historical Import empty state; first-run discovery of Pillar 2. **Found in Pass 3:** with Historical Import promoted to one of three top-level destinations, its empty state becomes a first-run surface, and nothing handled a scientist with zero experiments who wants to import rather than create | B/C | PLANNED | LIB-002 |
+| `UX-016` | Create-vs-import fork; Historical Import empty state; first-run discovery of Pillar 2. **Found in Pass 3:** with Historical Import promoted to one of three top-level destinations, its empty state becomes a first-run surface, and nothing handled a scientist with zero experiments who wants to import rather than create | B/C | **IMPORT HALF DONE 2026-09-13** — a fourth peer card in the Experiments empty state as a real `<Link>`, plus the Historical Import destination's own empty state. `emptyExperimentsBody` corrected in place with the old sentence struck: `ExperimentsHome`'s own comment said it "does not promise import" because "there is still no import path", which was TRUE when written and stale by omission the moment one shipped. **It still promises no upload** — a test asserts the word appears in neither string. The CREATE-VS-IMPORT FORK as a designed choice at the moment of creation is NOT done | LIB-002 |
 | `UX-017` | **PARTLY DONE 2026-09-13 (`89d9f07c`): removed from primary navigation and linked from `Settings → Overview`. The LIBRARY half — merging `My Stats` into the Experiment Library — is NOT done and belongs to the Library slice.** Statistics disposition: **REMOVE-FROM-PRIMARY** — merge `My Stats` into the Library, move `General ISAAC` under Settings. **Found in Pass 2:** it is the densest screen in the app (3 820 px, 422 visible text elements) and one of five top-level slots, and its disposition was implied but never stated | C | PLANNED | UX-010 |
 | `CAP-009` | Live-capture utterance evaluation suite — seven named cases (plain value · **"around 425, maybe 430"** · correction · observation · app command · inherited value · scientific doubt), each with its expected outcome. **Found in Pass 6** as an omission against the directive | D | PLANNED | CAP-004 |
 | `BL15-002` | Beamline Profile abstraction: filename patterns, directory and run-number conventions, column aliases, terminology, `.mac` conventions, stable facility identifiers, legacy vocabulary aliases. **CONSTRAINT: a Beamline Profile must not become an unofficial validator** — its role is repeatable source interpretation, and **only conventions supported by actual corpus evidence** may be encoded. **Found in Pass 6** as an omission against the directive | G | **BLOCKED** | **DEC-13 / EXT-10** |
@@ -1578,6 +1578,45 @@ record created for manual measurement must be discarded or the backend restarted
 `ISAAC_UI_WORKSPACE` first.
 
 ### THE PRINCIPAL REMAINING **EXECUTABLE** APPLICATION-SIDE WORK — Historical Import's shell
+
+> ***BUILT 2026-09-13, AND THIS WHOLE SECTION IS KEPT RATHER THAN DELETED because it is the
+> BRIEF the work was built from, and because three of its claims were measured and one of them
+> was WRONG.*** `HIST-001`, `HIST-004` (shell) and `HIST-003a` are **DONE** — see their rows in
+> the `PHASE G` table above and in the revision table below for what each one actually shipped.
+> Branch `feat/v2-hist`; four commits.
+>
+> **WHAT THIS SECTION GOT RIGHT, and it is most of it.** The `assets[]` pointer-only discipline
+> was the right primitive and is reused. The proposal pipeline was the right destination. The
+> honesty trap was real and inherited exactly as described: `upload-claim-parity.test.tsx`
+> genuinely does ban the absolute phrasings, the surface genuinely had to say what it cannot do,
+> and the answer genuinely had to be PER SOURCE rather than in a banner — because an example
+> source IS read and a reference is NOT, so one banner would be false for half the manifest.
+>
+> **THE ONE CLAIM THAT WAS WRONG, measured rather than argued.** This section said the shell would
+> have to decide whether it "can accept a file at all". It cannot and does not — but the binding
+> constraint is not `POST /api/uploads`'s 403, which was the reason given. It is that
+> `upload-claim-parity.test.tsx` asserts **EXACTLY TWO** non-test files under `apps/web/src`
+> declare `type="file"` and **names both**, so a third anywhere fails CI. That was measured before
+> a line was written, and it is a stronger constraint than the one this section named: the 403
+> could in principle be changed by a decision, and the guard cannot be satisfied by one.
+>
+> **AND ONE THING THIS SECTION DID NOT ANTICIPATE.** A proposal REQUIRES a `note_id`, so the
+> candidate-to-proposal hop must mint a note — and **none of the six existing `NOTE_SOURCES`
+> members was true of it**: `typed_note` claims a person typed it, `csv_column` claims a column
+> nothing recognised, `file_listing_line` claims a listing line that matched no asset rule,
+> `extraction_residue` claims a label the extractor refused to guess at, and
+> `transcript`/`connected_agent` are a different channel entirely. A seventh member
+> (`historical_source_line`, mapped to `ORIGIN_FILE` and deliberately **not** `assistant`) was
+> added on exactly the argument `connected_agent` itself rests on. Blast radius measured and
+> closed in one commit: five files plus a 6 → 7 count.
+>
+> **STILL BLOCKED, unchanged, and named rather than implied:** `BL15-001` (`.mac`), `HIST-002`
+> (spreadsheets/CSV/filenames — `openpyxl` is still not a dependency and was not added),
+> `BL15-002` (the Beamline Profile's conventions — the interface ships encoding **zero**, proven
+> BEHAVIOURALLY by feeding it a profile whose alias WOULD map the fixture's unmapped key and
+> getting a byte-identical reconstruction), `HIST-003b`, `HIST-005` (Add to Experiments — the
+> workflow's sixth step, which the surface renders as unbuilt with the server's own reason and
+> **no control at all**), and `HIST-006`. `HIST-000`'s data request is still prepared and unsent.
 
 **Stated plainly because §38 requires it: safely executable application-side work REMAINS, so this
 programme is not complete, and the reason is the session's agent budget rather than a blocker.**
