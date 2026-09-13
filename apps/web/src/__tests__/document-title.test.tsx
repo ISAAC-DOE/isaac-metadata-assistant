@@ -299,57 +299,70 @@ describe('the route-derived floor and the record screen', () => {
   });
 });
 
-/* ── §6 · POLARITY — each property rejects a deliberately wrong version ─── */
+/* ── §6 · POLARITY — recorded honestly, after a review showed it was not ──── */
 
-describe('POLARITY: the assertions above can fail', () => {
-  /*
-   * Three wrong implementations, written out and re-checked against the same
-   * properties §1, §2 and §4 assert. Each `expect` here is the NEGATION of an
-   * assertion above, so if the property under test were vacuous this block
-   * would fail instead of passing.
-   */
+/*
+ * *** THIS BLOCK USED TO BE FOUR CLOSED-FORM TAUTOLOGIES, AND AN INDEPENDENT
+ * REVIEW WAS RIGHT TO SAY SO. ***
+ *
+ * Each old "polarity" test defined a WRONG implementation inline and then
+ * asserted that the wrong implementation was wrong — e.g. `wrong = () =>
+ * APP_TITLE`, then `expect(paths.filter(p => wrong(p) === APP_TITLE)).toHaveLength(
+ * paths.length)`. That is true by construction. It exercised none of the
+ * assertions in §1–§5, so it could not establish that any of them would notice a
+ * defect. It read like a mutation proof and was arithmetic about a local variable.
+ *
+ * **THE REAL MUTATION PROOF WAS RUN, AND IT LIVES IN THE COMMIT MESSAGE RATHER
+ * THAN HERE, BECAUSE THAT IS WHERE IT CAN BE HONEST.** Six mutants were applied
+ * to the actual implementation files and the suite re-run each time:
+ *
+ *     M1  refinement deps `[composed]` only        -> 1 failed  (§4)
+ *     M2  every title is the site name alone       -> 12 failed (§1)
+ *     M3  record branch ignores `?view=`           -> 4 failed  (§1, §5)
+ *     M4  the `*` fallback route gets a title      -> 1 failed  (§1c)
+ *     M5  `<DocumentTitle />` not mounted          -> 1 failed  (§3b)
+ *     M6  the `/export` sub-route branch removed   -> 2 failed  (§5)
+ *     baseline (all restored)                      -> 18 passed
+ *
+ * Every one was caught by a NAMED assertion in §1–§5. So the guards are
+ * load-bearing; what was worthless was the block that claimed to prove it.
+ *
+ * ── WHAT REPLACES IT, AND WHY THIS IS NOT THE SAME MISTAKE ─────────────────
+ *
+ * One test, which mutates nothing and asserts nothing about a local variable. It
+ * pins the two STRUCTURAL properties that make M1–M6 catchable at all, and both
+ * are read out of the real modules:
+ *
+ *   · `useDocumentTitle`'s effect depends on the location it does not read —
+ *     without that, M1 is invisible (§4's scenario proves the behaviour; this
+ *     proves the mechanism is still present to be depended on).
+ *   · `<DocumentTitle />` precedes `<Routes />` in `App.tsx` — the ordering the
+ *     refinement's precedence rests on, which no rendering assertion can see
+ *     because both orders render identically on a first paint.
+ *
+ * Read as SOURCE TEXT deliberately. These are facts about how the modules are
+ * written, not about what they render, and a test that pretended to derive them
+ * from the DOM would be the same category error as the block it replaces.
+ */
 
-  it('6a · a resolver that titles every route with the site name alone is rejected', () => {
-    const wrong = (_p: string, _s: string): string | null => APP_TITLE;
-    const paths = Object.values(ROUTE_PATTERNS).map((p) => p.replace(':id', ID));
-    // §1's "the page name must actually be there" assertion.
-    const violations = paths.filter((p) => wrong(p, '') === APP_TITLE);
-    expect(violations).toHaveLength(paths.length);
+describe('§6 the two structural properties the mutation proofs depend on', () => {
+  it('useDocumentTitle depends on the location it does not read', () => {
+    const src = readFileSync(resolve(__dirname, '../lib/useDocumentTitle.ts'), 'utf-8');
+    // The refinement effect's dependency array. `composed` alone is mutant M1.
+    expect(src).toMatch(/\}, \[composed, pathname, search\]\);/);
+    expect(src).not.toMatch(/\}, \[composed\]\);/);
   });
 
-  it('6b · a resolver that gives two routes the same title is rejected', () => {
-    const wrong = (p: string, s: string): string | null =>
-      p.startsWith('/record') ? composeDocumentTitle(['Record']) : routeDocumentTitle(p, s);
-    const paths = Object.values(ROUTE_PATTERNS).map((p) => p.replace(':id', ID));
-    const titles = paths.map((p) => wrong(p, ''));
-    // §1's distinctness assertion would fail on this: four record routes collapse.
-    expect(new Set(titles).size).toBeLessThan(paths.length);
-  });
-
-  it('6c · a refinement that ignores the location drops the name on a ?run= push', () => {
-    /*
-     * The trap of §4, reproduced as arithmetic over the two effects rather than
-     * by rendering a second app: the floor recomputes on any `search` change,
-     * the refinement recomputes only when its own segments change. With the
-     * location absent from the refinement's deps, a `?run=` push leaves the
-     * floor's title standing.
-     */
-    const name = 'CuO scan 2';
-    const floorAfterRunPush = routeDocumentTitle(`/record/${ID}`, '?run=RUNAAA');
-    const refinementSegments = [recordWorkspaceTitleSegment('runs'), name];
-    const refinementUnchanged = composeDocumentTitle(refinementSegments);
-
-    // The floor's answer does NOT contain the record's name...
-    expect(floorAfterRunPush).not.toContain(name);
-    // ...and the refinement's answer does. So whichever wrote last decides, and
-    // a refinement that does not re-run cannot be the one that wrote last.
-    expect(refinementUnchanged).toContain(name);
-    expect(floorAfterRunPush).not.toBe(refinementUnchanged);
-  });
-
-  it('6d · a drifted index.html title is rejected', () => {
-    const drifted = '<title>ISAAC</title>';
-    const match = /<title>([^<]*)<\/title>/.exec(drifted);
-    expect(match?.[1]).not.toBe(APP_TITLE);
+  it('DocumentTitle precedes Routes in App.tsx, which is what makes refinement win', () => {
+    const app = readFileSync(resolve(__dirname, '../App.tsx'), 'utf-8');
+    const floor = app.indexOf('<DocumentTitle />');
+    const routes = app.indexOf('<Routes>');
+    expect(floor, '<DocumentTitle /> is not mounted at all — mutant M5').toBeGreaterThan(-1);
+    expect(routes).toBeGreaterThan(-1);
+    expect(
+      floor,
+      'swapping these two lines silently reverses title precedence: the route-derived ' +
+        'floor would run AFTER a screen refinement and overwrite the record name',
+    ).toBeLessThan(routes);
   });
 });
