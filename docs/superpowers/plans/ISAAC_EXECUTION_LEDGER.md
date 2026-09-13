@@ -2522,13 +2522,37 @@ added, so the class is still being grown, not merely inherited.
   i.e. `role=generic`, where ARIA prohibits naming. 113 nodes says the pattern is systematic rather
   than a one-off, and every one is a place where an author wrote an accessible name that may be
   announced to nobody. **Which nodes, and whether each is a real loss, is NOT measured here.**
-* **`color-contrast` (60).** axe answers `incomplete` for contrast when it **cannot compute the
-  background** — typically a gradient, an image, or **transparency**. That is directly relevant to
+* **`color-contrast` (60).** ~~axe answers `incomplete` for contrast when it cannot compute the
+  background — typically a gradient, an image, or **transparency**. That is directly relevant to
   `A11Y-01`: this session closed one ancestor-`opacity` composite and **two remain**, and a
   composited background is exactly the case axe declines to decide. **So the recorded 857 violating
   nodes may UNDERSTATE the contrast debt**, with the remainder sitting in a bucket nothing reads.
-  That is a hypothesis with a clear test (intersect the 60 against the two remaining opacity sites),
-  and it is not yet run.
+  That is a hypothesis with a clear test (intersect the 60 against the two remaining opacity
+  sites), and it is not yet run.~~
+
+  *** THE TEST WAS RUN AND THE HYPOTHESIS IS REFUTED. Struck rather than deleted, because a
+  plausible unverified worry about the contrast baseline is exactly the kind of claim a future
+  session would act on. *** Second probe, same 32 surfaces, resolving each node's ancestors in the
+  live page:
+
+  ```
+  QA023B_TOTAL_CONTRAST_INCOMPLETE=60
+  QA023B_INSIDE_REMAINING_OPACITY_SITES=0
+  ```
+
+  **Not one** of the 60 sits inside `.exp-row.done` or `.advisory-nongating`. axe's own reasons say
+  why, and they are a different class entirely: **37** *"background color could not be determined
+  because element contains an image node"* (SVG charts and the graph canvases — which is also why
+  `evidence`, `memory-graph`, `record-graph` and `evidence-graph` dominate the per-surface
+  distribution), **9** *"partially overlaps other elements"*, **5** *"overlapped by another
+  element"*, **5** *"content is too short to determine if it is actual text content"*. Several
+  targets are `aria-hidden="true"` counts, where contrast is a visual question and not an
+  assistive-technology one at all.
+
+  **SO `A11Y-01` IS NOT UNDERSTATED BY THIS, AND THE 857 STANDS.** The remaining two
+  ancestor-`opacity` composites are fully accounted for in the violation baseline, exactly as
+  recorded. The contrast half of `QA-023` is a charts-and-overlap class, which is real but is not
+  palette debt and must not be merged into that argument.
 
 **THE HONEST LIMIT ON ALL OF THIS: `incomplete` means "axe could not determine", NOT "defect".**
 Some of the 173 will be benign. The finding is not "there are 173 defects" — it is that **173
