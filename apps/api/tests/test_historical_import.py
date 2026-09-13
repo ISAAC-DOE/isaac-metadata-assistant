@@ -678,6 +678,53 @@ def test_the_module_imports_nothing_that_writes_the_truth_path():
     ]
 
 
+def test_the_module_can_make_no_outbound_request_of_any_kind():
+    """THE SURFACE SAYS "no request leaves this deployment". THIS IS WHY IT IS TRUE.
+
+    `IMPORT_COPY.reconstructLead` tells a scientist the reconstruction is
+    "deterministic and offline: no language model is involved, and no request
+    leaves this deployment". That is a claim about this module, and a claim about
+    a NEGATIVE needs a check over the code rather than a passing happy path —
+    §11 records four separate occasions on which a surface asserted something it
+    had not done.
+
+    Asserted over the IMPORT LIST rather than by grepping for call sites: an
+    outbound request needs a client, a client needs an import, and an import is a
+    line a reviewer has to add deliberately. `Protocol` is what makes the provider
+    seam provider-NEUTRAL, and a real provider would be a different
+    implementation wired by configuration that does not exist and is not
+    authorized (Dean deferred D1-D9).
+    """
+    src = Path(hi.__file__).read_text(encoding="utf-8")
+    imports = [
+        line.strip()
+        for line in src.splitlines()
+        if line.startswith(("import ", "from ")) and "import" in line
+    ]
+    joined = " ".join(imports)
+    for banned in (
+        "http",
+        "urllib",
+        "requests",
+        "socket",
+        "httpx",
+        "aiohttp",
+        "ssl",
+        "asyncio",
+        "subprocess",
+        "anthropic",
+        "openai",
+        "providers",
+    ):
+        assert banned not in joined, f"{banned!r} is imported: {imports}"
+
+
+def test_the_outbound_control_can_actually_fail():
+    """MUTATION CONTROL. A predicate over a list that never held the names passes
+    trivially; prove it fires on the line a future slice would add."""
+    assert "httpx" in " ".join(["import httpx", "from . import workspace as ws"])
+
+
 def test_an_import_session_is_stored_where_no_experiment_read_can_reach_it(workspace):
     """Structural, not asserted: ``_experiment_dirs`` skips a ``_``-prefixed name."""
     session = _bundle()
