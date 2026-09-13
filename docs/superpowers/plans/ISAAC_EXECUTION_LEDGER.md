@@ -33,7 +33,20 @@ BRANCH:                **`main`** at `654e43dd`, plus FOUR live working branches
                        `654e43dd` — so every lane merges cleanly into `main`).
                        ~~docs/product-scope-v2-planning — UNPUSHED. `main` is UNTOUCHED.~~ — both
                        halves superseded: it was pushed, PR'd as #248, and merged.
-HEAD:                  cb0494a2  — **ALL FOUR LANES INTEGRATED.** 62 commits on the branch
+HEAD:                  **`1017680f` — SECOND CONTINUATION. 46 commits on `main..HEAD`. FOUR LANES
+                       (§5 scientific · Experiment Library · Historical Import · the orchestrator's
+                       own) INTEGRATED AND BOTH INDEPENDENTLY REVIEWED, every finding remediated.**
+                       `main` = `origin/main` = `654e43dd` = **v0.0.233** and has NOT moved since
+                       this branch started, so the merge-base IS `origin/main` and exact-head CI
+                       describes the merge result — stated because §10's merge-result re-run is
+                       normally mandatory here.
+                       *** THE ONE THING A FUTURE SESSION MUST READ FIRST: the §5 preamble/bracket
+                       bypass is PINNED, NOT CLOSED. It is the next session's first task, the
+                       reproduction is in
+                       `test_the_pre_label_gate_IS_BYPASSED_by_a_preamble_or_a_bracket_RESIDUE`,
+                       and that test FAILS when the class is closed — which is the signal to
+                       delete it. ***
+                       ~~cb0494a2 — **ALL FOUR LANES INTEGRATED.** 62 commits on the branch
                        (`git rev-list --count main..HEAD`). Lanes, in merge order:
                        `4d6c74d9` §5 label-overreach + ramp semantics (committed, not merged —
                        it worked in the main tree); `4e50df81` merge of `feat/experiment-library`
@@ -258,7 +271,19 @@ SUBORDINATE AGENTS:    *** THIS IS A NEW TOP-LEVEL SESSION, SO THE BUDGET IS FRE
                        Remediation run: 3 of 5 implementation slots in use (all `opus`, all three
                        tasks being truth-adjacent, honesty-critical or test-correctness work);
                        2 implementation slots free; both Impeccable slots free.
-BRANCH VERDICT:        *** MERGE-READY on the four original findings; the branch is NOT PUSHED and
+BRANCH VERDICT (2026-09-13, SECOND continuation): *** TWO INDEPENDENT REVIEWS, BOTH REMEDIATED.
+                       Review 1 returned DO NOT MERGE on the §5 lane and was right; review 2
+                       returned no Criticals and MERGE-after-fixes on both its bodies. Every
+                       finding was REPRODUCED before being acted on, and in the Critical's case the
+                       reproduction CHANGED THE REMEDY — the bypass is pre-existing, so the lane is
+                       a strict improvement that over-claimed, and the defect in range was the
+                       CLAIM rather than the code.
+                       Three of the findings were defects in the ORCHESTRATOR'S OWN work, all of
+                       the same shape this session spent the day documenting: a fixture that cannot
+                       produce the input its assertion exists for. Disclosed, not absorbed.
+                       **The remediation itself is NOT independently reviewed — the 5-agent budget
+                       is spent.** ***
+                       ~~*** MERGE-READY on the four original findings; the branch is NOT PUSHED and
                        has had NO independent review of its LAST FOUR commits. ***
                        The earlier review's 2 Critical + 2 Important are remediated, and the
                        residual C-1 the orchestrator found afterwards is remediated too — verified
@@ -392,7 +417,11 @@ A SIXTH E2E TRAP, found here because it produced a false regression signal: the 
   reads exactly like a read-only regression and was a missing server. Two passing suites say
   NOTHING about whether :8000 is up. Also: `E2E_UVICORN=<repo>/.venv/bin/uvicorn` is required for
   the mutation and trusted configs on this host, or they exit 127 before collecting a test.
-CURRENT PHASE:         Phase 0 COMPLETE · PHASE A implemented, UNDER ACTIVE REMEDIATION
+CURRENT PHASE:         Phase 0 COMPLETE · Phase A COMPLETE · Phase B (Library) COMPLETE ·
+                       Phase E (MCP app-side) COMPLETE and measured · **Phase G (Historical
+                       Import) SHELL COMPLETE**, its parsers BLOCKED on `EXT-10` (the absent
+                       corpus) and NOT on any pending human answer.
+                       ~~Phase 0 COMPLETE · PHASE A implemented, UNDER ACTIVE REMEDIATION~~
 
 REMEDIATION IN FLIGHT (2026-09-12, all four findings re-derived FIRST-HAND before dispatch — the
                        C-1 table, the C-2 165 MB measurement, the I-1 heading inversion and both
