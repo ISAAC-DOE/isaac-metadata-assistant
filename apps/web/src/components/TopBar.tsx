@@ -280,7 +280,40 @@ function WorkspaceChip() {
   // while the chip describes the workspace the reader is currently looking at.
   const inExampleSession = useTutorialState().sessionId !== null;
   return (
-    <span className="mode-chip" aria-label={chipAriaLabel(health, inExampleSession)}>
+    /*
+     * `role="note"` — QA-023. THE `aria-label` BELOW WAS ON A BARE `<span>`, WHICH
+     * MAPS TO `role=generic`, AND ARIA **PROHIBITS** NAMING A GENERIC.
+     *
+     * Measured with axe 4.12.1 against this element's exact shipped markup:
+     *
+     *   bare span   violations=0  incomplete=[aria-prohibited-attr, color-contrast]
+     *   role=note   violations=0  incomplete=[color-contrast]
+     *
+     * WHAT THIS DOES AND DOES NOT CLAIM. It moves a ~90-word GOVERNANCE disclosure
+     * from an attribute ARIA says must not be there — where whether it is announced
+     * depends on user-agent leniency — onto a role that permits naming, so the name
+     * is conformant rather than tolerated. **It is NOT a claim that the disclosure
+     * was previously inaudible to every screen reader; that was not tested, and a
+     * real-AT check is a human gate this environment cannot perform.** The honest
+     * statement is that it was prohibited and is now permitted.
+     *
+     * WHY `note` AND NOT THE ALTERNATIVES, all four measured and all four clearing
+     * the prohibition equally — so the choice is made on SEMANTICS, not on axe:
+     *   · `status` makes it a LIVE REGION. The chip is driven by polled
+     *     `/api/health`, so every poll that changed a value would re-announce ninety
+     *     words of governance prose. Actively worse than the defect.
+     *   · `img` would treat the chip as a graphic and SUPPRESS its inner text.
+     *   · `group` asserts a set of related widgets; there are none.
+     *   · `note` is ARIA's "parenthetic or ancillary content", permits naming, is
+     *     not a live region, and leaves the visible word readable. That is what this
+     *     chip is.
+     *
+     * IT MOVES NO ACCESSIBILITY BASELINE CELL, which is why it can ship beside a
+     * Linux round-trip already in flight: `e2e/helpers/axe.ts` reads only
+     * `results.violations`, and violations go 0 -> 0. The `incomplete` bucket it
+     * clears is the one nothing reads — see `QA-023`.
+     */
+    <span className="mode-chip" role="note" aria-label={chipAriaLabel(health, inExampleSession)}>
       <Shield size={13} strokeWidth={2} aria-hidden="true" />
       {chipText(health, inExampleSession)}
     </span>
