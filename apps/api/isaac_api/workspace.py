@@ -66,6 +66,7 @@ import secrets
 import shutil
 import tempfile
 import threading
+import unicodedata
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -3104,10 +3105,40 @@ def normalize_folder_path(raw: object) -> str:
                 "invalid_folder_segment",
                 "A folder name cannot be “.” or “..”.",
             )
-        if any(ch < " " or ch == "\x7f" for ch in part):
+        # *** THE ORDINAL TEST MISSED TWO WHOLE CATEGORIES, AND THE CLAIM BESIDE IT
+        # WAS THEREFORE FALSE. Found by independent review, 2026-09-13. ***
+        #
+        # `ch < " " or ch == "\x7f"` covers C0 and DEL. Measured against the old
+        # predicate:
+        #
+        #     "a\x01b"    refused   (C0)
+        #     "a\x7fb"    refused   (DEL)
+        #     "a\x85b"    ACCEPTED  <- U+0085 NEL, Unicode category Cc: a control
+        #                              character, so "cannot contain control
+        #                              characters" was simply untrue
+        #     "a\u202eb"  ACCEPTED  <- RIGHT-TO-LEFT OVERRIDE, category Cf
+        #     "a\u200db"  ACCEPTED  <- ZERO WIDTH JOINER, category Cf
+        #
+        # `unicodedata.category` replaces the ordinal comparison, so the rule is now
+        # stated in terms of what it means rather than in terms of an ASCII range
+        # that happens to catch most of it.
+        #
+        # **Cf IS REFUSED TOO, and that is a wider rule than the message promised —
+        # deliberately.** A folder label is rendered back to a scientist in a
+        # breadcrumb and a browse list, and U+202E makes a path DISPLAY as something
+        # other than what it stores: `Cu/2026\u202egpj.evidence` reads as
+        # `Cu/2026evidence.jpg`. This repository's whole posture is that a surface
+        # must not claim something it is not, and a label that renders reversed is
+        # that defect in the data rather than in the copy. Nothing legitimate is
+        # lost: this is an organizational label, not scientific content, and it
+        # reaches no exported record or sidecar.
+        #
+        # The message now names both, so it does not over- or under-promise.
+        if any(unicodedata.category(ch) in {"Cc", "Cf"} for ch in part):
             raise FolderPathRefused(
                 "invalid_folder_segment",
-                "A folder name cannot contain control characters.",
+                "A folder name cannot contain control or invisible formatting "
+                "characters.",
             )
         if len(part) > FOLDER_MAX_SEGMENT_LENGTH:
             raise FolderPathRefused(

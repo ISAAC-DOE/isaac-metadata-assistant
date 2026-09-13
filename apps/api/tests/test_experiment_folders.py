@@ -893,3 +893,77 @@ def test_run_count_is_the_documents_own_runs_and_costs_no_extra_read(seeded):
         f"free: {offenders}. They are supposed to be read out of the experiment "
         "document the list read already loaded."
     )
+
+
+@pytest.mark.parametrize(
+    ("label", "segment"),
+    [
+        ("C0", "a\x01b"),
+        ("DEL", "a\x7fb"),
+        # The two the ORDINAL predicate missed, which is why this test exists.
+        ("C1 NEL U+0085", "a\x85b"),
+        ("RTL override U+202E", "a‮b"),
+        ("ZWJ U+200D", "a‍b"),
+    ],
+)
+def test_control_and_invisible_formatting_characters_are_refused(client, label, segment):
+    """*** FOUND BY INDEPENDENT REVIEW, 2026-09-13: the guard's claim was FALSE for
+    two whole Unicode categories. ***
+
+    The predicate was `ch < " " or ch == "\\x7f"` — C0 plus DEL — beside a message
+    saying "A folder name cannot contain control characters." Measured against it:
+
+        "a\\x01b"    refused   (C0)
+        "a\\x7fb"    refused   (DEL)
+        "a\\x85b"    ACCEPTED  <- U+0085 NEL, Unicode category **Cc**: a control
+                                 character, so the message was simply untrue
+        "a\\u202eb"  ACCEPTED  <- RIGHT-TO-LEFT OVERRIDE, category Cf
+        "a\\u200db"  ACCEPTED  <- ZERO WIDTH JOINER, category Cf
+
+    `unicodedata.category` now decides, so the rule is stated in terms of what it
+    MEANS rather than an ASCII range that happens to catch most of it.
+
+    **Cf IS REFUSED TOO — a wider rule than the old message promised, and the
+    reason is display truthfulness rather than tidiness.** A folder label is
+    rendered back to a scientist in a breadcrumb and a browse list, and U+202E
+    makes a path DISPLAY as something other than what it stores:
+    `Cu/2026\\u202egpj.evidence` reads as `Cu/2026evidence.jpg`. A label that
+    renders as something it is not is this repository's central defect class,
+    located in the data instead of the copy. Nothing legitimate is lost — see the
+    accented-name case in the sibling test, which still passes.
+    """
+    created = _create(client, f"control {label}")
+    detail = client.get(f"/api/experiments/{created['id']}").json()
+    res = client.patch(
+        f"/api/experiments/{created['id']}/folder",
+        json={"folder": segment},
+        headers={"If-Match": f'"{detail["version"]}"'},
+    )
+    assert res.status_code == 422, (label, res.status_code, res.text)
+    body = res.json()
+    assert body["error"] == "invalid_folder_segment", body
+    assert "Nothing was changed." in body["message"], body
+
+    # AND NOTHING WAS STORED — the refusal is asserted over the record, not only
+    # over the response, because "refused" and "refused without writing" are
+    # different claims and only the second is what the message promises.
+    after = client.get(f"/api/experiments/{created['id']}").json()
+    assert after["folder"] == "", after["folder"]
+
+
+def test_a_legitimate_non_ascii_folder_name_is_still_accepted(client):
+    """The other half of the rule above: refusing Cc/Cf must not refuse real names.
+
+    Without this, tightening the predicate to `unicodedata.category(ch) != "Lu"`
+    — or anything else over-broad — would pass every case in the parametrised test
+    above while making the feature useless for anyone not writing in ASCII.
+    """
+    created = _create(client, "accented")
+    detail = client.get(f"/api/experiments/{created['id']}").json()
+    res = client.patch(
+        f"/api/experiments/{created['id']}/folder",
+        json={"folder": "Cú K-edge/2026 café"},
+        headers={"If-Match": f'"{detail["version"]}"'},
+    )
+    assert res.status_code == 200, res.text
+    assert res.json()["folder"] == "Cú K-edge/2026 café"
