@@ -48,9 +48,20 @@ case is recorded in :data:`AMBIGUITY_POLICY`:
   empty ``review_required``, and **430 was lost in silence**: no candidate, no
   clarification, no abstention, no grouping. The text survived as a note, so
   nothing was destroyed; what was lost was the reading, and with it the
-  scientist's chance to accept either value. Two changes were needed, not one —
-  ``finditer`` for a sentence that repeats the LABEL, and a restatement read for a
-  sentence that repeats only the VALUE, which is the form people actually speak.
+  scientist's chance to accept either value. ~~Two changes were needed, not one~~
+  — **THREE, corrected 2026-09-12 by independent review.** ``finditer`` for a
+  sentence that repeats the LABEL, a restatement read for a sentence that repeats
+  only the VALUE (which is the form people actually speak), **and a gate on that
+  restatement read**, which the first two shipped without. Unbounded, the
+  restatement scan read the whole remainder of the segment and proposed a ramp
+  rate, a step size, a pressure, a cryostat setpoint, an END instant and a FUTURE
+  run's instant as alternative values for the labelled field — each with a
+  ``rule`` string asserting the sentence had restated the quantity. **That is
+  strictly worse than the omission it replaced: an omission loses a reading, an
+  assertion invents one**, and §5 forbids the second in terms. The gate is
+  :data:`_HEDGE_BRIDGE`, and the invariant is that a hedging connective from a
+  closed list must sit immediately between the two values with nothing else in
+  the gap.
   Note what is still refused: ``[425, 430]`` is never constructed. That asserts a
   continuous interval nobody stated, and the official schema's only uncertainty
   representation is ``$.descriptors.outputs[].descriptors[].uncertainty``, which
@@ -96,6 +107,8 @@ from .providers.extraction import ORIGIN_TRANSCRIPT, FieldCandidate
 
 __all__ = [
     "AMBIGUITY_POLICY",
+    "MAX_CANDIDATES",
+    "MAX_CANDIDATE_QUOTE_BYTES",
     "MAX_SEGMENTS",
     "OUTCOME_ABSTENTION",
     "OUTCOME_CLARIFICATION",
@@ -111,9 +124,51 @@ __all__ = [
     "RunRef",
     "Segment",
     "TranscriptReading",
+    "TranscriptTooDense",
     "read_transcript",
     "segment_transcript",
 ]
+
+
+class TranscriptTooDense(Exception):
+    """One finalized transcript whose reading would exceed a candidate ceiling.
+
+    **RAISED RATHER THAN REPORTED ON THE READING, AND THAT IS THE WHOLE POINT.**
+    The obvious alternative — return a :class:`TranscriptReading` carrying a
+    ``too_dense`` marker and an empty ``candidates`` tuple — was rejected because a
+    caller that ignores the marker gets an empty list that looks like a complete
+    reading of a transcript that read nothing, which is the silent discard this
+    module exists to refuse, reached through the fix instead of through the defect.
+    A truncated list is worse still. An exception is the one shape a caller cannot
+    accidentally treat as a successful reading, and this route already has the
+    idiom: ``notes.UnsupportedNote`` is raised by the model and becomes a typed
+    ``422`` at the route.
+
+    It carries the EXACT numbers rather than "at least" ones. Both are known
+    exactly before any candidate is constructed, because locating the matches and
+    de-duplicating the values is cheap and building
+    :class:`~.providers.extraction.FieldCandidate` objects is not — see
+    :func:`_segment_readings`.
+    """
+
+    def __init__(
+        self,
+        *,
+        candidates: int,
+        candidate_quote_bytes: int,
+        maximum_candidates: int,
+        maximum_candidate_quote_bytes: int,
+    ) -> None:
+        self.candidates = candidates
+        self.candidate_quote_bytes = candidate_quote_bytes
+        self.maximum_candidates = maximum_candidates
+        self.maximum_candidate_quote_bytes = maximum_candidate_quote_bytes
+        super().__init__(
+            f"this transcript reads {candidates} candidates carrying "
+            f"{candidate_quote_bytes} quoted bytes; the ceilings are "
+            f"{maximum_candidates} candidates and "
+            f"{maximum_candidate_quote_bytes} quoted bytes"
+        )
 
 #: Named on every candidate this module produces. It is NOT
 #: ``deterministic-fake``: that name belongs to the provider seam's test double,
@@ -130,6 +185,62 @@ PRODUCED_BY = "transcript-reader"
 #: "refused, split it" still has every word, while one who is told "captured" does
 #: not.
 MAX_SEGMENTS = 100
+
+#: The largest number of candidates one finalized transcript may read.
+#:
+#: WHY A COUNT CEILING EXISTS IN THE READER AT ALL. ``MAX_SEGMENTS`` does not bound
+#: this, and the reason is what punctuation-free ASR emits: a transcript with no
+#: ``.``, ``!``, ``?`` or newline anywhere is **one** segment, so it passes the
+#: segment ceiling whatever it contains. Measured on the code that shipped without
+#: this bound, through the real route: a **27,025-byte single segment** naming 3,000
+#: distinct kelvin values produced **3,001 candidates** and a **165,828,285-byte**
+#: response, built and serialised INSIDE ``record_lock``. Every individual refusal
+#: worked exactly as designed — the durable write refused all 3,001 as
+#: ``proposals_too_large`` and minted none — because the durable write is not where
+#: the cost is. The RESPONSE and the LOCK HOLD are.
+#:
+#: **THE NUMBER IS A JUDGEMENT, NOT A MEASUREMENT, AND SAYING SO IS PART OF IT** —
+#: ``routes._MAX_PROPOSALS_PER_RECORD`` makes the same disclosure for the same
+#: reason. Nothing here has measured a response-assembly or lock-hold cost at any
+#: candidate count on the deployed pod, so no figure in this comment is derived from
+#: one. What it IS derived from is the worst LEGITIMATE case it must still admit: a
+#: transcript at the segment ceiling with a hedged chain in every sentence —
+#: ``MAX_SEGMENTS`` × 4 = 400 — which this admits with headroom. A single 256 KiB
+#: ASR blob is the other worst legitimate case, and it is bounded by BYTES rather
+#: than by count; see below.
+MAX_CANDIDATES = 500
+
+#: The largest total quoted-segment size, in bytes, one transcript's candidates may
+#: carry: ``sum(len(segment.text.encode()) for each candidate)``.
+#:
+#: **THE TWO BOUNDS DO NOT COMPOSE, AND THIS EXISTS BECAUSE THEY DO NOT.** This
+#: repository has already solved exactly this shape once and the precedent is worth
+#: citing rather than re-deriving: ``routes._MAX_PROPOSALS_PER_RECORD``
+#: (``routes.py`` ~12132) beside ``routes._MAX_PROPOSAL_STATE_BYTES`` (~12176),
+#: whose comment reads *"THE TWO BOUNDS ABOVE DO NOT COMPOSE, AND THIS EXISTS
+#: BECAUSE THEY DO NOT … a bound on rows that a client can defeat by making each
+#: row large is not a bound."* It is the same defeat here, and it is cheap: every
+#: candidate carries the whole segment TWICE — once as ``quote`` and once inside the
+#: ``rule`` sentence — so the cost is O(values × segment length), and a caller that
+#: has run out of COUNT still has 256 KiB of transcript to spend on LENGTH.
+#:
+#: Measured, and this is the measurement that proves the pair is needed rather than
+#: one of them: with ``", maybe "`` between the values — i.e. hedged, and therefore
+#: still accepted by :data:`_HEDGE_BRIDGE` — the same attack produced **3,001
+#: candidates** and a **273,900,285-byte** response. **The adjacency gate does not
+#: bound size, and a size bound does not make values honest.** Two defects, two
+#: fixes.
+#:
+#: **THE NUMBER IS A JUDGEMENT, NOT A MEASUREMENT.** It is written as a multiple of
+#: the transcript ceiling rather than as a bare literal, so it follows that constant
+#: instead of drifting from it: ``routes._MAX_TRANSCRIPT_BYTES`` is
+#: ``_MAX_NOTE_BYTES`` = 256 KiB, and a transcript that fills it and reads two
+#: candidates per segment costs 2 × 256 KiB of quotes. That is the worst LEGITIMATE
+#: case, it is admitted, and this is twice it. ``test_transcript_capture_ceilings``
+#: pins the two constants against each other so the multiple cannot silently stop
+#: being one. At the ceiling the response is roughly 2 MiB rather than the 274 MB
+#: above, because the quote is carried twice.
+MAX_CANDIDATE_QUOTE_BYTES = 4 * 256 * 1024
 
 OUTCOME_CLARIFICATION = "clarification"
 OUTCOME_NEEDS_REVIEW = "needs_review"
@@ -246,7 +357,13 @@ AMBIGUITY_POLICY: tuple[dict[str, str], ...] = (
             "resolves the contradiction. Choosing the later one would be a guess "
             "dressed as a convention, and dropping both would lose something that "
             "was said twice. The same value restated inside one sentence is not a "
-            "contradiction and produces one candidate."
+            "contradiction and produces one candidate. Inside ONE sentence a "
+            "second value is read only when a hedging word — 'maybe', 'perhaps', "
+            "'or', 'about', 'and again' and the like, from a closed list — sits "
+            "immediately between the two, with nothing else in the gap; "
+            "'425 K and the pressure was 3 K' states two different quantities, "
+            "and reading the second as a temperature would invent a value the "
+            "transcript does not give."
         ),
     },
     {
@@ -542,10 +659,126 @@ _ACQUIRED_END = re.compile(
 
 #: The instant form ALONE, for the same reason ``_TEMPERATURE_K_RESTATED`` exists:
 #: *"the run started 2026-01-01T00:00:00Z, or maybe 2026-01-02T00:00:00Z"* says the
-#: start word once. A full UTC instant is self-identifying, so a restatement of one
-#: cannot be mistaken for something else — which is exactly why the phrase rules
-#: below get no restatement pattern.
+#: start word once.
+#:
+#: ~~"A full UTC instant is self-identifying, so a restatement of one cannot be
+#: mistaken for something else."~~ — **FALSE, and CORRECTED 2026-09-12 by
+#: independent review.** The form is self-identifying as *an instant*; it says
+#: nothing about *which* instant of the run it is. Measured on the code that
+#: shipped this comment: *"The scan started …01-01T00:00:00Z, ran until
+#: …01-02T00:00:00Z"* proposed the END instant as an alternative acquisition
+#: START, and *"…started …01-01T00:00:00Z and we will repeat it
+#: …02-01T00:00:00Z"* proposed a FUTURE scan's instant as this one's start. The
+#: sentence quoted above is exactly what made that look safe. What actually keeps
+#: a restatement honest is :data:`_HEDGE_BRIDGE` below, not the value's format —
+#: and the phrase rules still get no restatement pattern, for the separate and
+#: still-correct reason ``_Rule`` gives.
 _INSTANT_RESTATED = re.compile(_INSTANT)
+
+#: THE ONE THING THAT MAKES A RESTATEMENT READABLE AS A RESTATEMENT.
+#:
+#: A restatement pattern (``_TEMPERATURE_K_RESTATED``, ``_INSTANT_RESTATED``) is a
+#: bare value form with no label in front of it, so on its own it matches *every*
+#: later value of that shape in the sentence — including values that belong to a
+#: different quantity entirely. Measured on the code that shipped without this
+#: gate, each of these proposed TWO values for ``context.temperature_K`` or for
+#: ``timestamps.acquired_start_utc``, and the second one is not in the transcript:
+#:
+#: ===================================================================  =============
+#: sentence                                                             falsely read
+#: ===================================================================  =============
+#: ``The temperature was 425 K, ramped at 3 K/min``                     a ramp RATE
+#: ``The temperature was 425 K and the step size was 0.5 K``            a STEP SIZE
+#: ``Sample temperature 425 K, cryostat setpoint 80 K, base 4 K``       TWO others
+#: ``The temperature was 425 K and the pressure was 3 K``               a PRESSURE
+#: ``…started …01-01T00:00:00Z, ran until …01-02T00:00:00Z``            the END
+#: ``…started …01-01T00:00:00Z and we will repeat it …02-01T00:00:00Z`` a FUTURE run
+#: ===================================================================  =============
+#:
+#: Each of those shipped a ``rule`` string asserting that the sentence *restated*
+#: the quantity, which is a statement about the transcript that the transcript does
+#: not support — ``CLAUDE.md`` §5. It is strictly worse than the silent omission it
+#: replaced: an omission loses a reading, an assertion invents one.
+#:
+#: THE GATE, STATED AS THE INVARIANT IT IMPLEMENTS. A restatement is read only if
+#: the text lying between the end of the previous accepted reading of that rule and
+#: the start of this restatement's VALUE consists ENTIRELY of an optional comma,
+#: optional HORIZONTAL whitespace (never a line break — see ``_H_SPACE``), and
+#: exactly one connective drawn from the closed hedge list below. Nothing else may
+#: sit in that gap — no noun, no verb, no second label.
+#:
+#: WHY A HEDGE AND NOT MERELY ADJACENCY. The hedge is what makes the second value a
+#: statement about the SAME quantity. ``425 K, 430 K`` is adjacent and means
+#: nothing in particular; ``425 K, maybe 430 K`` is a person being uncertain about
+#: one number, which is the case the project owner asked for.
+#:
+#: **BARE ``and`` IS DELIBERATELY NOT IN THE LIST.** It is conjunctive, not
+#: hedging: *"425 K and 430 K"* may well be two different quantities, and half the
+#: table above is a bare ``and``. ``and again`` IS in the list, because ``again``
+#: is what makes it a restatement of one quantity rather than a second one.
+#:
+#: **CLAUSE-BOUNDING COMES FREE AND IS NOT A SEPARATE CHECK.** The pattern admits
+#: only a comma, horizontal whitespace and letters, so a ``.``, ``;`` or ``:`` in
+#: the gap refuses — which is the clause bound ``_TEMPERATURE_K`` imposes on itself
+#: with ``[^.;:]``. It is stated here rather than added as a second check.
+#:
+#: **AND CLAUSE-BOUNDING ALONE WOULD HAVE BEEN INSUFFICIENT BY A WIDER MARGIN THAN
+#: THE REVIEW SAID.** The review's phrasing was *"two of the rows above have no
+#: punctuation"*, which reads as though clause-bounding caught the other four.
+#: Measured over all six gaps (``test_clause_bounding_alone_would_have_caught``):
+#:
+#: * clause-bounding on ``.;:`` — the bound ``_TEMPERATURE_K`` already uses —
+#:   refuses **0 of 6**. Not one gap contains any of those characters.
+#: * clause-bounding that ALSO breaks at a comma refuses **3 of 6**; the three
+#:   bare-``and`` rows survive it.
+#:
+#: So the hedge is not a refinement of clause-bounding, it is the whole gate; and
+#: a comma cannot be treated as a clause break here anyway, because the owner's
+#: own sentence — *"around 425 K, maybe 430 K"* — bridges across one.
+#:
+#: **ADJACENCY CHAINS.** After a restatement is accepted the anchor advances to the
+#: end of it, so *"425 K, maybe 430 K, or perhaps 435 K"* reads all three — each
+#: hedged against the value before it. A REFUSED restatement does not advance the
+#: anchor, which is why *"425 K, cryostat setpoint 80 K, base 4 K"* refuses both
+#: rather than refusing 80 and then measuring 4's gap from it.
+_HEDGE_CONNECTIVES: tuple[str, ...] = (
+    "maybe",
+    "perhaps",
+    "possibly",
+    "around",
+    "about",
+    "roughly",
+    "approximately",
+    "and again",
+    "again",
+    "alternatively",
+    "or",
+)
+#: Horizontal whitespace: every whitespace character EXCEPT a line break.
+#:
+#: ``\s`` was the first spelling and it was WRONG in a way only a test caught: it
+#: admits ``\n``, so ``", maybe \n"`` bridged, and a hedge on the far side of a line
+#: break is not "immediately between" two values. Matching with ``fullmatch`` rather
+#: than ``$`` does NOT fix that — ``$``'s before-a-trailing-newline laxity is a
+#: different hole — and believing it did was the error. A segment cannot contain a
+#: newline today (``_SEGMENT_BOUNDARY`` splits on them), so this closes nothing
+#: live; it is written so nothing opens if segmentation ever changes. It is a
+#: character class rather than ``[ \t]`` so a non-breaking space in dictated text
+#: still bridges.
+_H_SPACE = r"[^\S\n]"
+
+#: Matched with ``fullmatch``, never ``search`` or ``$``: the hedge must be the
+#: WHOLE gap between the two values, and ``$`` would also match before a trailing
+#: newline.
+_HEDGE_BRIDGE = re.compile(
+    rf",?{_H_SPACE}*(?:or{_H_SPACE}+)?(?:"
+    + "|".join(
+        connective.replace(" ", f"{_H_SPACE}+")
+        for connective in _HEDGE_CONNECTIVES
+    )
+    + rf"){_H_SPACE}*",
+    re.IGNORECASE,
+)
 
 #: The absorbing element / absorption edge, which this build records as implicit,
 #: sidecar-only content because the official schema has no native field for them.
@@ -594,7 +827,12 @@ class _Rule:
     ``restated_sentence`` exists because a candidate's ``rule`` is how a scientist
     checks WHY a value was read. ``sentence`` claims the label and the value appeared
     in one clause, which is not true of a restatement, so a restatement must not
-    borrow it.
+    borrow it. **And it must state the MECHANISM, not just the conclusion** — that a
+    hedging word sat immediately between the two values, which is the whole of why
+    the second one was readable. The first version of these three strings asserted
+    only that "the same sentence restates the …", which was a claim about the
+    transcript that the reader had not checked and, on six measured sentences, that
+    the transcript did not support; see :data:`_HEDGE_BRIDGE`.
     """
 
     name: str
@@ -619,11 +857,16 @@ _RULES: tuple[_Rule, ...] = (
         ),
         restatement=_TEMPERATURE_K_RESTATED,
         restated_sentence=(
-            "the same sentence restates the temperature with a further number "
-            "followed by K or kelvin, after the one the word 'temperature' "
-            "introduced; it is read as an ALTERNATIVE value for the same field — "
-            "not a correction, not a preference, and NOT a range or an interval, "
-            "neither of which anybody stated"
+            "the same sentence restates the temperature: a HEDGING WORD — 'maybe', "
+            "'perhaps', 'or', 'about', 'around', 'and again' or another from a "
+            "closed list — sits immediately between the number the word "
+            "'temperature' introduced and a further number followed by K or "
+            "kelvin, with nothing else at all in the gap. That hedge is the ONLY "
+            "reason this number is read as an ALTERNATIVE value for the same "
+            "field: without one, a later number followed by K is a different "
+            "quantity — a ramp rate, a step size, a setpoint — and is not read. "
+            "It is not a correction, not a preference, and NOT a range or an "
+            "interval, neither of which anybody stated"
         ),
     ),
     _Rule(
@@ -637,10 +880,15 @@ _RULES: tuple[_Rule, ...] = (
         ),
         restatement=_INSTANT_RESTATED,
         restated_sentence=(
-            "the same sentence restates the start with a further full UTC instant, "
-            "after the one the start word introduced; it is read as an ALTERNATIVE "
-            "value for the same field, taken exactly as written — not a correction "
-            "and not a range"
+            "the same sentence restates the start: a HEDGING WORD — 'maybe', "
+            "'perhaps', 'or', 'about', 'around', 'and again' or another from a "
+            "closed list — sits immediately between the instant the start word "
+            "introduced and a further full UTC instant, with nothing else at all "
+            "in the gap. That hedge is the ONLY reason this instant is read as an "
+            "ALTERNATIVE value for the same field: without one, a later instant "
+            "belongs to something else — the end of this run, or another run "
+            "entirely — and is not read. It is taken exactly as written, and it is "
+            "not a correction and not a range"
         ),
     ),
     _Rule(
@@ -654,10 +902,14 @@ _RULES: tuple[_Rule, ...] = (
         ),
         restatement=_INSTANT_RESTATED,
         restated_sentence=(
-            "the same sentence restates the end with a further full UTC instant, "
-            "after the one the end word introduced; it is read as an ALTERNATIVE "
-            "value for the same field, taken exactly as written — not a correction "
-            "and not a range"
+            "the same sentence restates the end: a HEDGING WORD — 'maybe', "
+            "'perhaps', 'or', 'about', 'around', 'and again' or another from a "
+            "closed list — sits immediately between the instant the end word "
+            "introduced and a further full UTC instant, with nothing else at all "
+            "in the gap. That hedge is the ONLY reason this instant is read as an "
+            "ALTERNATIVE value for the same field: without one, a later instant "
+            "belongs to something else and is not read. It is taken exactly as "
+            "written, and it is not a correction and not a range"
         ),
     ),
     _Rule(
@@ -698,6 +950,137 @@ def _read_number(raw: str) -> Any:
 def _spans_overlap(left: tuple[int, int], right: tuple[int, int]) -> bool:
     """Whether two half-open character spans share any character."""
     return left[0] < right[1] and right[0] < left[1]
+
+
+# --- locating the readings, separately from constructing the candidates -------
+
+
+@dataclass(frozen=True, slots=True)
+class _Reading:
+    """One value this reader HAS read, before it becomes a candidate.
+
+    It exists so the two ceilings can be enforced on an EXACT count and an EXACT
+    byte total without the allocation they are there to prevent: a match object
+    and a parsed value per reading, rather than a
+    :class:`~.providers.extraction.FieldCandidate` carrying the segment text
+    twice. Internal and never served.
+    """
+
+    rule: "_Rule"
+    match: re.Match[str]
+    restated: bool
+    value: Any
+
+
+def _segment_readings(segment: Segment) -> list["_Reading"]:
+    """Every value one segment states, in the order a candidate list wants them.
+
+    Pure and cheap. It allocates no candidate and formats no ``rule`` sentence,
+    which is what lets :func:`read_transcript` learn what a segment WOULD cost
+    before it pays it.
+    """
+    # PASS ONE — EVERY label-anchored match of every rule, not just the first.
+    #
+    # ~~`match = rule.pattern.search(segment.text)`~~ — CORRECTED. `search`
+    # returns the FIRST match and nothing else, so a sentence that names the
+    # label twice ("the temperature was 425 K and the temperature at the end was
+    # 430 K") proposed one value and lost the other in silence: no candidate, no
+    # clarification, no abstention, no `review_required` row. The transcript
+    # survived as a note, so nothing was destroyed — what was lost was the
+    # READING, and with it the scientist's chance to accept either value.
+    labelled = [list(rule.pattern.finditer(segment.text)) for rule in _RULES]
+
+    # The VALUE spans every label-anchored match of every rule has claimed.
+    # ACROSS rules, which is what stops pass two from reading a value another
+    # rule read under its own label: "started X and ended Y" states two
+    # DIFFERENT fields, and a restatement scan that saw only "another instant
+    # after the start word" would propose Y as a second acquisition START,
+    # contradicting the word "ended" sitting in front of it. Value spans rather
+    # than whole-match spans for the reason the abstention guard elsewhere gives.
+    #
+    # KEPT AS DEFENCE IN DEPTH now that `_HEDGE_BRIDGE` also refuses that
+    # sentence. The two guards are independent and they AGREE on it — proven by
+    # measurement rather than asserted, in
+    # `test_both_restatement_guards_refuse_started_A_and_ended_B` — and keeping
+    # both means a widened hedge list cannot reintroduce a cross-field read.
+    claimed_value_spans = [
+        match.span(1) for matches in labelled for match in matches
+    ]
+
+    found: list["_Reading"] = []
+    for rule, matches in zip(_RULES, labelled, strict=True):
+        if not matches:
+            continue
+        # `(match, restated)`, label-anchored readings first so a field's
+        # candidates stay contiguous and in the order they were said.
+        readings: list[tuple[re.Match[str], bool]] = [
+            (match, False) for match in matches
+        ]
+
+        # PASS TWO — the same sentence restating the quantity WITHOUT restating
+        # the label. Gated on pass one having matched, so a bare number is never
+        # read; scanned only from the end of the last label-anchored match, so
+        # the label still PRECEDES the value exactly as the rule's own pattern
+        # requires ("At 300 K the temperature was 425 K" reads 425 alone).
+        #
+        # AND GATED ON AN ADJACENT HEDGED CONNECTIVE, which is the correction of
+        # 2026-09-12: without it this scan read the whole remainder of the segment
+        # for a bare value form and proposed a ramp rate, a step size, a pressure,
+        # a cryostat setpoint, an END instant and a FUTURE run's instant as
+        # alternatives for the labelled field. `_HEDGE_BRIDGE` carries the table.
+        #
+        # `fullmatch`, NOT `$`. The bridge must be the WHOLE gap, and `$` also
+        # matches before a trailing newline — the exact laxity this repository
+        # already ships an exactness gate for (`src/isaac_records/exactness.py`).
+        # A segment cannot contain a newline today (`_SEGMENT_BOUNDARY` splits on
+        # them), so this is not a live hole being closed; it is a guard written so
+        # it does not become one if segmentation ever changes.
+        if rule.restatement is not None:
+            anchor = max(match.end() for match in matches)
+            for extra in rule.restatement.finditer(segment.text, anchor):
+                if any(
+                    _spans_overlap(extra.span(1), claimed)
+                    for claimed in claimed_value_spans
+                ):
+                    continue
+                if _HEDGE_BRIDGE.fullmatch(segment.text[anchor : extra.start(1)]) is None:
+                    continue
+                readings.append((extra, True))
+                # THE ANCHOR ADVANCES ONLY ON AN ACCEPTED RESTATEMENT, so the
+                # chain is a chain of hedges rather than a chain of positions:
+                # "425 K, maybe 430 K, or perhaps 435 K" reads all three, while
+                # "425 K, cryostat setpoint 80 K, base 4 K" refuses both — 4's gap
+                # is measured from 425, not from the 80 that was just refused.
+                #
+                # It advances even for a restatement the de-duplication below then
+                # drops as an identical value, deliberately: adjacency is a fact
+                # about the TEXT, so "425 K, maybe 425 K, or perhaps 430 K" still
+                # reads 430.
+                anchor = extra.end()
+
+        # ONE VALUE STATED TWICE IN ONE SENTENCE IS ONE CANDIDATE.
+        # "425 K, and again 425 K" is emphasis, not disagreement. Two identical
+        # candidates would mint two durable proposals — `routes`'
+        # `_mint_transcript_proposals` keys on the candidate INDEX, so they do
+        # not collapse — giving one fact two independently acceptable rows.
+        # SCOPED TO ONE SEGMENT, deliberately: two sentences are two statements,
+        # and `test_the_same_value_said_twice_is_not_a_conflict` pins that as two
+        # candidates. The equality is `repr`, the same one the grouping in
+        # `read_transcript` uses, so the two cannot disagree about what "the same
+        # value" means.
+        seen: set[str] = set()
+        for match, restated in readings:
+            raw = match.group(1).strip()
+            if not raw:
+                continue
+            value = _read_number(raw) if rule.numeric else raw
+            if repr(value) in seen:
+                continue
+            seen.add(repr(value))
+            found.append(
+                _Reading(rule=rule, match=match, restated=restated, value=value)
+            )
+    return found
 
 
 # --- run reference resolution -------------------------------------------------
@@ -852,6 +1235,12 @@ def read_transcript(
     abstentions: list[Abstention] = []
     candidates: list[FieldCandidate] = []
     candidate_by_segment: dict[int, int] = {}
+    #: Every reading this transcript will turn into a candidate, LOCATED but not
+    #: yet constructed, with the two running totals the ceilings are checked
+    #: against. See the check below for why construction is deferred.
+    located: list[tuple[Segment, list["_Reading"]]] = []
+    candidate_count = 0
+    quote_bytes = 0
     # The run target is settled only when a run was selected AND nothing about a
     # run was left open. See the docstring.
     settled = selected_run is not None and not clarifications
@@ -914,101 +1303,79 @@ def read_transcript(
             )
         if not settled:
             continue
+        found = _segment_readings(segment)
+        if not found:
+            continue
+        located.append((segment, found))
+        candidate_count += len(found)
+        # EVERY CANDIDATE CARRIES THE WHOLE SEGMENT, so the segment's byte length
+        # times the number of readings over it IS the quoted cost, exactly. It is
+        # carried TWICE per candidate (`quote`, and inside the `rule` sentence), so
+        # the served size is about twice this plus per-candidate overhead; the
+        # ceiling is stated over the quoted bytes rather than over a guess at the
+        # serialised size, because this half is a measurement and that half is not.
+        quote_bytes += len(segment.text.encode("utf-8")) * len(found)
+
+    # THE CEILINGS ARE APPLIED BEFORE THE FIRST `FieldCandidate` IS CONSTRUCTED,
+    # AND THAT ORDERING IS THE POINT RATHER THAN AN OPTIMISATION. Building the
+    # 3,001 candidates of the measured attack and then discarding them allocates
+    # **137,256,245 bytes** of `rule` strings and **135,120,025** of `quote`,
+    # inside `record_lock` — paying the ceiling in full in order to enforce it.
+    # (Measured here, on the 45,025-byte hedged payload, with both ceilings lifted.
+    # The reviewer's "~81 MB" is right for the 27,025-byte BARE payload, which the
+    # adjacency gate now reads as ONE candidate, so it is no longer the payload
+    # these ceilings fire on. Quoting the number for the wrong payload is the kind
+    # of inherited figure this file corrects rather than carries.)
+    #
+    # The locating pass above allocates match objects and one value per reading,
+    # which is what makes an EXACT count and an EXACT byte total available here for
+    # nothing — and the byte total is exact, not an estimate: `quote_bytes` equals
+    # `sum(len(candidate.quote.encode()))` over the candidates that would have been
+    # built, measured identical at 135,120,025.
+    if (
+        candidate_count > MAX_CANDIDATES
+        or quote_bytes > MAX_CANDIDATE_QUOTE_BYTES
+    ):
+        raise TranscriptTooDense(
+            candidates=candidate_count,
+            candidate_quote_bytes=quote_bytes,
+            maximum_candidates=MAX_CANDIDATES,
+            maximum_candidate_quote_bytes=MAX_CANDIDATE_QUOTE_BYTES,
+        )
+
+    for segment, found in located:
         produced: list[int] = []
-
-        # PASS ONE — EVERY label-anchored match of every rule, not just the first.
-        #
-        # ~~`match = rule.pattern.search(segment.text)`~~ — CORRECTED. `search`
-        # returns the FIRST match and nothing else, so a sentence that names the
-        # label twice ("the temperature was 425 K and the temperature at the end was
-        # 430 K") proposed one value and lost the other in silence: no candidate, no
-        # clarification, no abstention, no `review_required` row. The transcript
-        # survived as a note, so nothing was destroyed — what was lost was the
-        # READING, and with it the scientist's chance to accept either value.
-        labelled = [list(rule.pattern.finditer(segment.text)) for rule in _RULES]
-
-        # The VALUE spans every label-anchored match of every rule has claimed.
-        # ACROSS rules, which is what stops pass two from reading a value another
-        # rule read under its own label: "started X and ended Y" states two
-        # DIFFERENT fields, and a restatement scan that saw only "another instant
-        # after the start word" would propose Y as a second acquisition START,
-        # contradicting the word "ended" sitting in front of it. Value spans rather
-        # than whole-match spans for the reason the abstention guard above gives.
-        claimed_value_spans = [
-            match.span(1) for matches in labelled for match in matches
-        ]
-
-        for rule, matches in zip(_RULES, labelled, strict=True):
-            if not matches:
-                continue
-            # `(match, restated)`, label-anchored readings first so a field's
-            # candidates stay contiguous and in the order they were said.
-            readings: list[tuple[re.Match[str], bool]] = [
-                (match, False) for match in matches
-            ]
-
-            # PASS TWO — the same sentence restating the quantity WITHOUT restating
-            # the label. Gated on pass one having matched, so a bare number is never
-            # read; scanned only from the end of the last label-anchored match, so
-            # the label still PRECEDES the value exactly as the rule's own pattern
-            # requires ("At 300 K the temperature was 425 K" reads 425 alone).
-            if rule.restatement is not None:
-                resume = max(match.end() for match in matches)
-                for extra in rule.restatement.finditer(segment.text, resume):
-                    if any(
-                        _spans_overlap(extra.span(1), claimed)
-                        for claimed in claimed_value_spans
-                    ):
-                        continue
-                    readings.append((extra, True))
-
-            # ONE VALUE STATED TWICE IN ONE SENTENCE IS ONE CANDIDATE.
-            # "425 K, and again 425 K" is emphasis, not disagreement. Two identical
-            # candidates would mint two durable proposals — `routes`'
-            # `_mint_transcript_proposals` keys on the candidate INDEX, so they do
-            # not collapse — giving one fact two independently acceptable rows.
-            # SCOPED TO ONE SEGMENT, deliberately: two sentences are two statements,
-            # and `test_the_same_value_said_twice_is_not_a_conflict` pins that as two
-            # candidates. The equality is `repr`, the same one the grouping below
-            # uses, so the two cannot disagree about what "the same value" means.
-            seen: set[str] = set()
-            for match, restated in readings:
-                raw = match.group(1).strip()
-                if not raw:
-                    continue
-                value = _read_number(raw) if rule.numeric else raw
-                if repr(value) in seen:
-                    continue
-                seen.add(repr(value))
-                candidates.append(
-                    FieldCandidate(
-                        field_path=rule.field_path,
-                        proposed_value=value,
-                        quote=segment.text,
-                        start_char=segment.start_char,
-                        end_char=segment.end_char,
-                        origin=ORIGIN_TRANSCRIPT,
-                        produced_by=PRODUCED_BY,
-                        rule=(
-                            f"in the sentence {segment.text.strip()!r}, "
-                            f"{rule.restated_sentence if restated else rule.sentence}; "
-                            f"the value is quoted from the transcript, not interpreted"
-                        ),
-                        provenance=MappingProxyType(
-                            {
-                                "reader_rule": rule.name,
-                                "run_id": selected_run,
-                                "segment_index": segment.index,
-                                "matched_text": match.group(0),
-                                # A RESTATEMENT SAYS SO. Its `rule` sentence already
-                                # explains it in prose; this is the same fact where a
-                                # surface can branch on it without parsing English.
-                                "restated_in_same_sentence": restated,
-                            }
-                        ),
-                    )
+        for reading in found:
+            rule = reading.rule
+            candidates.append(
+                FieldCandidate(
+                    field_path=rule.field_path,
+                    proposed_value=reading.value,
+                    quote=segment.text,
+                    start_char=segment.start_char,
+                    end_char=segment.end_char,
+                    origin=ORIGIN_TRANSCRIPT,
+                    produced_by=PRODUCED_BY,
+                    rule=(
+                        f"in the sentence {segment.text.strip()!r}, "
+                        f"{rule.restated_sentence if reading.restated else rule.sentence}; "
+                        f"the value is quoted from the transcript, not interpreted"
+                    ),
+                    provenance=MappingProxyType(
+                        {
+                            "reader_rule": rule.name,
+                            "run_id": selected_run,
+                            "segment_index": segment.index,
+                            "matched_text": reading.match.group(0),
+                            # A RESTATEMENT SAYS SO. Its `rule` sentence already
+                            # explains it in prose; this is the same fact where a
+                            # surface can branch on it without parsing English.
+                            "restated_in_same_sentence": reading.restated,
+                        }
+                    ),
                 )
-                produced.append(len(candidates) - 1)
+            )
+            produced.append(len(candidates) - 1)
         # Exactly one, or none. See `candidate_for_segment`.
         if len(produced) == 1:
             candidate_by_segment[segment.index] = produced[0]

@@ -260,13 +260,61 @@ def test_both_values_are_quoted_from_the_transcript_and_not_interpreted():
         assert candidate.provenance["matched_text"] in OWNER_SENTENCE
 
 
-def test_three_values_in_one_sentence_are_all_preserved():
-    """MUTATION: a cap that keeps the first two turns this RED. Truncating a
-    scientist's statements is the silent discard this feature exists to end."""
-    reading = _read("Temperature ramped 300 K, then 350 K, then 400 K.")
-    assert _values(reading, TEMPERATURE) == [300, 350, 400]
+def test_three_HEDGED_values_in_one_sentence_are_all_preserved():
+    """Three alternatives chain, because each is hedged against the one before it.
+
+    ~~``test_three_values_in_one_sentence_are_all_preserved``, over
+    ``"Temperature ramped 300 K, then 350 K, then 400 K."``, asserting
+    ``[300, 350, 400]`` and one ``review_required`` row.~~ — **INVERTED
+    2026-09-12, and the sentence was changed, not the assertion loosened.** That
+    test pinned the C-1 defect. ``then`` is a temporal sequencer, not a hedge: the
+    sentence says the temperature WENT 300 → 350 → 400, and
+    ``context.temperature_K`` is one scalar, so reading the three as *alternative*
+    values for it — grouped under ``conflicting_values_for_one_field``, whose own
+    served reason says *"Accept at most one"* — states something about the
+    transcript the transcript does not state. It is the same sentence family as
+    the reviewer's first measured row, ``"The temperature was 425 K, ramped at
+    3 K/min"``, which is now refused: a ramp is not a disagreement.
+
+    **The old test's reasoning was RIGHT and is kept**, which is why this is an
+    inversion rather than a deletion: truncating a scientist's statements IS the
+    silent discard this feature exists to end, and a cap that kept the first two
+    of three genuinely-alternative values would still be that defect. So the
+    capability is pinned here on a sentence that actually states three
+    alternatives, and ``test_a_ramp_is_not_a_disagreement`` pins the ramp. What is
+    NOT truncation is declining to read 350 and 400 as alternatives at all: they
+    are never proposed, never counted, and the whole sentence survives verbatim as
+    an Unmapped Note under rule (4).
+
+    MUTATION: a cap that keeps the first two turns this RED; so does dropping the
+    anchor advance in ``_segment_readings``, which would leave 435 unread.
+    """
+    reading = _read("The temperature was 425 K, maybe 430 K, or perhaps 435 K.")
+    assert _values(reading, TEMPERATURE) == [425, 430, 435]
     assert len(reading.review_required) == 1
     assert sorted(reading.review_required[0].candidate_indexes) == [0, 1, 2]
+    restated = [
+        candidate.provenance["restated_in_same_sentence"]
+        for candidate in reading.candidates
+    ]
+    assert restated == [False, True, True]
+
+
+def test_a_ramp_is_not_a_disagreement():
+    """The sentence the inverted test above used to assert three candidates for.
+
+    It is here so the change of behaviour is pinned in its own right rather than
+    only implied by the absence of the old assertion, and so that re-admitting
+    ``then`` to the hedge list turns a test RED instead of quietly restoring a §5
+    violation.
+    """
+    reading = _read("Temperature ramped 300 K, then 350 K, then 400 K.")
+    assert _values(reading, TEMPERATURE) == [300]
+    assert reading.review_required == ()
+    # And the words survive: rule (4) stores every segment regardless.
+    assert [segment.text for segment in reading.segments] == [
+        "Temperature ramped 300 K, then 350 K, then 400 K."
+    ]
 
 
 def test_the_same_value_restated_in_one_sentence_is_one_candidate_not_two():
@@ -508,26 +556,67 @@ def test_the_phrase_rules_deliberately_have_no_restatement_pattern():
     assert by_name["acquisition_end"].restatement is not None
 
 
-def test_the_reader_adds_no_ceiling_because_the_durable_write_already_has_one():
-    """WHY NO PER-SEGMENT CANDIDATE CEILING WAS ADDED, pinned rather than argued.
+def test_the_reader_DOES_need_its_own_ceilings_and_the_durable_write_is_not_where_the_cost_is():
+    """The inversion of this file's own vacuous test. See ``test_transcript_capture_ceilings.py``.
 
+    ~~``test_the_reader_adds_no_ceiling_because_the_durable_write_already_has_one``:
+    "WHY NO PER-SEGMENT CANDIDATE CEILING WAS ADDED, pinned rather than argued.
     Letting one sentence produce many candidates raises write amplification, and
     this module's own idiom is a ceiling that REFUSES rather than truncates
-    (``MAX_SEGMENTS``). A new one here would have needed a new
-    ``AMBIGUITY_POLICY`` kind and a new abstention — new surface for a bound the
-    repository already has. ``routes._MAX_PROPOSALS_PER_RECORD`` bounds the DURABLE
-    rows and discloses each candidate it could not store as ``too_many_proposals``,
-    dropping nothing in silence. So the reader stays unbounded per segment and the
-    write stays bounded, which is where the cost actually is.
+    (MAX_SEGMENTS). A new one here would have needed a new AMBIGUITY_POLICY kind
+    and a new abstention — new surface for a bound the repository already has.
+    routes._MAX_PROPOSALS_PER_RECORD bounds the DURABLE rows and discloses each
+    candidate it could not store as too_many_proposals, dropping nothing in
+    silence. So the reader stays unbounded per segment and the write stays
+    bounded, which is where the cost actually is."~~
 
-    MUTATION: removing that ceiling from ``routes`` turns this RED.
+    **INVERTED 2026-09-12. The reasoning is kept struck in place because it is
+    the more instructive half: every sentence of it is about the DURABLE WRITE,
+    and the durable write was never where the cost was.** Measured through the
+    real route on the code that shipped it, a 27,025-byte single segment naming
+    3,000 kelvin values produced 3,001 candidates and a **165,828,285-byte**
+    response, with ``proposals_too_large`` refusing all 3,001 rows and minting
+    **none**. The bound this test pointed at worked perfectly and the request
+    still cost 165 MB, assembled and serialised inside ``record_lock``.
+
+    **And the assertions were worse than the reasoning.** ``isinstance(int)`` and
+    ``> 0`` measure no size, no count and no time — a ceiling of ``1`` passes
+    them. The last line, ``assert not [name for name in dir(tc) if "MAX" in name
+    and name != "MAX_SEGMENTS"]``, did not merely fail to detect the defect: it
+    **mechanically forbade the fix**, so the repository was enforcing the absence
+    of the bound it needed, in a test whose name asserted that absence was a
+    decision.
+
+    Two claims in the struck text are also simply wrong. A new ceiling needed **no**
+    ``AMBIGUITY_POLICY`` kind and **no** abstention — ``MAX_SEGMENTS`` has neither,
+    because a refusal is not an ambiguity: nothing is read, so there is nothing to
+    be ambiguous about. And "the reader stays unbounded per segment" was the defect
+    stated as a property.
+
+    What replaces it: ``test_transcript_capture_ceilings.py`` MEASURES candidate
+    count, response bytes and elapsed time through the real route, and proves each
+    of the two ceilings binds on its own.
     """
     import isaac_api.routes as routes
 
+    # The durable-write bound still exists and is still correct — it was never the
+    # wrong bound, only the wrong ANSWER to "is the reader bounded?".
     assert isinstance(routes._MAX_PROPOSALS_PER_RECORD, int)
     assert routes._MAX_PROPOSALS_PER_RECORD > 0
-    # And the reader itself declares no candidate ceiling of any kind.
-    assert not [name for name in dir(tc) if "MAX" in name and name != "MAX_SEGMENTS"]
+
+    # AND THE READER NOW DECLARES ITS OWN, which the struck assertion forbade.
+    assert isinstance(tc.MAX_CANDIDATES, int) and tc.MAX_CANDIDATES > 0
+    assert (
+        isinstance(tc.MAX_CANDIDATE_QUOTE_BYTES, int)
+        and tc.MAX_CANDIDATE_QUOTE_BYTES > 0
+    )
+    # Both are exported, so a route refusing on them is not reaching into a private.
+    assert {"MAX_CANDIDATES", "MAX_CANDIDATE_QUOTE_BYTES"} <= set(tc.__all__)
+    # A refusal is not an ambiguity, so neither gets an `AMBIGUITY_POLICY` row —
+    # exactly as `MAX_SEGMENTS` does not. Pinned so a later slice does not add one
+    # on the strength of the struck reasoning above.
+    kinds = {entry["kind"] for entry in tc.AMBIGUITY_POLICY}
+    assert not {kind for kind in kinds if "too" in kind or "ceiling" in kind}
 
 
 def test_the_candidates_are_stable_across_two_identical_readings():
@@ -942,3 +1031,385 @@ def test_cap009_case_7_the_distrusted_value_is_not_written_anywhere(
         "Temperature is 425 K...",
         "actually I don't trust that reading.",
     }
+
+
+# =============================================================================
+# C-1 — THE ADJACENCY GATE. Independent review, 2026-09-12.
+# =============================================================================
+#
+# THE DEFECT, AND WHY IT IS WORSE THAN THE ONE THIS FILE WAS WRITTEN TO FIX.
+# ``read_transcript``'s pass two applied ``rule.restatement.finditer`` over the
+# WHOLE remainder of the segment, with no clause bound and no adjacency test. So a
+# bare ``<number> K`` or a bare instant ANYWHERE later in the sentence became an
+# "alternative value for the same field" — and shipped a ``rule`` string saying the
+# sentence had restated the quantity. Measured at `47fdbe30`, in-process:
+#
+#   "The temperature was 425 K, ramped at 3 K/min"              -> 425 AND 3
+#   "The temperature was 425 K and the step size was 0.5 K"     -> 425 AND 0.5
+#   "Sample temperature 425 K, cryostat setpoint 80 K, base 4 K"-> 425, 80, 4
+#   "The temperature was 425 K and the pressure was 3 K"        -> 425 AND 3
+#   "...started ...01-01T00:00:00Z, ran until ...01-02T00:00:00Z" -> END as START
+#   "...started ...01-01T00:00:00Z and we will repeat it ...02-01T00:00:00Z"
+#                                                               -> a FUTURE instant
+#
+# ``main`` proposes only the labelled value in every one of them. A silent omission
+# (the defect this file fixed) loses a reading; a silent assertion INVENTS one, and
+# ``CLAUDE.md`` §5 forbids the second in terms. The cross-rule
+# ``claimed_value_spans`` guard could not see any of it: it catches a value another
+# RULE matched under its OWN label, and "ran until", "pressure", "K/min" and
+# "repeat it" are not rules.
+#
+# THE GATE: the text between the end of the previous accepted reading of that rule
+# and the start of this restatement's VALUE must consist ENTIRELY of an optional
+# comma, optional whitespace, and exactly one connective from a closed hedge list.
+
+#: The six sentences above, each of which must now yield exactly ONE candidate.
+#: Written out rather than generated, so the corpus is readable in the failure.
+FALSE_RESTATEMENTS: tuple[tuple[str, str, object], ...] = (
+    ("ramp rate", "The temperature was 425 K, ramped at 3 K/min", 425),
+    ("step size", "The temperature was 425 K and the step size was 0.5 K", 425),
+    (
+        "two other instruments",
+        "Sample temperature 425 K, cryostat setpoint 80 K, base 4 K",
+        425,
+    ),
+    ("a pressure", "The temperature was 425 K and the pressure was 3 K", 425),
+    (
+        "the END instant read as a START",
+        "The scan started 2026-01-01T00:00:00Z, ran until 2026-01-02T00:00:00Z",
+        "2026-01-01T00:00:00Z",
+    ),
+    (
+        "a FUTURE run's instant read as this one's START",
+        "The scan started 2026-01-01T00:00:00Z and we will repeat it "
+        "2026-02-01T00:00:00Z",
+        "2026-01-01T00:00:00Z",
+    ),
+)
+
+#: Every hedged form that must still read both values, including the owner's.
+HEDGED_RESTATEMENTS: tuple[tuple[str, list], ...] = (
+    ("The temperature was around 425 K, maybe 430 K", [425, 430]),
+    ("The temperature was 425 K or perhaps 430 K", [425, 430]),
+    ("The temperature was 425 K, or maybe 430 K", [425, 430]),
+    ("The temperature was 425 K and again 430 K", [425, 430]),
+    ("The temperature was about 425 K, about 430 K", [425, 430]),
+    (
+        "The run started 2026-01-01T00:00:00Z, or maybe 2026-01-02T00:00:00Z",
+        ["2026-01-01T00:00:00Z", "2026-01-02T00:00:00Z"],
+    ),
+    ("The temperature was 425 K, maybe 430 K, or perhaps 435 K", [425, 430, 435]),
+)
+
+
+@pytest.mark.parametrize(
+    "label,sentence,only", FALSE_RESTATEMENTS, ids=[row[0] for row in FALSE_RESTATEMENTS]
+)
+def test_an_unhedged_second_value_is_NOT_read_as_a_restatement(label, sentence, only):
+    """Exactly ONE candidate — the label-anchored one — and it is not a restatement.
+
+    MUTATION: deleting the ``_HEDGE_BRIDGE.fullmatch`` guard from
+    ``_segment_readings`` turns all six of these RED.
+    """
+    reading = _read(sentence)
+    assert len(reading.candidates) == 1, [
+        (candidate.field_path, candidate.proposed_value)
+        for candidate in reading.candidates
+    ]
+    candidate = reading.candidates[0]
+    assert candidate.proposed_value == only
+    assert candidate.provenance["restated_in_same_sentence"] is False
+    # No contradiction was manufactured either: one value is not a disagreement.
+    assert reading.review_required == ()
+
+
+@pytest.mark.parametrize(
+    "sentence,expected", HEDGED_RESTATEMENTS, ids=[row[0][:44] for row in HEDGED_RESTATEMENTS]
+)
+def test_a_hedged_second_value_IS_read_as_a_restatement(sentence, expected):
+    """The requirement the gate had to preserve, including the owner's sentence.
+
+    MUTATION: dropping any connective from ``_HEDGE_CONNECTIVES`` turns one of
+    these RED; dropping the ``(?:or\\s+)?`` prefix turns two RED.
+    """
+    reading = _read(sentence)
+    assert [candidate.proposed_value for candidate in reading.candidates] == expected
+    restated = [
+        candidate.provenance["restated_in_same_sentence"]
+        for candidate in reading.candidates
+    ]
+    # The first is label-anchored; every later one is a hedged restatement.
+    assert restated == [False] + [True] * (len(expected) - 1)
+    # And every restatement's own `rule` string states the MECHANISM, because that
+    # is what a scientist reads to check why the value was proposed.
+    for candidate in reading.candidates[1:]:
+        assert "HEDGING WORD" in candidate.rule
+        assert "immediately between" in candidate.rule
+
+
+def test_bare_and_is_not_a_hedge_because_it_is_conjunctive():
+    """``and`` joins two quantities as readily as it restates one.
+
+    Half the measured defect table is a bare ``and``. ``and again`` IS admitted,
+    because ``again`` is what makes it one quantity said twice.
+
+    MUTATION: adding ``and`` to ``_HEDGE_CONNECTIVES`` turns this RED, and would
+    reopen "425 K and the pressure was 3 K".
+    """
+    assert "and" not in tc._HEDGE_CONNECTIVES
+    assert "and again" in tc._HEDGE_CONNECTIVES
+    assert tc._HEDGE_BRIDGE.fullmatch(" and ") is None
+    assert tc._HEDGE_BRIDGE.fullmatch(" and again ") is not None
+    assert _values(_read("The temperature was 425 K and 430 K"), TEMPERATURE) == [425]
+    assert _values(
+        _read("The temperature was 425 K and again 430 K"), TEMPERATURE
+    ) == [425, 430]
+
+
+def test_a_BARE_or_bridges_on_its_own():
+    """``or`` is a connective in its own right, not only the optional prefix.
+
+    **THIS TEST EXISTS BECAUSE A MUTATION SURVIVED.** Removing ``"or"`` from
+    ``_HEDGE_CONNECTIVES`` left all 174 transcript tests GREEN: every ``or`` case
+    in the parametrised corpus above is ``"or maybe"`` or ``"or perhaps"``, which
+    the ``(?:or\\s+)?`` PREFIX handles without the connective. So the corpus looked
+    like it covered ``or`` and covered only the prefix. Measured with ``"or"``
+    dropped: ``"425 K or 430 K"`` and ``"425 K, or 430 K"`` both fall back to
+    ``[425]``.
+
+    ``or`` alone IS alternation — "it was 425 or 430" is a person naming two
+    candidate values for one quantity — so reading both is the intended behaviour
+    and this pins it.
+
+    MUTATION: dropping ``"or"`` from ``_HEDGE_CONNECTIVES`` now turns this RED.
+    """
+    assert _values(_read("The temperature was 425 K or 430 K"), TEMPERATURE) == [
+        425,
+        430,
+    ]
+    assert _values(_read("The temperature was 425 K, or 430 K"), TEMPERATURE) == [
+        425,
+        430,
+    ]
+    # And the prefix is genuinely separate from the connective: BOTH spellings of
+    # "or perhaps" must work, which is what concealed the gap.
+    assert _values(
+        _read("The temperature was 425 K or perhaps 430 K"), TEMPERATURE
+    ) == [425, 430]
+
+
+#: The reviewed closed hedge list, written out so the tuple below is a RATCHET in
+#: BOTH directions rather than a list that checks itself.
+#:
+#: **THIS LITERAL EXISTS BECAUSE A MUTATION SURVIVED A TEST THAT WALKED THE LIST.**
+#: ``test_every_declared_connective_actually_bridges`` iterates
+#: ``tc._HEDGE_CONNECTIVES``, so deleting ``"approximately"`` from it left all 176
+#: transcript tests GREEN — the loop simply stopped checking the entry that had
+#: been removed. A self-referential test detects an entry that does not WORK; it
+#: cannot detect an entry that is GONE. Duplicating the list is the cost of
+#: catching that, and it buys the right thing: widening or narrowing the set a
+#: scientist's sentence is read under becomes a reviewed two-line change instead of
+#: a one-line one.
+REVIEWED_HEDGE_CONNECTIVES = (
+    "maybe",
+    "perhaps",
+    "possibly",
+    "around",
+    "about",
+    "roughly",
+    "approximately",
+    "and again",
+    "again",
+    "alternatively",
+    "or",
+)
+
+
+def test_the_hedge_list_is_exactly_the_reviewed_closed_set():
+    """A two-way ratchet on the set that decides whether a value is read at all.
+
+    Order is asserted too, not just membership: the alternation is built by
+    joining this tuple, and ``and again`` must precede ``again`` or the shorter
+    alternative would win — which ``fullmatch`` would then reject, silently
+    dropping ``and again``. So the ORDER is load-bearing and is pinned.
+
+    MUTATION: adding OR removing any connective turns this RED. Removing
+    ``"approximately"`` was GREEN across all 176 transcript tests before this
+    existed.
+    """
+    assert tc._HEDGE_CONNECTIVES == REVIEWED_HEDGE_CONNECTIVES
+    # The ordering constraint, stated as the behaviour it protects.
+    connectives = list(tc._HEDGE_CONNECTIVES)
+    assert connectives.index("and again") < connectives.index("again")
+
+
+def test_every_declared_connective_actually_bridges():
+    """A connective nobody exercises is a connective nobody has checked.
+
+    The ``or`` gap was one entry of a hand-written list that no test walked. This
+    walks the whole list, so an entry cannot be added inert. It deliberately
+    iterates ``tc._HEDGE_CONNECTIVES`` rather than the reviewed literal, so the two
+    tests fail for different reasons: this one for an entry that does not work, the
+    ratchet above for an entry that should not be there or has gone missing.
+
+    MUTATION: adding a connective the pattern cannot match turns this RED.
+    """
+    assert tc._HEDGE_CONNECTIVES, "an empty list would make this vacuous"
+    for connective in tc._HEDGE_CONNECTIVES:
+        sentence = f"The temperature was 425 K, {connective} 430 K"
+        assert _values(_read(sentence), TEMPERATURE) == [425, 430], connective
+        # And with the optional `or ` prefix in front of it.
+        prefixed = f"The temperature was 425 K, or {connective} 430 K"
+        assert _values(_read(prefixed), TEMPERATURE) == [425, 430], prefixed
+
+
+def test_the_hedge_bridge_admits_no_clause_terminator_so_clause_bounding_is_free():
+    """``_TEMPERATURE_K`` refuses to cross ``.;:`` and the restatement pass now
+    cannot either — not by a second check, but because the bridge pattern admits
+    only a comma, whitespace and letters.
+
+    Stated as a test rather than only as a comment because the reviewer's
+    alternative fix was clause-bounding, and the reason it was insufficient ALONE
+    (two defect rows carry no punctuation) is easy to misread as "clause-bounding
+    is not needed".
+
+    MUTATION: widening ``_HEDGE_BRIDGE`` to admit ``[^;]`` turns this RED.
+    """
+    for terminator in (".", ";", ":"):
+        assert tc._HEDGE_BRIDGE.fullmatch(f",{terminator} maybe ") is None
+        assert tc._HEDGE_BRIDGE.fullmatch(f", maybe{terminator} ") is None
+    # A LINE BREAK IS NOT A BRIDGE, and this assertion was RED on the first
+    # implementation: the pattern used `\s*`, which admits `\n`, and `fullmatch`
+    # rather than `$` does NOT close that — `$`'s before-a-trailing-newline laxity
+    # is a different hole. `_H_SPACE` is the fix. Nothing live depended on it (a
+    # segment cannot contain a newline), which is exactly why only a test found it.
+    assert tc._HEDGE_BRIDGE.fullmatch(", maybe \n") is None
+    assert tc._HEDGE_BRIDGE.fullmatch("\n maybe ") is None
+    assert tc._HEDGE_BRIDGE.fullmatch(", maybe ") is not None
+    # A non-breaking space still bridges: dictated text is not typed text, and
+    # `[ \t]` would have refused this while `[^\S\n]` admits it.
+    assert tc._HEDGE_BRIDGE.fullmatch(",\u00a0maybe\u00a0") is not None
+
+
+def test_clause_bounding_alone_would_have_caught():
+    """How much of the defect the REJECTED alternative fix would have closed.
+
+    The review offered clause-bounding as an alternative and said it was
+    insufficient because *"two of the rows above have no punctuation"*. Measured,
+    it is insufficient by a wider margin, and in a different way:
+
+    * on ``.;:`` — the bound ``_TEMPERATURE_K`` already imposes on itself — **0 of
+      6** gaps contain any such character, so it refuses NOTHING;
+    * breaking at a comma as well refuses **3 of 6**, not 4, and the three that
+      survive are the bare-``and`` rows.
+
+    Recorded as a test rather than a comment because it is the evidence for
+    choosing the hedge gate over the cheaper fix, and because a reader who trusts
+    the "two rows" phrasing would conclude clause-bounding was most of the answer.
+    It was none of it.
+    """
+    rows = [
+        ("The temperature was 425 K, ramped at 3 K/min", tc._TEMPERATURE_K, tc._TEMPERATURE_K_RESTATED),
+        ("The temperature was 425 K and the step size was 0.5 K", tc._TEMPERATURE_K, tc._TEMPERATURE_K_RESTATED),
+        ("Sample temperature 425 K, cryostat setpoint 80 K, base 4 K", tc._TEMPERATURE_K, tc._TEMPERATURE_K_RESTATED),
+        ("The temperature was 425 K and the pressure was 3 K", tc._TEMPERATURE_K, tc._TEMPERATURE_K_RESTATED),
+        ("The scan started 2026-01-01T00:00:00Z, ran until 2026-01-02T00:00:00Z", tc._ACQUIRED_START, tc._INSTANT_RESTATED),
+        ("The scan started 2026-01-01T00:00:00Z and we will repeat it 2026-02-01T00:00:00Z", tc._ACQUIRED_START, tc._INSTANT_RESTATED),
+    ]
+    gaps = []
+    for text, label_pattern, restatement in rows:
+        labelled = label_pattern.search(text)
+        assert labelled is not None, text
+        extra = restatement.search(text, labelled.end())
+        assert extra is not None, f"there IS a later value to be refused: {text}"
+        gaps.append(text[labelled.end() : extra.start(1)])
+
+    assert len(gaps) == 6
+    assert sum(any(ch in gap for ch in ".;:") for gap in gaps) == 0
+    assert sum("," in gap for gap in gaps) == 3
+    # And the hedge gate refuses all six, which is the comparison that matters.
+    assert sum(tc._HEDGE_BRIDGE.fullmatch(gap) is None for gap in gaps) == 6
+    # A comma is NOT a clause break for this purpose: the owner's own sentence
+    # bridges across one, so the cheaper fix would have broken the requirement.
+    assert "," in "The temperature was around 425 K, maybe 430 K"
+    assert _values(_read("The temperature was around 425 K, maybe 430 K"),
+                   TEMPERATURE) == [425, 430]
+
+
+def test_both_restatement_guards_refuse_started_A_and_ended_B():
+    """The reviewer asked that the two independent guards be proven to AGREE here.
+
+    ``"started A and ended B"`` is the one sentence both guards see: the overlap
+    guard refuses B because ``acquisition_end`` claimed it under its own label, and
+    the hedge guard refuses it because the gap is ``" and ended "``. They are
+    measured separately rather than inferred from the outcome, because an outcome
+    that two guards produce says nothing about either one.
+    """
+    text = "The scan started 2026-01-01T00:00:00Z and ended 2026-01-02T00:00:00Z"
+
+    start = tc._ACQUIRED_START.search(text)
+    end = tc._ACQUIRED_END.search(text)
+    assert start is not None and end is not None
+
+    # GUARD 1 — the cross-rule overlap guard. B's value span is claimed by the END
+    # rule, so the START rule's restatement scan must see an overlap.
+    restatement = tc._INSTANT_RESTATED.search(text, start.end())
+    assert restatement is not None, "there IS a later instant to be refused"
+    assert tc._spans_overlap(restatement.span(1), end.span(1)) is True
+
+    # GUARD 2 — the hedge bridge, measured on the same gap, independently.
+    bridge = text[start.end() : restatement.start(1)]
+    assert bridge == " and ended "
+    assert tc._HEDGE_BRIDGE.fullmatch(bridge) is None
+
+    # AND THE READING AGREES WITH BOTH: two fields, one value each, neither restated.
+    reading = _read(text)
+    assert [
+        (candidate.field_path, candidate.proposed_value) for candidate in reading.candidates
+    ] == [
+        ("timestamps.acquired_start_utc", "2026-01-01T00:00:00Z"),
+        ("timestamps.acquired_end_utc", "2026-01-02T00:00:00Z"),
+    ]
+    assert all(
+        candidate.provenance["restated_in_same_sentence"] is False
+        for candidate in reading.candidates
+    )
+
+
+def test_a_refused_restatement_does_not_advance_the_adjacency_anchor():
+    """The chain is a chain of HEDGES, not of positions.
+
+    If a refused restatement advanced the anchor, then in "425 K, cryostat setpoint
+    80 K, maybe 4 K" the gap before 4 would be measured from 80 and read as hedged
+    — inventing a value two clauses away from anything that introduced it.
+
+    MUTATION: moving ``anchor = extra.end()`` out of the accepted branch in
+    ``_segment_readings`` turns this RED.
+    """
+    reading = _read("Sample temperature 425 K, cryostat setpoint 80 K, maybe 4 K")
+    assert _values(reading, TEMPERATURE) == [425]
+
+
+def test_the_anchor_DOES_advance_across_a_deduplicated_restatement():
+    """Adjacency is a fact about the text, so a dropped duplicate still bridges.
+
+    "425 K, maybe 425 K, or perhaps 430 K": the middle reading is accepted by the
+    gate and then dropped as an identical value, and 430 must still be read.
+
+    MUTATION: advancing the anchor only for readings that survive de-duplication
+    turns this RED.
+    """
+    reading = _read("The temperature was 425 K, maybe 425 K, or perhaps 430 K")
+    assert _values(reading, TEMPERATURE) == [425, 430]
+
+
+def test_the_restatement_still_requires_the_label_to_come_first():
+    """Unchanged by the gate: a hedged value BEFORE the label is not a restatement
+    of it. Pass two still scans only from the end of the last labelled match."""
+    assert _values(_read("At 300 K, maybe 310 K, the temperature was 425 K"),
+                   TEMPERATURE) == [425]
+
+
+def test_a_hedged_value_with_no_labelled_match_at_all_reads_nothing():
+    """Pass two is still gated on pass one. A bare hedged number is never read."""
+    assert _read("It was around 425 K, maybe 430 K").candidates == ()

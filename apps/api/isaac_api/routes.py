@@ -15195,9 +15195,49 @@ def post_transcript(
             )
             for run in exp.sorted_runs()
         )
-        reading = tc.read_transcript(
-            raw_text, selected_run=run_id, known_runs=known_runs
-        )
+        # THE DENSITY CEILINGS REFUSE HERE, BESIDE THE SEGMENT CEILING, AND BEFORE
+        # ANY NOTE IS STORED — the reader raises rather than reporting, so there is
+        # no ordering in which a caller receives a partial or empty-looking
+        # candidate list for a transcript that blew a ceiling. See
+        # `tc.TranscriptTooDense` for why an exception and not a marker.
+        #
+        # WHY THE READER NEEDS ITS OWN BOUNDS AT ALL, given `_MAX_TRANSCRIPT_BYTES`
+        # above and `_MAX_PROPOSALS_PER_RECORD` below: the transcript ceiling bounds
+        # the INPUT and the proposal ceiling bounds the DURABLE WRITE, and the cost
+        # measured on the code that shipped without these was in neither. It was the
+        # RESPONSE and the LOCK HOLD — a 27,025-byte single segment produced a
+        # 165,828,285-byte response with `proposals_too_large` refusing all 3,001
+        # rows and minting none, i.e. every existing bound working as designed.
+        #
+        # A CONSEQUENCE TO STATE RATHER THAN LET A CLIENT DISCOVER: whichever bound
+        # binds first refuses, so a transcript that is BOTH over the segment ceiling
+        # and over a density ceiling reports `transcript_too_dense` and never sees
+        # `transcript_too_long`. Both are true of it, both say "finalize it in
+        # smaller pieces", and both store nothing — so the precedence changes which
+        # reason a client is told, never whether it is refused. `MAX_CANDIDATES`
+        # (500) sits above `MAX_SEGMENTS` (100) times a realistic per-sentence
+        # count, so an ordinarily-long transcript still gets the segment reason.
+        try:
+            reading = tc.read_transcript(
+                raw_text, selected_run=run_id, known_runs=known_runs
+            )
+        except tc.TranscriptTooDense as refusal:
+            return _transcript_refusal(
+                "transcript_too_dense",
+                (
+                    "This transcript states more values than one capture may "
+                    "read. It is REFUSED whole rather than partly read, because a "
+                    "partly read transcript proposes some of what was said and "
+                    "silently drops the rest. Nothing was stored; finalize it in "
+                    "smaller pieces."
+                ),
+                candidates=refusal.candidates,
+                maximum_candidates=refusal.maximum_candidates,
+                candidate_quote_bytes=refusal.candidate_quote_bytes,
+                maximum_candidate_quote_bytes=(
+                    refusal.maximum_candidate_quote_bytes
+                ),
+            )
         if len(reading.segments) > tc.MAX_SEGMENTS:
             return _transcript_refusal(
                 "transcript_too_long",
