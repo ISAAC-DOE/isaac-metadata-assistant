@@ -36,6 +36,18 @@ const CANONICAL_ROWS: ApiExperimentSummary[] = [
     evidenced_field_count: 26,
     exported: false,
     record_id: null,
+    // The LIB-001 Library columns, MEASURED from a real list read on this
+    // branch rather than chosen: this fixture's own docstring claims to be the
+    // payload exactly as served, so a placeholder here would falsify it. All
+    // five seeds carry the same technique and beamline because all five are
+    // built from the one committed fixture sheet, and `updated_utc` equals
+    // `created_utc` because no write has touched a freshly materialised seed.
+    updated_utc: '2026-07-12T00:00:01Z',
+    run_count: 0,
+    open_proposal_count: 0,
+    folder: '',
+    technique: 'HERFD-XAS',
+    beamline: '15-2',
   },
   {
     id: '01SYNTHXANESSEED0000000002',
@@ -47,6 +59,18 @@ const CANONICAL_ROWS: ApiExperimentSummary[] = [
     evidenced_field_count: 30,
     exported: false,
     record_id: null,
+    // The LIB-001 Library columns, MEASURED from a real list read on this
+    // branch rather than chosen: this fixture's own docstring claims to be the
+    // payload exactly as served, so a placeholder here would falsify it. All
+    // five seeds carry the same technique and beamline because all five are
+    // built from the one committed fixture sheet, and `updated_utc` equals
+    // `created_utc` because no write has touched a freshly materialised seed.
+    updated_utc: '2026-07-12T00:00:02Z',
+    run_count: 0,
+    open_proposal_count: 0,
+    folder: '',
+    technique: 'HERFD-XAS',
+    beamline: '15-2',
   },
   {
     id: '01SYNTHXANESSEED0000000003',
@@ -58,6 +82,18 @@ const CANONICAL_ROWS: ApiExperimentSummary[] = [
     evidenced_field_count: 33,
     exported: false,
     record_id: null,
+    // The LIB-001 Library columns, MEASURED from a real list read on this
+    // branch rather than chosen: this fixture's own docstring claims to be the
+    // payload exactly as served, so a placeholder here would falsify it. All
+    // five seeds carry the same technique and beamline because all five are
+    // built from the one committed fixture sheet, and `updated_utc` equals
+    // `created_utc` because no write has touched a freshly materialised seed.
+    updated_utc: '2026-07-12T00:00:03Z',
+    run_count: 0,
+    open_proposal_count: 0,
+    folder: '',
+    technique: 'HERFD-XAS',
+    beamline: '15-2',
   },
   {
     id: '01SYNTHXANESSEED0000000004',
@@ -69,6 +105,18 @@ const CANONICAL_ROWS: ApiExperimentSummary[] = [
     evidenced_field_count: 33,
     exported: false,
     record_id: null,
+    // The LIB-001 Library columns, MEASURED from a real list read on this
+    // branch rather than chosen: this fixture's own docstring claims to be the
+    // payload exactly as served, so a placeholder here would falsify it. All
+    // five seeds carry the same technique and beamline because all five are
+    // built from the one committed fixture sheet, and `updated_utc` equals
+    // `created_utc` because no write has touched a freshly materialised seed.
+    updated_utc: '2026-07-12T00:00:04Z',
+    run_count: 0,
+    open_proposal_count: 0,
+    folder: '',
+    technique: 'HERFD-XAS',
+    beamline: '15-2',
   },
   {
     id: '01SYNTHXANESSEED0000000005',
@@ -80,6 +128,18 @@ const CANONICAL_ROWS: ApiExperimentSummary[] = [
     evidenced_field_count: 33,
     exported: true,
     record_id: '01SYNTHXANESSEED0000000005',
+    // The LIB-001 Library columns, MEASURED from a real list read on this
+    // branch rather than chosen: this fixture's own docstring claims to be the
+    // payload exactly as served, so a placeholder here would falsify it. All
+    // five seeds carry the same technique and beamline because all five are
+    // built from the one committed fixture sheet, and `updated_utc` equals
+    // `created_utc` because no write has touched a freshly materialised seed.
+    updated_utc: '2026-07-12T00:00:05Z',
+    run_count: 0,
+    open_proposal_count: 0,
+    folder: '',
+    technique: 'HERFD-XAS',
+    beamline: '15-2',
   },
 ];
 

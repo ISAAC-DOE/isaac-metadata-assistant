@@ -561,6 +561,44 @@ export interface ExperimentSummary {
   // P33 S1 — the neutral created-date badge; a display string plus a full,
   // unambiguous accessible string. Undefined when the server sent no created_utc.
   date?: { iso: string; display: string; accessible: string };
+
+  // --- the Experiment Library's row metadata -----------------------------
+  //
+  // EVERY ONE OF THESE IS OPTIONAL AND EVERY ONE RENDERS NOTHING WHEN ABSENT.
+  // That is the same discipline `scenario` and `technique` above already carry,
+  // and it is the reason there is no placeholder anywhere in this group: a dash,
+  // an "unknown" or an empty chip shell all read as "we looked and it is nothing",
+  // which is a different claim from "nothing has established this".
+
+  /** The last-changed badge, worded for recency. See `formatUpdatedDate`. */
+  updated?: { iso: string; display: string; accessible: string };
+  /**
+   * How many runs, straight from the server. `0` is a real value and renders as
+   * nothing — a chip reading "0 runs" on every freshly created record would be
+   * noise on the most common row in the product.
+   */
+  runCount?: number;
+  /** Open ingestion proposals, the server's count. `0` renders nothing. */
+  openProposalCount?: number;
+  /** The folder path label, or `undefined` when unfiled. Never `''`. */
+  folder?: string;
+  /**
+   * The record-level beamline, from the server. `undefined` when the draft
+   * carries none, which is the case for every freshly created record.
+   *
+   * `technique` is declared FURTHER UP this interface, beside `scenario`, because
+   * it predates the Library — it has been optional-and-normally-absent since the
+   * adapter stopped inventing a hard-coded `'Cu K-edge XANES'` for every row. It
+   * now arrives from the server on the same terms as this one.
+   */
+  beamline?: string;
+  /**
+   * The record id, shown ONLY when this row's display title collides with another
+   * row on screen. See `adapt.RowContext` for why the decision cannot be made
+   * from inside one row, and `library.duplicateDisplayTitles` for how it is made.
+   */
+  disambiguator?: string;
+
   group: QueueGroupKey;
   trailing: ExperimentTrailing;
 }
@@ -648,6 +686,62 @@ export interface ApiExperimentSummary {
   evidenced_field_count: number;
   exported: boolean;
   record_id: string | null;
+
+  // --- LIB-001: the Experiment Library's columns ------------------------
+  //
+  // Every field below arrives on the SAME request as the rest of the row. The
+  // server builds each summary from a state document it has already read, so
+  // there is no second call to make and no reason for this screen to fan out —
+  // which is what `docs/superpowers/plans/2026-09-12-isaac-ux-ia-plan.md` §1.6
+  // predicted would be needed ("The Library cannot show 'how many Runs' without
+  // N further requests") and what the route's own comment records as measured
+  // false.
+
+  /**
+   * When the record's authoritative state last changed. STORED server-side, not
+   * derived.
+   *
+   * **WHOLE SECONDS.** Two changes inside the same second are indistinguishable
+   * by this value — which is precisely why the record change feed abandoned it as
+   * an ordering key in favour of a durable revision position. Render it, sort by
+   * it, and never make a correctness decision from it: not a precondition, not a
+   * cursor, not a conflict check, not a "has this changed?" test. `version` is
+   * the token for all of those.
+   */
+  updated_utc: string;
+  /** How many runs this experiment holds. Each one exports its own record. */
+  run_count: number;
+  /**
+   * Ingestion proposals still awaiting a person's judgement. Decided ones are not
+   * counted (they are kept forever rather than deleted, so a total would only
+   * grow), and an entry the server could not parse is not counted either, because
+   * it has no state that could be open.
+   */
+  open_proposal_count: number;
+  /**
+   * This experiment's folder path label, `/`-separated, or `''` when unfiled.
+   *
+   * **THERE IS NO FOLDER ENTITY, and nothing in this build pretends otherwise.**
+   * A path exists exactly while at least one experiment names it, so the set of
+   * folders is derived from this column across the whole list — see
+   * `lib/folders.ts`. Organizational only: it reaches no exported record, no
+   * evidence sidecar and no content signature.
+   */
+  folder: string;
+  /**
+   * The RECORD-LEVEL technique from the draft, or `null` when the draft carries
+   * none. A value still awaiting confirmation arrives as `null` rather than as a
+   * fact.
+   *
+   * `null` IS THE COMMON CASE FOR A CREATED RECORD, measured: `POST
+   * /api/experiments` yields a draft with no fields at all. Runs inherit this by
+   * reference, so it normally describes every run — a run that overrides it is
+   * not reflected here, which makes the value incomplete for that record and
+   * never wrong about the level it names.
+   */
+  technique: string | null;
+  /** The record-level beamline, on exactly `technique`'s terms above. */
+  beamline: string | null;
 }
 
 /**

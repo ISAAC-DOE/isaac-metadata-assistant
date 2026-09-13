@@ -1012,11 +1012,26 @@ export const api = {
    * inside a session, so the refusal is a backstop rather than a path a reader
    * meets.
    */
-  createExperiment(input: { title: string; description?: string }): Promise<ApiExperimentDetail> {
+  createExperiment(input: {
+    title: string;
+    description?: string;
+    /**
+     * Optional folder path label to file the new experiment under. Omitted from
+     * the body when empty, for the same reason `description` is: unfiled and
+     * `''` are the same thing and only one of them is a value.
+     *
+     * The server REFUSES a path it will not store (typed `422`) rather than
+     * trimming it to fit, and nothing is created when it does — so a caller must
+     * surface that refusal rather than assuming the record landed unfiled.
+     */
+    folder?: string;
+  }): Promise<ApiExperimentDetail> {
     const description = (input.description ?? '').trim();
+    const folder = (input.folder ?? '').trim();
     return postJson<ApiExperimentDetail>('/experiments', {
       title: input.title.trim(),
       ...(description ? { description } : {}),
+      ...(folder ? { folder } : {}),
     });
   },
 
@@ -1057,6 +1072,54 @@ export const api = {
     const res = await request(path, {
       method: 'PATCH',
       body: JSON.stringify({ title }),
+      ...(version ? { headers: { 'If-Match': `"${version}"` } } : {}),
+    });
+    if (res.ok) return readJson<ApiExperimentDetail>(res, path);
+    throw await mutationError(res, path);
+  },
+
+  /**
+   * File an experiment under a folder path label, move it, or unfile it.
+   *
+   * `folder: null` and `folder: ''` both UNFILE, and the server treats them
+   * identically. There is deliberately no separate `clearFolder` — "put this
+   * nowhere" and "take this out of where it is" are one act, and two functions
+   * for it would be two places to get the precondition wrong.
+   *
+   * **IT IS A SEPARATE OPERATION FROM `renameExperiment`, not a second field on
+   * it.** The rename's server-side contract says it writes the title and nothing
+   * else, and a test quotes that sentence; widening its body would have falsified
+   * a committed claim.
+   *
+   * **THERE IS NO `createFolder` OR `deleteFolder` ON THIS CLIENT, and their
+   * absence is the model rather than a gap.** A folder path exists because some
+   * experiment names it and stops existing when the last one stops, so this one
+   * call is the whole write surface. There is no folder rename either: it would
+   * mean rewriting every member as N independent writes with no transaction
+   * around them, and offering it would imply an atomicity this build cannot give.
+   *
+   * `If-Match` IS THE RECORD'S TOKEN, guarded on truthiness exactly as every
+   * other mutation here is — a blank version sends NO header (→ 428 naming the
+   * missing precondition) rather than `If-Match: ""` (→ 400, a client bug
+   * reported as a server disagreement).
+   *
+   * A SUCCESSFUL MOVE INVALIDATES THE HELD ETag. The folder is inside the
+   * record's authoritative signature — it has to be, or the write path would
+   * discard the first assignment silently — so `rev` advances and the caller must
+   * adopt the returned detail rather than keep its old version. A 412 means the
+   * move did not happen; `mutationError` attaches the parsed body so the caller
+   * can re-read before retrying. Re-sending the folder the record already holds
+   * is a no-op and returns the same token.
+   */
+  async moveExperimentToFolder(
+    id: string,
+    folder: string | null,
+    version: string,
+  ): Promise<ApiExperimentDetail> {
+    const path = `/experiments/${enc(id)}/folder`;
+    const res = await request(path, {
+      method: 'PATCH',
+      body: JSON.stringify({ folder }),
       ...(version ? { headers: { 'If-Match': `"${version}"` } } : {}),
     });
     if (res.ok) return readJson<ApiExperimentDetail>(res, path);

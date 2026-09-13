@@ -17,6 +17,14 @@ function baseSummary(overrides: Partial<ApiExperimentSummary> = {}): ApiExperime
     evidenced_field_count: 3,
     exported: false,
     record_id: null,
+    // The LIB-001 Library columns. The server sends all six on every row;
+    // these are the neutral values for a fixture that is not about them.
+    updated_utc: '2026-07-12T10:00:00Z',
+    run_count: 0,
+    open_proposal_count: 0,
+    folder: '',
+    technique: null,
+    beamline: null,
     ...overrides,
   };
 }
@@ -99,5 +107,74 @@ describe('adapt — trailingFor', () => {
     const s = baseSummary();
     expect(trailingFor(s, 'inReview')).toEqual({});
     expect(trailingFor(s, 'ready')).toEqual({});
+  });
+});
+
+describe('adapt — the Library columns are PASSED THROUGH, never invented', () => {
+  /*
+   * THE INVARIANT THIS BLOCK EXISTS FOR, and the reason it is at the ADAPTER and
+   * not at the renderer.
+   *
+   * `adapt.ts` once set `technique` on every row from a module constant
+   * `const TECHNIQUE = 'Cu K-edge XANES'` — a scientific value invented in the
+   * client, for a schema-governed enum field, wrong for any record that was not
+   * Cu K-edge XANES and carrying no signal that it was fabricated. Its own
+   * comment said "a display label, not a server field" as though that made it
+   * safe. The only thing standing over that hole afterwards was an assertion in
+   * `experiment-row.test.tsx` that the ROW renders no technique badge — a
+   * RENDERER test, which could only ever have caught the adapter's constant by
+   * accident of which string it happened to be, and which had to be replaced the
+   * moment a real server-supplied technique started rendering.
+   *
+   * These assertions are that guard, relocated to the layer that can breach it.
+   */
+  it('the adapter never invents a technique or a beamline', () => {
+    const row = toExperimentSummary(baseSummary({ technique: null, beamline: null }));
+    expect(row.technique).toBeUndefined();
+    expect(row.beamline).toBeUndefined();
+  });
+
+  it('passes a server-supplied technique and beamline through unchanged', () => {
+    const row = toExperimentSummary(baseSummary({ technique: 'HERFD-XAS', beamline: '15-2' }));
+    expect(row.technique).toBe('HERFD-XAS');
+    expect(row.beamline).toBe('15-2');
+  });
+
+  it('passes the server counts through as numbers, including zero', () => {
+    const zero = toExperimentSummary(baseSummary({ run_count: 0, open_proposal_count: 0 }));
+    expect(zero.runCount).toBe(0);
+    expect(zero.openProposalCount).toBe(0);
+    const some = toExperimentSummary(baseSummary({ run_count: 3, open_proposal_count: 2 }));
+    expect(some.runCount).toBe(3);
+    expect(some.openProposalCount).toBe(2);
+  });
+
+  it('maps an unfiled folder to undefined, not to the empty string', () => {
+    // `''` would render as a blank element in the metadata line, which reads as
+    // "we know this and it is nothing" — a different claim from "unfiled".
+    expect(toExperimentSummary(baseSummary({ folder: '' })).folder).toBeUndefined();
+    expect(toExperimentSummary(baseSummary({ folder: 'A/B' })).folder).toBe('A/B');
+  });
+
+  it('carries NO disambiguator unless the caller says the title collides', () => {
+    // The default is the common case and it must be silent: an id beside every
+    // title is noise a reader learns to skip, which is how it would fail to help
+    // on the two rows where it matters.
+    expect(toExperimentSummary(baseSummary()).disambiguator).toBeUndefined();
+    expect(toExperimentSummary(baseSummary(), { ambiguousTitle: true }).disambiguator).toBe(
+      '01SYNTH1',
+    );
+  });
+
+  it('prefers updated_utc for the row date and still maps created_utc', () => {
+    const row = toExperimentSummary(
+      baseSummary({ created_utc: '2026-07-12T10:00:00Z', updated_utc: '2026-08-01T09:00:00Z' }),
+    );
+    expect(row.updated?.iso).toBe('2026-08-01');
+    expect(row.updated?.accessible).toBe('Last updated August 1, 2026');
+    // The created date is still mapped, so the row can fall back to it when a
+    // response carried no `updated_utc` at all.
+    expect(row.date?.iso).toBe('2026-07-12');
+    expect(row.date?.accessible).toBe('Created July 12, 2026');
   });
 });

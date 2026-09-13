@@ -373,6 +373,31 @@ def test_no_shipped_write_route_mutates_a_submitted_records_history(client, db):
             ),
         ),
         (
+            # THE FOLDER MOVE IS GENUINELY SWEPT RATHER THAN EXEMPTED, and that is
+            # the point of putting it here instead of in
+            # `not_addressed_to_a_record`. It is `ACCEPTED` — filing a submitted
+            # record is allowed, deliberately, because a folder is organizational
+            # and a scientist tidying their workspace is not editing their science.
+            # So this attempt lands a real write on a submitted record, and the
+            # assertions this sweep makes about the submission history afterwards
+            # are the ones that have to hold: a move must move `rev` (it is inside
+            # the authoritative signature) while touching no revision row, no
+            # submission row, and no content signature.
+            #
+            # IT IS THE STRICTLY STRONGER CHOICE. Listing it as "not addressed to a
+            # record" would have been true of the FIELD PATHS and false of the
+            # RECORD — it writes the record's own document — and would have bought
+            # an exemption for the one write on a submitted record this feature
+            # newly makes reachable.
+            "PATCH /experiments/{id}/folder",
+            ACCEPTED,
+            lambda: client.patch(
+                f"/api/experiments/{eid}/folder",
+                json={"folder": "Submitted work/2026"},
+                headers={"If-Match": _etag(client, eid)},
+            ),
+        ),
+        (
             # MEASURED, AND IT IS A PROPERTY OF A RECORD A PERSON BUILT rather than of
             # this payload. Once a record has runs, every answerable key it holds is
             # run-owned, so the RECORD-level answer and correction routes have nothing
@@ -994,6 +1019,7 @@ def test_the_sweep_covers_every_mutating_route_this_api_publishes(app):
     #: a path template. Keyed by the published (method, path).
     swept_names = {
         ("PATCH", "/api/experiments/{experiment_id}"): "PATCH /experiments/{id}",
+        ("PATCH", "/api/experiments/{experiment_id}/folder"): "PATCH /experiments/{id}/folder",
         ("POST", "/api/experiments/{experiment_id}/answers"): "POST /answers",
         ("POST", "/api/experiments/{experiment_id}/edit"): "POST /edit",
         ("POST", "/api/experiments/{experiment_id}/runs"): "POST /runs (add)",

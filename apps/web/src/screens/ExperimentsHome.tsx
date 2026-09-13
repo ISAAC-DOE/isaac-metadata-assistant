@@ -12,6 +12,9 @@ import { AppShell } from '../components/AppShell';
 import { TopBar } from '../components/TopBar';
 import { LeftNav } from '../components/LeftNav';
 import { ExperimentQueue } from '../components/ExperimentQueue';
+import { LibraryList, LibraryNoResults } from '../components/LibraryList';
+import { LibraryToolbar } from '../components/LibraryToolbar';
+import { FolderBreadcrumbs, FolderList } from '../components/LibraryFolders';
 import { TutorialPromotion } from '../components/TutorialPromotion';
 import { LoadingPanel, BackendDown } from '../components/FetchStates';
 import { Compass, LayoutList, Plus, ShieldCheck } from '../components/icons';
@@ -24,7 +27,15 @@ import { useFetch } from '../lib/useFetch';
 import { useHealth } from '../lib/useHealth';
 import { useWorkspaceScope } from '../lib/workspaceScope';
 import { subscribeWorkspaceRebuilt } from '../lib/workspaceInvalidation';
-import { queueSubcount, summariesToQueueGroups } from '../lib/adapt';
+import { libraryRows, queueSubcount, summariesToQueueGroups } from '../lib/adapt';
+import {
+  DEFAULT_LIBRARY_SORT,
+  facetCounts,
+  selectLibraryRows,
+  type LibraryFacetId,
+  type LibrarySortId,
+} from '../lib/library';
+import { buildFolderTree, rootFolders, type FolderNode } from '../lib/folders';
 import type { ApiListIncomplete } from '../lib/types';
 
 /**
@@ -302,6 +313,27 @@ export function ExperimentsHome() {
    */
   useEffect(() => subscribeWorkspaceRebuilt(reloadSilent), [reloadSilent]);
 
+  /*
+   * THE LIBRARY'S VIEW STATE, and it is deliberately LOCAL rather than in the URL.
+   *
+   * The record screen puts its four workspaces in `?view=` because those are
+   * DESTINATIONS a person bookmarks, links to and presses Back out of. A filter
+   * chip and a search box are not: pushing history on every keystroke would make
+   * Back mean "undo one character", which is the behaviour that makes a browser's
+   * own back button untrustworthy on a page. If sharing a filtered view is ever
+   * asked for, that is a deliberate addition with its own argument — not a
+   * consequence of how the state happened to be stored.
+   *
+   * THE FOLDER IS LOCAL FOR THE SAME REASON AND IT IS THE CLOSER CALL. Browsing
+   * into a folder feels like navigation, and a future slice may well move it to a
+   * query parameter. It is local now because the alternative is to ship a URL
+   * shape that becomes a contract the moment someone bookmarks it.
+   */
+  const [query, setQuery] = useState('');
+  const [facet, setFacet] = useState<LibraryFacetId>('all');
+  const [sort, setSort] = useState<LibrarySortId>(DEFAULT_LIBRARY_SORT);
+  const [folder, setFolder] = useState('');
+
   let subcount = '';
   let body: ReactNode;
   /*
@@ -323,20 +355,130 @@ export function ExperimentsHome() {
   } else {
     const summaries = result.data.experiments;
     subcount = queueSubcount(summaries);
-    const groups = summariesToQueueGroups(summaries);
-    queueIsEmpty = groups.length === 0;
-    body =
-      groups.length > 0 ? (
-        <ExperimentQueue groups={groups} />
-      ) : (
-        <EmptyExperiments
-          launchRef={launchRef}
-          launchBusy={launchBusy}
-          durability={durability}
-          onCreated={openCreated}
-          onOpenValidator={() => navigate(`${ROUTES.governance}?tab=validator`)}
+    /*
+     * `queueIsEmpty` IS ABOUT THE WORKSPACE, NOT ABOUT THE VIEW, and the
+     * distinction decides which of two very different screens a reader gets.
+     *
+     * It gates the first-run empty state ("create your first experiment") and the
+     * header's Create control, so it MUST mean "this workspace holds nothing" —
+     * derived from the unfiltered server list. Deriving it from the filtered rows
+     * instead would put "Start your first experiment" in front of somebody with
+     * forty records who had simply typed a word that matched none of them. That is
+     * the single worst false claim this screen could make, and it is one line of
+     * carelessness away, which is why this is spelled out rather than inlined.
+     *
+     * An empty RESULT is a different state with different copy (`LibraryNoResults`),
+     * and it says the rows are being narrowed rather than that they do not exist.
+     */
+    queueIsEmpty = summaries.length === 0;
+
+    // Over the WHOLE list, never over the filtered rows — see `facetCounts`.
+    const counts = facetCounts(summaries);
+    /*
+     * THE FOLDER TREE IS BUILT FROM THE WHOLE LIST TOO, and that is the same
+     * count-scope decision the chips make, for the same reason. A folder's count is
+     * a fact about the FOLDER — how much is filed there — not about what the current
+     * search happens to match. A tree that shrank with the query would make a reader
+     * believe records had left a folder they are still in, and would hide a folder
+     * entirely the moment its names stopped matching what was typed.
+     */
+    const tree = buildFolderTree(summaries);
+    const childFolders = (folder === '' ? rootFolders(tree) : (tree.get(folder)?.children ?? []))
+      .map((path) => tree.get(path))
+      .filter((n): n is FolderNode => n !== undefined);
+
+    /*
+     * BROWSING IS SUBTREE-SCOPED AND SO IS SEARCHING, and that is one decision
+     * rather than two. `exactFolder` is deliberately never set: standing in
+     * `Cu K-edge` shows the records filed there AND the ones in its subfolders,
+     * with the subfolders listed separately above them. The alternative — showing
+     * only exact members — hides a record from the folder a reader believes it is
+     * in, which is the failure that makes a folder tree untrustworthy.
+     */
+    /*
+     * SELECTED ONCE, THEN ADAPTED TWO WAYS — and the single call is a correctness
+     * requirement, not a saving. `libraryRows` computes the title-collision set
+     * over the rows it is given, so two independent selections could disagree about
+     * which titles collide if either ever became non-deterministic; and the flat
+     * list and the grouped list are two renderings of ONE result set, so they must
+     * be built from one.
+     *
+     * (`summariesToQueueGroups` calls `libraryRows` itself, over the same array, so
+     * the collision set is identical by construction rather than by coincidence.)
+     */
+    const selected = selectLibraryRows(summaries, { query, facet, sort, folder });
+    const rows = libraryRows(selected);
+    const groups = summariesToQueueGroups(selected);
+
+    /*
+     * TWO RESULT RENDERINGS, AND THE CHOICE IS NOT COSMETIC.
+     *
+     * GROUPED, when no filter and no search are applied: the four status groups
+     * answer "what needs me next?", which is what this screen is for and what its
+     * vocabulary has always been. Grouping is preserved rather than replaced —
+     * the chips are the same four states used as lenses, not a parallel set.
+     *
+     * FLAT, the moment a facet or a query narrows the list. A group header over
+     * rows a reader has just filtered to one status is a heading that restates
+     * the chip they pressed, and with a search applied the groups fragment the
+     * results for no reason. The flat list states its own count instead.
+     */
+    const isNarrowed = facet !== 'all' || query.trim() !== '';
+
+    body = queueIsEmpty ? (
+      <EmptyExperiments
+        launchRef={launchRef}
+        launchBusy={launchBusy}
+        durability={durability}
+        onCreated={openCreated}
+        onOpenValidator={() => navigate(`${ROUTES.governance}?tab=validator`)}
+      />
+    ) : (
+      <>
+        <FolderBreadcrumbs folder={folder} onNavigate={setFolder} />
+        <LibraryToolbar
+          query={query}
+          onQuery={setQuery}
+          facet={facet}
+          onFacet={setFacet}
+          sort={sort}
+          onSort={setSort}
+          counts={counts}
         />
-      );
+        <FolderList
+          folders={childFolders}
+          onNavigate={setFolder}
+          showModelNote={folder === ''}
+        />
+        {rows.length === 0 ? (
+          <LibraryNoResults
+            onClear={() => {
+              setQuery('');
+              setFacet('all');
+            }}
+          />
+        ) : isNarrowed ? (
+          <>
+            {/*
+              THE COUNT OF WHAT IS ON SCREEN, stated where it describes the thing
+              it counts. It is `rows.length` and that is CORRECT here, unlike every
+              count on the record screen: this list is not paged, the server sent
+              every row, and `selectLibraryRows` filtered them locally — so the
+              array IS the result set rather than a window onto it. The chips'
+              counts, which are over the whole list, are computed separately and
+              never read from a filtered array.
+            */}
+            <p className="library-result-count" role="status">
+              {rows.length} of {summaries.length} experiment
+              {summaries.length === 1 ? '' : 's'}
+            </p>
+            <LibraryList rows={rows} />
+          </>
+        ) : (
+          <ExperimentQueue groups={groups} />
+        )}
+      </>
+    );
   }
 
   /*
@@ -772,6 +914,19 @@ function CreateExperimentControl({
   const [open, setOpen] = useState(false);
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
+  /*
+   * THE DESTINATION, AT CREATE TIME. Optional, empty by default, and empty means
+   * unfiled — which is what every record created before folders existed is, so
+   * there is no default destination to be surprised by.
+   *
+   * IT IS A FREE-TEXT FIELD AND NOT A PICKER, and that follows from the model
+   * rather than from effort. A folder path comes into existence by being named, so
+   * the field that names it has to accept a path that does not exist yet; a picker
+   * over existing paths could only ever file a record beside another one. The
+   * server REFUSES a path it will not store, with a typed 422 and nothing created,
+   * which `submit` below surfaces rather than swallowing.
+   */
+  const [folder, setFolder] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const titleRef = useRef<HTMLInputElement>(null);
@@ -781,6 +936,8 @@ function CreateExperimentControl({
   const titleId = `${formId}-title`;
   const descriptionId = `${formId}-description`;
   const descriptionHintId = `${formId}-description-hint`;
+  const folderId = `${formId}-folder`;
+  const folderHintId = `${formId}-folder-hint`;
   const titleCountId = `${formId}-title-count`;
   const descriptionCountId = `${formId}-description-count`;
   const errorId = `${formId}-error`;
@@ -872,7 +1029,7 @@ function CreateExperimentControl({
     setBusy(true);
     setError(null);
     try {
-      const created = await api.createExperiment({ title: trimmed, description });
+      const created = await api.createExperiment({ title: trimmed, description, folder });
       onCreated(created.id);
     } catch (err) {
       // The message is whatever the API layer could establish. It is not
@@ -948,6 +1105,36 @@ function CreateExperimentControl({
           length={description.length}
           limit={DESCRIPTION_MAX_LENGTH}
         />
+      </div>
+
+      {/*
+        THE OPTIONAL DESTINATION. A plain text field, because a folder path is
+        created by being named — see the state declaration above for why a picker
+        over existing paths could not express the common case.
+
+        NO `maxLength` ATTRIBUTE, matching the two fields above and for the reason
+        recorded in `submit`: `maxLength` silently CUTS a pasted value at the
+        limit, turning a loud refusal into an invisible edit of the reader's text.
+        The server's refusal is typed and is surfaced verbatim.
+      */}
+      <div className="create-experiment-field">
+        <label className="create-experiment-label" htmlFor={folderId}>
+          {LABELS.createExperimentFolderLabel}
+        </label>
+        <input
+          id={folderId}
+          className="create-experiment-input"
+          type="text"
+          value={folder}
+          aria-describedby={folderHintId}
+          onChange={(e) => {
+            setFolder(e.target.value);
+            if (error !== null) setError(null);
+          }}
+        />
+        <span className="create-experiment-hint" id={folderHintId}>
+          {LABELS.createExperimentFolderHint}
+        </span>
       </div>
 
       {/* `role="alert"` rather than a bare paragraph: the message appears after a
