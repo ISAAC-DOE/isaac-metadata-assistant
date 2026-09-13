@@ -15,6 +15,12 @@ import { stubFetchRoutes, graphStatusAvailable } from '../test/apiFixtures';
  *           (inactive tabs omit it — matching the accordion convention).
  */
 
+/* UX-021 — `MemoryRouter` IS REQUIRED here. `HelpPanel` renders a real `<Link>` to
+ * Settings -> Help & Tutorial, and `Link` reads router context, so a bare render throws
+ * `Cannot destructure property 'basename' of useContext(...) as it is null` and takes every
+ * test in the file down with it. Wrapping is the right fix rather than downgrading the
+ * `<Link>`: in production this panel is mounted inside `TopBar`, inside the router, so the
+ * HARNESS was what did not match reality. */
 function renderMemory(path = '/memory') {
   return render(
     <MemoryRouter initialEntries={[path]} future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
@@ -51,7 +57,11 @@ describe('P33 S5 · D10 — status label casing', () => {
 
 describe('P33 S5 · C4 — icon-only accessible names', () => {
   it('the Help trigger and its close control both have accessible names', () => {
-    const { getByRole } = render(<HelpPanel />);
+    const { getByRole } = render(
+    <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+      <HelpPanel />
+    </MemoryRouter>,
+  );
     const trigger = getByRole('button', { name: 'Help' });
     expect(trigger).toBeInTheDocument();
     fireEvent.click(trigger);

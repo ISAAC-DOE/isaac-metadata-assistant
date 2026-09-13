@@ -610,6 +610,35 @@ export const LABELS = {
     'It lives in Settings & API → Help & Tutorial.',
   actionGoToHelpAndTutorial: 'Go to Help & Tutorial',
   actionGoToExperiments: 'Go to My Experiments',
+
+  /*
+   * QA-020 — THE NOT-FOUND STATE. Every word here is scoped on purpose, because
+   * the surface that had none used to silently redirect to My Experiments and
+   * erase the attempted URL.
+   *
+   * `screenNotFound` says "page", not "record". An unrecognised PATH and a
+   * missing RECORD are different failures with different remedies, and the
+   * second is already handled: `/record/<unknown-ULID>` matches the record
+   * route and reaches `RecordWorkbench`'s own not-found handling. Saying
+   * "record" here would tell a scientist their work is gone when all that
+   * happened is that no screen answers to this address.
+   *
+   * `notFoundRecordScope` exists to CLOSE that door explicitly rather than
+   * leaving it to inference, because a reader who lands here from a stale
+   * record bookmark will assume the worst unless told otherwise.
+   *
+   * Nothing here guesses a destination. "Did you mean ...?" would need a
+   * similarity rule nobody specified, and a wrong guess on this screen is the
+   * very defect being fixed, one step further along.
+   */
+  screenNotFound: 'Page not found',
+  notFoundExplanation:
+    'No screen in this application answers to this address. The link may be out of date, or ' +
+    'the address may have a typo.',
+  notFoundAttemptedLabel: 'You asked for:',
+  notFoundRecordScope:
+    'This is about the address, not about your data. Nothing has been deleted, and no record ' +
+    'was looked up — an address ISAAC does not recognise never reaches a record at all.',
   actionReviewAnswer: 'Review & Answer',
   actionConfirm: 'Confirm',
   actionEdit: 'Edit',

@@ -262,6 +262,26 @@ export const SURFACES: readonly Surface[] = [
     ready: { role: 'heading', name: 'Graph' },
   },
   {
+    /*
+     * QA-020 — the not-found state, enrolled deliberately and with its cost known.
+     *
+     * `QA-018`'s closure recorded the lesson in its own commit subject: adding an
+     * entry here enrols a surface in THIRTEEN sweeps, not one, and mints fresh
+     * baseline cells on BOTH platforms. It is enrolled anyway, because the
+     * alternative is a scientist-facing screen that no axe or narrow-width run has
+     * ever measured — which is exactly the gap `QA-018` existed to close, and
+     * shipping a NEW one while closing the old would be the worse trade.
+     *
+     * `scope: 'ordinary'` because this screen reads no record and needs no worked
+     * example: it is reachable at any unrecognised address, in any scope.
+     */
+    id: 'not-found',
+    name: 'Page not found',
+    path: '/an-address-no-route-declares',
+    scope: 'ordinary',
+    ready: { role: 'heading', name: 'Page not found' },
+  },
+  {
     id: 'governance',
     name: 'Governance & Safety — Policy',
     path: '/governance',

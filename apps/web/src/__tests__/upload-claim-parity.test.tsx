@@ -219,6 +219,12 @@ function syntheticModeCard(): string {
  * is on the surface the reader is looking at rather than merely present in the
  * module.
  */
+/* UX-021 — `MemoryRouter` IS REQUIRED here. `HelpPanel` renders a real `<Link>` to
+ * Settings -> Help & Tutorial, and `Link` reads router context, so a bare render throws
+ * `Cannot destructure property 'basename' of useContext(...) as it is null` and takes every
+ * test in the file down with it. Wrapping is the right fix rather than downgrading the
+ * `<Link>`: in production this panel is mounted inside `TopBar`, inside the router, so the
+ * HARNESS was what did not match reality. */
 function policyTabText(): string {
   render(
     <MemoryRouter
@@ -903,7 +909,11 @@ describe('R1b §5b · the capture site states the affirmative claim, tolerant of
  *  section cannot supply half of the claim and count as compliance. Same
  *  technique `db-recon-truthfulness.test.tsx`'s `helpSyntheticSection` uses. */
 function helpValuesSectionEl(): Element {
-  const view = render(<HelpPanel />);
+  const view = render(
+    <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+      <HelpPanel />
+    </MemoryRouter>,
+  );
   fireEvent.click(view.getByRole('button', { name: 'Help' }));
   const section = [...view.container.querySelectorAll('.help-section')].find(
     (el) => el.querySelector('h3')?.textContent === 'Where values come from',

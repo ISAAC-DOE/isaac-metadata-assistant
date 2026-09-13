@@ -148,6 +148,7 @@ import { API_BASE, API_ROUTE_GLOB, SEED } from '../env';
 import { LOADING_PANEL, expect, test, type AppHelper, type TutorialHelper } from '../fixtures';
 import { LAYOUT_SWEEP_WIDTHS, layoutWidthId } from '../layout-baseline';
 import { findClippedText, horizontalPageScroll, render, renderedFontFamily } from '../helpers/layout';
+import { openAssistant } from '../helpers/assistant';
 import { SURFACES } from '../surfaces';
 import { TUTORIAL_SESSION_STORAGE_KEY } from '../worked-example';
 import type { Locator, Page } from '@playwright/test';
@@ -393,14 +394,12 @@ async function settled(page: Page): Promise<void> {
  * landmark at >=1024px and a CSS-hidden slide-over below it.
  */
 async function openAssistantPanel(page: Page): Promise<Locator> {
-  const trigger = page.locator('button.assistant-drawer-trigger');
-  const panel = page.locator('aside.assistant-drawer-panel');
-  await expect(panel).toHaveCount(1, { timeout: 20_000 });
-  if (await trigger.isVisible()) {
-    await trigger.click();
-    await expect(trigger).toHaveAttribute('aria-expanded', 'true');
-  }
-  await expect(panel).toBeVisible({ timeout: 10_000 });
+  /* UX-013 — delegates to the shared `helpers/assistant.ts`. This used to click
+     only the <=1024px slide-over trigger and then assert the panel visible,
+     which was correct only while the desktop rail defaulted to EXPANDED. The
+     wrapper survives because the rest of this function does sweep-specific
+     settling after the panel is open; only the OPENING moved. */
+  const panel = await openAssistant(page);
   return panel;
 }
 

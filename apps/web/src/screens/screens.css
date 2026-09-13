@@ -3239,3 +3239,65 @@ a.settings-jump-btn {
   min-width: 0;
   overflow-wrap: anywhere;
 }
+
+/* QA-020 — the not-found state. Deliberately built from EXISTING tokens only, so
+   it introduces no new colour and cannot move a `color-contrast` count:
+   `--text-primary` for the heading, `--text-secondary` for the explanation,
+   `--text-muted` for the narrower scope note, and the advisory (non-gating)
+   amber for the icon, because an unrecognised address is not a FAILURE of the
+   record — it is a notice. The reserved pass/fail hues are not used, per the
+   interaction-state guard's rule that they mean a verdict. */
+/* SPACING USES DECLARED RUNGS, not hand-authored values — `UX-001`'s ratchet
+   refused the first version of this block (`spacing: 2404 raw literals, recorded
+   ceiling 2400`) and it was right to. The rungs are 2/4/8/12/16/24px; `10px` and
+   `6px` are off-grid and are snapped to `--space-sm`. */
+.notfound {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-sm);
+  max-width: 68ch;
+}
+.notfound-icon {
+  display: inline-flex;
+  color: var(--advisory-text);
+}
+/* `--font-size-heading-md` (17px), NOT an invented `--font-size-title`. The first
+   draft of this rule reached for that name and it is DECLARED NOWHERE — the exact
+   phantom-custom-property class this repo has been bitten by, where the
+   declaration is dropped at computed-value time and the text silently inherits.
+   Caught by checking each token against `styles/tokens.css` before committing
+   rather than by looking at the page, which is the only way a phantom with a
+   plausible inherited fallback is ever found. The declared scale is
+   meta 11 / body 13 / heading-sm 15 / heading-md 17 / heading-lg 22. */
+.notfound-title {
+  margin: 0;
+  font-size: var(--font-size-heading-md);
+  line-height: var(--line-height-tight);
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-primary);
+}
+.notfound-body {
+  margin: 0;
+  font-size: var(--font-size-body);
+  line-height: var(--line-height-relaxed);
+  color: var(--text-secondary);
+}
+.notfound-attempted {
+  margin: var(--space-2xs) 0 0;
+  font-size: var(--font-size-body);
+  color: var(--text-secondary);
+}
+/* The attempted path is arbitrary reader input, so it must wrap rather than
+   stretch the card or introduce a horizontal scrollbar at a narrow width.
+   `anywhere` rather than `break-all` so ordinary path segments still break at
+   the slashes where a reader expects them to. */
+.notfound-path {
+  overflow-wrap: anywhere;
+}
+.notfound-scope {
+  margin: var(--space-2xs) 0 var(--space-sm);
+  font-size: var(--font-size-meta);
+  line-height: var(--line-height-relaxed);
+  color: var(--text-muted);
+}

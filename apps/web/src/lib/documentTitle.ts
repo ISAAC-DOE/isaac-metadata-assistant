@@ -94,9 +94,18 @@ export function recordWorkspaceTitleSegment(view: RecordViewId): string {
  * refinement's ordering guarantee, and the trap it avoids, are documented on
  * that hook.
  *
- * `null` means "this route resolves elsewhere" (`/` and the `*` fallback both
- * `<Navigate replace>`), and the caller leaves the title alone rather than
- * writing a title for a URL the reader is not on.
+ * `null` means "this route resolves elsewhere", and the caller leaves the title
+ * alone rather than writing a title for a URL the reader is not on.
+ *
+ * ~~(`/` and the `*` fallback both `<Navigate replace>`)~~ — **HALF OF THAT IS
+ * NO LONGER TRUE, corrected by QA-020 and struck rather than reworded because a
+ * reader uses this sentence to decide whether a title is owed.** `/` still
+ * redirects. The `*` fallback now RENDERS `screens/NotFound`, so it is a real
+ * destination a reader can sit on, bookmark and read a browser tab for — and
+ * WCAG 2.4.2 applies to it exactly as to any other screen. Leaving it `null`
+ * would have left the previous screen's title in the tab while the reader
+ * looked at a not-found page, which is a false claim in the one place they
+ * cannot see the page to check it. It is titled below.
  */
 export function routeDocumentTitle(pathname: string, search: string): string | null {
   const path = pathname.replace(/\/+$/, '') || '/';
@@ -134,7 +143,22 @@ export function routeDocumentTitle(pathname: string, search: string): string | n
       return composeDocumentTitle([LABELS.navStatistics]);
     case '/settings':
       return composeDocumentTitle([LABELS.navSettings]);
-    default:
+    case '/':
+      // The site root is the one remaining `<Navigate replace>`: the reader is
+      // never on it, so no title is owed and writing one would name a screen
+      // they are already leaving.
       return null;
+    default:
+      // QA-020 — ANYTHING ELSE IS THE NOT-FOUND SCREEN, and it gets a real
+      // title. This is a `default` rather than an explicit pattern precisely
+      // because `App.tsx`'s `path="*"` is also a default: the two have to agree
+      // about which addresses are unrecognised, and the only way to keep them
+      // agreeing as routes are added is for both to be the fallthrough.
+      //
+      // The consequence worth stating: add a `<Route>` to `App.tsx` without
+      // adding a case here and the new screen silently gets the NOT-FOUND
+      // title. `__tests__/document-title.test.tsx` covers every declared route,
+      // so that mistake fails a test rather than shipping.
+      return composeDocumentTitle([LABELS.screenNotFound]);
   }
 }

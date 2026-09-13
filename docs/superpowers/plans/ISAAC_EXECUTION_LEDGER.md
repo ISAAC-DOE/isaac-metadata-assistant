@@ -2283,6 +2283,67 @@ sweeps and mints cells on both platforms. Enrolled anyway: the alternative is sh
 never-measured scientist-facing screen while closing the old one, which is the worse trade.
 **Linux CI is the authority for its cells.**
 
+### *** THE FULL READ-ONLY BROWSER SUITE FOUND WHAT THREE TARGETED RUNS COULD NOT — and `QA-018`'s lesson landed twice ***
+
+`QA-018`'s closure said it in its own commit subject: **adding a `SURFACES` entry enrols a surface
+in THIRTEEN sweeps, not one.** I enrolled `not-found`, ran the **three** a11y specs, got
+`604 passed / 0 failed / 0 movements`, and would have shipped on that. The full read-only suite
+then returned **1085 passed / 16 failed / 589 skipped**. Fifteen specs reference `SURFACES`; I had
+run three.
+
+**SIXTEEN FAILURES, TWO CAUSES, AND NEITHER WAS THE ONE THE SURFACE COUNT SUGGESTED.**
+
+**(1) Seven `states.spec.ts` + two `visual-sweep.spec.ts` failures — `UX-013`, and the cause was a
+DUPLICATED HELPER.** `AssistantDrawer` has two controls in two viewport bands:
+`button.assistant-drawer-trigger` (≤1024px, slide-over) and `button.assistant-rail-toggle`
+(>1024px, the rail). `states.spec.ts` and `visual-sweep.spec.ts` **each hand-rolled** an
+`openAssistant` that clicked only the first and, at desktop, merely asserted the panel visible —
+correct for exactly as long as the desktop rail defaulted to EXPANDED.
+
+**The failure mode is worth keeping because it is not a crash.** The `<aside>` stays present and
+"visible" while its CONTENT is `display: none` inside the collapsed band, so `toBeVisible()` on the
+panel **PASSES** and every assertion about what is inside it fails. Nine tests reported as nine
+unrelated assistant-state regressions. Fixed with **one** shared `e2e/helpers/assistant.ts` that
+handles both bands, keys on the control's own `aria-expanded` rather than on a class or a stored
+preference, and — the part that closes the trap — asserts `.assistant-drawer-content` visible, not
+just the panel. `keyboard.spec.ts`, `dialogs.spec.ts`, `assistant-dock-short-viewport.spec.ts` and
+the trusted two-actor walk deliberately do **not** use it: each drives ONE band on purpose (768px
+or a zoomed phone) and asserts that band's semantics, so routing them through a band-agnostic
+helper would make them test something other than what they are named for. Verified: re-run of
+`states.spec.ts` + `layout-widths.spec.ts` → the seven `states` failures are **gone**.
+
+**(2) Seven `layout-widths` failures — BUDGET EXHAUSTION ON PRE-EXISTING FRAGILITY, and the file
+had already diagnosed the signature in the abstract.** All seven widths died as
+`Test timeout of 60000ms exceeded`, and **the death point MOVED between runs** — `settings-about`
+once, `Statistics` the next, both read off the failure screenshots rather than guessed. That same
+file's S2 block names the signature exactly: *"a death point that moves between runs is the
+signature of budget exhaustion rather than of a product regression."*
+
+**A CONTROL SETTLED IT RATHER THAN REASONING.** A worktree at `main` (`654e43dd`, 31 surfaces),
+same backend, same port, run alone: **exit 0**, and the seven sweeps took **36.7s – 46.8s against
+`playwright.config.ts`'s fixed `timeout: 60_000`** — about **13s of headroom** at the worst width,
+~1.5s per surface. So the 32nd surface spent most of what was left, **and the next new screen would
+have done this whether or not anybody connected it to a change.** The 60s was never sized for this
+loop; it is the global default, over a loop that grows every time the product gains a screen.
+
+**THE FIX MAKES THE BUDGET DERIVED, NOT FIXED:**
+`test.setTimeout(20_000 + SURFACES.length * 4_000)`.
+
+**And it does NOT contradict the S2 block's rejection of raising a timeout — it answers it.** That
+rejection's reason was READABILITY (*"a test that fails as a timeout tells the next reader nothing
+about which surface broke"*) and its remedy was one test per (width, surface). **That remedy is not
+available to this test**: it accumulates `staleness` ACROSS surfaces and asserts at the end that
+every recorded baseline instance fired *somewhere* in the sweep. Split per surface, each test would
+see only its own surface and report every other surface's instances as stale — the aggregate
+assertion is the reason the single test exists. So the objection is answered directly instead:
+`app.open` now **names the surface and its path** on failure, which is exactly the information the
+S2 note said a raised timeout would cost.
+
+**THE DURABLE LESSON, which is a class and not an instance: a fixed per-test timeout over a loop
+that iterates a growing catalogue is a latent failure with a countdown on it.** It does not fail
+when it is introduced; it fails for whoever adds the item that crosses the line, and it fails
+looking like their defect. Quote the headroom, not just the pass.
+
 ### RESIDUE NAMED THIS RUN, measured and deliberately not fixed
 
 | ID | Finding | Measurement |
