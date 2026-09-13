@@ -1033,3 +1033,71 @@ def test_the_VALUE_BEFORE_LABEL_class_is_STILL_SILENT(sentence):
         for rule in tc._RULES
         if rule.label_head is not None
     ), _explain(sentence)
+
+
+@pytest.mark.parametrize(
+    "sentence",
+    (
+        "The cryostat setpoint temperature was 80 K.",
+        "The sample setpoint temperature was 425 K.",
+        "The measured setpoint temperature was 425 K.",
+        "The actual setpoint temperature was 425 K.",
+        "The cryostat maximum temperature was 80 K.",
+        "The measured maximum temperature was 500 K.",
+        "The recorded ambient temperature was 295 K.",
+        "The true target temperature was 425 K.",
+        "The sample drift temperature was 3 K.",
+        "The measured drift temperature was 3 K.",
+        "The measured previous scan ended at 2026-01-01T00:00:00Z.",
+        "The recorded calibration scan ended at 2026-01-01T00:00:00Z.",
+    ),
+)
+def test_an_ADMITTED_modifier_cannot_SHIELD_a_re_subjecting_one(sentence):
+    """**THE SAFETY PROPERTY THAT MAKES THE THREE-GROUP WIDENING SOUND, and the
+    obvious attack on it.** Widening `tc._PRE_LABEL_NOUN` from 11 words to three
+    groups made the pre-modifier slot large, and the natural worry is that an
+    admitted word now escorts a forbidden one past the gate — `"the SAMPLE SETPOINT
+    temperature"`, `"the MEASURED MAXIMUM temperature"`, `"the RECORDED CALIBRATION
+    scan"`.
+
+    It cannot, and the mechanism is the pattern rather than a list of pairs:
+    `tc._PRE_LABEL` is a `fullmatch` in which **every** word of the slot must come
+    from the allowlist, so one unadmitted word fails the WHOLE pre-label text
+    regardless of what accompanies it. There is no position in which an admitted word
+    confers admission on its neighbour.
+
+    That is the opposite of the shielding hazard `_CONTINUATION_WORD` records on the
+    far side of the value, where a bare adverb DOES shield a qualifier behind it
+    (`"3 K consistently above target"`). The difference is `fullmatch` versus a
+    prefix match, and it is why the same risk does not transfer.
+
+    MUTATION: changing `_PRE_LABEL`'s `fullmatch` to `match` turns every row here RED,
+    because a prefix match would accept `"The sample "` and ignore `"setpoint "`.
+    Changing `{0,2}` to `{0,3}` leaves it GREEN — the bound is not what makes this
+    safe, the allowlist is.
+    """
+    reading = _read(sentence)
+    assert reading.candidates == (), _explain(sentence)
+    assert reading.abstentions != (), _explain(sentence)
+
+
+@pytest.mark.parametrize(
+    "sentence,expected",
+    (
+        ("The cryostat temperature was 80 K.", 80),
+        ("The stage temperature was 300 K.", 300),
+        ("The measured temperature was 425 K.", 425),
+        ("The actual temperature was 425 K.", 425),
+        ("The measured sample temperature was 425 K.", 425),
+    ),
+)
+def test_each_widened_group_READS_on_its_own(sentence, expected):
+    """The positive half of the row above: an admitted modifier alone must READ, or
+    the widening bought nothing and the 39% loss is still there.
+
+    Paired with that test deliberately — the two together say "admitted alone, yes;
+    admitted as an escort, no", which is the whole claim about the widening and is
+    not established by either half.
+    """
+    assert _values(sentence) == [expected], _explain(sentence)
+    assert _read(sentence).abstentions == (), _explain(sentence)
