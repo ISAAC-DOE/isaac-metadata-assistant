@@ -261,6 +261,76 @@ export const CAPTURE_COPY = {
     'upload route refuses every request outright — so nothing in this capture ' +
     'path has anywhere to send it.',
 
+  /*
+   * ── THE INTAKE CHOOSER (project owner, 2026-09-13) ────────────────────────
+   *
+   * "Data capture should be the first step, and this is where scientists can
+   * make a choice whether they want to upload files that they have from their
+   * own experiments, or if they want to use the voice assistant thing and we
+   * record it directly with the transcription model."
+   *
+   * THREE ROUTES, NOT TWO, AND THE THIRD IS THE ONE THAT WORKS TODAY. The two
+   * the owner named are the intended ones; measured over HTTP, both are
+   * externally blocked in this build and typing is not:
+   *
+   *   POST .../transcript        -> 200   text becomes a note, and candidates
+   *                                       become proposals
+   *   POST /api/transcription    -> 501   no_provider_configured
+   *   POST /api/uploads          -> 403   unconditional
+   *
+   * So a chooser offering only the owner's two would offer a scientist two doors
+   * that do not open. Writing it down is listed first and styled primary because
+   * it is the one that reaches a proposal today.
+   *
+   * *** NOTHING HERE IMPLIES TRANSCRIPTION WORKS. *** `CLAUDE.md` §15 and
+   * `ai-integration-decision-packet.md` §6 are explicit — no fake `Connected`
+   * state, and 'build nothing that implies any of it exists'. Dean DEFERRED
+   * D1–D9 on 2026-08-12, so there is no approved provider, endpoint or
+   * credential, and no application change can create one. The recorder is real
+   * and useful anyway (hands-free capture, in-tab playback), and this copy says
+   * exactly which half is missing and whose decision it is.
+   *
+   * The file wording is deliberately 'record where each file lives' rather than
+   * 'upload': `upload-claim-parity.test.tsx` bans absolute no-read phrasings,
+   * and Historical Import keeps a pointer, a checksum and the reader's notes
+   * WITHOUT reading bytes. That is a real capability, described as what it is.
+   */
+  intakeHeading: 'How do you want to get this experiment in?',
+  intakeIntro:
+    'Three ways in, and you can use more than one on the same record. Everything ' +
+    'you put in stays exactly as you wrote it — ISAAC proposes values from it and ' +
+    'you accept, correct or refuse each one.',
+
+  intakeWriteTitle: 'Write it down',
+  intakeWriteBody:
+    'Type or paste what happened at the instrument. ISAAC reads it for values, ' +
+    'asks about anything it will not guess, and keeps your exact words either way.',
+  intakeWriteAction: 'Start Writing',
+  intakeWriteAvailable: 'Ready to use',
+
+  intakeVoiceTitle: 'Record at the instrument',
+  intakeVoiceBody:
+    'Record while your hands are busy. The audio stays in this tab and is never ' +
+    'uploaded — you can play it back here and type from it.',
+  intakeVoiceAction: 'Open Recorder',
+  /*
+   * THE LIMIT, ATTRIBUTED. It names WHAT is missing (an approved provider), WHO
+   * decides (not this application), and what the control still does — so a reader
+   * can tell a deferred decision from a broken feature.
+   */
+  intakeVoiceLimit:
+    'Speech-to-text is not turned on in this deployment: it needs a transcription ' +
+    'provider that has been approved for scientific audio, which is an ' +
+    'institutional decision rather than a setting here. Recording and playback ' +
+    'work now; the words have to be typed.',
+
+  intakeFilesTitle: 'Bring files you already have',
+  intakeFilesBody:
+    'Record where each file lives, with its checksum and your notes, so the record ' +
+    'points at the real material. One layout is read today; everything else is kept ' +
+    'as a reference for a later build that can read it.',
+  intakeFilesAction: 'Go to Historical Import',
+
   // -- primary/secondary controls, per voice state --------------------------
   voiceRecord: 'Start Recording',
   voiceRequesting: 'Requesting…',

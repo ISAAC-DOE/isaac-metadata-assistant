@@ -189,14 +189,30 @@ export const SURFACES: readonly Surface[] = [
      * controls, its seam-status disclosure and its textarea), the unmapped-notes
      * queue, and the ingestion-proposals list.
      *
-     * `ready` waits on the transcript panel's own heading, which is the first of the
-     * three and the one whose capability report resolves last.
+     * `ready` USED TO WAIT on the transcript panel's own heading. It no longer can,
+     * and the reason is a deliberate product change rather than a broken selector:
+     * the capture workspace now lands on the three-route CHOOSER (`CaptureIntake`),
+     * and the panel — which the chooser opens — renders nothing at all until it
+     * does, because two entry points for one action was the defect that change
+     * fixed. So the probe is the chooser's own heading, which is what a reader
+     * actually meets on arrival.
+     *
+     * *** WHAT THIS DOES AND DOES NOT DO TO COVERAGE, stated because `ready`
+     * silently decides what gets scanned. *** The panel's closed-state entry (its
+     * heading and its one button) leaves this scan; the chooser's three cards,
+     * three action controls and advisory limit note enter it — so the surface gains
+     * controls rather than losing them. What is UNCHANGED is the gap
+     * `a11y-baseline.ts` already records in full: the panel's textarea, run select,
+     * candidate list, decision controls and every voice control are STILL UNSCANNED,
+     * because this scan does not press the entry. That gap was not created here and
+     * is not closed here; driving the disclosure remains its own slice, exactly as
+     * that note says.
      */
     id: 'record-capture',
     name: 'Record Detail — Capture & Proposals',
     path: `/record/${SEED.partial}?view=capture`,
     scope: 'example',
-    ready: { role: 'heading', name: /Transcript/i },
+    ready: { role: 'heading', name: /How do you want to get this experiment in\?/i },
   },
   {
     /*

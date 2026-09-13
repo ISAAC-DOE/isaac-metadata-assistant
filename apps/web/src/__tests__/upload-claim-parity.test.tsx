@@ -712,7 +712,16 @@ describe('R1b §4 · the guard rejects the exact strings that shipped', () => {
  * skips. Pinned because that skip makes the sweep shrinkable without any test
  * failing — convert one key to a function and it silently leaves the ban.
  */
-const CAPTURE_COPY_KEY_COUNTS = { total: 79, strings: 75, functions: 4 };
+/*
+ * 79 -> 92 (strings 75 -> 88), 2026-09-13: the intake chooser's thirteen keys.
+ *
+ * THE RATCHET DID ITS JOB AND THAT IS WHY THE NUMBER MOVED RATHER THAN THE LOOP.
+ * The new keys are CLAIM-BEARING copy about what this build can and cannot do
+ * with files and audio, which is precisely the class this sweep exists for — so
+ * they belong INSIDE the ban, and the correct response to the failure was to
+ * admit them and let the bans judge them, not to exempt them.
+ */
+const CAPTURE_COPY_KEY_COUNTS = { total: 92, strings: 88, functions: 4 };
 
 function captureVoiceAudioHandling(): string {
   return CAPTURE_COPY.voiceAudioHandling;

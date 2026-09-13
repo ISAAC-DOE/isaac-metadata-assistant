@@ -90,6 +90,25 @@ function renderAt(path: string, extra: Record<string, unknown> = {}) {
 }
 
 const nav = () => screen.getByRole('navigation', { name: 'Record workspaces' });
+
+/*
+ * THE CAPTURE ROW MOVED INTO ITS OWN NAMED LANDMARK, 2026-09-13, so the record
+ * sidebar can render it ABOVE the workflow spine (project owner). Previously it was
+ * the first link inside the `Record workspaces` nav.
+ *
+ * TWO landmarks rather than one is the cost of the reorder, and it is paid
+ * deliberately: keeping one landmark would have meant moving the whole workspace
+ * list above the spine too, which buries the pipeline a reader orients by. Both
+ * navs are NAMED, which is what makes more than one acceptable — an unnamed second
+ * `navigation` is the defect this would otherwise introduce, and it is asserted
+ * below rather than assumed.
+ */
+const captureNav = () => screen.getByRole('navigation', { name: 'Data Capture' });
+
+/** Every destination link in the rail, across BOTH landmarks, in DOM order. */
+function railLinks(): HTMLElement[] {
+  return [...within(captureNav()).getAllByRole('link'), ...within(nav()).getAllByRole('link')];
+}
 const address = () => screen.getByTestId('address').textContent ?? '';
 
 afterEach(() => {
@@ -97,11 +116,11 @@ afterEach(() => {
 });
 
 describe('the record workspace list', () => {
-  it('offers exactly the four declared destinations, in one navigation landmark', async () => {
+  it('offers exactly the declared destinations across the rail, capture FIRST, in two NAMED landmarks', async () => {
     renderAt(`/record/${ID}`);
     await screen.findByRole('link', { name: 'Record Fields' });
 
-    const links = within(nav()).getAllByRole('link');
+    const links = railLinks();
     /*
      * CAPTURE IS FIRST, AND OUTSIDE THE LIST. It is rendered above the other
      * three under its own `Data Capture` eyebrow — the record's data-acquisition
@@ -148,6 +167,42 @@ describe('the record workspace list', () => {
     expect(
       RECORD_VIEW_IDS.filter((id) => !URL_ONLY.includes(id)).length,
     ).toBe(links.length);
+
+    /*
+     * CAPTURE IS FIRST IN THE RAIL, which is the ordering the owner asked for and
+     * the reason the landmark split exists. Asserted over DOM POSITION, not over
+     * the array above — `railLinks()` builds that array in the order it wants, so
+     * asserting its first element would be asserting the helper.
+     */
+    const captureLink = within(captureNav()).getByRole('link', { name: 'Capture & Proposals' });
+    const firstWorkspaceLink = within(nav()).getAllByRole('link')[0]!;
+    expect(
+      captureLink.compareDocumentPosition(firstWorkspaceLink) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+      'the capture row must precede the workspace list in the document',
+    ).toBeTruthy();
+
+    /*
+     * AND CAPTURE PRECEDES THE WORKFLOW SPINE — the actual request. Without this
+     * the split could be "reordered" back by moving one JSX line and every other
+     * assertion here would still pass.
+     */
+    const spine = screen.getByRole('navigation', { name: /workflow/i });
+    expect(
+      captureLink.compareDocumentPosition(spine) & Node.DOCUMENT_POSITION_FOLLOWING,
+      'the capture row must precede the workflow spine; being FIRST is the request',
+    ).toBeTruthy();
+
+    /*
+     * BOTH LANDMARKS ARE NAMED. More than one `navigation` in a region is only
+     * acceptable when each is distinguishable, so this is the condition that makes
+     * the split legitimate rather than a regression.
+     */
+    for (const landmark of screen.getAllByRole('navigation')) {
+      const name =
+        landmark.getAttribute('aria-label') ?? landmark.getAttribute('aria-labelledby') ?? '';
+      expect(name.trim(), 'an unnamed navigation landmark in the record rail').not.toBe('');
+    }
   });
 
   it('the URL-only workspace is still addressable, and still names itself', async () => {

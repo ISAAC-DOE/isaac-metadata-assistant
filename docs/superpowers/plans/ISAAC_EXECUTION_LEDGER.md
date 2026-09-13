@@ -3014,6 +3014,133 @@ two-sided. `QA-010`'s four polarity controls are real. `QA-023`'s central claim 
 
 ---
 
+## *** `IA-001` — DATA CAPTURE LEADS THE RECORD SCREEN, AND THE CHOICE IS THREE ROUTES, NOT TWO ***
+
+**Project owner, 2026-09-13, verbatim:** *"i think the data capture and everything should be on the
+top aka the first step and so this is where scientists can make a choice whether they want to upload
+files that they have from their own experiments, or if they want to use the voice assistant thing and
+we record it directly with the transcription model"* — with *"remember we need usability to be a
+factor here"*.
+
+### What shipped
+
+| | |
+|---|---|
+| Sidebar order | `DATA CAPTURE` → `WORKFLOW` → `WORKSPACES` (was: spine, capture, workspaces) |
+| New landmark | `RecordCaptureNav`, extracted from `RecordWorkspaceNav`, `aria-label` = the eyebrow |
+| New component | `CaptureIntake` — three route cards on the capture workspace |
+| Panel change | `TranscriptCapturePanel` takes an optional **controlled** `open`/`onOpenChange` pair |
+
+### THE OWNER NAMED TWO ROUTES; BOTH ARE EXTERNALLY BLOCKED, AND THE THIRD IS NOT
+
+Measured over HTTP against a local build, not read off the source:
+
+| Route | Status | Consequence for the chooser |
+|---|---|---|
+| type or paste → `POST .../transcript` | **200** | the only route that reaches a proposal today — so it is listed first and is the **only** `btn-primary` |
+| record → `POST /api/transcription` | **501** `no_provider_configured` | offered, with the limit **on the card**: it needs an approved transcription provider, which is an institutional decision (Dean **D1–D9**, deferred 2026-08-12) |
+| files → `POST /api/uploads` | **403** unconditional | routed to Historical Import, which keeps a pointer, a checksum and the reader's notes **without reading bytes** |
+
+A chooser offering only the owner's two would have put a scientist in front of two doors that do not
+open. **Nothing here implies transcription works** (§15; `ai-integration-decision-packet.md` §6 —
+no fake `Connected` state, *"build nothing that implies any of it exists"*).
+
+### FIRST IS NOT A STEP, and that distinction is the whole design
+
+Only the ORDERING changed. Capture has no tick, no lock, no reason text and no `aria-current="step"`,
+because a step state needs a criterion the record's own signals can decide and *"the scientist has
+finished capturing"* is not one. `workflow.py:128-149` keeps submission out of `CANONICAL_ORDER` on
+exactly this ground; a criterion invented here (`notes >= 1`) would nag every record that
+legitimately needs none (§5). The spine is **untouched** — still server-derived, still gated, still
+the only list in the rail whose entries can be blocked.
+
+### FOUR DEFECTS, EACH FOUND BY A DIFFERENT METHOD, NONE BY THE SLICE'S OWN UNIT TESTS
+
+1. **A double CTA — found in a real browser.** "Start Writing" and the panel's own "Capture
+   Experiment Notes", ten pixels apart, both blue, both doing the same thing. Exactly what
+   `ExperimentsHome` already argued against. Fixed by letting the panel withhold its entry when a
+   caller controls it.
+2. **An `aria-prohibited-attr` node on all seven viewports — found by axe, and the unit tests were
+   green.** The first fix withheld only the heading and the button, leaving an EMPTY `<section>`
+   still carrying `aria-labelledby` to a heading that was gone. A `<section>` with no accessible
+   name is not a `region`; it degrades to `generic`, and `generic` prohibits `aria-labelledby`. The
+   honest render is `return null` — the component stays **mounted** (typed text survives), it simply
+   contributes nothing.
+3. **Two dead guards left behind by that fix.** After the early return, both inner
+   `entryOwnedElsewhere && !open` branches were unreachable — an equivalent mutant, a class this
+   repository has shipped before. Removed; the condition is stated once.
+4. **A surface readiness probe silently deciding what gets scanned.** `record-capture`'s `ready`
+   waited on the panel's heading, which the workspace no longer lands on, so the a11y scan **could
+   not open the surface at all**. Repointed at the chooser's heading, with the coverage consequence
+   written into `surfaces.ts`: the panel's closed-state entry leaves the scan, the chooser's three
+   cards enter it, and the pre-existing gap `a11y-baseline.ts` already records (the panel's textarea,
+   run select and voice controls are unscanned because the scan never presses the entry) is
+   **neither created nor closed here**.
+
+### A PROPERTY THAT MOVED RATHER THAN BEING DROPPED
+
+`two-actor-real-browser.spec.ts` asserted *"collapsed, the panel offers exactly ONE entry action"*.
+The panel no longer renders while the chooser owns the entry, so that assertion would have passed
+**vacuously on an empty region** — the exact shape this repository keeps catching. It is re-asserted
+where the entry now lives, scoped to the two elements the property is about. **The first version of
+the replacement was ALSO wrong**: it counted `.btn-primary` page-wide and read **4**, because the
+spine, the notes queue and the proposals list each own a primary and always did. A page-wide count
+would have had to be loosened to 4 and would then pass with the double CTA back.
+
+The sibling check — *"no recording claim while collapsed"* — was reworded (the panel reached there is
+now OPEN) and **paired with its other half**: the chooser DOES name recording, so a test now requires
+the voice card to carry its limit on the card. Naming the route without naming the limit is the
+"equally finished path" claim the original check existed to prevent.
+
+### `prettier --write` WAS A SELF-INFLICTED WOUND, AND THE RECOVERY IS THE LESSON
+
+This repository has **no prettier config and no prettier dependency**; its style is hand-maintained
+(single-quoted TS strings, double-quoted JSX attributes). `npx prettier --write` therefore ran with
+stock defaults and rewrote five files to double quotes and an 80-column reflow — **1,436 changed
+lines**, of which fewer than 200 were semantic. It also broke a real guard:
+`assistant-model-claim-parity.test.tsx` requires the literal `seam.seam === 'transcription'` in
+`TranscriptCapturePanel.tsx`, and prettier had made it `"transcription"`.
+
+Recovery, rather than committing the noise: the prettier'd files were backed up, restored from
+`HEAD`, and each semantic edit re-applied under an `assert count == 1`. A normalising differ
+(quote-folded, whitespace-collapsed) reduced the panel's **18** apparent hunks to **5** real ones.
+Result: **628 insertions / 86 deletions**, reviewable.
+
+**Rule: do not run a formatter this repository does not declare.** Check for a config first; its
+absence is the answer, not a licence to supply one.
+
+### Verification, all re-run AFTER the reconstruction
+
+| Check | Command | Result |
+|---|---|---|
+| Frontend | `npx vitest run` (from `apps/web`) | **218 files / 5,883 tests, exit 0** |
+| Typecheck | `npx tsc -b` | exit 0 |
+| a11y, capture surface | `playwright … -g "Capture & Proposals"` | **7 passed**, and **zero baseline cells moved** |
+| Trusted e2e | `playwright --config=playwright.trusted.config.ts` | **8 passed** |
+| Microphone e2e | `playwright --config=playwright.mutation.config.ts -g microphone` | **7 passed** |
+| Snapshot | `build_memory_snapshot.py --check` (both artifacts) | drift found → regenerated → clean |
+
+**Zero baseline cells moved** is worth stating plainly: the chooser adds prose, and prose on the
+post-**A3** palette adds no *violating* nodes. This is the second-order effect `a11y-baseline.ts`
+already documents — more text on a compliant token costs nothing.
+
+### A THIRD OPERATIONAL TRAP THIS RUN
+
+**A stale exit-code file read as a fresh result.** `cat be-exit.txt` returned `BACKEND_EXIT=0` while
+the log sat at 36% and `pgrep` showed pytest **still running** — the file was 40 minutes old, from an
+earlier run that had written the same path. Same family as the launcher-exit trap already recorded.
+**Delete the marker before the run, or gate on the process, not on the file.**
+
+### Not done, named rather than implied
+
+- **No Linux CI round-trip yet** for the a11y sweep. Zero cells moved on darwin, so there is nothing
+  to transcribe — but Linux is the authority and only CI can say so.
+- **The panel's interior remains unscanned** by axe (pre-existing; see `surfaces.ts`).
+- **Historical Import's own loaded-state a11y** is untouched by this slice.
+- **Hosted QA** of any resulting image: `HOSTED QA PENDING (Krish)`.
+
+---
+
 ## CONTINUATION PROTOCOL
 
 Every future session starts here, in this order:

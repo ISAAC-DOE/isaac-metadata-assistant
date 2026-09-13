@@ -117,31 +117,72 @@ afterEach(() => {
 });
 
 describe('the promoted capture destination', () => {
-  it('is its own group, ABOVE the workspaces list, and still inside the one nav landmark', async () => {
+  it('is its own NAMED landmark, above the workspaces list AND above the workflow spine', async () => {
+    /*
+     * *** THE LANDMARK SPLIT, 2026-09-13 (project owner). ***
+     *
+     * ~~"still inside the one nav landmark"~~ — capture now has its OWN named
+     * `navigation` so the record rail can render it ABOVE the workflow spine.
+     * The owner's reason: this is where a scientist's own work starts, and it was
+     * reaching them third, below the pipeline.
+     *
+     * TWO landmarks is the cost, and it is paid deliberately. Keeping one would
+     * have meant moving the whole workspace list above the spine too, burying the
+     * thing a reader orients by. What makes two acceptable is that both are
+     * NAMED — asserted below, because an unnamed second `navigation` is the
+     * defect this would otherwise introduce.
+     *
+     * The ordering assertions are strengthened rather than relaxed: this now pins
+     * capture above the SPINE as well, which is the actual request and which the
+     * old within-one-nav assertion could not express.
+     */
     renderAt(`/record/${ID}`);
     await screen.findByRole('link', { name: 'Record Fields' });
 
-    const captureEyebrow = within(nav()).getByText('Data Capture');
+    const captureNav = screen.getByRole('navigation', { name: 'Data Capture' });
     const workspacesEyebrow = within(nav()).getByText('Workspaces');
+    const spine = screen.getByRole('navigation', { name: /workflow/i });
+
     /* ABOVE, asserted as document order rather than by reading the JSX: the
        whole point of the change is where a reader's eye lands first. */
     expect(
-      captureEyebrow.compareDocumentPosition(workspacesEyebrow) &
+      captureNav.compareDocumentPosition(workspacesEyebrow) &
         Node.DOCUMENT_POSITION_FOLLOWING,
+      'capture must precede the workspaces list',
     ).toBeTruthy();
-    expect(nav().contains(captureLink())).toBe(true);
+    expect(
+      captureNav.compareDocumentPosition(spine) & Node.DOCUMENT_POSITION_FOLLOWING,
+      'capture must precede the workflow spine — being FIRST is the request',
+    ).toBeTruthy();
+    expect(captureNav.contains(captureLink())).toBe(true);
+
+    /* Both landmarks named, which is what makes more than one legitimate. */
+    for (const landmark of screen.getAllByRole('navigation')) {
+      const name =
+        landmark.getAttribute('aria-label') ?? landmark.getAttribute('aria-labelledby') ?? '';
+      expect(name.trim(), 'an unnamed navigation landmark in the record rail').not.toBe('');
+    }
 
     /* AND IT APPEARS EXACTLY ONCE. Promoting it is a rendering split, not a
        second list: a build that forgot to filter `capture` out of the list
        below would show the destination twice with two different shapes. */
     expect(screen.getAllByRole('link', { name: 'Capture & Proposals' })).toHaveLength(1);
-    expect(
-      within(nav()).getAllByRole('link').map((l) => l.getAttribute('aria-label') ?? l.textContent),
-      /* ~~[... 'Runs', 'Graph']~~ — the Graph left this list on 2026-09-13
-         (`EVG-002`/`DEC-04`). `?view=graph` still opens it; see
-         `RecordWorkspaceNav`'s `URL_ONLY`. Capture's promotion above the list,
-         which is what THIS file is about, is unaffected. */
-    ).toEqual(['Capture & Proposals', 'Record Fields', 'Runs']);
+    /* THE RAIL'S FULL SET, now spanning BOTH landmarks — capture first, in its
+       own, then the workspace list. Reading only `nav()` would silently stop
+       covering capture the moment it moved out, which is exactly what happened
+       here and is why the assertion is over the union.
+
+       ~~[... 'Runs', 'Graph']~~ — the Graph left this list on 2026-09-13
+       (`EVG-002`/`DEC-04`). `?view=graph` still opens it; see
+       `RecordWorkspaceNav`'s `URL_ONLY`. */
+    expect([
+      ...within(captureNav)
+        .getAllByRole('link')
+        .map((l) => l.getAttribute('aria-label') ?? l.textContent),
+      ...within(nav())
+        .getAllByRole('link')
+        .map((l) => l.getAttribute('aria-label') ?? l.textContent),
+    ]).toEqual(['Capture & Proposals', 'Record Fields', 'Runs']);
   });
 
   it('routes to ?view=capture, the destination that already exists', async () => {

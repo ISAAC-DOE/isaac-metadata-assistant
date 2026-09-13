@@ -174,9 +174,20 @@ describe('the record workspaces keep unsaved text', () => {
   it('keeps the transcript box and the note-capture box across a Graph AND a workspace round trip', async () => {
     renderRecord({ [`GET ${BASE}/runs`]: { body: runsPage([RUN]) } }, 'capture');
 
-    // The capture panel opens behind its own disclosure; opening it is the reader's
-    // first act, and the box only exists after it.
-    fireEvent.click(await screen.findByRole('button', { name: 'Capture Experiment Notes' }));
+    /*
+     * The capture panel opens behind a disclosure; opening it is the reader's first
+     * act, and the box only exists after it. The control that opens it is "Start
+     * Writing", on the `CaptureIntake` chooser — NOT the panel's own
+     * "Capture Experiment Notes", which this workspace no longer renders at all,
+     * because two entry points for one action was the defect the chooser fixed.
+     *
+     * This selector change does not weaken what the test is for. The property under
+     * test is that typed text SURVIVES a round trip through another workspace, and
+     * that property now has a second way to fail — the panel is only kept mounted
+     * while the chooser owns its `open` state, so a future change that unmounts it
+     * on close would break this test exactly as it should.
+     */
+    fireEvent.click(await screen.findByRole('button', { name: 'Start Writing' }));
     const transcript = screen.getByLabelText('Transcript');
     fireEvent.change(transcript, { target: { value: 'the scan was repeated at 8979 eV' } });
     const capture = screen.getByLabelText('Capture a note');

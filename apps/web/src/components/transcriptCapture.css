@@ -906,3 +906,95 @@
     animation: none !important;
   }
 }
+
+/* ── THE INTAKE CHOOSER ─────────────────────────────────────────────────────
+   The first thing on the capture workspace: three routes in, one of which works
+   today. Built from DECLARED tokens only — `transcriptCapture.css` was caught
+   once with nine phantom custom properties, five of them unrescued, which left
+   the primary input of this surface with no border at all. Every value below is
+   a rung from `styles/tokens.css`. */
+.capture-intake {
+  margin: 0 0 var(--space-lg);
+}
+.capture-intake-heading {
+  margin: 0;
+  font-size: var(--font-size-heading-md);
+  line-height: var(--line-height-tight);
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-primary);
+}
+.capture-intake-intro {
+  margin: var(--space-xs) 0 var(--space-md);
+  font-size: var(--font-size-body);
+  line-height: var(--line-height-relaxed);
+  color: var(--text-secondary);
+  max-width: 74ch;
+}
+/* `auto-fit` with a floor, so three cards sit side by side on a wide record
+   column and stack cleanly at narrow widths without a media query — the record
+   column is already responsive and a fixed 3-up would overflow it at 390px. */
+.capture-intake-grid {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+  gap: var(--space-md);
+}
+.capture-intake-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-xs);
+  padding: var(--space-md);
+  border: 1px solid var(--border-faint);
+  border-radius: var(--radius-inner);
+  background: var(--surface);
+}
+/* The one route that reaches a proposal today reads as the primary choice. A
+   border weight and the action's own `btn-primary`, NOT a reserved hue:
+   `interaction-states.test.ts` forbids a pass/fail colour carrying a verdict,
+   and "this one works" is a fact about the build, not a verdict. */
+.capture-intake-card[data-route='write'] {
+  border-color: var(--border-strong);
+}
+.capture-intake-icon {
+  display: inline-flex;
+  color: var(--text-secondary);
+}
+.capture-intake-title {
+  margin: 0;
+  font-size: var(--font-size-heading-sm);
+  line-height: var(--line-height-snug);
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-primary);
+}
+.capture-intake-available {
+  margin: 0;
+  font-size: var(--font-size-meta);
+  font-weight: var(--font-weight-medium);
+  color: var(--text-secondary);
+}
+.capture-intake-body {
+  margin: 0;
+  font-size: var(--font-size-body);
+  line-height: var(--line-height-relaxed);
+  color: var(--text-secondary);
+}
+/* The deferred-provider note. On the ADVISORY ramp, which this palette declares
+   as the soft, NON-GATING motif — a missing institutional decision is not a
+   failure of the record, and the reserved fail hue would say it was. */
+.capture-intake-limit {
+  margin: 0;
+  padding: var(--space-xs) var(--space-sm);
+  border-radius: var(--radius-inner);
+  background: var(--advisory-bg);
+  color: var(--advisory-text);
+  font-size: var(--font-size-meta);
+  line-height: var(--line-height-relaxed);
+}
+/* The action sits at the bottom of every card regardless of body length, so the
+   three read as one row of choices rather than three ragged blocks. */
+.capture-intake-card .btn {
+  margin-top: auto;
+}

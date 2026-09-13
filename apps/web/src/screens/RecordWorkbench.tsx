@@ -5,10 +5,15 @@ import { Navigate, useNavigate, useParams, useSearchParams } from 'react-router-
 import { AppShell } from '../components/AppShell';
 import { TopBar } from '../components/TopBar';
 import { WorkflowSpine } from '../components/WorkflowSpine';
-import { RECORD_WORKSPACES, RecordWorkspaceNav } from '../components/RecordWorkspaceNav';
+import {
+  RECORD_WORKSPACES,
+  RecordCaptureNav,
+  RecordWorkspaceNav,
+} from '../components/RecordWorkspaceNav';
 import { StatusBar } from '../components/StatusBar';
 import { FieldGroup } from '../components/FieldGroup';
 import { RecordInfoPanel, RecordLinksPanel } from '../components/RecordInfoPanel';
+import { CaptureIntake } from '../components/CaptureIntake';
 import { RenameExperimentPanel } from '../components/RenameExperimentPanel';
 import { MoveExperimentPanel } from '../components/MoveExperimentPanel';
 import { RecordDescriptionPanel } from '../components/RecordDescriptionPanel';
@@ -775,6 +780,14 @@ function LoadedWorkbench({
   // Pre-export, validation is a DRY-RUN and audit has nothing to count — those
   // segments carry the live server result as a note; the reserved PASS/FAIL chip
   // appears only for real (post-export) validation.
+  /*
+   * THE CAPTURE PANEL'S OPEN STATE LIVES HERE so the intake chooser above it can
+   * open it. It starts CLOSED, exactly as the panel's own default was — the
+   * chooser is what a reader meets first now, and the panel opens on the route
+   * they pick. See `CaptureIntake` for why the three routes are what they are.
+   */
+  const [captureOpen, setCaptureOpen] = useState(false);
+
   const validationLive = validate.dry_run ? 'pending' : toValidationResult(validate);
   const validationNote = validate.dry_run
     ? `dry-run · ${validate.errors.length} error${validate.errors.length === 1 ? '' : 's'}`
@@ -830,6 +843,27 @@ function LoadedWorkbench({
   // EXISTING /evidence route (ROUTES.evidence) — no new route or evidence system.
   const sidebar = (
     <div className="record-aside">
+      {/*
+        DATA CAPTURE LEADS THE RAIL (project owner, 2026-09-13).
+
+        Previously it sat third — below the spine, above the workspace list —
+        and the hosted screen showed it that way: a secondary row reading 'No
+        notes or proposals' in the middle of the sidebar. A scientist arriving
+        from the instrument with something to write down met the pipeline first
+        and their own first act third.
+
+        FIRST IS NOT A STEP. Only the ordering changed. The spine below is
+        untouched — still server-derived, still gated, still the only list here
+        whose entries can be blocked — and capture still carries no tick, no
+        lock and no `aria-current='step'`, because 'the scientist has finished
+        capturing' is not derivable from any signal the record has. See
+        `RecordCaptureNav`'s own header.
+      */}
+      <RecordCaptureNav
+        active={activeView}
+        captureSummary={captureSummary}
+        onNavigate={flushHeldRunEdits}
+      />
       <WorkflowSpine workflow={detail.workflow} recordId={id} />
       {/*
         THE FOUR WORKSPACES SIT BETWEEN THE SPINE AND THE EVIDENCE TRAIL, and both
@@ -1235,7 +1269,31 @@ function LoadedWorkbench({
             whether this list ever refreshed. See `recordChanges.ChangeFloors` and
             `apps/web/e2e/mutation/proposals.spec.ts`.
           */}
-          <TranscriptCapturePanel experimentId={id} />
+          {/*
+        THE CHOOSER IS FIRST, AND IT IS WHY CAPTURE MOVED TO THE TOP OF THE RAIL
+        (project owner, 2026-09-13): 'this is where scientists can make a choice
+        whether they want to upload files that they have from their own
+        experiments, or if they want to use the voice assistant thing'.
+
+        Before this, the workspace opened on ONE collapsed button and a reader
+        had to press it to find out what was inside — while the file route lived
+        on a different top-level destination and the recorder was three controls
+        deep. The chooser names all three routes up front and sends each to the
+        ONE surface that owns it, so nothing is reimplemented.
+
+        IT DOES NOT REPLACE THE PANEL, it routes into it: `captureOpen` is
+        lifted here so 'Start Writing' and 'Open Recorder' both open the panel
+        below rather than opening a second copy of it.
+      */}
+      <CaptureIntake
+        onOpenCapture={() => setCaptureOpen(true)}
+        onOpenRecorder={() => setCaptureOpen(true)}
+      />
+      <TranscriptCapturePanel
+        experimentId={id}
+        open={captureOpen}
+        onOpenChange={setCaptureOpen}
+      />
           <UnmappedNotesPanel experimentId={id} activity={notesActivity} />
           <IngestionProposalsPanel experimentId={id} activity={proposalActivity} />
         </section>
