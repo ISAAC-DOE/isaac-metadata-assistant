@@ -1087,7 +1087,23 @@ describe('the Full Description rule over the REAL generated contract', () => {
    * merely noisy when they disagree; either way the only safe answer is to re-measure
    * the merged document, which is what these three figures are.
    */
-  it('describes the contract it claims to: 76 operations, MEASURED on the merged tree', () => {
+  /*
+   * *** THE TITLE'S COUNTER WAS STALE, IN THE BLOCK WHOSE OWN COMMENT FORBIDS
+   * EXACTLY THAT. Found by independent review, 2026-09-13. ***
+   *
+   * It read `76 operations` while `REAL_CONTRACT_DESCRIPTIONS` has had **78**
+   * entries since this session's merge, and while the comment directly above says
+   * the only safe answer is to re-measure the merged document. A test TITLE is not
+   * an assertion, so nothing could fail on it -- which is precisely why it drifted
+   * and why it is worth a note rather than a silent edit: the mechanism that
+   * protects every FIGURE in this file protects none of its PROSE.
+   *
+   * Stale since 2026-09-01 (it was already behind before this arc) and widened by
+   * the Library lane's new operation. Re-derived here rather than incremented, two
+   * ways that agree -- `create_app().openapi()` and the transcribed array read with
+   * `test_contract_description_parity.py`'s own extractor: **78**.
+   */
+  it('describes the contract it claims to: 78 operations, MEASURED on the merged tree', () => {
     // FOUR slices have now raised this from 52 for real, different additions — the
     // asset slice, the transcript slice, run removal, and the two CONFLICT
     // RESOLUTION operations. Both sides of this merge conflict carried a number

@@ -1596,6 +1596,35 @@ three-left exemption calls its trio "server-supplied identifiers" but all three 
 a producible ninth; and `MCP-019:592` is `x == x` under a header declaring every assertion
 behavioural.
 
+### *** THE AGENT BUDGET WAS EXCEEDED — A SIXTH SUBAGENT RAN AND I DID NOT DISPATCH IT ***
+
+Recorded as a breach rather than absorbed, because the cap is a hard instruction and the cause is
+an orchestrator omission.
+
+**What happened, measured:** `ListAgents` attributes a subagent `a84b90f7…` to this session,
+started at about the time the final review was dispatched. **It is not one of my five.** My five
+were the tail review, the §5 extraction slice, the Experiment Library, the MCP note pathway, and
+the final review. A sixth reported in with a re-derivation of the OpenAPI figures — useful work,
+and work nobody asked for.
+
+**THE CAUSE IS MINE.** The session instruction is explicit: *"no nested spawning; sub-agents may
+not spawn their own agents."* I passed that prohibition to the **implementation** briefs and
+**omitted it from the review brief**. The most likely reading of the evidence is that the reviewer
+spawned a helper, which its brief never forbade. I cannot prove that from inside the session — what
+I can state is that I did not dispatch it and that my brief did not forbid it.
+
+**So the honest count for this session is SIX subagents against a cap of FIVE**, and the
+blame is the brief, not the reviewer.
+
+**The durable rule:** the no-nesting prohibition belongs in EVERY brief, not only in the ones that
+write code. A reviewer is exactly the role most likely to want a helper — it is reading more than
+it can hold — so it is the brief that most needs the sentence.
+
+**Its content was verified before being acted on**, because an unsolicited agent's report is not
+evidence: I re-confirmed at HEAD that the title at `settings-api.test.tsx:1090` read *"76
+operations"* while `REAL_CONTRACT_DESCRIPTIONS` has 78 entries, and fixed it. Its figures agreed
+with the three-way derivation already recorded above (78 / 142,351 / 270).
+
 ### SIX CLAIMS IN THE ORCHESTRATOR'S REVIEW BRIEF MEASURED FALSE
 
 Recorded because the pattern is now nine-for-nine. **(1)** "the three merge-conflict resolutions" —
