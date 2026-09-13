@@ -15,6 +15,7 @@ import { ExperimentQueue } from '../components/ExperimentQueue';
 import { LibraryList, LibraryNoResults } from '../components/LibraryList';
 import { LibraryToolbar } from '../components/LibraryToolbar';
 import { FolderBreadcrumbs, FolderList } from '../components/LibraryFolders';
+import { LibraryOverview } from '../components/LibraryOverview';
 import { TutorialPromotion } from '../components/TutorialPromotion';
 import { LoadingPanel, BackendDown } from '../components/FetchStates';
 import { Compass, LayoutList, Plus, ShieldCheck } from '../components/icons';
@@ -31,6 +32,7 @@ import { libraryRows, queueSubcount, summariesToQueueGroups } from '../lib/adapt
 import {
   DEFAULT_LIBRARY_SORT,
   facetCounts,
+  libraryOverviewStats,
   selectLibraryRows,
   type LibraryFacetId,
   type LibrarySortId,
@@ -435,6 +437,15 @@ export function ExperimentsHome() {
       />
     ) : (
       <>
+        {/*
+          UX-017's LIBRARY HALF — see `components/LibraryOverview.tsx` and
+          `lib/library.ts::libraryOverviewStats`. Shown only at the root
+          (`folder === ''`), matching `FolderList`'s own `showModelNote` gate
+          below: these are WORKSPACE-wide totals, and showing a "Workspace
+          Statistics" strip while browsing one folder's contents would read as
+          though it described that folder rather than everything in it.
+        */}
+        {folder === '' && <LibraryOverview stats={libraryOverviewStats(summaries)} />}
         <FolderBreadcrumbs folder={folder} onNavigate={setFolder} />
         <LibraryToolbar
           query={query}

@@ -449,3 +449,77 @@
      consistent with every other refusal a reader meets. */
   color: var(--fail-text);
 }
+
+/* --- UX-017 Library half: Workspace Statistics ----------------------------
+ *
+ * NOT `.stat-card`/`.stats-figure` from `statistics.css` — those rules are
+ * scoped `.statistics .stat-card` etc., so they render unstyled outside that
+ * screen's own root. This is an independent, minimal presentation of the same
+ * idea, following this file's own three constraints at the top: every custom
+ * property here is declared in `tokens.css`, no raw literal on the font-size /
+ * font-weight / line-height / spacing axes (`1px` borders and the `0.04em`
+ * letter-spacing below are the SAME two exceptions already used by
+ * `.library-folder`/`.library-folders-heading` above, neither of which is a
+ * ratcheted axis), and no green/red/pass-fail hue — `data-tone='attention'`
+ * below uses `--advisory-*`, the same non-verdict amber family
+ * `statistics.css`'s own `[data-tone='attention']` uses for the identical
+ * "needs attention" meaning.
+ */
+.library-overview {
+  margin-bottom: var(--space-lg);
+  padding: var(--space-md) var(--space-lg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  background: var(--surface);
+}
+
+.library-overview-heading {
+  margin: 0 0 var(--space-sm);
+  font-size: var(--font-size-meta);
+  font-weight: var(--font-weight-semibold);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.library-overview-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-xl);
+  margin: 0;
+}
+
+.library-overview-item {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2xs);
+}
+
+.library-overview-label {
+  margin: 0;
+  font-size: var(--font-size-meta);
+  font-weight: var(--font-weight-medium);
+  color: var(--text-muted);
+}
+
+.library-overview-value {
+  margin: 0;
+  font-size: var(--font-size-heading-md);
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-heading);
+}
+
+/* The non-verdict amber family — a workspace fact ("N records need you"), not
+   a pass/fail about them. Matches `statistics.css`'s identical use of these
+   three tokens for the same meaning. */
+.library-overview-item[data-tone='attention'] .library-overview-value {
+  color: var(--advisory-text);
+}
+
+.library-overview-note {
+  margin: var(--space-sm) 0 0;
+  max-width: 62ch;
+  font-size: var(--font-size-meta);
+  line-height: var(--line-height-normal);
+  color: var(--text-muted);
+}

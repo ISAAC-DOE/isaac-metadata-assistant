@@ -330,3 +330,62 @@ describe('the two empty states are DIFFERENT, and this is the one that matters',
     expect(screen.getByText('So do I')).toBeInTheDocument();
   });
 });
+
+/*
+ * UX-017's LIBRARY HALF — the "Workspace Statistics" strip. Not the folder
+ * chips (`search, facets and sort` above already owns those); this owns the
+ * two genuinely new aggregates (`totalRuns`, `openProposals` — SUMS, not
+ * `facetCounts`) and the folder-scope gate.
+ */
+describe('UX-017 — Workspace Statistics is merged into the Library', () => {
+  it('shows workspace-wide totals at the root, including the two SUMS the facet chips do not state', async () => {
+    stub([
+      row({ id: '01A00000000000000000000001', status: 'needs_attention', run_count: 3, open_proposal_count: 2 }),
+      row({ id: '01A00000000000000000000002', status: 'ready_to_export', run_count: 5, open_proposal_count: 1 }),
+      row({ id: '01A00000000000000000000003', status: 'done', run_count: 0, open_proposal_count: 0 }),
+    ]);
+    const { container } = renderLibrary();
+    await screen.findByRole('heading', { name: LABELS.libraryOverviewHeading });
+    // In DOM order: Experiments, Needs Attention, Runs Recorded, Proposals Waiting.
+    // Experiments: 3. Needs Attention: 1 (facetCounts parity). Runs Recorded:
+    // 3 + 5 + 0 = 8 (a SUM). Proposals Waiting: 2 + 1 + 0 = 3 (a SUM, not the
+    // "2 records have at least one" the `proposals` facet chip would show).
+    const values = Array.from(container.querySelectorAll('.library-overview-value')).map(
+      (el) => el.textContent,
+    );
+    expect(values).toEqual(['3', '1', '8', '3']);
+  });
+
+  it('never claims the counts are personal — the note is workspace-scoped, matching Settings', async () => {
+    stub([row({ title: 'Any' })]);
+    renderLibrary();
+    const note = await screen.findByText(LABELS.libraryOverviewNote);
+    expect(note.textContent ?? '').not.toMatch(/your (own )?activity|you have/i);
+  });
+
+  it('is hidden while browsing INSIDE a folder — these are workspace totals, not the folder’s', async () => {
+    stub([
+      row({ id: '01A00000000000000000000001', title: 'Inside', folder: 'Campaign' }),
+      row({ id: '01A00000000000000000000002', title: 'Outside', folder: '' }),
+    ]);
+    renderLibrary();
+    await screen.findByText('Inside');
+    expect(screen.getByRole('heading', { name: LABELS.libraryOverviewHeading })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /Campaign/ }));
+    expect(screen.getByText('Inside')).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: LABELS.libraryOverviewHeading })).toBeNull();
+
+    // And it reappears on the way back out.
+    const trail = screen.getByRole('navigation', { name: 'Folder path' });
+    fireEvent.click(within(trail).getByRole('button', { name: LABELS.libraryRootFolder }));
+    expect(screen.getByRole('heading', { name: LABELS.libraryOverviewHeading })).toBeInTheDocument();
+  });
+
+  it('is absent from the first-run empty state — there is nothing to summarise yet', async () => {
+    stub([]);
+    renderLibrary();
+    await screen.findByText(LABELS.emptyExperimentsTitle);
+    expect(screen.queryByRole('heading', { name: LABELS.libraryOverviewHeading })).toBeNull();
+  });
+});
