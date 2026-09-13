@@ -536,6 +536,7 @@ def test_every_ambiguity_kind_is_covered_by_the_published_policy():
         "conflicting_values_for_one_field",
         "temperature_not_in_kelvin",
         "implicit_only_subject",
+        "unhedged_further_values",
         "unmatched_text",
     } == published
 
