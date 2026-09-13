@@ -55,10 +55,41 @@ SUBORDINATE AGENTS:    **THE AGENT BUDGET WAS MISUNDERSTOOD BY THE PLANNING RUN 
                        Remediation run: 3 of 5 implementation slots in use (all `opus`, all three
                        tasks being truth-adjacent, honesty-critical or test-correctness work);
                        2 implementation slots free; both Impeccable slots free.
-BRANCH VERDICT:        *** DO NOT MERGE — MERGE-after-fixes. 4 BLOCKING findings. ***
-                       Independent review (implemented none of it) found 2 Critical + 2 Important.
-                       `main` is UNTOUCHED at 2f9a1133 and this branch is UNPUSHED, so nothing
-                       harmful is shipped. See "INDEPENDENT REVIEW" below before doing anything.
+BRANCH VERDICT:        *** STILL DO NOT MERGE (2026-09-12, remediation run) — and the reason is
+                       now MINE, not the earlier review's. *** The four blocking findings are
+                       remediated and committed (`486ef405`, `cb385b69`, `c9a4c6e8`, `846f43ce`),
+                       but the orchestrator then found **C-1 INCOMPLETE**: eight further inputs of
+                       the identical §5 class still fabricate values, three of them the review's
+                       own `3 K/min` row reached through a different connective. See
+                       "C-1 TOOK TWO PASSES" below. A second-pass fix and an independent review
+                       are in flight. `main` is UNTOUCHED at 2f9a1133 and this branch is UNPUSHED,
+                       so nothing harmful is shipped.
+                       ~~4 BLOCKING findings from the earlier independent review (2 Critical +
+                       2 Important)~~ — those are addressed; the live blocker is the residual C-1.
+
+VERIFIED ON THE REMEDIATED TREE at 846f43ce (orchestrator's own runs, exit codes captured not
+piped, checkout named per the measurement rules):
+  backend    .venv/bin/pytest -q -rs   (MAIN CHECKOUT) -> 7283 passed, 45 skipped, exit 0
+                                        baseline 7239/45 -> +44, skips UNCHANGED
+  frontend   npx vitest run            -> 208 files / 5588 tests, exit 0
+                                        baseline 208/5525 -> +63
+  types      npx tsc -b                -> exit 0
+  snapshot   --check with BOTH --out and --detail-out -> exit 0, both artifacts, no drift
+  browser    playwright read-only  -> 1043 passed / 557 skipped, exit 0
+             playwright mutation   -> 121 passed, exit 0
+             playwright trusted    -> 8 passed, exit 0
+             playwright bench      -> NOT RUN, and reported unrun rather than passing
+  a11y       darwin MEASURED, nothing moved: 560 passed / 200 skipped / 0 failed;
+             A11Y_BASELINE_TOTAL_NODES 877/877, 70 cells, DARWIN_CARRIED_FORWARD = [],
+             all re-read from the file. LINUX STILL UNVERIFIED — CI is the authority.
+
+A SIXTH E2E TRAP, found here because it produced a false regression signal: the READ-ONLY
+  playwright config does NOT start a backend — `global-setup.ts:173` only PROBES
+  `127.0.0.1:8000/api/health` and aborts — while the mutation and trusted configs SPAWN their own.
+  Firing all three in one script gave `READONLY_EXIT=1 / MUTATION_EXIT=0 / TRUSTED_EXIT=0`, which
+  reads exactly like a read-only regression and was a missing server. Two passing suites say
+  NOTHING about whether :8000 is up. Also: `E2E_UVICORN=<repo>/.venv/bin/uvicorn` is required for
+  the mutation and trusted configs on this host, or they exit 127 before collecting a test.
 CURRENT PHASE:         Phase 0 COMPLETE · PHASE A implemented, UNDER ACTIVE REMEDIATION
 
 REMEDIATION IN FLIGHT (2026-09-12, all four findings re-derived FIRST-HAND before dispatch — the
@@ -529,6 +560,64 @@ Recorded here so the ledger and the plan cannot disagree. Full rationale in the 
 Every finding was reproduced FIRST-HAND by the orchestrator before any brief was written. What
 follows is what the remediation slices found that the briefs did not, kept because a brief's
 errors are the most useful thing a slice reports.
+
+### *** C-1 TOOK TWO PASSES. DO NOT READ `c9a4c6e8` AS HAVING CLOSED IT. ***
+
+`c9a4c6e8`'s message says *"All six rows now yield one candidate"* — **true of those six rows, and
+not the same claim as "C-1 is closed."** After committing it the orchestrator kept attacking the
+gate and found **eight more inputs of the identical class still shipping**, measured at that HEAD:
+
+| Input | Still proposed |
+|---|---|
+| `"…was 425 K, about 3 K above target"` | 425 **and 3** — an offset from target |
+| `"…was 425 K, around 80 K colder than before"` | 425 **and 80** |
+| `"…was 425 K, about 5 K of drift"` | 425 **and 5** |
+| `"…was 425 K, roughly 2 K of scatter"` | 425 **and 2** |
+| `"…was 425 K, approximately 10 K below the setpoint"` | 425 **and 10** |
+| `"…was 425 K or 3 K/min"` | 425 **and 3** — a **RATE** |
+| `"…was 425 K and again 3 K/min"` | 425 **and 3** — a **RATE** |
+| `"…was 425 K, about 1 K per minute"` | 425 **and 1** — a **RATE** |
+
+**The last three are the review's own first must-refuse row with a different connective.** It read
+`"The temperature was 425 K, ramped at 3 K/min"`; the first fix caught `ramped at` and missed `or`
+and `about`. Same §5 violation, same false `rule` string asserting *"the same sentence restates the
+temperature"*, narrower entrance.
+
+**Root cause:** the hedge list admits words that are equally ordinary **prepositions or adverbs of
+comparison**, and the gate constrains only the gap **BEFORE** the value — never what **FOLLOWS**
+it. Every false positive above carries a comparative or partitive tail (`above target`, `colder
+than before`, `of drift`, `of scatter`, `below the setpoint`, `/min`, `per minute`).
+
+**The second-pass fix requires the restatement to be TERMINAL** — followed only by optional
+punctuation and end of segment, or by another hedge bridge (which is what preserves chaining). **A
+denylist of comparative tails was deliberately REJECTED: it fails OPEN**, so the next unanticipated
+tail becomes a fabricated scientific value, which is the failure mode that has now shipped twice.
+The terminal rule fails CLOSED, and the words still survive as an Unmapped Note. In-repo precedent:
+the `_ATMOSPHERE`/`_ENVIRONMENT` phrase rules are already anchored to end-of-segment.
+
+**The durable lesson, and it is about how a fix is judged rather than about regexes:** the first
+pass was verified against **the reviewer's own table** and passed it completely. A table of six
+reproductions is a test of the FIX, not a measure of the DEFECT CLASS — and a gate built from a
+denylist-shaped intuition will always pass the examples that motivated it. The second pass was
+found only by generating *new* inputs of the same class rather than re-running the given ones.
+
+### RESIDUE the second pass deliberately does NOT admit, each an omission rather than an assertion
+
+`or so`, `give or take`, `circa`, `say 430 K`, `possibly more like 430 K`, `maybe closer to 430 K`,
+`430 K perhaps` (hedge AFTER the value), `or it might have been 430 K`. All currently refused. §5
+prefers an omission to an assertion and the whole sentence survives as a note, so these are residue,
+not defects — **but `"or it might have been 430 K"` is natural dictation and is referred to the
+independent reviewer rather than settled here.**
+
+### An OPEN question, referred rather than answered
+
+`"The temperature was 425 or 430 K"` returns **`[430]`** — it proposes the LATER number and silently
+loses `425`, with no clarification and no abstention. Believed **PRE-EXISTING**: `_TEMPERATURE_K`
+requires the kelvin unit, so a unitless `425` was never readable, and `47fdbe30`'s own message
+records that the owner's unitless phrasing yields **zero** candidates. **Referred to the independent
+reviewer** to verify or refute, and to say whether a silent preference for the later of two stated
+numbers is acceptable under §5. Not fixed in the second pass, deliberately — it is a different
+defect with a different cause.
 
 ### FOUR ERRORS IN MY OWN BRIEFS, each caught by an implementer and each recorded rather than fixed quietly
 
