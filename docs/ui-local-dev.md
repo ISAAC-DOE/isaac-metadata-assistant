@@ -205,10 +205,30 @@ shows real results, nothing is staged client-side.
    immutable — re-exporting the same id returns `409` and the UI shows an
    immutability message, never an overwrite.
 
-The primary nav (`LeftNav`) has five destinations, in this order: **My
+~~The primary nav (`LeftNav`) has five destinations, in this order: **My
 Experiments**, **Project Memory**, **Governance & Safety**, **Statistics**,
-**Settings & API**. The first is the demo path's entry point above; the other
-four are separate surfaces, none of them a placeholder:
+**Settings & API**.~~ — **CORRECTED 2026-09-13: it has THREE.** `UX-015`/**DEC-19**
+demoted **Project Memory** and `UX-017` demoted **Statistics** out of primary
+navigation, so the list is now **My Experiments**, **Governance & Safety**,
+**Settings & API**.
+
+**BOTH DEMOTED SURFACES ARE UNCHANGED AND STILL REACHABLE**, which is why the
+descriptions below are kept rather than deleted: the routes (`/memory`,
+`/statistics`), the screens and all of their tests are untouched — including
+Project Memory's 578 test cases — and both are linked from **Settings & API →
+Overview** under *Advanced & Developer Surfaces*. A demotion is a navigation
+decision; deletion would be a separate one nobody has taken. When you are
+standing on either of them the `Settings & API` slot is marked as the ANCESTOR
+(`.nav-item.ancestor`) and **no** slot carries `aria-current="page"`, because
+none of the three links points at the page you are on.
+
+A separate change in the same session, since it also removes a link a developer
+may go looking for: the record screen's **Graph** workspace left the record
+sidebar (`EVG-002`/**DEC-04**). `?view=graph` still opens it and every existing
+bookmark still works — nothing in the UI links to it.
+
+The first destination is the demo path's entry point above; the other surfaces
+are separate, none of them a placeholder:
 
 - **Project Memory** (`/memory`) — a real read-only surface since Phase 24; see
   the next section.
