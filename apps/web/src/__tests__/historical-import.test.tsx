@@ -411,6 +411,34 @@ describe('§1 · the destination cannot accept bytes and does not say it can', (
     expect(code).not.toContain('multipart');
   });
 
+  it('M-9 — the LANDING copy does not promise a format the build cannot read', async () => {
+    /*
+     * The promise and the capability must sit on the SAME screen. The lead used to
+     * name four source classes ("filenames, notes, sheets, run logs") on the index,
+     * while the honest correction rendered one step downstream on Sources — so a
+     * scientist decided whether to start from a sentence the product corrected
+     * later. Of the four, one layout is read.
+     *
+     * §15: "build nothing that implies any of it exists". Asserted over the RENDERED
+     * index rather than over the constant, because what matters is what a reader
+     * meets before they commit to the flow.
+     */
+    renderScreen();
+    await screen.findByRole('heading', { level: 1 });
+    const lead = document.querySelector('.hi-lead')!;
+    const text = (lead.textContent ?? '').toLowerCase();
+
+    // The formats this build CANNOT read must not be offered here.
+    for (const unreadable of ['run log', 'spreadsheet', 'sheets', '.mac', 'macro']) {
+      expect(text, `the landing copy offers ${unreadable}, which this build cannot read`).not.toContain(
+        unreadable,
+      );
+    }
+    // ...and the honest limit IS stated here, not only downstream.
+    expect(text).toContain('one layout');
+    expect(text).toContain('reference');
+  });
+
   it('MUTATION-GUARDED: the source check can actually fail, THROUGH the real pipeline', () => {
     /*
      * *** THE PREVIOUS VERSION OF THIS TEST WAS A TAUTOLOGY, and an independent

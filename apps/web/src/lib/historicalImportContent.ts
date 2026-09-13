@@ -87,12 +87,30 @@ export const IMPORT_COPY = {
    * thing that decides how a reader should use it — every candidate is a
    * suggestion, and a person decides each one.
    */
+  /*
+   * M-9 — THE PROMISE AND THE CAPABILITY ARE NOW IN THE SAME SENTENCE.
+   *
+   * This used to read "...from the files your work is already scattered across —
+   * filenames, notes, sheets, run logs — ...", naming FOUR source classes on the
+   * INDEX while the honest correction (`formatsNote`) renders one step downstream
+   * on the Sources step. Of those four, one layout is read. An independent review
+   * raised it (M-9) and it is a §15 matter, not a style one: "build nothing that
+   * implies any of it exists".
+   *
+   * The purpose is kept, because that IS what this destination is for and stating
+   * an intention is not a capability claim. What changed is that the sentence now
+   * says which part works TODAY, on the screen where a reader decides whether to
+   * start. `formatsNote` still carries the detail, and now corroborates the lead
+   * instead of correcting it.
+   */
   lead:
     'Reconstruct candidate experiment metadata from the files your work is already ' +
-    'scattered across — filenames, notes, sheets, run logs — and put every candidate ' +
-    'through the same review and validation as anything else in ISAAC. Nothing here ' +
-    'becomes a value on its own: each candidate is a suggestion you accept, correct or ' +
-    'refuse.',
+    'scattered across, and put every candidate through the same review and validation ' +
+    'as anything else in ISAAC. Today it reads one layout — the one ISAAC’s own ' +
+    'example sources are written in — and records every other file as a reference, ' +
+    'keeping its pointer, checksum and your notes for a later build that can read it. ' +
+    'Nothing here becomes a value on its own: each candidate is a suggestion you ' +
+    'accept, correct or refuse.',
 
   /**
    * THE SCOPED FILE CLAIM. Both halves are true and neither is an absolute.
