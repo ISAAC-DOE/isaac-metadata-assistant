@@ -68,8 +68,21 @@ const STEP_TEXT: Record<string, string> = {
   //
   // The repository already said so in two committed places while this said
   // "both": `screens/ExportReadiness.tsx:789-791` ("it clears THREE gates, not
-  // two"), and `lib/officialAttribution.ts:11,164`, which counts the first two as
-  // "ISAAC's two gates" — ISAAC's OWN — beside the upstream schema. So the
+  // two"), and `lib/officialAttribution.ts` calls them
+  // "ISAAC's two gates" at `:164` — ISAAC's OWN — beside the upstream schema.
+  //
+  // THAT CITATION WAS WRONG IN TWO WAYS AND IS CORRECTED HERE, because a comment
+  // citing the wrong line is how this branch has already lost time. It read
+  // ``lib/officialAttribution.ts:11,164`, which counts the FIRST TWO as "ISAAC's
+  // two gates"'. (i) `:11` does NOT make that count: it is item **3** of that
+  // module's own three-item numbering of finding PRODUCERS (`:9` the vendored
+  // official schema, `:10` the no-guessing draft validator, `:11` the
+  // anchored-pattern exactness gate). Only `:164` states the count. (ii) The
+  // pair is the LAST two, not the first two — `:13` is the line that pairs them
+  // ("`export.py` folds (2) and (3) together"), and (1) is the upstream schema,
+  // which is precisely the one that is NOT ISAAC's. The substantive point the
+  // citation was making survives intact and is unchanged: this product shipped
+  // two different counts of its own export gates on two screens. So the
   // product shipped two different counts of its own export gates on two screens,
   // and this was the wrong one.
   //
@@ -284,8 +297,8 @@ export function HelpPanel() {
                   CSV comparison) AND OMITTED THE OTHER — so the comment asserted the
                   property the copy beside it did not have, which is the shape §11
                   records over and over. The omitted reader is a button labelled
-                  "Upload JSON File" (`components/RecordValidator.tsx:241`) over an
-                  `<input type="file">` (`:245`) whose handler calls `file.text()`
+                  "Upload JSON File" (`components/RecordValidator.tsx:241`) over a
+                  file-typed `<input>` (`:245`) whose handler calls `file.text()`
                   (`:40`) and POSTs the contents — mounted one tab away from this
                   popover's own Governance page.
 
@@ -297,12 +310,38 @@ export function HelpPanel() {
 
                   BOTH READERS ARE NAMED NOW AND THE REFUSAL IS SCOPED TO THE ROUTE.
                   Measured rather than assumed: exactly two components under
-                  `apps/web/src` declare an `<input type="file">` —
-                  `components/RecordValidator.tsx` and `components/CsvReconcilePanel.tsx`
-                  (`rg -al 'type="file"' apps/web/src` returns five files, three of them
-                  tests) — so "no other control accepts a file" is a count, not an
-                  impression. `-a` and plain `rg` agree, and no file under
-                  `apps/web/src` holds a NUL byte.
+                  `apps/web/src` declare a file-typed `<input>` —
+                  `components/RecordValidator.tsx` and `components/CsvReconcilePanel.tsx`.
+
+                  THE REPRODUCTION COMMAND WAS INVALIDATED BY THE COMMIT THAT WROTE
+                  IT, and is corrected here rather than dropped. It read: `rg -al
+                  'type="file"' apps/web/src` returns five files, three of them tests.
+                  Five was right at `97c44c84`. At HEAD the same command returns SEVEN
+                  — a test file was added, and, the part worth remembering, THIS
+                  COMMENT BECAME ONE OF ITS OWN HITS by quoting the attribute it was
+                  counting. A comment cannot quote the pattern it counts and stay
+                  outside the count, so the corrected command excludes this file BY
+                  NAME and says why rather than pretending the self-hit away. Note the
+                  globs are BASENAME globs: a path glob would have to contain the two
+                  characters that end this very comment block, so it cannot be written
+                  here at all — which is the self-reference problem twice over.
+
+                    rg -al -g '!*test*' -g '!HelpPanel*' 'type="file"' apps/web/src
+
+                  returns exactly those TWO components (measured 2026-09-12). `-a` and
+                  plain `rg` agree — 7 and 7 unfiltered, 2 and 2 filtered — and no file
+                  under `apps/web/src` holds a NUL byte, which matters because a plain
+                  `rg` silently drops every hit in a file that has one and still exits
+                  0.
+
+                  THE EXCLUSION IS THE WEAK PART OF THAT COMMAND, so the count does not
+                  rest on it: `__tests__/upload-claim-parity.test.tsx` §1 pins the same
+                  claim mechanically, by reading the tree and asserting that the set of
+                  NON-TEST files whose JSX declares that attribute is exactly these two
+                  — comments stripped, so no prose about the attribute can join the set
+                  and no exclusion-by-name is needed. If a third control ever accepts a
+                  file, that test fails; this comment going stale is the failure mode it
+                  exists to replace.
 
                   WHY THIS IS STILL NOT A FIFTH SITE OF THE FOUR-PART CLAIM
                   `__tests__/upload-claim-parity` §2 pins. That claim adds two RETENTION
@@ -408,9 +447,16 @@ export function HelpPanel() {
                   the assembled record between the no-guessing report and the official
                   validator", with its own comment explaining that a reader who saw only
                   two had no way to learn a third exists. And
-                  `lib/officialAttribution.ts:11,164` counts the first two as "ISAAC's
-                  two gates" — ISAAC's OWN, beside the upstream schema — which is the
-                  same arithmetic from the other end. This heading was the outlier.
+                  `lib/officialAttribution.ts:164` calls them "ISAAC's two gates" —
+                  ISAAC's OWN, beside the upstream schema — which is the same arithmetic
+                  from the other end. This heading was the outlier.
+
+                  THE CITATION HERE USED TO READ `:11,164` AND "the first two", and both
+                  halves were wrong; see the block comment at the top of this file for
+                  the full correction. In short: `:11` is item 3 of that module's own
+                  three-item list of finding producers, not a statement of any count,
+                  and the pair is the LAST two (`:10` and `:11`, paired at `:13`) — item
+                  1 is the upstream schema, the one that is precisely NOT ISAAC's.
 
                   THE OWNERSHIP DISTINCTION IS THE PART THAT MUST SURVIVE ANY REWORDING,
                   and it is not pedantry. The schema is upstream-owned (`CLAUDE.md` §1)

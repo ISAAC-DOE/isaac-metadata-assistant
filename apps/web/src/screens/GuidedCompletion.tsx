@@ -828,8 +828,18 @@ function LoadedCompletion({
        * "runs next" was wrong about the order too: exactness runs BEFORE the
        * official validator. `screens/ExportReadiness.tsx:789-791` already said so
        * in committed prose ("it clears THREE gates, not two"), and
-       * `lib/officialAttribution.ts:11,164` counts the first two as "ISAAC's two
-       * gates" — ISAAC's OWN — beside the upstream schema.
+       * `lib/officialAttribution.ts:164` calls them "ISAAC's two gates" — ISAAC's
+       * OWN — beside the upstream schema.
+       *
+       * THAT CITATION USED TO READ `:11,164` AND "the first two", and both halves
+       * were wrong. `:11` is item **3** of that module's own three-item numbering
+       * of finding PRODUCERS (`:9` the vendored official schema, `:10` the
+       * no-guessing draft validator, `:11` the anchored-pattern exactness gate) and
+       * states no count at all; only `:164` does. And the pair is the LAST two,
+       * paired at `:13` ("`export.py` folds (2) and (3) together") — item 1 is the
+       * upstream schema, which is the one that is NOT ISAAC's. The substantive
+       * point is unchanged: two screens shipped two different counts of this
+       * product's own export gates.
        *
        * THE LENGTH BUDGET BELOW IS UNCHANGED AND WAS RESPECTED: 53 characters
        * against the 61 of the string it replaces (measured), so the 640px /

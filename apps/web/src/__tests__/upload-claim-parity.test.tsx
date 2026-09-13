@@ -71,6 +71,33 @@
  * invariant instead: that section must name BOTH readers, and must not state the
  * refusal as anything other than a property of the upload ROUTE.
  *
+ * A SEVENTH SITE, ADDED FOR THE DO-NOT-MERGE REVIEW, AND ALSO DELIBERATELY KEPT
+ * OUT OF §§2–4. `lib/settingsContent.ts`'s `synthetic-data-only` concept — the
+ * Settings → Data & Privacy card rendered by `screens/settings/SettingsPage.tsx`
+ * — stated the refusal UNSCOPED in BOTH its `summary` and its `detail`:
+ *
+ *   summary  "Synthetic-only mode — file upload is refused outright, and the app
+ *             cannot tell real data from synthetic."
+ *   detail   "This deployment runs in synthetic-only mode: file upload is refused
+ *             outright, and the records in this workspace are synthetic. …"
+ *
+ * That is the SAME claim class as the six above, on the SAME tab as its already-
+ * pinned sibling `no-real-experiment-data`, which scopes correctly — so the
+ * design intent existed and this one card missed it. It was invisible to this
+ * file: `rg -acn "synthetic-data-only"` returned 0 here before §7.
+ *
+ * WHY IT IS NOT A FIFTH MEMBER OF `SITES`, and this is a correction to the
+ * review's own prescription rather than a preference. §2 requires every `SITES`
+ * member to name BOTH readers and to state the two RETENTION bounds. This card
+ * is deliberately forbidden from restating them: `settingsContent.ts:280-289`
+ * documents the de-duplication decision, and `db-recon-truthfulness.test.tsx`
+ * §12 ("makes the capability statement on exactly one card", "states the full
+ * capability paragraph exactly once across the tab") MECHANICALLY FAILS if it
+ * does. Adding it to `SITES` would therefore force a copy change that another
+ * committed guard forbids — a guard that mandates the defect, which is exactly
+ * what that file's own :736-738 warns about. §7 pins the narrower, real
+ * invariant instead, using the three bans that need no reader vocabulary.
+ *
  * A FIFTH SITE, ADDED LATER, AND DELIBERATELY KEPT OUT OF §§2–4. Found by
  * review: `lib/transcriptCaptureContent.ts`'s `voiceAudioHandling` claimed
  * "This application declares no upload endpoint for it to reach" — false;
@@ -84,8 +111,8 @@
  * the one route that exists refuses every request it gets.
  */
 
-import { existsSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { join, relative, sep } from 'node:path';
 
 import { describe, it, expect, afterEach } from 'vitest';
 import { cleanup, render, screen, fireEvent } from '@testing-library/react';
@@ -139,6 +166,21 @@ const SETTINGS_FACTS = {
 function noRealDataDetail(): string {
   const found = settingsConcepts(SETTINGS_FACTS).find((c) => c.id === 'no-real-experiment-data');
   if (!found) throw new Error('no such concept: no-real-experiment-data');
+  return `${found.heading} ${found.summary} ${found.detail}`;
+}
+
+/**
+ * The Settings → Data & Privacy synthetic-only MODE card, heading + summary +
+ * detail. Read off the content module exactly as `noRealDataDetail` is, and for
+ * the same reason: the claim is authored there, and `settings-page.test.tsx`
+ * already proves every concept `detail` is rendered on the tab under its own
+ * heading, so re-mounting the page here would duplicate that proof rather than
+ * add one. BOTH `summary` and `detail` are read, because both shipped the
+ * unscoped claim and a guard over one of them would have missed the other.
+ */
+function syntheticModeCard(): string {
+  const found = settingsConcepts(SETTINGS_FACTS).find((c) => c.id === 'synthetic-data-only');
+  if (!found) throw new Error('no such concept: synthetic-data-only');
   return `${found.heading} ${found.summary} ${found.detail}`;
 }
 
@@ -207,6 +249,24 @@ const SITES: [string, () => string][] = [
   ['Settings → Connect Your Agent → the no-upload capability row', mcpNoUploadRow],
 ];
 
+/**
+ * Every surface any VOCABULARY-FREE ban in this file runs over: the four
+ * `SITES` plus the two that are deliberately not `SITES` members (§5's capture
+ * disclosure, §7's Settings mode card). §2's `SHARED_CLAIM` deliberately does
+ * NOT use this list — it requires reader vocabulary those two have no business
+ * carrying, which is the whole reason they are separate.
+ *
+ * ONE list rather than a per-section literal, because the measured failure mode
+ * in this file is a ban that was widened at one call site and not at another:
+ * §5 shipped as `ALL_FIVE` while §3 and §3b still looped over `SITES`, so the
+ * capture disclosure was outside two bans that would have held it.
+ */
+const ALL_BAN_SURFACES: [string, () => string][] = [
+  ...SITES,
+  ['transcript capture: voiceAudioHandling', captureVoiceAudioHandling],
+  ['Settings → Data & Privacy → synthetic-data-only', syntheticModeCard],
+];
+
 // --- §1 the readers this ban is justified by ---------------------------------
 
 /**
@@ -232,6 +292,59 @@ describe('R1b §1 · the file-reading controls exist, so the absolute claim is f
   it('the Governance page mounts one of them one tab away from its own policy copy', () => {
     const src = rawSource('screens/GovernancePage.tsx');
     expect(src).toMatch(/<RecordValidator\s*\/>/);
+  });
+
+  /*
+   * EXHAUSTIVENESS, which the pair above does not establish.
+   *
+   * `components/HelpPanel.tsx` tells the reader that EXACTLY TWO components
+   * accept a file, and that claim was backed only by a command written into a
+   * comment — a command the commit that wrote it INVALIDATED, because the
+   * comment quoting `type="file"` became one of its own hits (5 files at
+   * `97c44c84`, 7 at HEAD). A count in prose goes stale silently; this does not.
+   *
+   * COMMENTS ARE STRIPPED FIRST, which is the whole reason this can be exact
+   * where the `rg` command could not: prose ABOUT the attribute cannot join the
+   * set, so no file needs excluding by name. The strip is deliberately crude
+   * (line comments and block comments), and that is safe in this direction — it
+   * can only ever REMOVE candidates, so a stripper that missed a comment would
+   * make this test FAIL rather than pass, which is the failure direction a
+   * guard is allowed to have.
+   */
+  it('EXACTLY these two non-test files declare a file input — no third control', () => {
+    const ATTRIBUTE = 'type="file"';
+    function walk(dir: string): string[] {
+      const out: string[] = [];
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        const full = join(dir, entry.name);
+        if (entry.isDirectory()) {
+          if (entry.name !== '__tests__' && entry.name !== 'test') out.push(...walk(full));
+        } else if (/\.tsx?$/.test(entry.name) && !entry.name.endsWith('.d.ts')) {
+          out.push(full);
+        }
+      }
+      return out;
+    }
+    const stripComments = (src: string) =>
+      src.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/^\s*\/\/.*$/gm, ' ');
+
+    const declaring = walk(SRC_DIR)
+      .filter((full) => stripComments(readFileSync(full, 'utf8')).includes(ATTRIBUTE))
+      .map((full) => relative(SRC_DIR, full).split(sep).join('/'))
+      .sort();
+
+    expect(
+      declaring,
+      'the set of components that accept a user-chosen file has changed. ' +
+        'components/HelpPanel.tsx tells the reader there are exactly two and names ' +
+        'them, and __tests__/help-claim-parity.test.tsx requires that section to name ' +
+        'BOTH readers — so a third control means that copy is now a half-disclosure, ' +
+        'and a removed one means the §3 ban rests on nothing (see §1 above).',
+    ).toEqual(['components/CsvReconcilePanel.tsx', 'components/RecordValidator.tsx']);
+
+    // The two names the copy uses are exactly the two paths asserted above, so
+    // the prose and the count cannot drift apart.
+    expect(FILE_READING_CONTROLS.map(([, path]) => path).sort()).toEqual(declaring);
   });
 });
 
@@ -348,7 +461,10 @@ const INVERTED_DISCLOSURE =
   'outcome — never the content.';
 
 describe('R1b §3 · no site claims the absolute "no file is read"', () => {
-  for (const [site, text] of SITES) {
+  // `ALL_BAN_SURFACES`, not `SITES`: this ban needs no reader vocabulary, so the
+  // capture disclosure and the Settings mode card were outside it for no reason
+  // other than that nobody widened the loop when they were added.
+  for (const [site, text] of ALL_BAN_SURFACES) {
     it.each(ABSOLUTE_NO_READ)(`${site} never claims %s`, (_what, pattern) => {
       expect(text()).not.toMatch(pattern);
     });
@@ -356,7 +472,7 @@ describe('R1b §3 · no site claims the absolute "no file is read"', () => {
 });
 
 describe('R1b §3b · no site denies that the two review tools read', () => {
-  for (const [site, text] of SITES) {
+  for (const [site, text] of ALL_BAN_SURFACES) {
     it.each(NEGATED_READER)(`${site} never states %s`, (_what, pattern) => {
       expect(text()).not.toMatch(pattern);
     });
@@ -383,7 +499,7 @@ describe('R1b §4b · the polarity pattern is proven on the string that defeated
   // second site on top of the first, and the by-role query then matches two
   // tabpanels. That is a harness artefact, not a copy defect, and it is easy to
   // misread as one.
-  for (const [site, text] of SITES) {
+  for (const [site, text] of ALL_BAN_SURFACES) {
     it(`does NOT fire on the correct copy of ${site}`, () => {
       // Hoisted: `text()` RENDERS, and `.filter` would call it once per pattern —
       // two renders in one test, which the by-role query reports as an ambiguous
@@ -479,6 +595,15 @@ describe('R1b §4 · the guard rejects the exact strings that shipped', () => {
 // against the same eight phrasings; see the probe at the bottom of this
 // section, which is a real test and fails if any of the eight goes uncaught.
 
+/**
+ * The shape of `CAPTURE_COPY`, MEASURED on 2026-09-12 by running the assertion
+ * below with sentinel zeroes and reading the reported values: 79 keys, of which
+ * 75 are strings the ban's loop reads and 4 are string-RETURNING FUNCTIONS it
+ * skips. Pinned because that skip makes the sweep shrinkable without any test
+ * failing — convert one key to a function and it silently leaves the ban.
+ */
+const CAPTURE_COPY_KEY_COUNTS = { total: 79, strings: 75, functions: 4 };
+
 function captureVoiceAudioHandling(): string {
   return CAPTURE_COPY.voiceAudioHandling;
 }
@@ -563,9 +688,14 @@ describe('R1b §5 · no upload-claim site, and no CAPTURE_COPY string, claims th
     expect(noEndpointClaims(captureVoiceAudioHandling()), captureVoiceAudioHandling()).toEqual([]);
   });
 
-  describe('applies to all five upload-claim surfaces, not just the capture site', () => {
-    const ALL_FIVE: [string, () => string][] = [...SITES, ['transcript capture: voiceAudioHandling', captureVoiceAudioHandling]];
-    for (const [site, text] of ALL_FIVE) {
+  // SIX, not five: the `synthetic-data-only` Settings card is a seventh
+  // upload-claim site (see the file header) and this ban needs no reader
+  // vocabulary, so it costs nothing to run over it and closes it by the same
+  // mechanism. `ALL_BAN_SURFACES` is the one list every vocabulary-free ban in
+  // this file runs over, so a future site added to it is covered by §3, §3b,
+  // §5 and §7 at once rather than by whichever the author remembered.
+  describe('applies to every upload-claim surface, not just the capture site', () => {
+    for (const [site, text] of ALL_BAN_SURFACES) {
       it(`${site} does not claim the route does not exist`, () => {
         // Hoisted to ONE call: `text()` renders for three of the five sites,
         // and `cleanup` runs between TESTS, not between calls — a second call
@@ -577,6 +707,37 @@ describe('R1b §5 · no upload-claim site, and no CAPTURE_COPY string, claims th
         expect(noEndpointClaims(rendered), rendered).toEqual([]);
       });
     }
+  });
+
+  /*
+   * THE COUNT IS PINNED, because the `continue` makes this sweep silently
+   * shrinkable. Converting one key from a string to a string-returning function
+   * — a refactor nobody would think of as a copy change — removes it from the
+   * scan with no test failing, and the sweep keeps reporting `[]`. So the two
+   * numbers are asserted: how many keys exist, and how many this loop actually
+   * reads. If either moves, the diff has to say why.
+   *
+   * The FUNCTION count is asserted too, not just the string count: if it were
+   * only the strings, adding a key AND converting one would net to zero.
+   */
+  it('the sweep reads a pinned number of CAPTURE_COPY keys, so it cannot shrink silently', () => {
+    const entries = Object.entries(CAPTURE_COPY);
+    const strings = entries.filter(([, v]) => typeof v === 'string');
+    const functions = entries.filter(([, v]) => typeof v === 'function');
+    expect(
+      { total: entries.length, scanned: strings.length, notScanned: functions.length },
+      'a CAPTURE_COPY key was added, removed, or changed between a string and a ' +
+        'function. The loop below reads typeof === "string" values ONLY, so a ' +
+        'conversion silently removes a key from the ban. Update these numbers in the ' +
+        'same change, and if a converted key still makes a copy claim, give it its ' +
+        'own assertion.',
+    ).toEqual({ total: entries.length, scanned: strings.length, notScanned: functions.length });
+    expect(entries.length).toBe(CAPTURE_COPY_KEY_COUNTS.total);
+    expect(strings.length).toBe(CAPTURE_COPY_KEY_COUNTS.strings);
+    expect(functions.length).toBe(CAPTURE_COPY_KEY_COUNTS.functions);
+    // ...and every key is one or the other, so no third kind is going unscanned
+    // and uncounted.
+    expect(strings.length + functions.length).toBe(entries.length);
   });
 
   it('no string value anywhere in CAPTURE_COPY claims the route does not exist', () => {
@@ -668,14 +829,21 @@ describe('R1b §5b · the capture site states the affirmative claim, tolerant of
 /** Just the one section, located by its own heading — so a neighbouring
  *  section cannot supply half of the claim and count as compliance. Same
  *  technique `db-recon-truthfulness.test.tsx`'s `helpSyntheticSection` uses. */
-function helpValuesSection(): string {
+function helpValuesSectionEl(): Element {
   const view = render(<HelpPanel />);
   fireEvent.click(view.getByRole('button', { name: 'Help' }));
   const section = [...view.container.querySelectorAll('.help-section')].find(
     (el) => el.querySelector('h3')?.textContent === 'Where values come from',
   );
   expect(section, 'no "Where values come from" section in the Help popover').toBeTruthy();
-  return section!.textContent ?? '';
+  return section!;
+}
+
+/** The same section flattened. §6a asks "is this named ANYWHERE in the section",
+ *  which is a whole-section question and is correct over `textContent`. §6b asks
+ *  a PER-SENTENCE question and is NOT — see `unscopedUploadRefusalsInBlocks`. */
+function helpValuesSection(): string {
+  return helpValuesSectionEl().textContent ?? '';
 }
 
 /** Both file-reading controls, as the claim must name them. */
@@ -733,11 +901,41 @@ describe('R1b §6a · the Help "Where values come from" section names BOTH reade
   });
 });
 
+/*
+ * THE SAME BAN, RUN PER BLOCK ELEMENT — and this is a VACUITY FIX, not a
+ * tightening. Measured by an independent review and reproduced here in §6c.
+ *
+ * `unscopedUploadRefusals` splits on `/(?<=\.)\s+/`, which requires WHITESPACE
+ * after the period. JSX emits no text node between sibling elements, so
+ * `section.textContent` glues the last sentence of one `<p>` to the first of the
+ * next — "…apply nothing to a record.Dictating into Cap…" — and a whole new
+ * paragraph is absorbed into the preceding chunk, INHERITING ITS EXEMPTION. The
+ * shipped section's first `<p>` ends "The upload route refuses every request,
+ * and only two controls read a file you pick…", so anything appended after it
+ * carries that `\bupload\s+route\b` exemption for free.
+ *
+ * CONSEQUENCE, stated plainly because it is Task 1's failure mode one element
+ * away: if this section grew a new `<p>` reading "Uploads are disabled in this
+ * build.", the whole-section form of this guard would have stayed GREEN.
+ *
+ * The fix is to take the corpus from the section's BLOCK children and split
+ * within each, so a paragraph boundary is at least as strong a separator as a
+ * period. `h3,p,li` rather than `*`: those are the blocks this popover authors
+ * copy in, and a wildcard would also collect wrapper `<div>`s whose
+ * `textContent` is the same glued string the bug is made of.
+ */
+function unscopedUploadRefusalsInBlocks(root: Element): string[] {
+  const blocks = [...root.querySelectorAll('h3,p,li')];
+  // A section with no block children would make this vacuous in a second way,
+  // so the absence is a failure rather than a pass.
+  expect(blocks.length, 'the section has no h3/p/li blocks to scan').toBeGreaterThan(0);
+  return blocks.flatMap((b) => unscopedUploadRefusals(b.textContent ?? ''));
+}
+
 describe('R1b §6b · no upload refusal in that section is left unscoped', () => {
   it('the shipped section scopes every refusal to the upload route', () => {
-    const rendered = helpValuesSection();
     expect(
-      unscopedUploadRefusals(rendered),
+      unscopedUploadRefusalsInBlocks(helpValuesSectionEl()),
       'an upload refusal in the Help popover is predicated of the application rather ' +
         'than of the upload route. CLAUDE.md §11: the refusal claim is true of ' +
         'POST /api/uploads ONLY, and this build ships a button labelled "Upload JSON ' +
@@ -775,5 +973,165 @@ describe('R1b §6b · no upload refusal in that section is left unscoped', () =>
       'a correctly scoped refusal must stay sayable. A guard that fires on true copy ' +
         'teaches the next reader to weaken it (§3b).',
     ).toEqual([]);
+  });
+});
+
+// --- §6c the vacuity is PROVEN, in both directions --------------------------
+//
+// A vacuity fix that cannot demonstrate the previously-escaping input is not a
+// fix, it is a preference. The fixture below is the shipped section's own shape:
+// a first `<p>` that ends on a correctly-scoped refusal (so it carries the
+// `upload route` exemption), and a second `<p>` carrying a bare unscoped one.
+
+/** The false sentence Task 1's defect would have looked like on this surface. */
+const UNSCOPED_IN_A_NEW_PARAGRAPH = 'Uploads are disabled in this build.';
+
+function twoParagraphSection(second: string): Element {
+  const section = document.createElement('section');
+  section.className = 'help-section';
+  const h3 = document.createElement('h3');
+  h3.textContent = 'Where values come from';
+  const p1 = document.createElement('p');
+  p1.textContent =
+    'No control here reads one of your files and fills a field from it. The upload route ' +
+    'refuses every request, and only two controls read a file you pick.';
+  const p2 = document.createElement('p');
+  p2.textContent = second;
+  section.append(h3, p1, p2);
+  document.body.append(section);
+  return section;
+}
+
+describe('R1b §6c · the paragraph-boundary escape, measured both ways', () => {
+  it('the whole-section (textContent) form MISSES it — this is the defect', () => {
+    const section = twoParagraphSection(UNSCOPED_IN_A_NEW_PARAGRAPH);
+    // The glue itself, asserted rather than assumed: no whitespace between the
+    // two paragraphs' text, so the sentence splitter cannot separate them.
+    expect(section.textContent).toContain('file you pick.Uploads are disabled');
+    expect(
+      unscopedUploadRefusals(section.textContent ?? ''),
+      'if this now FIRES, the paragraph-boundary escape has been closed by some ' +
+        'other means and §6b no longer needs the block-aware corpus. Re-derive ' +
+        'before deleting anything: the escape is a property of `(?<=\\.)\\s+` ' +
+        'meeting JSX, not of this fixture.',
+    ).toEqual([]);
+  });
+
+  it('the block-aware form CATCHES it — this is the fix', () => {
+    const section = twoParagraphSection(UNSCOPED_IN_A_NEW_PARAGRAPH);
+    expect(unscopedUploadRefusalsInBlocks(section)).toEqual([UNSCOPED_IN_A_NEW_PARAGRAPH]);
+  });
+
+  it('and the block-aware form still leaves a correctly scoped paragraph alone', () => {
+    // The other direction, per §3b: a guard that fires on true copy teaches the
+    // next reader to weaken it.
+    const section = twoParagraphSection('The upload route refuses every request it gets.');
+    expect(unscopedUploadRefusalsInBlocks(section)).toEqual([]);
+  });
+
+  it('the same escape appended INSIDE the first paragraph is caught either way', () => {
+    // The control the review used to isolate the cause: identical sentence,
+    // identical copy, only the element boundary differs. If this failed, the
+    // finding would be about the sentence rather than about the boundary.
+    const section = twoParagraphSection('Dictating into Capture does not write a field.');
+    const p1 = section.querySelector('p')!;
+    p1.textContent = `${p1.textContent} ${UNSCOPED_IN_A_NEW_PARAGRAPH}`;
+    // The flattened form DOES fire here — but note what it returns: the glue
+    // swallows the FOLLOWING paragraph into the flagged chunk too, so even when
+    // the whole-section form catches something it reports a span that is not a
+    // sentence. The block-aware form returns the sentence itself.
+    const flattened = unscopedUploadRefusals(section.textContent ?? '');
+    expect(flattened).toHaveLength(1);
+    expect(flattened[0]).toContain(UNSCOPED_IN_A_NEW_PARAGRAPH);
+    expect(flattened[0]).toContain('Dictating into Capture');
+    expect(unscopedUploadRefusalsInBlocks(section)).toEqual([UNSCOPED_IN_A_NEW_PARAGRAPH]);
+  });
+});
+
+// --- §7 the SEVENTH site: Settings → Data & Privacy → synthetic-data-only ---
+//
+// See the file header for why this is not a fifth member of `SITES`. The bans in
+// §3, §3b and §5 need no reader vocabulary, so they run over `ALL_BAN_SURFACES`
+// and cover this card unchanged; §2's four-part claim deliberately does not.
+//
+// WHY THE UNSCOPED-REFUSAL BAN IS *NOT* ALSO RUN OVER `ALL_BAN_SURFACES`, and
+// this is MEASURED rather than assumed, because widening it is the obvious next
+// edit and it is the wrong one. Running `unscopedUploadRefusals` over all six
+// surfaces flags FOUR of them:
+//
+//   Governance → Policy                      2 sentences
+//   the Load Materials on-ramp warning        1
+//   Settings → no-real-experiment-data        2
+//   Settings → Connect Your Agent no-upload   1
+//   transcript capture: voiceAudioHandling    0
+//   Settings → synthetic-data-only            0
+//
+// All four are the `SITES` members, and all four are CORRECT COPY: they scope
+// the refusal by stating the whole four-part claim in the same breath ("...and
+// the refused request is never read, parsed, or inspected", "...while the CSV
+// preview and the record validator do read what you paste or pick"). That is a
+// DIFFERENT, stronger scoping mechanism than attaching `route` to the noun, and
+// §2 is what holds it. So this ban belongs exactly to the surfaces that do NOT
+// state the four-part claim — §6b's Help section and §7's card — and widening it
+// would fire on true copy, which §3b records as worse than the gap it closes.
+// If a future slice wants one ban over everything, the predicate has to accept
+// either scoping mechanism; a wider window is not that.
+
+/** `lib/settingsContent.ts:298,301` at `9a1a3d07`, verbatim — BOTH halves, and
+ *  both were unscoped. Kept as the polarity fixtures. */
+const RETIRED_SETTINGS_MODE_SUMMARY =
+  'Synthetic-only mode — file upload is refused outright, and the app cannot tell real ' +
+  'data from synthetic.';
+
+const RETIRED_SETTINGS_MODE_DETAIL_OPENING =
+  'This deployment runs in synthetic-only mode: file upload is refused outright, and the ' +
+  'records in this workspace are synthetic.';
+
+describe('R1b §7 · the Settings synthetic-only MODE card scopes its refusal', () => {
+  it('scopes every upload refusal to the route, in both summary and detail', () => {
+    expect(
+      unscopedUploadRefusals(syntheticModeCard()),
+      'the Settings → Data & Privacy synthetic-only card refuses an upload without ' +
+        'scoping the refusal to the upload ROUTE. CLAUDE.md §11 records that claim as ' +
+        'true of POST /api/uploads ONLY, and this build ships two controls that read a ' +
+        'user-picked file (§1) — one of them, the Validator, reachable from the same ' +
+        'Settings shell this card sits in.',
+    ).toEqual([]);
+  });
+
+  it('POLARITY: the summary that shipped IS flagged', () => {
+    expect(
+      unscopedUploadRefusals(RETIRED_SETTINGS_MODE_SUMMARY),
+      'the exact summary that shipped is not flagged, so this ban would not have ' +
+        'caught the defect it was written for.',
+    ).toEqual([RETIRED_SETTINGS_MODE_SUMMARY]);
+  });
+
+  it('POLARITY: the detail opening that shipped IS flagged', () => {
+    expect(unscopedUploadRefusals(RETIRED_SETTINGS_MODE_DETAIL_OPENING)).toEqual([
+      RETIRED_SETTINGS_MODE_DETAIL_OPENING,
+    ]);
+  });
+
+  it('the card is inside ALL_BAN_SURFACES, so §3, §3b and §5 hold it too', () => {
+    // The gap that let this card ship unscoped was not a missing pattern — every
+    // pattern needed already existed — it was that no list named the card. This
+    // asserts the membership rather than the patterns, because membership is
+    // what was missing.
+    expect(ALL_BAN_SURFACES.map(([site]) => site)).toContain(
+      'Settings → Data & Privacy → synthetic-data-only',
+    );
+  });
+
+  it('and the sibling card on the same tab is the one that states the claim in full', () => {
+    // The de-duplication split this card sits on, asserted so that a future
+    // slice cannot "fix" §7 by copying the four-part claim onto this card —
+    // which `db-recon-truthfulness.test.tsx` §12 would then fail.
+    expect(SITES.map(([site]) => site)).toContain(
+      'Settings → Data & Privacy → no-real-experiment-data',
+    );
+    expect(SITES.map(([site]) => site)).not.toContain(
+      'Settings → Data & Privacy → synthetic-data-only',
+    );
   });
 });

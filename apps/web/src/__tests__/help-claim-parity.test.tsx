@@ -233,7 +233,10 @@ describe('UX-004 §1 · exactness is a real SECOND gate, and it is ISAAC’s own
    * The panel used to be headed "Two gates on export" and its step-5 text said
    * "both export gates". There are THREE. `screens/ExportReadiness.tsx:789-791`
    * had said so in committed prose the whole time ("it clears THREE gates, not
-   * two"), and `lib/officialAttribution.ts:11,164` counts the first two as
+   * two"), and `lib/officialAttribution.ts:164` calls them (CORRECTED: this read
+   * `:11,164` and "the first two"; `:11` is item 3 of that module's three-item
+   * producer list and states no count, and the pair is the LAST two, paired at
+   * `:13` — item 1 is the upstream schema, the one that is not ISAAC's)
    * "ISAAC's two gates" — ISAAC's OWN — beside the upstream schema, which is the
    * same arithmetic from the other end. So the product shipped two different
    * counts of its own export gates on two screens.
@@ -429,6 +432,13 @@ const REQUIRED_CLAIMS: [string, RegExp][] = [
    * retired pattern failed on correct copy for exactly that reason, which is the
    * `QA-010` hazard: `[^.]` is only a sentence proxy and breaks on version
    * numbers.
+   *
+   * AND THIS RULE WAS STATED HERE WHILE 8 OF FAMILY B's 13 PATTERNS STILL USED
+   * `[^.]` — 11 window occurrences — in the one family whose whole subject is
+   * "ISAAC v1.05". They are `[\s\S]` now; §5g measures the change in both
+   * directions and shows it introduces no false positive on any of the 16
+   * correct-copy fixtures. A rule documented in one family and not applied to
+   * the next is the shape this file has been caught in twice.
    */
   [
     'export runs three checks, and the copy says three',
@@ -674,6 +684,54 @@ const NEGATOR =
  * token. §5d re-measures all of this on every run, and the before/after ratios
  * are asserted below rather than described.
  */
+/*
+ * -- `QA-010` IS LIVE IN THIS FILE, AND IT WAS LIVE IN THE ONE PLACE IT IS
+ *    DOCUMENTED. -----------------------------------------------------------
+ *
+ * `:427-430` of this same file records the hazard and states the remedy -- "the
+ * copy contains the literal `v1.05`, so a dot-excluding window cannot reach
+ * across it ... `[^.]` is only a sentence proxy and breaks on version numbers"
+ * -- and then applies it to Family B's WINDOWS while leaving the three CLAUSE
+ * SPLITS on the version-naive character class. Measured:
+ *
+ *   'Draft extracts candidate field values from your v1.05 spreadsheets.'
+ *   split on [.;:,] -> ['Draft extracts candidate field values from your v1',
+ *                       '05 spreadsheets', '']
+ *
+ * The required tokens are now in DIFFERENT chunks -- extraction verb and field
+ * noun in the first, source-file noun in the second -- so no chunk satisfies the
+ * conjunction and the ban cannot fire. In a guard whose subject vocabulary is
+ * literally "ISAAC v1.05", that is not a corner case.
+ *
+ * AND THE CORPUS COULD NOT SEE IT: before this change, ZERO of the 19
+ * `EXTRACTION_REPHRASINGS` and ZERO of the 6 `UNIVERSAL_EVIDENCE_REPHRASINGS`
+ * contained a decimal, so the `100%` assertions in §5b were measured on a corpus
+ * that systematically omitted the token that defeats the detector. A ratio is a
+ * property of its corpus, and this one could not have caught this class.
+ * Decimal-bearing entries are added below, and §5f measures the split fix
+ * against them the way §5b measures the adjunct strip.
+ *
+ * SCOPE OF THE CLAIM, because the review's own figure did not reproduce here. It
+ * reported 4 of 4 paired probes escaping; four independently written probes
+ * escape 2 of 4. Whether a version number defeats the detector depends on WHERE
+ * it falls relative to the three required tokens -- "ISAAC v1.05 records are
+ * populated from the spreadsheet you provide" leaves all three in the trailing
+ * chunk and is caught either way. So the defect is real and the mechanism is
+ * exactly as described; the RATE is a property of the probe set, and 4/4 must
+ * not be quoted as a reproduction. §5f asserts the rate it measures.
+ *
+ * WHY A LOOKBEHIND AND NOT A SENTENCE PARSER: the only failure being fixed is a
+ * dot BETWEEN TWO DIGITS. `(?<!\d)[.](?!\d)` declines exactly those and leaves
+ * every other separator alone, so it cannot change any existing verdict -- and
+ * §5f asserts that it does not, on both the 19-entry and 6-entry corpora as they
+ * stood before the additions.
+ */
+const CLAUSE_SPLIT = /(?<!\d)[.](?!\d)|[;:,]/;
+
+/** The PRE-FIX splitter, kept so §5f can MEASURE the improvement instead of
+ *  asserting it -- the same posture §5b takes for the adjunct strip. */
+const CLAUSE_SPLIT_VERSION_NAIVE = /[.;:,]/;
+
 const ADJUNCT_HEAD =
   /\s+(?:with|without|requiring|requires|needing|needs|so\s+(?:you|that|nothing|nobody|no\s+one)|at\s+no|and\s+no\s+need|instead\s+of)\b[\s\S]*$/i;
 
@@ -685,7 +743,7 @@ function stripAdjunct(clause: string): string {
 /** Every clause that affirms a file-to-field capability. Empty is the pass. */
 function fileToFieldClaims(text: string): string[] {
   return text
-    .split(/[.;:,]/)
+    .split(CLAUSE_SPLIT)
     .map((c) => c.trim())
     .filter(
       (c) =>
@@ -702,7 +760,7 @@ function fileToFieldClaims(text: string): string[] {
  *  this repository has been caught publishing unmeasured numbers before. */
 function fileToFieldClaimsClauseWideNegator(text: string): string[] {
   return text
-    .split(/[.;:,]/)
+    .split(CLAUSE_SPLIT)
     .map((c) => c.trim())
     .filter(
       (c) =>
@@ -710,6 +768,21 @@ function fileToFieldClaimsClauseWideNegator(text: string): string[] {
         FIELD_NOUN.test(c) &&
         SOURCE_FILE_NOUN.test(c) &&
         !NEGATOR.test(c),
+    );
+}
+
+/** Family A with the PRE-FIX splitter and the CURRENT negator, so §5f isolates
+ *  the split as the single changed variable. */
+function fileToFieldClaimsVersionNaiveSplit(text: string): string[] {
+  return text
+    .split(CLAUSE_SPLIT_VERSION_NAIVE)
+    .map((c) => c.trim())
+    .filter(
+      (c) =>
+        EXTRACTION_VERB.test(c) &&
+        FIELD_NOUN.test(c) &&
+        SOURCE_FILE_NOUN.test(c) &&
+        !NEGATOR.test(stripAdjunct(c)),
     );
 }
 
@@ -818,15 +891,15 @@ function maskRouteQualifiedCounts(text: string): string {
 const SCHEMA_IS_THE_WHOLE_GATE: [string, RegExp][] = [
   [
     'an exclusive gate on export, named and verbed',
-    /\b(only|sole|solely|single|one)\b[^.]{0,25}\b(signal|gates?|check|thing|rule|verdict)\b[^.]{0,45}\b(gates?|gating|blocks?|blocking|authoris\w*|authoriz\w*|decides?)\b[^.]{0,25}\bexports?\b/i,
+    /\b(only|sole|solely|single|one)\b[\s\S]{0,25}\b(signal|gates?|check|thing|rule|verdict)\b[\s\S]{0,45}\b(gates?|gating|blocks?|blocking|authoris\w*|authoriz\w*|decides?)\b[\s\S]{0,25}\bexports?\b/i,
   ],
   [
     'an exclusive gate adjacent to the word export',
-    /\b(only|sole|single) (signal|gate|check|rule|verdict)\b[^.]{0,30}\bexports?\b/i,
+    /\b(only|sole|single) (signal|gate|check|rule|verdict)\b[\s\S]{0,30}\bexports?\b/i,
   ],
   [
     'the schema verdict described as the only gate',
-    /\b(schema|official validation)\b[^.]{0,40}\b(is|remains) the (only|sole|single)\b/i,
+    /\b(schema|official validation)\b[\s\S]{0,40}\b(is|remains) the (only|sole|single)\b/i,
   ],
   [
     'export gated only/solely on something',
@@ -834,7 +907,7 @@ const SCHEMA_IS_THE_WHOLE_GATE: [string, RegExp][] = [
   ],
   [
     'nothing but X gates export',
-    /\bnothing (but|other than|else|more than)\b[^.]{0,50}\b(gates?|blocks?|refus\w*)\b/i,
+    /\bnothing (but|other than|else|more than)\b[\s\S]{0,50}\b(gates?|blocks?|refus\w*)\b/i,
   ],
   [
     'the retired step-4 sentence: a bare check against the official schema',
@@ -842,7 +915,7 @@ const SCHEMA_IS_THE_WHOLE_GATE: [string, RegExp][] = [
   ],
   [
     'an exactness refusal reported as a schema error',
-    /\b(exactness|anchored[- ]pattern)\b[^.]{0,60}\b(schema (error|violation|failure)|invalid against)\b/i,
+    /\b(exactness|anchored[- ]pattern)\b[\s\S]{0,60}\b(schema (error|violation|failure)|invalid against)\b/i,
   ],
   // ---- I-2 additions: the COUNT claims and the VERBED claims ---------------
   [
@@ -866,15 +939,15 @@ const SCHEMA_IS_THE_WHOLE_GATE: [string, RegExp][] = [
   ],
   [
     'the schema described as what decides or determines export',
-    /\b(schema|official validation)\b[^.]{0,45}\b(decides?|determines?|settles?)\b[^.]{0,25}\bexports?\b/i,
+    /\b(schema|official validation)\b[\s\S]{0,45}\b(decides?|determines?|settles?)\b[\s\S]{0,25}\bexports?\b/i,
   ],
   [
     'the schema check described as the next or the only remaining check',
-    /\b(official\s+)?(ISAAC\s+)?(v1\.05\s+)?schema\s+check\b[^.]{0,20}\b(runs?\s+next|is\s+what\s+remains|remains|comes?\s+next)\b/i,
+    /\b(official\s+)?(ISAAC\s+)?(v1\.05\s+)?schema\s+check\b[\s\S]{0,20}\b(runs?\s+next|is\s+what\s+remains|remains|comes?\s+next)\b/i,
   ],
   [
     'export decided by the schema, verbed in the passive with no exclusivity word',
-    /\bexports?\b[^.]{0,30}\bis\s+(decided|determined|settled)\s+by\s+the\s+(official\s+)?(ISAAC\s+)?(v1\.05\s+)?schema\b/i,
+    /\bexports?\b[\s\S]{0,30}\bis\s+(decided|determined|settled)\s+by\s+the\s+(official\s+)?(ISAAC\s+)?(v1\.05\s+)?schema\b/i,
   ],
   [
     'an enumeration of the export gates that omits the no-guessing draft check',
@@ -931,7 +1004,22 @@ const SCOPER =
 /** Every clause that makes an unscoped universal evidence claim. Empty is the pass. */
 function universalEvidenceClaims(text: string): string[] {
   return text
-    .split(/[.;:,]/)
+    .split(CLAUSE_SPLIT)
+    .map((c) => c.trim())
+    .filter(
+      (c) =>
+        UNIVERSAL.test(c) &&
+        CLAIM_SUBJECT.test(c) &&
+        POSSESSION_VERB.test(c) &&
+        EVIDENCE_NOUN.test(c) &&
+        !SCOPER.test(c),
+    );
+}
+
+/** Family C with the PRE-FIX splitter, for the same reason. */
+function universalEvidenceClaimsVersionNaiveSplit(text: string): string[] {
+  return text
+    .split(CLAUSE_SPLIT_VERSION_NAIVE)
     .map((c) => c.trim())
     .filter(
       (c) =>
@@ -1094,6 +1182,21 @@ const EXTRACTION_REPHRASINGS: string[] = [
   'It parses your spreadsheet and fills every field, requiring no transcription.',
   'Candidate values are lifted from the document at no effort to you.',
   'It ingests your files and prefills the draft instead of you keying it in.',
+  // ---- THE DECIMAL-BEARING CLASS, which the corpus systematically omitted.
+  //
+  // Before these four, no entry in this corpus contained a decimal, so the
+  // `100%` assertion above was measured on a corpus that could not see the
+  // token that defeats the splitter. Two of the four escaped the version-naive
+  // split and two did not — §5f asserts that split, because "all four escape"
+  // would overstate the defect and "the class is closed" would understate the
+  // reason the ratio moved.
+  //
+  // Each is a sentence an author of THIS product could plausibly write: `v1.05`
+  // is the schema version named on nearly every surface in it.
+  'Draft extracts candidate field values from your v1.05 spreadsheets.',
+  'Field values are extracted from your v1.05 workbook automatically.',
+  'ISAAC v1.05 records are populated from the spreadsheet you provide.',
+  'It parses your v1.05 CSV and fills the record fields from it.',
 ];
 
 const SCHEMA_GATE_REPHRASINGS: string[] = [
@@ -1119,6 +1222,14 @@ const SCHEMA_GATE_REPHRASINGS: string[] = [
   'The official ISAAC v1.05 schema determines export.',
   'Export is decided by the official ISAAC schema.',
   'The official schema check is what remains.',
+  // ---- THE DECIMAL-BEARING CLASS, added with the `[\s\S]` widening (§5g).
+  //
+  // The first of these was caught by ZERO patterns while 8 of the 13 used
+  // `[^.]`; the second — the same sentence with `v1.05` deleted — was caught by
+  // one. A pair that differs only in a version number, with different verdicts,
+  // is the `QA-010` hazard stated as a test rather than as a comment.
+  'That is the only ISAAC v1.05 rule that blocks an export.',
+  'That is the only ISAAC rule that blocks an export.',
 ];
 
 const UNIVERSAL_EVIDENCE_REPHRASINGS: string[] = [
@@ -1128,6 +1239,10 @@ const UNIVERSAL_EVIDENCE_REPHRASINGS: string[] = [
   'All fields link to the evidence behind them.',
   'Every value comes with a citation.',
   'Each record field shows its provenance.',
+  // ---- the decimal-bearing class, same reason as Family A's four above. Both
+  // of these escaped the version-naive split completely (§5f measures it).
+  'Every field in an ISAAC v1.05 record has an evidence trail.',
+  'Each v1.05 record field carries its citations.',
 ];
 
 describe('UX-003 §5b · Family A catches every plausible rephrasing', () => {
@@ -1159,15 +1274,37 @@ describe('UX-003 §5b · Family A catches every plausible rephrasing', () => {
    * 19/19 is therefore evidence about the six escapes named above, and NOT
    * evidence that the strip generalises to phrasings nobody has written down.
    */
-  it('the adjunct strip is what closes the gap: 14/19 before, 19/19 after', () => {
+  /*
+   * RE-MEASURED WHEN THE CORPUS GREW, AND THE NUMERATOR AND DENOMINATOR BOTH
+   * MOVED. The four decimal-bearing entries took the corpus from 19 to 23, and
+   * the clause-wide-negator reference catches all four (none of them contains a
+   * negator), so `14/19 -> 19/19` became `18/23 -> 23/23`. The OLD figures are
+   * recorded here rather than overwritten, because the thing worth carrying
+   * forward is that they were correct about the 19-entry corpus and say nothing
+   * about a 23-entry one. WHAT DID NOT MOVE IS THE FINDING: the five misses are
+   * the same five adjunct-shadowed clauses, asserted below by count and by the
+   * classifier that follows.
+   */
+  it('the adjunct strip is what closes the gap: 18/23 before, 23/23 after', () => {
     const before = EXTRACTION_REPHRASINGS.filter(
       (s) => fileToFieldClaimsClauseWideNegator(s).length === 0,
     );
     const after = EXTRACTION_REPHRASINGS.filter((s) => fileToFieldClaims(s).length === 0);
-    expect(EXTRACTION_REPHRASINGS.length - before.length, 'pre-fix catch count').toBe(14);
-    expect(EXTRACTION_REPHRASINGS.length - after.length, 'post-fix catch count').toBe(19);
+    expect(EXTRACTION_REPHRASINGS.length, 'the corpus size the ratio is over').toBe(23);
+    expect(EXTRACTION_REPHRASINGS.length - before.length, 'pre-fix catch count').toBe(18);
+    expect(EXTRACTION_REPHRASINGS.length - after.length, 'post-fix catch count').toBe(23);
     expect(before.length, 'the pre-fix misses are the adjunct-shadowed ones').toBe(5);
     expect(after).toEqual([]);
+    // The five are ADJUNCT-shadowed, not decimal-shadowed: the adjunct
+    // reference shares the FIXED splitter, so a decimal entry cannot be one of
+    // these misses. Asserted, so the two fixes cannot be confused for each other.
+    for (const missed of before) {
+      expect(
+        ADJUNCT_HEAD.test(missed),
+        `"${missed}" is a pre-fix miss that carries no trailing adjunct, so the ` +
+          'adjunct diagnosis does not cover it.',
+      ).toBe(true);
+    }
   });
 });
 
@@ -1187,13 +1324,28 @@ describe('UX-004 §5b · Family B catches every plausible rephrasing', () => {
    * catches 20/20. The two "before" figures are not comparable — different
    * corpora — and neither is quoted as the other.
    */
-  it('the count and verb patterns are what close the gap: 10/20 before, 20/20 after', () => {
+  /*
+   * RE-MEASURED WHEN THE TWO DECIMAL CONTROLS JOINED THE CORPUS: 20 -> 22
+   * entries, and the first seven patterns catch BOTH of them once their windows
+   * are `[\s\S]`, so `10/20 -> 20/20` became `12/22 -> 22/22`. The old figures
+   * were correct about the 20-entry corpus and are recorded rather than
+   * overwritten. THE DIAGNOSIS IS UNCHANGED: the misses are still exactly 10,
+   * still all count claims or verbed claims, and the classifier below still
+   * proves it entry by entry.
+   *
+   * NOTE WHAT `schemaWholeGateClaimsBeforeI2` IS AND IS NOT. It slices the LIVE
+   * pattern list, so "before I-2" means "the original seven patterns AS THEY
+   * EXIST TODAY" — i.e. with the §5g widening applied. It isolates the I-2
+   * ADDITIONS, not the window change; §5g isolates the window change.
+   */
+  it('the count and verb patterns are what close the gap: 12/22 before, 22/22 after', () => {
     const before = SCHEMA_GATE_REPHRASINGS.filter(
       (s) => schemaWholeGateClaimsBeforeI2(s).length === 0,
     );
     const after = SCHEMA_GATE_REPHRASINGS.filter((s) => schemaWholeGateClaims(s).length === 0);
-    expect(SCHEMA_GATE_REPHRASINGS.length - before.length, 'pre-I-2 catch count').toBe(10);
-    expect(SCHEMA_GATE_REPHRASINGS.length - after.length, 'post-I-2 catch count').toBe(20);
+    expect(SCHEMA_GATE_REPHRASINGS.length, 'the corpus size the ratio is over').toBe(22);
+    expect(SCHEMA_GATE_REPHRASINGS.length - before.length, 'pre-I-2 catch count').toBe(12);
+    expect(SCHEMA_GATE_REPHRASINGS.length - after.length, 'post-I-2 catch count').toBe(22);
     expect(after).toEqual([]);
     // ...and every pre-I-2 miss is a count claim or a verbed claim, which is the
     // diagnosis the extension rests on. If a miss appears that is neither, the
@@ -1227,6 +1379,196 @@ describe('QA-013 §5b · Family C catches every plausible rephrasing', () => {
       `${UNIVERSAL_EVIDENCE_REPHRASINGS.length - missed.length}/` +
         `${UNIVERSAL_EVIDENCE_REPHRASINGS.length} caught.`,
     ).toEqual([]);
+  });
+});
+
+// --- §5g the QA-010 WINDOW fix in Family B, MEASURED both directions -------
+//
+// `:427-437` states the `[\s\S]`-not-`[^.]` rule and applied it to ONE pattern.
+// Eight of the thirteen still used `[^.]` — 11 window occurrences — so in the
+// family whose subject vocabulary is "ISAAC v1.05", a dot-excluding window
+// could not reach across the version number in its own subject.
+//
+// The pre-fix list is RECONSTRUCTED from the live one by narrowing exactly the
+// entries that were widened, rather than copied — a copy would stop describing
+// the patterns the moment one of them changed.
+
+/** 0-based indices of the entries whose windows this change widened. Asserted
+ *  below against the live list, so a reorder or an insertion fails here rather
+ *  than silently re-pointing the measurement at the wrong patterns. */
+const WIDENED_ENTRY_INDICES = [0, 1, 2, 4, 6, 9, 10, 11];
+
+function schemaWholeGateClaimsNarrowWindows(text: string): string[] {
+  const masked = maskRouteQualifiedCounts(text);
+  return SCHEMA_IS_THE_WHOLE_GATE.filter(([, p], i) => {
+    const pattern = WIDENED_ENTRY_INDICES.includes(i)
+      ? // `split`/`join`, not `replaceAll`: this package's `lib` target predates
+        // ES2021 and `npx tsc -b` rejects `replaceAll` outright.
+        new RegExp(p.source.split('[\\s\\S]').join('[^.]'), p.flags)
+      : p;
+    return pattern.test(masked);
+  }).map(([label]) => label);
+}
+
+describe('QA-010 §5g · Family B window widening, both directions', () => {
+  it('the widened set is exactly the 8 entries with 11 occurrences it claims', () => {
+    const widened = SCHEMA_IS_THE_WHOLE_GATE.map(([, p], i) => [i, p] as const).filter(
+      ([, p]) => p.source.includes('[\\s\\S]'),
+    );
+    // Entries 7 and 12 already used `[\s\S]` before this change, so the set of
+    // patterns CONTAINING it is 10, of which 8 are the ones narrowed above.
+    expect(
+      widened.map(([i]) => i),
+      'a pattern was added, removed or reordered. WIDENED_ENTRY_INDICES points at ' +
+        'positions, so §5g would otherwise go on measuring the wrong patterns and ' +
+        'keep passing.',
+    ).toEqual([0, 1, 2, 4, 6, 7, 9, 10, 11, 12]);
+    const narrowedOccurrences = WIDENED_ENTRY_INDICES.map(
+      (i) => (SCHEMA_IS_THE_WHOLE_GATE[i][1].source.match(/\[\\s\\S\]/g) ?? []).length,
+    ).reduce((a, b) => a + b, 0);
+    expect(narrowedOccurrences, 'window occurrences under narrowing').toBe(11);
+  });
+
+  it('the review’s negative control escaped ENTIRELY with narrow windows', () => {
+    const withVersion = 'That is the only ISAAC v1.05 rule that blocks an export.';
+    expect(
+      schemaWholeGateClaimsNarrowWindows(withVersion),
+      'if this now FIRES, the narrow-window reconstruction is not reproducing the ' +
+        'pre-fix behaviour and the ratio below means nothing.',
+    ).toEqual([]);
+    expect(schemaWholeGateClaims(withVersion)).toEqual([
+      'an exclusive gate on export, named and verbed',
+    ]);
+  });
+
+  it('the SAME sentence without the version number was caught either way', () => {
+    // The pair is the whole argument: identical claim, one token apart, and only
+    // the narrow window could tell them apart — which is exactly what a
+    // sentence proxy must not do.
+    const withoutVersion = 'That is the only ISAAC rule that blocks an export.';
+    expect(schemaWholeGateClaimsNarrowWindows(withoutVersion)).toEqual([
+      'an exclusive gate on export, named and verbed',
+    ]);
+    expect(schemaWholeGateClaims(withoutVersion)).toEqual([
+      'an exclusive gate on export, named and verbed',
+    ]);
+  });
+
+  it('the widening introduces NO false positive on any correct-copy fixture', () => {
+    // The §3b risk, measured rather than argued: a wider window can cross a
+    // sentence boundary and flag two unrelated clauses as one claim. Measured
+    // over all 16 fixtures, it flags nothing new — and nothing at all.
+    const regressions = CORRECT_COPY_FIXTURES.filter(
+      ([, text]) =>
+        schemaWholeGateClaims(text).length > schemaWholeGateClaimsNarrowWindows(text).length,
+    ).map(([what]) => what);
+    expect(
+      regressions,
+      'widening a window made a family fire on correct copy. That teaches the next ' +
+        'reader to weaken the guard rather than fix the copy (§3b), so narrow the ' +
+        'specific window rather than accepting this.',
+    ).toEqual([]);
+    for (const [, text] of CORRECT_COPY_FIXTURES) {
+      expect(schemaWholeGateClaims(text)).toEqual([]);
+    }
+  });
+
+  /*
+   * 21/22, not a dramatic number, AND THAT IS THE HONEST FRAMING. The widening
+   * closes exactly ONE entry of this corpus — the decimal-bearing control — and
+   * it is quoted at 1 rather than inflated, because the other 21 were already
+   * caught and the corpus was never designed to probe windows. The value of the
+   * change is not the ratio; it is that the SPECIFIC escape class named at
+   * `:427-437` can no longer walk through 8 of the 13 patterns. §5b's own
+   * honesty note makes the same distinction for a different fix.
+   */
+  it('and it costs no coverage: 21/22 narrow, 22/22 wide', () => {
+    const narrow = SCHEMA_GATE_REPHRASINGS.filter(
+      (x) => schemaWholeGateClaimsNarrowWindows(x).length > 0,
+    ).length;
+    const wide = SCHEMA_GATE_REPHRASINGS.filter((x) => schemaWholeGateClaims(x).length > 0).length;
+    expect(narrow, 'narrow-window catch count').toBe(21);
+    expect(wide, 'wide-window catch count').toBe(22);
+  });
+});
+
+// --- §5f the QA-010 split fix, MEASURED with its corpus ---------------------
+//
+// Same posture as §5b: the pre-fix behaviour is kept as a function so the
+// improvement is measured rather than described, and the honest caveat travels
+// with the number. Two directions are asserted for each family — the previously
+// escaping input is shown to have escaped, and shown not to escape now.
+
+describe('QA-010 §5f · the version-aware clause split, both directions', () => {
+  /** The four decimal-bearing entries, by the property that defines the class
+   *  rather than by index — an index would silently follow a corpus reorder. */
+  const DECIMAL_A = EXTRACTION_REPHRASINGS.filter((x) => /\d\.\d/.test(x));
+  const DECIMAL_C = UNIVERSAL_EVIDENCE_REPHRASINGS.filter((x) => /\d\.\d/.test(x));
+
+  it('the corpus now CONTAINS the class at all — it contained none of it before', () => {
+    // The review's central point: a ratio asserted as a test is only as good as
+    // its corpus. Zero decimal-bearing entries is the state this replaces.
+    expect(DECIMAL_A.length, 'Family A decimal-bearing entries').toBe(4);
+    expect(DECIMAL_C.length, 'Family C decimal-bearing entries').toBe(2);
+  });
+
+  it('Family A: the version-naive split let 2 of the 4 through; the fix lets 0', () => {
+    const escapedBefore = DECIMAL_A.filter((x) => fileToFieldClaimsVersionNaiveSplit(x).length === 0);
+    const escapedAfter = DECIMAL_A.filter((x) => fileToFieldClaims(x).length === 0);
+    expect(escapedBefore.length, 'escapes under /[.;:,]/').toBe(2);
+    expect(escapedAfter, 'escapes under the version-aware split').toEqual([]);
+    // NAMED, so the two that escaped are not confused with the two that did not.
+    // A version number defeats the conjunction only when it falls BETWEEN the
+    // required tokens; in the other two, all three survive in one chunk.
+    expect(escapedBefore).toEqual([
+      'Draft extracts candidate field values from your v1.05 spreadsheets.',
+      'Field values are extracted from your v1.05 workbook automatically.',
+    ]);
+  });
+
+  it('Family C: the version-naive split let 2 of 2 through; the fix lets 0', () => {
+    const escapedBefore = DECIMAL_C.filter(
+      (x) => universalEvidenceClaimsVersionNaiveSplit(x).length === 0,
+    );
+    const escapedAfter = DECIMAL_C.filter((x) => universalEvidenceClaims(x).length === 0);
+    expect(escapedBefore.length, 'escapes under /[.;:,]/').toBe(2);
+    expect(escapedAfter, 'escapes under the version-aware split').toEqual([]);
+  });
+
+  it('the fix moves NO verdict on the pre-existing, decimal-free corpora', () => {
+    // The lookbehind declines only a dot between two digits, so on a corpus
+    // with no decimal in it the two splitters must agree exactly. If this ever
+    // fails, the fix is doing more than it claims and the §5b figures above are
+    // no longer measurements of the adjunct strip alone.
+    for (const corpus of [
+      EXTRACTION_REPHRASINGS.filter((x) => !/\d\.\d/.test(x)),
+      UNIVERSAL_EVIDENCE_REPHRASINGS.filter((x) => !/\d\.\d/.test(x)),
+      CORRECT_COPY_FIXTURES.map(([, text]) => text),
+    ]) {
+      for (const entry of corpus) {
+        expect(fileToFieldClaimsVersionNaiveSplit(entry), entry).toEqual(
+          fileToFieldClaims(entry),
+        );
+        expect(universalEvidenceClaimsVersionNaiveSplit(entry), entry).toEqual(
+          universalEvidenceClaims(entry),
+        );
+      }
+    }
+  });
+
+  it('the shipped panel is unaffected by the split change', () => {
+    // The panel's copy contains `v1.05`, so this is the one place the change
+    // could plausibly have created a false positive on real copy. §5c already
+    // asserts the panel trips no ban; this asserts the two splitters AGREE on
+    // it, which is the stronger statement and localises any future difference.
+    const panel = helpPanelText();
+    expect(fileToFieldClaims(panel)).toEqual(fileToFieldClaimsVersionNaiveSplit(panel));
+    expect(universalEvidenceClaims(panel)).toEqual(
+      universalEvidenceClaimsVersionNaiveSplit(panel),
+    );
+    expect(panel, 'the panel really does contain a decimal, or this proves nothing').toMatch(
+      /\d\.\d/,
+    );
   });
 });
 

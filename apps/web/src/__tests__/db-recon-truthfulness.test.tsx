@@ -1278,9 +1278,21 @@ describe('sweep guard — rejects every string this defect has ever shipped as',
     for (const scoped of [
       // The replacement that shipped in `app.py`.
       'FastAPI wrapper over the deterministic isaac_records core: a synthetic-only workspace plus one read-only, aggregate-only database diagnostic.',
-      // The Settings mode card's summary, which keeps the token on purpose: the
-      // token opens the unit, but its head noun is `mode`, not the software.
+      // The Settings mode card's summary AS IT STOOD ON 2026-09-12, kept as a
+      // frozen fixture of the token-scoping rule: the token opens the unit, but
+      // its head noun is `mode`, not the software.
+      //
+      // IT NO LONGER QUOTES THE SHIPPED COPY, and that is recorded rather than
+      // silently refreshed. The card's refusal clause was UNSCOPED — "file
+      // upload is refused outright" on a build with two controls that read a
+      // user-picked file — and is now "the upload route refuses every request
+      // outright" (`upload-claim-parity.test.tsx` §7 pins it and holds the
+      // polarity). That defect is orthogonal to what THIS fixture tests, which
+      // is why the string is left as it was: narrowing it to the new wording
+      // would drop the older phrasing from the scoping proof for no gain.
       'Synthetic-only mode — file upload is refused outright.',
+      // ...and the wording that replaced it, so the rule is proven on both.
+      'Synthetic-only mode — the upload route refuses every request outright.',
       // `screens/LoadMaterials.tsx`, reviewed and found truthful: it makes no
       // data-regime claim at all, and "build" is a neutral label for the thing
       // the affordance is disabled in.
