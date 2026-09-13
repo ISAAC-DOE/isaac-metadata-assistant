@@ -994,6 +994,24 @@ def test_the_persisted_state_keys_are_unchanged_by_scoping():
         # moves. That is checked STRUCTURALLY immediately below rather than by a
         # per-entry loop, and the note there says why a loop would be vacuous here.
         "proposal_change_revs",
+        # ``note_change_revs`` was added with MCP-005's ``note`` change-feed kind, and
+        # is ADMITTED HERE DELIBERATELY rather than because a test went red — the same
+        # rule the four keys above follow. Everything ``proposal_change_revs``' note
+        # says applies unchanged, one entity kind over: it is a version coordinate and
+        # NOT content, it is ``{note_id: this record's rev at the save that last
+        # changed that note}``, it sits in a map beside the notes because a field on
+        # the ``Note`` would be hashed by ``_authoritative_signature``, and it belongs
+        # in the persisted document because no other store holds it.
+        #
+        # IT IS A SECOND MAP RATHER THAN A SHARED ONE, and that is the one thing worth
+        # adding here: a note id and a proposal id are both opaque ULIDs from the same
+        # minter, so a shared dict would be keyed from two id spaces with nothing but
+        # convention keeping them apart, and a collision would silently hand one
+        # entity the other's feed position.
+        #
+        # It satisfies the property THIS test defends for the identical reason: the
+        # keys are note ids, the values are integers, and neither can encode a scope.
+        "note_change_revs",
     }
     assert "session_id" not in state and "scope" not in state and "root" not in state
     # ``proposal_change_revs`` IS EMPTY HERE, AND THAT IS SAID RATHER THAN ASSERTED

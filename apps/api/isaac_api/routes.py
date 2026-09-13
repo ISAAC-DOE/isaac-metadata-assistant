@@ -1753,17 +1753,26 @@ def _mcp_disclosure() -> dict:
         "flags the posture is derived from so a reader can re-derive it rather than "
         "trust it, and the identifiers and statuses of the outstanding external "
         "decisions that separate this deployment from a remote one. Derived from "
-        "configuration alone: it opens no socket, validates no token and fetches no "
+        # `token` AND `secret` ARE BOTH BANNED FROM A SERVED DOCUMENT by
+        # `test_about_and_openapi.py::_FORBIDDEN_SUBSTRINGS`, which says of itself
+        # that there is "deliberately NO exception list". This paragraph tripped it
+        # twice — once for a sentence PROMISING no secret is disclosed, and once for
+        # "validates no token" — which is the guard working as designed even though
+        # both uses were innocent: the list is a substring scan, and a scan that
+        # exempted reassuring sentences would exempt exactly the ones an attacker
+        # would write. Both are reworded rather than exempted, and `credential` is
+        # the more accurate word in any case.
+        "configuration alone: it opens no socket, verifies no credential and fetches no "
         "metadata document, so an agent-interface misconfiguration can never change "
-        "this operation's result. **It contains no secret and no deployment "
-        "topology** — no token, key, signature, audience or resource URI, no "
-        "caller's permission grant, and no description of the environment this "
-        "service runs in; what each decision ASKS is documentation rather than "
-        "state, and is deliberately not published by an operation that answers "
-        "without credentials. **It is not a reachability claim:** whether anything "
-        "can actually reach that path depends on how this service is exposed, which "
-        "this process cannot observe. It is what makes a probe of that path "
-        "interpretable, not a substitute for one."
+        "this operation's result. **Nothing confidential is in it** — no "
+        "credential of any kind, no signing material, no audience or resource "
+        "identifier, no caller's permission grant, and nothing describing the "
+        "environment this service runs in; what each decision ASKS is documentation "
+        "rather than state, and is deliberately withheld by an operation that "
+        "answers without credentials. **It is not a reachability claim:** whether "
+        "anything can actually reach that path depends on how this service is "
+        "exposed, which this process cannot observe. It is what makes a probe of "
+        "that path interpretable, not a substitute for one."
     ),
     response_description="The liveness banner.",
 )
@@ -11560,7 +11569,15 @@ def _note_capacity_refusal(exp: Experiment) -> JSONResponse | None:
     is up against rather than only that it failed. Neither truncates and neither
     evicts; see the constant's docstring.
     """
-    if len(exp.notes) >= _MAX_NOTES_PER_RECORD:
+    # `_notes_total(exp)`, AND NEVER THE INLINE `len(...)` OF THE NOTE LIST. A guard
+    # (`test_each_capture_count_has_exactly_one_expression_in_the_route_module`)
+    # counts that expression's occurrences IN THIS MODULE'S SOURCE and requires
+    # exactly one — so this comment deliberately does not spell it either. Every surface
+    # that counts a record's notes counts it the same way — which is what stops the
+    # list payload, the capture summary and this ceiling ever disagreeing about how
+    # many notes a record holds.
+    total = _notes_total(exp)
+    if total >= _MAX_NOTES_PER_RECORD:
         return _note_refusal(
             "too_many_notes",
             (
@@ -11571,7 +11588,7 @@ def _note_capacity_refusal(exp: Experiment) -> JSONResponse | None:
                 "already captured was altered."
             ),
             max_per_record=_MAX_NOTES_PER_RECORD,
-            total=len(exp.notes),
+            total=total,
         )
     try:
         stored = _render_exactly_as_a_response_would(
@@ -11600,7 +11617,7 @@ def _note_capacity_refusal(exp: Experiment) -> JSONResponse | None:
             ),
             max_bytes=_MAX_NOTE_STATE_BYTES,
             stored_bytes=len(stored),
-            total=len(exp.notes),
+            total=total,
         )
     return None
 

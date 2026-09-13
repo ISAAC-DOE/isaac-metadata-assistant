@@ -786,8 +786,21 @@ def disclosure(env: Mapping[str, str] | None = None) -> dict:
             for decision in detail.get("outstanding_decisions", [])
             if isinstance(decision, dict)
         ],
-        # THE NAMES ONLY, sorted — never their explanations, for the reason above. A
-        # reserved name is a documented constant an operator may have typed; what the
-        # name MEANS is documentation.
-        "reserved_binding_names": sorted(RESERVED_BINDING_NAMES),
+        # ~~"reserved_binding_names": sorted(RESERVED_BINDING_NAMES)~~ —
+        # **WITHDRAWN, AND THIS IS THE SECOND NARROWING OF THIS BLOCK IN ONE SLICE.**
+        # First the explanations were dropped (they name the environment); then the
+        # NAMES themselves were dropped, because the slice's own leak guard measured
+        # `edge-issued-bearer` against `_FORBIDDEN_SUBSTRINGS` and flagged `bearer`.
+        #
+        # THE GUARD WAS RIGHT AND THE OBJECTION IS WORTH RECORDING. That string is a
+        # documented constant, not a credential, so the match is in one sense a false
+        # positive — and the correct response is still to withhold it, for two
+        # reasons. It is a DOCUMENTED CONSTANT, i.e. documentation, and `/api/health`
+        # answers without credentials; and `_FORBIDDEN_SUBSTRINGS` says of itself
+        # that there is "deliberately NO exception list", so arguing an exemption
+        # here would be the first one. An operator who typed a reserved name still
+        # sees it echoed in `supplied_value`, which is the field that actually
+        # diagnoses their typo — so nothing diagnostic is lost.
+        #
+        # The names live in `docs/mcp-operator-preflight.md`.
     }

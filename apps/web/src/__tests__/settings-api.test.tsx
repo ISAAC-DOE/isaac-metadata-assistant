@@ -2245,7 +2245,36 @@ describe('the Full Description rule over the REAL generated contract', () => {
     // Internal consistency as a CHECK, not the derivation: raw sum 134,572 minus 2
     // per `\n\n` separator (254 x 2 = 508) = 134,064. The entry was re-transcribed
     // from `create_app().openapi()` by script, never hand-edited.
-    expect(total).toBe(134064);
+    //
+    // 134,064 -> 137,701 and 254 -> 259 post-lead paragraphs. TWO descriptions were
+    // re-transcribed and NO operation was added — the count above stays at 77, which
+    // `test_contract_description_parity.py` proves in both directions and which the
+    // re-transcription script confirmed by parsing 77 entries in and 77 out.
+    //
+    // The two that moved, and why:
+    // `GET /api/health` — a fourth `mcp` block (MCP-003), because the agent seam was
+    //     the only one in the application that said nothing about itself on the wire.
+    // `POST /api/experiments/{experiment_id}/notes` — `client_request_key` (MCP-001),
+    //     the two per-record capacity ceilings (MCP-001a), and the disclosure that
+    //     `source` is CALLER-ASSERTED on this route and therefore not proof of a
+    //     channel (CAP-006).
+    //
+    // DERIVED TWO WAYS THAT AGREE, NEITHER AN INCREMENT, per this block's own rule:
+    // the splitPurpose rule transcribed into Python over `create_app().openapi()`,
+    // restricted to the 77 named operations -> 137,701 / 259; and the same rule over
+    // the transcribed array read back out of `apiFixtures.ts` as text -> the same two
+    // numbers. Internal consistency as a CHECK, not the derivation: raw sum 138,219
+    // minus 2 per `\n\n` separator (259 x 2 = 518) = 137,701. Both entries were
+    // re-transcribed from `create_app().openapi()` by script, never hand-edited.
+    //
+    // **THE PARAGRAPH COUNT MOVED, AND THIS BLOCK SAYS WHAT THAT COSTS.** The note
+    // above records that a number moving to 255 "would mean the prose had been
+    // appended instead" of written into the lead. It moved to 259, and that is
+    // accurate: both descriptions gained whole paragraphs. The Endpoint Explorer
+    // renders each post-lead paragraph as its own `<p class="api-docs-description">`,
+    // so the `settings-explorer` accessibility cells WILL move on both platforms and
+    // need a CI round-trip. That is named residue, not a silent consequence.
+    expect(total).toBe(137701);
     // 104,045 -> 114,959 (+10,914): the four new operations, and NO existing
     // description changed — `test_contract_description_parity.py` proves that rather
     // than leaving it asserted here. RE-DERIVED from the served document and never
@@ -2460,7 +2489,9 @@ describe('the Full Description rule over the REAL generated contract', () => {
     // normalised `url`, the refusal-names-its-category rule, deep-link-only,
     // `checked_reachable`, the connector prerequisite), and a reader who stops early
     // must not have skipped one. RE-DERIVED from the served document, not incremented.
-    expect(REAL_CONTRACT_DESCRIPTIONS.reduce((n, d) => n + rest(d).length, 0)).toBe(254);
+    // 254 -> 259. Derived, not incremented — see the block above `expect(total)`
+    // for both derivations and the internal check.
+    expect(REAL_CONTRACT_DESCRIPTIONS.reduce((n, d) => n + rest(d).length, 0)).toBe(259);
     // 211 -> 235 (+24): the four new operations carry a lead plus 24 post-lead
     // paragraphs between them. It is asserted separately from the character total
     // for the reason every entry above gives: a change that moved one and not the
