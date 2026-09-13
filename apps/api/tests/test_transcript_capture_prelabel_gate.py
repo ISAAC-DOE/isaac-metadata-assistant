@@ -1101,3 +1101,88 @@ def test_each_widened_group_READS_on_its_own(sentence, expected):
     """
     assert _values(sentence) == [expected], _explain(sentence)
     assert _read(sentence).abstentions == (), _explain(sentence)
+
+
+@pytest.mark.parametrize(
+    "sentence",
+    (
+        "Their scan ended at 2026-01-01T00:00:00Z.",
+        "His scan ended at 2026-01-01T00:00:00Z.",
+        "Her scan ended at 2026-01-01T00:00:00Z.",
+        "Their temperature was 425 K.",
+        "That scan ended at 2026-01-01T00:00:00Z.",
+        "Those scans ended at 2026-01-01T00:00:00Z.",
+        "Every scan ended at 2026-01-01T00:00:00Z.",
+        "Each temperature was 425 K.",
+        "Both scans ended at 2026-01-01T00:00:00Z.",
+    ),
+)
+def test_the_DETERMINER_itself_can_name_another_measurement(sentence):
+    """**A SILENT FABRICATION FOUND BY INDEPENDENT HUNT *AFTER* GATE (4) SHIPPED, and
+    the pre-modifier allowlist could not have caught it — the offending word is the
+    DETERMINER.**
+
+    Measured on the shipped gate: `"THEIR scan ended at <instant>"` proposed this
+    run's `acquired_end_utc`. That is the run-misattribution family exactly — a real
+    acquisition time, of somebody else's measurement, attributed to this one — and it
+    slipped through because `tc._DETERMINER` lists `their`/`his`/`her`.
+
+    **THE FIX IS A SECOND CONSTANT, NOT AN EDIT TO THE SHARED ONE, and that is the
+    part to preserve.** `tc._DETERMINER` is used by five other constructs, and in
+    every one the determiner introduces the object of a LOCATING phrase — "the
+    temperature of THEIR sample", "425 K at THEIR stage" — where a third-person
+    possessive says whose apparatus, not whose measurement, and is perfectly
+    readable. The pre-label slot is the ONLY one where the determiner answers "whose
+    measurement is this?". `tc._PRE_LABEL_DETERMINER` is therefore narrower there and
+    nowhere else; the negative control below proves the other five are untouched.
+
+    `that`/`those` are deictic-DISTAL and ambiguous rather than wrong, which
+    fail-closed resolves toward a disclosed refusal;
+    `each`/`every`/`both`/`all` QUANTIFY over several measurements.
+
+    **`that` ALSO NEEDED REMOVING FROM `tc._PRE_LABEL_CLAUSE_OPEN`**, which is why it
+    is in this list: as a subordinator it was treated as a clause boundary, so
+    `"That scan "` was cut to `" scan "` and admitted regardless of the determiner
+    set. Measured cost of removing it: ZERO — `"The temperature THAT we recorded was
+    425 K"` is handled by `_LABEL_CLAUSE`, on the far side of the label, and still
+    reads (asserted below).
+
+    MUTATION: restoring `_DETERMINER` in `_PRE_LABEL`, or putting `that` back into
+    `_PRE_LABEL_CLAUSE_OPEN`, turns rows here RED.
+    """
+    reading = _read(sentence)
+    assert reading.candidates == (), _explain(sentence)
+    assert reading.abstentions != (), _explain(sentence)
+
+
+@pytest.mark.parametrize(
+    "sentence",
+    (
+        # The FIVE other users of the shared `_DETERMINER` are untouched: a
+        # third-person possessive there says whose APPARATUS, not whose measurement.
+        "The temperature of their sample was 425 K.",
+        "The temperature was 425 K at their stage.",
+        "The temperature of that sample was 425 K.",
+        "During their run the temperature was 425 K.",
+        # And `that` on the far side of the label still reads via `_LABEL_CLAUSE`,
+        # which is the measured zero cost of dropping it from the clause bound.
+        "The temperature that we recorded was 425 K.",
+        "The temperature that I measured was 425 K.",
+        # The determiners that survive in the pre-label slot.
+        "The temperature was 425 K.",
+        "This temperature was 425 K.",
+        "Our temperature was 425 K.",
+        "This scan ended at 2026-01-01T00:00:00Z.",
+        "Our scan ended at 2026-01-01T00:00:00Z.",
+    ),
+)
+def test_narrowing_the_pre_label_determiner_cost_NOTHING_elsewhere(sentence):
+    """The negative control for the row above, and the reason the fix is a second
+    constant rather than an edit to `tc._DETERMINER`.
+
+    If this file only asserted the refusals, a future slice could "simplify" by
+    editing the shared constant and every test would stay green while four unrelated
+    legitimate constructions silently stopped reading.
+    """
+    assert _read(sentence).candidates != (), _explain(sentence)
+    assert _read(sentence).abstentions == (), _explain(sentence)

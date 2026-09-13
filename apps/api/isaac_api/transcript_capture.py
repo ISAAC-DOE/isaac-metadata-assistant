@@ -1498,6 +1498,42 @@ _PRE_LABEL_ADJUNCT = (
     rf"|{_PRE_LABEL_SUBJECT}\s+{_PRE_LABEL_REPORT}|{_PRE_LABEL_SUBJECT})"
 )
 
+#: The determiner gate (4) accepts in front of the label — **NARROWER than the shared
+#: :data:`_DETERMINER`, and the narrowing closed a silent fabrication an independent
+#: hunt found AFTER the gate had shipped.**
+#:
+#: Measured: *"THEIR scan ended at 2026-01-01T00:00:00Z"* proposed this run's
+#: ``acquired_end_utc``. That is the run-misattribution family exactly — a real
+#: acquisition time, of somebody else's measurement, attributed to this one — and the
+#: pre-modifier allowlist could not have caught it, because the offending word is the
+#: DETERMINER and not a modifier.
+#:
+#: **WHY A SECOND CONSTANT RATHER THAN EDITING THE SHARED ONE, which is the part to
+#: preserve.** ``_DETERMINER`` is used by five other constructs
+#: (:data:`_LABEL_MODIFIER`, :data:`_LABEL_CLAUSE`, :data:`_CONTINUATION_PHRASE`,
+#: :data:`_CONTINUATION_PREP`, :data:`_PRE_LABEL_PREP_PHRASE`), and in every one of
+#: them the determiner introduces the object of a LOCATING phrase — *"the temperature
+#: of THEIR sample"*, *"425 K at THEIR stage"* — where a third-person possessive says
+#: whose APPARATUS, not whose MEASUREMENT, and is perfectly readable. **The pre-label
+#: slot is the only one where the determiner answers "whose measurement is this?"**,
+#: so it is the only one narrowed. Editing the shared constant would have refused
+#: four unrelated legitimate constructions to close one defect; a test asserts all
+#: five still read.
+#:
+#: Dropped, each for a stated reason: ``their``/``his``/``her`` name a THIRD PARTY;
+#: ``that``/``those`` are deictic-DISTAL and ambiguous rather than wrong, which
+#: fail-closed resolves toward a disclosed refusal; ``each``/``every``/``both``/
+#: ``all`` QUANTIFY over several measurements, so *"every scan ended at <instant>"*
+#: says something about all of them and nothing about this one.
+#:
+#: **``that`` ALSO HAD TO LEAVE :data:`_PRE_LABEL_CLAUSE_OPEN`, or narrowing this set
+#: would have achieved nothing for it.** As a subordinator it was treated as a clause
+#: boundary, so *"That scan "* was cut to *" scan "* and admitted whatever the
+#: determiner set said. Measured cost of removing it: **zero** — *"The temperature
+#: THAT we recorded was 425 K"* is handled by :data:`_LABEL_CLAUSE` on the far side of
+#: the label and still reads.
+_PRE_LABEL_DETERMINER = r"(?:the|this|these|a|an|its|our|my)"
+
 #: **GATE (4).** The WHOLE text from the start of the label's clause to the label
 #: must be: clause-level adjuncts, then at most one determiner, then at most one
 #: admitted locating noun — in that order. ``fullmatch``, for the reason gate (1)
@@ -1543,7 +1579,7 @@ _PRE_LABEL_ADJUNCT = (
 #: this is one, and it is the only one left in this gate.
 _PRE_LABEL = re.compile(
     rf"\s*(?:{_PRE_LABEL_ADJUNCT}\s+)*"
-    rf"(?:{_DETERMINER}\s+)?(?:{_PRE_LABEL_NOUN}\s+){{0,2}}\s*",
+    rf"(?:{_PRE_LABEL_DETERMINER}\s+)?(?:{_PRE_LABEL_NOUN}\s+){{0,2}}\s*",
     re.IGNORECASE,
 )
 
@@ -1557,7 +1593,7 @@ _PRE_LABEL = re.compile(
 _PRE_LABEL_CLAUSE_OPEN = re.compile(
     _CLAUSE_BOUNDARY
     + r"|\b(?:and|but|or|so|while|whilst|because|although|though|when|once"
-    r"|until|that|which|as)\b",
+    r"|until|which|as)\b",
     re.IGNORECASE,
 )
 
@@ -2041,6 +2077,19 @@ AMBIGUITY_POLICY: tuple[dict[str, str], ...] = (
         # and requires a row for each. A guard over `_REFUSAL_REASONS` alone would
         # have been weaker — it would pass for a kind that has a reason and no row,
         # which is exactly the state this row fixes.
+        #
+        # **AND `32fd4189`'s CLAIM THAT "NO GUARD COULD HAVE CAUGHT IT" WAS TOO
+        # STRONG — withdrawn here.** `test_transcript_capture.py::test_every_
+        # ambiguity_kind_is_covered_by_the_published_policy` has long asserted SET
+        # EQUALITY between `AMBIGUITY_POLICY`'s kinds and a hand-written list, and it
+        # DID fire on this row — in the other direction, when the row was added
+        # without extending the list. What it cannot do is catch a kind the READER
+        # emits with no row, because it never consults the reader. So the accurate
+        # claim is about the guard's SHAPE, not its absence — and that shape was
+        # already named as one of the three weak forms in the new guard's own
+        # docstring, so the slice named the weakness and then asserted the guard's
+        # absence anyway. Both tests are kept: one ratchets the served set, the other
+        # measures what the reader emits, and neither subsumes the other.
         "kind": "words_before_the_label_name_something_else",
         "outcome": OUTCOME_ABSTENTION,
         "rule": (
