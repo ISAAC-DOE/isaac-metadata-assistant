@@ -603,6 +603,10 @@ no slice ran playwright.
   `GuidedCompletion.tsx:826`: *"the official ISAAC schema check … decides export."*
 - A visible 22px `h1` landed on four axe/layout-measured surfaces with `a11y-baseline.ts` untouched
   and no e2e run. Probably fine (`--text-slate` is 4.64:1) but **reasoned, not measured** — `QA-016`.
+  **UPDATE 2026-09-12: MEASURED on darwin, and nothing moved** — 560 passed / 200 skipped / 0
+  failed, `A11Y_BASELINE_TOTAL_NODES` unchanged at 877/877. Linux is still unverified, and the
+  surface count in this sentence's own framing was wrong: **three** record workspaces are
+  axe-measured, not four (`QA-018`).
 
 ### The two places the reviewer looked hardest, and they HELD
 Recorded because a review that reports nothing without saying where it looked is not evidence.
@@ -650,7 +654,7 @@ sizes **9 → 9**, share ≤13.5px **94.7% → 94.8%**, exactly one element abov
 | `UX-025` | **`line-length ~107 chars` on the amber banner's explanation** — the product's strongest asset (its honest copy) rendered too wide to read comfortably. | **P3** | PLANNED | Aim <80. |
 | `A11Y-02` | **Help's `role="dialog"` has no focus trap.** | **P1** | PLANNED | Accessibility defect, found by the persona pass. |
 | `A11Y-03` | **The mode chip's ~90-word disclosure exists in `aria-label` ONLY**, so a screen-reader user is better informed than a sighted colleague. | **P2** | PLANNED | The inverse of the usual defect, and it concerns a governance disclosure. |
-| `QA-016` | **No a11y baseline round-trip for the two new record-screen elements.** UX-002's expectation of zero new failing axe nodes is **reasoning** (both use tokens already proven compliant on every ground), explicitly **not** a measurement. Clipping and visual-sweep cells may still move. | **P1** | **OPEN** | Needs **Linux CI**; `grep -rn 'macos\|darwin' .github/workflows/` returns nothing, so the darwin column must be measured locally and never carried forward. |
+| `QA-016` | ~~**No a11y baseline round-trip for the two new record-screen elements.**~~ **THE DARWIN HALF IS NOW MEASURED (2026-09-12) AND NOTHING MOVED.** UX-002's expectation of zero new failing axe nodes was reasoning; it is now a measurement on one of the two platforms. `a11y-axe` + `a11y-narrow` + `structure`: **560 passed, 200 skipped, 0 failed** across all five viewport projects and both narrow widths (390/320), and `auditScan` asserts `new`/`grew`/`improved`/`new-target`/`new-foreground` all `=== []`, so zero failures means **no cell moved in ANY direction** — the §11 vacuous-`foregrounds` trap avoided rather than re-entered. `A11Y_BASELINE_TOTAL_NODES` re-read from the file, not quoted: **877 darwin / 877 linux, 70 cells, `DARWIN_CARRIED_FORWARD = []`, unchanged.** `record-detail` 25 == 25 expected; `record-runs` and `record-capture` 0 == 0. **No darwin cell was edited and no linux cell was touched or reasoned about.** | **P1** | **PARTLY CLOSED — darwin measured, LINUX STILL UNVERIFIED** | **"the two new elements" and "four surfaces" were BOTH slightly wrong in my brief, and the correction matters: it is THREE axe-measured surfaces, not four** — the `?view=graph` workspace is absent from `SURFACES` entirely, which is now `QA-018`. Linux remains the authority: a green macOS run has predicted Linux exactly in past sessions but **is not evidence of it**. Still needs **Linux CI**; `grep -rn 'macos\|darwin' .github/workflows/` returns nothing, so the darwin column must always be measured locally and never carried forward. |
 | `QA-017` | **`TopBar variant="record"` mounts without `recordId`**, so the breadcrumb is `[logo] › [record title]` — **one segment, the page's own name** — with the ancestor reachable only by clicking what reads as a logo. Add `My Experiments` as a linked crumb. | **P2** | PLANNED | Gives the bar a job the `h1` cannot do; composes with `UX-019`. |
 
 
