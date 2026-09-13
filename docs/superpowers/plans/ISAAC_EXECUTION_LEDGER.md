@@ -1452,6 +1452,162 @@ against a deterministic fake provider. `HIST-000`'s data request is **prepared a
 `docs/bl15-2-data-request-2026-09-12.md`; sending it is Krish's act and it gates only `HIST-002`,
 `HIST-003b`, `BL15-001`, `BL15-002` and `HIST-006` — **not** the three slices above.
 
+## FINAL INDEPENDENT REVIEW of `782082bb..ddd3d24e` — **MERGE-after-fixes**, 5 Critical, ALL FIXED
+
+The §34 gate before any push. A reviewer that implemented none of the range read 23 commits / 103
+files / ~18,000 insertions, **ran the full backend and frontend suites itself in an isolated
+worktree** (7648 / 47 — which CONFIRMS the ledger's 7650 / 45 rather than contradicting it, via
+§11's documented worktree `+2` offset, and it quoted the vantage point), and attacked the §5 gate
+with a corpus **written from scratch**.
+
+**ALL FIVE CRITICALS AND THE THREE BLOCKING IMPORTANTS ARE FIXED, each with a polarity proof.**
+
+### C-1 — `/api/health` echoed a raw operator env value, unauthenticated, under a claim denying it
+
+Reproduced before fixing: with `ISAAC_MCP_DEPLOYMENT` set to a connection string, an
+**uncredentialed `GET /api/health` returned it verbatim** while `GET /api/experiments` returned
+`401` to the same caller. A second channel interpolated an `ISAAC_MCP_LOCAL_SCOPES` token into
+`reason` as `misconfigured: {token}`. **And the same change added a served claim saying
+*"Nothing confidential is in it … nothing describing the environment this service runs in"*** —
+both halves arrived together (`git show 782082bb:routes.py | grep -c '"mcp"'` → 0).
+
+**The claim was KEPT and the echo redacted, not the reverse** — weakening a disclosure to match a
+leak is the trade this repository has been caught making before. `redact_supplied_value` withholds
+**unconditionally and without inspecting content**, so an unanticipated value is withheld by
+default rather than by a rule that had to predict it; it is applied inside
+`UnconfiguredDeployment.detail()`, which is ALSO the MCP refusal payload, so one redaction covers
+both paths. Not a length and not a prefix: a character count of an unrecognised value is a small
+fact about a possible secret, and `reason` already carries everything an operator needs to act.
+Fixed in `e0d6ee9d`.
+
+### C-2 — the lane's own leak guard was VACUOUS on exactly those two fields
+
+Its fixture never set either variable, so every assertion ran over a body where `supplied_value`
+was `None` and `reason` was `"unset"`. The commit's claim that the guard *"sweeps the WHOLE health
+banner"* was **true and inert**: a forbidden substring can only be found in a field carrying
+content. **This is the seventh instance in this programme of a guard passing while being wrong, and
+the mechanism is always the same — a fixture that cannot produce the input the guard exists for.**
+Two arms added; the pre-fix code now fails both.
+
+### C-3 / C-4 — both in the ORCHESTRATOR'S OWN `REV-002` slice, both in the ONLY state that ships
+
+`RevisionHistoryState` has **three** members and `workingState` branched on `!== 'available'`, so
+`not_applicable` — which the server's own served description calls *"a fact rather than an
+inability: such records are never submitted"*, answered with **200** — was reported as *"This
+deployment could not read the submission history"*. And `revisionNo` is `null` for **both**
+`unknown` and `never_submitted`, so the panel rendered **`Last Submitted Revision · None`** about a
+history that had not been read — this module's own Rule 1 (*"ABSENCE IS NOT A VALUE"*) broken by
+this module, in a way a scientist would act on.
+
+*** THE IRONY IS THE LESSON: that function was written with deliberate care NOT to collapse
+`unknown` into `never_submitted`, and collapsed `not_applicable` into `unknown` in the same
+breath. Being careful about one direction of a three-way distinction is not being careful about the
+distinction. *** It is now an exhaustive `switch`, so a fourth state fails to compile.
+
+**AND THE REVIEWER DIAGNOSED WHY MY OWN FIVE-MUTANT SWEEP MISSED BOTH:** `PGHOST` is unset in every
+shipped deployment, so `unknown` is the only render path that ships — **and it had no rendering
+coverage at all.** The one test that rendered the block rendered `unchanged`, a state no current
+deployment can reach. Every mutant I killed was on an unreachable branch. Fixed in `f8bb87db`,
+with a render test for the shipping path.
+
+### C-5 — a test that could not fail while its docstring claimed a comparison it did not make
+
+`test_run_count_is_the_documents_own_runs_and_costs_no_extra_read`'s "without" arm called
+`real_summary` (computing all six columns and their I/O) and **then popped the keys**. Popping a
+key removes no file read; both arms were identical. The reviewer demonstrated it rather than
+arguing it: an unguarded read inside `_evidenced_field_value` gave
+`with_count=15 without_count=15 → 1 passed`.
+
+**There is no honest "without" arm available**, so the SHAPE changed rather than the control:
+`_summary` must now perform **zero** reads, measured per call and attributable per record, which is
+**strictly stronger** than the comparison it replaces — a comparison tolerates a read occurring in
+both arms. Two vacuity guards added, because "zero reads" is also the arithmetic of a function
+never called. Fixed in `61b59cd6`; the reviewer's own mutant now fails naming every offending path.
+
+### I-3 / I-4 / I-5 — three claims THIS SESSION falsified, in documents that get FOLLOWED
+
+`CLAUDE.md` said in bold *"**There is no `note` kind**"* while this range added it (measured:
+collectors `['experiment','run','proposal','note']`, `feed_kinds()` serving four, `CURSOR_VERSION`
+**3** — and the bump was MANDATORY, because `note` sorts between `experiment` and `proposal` so a
+v2 cursor at a proposal position would have walked past every note at that rev **forever**).
+`CLAUDE.md` also said *'Quote **77** for "documented operations"'* — **in the one paragraph whose
+whole purpose is to stop a session quoting a stale figure**; it is **78 operations / 70 paths**.
+And `docs/krish-manual-verification-checklist.md` — the hosted-QA sequence §11 sends Krish to —
+still described **four** record workspaces including **Graph**, so a tester would have hunted for a
+link `EVG-002` removed and could reasonably have filed its absence as a regression. An earlier
+commit this session swept three other human-followed docs and **missed this one**: the same
+partial-sweep failure, which is why the reviewer checked. Fixed in `eb192809`.
+
+### WHAT THE REVIEWER ATTACKED AND DID NOT BREAK — as valuable as the findings
+
+The three §5 headline closures hold **behaviourally and end-to-end**. Its own from-scratch
+fabrication corpus: base read **67 of 68**; HEAD refuses **59 with disclosure**. Reason strings
+**mechanically digit-free**. All three new `kind` values **served on the wire**, and `kind` is an
+open string end-to-end — **no unknown-kind defect**, because `recordChanges.ts` has a consumed
+`default:` branch. **Exactly one durable proposal minted, all four segments stored verbatim as
+notes — no refused value became a proposal.** Four mutants caught, including the silent-refusal one
+(43 failures), so the suite CAN report RED and the residue tests are genuinely wrong-way-round.
+
+`resolveRecordView` **exhaustively enumerated — 1,950 combinations, 0 mismatches**; the
+run-beats-proposal guarantee holds; one function, both the title floor and the render path. The
+allowlist union is exact (14→16). All three OpenAPI figures re-derived **three** ways: **78 /
+142,351 / 270**, deltas composing, `apiFixtures.ts` byte-faithful **both directions**, 78/78
+distinct, nothing reverted. `folder` reaches **neither** exported record **nor** sidecar —
+verified with its own canary over raw bytes **and** a recursive key sweep at every depth, both
+artifacts non-empty. 43 adversarial folder input families all refused or read-not-refused. `409
+human_actor_required` not weakened; **MCP has no accept/submit/export operation at any scope**;
+every bound probed at its shipped value actually bounds. Truth path empty; `OWNED_TABLES`
+untouched; **0 NUL bytes across all 103 range files**.
+
+### NON-BLOCKING RESIDUE THE REVIEW NAMED — carried forward, NOT fixed
+
+**The most important is a §5 documentation overclaim, not a code defect.**
+`transcript_capture.py:2471` publishes *"**THE ONE MEMBER OF THE CLASS** the pass-one assertion
+gate does not close"* over a one-row table, and the reviewer found a **large, structurally
+different pre-label family it does not cover — 18 of 18 SILENT**: `The setpoint temperature was
+425 K` → 425, `The maximum/average/ambient/target/requested/planned temperature was …` → the
+modifier's value. **The sharpest exhibit is that the module's own sequence-gate comment cites
+`"cryostat setpoint 80 K"` as a case where the gap positively identifies 80 as something else** —
+yet `The setpoint temperature was 425 K` proposes 425. Plus a **run-misattribution** family on the
+instant rules: `The previous/last/first/earlier/calibration/dark/reference scan ended at <instant>`
+→ **this** run's `acquired_end_utc`, silently. **These fabrications are PRE-EXISTING and outside
+the slice's declared scope** (which took 67→8 in the reviewer's corpus); what is wrong and in range
+is the published **completeness**. The fix is a residue tuple and a sentence, not code.
+
+**And the slice's own benign-refusal figure understates by ~3×**: it publishes *"bridge: 1 of 15
+(7%)"*; the reviewer measured **28% overall (14/50)**, 10 of the 14 being bridge refusals. The
+module records that its 86%→7% widening was re-measured against *"an independently-written list of
+fifteen forms"* — **written by the same author as the grammar, which is the same defect one level
+up**. Its published **tail** figure (28%) matched the reviewer's rate almost exactly and is honest.
+
+Also named: two of five documented folder refusal tokens (`invalid_folder`,
+`folder_path_too_long`) are **unreachable on the wire** because Pydantic's `max_length` fires
+first, so the served description promises five and delivers three; **the scientist never sees any
+folder refusal sentence** — `MoveExperimentPanel` renders `"Request failed (422)."` for all five
+and its "Nothing was changed" fallback is dead code; `SettingsPage` promises statistics *"over your
+own activity"* while `MyStats` says the build *"cannot attribute activity to anyone"*;
+`note_change_revs` entered the tutorial-isolation allowlist with **no** structural assertion while
+its sibling `folder` got two (two session-id-bearing mutants pass); `document-title.test.tsx` §6's
+four "polarity" tests are **closed-form tautologies** (the real mutants are caught — by §1, not
+§6); `settings-api.test.tsx:1090`'s title says "76 operations" while its assertion says 78;
+`routes.py:1329` cites `test_experiment_library_list.py`, which **does not exist**; `UX-014`'s
+three-left exemption calls its trio "server-supplied identifiers" but all three have **0 schema and
+0 vocabulary hits**; `experimentGraph.ts:701` says *"**eight** stable sections"* where `_OTHER` is
+a producible ninth; and `MCP-019:592` is `x == x` under a header declaring every assertion
+behavioural.
+
+### SIX CLAIMS IN THE ORCHESTRATOR'S REVIEW BRIEF MEASURED FALSE
+
+Recorded because the pattern is now nine-for-nine. **(1)** "the three merge-conflict resolutions" —
+there are **two merges**; `4d6c74d9` has a single parent and is not one. **(2)** *** "check `pgrep
+-f "bin/pytest"`" — the PIDs it returns are SELF-MATCHING WAITER SHELLS whose own command lines
+contain the literal. Use `pgrep -f '\.venv/bin/pytest'`; the unanchored pattern livelocks. *** This
+is a live operational trap and cost this session two misreadings of its own suite state. **(3)** the
+unknown-`kind` premise is false (`recordChanges.ts` has a consumed `default:`). **(4)** the
+two-sided `apiFixtures.ts` auto-merge is `107812ea`, not `4e50df81`, whose `^2` diff for that file
+is **empty**. **(5)** `7da7271c` does not touch `labels.ts`. **(6)** no test was added for the
+`8f961ed7` CSS fix, and its confirming browser run is **still unobserved**.
+
 ### ORCHESTRATOR ERRORS THIS RUN — every one caught by a lane or a reviewer, recorded in place
 
 **EIGHT briefed claims were measured false by the lanes I briefed**, and the pattern is the same one
