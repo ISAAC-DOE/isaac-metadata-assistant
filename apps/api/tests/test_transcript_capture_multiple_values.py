@@ -283,8 +283,22 @@ def test_three_HEDGED_values_in_one_sentence_are_all_preserved():
     capability is pinned here on a sentence that actually states three
     alternatives, and ``test_a_ramp_is_not_a_disagreement`` pins the ramp. What is
     NOT truncation is declining to read 350 and 400 as alternatives at all: they
-    are never proposed, never counted, and the whole sentence survives verbatim as
-    an Unmapped Note under rule (4).
+    are never proposed and never counted.
+
+    ~~"and the whole sentence survives verbatim as an Unmapped Note under rule
+    (4)"~~ — **CORRECTED 2026-09-12: FALSE IN THE SENSE THAT MATTERS HERE, and it
+    was the stated mitigation for the whole refusal, so it is struck rather than
+    reworded.** The sentence does survive verbatim — rule (4) stores every segment
+    — but it does not survive as an *Unmapped* note. Exactly one candidate survives
+    the gate, so ``len(produced) == 1`` records the segment in
+    ``candidate_by_segment`` and the note is presented as **MAPPED to that one
+    value**. Measured at ``c9a4c6e8``: *"Temperature ramped 300 K, then 350 K, then
+    400 K."* gave ``candidates=[temperature_K=300]``, ``abstentions=[]``,
+    ``review_required=()``, ``candidate_by_segment={0: 0}`` — a sentence saying the
+    temperature went to 400, filed as a note about 300 with no disclosure anywhere
+    that anything had been declined. The refusal is correct; its invisibility was
+    not. An ``unhedged_further_values`` abstention now names the field whose
+    further values were withheld, which is what this claim was reaching for.
 
     MUTATION: a cap that keeps the first two turns this RED; so does dropping the
     anchor advance in ``_segment_readings``, which would leave 435 unread.
@@ -1093,7 +1107,16 @@ HEDGED_RESTATEMENTS: tuple[tuple[str, list], ...] = (
     ("The temperature was 425 K or perhaps 430 K", [425, 430]),
     ("The temperature was 425 K, or maybe 430 K", [425, 430]),
     ("The temperature was 425 K and again 430 K", [425, 430]),
-    ("The temperature was about 425 K, about 430 K", [425, 430]),
+    # ~~("The temperature was about 425 K, about 430 K", [425, 430]),~~ —
+    # **WITHDRAWN 2026-09-12 by the project owner's own instruction, and kept here
+    # struck rather than deleted because it was a MUST-PASS and a future session
+    # would otherwise read its absence as an oversight.** A BARE `about` no longer
+    # bridges: it is an approximation modifier of what FOLLOWS it, so admitting it
+    # also admitted `"425 K, about 3 K above target"` -> an offset read as a
+    # temperature. `"or about 430 K"` still reads. The withdrawn sentence is now
+    # expected residue and is pinned as such in
+    # `test_transcript_capture_hedge_and_unit_gate.py`.
+    ("The temperature was 425 K, or about 430 K", [425, 430]),
     (
         "The run started 2026-01-01T00:00:00Z, or maybe 2026-01-02T00:00:00Z",
         ["2026-01-01T00:00:00Z", "2026-01-02T00:00:00Z"],
@@ -1201,6 +1224,16 @@ def test_a_BARE_or_bridges_on_its_own():
 #: The reviewed closed hedge list, written out so the tuple below is a RATCHET in
 #: BOTH directions rather than a list that checks itself.
 #:
+#: **RE-ORDERED 2026-09-12, MEMBERSHIP UNCHANGED, and that distinction is the whole
+#: point of keeping this literal.** All eleven connectives are still admitted. Six
+#: of them — ``about``, ``around``, ``roughly``, ``approximately``, ``possibly``,
+#: ``again`` — moved from bridging BARE to bridging only behind a mandatory ``or``,
+#: because they modify what FOLLOWS them rather than hedging what came before. The
+#: module now DERIVES this union from ``_BARE_HEDGES + _OR_REQUIRED_HEDGES +
+#: ("or",)`` so it cannot disagree with the pattern about membership; the SPLIT is
+#: the thing a test has to pin separately, and ``REVIEWED_BARE_HEDGES`` /
+#: ``REVIEWED_OR_REQUIRED_HEDGES`` below do that.
+#:
 #: **THIS LITERAL EXISTS BECAUSE A MUTATION SURVIVED A TEST THAT WALKED THE LIST.**
 #: ``test_every_declared_connective_actually_bridges`` iterates
 #: ``tc._HEDGE_CONNECTIVES``, so deleting ``"approximately"`` from it left all 176
@@ -1213,34 +1246,84 @@ def test_a_BARE_or_bridges_on_its_own():
 REVIEWED_HEDGE_CONNECTIVES = (
     "maybe",
     "perhaps",
-    "possibly",
-    "around",
+    "alternatively",
+    "and again",
     "about",
+    "around",
     "roughly",
     "approximately",
-    "and again",
+    "possibly",
     "again",
-    "alternatively",
     "or",
+)
+
+#: The SPLIT, written out for the same reason the union is: a test that walks
+#: ``tc._BARE_HEDGES`` cannot see a connective that has MOVED out of it, and moving
+#: one is exactly the change that widens or narrows the set of sentences a
+#: scientific value is read out of.
+REVIEWED_BARE_HEDGES = ("maybe", "perhaps", "alternatively", "and again")
+REVIEWED_OR_REQUIRED_HEDGES = (
+    "about",
+    "around",
+    "roughly",
+    "approximately",
+    "possibly",
+    "again",
 )
 
 
 def test_the_hedge_list_is_exactly_the_reviewed_closed_set():
-    """A two-way ratchet on the set that decides whether a value is read at all.
+    """A two-way ratchet on the set that decides whether a value is read at all,
+    and on the SPLIT that decides how each member may appear.
 
-    Order is asserted too, not just membership: the alternation is built by
+    ~~"Order is asserted too, not just membership: the alternation is built by
     joining this tuple, and ``and again`` must precede ``again`` or the shorter
     alternative would win — which ``fullmatch`` would then reject, silently
-    dropping ``and again``. So the ORDER is load-bearing and is pinned.
+    dropping ``and again``. So the ORDER is load-bearing and is pinned."~~ —
+    **WITHDRAWN 2026-09-12: THE HAZARD WAS NEVER REAL, and the index comparison
+    that pinned it proved nothing.** Two measurements retire it:
 
-    MUTATION: adding OR removing any connective turns this RED. Removing
-    ``"approximately"`` was GREEN across all 176 transcript tests before this
-    existed.
+    * neither string is a prefix of the other — ``"again"`` begins ``ag`` and
+      ``"and again"`` begins ``an`` — so ``again`` could never match where ``and
+      again`` was intended; and
+    * ``fullmatch`` does the OPPOSITE of what the claim says. It is exhaustive, so
+      a short alternative that matches and then fails on the remainder causes the
+      engine to BACKTRACK into the longer one. On ``("maybe", "maybe not")``, where
+      one string genuinely IS a prefix of the other, ``" maybe not "`` bridges
+      under BOTH orders.
+
+    **A first attempt at this correction was itself wrong and is recorded because
+    it is the more instructive error:** it said "the hazard was real; what changed
+    is the mechanism holding it", and added a longest-first ``sorted()`` to
+    ``_alternation`` as that mechanism. Mutation testing measured the sort to be an
+    **equivalent mutant** — inverting it to shortest-first left all 249 transcript
+    tests GREEN — so the sort was removed rather than kept with a false rationale.
+
+    The assertions below therefore pin BEHAVIOUR, not order: ``and again`` bridges
+    while bare ``again`` does not, which is a property of the SPLIT and is the thing
+    that actually matters.
+
+    MUTATION: adding OR removing any connective turns this RED; so does MOVING one
+    between the bare and the ``or``-required branch, which is the change that
+    widens or narrows what a scientific value is read out of. Removing
+    ``"approximately"`` was GREEN across all 176 transcript tests before the union
+    ratchet existed.
     """
     assert tc._HEDGE_CONNECTIVES == REVIEWED_HEDGE_CONNECTIVES
-    # The ordering constraint, stated as the behaviour it protects.
-    connectives = list(tc._HEDGE_CONNECTIVES)
-    assert connectives.index("and again") < connectives.index("again")
+    assert tc._BARE_HEDGES == REVIEWED_BARE_HEDGES
+    assert tc._OR_REQUIRED_HEDGES == REVIEWED_OR_REQUIRED_HEDGES
+    # The union is DERIVED, so membership cannot drift from the pattern; the split
+    # is what the two literals above exist to pin. Asserted as a partition: no
+    # connective may sit in both branches, and none may be dropped from both.
+    assert set(tc._BARE_HEDGES) & set(tc._OR_REQUIRED_HEDGES) == set()
+    assert set(tc._BARE_HEDGES) | set(tc._OR_REQUIRED_HEDGES) | {"or"} == set(
+        tc._HEDGE_CONNECTIVES
+    )
+    # The property that replaced the retired index assertion: `and again` bridges
+    # while bare `again` does not. That is the SPLIT, and it is what a reader of
+    # this tuple actually needs to know.
+    assert tc._HEDGE_BRIDGE.fullmatch(" and again ") is not None
+    assert tc._HEDGE_BRIDGE.fullmatch(" again ") is None
 
 
 def test_every_declared_connective_actually_bridges():
@@ -1252,15 +1335,37 @@ def test_every_declared_connective_actually_bridges():
     tests fail for different reasons: this one for an entry that does not work, the
     ratchet above for an entry that should not be there or has gone missing.
 
-    MUTATION: adding a connective the pattern cannot match turns this RED.
+    **SPLIT 2026-09-12, because the old single loop asserted something that is now
+    FALSE for six of the eleven entries.** It required every connective to bridge
+    BARE *and* behind ``or``. ``about``, ``around``, ``roughly``,
+    ``approximately``, ``possibly`` and ``again`` now bridge ONLY behind ``or``, so
+    the loop is two loops and the second one asserts the REFUSAL as well as the
+    acceptance — a connective that was supposed to move branches and did not is
+    then not silently green.
+
+    MUTATION: adding a connective the pattern cannot match turns this RED; so does
+    moving one between branches without moving it in the module.
     """
-    assert tc._HEDGE_CONNECTIVES, "an empty list would make this vacuous"
-    for connective in tc._HEDGE_CONNECTIVES:
-        sentence = f"The temperature was 425 K, {connective} 430 K"
-        assert _values(_read(sentence), TEMPERATURE) == [425, 430], connective
-        # And with the optional `or ` prefix in front of it.
+    assert tc._BARE_HEDGES, "an empty list would make this vacuous"
+    assert tc._OR_REQUIRED_HEDGES, "an empty list would make this vacuous"
+
+    for connective in tc._BARE_HEDGES:
+        bare = f"The temperature was 425 K, {connective} 430 K"
+        assert _values(_read(bare), TEMPERATURE) == [425, 430], bare
         prefixed = f"The temperature was 425 K, or {connective} 430 K"
         assert _values(_read(prefixed), TEMPERATURE) == [425, 430], prefixed
+
+    for connective in tc._OR_REQUIRED_HEDGES:
+        # BARE is refused — this half is the point of the split.
+        bare = f"The temperature was 425 K, {connective} 430 K"
+        assert _values(_read(bare), TEMPERATURE) == [425], bare
+        prefixed = f"The temperature was 425 K, or {connective} 430 K"
+        assert _values(_read(prefixed), TEMPERATURE) == [425, 430], prefixed
+
+    # And the bare `or`, which is neither: it IS the prefix, standing alone.
+    assert _values(
+        _read("The temperature was 425 K, or 430 K"), TEMPERATURE
+    ) == [425, 430]
 
 
 def test_the_hedge_bridge_admits_no_clause_terminator_so_clause_bounding_is_free():
