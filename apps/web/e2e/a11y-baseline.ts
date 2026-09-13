@@ -776,8 +776,9 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
        * introducing new debt: same markup, same tokens, same counts.
        */
       /*
-       * *** experiments-example color-contrast: A PLATFORM SPLIT, 2026-09-13, and
-       * the two halves have DIFFERENT EVIDENTIAL STATUS. Read both. ***
+       * *** experiments-example color-contrast: 3 -> 2 ON BOTH PLATFORMS, 2026-09-13.
+       * It was briefly recorded as a SPLIT; it is not one, and the sequence is kept
+       * because the wrong step in it was reasonable. ***
        *
        * darwin 3 -> 2 · MEASURED locally on this host, all seven cells, twice
        *   (`a11y-axe.spec.ts` for the five viewport cells, `a11y-narrow.spec.ts`
@@ -785,11 +786,28 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
        *   `IMPROVED ... fell from 3 to 2`; ZERO `GREW` and ZERO `NEW COLOUR` on
        *   darwin, and no other surface moved.
        *
-       * linux 3 · CARRIED FORWARD, NOT MEASURED. This is the last RECORDED
-       *   baseline value, and it is deliberately not the 6 that Linux CI measured
-       *   on PR #248 before the fix -- 6 was the defect, not a baseline. After the
-       *   fix the linux count is either 3 or 2 and **this host cannot tell which**.
-       *   CI will say; if it reports IMPROVED, transcribe 2.
+       * linux 2 · MEASURED BY CI, and **my carried-forward 3 was WRONG.** Actions
+       *   run 34762566061, job "browser accessibility and responsive baseline",
+       *   head 91290da6: `IMPROVED experiments-example @ <viewport> on linux: rule
+       *   "color-contrast" fell from 3 to 2` at ALL SEVEN cells, and no other
+       *   surface moved on linux.
+       *
+       *   ~~CARRIED FORWARD, NOT MEASURED … either 3 or 2 and this host cannot tell
+       *   which~~ — kept struck because the CARRY-FORWARD WAS THE RIGHT MOVE AND
+       *   STILL PRODUCED A WRONG NUMBER, which is the useful part. I chose the last
+       *   recorded value (3) over the 6 CI had just measured, on the grounds that 6
+       *   was the defect rather than a baseline. That reasoning holds. The number it
+       *   produced did not, and **the a11y job caught it by reporting IMPROVED
+       *   rather than passing** — a stale-but-conservative figure is still a figure
+       *   nothing measured, and this file's ratchet exists precisely to refuse one.
+       *
+       *   SO THESE CELLS ARE NOT SPLITS AT ALL. Both platforms read 2, so they are
+       *   SCALARS again, and `DARWIN_CARRIED_FORWARD` stays `[]` with
+       *   `A11Y_BASELINE_DARWIN_UNVERIFIED_NODES` at 0. The split-declaration
+       *   invariant in `e2e/invariants/baseline-aggregate.invariant.test.ts` needs
+       *   no new entry — which is the correct outcome, because that list's contract
+       *   is "both halves MEASURED SEPARATELY" and a carried-forward half could
+       *   never have satisfied it honestly.
        *
        * ── WHY THIS SPLIT EXISTS AT ALL, which is the useful part ──────────────
        *
@@ -815,11 +833,11 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
        * `.done` and cannot reach `.chip-exported`/`time`) was right about WHICH
        * nodes it could reach and wrong about how many of them were already failing.
        */
-      'experiments-example@desktop-1280x800': { darwin: 2, linux: 3 },
-      'experiments-example@laptop-1024x768': { darwin: 2, linux: 3 },
-      'experiments-example@tablet-768x1024': { darwin: 2, linux: 3 },
-      'experiments-example@mobile-375x812': { darwin: 2, linux: 3 },
-      'experiments-example@zoom-200': { darwin: 2, linux: 3 },
+      'experiments-example@desktop-1280x800': 2,
+      'experiments-example@laptop-1024x768': 2,
+      'experiments-example@tablet-768x1024': 2,
+      'experiments-example@mobile-375x812': 2,
+      'experiments-example@zoom-200': 2,
       'export-readiness@desktop-1280x800': 1,
       'export-readiness@laptop-1024x768': 1,
       'export-readiness@tablet-768x1024': 1,
@@ -2057,12 +2075,12 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
          run rather than guessing the other. Nobody retyped a count. */
       'evidence@width-320': 68,
       'evidence@width-390': 68,
-      /* Split 2026-09-13 — see the dated block on the five viewport cells above
-         for the measurement, the platform divergence that caused it, and why the
-         linux half is a CARRY-FORWARD rather than a measurement. Both of these
-         were measured on darwin by `a11y-narrow.spec.ts`: `fell from 3 to 2`. */
-      'experiments-example@width-320': { darwin: 2, linux: 3 },
-      'experiments-example@width-390': { darwin: 2, linux: 3 },
+      /* 3 -> 2 on BOTH platforms, 2026-09-13 — darwin measured locally by
+         `a11y-narrow.spec.ts`, linux by Actions run 34762566061. See the dated
+         block on the five viewport cells above for the divergence that caused the
+         movement and for why these were briefly, wrongly, recorded as splits. */
+      'experiments-example@width-320': 2,
+      'experiments-example@width-390': 2,
       'export-readiness-done@width-320': 1,
       'export-readiness-done@width-390': 1,
       'export-readiness@width-320': 1,
@@ -4255,7 +4273,13 @@ export const A11Y_BASELINE_TOTAL_NODES: Readonly<Record<BaselinePlatform, number
   // on any of them. It was not read as evidence. The colour was measured directly
   // instead — one foreground, `#2f7d78`, already listed — see the block above
   // `settings-explorer@desktop-1280x800`.
-  linux: 877,
+  // ── EXPERIMENT LIBRARY CONTRAST FIX, 2026-09-13: linux 877 -> 870 ──────────
+  // The SAME seven `experiments-example@*` cells that moved on darwin, measured on
+  // linux by Actions run 34762566061 (job "browser accessibility and responsive
+  // baseline", head 91290da6): `IMPROVED ... fell from 3 to 2` at all seven. Both
+  // columns now read 870 and the cells are SCALARS, not splits — the split I
+  // recorded while the linux half was unmeasured is struck at those cells.
+  linux: 870,
   // 2026-08-30, ROUND TWO — CI's linux figures for the merged tree: 2287 -> 2291.
   //
   //   desktop-1280x800   59 -> 60   (+1)      laptop-1024x768   59 -> 60   (+1)
