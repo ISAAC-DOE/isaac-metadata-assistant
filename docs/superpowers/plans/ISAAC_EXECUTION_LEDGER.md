@@ -2616,6 +2616,173 @@ the suite wholesale or need a 1,000-plus-cell baseline invented in the same chan
 thoroughly and still read partially.** Nothing was disabled, nothing was excluded, and one whole
 result category was never consulted.
 
+### *** THE LINUX A11Y ROUND-TRIP CAME BACK GREEN — the falsifiable choice was NOT falsified ***
+
+This session's accessibility work was gated on one thing Linux CI alone can answer, and it has
+answered. **Run `34779505189` at `53745c30`: `completed/success`**, the `browser accessibility and
+responsive baseline` job included, with all five checks on PR #249 green.
+
+**AND IT IS CONFIRMED NON-VACUOUS, which matters more than the pass.** A green a11y job could mean
+"the changed surfaces were never reached". Measured against the job's own log: `guided-completion`
+and `Page not found` appear **47** times, and the movement vocabulary
+(`IMPROVED` / `FIXED?` / `GREW` / `NEW COLOUR` / `Accessibility baseline mismatch`) appears
+**0** times.
+
+**WHAT THAT SETTLES, item by item:**
+
+| claim | Linux verdict |
+|---|---|
+| the seven `guided-completion` `color-contrast` cells **DELETED**, asserting **zero on BOTH platforms** | **CONFIRMED.** Not one reappeared |
+| `A11Y_BASELINE_TOTAL_NODES` 870 → **857**, moved "by arithmetic over the declared map" rather than by a linux measurement | **CONFIRMED** — the arithmetic was right about linux, and it is now measured rather than inferred |
+| the new `not-found` surface mints **zero** baseline cells | **CONFIRMED** on linux as well as darwin |
+| `.upcoming-row`'s opacity removal changes no other surface | **CONFIRMED** — zero movements anywhere |
+
+**THE METHOD IS THE POINT, AND IT IS WORTH REUSING.** Deleting the cells rather than lowering them
+was chosen *because* it was falsifiable: it asserts zero on a platform nobody had measured, so a
+linux disagreement would have **red the build and named the numbers**. A lowered-but-present cell
+would have hidden any disagreement inside a figure that still looked deliberate. The stronger claim
+was made on purpose, and it survived — which is a different and better outcome than a weaker claim
+passing.
+
+**WHAT THIS DOES NOT COVER, so the pass is not read as broader than it is:** the run was at
+`53745c30`, which predates the `role="note"` chip fix, the `QA-010`/`QA-022` guard work and the
+**entire Historical Import lane**. Those need their own CI run, and the `imports` surface's own
+linux cells are still unmeasured — its lane predicts zero, and that prediction is exactly as
+unverified as this one was an hour ago.
+
+## *** FIRST INDEPENDENT REVIEW — `DO NOT MERGE` on the scientific lane, and it was right ***
+
+A reviewer that implemented none of it read `d3473414..499cfee5` (the §5 lane) and
+`d3473414..eba51d72` (the Library lane) from `git archive` extractions, verified byte-identical
+to their frozen commits, and returned **DO NOT MERGE / MERGE-after-fixes**. Every finding was
+**reproduced by the orchestrator before being acted on**, and in the Critical's case the
+reproduction changed the remedy.
+
+### `A-1` · CRITICAL — the gate's headline claim is FALSE, and the code is still a strict improvement
+
+Gate (4) closes the 23 named fabrications **in their DIRECT form only**. A prepositional preamble
+or a bracketing character puts every one of them back, **silently**. Re-measured here with an
+independent corpus, two families × eight templates:
+
+| template | temperature (14 modifiers) | instant (8 modifiers) |
+|---|---|---|
+| **direct — the CONTROL** | **0/14 proposed** | **0/8 proposed** |
+| prepositional preamble | 14/14, **all silent** | 8/8, all silent |
+| numeric-object preamble | 14/14, all silent | — |
+| parenthesis / double quotes | 14/14, all silent | 8/8, all silent |
+| colon / semicolon | 14/14, all silent | — |
+
+**"Silent" means a candidate with ZERO abstentions** — a §5 fabrication with no disclosure, the
+worst outcome this reader has. It also falsifies the lane's own fail-closed property:
+`In our lab the zorblatt temperature was 425 K.` → **PROPOSED 425**, where `zorblatt` appears in
+no list in the module.
+
+**TWO MECHANISMS, needing separate fixes.** `_PRE_LABEL_PREP_PHRASE` ends in
+`(?:\s+[A-Za-z][A-Za-z0-9-]*){0,3}` — three ARBITRARY words, which absorb the label's determiner
+and its forbidden pre-modifier. And `_PRE_LABEL_CLAUSE_OPEN` inherits `)`, `"`, `'`, `:`, `;` from
+`_CLAUSE_BOUNDARY`, so `_pre_label_text` returns only what follows the last one and the modifier is
+cut out before the gate sees it.
+
+*** AND MEASURING THE BASE COMMIT CHANGED THE REMEDY, which is why reproducing beats accepting. ***
+At `d3473414`, before gate (4) existed, **every one of these proposed silently — including the
+direct form**. So the lane did not introduce the bypass; it closed 23 forms and **over-claimed
+completeness**. The defect in range is the CLAIM, not a regression.
+
+**WHAT WAS DONE:** the SERVED `AMBIGUITY_POLICY` row — published to clients — no longer describes
+the pre-label slot as a closed allowlist and names both gaps in the text a scientist reads; the
+fail-closed test is renamed and its claim narrowed to the direct form with the falsifying
+measurement in its docstring; and the class is **PINNED WRONG-WAY-ROUND** by a new test asserting
+ten forms propose and disclose nothing, with a control asserting the direct forms still refuse.
+**When the class is closed that test FAILS, and its failure is the signal to delete it** — which a
+comment could not do.
+
+**WHY THE CLASS IS NOT CLOSED HERE, with the cost measured rather than guessed.** Replacing the
+open tail with a bare determiner takes the transcript suites to **83 failed / 1807 passed** — it is
+load-bearing for legitimate forms like *"At the second scan the temperature hit 500 K."* The repair
+is an **allowlisted tail**, and choosing its members is a scientific judgement about which position
+words re-subject a measurement (`second`? `first`? — the MOMENT family is deliberately refused two
+screens away). §5 governs that choice, the agent budget is spent, and an unreviewed guess in the one
+place §5 says a wrong guess mints a false scientific value is the wrong trade. **It is the next
+session's first task.**
+
+### `A-2` · IMPORTANT — the one REAL regression, fixed
+
+The lane **refused 16 of 16 apparatus possessives that the base READ.** Measured at both SHAs. It is
+precisely the inconsistency the gate's own GROUP-2 note condemns:
+
+```
+The sample temperature was 425 K.         read     16/16
+The temperature of the sample was 425 K.  read     16/16
+The sample's temperature was 425 K.       REFUSED   0/16
+```
+
+Two causes, both fixed: `_PRE_LABEL_NOUN` matched `samples?` but not `sample's` (the alternation now
+carries an optional `['’]s`, attached to the **group** so a noun added later cannot be admitted
+without its possessive), and a **straight apostrophe was in `_CLAUSE_BOUNDARY`**, so
+`_pre_label_text` cut the sentence down to `"s "`.
+
+*** ONE CHARACTER DECIDED IT, and that is the part to carry forward. *** The curly `’s` read
+correctly throughout, because **U+2019 was never in the class** — so an identical sentence was read
+or refused depending on which keyboard typed it, and a dictated or word-processed transcript carries
+U+2019. Only the apostrophe leaves the pre-label boundary; `)`, `"`, `:`, `;` stay, because they are
+the second bypass mechanism and removing them needs its own corpus.
+
+Now 16/16 read, all three phrasings consistent, fabrications still refused (0/14, 0/8). Pinned by a
+parametrised test over all three phrasings **and both apostrophes**, plus a safety test that a
+FORBIDDEN modifier's possessive still refuses — so *"admit `'s`"* cannot be read as *"admit anything
+ending in `'s`"*.
+
+### `A-3` · IMPORTANT — a test that REQUIRED a false literal
+
+`assert "20 of 51 (39%)" in ledger`. Re-derived by running the shipped 51-row corpus against the
+pre-widening commit itself: **22 of 51 (43%)**. The `20` was a numerator measured over the earlier
+**49**-row corpus (20/49 = 41%, the other figure in the same sentence) and silently **rebased onto
+the new denominator** — the exact error the parenthetical four lines above declares it is avoiding.
+
+**THE DEFECT WAS THE TEST'S SHAPE.** A guard that REQUIRES a literal cements whatever it says, while
+its docstring claimed the figures *"cannot drift apart"* — the same pattern `CLAUDE.md` §15 records
+for the migration packets' *"No PostgreSQL has ever executed this file"*. It now additionally checks
+the **property** a rebased numerator violates: every `N of M (P%)` triple must be arithmetically
+self-consistent. Mutation-proved against the inconsistent form and an impossible one.
+
+### `B-1` · IMPORTANT — a vacuous guard, reproduced exactly
+
+The Library strip had its **own weaker** personal-claim check — **2 of the 6** phrasings `8ce85a87`
+banned, scoped to a single `<p>`, so the heading and four labels were outside it. The reviewer's
+mutation (heading → *"Your Workspace Statistics"*, a label → *"Runs You Recorded"*) **passed 36/36**.
+Reproduced here; it now **fails**. The strip is enrolled in the full six-phrasing ban over the whole
+section, with a positive control per pattern.
+
+### `B-2` · IMPORTANT — an unconditional completeness claim
+
+`GET /api/experiments` may return `incomplete`, and its own description says to *"treat a short list
+as evidence about this read, never as an inventory"*. The strip computed four figures from that list,
+published them as **"Workspace Statistics"**, and **never consulted `incomplete`** — no test covered
+the interaction. Both heading and note are now scoped when the server says the read was short, with a
+**CONTROL arm** proving a complete read still says "Workspace" (a blanket hedge would be the opposite
+defect).
+
+### Minors fixed, and one named-not-fixed
+
+`A-5` a tautology (`admitted | (every - admitted) == every` is true for any two sets once
+`admitted <= every` is asserted above it) credited by its docstring with real work · `B-3` a
+docstring naming an `exported` field the interface does not have · `B-4` a comment naming rows `b`
+and `c` where they are `a` and `c` — **the number was right and the named rows were wrong, which is
+the more misleading of the two**. **`A-4` is NOT fixed and is named:** the gate-4 abstention's
+`quote` excludes the offending pre-label words its own reason names.
+
+### What the reviewer attacked and could NOT break — as valuable as the findings
+
+`CAP-001` ramp/sequence held against its own freshly-written forms *including behind a preamble*;
+ambiguity preservation held (both candidates kept, 0 collapsed); the other two adjunct routes
+(`_PRE_LABEL_ADVERB`, subject+report) correctly refuse a forbidden modifier behind them, **so the
+defect is isolated to one construct and the fix is narrow**; hyphen, non-ASCII, NBSP, tab and plural
+variants all refuse correctly; `UX-017`'s **"zero new requests" MEASURED** (a probe recording every
+fetched URL: 2, the same two the screen already made); `GET /api/experiments` confirmed genuinely
+unpaginated; and `LIB-005`'s storage module was called *"the best-tested thing in either lane"* — it
+uses `vi.spyOn(Storage.prototype, …)`, the form that actually intercepts, avoiding the trap `QA-022`
+documents.
+
 ### RESIDUE NAMED THIS RUN, measured and deliberately not fixed
 
 | ID | Finding | Measurement |
