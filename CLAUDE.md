@@ -614,8 +614,22 @@ Current state:
       name, because `UX-014`'s rule is that the path is never removed.
       **Three deliberately not fixed, and named rather than implied:** the `fields` trio are the
       server's `locator` on a "needs you" question, rendered beside an already-correct human label
-      — server-supplied **identifiers**, which that same rule protects, so whether they belong
-      under progressive disclosure is placement rather than jargon; `isaac_propose_field_value`
+      — ~~server-supplied **identifiers**, which that same rule protects, so whether they belong
+      under progressive disclosure is placement rather than jargon~~ — **MY EXEMPTION WAS WRONG,
+      corrected 2026-09-13 after an independent review challenged it and I measured the trio.**
+      They are **`blocker` keys** minted in `experiment_repository.py:769,778,786`
+      (`"blocker": "reduced_spectrum"`, `"qc_status"`, `"required_for_evidence_record"`), and
+      `grep -rao` over `schema/` and `vocabulary/` returns **0 hits for all three**. So they are
+      **not schema paths** — and `UX-014`'s rule protects a *schema path*, on the stated ground
+      that "it is how a curator maps a field". A key that appears nowhere in the schema maps
+      nothing; the rule I cited does not reach them, and the exemption rested on that citation.
+      **The item is therefore STILL OPEN as jargon, not exempt**, and the honest framing is that
+      three internal blocker identifiers are rendered to a scientist beside an already-correct
+      human label. The fix is a human wording for each blocker key — which is a copy decision
+      with a real constraint (the keys also appear in the Assistant's own sentences, e.g.
+      `routes.py:22778`'s *"3 fields still need you: reduced_spectrum, qc_status,
+      required_for_evidence_record"*), so it needs its own slice rather than a rename in one
+      place; `isaac_propose_field_value`
       names a real MCP tool inside an honest explanation of how a proposal arrives, and editing it
       touches §15's decision about what a product screen may say about the agent seam; and the
       `NO_LINKS` / `NO_MEASUREMENT_SERIES` advisory codes each already carry their plain-English

@@ -10240,7 +10240,7 @@
       },
       {
         "path": "CLAUDE.md",
-        "sha256": "2d08bf53d406d106d4ba929b7dbf2f0def8be70429126820f8ca83a18cc63810"
+        "sha256": "6f58fc94f0e2497a0113c37f428628162957b3a5c7768f9877698887d614dcfa"
       },
       {
         "path": "CONTRIBUTING.md",
@@ -10516,7 +10516,7 @@
       },
       {
         "path": "apps/web/src/lib/routes.ts",
-        "sha256": "98b6ae299e72a0520417af7b281da4573982ff4b711c268d2be250b8d5c465dc"
+        "sha256": "ec99f9ac7ce579b3496d5d7d3b40929df947482ff892e3fb87ea6103e00015ec"
       },
       {
         "path": "apps/web/src/lib/status.ts",
@@ -11012,7 +11012,7 @@
       }
     ],
     "served_file_count": 200,
-    "served_manifest_fingerprint": "55412d6d8066823d04c30559acfdc2ae2b4e26f689d4c90769800334e20d845e"
+    "served_manifest_fingerprint": "d6abc085b2b722c318b08946095e62c78650f11d04fd2715cd86700455346482"
   },
   "overview": {
     "built_at_commit": "caab1d0a69c1733524bda5dde495623bc4b7bad1",
