@@ -8,14 +8,31 @@ the repository — never from remembered chat context.
 ## SESSION HEADER
 
 ```
-LAST UPDATED:          2026-09-13 (CONTINUATION run — ship the remediation branch, then execute
-                       the Scope V2 ledger. Session opened by re-deriving every fact below from the
-                       repository; the supplied handoff was right about HEAD and WRONG about the
-                       commit count.)
+LAST UPDATED:          2026-09-13 (**SECOND CONTINUATION run, a NEW top-level session with a
+                       FRESH budget of five subordinate agents.** PR #248 is MERGED; the programme
+                       has moved on to the remaining ledger tasks. Every fact in the block below
+                       was re-derived from the repository at session open, and the supplied handoff
+                       was accurate this time on branch, HEAD, remote parity, `main`, the open PR
+                       and the four-of-five green checks — the one thing it could not know was the
+                       fifth check, which has since concluded `success`.
+                       *** PR #248 MERGED as `654e43dd` (two-parent merge, `gh pr merge --merge`).
+                       `main` = `origin/main` = `654e43dd`, local fast-forwarded, 0 ahead / 0
+                       behind. The merge was safe WITHOUT the §10 merge-result round-trip and the
+                       reason is measured rather than assumed: `baseRefOid` was `2f9a1133`, byte-
+                       identical to `origin/main`, so `main` had not moved since the branch went
+                       green and exact-head CI DID describe the merge result. That is stated
+                       explicitly because the merge-result re-run is normally mandatory here —
+                       this repository has two counterexamples nine minutes apart. ***)
 CANONICAL REPO:        /Users/krishverma/Documents/ISAAC
                        origin = https://github.com/ISAAC-DOE/isaac-metadata-assistant.git
                        personal = https://github.com/Krish-Verma/isaac-metadata-assistant.git (historical mirror)
-BRANCH:                docs/product-scope-v2-planning  — UNPUSHED. `main` is UNTOUCHED.
+BRANCH:                **`main`** at `654e43dd`, plus FOUR live working branches this session:
+                       `fix/assistant-collapsed-and-help` (ORCHESTRATOR lane), `feat/v2-sci`,
+                       `feat/v2-hist`, `feat/v2-lib` (three agent lanes, each in its OWN worktree
+                       under the session scratchpad, all based at `d3473414`, which is a parent of
+                       `654e43dd` — so every lane merges cleanly into `main`).
+                       ~~docs/product-scope-v2-planning — UNPUSHED. `main` is UNTOUCHED.~~ — both
+                       halves superseded: it was pushed, PR'd as #248, and merged.
 HEAD:                  cb0494a2  — **ALL FOUR LANES INTEGRATED.** 62 commits on the branch
                        (`git rev-list --count main..HEAD`). Lanes, in merge order:
                        `4d6c74d9` §5 label-overreach + ramp semantics (committed, not merged —
@@ -49,7 +66,8 @@ DIRTY STATE:           2026-09-13: CLEAN at session open; then THREE lanes editi
                        orchestrator's lane. Snapshot regeneration is deliberately DEFERRED to ONE
                        run after all three settle — `routes.py` is manifest-listed and will drift it.~~
                        snapshot drift at session open: NONE (exit 0, both artifacts)
-OPEN PRS:              **#248** — `docs/product-scope-v2-planning`, opened this session.
+OPEN PRS:              **none.** #248 is **MERGED** (`654e43dd`); `gh pr list --state open` is
+                       empty. ~~**#248** — `docs/product-scope-v2-planning`, opened this session.~~
                        ~~none~~ was true at session open and is corrected rather than replaced so
                        the header reads as a record and not a snapshot.
 COMMIT COUNT (FINAL):  **95** at `4980d3e7` (`git rev-list --count main..HEAD`), up from the 38
@@ -87,8 +105,27 @@ GOVERNANCE (FULL BRANCH): truth path EMPTY; any `src/` change EMPTY; migrations 
                        `db_write.py` EMPTY; no packet APPROVED/APPLIED status moved;
                        `OWNED_TABLES` unchanged; `examples/` staged 0; secret-shaped strings 0
                        across 5 patterns; tracked mode-120000 symlinks **0** (the `.venv` guard).
-LATEST VERIFIED RELEASE: v0.0.232  (git rev-list -n1 v0.0.232 -> 2f9a1133…)
-CI FOR HEAD:           run 34709792004, conclusion success
+LATEST VERIFIED RELEASE: **v0.0.233** (`git rev-list -n1 v0.0.233` -> `654e43dd`), which is PR
+                       #248. ~~v0.0.232 (git rev-list -n1 v0.0.232 -> 2f9a1133…)~~ — still correct
+                       for that tag, superseded as *latest*.
+HOSTED QA:             **PENDING (Krish)** for `v0.0.233` and for every image before it from this
+                       programme. `/krish` sits behind an Authentik edge this environment cannot
+                       authenticate to, and an agent must not enter a credential. Nothing about the
+                       rollout is claimed as verified. Manual sequence:
+                       `docs/krish-manual-verification-checklist.md`.
+CI FOR HEAD:           **`main` at `654e43dd` — CI run `34775370200`, conclusion `success`**
+                       (verified with `gh run view --json conclusion`, not inferred from a
+                       green-looking list). All four jobs individually `success`: tests and
+                       synthetic demo · frontend tests and build · migration against a real
+                       PostgreSQL · browser accessibility and responsive baseline.
+                       **RESOLVED: GHCR/release run `34777569712` concluded `success`, and the
+                       whole chain is verified rather than inferred.** From that run's own log:
+                       `commit under release: 654e43dd32220c3abc6f6dd563197ad7e6fdedc2`, then
+                       `release gate ALLOWED for 654e43dd…: all 1 required 'CI' run(s) for this
+                       commit concluded 'success'`, then `TAG="v0.0.233"`. Cross-checked the other
+                       way: `git rev-list -n1 v0.0.233` -> `654e43dd`, and `v0.0.232` still
+                       resolves to `2f9a1133`, so the tag was not re-pointed.
+                       ~~run 34709792004, conclusion success~~ — that was `2f9a1133`'s.
 GHCR PUBLISH:          run 34711838575, conclusion success
 HOSTED COMMIT:         2f9a1133…  — **re-observed read-only 2026-09-13, and this time the recon
                        RESPONSE BODY was inspected rather than the health commit alone.** Hosted is
@@ -117,8 +154,26 @@ ORCHESTRATOR:          Opus 5 (claude-opus-5[1m]) — **DISCLOSED FALLBACK, RE-D
                        the substitution (2026-09-12). Orchestrator-only discipline preserved: plan, delegate,
                        review, integrate, verify, commit — no production code written by the
                        orchestrator. No other model silently substituted.
-SUBORDINATE AGENTS:    **SPENT: 5 of 5. The budget is exhausted and no replacement may be
-                       spawned.** (1) independent review of the unreviewed tail
+SUBORDINATE AGENTS:    *** THIS IS A NEW TOP-LEVEL SESSION, SO THE BUDGET IS FRESH: **5 TOTAL,
+                       SESSION-WIDE**, exactly as the previous run's exhausted budget provided for
+                       ("continue through a new `/clear` session with a new budget of five").
+                       **SPENT SO FAR THIS SESSION: 3 of 5.** (1) `feat/v2-sci`, `opus` — close the
+                       §5 label-overreach/value-fabrication CLASS (the pre-label modifier family,
+                       the instant-rule run-misattribution family, the published completeness
+                       overclaim, the understated benign-refusal figure) and verify ramp semantics.
+                       (2) `feat/v2-hist`, `opus` — the Historical Import shell: `HIST-001`,
+                       `HIST-004`, `HIST-003a`. (3) `feat/v2-lib`, `sonnet` — `LIB-004`, `LIB-005`,
+                       `LIB-003a`, `UX-017`'s Library half, `QA-017`.
+                       **2 REMAINING, BOTH RESERVED FOR INDEPENDENT REVIEW.** Nested spawning
+                       forbidden and every brief says so in terms. Peak concurrency 3.
+                       **THE ORCHESTRATOR IMPLEMENTS THE SMALLER FRONTEND/UX SLICES DIRECTLY**, as
+                       the previous run did and for the same disclosed reason — a five-agent
+                       ceiling and §36's "continue while safe work remains" cannot both be honoured
+                       under a strict reading of `CLAUDE.md` §10. Every such slice is labelled
+                       ORCHESTRATOR-IMPLEMENTED, NOT INDEPENDENTLY REVIEWED.
+                       ~~**SPENT: 5 of 5. The budget is exhausted and no replacement may be
+                       spawned.**~~ — true of the PREVIOUS session, kept so the transition is
+                       visible rather than looking like a budget that reset itself. (1) independent review of the unreviewed tail
                        `ebc5c331..782082bb` — MERGE-after-fixes, one Critical; (2) the §5
                        label-overreach + ramp-semantics slice; (3) the Experiment Library;
                        (4) the MCP note pathway; (5) **the final independent review of
@@ -1997,6 +2052,261 @@ been wrong to.**
    `required_for_evidence_record`) move under progressive disclosure** on the "needs you" question,
    rather than rendering inline beside its already-correct human label? `UX-014`'s own rule
    protects the identifier itself, so this is placement, not jargon.
+
+---
+
+## SECOND CONTINUATION RUN — 2026-09-13 · PR #248 shipped, then the remaining ledger
+
+### THE §9 REVIEW GATE ON THE UNREVIEWED TAIL — performed by the ORCHESTRATOR, disclosed
+
+`ddd3d24e..d3473414` was **35 commits that no reviewer had seen**, because `ddd3d24e` is the SHA the
+previous run's final review froze, and every remediation commit for its 5 Criticals landed after it.
+Reviewing one's own remediation is the gap §9 exists to close.
+
+**The reviewer was the orchestrator of THIS session, which had implemented none of that range**, in
+a context that began at `/clear`. That is independence in the operative sense this repository uses
+("an agent that implemented none of the work under review") and it is disclosed rather than dressed
+up: the two remaining agent slots were judged better spent on the three large in-flight lanes, where
+the repository's own evidence says review pays off most.
+
+**Reviewed by MEASUREMENT, not by reading commit prose** — which matters, because the prose is
+exactly what a self-review would be tempted to trust:
+
+| finding | how it was checked | result |
+|---|---|---|
+| **C-1** — `/api/health` echoed a raw operator env value, unauthenticated | live probe: `ISAAC_MCP_DEPLOYMENT` set to `postgresql://admin:SuPerSecret123@…`, `ISAAC_MCP_LOCAL_SCOPES` to a token, `PGHOST` unset, fresh workspace, then `GET /api/health` | **fixed.** `supplied_value: "withheld"`, `reason: "unrecognised"`; connection string, password fragment and scope token all absent from the whole body. `redact_supplied_value` is an ALLOWLIST (`_ECHOABLE_BINDING_NAMES`) so an unanticipated value is withheld by default rather than by a rule that had to predict it |
+| **C-2** — that lane's own leak guard was VACUOUS | **two-sided** mutation: reverted the redaction to the pre-fix identity echo, with the mutation asserted to have applied | **fixed and non-vacuous.** Mutant → 1 failed. And the sibling test *"a RECOGNISED binding name IS still echoed"* stayed GREEN, which is the half that matters: it proves the guard is not simply "withhold everything", which would have passed the leak test while breaking the legitimate disclosure |
+| **C-5** — a control arm that computed the columns then popped the keys | read the replacement | **sound, and strictly stronger than a comparison.** `_summary` must now perform ZERO reads, measured per call and attributable per record, with THREE vacuity guards: the columns are asserted populated, all six keys asserted served, and `per_row_reads` asserted non-empty — because "zero reads" is also the arithmetic of a function never called |
+| the tail's touched files | `pytest` on 4 backend files; `vitest` on 5 frontend files | **132 passed** / exit 0 · **5 files / 176 tests** / exit 0 |
+| `QA-018`'s accessibility-surface enrollment | **Linux CI**, which is the authority | green on the exact head |
+
+**Verdict: MERGE. No Critical or Important finding.** Merged as `654e43dd`.
+
+### *** MY OWN BRIEF WAS STALE AND I CAUGHT IT ONLY BY ACCIDENT — the trap this ledger documents most ***
+
+I briefed the Library lane from the **NAMED RESIDUE** section, which was written against an earlier
+SHA and never revised after the remediation commits. **Four of its items were already fixed**, and I
+found out because I happened to review the same commits for the §9 gate minutes later — not because
+I had verified the brief:
+
+| item I briefed | actually fixed in | and the fix DIFFERED from what I briefed |
+|---|---|---|
+| folder refusal tokens unreachable | `0177364c` | it **removed** the Pydantic `max_length` so the typed refusal is reachable, and **deliberately leaves the fifth token to the framework** — a non-text `folder` gets Pydantic's `string_type`, judged more useful than a hand-rolled `invalid_folder`. I had briefed "make them reachable or correct the description", which would have re-litigated a decision already taken |
+| `MoveExperimentPanel` showing a status where it claimed a reason | `0177364c` (I-7) | — |
+| `SettingsPage` statistics *"over your own activity"* | `8ce85a87` (I-8) | pinned as a **ban on six phrasings** with the honest half asserted PRESENT, and it deliberately does not name the `My Stats` tab either. I had briefed it as a copy fix |
+| `routes.py:1329` citing a nonexistent test | `e46c0a6b` | re-pointed at a guard that **had itself been vacuous** and was rewritten in the same session — so the citation was wrong AND its target was too |
+
+**A correction was sent to the lane mid-flight**, naming the commits, telling it to re-derive rather
+than trust me twice, and adding the one instruction that survives: `UX-017`'s Library half must not
+reintroduce a per-person statistics claim, because `8ce85a87` banned that class.
+
+**The durable lesson is NOT "read the ledger more carefully" — it is that a residue section is a
+dated measurement, and briefing from one without re-deriving it is the same act as quoting a stale
+test count.** This ledger records eleven stale rows found in one sweep the day before. I read that
+sweep, wrote a brief from a section it had not covered, and reproduced the failure inside 24 hours.
+
+### `UX-013` — **DONE** (`cd49e936`, ORCHESTRATOR-IMPLEMENTED, NOT INDEPENDENTLY REVIEWED)
+
+The row's stated blocker was *verification, not difficulty*, and that was correct. Two literals
+moved: `AssistantDrawer.tsx` `useState(false)` → `useState(true)`, and
+`readStoredRailCollapsed` `=== '1'` → `!== '0'`.
+
+**The reader had to change too, and the reason is the property the row protects.** Three cases stay
+distinguishable and only one means expanded — absent → collapsed, `'1'` → collapsed, `'0'` →
+EXPANDED — so *"a scientist who expands it once keeps it"* still holds. `!== '0'` rather than
+`=== '1'` puts the absent case AND any unrecognised future value on the default side.
+
+Tests **11 → 17**. Two pinned the OLD default and are **INVERTED, not deleted**.
+
+*** AND MUTATION-TESTING THE FLIP FOUND THAT `window.localStorage.getItem = fn` IS SILENTLY IGNORED
+BY THIS JSDOM. *** The own-property assignment does not shadow `Storage.prototype.getItem`. A direct
+probe confirmed it (`MOCK_CALLED=false THREW=false`); `vi.spyOn(Storage.prototype, 'getItem')` is the
+form that works (`PROTO_THREW=true`). **So BOTH storage-refusing tests in that file had injected no
+fault since they were written, in both polarities** — the write-side one asserted `not.toThrow()`
+against a `setItem` that never throws. Both now spy on the prototype and both **assert the spy was
+called**, because a fault never injected is not a fault tolerated.
+
+**It was concealed by an ACCIDENTAL AGREEMENT**: the `catch` returned `false` while the default was
+also `false`, so they matched without the mock ever working. Flipping the default without touching
+the `catch` would have made a storage-refusing browser the ONE environment where the rail still
+opened by default — a divergence no test asserted in either direction.
+
+**Three mutants, each ASSERTED to have applied before being run** (the first attempt at M2 was run
+*without* that assertion and its green was a non-answer — recorded because it is the same
+plausible-non-answer class this ledger already documents for `tr` on binary input):
+
+| mutant | result |
+|---|---|
+| reader back to `=== '1'` | **8 failed** |
+| `catch` returns `false` | **1 failed** — but only AFTER the injection was repaired; it survived before |
+| `useState(true)` → `useState(false)` | **1 failed** — but only AFTER a first-paint test existed; it survived all 16 before |
+
+**M3 NEEDED A NEW KIND OF TEST, and the reason is the harness rather than the code.** `render()`
+wraps in `act()`, which flushes the storage-reading effect, so every assertion in the file observes
+what the EFFECT decided — the initial literal was an **equivalent mutant** across all 16.
+`renderToStaticMarkup` runs no effects and observes the first frame directly, with storage seeded to
+the OPPOSITE preference so a first paint that consulted it would fail, plus a positive control
+because a renderer emitting no `data-collapsed` at all would satisfy both primary assertions.
+
+Also added: the three-way storage distinction (the new load-bearing logic, previously untested in
+either polarity) and a guard that merely MOUNTING never writes the preference — no rendered
+difference, so nothing else would have noticed.
+
+### `A11Y-01` cause (b) — **ONE OF THREE ANCESTOR-OPACITY COMPOSITES CLOSED**, and `UX-013` forced it
+
+The darwin a11y run on the `UX-013` commit came back **581 passed / 1 failed / 208 skipped**, and the
+one failure was attributable and real:
+
+> GREW guided-completion @ desktop-1280x800 on darwin: rule "color-contrast" grew from 1 to 2 node(s)
+
+The nodes were **`.upcoming-label` and `.upcoming-path`** — not the rail. Collapsing it widened the
+main column and made a **second instance of a pre-existing defect visible**, so the baseline's
+recorded `1` had been measuring a partially-hidden failure.
+
+**The choice was to fix it or to transcribe a `serious` violation upward.** Transcribing a defect
+one's own change made worse is the trade this repository has been caught making before, so:
+`assistant.css` `.upcoming-row { opacity: 0.72 }` is **GONE**.
+
+**Deleting the declaration was the ENTIRE fix, and that is why no colour changed.** Both tokens the
+row paints clear AA uncomposited (`--text-secondary` 6.86:1, `--text-tertiary` 4.54:1 on its worst
+ground); the opacity was piling de-emphasis on ink that was already de-emphasised, and it is the only
+one of the two mechanisms invisible to a palette audit. `palette-contrast.test.ts` had **already
+proved the alternative impossible**: composited at .72 a neutral grey only clears 4.5:1 down to
+`#414141`, darker than `--text-secondary` two rungs above it — so a compliant "tertiary" would have
+had to be darker than the tiers it exists to sit below.
+
+**The ratchet behaved exactly as designed** — one failure, naming the site, saying to update the
+record. `OPACITY_SITES` is now 2, with `CLOSED_OPACITY_SITES` recording the third and a **two-way
+guard** proving it has not reacquired an opacity (mutation-proved: restoring `opacity: 0.72` → 1
+failed). Without that guard, re-adding it would make every test pass again while restoring a
+`serious` failure — the guard would have become a guard against *fixing* it only.
+
+`e2e/a11y-baseline.ts` loses **three** `foregrounds` entries (`#777f8a`, `#b3bbc4`, `#8b939b`), which
+makes the guard **STRICTER**: `foregrounds` is an allowlist of colours axe may report, so a colour no
+longer reachable must not stay on it.
+
+**THE OTHER TWO SITES ARE NOT THE SAME SHAPE and are deliberately untouched:** `queue.css`
+`.exp-row.done` (.82) also dims borders and a numbered disc, and `signals.css`
+`.advisory-nongating` (.85) dims a **saturated** ink on a **tinted** ground that no neutral-ramp
+reasoning reaches in either direction. Each moves baseline cells on both platforms and needs its own
+Linux-CI round-trip.
+
+### `A11Y-02` + `UX-021` (part) — Help gets a focus trap and a walkthrough pointer
+
+**`A11Y-02`.** The panel had announced `role="dialog"` (and `aria-haspopup="dialog"`) since it
+shipped, and moved focus in on open and back to the trigger on close — but **Tab from the last
+control walked out into the page the dialog was visually covering**, with nothing to tell a keyboard
+or screen-reader user they had left. `aria-modal="true"` is added in the **same** change and
+deliberately not before it: that attribute asserts the rest of the page is inert, which was FALSE
+while Tab could reach it. **Trap and attribute are one decision.** The shape is copied from
+`SearchDialog` and `ResetDemoDialog`, which hand-roll the identical containment.
+
+**`UX-021`, and one of its three halves was ALREADY DONE.** The developer jargon (`^…$`, *"Python's
+`$` also matches before a trailing newline"*) is **already gone from rendered copy** — the grep hits
+that look like live jargon are JSX comments *documenting its removal*, which is the same
+comment-mistaken-for-code trap that kept `MCP-008` alive. Re-measured: **7 sections**, and the
+walkthrough link genuinely absent.
+
+**The pointer's destination is SETTINGS, not My Experiments, and that is correctness rather than
+taste.** The obvious pointer — "press Launch Guided Demo on My Experiments" — is **false for any
+reader who has finished the walkthrough**: `ExperimentsHome.tsx` says that control *"disappears for
+good once the walkthrough is finished"*, with the replay control living in Settings & API → Help &
+Tutorial, and `lib/routes.ts:19` already calls that tab *"the one permanent home of the guided
+walkthrough"*. A Help surface is exactly where a first-time-only claim does the most damage. Zero new
+vocabulary: `LABELS.actionGoToHelpAndTutorial` and `ROUTES.settingsTab('help')` both already existed.
+
+**DELIBERATELY NOT DONE in the same change:** the 7→4 section reduction. It would move accessibility
+baseline cells in the same PR as `UX-013` and the opacity fix, and this ledger already records the
+lesson from the A3 / change-feed near-collision — **sequence baseline-moving changes so movements stay
+attributable.** The right shape is progressive disclosure (`<details>`, as `RecordValidator` already
+does) rather than deleting claims, since the volume is honesty copy that tests pin.
+
+### `QA-020` — **DONE** (ORCHESTRATOR-IMPLEMENTED, NOT INDEPENDENTLY REVIEWED)
+
+`App.tsx`'s catch-all was `<Route path="*" element={<Navigate to={ROUTES.experiments} replace />} />`,
+so **every unrecognised address silently became My Experiments** and `replace` **erased the attempted
+URL** so Back could not recover it. Found by navigating hosted `/krish/validator`: it landed on
+`<h1>My Experiments</h1>`, path rewritten, no message at all. A stale bookmark, a mistyped path or a
+link from an old document is an ordinary thing for a scientist to arrive with, and the product's
+answer was to pretend they had asked for something else.
+
+**The row's "ZERO test files assert the router redirect" was right**, and its earlier "8 test files"
+figure was the corrected one — that grep had matched unrelated vocabulary in three other domains.
+
+**What shipped:** `screens/NotFound.tsx`, one visible `<h1>`, the **attempted path shown** (the one
+thing `replace` destroyed), a real `<Link>` back to My Experiments, a per-route `document.title`, and
+`.notfound*` styles built from **existing tokens only** so the surface paints no new colour.
+
+**THE HONESTY BOUNDARY IS THE DESIGN, and it is narrow on purpose.** This is an unrecognised
+**PATH**, not a missing **RECORD** — `/record/<unknown-ULID>` matches `ROUTE_PATTERNS.record` and
+reaches `RecordWorkbench`'s own not-found handling. So the screen may not say a record was not found,
+may not speculate that anything was deleted, and says so explicitly rather than leaving it to
+inference: *"This is about the address, not about your data. Nothing has been deleted, and no record
+was looked up — an address ISAAC does not recognise never reaches a record at all."* **A negative
+control proves the neighbouring claim**: an unknown record id must still reach the record route, and
+if it ever fell through, that sentence becomes false on the most common failing address in the product.
+
+**It also guesses nothing.** No "did you mean …?" — that needs a similarity rule nobody specified,
+and a wrong guess here is the defect being fixed one step along.
+
+**THREE THINGS FOUND WHILE BUILDING IT, each recorded because each is a class rather than an instance:**
+
+1. **A PHANTOM CUSTOM PROPERTY, caught before it shipped.** The first draft of `.notfound-title`
+   reached for `--font-size-title`, which is **declared nowhere** — the exact class that once left
+   `.capture-textarea` with no border for an unknown number of releases. Found by checking each token
+   against `styles/tokens.css` before committing, **not** by looking at the page, which is the only
+   way a phantom with a plausible inherited fallback is ever found. Replaced with
+   `--font-size-heading-md` (17px), which is on the declared scale.
+2. **MY OWN BAN CAUGHT MY OWN REASSURANCE.** The honesty test forbade the substring `has been
+   deleted`; the shipped scope sentence reads *"Nothing **has been deleted**"* — the opposite claim,
+   containing the banned string. The wrong repair is to delete the reassurance to satisfy the
+   substring. The check is now **polarity-aware** (every deletion word must be negated, within a
+   **bounded** 40-character window so a "nothing" in an unrelated earlier clause cannot launder a
+   claim) and carries a **positive control** asserting it fires on `this record was deleted by an
+   administrator` and on the unbounded-window case — because `[]` from a regex that matches nothing
+   is indistinguishable from `[]` from a clean page.
+3. **`routeDocumentTitle`'s docstring became false and is struck in place.** It said *"`/` and the
+   `*` fallback both `<Navigate replace>`"*. `/` still does; the fallback now RENDERS, so it is a
+   destination a reader sits on and reads a browser tab for, and WCAG 2.4.2 applies. Leaving it
+   `null` would have left the PREVIOUS screen's title in the tab. `document-title.test.tsx`'s
+   *"answers null for the routes that redirect elsewhere"* is **inverted in half** — `/` still null,
+   `/not-a-route` now titled — and the not-found title is asserted unreachable from any recognised
+   address.
+
+**Mutation results, each asserted to have applied before being run:** restoring the silent redirect
+→ **1 failed**; dropping the attempted path → **2 failed**; deleting the scope sentence →
+**1 failed**.
+
+**Enrolled in the accessibility sweep** (`e2e/surfaces.ts`, `id: 'not-found'`, `scope: 'ordinary'`)
+**with its cost known** — `QA-018` recorded that an entry here enrols a surface in **thirteen**
+sweeps and mints cells on both platforms. Enrolled anyway: the alternative is shipping a NEW
+never-measured scientist-facing screen while closing the old one, which is the worse trade.
+**Linux CI is the authority for its cells.**
+
+### RESIDUE NAMED THIS RUN, measured and deliberately not fixed
+
+| ID | Finding | Measurement |
+|---|---|---|
+| `A11Y-01b` | **Two ancestor-opacity composites remain.** | `queue.css .exp-row.done { opacity: .82 }` and `signals.css .advisory-nongating { opacity: .85 }`, both still pinned open by `palette-contrast.test.ts`'s `OPACITY_SITES` (now length 2) |
+| `QA-021` | **The focus-trap logic is now hand-rolled in THREE dialogs.** Extracting a shared hook is real work and was declined here on purpose: two of the three are pinned by their own suites and one is the **destructive reset** path, so a refactor there needs its own slice and its own review. | `HelpPanel.tsx`, `SearchDialog.tsx`, `ResetDemoDialog.tsx` — identical capture-phase/re-query/wraparound shape |
+| `QA-022` | **`vi.spyOn` on a `localStorage` INSTANCE silently does nothing in this jsdom**, and so does plain property assignment. Any other test in the tree that mocks storage that way is injecting no fault. Only `Storage.prototype` works. | probe: instance assignment `MOCK_CALLED=false`; `vi.spyOn(window.localStorage,…)` `SPYON_THREW=false`; `vi.spyOn(Storage.prototype,…)` `PROTO_THREW=true`. **A tree-wide sweep for the broken form is NOT done** |
+| `UX-021b` | **Help is still 7 sections.** The 7→4 reduction wants progressive disclosure, not deletion, and its own PR. | `grep -c 'className="help-section"'` → 7 |
+
+### TWO OPERATIONAL TRAPS, both self-inflicted, both cheap to record
+
+1. **`npx vitest run` from the REPO ROOT collects specs inside leftover agent worktrees.** It
+   reported **38 failed** against a file that passes — a *collection* artifact, not a regression. Two
+   merged worktrees from the previous session were still registered under `.claude/worktrees/`. They
+   were proved empty first (`git rev-list --count main..<branch>` → **0** and a clean `status` for
+   both) and then removed; the branches were KEPT. **Run `vitest` from `apps/web`.**
+2. **A mutation applied without an applied-assertion produced a plausible green.** M2's first run
+   reported 16 passed and it meant nothing, because the `python` replacement had no `assert
+   count == 1`. Every mutation in this run now asserts it landed before the suite is run. Same class
+   as the `tr`-on-binary and `ugrep`-complexity traps already recorded.
+3. **A `grep` for a removed declaration matches the comment documenting its removal.**
+   `grep -c "opacity: 0.72"` returned **1** after the declaration was deleted — the hit was the new
+   comment. Verified with `awk '/^\.upcoming-row \{/,/^\}/'` over the rule body instead.
+   Precisely the `MCP-008` trap, met again inside one session.
 
 ---
 
