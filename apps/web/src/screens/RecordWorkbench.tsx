@@ -28,15 +28,9 @@ import { LoadingPanel, BackendDown } from '../components/FetchStates';
 import { CircleAlert, ExternalLink } from '../components/icons';
 import { ExperimentGraphPanel } from './graph/ExperimentGraphPanel';
 import { LABELS } from '../lib/labels';
-import {
-  RECORD_COMPARE_PARAM,
-  RECORD_RUN_PARAM,
-  RECORD_VIEW_PARAM,
-  ROUTES,
-  isRecordView,
-  type RecordViewId,
-} from '../lib/routes';
+import { ROUTES, resolveRecordView, type RecordViewId } from '../lib/routes';
 import { api } from '../lib/api';
+import { useDocumentTitle } from '../lib/useDocumentTitle';
 import { useFetch } from '../lib/useFetch';
 import { useRecordSession } from '../lib/useRecordSession';
 import { useWorkspaceScope, useWorkspaceScopeChanged } from '../lib/workspaceScope';
@@ -583,15 +577,32 @@ function LoadedWorkbench({
    * and back precisely because the parameters are independent.
    */
   const [searchParams] = useSearchParams();
-  const requestedView = searchParams.get(RECORD_VIEW_PARAM);
-  const hasRunAddress =
-    (searchParams.get(RECORD_RUN_PARAM) ?? '') !== '' ||
-    searchParams.getAll(RECORD_COMPARE_PARAM).length > 0;
-  const activeView: RecordViewId = isRecordView(requestedView)
-    ? requestedView
-    : hasRunAddress
-      ? 'runs'
-      : 'fields';
+  /*
+   * THE WORKSPACE THIS URL RESOLVES TO — `resolveRecordView`, in `lib/routes.ts`.
+   *
+   * The three-branch rule used to be written out here. It moved (2026-09-13)
+   * because the WCAG 2.4.2 `document.title` floor needs the identical answer and
+   * a title naming a workspace this screen is not rendering would be a false
+   * claim about the page. Two expressions of one decision is the drift shape
+   * this repository has been caught publishing before; there is now one.
+   */
+  const activeView: RecordViewId = resolveRecordView(searchParams);
+
+  /*
+   * WCAG 2.4.2 — REFINE THE ROUTE-DERIVED TITLE WITH THE RECORD'S OWN NAME.
+   *
+   * `<DocumentTitle />` in `App.tsx` has already titled this route from the URL
+   * alone (`Record Fields · ISAAC Metadata Assistant`). This adds the one thing
+   * the URL does not carry: which record. It runs only inside
+   * `LoadedWorkbench`, i.e. only when `bundle.status === 'data'`, so the name is
+   * read from loaded data and never guessed — the not-loaded branch above keeps
+   * the floor's title and asserts nothing about the record.
+   *
+   * `stripLifecycleSuffix` is the SAME transform the visible `<h1>` and the top
+   * bar apply to this title, so the tab strip, the heading and the breadcrumb
+   * cannot disagree about what the record is called.
+   */
+  useDocumentTitle([workspaceLabel(activeView), stripLifecycleSuffix(detail.title)]);
 
   /*
    * THE CAPTURE DESTINATION'S COUNTS, for the promoted sidebar row.
@@ -1214,7 +1225,8 @@ const workspacePanelId = (id: RecordViewId) => `record-workspace-${id}`;
  * fifth vocabulary for the same four destinations.
  *
  * The fallback is the raw `view` id, which is unreachable today: `activeView` is
- * resolved through `isRecordView`, so it is always one of `RECORD_VIEW_IDS`, and
+ * resolved through `resolveRecordView`, whose every branch returns a member of
+ * `RECORD_VIEW_IDS`, and
  * `RECORD_WORKSPACES` covers all four (asserted by `record-workspaces.test.tsx`).
  * It exists so that adding a fifth id to `RECORD_VIEW_IDS` without adding it to
  * `RECORD_WORKSPACES` degrades to a usable name instead of `undefined`.

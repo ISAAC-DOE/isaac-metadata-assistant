@@ -188,6 +188,38 @@ export function isEvidenceView(value: string | null | undefined): value is Evide
 export const RECORD_COMPARE_PARAM = 'compare';
 
 /**
+ * WHICH RECORD WORKSPACE A URL RESOLVES TO — the ONE resolution, shared.
+ *
+ * Extracted 2026-09-13 because it had to be, not for tidiness. It was inline in
+ * `RecordWorkbench` and the WCAG 2.4.2 `document.title` floor
+ * (`lib/documentTitle.ts`) needs the identical answer: a title naming a
+ * workspace the screen is not rendering is a FALSE statement about the page, in
+ * the one place a reader cannot see the page to check it. Duplicating the rule
+ * would have been two expressions of one decision, which is the shape §15
+ * records four separate table-authorization failures under.
+ *
+ * The rules, in order, and each is load-bearing:
+ *
+ * 1. An explicit, recognised `?view=` wins. (`isRecordView` rejects anything
+ *    else, so an unrecognised value falls through rather than throwing — there
+ *    is no dead route.)
+ * 2. Otherwise, a URL carrying a RUN ADDRESS — `?run=<id>` or any number of
+ *    `?compare=<id>` — resolves to `runs`. This is what makes a run deep link
+ *    from outside the screen land on the workspace that can show it, without
+ *    every such link having to also spell `view=runs`.
+ * 3. Otherwise `fields`, the workspace a bare `/record/<id>` renders.
+ */
+export function resolveRecordView(search: string | URLSearchParams): RecordViewId {
+  const params = typeof search === 'string' ? new URLSearchParams(search) : search;
+  const requested = params.get(RECORD_VIEW_PARAM);
+  if (isRecordView(requested)) return requested;
+  const hasRunAddress =
+    (params.get(RECORD_RUN_PARAM) ?? '') !== '' ||
+    params.getAll(RECORD_COMPARE_PARAM).length > 0;
+  return hasRunAddress ? 'runs' : 'fields';
+}
+
+/**
  * TWO. Not `n`, and the number is a decision rather than a first iteration.
  *
  * A two-column table can put an address, both values and the relation between them
