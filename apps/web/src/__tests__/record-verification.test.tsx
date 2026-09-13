@@ -840,6 +840,50 @@ describe('mutation verification', () => {
     expect(bodyText()).not.toMatch(/records[^.]{0,40}\bnever altered\b/i);
     expect(bodyText()).not.toMatch(/source records were (left )?unchanged\./i);
 
+    /*
+     * QA-010 — THE `[^.]` WINDOW IS A SENTENCE PROXY AND IT LEAKS ACROSS ONE.
+     *
+     * The ledger filed these two `not.toMatch` assertions as possibly UNFIREABLE
+     * and "unproven either way". Measured 2026-09-13, and the first half of that
+     * worry is ANSWERED: they do fire. `records[^.]{0,40}never altered` matches
+     * "the source records are never altered by a trial" and "source records are
+     * never altered. Ever." — so the guard is real, not vacuous.
+     *
+     * What the measurement DID find is narrower and still a gap: each MISSES a
+     * violation with a period inside the window —
+     *
+     *     "the records. They are never altered"      -> MISSES
+     *
+     * `[^.]` cannot span a sentence boundary, which is exactly what a two-sentence
+     * version of the banned claim would do.
+     *
+     * *** WIDENING IT TO `[\s\S]{0,40}` WAS TRIED AND IS REFUSED, on evidence from
+     * the sibling guard in `revision-history.test.tsx`. *** There, the widened
+     * window failed immediately on `"export gate.last submitted"` — two ADJACENT
+     * BUT UNRELATED labels — because `textContent` concatenates across element
+     * boundaries with NO SEPARATOR. So on a textContent haystack `[^.]` is not
+     * merely a sentence proxy; it is also the only thing preventing cross-element
+     * false positives. This assertion happens to pass widened, because this surface
+     * contains "never altered" nowhere at all — but it would be the same unsound
+     * technique passing by luck, and a guard that is sound only until the copy
+     * changes is worse than one whose limit is written down.
+     *
+     * The limit, written down: a two-sentence phrasing of the banned claim would
+     * escape. The `not.toContain` on the exact sentence above is what covers the
+     * form actually observed.
+     */
+    for (const [label, re, violation] of [
+      ['records→never altered', /records[^.]{0,40}\bnever altered\b/i, 'the source records are never altered by a trial'],
+      ['left unchanged', /source records were (left )?unchanged\./i, 'the source records were left unchanged.'],
+    ] as const) {
+      expect(
+        re.test(violation),
+        `${label}: this guard cannot fire, so its passing above means nothing. ` +
+          `Constructed violation: ${JSON.stringify(violation)}`,
+      ).toBe(true);
+      expect(re.test('each trial works on a copy of one record'), label).toBe(false);
+    }
+
     // What IS said: the design, plus a pointer to the measurement.
     expect(bodyText()).toMatch(/each trial works on a copy of one record/i);
     expect(bodyText()).toMatch(/reported below rather than promised here/i);

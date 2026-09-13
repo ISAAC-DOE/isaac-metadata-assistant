@@ -325,6 +325,42 @@ describe('the lifecycle', () => {
     // as a submission, in any phrasing.
     expect(text).not.toMatch(/export(ed|ing)?[^.]{0,40}\bsubmitted\b/);
     expect(text).not.toMatch(/\bsubmitted\b[^.]{0,40}\bexport(ed)?\b/);
+
+    /*
+     * QA-010 — POLARITY CONTROLS, which is what that row actually asked for: "Each
+     * needs a constructed false version to polarity-test." The two windows above
+     * are `not.toMatch`, so they pass whether they are load-bearing or unfireable,
+     * and the ledger recorded them as "unproven either way". They are proven here.
+     *
+     * *** AND WIDENING THEM WAS TRIED FIRST AND WAS WRONG. *** `[^.]` cannot span a
+     * sentence boundary, so a two-sentence conflation ("the record was exported. it
+     * is submitted") escapes — which looked like a gap worth closing with
+     * `[\s\S]{0,40}`. Measured against the real rendered text, that widening FAILED
+     * immediately, on:
+     *
+     *     "export gate.last submitted"
+     *
+     * — two ADJACENT BUT UNRELATED labels. `document.body.textContent` concatenates
+     * across element boundaries with NO SEPARATOR, so a widened window stitches
+     * unrelated UI strings into a sentence that was never written. **On a
+     * textContent haystack, `[^.]` is not merely a sentence proxy — it is also the
+     * only thing preventing cross-element false positives.** The windows stay as
+     * they are, and the residual two-sentence gap is named rather than closed with
+     * a guard that cries wolf.
+     */
+    for (const [label, re, violation] of [
+      ['export→submitted', /export(ed|ing)?[^.]{0,40}\bsubmitted\b/, 'exported and therefore submitted'],
+      ['submitted→export', /\bsubmitted\b[^.]{0,40}\bexport(ed)?\b/, 'submitted, which is the same as exported'],
+    ] as const) {
+      expect(
+        re.test(violation),
+        `${label}: this guard cannot fire, so its passing above means nothing. ` +
+          `Constructed violation: ${JSON.stringify(violation)}`,
+      ).toBe(true);
+      // ...and it is not a regex that matches everything, which would be the other
+      // way to be useless.
+      expect(re.test('this record is ready to submit and has not been exported'), label).toBe(false);
+    }
     expect(screen.queryByText(/^Submitted$/)).toBeNull();
   });
 
