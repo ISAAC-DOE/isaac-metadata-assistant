@@ -434,7 +434,7 @@ data-governance boundaries are unchanged.
 ## PHASE A — DESIGN SYSTEM COMPLETION + HONESTY FIXES · unblocked
 
 ### UX-001 — Declare the four missing token axes
-- **Workstream** UX · **Status** PLANNED · **Owner** Sonnet implementer + Opus reviewer
+- **Workstream** UX · **Status** **IMPLEMENTED + INDEPENDENTLY REVIEWED (`19c04692`) — on the branch, PR #248, NOT YET ON `main`; row was stale, corrected 2026-09-13** · **Owner** Sonnet implementer + Opus reviewer
 - **Dependencies** none. **This is the first executable task after approval.**
 - **Objective** Add font-size, font-weight, line-height and spacing tokens to `styles/tokens.css`.
 - **Evidence** `tokens.css` declares **82** tokens: 70 colour, 6 radii, 4 shadow, 2 font-family,
@@ -451,7 +451,7 @@ data-governance boundaries are unchanged.
   the scale ratified (**DEC-05** adjacent), then implement.
 
 ### UX-002 — Type scale, visible record title, per-workspace `h1`
-- **Status** PLANNED · **Depends** UX-001 · **Owner** Opus implementer + Opus reviewer
+- **Status** **IMPLEMENTED + INDEPENDENTLY REVIEWED (`19c04692`) — on the branch, PR #248, NOT YET ON `main`; row was stale, corrected 2026-09-13** · **Depends** UX-001 · **Owner** Opus implementer + Opus reviewer
 - **Evidence** Record screen's largest **visible** text is 15 px (Capture) / 17 px (Graph). Its only
   `<h1>` is `sr-only`, 1×1 px, `clip: rect(0,0,0,0)`, and reads **`"Review Record"` on all four
   workspaces** — correct on one of four. Secondary screens all render a 22 px visible title; the
@@ -501,8 +501,8 @@ data-governance boundaries are unchanged.
 - **Operational trap:** `npx vitest run` with 84 filter args silently reports *"No test files found,
   exiting with code 1"* — a filter-count limit, neither a pass nor a failure. Batch.
 
-### ~~UX-003 — Two false Help strings, fixed and pinned~~ (original brief, superseded above)
-- **Status** PLANNED · **Depends** none · **Owner** Sonnet + Opus reviewer
+### ~~UX-003 — Two false Help strings, fixed and pinned~~ (original brief, superseded above — **COMPLETE at `43544c6c`**)
+- **Status** ~~PLANNED~~ **COMPLETE — see the `UX-003 + UX-004` entry above.** The heading was struck when it was superseded but the status line was not, which is why a `PLANNED` scan still caught it. · **Depends** none · **Owner** Sonnet + Opus reviewer
 - **Evidence** `HelpPanel.tsx:7` promises draft extraction *"from your files"* while
   `POST /api/uploads` is an unconditional **403** and no path turns a file into a draft.
   `HelpPanel.tsx:10` attributes the whole verdict to the official schema — **stale** since
@@ -511,8 +511,8 @@ data-governance boundaries are unchanged.
   family; **polarity tested** (the guard must fail on the false version — this repo has shipped an
   inverted disclosure guard before).
 
-### UX-004 — Reconcile the two workflow vocabularies; Help on record screens
-- **Status** PLANNED · **Depends** UX-003 · **Owner** Sonnet + Opus reviewer
+### ~~UX-004 — Reconcile the two workflow vocabularies; Help on record screens~~ (original brief, superseded above — **COMPLETE at `43544c6c`**)
+- **Status** ~~PLANNED~~ **COMPLETE — see the `UX-003 + UX-004` entry above.** Marker added 2026-09-13: `UX-003`'s original brief carried a struck heading and *"(original brief, superseded above)"*, and **`UX-004`'s did not** — the same supersession was recorded for one of the pair and not the other, so a reader scanning for `PLANNED` found this row and missed the completion four headings earlier. · **Depends** UX-003 · **Owner** Sonnet + Opus reviewer
 - **Evidence** Server spine: `Load Record · Complete Metadata · Review Evidence · Review Export
   Readiness · Export`. `HelpPanel`: `Draft · Complete · Export · Validate · Audit`. A first-timer
   reading Help is taught the second. Help renders only on the `home` TopBar variant, so it is
@@ -525,7 +525,7 @@ data-governance boundaries are unchanged.
 ## PHASE B — EXPERIMENT LIBRARY · unblocked · highest value
 
 ### LIB-001 — Extend `GET /api/experiments`  **(API before screen)**
-- **Status** PLANNED · **Depends** none · **Owner** Opus + Opus reviewer
+- **Status** **IMPLEMENTED + INDEPENDENTLY REVIEWED — on the branch, PR #248, NOT YET ON `main`; row was stale, corrected 2026-09-13** · **Depends** none · **Owner** Opus + Opus reviewer
 - **Evidence** the served payload is exactly `id · title · scenario · status · created_utc ·
   pending_count · evidenced_field_count · exported · record_id` (`routes.py:1260`). No run count,
   no technique/beamline.
@@ -550,12 +550,12 @@ data-governance boundaries are unchanged.
   list must show; response shape pinned by test.
 
 ### LIB-002 — Library screen: search, sort, facets, row identity
-- **Status** PLANNED · **Depends** LIB-001
+- **Status** **IMPLEMENTED + INDEPENDENTLY REVIEWED — on the branch, PR #248, NOT YET ON `main`; row was stale, corrected 2026-09-13** · **Depends** LIB-001
 - **Acceptance** the shipped worked example's **five records all titled `XANES Example — CuO
   (Cu K-edge)`** are distinguishable in the list. That is the test.
 
 ### LIB-003 — Folders: migration-free VIRTUAL NESTED PATH-LABEL model  (revised per DEC-20)
-- **Status** PLANNED · **Depends** LIB-001 · **Owner** Opus + independent Opus reviewer
+- **Status** **IMPLEMENTED + INDEPENDENTLY REVIEWED — on the branch, PR #248, NOT YET ON `main`; row was stale, corrected 2026-09-13** · **Depends** LIB-001 · **Owner** Opus + independent Opus reviewer
 - **Design** a top-level `folder` **path label** on the experiment state document, **included in
   `_authoritative_signature`**. Precedent: `title` — assistant-side, mutable, organizational,
   reaching neither the official record nor `content_signature`.
@@ -666,6 +666,84 @@ data-governance boundaries are unchanged.
 | MCP-007 | `create_run` retry-ambiguity sentence | **IMPLEMENTED + INDEPENDENTLY REVIEWED (`23fa2256`, review fixes `e0d6ee9d`) — on the branch, PR #248, NOT YET ON `main`; row was stale, corrected 2026-09-13** | — | one free sentence |
 | MCP-008 | ~~`IngestionProposalsPanel` destructive-silent-failure fix~~ | **CLOSED — ALREADY SHIPPED; the row was stale, measured 2026-09-13** | — | ~~`IngestionProposalsPanel.tsx:786` — a failed background refresh replaces the list and can destroy typed text **with no user action at all**. `UnmappedNotesPanel` has the fixed shape; this one does not~~ — **the last clause was the stale half.** The fix landed in `6a4296b6` (an ancestor of `main`) **six hours after** the residue was named in `49a26e1f` — `git merge-base --is-ancestor 49a26e1f 6a4296b6` exits 0 — so this row was TRUE when written and was never updated. **Both panels carry the identical gate** `wasSilent && listStatusRef.current === 'data'` (`IngestionProposalsPanel.tsx:1029`, `UnmappedNotesPanel.tsx:516`), which is the non-obvious part: branching on `wasSilent` alone swallowed a silent failure arriving while the first LOUD load was in flight, leaving a permanent spinner with no disclosure and no way out. Pinned by `I-2` (`:2073`) with a **negative control** at `:2119` and two `MUTATION-GUARDED` editor cases; **80 passed, exit 0**, measured directly. **Cited `:786` without reading it** — that line is a *comment describing the fix*, which is how the row survived. `:1821`'s narrower "latent in-flight-first-load case" is a DIFFERENT claim and stays open. |
 | MCP-009 | **Decision to surface, not a task:** authless remote MCP is vendor-**permitted** | PROPOSED | — | auth type `none` is documented "Supported". **So OAuth is ISAAC's choice, not a vendor gate** — a stronger and cheaper argument to Dean. **But it does not close EXT-01:** an OAuth bearer yields a `ServicePrincipal`, so **EXT-01 survives EXT-02** |
+
+### THE FULL STALE-ROW SWEEP: FOURTEEN ROWS, AND ONLY TWO WERE GENUINELY OPEN (2026-09-13)
+
+Having found `MCP-008` stale by accident, I swept **every** remaining `PLANNED` row against the
+code. The result is the headline finding of this continuation:
+
+| Row | Verdict | Measured |
+|---|---|---|
+| MCP-001…007 | **done on branch** | `23fa2256`, reviewed `e0d6ee9d` — see the Phase-E note |
+| MCP-008 | **done on `main`** | `6a4296b6`, before this branch existed |
+| LIB-001 | **done on branch** | list payload gains `folder`, `run_count`, `technique` |
+| LIB-002 | **done on branch** | `ExperimentsHome.tsx` 1,198 lines, +202/−15 |
+| LIB-003 | **done on branch** | `test_experiment_folders.py` → **59** tests collected |
+| UX-001 | **done on branch** | `19c04692`; **+19** tokens across exactly the four named axes |
+| UX-002 | **done on branch** | `19c04692`; **21** tests pass |
+| UX-003 | **complete, mis-statused** | `43544c6c`; heading struck, **status line was not** |
+| UX-004 | **complete, mis-statused** | `43544c6c`; **neither** heading nor status marked |
+| LIB-004 | **GENUINELY OPEN** | no breadcrumb, cross-folder search or create-destination in `ExperimentsHome.tsx` |
+| LIB-005 | **GENUINELY OPEN** | no reopen-and-continue; `routes.py`'s `reopen` is workflow **steps** regressing, a different concept |
+
+**Twelve of fourteen were already done. Two were real.** A ledger read at face value would have sent
+a session to rebuild the MCP note pathway, the Library screen, the folder model and the type scale —
+and would have hidden the only two items actually worth picking up next.
+
+**UX-003 and UX-004 are the most instructive pair**, because they were completed in the **same
+commit** and recorded **three different ways**: UX-003's heading was struck *and* annotated
+*"(original brief, superseded above)"*, its status line was left at `PLANNED`; UX-004 got **neither**.
+So one supersession, applied to a pair, produced three inconsistent states — and a `PLANNED` scan
+surfaced both original briefs while the completion entry sat four headings above them. *Striking a
+heading is not re-statusing a row, and a reader greps the status.*
+
+**Two figure corrections, both mine to own:**
+
+- `UX-001`'s row records `tokens.css` as declaring **82** tokens. Under my line-start pattern I read
+  **72** on `main` and **91** on the branch; under a looser one, **83** and **102**. So `82`
+  reproduces under neither — it is a **counting-convention difference, not an error**, and I am not
+  calling it wrong. What is stable is the **delta: +19 under both patterns**, matching exactly the 19
+  tokens across the four axes (`font-size` 5, `font-weight` 4, `line-height` 4, `space` 6), against
+  **0 of all four** on `main`. *Quote the delta; the absolute depends on how you count.*
+- `LIB-003`'s "52 folder tests" and `LIB-001`'s "six honest list fields" are corrected in the note
+  below.
+
+**Method, stated because two of my own measurements in this sweep were wrong:** every verdict above
+is a check against the **artifact** — a symbol, a collected test count, a payload key — never against
+a commit message (`23fa2256`'s reads `MCP-001..019`, which is evidence for no particular row) and
+never against a grep for a word I guessed. `MCP-002` first measured as *missing* because I grepped
+for an invented constant name, and `QA-020`'s blast radius first measured as **8 test files** because
+I grepped for `catch-all|not.found` and matched a fetch stub, a record list and the assistant intent
+resolver. Both were corrected the same day by a second method.
+
+### THE LIB ROWS WERE STALE TOO — and two published figures about them are corrected (2026-09-13)
+
+`LIB-001`, `LIB-002` and `LIB-003` all read `PLANNED` while the Library lane sat merged on this
+branch. That makes **eleven** stale rows found by this sweep (eight in Phase E, three here), of
+which `MCP-008` had been done on `main` before the branch existed.
+
+**Measured, not taken from the merge commit's message** — which is the discipline the `MCP-002`
+false negative earlier today argued for:
+
+| Row | Measured |
+|---|---|
+| LIB-001 | the list payload adds **three** fields — `folder`, `run_count`, `technique` |
+| LIB-002 | `screens/ExperimentsHome.tsx`, 1,198 lines, **+202 / −15** on this branch |
+| LIB-003 | `test_experiment_folders.py` → **59 tests collected**; 54 `folder` references in `workspace.py` |
+
+**TWO FIGURES IN PR #248's OWN DESCRIPTION ARE WRONG, and both are corrected here rather than in
+place, because the PR body is a historical record of what was claimed:**
+
+1. ***"52 folder tests"*** — `pytest --collect-only -q` reads **59**. The seven extra are most
+   likely the independent review's own additions, which is the ordinary way this number grows; what
+   is not ordinary is publishing it once and never re-reading it.
+2. ***"six honest list fields"*** — true of the Library **screen's columns**, but it reads as six
+   new API fields, and the API gained **three**. `updated_utc` was already in `main`'s `routes.py`
+   (though not served on the list), so counting it as new would double-count. The hosted `main`
+   payload served **nine** keys; the branch serves **twelve**.
+
+Neither error changes a verdict, and both are the same shape as everything else this sweep found: a
+number that was right when written, published once, and then quoted rather than re-measured.
 
 ### QA-020 — NO NOT-FOUND STATE EXISTS (found by hosted observation, 2026-09-13)
 
