@@ -846,6 +846,119 @@ def test_the_mcp_state_is_disclosed_and_names_the_external_decisions(http):
         assert needle.lower() not in whole, f"leak in the health banner: {needle!r}"
 
 
+def test_the_two_operator_controlled_env_values_are_NEVER_echoed(monkeypatch):
+    '''*** C-2, FOUND BY INDEPENDENT REVIEW 2026-09-13: THE SWEEP ABOVE IS VACUOUS ON
+    THE ONLY TWO FIELDS AN OPERATOR OR AN ATTACKER CONTROLS. ***
+
+    The `http` fixture never sets `ISAAC_MCP_DEPLOYMENT` or
+    `ISAAC_MCP_LOCAL_SCOPES`, so every assertion above runs over a body where
+    `supplied_value` is `None` and `reason` is `"unset"`. The claim that the guard
+    "sweeps the WHOLE health banner" was true and **inert**: a forbidden substring
+    can only be found in a field that carries content, and those two carried none.
+
+    THAT IS NOT A HYPOTHETICAL. With the values set, the pre-fix code served this
+    on an uncredentialed `GET /api/health`, verbatim:
+
+        "supplied_value": "postgres://user:S3cr3tP@ss@db.internal.slac.stanford.edu:5432/isaac"
+
+    while `GET /api/experiments` answered `401` to the same caller. So this test
+    sets both variables to values that are unmistakably secrets, and asserts over
+    the WHOLE serialised banner. It is the arm the sweep above was missing, not a
+    duplicate of it.
+
+    **WHY `monkeypatch` AND A FRESH APP RATHER THAN THE `http` FIXTURE.** The binding
+    is resolved from the process environment at request time, so the variables have
+    to be set before the call; the fixture's app is built without them. A separate
+    app also keeps the poisoned environment out of every other test in this module.
+    '''
+    import json as _json
+
+    from fastapi.testclient import TestClient
+
+    from isaac_api.app import create_app
+    from isaac_api.mcp import deployment as _dep
+
+    secrets = {
+        # A pasted connection string: the exact shape the review reproduced.
+        _dep.DEPLOYMENT_ENV: (
+            "postgres://user:S3cr3tP@ss@db.internal.example.invalid:5432/isaac"
+        ),
+        # The second channel: `reason` used to interpolate the offending token out
+        # of this one as `misconfigured: {token}`.
+        _dep.LOCAL_SCOPES_ENV: "isaac:not-a-real-scope-NOTASCOPE",
+    }
+    for key, value in secrets.items():
+        monkeypatch.setenv(key, value)
+
+    body = _json.dumps(TestClient(create_app()).get("/api/health").json())
+
+    # Not one fragment of either value, at any granularity a reader could use.
+    for fragment in (
+        "S3cr3tP@ss",
+        "db.internal.example.invalid",
+        "postgres://",
+        "5432",
+        "NOTASCOPE",
+        "not-a-real-scope",
+    ):
+        assert fragment not in body, f"the health banner echoed {fragment!r}"
+
+    # AND THE FIELDS ARE STILL THERE, SAYING SOMETHING TRUE. Redaction that removed
+    # the keys would pass the assertions above while making the block less
+    # interpretable, which is not the fix — an operator still has to be able to tell
+    # "unset" from "set and not recognised".
+    block = _json.loads(body)["mcp"]
+    assert block["supplied_value"] == _dep.WITHHELD_SUPPLIED_VALUE, block
+    assert block["reason"] == "unrecognised", block
+
+
+def test_a_RECOGNISED_binding_name_IS_still_echoed_when_something_else_is_wrong(
+    monkeypatch,
+):
+    '''The other half of C-2's fix: redaction must not be indiscriminate.
+
+    `local-loopback` is one of this build's own published binding names -- it is in
+    `deployment.py`, in the OpenAPI document and in a public repository -- so
+    echoing it back tells an operator "I recognised your NAME and something else is
+    wrong", which is the one case where the value is informative and carries nothing
+    the reader did not already have. A redaction that withheld it too would make a
+    correctly-named-but-misconfigured deployment indistinguishable from a typo, and
+    that distinction is the whole diagnostic purpose of this block.
+
+    Without this arm, a `redact_supplied_value` returning a constant for EVERY input
+    would pass the test above.
+
+    ── THE BRANCH THIS HAD TO BE MOVED ONTO, recorded because the first version of
+    this test asserted the wrong one and FAILED ──────────────────────────────────
+
+    Setting a VALID `local-loopback` configuration does not exercise the echo at
+    all: `resolve_binding` returns a `LocalLoopbackDeployment`, whose `detail()`
+    carries no `supplied_value`, so the served field is `None` --
+    `assert None == 'local-loopback'`. `supplied_value` exists ONLY on the
+    `UnconfiguredDeployment` path.
+
+    So the echo is reachable exactly when a RECOGNISED name fails for a
+    DIFFERENT reason, and the shipped case is a bad scope list. That is also the
+    case where echoing is most useful, so the test is now both correct and
+    pointed at the right thing.
+    '''
+    from fastapi.testclient import TestClient
+
+    from isaac_api.app import create_app
+    from isaac_api.mcp import deployment as _dep
+
+    monkeypatch.setenv(_dep.DEPLOYMENT_ENV, _dep.LOCAL_LOOPBACK)
+    # Recognised binding, UNrecognised scope -> `UnconfiguredDeployment`, reason
+    # `misconfigured: ...`, and `supplied_value` carrying the recognised name.
+    monkeypatch.setenv(_dep.LOCAL_SCOPES_ENV, "isaac:NOT-A-SCOPE-EITHER")
+
+    block = TestClient(create_app()).get("/api/health").json()["mcp"]
+    assert block["supplied_value"] == _dep.LOCAL_LOOPBACK, block
+    # The name survives; the OFFENDING TOKEN still does not.
+    assert block["reason"] == "misconfigured: unrecognised scope", block
+    assert "NOT-A-SCOPE-EITHER" not in str(block), block
+
+
 # ==========================================================================
 # 8. the deep link an agent hands the scientist — MCP-006
 # ==========================================================================

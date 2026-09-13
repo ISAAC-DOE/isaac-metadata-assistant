@@ -444,7 +444,10 @@ class UnconfiguredDeployment:
             "binding": self.name,
             "reason": self.reason,
             "selected_by": DEPLOYMENT_ENV,
-            "supplied_value": self.supplied,
+            # REDACTED HERE rather than at the HTTP boundary, so BOTH consumers get
+            # it: this dict is also the `data=` payload of the `deployment_unconfigured`
+            # refusal an MCP caller receives. One redaction, both paths.
+            "supplied_value": redact_supplied_value(self.supplied),
             "outstanding_decisions": [
                 {
                     "id": "D1",
@@ -637,9 +640,74 @@ def resolve_binding(env: Mapping[str, str] | None = None) -> DeploymentBinding:
 
     scopes = _parse_scopes(environ.get(LOCAL_SCOPES_ENV))
     if isinstance(scopes, str):
-        return UnconfiguredDeployment(supplied=raw, reason=f"misconfigured: {scopes}")
+        # *** THE SCOPE TOKEN IS NOT INTERPOLATED, AND THAT IS THE SECOND HALF OF
+        # C-1. *** `_parse_scopes`' error names the offending token, and `reason` is
+        # served on the uncredentialed `/api/health`. `ISAAC_MCP_LOCAL_SCOPES` is
+        # another free-form operator string, so echoing a token out of it is the same
+        # channel as `supplied_value` was. The PREFIX is preserved because two tests
+        # discriminate on it (`reason.startswith("misconfigured:")`), and the specific
+        # token is available to the operator in their own environment and in this
+        # process's own logs -- neither of which is a public route.
+        _ = scopes  # the specific token is deliberately not served
+        return UnconfiguredDeployment(supplied=raw, reason="misconfigured: unrecognised scope")
     session = (environ.get(LOCAL_SESSION_ENV) or "").strip() or None
     return LocalLoopbackDeployment(scopes=scopes, tutorial_session_id=session)
+
+
+#: What `supplied_value` says when the operator's value is NOT one of the two
+#: binding names this build ships as literals.
+#:
+#: *** C-1, FOUND BY INDEPENDENT REVIEW 2026-09-13. THE VALUE USED TO BE ECHOED
+#: RAW, ON `/api/health`, WHICH ANSWERS `200` WITH NO CREDENTIAL. *** Reproduced:
+#: with `ISAAC_MCP_DEPLOYMENT=postgres://user:S3cr3tP@ss@db.internal.slac.stanford.edu:5432/isaac`
+#: an unauthenticated `GET /api/health` returned that string verbatim, while
+#: `GET /api/experiments` returned `401` on the same request. `ISAAC_MCP_DEPLOYMENT`
+#: is a free-form operator string; nothing stops a mistaken paste of a connection
+#: string, a bearer token or an internal hostname into it, and this operation is
+#: exactly where a mistaken paste becomes public.
+#:
+#: **AND THE SAME CHANGE THAT ADDED THE ECHO ADDED A SERVED CLAIM DENYING IT.**
+#: The operation's own OpenAPI description says "**Nothing confidential is in it**
+#: — no credential of any kind ... and nothing describing the environment this
+#: service runs in". That was false for one commit. The claim is KEPT and the echo
+#: is redacted, rather than the reverse: the claim is the behaviour this surface
+#: should have, and weakening it to match a leak would have been the wrong repair.
+#:
+#: **WHY A FIXED MARKER AND NOT A LENGTH OR A PREFIX.** A character count of an
+#: unrecognised value is a (small) fact about a possible secret, and a prefix is a
+#: larger one. `reason` already distinguishes `unset` from `unrecognised` from
+#: `reserved_pending_decision` from `misconfigured: ...`, which is what an operator
+#: needs to act; the VALUE only ever helped spot a typo, and a typo is not worth a
+#: disclosure channel on an uncredentialed route. An operator who needs to see what
+#: they set can read their own environment.
+WITHHELD_SUPPLIED_VALUE = "withheld"
+
+#: The two values that ARE safe to echo: this build's own published binding names,
+#: which appear in this module, in the OpenAPI document and in the public
+#: repository. Echoing one back tells an operator "I recognised your name and
+#: something else is wrong", which is the one case where the value is informative
+#: and carries nothing the reader did not already have.
+#:
+#: `RESERVED_BINDING_NAMES` is deliberately NOT in this set. Those are withheld from
+#: the served block already -- see `disclosure()`'s note on withdrawing them -- and a
+#: reserved name is a placeholder for an infrastructure decision, so confirming which
+#: one an operator selected says something about intent rather than about code.
+_ECHOABLE_BINDING_NAMES: frozenset[str] = frozenset({LOCAL_LOOPBACK, OAUTH_RESOURCE_SERVER})
+
+
+def redact_supplied_value(raw: str | None) -> str | None:
+    """The operator's `ISAAC_MCP_DEPLOYMENT` value, safe to serve.
+
+    `None` stays `None` -- nothing was supplied, and an empty disclosure is the
+    honest one. A recognised binding name is echoed. **Everything else becomes
+    :data:`WITHHELD_SUPPLIED_VALUE`, unconditionally and without inspecting the
+    content**, which is what makes this fail closed: a future value nobody
+    anticipated is withheld by default rather than by a rule that has to have
+    predicted it.
+    """
+    if raw is None:
+        return None
+    return raw if raw in _ECHOABLE_BINDING_NAMES else WITHHELD_SUPPLIED_VALUE
 
 
 #: The four postures an operator has to be able to tell apart. **MCP-003.**
