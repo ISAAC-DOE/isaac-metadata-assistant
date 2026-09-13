@@ -171,9 +171,17 @@ the brief forbids.*
 
 > **LINE NUMBER CORRECTED 2026-09-12 (`QA-014`), and this is the citation the withdrawal in §4
 > diagnosed and then failed to fix.** It read `…scientist-capture-data-contract.md:480`. **`:480`
-> is no longer stale — it is WRONG, which is worse:** it now resolves to **`### DECISION D3 —
-> 'submitted' is the one genuinely new *stored* state`**, a different decision entirely. An
-> operator following it would have read D3 and believed it was D7. `:1100` is D7; `:1089` is its
+> is no longer stale — it is WRONG, which is worse:** it now lands **inside the section headed
+> `### DECISION D3 — 'submitted' is the one genuinely new *stored* state`**, a different decision
+> entirely. An operator following it would have read D3 and believed it was D7.
+>
+> **PRECISION CORRECTED 2026-09-13, by an independent review of the commit that wrote this note.**
+> The sentence above used to say `:480` *"resolves to"* that heading, which reads as though `:480`
+> **is** the heading line. It is not: measured, `:478` is the heading and `:480` is the second
+> line of D3's body (`Every existing status is recomputed from pending_count / draft_ok / …`). The
+> operator-facing conclusion is unchanged and is the reason this note exists — `:480` is inside
+> D3 — but quoting a heading at a line that is not the heading, in a document an operator reads
+> before applying a migration, is the same class of imprecision this whole note is about. `:1100` is D7; `:1089` is its
 > enclosing §8. Re-derive rather than trusting either number:
 > `grep -n 'DECISION D7' docs/superpowers/specs/2026-08-08-scientist-capture-data-contract.md`.
 >
@@ -315,9 +323,17 @@ absence.
 > **WHAT IT GOT WRONG: IT CHECKED THE WRONG DOCUMENT.** It tested the citation against
 > [`isaac-runs-stage-2-contract.md`](isaac-runs-stage-2-contract.md), which genuinely has no §8 —
 > and which is **not the document this packet cites.** §1 of this very file carries the path, four
-> lines of prose above where the note was written ~~four lines~~ — **it is 122 lines (`:166` versus
-> `:288`), corrected 2026-09-12; "four lines above" made the miss sound careless when the real
-> lesson is that distance is irrelevant: the sweep did not grep, it recalled**:
+> lines of prose above where the note was written ~~four lines~~ ~~**it is 122 lines (`:166`
+> versus `:288`)**~~ — **BOTH FIGURES ARE WITHDRAWN, 2026-09-13, and no third one replaces them.**
+> "four lines above" made the miss sound careless; "122 lines" was measured once and then went
+> stale, because `:288` is no longer where this note sits — the file has been edited since, and
+> **a line-number distance inside a document that keeps being edited is not evidence of anything,
+> it is a hostage.** That is not a small irony: *the sentence's own point is that distance is
+> irrelevant*, so stating a distance at all was the defect, and stating a wrong one in an operator
+> packet is how this file has been caught before. Re-derive if the distance ever matters:
+> `grep -n 'scientist-capture-data-contract' docs/migration-approval-packet-0002.md | head -1`.
+> **The lesson that survives both figures is the one that was always the point: the sweep did not
+> grep, it recalled**:
 >
 > ```
 > :165  … Contract §8 DECISION D7
