@@ -1,11 +1,17 @@
 import './chrome.css';
 import { Link } from 'react-router-dom';
-import { LayoutList, ShieldCheck, Settings } from './icons';
+import { Inbox, LayoutList, ShieldCheck, Settings } from './icons';
 import { LABELS } from '../lib/labels';
 import { ROUTES } from '../lib/routes';
 import type { LucideIcon } from './icons';
 
-export type NavKey = 'experiments' | 'memory' | 'governance' | 'statistics' | 'settings';
+export type NavKey =
+  | 'experiments'
+  | 'imports'
+  | 'memory'
+  | 'governance'
+  | 'statistics'
+  | 'settings';
 
 /**
  * THE PRIMARY DESTINATIONS — THREE, down from five (2026-09-13).
@@ -48,14 +54,54 @@ export type NavKey = 'experiments' | 'memory' | 'governance' | 'statistics' | 's
  * it would be taking a product decision nobody took. Raised in the ledger as an
  * open question for Krish instead.
  *
- * **`Historical Import` is NOT added here.** It is one of the three named
+ * ~~**`Historical Import` is NOT added here.** It is one of the three named
  * top-level destinations, and there is no import pipeline behind it yet. §15's
  * *"build nothing that implies any of it exists"* forbids offering the slot
  * before the destination; adding it would be a nav item that teaches a
- * scientist a capability this build does not have.
+ * scientist a capability this build does not have.~~
+ *
+ * **REVERSED 2026-09-13, and kept struck rather than deleted because "this is
+ * deliberately absent" is exactly the kind of claim a future session acts on —
+ * by re-deleting it.** The decline was CORRECT when it was written and its
+ * condition is now met: the destination exists. `HIST-001`, `HIST-004` and
+ * `HIST-003a` shipped in the same change that adds this item — nine HTTP
+ * operations over an import session, a review surface over them, and a
+ * deterministic reconstruction whose output enters the existing proposal review
+ * pipeline. So the item no longer teaches a capability this build lacks.
+ *
+ * **AND THE HALF OF §15 THE DECLINE RESTED ON IS STILL LOAD-BEARING, which is
+ * why the destination says what it cannot do rather than implying otherwise.**
+ * It cannot open a file a scientist points at; it cannot parse a `.mac` or a
+ * spreadsheet (`BL15-001`/`HIST-002` are blocked on a corpus this repository
+ * does not hold, and §5 forbids designing a parser against zero examples); it
+ * encodes no beamline convention (`BL15-002`, same block); and it does not
+ * create an experiment for you (`HIST-005`). Every one of those is stated on the
+ * surface, per source or per step, rather than in a banner — because the answer
+ * differs per source and a banner would be wrong for half of them.
+ *
+ * **THE ORDER IS THE PRODUCT'S**, not alphabetical and not by age: `Experiments`
+ * is the home, `Historical Import` is the second pillar, and the two
+ * scientist-facing destinations sit together above `Governance & Safety` and
+ * `Settings & API`.
  */
 const ITEMS: { key: NavKey; label: string; icon: LucideIcon; to: string }[] = [
   { key: 'experiments', label: LABELS.navExperiments, icon: LayoutList, to: ROUTES.experiments },
+  /*
+   * `Inbox` — "content that is waiting to be placed", which is `icons.tsx`'s own
+   * description of that glyph and is exactly what a source bundle is.
+   *
+   * DELIBERATELY NOT `Upload`, which this file also exports: nothing about this
+   * destination uploads anything, and a glyph that said so would be the first
+   * false claim a reader met. Not `FolderIcon` either — that mark is reserved for
+   * the Library's virtual folder path and its own comment explains why a folder
+   * metaphor is already carrying risk here.
+   *
+   * THE GLYPH IS REUSED (`revUnmapped` wears it too) AND THAT IS CONSISTENT
+   * RATHER THAN A COLLISION: an unmapped note and an unparsed source bundle are
+   * the same fact in two places — content ISAAC holds and has not placed. Both
+   * sites pair it with a text label, which is this file's standing rule.
+   */
+  { key: 'imports', label: LABELS.navImports, icon: Inbox, to: ROUTES.imports },
   { key: 'governance', label: LABELS.navGovernance, icon: ShieldCheck, to: ROUTES.governance },
   { key: 'settings', label: LABELS.navSettings, icon: Settings, to: ROUTES.settings },
 ];

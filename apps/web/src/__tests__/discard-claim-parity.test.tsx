@@ -252,23 +252,93 @@ const NEVER_SENT_CONTROLS = DISCARD_COPY_ENTRIES.filter(
 // ═══════════════════════════════════════════════════════════════════════════════
 
 describe('§1 the deletion this copy must not claim does not exist', () => {
-  it('the ONE DELETE this client declares is a tutorial session, and reaches no record content', () => {
+  /*
+   * *** THE COUNT WENT 1 -> 3 ON 2026-09-13, AND THE INVARIANT DID NOT MOVE.
+   * The assertion is rewritten to pin the INVARIANT rather than the number,
+   * because the number was never the property §3 rests on — and this is the shape
+   * `CLAUDE.md` §11 records for a guard that pinned a count where a property was
+   * meant. ***
+   *
+   * ~~expect(deleteCount).toBe(1)~~
+   * ~~expect(deletePaths).toEqual(['/tutorial/sessions/${enc(sessionId)}'])~~
+   *
+   * Historical Import added two: `DELETE /imports/{id}` discards an import
+   * SESSION — a working area the server itself describes as not part of the
+   * durable record store — and `DELETE /imports/{id}/sources/{sourceId}` removes
+   * one entry from that session's source MANIFEST, which is metadata about a file
+   * this build never opened.
+   *
+   * NEITHER REACHES RECORD CONTENT, and that is what §3 needs. The import
+   * operation's own description says so in terms: every proposal a session sent
+   * stays on the record it was sent to, and so does the note behind it — which is
+   * precisely why a session is discardable at all while a note and a proposal are
+   * not. The append-only history tables refuse a `DELETE` mechanically
+   * (`db_write._APPEND_ONLY_TABLES`).
+   */
+  it('every DELETE this client declares reaches no note, record, run, conflict, asset or answer', () => {
     /*
-     * NOT "there is no DELETE" — there is exactly one, and stating the stronger claim
-     * would have been the same kind of error this file exists to catch. `git grep` it:
-     * `api.disposeTutorialSession` sends `DELETE /tutorial/sessions/{id}`, and a
-     * worked-example session is temporary, synthetic, and never persisted as a normal
-     * experiment (`PostgresOrdinaryStore.refuse_if_not_persistable`).
+     * NOT "there is no DELETE" — there are three, and stating the stronger claim
+     * would have been the same kind of error this file exists to catch.
      *
-     * What matters for §3 is that no note, record, run, conflict, asset or answer has a
-     * DELETE, so no Discard control could truthfully claim one even if it wanted to.
+     * What matters for §3 is that no note, record, run, conflict, asset or answer
+     * has a DELETE, so no Discard control could truthfully claim one even if it
+     * wanted to. That is now asserted as a PREDICATE over the paths rather than as
+     * an equality against one literal, so a fourth DELETE to a working area passes
+     * and a first DELETE to a note fails.
      */
     const api = rawSource('lib/api.ts');
-    const deletePaths = [...api.matchAll(/const path = `([^`]+)`;\s*\n\s*const res = await request\(path, \{ method: 'DELETE' \}\)/g)]
-      .map((m) => m[1]);
+    const deletePaths = [
+      ...api.matchAll(
+        /const path = `([^`]+)`;\s*\n\s*const res = await request\(path, \{ method: 'DELETE' \}\)/g,
+      ),
+    ].map((m) => m[1]);
     const deleteCount = [...api.matchAll(/method:\s*'DELETE'/g)].length;
-    expect(deleteCount).toBe(1);
-    expect(deletePaths).toEqual(['/tutorial/sessions/${enc(sessionId)}']);
+
+    // The enumeration is still asserted — it is how a reviewer sees a new one —
+    // but it is the LIST that is pinned, with each member's justification above.
+    expect(deletePaths.sort()).toEqual([
+      '/imports/${enc(importId)}',
+      '/imports/${enc(importId)}/sources/${enc(sourceId)}',
+      '/tutorial/sessions/${enc(sessionId)}',
+    ]);
+    // Every DELETE is accounted for by the list — none is written some other way.
+    expect(deleteCount).toBe(deletePaths.length);
+
+    /*
+     * THE PROPERTY, over the paths. `RECORD_CONTENT` is the six nouns §3's ban
+     * rests on; a DELETE naming any of them would make a Discard control's claim
+     * ("this was never sent") potentially false, because a delete would exist.
+     */
+    const RECORD_CONTENT = /(notes|experiments|runs|conflicts|assets|answers|proposals)/;
+    for (const path of deletePaths) {
+      expect(path, `${path} names record content`).not.toMatch(RECORD_CONTENT);
+    }
+  });
+
+  it('MUTATION-GUARDED: the record-content predicate can actually fail', () => {
+    /*
+     * Guards the guard above. A `not.toMatch` over three paths that never
+     * contained the nouns passes trivially, so the predicate is proven to fire on
+     * the exact shapes it exists to refuse — otherwise widening the enumeration
+     * would have quietly widened the property too.
+     */
+    const RECORD_CONTENT = /(notes|experiments|runs|conflicts|assets|answers|proposals)/;
+    for (const forbidden of [
+      '/experiments/${enc(id)}/notes/${enc(noteId)}',
+      '/experiments/${enc(id)}',
+      '/experiments/${enc(id)}/runs/${enc(runId)}',
+      '/experiments/${enc(id)}/proposals/${enc(proposalId)}',
+    ]) {
+      expect(forbidden).toMatch(RECORD_CONTENT);
+    }
+    // ...and does NOT fire on the three that are legitimately there.
+    for (const allowed of [
+      '/imports/${enc(importId)}',
+      '/imports/${enc(importId)}/sources/${enc(sourceId)}',
+      '/tutorial/sessions/${enc(sessionId)}',
+    ]) {
+      expect(allowed).not.toMatch(RECORD_CONTENT);
+    }
   });
 
   it('the component behind every Discard cannot issue a request of any kind', () => {

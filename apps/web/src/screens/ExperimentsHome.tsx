@@ -7,7 +7,7 @@ import {
   type ReactNode,
   type RefObject,
 } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { AppShell } from '../components/AppShell';
 import { TopBar } from '../components/TopBar';
 import { LeftNav } from '../components/LeftNav';
@@ -17,7 +17,7 @@ import { LibraryToolbar } from '../components/LibraryToolbar';
 import { FolderBreadcrumbs, FolderList } from '../components/LibraryFolders';
 import { TutorialPromotion } from '../components/TutorialPromotion';
 import { LoadingPanel, BackendDown } from '../components/FetchStates';
-import { Compass, LayoutList, Plus, ShieldCheck } from '../components/icons';
+import { Compass, Inbox, LayoutList, Plus, ShieldCheck } from '../components/icons';
 import { LABELS } from '../lib/labels';
 import { ROUTES } from '../lib/routes';
 import { api } from '../lib/api';
@@ -708,10 +708,25 @@ function EmptyExperiments({
             moment `POST /api/experiments` shipped. Leaving it would have been the
             one failure this screen's whole comment history is about.
 
-            What it does NOT claim: it does not promise import. There is still no
+            ~~What it does NOT claim: it does not promise import. There is still no
             import path — `POST /api/uploads` refuses every upload by design — so
             the sentence names creating, validating and the demo, which are the
-            three things a reader can actually do from here.
+            three things a reader can actually do from here.~~
+
+            **CORRECTED 2026-09-13, and struck rather than deleted because "there
+            is still no import path" is exactly the kind of claim a future session
+            acts on — by deleting the card below.** There IS one now:
+            `HIST-001`/`HIST-004`/`HIST-003a` shipped nine operations over an
+            import session and a review surface over them, so the omission stopped
+            being honesty the moment they landed. This is `UX-016`'s import half: a
+            scientist with zero experiments who wants to RECOVER rather than CREATE
+            had nowhere to go from the one screen they land on.
+
+            WHAT IS STILL TRUE, and is why the copy says "bring in work you already
+            have" rather than "import your files": `POST /api/uploads` is
+            unchanged and still refuses every upload, and Historical Import does
+            not open a file you point it at. It records where the file is. The
+            destination says so itself, per source.
           */}
           <p className="queue-empty-body">{LABELS.emptyExperimentsBody}</p>
         </div>
@@ -789,6 +804,34 @@ function EmptyExperiments({
           the same docstring's parity claim: it calls the same `validate_official`
           over the same vendored schema that the per-experiment validation uses.
         */}
+        {/*
+          HISTORICAL IMPORT — `UX-016`'s import half, and the second of the
+          product's two scientist-facing pillars.
+
+          It is a LINK and not a button, deliberately: it goes to a destination
+          that exists in the nav, and a button that navigates is a button a reader
+          cannot middle-click, bookmark or open in a new tab. The other three cards
+          act in place (create a record, launch the walkthrough, open a tab), which
+          is why they are buttons.
+
+          The description promises no upload. See the struck note above the lede
+          for what changed and what did not.
+        */}
+        <li className="queue-empty-action">
+          <span className="queue-empty-action-mark" aria-hidden="true">
+            <Inbox size={18} strokeWidth={1.75} />
+          </span>
+          <div className="queue-empty-action-main">
+            <h3 className="queue-empty-action-title">{LABELS.navImports}</h3>
+            <p className="queue-empty-hint">{LABELS.historicalImportHint}</p>
+          </div>
+          <div className="queue-empty-action-cta">
+            <Link className="btn btn-secondary queue-empty-cta" to={ROUTES.imports}>
+              {LABELS.actionOpenHistoricalImport}
+            </Link>
+          </div>
+        </li>
+
         <li className="queue-empty-action">
           <span className="queue-empty-action-mark" aria-hidden="true">
             <ShieldCheck size={18} strokeWidth={1.75} />

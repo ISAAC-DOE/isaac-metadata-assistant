@@ -489,7 +489,20 @@ class SyntheticFixtureKeyValueParser:
     """
 
     parser_id: str = "synthetic_fixture_key_value"
-    display_name: str = "Synthetic fixture (key = value)"
+    #: WHAT A SCIENTIST IS SHOWN, and it deliberately does not say "fixture".
+    #:
+    #: ``display_name`` reaches a product screen verbatim — it is interpolated
+    #: into every parsed source's ``parse_detail`` ("Read by …"). "Fixture" is this
+    #: project's test-harness vocabulary, and
+    #: ``apps/web/src/__tests__/product-facing-language.test.tsx`` retires it as
+    #: product copy; it caught the frontend half of this surface using it. That
+    #: guard reads ``apps/web/src`` only — its own header names backend-served copy
+    #: as a live gap it cannot see — so this string is register-checked by review,
+    #: which is what this comment is for.
+    #:
+    #: ``parser_id`` KEEPS THE ENGINEERING NAME on purpose: it is a machine-readable
+    #: identifier a client branches on, not a sentence anybody reads.
+    display_name: str = "Example source (key = value)"
 
     def can_parse(self, source: SourceReference) -> bool:
         return source.kind == SOURCE_KIND_SYNTHETIC_FIXTURE
