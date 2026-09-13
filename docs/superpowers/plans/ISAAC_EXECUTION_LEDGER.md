@@ -75,8 +75,16 @@ through a pipe; checkout named with every count):
   frontend   npx vitest run           -> 208 files / 5638 tests, exit 0   (baseline 208/5525 -> +113)
   types      npx tsc -b               -> exit 0
   snapshot   --check with BOTH --out and --detail-out -> exit 0, both artifacts, no drift
-  browser    re-run after the final BACKEND change, because the mutation and trusted suites
-             exercise the capture write path and a passing earlier run would not have covered it
+  browser    RE-RUN AFTER THE FINAL BACKEND CHANGE and all green — because the mutation and
+             trusted configs exercise the capture write path, so the earlier green run would not
+             have covered it:
+               read-only 1043 passed / 557 skipped, exit 0   (skips all pre-existing host-project
+                 gates: layout-widths 256, a11y-narrow 200, visual-sweep 56, statistics-states 44,
+                 dialogs 1)
+               mutation  121 passed, exit 0
+               trusted     8 passed, exit 0  — the ONLY end-to-end walk that exercises proposal
+                 acceptance; everywhere else it answers 409 human_actor_required by design
+               bench     NOT RUN, and reported unrun rather than passing
   a11y       darwin MEASURED, unmoved: 560 passed / 200 skipped / 0 failed;
              A11Y_BASELINE_TOTAL_NODES 877/877, 70 cells, DARWIN_CARRIED_FORWARD = [].
              LINUX UNVERIFIED — CI is the authority; a green macOS run is not evidence of one.
