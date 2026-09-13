@@ -47,6 +47,7 @@ import {
   SIDE_REVISION,
   SUBMITTED_IMMUTABLE_NOTE,
   SUBMITTED_REVISION_HEADING,
+  submittedRevisionText,
   WORKING_CHANGES_HEADING,
   actorBasisNote,
   actorText,
@@ -211,13 +212,14 @@ function SubmittedVersusWorking({ history }: { history: ApiRevisionHistory }) {
         <div className="revhist-working-row">
           <dt className="revhist-working-label">{SUBMITTED_REVISION_HEADING}</dt>
           <dd className="revhist-working-value">
-            {state.revisionNo === null ? (
-              'None'
-            ) : (
-              <>
-                Revision <span className="mono">{state.revisionNo}</span>
-              </>
-            )}
+            {/*
+              C-4 — `submittedRevisionText`, NOT `revisionNo === null ? 'None'`.
+              `revisionNo` is null for BOTH `unknown` and `never_submitted`, and on
+              every deployment shipped today the state is `unknown`, so this cell
+              read "None" about a history that had not been read. The helper carries
+              the reasoning; `None` survives for the one state where it is a fact.
+            */}
+            {submittedRevisionText(state)}
             <span className="revhist-working-note">{SUBMITTED_IMMUTABLE_NOTE}</span>
           </dd>
         </div>

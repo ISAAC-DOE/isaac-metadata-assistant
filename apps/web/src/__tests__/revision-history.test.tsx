@@ -38,6 +38,7 @@ import {
   renameTrapNote,
   sideSentence,
   sideText,
+  submittedRevisionText,
   workingState,
   workingStateSentence,
 } from '../lib/revisionHistory';
@@ -934,5 +935,127 @@ describe('REV-002 · Last Submitted Revision versus Current Working Changes', ()
     // assertions above pass while telling the reader nothing.
     const sentences = seen.map(workingStateSentence);
     expect(new Set(sentences).size).toBe(4);
+  });
+});
+
+/* ── C-3 / C-4 · the two states the first version of REV-002 got wrong ────── */
+
+describe('REV-002 · the third availability state, and the cell that read "None"', () => {
+  /*
+   * BOTH FOUND BY INDEPENDENT REVIEW, 2026-09-13, and both in the state that is
+   * the ONLY one any shipped deployment reaches.
+   *
+   * C-3 · `RevisionHistoryState` has THREE members. `workingState` branched on
+   *       `!== 'available'`, so `not_applicable` — which the server's own
+   *       description calls "a fact rather than an inability: such records are
+   *       never submitted", served with **200** — was reported as "This
+   *       deployment could not read the submission history".
+   *
+   * C-4 · `revisionNo` is `null` for BOTH `unknown` and `never_submitted`, and the
+   *       panel rendered `'None'` for either. On every deployment shipped today
+   *       the tables are unapplied, so the state is `unknown` and a scientist read
+   *       **"Last Submitted Revision · None"** about a history that had not been
+   *       read — this module's own Rule 1 ("ABSENCE IS NOT A VALUE") broken by
+   *       this module.
+   *
+   * The review also noted WHY neither was caught: the `unknown` render path, the
+   * only one that ships, had no rendering coverage at all — the single test that
+   * rendered the block rendered `unchanged`. That gap is closed here too.
+   */
+
+  const NOT_APPLICABLE = {
+    state: 'not_applicable' as const,
+    reason: 'worked_example_session' as const,
+    message: 'A worked-example record is never submitted.',
+  };
+
+  it('C-3 · not_applicable is NEVER SUBMITTED, not "could not read"', () => {
+    const state = workingState(history({ availability: NOT_APPLICABLE, revisions: [] }));
+    expect(state).toEqual({ kind: 'never_submitted', revisionNo: null });
+
+    const sentence = workingStateSentence(state);
+    expect(sentence).toMatch(/no submitted revision yet/);
+    // The exact inversion this closes: an inability claimed about a successful read.
+    expect(sentence).not.toMatch(/could not read/i);
+    expect(sentence).not.toMatch(/unknown rather than no/);
+  });
+
+  it('C-3 · not_applicable stays NEVER SUBMITTED even with revisions absent', () => {
+    // The server sends no `revisions` key for a non-available state. The state must
+    // decide, not the presence of the key — otherwise the `undefined` guard below
+    // would drag it back into `unknown`.
+    const state = workingState(
+      history({ availability: NOT_APPLICABLE, revisions: undefined }),
+    );
+    expect(state.kind).toBe('never_submitted');
+  });
+
+  it('C-3 · unavailable is STILL unknown — the other direction is not broken', () => {
+    const state = workingState(
+      history({
+        availability: { state: 'unavailable', reason: 'tables_absent', message: 'x' },
+        revisions: undefined,
+      }),
+    );
+    expect(state.kind).toBe('unknown');
+    expect(workingStateSentence(state)).toMatch(/unknown rather than no/);
+  });
+
+  it('C-4 · the submitted-revision cell distinguishes "none" from "not read"', () => {
+    // The two states `revisionNo === null` could not tell apart.
+    expect(submittedRevisionText({ kind: 'unknown', revisionNo: null })).toBe(
+      'Not read on this deployment',
+    );
+    expect(submittedRevisionText({ kind: 'never_submitted', revisionNo: null })).toBe(
+      'None',
+    );
+    // ...and the two that carry a number still read as one.
+    expect(submittedRevisionText({ kind: 'unchanged', revisionNo: 4 })).toBe('Revision 4');
+    expect(submittedRevisionText({ kind: 'changed', revisionNo: 9 })).toBe('Revision 9');
+
+    // POLARITY: the four are pairwise distinct, so a helper returning one constant
+    // would fail rather than satisfy the assertions above.
+    const all = [
+      submittedRevisionText({ kind: 'unknown', revisionNo: null }),
+      submittedRevisionText({ kind: 'never_submitted', revisionNo: null }),
+      submittedRevisionText({ kind: 'unchanged', revisionNo: 4 }),
+      submittedRevisionText({ kind: 'changed', revisionNo: 9 }),
+    ];
+    expect(new Set(all).size).toBe(4);
+  });
+
+  it('C-4 · RENDERS the unknown state without the word "None" — the path that ships', async () => {
+    /*
+     * THE MISSING COVERAGE. `PGHOST` is unset in every shipped deployment, so the
+     * server answers 503 with `no_durable_storage` and this is the branch a
+     * scientist actually sees. It had no rendering test.
+     */
+    stubFetchRoutes({
+      [`GET /api/experiments/${EXP}/revisions`]: {
+        status: 503,
+        body: history({
+          availability: {
+            state: 'unavailable',
+            reason: 'no_durable_storage',
+            message: 'This deployment has no durable storage, so no submission history exists.',
+          },
+          revisions: undefined,
+          total: undefined,
+          returned: undefined,
+        }),
+      },
+    } as never);
+    render(<RevisionHistoryPanel experimentId={EXP} />);
+
+    const card = await screen.findByRole('region', {
+      name: `${SUBMITTED_REVISION_HEADING} and ${WORKING_CHANGES_HEADING}`,
+    });
+    const row = within(card).getByText(SUBMITTED_REVISION_HEADING).parentElement!;
+    expect(row.textContent).toContain('Not read on this deployment');
+    // The defect, asserted as absent rather than merely as "the new text is there".
+    expect(row.textContent).not.toContain('None');
+    // And the rename caution must NOT appear: it belongs to `unchanged` only, and
+    // there is nothing here for a resubmission to be refused against.
+    expect(within(card).queryByText(/Renaming this record does not count/)).toBeNull();
   });
 });

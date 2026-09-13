@@ -277,7 +277,47 @@ export interface WorkingState {
  * answer.
  */
 export function workingState(history: ApiRevisionHistory): WorkingState {
-  if (history.availability.state !== 'available' || history.revisions === undefined) {
+  /*
+   * *** C-3, FOUND BY INDEPENDENT REVIEW 2026-09-13. `not_applicable` IS A FACT,
+   * NOT AN INABILITY, AND THIS FUNCTION USED TO REPORT IT AS ONE. ***
+   *
+   * `RevisionHistoryState` has THREE members — `available`, `unavailable`,
+   * `not_applicable` — and the first version of this function branched on
+   * `!== 'available'`, sending `not_applicable` to `unknown`, whose sentence reads
+   * *"This deployment could not read the submission history"*.
+   *
+   * The server says the opposite, in the served description of that very
+   * operation: a worked-example record answers **`200`** with
+   * `availability.state: "not_applicable"`, *"which is a fact rather than an
+   * inability: such records are never submitted."* So the reader of a
+   * worked-example record was told the deployment had failed to read something,
+   * when it had read it successfully and the answer was "there is nothing here".
+   * It also contradicted `availabilityHeading` two blocks below on the same card.
+   *
+   * The irony is the useful part: this function was written with deliberate care
+   * NOT to collapse `unknown` into `never_submitted` — that would be a false
+   * negative on every deployment shipped today — and it collapsed
+   * `not_applicable` into `unknown` in the same breath. **Being careful about one
+   * direction of a three-way distinction is not being careful about the
+   * distinction.**
+   *
+   * Written as an explicit switch over the three states rather than as a second
+   * inequality, so a FOURTH state added later fails to compile here instead of
+   * silently inheriting whichever branch the inequality happened to send it to.
+   */
+  switch (history.availability.state) {
+    case 'not_applicable':
+      return { kind: 'never_submitted', revisionNo: null };
+    case 'unavailable':
+      return { kind: 'unknown', revisionNo: null };
+    case 'available':
+      break;
+  }
+  if (history.revisions === undefined) {
+    // `available` with no `revisions` key is not a shape the server documents, so
+    // it is read as an inability rather than as an empty history: claiming "never
+    // submitted" about a payload we cannot interpret is the false negative this
+    // whole function exists to avoid.
     return { kind: 'unknown', revisionNo: null };
   }
   const submitted = history.revisions.filter((r) => r.submission !== null);
@@ -288,6 +328,38 @@ export function workingState(history: ApiRevisionHistory): WorkingState {
       latest.content_signature === history.current_content_signature ? 'unchanged' : 'changed',
     revisionNo: latest.revision_no,
   };
+}
+
+/**
+ * WHAT THE `Last Submitted Revision` CELL SAYS — and why `'None'` is wrong for one
+ * of the four states.
+ *
+ * *** C-4, FOUND BY INDEPENDENT REVIEW 2026-09-13. *** The panel rendered
+ * `state.revisionNo === null ? 'None' : 'Revision N'`, and `revisionNo` is `null`
+ * for **both** `unknown` and `never_submitted`. On every deployment shipped today
+ * the submission-history tables are unapplied, so the state IS `unknown` — and a
+ * scientist read **"Last Submitted Revision · None"** about a record whose history
+ * had not been read at all.
+ *
+ * That is this module's own Rule 1 broken by this module: *"ABSENCE IS NOT A
+ * VALUE. 'The record now holds nothing here' and 'the record now holds something
+ * else here' are different facts and get different words."* `None` is an answer;
+ * the truth was that there was no answer.
+ *
+ * The distinction is not cosmetic. `None` tells a scientist their work has never
+ * been submitted — which, if it has been and this deployment simply cannot see the
+ * history, is exactly backwards, and is the kind of thing someone acts on.
+ */
+export function submittedRevisionText(state: WorkingState): string {
+  switch (state.kind) {
+    case 'unknown':
+      return 'Not read on this deployment';
+    case 'never_submitted':
+      return 'None';
+    case 'unchanged':
+    case 'changed':
+      return `Revision ${state.revisionNo}`;
+  }
 }
 
 /** The heading for the immutable half. Never varies: it names a kind of thing. */
