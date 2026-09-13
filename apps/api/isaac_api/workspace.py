@@ -1783,8 +1783,30 @@ def _proposal_state_payload(exp: "Experiment") -> list:
 def _authoritative_signature(exp: "Experiment") -> str:
     """Deterministic hash of the AUTHORITATIVE scientific state of an experiment.
 
-    Covers exactly ``{title, source, draft, record_id, runs}`` — the fields that
-    define the record's scientific content. It EXCLUDES ``answer_log`` (an audit
+    ~~Covers exactly ``{title, source, draft, record_id, runs}``~~ — **STALE, and
+    corrected 2026-09-13 after an independent review caught it. It covers EIGHT
+    keys:** ``{title, source, draft, record_id, folder, runs, notes, proposals}``.
+    Re-derived from the payload below rather than re-counted by eye, because a
+    five-item list in a docstring is exactly the kind of claim that goes quietly
+    false as a feature lands.
+
+    ``notes`` and ``proposals`` joined when durable capture and ingestion
+    proposals shipped; ``folder`` joined with the Experiment Library, and it HAD
+    to — ``save_versioned`` writes nothing when this hash is unchanged, so a
+    ``folder`` outside this payload would make every first assignment a silent
+    no-op.
+
+    **THE WORD "SCIENTIFIC" IS NOW DOING TOO MUCH WORK, and saying so is part of
+    the correction.** ``title`` and ``folder`` are organizational labels, not
+    scientific content, and they are in here because this hash is what decides
+    whether a WRITE HAPPENS AND A CHANGE-FEED EVENT FIRES — not because they
+    describe the science. They reach no exported record and no evidence sidecar,
+    and neither moves ``content_signature``; ``test_experiment_folders.py``
+    asserts the folder half of that over the raw bytes of both artifacts. So read
+    this as the AUTHORITATIVE-STATE hash, and treat "scientific" as the reason
+    most of its members are here rather than as a property of all of them.
+
+    These are the fields that define the record's authoritative content. It EXCLUDES ``answer_log`` (an audit
     trail, not scientific state), ``generation``/``rev``/``updated_utc`` (version
     metadata, not scientific content — excluding ``generation`` keeps a byte-stable
     no-op from churning the token), and ``created_utc`` (immutable identity). Two
