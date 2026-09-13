@@ -920,3 +920,72 @@ def test_a_RAMP_is_neither_collapsed_nor_asserted_and_that_was_ALREADY_TRUE(sent
     assert "300" not in reason and "350" not in reason and "400" not in reason, reason
     # No ReviewRequired: there are no candidates to group. See the docstring.
     assert reading.review_required == (), _explain(sentence)
+
+
+def test_every_abstention_kind_the_reader_can_PRODUCE_has_a_served_policy_row():
+    """**THE GUARD WHOSE ABSENCE LET GATE (4) SHIP WITHOUT A SERVED POLICY ROW.**
+
+    `tc.AMBIGUITY_POLICY` is SERVED to clients (`routes.py:16309`), and for two
+    commits it enumerated three pass-one outcomes while the reader produced four. A
+    scientist receiving a `words_before_the_label_name_something_else` abstention
+    would have found no rule for it in the one document that exists to explain the
+    reader's refusals — a surface publishing completeness it did not have.
+
+    **IT IS MEASURED FROM PRODUCED OUTPUT, NOT FROM A CONSTANT, AND THAT IS THE WHOLE
+    DESIGN.** Three weaker versions of this test were available and each would have
+    passed over the real gap:
+
+    * comparing `AMBIGUITY_POLICY` against `_REFUSAL_REASONS` — passes for a kind
+      that has a reason and no row, which is precisely the state that shipped;
+    * comparing it against a hand-written list of kinds — a third place to forget;
+    * asserting a COUNT — passes whenever one row is added and another removed.
+
+    So this walks real sentences, collects the `kind` of every abstention the reader
+    actually emits, and requires a served row for each. A new refusal kind cannot be
+    added without either a policy row or a corpus that never fires it — and the
+    second is caught by the emptiness assertion below.
+
+    MUTATION: deleting the `words_before_the_label_name_something_else` row from
+    `tc.AMBIGUITY_POLICY` turns this RED and names the kind.
+    """
+    corpus = [
+        # gate (4) — both families
+        "The setpoint temperature was 425 K.",
+        "The previous scan ended at 2026-01-01T00:00:00Z.",
+        # gate (1)
+        "The temperature drift was 3 K.",
+        # gate (2)
+        "The temperature was 3 K above target.",
+        # the sequence gate
+        "The temperature was 300 K, then 350 K, then 400 K.",
+        # pass two, both conditions
+        "The temperature was 425 K, maybe 3 K of drift.",
+        "The temperature was 425 K, ramped at 3 K/min",
+        # the non-kelvin and implicit-subject abstentions
+        "The temperature was 20 C.",
+        "The absorbing element was iron.",
+    ]
+    produced: set[str] = set()
+    for sentence in corpus:
+        produced.update(entry.kind for entry in _read(sentence).abstentions)
+
+    assert produced, "the corpus fired NO abstention at all, so this proves nothing"
+
+    served = {row["kind"] for row in tc.AMBIGUITY_POLICY}
+    missing = sorted(produced - served)
+    assert missing == [], (
+        f"the reader emits abstention kind(s) {missing} with no row in the SERVED "
+        f"AMBIGUITY_POLICY — a scientist gets a refusal the published policy does "
+        f"not explain. Add a row; do not delete this test."
+    )
+
+    # And every pass-one gate kind has BOTH a served row and a served reason, so the
+    # two documents cannot drift apart in either direction.
+    for kind in (
+        tc._KIND_NOT_ASSERTED,
+        tc._KIND_QUALIFIED,
+        tc._KIND_NOT_THIS_SUBJECT,
+        tc._KIND_NONE_SELECTED,
+    ):
+        assert kind in served, kind
+        assert kind in tc._REFUSAL_REASONS, kind
