@@ -191,6 +191,25 @@ def test_health_commit_null_when_neither_env_set(tmp_path, monkeypatch):
             "actor_trust_basis": None,
             "verifier_id": "unconfigured",
         },
+        # MCP-003. THE FOURTH SIBLING. This file's purpose is that the SHIPPED
+        # configuration — no deploy artifact sets `ISAAC_MCP_DEPLOYMENT` — produces
+        # exactly this banner, so the agent interface reporting `unmounted` here is
+        # the assertion that no deployment silently mounts it.
+        "mcp": {
+            "posture": "unmounted",
+            "postures": ["local-only", "oauth-mounted", "remote-ready", "unmounted"],
+            "binding": "unconfigured",
+            "reason": "unset",
+            "selected_by": "ISAAC_MCP_DEPLOYMENT",
+            "supplied_value": None,
+            "serves_transport": False,
+            "requires_loopback_peer": True,
+            "refuses_proxy_headers": True,
+            "outstanding_decisions": [
+                {"id": "D1", "status": "DEFERRED 2026-08-12"},
+                {"id": "D2", "status": "DEFERRED 2026-08-12"},
+            ],
+        },
     }
 
 

@@ -126,6 +126,40 @@ def test_health(client, monkeypatch):
             "actor_trust_basis": None,
             "verifier_id": "unconfigured",
         },
+        # MCP-003. A FOURTH SIBLING, and the whole block is written out rather than
+        # spot-checked because this test's value is that it is an EXACT comparison:
+        # a loosened one would let a future key ship unreviewed.
+        #
+        # THE SHIPPED DEFAULT IS `unmounted`, and every deploy artifact leaves it
+        # there — `ISAAC_MCP_DEPLOYMENT` is unset, so `resolve_binding` returns the
+        # unconfigured binding with `reason: "unset"`. That is not an error state and
+        # the block deliberately does not read as one.
+        #
+        # `postures` IS SERVED so a client learns the closed set from the server
+        # rather than from a literal in its bundle (`change_feed.feed_kinds`' rule),
+        # and the three flags are served so an operator can RE-DERIVE `posture`
+        # instead of trusting it.
+        #
+        # `outstanding_decisions` carries IDS AND STATUSES ONLY. The question text
+        # names the environment this service runs in, and this operation answers
+        # without credentials — see `mcp.deployment.disclosure`, which records that
+        # this block was narrowed twice during the slice that added it, the second
+        # time by its own leak guard.
+        "mcp": {
+            "posture": "unmounted",
+            "postures": ["local-only", "oauth-mounted", "remote-ready", "unmounted"],
+            "binding": "unconfigured",
+            "reason": "unset",
+            "selected_by": "ISAAC_MCP_DEPLOYMENT",
+            "supplied_value": None,
+            "serves_transport": False,
+            "requires_loopback_peer": True,
+            "refuses_proxy_headers": True,
+            "outstanding_decisions": [
+                {"id": "D1", "status": "DEFERRED 2026-08-12"},
+                {"id": "D2", "status": "DEFERRED 2026-08-12"},
+            ],
+        },
     }
     assert body["version"]
 

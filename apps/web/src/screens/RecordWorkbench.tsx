@@ -579,29 +579,40 @@ function LoadedWorkbench({
    */
   const [searchParams] = useSearchParams();
   /*
-   * THE WORKSPACE THIS URL RESOLVES TO — `resolveRecordView`, in `lib/routes.ts`.
+   * THE WORKSPACE THIS URL RESOLVES TO - `resolveRecordView`, in `lib/routes.ts`.
    *
-   * The three-branch rule used to be written out here. It moved (2026-09-13)
-   * because the WCAG 2.4.2 `document.title` floor needs the identical answer and
-   * a title naming a workspace this screen is not rendering would be a false
-   * claim about the page. Two expressions of one decision is the drift shape
-   * this repository has been caught publishing before; there is now one.
+   * The rule used to be written out here. It moved (2026-09-13) because the WCAG
+   * 2.4.2 `document.title` floor needs the identical answer, and a title naming a
+   * workspace this screen is not rendering would be a false claim about the page.
+   * Two expressions of one decision is the drift shape this repository has been
+   * caught publishing before; there is now one.
+   *
+   * **THE `?proposal=` BRANCH LIVES THERE TOO, AND THAT WAS A MERGE DECISION.**
+   * It arrived inline here, from the lane that built the agent-facing proposal
+   * deep link, in the same hour this extraction landed. Keeping it inline would
+   * have restored the second expression; dropping it would have made a
+   * `?proposal=` link RENDER `Capture & Proposals` while the page TITLE said
+   * `Record Fields` - a false claim about the page in the one place a reader
+   * cannot see the page to check it. `resolveRecordView`'s own comment carries
+   * the reasoning and the branch ORDER, which is load-bearing: a run address
+   * still wins, so a URL carrying both lands exactly where it landed yesterday.
+   * Verified behaviourally rather than structurally: that lane's own 113
+   * frontend tests, `proposal-deep-link.test.tsx` included, pass unchanged.
    */
   const activeView: RecordViewId = resolveRecordView(searchParams);
 
   /*
-   * WCAG 2.4.2 — REFINE THE ROUTE-DERIVED TITLE WITH THE RECORD'S OWN NAME.
+   * WCAG 2.4.2 - REFINE THE ROUTE-DERIVED TITLE WITH THE RECORD'S OWN NAME.
    *
    * `<DocumentTitle />` in `App.tsx` has already titled this route from the URL
-   * alone (`Record Fields · ISAAC Metadata Assistant`). This adds the one thing
-   * the URL does not carry: which record. It runs only inside
-   * `LoadedWorkbench`, i.e. only when `bundle.status === 'data'`, so the name is
-   * read from loaded data and never guessed — the not-loaded branch above keeps
-   * the floor's title and asserts nothing about the record.
+   * alone. This adds the one thing the URL does not carry: which record. It runs
+   * only inside `LoadedWorkbench`, i.e. only when `bundle.status === 'data'`, so
+   * the name is read from loaded data and never guessed - the not-loaded branch
+   * above keeps the floor's title and asserts nothing about the record.
    *
    * `stripLifecycleSuffix` is the SAME transform the visible `<h1>` and the top
-   * bar apply to this title, so the tab strip, the heading and the breadcrumb
-   * cannot disagree about what the record is called.
+   * bar apply, so the tab strip, the heading and the breadcrumb cannot disagree
+   * about what the record is called.
    */
   useDocumentTitle([workspaceLabel(activeView), stripLifecycleSuffix(detail.title)]);
 

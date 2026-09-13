@@ -109,7 +109,13 @@ describe('the Python source can actually be read', () => {
     expect(backendTuple('REVIEW_STATES')).toHaveLength(5);
     expect(backendTuple('ORIGIN_PRECEDENCE')).toHaveLength(8);
     expect(Object.keys(backendTable('SOURCE_TYPE_ORIGIN'))).toHaveLength(7);
-    expect(Object.keys(backendTable('NOTE_SOURCE_ORIGIN'))).toHaveLength(5);
+    // 5 -> 6: the backend gained `connected_agent`, the machine-callable (agent)
+    // channel — MCP-001 / CAP-006, and the first note source that maps to
+    // `assistant`, which had been an unreachable member of the origin vocabulary.
+    // MEASURED by reading the table out of the Python source, as everything in this
+    // file is; the number is a tripwire against the parser silently matching nothing,
+    // not a hand-maintained inventory.
+    expect(Object.keys(backendTable('NOTE_SOURCE_ORIGIN'))).toHaveLength(6);
   });
 });
 

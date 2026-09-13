@@ -216,7 +216,34 @@ export function resolveRecordView(search: string | URLSearchParams): RecordViewI
   const hasRunAddress =
     (params.get(RECORD_RUN_PARAM) ?? '') !== '' ||
     params.getAll(RECORD_COMPARE_PARAM).length > 0;
-  return hasRunAddress ? 'runs' : 'fields';
+  if (hasRunAddress) return 'runs';
+  /*
+   * BRANCH 3, ADDED AT MERGE TIME (2026-09-13) rather than by either lane alone.
+   *
+   * A proposal is reviewed on the `capture` workspace, so a URL carrying only
+   * `?proposal=` would otherwise open Record Fields, where
+   * `IngestionProposalsPanel` is not mounted and the parameter is silently inert.
+   * `ROUTES.recordProposal` mints `view=capture` so new links are
+   * self-describing; this covers every link it did not mint, including one built
+   * in another language against the relative path -- which is the case the
+   * agent-facing deep link exists for.
+   *
+   * A RUN ADDRESS STILL WINS, above, and the order is a decision rather than an
+   * accident: `?run=`/`?compare=` resolved to `runs` before this parameter
+   * existed, and a URL carrying both must keep landing exactly where it landed
+   * yesterday. The proposal parameter is not lost in that case -- it survives on
+   * the address and is honoured the moment the reader opens `capture`, because
+   * the two parameters are independent and `RecordWorkspaceNav` copies the whole
+   * query string.
+   *
+   * WHY IT IS HERE AND NOT IN `RecordWorkbench`, where it was written: the WCAG
+   * 2.4.2 `document.title` floor calls this function too. Left inline, a
+   * `?proposal=` deep link would have RENDERED `Capture & Proposals` while the
+   * page TITLE said `Record Fields`. Neither side of that merge conflict was
+   * correct alone.
+   */
+  const hasProposalAddress = (params.get(RECORD_PROPOSAL_PARAM) ?? '') !== '';
+  return hasProposalAddress ? 'capture' : 'fields';
 }
 
 /**
@@ -249,6 +276,39 @@ export const RUN_COMPARE_MAX = 2;
  * not have noticed following.
  */
 export const RECORD_ADDRESS_PARAM = 'at';
+
+/**
+ * WHICH PROPOSAL A LINK INTO THE CAPTURE WORKSPACE IS ABOUT —
+ * `?view=capture&proposal=01PROPOSAL…`.
+ *
+ * The SAME `?param=` mechanism as `tab`, `view`, `run`, `compare` and `at`: the
+ * value is read with `useSearchParams` and, where it is written at all, by COPYING
+ * the existing `URLSearchParams`, so the proposal id is the query VALUE and every
+ * link stays relative to the router `basename` ('' locally, '/krish' in the deployed
+ * build). No surface writes a base path of its own.
+ *
+ * WHY IT EXISTS. An agent that has just made a suggestion needs to be able to say
+ * WHERE a person reviews it, and a sentence naming an opaque proposal id is not that
+ * — the same "reachable by clicking, not by link" defect `?run=` and `?compare=`
+ * each exist to close, for the one surface in this build whose whole job is
+ * reviewing something somebody else produced.
+ *
+ * THE VALUE IS A PROPOSAL ID AND IS NEVER VALIDATED HERE. `IngestionProposalsPanel`
+ * resolves it against the window the server actually returned, and says honestly
+ * what it found. An absent or EMPTY value simply means "not focused", so there is no
+ * dead route.
+ *
+ * AND WHAT "NOT FOUND" MEANS IS DELIBERATELY NARROWER THAN IT LOOKS, which is why
+ * this parameter needs a sentence the other five did not. `?run=` can be resolved
+ * against the server by id, so Focus Run can truthfully say "no run with this id is
+ * in this record". A proposal CANNOT: the list route serves a WINDOW (oldest first
+ * by default, 50 entries), there is no read-one-proposal route, and so a window that
+ * does not contain the id is evidence of exactly one thing — that the id is not in
+ * THIS window. It is not evidence that the record does not hold it. The panel's
+ * disclosure claims only the former, and offers the controls that widen the window;
+ * nothing on that surface may ever say the proposal does not exist.
+ */
+export const RECORD_PROPOSAL_PARAM = 'proposal';
 
 export const ROUTES = {
   experiments: '/experiments',
@@ -314,6 +374,23 @@ export const ROUTES = {
     `/record/${id}?${RECORD_VIEW_PARAM}=runs${runIds
       .map((runId) => `&${RECORD_COMPARE_PARAM}=${encodeURIComponent(runId)}`)
       .join('')}`,
+  /** A deep link to ONE proposal on a record, e.g.
+   *  `/record/<id>?view=capture&proposal=<proposalId>`. Same division of labour as
+   *  `recordRun` and `recordCompare`: whole-URL links use this, while the panel
+   *  itself only ever READS the parameter and never writes one.
+   *
+   *  IT NAMES THE WORKSPACE, for `recordRun`'s reason and one more. A proposal is
+   *  reviewed on the `capture` workspace, so a URL carrying only `?proposal=` would
+   *  land the reader on Record Fields where the panel is not mounted at all — the
+   *  parameter would then be silently inert, which is the closest thing to a lie a
+   *  query parameter can be. `RecordWorkbench` ALSO resolves a bare `?proposal=` to
+   *  `capture`, exactly as it already does for `?run=`, so a link minted by
+   *  something that does not use this helper — an MCP tool building a relative path
+   *  in another language, for instance — still opens the workspace that can honour
+   *  it. The redundancy is deliberate: one half makes new links self-describing, the
+   *  other serves every link this helper did not mint. */
+  recordProposal: (id: string, proposalId: string) =>
+    `/record/${id}?${RECORD_VIEW_PARAM}=capture&${RECORD_PROPOSAL_PARAM}=${encodeURIComponent(proposalId)}`,
   complete: (id: string) => `/record/${id}/complete`,
   evidence: (id: string) => `/record/${id}/evidence`,
   /** A deep link to ONE Evidence view, e.g. `/record/<id>/evidence?view=graph`.
