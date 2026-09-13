@@ -989,3 +989,47 @@ def test_every_abstention_kind_the_reader_can_PRODUCE_has_a_served_policy_row():
     ):
         assert kind in served, kind
         assert kind in tc._REFUSAL_REASONS, kind
+
+
+@pytest.mark.parametrize("sentence", tc._VALUE_BEFORE_LABEL_RESIDUE)
+def test_the_VALUE_BEFORE_LABEL_class_is_STILL_SILENT(sentence):
+    """**A PRE-EXISTING class found by an independent adversarial hunt AFTER gate (4)
+    shipped, asserted the WRONG WAY ROUND. It is a silent LOSS, which §5 ranks worse
+    than the silent refusal gate (4) closed.**
+
+    Every label-anchored pattern is label-then-value, so a sentence putting the
+    quantity in FRONT of the label produces no match — hence no candidate AND no
+    abstention. The reader never says it saw anything.
+
+    **The tuple deliberately mixes the two halves**, because a fix has to satisfy both
+    at once: `"A 425 K temperature was used"` is a real temperature that ought to
+    read, and `"We saw a 3 K temperature drift"` is a drift that ought not to — and
+    today they are indistinguishable, both silent, for the same reason.
+
+    PRE-EXISTING, verified mechanically rather than assumed: `_TEMPERATURE_K` is
+    byte-identical to `d3473414`, so this slice neither introduced nor worsened it.
+
+    NOT FIXED: it is the DETECTOR, not a gate. See `tc._VALUE_BEFORE_LABEL_RESIDUE`
+    for why that makes it a different shape of change — `_label_bridge` and
+    `_pre_label_text` both slice on the assumption that `match.start(1)` sits after
+    the label, and it is the one change here that can only ADD candidates.
+
+    MUTATION: this pins behaviour this slice did not change; removing gate (4)
+    entirely leaves it GREEN, which isolates it as pre-existing.
+    """
+    reading = _read(sentence)
+    assert reading.candidates == (), (
+        "if this now READS, the value-before-label class has moved — delete the row "
+        "from _VALUE_BEFORE_LABEL_RESIDUE and say which half it closed"
+        + _explain(sentence)
+    )
+    assert reading.abstentions == (), (
+        "if this now DISCLOSES, the silence is closed — a strict improvement. "
+        "Delete the row and say so; do not weaken this." + _explain(sentence)
+    )
+    # The cause, asserted rather than described: no detector matches at all.
+    assert not any(
+        rule.pattern.search(sentence)
+        for rule in tc._RULES
+        if rule.label_head is not None
+    ), _explain(sentence)

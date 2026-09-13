@@ -2016,6 +2016,57 @@ AMBIGUITY_POLICY: tuple[dict[str, str], ...] = (
         ),
     },
     {
+        # GATE (4). **THIS ROW WAS MISSING FOR THREE COMMITS. `AMBIGUITY_POLICY` IS
+        # SERVED (`routes.py:16309`), so this application published a policy document
+        # enumerating three pass-one outcomes while its reader produced four.** A
+        # scientist receiving a `words_before_the_label_name_something_else`
+        # abstention would have found no rule for it in the very document that exists
+        # to explain the reader's refusals — a surface promising completeness it did
+        # not have, which is the defect class this module keeps finding in itself.
+        #
+        # **AND IT WENT MISSING A SECOND TIME, BY A PROCESS FAILURE WORTH RECORDING:**
+        # the row was written, then a mutation-testing harness that restores with
+        # `git checkout -- <file>` ran against it. That restores from HEAD, so it
+        # **discarded the uncommitted row**, and the commit whose message announced
+        # this fix (`32fd4189`) therefore contained only the TEST. The test is what
+        # caught it. **A mutation harness that restores from git destroys
+        # uncommitted work in the file it mutates — commit first, or snapshot the
+        # bytes.** (An in-process `try/finally` restore was tried before that and is
+        # worse: a timeout killed it mid-run and left this module silently corrupt
+        # but syntactically valid, because implicit string concatenation swallowed a
+        # deleted alternation.)
+        #
+        # The guard is `test_every_abstention_kind_the_reader_can_PRODUCE_has_a_
+        # served_policy_row`: it walks a corpus, collects the kinds actually emitted,
+        # and requires a row for each. A guard over `_REFUSAL_REASONS` alone would
+        # have been weaker — it would pass for a kind that has a reason and no row,
+        # which is exactly the state this row fixes.
+        "kind": "words_before_the_label_name_something_else",
+        "outcome": OUTCOME_ABSTENTION,
+        "rule": (
+            "A sentence stated a value the way a field is stated, but the words in "
+            "FRONT of the label re-named what the label denotes: 'the SETPOINT "
+            "temperature was 425 K' states a setpoint, 'the MAXIMUM temperature' an "
+            "extremum, 'the AMBIENT temperature' the room's, and 'the PREVIOUS scan "
+            "ended at ...' a different measurement's time. The two forward gates "
+            "cannot see any of it — one reads label-to-value and the other "
+            "value-to-end — so what may sit in front of the label is a THIRD "
+            "ALLOWLIST: clause-level adjuncts, one determiner, and a closed set of "
+            "words that LOCATE the quantity ('sample', 'cryostat', 'scan') or say "
+            "how it was obtained ('measured', 'recorded') rather than re-subject "
+            "it. The direction is the decision, for the third time in this reader: "
+            "a list of forbidden modifiers fails OPEN on the next one, while an "
+            "allowlist costs a reading and DISCLOSES it. This outcome does NOT "
+            "claim the value is not the field's — an ambient or a cryostat "
+            "temperature may be exactly what was meant, and deciding that it is "
+            "not would be as much a scientific judgement as deciding that it is. "
+            "It reports that the sentence does not settle it. The value is not "
+            "read, the statement is reported, the text is kept verbatim, and the "
+            "same claim stated with the qualifier BEHIND the label — 'the "
+            "temperature of the sample was ...' — is read normally."
+        ),
+    },
+    {
         "kind": "several_values_and_none_selected",
         "outcome": OUTCOME_ABSTENTION,
         "rule": (
@@ -3020,6 +3071,62 @@ _RUN_MISATTRIBUTION_CLOSED: tuple[str, ...] = (
     "The last scan ended at 2026-01-01T00:00:00Z",
     "The calibration scan ended at 2026-01-01T00:00:00Z",
     "The reference scan started at 2026-01-01T00:00:00Z",
+)
+
+#: *** A THIRD, PRE-EXISTING CLASS, FOUND 2026-09-13 BY AN INDEPENDENT ADVERSARIAL
+#: HUNT AFTER GATE (4) SHIPPED — AND IT IS A SILENT **LOSS**, WHICH §5 RANKS WORSE
+#: THAN A SILENT REFUSAL. Named here because nothing in this module or the ledger
+#: names it, NOT fixed because it is the DETECTOR and not a gate. ***
+#:
+#: **THE VALUE MAY PRECEDE THE LABEL, AND THEN NOTHING HAPPENS AT ALL.** Every
+#: label-anchored pattern is written label-then-value —
+#: ``\btemperatures?\b[^.;:]{0,40}?<number>\s*K`` — so a sentence that puts the
+#: quantity in FRONT of the label produces **no match**, and therefore no candidate
+#: AND no abstention. Measured at this head, and the detector pattern is
+#: byte-identical to ``d3473414`` (``git diff d3473414 HEAD -- <this file>`` shows
+#: zero changes to ``_TEMPERATURE_K``), so this is pre-existing in full:
+#:
+#:     "A 425 K temperature was used."          -> nothing, SILENT   <- a LOSS
+#:     "We ran at a 425 K temperature."         -> nothing, SILENT   <- a LOSS
+#:     "The 425 K temperature was held."        -> nothing, SILENT   <- a LOSS
+#:     "We saw a 3 K temperature drift."        -> nothing, SILENT   <- correct outcome
+#:     "A 3 K temperature error was seen."      -> nothing, SILENT   <- correct outcome
+#:     "There was a 3 K temperature offset."    -> nothing, SILENT   <- correct outcome
+#:
+#: **THE TWO HALVES ARE OPPOSITE AND THAT IS THE WHOLE REASON TO RECORD IT.** The
+#: last three are *drift*, *error* and *offset* — refusing them is RIGHT, and only
+#: the silence is suboptimal. The first three are ordinary dictation of a real
+#: temperature, refused just as silently. So the class contains both a correct
+#: refusal and a genuine reading loss, produced by the same cause, and neither is
+#: disclosed: the reader never knows it saw anything. That is worse than gate
+#: (4)'s abstentions, which at least tell the scientist to restate.
+#:
+#: **WHY IT IS NOT FIXED HERE, with the shape of the fix named so it is not
+#: re-derived.** It is not a gate, it is the DETECTOR. Every gate in this module is
+#: built on the premise that the permissive pattern matches MORE than it may read —
+#: *"the permissive pattern is kept as the DETECTOR — that is what makes a refusal
+#: disclosable instead of silent"*. Widening ``_TEMPERATURE_K`` to match
+#: value-then-label would change what all four gates see, what the restatement pass
+#: is allowed to scan, and what every span-overlap guard computes, because
+#: ``match.start(1)`` would no longer sit after the label and :func:`_label_bridge`
+#: and :func:`_pre_label_text` both slice on that assumption. It is also the one
+#: change in this module that can only ADD candidates, so it must arrive with its own
+#: adversarial corpus rather than beside a gate. A slice of its own.
+#:
+#: Asserted the wrong way round by
+#: ``test_the_VALUE_BEFORE_LABEL_class_is_STILL_SILENT`` so closing it is a reviewed
+#: deletion rather than a documented item quietly going away.
+_VALUE_BEFORE_LABEL_RESIDUE: tuple[str, ...] = (
+    # The LOSSES: legitimate temperatures, read by nothing, disclosed by nothing.
+    "A 425 K temperature was used.",
+    "We ran at a 425 K temperature.",
+    "The 425 K temperature was held.",
+    # The CORRECT refusals, silent for the identical reason. Kept in the same tuple
+    # deliberately: a fix that discloses one must disclose the other, and a fix that
+    # reads the first three must NOT read these.
+    "We saw a 3 K temperature drift.",
+    "A 3 K temperature error was seen.",
+    "There was a 3 K temperature offset.",
 )
 
 #: **THE OTHER SIDE OF THE SAME LEDGER: the false NEGATIVES this gate costs,
