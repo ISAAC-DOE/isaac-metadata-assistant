@@ -1,5 +1,17 @@
 /*
- * HISTORICAL IMPORT — every authored string the surface renders, in one place.
+ * HISTORICAL IMPORT — the surface's CLAIM-BEARING copy, in one place.
+ *
+ * ~~every authored string the surface renders~~ — **FALSE, corrected 2026-09-13 after an
+ * independent review measured it (M-6).** At least six authored, user-visible strings live
+ * in `screens/HistoricalImport.tsx` itself — form labels and step headings such as
+ * `Name this import (optional)`, `Checksum (optional)`, `Read the Sources`,
+ * `Sources disagree`, `No value was chosen`, `Send it to which record?`.
+ *
+ * THE DISTINCTION MATTERS BECAUSE OF WHAT THIS MODULE IS FOR: it exists so the surface's
+ * CLAIMS sit inside the `upload-claim-parity` ratchet. A header promising "every authored
+ * string" tells the next reader that adding copy to the screen is safe because the ratchet
+ * covers it. It does not. Copy that makes a claim about what this build reads, refuses or
+ * stores belongs HERE; a field label does not have to.
  *
  * WHY A CONTENT MODULE AND NOT INLINE JSX. `transcriptCaptureContent.ts`,
  * `settingsContent.ts` and `mcpConnectContent.ts` each exist for this reason and

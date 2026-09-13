@@ -69,8 +69,14 @@ export function AppRoutes() {
 }
 
 /** Router basename from Vite's base ('/' locally and under vitest; '/krish/'
- * in the deployed build). Trailing slash stripped: '' means no basename. */
-const BASENAME = import.meta.env.BASE_URL.replace(/\/+$/, '');
+ * in the deployed build). Trailing slash stripped: '' means no basename.
+ *
+ * EXPORTED for `screens/NotFound`, which has to show the reader the address they
+ * actually typed. `useLocation().pathname` is basename-STRIPPED by React Router, so
+ * a reader who asked for `/krish/validator` was being shown `/validator` — see the
+ * note in that file. Exported rather than recomputed so the two can never disagree
+ * about what the basename is. */
+export const BASENAME = import.meta.env.BASE_URL.replace(/\/+$/, '');
 
 export default function App() {
   return (

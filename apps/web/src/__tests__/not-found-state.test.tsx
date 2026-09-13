@@ -22,10 +22,25 @@ import { NotFound } from '../screens/NotFound';
 import { LABELS } from '../lib/labels';
 import { ROUTES } from '../lib/routes';
 
+/*
+ * *** BOTH HARNESSES BELOW USED TO OMIT `basename`, AND THAT IS WHY A REAL DEFECT
+ * SHIPPED PAST THEM. *** React Router STRIPS the basename from
+ * `useLocation().pathname`, and the deployed basename is `/krish`. With no
+ * `basename` in the fixture, `useLocation().pathname` equals the whole entry and
+ * the assertion "shows the address that was asked for" passed — while hosted, a
+ * reader who typed `/krish/validator` was shown `/validator`.
+ *
+ * The fixture could not produce the input the assertion exists for, which is this
+ * programme's most-repeated defect shape. The deployed configuration is now driven
+ * explicitly, in its own test, rather than left to a default that happens to agree.
+ */
+const DEPLOYED_BASENAME = '/krish';
+
 /** The real router, entered at an address no `<Route>` declares. */
-function renderAtUnknownPath(path: string) {
+function renderAtUnknownPath(path: string, basename?: string) {
   return render(
     <MemoryRouter
+      basename={basename}
       initialEntries={[path]}
       future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
     >
@@ -98,6 +113,52 @@ describe('QA-020 · an unrecognised address reaches the not-found screen', () =>
     // here too so the unit suite catches it without a browser run.
     renderScreenAt('/nope');
     expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1);
+  });
+});
+
+describe('I-1 · the address shown is the one the reader typed, basename included', () => {
+  /*
+   * The regression test for the defect above. `BASENAME` is `''` under vitest
+   * (Vite's `BASE_URL` is `/` here), so these tests cannot assert the deployed
+   * string by rendering alone — they assert the PROPERTY: what the screen shows
+   * must equal what the router was entered with, whatever the basename is.
+   *
+   * That is deliberately stronger than pinning `/krish`: the basename is a build
+   * argument (`Dockerfile` `ARG BASE_PATH=/krish`), so a test that hard-codes it
+   * would pass while a differently-deployed build showed the wrong address.
+   */
+  it('MUTATION-GUARDED — under the DEPLOYED basename, the shown address is the full URL', () => {
+    const entered = `${DEPLOYED_BASENAME}/validator`;
+    const { container } = render(
+      <MemoryRouter
+        basename={DEPLOYED_BASENAME}
+        initialEntries={[entered]}
+        future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+      >
+        <Routes>
+          <Route path="*" element={<NotFound />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    const shown = container.querySelector('.notfound-path')!.textContent;
+
+    // What React Router hands the component, basename stripped — the value the
+    // screen used to display, asserted here so the defect is DOCUMENTED by the
+    // test rather than only by a comment.
+    expect(shown).not.toBe('/validator');
+
+    // The property: the reader sees an address that ENDS with what they asked for
+    // and carries the basename segment, so it is comparable to their URL bar.
+    expect(shown!.endsWith('/validator')).toBe(true);
+    expect(shown).toContain(DEPLOYED_BASENAME);
+    expect(shown).toBe(entered);
+  });
+
+  it('with NO basename, the shown address is still exactly what was entered', () => {
+    // The local/default configuration, so the fix cannot have traded one
+    // environment for the other.
+    const { container } = renderAtUnknownPath('/validator');
+    expect(container.querySelector('.notfound-path')!.textContent).toBe('/validator');
   });
 });
 

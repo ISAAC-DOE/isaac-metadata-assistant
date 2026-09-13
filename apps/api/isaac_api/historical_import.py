@@ -65,8 +65,16 @@ WHAT IS DELIBERATELY NOT BUILT, AND WHY IT IS NAMED RATHER THAN IMPLIED
   Beamline Profile is an interpretation aid and **never an unofficial
   validator** — nothing in this module consults it to accept or refuse a value.
 * **``HIST-002`` — the first-wave deterministic parsers.** Spreadsheet reading
-  needs ``openpyxl``, which is not a dependency and is deliberately not added
-  for a parser that could not be validated against any real material.
+  would need ``openpyxl``. ~~which is not a dependency and is deliberately not
+  added~~ — **THAT WAS FALSE AND IS CORRECTED 2026-09-13 after an independent
+  review measured it.** ``openpyxl>=3.1`` IS a declared runtime dependency
+  (``pyproject.toml``, added in ``dea4a7ae``), and it imports (3.1.5). The
+  sentence invented a cost that does not exist, in the paragraph a reader
+  consults to learn why this is blocked.
+  **THE REAL BLOCKER IS UNCHANGED AND IS SUFFICIENT ON ITS OWN:** there is no
+  representative corpus to validate a spreadsheet parser against, and §5 forbids
+  designing against assumptions. Correcting this does NOT unblock ``HIST-002``;
+  it removes a second reason that was never true.
 * **``HIST-003b`` — real model reconstruction.** :class:`ReconstructionProvider`
   is provider-NEUTRAL and the only implementation is
   :class:`DeterministicFakeReconstructionProvider`. No provider is configured, no

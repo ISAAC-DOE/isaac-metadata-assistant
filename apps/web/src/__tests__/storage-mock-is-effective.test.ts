@@ -152,6 +152,64 @@ describe('storage mocks must actually intercept', () => {
     expect(exempted, `the self-exemption path no longer matches any file: ${SELF}`).toBe(1);
   });
 
+  it('POLARITY CONTROL — the two ban patterns actually MATCH the forms they forbid', () => {
+    /*
+     * *** THIS FILE SHIPPED WITHOUT THIS TEST AND WAS THEREFORE UNPROVEN — the exact
+     * failure it was written to prevent. Found by independent review (I-3). ***
+     *
+     * Measured: replacing BOTH patterns with `/ZZZ_NEVER_MATCHES/g` left the file
+     * GREEN at 3 passed, exit 0. The vacuity guard below checks the WALK (>250
+     * files, a prototype spy exists somewhere) and never the PREDICATES, and the one
+     * file containing the banned form is the `SELF` exemption, which is skipped — so
+     * nothing in the suite ever fed either regex a string it must catch.
+     *
+     * "A fault never injected is not a fault tolerated" is this file's own sentence,
+     * one level up.
+     */
+    const MUST_CATCH_SPY = [
+      "vi.spyOn(window.localStorage, 'getItem')",
+      "vi.spyOn(localStorage, 'setItem')",
+      "vi.spyOn(window.sessionStorage, 'removeItem')",
+      "vi.spyOn( sessionStorage , 'clear')",
+    ];
+    for (const sample of MUST_CATCH_SPY) {
+      expect(new RegExp(INSTANCE_SPY.source).test(sample), `INSTANCE_SPY missed: ${sample}`).toBe(
+        true,
+      );
+    }
+
+    const MUST_CATCH_ASSIGN = [
+      "window.localStorage.getItem = () => null",
+      'localStorage.setItem = fn',
+      'window.sessionStorage.removeItem = noop',
+      'sessionStorage.clear = () => {}',
+    ];
+    for (const sample of MUST_CATCH_ASSIGN) {
+      expect(
+        new RegExp(INSTANCE_ASSIGN.source).test(sample),
+        `INSTANCE_ASSIGN missed: ${sample}`,
+      ).toBe(true);
+    }
+
+    // ...AND THE WORKING FORM IS NOT CAUGHT, or the ban would forbid the remedy it
+    // tells people to use — which is the other way to be useless.
+    const MUST_NOT_CATCH = [
+      "vi.spyOn(Storage.prototype, 'getItem')",
+      "vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {})",
+      // an equality COMPARISON is not an assignment
+      'expect(window.localStorage.getItem("k") === null).toBe(true)',
+    ];
+    for (const sample of MUST_NOT_CATCH) {
+      expect(new RegExp(INSTANCE_SPY.source).test(sample), `INSTANCE_SPY false-positive: ${sample}`).toBe(
+        false,
+      );
+      expect(
+        new RegExp(INSTANCE_ASSIGN.source).test(sample),
+        `INSTANCE_ASSIGN false-positive: ${sample}`,
+      ).toBe(false);
+    }
+  });
+
   it('VACUITY GUARD — the sweep actually reads a meaningful number of files', () => {
     // Without this, a broken `sourceFiles` walk returning [] would report a clean tree.
     const files = sourceFiles(SRC);

@@ -322,7 +322,18 @@ def test_only_one_parser_is_registered_and_it_is_the_fixture_parser():
 
 
 def test_no_mac_or_spreadsheet_parsing_is_attempted_anywhere():
-    """The BLOCKED formats are not parsed, and no dependency was added for them."""
+    """The BLOCKED formats are not PARSED — a claim about this module's code only.
+
+    ~~and no dependency was added for them~~ — **REMOVED 2026-09-13: the docstring
+    claimed something this test does not check and that is FALSE.** ``openpyxl>=3.1``
+    is a declared runtime dependency (``pyproject.toml``, since ``dea4a7ae``). The
+    assertions below grep ``historical_import.py``'s executable code; they say
+    nothing about the dependency set, and a docstring that claims more than its body
+    checks is the shape this repository keeps finding.
+
+    What is asserted, and it is the property that matters: no blocked format is
+    parsed HERE, however available its library is.
+    """
     src = Path(hi.__file__).read_text(encoding="utf-8")
     code = re.sub(r'"""[\s\S]*?"""', " ", src)
     code = re.sub(r"^\s*#.*$", " ", code, flags=re.MULTILINE)

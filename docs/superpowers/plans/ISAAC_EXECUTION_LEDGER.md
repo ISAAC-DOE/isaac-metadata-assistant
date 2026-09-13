@@ -888,18 +888,30 @@ work, and nothing about it has been decided. `MCP-020`/`MCP-021`/`SEC-001` stay 
 
 ---
 
-## PHASE G — HISTORICAL IMPORT · gated on DEC-13; the shell is not
+## PHASE G — HISTORICAL IMPORT · gated on **EXT-10 (the absent corpus)**; the shell is not
+
+> ~~gated on DEC-13~~ — **CORRECTED 2026-09-13 (independent review, M-8). This header and four
+> rows below cited `DEC-13` as the gate while THIS FILE'S OWN SESSION HEADER says `DEC-13` was
+> RESOLVED by the 2026-09-12 revision** — a self-contradiction across one document, and the kind
+> a reader resolves by believing whichever half they happen to read first.
+>
+> **The real gate was always `EXT-10`: there is no representative BL15-2 corpus.** That is an
+> external blocker nothing in this repository can clear, and it is sufficient on its own — §5
+> forbids designing a parser against assumptions. Naming the resolved decision instead made the
+> phase look blocked on a pending human answer when it is blocked on absent evidence, which are
+> different things with different next actions: one is a question to ask, the other is material
+> to request (`HIST-000`, prepared and unsent).
 
 | ID | Objective | Status | Depends |
 |---|---|---|---|
 | **HIST-000** | **Issue the BL15-2 data request.** This is the phase's first deliverable and its gate. | **PLANNED — do this immediately on approval; it costs nothing and unblocks everything else** | — |
-| HIST-001 | Import Session + Source Bundle + manifest, reusing `assets[]` pointer-only (`"NO BYTES, EVER"`) | **DONE 2026-09-13** — `apps/api/isaac_api/historical_import.py` + nine HTTP operations (78 → 87). Two source kinds: a POINTER this build records and does not open, and the committed example sources it reads because they ship inside the application. **No digest is ever computed**, not even for a file it does read. NO migration, NO new table, `db_write.OWNED_TABLES` unchanged — a session is one atomically-written JSON file under `_imports/`, which `workspace._experiment_dirs` skips unconditionally, so no experiment read can reach it. **It is therefore NOT durable, and the server says so on every response** (`durability`); DEC-24's write-`0006` route was deliberately NOT taken, because a working area that says it is a working area does not need one | CAP-003 |
-| HIST-002 | First-wave deterministic parsers (filenames, directories, spreadsheet cells — needs `openpyxl`, not currently a dependency — CSV, explicit key/value) | **BLOCKED on DEC-13** | HIST-000 |
+| HIST-001 | Import Session + Source Bundle + manifest, reusing `assets[]` pointer-only (`"NO BYTES, EVER"`) | **DONE 2026-09-13** — `apps/api/isaac_api/historical_import.py` + nine HTTP operations (78 → 87). Two source kinds: a POINTER this build records and does not open, and the committed example sources it reads because they ship inside the application. **No digest is ever computed**, not even for a file it does read. NO migration, NO new table, `db_write.OWNED_TABLES` unchanged — a session is one atomically-written JSON file under `_imports/`, which `workspace._experiment_dirs` skips unconditionally, so no experiment read can reach it. **It is therefore NOT durable, and the server says so on ~~every~~ EIGHT OF NINE responses** (`durability`) — corrected 2026-09-13 (M-10), measured over all nine operations: `DELETE /api/imports/{id}` carries no `durability`, which is defensible (no session is left to describe) but is not "every"; DEC-24's write-`0006` route was deliberately NOT taken, because a working area that says it is a working area does not need one | CAP-003 |
+| HIST-002 | First-wave deterministic parsers (filenames, directories, spreadsheet cells — ~~needs `openpyxl`, not currently a dependency~~ **`openpyxl>=3.1` IS a declared dependency since `dea4a7ae`; corrected 2026-09-13. The blocker is the absent corpus alone** — CSV, explicit key/value) | **BLOCKED on EXT-10** (~~DEC-13~~, resolved) | HIST-000 |
 | BL15-001 | `.mac` parser | **BLOCKED — no representative file exists anywhere in reach.** §5 forbids designing against assumptions | HIST-000 |
-| HIST-003 | Semantic reconstruction into the **shared** Phase-D pipeline | BLOCKED on DEC-13 | HIST-002 |
-| HIST-004 | Import review surface. **Banned pattern: Upload → Spinner → Mysterious JSON** | **DONE 2026-09-13 (shell)** — `apps/web/src/screens/HistoricalImport.tsx` at `/imports`, the SECOND primary destination. All three halves of the banned pattern refused and asserted: no file input (proven over the DOM, over the source with comments stripped, and over every request made — plus a control proving that predicate fires), no control for the one unbuilt step (not even a disabled one), and all NINE things the plan requires a scientist to see, each with its own test. 37 frontend tests, six mutation-verified. **Zero a11y baseline cells added** — `imports` passes `a11y-axe` and `structure` at all five viewports on darwin | HIST-001 |
+| HIST-003 | Semantic reconstruction into the **shared** Phase-D pipeline | BLOCKED on EXT-10 (~~DEC-13~~, resolved) | HIST-002 |
+| HIST-004 | Import review surface. **Banned pattern: Upload → Spinner → Mysterious JSON** | **DONE 2026-09-13 (shell)** — `apps/web/src/screens/HistoricalImport.tsx` at `/imports`, the SECOND primary destination. All three halves of the banned pattern refused and asserted: no file input (proven over the DOM, over the source with comments stripped, and over every request made — plus a control proving that predicate fires), no control for the one unbuilt step (not even a disabled one), and all NINE things the plan requires a scientist to see, each with its own test. ~~37~~ **38** frontend tests (corrected 2026-09-13, M-7: `npx vitest run src/__tests__/historical-import.test.tsx` -> `38 passed`), six mutation-verified. **Zero a11y baseline cells added** — `imports` passes `a11y-axe` and `structure` at all five viewports on darwin | HIST-001 |
 | HIST-005 | Merge into the ordinary Library | **PLANNED — and it is now the workflow's ONE unbuilt step, named on the surface rather than implied.** `historical_import.UNBUILT_STEP` is `add_to_experiments`; the review screen renders the server's own `UNBUILT_STEP_DISCLOSURE` beside it and **no control at all** — not a disabled one, which would say the act exists and is temporarily unavailable (`test_...offers_NO_control` is mutation-verified against exactly that). What a scientist can do instead is send each field candidate to review on an experiment they create themselves, which is `HIST-001`'s ninth operation. **Two structural candidates are therefore refused by name** with `candidate_not_proposable`: a proposal is about one value at one official field path, so "an experiment exists here" has no proposal shape | HIST-004, LIB-003 |
-| HIST-006 | Gold-standard evaluation; the headline metric is **fabricated-value rate**, not fields-filled. Every metric must name the artifact required to compute it | BLOCKED on DEC-13 | HIST-005 |
+| HIST-006 | Gold-standard evaluation; the headline metric is **fabricated-value rate**, not fields-filled. Every metric must name the artifact required to compute it | BLOCKED on EXT-10 (~~DEC-13~~, resolved) | HIST-005 |
 | SRC-001 | **Already satisfied — do not rebuild.** Multi-source disagreement for a value in the draft is representable **today**: `evidence_classify.asserted_values` → `conflicting_evidence` at ≥2 values; `conflict_resolution` stores `competing_values` + set-digest with `deferred` first-class; `build_sidecar` copies the **whole** evidence list, so the record carries one value and the sidecar preserves the disagreement | CONFIRMED CURRENT | — |
 
 ---
@@ -954,7 +966,7 @@ Recorded here so the ledger and the plan cannot disagree. Full rationale in the 
 | `UX-016` | Create-vs-import fork; Historical Import empty state; first-run discovery of Pillar 2. **Found in Pass 3:** with Historical Import promoted to one of three top-level destinations, its empty state becomes a first-run surface, and nothing handled a scientist with zero experiments who wants to import rather than create | B/C | **IMPORT HALF DONE 2026-09-13** — a fourth peer card in the Experiments empty state as a real `<Link>`, plus the Historical Import destination's own empty state. `emptyExperimentsBody` corrected in place with the old sentence struck: `ExperimentsHome`'s own comment said it "does not promise import" because "there is still no import path", which was TRUE when written and stale by omission the moment one shipped. **It still promises no upload** — a test asserts the word appears in neither string. The CREATE-VS-IMPORT FORK as a designed choice at the moment of creation is NOT done | LIB-002 |
 | `UX-017` | **PARTLY DONE 2026-09-13 (`89d9f07c`): removed from primary navigation and linked from `Settings → Overview`. The LIBRARY half — merging `My Stats` into the Experiment Library — is NOT done and belongs to the Library slice.** Statistics disposition: **REMOVE-FROM-PRIMARY** — merge `My Stats` into the Library, move `General ISAAC` under Settings. **Found in Pass 2:** it is the densest screen in the app (3 820 px, 422 visible text elements) and one of five top-level slots, and its disposition was implied but never stated | C | PLANNED | UX-010 |
 | `CAP-009` | Live-capture utterance evaluation suite — seven named cases (plain value · **"around 425, maybe 430"** · correction · observation · app command · inherited value · scientific doubt), each with its expected outcome. **Found in Pass 6** as an omission against the directive | D | PLANNED | CAP-004 |
-| `BL15-002` | Beamline Profile abstraction: filename patterns, directory and run-number conventions, column aliases, terminology, `.mac` conventions, stable facility identifiers, legacy vocabulary aliases. **CONSTRAINT: a Beamline Profile must not become an unofficial validator** — its role is repeatable source interpretation, and **only conventions supported by actual corpus evidence** may be encoded. **Found in Pass 6** as an omission against the directive | G | **BLOCKED** | **DEC-13 / EXT-10** |
+| `BL15-002` | Beamline Profile abstraction: filename patterns, directory and run-number conventions, column aliases, terminology, `.mac` conventions, stable facility identifiers, legacy vocabulary aliases. **CONSTRAINT: a Beamline Profile must not become an unofficial validator** — its role is repeatable source interpretation, and **only conventions supported by actual corpus evidence** may be encoded. **Found in Pass 6** as an omission against the directive | G | **BLOCKED** | **EXT-10** (~~DEC-13 /~~ — DEC-13 is resolved; the corpus is the gate) |
 | `MCP-001a` | Size and rate bounds on MCP note creation. **Found in Pass 4:** with EXT-01 open, an untrusted in-cluster caller could flood notes. "Inert to export" is not the same as "harmless to the record" | E | PLANNED | MCP-001 |
 | `LIB-003a` | Assert `folder` reaches **no** exported record and **no** sidecar. **Found in Pass 4:** `LIB-003`'s acceptance proved the move does not shift `content_signature` but never that the value cannot reach an exported artifact — which is the only reason the design is safe. It is the property `title` already has | B | PLANNED | LIB-003 |
 
@@ -1685,7 +1697,7 @@ record created for manual measurement must be discarded or the backend restarted
 > closed in one commit: five files plus a 6 → 7 count.
 >
 > **STILL BLOCKED, unchanged, and named rather than implied:** `BL15-001` (`.mac`), `HIST-002`
-> (spreadsheets/CSV/filenames — `openpyxl` is still not a dependency and was not added),
+> (spreadsheets/CSV/filenames — ~~`openpyxl` is still not a dependency and was not added~~ **FALSE, corrected 2026-09-13: it is declared in `pyproject.toml` and imports. The lane added nothing, which is the true half; the dependency's absence was never true**),
 > `BL15-002` (the Beamline Profile's conventions — the interface ships encoding **zero**, proven
 > BEHAVIOURALLY by feeding it a profile whose alias WOULD map the fixture's unmapped key and
 > getting a byte-identical reconstruction), `HIST-003b`, `HIST-005` (Add to Experiments — the
@@ -2195,7 +2207,7 @@ plausible-non-answer class this ledger already documents for `tr` on binary inpu
 
 | mutant | result |
 |---|---|
-| reader back to `=== '1'` | **8 failed** |
+| reader back to `=== '1'` | ~~**8 failed**~~ **7 failed** — corrected 2026-09-13 (M-3). Re-measured at HEAD with the mutation asserted applied: `7 failed | 10 passed (17)`. `AssistantDrawer.tsx` and its spec are byte-identical to `cd49e936`, so this is a MISCOUNT AND NOT STALENESS — I read the wrong line of the runner's output. The other two published mutants reproduce exactly. |
 | `catch` returns `false` | **1 failed** — but only AFTER the injection was repaired; it survived before |
 | `useState(true)` → `useState(false)` | **1 failed** — but only AFTER a first-paint test existed; it survived all 16 before |
 
@@ -2550,10 +2562,16 @@ QA023_TOTAL_INCOMPLETE_NODES=173
 QA023_BY_RULE={"aria-prohibited-attr":113,"color-contrast":60}
 ```
 
-**27 of 32 surfaces carry at least one.** The distribution is not uniform, which is what makes it
-actionable rather than ambient: `evidence` **67**, `memory-graph` **19**, `record-graph` **17**,
-`evidence-graph` **10**, then a long tail of 1–6. **`not-found` = 1** — the screen this session
-added, so the class is still being grown, not merely inherited.
+~~**27 of 32 surfaces carry at least one.**~~ — **THE DENOMINATOR WAS WRONG AND IT UNDERSTATED THE
+FINDING, corrected 2026-09-13 by an independent review (M-1). It is 27 OF 27 — every surface.**
+`SURFACES.length` was **27** at the commit that published this and is **28** at HEAD (Body A added
+`imports`); measured by importing the constant, not by grepping it. My `32` came from
+`grep -c "^    id: '"`, which also counts entries in the OTHER arrays in that file — *a grep for a
+pattern measures your guess about the formatting*, which is the trap this very session has recorded
+three times. The distribution is not uniform, which is what makes it actionable rather than
+ambient: `evidence` **67**, `memory-graph` **19**, `record-graph` **17**, `evidence-graph` **10**,
+then a tail of 1–6. **`not-found` = 1** — the screen this session added, so the class is still being
+grown, not merely inherited.
 
 **WHAT THE TWO RULES PROBABLY MEAN, marked as inference and not measurement:**
 
@@ -2584,7 +2602,11 @@ added, so the class is still being grown, not merely inherited.
   because element contains an image node"* (SVG charts and the graph canvases — which is also why
   `evidence`, `memory-graph`, `record-graph` and `evidence-graph` dominate the per-surface
   distribution), **9** *"partially overlaps other elements"*, **5** *"overlapped by another
-  element"*, **5** *"content is too short to determine if it is actual text content"*. Several
+  element"*, **5** *"content is too short to determine if it is actual text content"* —
+  **which sums to 56, NOT 60.** Corrected 2026-09-13 (M-2): those are the **top four** reasons the
+  probe printed, and presenting them as the account of all 60 implied a completeness they did not
+  have. The remaining **4** fall in reasons the probe truncated. §17 records this exact shape — a
+  bucket list that sums to less than its own total and reads as exhaustive. Several
   targets are `aria-hidden="true"` counts, where contrast is a visual question and not an
   assistive-technology one at all.
 
@@ -2782,6 +2804,128 @@ fetched URL: 2, the same two the screen already made); `GET /api/experiments` co
 unpaginated; and `LIB-005`'s storage module was called *"the best-tested thing in either lane"* — it
 uses `vi.spyOn(Storage.prototype, …)`, the form that actually intercepts, avoiding the trap `QA-022`
 documents.
+
+## *** SECOND INDEPENDENT REVIEW — no Criticals, and the worst finding was in MY OWN work ***
+
+A reviewer that implemented none of it read the Historical Import lane (`d3473414..cb1bb9c2`) and
+the **thirteen orchestrator commits nobody had seen**. Verdict: **MERGE-after-fixes** on both.
+Every finding below was reproduced before being acted on.
+
+**It re-ran both suites in a FROZEN WORKTREE at `e605bd98` after noticing the main checkout moved
+mid-review** — 9,397 passed / 47 skipped (worktree, so 45 in the main checkout) and 217 files /
+5,866 tests, both exit 0. Naming the checkout is what made its figures usable; a reviewer that had
+quoted the moving tree would have reported two failures that were not in its range.
+
+### `I-1` · IMPORTANT — **my own defect, and the exact class I spent the day hunting**
+
+`NotFound.tsx` rendered `useLocation().pathname`. **React Router STRIPS the basename**, and the
+deployed basename is `/krish`. So hosted, a reader who typed `/krish/validator` was shown:
+
+> You asked for: `/validator`
+
+— a different string from their URL bar, on the one screen whose entire purpose is letting them
+tell a typo from a dead link. **`/krish/validator` is the exact URL my own commit message cites as
+the discovery that motivated the screen**, so the defect was in the demonstration case.
+
+**AND BOTH MY TEST HARNESSES USED `MemoryRouter` WITH NO `basename`** — the fixture could not
+produce the input the assertion existed for. That is the same shape as `B-1`, as `QA-022`, as the
+`states.spec.ts` helper, and as the §5 lane's uncrossed corpus axes. I wrote four of those findings
+up today and shipped a fifth.
+
+**Fixed, and the second attempt is the interesting one.** My first fix imported `App`'s `BASENAME`
+(from `import.meta.env.BASE_URL`) and was wrong twice: it is `''` under vitest, so the regression
+test could not see the case it exists for, **and `NotFound` importing `App` while `App` imports
+`NotFound` is a cycle**. It now uses `useHref('/')` — asking the ROUTER what the application root
+resolves to — which cannot disagree with the router by construction, works for both router types,
+and is measurable. The test asserts the **property** (shown == entered) rather than pinning
+`/krish`, because the basename is a build argument and a hard-coded test would pass while a
+differently-deployed build showed the wrong address.
+
+### `I-2` · IMPORTANT — `openpyxl` **is** a dependency; four sites said it is not
+
+`pyproject.toml` declares `openpyxl>=3.1` (since `dea4a7ae`) and it imports at 3.1.5. Corrected at
+all four sites. **This does NOT unblock `HIST-002`:** the real blocker is the absent corpus, which
+is sufficient alone. What was wrong was inventing a *second* reason that never existed, in the
+paragraph a reader consults to learn why the work is blocked.
+
+**One nearby claim was checked and deliberately NOT changed:** `test_format_shadow.py:156`'s *"no
+dependency was added by this slice"* is a claim about the SLICE, not the dependency set, and its
+body asserts exactly that. Different claim, measured true.
+
+### `I-3` · IMPORTANT — **my new tree-wide guard had no polarity control**
+
+`storage-mock-is-effective.test.ts` re-measures its own premise, asserts its self-exemption was
+used, and guards the walk — and **never proved its two ban regexes match anything**. Reproduced:
+replacing both with `/ZZZ_NEVER_MATCHES/g` left it **3 passed, exit 0**.
+
+That is the precise failure the file was written to prevent, one level up. Its vacuity guard checks
+the WALK and not the PREDICATES, and the only file containing the banned form is the exemption,
+which is skipped. Fixed with a polarity control: four must-catch forms per pattern, plus three
+must-NOT-catch (including `Storage.prototype` itself, so the ban cannot forbid the remedy it
+recommends). Re-running the reviewer's mutant now **fails**.
+
+### Minors corrected
+
+`M-1` **"27 of 32 surfaces" was wrong and UNDERSTATED the finding — it is 27 of 27, every
+surface.** `SURFACES.length` is 27 at that commit and 28 at HEAD; my 32 came from
+`grep -c "^    id: '"`, which also counts other arrays in the file. *A grep for a pattern measures
+your guess about the formatting* — the third instance of that trap this session, and the first in
+my own arithmetic. · `M-2` the contrast-reason breakdown sums to **56, not 60**: those were the top
+four, presented as the account of all sixty. · `M-3` the `=== '1'` mutant fails **7**, not the
+published 8 — a miscount, not staleness, since the files are byte-identical. · `M-6` the content
+module claimed *"every authored string the surface renders"* while six live in the screen. · `M-7`
+37 → **38**. · `M-8` Phase G cited `DEC-13` as its gate at five sites while this file's own header
+says `DEC-13` is RESOLVED — the real gate is **`EXT-10`, the absent corpus**, and the distinction
+changes the next action: one is a question to ask, the other is material to request. · `M-10`
+"every response" is **8 of 9** (`DELETE` carries no `durability`).
+
+### Named, measured, NOT fixed
+
+- **`M-5` — three Body-A commits cite `CLAUDE.md:1546` and `:1247`; the grant is at `2349` and the
+  persistence lift at `2096`.** `CLAUDE.md` is byte-unchanged across both bodies, so these were
+  never correct. **Commit messages are immutable history and are not rewritten**; the correct
+  citations are recorded here and the merge commit already carries them.
+- **`M-4` — two "MUTATION CONTROL" tests are tautologies** (`x` contains a substring of `x`).
+  **The reviewer mutation-tested both REAL guards and both fire**, so the guards are sound and only
+  the controls are theatre — worth fixing because the label says otherwise.
+- **`M-9` — the `/imports` landing copy names four source classes the build cannot read**
+  ("filenames, notes, sheets, run logs"), while the honest correction renders one step downstream
+  on the Sources step. Not a false claim — the per-entry disclosure is genuinely good — but the
+  disclosure is downstream of the promise. A copy decision.
+- **`M-11` — `/imports` a11y coverage is the EMPTY LIST only.** The `SURFACES` entry says so in its
+  own comment; the ledger's "zero cells added" did not carry that scope. The 1,010-line session
+  state is never axe-scanned.
+
+### *** THE QUESTION ONLY KRISH CAN SETTLE — a SIXTH instance of §15's recurring pattern ***
+
+`CLAUDE.md` names **no** `HIST-*`, "Historical Import", "import session", "source bundle" or
+"beamline profile" — `grep`: **0 hits**. Body A's authorization rests on reading the 2026-08-29
+grant's *"the scientist-facing Experiment Data Workspace"* broadly enough to cover a new top-level
+destination, nine HTTP operations, a new nav entry and a new `_imports` persistence namespace.
+
+**§15 records FIVE occasions where exactly this inference was made and had to be corrected
+afterwards** — `isaac_runs`, the five submission-lifecycle tables, `isaac_run_projection`, the
+incomplete correction sweep, and `DELETE`. In every one, the remedy was the same: add the sentence,
+so the basis is committed rather than conversational.
+
+**No agent can observe the owner's instruction.** The honest entry is that the repository records
+no sentence naming this feature, and the reviewer was right to raise it rather than infer it. It is
+a question for Krish, not a defect in the code — and the code touches no table, no migration, no
+`OWNED_TABLES` entry and no external gate, which is why it is a question and not a stop.
+
+### What this reviewer attacked and could NOT break
+
+`BL15-002`'s zero-conventions claim held **decisively** — with minted ULIDs normalised the full
+`to_state()` is byte-identical with and without a profile, and the alias LHS is a genuine unmapped
+key, so it *would* have mapped. `HIST-003a`'s full chain ran over HTTP with nothing stubbed, ending
+in `409 human_actor_required`, with the proposed value appearing **nowhere** in the experiment
+document afterwards. "No digest is ever computed" held. **Path traversal, path leakage and
+`_imports` isolation all held** — zero absolute-path or workspace-root leaks across seven bodies.
+**Every `A11Y-01` figure re-derived independently**: 857/857, 63 cells, 9 surfaces, 13 nodes,
+`foregrounds` 13 → 10, **and both platform columns sum to 857 independently** because the two
+`settings-explorer` splits cancel — exactly as claimed. `QA-022`'s identity fix is genuinely
+two-sided. `QA-010`'s four polarity controls are real. `QA-023`'s central claim holds: **zero**
+`.incomplete` consumers in `e2e/`.
 
 ### RESIDUE NAMED THIS RUN, measured and deliberately not fixed
 

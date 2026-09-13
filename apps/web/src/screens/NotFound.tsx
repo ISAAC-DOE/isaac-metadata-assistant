@@ -1,5 +1,5 @@
 import './screens.css';
-import { Link, useLocation } from 'react-router-dom';
+import { Link, useHref, useLocation } from 'react-router-dom';
 import { AppShell } from '../components/AppShell';
 import { TopBar } from '../components/TopBar';
 import { TriangleAlert } from '../components/icons';
@@ -48,10 +48,44 @@ import { ROUTES } from '../lib/routes';
  * requested, and decoding could render control characters or a lookalike.
  */
 export function NotFound() {
+  /*
+   * THE BASENAME IS PREPENDED, AND THAT IS A FIX FOR A DEFECT THIS SCREEN SHIPPED
+   * WITH — found by independent review (I-1).
+   *
+   * React Router STRIPS the basename from `useLocation().pathname`. The deployed
+   * basename is `/krish` (`Dockerfile` `ARG BASE_PATH=/krish` -> `VITE_BASE_PATH`
+   * -> `App.tsx`'s `BASENAME`), so a reader who typed `/krish/validator` was shown
+   *
+   *     You asked for: /validator
+   *
+   * — a different string from the one in their URL bar, on the one screen whose
+   * entire purpose is to let them tell a typo from a dead link. `/krish/validator`
+   * is the EXACT url this screen's own commit message cites as the discovery that
+   * motivated it, so the defect was in the demonstration case.
+   *
+   * IT WAS INVISIBLE BECAUSE BOTH TEST HARNESSES USED `MemoryRouter` WITH NO
+   * `basename`, so the fixture could not produce the input the assertion exists
+   * for. That is the same shape as every other vacuous guard this programme has
+   * found; `__tests__/not-found-state.test.tsx` now drives the deployed basename
+   * explicitly.
+   *
+   * THE BASENAME IS TAKEN FROM THE ROUTER, NOT FROM THE BUILD, and that is the
+   * second version of this fix. The first imported `App`'s `BASENAME` (derived from
+   * `import.meta.env.BASE_URL`) and was wrong twice over: it is `''` under vitest,
+   * so the regression test could not see the deployed case it exists for, and
+   * `NotFound` importing from `App` while `App` imports `NotFound` is a CYCLE.
+   *
+   * `useHref('/')` asks the router what the application root resolves to — `/krish/`
+   * under the deployed basename, `/` without one. It therefore cannot disagree with
+   * the router by construction, works identically for `BrowserRouter` and
+   * `MemoryRouter`, and is measurable in a test that supplies a basename.
+   *
+   * `search` and `hash` are still excluded: they are not part of what failed to
+   * match, and a query string can be long enough to bury the part that matters.
+   */
   const location = useLocation();
-  // `pathname` only — `search` and `hash` are not part of what failed to match,
-  // and a query string can be long enough to bury the part that matters.
-  const attempted = location.pathname;
+  const basename = useHref('/').replace(/\/+$/, '');
+  const attempted = `${basename}${location.pathname}`;
 
   return (
     <AppShell
