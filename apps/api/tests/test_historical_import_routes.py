@@ -1061,3 +1061,31 @@ def test_all_three_ceilings_leave_the_import_session_untouched(client, monkeypat
     body = client.get(f"/api/imports/{import_id}").json()["import"]
     assert body["proposed"] == {}
     assert body["furthest_step"] == "reconstruct"
+
+
+def test_discarding_a_worked_example_session_takes_its_imports_with_it(client):
+    """The isolation guarantee, for imports too — and it is STRUCTURAL.
+
+    A worked-example session's imports live at `<session root>/_imports/`, and
+    `dispose_tutorial_session` removes that root, so nothing about imports had to
+    be taught to the disposal path. Asserted rather than assumed: a session's
+    working area outliving the session would be exactly the leak `CLAUDE.md` §15
+    calls the invariant this feature must not break.
+    """
+    created = client.post("/api/tutorial/sessions")
+    assert created.status_code == 201, created.text
+    session_id = created.json()["session_id"]
+    headers = {"X-Isaac-Tutorial-Session": session_id}
+
+    scoped = client.post("/api/imports", json={"label": "in a session"}, headers=headers)
+    assert scoped.status_code == 200, scoped.text
+    scoped_id = scoped.json()["import"]["import_id"]
+    assert client.get(f"/api/imports/{scoped_id}", headers=headers).status_code == 200
+
+    disposed = client.delete(f"/api/tutorial/sessions/{session_id}")
+    assert disposed.status_code == 204, disposed.text
+
+    # The session's whole root is gone, so the import went with it -- and the
+    # ordinary workspace never held it in the first place.
+    assert hist.list_sessions() == []
+    assert not (hist.imports_root() / scoped_id).exists()
