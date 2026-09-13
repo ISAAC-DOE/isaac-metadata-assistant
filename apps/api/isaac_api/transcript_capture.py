@@ -1530,6 +1530,17 @@ _PRE_LABEL_ADJUNCT = (
 #: equivalence is a property of the CORPUS AND THE LEXICON at one moment, not of the
 #: pattern — so widening a vocabulary can un-equivalence a mutation that was
 #: correctly removed.**
+#:
+#: **AND ``{0,2}`` → ``*`` REMAINS A GENUINE EQUIVALENT MUTANT, recorded rather than
+#: chased.** Measured: all 1,740 tests stay GREEN with the bound removed, because the
+#: two differ only on THREE OR MORE stacked pre-modifiers and no corpus anywhere
+#: contains one. The bound is kept regardless, and the reason is not behavioural: an
+#: allowlist's reach should be STATED. ``*`` would admit *"the measured recorded
+#: observed logged sample cryostat temperature"*, and while every word in it is
+#: vetted and the sentence is harmless, a pattern whose reach nobody has bounded is
+#: how an allowlist stops being one. ``{0,2}`` is the measured need plus nothing.
+#: This repository records equivalent mutants as a real and instructive outcome;
+#: this is one, and it is the only one left in this gate.
 _PRE_LABEL = re.compile(
     rf"\s*(?:{_PRE_LABEL_ADJUNCT}\s+)*"
     rf"(?:{_DETERMINER}\s+)?(?:{_PRE_LABEL_NOUN}\s+){{0,2}}\s*",
@@ -3440,9 +3451,22 @@ def _label_is_the_subject(rule: "_Rule", text: str, match: re.Match[str]) -> boo
     this gate last leaves every reading refused by the bridge or the continuation
     disclosing exactly what it disclosed before, so the thirteen rows of
     :data:`_LABEL_OVERREACH_CLOSED` keep the reason they are pinned to, and only a
-    match that survives both forward gates reaches this one. Running it FIRST was
-    tried and it re-labelled six already-closed rows, which is a worse disclosure
-    (the bridge is the nearer fact) for no gain.
+    match that survives both forward gates reaches this one.
+
+    **RUNNING IT FIRST WAS TRIED AND RE-LABELLED EXACTLY TWO ALREADY-CLOSED ROWS —
+    and this sentence said "six" until it was counted, which is the reason the
+    derivation is written out rather than the number quoted.** The rows are
+    *"We held the temperature to within 2 K"* and *"We corrected the temperature by
+    7 K"*, both from :data:`_LABEL_OVERREACH_CLOSED`; they fail this gate on
+    ``We held the``/``We corrected the`` AND gate (1) on their bridge. Re-derive over
+    the 18 rows of :data:`_LABEL_OVERREACH_CLOSED` plus
+    :data:`_MODIFIER_OBJECT_OVERREACH_RESIDUE`, counting those where
+    ``_asserts_the_value and _continuation_is_clean`` is False and
+    ``_label_is_the_subject`` is also False. Two is a smaller reason than six, and
+    it is still the reason: the bridge is the NEARER fact about those sentences, so
+    naming a pre-label word when the words between the label and the value are
+    themselves disqualifying tells the scientist about the wrong half of their
+    sentence — and it would break the pins those rows carry, for no gain.
     """
     pre_label = _pre_label_text(rule, text, match)
     return pre_label is None or _PRE_LABEL.fullmatch(pre_label) is not None
