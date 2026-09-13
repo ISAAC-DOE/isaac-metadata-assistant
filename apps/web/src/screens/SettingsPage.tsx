@@ -551,8 +551,25 @@ function AdvancedSurfaces() {
         <div className="settings-summary-row">
           <dt className="settings-summary-label">{LABELS.navStatistics}</dt>
           <dd className="settings-summary-text">
-            Counts over the records in this workspace, and over your own activity in it. Summary
-            figures only; nothing here gates export or changes a record.
+            {/*
+              ~~"and over your own activity in it"~~ — REMOVED 2026-09-13, found by
+              independent review. It was FALSE: `MyStats.tsx` renders
+              `ChartAccessPending` on EVERY branch and its own header says "there is
+              no personal figure in this build to appear", because the three reasons
+              in `lib/myStatsContract.ts` — `no_signed_in_account`,
+              `no_record_ownership`, `not_recorded` — are all downstream of the
+              absent trusted authentication boundary. A scientist following that
+              sentence would have gone looking for their own figures and found a
+              gated panel.
+
+              §15's "build nothing that implies any of it exists" applies to a
+              DESCRIPTION of a destination as much as to the destination, and this
+              same commit cited that rule as its reason for restraint elsewhere.
+              The `My Stats` TAB is deliberately not mentioned either: naming it
+              here would reintroduce the same implication one level down.
+            */}
+            Counts over the records in this workspace. Summary figures only; nothing here
+            gates export or changes a record.
           </dd>
         </div>
       </dl>

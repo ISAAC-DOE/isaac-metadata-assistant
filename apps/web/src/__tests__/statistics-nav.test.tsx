@@ -487,3 +487,59 @@ describe('Back / Forward across the new destination', () => {
     expect(screen.queryByRole('heading', { level: 1, name: 'Settings & API' })).toBeNull();
   });
 });
+
+/* ── the Settings description of Statistics must not promise personal figures ── */
+
+describe('the Advanced surfaces description of Statistics', () => {
+  /*
+   * FOUND BY INDEPENDENT REVIEW, 2026-09-13. The description read "Counts over the
+   * records in this workspace, **and over your own activity in it**".
+   *
+   * That second clause was FALSE. `MyStats.tsx` renders `ChartAccessPending` on
+   * EVERY branch — its own header says "there is no personal figure in this build to
+   * appear" — because all three reasons in `lib/myStatsContract.ts`
+   * (`no_signed_in_account`, `no_record_ownership`, `not_recorded`) are downstream of
+   * the absent trusted authentication boundary. A scientist following that sentence
+   * would have gone looking for their own figures and found a gated panel.
+   *
+   * Pinned as a BAN rather than as an exact string, because the defect is the CLAIM
+   * and not its wording: any phrasing that promises per-person figures from this
+   * description is the same defect. §15's "build nothing that implies any of it
+   * exists" governs a DESCRIPTION of a destination as much as the destination.
+   */
+  const PERSONAL_CLAIM_PHRASINGS = [
+    /your own activity/i,
+    /your activity/i,
+    /\byour\b[^.]{0,40}\b(figures|statistics|stats|records|contributions)\b/i,
+    /per-person/i,
+    /who did what/i,
+    /activity (?:by|per) (?:user|person|scientist|you)/i,
+  ];
+
+  it('never promises per-person figures, in any of six phrasings', async () => {
+    stubFetchRoutes(settingsRoutes());
+    const { container } = renderAt(ROUTES.settings);
+    await screen.findByRole('heading', { level: 1, name: 'Settings & API' });
+
+    const group = await screen.findByRole('navigation', {
+      name: 'Advanced and developer surfaces',
+    });
+    // The whole Overview panel, not just the group: the description sits in a
+    // sibling list, and scoping too tightly is how this kind of guard goes vacuous.
+    const panel = group.closest('.settings-panel') ?? container;
+    const text = (panel.textContent ?? '').replace(/\s+/g, ' ');
+
+    // The honest half must still be there, or this test would pass on a panel that
+    // simply stopped describing Statistics at all.
+    expect(text).toMatch(/Counts over the records in this workspace/);
+
+    for (const pattern of PERSONAL_CLAIM_PHRASINGS) {
+      expect(
+        text,
+        `the Statistics description promises per-person figures (${pattern}), but ` +
+          `MyStats renders ChartAccessPending on every branch — there is no personal ` +
+          `figure in this build to show`
+      ).not.toMatch(pattern);
+    }
+  });
+});
