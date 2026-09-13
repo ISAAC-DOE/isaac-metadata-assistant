@@ -775,11 +775,51 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
        * corroboration that this surface inherited that coverage rather than
        * introducing new debt: same markup, same tokens, same counts.
        */
-      'experiments-example@desktop-1280x800': 3,
-      'experiments-example@laptop-1024x768': 3,
-      'experiments-example@tablet-768x1024': 3,
-      'experiments-example@mobile-375x812': 3,
-      'experiments-example@zoom-200': 3,
+      /*
+       * *** experiments-example color-contrast: A PLATFORM SPLIT, 2026-09-13, and
+       * the two halves have DIFFERENT EVIDENTIAL STATUS. Read both. ***
+       *
+       * darwin 3 -> 2 · MEASURED locally on this host, all seven cells, twice
+       *   (`a11y-axe.spec.ts` for the five viewport cells, `a11y-narrow.spec.ts`
+       *   for `width-320`/`width-390`). Every one reported
+       *   `IMPROVED ... fell from 3 to 2`; ZERO `GREW` and ZERO `NEW COLOUR` on
+       *   darwin, and no other surface moved.
+       *
+       * linux 3 · CARRIED FORWARD, NOT MEASURED. This is the last RECORDED
+       *   baseline value, and it is deliberately not the 6 that Linux CI measured
+       *   on PR #248 before the fix -- 6 was the defect, not a baseline. After the
+       *   fix the linux count is either 3 or 2 and **this host cannot tell which**.
+       *   CI will say; if it reports IMPROVED, transcribe 2.
+       *
+       * ── WHY THIS SPLIT EXISTS AT ALL, which is the useful part ──────────────
+       *
+       * These seven cells were SCALARS at 3 -- the two platforms agreed. Then the
+       * Experiment Library added three spans to the queue row
+       * (`.exp-scenario-text`, `.exp-meta-item`, `.exp-meta-mono`), and:
+       *
+       *   on LINUX  those three FAILED  -> 3 grew to 6
+       *   on DARWIN those three PASSED  -> 3 stayed 3
+       *
+       * Identical code, identical markup, a three-node difference. That is this
+       * file's whole thesis demonstrated on a fresh case: **a green darwin run is
+       * not evidence about linux**, and the converse also bit here -- the local
+       * run could not have found this defect, and the CI run that found it cannot
+       * tell me the fixed number.
+       *
+       * The fix (`queue.css`, `.exp-row.done` descendants raised to
+       * `--text-secondary`) then cleared one PRE-EXISTING node on darwin as well,
+       * which is why darwin fell BELOW its old baseline rather than returning to
+       * it. **That contradicted my own prediction**, which was "expect a return to
+       * 3, not an improvement to 0" -- wrong in the useful direction, and recorded
+       * rather than banked, because the reasoning behind it (the rule is scoped to
+       * `.done` and cannot reach `.chip-exported`/`time`) was right about WHICH
+       * nodes it could reach and wrong about how many of them were already failing.
+       */
+      'experiments-example@desktop-1280x800': { darwin: 2, linux: 3 },
+      'experiments-example@laptop-1024x768': { darwin: 2, linux: 3 },
+      'experiments-example@tablet-768x1024': { darwin: 2, linux: 3 },
+      'experiments-example@mobile-375x812': { darwin: 2, linux: 3 },
+      'experiments-example@zoom-200': { darwin: 2, linux: 3 },
       'export-readiness@desktop-1280x800': 1,
       'export-readiness@laptop-1024x768': 1,
       'export-readiness@tablet-768x1024': 1,
@@ -2017,8 +2057,12 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
          run rather than guessing the other. Nobody retyped a count. */
       'evidence@width-320': 68,
       'evidence@width-390': 68,
-      'experiments-example@width-320': 3,
-      'experiments-example@width-390': 3,
+      /* Split 2026-09-13 — see the dated block on the five viewport cells above
+         for the measurement, the platform divergence that caused it, and why the
+         linux half is a CARRY-FORWARD rather than a measurement. Both of these
+         were measured on darwin by `a11y-narrow.spec.ts`: `fell from 3 to 2`. */
+      'experiments-example@width-320': { darwin: 2, linux: 3 },
+      'experiments-example@width-390': { darwin: 2, linux: 3 },
       'export-readiness-done@width-320': 1,
       'export-readiness-done@width-390': 1,
       'export-readiness@width-320': 1,
@@ -3726,7 +3770,15 @@ export const A11Y_BASELINE_TOTAL_NODES: Readonly<Record<BaselinePlatform, number
   // because it is this edit's claim: the two consecutive runs at `11e08da` re-ran the
   // whole `a11y-axe` + `a11y-narrow` sweep, and every non-`settings-explorer` cell
   // PASSED — so no other cell moved on darwin either.
-  darwin: 877,
+  // ── EXPERIMENT LIBRARY CONTRAST FIX, 2026-09-13: darwin 877 -> 870 ──────────
+  // Seven `experiments-example@*` cells each fell 3 -> 2, MEASURED on this host
+  // across two spec files. `linux` deliberately does NOT move: its seven cells are
+  // carried forward at 3 pending the CI round-trip, so the linux column's sum is
+  // unchanged. If CI reports IMPROVED on linux, lower those seven cells AND this
+  // constant by 7 in the same commit -- the guard compares this number against the
+  // column sum, and a previous slice learned that the hard way by lowering keys and
+  // leaving the constant stale.
+  darwin: 870,
   // ── MERGED: PROPOSALS + CHANGE FEED, 2026-08-30: darwin 2282 -> 2289. ──
   //
   // TWO SLICES MOVED THE SAME SEVEN CELLS FROM THE SAME BASE, and this file now
