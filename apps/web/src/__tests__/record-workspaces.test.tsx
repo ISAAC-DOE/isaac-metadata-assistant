@@ -38,7 +38,7 @@ import {
   runsPage,
   stubFetchRoutes,
 } from '../test/apiFixtures';
-import { RECORD_WORKSPACES } from '../components/RecordWorkspaceNav';
+import { RECORD_WORKSPACES, URL_ONLY } from '../components/RecordWorkspaceNav';
 import { RECORD_VIEW_IDS, ROUTES, type RecordViewId } from '../lib/routes';
 import { workspaceAgentPrompts, workspaceLabel } from '../screens/RecordWorkbench';
 import * as runAutosaveStore from '../lib/runAutosaveStore';
@@ -114,16 +114,61 @@ describe('the record workspace list', () => {
      * promoted row also renders a live count line beneath its label and the
      * name is deliberately the destination alone (`aria-label` on the link).
      */
+    /*
+     * *** THREE, NOT FOUR, SINCE 2026-09-13 — `EVG-002`/`DEC-04`. ***
+     *
+     * ~~['Capture & Proposals', 'Record Fields', 'Runs', 'Graph']~~ and
+     * ~~expect(links).toHaveLength(RECORD_VIEW_IDS.length)~~ — inverted in
+     * place, because this file's own expectation is what a future session would
+     * read as the intended design.
+     *
+     * The Graph left the record's sidebar. It did NOT leave the product: the
+     * route, the `?view=graph` id, the panel and its 123 tests are all
+     * unchanged, and a bookmark a scientist already holds still opens it
+     * (`DEC-11` step 6). `RecordWorkspaceNav`'s `URL_ONLY` carries the
+     * reasoning, including why `DEC-11`'s step 4 — deleting the visualization —
+     * is REFUSED by its own dependency condition.
+     */
     expect(links.map((l) => l.getAttribute('aria-label') ?? l.textContent)).toEqual([
       'Capture & Proposals',
       'Record Fields',
       'Runs',
-      'Graph',
     ]);
-    /* DERIVED FROM THE ROUTE CONTRACT, not from a second hand-written list: a
-       fifth `?view=` id with no entry here would be a destination nothing can
-       reach, which is the defect this assertion exists to name. */
-    expect(links).toHaveLength(RECORD_VIEW_IDS.length);
+    /*
+     * STILL DERIVED FROM THE ROUTE CONTRACT, and the guard's PURPOSE is
+     * unchanged: a fifth `?view=` id with no entry here would be a destination
+     * nothing can reach, which is the defect this assertion exists to name.
+     * What changed is that one id is now deliberately URL-only, so the identity
+     * is stated over the explicit exception rather than over the raw count — a
+     * NEW id still cannot silently become unreachable, because it would have to
+     * be added to `URL_ONLY` on purpose to escape this.
+     */
+    expect(links).toHaveLength(RECORD_VIEW_IDS.length - URL_ONLY.length);
+    expect(
+      RECORD_VIEW_IDS.filter((id) => !URL_ONLY.includes(id)).length,
+    ).toBe(links.length);
+  });
+
+  it('the URL-only workspace is still addressable, and still names itself', async () => {
+    /*
+     * THE OTHER HALF OF THE DEMOTION, and without it a green suite could not
+     * tell removal-from-navigation from removal-from-the-product. `DEC-11` step
+     * 6 requires old `?view=graph` deep links to degrade safely; they do not
+     * degrade at all, which is safer.
+     */
+    renderAt(`/record/${ID}?view=graph`);
+    await screen.findByRole('link', { name: 'Record Fields' });
+
+    // Absent from the list...
+    expect(
+      within(nav())
+        .getAllByRole('link')
+        .map((l) => l.getAttribute('aria-label') ?? l.textContent),
+    ).not.toContain('Graph');
+    // ...and still the workspace the address resolves to, with its label intact.
+    expect(RECORD_WORKSPACES.find((w) => w.id === 'graph')?.label).toBe('Graph');
+    expect(workspaceLabel('graph')).toBe('Graph');
+    expect(address()).toBe(`/record/${ID}?view=graph`);
   });
 
   it('marks the open workspace with aria-current="page" — never "step"', async () => {
@@ -152,14 +197,20 @@ describe('the record workspace list', () => {
 
   it('switching is a PUSH: Back returns to the workspace the reader left', async () => {
     renderAt(`/record/${ID}`);
-    await screen.findByRole('link', { name: 'Graph' });
+    await screen.findByRole('link', { name: 'Record Fields' });
     expect(address()).toBe(`/record/${ID}`);
 
     fireEvent.click(screen.getByRole('link', { name: 'Runs' }));
     await waitFor(() => expect(address()).toBe(`/record/${ID}?view=runs`));
 
-    fireEvent.click(screen.getByRole('link', { name: 'Graph' }));
-    await waitFor(() => expect(address()).toBe(`/record/${ID}?view=graph`));
+    /*
+     * ~~the second hop used to be `Graph`~~ — it left the sidebar
+     * (`EVG-002`/`DEC-04`, 2026-09-13), so the hop is `Capture & Proposals`.
+     * The property under test is the PUSH, not the destination: any two
+     * switches exercise it identically.
+     */
+    fireEvent.click(screen.getByRole('link', { name: 'Capture & Proposals' }));
+    await waitFor(() => expect(address()).toBe(`/record/${ID}?view=capture`));
 
     /* THE ASSERTION THAT WOULD HAVE FAILED BEFORE. The retired tab bar wrote the
        parameter with `replace: true`, so one Back left the record screen entirely
@@ -211,12 +262,15 @@ describe('the record workspace list', () => {
 
   it('COPIES the rest of the query string rather than rebuilding the address', async () => {
     renderAt(`/record/${ID}?run=RUNAAA&at=field:sample.material.name`);
-    await screen.findByRole('link', { name: 'Graph' });
+    await screen.findByRole('link', { name: 'Record Fields' });
 
-    fireEvent.click(screen.getByRole('link', { name: 'Graph' }));
+    /* ~~clicked `Graph`~~ — demoted out of the sidebar (`EVG-002`/`DEC-04`).
+       The property is that the OTHER parameters are copied, which any
+       destination exercises. */
+    fireEvent.click(screen.getByRole('link', { name: 'Capture & Proposals' }));
     await waitFor(() => {
       const url = new URLSearchParams(address().split('?')[1] ?? '');
-      expect(url.get('view')).toBe('graph');
+      expect(url.get('view')).toBe('capture');
       // The run focus and the address the reader followed both survive, so the
       // trip back lands them where they were rather than at the top of the list.
       expect(url.get('run')).toBe('RUNAAA');

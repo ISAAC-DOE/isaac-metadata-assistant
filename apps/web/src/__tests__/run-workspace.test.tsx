@@ -1676,7 +1676,11 @@ describe('PHASE 2 — save state that outlives the card', () => {
      are about; only the control moved. */
   function toGraph() {
     return act(async () => {
-      fireEvent.click(screen.getByRole('link', { name: 'Graph' }));
+      /* ~~clicked the sidebar's `Graph` link~~ — it left the list on 2026-09-13
+         (`EVG-002`/`DEC-04`). This assertion is about LEAVING the Runs
+         workspace, and any other destination leaves it identically; `Record
+         Fields` is the one every record always has. */
+      fireEvent.click(screen.getByRole('link', { name: 'Record Fields' }));
     });
   }
   function toRuns() {

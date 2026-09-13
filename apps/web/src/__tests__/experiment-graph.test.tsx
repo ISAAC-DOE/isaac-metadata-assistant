@@ -87,15 +87,30 @@ function routesFor(bundle: ExperimentGraphBundle) {
  * control being clicked moved: `role="tab"` + `aria-selected` became a real
  * `<Link>` with `aria-current="page"`.
  */
-const workspaceLink = (view: RenderResult, name: string) =>
-  view.getByRole('link', { name });
+/*
+ * ~~`workspaceLink`~~ — REMOVED, and recorded because a deleted helper reads as
+ * lost coverage. Its three call sites all asked whether the `Graph` sidebar
+ * link carried `aria-current`; that link no longer exists
+ * (`EVG-002`/`DEC-04`, 2026-09-13), and the replacements assert the stronger
+ * property — that no such link is rendered at all, and that none of the three
+ * surviving workspaces falsely claims to be the current page when the graph is
+ * open. `tsc -b` (`TS6133`) is what caught that the helper had gone unused.
+ */
 
-/** Open the record, switch to the Graph workspace, and wait for it to load. */
+/**
+ * Open the record ON the Graph workspace, and wait for it to load.
+ *
+ * ~~It used to render `/record/<id>` and CLICK the sidebar's `Graph` link.~~
+ * The Graph left the record's workspace list on 2026-09-13 (`EVG-002`/`DEC-04`);
+ * `?view=graph` is unchanged and still opens it, which is `DEC-11` step 6 and is
+ * what every one of this file's 100-plus assertions actually needs. The one
+ * property the click was carrying — that the graph is NOT fetched on page load —
+ * is asserted separately and directly by the first test below, so nothing is
+ * lost by opening on the address instead.
+ */
 async function openGraph(bundle: ExperimentGraphBundle = experimentGraphBundle()) {
   stubFetchRoutes(routesFor(bundle));
-  const view = renderAt(`/record/${GRAPH_EXP_ID}`);
-  const tab = await view.findByRole('link', { name: 'Graph' });
-  fireEvent.click(tab);
+  const view = renderAt(`/record/${GRAPH_EXP_ID}?view=graph`);
   await view.findByRole('heading', { name: 'Experiment Graph' });
   return view;
 }
@@ -114,7 +129,14 @@ describe('the graph lives inside the record, and is linkable', () => {
 
     const fieldsTab = await view.findByRole('link', { name: 'Record Fields' });
     expect(fieldsTab).toHaveAttribute('aria-current', 'page');
-    expect(workspaceLink(view, 'Graph')).not.toHaveAttribute('aria-current');
+    /*
+     * ~~expect(workspaceLink(view, 'Graph')).not.toHaveAttribute('aria-current')~~
+     * — the Graph has no sidebar link to carry the attribute since 2026-09-13
+     * (`EVG-002`/`DEC-04`). The stronger replacement asserts the ABSENCE, which
+     * is the actual current contract and which the old assertion could not
+     * distinguish from "present but not current".
+     */
+    expect(view.queryByRole('link', { name: 'Graph' })).toBeNull();
     // The graph has NOT been fetched yet: it is opt-in, not a page-load cost.
     expect(view.queryByRole('heading', { name: 'Experiment Graph' })).toBeNull();
   });
@@ -123,7 +145,17 @@ describe('the graph lives inside the record, and is linkable', () => {
     stubFetchRoutes(routesFor(experimentGraphBundle()));
     const view = renderAt(`/record/${GRAPH_EXP_ID}?view=graph`);
     expect(await view.findByRole('heading', { name: 'Experiment Graph' })).toBeInTheDocument();
-    expect(workspaceLink(view, 'Graph')).toHaveAttribute('aria-current', 'page');
+    /*
+     * ~~expect(workspaceLink(view, 'Graph')).toHaveAttribute('aria-current', 'page')~~
+     * — there is no such link to mark. The deep link still RESOLVES to the
+     * graph, which is the whole point of this test and of `DEC-11` step 6; what
+     * it can no longer do is mark itself in a list it is not in. The three
+     * remaining workspaces must also not falsely claim to be the current page.
+     */
+    expect(view.queryByRole('link', { name: 'Graph' })).toBeNull();
+    for (const name of ['Record Fields', 'Runs', 'Capture & Proposals']) {
+      expect(view.getByRole('link', { name })).not.toHaveAttribute('aria-current');
+    }
   });
 
   it('switching the view writes it to the URL, so the graph can be shared', async () => {

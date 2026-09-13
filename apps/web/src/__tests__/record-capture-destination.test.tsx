@@ -137,7 +137,11 @@ describe('the promoted capture destination', () => {
     expect(screen.getAllByRole('link', { name: 'Capture & Proposals' })).toHaveLength(1);
     expect(
       within(nav()).getAllByRole('link').map((l) => l.getAttribute('aria-label') ?? l.textContent),
-    ).toEqual(['Capture & Proposals', 'Record Fields', 'Runs', 'Graph']);
+      /* ~~[... 'Runs', 'Graph']~~ — the Graph left this list on 2026-09-13
+         (`EVG-002`/`DEC-04`). `?view=graph` still opens it; see
+         `RecordWorkspaceNav`'s `URL_ONLY`. Capture's promotion above the list,
+         which is what THIS file is about, is unaffected. */
+    ).toEqual(['Capture & Proposals', 'Record Fields', 'Runs']);
   });
 
   it('routes to ?view=capture, the destination that already exists', async () => {
