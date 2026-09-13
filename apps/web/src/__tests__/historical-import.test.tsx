@@ -841,3 +841,46 @@ describe('§7 · the authored copy states the blocked work rather than implying 
     expect(IMPORT_COPY.reconstructLead).toMatch(/no request leaves this deployment/i);
   });
 });
+
+/* --------------------------------------------------------------------------
+ * §8 the loading state is the SHARED one, so the sweeps can see it
+ * -------------------------------------------------------------------------- */
+
+describe('§8 · the loading panel is the one every sweep waits for', () => {
+  it('renders `div.fetch-state[role="status"]`, not a hand-rolled status div', async () => {
+    /**
+     * AN INVARIANT, NOT CONSISTENCY FOR ITS OWN SAKE — and it was a real defect
+     * in the first version of this screen.
+     *
+     * `e2e/specs/layout-widths.spec.ts` asserts
+     * `locator('div.fetch-state[role="status"]')` has count 0 before it measures
+     * a surface, i.e. "no screen is still loading". This screen first rendered
+     * `<div className="placeholder" role="status">`, which that locator does NOT
+     * match — so the sweep could not wait for it and would one day have measured
+     * a skeleton and reported it as this surface.
+     *
+     * MUTATION: replacing `<LoadingPanel/>` with a bare `role="status"` div makes
+     * this RED.
+     */
+    let resolve: ((value: unknown) => void) | undefined;
+    const pending = new Promise((r) => {
+      resolve = r;
+    });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        await pending;
+        return new Response(JSON.stringify(listResponse()), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }),
+    );
+    const { container } = renderScreen();
+    const panel = container.querySelector('div.fetch-state[role="status"]');
+    expect(panel, 'the loading panel is not the shared one the sweeps wait for').not.toBeNull();
+    expect(panel?.textContent).toContain('Loading imports');
+    resolve?.(null);
+    await screen.findByRole('heading', { name: 'Imports' });
+  });
+});

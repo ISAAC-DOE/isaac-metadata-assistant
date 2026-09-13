@@ -5,7 +5,7 @@ import { Link } from 'react-router-dom';
 import { AppShell } from '../components/AppShell';
 import { TopBar } from '../components/TopBar';
 import { LeftNav } from '../components/LeftNav';
-import { BackendDown } from '../components/FetchStates';
+import { BackendDown, LoadingPanel } from '../components/FetchStates';
 import { CircleAlert, Inbox, Plus, TriangleAlert } from '../components/icons';
 import { LABELS } from '../lib/labels';
 import { ROUTES } from '../lib/routes';
@@ -88,9 +88,23 @@ export function HistoricalImport() {
         <p className="hi-lead">{IMPORT_COPY.lead}</p>
       </div>
 
+      {/*
+        `LoadingPanel`, NOT a hand-rolled `role="status"` div — and the reason is
+        an INVARIANT rather than consistency for its own sake.
+
+        The first version of this screen rendered
+        `<div className="placeholder" role="status">Loading imports…</div>`. It
+        looked right and announced correctly, and it was INVISIBLE to
+        `e2e/specs/layout-widths.spec.ts`, which asserts
+        `locator('div.fetch-state[role="status"]')` has count 0 before it measures
+        a surface — i.e. "no screen is still loading". A loading panel outside
+        that class is a loading panel that sweep cannot wait for, so it would one
+        day measure a skeleton and report it as this surface. Found while
+        diagnosing that sweep's timeouts, not by a failing test.
+      */}
       {list.status === 'loading' && (
-        <div className="placeholder" role="status">
-          Loading imports…
+        <div className="placeholder">
+          <LoadingPanel label="Loading imports…" />
         </div>
       )}
       {list.status === 'error' && (
@@ -294,9 +308,10 @@ function ImportSessionView({
   );
 
   if (session.status === 'loading') {
+    // Same reason as the list's, above.
     return (
-      <div className="placeholder" role="status">
-        Loading this import…
+      <div className="placeholder">
+        <LoadingPanel label="Loading this import…" />
       </div>
     );
   }
