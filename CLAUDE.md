@@ -792,8 +792,17 @@ Current state:
   happens to have **69 PATHS** (`len(schema["paths"])`, verified by hitting the route directly) —
   the same number the operations count read at an earlier commit, for an unrelated reason (a path
   can carry more than one HTTP method, so paths ≤ method-operations; today paths=69,
-  method-operations=77). Quote **77** for "documented operations", and say "paths" explicitly if
-  that is the count meant.
+  method-operations=77). ~~Quote **77** for "documented operations"~~ — **STALE SINCE 2026-09-13:
+  quote **78**.** Re-measured over `create_app().openapi()` in the same session that moved it:
+  **78 method-operations / 70 paths**, and `test_about_and_openapi.py:706` reads
+  `assert checked == 78`. The one new operation is `PATCH /api/experiments/{experiment_id}/folder`
+  (the Experiment Library); the MCP note pathway added an *MCP* operation over the already-existing
+  `POST .../notes` route and so moved neither number. **The paths/operations distinction this
+  paragraph exists to protect is UNCHANGED and is why both figures are restated:** a path can carry
+  several methods, so paths (70) ≤ method-operations (78), and the two were briefly equal at 69 for
+  unrelated reasons. Say "paths" explicitly if that is the count meant, and re-derive rather than
+  quoting — this figure has now been wrong four times, and the fourth time was in the paragraph
+  warning against it.
   `test_about_and_openapi.py` pins. So the sentence was not describing a gap; it was describing
   absent *routes* that existed. **The true residue, which is what the clause was reaching for and
   what still holds: no product screen advertises the assistant seam** — deliberately, per
@@ -1584,8 +1593,19 @@ Current state:
   (`transcript_capture.py` stores EVERY segment as a note precisely so the words survive rejection).
   Fixed through the **ONE existing** change-feed subscription (`useChangeFeed` call sites 1 → 1,
   measured), as a fourth derived summary `notesActivity` beside `proposalActivity`/`runActivity`.
-  **There is no `note` kind** — `change_feed.RECORD_COLLECTORS` serves exactly `experiment`, `run`,
-  `proposal` — so it keys on the `experiment` kind and therefore fires on ANY authoritative record
+  ~~**There is no `note` kind** — `change_feed.RECORD_COLLECTORS` serves exactly `experiment`, `run`,
+  `proposal`~~ — **FALSE SINCE 2026-09-13, and corrected by the same session that falsified it after
+  an independent review caught the sweep missing.** `MCP-005` added the `note` kind. Measured, not
+  read: `change_feed.RECORD_COLLECTORS` keys are `['experiment', 'run', 'proposal', 'note']` and
+  `change_feed.feed_kinds()` serves `['experiment', 'note', 'proposal', 'run']` on the wire.
+  **`CURSOR_VERSION` is 3, and the bump was MANDATORY rather than tidy:** `note` sorts between
+  `experiment` and `proposal`, so a v2 cursor resting at a `proposal` position would have walked
+  past every note at that revision and **never reported one**. A v2 cursor is refused, not
+  reinterpreted. The paragraph below — that notes reach the feed only via
+  `_authoritative_signature` hashing, so the trigger fires on ANY authoritative change — was the
+  reason a `note` kind was wanted and is now **historical**; it describes the state this correction
+  ends. The struck sentence is kept because "there is no `note` kind" is exactly the sort of claim a
+  future session builds against` — so it keys on the `experiment` kind and therefore fires on ANY authoritative record
   change, not only a note change. That imprecision is stated in the code, not hidden; a `note` kind
   is the precise answer and is **named residue, not built**. Notes reach the feed at all only
   because they are hashed into `_authoritative_signature` (`workspace.py:1832`).
