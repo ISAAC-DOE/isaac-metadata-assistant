@@ -10276,7 +10276,7 @@
       },
       {
         "path": "apps/api/isaac_api/routes.py",
-        "sha256": "f58dae9905b2b8330c6016c5eabeaf2e49e61e643023501977a3dc6f57029880"
+        "sha256": "32a5e0a88f3edcd107850c4905cfc4c1c067b4cc6ae73dcd9f230e160a8b83db"
       },
       {
         "path": "apps/api/isaac_api/serialize.py",
@@ -10460,7 +10460,7 @@
       },
       {
         "path": "apps/web/src/components/HelpPanel.tsx",
-        "sha256": "fb85980d9c85bc408462a29d5fccbac7115154840c946d7cdaca664b41f7d469"
+        "sha256": "53a53f2fe9c49c70d905612b93dd7e5d0e3d26860d49bf8fcabd383cb9c25f8d"
       },
       {
         "path": "apps/web/src/components/LeftNav.tsx",
@@ -10552,7 +10552,7 @@
       },
       {
         "path": "apps/web/src/screens/GuidedCompletion.tsx",
-        "sha256": "c5406d888067603bbfb55836bb2d0ba9fc9f842d1abaf56e53060dd7ecb5ef59"
+        "sha256": "762847b8742d0df532d227cf9760cd36412f67f011158837a3ce1cc80959de8a"
       },
       {
         "path": "apps/web/src/screens/LoadMaterials.tsx",
@@ -11012,7 +11012,7 @@
       }
     ],
     "served_file_count": 200,
-    "served_manifest_fingerprint": "46e22a790829b62b44f04b5a61a823e6752ec2ed1ea1490a87af7b5902633913"
+    "served_manifest_fingerprint": "85e9948e4939b2990c8ab08eedcf243e9bf2e63e4d9b3f3c03f14b8ca03c15e3"
   },
   "overview": {
     "built_at_commit": "caab1d0a69c1733524bda5dde495623bc4b7bad1",
