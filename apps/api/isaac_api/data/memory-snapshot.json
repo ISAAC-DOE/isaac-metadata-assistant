@@ -10232,7 +10232,7 @@
       },
       {
         "path": ".github/workflows/ci.yml",
-        "sha256": "5defce996a0e88d08403f52492f5e1903d3ece5ce60bd25dbcd632bf28e73d83"
+        "sha256": "426c2dba03da97b3b2000f3c73bf54f234ced546a3ec3bcd9ec6b0177adc7e02"
       },
       {
         "path": "AGENTS.md",
@@ -11012,7 +11012,7 @@
       }
     ],
     "served_file_count": 200,
-    "served_manifest_fingerprint": "a973e660cdba14752476cde2bc888122a792446e0288c03c24db5cd1084b5abb"
+    "served_manifest_fingerprint": "01a426191bb3c5aae5938f7d5a9e49cb17d442769d7eab874442e11b576b788c"
   },
   "overview": {
     "built_at_commit": "caab1d0a69c1733524bda5dde495623bc4b7bad1",

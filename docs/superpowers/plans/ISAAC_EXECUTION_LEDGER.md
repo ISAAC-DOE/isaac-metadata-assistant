@@ -89,13 +89,33 @@ COMMIT COUNT (FINAL):  **95** at `4980d3e7` (`git rev-list --count main..HEAD`),
                        `main` has NOT moved: merge-base == `origin/main` == 2f9a1133, behind by 0,
                        so **exact-head CI describes the merge result** and the merge-result rule
                        adds nothing here — stated because it is normally mandatory.
-FINAL VERIFICATION:    backend **7672 passed / 45 skipped / 0 FAILED** (665.79s, MAIN CHECKOUT —
+FINAL VERIFICATION (2026-09-13, SECOND continuation, at `72a9cfeb`, MAIN CHECKOUT, settled tree
+                       with nothing else running, exit codes from a redirect and never a pipe):
+                         backend  `.venv/bin/python -m pytest -q -rs` -> **9,417 passed / 45
+                                  skipped / 0 FAILED**, exit 0 (572.03 s). Skip multipliers sum to
+                                  exactly **45**, checked and not asserted.
+                         frontend `npx vitest run` from `apps/web` -> **217 files / 5,873 tests**,
+                                  exit 0.
+                         types    `npx tsc -b` -> 0 · `npx tsc -p e2e/tsconfig.json` -> 0
+                         snapshot regenerated THREE times (once per settled change, never
+                                  concurrently); **201 served / 200 manifest INTACT**, zero
+                                  `"path"` lines moved; gate 155 passed.
+                         a11y     **LINUX CI CONFIRMED THE TRANSCRIPTION** at `53745c30` — run
+                                  `34779505189` `completed/success`, the changed surfaces named
+                                  **47×** in its log and **zero** movement lines. The seven
+                                  `guided-completion` cells were DELETED (asserting zero on BOTH
+                                  platforms, deliberately falsifiable) and were not falsified.
+                                  **The `/imports` surface's linux cells are UNMEASURED**; its
+                                  lane predicts zero and the run at `72a9cfeb` is where that is
+                                  tested.
+                       ~~backend **7672 passed / 45 skipped / 0 FAILED** (665.79s, MAIN CHECKOUT —
                        a worktree reads +2 because `graphify-out/graph.json` is gitignored);
                        frontend **212 files / 5755 tests, EXIT=0**; a11y axe+narrow+structure
                        across **all 7 viewports 582 passed, 0 movements**; `tsc -b` and
                        `tsc -p e2e/tsconfig.json` both exit 0; snapshot `--check` on BOTH
                        artifacts exit 0, **201 served / 200 manifest** intact;
-                       `baseline-aggregate.invariant.test.ts` 47 passed.
+                       `baseline-aggregate.invariant.test.ts` 47 passed.~~ — superseded by the
+                       block above; kept because it describes the FIRST continuation's head.
                        **AND THE TRUSTED PLAYWRIGHT SUITE WAS RUN, which the PR body had
                        explicitly disclaimed: 8 passed, EXIT=0 (2.3m)** across
                        `proposals-run-scoped`, `two-actor-real-browser` and `two-actor-workflow`.

@@ -1178,7 +1178,16 @@ jobs:
           # THE FIFTH REAL-ENGINE SCENARIO HAS NEVER RUN ANYWHERE EITHER: this host
           # has no container runtime and no PostgreSQL, so if this step goes red, its
           # planted `INSERT` is the first thing to read.
-          expected_scenarios=51
+          # 51 -> 52, 2026-09-13. The Historical Import lane added
+          # `test_the_no_experiment_DELETE_predicate_can_actually_fail` — a POLARITY
+          # CONTROL for the no-experiment-DELETE guard, i.e. exactly the kind of test
+          # this repository keeps asking for — and did not bump this pin. CI caught it,
+          # which is the pin working: locally the file reads `47 passed, 5 skipped`
+          # because the five real-engine scenarios are flag-gated, so a laptop cannot
+          # see this number at all. The other two pinned counts in this workflow were
+          # CHECKED and are unaffected: `test_proposal_durability.py` (14+6=20) and
+          # `test_run_row_parity.py` (8+24=32) are both byte-untouched by this branch.
+          expected_scenarios=52
           passed=$(grep -Eo '[0-9]+ passed' /tmp/discard.log | grep -Eo '^[0-9]+' || echo 0)
           [ "$passed" = "$expected_scenarios" ] || {
             echo "::error::$passed discard test(s) passed; exactly $expected_scenarios are expected."
