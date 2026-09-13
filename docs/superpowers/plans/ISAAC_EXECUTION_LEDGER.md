@@ -2457,6 +2457,102 @@ word you guessed.** `MCP-002`'s false negative earlier in this programme is the 
 makes the last clause necessary: a zero-hit grep for an invented constant name reads as "not built"
 and measures only your guess about the name.
 
+### *** `QA-023` — THE ACCESSIBILITY HARNESS READS ONLY `violations` AND HAS NEVER READ `incomplete` ***
+
+Found while measuring `A11Y-03`, and it is larger than the row that led to it.
+
+**MEASURED, three ways:**
+
+1. `apps/web/e2e/helpers/axe.ts:108` is `for (const v of results.violations)`, and
+   **`results.incomplete` appears NOWHERE in that file** (`grep -n 'incomplete' ` → no match).
+2. Run against the mode chip's exact shipped markup — a bare `<span className="mode-chip"
+   aria-label="…">Workspace</span>` — axe 4.12.1 answers **`violations=0, incomplete=1`**, the
+   incomplete being **`aria-prohibited-attr`** (tags: `wcag2a`, `wcag412`).
+3. Two controls, so the result is not an artefact of the fixture: the SAME span with its text
+   removed answers **`violations=1`** (a real violation), and the same span **given a role**
+   answers **0 violations and 0 incomplete**.
+
+**`incomplete` is axe's "a human must decide" bucket** — it is precisely where a defect axe cannot
+settle automatically lands. So this suite's green has never meant "axe found nothing"; it has meant
+"axe found nothing it was **certain** about". The harness's own header says *"NOTHING is ever
+disabled"* and that is true of `disableRules()` — the omission is one bucket further on, which is
+why it reads as thorough.
+
+**AND IT EXPLAINS WHY `A11Y-03` HAS SAT AT P2 WITH A GREEN SUITE.** `aria-label` on a bare `<span>`
+maps to `role=generic`, where ARIA **prohibits** naming — so the ~90-word governance disclosure may
+be announced to nobody at all, rather than (as the row says) to screen-reader users but not sighted
+ones. That is a *different and worse* claim than the one filed, and it is the one the evidence
+supports.
+
+**WHY THE FIX IS NOT IN THIS PR, and it is sequencing rather than difficulty** — the same reason
+`UX-013` gave before it shipped:
+
+- Reporting `incomplete` at all will surface an unknown number of findings across 32 surfaces × 7
+  viewports. **The scale is UNMEASURED**, and adding a gate before knowing the number would either
+  red the suite wholesale or need a baseline invented on the spot.
+- The chip fix has three candidate shapes and they are not equivalent: give the span a **role**
+  (measured to clear both buckets), move the disclosure into **`.sr-only` text** (which makes it the
+  element's real accessible name — but `.sr-only` is `position: absolute` and this repo has a
+  dedicated S2 sweep for `.sr-only` escaping the document at narrow widths, and ~90 words would
+  enter `document.body.textContent`, where several claim-parity guards read), or make the chip an
+  **interactive disclosure** (which is what `A11Y-03` actually asks for, and moves baseline cells on
+  every surface because the chip is in the top bar).
+- A Linux a11y round-trip is already in flight for this PR. Adding a second baseline-moving change
+  now would make CI movements unattributable, which is the collision this ledger already records.
+
+### *** `QA-023`, MEASURED: 173 UNREAD `incomplete` NODES, AND ONE OF THEM IS ON A SURFACE I SHIPPED TODAY ***
+
+Step 1 below said to get the number before deciding anything. It is measured — one instrumented
+`AxeBuilder` run over **all 32 surfaces at `desktop-1280x800`** (temporary probe, run and removed,
+not committed):
+
+```
+QA023_TOTAL_INCOMPLETE_NODES=173
+QA023_BY_RULE={"aria-prohibited-attr":113,"color-contrast":60}
+```
+
+**27 of 32 surfaces carry at least one.** The distribution is not uniform, which is what makes it
+actionable rather than ambient: `evidence` **67**, `memory-graph` **19**, `record-graph` **17**,
+`evidence-graph` **10**, then a long tail of 1–6. **`not-found` = 1** — the screen this session
+added, so the class is still being grown, not merely inherited.
+
+**WHAT THE TWO RULES PROBABLY MEAN, marked as inference and not measurement:**
+
+* **`aria-prohibited-attr` (113).** The mode chip is one instance — `aria-label` on a bare `<span>`,
+  i.e. `role=generic`, where ARIA prohibits naming. 113 nodes says the pattern is systematic rather
+  than a one-off, and every one is a place where an author wrote an accessible name that may be
+  announced to nobody. **Which nodes, and whether each is a real loss, is NOT measured here.**
+* **`color-contrast` (60).** axe answers `incomplete` for contrast when it **cannot compute the
+  background** — typically a gradient, an image, or **transparency**. That is directly relevant to
+  `A11Y-01`: this session closed one ancestor-`opacity` composite and **two remain**, and a
+  composited background is exactly the case axe declines to decide. **So the recorded 857 violating
+  nodes may UNDERSTATE the contrast debt**, with the remainder sitting in a bucket nothing reads.
+  That is a hypothesis with a clear test (intersect the 60 against the two remaining opacity sites),
+  and it is not yet run.
+
+**THE HONEST LIMIT ON ALL OF THIS: `incomplete` means "axe could not determine", NOT "defect".**
+Some of the 173 will be benign. The finding is not "there are 173 defects" — it is that **173
+findings in `wcag2a`/`wcag412`/contrast rules have never been looked at**, by a suite whose own
+header says *"NOTHING is ever disabled"*, and that nobody can say which kind they are without
+looking. **Do not quote 173 as a defect count.**
+
+**WHY IT STILL DOES NOT GO IN THIS PR:** 173 at ONE viewport, over seven viewports, is a baseline
+far larger than the 857-node violation baseline it would sit beside — and a Linux round-trip is
+already in flight for this PR's existing accessibility changes. Gating on it now would either red
+the suite wholesale or need a 1,000-plus-cell baseline invented in the same change. It is a slice.
+
+**EXACT NEXT ACTIONS, with step 1 now DONE:**
+
+1. ~~Instrument one darwin run to count `incomplete` by rule and by surface.~~ **DONE — 173, above.**
+2. Add `incomplete` to `auditScan` as a **disclosed, non-gating** count first (the posture
+   `portal_warnings` already has in the truth path), then ratchet it once the number is known.
+3. Fix the chip. Prefer the **role** (measured to clear both buckets, no new text, no `.sr-only`
+   hazard, no textContent change) and treat `A11Y-03`'s sighted-user half as its own slice.
+
+**The class, stated so it transfers: a tool with more than one output bucket is a tool you can read
+thoroughly and still read partially.** Nothing was disabled, nothing was excluded, and one whole
+result category was never consulted.
+
 ### RESIDUE NAMED THIS RUN, measured and deliberately not fixed
 
 | ID | Finding | Measurement |
