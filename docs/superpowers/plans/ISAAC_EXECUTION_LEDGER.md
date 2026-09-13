@@ -55,33 +55,54 @@ SUBORDINATE AGENTS:    **THE AGENT BUDGET WAS MISUNDERSTOOD BY THE PLANNING RUN 
                        Remediation run: 3 of 5 implementation slots in use (all `opus`, all three
                        tasks being truth-adjacent, honesty-critical or test-correctness work);
                        2 implementation slots free; both Impeccable slots free.
-BRANCH VERDICT:        *** STILL DO NOT MERGE (2026-09-12, remediation run) — and the reason is
-                       now MINE, not the earlier review's. *** The four blocking findings are
-                       remediated and committed (`486ef405`, `cb385b69`, `c9a4c6e8`, `846f43ce`),
-                       but the orchestrator then found **C-1 INCOMPLETE**: eight further inputs of
-                       the identical §5 class still fabricate values, three of them the review's
-                       own `3 K/min` row reached through a different connective. See
-                       "C-1 TOOK TWO PASSES" below. A second-pass fix and an independent review
-                       are in flight. `main` is UNTOUCHED at 2f9a1133 and this branch is UNPUSHED,
-                       so nothing harmful is shipped.
-                       ~~4 BLOCKING findings from the earlier independent review (2 Critical +
-                       2 Important)~~ — those are addressed; the live blocker is the residual C-1.
+BRANCH VERDICT:        *** MERGE-READY on the four original findings; the branch is NOT PUSHED and
+                       has had NO independent review of its LAST FOUR commits. ***
+                       The earlier review's 2 Critical + 2 Important are remediated, and the
+                       residual C-1 the orchestrator found afterwards is remediated too — verified
+                       by first-hand probes, not by report. What remains OPEN is a **pre-existing**
+                       §5 class in PASS ONE that `main` shares (see the section below); it does not
+                       block this branch and must not be described as introduced by it.
+                       **Before any merge:** an independent review of `ebc5c331..HEAD` (the third
+                       C-1 pass, the decoupling and the snapshot), because no reviewer has seen
+                       them. `main` is UNTOUCHED at 2f9a1133; nothing is pushed; no PR exists.
+                       ~~*** STILL DO NOT MERGE — the reason is now MINE ***~~ — superseded.
+                       ~~4 BLOCKING findings from the earlier independent review~~ — addressed.
 
-VERIFIED ON THE REMEDIATED TREE at 846f43ce (orchestrator's own runs, exit codes captured not
-piped, checkout named per the measurement rules):
-  backend    .venv/bin/pytest -q -rs   (MAIN CHECKOUT) -> 7283 passed, 45 skipped, exit 0
-                                        baseline 7239/45 -> +44, skips UNCHANGED
-  frontend   npx vitest run            -> 208 files / 5588 tests, exit 0
-                                        baseline 208/5525 -> +63
-  types      npx tsc -b                -> exit 0
+VERIFIED ON THE FULLY SETTLED TREE (orchestrator's own runs, exit codes captured NOT piped,
+checkout named with every count per the measurement rules):
+  backend    .venv/bin/pytest -q -rs  (MAIN CHECKOUT) -> 7390 passed, 45 skipped, exit 0
+                                       baseline 7239/45 at 97c44c84 -> +151, skips UNCHANGED
+  frontend   npx vitest run           -> 208 files / 5638 tests, exit 0
+                                       baseline 208/5525 -> +113
+  types      npx tsc -b               -> exit 0
   snapshot   --check with BOTH --out and --detail-out -> exit 0, both artifacts, no drift
-  browser    playwright read-only  -> 1043 passed / 557 skipped, exit 0
-             playwright mutation   -> 121 passed, exit 0
-             playwright trusted    -> 8 passed, exit 0
-             playwright bench      -> NOT RUN, and reported unrun rather than passing
+  browser    read-only 1043 passed / 557 skipped · mutation 121 · trusted 8 — all exit 0,
+             re-run on the settled tree. bench NOT RUN and reported unrun, never as passing.
   a11y       darwin MEASURED, nothing moved: 560 passed / 200 skipped / 0 failed;
-             A11Y_BASELINE_TOTAL_NODES 877/877, 70 cells, DARWIN_CARRIED_FORWARD = [],
-             all re-read from the file. LINUX STILL UNVERIFIED — CI is the authority.
+             A11Y_BASELINE_TOTAL_NODES 877/877, 70 cells, DARWIN_CARRIED_FORWARD = [].
+             LINUX STILL UNVERIFIED — CI is the authority and a green macOS run is not evidence.
+
+SEVEN ORCHESTRATOR ERRORS, all caught by implementers or the reviewer, all recorded rather than
+quietly fixed. The worst was #2, published into an OPERATOR MIGRATION PACKET:
+  1  asserted served-manifest membership never measured, and backwards — checked a
+     `components/GuidedCompletion.tsx` path that does not exist and reported its absence as the
+     file's. Told a slice it could not drift the snapshot when it was certain to.
+  2  **published a FALSE "phantom citation" finding into `migration-approval-packet-0002.md` and
+     struck out THREE CORRECT sentences to do it** — tested the citation against the wrong
+     document, and the enumeration missed `:165`, the only citation carrying a document path.
+     Withdrawn in `9a1a3d07`.
+  3  defended a real defect (`ValidateReview.tsx:420`) as a false positive, in writing.
+  4  proposed a C-1 terminal rule that broke two green C-2 tests by 48,576 bytes, lost six natural
+     dictations, and did not close the defect.
+  5  "four axe-measured surfaces" / "four e2e sites" — three, and three plus a ready gate.
+  6  exempted the `or`-branch as "already constrained by the mandatory `or`" — measured FALSE,
+     five silent counterexamples.
+  7  missed four commits of snapshot drift, so every backend run from `31a220af` reported
+     "1 failed" and two slices had to be forewarned it was not theirs.
+  Plus: instructed a slice to add a site to `SITES` (would have made one guard mandate a copy
+  change another guard fails) and to "remove the exemption and let the detector cover the site"
+  (the detector did not cover it at all — removal would have left it SILENTLY UNCOVERED).
+  **FIVE slices refused an instruction of mine with evidence. All five were right.**
 
 A SIXTH E2E TRAP, found here because it produced a false regression signal: the READ-ONLY
   playwright config does NOT start a backend — `global-setup.ts:173` only PROBES
@@ -555,7 +576,69 @@ Recorded here so the ledger and the plan cannot disagree. Full rationale in the 
 
 ---
 
-## REMEDIATION OF THE FOUR BLOCKING FINDINGS (2026-09-12) — and FOUR orchestrator errors
+## *** THE §5 CLAIM CLASS IS NARROWER, NOT CLOSED — and the remaining entrance is PRE-EXISTING ***
+
+**Answer in one word first, because "closed" is the claim this whole arc is about getting wrong:
+NARROWER.**
+
+The **restatement** entrance (pass two, now a three-condition gate) is closed as far as anything
+here can measure: all nine named sentences refuse **and disclose**, and a **510-cell sweep**
+(15 connectives × 17 modifier tails × 2 separators) finds **0 fabrications and 0 silent refusals**.
+
+**But the class has a SECOND entrance nobody had looked at in four passes: the label-anchored rule
+of PASS ONE.** `_TEMPERATURE_K` bridges label→value with `[^.;:]{0,40}?`, so every one of these
+proposes a value the transcript does not state — **silently**, with
+`restated_in_same_sentence: False`:
+
+| sentence | proposes | what it really is |
+|---|---|---|
+| `"The temperature drift was 3 K"` | `temperature_K = 3` | a **DRIFT** |
+| `"The temperature error was 2 K"` | `2` | an **ERROR** |
+| `"temperature resolution 0.5 K"` | `0.5` | a **RESOLUTION** |
+| `"The temperature was stable to 1 K"` | `1` | a **TOLERANCE** |
+| `"The temperature rose by 30 K"` | `30` | a **DELTA** |
+| `"temperature step 5 K"` | `5` | a **STEP SIZE** |
+| `"We held the temperature to within 2 K"` | `2` | a **TOLERANCE** |
+| `"It started drifting at <instant>"` | acquisition **START** | a drift onset |
+
+**PRE-EXISTING, and verified as such by the orchestrator rather than accepted:** extracting `main`'s
+own `_TEMPERATURE_K` out of `git show 2f9a1133:apps/api/isaac_api/transcript_capture.py` and running
+it, **all seven fabricate on `main` too.** So this branch neither introduces nor worsens it, and is
+**not blocked on it**.
+
+**AND EVERY ONE IS MORE NATURAL DICTATION THAN ANY OF THE FIVE `or`-BRANCH ROWS TWO SLICES WERE
+SPENT ARGUING ABOUT.** That is the humbling part and the durable lesson: four passes refined a gate
+on pass TWO while pass ONE fabricated on sentences a scientist is far likelier to say. **A defect
+class is not the entrance you happen to be standing in.** Carried as `_LABEL_OVERREACH_RESIDUE`,
+pinned **as open** by a wrong-way-round test, deliberately NOT fixed — every obvious proxy either
+fails open (a denylist) or kills readings the rule exists for (a shorter bridge breaks
+`"Sample temperature at the second scan was 425 K"`). **It needs its own slice and its own
+argument.**
+
+One case left deliberately, and it is not a defect: `"425 K or 3 K."` (terminal) still reads `3`. It
+is structurally identical to the must-pass `"425 K or 430 K"`, and judging `3 K` implausible *as a
+temperature* is a scientific judgement **§5 forbids**.
+
+### THE COUPLING THAT DISTORTED TWO DECISIONS — and the rule that comes out of it
+
+`_bytes_only()` built the C-2 byte-ceiling proof out of **restatements**, so a resource ceiling's
+proof depended on a **semantic** gate admitting them:
+
+| | candidates | quoted bytes | ceiling fires? |
+|---|---:|---:|---|
+| old fixture, scoped condition 3 | 5 | 1,250,000 | yes |
+| **old fixture, universal condition 3** | **3** | **750,000** | **NO — silently stops testing** |
+| new fixture, either | 5 | 1,250,000 | yes |
+
+It **refuted one C-1 proposal** and **caused the `or`-branch exemption**. The durable rule: **a
+resource-ceiling proof must not be hostage to a semantic gate.** The fixture now repeats the LABEL
+per value so pass two accepts and refuses nothing, and the test that pinned the coupling as a fact
+was **inverted in place** into `..._ARE_NO_LONGER_COUPLED`, asserting the mechanism rather than the
+number.
+
+---
+
+## REMEDIATION OF THE FOUR BLOCKING FINDINGS (2026-09-12) — and SEVEN orchestrator errors
 
 Every finding was reproduced FIRST-HAND by the orchestrator before any brief was written. What
 follows is what the remediation slices found that the briefs did not, kept because a brief's
