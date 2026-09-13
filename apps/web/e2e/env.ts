@@ -92,3 +92,36 @@ export const SEED = {
  * for the wrong reason the moment a session was in play.
  */
 export const MISSING_RECORD_ID = '01SYNTHXANESSEED0000000099';
+
+/**
+ * THE TITLE ALL FIVE CANONICAL SEEDS SHARE, and why a browser spec needs it.
+ *
+ * Before UX-002 the record screen's only `<h1>` was
+ * `<h1 class="sr-only">Review Record</h1>`, and it was rendered in BOTH the
+ * `bundle.status !== 'data'` branch (loading and `BackendDown`) and the loaded
+ * one. So `getByRole('heading', { name: 'Review Record' })` was a usable — if
+ * weak — proof that a record screen had opened.
+ *
+ * UX-002 replaced the loaded branch's heading with a VISIBLE
+ * `h1.record-page-title` reading `<workspace> / <record title>`, and left the
+ * `sr-only` form in the loading/error branch alone. `Review Record` therefore
+ * became a heading that exists **only when the record has NOT resolved** — the
+ * exact opposite of what four `e2e/` sites were asserting with it (review
+ * finding I-1). Every one of them now waits on something that cannot render
+ * until `bundle.status === 'data'`.
+ *
+ * This is the base title the backend gives each of the five (`workspace.py`'s
+ * `_SEED_TITLE_BASE`); each seed appends a ` · <lifecycle>` suffix that
+ * `stripLifecycleSuffix` (`src/lib/adapt.ts`) removes before the `h1` renders
+ * it. It is the base, so a spec that does not control WHICH seed it landed on
+ * can still assert the record's own identity.
+ */
+export const SEED_TITLE_BASE = 'XANES Example — CuO (Cu K-edge)';
+
+/**
+ * The heading `Review Record` — kept as a named constant precisely so the
+ * ANTI-assertions can name it. A spec proving a record resolved asserts this is
+ * ABSENT: it is the loading/`BackendDown` heading, so its presence on a screen
+ * that claims to have loaded a record means the record did not load.
+ */
+export const UNRESOLVED_RECORD_HEADING = 'Review Record';

@@ -167,6 +167,15 @@ const SEL_INTERACTIVE =
  * `h1.sr-only` is in the set but never reported: it measures 1x1, and the
  * width guard in the probe drops boxes under 2px (their content-loss question
  * belongs to `findClippedText`, which knows the visually-hidden allowlist).
+ *
+ * THAT EXEMPTION NO LONGER COVERS THE RECORD SCREEN, and the change is a
+ * widening of coverage rather than a gap. UX-002 made the record workbench's
+ * `<h1>` a VISIBLE `h1.record-page-title` (`<workspace>` / `<record title>`) on
+ * all four `?view=` workspaces, so on those surfaces the `h1` now presents a
+ * real box and IS assessed for occlusion, slivers and clipping like any other
+ * critical label. The `sr-only` form survives only in `RecordWorkbench`'s
+ * `bundle.status !== 'data'` branch and on the surfaces that still use it, where
+ * the sentence above continues to hold exactly as written.
  * Headings below `<h1>` are deliberately NOT included — they are section labels,
  * and including them was measured to add noise without adding a finding.
  */

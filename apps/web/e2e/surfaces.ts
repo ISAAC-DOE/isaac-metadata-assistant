@@ -94,11 +94,34 @@ export const SURFACES: readonly Surface[] = [
     // structure.spec's own failure message instructs.
   },
   {
+    /*
+     * THE READY GATE IS THE PAGE `h1`'s WORKSPACE LINE, AND IT USED TO BE A RACE.
+     *
+     * It read `{ role: 'heading', name: 'Review Record' }`. That heading is
+     * `<h1 class="sr-only">` in `RecordWorkbench`'s `bundle.status !== 'data'`
+     * branch — i.e. it renders while the record is still LOADING and again when
+     * the API is down (`BackendDown`) — and until UX-002 the loaded branch
+     * rendered the same string, so the gate happened to resolve on both. UX-002
+     * replaced the loaded branch's heading with the visible
+     * `h1.record-page-title` (`<workspace>` / `<record title>`), which left
+     * `Review Record` as a heading that exists ONLY when the record has not
+     * resolved. A gate that resolves on the loading branch lets axe, the width
+     * sweep, the layout probes and the 200% pass measure a `role="status"`
+     * skeleton — or `BackendDown` — and report it as this surface.
+     *
+     * `Record Fields` is the `.eyebrow` inside that `h1`, so it cannot render
+     * before `bundle.status === 'data'`. It is the workspace name rather than
+     * the record title on purpose: this gate's job is "the loaded branch
+     * mounted", and pinning the seed's scientific title here would make every
+     * sweeping spec restate fixture content. That the `h1` names the RECORD is
+     * asserted where it belongs — `specs/workspace-scope.spec.ts` and
+     * `specs/record-identity.spec.ts`.
+     */
     id: 'record-detail',
     name: 'Record Detail (needs attention)',
     path: `/record/${SEED.partial}`,
     scope: 'example',
-    ready: { role: 'heading', name: 'Review Record' },
+    ready: { role: 'heading', name: /^Record Fields/ },
   },
   {
     /*

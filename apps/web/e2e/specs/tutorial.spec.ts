@@ -39,7 +39,7 @@
  * read-only suite's contract is that it does not.
  */
 
-import { API_BASE, SEED } from '../env';
+import { API_BASE, SEED, SEED_TITLE_BASE, UNRESOLVED_RECORD_HEADING } from '../env';
 import { expect, test } from '../fixtures';
 import { SURFACES } from '../surfaces';
 import { enterWorkedExampleAsTheAppDoes } from '../worked-example';
@@ -383,7 +383,22 @@ test.describe('@interaction the coach marks', () => {
     await page.getByRole('button', { name: 'Next', exact: true }).click();
     await expect(mark(page)).toHaveAttribute('data-tutorial-step', 'record-readiness');
     await expect(page).toHaveURL(/\/record\/01SYNTHXANESSEED000000000\d$/);
-    await expect(page.getByRole('heading', { name: 'Review Record' })).toBeVisible();
+    /*
+     * "AND THE RECORD RESOLVES, WHICH IT COULD ONLY DO INSIDE THE SESSION" — the
+     * comment above is the claim, and until review finding I-1 this assertion was
+     * its opposite. It waited on `heading { name: 'Review Record' }`, which after
+     * UX-002 is rendered only by `RecordWorkbench`'s `bundle.status !== 'data'`
+     * branch: it is what the LOADING panel and `BackendDown` are headed. So a
+     * walkthrough that navigated to a record the session could not serve passed
+     * here.
+     *
+     * `h1.record-page-title` exists only in the loaded branch, and it carries the
+     * record's own title. The base title is asserted rather than the full one
+     * because the step chooses the seed (the URL above is a regex over all five)
+     * and all five share it.
+     */
+    await expect(page.locator('h1.record-page-title')).toContainText(SEED_TITLE_BASE);
+    await expect(page.getByRole('heading', { name: UNRESOLVED_RECORD_HEADING })).toHaveCount(0);
     await expect(page.getByRole('alert')).toHaveCount(0);
 
     // Back returns to the previous step, and back to its surface.
@@ -607,7 +622,21 @@ test.describe('@interaction reloading', () => {
     // before the screen's first fetch.
     await expect(mark(page)).toBeVisible({ timeout: 20_000 });
     await expect(mark(page)).toHaveAttribute('data-tutorial-step', 'record-readiness');
-    await expect(page.getByRole('heading', { name: 'Review Record' })).toBeVisible();
+    /*
+     * "…AND THE RECORD IS STILL REACHABLE, SO THE SCOPE WAS RE-ENTERED BEFORE THE
+     * SCREEN'S FIRST FETCH" — that is the property this test exists for, and
+     * `heading { name: 'Review Record' }` stopped being able to witness it at
+     * UX-002 (review finding I-1): that heading is now the loading/`BackendDown`
+     * one, so a reload that came back OUTSIDE the session — the exact regression
+     * this line guards — would have satisfied it, twice over (first while
+     * fetching, then on the failure branch).
+     *
+     * `h1.record-page-title` cannot render until `bundle.status === 'data'`, so
+     * the wait is now the assertion, and no timeout is needed beyond the one
+     * `mark(page)` above already served: the heading arrives with the bundle.
+     */
+    await expect(page.locator('h1.record-page-title')).toContainText(SEED_TITLE_BASE, { timeout: 20_000 });
+    await expect(page.getByRole('heading', { name: UNRESOLVED_RECORD_HEADING })).toHaveCount(0);
     await expect(bar(page)).toBeVisible();
     await expect(chip(page)).toHaveText('Worked Example');
 
