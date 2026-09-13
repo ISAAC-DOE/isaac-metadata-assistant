@@ -250,6 +250,23 @@ NOTE_SOURCE_ORIGIN: dict[str, str] = {
     # no note is attributed to anybody, and this build establishes no identity for an
     # agent call at all.
     "connected_agent": ORIGIN_ASSISTANT,
+    # A LINE A DETERMINISTIC PARSER READ OUT OF A HISTORICAL SOURCE FILE during a
+    # Historical Import. :data:`ORIGIN_FILE` for the identical reason the three
+    # above are: the content was lifted out of an artifact this application read.
+    #
+    # NOT :data:`ORIGIN_ASSISTANT`, and the distinction is the whole point of the
+    # import shell's design. The reading is done by a registered parser over a
+    # committed synthetic fixture — there is no model, no provider and no network
+    # call anywhere in that path — so ``assistant`` would claim a machine
+    # INTERPRETED the words when what happened is that a parser READ them.
+    #
+    # AND NOT :data:`ORIGIN_MANUAL` either: nobody typed it here. The scientist
+    # chose which source to read and judges every candidate, which is a different
+    # act from authoring the value.
+    #
+    # UNLIKE the three unreachable members above, this one HAS a producer: the
+    # candidate-to-proposal operation writes one such note per statement it cites.
+    "historical_source_line": ORIGIN_FILE,
 }
 
 #: THE ORDER :func:`primary_origin` READS, HIGHEST FIRST. Explicit, total, and

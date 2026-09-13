@@ -59,6 +59,7 @@ from . import dependencies
 from . import conflict_resolution as cr
 from . import evidence_classify
 from . import experiment_repository
+from . import historical_import as hist
 from . import identity as identity_module
 from . import memory
 from . import memory_graph
@@ -24090,3 +24091,999 @@ def get_runtime_verification(
         # The exception text is not captured: it could carry a filesystem path
         # or a record value. `error` is all a caller may safely learn.
         return verification.build_pending_report("error")
+
+
+# --- 23. historical import (the SHELL) ----------------------------------------
+#
+# NINE OPERATIONS OVER AN IMPORT SESSION. NO BYTES ARRIVE FROM OUTSIDE, EVER.
+#
+# The workflow, in the product's own order and words:
+#
+#   New Import -> Sources -> Parse -> Reconstruct -> Review -> Add to Experiments
+#
+# `isaac_api.historical_import` is the domain model and its module docstring is
+# the authority on what is built and what is deliberately not. What this section
+# adds is the HTTP surface, and four things about it are worth stating here
+# because they are properties of the ROUTES rather than of the model:
+#
+# 1. NO UPLOAD, NO MULTIPART, NO FILE INPUT. `POST /api/uploads` remains an
+#    unconditional 403 and nothing here changes or depends on it. A source is
+#    either a POINTER the scientist typed (recorded; not opened) or one of the
+#    committed synthetic fixtures (read, because it is a file inside this
+#    repository put there for this purpose). The frontend adds no
+#    `<input type="file">`, which is not a promise: `upload-claim-parity.test.tsx`
+#    asserts exactly two non-test frontend files declare one and names both.
+#
+# 2. AN IMPORT SESSION SERVES NO `ETag` AND TAKES NO `If-Match`, and the ONE
+#    operation that writes an EXPERIMENT takes the RECORD's. A session is a
+#    working area with no revision contract; the record it proposes onto has one,
+#    and that operation is held to it exactly as `POST .../proposals` is. Putting
+#    a validator on the session would be inventing the contract that needs it.
+#
+# 3. THE ONLY WAY A CANDIDATE REACHES A RECORD IS AS AN **OPEN** PROPOSAL.
+#    `POST .../candidates/{id}/propose` mints one note and one proposal, in one
+#    `record_lock` and one `save_versioned`, through `notes.new_note` and
+#    `proposals.new_proposal` unchanged — the arrangement the transcript route
+#    already uses, for its reason. It writes no field, mints no evidence entry and
+#    builds no confirmation envelope. Accepting is a separate operation that
+#    requires a trusted human identity, which no default-configured deployment
+#    establishes.
+#
+# 4. `POST .../ingestion/csv/preview` IS NOT GIVEN AN APPLY ROUTE, and nothing
+#    here is one. Its reconciliation-only authority boundary is a committed human
+#    decision.
+
+#: The path parameter naming an import session. One description, so the wording
+#: cannot drift between the seven operations that take it.
+ImportId = Annotated[
+    str,
+    Path(
+        max_length=_EXPERIMENT_ID_MAX_LENGTH,
+        description=(
+            "The id of an import session in this workspace, as returned by "
+            "`GET /api/imports`."
+        ),
+    ),
+]
+
+#: The path parameter naming one manifest entry.
+ImportSourceId = Annotated[
+    str,
+    Path(
+        max_length=_EXPERIMENT_ID_MAX_LENGTH,
+        description=(
+            "The `source_id` of one entry in this session's source bundle, as "
+            "returned by `GET /api/imports/{import_id}`."
+        ),
+    ),
+]
+
+#: The path parameter naming one reconstructed candidate.
+ImportCandidateId = Annotated[
+    str,
+    Path(
+        max_length=_EXPERIMENT_ID_MAX_LENGTH,
+        description=(
+            "The `candidate_id` of one candidate in this session's reconstruction, "
+            "as returned by `GET /api/imports/{import_id}`."
+        ),
+    ),
+]
+
+_R_IMPORT_NOT_FOUND: dict = {
+    404: {
+        "description": (
+            "No import session in the selected workspace has that id — or the "
+            "`X-Isaac-Tutorial-Session` header named a worked-example session that "
+            "does not exist. The request is never silently answered from the "
+            "ordinary workspace instead."
+        )
+    },
+}
+
+#: The note `source` every import-minted note carries. Checked against the closed
+#: vocabulary at import time, exactly as the transcript route checks its own: a
+#: member removed from `notes.NOTE_SOURCES` would otherwise turn every propose
+#: into a 500 at the moment a scientist used it.
+_IMPORT_NOTE_SOURCE = "historical_source_line"
+
+if _IMPORT_NOTE_SOURCE not in notes.NOTE_SOURCES:  # pragma: no cover - import-time
+    raise RuntimeError(
+        f"{_IMPORT_NOTE_SOURCE!r} is not one of the note sources; an import "
+        "cannot describe what produced its own content"
+    )
+
+
+def _import_not_found(import_id: str) -> JSONResponse:
+    return JSONResponse(
+        status_code=404,
+        content={"error": "import_session_not_found", "id": import_id},
+    )
+
+
+def _import_source_not_found(import_id: str, source_id: str) -> JSONResponse:
+    """A manifest entry this session does not hold. DISTINCT from `_import_not_found`.
+
+    The two 404s mean different things — one says the workspace has no such
+    session, this one says the session was read successfully and holds no entry
+    under that id — and collapsing them sends a client looking in the wrong
+    place. Same reasoning as `_asset_not_found` and `_note_not_found`.
+    """
+    return JSONResponse(
+        status_code=404,
+        content={
+            "error": "import_source_not_found",
+            "import_id": import_id,
+            "id": source_id,
+        },
+    )
+
+
+def _import_candidate_not_found(import_id: str, candidate_id: str) -> JSONResponse:
+    return JSONResponse(
+        status_code=404,
+        content={
+            "error": "import_candidate_not_found",
+            "import_id": import_id,
+            "id": candidate_id,
+        },
+    )
+
+
+def _import_refusal(exc: "hist.UnsupportedImport") -> JSONResponse:
+    """The domain model's own refusal, rendered as a typed 422 — never a 500.
+
+    THE ECHOED KEY IS BOUNDED AT THE PUBLICATION BOUNDARY, exactly as
+    `_asset_refusal` bounds its own. `hist.UnsupportedImport` can name the
+    caller's own body key in `key`, so `{"\\ud800": 1}` would otherwise put a lone
+    surrogate into this response and Starlette's render would raise
+    `UnicodeEncodeError` — a 500 out of a refusal, which is precisely what this
+    function exists to prevent. `_echoable_key` is CALLED rather than
+    reimplemented: a second copy of the predicate is the drift
+    `test_the_helper_is_the_same_predicate_as_the_handlers_check` forbids.
+    """
+    extra = dict(exc.extra)
+    if isinstance(extra.get("key"), str):
+        extra["key"] = _echoable_key(extra["key"])
+    return JSONResponse(
+        status_code=422,
+        content=jsonable_encoder(
+            {"error": exc.error, "message": exc.message, **extra}
+        ),
+    )
+
+
+def _load_import_or_404(import_id: str, scope: str | None):
+    """`(session, None)` or `(None, <404 response>)`. One lookup, one refusal."""
+    session = hist.load_session(import_id, session_id=scope)
+    if session is None:
+        return None, _import_not_found(import_id)
+    return session, None
+
+
+_IMPORT_CREATE_KEYS = frozenset({"label"})
+
+_IMPORT_SOURCE_KEYS = frozenset(
+    {
+        "kind",
+        "filename",
+        "reference",
+        "fixture_name",
+        "media_type",
+        "size_bytes",
+        "sha256",
+    }
+)
+
+_IMPORT_PROPOSE_KEYS = frozenset({"experiment_id", "run_id"})
+
+
+def _unknown_import_keys(body: dict, allowed: frozenset[str]) -> JSONResponse | None:
+    """A body key this operation does not accept, refused BY NAME.
+
+    Accepted-and-quietly-ignored is the failure mode this exists to prevent: a
+    caller that sent `sha256_computed` and got a 200 would reasonably believe the
+    server had honoured it.
+    """
+    refused = sorted(set(body) - allowed)
+    if not refused:
+        return None
+    return JSONResponse(
+        status_code=422,
+        content={
+            "error": "unrecognized_field",
+            "message": (
+                "This operation does not accept those keys. They are refused by "
+                "name rather than ignored, because a request that is accepted and "
+                "silently not honoured is worse than one that is refused."
+            ),
+            "keys": [_echoable_key(key) for key in refused],
+            "allowed": sorted(allowed),
+        },
+    )
+
+
+@router.post(
+    "/imports",
+    tags=[TAG_INGESTION],
+    summary="Start a Historical Import Session",
+    description=(
+        "Creates an empty import session — a working area in which you assemble a "
+        "bundle of sources, have what this build can read parsed, have candidate "
+        "values reconstructed from that reading, and send each candidate you agree "
+        "with into review on an experiment you choose.\n\n"
+        "IT CREATES NO EXPERIMENT AND NO RECORD. A session holds metadata about "
+        "files and the candidates read out of them; nothing in it is a value, "
+        "evidence or a confirmation, and nothing in it reaches an exported record.\n\n"
+        "A SESSION IS A WORKING AREA AND IS NOT PART OF THE DURABLE RECORD STORE. "
+        "It is kept in this workspace, so a server restart can end it. Anything you "
+        "propose onto an experiment is stored with that experiment and is not "
+        "affected. The response says so in `durability`, so a client does not have "
+        "to know it.\n\n"
+        "`label` is optional and is yours — it names the bundle, not a record, and "
+        "it reaches no exported artifact."
+    ),
+    response_description="The new, empty session.",
+    responses={**_R_UNAUTHORIZED, **_R_TUTORIAL_SCOPE},
+)
+def post_import_session(
+    scope: TutorialScopeDep,
+    body: dict = Body(
+        default_factory=dict,
+        description=(
+            "`{\"label\": \"<optional, yours>\"}`. Any other key is refused with "
+            "`422`."
+        ),
+    ),
+):
+    if not isinstance(body, dict):
+        return JSONResponse(
+            status_code=422,
+            content={
+                "error": "invalid_body",
+                "message": "The request body must be a JSON object.",
+            },
+        )
+    refused = _unknown_import_keys(body, _IMPORT_CREATE_KEYS)
+    if refused is not None:
+        return refused
+    try:
+        session = hist.new_session(label=body.get("label"), now_utc=_now_iso())
+    except hist.UnsupportedImport as refusal:
+        return _import_refusal(refusal)
+    hist.save_session(session, session_id=scope)
+    return {"import": hist.session_view(session)}
+
+
+@router.get(
+    "/imports",
+    tags=[TAG_INGESTION],
+    summary="List Historical Import Sessions",
+    description=(
+        "Every import session in the selected workspace, newest first.\n\n"
+        "EACH ENTRY IS A SUMMARY AND NEVER THE BUNDLE. It carries counts — sources, "
+        "sources parsed, candidates, candidates already sent to review — and not the "
+        "manifest, the parse results or the candidates themselves, so this response "
+        "does not grow in the size of each bundle. Read one session for its detail.\n\n"
+        "A session document this build cannot read is SKIPPED rather than failing "
+        "the whole list: one unreadable file must not empty this screen for every "
+        "other session."
+    ),
+    response_description="The session summaries, newest first.",
+    responses={**_R_UNAUTHORIZED, **_R_TUTORIAL_SCOPE},
+)
+def list_import_sessions(scope: TutorialScopeDep) -> dict:
+    sessions = hist.list_sessions(session_id=scope)
+    return {
+        "imports": [hist.session_summary(session) for session in sessions],
+        "total": len(sessions),
+        # THE WORKFLOW AND THE DISCLOSURES COME FROM THE SERVER, so a client does
+        # not carry a second copy of the step list or of what the last step does
+        # not do. The alternative is two vocabularies for one workflow, free to
+        # drift — which is the defect the retired step names already recorded once.
+        "workflow": [
+            {
+                "id": step,
+                "label": label,
+                "built": step != hist.UNBUILT_STEP,
+                "disclosure": (
+                    hist.UNBUILT_STEP_DISCLOSURE if step == hist.UNBUILT_STEP else None
+                ),
+            }
+            for step, label in hist.WORKFLOW_STEPS
+        ],
+        "durability": hist.SESSION_DURABILITY_DISCLOSURE,
+        "available_fixtures": list(hist.fixture_names()),
+    }
+
+
+@router.get(
+    "/imports/{import_id}",
+    tags=[TAG_INGESTION],
+    summary="Read One Historical Import Session",
+    description=(
+        "The whole session: its source bundle, what parsed and what did not, the "
+        "reconstruction's candidates, and what has already been sent to review.\n\n"
+        "WHAT THE MANIFEST SAYS PER ENTRY, because the answer differs per entry and "
+        "a banner would be wrong for half of them. `parse_state` is one of four: "
+        "`parsed` (a registered parser read it), `failed` (a parser was applied and "
+        "refused the content), `unparsed` (registered, not read yet), and "
+        "`no_content_path` — **this build has no path to that file's contents**, "
+        "which is the state of every entry recorded as a reference. Every state but "
+        "`parsed` carries a `parse_detail` saying which and why. `sha256` and "
+        "`size_bytes` are what you recorded; nothing here computes either, for a "
+        "reference or for a fixture, so no surface may report a digest as verified.\n\n"
+        "WHAT THE RECONSTRUCTION SAYS PER CANDIDATE. `determinism` is `deterministic` "
+        "(read out of a source, with the key and the line it was read from in `rule`) "
+        "or `inferred` (produced by a stored rule over the bundle, which `rule` names "
+        "— no source states it). `supporting_statements` names every source backing "
+        "it. `disagreement` lists every competing value with the sources asserting it, "
+        "and when it is non-empty `proposed_value` is `null` and `unresolved_reason` "
+        "is set: a reconstruction never chooses between sources that disagree. "
+        "`proposable` is `false` — with `not_proposable_reason` saying which of the "
+        "three reasons applies — when the sources disagree, when the candidate is "
+        "structural rather than a value at a field path, or when this build has no "
+        "write operation for that path.\n\n"
+        "`applied` is always `false`. A reconstruction writes no field, mints no "
+        "evidence and changes no record; it is read and never hydrated from the "
+        "stored document, so a hand-edited `true` cannot make this response claim "
+        "otherwise."
+    ),
+    response_description="The session, its bundle, its reading and its candidates.",
+    responses={**_R_UNAUTHORIZED, **_R_IMPORT_NOT_FOUND},
+)
+def get_import_session(scope: TutorialScopeDep, import_id: ImportId):
+    session, missing = _load_import_or_404(import_id, scope)
+    if missing is not None:
+        return missing
+    return {"import": hist.session_view(session)}
+
+
+@router.delete(
+    "/imports/{import_id}",
+    tags=[TAG_INGESTION],
+    summary="Discard a Historical Import Session",
+    description=(
+        "Removes one import session's working area.\n\n"
+        "IT DESTROYS A WORKING AREA AND NOTHING ELSE. Every proposal this session "
+        "sent to review lives on the experiment it was sent to and is untouched, as "
+        "is every note behind one — which is why a session is discardable at all "
+        "while a note and a proposal are not: those are captured content and a "
+        "recorded judgement, and this API has no delete for either.\n\n"
+        "Discarding a session you have already proposed from does mean losing the "
+        "record of WHICH candidates you sent, so a later session over the same "
+        "sources will offer them again. Sending one twice is still refused: the "
+        "proposal operation is exactly-once per candidate on a given record."
+    ),
+    response_description="Confirmation that the working area is gone.",
+    responses={**_R_UNAUTHORIZED, **_R_IMPORT_NOT_FOUND},
+)
+def delete_import_session(scope: TutorialScopeDep, import_id: ImportId):
+    with hist.import_lock(import_id, session_id=scope):
+        session, missing = _load_import_or_404(import_id, scope)
+        if missing is not None:
+            return missing
+        hist.delete_session(import_id, session_id=scope)
+    return {"discarded": True, "import_id": import_id}
+
+
+@router.post(
+    "/imports/{import_id}/sources",
+    tags=[TAG_INGESTION],
+    summary="Add a Source to an Import Bundle",
+    description=(
+        "Records ONE entry in this session's source bundle: where a file is, what "
+        "it is called, and what you say identifies it.\n\n"
+        "**NOTHING IS UPLOADED AND NO FILE IS FETCHED BY THIS OPERATION.** Send "
+        "`kind: \"reference\"` with a `filename` and a `reference`, and this build "
+        "stores them; it has not opened the file the reference names, so that entry "
+        "is recorded with `parse_state: \"no_content_path\"` and cannot contribute a "
+        "parsed statement. That is stated per entry rather than in a banner, because "
+        "the other kind of entry IS read.\n\n"
+        "Send `kind: \"synthetic_fixture\"` with a `fixture_name` from the list "
+        "`GET /api/imports` reports under `available_fixtures`, and this build reads "
+        "that file — it is a committed synthetic fixture inside this application, put "
+        "there so the import workflow can be exercised end to end, and it says in its "
+        "own first lines that it is synthetic and was never produced by an "
+        "instrument. A name outside that list is refused; the check is the same "
+        "branch for a name that could describe a path and for one that is merely "
+        "absent, so this operation cannot be used to find out what files exist.\n\n"
+        "`sha256` is optional, is checked for SHAPE only — 64 lowercase hex "
+        "characters — and is **never computed**, not even for a fixture this build "
+        "does read. So a digest here records what you say identifies the file, and no "
+        "surface may describe it as verified, checked or matched. `size_bytes` and "
+        "`media_type` are likewise yours, are stored verbatim, and are consulted by "
+        "nothing.\n\n"
+        "Adding a source does not re-read the bundle. Run the parse operation again "
+        "to include it, which also discards any earlier reconstruction — candidates "
+        "derived from a reading of a bundle that has since changed are a claim about "
+        "evidence that may no longer be there.\n\n"
+        "Any other body key is refused with `422` naming it."
+    ),
+    response_description="The stored manifest entry, and the session it is now in.",
+    responses={**_R_UNAUTHORIZED, **_R_IMPORT_NOT_FOUND},
+)
+def post_import_source(
+    scope: TutorialScopeDep,
+    import_id: ImportId,
+    body: dict = Body(
+        ...,
+        description=(
+            "`{\"kind\": \"reference\"|\"synthetic_fixture\", \"filename\": "
+            "\"<required for a reference>\", \"reference\": \"<required for a "
+            "reference>\", \"fixture_name\": \"<required for a fixture>\", "
+            "\"media_type\": \"<optional>\", \"size_bytes\": <optional>, "
+            "\"sha256\": \"<optional, 64 hex characters, never computed>\"}`. Any "
+            "other key is refused with `422`."
+        ),
+    ),
+):
+    if not isinstance(body, dict):
+        return JSONResponse(
+            status_code=422,
+            content={
+                "error": "invalid_body",
+                "message": "The request body must be a JSON object.",
+            },
+        )
+    refused = _unknown_import_keys(body, _IMPORT_SOURCE_KEYS)
+    if refused is not None:
+        return refused
+    with hist.import_lock(import_id, session_id=scope):
+        session, missing = _load_import_or_404(import_id, scope)
+        if missing is not None:
+            return missing
+        try:
+            entry = hist.add_source(
+                session,
+                kind=body.get("kind"),
+                filename=body.get("filename"),
+                reference=body.get("reference"),
+                fixture_name=body.get("fixture_name"),
+                media_type=body.get("media_type"),
+                size_bytes=body.get("size_bytes"),
+                sha256=body.get("sha256"),
+                recorded_utc=_now_iso(),
+                now_utc=_now_iso(),
+            )
+        except hist.UnsupportedImport as refusal:
+            # NOTHING WAS SAVED: `add_source` mutates the in-memory session only,
+            # and the save below has not run.
+            return _import_refusal(refusal)
+        hist.save_session(session, session_id=scope)
+    return {"source": entry.to_state(), "import": hist.session_view(session)}
+
+
+@router.delete(
+    "/imports/{import_id}/sources/{source_id}",
+    tags=[TAG_INGESTION],
+    summary="Remove a Source from an Import Bundle",
+    description=(
+        "Drops one entry from this session's source bundle.\n\n"
+        "IT ALSO DISCARDS THIS SESSION'S PARSE RESULTS AND ITS RECONSTRUCTION, and "
+        "that is deliberate rather than tidy: a reading of a bundle the bundle no "
+        "longer matches is a stale claim, and keeping candidates whose supporting "
+        "source is gone would put unsupportable values in front of a scientist. Run "
+        "the parse and reconstruct operations again.\n\n"
+        "WHAT IT DOES NOT DROP is the record of which candidates you have already "
+        "sent to review. Those proposals exist on the experiments they were sent to, "
+        "and forgetting that they were sent would let the same candidate be offered "
+        "again."
+    ),
+    response_description="The session with that entry, its reading and its candidates gone.",
+    responses={**_R_UNAUTHORIZED, **_R_IMPORT_NOT_FOUND},
+)
+def delete_import_source(
+    scope: TutorialScopeDep, import_id: ImportId, source_id: ImportSourceId
+):
+    with hist.import_lock(import_id, session_id=scope):
+        session, missing = _load_import_or_404(import_id, scope)
+        if missing is not None:
+            return missing
+        if not hist.remove_source(session, source_id, now_utc=_now_iso()):
+            return _import_source_not_found(import_id, source_id)
+        hist.save_session(session, session_id=scope)
+    return {"removed": True, "import": hist.session_view(session)}
+
+
+@router.post(
+    "/imports/{import_id}/parse",
+    tags=[TAG_INGESTION],
+    summary="Parse an Import Bundle's Readable Sources",
+    description=(
+        "Applies every registered parser to every source in this bundle that has "
+        "one, and reports what each said.\n\n"
+        "WHICH SOURCES THIS REACHES, precisely. A source recorded as a "
+        "`synthetic_fixture` is read. A source recorded as a `reference` is not: "
+        "this build has no path to its contents, so it keeps "
+        "`parse_state: \"no_content_path\"` and contributes nothing. Every entry ends "
+        "in exactly one of the four parse states and every state but `parsed` carries "
+        "a `parse_detail`, so no source is silently passed over.\n\n"
+        "WHAT A PARSE READS AND WHAT IT DOES NOT. A parser reads; it does not "
+        "normalise, round, coerce or reinterpret, so every statement it reports is "
+        "verbatim and carries the line it came from. A line it cannot read is "
+        "reported under `skipped` with the reason rather than dropped. A source "
+        "larger than one parse may read is refused whole rather than read partly, "
+        "because a partly read source reports some of what it says and silently drops "
+        "the rest.\n\n"
+        "THE REGISTRY IS SHORT AND THAT IS THE HONEST STATE OF THIS BUILD. "
+        "`GET /api/imports/{import_id}` reports it under `parsers`. Formats this "
+        "build has never had a representative example of are deliberately absent "
+        "rather than present as a parser that would be guessing at a syntax.\n\n"
+        "Running this again discards any earlier reconstruction, for the reason the "
+        "source operations give. Nothing about any record changes: this writes to the "
+        "session only."
+    ),
+    response_description="The session, with every source's parse state and every statement read.",
+    responses={
+        **_R_UNAUTHORIZED,
+        **_R_IMPORT_NOT_FOUND,
+        # DECLARED, because the handler emits it. An undeclared status on a
+        # published contract is a contract that is wrong — an independent review
+        # found three routes emitting a live `409` this document did not list, so
+        # the guard that pins the contract was certifying one that omitted it.
+        #
+        # Deliberately NOT `_R_STORAGE_UNAVAILABLE`: that 503 is about the
+        # experiment database, and reusing its description here would tell a reader
+        # the database is unreachable when what happened is that a file this
+        # application ships could not be read.
+        503: {
+            "description": (
+                "A source this application ships could not be read, so the parse "
+                "was abandoned and nothing was stored. This is a problem with the "
+                "deployment rather than with the request, and the body names no "
+                "filesystem path."
+            )
+        },
+    },
+)
+def post_import_parse(scope: TutorialScopeDep, import_id: ImportId):
+    with hist.import_lock(import_id, session_id=scope):
+        session, missing = _load_import_or_404(import_id, scope)
+        if missing is not None:
+            return missing
+        try:
+            hist.parse_session(session, now_utc=_now_iso())
+        except hist.UnsupportedImport as refusal:  # pragma: no cover - per-source
+            # A per-source refusal becomes that source's `parse_state`; this arm
+            # exists for a refusal the whole parse could raise, so one cannot
+            # escape as a traceback.
+            return _import_refusal(refusal)
+        except OSError:
+            # A fixture this repository ships became unreadable — a deployment
+            # fault, not a caller's. Refused with a stable code and no filesystem
+            # path: an `OSError` message carries the filename it failed on.
+            return JSONResponse(
+                status_code=503,
+                content={
+                    "error": "source_unreadable",
+                    "message": (
+                        "A source this application ships could not be read, so the "
+                        "parse was abandoned and nothing was stored. This is a "
+                        "problem with the deployment rather than with your request."
+                    ),
+                },
+            )
+        hist.save_session(session, session_id=scope)
+    return {"import": hist.session_view(session)}
+
+
+@router.post(
+    "/imports/{import_id}/reconstruct",
+    tags=[TAG_INGESTION],
+    summary="Reconstruct Candidates From an Import Bundle",
+    description=(
+        "Runs this build's semantic reconstruction over what the parse read, and "
+        "returns candidates.\n\n"
+        "**IT APPLIES NOTHING.** `applied` is `false` on every response. No field is "
+        "written, no evidence entry is minted, no record is touched and no experiment "
+        "is created. A candidate becomes a value only when you send it to review as a "
+        "proposal and a person accepts that proposal, which is a separate operation "
+        "with its own preconditions.\n\n"
+        "WHAT THE RECONSTRUCTION IS, stated so nothing is assumed about it. It is "
+        "deterministic and offline: no language model is involved, no provider is "
+        "configured, and no outbound request is made. `GET /api/imports/{import_id}` "
+        "names it under `provider`. Its mapping rule is that a parsed key becomes a "
+        "candidate for an official ISAAC field only when the key IS that field's path, "
+        "exactly — there is no alias list, no synonym table and no case folding, "
+        "because a key this build had to interpret is a key it would be guessing "
+        "about. Every parsed key it could not map is reported under `unmapped_keys` "
+        "with its value and the line it came from, and never guessed at.\n\n"
+        "WHERE SOURCES DISAGREE, NOTHING IS CHOSEN. Two sources stating different "
+        "values at one path produce one candidate carrying every competing value with "
+        "the sources asserting it, `proposed_value: null`, and "
+        "`unresolved_reason: \"sources_disagree\"`. Deciding between them is yours.\n\n"
+        "A beamline profile is accepted by the seam and this build has only an empty "
+        "one, so no filename convention, column alias or local terminology is applied "
+        "to your sources. A profile is an interpretation aid and is never consulted to "
+        "accept or refuse a value: the official ISAAC schema is the only authority on "
+        "what is valid.\n\n"
+        "Refused with `422` when no source in the bundle has been parsed — a bundle "
+        "of references alone has no evidence to reconstruct from, and an empty "
+        "reconstruction that looked finished would be worse than a refusal."
+    ),
+    response_description="The session, with the reconstruction's candidates and its unmapped keys.",
+    responses={**_R_UNAUTHORIZED, **_R_IMPORT_NOT_FOUND},
+)
+def post_import_reconstruct(scope: TutorialScopeDep, import_id: ImportId):
+    with hist.import_lock(import_id, session_id=scope):
+        session, missing = _load_import_or_404(import_id, scope)
+        if missing is not None:
+            return missing
+        try:
+            hist.reconstruct_session(session, now_utc=_now_iso())
+        except hist.UnsupportedImport as refusal:
+            return _import_refusal(refusal)
+        hist.save_session(session, session_id=scope)
+    return {"import": hist.session_view(session)}
+
+
+def _import_note_text(statement: Mapping, filename: str) -> str:
+    """The words an import-minted note carries, and where they were read from.
+
+    A note is stored verbatim and is what keeps the content safe from every
+    proposal outcome, so it carries the SOURCE's own words — the key and the value
+    as the file wrote them — prefixed by the file and line they were read from.
+    The prefix is part of the note rather than a separate field because a note has
+    exactly one text and a reader meeting it later needs to know which file said
+    this.
+    """
+    return f"{filename} ({statement.get('locator')}): {statement.get('key')} = {statement.get('value')}"
+
+
+def _import_note_value_span(statement: Mapping, filename: str) -> tuple[int, int]:
+    """`(start_char, end_char)` of the VALUE inside `_import_note_text`.
+
+    Computed from the same two pieces the text is built from rather than searched
+    for, so it cannot point at the wrong occurrence when a value happens to
+    appear in its own key or in the filename. `excerpt_of` therefore derives
+    exactly the proposed value on read, and no copy of the words is stored twice.
+    """
+    text = _import_note_text(statement, filename)
+    value = str(statement.get("value"))
+    return len(text) - len(value), len(text)
+
+
+@router.post(
+    "/imports/{import_id}/candidates/{candidate_id}/propose",
+    tags=[TAG_INGESTION],
+    summary="Send an Import Candidate to Review on a Record",
+    description=(
+        "Stores one candidate as an **open ingestion proposal** on an experiment you "
+        "name, together with the note carrying the source's own words, in one write.\n\n"
+        "**THIS IS THE ONLY WAY ANYTHING FROM AN IMPORT REACHES A RECORD, AND IT "
+        "WRITES NO VALUE.** It leaves every field of that record, and of every run, "
+        "byte-for-byte unchanged. A proposal is a suggestion awaiting a person's "
+        "judgement and is inert to export. The separate review operation is what "
+        "writes anything, and it writes through the same routes manual entry already "
+        "uses.\n\n"
+        "WHY THE NOTE AND THE PROPOSAL ARE ONE REQUEST. A proposal must cite a note "
+        "the record already holds, and the note's id does not exist until this "
+        "request mints it — so a client doing both would need a round trip in "
+        "between, and a failure in the middle would leave the record holding the "
+        "words with no proposal, or neither. Both are written inside one record lock "
+        "and one save: the record holds both or it holds neither.\n\n"
+        "THE NOTE CARRIES THE SOURCE'S OWN WORDS, prefixed by the file and line they "
+        "were read from, and it survives every proposal outcome including rejection — "
+        "so refusing a proposal can never destroy what the source said. Its `source` "
+        "records that a parser read it out of a historical source file, which is "
+        "neither a person typing nor a machine interpreting.\n\n"
+        "IT IS EXACTLY-ONCE PER CANDIDATE ON A GIVEN RECORD. A second request for the "
+        "same candidate and the same record returns the EXISTING proposal with "
+        "`deduplicated: true` and stores nothing, so a retry, a double click or a "
+        "session you discarded and rebuilt cannot produce two proposals for one "
+        "candidate.\n\n"
+        "THE RECORD'S OWN `ETag` IS REQUIRED in `If-Match`, because this rewrites the "
+        "record — omitted is `428`, malformed is `400`, stale is `412` with nothing "
+        "written. It is the RECORD's, never the session's: an import session has no "
+        "revision contract and serves no validator of its own.\n\n"
+        "`run_id` is required for every candidate whose target is written on a run, "
+        "and is refused for the ones written on the record. It is never inferred from "
+        "the only run that happens to exist.\n\n"
+        "REFUSED, AND EACH FOR A REASON THE BODY NAMES: a candidate whose sources "
+        "disagree (nothing was chosen, so there is nothing to propose); a structural "
+        "candidate, which is about whether an experiment or a run exists rather than "
+        "about a value at a field path; and a candidate at a path this build has no "
+        "write operation for, which would be a proposal that could be created and "
+        "never applied. The last of those describes a limitation of this build and "
+        "never says anything about the official ISAAC schema, which defines the field."
+    ),
+    response_description=(
+        "The stored proposal and its note, with the record's new revision and `ETag`."
+    ),
+    responses={
+        **_R_STORAGE_UNAVAILABLE,
+        **_R_UNAUTHORIZED,
+        **_R_IMPORT_NOT_FOUND,
+        **_R_PRECONDITION,
+    },
+)
+def post_import_candidate_proposal(
+    scope: TutorialScopeDep,
+    import_id: ImportId,
+    candidate_id: ImportCandidateId,
+    response: Response,
+    body: dict = Body(
+        ...,
+        description=(
+            "`{\"experiment_id\": \"<the record to propose onto>\", \"run_id\": "
+            "\"<required when the target is written on a run>\"}`. Any other key is "
+            "refused with `422`."
+        ),
+    ),
+    if_match: str | None = Header(
+        default=None,
+        alias="If-Match",
+        description=(
+            "Required. The RECORD's current `ETag`, exactly as a read operation "
+            "returned it. An import session has no validator of its own."
+        ),
+    ),
+):
+    if not isinstance(body, dict):
+        return JSONResponse(
+            status_code=422,
+            content={
+                "error": "invalid_body",
+                "message": "The request body must be a JSON object.",
+            },
+        )
+    refused = _unknown_import_keys(body, _IMPORT_PROPOSE_KEYS)
+    if refused is not None:
+        return refused
+
+    # THE SESSION IS READ FIRST AND ITS LOCK IS NOT HELD ACROSS THE RECORD WRITE.
+    # Two locks taken in one critical section is how a deadlock is built, and the
+    # session needs no protection here: it is only READ to resolve the candidate,
+    # and the record write is what has to be serialised. The session is written
+    # afterwards, under its own lock, and the exactly-once guarantee deliberately
+    # does NOT depend on that write landing — see below.
+    session, missing = _load_import_or_404(import_id, scope)
+    if missing is not None:
+        return missing
+    candidate = session.candidate(candidate_id)
+    if candidate is None:
+        return _import_candidate_not_found(import_id, candidate_id)
+
+    if candidate.unresolved_reason is not None:
+        return JSONResponse(
+            status_code=422,
+            content={
+                "error": "candidate_unresolved",
+                "message": candidate.not_proposable_reason
+                or hist.CANDIDATE_NOT_PROPOSABLE_DISAGREEMENT,
+                "unresolved_reason": candidate.unresolved_reason,
+                "disagreement": [dict(row) for row in candidate.disagreement],
+            },
+        )
+    if not candidate.proposable:
+        return JSONResponse(
+            status_code=422,
+            content={
+                "error": "candidate_not_proposable",
+                "message": candidate.not_proposable_reason
+                or hist.CANDIDATE_NOT_PROPOSABLE_NO_EXPERIMENT_CREATION,
+                "kind": candidate.kind,
+                "target_field_path": candidate.target_field_path,
+            },
+        )
+    path = candidate.target_field_path
+    statement = candidate.supporting_statements[0] if candidate.supporting_statements else None
+    if statement is None:  # pragma: no cover - a field candidate always cites one
+        return JSONResponse(
+            status_code=422,
+            content={
+                "error": "candidate_cites_no_source",
+                "message": (
+                    "This candidate cites no source statement, so a note carrying "
+                    "what the source said could not be written and a proposal has "
+                    "nothing to cite. Nothing was written."
+                ),
+            },
+        )
+    filename = next(
+        (
+            entry.filename
+            for entry in session.sources
+            if entry.source_id == statement.get("source_id")
+        ),
+        statement.get("source_id") or "",
+    )
+
+    experiment_id = body.get("experiment_id")
+    if not isinstance(experiment_id, str) or not experiment_id.strip():
+        return JSONResponse(
+            status_code=422,
+            content={
+                "error": "missing_experiment_id",
+                "message": (
+                    "`experiment_id` must name the record to propose onto. It is "
+                    "never chosen for you, not even when the workspace holds "
+                    "exactly one record. Nothing was written."
+                ),
+            },
+        )
+    # Existence pre-check OUTSIDE the lock, exactly as every other mutation does
+    # it, so a bogus id never pins a permanent entry in the never-evicting lock
+    # map.
+    if ws.load_experiment(experiment_id, session_id=scope) is None:
+        return _not_found(experiment_id)
+
+    client_request_key = f"import:{import_id}:{candidate_id}"
+
+    with ws.record_lock(experiment_id, session_id=scope):
+        exp = ws.load_experiment(experiment_id, session_id=scope)
+        if exp is None:
+            return _not_found(experiment_id)  # deleted in the pre-check->lock window
+
+        run_id = body.get("run_id")
+        if run_id is not None and (
+            not isinstance(run_id, str) or exp.get_run(run_id) is None
+        ):
+            return _proposal_refusal(
+                "unknown_run",
+                (
+                    "This record has no run with that id, so a proposal cannot be "
+                    "made against it. It is never inferred from the only run that "
+                    "happens to exist. Nothing was written."
+                ),
+                run_id=run_id if isinstance(run_id, str) else None,
+            )
+        scope_of_target = _PROPOSAL_WRITER_SCOPE[_proposal_writer_for(path)]
+        if scope_of_target == "run" and run_id is None:
+            return _proposal_refusal(
+                "target_requires_a_run",
+                (
+                    "A proposal at this path is applied through a run's writer, so "
+                    "it must name the run it is about; it is never inferred. "
+                    "Nothing was written."
+                ),
+                target_field_path=path,
+            )
+        if scope_of_target == "record" and run_id is not None:
+            return _proposal_refusal(
+                "target_is_record_scoped",
+                (
+                    "A value at this path is written on the RECORD, not on a run, "
+                    "so a proposal for it must not name one. Nothing was written."
+                ),
+                target_field_path=path,
+            )
+
+        precondition = _check_if_match(if_match, exp)
+        if precondition is not None:
+            return precondition
+
+        # EXACTLY-ONCE, INSIDE THE LOCK, AND IT DOES NOT DEPEND ON THE SESSION.
+        # The key is derived from the import id and the candidate id, so it is the
+        # same string on every attempt — including one made after the session was
+        # discarded and rebuilt. That is why `record_proposed` below is a
+        # convenience for the surface and not the guard: if this route's session
+        # write never landed, the record's own proposal list still answers "this
+        # candidate was already sent" and no second proposal is minted.
+        existing = proposals.find_by_client_request_key(
+            exp.sorted_proposals(), client_request_key
+        )
+        if existing is not None:
+            return JSONResponse(
+                status_code=200,
+                headers={"ETag": exp.etag()},
+                content=jsonable_encoder(
+                    {
+                        "proposal": _proposal_view(exp, existing),
+                        "note": None,
+                        "deduplicated": True,
+                        "experiment_version": exp.version_token(),
+                    }
+                ),
+            )
+
+        if len(exp.proposals) >= _MAX_PROPOSALS_PER_RECORD:
+            return _proposal_refusal(
+                "too_many_proposals",
+                (
+                    "This record already holds the maximum number of proposals. "
+                    "Nothing was written."
+                ),
+                max_per_record=_MAX_PROPOSALS_PER_RECORD,
+                total=len(exp.proposals),
+            )
+
+        problem = _proposal_value_problem(candidate.proposed_value, candidate.rule)
+        if problem is not None:
+            error, message, extra = problem
+            return _proposal_refusal(error, message, **extra)
+
+        text = _import_note_text(statement, filename)
+        start_char, end_char = _import_note_value_span(statement, filename)
+        try:
+            note = exp.capture_note(
+                text=text,
+                source=_IMPORT_NOTE_SOURCE,
+                run_id=run_id,
+                candidate_field_path=path,
+                candidate_rule=candidate.rule,
+            )
+        except notes.UnsupportedNote as refusal:
+            # The model's own refusals reach the client as a typed 422, never a
+            # 500. Nothing was saved: `capture_note` mutates the in-memory record
+            # only, and the save below has not run.
+            return _proposal_refusal("unsupported_note", str(refusal))
+
+        run = exp.get_run(run_id) if run_id is not None else None
+        try:
+            digest = proposals.target_digest(_proposal_target_state(exp, run, path))
+        except (TypeError, ValueError) as refusal:  # pragma: no cover - hand-edited doc
+            return _proposal_refusal(
+                "unrepresentable_value",
+                (
+                    "What this record currently holds at that path could not be "
+                    "digested, so a proposal for it would have no acceptance "
+                    f"precondition to check against: {refusal}. Nothing was written."
+                ),
+            )
+        try:
+            proposal = proposals.new_proposal(
+                proposal_id=new_record_id(),
+                experiment_id=exp.id,
+                note_id=note.id,
+                target_field_path=path,
+                proposed_value=candidate.proposed_value,
+                # THE RECONSTRUCTION'S OWN RULE SENTENCE, carried verbatim. It
+                # names the key and the line the value was read from, or the stored
+                # rule that inferred it, which is exactly what a reviewer needs and
+                # is not something this route may paraphrase.
+                rule=candidate.rule,
+                # READ OFF THE NOTE, never chosen here — the note already records
+                # what produced its content, and a second answer could disagree.
+                source=note.source,
+                proposed_utc=_now_iso(),
+                base_rev=exp.rev,
+                target_digest=digest,
+                # THE PROPOSER'S ACTOR SEAM STAYS UNSET. Creating a proposal
+                # requires no attributable actor — it writes no scientific value —
+                # and no trusted authentication boundary exists in this build, so a
+                # subject here would be a name nothing vouched for.
+                trust_basis=submissions.TRUST_BASIS_UNATTRIBUTED,
+                run_id=run_id,
+                start_char=start_char,
+                end_char=end_char,
+                client_request_key=client_request_key,
+            )
+        except proposals.UnsupportedProposal as refusal:
+            return _proposal_refusal("unsupported_proposal", str(refusal))
+
+        exp.add_proposal(proposal)
+        _changed, stale = _save_versioned(exp, if_match)
+        if stale is not None:
+            return stale  # another writer won the race; nothing was stored
+
+        response.headers["ETag"] = exp.etag()
+        proposal_view = _proposal_view(exp, proposal, notes_by_id={note.id: note})
+        note_view = _note_view(note)
+        version = exp.version_token()
+
+    # THE SESSION IS WRITTEN AFTER THE RECORD, OUTSIDE THE RECORD LOCK, AND A
+    # FAILURE HERE COSTS NOTHING THAT MATTERS. The record is the durable half and
+    # holds both the note and the proposal; this only records WHICH candidate was
+    # sent, so the surface can say so without re-reading every proposal. If it
+    # does not land, the exactly-once key above still refuses a second proposal.
+    with hist.import_lock(import_id, session_id=scope):
+        fresh = hist.load_session(import_id, session_id=scope)
+        if fresh is not None:
+            hist.record_proposed(
+                fresh,
+                candidate_id=candidate_id,
+                experiment_id=experiment_id,
+                proposal_id=proposal.proposal_id,
+                note_id=note_view["id"],
+                proposed_utc=_now_iso(),
+            )
+            hist.save_session(fresh, session_id=scope)
+
+    return {
+        "proposal": proposal_view,
+        "note": note_view,
+        "deduplicated": False,
+        "experiment_version": version,
+    }
