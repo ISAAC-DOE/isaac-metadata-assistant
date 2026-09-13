@@ -1186,3 +1186,62 @@ def test_narrowing_the_pre_label_determiner_cost_NOTHING_elsewhere(sentence):
     """
     assert _read(sentence).candidates != (), _explain(sentence)
     assert _read(sentence).abstentions == (), _explain(sentence)
+
+
+def test_EVERY_determiner_is_classified_EXHAUSTIVELY_not_sampled():
+    """**The determiner set is CLOSED and small, so exhaustive enumeration beats
+    sampling — and unlike the modifier families it is DERIVED from the constant, so
+    it cannot drift.**
+
+    This is the one place in this file where a table is the stronger instrument, and
+    the reason is a property of the thing being tested rather than a preference:
+    `tc._DETERMINER` is a fixed alternation of 17 words, so "every member is
+    classified" is checkable in full, whereas the pre-modifier space is open and only
+    a generated product can probe it. The two instruments are matched to the two
+    shapes.
+
+    The parametrised test above hand-lists 8 of the 9 refused determiners, which is
+    exactly the sampling weakness this file argues against elsewhere. This closes it:
+    both sets are parsed out of `tc._DETERMINER` and `tc._PRE_LABEL_DETERMINER`, every
+    word is exercised in BOTH label families, and their union is asserted to be the
+    whole constant — so a determiner added to `_DETERMINER` later is unclassified
+    until someone decides which side it belongs on.
+
+    MUTATION: adding a word to `tc._DETERMINER` without adding it to
+    `tc._PRE_LABEL_DETERMINER` leaves this GREEN only if the word genuinely refuses;
+    adding it to both leaves it GREEN only if it genuinely reads. Removing a word
+    from `_PRE_LABEL_DETERMINER` turns the "reads" half RED for that word.
+    """
+    import re
+
+    def words(alternation: str) -> set[str]:
+        return set(re.fullmatch(r"\(\?:(.+)\)", alternation).group(1).split("|"))
+
+    every = words(tc._DETERMINER)
+    admitted = words(tc._PRE_LABEL_DETERMINER)
+
+    # The narrower set is a strict subset — it narrows, it does not diverge.
+    assert admitted < every, sorted(admitted - every)
+    # And the union is the whole constant, so nothing is unclassified.
+    assert admitted | (every - admitted) == every
+
+    for determiner in sorted(every):
+        reads_expected = determiner in admitted
+        for sentence in (
+            f"{determiner.capitalize()} temperature was 425 K.",
+            f"{determiner.capitalize()} scan ended at {INSTANT}.",
+        ):
+            reading = _read(sentence)
+            got = reading.candidates != ()
+            assert got is reads_expected, (
+                f"determiner {determiner!r} is "
+                f"{'ADMITTED' if reads_expected else 'REFUSED'} by "
+                f"_PRE_LABEL_DETERMINER but the reader "
+                f"{'refused' if reads_expected else 'READ'} it"
+                + _explain(sentence)
+            )
+            # A refusal must be DISCLOSED; a reading must carry no abstention.
+            if reads_expected:
+                assert reading.abstentions == (), _explain(sentence)
+            else:
+                assert reading.abstentions != (), _explain(sentence)
