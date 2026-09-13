@@ -2105,8 +2105,11 @@ def test_the_option_ceilings_derivation_is_held_by_this_test_not_by_arithmetic()
 #: the one thing a table of known reproductions cannot establish about itself.**
 #: Nineteen of the twenty are refused by `_ASSERTION_BRIDGE` without any of them
 #: having been known to it when it was written. The twentieth is in
-#: `tc._PRE_LABEL_OVERREACH_RESIDUE` and is asserted STILL OPEN below, because its
+#: `tc._PRE_LABEL_OVERREACH_CLOSED` and was asserted STILL OPEN below, because its
 #: re-subjecting word is to the LEFT of the label where the bridge has no reach.
+#: **IT IS NOW CLOSED TOO, by GATE (4) — and by a grammar rather than by naming it,
+#: which is the same argument one level up: `_PRE_LABEL` admits no verb of change in
+#: the pre-label slot, so `lowered` is refused without appearing anywhere.**
 _REVIEW_CORPUS_2026_09_13: tuple[str, ...] = (
     "The temperature setpoint was 350 K",
     "The temperature tolerance was 1 K",
@@ -2160,9 +2163,32 @@ def test_an_INDEPENDENTLY_FOUND_member_of_the_class_is_also_closed(sentence):
     assert [segment.text for segment in reading.segments] == [sentence]
 
 
-@pytest.mark.parametrize("sentence", tc._PRE_LABEL_OVERREACH_RESIDUE)
-def test_the_PRE_LABEL_overreach_is_STILL_OPEN(sentence):
-    """KNOWN-OPEN §5 defects of a DIFFERENT sub-class, asserted to still occur.
+@pytest.mark.parametrize("sentence", tc._PRE_LABEL_OVERREACH_CLOSED)
+def test_the_PRE_LABEL_overreach_is_CLOSED(sentence):
+    """**INVERTED IN PLACE, not deleted.** This test asserted these nine sentences
+    STILL FABRICATED, deliberately the wrong way round, and its own failure message
+    named the remedy: *"if this reads nothing the PRE-LABEL sub-class is CLOSED —
+    delete the row … and say so, do not weaken this"*. Gate (4)
+    (:data:`tc._PRE_LABEL`) closed them, so the assertion is turned over rather than
+    relaxed, and the constant is RENAMED rather than emptied — the precedent
+    `_LABEL_OVERREACH_CLOSED` and `_RESTATEMENT_RESIDUE_CLOSED` both set. The whole
+    original docstring is kept below, because the reasoning that referred the class
+    three times is the most useful thing here.
+
+    **WHAT NOW HOLDS:** each row proposes NOTHING and raises exactly one
+    `words_before_the_label_name_something_else` abstention. Both halves are
+    asserted: a silent refusal would be a §5 defect of the same rank as the
+    fabrication, which is exactly what the pre-inversion version of this test
+    pinned (`assert _read(sentence).abstentions == ()`).
+
+    MUTATION: deleting the `_label_is_the_subject` call from the reading loop turns
+    every row here RED on the candidate assertion; leaving the call but dropping the
+    `gate_refusals.append` turns every row RED on the abstention assertion — so the
+    two assertions are independently load-bearing and neither is decoration.
+
+    ── THE ORIGINAL, KEPT ──────────────────────────────────────────────────────
+
+    KNOWN-OPEN §5 defects of a DIFFERENT sub-class, asserted to still occur.
 
     ── TWO FORMS, AND THE TUPLE GREW FROM ONE TO NINE ON 2026-09-13 ───────────
 
@@ -2192,7 +2218,7 @@ def test_the_PRE_LABEL_overreach_is_STILL_OPEN(sentence):
 
     Asserted the WRONG WAY ROUND on purpose, the same discipline
     `_LABEL_OVERREACH_CLOSED` was held to before it was closed: shutting any of
-    these requires DELETING a row from `tc._PRE_LABEL_OVERREACH_RESIDUE` — a
+    these requires DELETING a row from `tc._PRE_LABEL_OVERREACH_CLOSED` — a
     reviewed change — rather than discovering that a documented open item quietly
     went away.
 
@@ -2200,21 +2226,63 @@ def test_the_PRE_LABEL_overreach_is_STILL_OPEN(sentence):
     OPEN, and the real distinction is between a modifier that RE-SUBJECTS the
     quantity and one that merely LOCATES it (`"Sample temperature at the second
     scan was 425 K"` must keep reading), which is not decidable by bridge shape.
+
+    ── AND THE LAST SENTENCE OF THAT ORIGINAL IS WHERE IT WENT WRONG ───────────
+
+    "Not decidable by bridge SHAPE" is true and is why gate (4) is a fourth gate.
+    "A denylist of nouns fails OPEN" is true and settles the DENYLIST only. The
+    POLARITY was never examined across three referrals: an ALLOWLIST of the same
+    nouns fails CLOSED, costing a disclosed reading instead of minting a silent
+    value. `"Sample temperature at the second scan was 425 K"` still reads, because
+    `sample` is an admitted locator — so the reading the referrals protected was
+    never actually in tension with closing the class.
     """
     rows = _rows(sentence)
-    assert len(rows) == 1, (
-        "if this reads nothing the PRE-LABEL sub-class is CLOSED — delete the row "
-        "from _PRE_LABEL_OVERREACH_RESIDUE and say so, do not weaken this"
+    assert rows == [], (
+        "gate (4) must refuse every row of _PRE_LABEL_OVERREACH_CLOSED; a reading "
+        "here means the pre-label class has REOPENED"
     )
-    assert rows[0][1] is False, "pass ONE, so no restatement condition can close it"
-    # AND IT IS SILENT, which is what makes it a §5 defect rather than a disclosed
-    # omission. Pinned so a slice that makes it merely disclosed comes through here.
-    assert _read(sentence).abstentions == ()
+    reading = _read(sentence)
+    assert reading.candidates == (), [
+        (candidate.field_path, candidate.proposed_value)
+        for candidate in reading.candidates
+    ]
+    # AND IT IS DISCLOSED. The pre-inversion version of this test asserted
+    # `abstentions == ()` — that the fabrication was SILENT — so this line is the
+    # exact inversion of the pinned defect, not an addition beside it.
+    assert [entry.kind for entry in reading.abstentions] == [
+        "words_before_the_label_name_something_else"
+    ]
+    assert [segment.text for segment in reading.segments] == [sentence]
 
 
-@pytest.mark.parametrize("sentence", tc._RUN_MISATTRIBUTION_RESIDUE)
-def test_the_RUN_MISATTRIBUTION_on_the_instant_rules_is_STILL_OPEN(sentence):
-    """A KNOWN-OPEN §5 defect of a SECOND, DISTINCT class — and arguably the worst
+@pytest.mark.parametrize("sentence", tc._RUN_MISATTRIBUTION_CLOSED)
+def test_the_RUN_MISATTRIBUTION_on_the_instant_rules_is_CLOSED(sentence):
+    """**INVERTED IN PLACE, not deleted**, exactly as its sibling above was, and for
+    the same reason: this test asserted the misattribution STILL HAPPENED and told a
+    future slice to delete the row and say so. Gate (4) closed it.
+
+    **THE REFERRAL'S PREMISE WAS FALSE, AND THAT IS WORTH MORE THAN THE FIX.** It
+    said closing this needs REFERENT RESOLUTION — knowing WHICH scan the sentence is
+    about. It does not. This reader never had to decide what `"the previous scan"`
+    names; it had only to notice that the sentence does not say it is THIS one, and
+    refuse. **Deciding a referent and declining to decide it are different acts, and
+    only the first is the hard problem.** The general form: *"fixing this requires
+    knowing X"* is a claim about a fix that ASSERTS, and a refusal asserts nothing,
+    so the requirement usually does not transfer.
+
+    And the fear the referral was right to have — that a guess would replace one
+    misattribution with another — is answered by measurement rather than intent:
+    nothing is proposed at all, and the transcript is retained in full.
+
+    MUTATION: removing `previous`/`last`/`calibration`/`reference` handling is not
+    possible, because the gate never names them — it admits `scan`/`run` and refuses
+    every other pre-modifier. Deleting `_label_is_the_subject` from the loop, or
+    adding an open `[A-Za-z]+` to `_PRE_LABEL_NOUN`, turns every row here RED.
+
+    ── THE ORIGINAL, KEPT ──────────────────────────────────────────────────────
+
+    A KNOWN-OPEN §5 defect of a SECOND, DISTINCT class — and arguably the worst
     one this module has, which is why it is pinned separately rather than folded in.
 
     Found by independent review, 2026-09-13, and re-measured before being pinned.
@@ -2241,18 +2309,28 @@ def test_the_RUN_MISATTRIBUTION_on_the_instant_rules_is_STILL_OPEN(sentence):
     above, so closing it is a reviewed deletion rather than a silent disappearance.
     """
     reading = _read(sentence)
-    assert len(reading.candidates) == 1, (
-        "if this reads nothing the run-misattribution class is CLOSED — delete the "
-        "row from _RUN_MISATTRIBUTION_RESIDUE and say so, do not weaken this"
-    )
-    # It is an INSTANT field, and it is THIS run's — which is the defect.
-    assert reading.candidates[0].field_path in {
-        "timestamps.acquired_start_utc",
-        "timestamps.acquired_end_utc",
-    }, reading.candidates[0].field_path
-    # AND IT IS SILENT. A disclosed version would be a materially lesser defect, so
-    # a slice that merely discloses it comes through here rather than past it.
-    assert reading.abstentions == ()
+    assert reading.candidates == (), [
+        (candidate.field_path, candidate.proposed_value)
+        for candidate in reading.candidates
+    ]
+    # AND IT IS DISCLOSED — the exact inversion of the pinned defect, which asserted
+    # `reading.abstentions == ()`. A real acquisition time belonging to a different
+    # measurement is the worst fabrication this module had; it is now a refusal the
+    # scientist can see and act on.
+    assert [entry.kind for entry in reading.abstentions] == [
+        "words_before_the_label_name_something_else"
+    ]
+    # AND THE INSTANT FIELDS ARE STILL READ WHEN THE SENTENCE IS ABOUT THIS RUN.
+    # A negative control in the same test, so a gate that refused every instant
+    # would pass the two assertions above and fail here.
+    this_run = sentence.replace("previous ", "").replace("last ", "")
+    this_run = this_run.replace("calibration ", "").replace("reference ", "")
+    control = _read(this_run)
+    assert [candidate.field_path for candidate in control.candidates] == [
+        "timestamps.acquired_end_utc"
+        if "ended" in this_run
+        else "timestamps.acquired_start_utc"
+    ], (this_run, control.candidates)
 
 
 def test_the_PREPOSITIONAL_forms_of_the_same_sentence_ARE_closed():
@@ -2518,7 +2596,11 @@ def test_no_refusal_reason_CONTAINS_A_DIGIT_at_all():
     """
     import re
 
-    assert len(tc._REFUSAL_REASONS) == 5
+    # 5 -> 6 on 2026-09-13: GATE (4) added `words_before_the_label_name_something
+    # _else`. The ratchet is what forced its reason through this sweep at all, and
+    # the sweep below is what forced a sentence FIRING it to be added — a new kind
+    # cannot be admitted here while going unexercised.
+    assert len(tc._REFUSAL_REASONS) == 6
     for kind, reason in tc._REFUSAL_REASONS.items():
         digits = sorted(set(re.findall(r"[0-9]", reason)))
         assert digits == [], f"{kind} names digit(s) {digits}: {reason!r}"
@@ -2536,6 +2618,12 @@ def test_no_refusal_reason_CONTAINS_A_DIGIT_at_all():
         "The temperature was 300 K, then 350 K, then 400 K.",
         "The temperature was 425 K, ramped at 3 K/min",
         "The temperature was 425 K, maybe 3 K of drift",
+        # GATE (4). This row is the one that matters most for the leak check, and
+        # not by coincidence: its reason enumerates "a setpoint, a target, ... a
+        # maximum, a minimum, an average", so the reason literally NAMES the
+        # construction while the sentence supplies the number — which is exactly the
+        # shape in which a digit would sit beside the value it withheld.
+        "The setpoint temperature was 425 K.",
     ):
         reading = _read(sentence)
         numbers = set(re.findall(r"[0-9]+(?:\.[0-9]+)?", sentence))
@@ -2864,7 +2952,8 @@ def test_the_gate_ledger_constants_are_not_DEAD():
     # can become a vacuous parameter set -- the exact failure mode
     # `_RESTATEMENT_RESIDUE` was deleted to avoid.
     for name, tup in (
-        ("_PRE_LABEL_OVERREACH_RESIDUE", tc._PRE_LABEL_OVERREACH_RESIDUE),
+        ("_PRE_LABEL_OVERREACH_CLOSED", tc._PRE_LABEL_OVERREACH_CLOSED),
+        ("_RUN_MISATTRIBUTION_CLOSED", tc._RUN_MISATTRIBUTION_CLOSED),
         ("_MODIFIER_OBJECT_OVERREACH_RESIDUE",
          tc._MODIFIER_OBJECT_OVERREACH_RESIDUE),
         ("_PARENTHETICAL_BRIDGE_RESIDUE", tc._PARENTHETICAL_BRIDGE_RESIDUE),
@@ -2880,7 +2969,7 @@ def test_the_gate_ledger_constants_are_not_DEAD():
     # the other would say it is.
     closed = set(tc._LABEL_OVERREACH_CLOSED) | set(tc._RESTATEMENT_RESIDUE_CLOSED)
     open_rows = (
-        set(tc._PRE_LABEL_OVERREACH_RESIDUE)
+        set(tc._PRE_LABEL_OVERREACH_CLOSED)
         | set(tc._MODIFIER_OBJECT_OVERREACH_RESIDUE)
         | set(tc._PARENTHETICAL_BRIDGE_RESIDUE)
         | {row[0] for row in tc._PHRASE_BOUNDARY_RESIDUE}
