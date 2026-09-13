@@ -163,10 +163,24 @@ fails a test instead of drifting.
 
 Today a Run lives *inside* its experiment's `state` document — `Experiment.to_state()` serialises
 `runs` as an array (`apps/api/isaac_api/workspace.py:2249`). Contract §8 DECISION D7
-(`docs/superpowers/specs/2026-08-08-scientist-capture-data-contract.md:480`) rejects that shape on
+(`docs/superpowers/specs/2026-08-08-scientist-capture-data-contract.md:1100`, under `## 8.` at
+`:1089`) rejects that shape on
 the brief's own §5 requirement that Runs be independently persisted and loaded: *one jsonb document
 rewritten on every autosave keystroke, containing N runs, is precisely the "single enormous object"
 the brief forbids.*
+
+> **LINE NUMBER CORRECTED 2026-09-12 (`QA-014`), and this is the citation the withdrawal in §4
+> diagnosed and then failed to fix.** It read `…scientist-capture-data-contract.md:480`. **`:480`
+> is no longer stale — it is WRONG, which is worse:** it now resolves to **`### DECISION D3 —
+> 'submitted' is the one genuinely new *stored* state`**, a different decision entirely. An
+> operator following it would have read D3 and believed it was D7. `:1100` is D7; `:1089` is its
+> enclosing §8. Re-derive rather than trusting either number:
+> `grep -n 'DECISION D7' docs/superpowers/specs/2026-08-08-scientist-capture-data-contract.md`.
+>
+> **The section reference `§8 DECISION D7` was always correct** — §4 records at length why the
+> "phantom citation" finding that struck it was false, and how it went wrong. What was genuinely
+> broken here is the line number, and that this citation — **the one that names its own source** —
+> was the one an enumeration missed.
 
 This migration creates the table that makes a Run the unit of write. **It moves no data and changes
 no application behaviour** — see §4.
@@ -288,8 +302,12 @@ absence.
 > ### ~~"CONTRACT §8 D7" IS A PHANTOM CITATION~~ — **THE WHOLE FINDING IS WITHDRAWN, 2026-09-12.**
 >
 > **The note that stood here was FALSE, it was published into the document an operator reads before
-> applying a migration to a production database, and it struck out three CORRECT sentences to make
-> room for itself.** It is withdrawn in place rather than deleted, per house style, because
+> applying a migration to a production database, and it struck out correct sentences to make room
+> for itself.** ~~three CORRECT sentences~~ — **corrected 2026-09-12, by the review that checked
+> this withdrawal: it is TWO.** §12B's and §13's are restored; §12C's stays struck because half of
+> that strike was right ("remain uncreated" was genuinely stale, and "a test still pins their
+> absence" genuinely imprecise). **A withdrawal can be as wrong as the claim it withdraws, and this
+> one over-counted its own damage** — which is the same enumeration failure, one level up. It is withdrawn in place rather than deleted, per house style, because
 > "this authority is a phantom" is exactly the kind of claim an operator acts on — and because the
 > way it went wrong is worth more than the finding ever was. Found by an independent review that
 > implemented none of it.
@@ -297,7 +315,9 @@ absence.
 > **WHAT IT GOT WRONG: IT CHECKED THE WRONG DOCUMENT.** It tested the citation against
 > [`isaac-runs-stage-2-contract.md`](isaac-runs-stage-2-contract.md), which genuinely has no §8 —
 > and which is **not the document this packet cites.** §1 of this very file carries the path, four
-> lines of prose above where the note was written:
+> lines of prose above where the note was written ~~four lines~~ — **it is 122 lines (`:166` versus
+> `:288`), corrected 2026-09-12; "four lines above" made the miss sound careless when the real
+> lesson is that distance is irrelevant: the sweep did not grep, it recalled**:
 >
 > ```
 > :165  … Contract §8 DECISION D7
@@ -310,7 +330,10 @@ absence.
 > **correct**, and D7 **is** already recorded.
 >
 > **AND THE ENUMERATION MISSED THE ONE CITATION THAT WOULD HAVE REFUTED IT.** The note said "cited
-> four times (here, §12B, §12C, §13)". Measured: `grep -in "contract §8"` returns **five** hits —
+> four times (here, §12B, §12C, §13)". Measured **at that time**: `grep -in "contract §8"` returned
+> **five** hits (**re-measured at HEAD it is eight, because this withdrawal itself added mentions —
+> a count published without its vantage point, corrected 2026-09-12; §17's rule about quoting the
+> checkout with a measurement applies to a `grep` count too**) —
 > and the one it omitted is **`:165`, in §1, unstruck, and the only one carrying a document path.**
 > A sweep that skips the citation naming its own source cannot test that source.
 >

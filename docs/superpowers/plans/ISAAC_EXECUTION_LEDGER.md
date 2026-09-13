@@ -585,6 +585,13 @@ The **restatement** entrance (pass two, now a three-condition gate) is closed as
 here can measure: all nine named sentences refuse **and disclose**, and a **510-cell sweep**
 (15 connectives × 17 modifier tails × 2 separators) finds **0 fabrications and 0 silent refusals**.
 
+**AND THE SCOPE OF THAT SWEEP IS PART OF THE NUMBER, which the first version of this section
+omitted — the omission is exactly where the next blocking defect lived (`QA-020`/F1 below).** Every
+one of the 510 cells is `f"The temperature was 425 K{sep}{connective} 3 K {tail}"`, so it is
+**temperature-only**, and **every tail is NON-EMPTY**. The instant rules and the terminal case are
+both **structurally outside it**. A sweep whose shape excludes a rule cannot clear that rule, and
+quoting its cell count without its shape reads as coverage it does not have.
+
 **But the class has a SECOND entrance nobody had looked at in four passes: the label-anchored rule
 of PASS ONE.** `_TEMPERATURE_K` bridges label→value with `[^.;:]{0,40}?`, so every one of these
 proposes a value the transcript does not state — **silently**, with
