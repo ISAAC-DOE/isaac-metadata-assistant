@@ -2162,22 +2162,44 @@ def test_an_INDEPENDENTLY_FOUND_member_of_the_class_is_also_closed(sentence):
 
 @pytest.mark.parametrize("sentence", tc._PRE_LABEL_OVERREACH_RESIDUE)
 def test_the_PRE_LABEL_overreach_is_STILL_OPEN(sentence):
-    """A KNOWN-OPEN §5 defect of a DIFFERENT sub-class, asserted to still occur.
+    """KNOWN-OPEN §5 defects of a DIFFERENT sub-class, asserted to still occur.
 
-    The twentieth row of the reviewer's corpus. Its bridge is EMPTY — the value is
-    juxtaposed, exactly as in `"temperature 425 K"`, which this reader must keep
-    reading — and the word that re-subjects the quantity (`lowered`) sits to the
-    LEFT of the label, where a bridge grammar has no reach by construction.
+    ── TWO FORMS, AND THE TUPLE GREW FROM ONE TO NINE ON 2026-09-13 ───────────
+
+    What they share is the only thing that matters here: **the word that
+    re-subjects the quantity sits to the LEFT of the label, where a bridge grammar
+    has no reach by construction.** Both allowlists look rightward —
+    `_ASSERTION_BRIDGE` reads label -> value, `_VALUE_CONTINUATION` reads value ->
+    end — so neither can see upstream of the label at all.
+
+    1. THE DELTA FORM (`"We lowered the temperature 15 K"`), the original row. Its
+       bridge is EMPTY: the value is juxtaposed, exactly as in
+       `"temperature 425 K"`, which this reader must keep reading.
+
+    2. THE MODIFIER FAMILY (eight rows, added after an independent review found
+       them), e.g. `"The setpoint temperature was 425 K"`. Here the bridge is
+       `" was "` — **the very bridge the gate exists to ADMIT**, and correctly so.
+       There is nothing wrong with what the gate sees; the disqualifying word is
+       somewhere it never looks.
+
+    ── WHY THIS TEST'S OWN PREVIOUS DOCSTRING WAS PART OF THE DEFECT ─────────
+
+    It said "The twentieth row of the reviewer's corpus", describing ONE sentence,
+    while the constant it parametrises over claimed to hold *"THE ONE MEMBER OF THE
+    CLASS"*. Both were overclaims: the family above was never hunted for. The
+    lesson the module records — that a corpus generated from the same mental model
+    as the fix tests the fix's REACH and not its PREMISE — applied to this file too.
 
     Asserted the WRONG WAY ROUND on purpose, the same discipline
-    `_LABEL_OVERREACH_CLOSED` was held to before it was closed: shutting this
-    requires DELETING a row from `tc._PRE_LABEL_OVERREACH_RESIDUE` — a reviewed
-    change — rather than discovering that a documented open item quietly went away.
+    `_LABEL_OVERREACH_CLOSED` was held to before it was closed: shutting any of
+    these requires DELETING a row from `tc._PRE_LABEL_OVERREACH_RESIDUE` — a
+    reviewed change — rather than discovering that a documented open item quietly
+    went away.
 
-    See that constant for the three proxies considered and why each fails: a verb
-    denylist fails OPEN, "no determiner before the label" refuses
-    `"The temperature 425 K"`, and a word-count rule cannot separate
-    `"The sample temperature 425 K"` from this by one word.
+    See that constant for why no proxy works: a denylist of nouns or verbs fails
+    OPEN, and the real distinction is between a modifier that RE-SUBJECTS the
+    quantity and one that merely LOCATES it (`"Sample temperature at the second
+    scan was 425 K"` must keep reading), which is not decidable by bridge shape.
     """
     rows = _rows(sentence)
     assert len(rows) == 1, (
@@ -2188,6 +2210,49 @@ def test_the_PRE_LABEL_overreach_is_STILL_OPEN(sentence):
     # AND IT IS SILENT, which is what makes it a §5 defect rather than a disclosed
     # omission. Pinned so a slice that makes it merely disclosed comes through here.
     assert _read(sentence).abstentions == ()
+
+
+@pytest.mark.parametrize("sentence", tc._RUN_MISATTRIBUTION_RESIDUE)
+def test_the_RUN_MISATTRIBUTION_on_the_instant_rules_is_STILL_OPEN(sentence):
+    """A KNOWN-OPEN §5 defect of a SECOND, DISTINCT class — and arguably the worst
+    one this module has, which is why it is pinned separately rather than folded in.
+
+    Found by independent review, 2026-09-13, and re-measured before being pinned.
+
+    **THE INSTANT RULES DO NOT ANCHOR ON `"scan"` AT ALL.** The pattern is
+    `\b(?:ended|end|finished|stopped)\b[^.;:]{0,40}?<instant>` — it anchors on the
+    VERB. So it never asks WHICH scan ended, and a sentence about a previous,
+    calibration, dark or reference scan yields an instant for **the run currently
+    selected**.
+
+    That is worse than reading the wrong QUANTITY, and the difference is worth
+    stating: the value is a real acquisition time, correctly parsed, of a different
+    measurement — attributed to this one. A scientist reviewing the proposal sees a
+    plausible timestamp and no signal at all that it belongs elsewhere.
+
+    PRE-EXISTING: `git show 2f9a1133:apps/api/isaac_api/transcript_capture.py`
+    carries the same verb-anchored pattern, so this gate neither introduced nor
+    worsened it.
+
+    NOT FIXED because it is a REFERENT-RESOLUTION problem rather than a
+    pattern-shape one. Deciding that "the previous scan" is not "this run" requires
+    knowing which scan the sentence is about; guessing would substitute one
+    misattribution for another. Asserted the wrong way round, like its sibling
+    above, so closing it is a reviewed deletion rather than a silent disappearance.
+    """
+    reading = _read(sentence)
+    assert len(reading.candidates) == 1, (
+        "if this reads nothing the run-misattribution class is CLOSED — delete the "
+        "row from _RUN_MISATTRIBUTION_RESIDUE and say so, do not weaken this"
+    )
+    # It is an INSTANT field, and it is THIS run's — which is the defect.
+    assert reading.candidates[0].field_path in {
+        "timestamps.acquired_start_utc",
+        "timestamps.acquired_end_utc",
+    }, reading.candidates[0].field_path
+    # AND IT IS SILENT. A disclosed version would be a materially lesser defect, so
+    # a slice that merely discloses it comes through here rather than past it.
+    assert reading.abstentions == ()
 
 
 def test_the_PREPOSITIONAL_forms_of_the_same_sentence_ARE_closed():

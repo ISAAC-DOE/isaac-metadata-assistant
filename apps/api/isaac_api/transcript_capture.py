@@ -2468,8 +2468,97 @@ _RESTATEMENT_RESIDUE_CLOSED: tuple[str, ...] = (
 #: has a blind side. The lesson is not "add ``lowered``": it is that a corpus
 #: generated from the same mental model as the fix tests the fix's reach and not its
 #: premise, and only an independent hunt found the premise.
+#: *** THE "ONE MEMBER" CLAIM ABOVE WAS AN OVERCLAIM AND IS WITHDRAWN — found by
+#: independent review, 2026-09-13, and re-measured here before being written down. ***
+#:
+#: The note above called `"We lowered the temperature 15 K"` *"THE ONE MEMBER OF THE
+#: CLASS the pass-one assertion gate does not close"*, over a one-row table. A
+#: reviewer that wrote its own corpus found a **structurally different pre-label
+#: family the delta case does not cover at all**, and every row of it is SILENT.
+#:
+#: Re-measured at this head, 8 of 8 silent (candidate proposed, zero disclosures):
+#:
+#:     "The setpoint temperature was 425 K."   -> 425
+#:     "The maximum temperature was 500 K."    -> 500
+#:     "The average temperature was 400 K."    -> 400
+#:     "The ambient temperature was 295 K."    -> 295
+#:     "The room temperature was 295 K."       -> 295
+#:     "The target temperature was 425 K."     -> 425
+#:     "The requested temperature was 425 K."  -> 425
+#:     "The planned temperature was 425 K."    -> 425
+#:
+#: **WHY THE GATE CANNOT SEE THEM, which is the part worth understanding.** The
+#: modifier sits BEFORE the label, and both allowlist grammars look AFTER it:
+#: `_ASSERTION_BRIDGE` reads label -> value, `_VALUE_CONTINUATION` reads value ->
+#: end. `"setpoint temperature was 425 K"` presents the gate with the bridge `" was "`
+#: — which is exactly the bridge the gate exists to ADMIT, and correctly so, because
+#: `"The temperature was 425 K"` must keep reading. The word that re-subjects the
+#: quantity is upstream of everything the gate inspects.
+#:
+#: **THE SHARPEST EXHIBIT IS THIS MODULE'S OWN COMMENT.** The sequence gate cites
+#: `"cryostat setpoint 80 K"` as a case where the gap *positively identifies 80 as
+#: something else* — and `"The setpoint temperature was 425 K"` proposes 425 as the
+#: temperature. The same word, read as disqualifying in one position and invisible in
+#: the other.
+#:
+#: **PRE-EXISTING, VERIFIED RATHER THAN ASSUMED.** `git show
+#: 2f9a1133:apps/api/isaac_api/transcript_capture.py` has
+#: `_TEMPERATURE_K = \btemperatures?\b[^.;:]{0,40}?<number>\s*(?:K|kelvin)` — the bare
+#: label with a permissive bridge — so every row above fabricates on `main` too. This
+#: gate neither introduced nor worsened them; what was wrong and in range was the
+#: published claim of completeness.
+#:
+#: **NOT FIXED HERE, and the reason is the same one that referred the original
+#: residue:** a fix has to reject a modifier before the label without rejecting
+#: `"Sample temperature at the second scan was 425 K"` — where the words before the
+#: label are a legitimate qualifier of the SAME quantity. That is a distinction
+#: between an adjective that re-subjects and one that locates, it is not decidable by
+#: the allowlist shape this gate uses, and a denylist of nouns fails OPEN, which is
+#: the failure mode that has already shipped twice in this module. It needs its own
+#: slice and its own argument.
 _PRE_LABEL_OVERREACH_RESIDUE: tuple[str, ...] = (
+    # The DELTA case: the re-subjecting word is a verb and there is no `by`.
     "We lowered the temperature 15 K",
+    # The MODIFIER family, added 2026-09-13. A noun or adjective before the label
+    # renames the quantity; the bridge after it is the legitimate one.
+    "The setpoint temperature was 425 K",
+    "The maximum temperature was 500 K",
+    "The average temperature was 400 K",
+    "The ambient temperature was 295 K",
+    "The room temperature was 295 K",
+    "The target temperature was 425 K",
+    "The requested temperature was 425 K",
+    "The planned temperature was 425 K",
+)
+
+#: *** A SECOND, DISTINCT CLASS: RUN MISATTRIBUTION ON THE INSTANT RULES. Same
+#: review, and it is NOT pre-label overreach — it is kept separate because
+#: conflating them would hide what the fix would have to be. ***
+#:
+#: Re-measured at this head, 4 of 4 silent:
+#:
+#:     "The previous scan ended at <instant>."     -> acquired_end_utc
+#:     "The last scan ended at <instant>."         -> acquired_end_utc
+#:     "The calibration scan ended at <instant>."  -> acquired_end_utc
+#:     "The reference scan started at <instant>."  -> acquired_start_utc
+#:
+#: **THE INSTANT RULES DO NOT ANCHOR ON "scan" AT ALL.** On `main` and here the
+#: pattern is `\b(?:ended|end|finished|stopped)\b[^.;:]{0,40}?<instant>` — it anchors
+#: on the VERB. So it never asks WHICH scan ended, and a sentence about a previous,
+#: calibration, dark or reference scan is read as an instant for THE RUN CURRENTLY
+#: SELECTED. That is a worse failure than reading the wrong quantity: the value is a
+#: real acquisition time, of a different measurement, attributed to this one.
+#:
+#: **PRE-EXISTING**, by the same `git show` above. **NOT FIXED HERE** for the
+#: analogous reason: distinguishing "the scan" from "the previous scan" requires
+#: knowing which scan the sentence is about, which is a referent-resolution problem
+#: rather than a pattern-shape one, and guessing it would substitute one
+#: misattribution for another.
+_RUN_MISATTRIBUTION_RESIDUE: tuple[str, ...] = (
+    "The previous scan ended at 2026-01-01T00:00:00Z",
+    "The last scan ended at 2026-01-01T00:00:00Z",
+    "The calibration scan ended at 2026-01-01T00:00:00Z",
+    "The reference scan started at 2026-01-01T00:00:00Z",
 )
 
 #: **THE OTHER SIDE OF THE SAME LEDGER: the false NEGATIVES this gate costs,
