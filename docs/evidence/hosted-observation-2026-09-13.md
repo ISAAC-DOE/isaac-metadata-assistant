@@ -335,3 +335,45 @@ redirect with a not-found screen is a behaviour change with a real blast radius.
 **One measurement a follow-up must make first, because I did not:** whether any *shipped* link,
 redirect or documented URL currently depends on the catch-all to land somewhere sensible. If one
 does, a not-found screen would surface a defect rather than fix one, and that link is the real bug.
+
+### 11.1 The blast-radius figure in §11 was FALSE, and is corrected here
+
+§11 above said **8 test files** reference the catch-all. **Re-measured against the behaviour rather
+than the vocabulary: ZERO test files assert the router redirect.**
+
+The 8 came from `grep -lE "catch-all|unknown route|not.found|NotFound"`. Every one of the four
+actual matches is about something else entirely:
+
+| Match | What it is actually about |
+|---|---|
+| `tutorial-anchors.test.tsx:151` | `stubFetchRoutes` rejecting an unknown **API** route |
+| `record-identity.test.ts:537` | a **record list**'s "weaker not-found" |
+| `assistant-capabilities.test.tsx:573` | the **assistant intent resolver**'s catch-all |
+| `assistant-capabilities.test.tsx:579` | the same intent resolver |
+
+Three unrelated domains, one shared vocabulary. **This is the same error as `MCP-002`'s false
+negative earlier in this same session** — there a grep for an invented constant name reported a
+built feature as missing; here a grep for a real word reported an unrelated feature as related.
+*A grep for a word measures your guess about the vocabulary, not the behaviour.*
+
+**And the precondition §11 demanded is now discharged, in the safe direction.** Over **175** shipped
+non-test `.ts`/`.tsx` files:
+
+| Probe | Result |
+|---|---|
+| literal `to=`/`href=` targets outside the ten legitimate routes | **0** |
+| template-literal `` to={`/…`} `` targets | **0** |
+
+All navigation goes through `ROUTES` and its path helpers, so every shipped destination is
+legitimate by construction and **nothing relies on the catch-all**. A not-found screen therefore
+fixes a defect rather than surfacing one.
+
+**Revised assessment: small and low-risk** — and still deliberately not in PR #248, but now for a
+different and better reason. A not-found screen is a **new surface**, and `QA-018` is this session's
+lesson that a new surface needs its own accessibility scan before it ships. It should get that in
+its own reviewable PR, not appended to a 94-commit one.
+
+The ten legitimate routes, for the record: `/experiments`, `/load`, `/memory`, `/governance`,
+`/statistics`, `/settings`, `/record/:id`, and `/record/:id/{complete,evidence,export}`. **There is
+no `/validator` route** — the Standalone Validator is not addressable, so the URL that exposed this
+defect was my own wrong guess rather than a broken shipped link.
