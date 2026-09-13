@@ -66,8 +66,22 @@ DIRTY STATE:           2026-09-13: CLEAN at session open; then THREE lanes editi
                        orchestrator's lane. Snapshot regeneration is deliberately DEFERRED to ONE
                        run after all three settle — `routes.py` is manifest-listed and will drift it.~~
                        snapshot drift at session open: NONE (exit 0, both artifacts)
-OPEN PRS:              **none.** #248 is **MERGED** (`654e43dd`); `gh pr list --state open` is
-                       empty. ~~**#248** — `docs/product-scope-v2-planning`, opened this session.~~
+OPEN PRS:              **#249 — DRAFT**, `fix/assistant-collapsed-and-help` -> `main`, opened this
+                       session as the integration branch for every lane. Its CI at `53745c30` had
+                       **4 of 5 checks SUCCESS** with `browser accessibility and responsive
+                       baseline` still running — that job is the **Linux a11y round-trip** this
+                       session's accessibility work is gated on, and it is the reason the PR was
+                       opened before review rather than after: CI fires only on a pull request in
+                       this repo (`on: push: branches: [main]` + `pull_request`), so a bare branch
+                       push measures nothing.
+                       ~~**none.** #248 is MERGED~~ — #248 is still merged; this line now tracks
+                       #249. ~~**#248** — `docs/product-scope-v2-planning`, opened this session.~~
+LANES MERGED INTO #249: **`feat/v2-lib`** (`2aff1ee9`) and **`feat/v2-sci`** (`13296415`), both
+                       clean, zero conflicts. **`feat/v2-hist`** was still running when this line
+                       was written. ONE snapshot regeneration after the Library merge; the
+                       scientific lane **measured that it drifts nothing** (`transcript_capture.py`
+                       is not among the manifest's 15 `apps/api` entries) and **my brief's drift
+                       prediction was wrong** — recorded because I told that lane to expect drift.
                        ~~none~~ was true at session open and is corrected rather than replaced so
                        the header reads as a record and not a snapshot.
 COMMIT COUNT (FINAL):  **95** at `4980d3e7` (`git rev-list --count main..HEAD`), up from the 38
@@ -164,8 +178,13 @@ SUBORDINATE AGENTS:    *** THIS IS A NEW TOP-LEVEL SESSION, SO THE BUDGET IS FRE
                        (2) `feat/v2-hist`, `opus` — the Historical Import shell: `HIST-001`,
                        `HIST-004`, `HIST-003a`. (3) `feat/v2-lib`, `sonnet` — `LIB-004`, `LIB-005`,
                        `LIB-003a`, `UX-017`'s Library half, `QA-017`.
-                       **2 REMAINING, BOTH RESERVED FOR INDEPENDENT REVIEW.** Nested spawning
-                       forbidden and every brief says so in terms. Peak concurrency 3.
+                       **SPENT: 4 of 5.** (4) an **INDEPENDENT REVIEWER** over the two merged
+                       lanes (`feat/v2-sci` 8 commits + `feat/v2-lib` 3), dispatched while the
+                       Historical Import lane was still running so the review overlaps the wait
+                       rather than following it. **1 REMAINING, reserved for the review of the
+                       Historical Import lane together with the orchestrator's own unreviewed
+                       commits.** Nested spawning forbidden and every brief says so in terms.
+                       Peak concurrency 3.
                        **THE ORCHESTRATOR IMPLEMENTS THE SMALLER FRONTEND/UX SLICES DIRECTLY**, as
                        the previous run did and for the same disclosed reason — a five-agent
                        ceiling and §36's "continue while safe work remains" cannot both be honoured
