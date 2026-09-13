@@ -22,6 +22,18 @@ import { render, screen, fireEvent, waitFor, within } from '@testing-library/rea
 import { MemoryRouter } from 'react-router-dom';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+
+/** The comment-stripping the source-scan guards use, extracted so the mutation
+ *  control can exercise the REAL pipeline rather than a bare substring check.
+ *  Block comments, JSX expression comments, and line comments — in that order,
+ *  because a JSX comment contains a block comment. */
+function stripComments(source: string): string {
+  return source
+    .replace(/\{\/\*[\s\S]*?\*\/\}/g, ' ')
+    .replace(/\/\*[\s\S]*?\*\//g, ' ')
+    .replace(/^\s*\/\/.*$/gm, ' ')
+    .replace(/\/\/.*$/gm, ' ');
+}
 import { HistoricalImport } from '../screens/HistoricalImport';
 import { ExperimentsHome } from '../screens/ExperimentsHome';
 import { LeftNav } from '../components/LeftNav';
@@ -392,21 +404,49 @@ describe('§1 · the destination cannot accept bytes and does not say it can', (
       join(__dirname, '..', 'screens', 'HistoricalImport.tsx'),
       'utf8',
     );
-    const code = src
-      .replace(/\/\*[\s\S]*?\*\//g, ' ')
-      .replace(/\{\/\*[\s\S]*?\*\/\}/g, ' ')
-      .replace(/^\s*\/\/.*$/gm, ' ');
+    const code = stripComments(src);
     expect(code).not.toContain('type="file"');
     expect(code).not.toContain('onDrop');
     expect(code).not.toContain('FormData');
     expect(code).not.toContain('multipart');
   });
 
-  it('MUTATION-GUARDED: the source check can actually fail', () => {
-    /* Guards the guard: a `not.toContain` over a file that never had the string
-     * passes trivially, so prove the predicate fires on the shape it bans. */
-    const bad = '<input type="file" onChange={read} />';
-    expect(bad).toContain('type="file"');
+  it('MUTATION-GUARDED: the source check can actually fail, THROUGH the real pipeline', () => {
+    /*
+     * *** THE PREVIOUS VERSION OF THIS TEST WAS A TAUTOLOGY, and an independent
+     * review caught it (M-4). *** It read:
+     *
+     *     const bad = '<input type="file" onChange={read} />';
+     *     expect(bad).toContain('type="file"');
+     *
+     * — `x` contains a substring of `x`. True for any two strings so related, and
+     * it exercised NEITHER the comment-stripping pipeline NOR the assertion above
+     * it. The guard it claimed to control was in fact sound (the reviewer injected
+     * a live `type="file"` into the screen and the real test failed), so this is a
+     * false LABEL rather than a false guard — which is its own defect, because the
+     * label is what a future reader trusts instead of re-checking.
+     *
+     * It now drives `stripComments`, the SAME function the assertion above uses, in
+     * BOTH directions. The second arm is the one that matters and the tautology
+     * could never have reached: a banned string inside a COMMENT must survive
+     * stripping as absent, or the guard would fire on its own documentation — and
+     * this file's screen does discuss file inputs in prose.
+     */
+    const inCode = '<input type="file" onChange={read} />';
+    expect(stripComments(inCode)).toContain('type="file"');
+
+    for (const commented of [
+      '/* we deliberately render no <input type="file" /> here */',
+      '{/* no type="file", no onDrop, no FormData, no multipart */}',
+      '// FormData and multipart are never constructed',
+    ]) {
+      const stripped = stripComments(commented);
+      expect(stripped, `stripComments left content behind: ${commented}`).not.toContain(
+        'type="file"',
+      );
+      expect(stripped).not.toContain('FormData');
+      expect(stripped).not.toContain('multipart');
+    }
   });
 
   it('sends no multipart body on any request it makes', async () => {

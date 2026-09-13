@@ -662,11 +662,51 @@ def test_the_module_writes_no_draft_no_evidence_and_no_confirmation_envelope():
         assert banned not in code, f"{banned!r} appears in executable code"
 
 
-def test_the_negative_control_can_actually_fail():
-    """MUTATION CONTROL on the check above — a grep over a file that does not
-    contain the literals passes trivially, so prove the predicate fires."""
-    code = "x = user_confirmation(question='q')"
-    assert "user_confirmation" in code
+def _strip_comments_and_docstrings(src: str) -> str:
+    """The stripping the source-scan guards use, extracted so the mutation control
+    can exercise the REAL pipeline instead of a bare substring check."""
+    code = re.sub(r'"""[\s\S]*?"""', " ", src)
+    return re.sub(r"^\s*#.*$", " ", code, flags=re.MULTILINE)
+
+
+def test_the_negative_control_can_actually_fail_THROUGH_the_real_pipeline():
+    """*** THE PREVIOUS VERSION WAS A TAUTOLOGY, caught by independent review (M-4).
+
+    It read::
+
+        code = "x = user_confirmation(question='q')"
+        assert "user_confirmation" in code
+
+    — ``x`` contains a substring of ``x``. True for any two strings so related, and
+    it exercised neither the docstring/comment stripping nor the assertion it
+    claimed to control. The guard itself was SOUND (the reviewer injected
+    ``export_draft`` and ``block_evidence`` into executable code and the real test
+    failed), so this was a false LABEL rather than a false guard — which is its own
+    defect, because the label is what a future reader trusts instead of re-checking.
+    ***
+
+    It now drives the SAME stripping the guard uses, in BOTH directions. The second
+    direction is the one a tautology could never reach and the one that matters
+    here: this module DISCUSSES ``export_draft`` and the truth path at length in
+    prose, so if stripping failed the guard would fire on its own documentation —
+    and someone would "fix" it by deleting the explanation.
+    """
+    in_code = "x = user_confirmation(question='q')\nimport export_draft\n"
+    stripped = _strip_comments_and_docstrings(in_code)
+    assert "user_confirmation" in stripped
+    assert "export_draft" in stripped
+
+    for commented in (
+        '"""This module never calls user_confirmation or export_draft."""',
+        "# block_evidence and build_sidecar are deliberately absent",
+        '    """Nothing here writes .draft[ or block_evidence."""',
+    ):
+        out = _strip_comments_and_docstrings(commented)
+        for banned in ("user_confirmation", "export_draft", "block_evidence", "build_sidecar"):
+            assert banned not in out, (
+                f"stripping left {banned!r} behind in {commented!r}; the guard would "
+                f"fire on this module's own prose"
+            )
 
 
 def test_the_module_imports_nothing_that_writes_the_truth_path():
