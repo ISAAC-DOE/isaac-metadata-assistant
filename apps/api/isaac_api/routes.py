@@ -25038,6 +25038,24 @@ def post_import_candidate_proposal(
 
         text = _import_note_text(statement, filename)
         start_char, end_char = _import_note_value_span(statement, filename)
+        # THE PER-NOTE BYTE BOUND, AND `_note_text_refusal` IS ITS THIRD CALLER.
+        #
+        # A note's own size limit is enforced at the ROUTE — `notes.Note` does not
+        # check it — so a route that mints a note and does not call this is a route
+        # with no per-note bound at all. The per-RECORD ceilings checked above are a
+        # different bound and do not imply this one: `_MAX_NOTE_STATE_BYTES` is
+        # sixteen times `_MAX_NOTE_BYTES`, so one oversized note passes it.
+        #
+        # UNREACHABLE ON THE COMMITTED EXAMPLE SOURCES, and that is exactly why it
+        # is written rather than reasoned away. The only readable sources today are
+        # two short committed files, but a parsed line is bounded only by
+        # `MAX_SOURCE_TEXT_BYTES` (1,000,000) while a note is bounded by 256 KiB —
+        # so a single long line in a future source would mint a note no other route
+        # would have accepted. It also covers the lone-surrogate case, which a
+        # hand-edited session document could carry into `statement`.
+        too_big = _note_text_refusal(text, what="The words read from this source")
+        if too_big is not None:
+            return too_big
         try:
             note = exp.capture_note(
                 text=text,

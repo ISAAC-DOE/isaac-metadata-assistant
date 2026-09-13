@@ -1122,3 +1122,33 @@ def test_an_unreadable_shipped_source_refuses_with_no_filesystem_path(client, mo
     assert "a-path-nobody-should-see" not in serialized
     assert str(tmp_path) not in serialized
     assert "Errno" not in serialized
+
+
+def test_a_note_larger_than_one_note_may_be_is_refused_not_shortened(client, monkeypatch):
+    """THE PER-NOTE BYTE BOUND, and `_note_text_refusal` is its THIRD caller.
+
+    A note's own size limit is enforced at the ROUTE — `notes.Note` does not check
+    it — so a route that mints a note without calling that helper has no per-note
+    bound at all. The per-RECORD ceilings are a DIFFERENT bound and do not imply
+    this one: `_MAX_NOTE_STATE_BYTES` is sixteen times `_MAX_NOTE_BYTES`, so one
+    oversized note passes it.
+
+    UNREACHABLE ON THE COMMITTED EXAMPLE SOURCES, which is why it is worth a test
+    rather than an argument: their lines are short, but a parsed line is bounded
+    only by `MAX_SOURCE_TEXT_BYTES` (1,000,000) while a note is bounded by
+    256 KiB. The ceiling is lowered here rather than a giant source invented,
+    because the bound is what is under test and not the parser.
+
+    MUTATION: removing the `_note_text_refusal` call makes this RED.
+    """
+    monkeypatch.setattr(routes, "_MAX_NOTE_BYTES", 8)
+    import_id = _bundle(client)
+    eid = _record(client)
+    candidate = _candidate(client, import_id, RECORD_PATH)
+    response = _propose(client, import_id, candidate["candidate_id"], eid)
+    assert response.status_code == 422, response.text
+    assert response.json()["error"] == "unrepresentable_value"
+    assert "REFUSED rather than shortened" in response.json()["message"]
+    # NEITHER HALF OF THE PAIR WAS WRITTEN.
+    assert client.get(f"/api/experiments/{eid}/notes").json()["notes"] == []
+    assert client.get(f"/api/experiments/{eid}/proposals").json()["proposals"] == []
