@@ -1584,9 +1584,24 @@ test.describe('two scientists, two real browsers, one record', () => {
          * server-derived pipeline above `RecordWorkspaceNav` in the same sidebar, so a
          * Tab walk from the top of the page meets it first. It is walked THROUGH
          * rather than activated: its steps are gated destinations that would leave the
-         * record screen, and this step is about the record's own four workspaces.
+         * record screen, and this step is about the record's own workspaces.
+         *
+         * ~~four workspaces … 'Graph'~~ — **THREE, since 2026-09-13.** `EVG-002`/
+         * `DEC-04` removed the Graph from the record sidebar, so there is no Graph
+         * link in the keyboard order to reach. The failure this produced is worth
+         * keeping, because it is the one a repository-wide sweep MISSED: the sweep
+         * looked for `getByRole('link', { name: 'Graph' })` and this walk finds the
+         * link by TABBING to it and matching its accessible name, so it matched no
+         * pattern the sweep used. It failed as
+         * `step 11: the Graph workspace link was not reached by 150 Tab presses`.
+         *
+         * `?view=graph` still resolves and every existing bookmark still opens it —
+         * what no longer exists is a control to tab to. The three that remain are
+         * asserted here, and the ABSENCE of a fourth is asserted immediately after
+         * the loop, so a Graph link silently returning to the sidebar would fail
+         * here rather than pass unnoticed.
          */
-        for (const workspace of ['Record Fields', 'Runs', 'Capture & Proposals', 'Graph'] as const) {
+        for (const workspace of ['Record Fields', 'Runs', 'Capture & Proposals'] as const) {
           await page.locator('body').click({ position: { x: 2, y: 2 } });
           await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
           await tabUntil(
@@ -1651,10 +1666,27 @@ test.describe('two scientists, two real browsers, one record', () => {
               'Record Fields': 'record-workspace-fields',
               Runs: 'record-workspace-runs',
               'Capture & Proposals': 'record-workspace-capture',
-              Graph: 'record-workspace-graph',
             }[workspace],
           );
         }
+
+        /*
+         * AND THERE IS NO FOURTH. Asserted, not left implicit: the loop above
+         * shrank from four workspaces to three when `EVG-002` removed the Graph
+         * from the sidebar, and a loop that simply stopped naming it would also
+         * pass if the link came silently back. This fails in that case.
+         *
+         * It is scoped to the record's own navigation landmark rather than to the
+         * page, because `?view=graph` is still a live address and nothing here
+         * claims otherwise — what must not exist is a CONTROL in this list.
+         */
+        await expect(
+          page
+            .getByRole('navigation', { name: 'Record workspaces' })
+            .getByRole('link', { name: 'Graph', exact: true }),
+          'step 11: the Graph workspace must not be back in the record sidebar — ' +
+            'EVG-002 removed it, and ?view=graph remains reachable by address only',
+        ).toHaveCount(0);
 
         // ---- and the Assistant drawer, at 768 ---------------------------------
         /*
