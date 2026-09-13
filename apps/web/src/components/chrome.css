@@ -252,6 +252,35 @@
   outline: 2px solid var(--action);
   outline-offset: 2px;
 }
+/* QA-017: the `My Experiments` ancestor crumb, one level above the record
+ * title. Quieter than `.record-title` — it is not the current page — but not
+ * `--text-tertiary` either: A3 measured that token at 4.54:1 on this bar's own
+ * worst ground (`--assist-tint`), and a breadcrumb link is exactly the kind of
+ * small, 500-weight text A3's own note names as having no 3:1 large-text
+ * exemption. `--text-secondary` is 8.07:1 on `--surface`, already used one
+ * crumb over on `.record-surface` above.
+ *
+ * TOKENS, NOT `.record-surface`'s OWN 12.5px/500 LITERALS — deliberately, even
+ * though it sits one crumb over and uses that exact pair. `UX-001`'s ratchet
+ * (`type-scale-and-spacing.test.ts`) counts DECLARATIONS, not distinct values,
+ * so a new site repeating an existing literal still fails it (measured: it
+ * did, +1 on each axis, before this became `var()`). `--font-size-meta` is
+ * 11px against `.record-surface`'s 12.5px — visually close at this weight and
+ * the nearest declared rung — and `--font-weight-medium` is the same 500. */
+.record-ancestor-link {
+  font-size: var(--font-size-meta);
+  font-weight: var(--font-weight-medium);
+  color: var(--text-secondary);
+  text-decoration: none;
+  white-space: nowrap;
+  border-radius: var(--radius-token);
+  transition: color 0.12s ease;
+}
+.record-ancestor-link:hover { color: var(--action-hover); }
+.record-ancestor-link:focus-visible {
+  outline: 2px solid var(--action);
+  outline-offset: 2px;
+}
 /* Leaf crumb: the current sub-surface, non-link. */
 .record-surface {
   font-size: 14px;
@@ -814,6 +843,13 @@
      gap — 19.7px of a row that is 329px wide at 375. Direct children only, so
      the state chip's own icon is untouched. */
   .record-context > svg { display: none; }
+  /* QA-017's `My Experiments` ancestor crumb is hidden in this whole band, not
+     shrunk or truncated — see the comment beside `.record-ancestor-link`'s
+     declaration above and beside its JSX in `TopBar.tsx`. This keeps the
+     narrow-width crumb row byte-identical to what C1/I4/LAYOUT-01/LAYOUT-02
+     measured and fixed; the `Brand` logo link is still the way back at every
+     width this band covers. */
+  .record-ancestor-link { display: none; }
   /* The title takes the full row and finally has a width to ellipsize into. */
   .record-title {
     flex: 1 1 100%;
