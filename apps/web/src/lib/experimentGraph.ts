@@ -82,6 +82,7 @@ import {
   officialFindingsNote,
 } from './officialAttribution';
 import { titleCase } from './labels';
+import { experimentStatusLabel } from './adapt';
 
 export { MAX_SCALE, MIN_SCALE, VIEW_EXTENT };
 
@@ -605,7 +606,12 @@ export function buildExperimentGraph(
     producer: NODE_PRODUCERS.experiment,
     detail: [
       { term: 'Experiment id', value: detail.id },
-      { term: 'Status', value: detail.status },
+      /* UX-014 — this read the raw server enum (`needs_attention`), measured in
+         a real browser on a freshly created record. `experimentStatusLabel` is
+         the queue's own wording, derived from the queue's own maps rather than
+         authored again here. The `Experiment id` above it is deliberately NOT
+         humanized: an id is an identifier a curator maps by, not a word. */
+      { term: 'Status', value: experimentStatusLabel(detail.status) },
       { term: 'Created', value: detail.created_utc },
       { term: 'Fields with evidence', value: String(detail.evidenced_field_count) },
     ],
@@ -677,7 +683,22 @@ export function buildExperimentGraph(
         source: subjectId,
         target: id,
         kind: 'has_section',
-        why: `"${title}" is one of the stable draft sections (serialize.draft_to_groups groups official paths by their top-level segment).`,
+        /*
+         * UX-014 — this sentence named a PYTHON FUNCTION to a scientist:
+         * "(serialize.draft_to_groups groups official paths by their top-level
+         * segment)". Measured in a real browser; it rendered in the detail
+         * pane's "why" prose AND in the edge's `title` tooltip, eight times on
+         * one screen.
+         *
+         * The mechanism is not hidden, it is RELOCATED to where this file
+         * already puts mechanism: `NODE_PRODUCERS.section` still reads
+         * `serialize.draft_to_groups → _GROUP_TITLES (8 stable sections +
+         * Other)`, and that field's documented job is to answer "where did this
+         * node come from?" verbatim. UX-014's rule is that the path is never
+         * removed — so it is not; it just stops being the explanation offered
+         * to someone reading why two things are connected.
+         */
+        why: `"${title}" is one of the eight stable sections a draft is grouped into, by the top-level segment of its official field paths.`,
         label: null,
       });
     }

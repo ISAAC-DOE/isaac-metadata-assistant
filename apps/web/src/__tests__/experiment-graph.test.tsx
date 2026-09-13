@@ -298,7 +298,39 @@ describe('the graph draws an experiment, and explains itself', () => {
     expect(
       within(detail).getByText(/Defined by schema field sample\.material\.formula/),
     ).toBeInTheDocument();
-    expect(within(detail).getByText(/one of the stable draft sections/)).toBeInTheDocument();
+    /*
+     * ~~/one of the stable draft sections/~~ — the sentence was rewritten by
+     * UX-014 (2026-09-13) because the version this matched named a PYTHON
+     * FUNCTION to a scientist: "(serialize.draft_to_groups groups official
+     * paths by their top-level segment)". Measured rendering eight times on one
+     * screen, in the prose AND in an edge tooltip.
+     *
+     * The assertion is STRENGTHENED rather than just re-pointed: it now also
+     * pins the absence of the module name, so the jargon cannot come back
+     * without failing here. The mechanism is still reachable — it stayed in
+     * `NODE_PRODUCERS.section`, whose documented job is to answer "where did
+     * this node come from?" verbatim — and the producer assertion in the test
+     * above this one covers that side.
+     */
+    expect(
+      within(detail).getByText(/one of the eight stable sections a draft is grouped into/),
+    ).toBeInTheDocument();
+    /*
+     * SCOPED TO THE "WHY" PROSE, and the first version of this line was not —
+     * which is worth recording because it would have forced the WRONG fix.
+     *
+     * `queryByText(/draft_to_groups/)` over the whole detail pane FAILED,
+     * matching `.expgraph-detail-producer-value`: "serialize.draft_to_groups →
+     * _GROUP_TITLES (8 stable sections + Other)". That is the line the module
+     * name was deliberately RELOCATED to, so a guard that banned it there would
+     * have deleted the provenance UX-014 explicitly says never to remove. The
+     * ban belongs on the explanation a reader is offered, not on the mechanism
+     * a curator can look up.
+     */
+    for (const why of detail.querySelectorAll('.expgraph-conn-why')) {
+      expect(why.textContent ?? '').not.toMatch(/draft_to_groups/);
+    }
+    expect(detail.querySelectorAll('.expgraph-conn-why').length).toBeGreaterThan(0);
   });
 
   it('names the evidence source, the file and the locator — never a bare code', async () => {

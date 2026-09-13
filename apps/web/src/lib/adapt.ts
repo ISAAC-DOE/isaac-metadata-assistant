@@ -61,6 +61,41 @@ const GROUP_ORDER: { key: QueueGroupKey; label: string }[] = [
   { key: 'done', label: LABELS.groupDone },
 ];
 
+/**
+ * A SERVER STATUS ENUM, IN THE WORDS THE QUEUE ALREADY USES.
+ *
+ * ── WHY THIS EXISTS (UX-014, 2026-09-13) ────────────────────────────────────
+ *
+ * `needs_attention` was rendering verbatim to a scientist. Measured in a real
+ * browser, on a freshly created record at `?view=graph`: the experiment node's
+ * detail pane read `Status` / **`needs_attention`**. The queue has always had a
+ * human wording for that exact value — `LABELS.groupNeedsAttention`, "Needs
+ * Attention" — and two surfaces of one product were saying it two ways.
+ *
+ * ── WHY IT IS DERIVED AND NOT A SECOND MAP ──────────────────────────────────
+ *
+ * It composes the two maps directly above: status → queue group → the group's
+ * label. So there is no third vocabulary to drift, and a rename in `LABELS`
+ * moves the queue heading, the row badge and this together. Writing out a
+ * `{needs_attention: 'Needs Attention', …}` literal would have been a second
+ * expression of one decision, which is the shape this repository has published
+ * wrong repeatedly.
+ *
+ * ── WHAT IT IS NOT FOR, AND THIS BOUNDARY IS LOAD-BEARING ───────────────────
+ *
+ * **Only the experiment lifecycle status.** It must NOT be reached for a
+ * scientific vocabulary term — a `qc.status` of `valid`/`compromised`/`failed`/
+ * `pending` is a value the scientist asserted and the schema governs, and
+ * `transcript_capture`'s own rule is that "nothing normalises a vocabulary
+ * term". Prettifying one would put a word in a scientist's mouth. Nor is it for
+ * the draft envelope's own statuses (`verified`, `needs_confirmation`), which
+ * are a different vocabulary with a different owner.
+ */
+export function experimentStatusLabel(status: ApiExperimentStatus): string {
+  const group = STATUS_TO_GROUP[status];
+  return GROUP_ORDER.find((g) => g.key === group)?.label ?? status;
+}
+
 // --- S1 queue -----------------------------------------------------------
 
 // P33 S1 (D1) — the server-authored title carries a trailing lifecycle suffix
