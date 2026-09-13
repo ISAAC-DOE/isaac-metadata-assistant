@@ -142,19 +142,59 @@ _COUNT_ONLY = " ".join(
 )
 
 
+#: The exact size of :func:`_bytes_only`'s single segment. It is a JUDGEMENT with
+#: two hard constraints, both asserted rather than assumed: it must stay inside
+#: ``routes._MAX_TRANSCRIPT_BYTES`` (262,144) so the payload is a LEGAL transcript,
+#: and five copies of it must exceed ``MAX_CANDIDATE_QUOTE_BYTES`` (1,048,576) while
+#: four do not, so the byte ceiling is breached by the fixture's own last candidate
+#: rather than by a margin nobody can see. Any value in (209,716, 262,144] satisfies
+#: both; 250,000 is the middle of that window.
+_BYTES_ONLY_SEGMENT_BYTES = 250_000
+
+
 def _bytes_only() -> str:
     """BYTES bind, COUNT does not: one enormous segment stating five values.
 
-    Five candidates — a hedged chain of three temperatures, plus a start and an end
-    instant — each quoting ~250 KB. Well inside ``MAX_CANDIDATES`` and well outside
-    ``MAX_CANDIDATE_QUOTE_BYTES``, which is the whole point: a bound on rows that a
-    client can defeat by making each row large is not a bound.
+    Five candidates, each quoting ~250 KB. Well inside ``MAX_CANDIDATES`` and well
+    outside ``MAX_CANDIDATE_QUOTE_BYTES``, which is the whole point: a bound on rows
+    that a client can defeat by making each row large is not a bound.
+
+    **ALL FIVE ARE LABEL-ANCHORED, AND THAT IS THE WHOLE DESIGN OF THIS FIXTURE —
+    CHANGED 2026-09-12 (third pass).** ~~"a hedged chain of three temperatures, plus
+    a start and an end instant"~~ — that is what it used to be, and it made a
+    RESOURCE-ceiling proof hostage to a SEMANTIC gate. Three of its five candidates
+    came from the restatement scan (pass two), so every C-1 decision about which
+    restatements are honest silently moved this payload's candidate count, and
+    twice it moved it under the cap: a universal terminal rule took the old fixture
+    to **THREE candidates / 750,000 B against a 1,048,576 B cap**, at which point
+    ``pytest.raises(TranscriptTooDense)`` stopped firing and three byte-ceiling
+    tests passed for a reason that had nothing to do with ceilings. That coupling
+    refuted one C-1 proposal outright and was cited as the reason a measured §5
+    false-positive class was left open.
+
+    **THE DECOUPLING IS THAT PASS TWO CONTRIBUTES NOTHING HERE.** The label
+    (``temperature``) is repeated for each value, so all three kelvin candidates are
+    produced by ``_TEMPERATURE_K.finditer`` in pass one, which no hedge rule, unit
+    rule or terminal rule gates. Nothing of the kelvin or instant form follows the
+    last labelled match, so the restatement scan matches nothing, accepts nothing
+    and refuses nothing: every candidate reports
+    ``restated_in_same_sentence is False`` and the reading reports **zero**
+    disclosures. ``test_the_C2_BYTE_CEILING_PROOF_IS_DECOUPLED_FROM_THE_C1_GATE``
+    asserts exactly that, and the hedged shapes the old fixture exercised are
+    covered by ``_COUNT_ONLY`` and by the gate's own test file, neither of which is
+    a ceiling proof.
+
+    The slice is exact rather than arithmetic (``"ab " * n`` does not divide
+    250,000) so the byte figures in the assertions are round. The tail may be a
+    partial ``"ab "``; it carries no digit and no ``K``, so it reads as nothing.
     """
     head = (
-        "The temperature was 425 K, maybe 430 K, or perhaps 435 K and it started "
-        "2026-01-01T00:00:00Z and ended 2026-01-02T00:00:00Z "
+        "The temperature was 425 K and the temperature was 430 K and the "
+        "temperature was 435 K and it started 2026-01-01T00:00:00Z and ended "
+        "2026-01-02T00:00:00Z "
     )
-    return head + "ab " * ((250_000 - len(head)) // 3)
+    filler = "ab " * (_BYTES_ONLY_SEGMENT_BYTES // 3 + 1)
+    return (head + filler)[:_BYTES_ONLY_SEGMENT_BYTES]
 
 
 OWNER_SENTENCE = "The temperature was around 425 K, maybe 430 K."
@@ -297,6 +337,100 @@ def test_the_byte_ceiling_binds_with_the_count_ceiling_far_from_binding():
     assert refusal.candidates < tc.MAX_CANDIDATES
     assert refusal.candidate_quote_bytes == len(_encode(text)) * 5
     assert refusal.candidate_quote_bytes > tc.MAX_CANDIDATE_QUOTE_BYTES
+    # The margin is the fifth candidate and nothing wider, so the proof is tight.
+    assert len(_encode(text)) * 4 <= tc.MAX_CANDIDATE_QUOTE_BYTES
+
+
+def test_the_C2_BYTE_CEILING_PROOF_IS_DECOUPLED_FROM_THE_C1_GATE():
+    """A RESOURCE ceiling's proof must not be hostage to a SEMANTIC gate.
+
+    **THIS TEST IS THE INVERSION OF ONE THAT PINNED THE COUPLING AS A FACT.**
+    ``test_transcript_capture_hedge_and_unit_gate.py`` carried
+    ``test_the_C1_GATE_AND_THE_C2_BYTE_CEILING_PROOF_ARE_COUPLED``, which asserted
+    that ``_bytes_only()`` needs a restatement the C-1 gate happens to admit. The
+    coupling was real and was found by measurement, and it then distorted two
+    separate C-1 decisions — it refuted a universal terminal rule (which takes the
+    OLD fixture to three candidates and 750,000 B, under the 1,048,576 B cap, so
+    the ceiling silently stops firing), and it was cited as a reason to leave a
+    measured §5 false-positive class open. The remedy is to remove the coupling,
+    not to reason about it, so that test is inverted here rather than deleted.
+
+    **WHAT IS ASSERTED IS THE MECHANISM, NOT THE OUTCOME.** "Five candidates under
+    the gate in force" is what the coupled test asserted, and it would stay green on
+    a fixture that is coupled but happens to land on five. So this asserts that pass
+    two is not involved at all: every candidate is label-anchored
+    (``restated_in_same_sentence is False``), the reading discloses nothing (a
+    refused restatement would disclose), and the restatement patterns of the three
+    rules that have one match **nothing** in the region pass two scans.
+
+    MUTATION: reverting ``_bytes_only()`` to its hedged-chain head turns the
+    ``restated_in_same_sentence`` assertion RED at the second candidate.
+    """
+    text = _bytes_only()
+    assert len(_encode(text)) == _BYTES_ONLY_SEGMENT_BYTES
+    segments = tc.segment_transcript(text)
+    assert len(segments) == 1
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(tc, "MAX_CANDIDATES", 10**9)
+        patch.setattr(tc, "MAX_CANDIDATE_QUOTE_BYTES", 10**12)
+        patch.setattr(tc, "MAX_DISCLOSURES", 10**9)
+        reading = _read(text)
+
+    assert [candidate.proposed_value for candidate in reading.candidates] == [
+        425,
+        430,
+        435,
+        "2026-01-01T00:00:00Z",
+        "2026-01-02T00:00:00Z",
+    ]
+    # (1) NO candidate came from the restatement scan.
+    assert [
+        candidate.provenance["restated_in_same_sentence"]
+        for candidate in reading.candidates
+    ] == [False] * 5
+    # (2) Nothing was withheld, so no gate refused anything either. Both
+    #     disclosure classes, because a refused restatement raises an abstention.
+    assert reading.abstentions == ()
+    assert reading.clarifications == ()
+    # The one row the reading DOES carry is a conflict over the three kelvin
+    # values, and the OLD hedged-chain fixture carried the identical row — measured,
+    # not assumed. It is not a disclosure, it withholds nothing, and it is asserted
+    # so that "the reading is otherwise the same shape" is checkable rather than
+    # claimed.
+    assert [
+        (entry.kind, entry.field_path, entry.candidate_indexes)
+        for entry in reading.review_required
+    ] == [("conflicting_values_for_one_field", "context.temperature_K", (0, 1, 2))]
+
+    # (3) And NO restatement match in the region pass two scans ever reaches the
+    #     three gates, so there is nothing for a present or future gate to decide.
+    #
+    #     **THIS IS NOT "the scan matches nothing", AND THE DIFFERENCE WAS
+    #     MEASURED RATHER THAN ASSUMED.** The kelvin scan matches nothing. The
+    #     acquisition-START scan DOES match one thing — the END instant, which
+    #     follows the start clause — and it is skipped by the overlap guard in
+    #     ``_segment_readings``, because ``_ACQUIRED_END`` already claimed that
+    #     value under its OWN label. That guard sits BEFORE ``_HEDGE_BRIDGE``,
+    #     ``_unit_is_complete`` and ``_statement_ends_after``, records no refusal
+    #     and withholds nothing, so it is as gate-independent as pass one is —
+    #     but writing "matches nothing" here would have been false.
+    claimed = [
+        match.span(1)
+        for rule in tc._RULES
+        for match in rule.pattern.finditer(text)
+    ]
+    for rule in tc._RULES:
+        if rule.restatement is None:
+            continue
+        labelled = list(rule.pattern.finditer(text))
+        if not labelled:
+            continue
+        anchor = max(match.end() for match in labelled)
+        for extra in rule.restatement.finditer(text, anchor):
+            assert any(
+                tc._spans_overlap(extra.span(1), span) for span in claimed
+            ), (rule.name, extra.group(0))
 
 
 def test_the_byte_ceiling_refuses_at_the_route_too_and_stores_nothing(
