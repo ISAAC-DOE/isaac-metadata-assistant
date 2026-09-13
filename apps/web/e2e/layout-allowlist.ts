@@ -181,6 +181,21 @@ export const HIDDEN_TEXT_ALLOWANCES: readonly OverflowAllowance[] = [
       'record-detail',
       'record-runs',
       'record-capture',
+      // `record-graph` added 2026-09-13 (QA-018). The workflow spine renders on
+      // ALL FOUR record workspaces, and the other three were already here — this
+      // one was missing only because `record-graph` did not exist as a SURFACE
+      // until QA-018 enrolled it. Adding a surface to `e2e/surfaces.ts` enrols it
+      // in the layout sweep as well as the axe sweep, so Linux CI failed at
+      // 1024/768/640/390/375/320 with `scrollWidth 200 vs clientWidth 1` — which
+      // is the EXPECTED signature of this visually-hidden rule, not a new defect.
+      // Verified before adding: the element is `position: absolute; width: 1px;
+      // height: 1px; overflow: hidden; clip-path: inset(50%)` in
+      // `workflow.css`, i.e. the standard visually-hidden technique, so nothing
+      // is actually clipped from a sighted reader. The alternative — a
+      // `layout-baseline.ts` entry — would have recorded it as DEBT, which would
+      // be false: it is a deliberate allowance the other three workspaces
+      // already hold.
+      'record-graph',
       'guided-completion',
       'evidence',
       'evidence-graph',

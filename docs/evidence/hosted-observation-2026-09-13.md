@@ -234,17 +234,44 @@ synthetic *mode*, never synthetic *data*.
 ### 8.2 There is NO fake `Connected` state
 
 `ai-integration-decision-packet.md` §6 binds the continued AI work with, above all, **no fake
-`Connected` state**. Measured over the whole of `Settings & API`:
+`Connected` state**.
 
-```
-/\bconnected\b/i          →  false      (zero matching sentences)
-/not connected/i          →  false
-```
+**MY FIRST MEASUREMENT OF THIS SAID "over the whole of `Settings & API`" AND HAD SEEN ONE TAB.**
+That is corrected here rather than quietly widened, because the sentence described a method. The
+probe read `document.body.innerText` with the **Overview** tab active — **2,575 characters** — and
+Settings has **seven** tabs, one of which is literally *"Connect Your Agent"*. The conclusion
+happened to be right; the stated scope was wrong by **18×**.
 
-The word does not appear at all — which is stronger than the guard requires and is the right
-outcome, since a screen that says *"Not connected"* still implies a connection is a thing this build
-attempts. Settings' seven tabs are `Overview`, `Data & Privacy`, `About`, `API Access`,
-`Endpoint Explorer`, `Connect Your Agent`, `Help & Tutorial`.
+Re-measured by clicking through all seven and reading each rendered panel:
+
+| Tab | `?tab=` | chars | `/\bconnected\b/i` |
+|---|---|---:|---|
+| Overview | `overview` | 2,575 | false |
+| Data & Privacy | `privacy` | 10,378 | false |
+| About | `about` | 1,341 | false |
+| API Access | `api` | 3,918 | false |
+| Endpoint Explorer | `explorer` | 10,622 | false |
+| **Connect Your Agent** | `mcp` | **17,038** | **false** |
+| Help & Tutorial | `help` | 2,004 | false |
+| **total** | | **47,876** | **0 occurrences** |
+
+**The word appears nowhere in 47,876 characters**, which is stronger than the guard requires: a
+screen reading *"Not connected"* would still imply connecting is something this build attempts.
+
+And the `Connect Your Agent` tab — the one place a fake state would actually live, and the largest
+body of copy in Settings — **names the absence rather than omitting it**:
+
+> No agent can connect to this deployment.
+
+> There is no endpoint address to connect to and no configured way to authenticate a caller, so
+> there is **no live connection for this page to report**, and nothing for it to revoke.
+
+Its headings include `Requires organization configuration` and `No Agent Can Submit a Record`. That
+is §6 honoured deliberately, not by accident of vocabulary.
+
+**One incidental correction:** the tab parameter for that panel is `mcp`, not `agent` — my
+`?tab=agent` guess loaded Settings with **Overview** still active and no error, which is its own
+small lesson about deep links that silently fall back.
 
 ### 8.3 The no-model claim renders, and is true
 
