@@ -15,6 +15,20 @@ proceeds now.
 
 ---
 
+> **EDITORIAL CORRECTION, 2026-09-13 — numbering and three cross-references. No request, scope,
+> commitment or measurement changed.** The top-level sections ran `1 · 2 · 5 · 6 · 7 · 8`: §2's four
+> sub-items had consumed 3 and 4 in the author's head but not on the page, so a reader following a
+> numbered list skipped two. They now run `1 … 6`.
+>
+> **Renumbering then exposed three cross-references that were ALREADY WRONG, and that is worth
+> stating precisely: they were not introduced here.** *"see §4"* for what not to send pointed at a
+> section that did not exist at top level; *"for each bundle in §1"* pointed at the rationale
+> section rather than at the bundle description; and *"the gold corpus from §4"* pointed at a
+> top-level section rather than at §2's fourth item. All three now name their target in words as
+> well as by number, so the next renumbering cannot break them silently.
+>
+> This document is **prepared and NOT SENT.** Sending it is Krish's act, not an agent's.
+
 ## 1. Why this request exists, stated as a measurement rather than an opinion
 
 BL15-2 is the confirmed first Historical Import pilot (`DEC-13`) and **that decision is closed.**
@@ -52,7 +66,8 @@ For each, whatever exists of:
 - the **macro / run / `.mac` files**, with their structure intact;
 - the **spreadsheet or logbook** (Excel, CSV, or a Google Sheet export);
 - any **README, notes, or text file** that a human wrote to explain the campaign;
-- the **raw-data filename patterns** (not the raw data itself — see §4).
+- the **raw-data filename patterns** (not the raw data itself — see §3, *What we explicitly do
+  NOT need, and what not to send*).
 
 ### 2. One case that is deliberately awkward
 The easy cases teach us little. Specifically useful:
@@ -75,14 +90,14 @@ Written or verbal, whichever is easier:
 - any convention that changed over time, and roughly when.
 
 ### 4. Expert ground truth — the part only Angel can give
-For each bundle in §1, the correct answer: **what the Experiments and Runs actually are**, and the
+For each bundle in item 1 above, the correct answer: **what the Experiments and Runs actually are**, and the
 important metadata values, as a domain expert would record them. Without this we can measure that a
 parser *ran*; we cannot measure whether it was *right*, and "the model seemed right" is not an
 evaluation.
 
 This is the single highest-value item after item 1, and it is the one that cannot be substituted.
 
-## 5. What we explicitly do NOT need, and what not to send
+## 3. What we explicitly do NOT need, and what not to send
 
 - **Not the raw scan data.** ISAAC's official record stores **references and hashes, never file
   bytes** (`DEC-12` / `D5`, and `assets[]`'s own header says *"NO BYTES, EVER"*). Filename patterns
@@ -97,7 +112,7 @@ This is the single highest-value item after item 1, and it is the one that canno
   egress approval — blocked, not rejected** — and the seam is being built and tested against
   synthetic fixtures in the meantime so that approval is the only thing missing.
 
-## 6. Handling commitments, so the answer to "is this safe to send?" is on the record
+## 4. Handling commitments, so the answer to "is this safe to send?" is on the record
 
 | Commitment | Basis |
 |---|---|
@@ -108,7 +123,7 @@ This is the single highest-value item after item 1, and it is the one that canno
 | Parser development may read a source **ephemerally** and keep only sanitized extraction | `DEC-12` Option C, mirroring the already-approved "one short-lived read, sanitized aggregate output only" pattern |
 | Nothing is uploaded anywhere by the application | `POST /api/uploads` is an unconditional `403` |
 
-## 7. What happens when a bundle arrives
+## 5. What happens when a bundle arrives
 
 In this order, and not before:
 
@@ -120,7 +135,7 @@ In this order, and not before:
 5. Encode Beamline Profile rules **only where corpus evidence supports them** (`BL15-002`) — and a
    Beamline Profile must **never** become an unofficial validator; its job is repeatable source
    interpretation.
-6. Build the expert-reviewed **gold corpus** from §4.
+6. Build the expert-reviewed **gold corpus** from §2 item 4, *Expert ground truth*.
 7. Measure: source-parsing coverage · Run-segmentation accuracy · field-mapping precision and
    recall · provenance coverage · conflict detection · ambiguity preservation · unmapped-content
    preservation · **fabricated-value rate** · incorrect-confident-mapping rate · scientist
@@ -129,7 +144,7 @@ In this order, and not before:
 **The headline safety metric is fabricated-value rate, not fields filled.** A parser that fills
 every field and invents three of them is worse than one that fills half and says so.
 
-## 8. If the corpus cannot be shared at all
+## 6. If the corpus cannot be shared at all
 
 That is a legitimate answer and it is better to have it early than to wait. In that case Pillar 2
 still ships:
