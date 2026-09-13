@@ -10328,7 +10328,7 @@
       },
       {
         "path": "apps/web/src/App.tsx",
-        "sha256": "a457cee7b9851f3a7303384f6877ae2fc4fb4dd524bed7cc153496bf67db08aa"
+        "sha256": "203cd683539702bebd2e85ca5e87dc08c3740f30cb0c036f507173faebba81e2"
       },
       {
         "path": "apps/web/src/__tests__/api.test.ts",
@@ -11012,7 +11012,7 @@
       }
     ],
     "served_file_count": 200,
-    "served_manifest_fingerprint": "eb810d452b7fede933fd8fab97825f0de79788fd145b7c2129e181c8542d5bbb"
+    "served_manifest_fingerprint": "a973e660cdba14752476cde2bc888122a792446e0288c03c24db5cd1084b5abb"
   },
   "overview": {
     "built_at_commit": "caab1d0a69c1733524bda5dde495623bc4b7bad1",
