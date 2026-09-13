@@ -591,11 +591,38 @@ Current state:
       `--text-tertiary` contrast debt, is untouched and is a palette decision; and the darwin
       half of those 119 cells was **reasoned rather than measured** until a local macOS run on
       2026-08-27 confirmed all 119 and corrected 19 other cells.
-    - **backend-sourced jargon on product screens — UNCERTAIN, and the named exemplar is wrong.**
+    - ~~**backend-sourced jargon on product screens — UNCERTAIN, and the named exemplar is wrong.**
       `MANAGED_SOURCE_DESCRIPTION` reaches **no** frontend file: `rg "Synthetic XANES campaign"
       apps/web/` returns **0** hits. So the example this item rested on no longer supports it.
       Whether other backend jargon reaches a screen is UNMEASURED. Do not treat the item as
-      closed, and do not treat the old example as evidence.
+      closed, and do not treat the old example as evidence.~~ — **MEASURED 2026-09-13 AND THE ITEM
+      IS RESOLVED AS *CONFIRMED PRESENT*.** Both halves of the old entry were right and are kept:
+      `MANAGED_SOURCE_DESCRIPTION` really does reach no frontend file, and the class really was
+      unmeasured. **It is measured now, and a source sweep could never have settled it** — three
+      of the four exemplars appear nowhere in `apps/web/src` except fixtures, because they arrive
+      from the server as **data** and are rendered verbatim. Measured instead in a real Chromium
+      against a locally-served build (vite + uvicorn, synthetic-only, fresh `ISAAC_UI_WORKSPACE`),
+      on a record created through `POST /api/experiments`, by walking every visible text node of
+      all four record workspaces for snake_case of 2+ segments or a dotted path:
+      **`fields`** → `qc_status`, `reduced_spectrum`, `required_for_evidence_record`;
+      **`runs`** → none; **`capture`** → `isaac_propose_field_value`;
+      **`graph`** → `needs_attention`, `serialize.draft_to_groups` (a Python function named to a
+      scientist, rendering **eight times on one screen**).
+      **Two fixed** in `7da7271c` — `needs_attention` now reads "Needs Attention" through a label
+      **derived from** the queue's own two existing maps (no third vocabulary), and the graph's
+      "why" prose explains the grouping in English while `NODE_PRODUCERS.section` keeps the module
+      name, because `UX-014`'s rule is that the path is never removed.
+      **Three deliberately not fixed, and named rather than implied:** the `fields` trio are the
+      server's `locator` on a "needs you" question, rendered beside an already-correct human label
+      — server-supplied **identifiers**, which that same rule protects, so whether they belong
+      under progressive disclosure is placement rather than jargon; `isaac_propose_field_value`
+      names a real MCP tool inside an honest explanation of how a proposal arrives, and editing it
+      touches §15's decision about what a product screen may say about the agent seam; and the
+      `NO_LINKS` / `NO_MEASUREMENT_SERIES` advisory codes each already carry their plain-English
+      meaning beside them.
+      **One exemplar of the original item DID NOT REPRODUCE:** "Environment & Context context".
+      `Environment & Context` renders as a section label, correctly, with no duplicated suffix. Do
+      not go looking for it.
   - **HOSTED QA PENDING (Krish)** for every image from this phase. `/krish` returns `302` here.
     Manual sequence: `docs/krish-manual-verification-checklist.md`.
 - **Session of 2026-08-18 — an honesty-defect sweep, conflict resolution, and two external packages.**
