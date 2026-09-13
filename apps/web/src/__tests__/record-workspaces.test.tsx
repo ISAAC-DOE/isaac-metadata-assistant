@@ -42,6 +42,7 @@ import { RECORD_WORKSPACES, URL_ONLY } from '../components/RecordWorkspaceNav';
 import { RECORD_VIEW_IDS, ROUTES, type RecordViewId } from '../lib/routes';
 import { workspaceAgentPrompts, workspaceLabel } from '../screens/RecordWorkbench';
 import * as runAutosaveStore from '../lib/runAutosaveStore';
+import { clearRecordLastView, lastRecordView } from '../lib/recordLastView';
 
 const ID = 'demo';
 const BASE = `/api/experiments/${ID}`;
@@ -596,5 +597,59 @@ describe("UX-002 · the record screen's h1", () => {
     // `RECORD_WORKSPACES`, or the product grows a fifth name for one place.
     for (const w of RECORD_WORKSPACES) expect(workspaceLabel(w.id)).toBe(w.label);
     expect(RECORD_WORKSPACES.map((w) => w.id).sort()).toEqual([...RECORD_VIEW_IDS].sort());
+  });
+});
+
+/*
+ * LIB-005 — reopen-and-continue: this SCREEN's half of the contract. The
+ * `lib/recordLastView.ts` unit tests own the storage's own fail-safe
+ * direction; this file owns the property that only a mounted `RecordWorkbench`
+ * can prove — that VISITING a workspace here is what writes the memory, on
+ * mount and on every switch, keyed by the record actually loaded.
+ */
+describe('LIB-005 — reopen-and-continue: visiting a workspace remembers it', () => {
+  afterEach(() => clearRecordLastView());
+
+  it('a bare visit remembers `fields`', async () => {
+    renderAt(`/record/${ID}`);
+    await screen.findByRole('link', { name: 'Record Fields' });
+    expect(lastRecordView(ID)).toBe('fields');
+  });
+
+  it('a deep link into `runs` remembers `runs`', async () => {
+    renderAt(`/record/${ID}?view=runs`);
+    await screen.findByRole('link', { name: 'Record Fields' });
+    expect(lastRecordView(ID)).toBe('runs');
+  });
+
+  it('switching workspaces via the sidebar updates the remembered one', async () => {
+    renderAt(`/record/${ID}`);
+    await screen.findByRole('link', { name: 'Record Fields' });
+    expect(lastRecordView(ID)).toBe('fields');
+
+    fireEvent.click(within(nav()).getByRole('link', { name: 'Runs' }));
+    await waitFor(() => expect(address()).toContain('view=runs'));
+    expect(lastRecordView(ID)).toBe('runs');
+  });
+
+  it('a DIFFERENT record already remembered is untouched by visiting this one', async () => {
+    const OTHER_ID = 'some-other-record';
+    // Seed a prior memory for a different id, the way a previous visit would.
+    stubFetchRoutes(bundleRoutes(OTHER_ID) as never);
+    render(
+      <MemoryRouter
+        initialEntries={[`/record/${OTHER_ID}?view=graph`]}
+        future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+      >
+        <AppRoutes />
+      </MemoryRouter>,
+    );
+    await screen.findByRole('link', { name: 'Record Fields' });
+    expect(lastRecordView(OTHER_ID)).toBe('graph');
+
+    renderAt(`/record/${ID}`);
+    await screen.findByRole('link', { name: 'Record Fields' });
+    expect(lastRecordView(ID)).toBe('fields');
+    expect(lastRecordView(OTHER_ID)).toBe('graph');
   });
 });

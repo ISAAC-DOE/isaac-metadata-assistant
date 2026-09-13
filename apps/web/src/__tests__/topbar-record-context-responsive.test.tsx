@@ -219,6 +219,22 @@ describe('C1 · the record breadcrumb can no longer paint over the top-bar contr
     expect(hidden).not.toContain('button.topbar-search');
   });
 
+  it('CSS source: QA-017\'s `My Experiments` ancestor crumb is the ONE deliberate exception, hidden below 1024px', () => {
+    // NOT a violation of the "nothing is hidden outright" contract above — the
+    // NAVIGATIONAL CAPABILITY the ancestor crumb adds (a way back to My
+    // Experiments) is never lost at any width, because `Brand` — the logo link
+    // — is unconditionally present and unconditionally links to the same
+    // route at every width, including this band. Only the SUPPLEMENTARY label
+    // is hidden here, and it is hidden rather than shrunk/truncated because
+    // re-measuring the exact-pixel narrow-width budget this file records
+    // (C1/I4/LAYOUT-01/LAYOUT-02) was out of scope for adding it. See the
+    // comment beside `.record-ancestor-link`'s declaration in `chrome.css`.
+    const hidden = rulesIn(compact)
+      .filter((r) => /display:\s*none/.test(r.body))
+      .map((r) => r.selector);
+    expect(hidden).toContain('.record-ancestor-link');
+  });
+
   it('DOM: the chevrons the phone rule hides carry no information', () => {
     const { container } = renderRecordBar();
     const chevrons = [...container.querySelectorAll('.record-context > svg')];

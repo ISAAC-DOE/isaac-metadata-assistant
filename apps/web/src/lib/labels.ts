@@ -270,6 +270,31 @@ export const LABELS = {
     'empty to decide later.',
 
   /*
+   * UX-017's LIBRARY HALF — merging scientist-facing statistics into the
+   * Experiment Library, rather than requiring a trip to the demoted Statistics
+   * destination (`89d9f07c`'s own commit message names this half as not yet
+   * done: "the scientist-relevant half is per-record summary that belongs
+   * beside the records").
+   *
+   * WORKSPACE-SCOPED, NEVER PERSONAL, and the note below says so explicitly.
+   * `8ce85a87` deleted "and over your own activity in it" from Settings' own
+   * statistics description because this build cannot back a personal-activity
+   * claim (no trusted authentication boundary, no per-record author — see
+   * `MyStats.tsx`). The note here is adapted from that same fix's replacement
+   * sentence rather than freshly authored, so the two surfaces state the same
+   * boundary in matching words rather than two independent claims that could
+   * drift apart.
+   */
+  libraryOverviewHeading: 'Workspace Statistics',
+  libraryOverviewTotal: 'Experiments',
+  libraryOverviewNeedsAttention: 'Needs Attention',
+  libraryOverviewRuns: 'Runs Recorded',
+  libraryOverviewProposals: 'Proposals Waiting',
+  libraryOverviewNote:
+    'Counts over the records in this workspace. Summary figures only; nothing here gates ' +
+    'export or changes a record.',
+
+  /*
    * RETIRED — a SECOND five-step workflow vocabulary, deleted rather than
    * renamed. It read:
    *

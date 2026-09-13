@@ -351,6 +351,43 @@ export function TopBar({ variant, breadcrumb, title, filename, stateChip, record
       {variant === 'record' && (
         <>
           <div className="record-context">
+            {/*
+              QA-017 — the record breadcrumb had exactly one segment (the page's own
+              name), with the ancestor reachable only by clicking `Brand`, which reads
+              as a logo rather than a crumb. This adds `My Experiments` as its own
+              LINKED crumb, ahead of the title, on every `variant="record"` render —
+              whether or not the caller passes `recordId` — because the not-loaded and
+              loaded Review Record screens are exactly the two callers that omit it
+              (`RecordWorkbench.tsx`), and both are the "one segment" case.
+
+              HIDDEN BELOW 1024px, DELIBERATELY, not as an oversight. The narrow-width
+              layout of `.record-context` above is the product of measured, exact-pixel
+              fixes (C1/I4/LAYOUT-01/LAYOUT-02) that this file documents in detail; adding
+              width here would re-open exactly the overflow class those fixes closed,
+              and re-measuring the whole band was out of this slice's scope. `.record-
+              ancestor-link` is hidden in the same `@media (max-width: 1024px)` block
+              that already hides this crumb's decorative `<svg>` separators, so the
+              narrow-width layout is BYTE-IDENTICAL to before this change. The `Brand`
+              logo link remains the way back at every width. */}
+            {/*
+              `aria-label` OPENS WITH THE VISIBLE TEXT (WCAG 2.5.3) AND THEN
+              DISAMBIGUATES — found necessary, not stylistic: `FetchStates.tsx`'s
+              error panel renders its own "the one affordance offered" link with
+              the identical visible text and NO `aria-label`, so its accessible
+              name is the bare `LABELS.navExperiments` string. On the record
+              screen's own not-found/no-session error state that link and this
+              crumb are both mounted, and `getByRole('link', { name:
+              LABELS.navExperiments })` — an existing, unmodified test —
+              correctly failed on "found multiple elements" until this crumb's
+              name became distinct.
+            */}
+            <Link
+              to={ROUTES.experiments}
+              className="record-ancestor-link"
+              aria-label={`${LABELS.navExperiments} breadcrumb`}
+            >
+              {LABELS.navExperiments}
+            </Link>
             <ChevronRight size={14} strokeWidth={2} aria-hidden="true" style={{ color: 'var(--text-disabled)' }} />
             {recordId ? (
               // Sub-surface: the record title is an ancestor crumb linking back to

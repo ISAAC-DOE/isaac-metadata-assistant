@@ -1,7 +1,8 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { render } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { ExperimentRow } from '../components/ExperimentRow';
+import { clearRecordLastView, rememberRecordView } from '../lib/recordLastView';
 import type { ExperimentSummary } from '../lib/types';
 
 function renderRow(exp: ExperimentSummary) {
@@ -215,5 +216,42 @@ describe('ExperimentRow — accessible name parity (CQ-10 invariant preserved)',
     expect(label).not.toContain('undefined');
     expect(label).toContain('Exported');
     expect(label).toContain('Done');
+  });
+});
+
+// LIB-005 — reopen-and-continue. The row's link target follows this browser's
+// remembered workspace for the record, when one is remembered and it is not
+// `fields` (a bare link already opens `fields`).
+describe('ExperimentRow — LIB-005 reopen-and-continue link target', () => {
+  beforeEach(() => clearRecordLastView());
+  afterEach(() => clearRecordLastView());
+
+  it('with nothing remembered, links to the bare record route', () => {
+    const href = renderRow(draftNeedsAttention).getByRole('link').getAttribute('href');
+    expect(href).toBe(`/record/${draftNeedsAttention.id}`);
+  });
+
+  it('with fields remembered, links to the bare record route (no ?view= added)', () => {
+    rememberRecordView(draftNeedsAttention.id, 'fields');
+    const href = renderRow(draftNeedsAttention).getByRole('link').getAttribute('href');
+    expect(href).toBe(`/record/${draftNeedsAttention.id}`);
+  });
+
+  it('with runs remembered, links straight to the runs workspace', () => {
+    rememberRecordView(draftNeedsAttention.id, 'runs');
+    const href = renderRow(draftNeedsAttention).getByRole('link').getAttribute('href');
+    expect(href).toBe(`/record/${draftNeedsAttention.id}?view=runs`);
+  });
+
+  it('with graph remembered, links straight to the graph workspace', () => {
+    rememberRecordView(draftNeedsAttention.id, 'graph');
+    const href = renderRow(draftNeedsAttention).getByRole('link').getAttribute('href');
+    expect(href).toBe(`/record/${draftNeedsAttention.id}?view=graph`);
+  });
+
+  it('a remembered view for a DIFFERENT record does not affect this row', () => {
+    rememberRecordView('some-other-id', 'graph');
+    const href = renderRow(draftNeedsAttention).getByRole('link').getAttribute('href');
+    expect(href).toBe(`/record/${draftNeedsAttention.id}`);
   });
 });

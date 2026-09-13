@@ -39,6 +39,7 @@ import {
   existingFolderPaths,
   facetCounts,
   isAmbiguousTitle,
+  libraryOverviewStats,
   matchesQuery,
   selectLibraryRows,
   sortLibraryRows,
@@ -509,5 +510,67 @@ describe('folders — a projection of the experiment list, and nothing else', ()
     // campaign/ ` normalised to `Cu K-edge/2026 campaign`).
     expect(FOLDER_SEPARATOR).toBe('/');
     expect(folderSegments('Cu K-edge/2026 campaign')).toEqual(['Cu K-edge', '2026 campaign']);
+  });
+});
+
+/*
+ * UX-017's LIBRARY HALF — `libraryOverviewStats`. Over the whole list, never
+ * over a filtered subset (that is `ExperimentsHome`'s job, and this function
+ * takes no facet/query/folder argument at all — it cannot be called with a
+ * narrowed array by accident from within this module).
+ */
+describe('UX-017 · libraryOverviewStats — workspace-wide totals, never personal', () => {
+  it('all-zero on an empty workspace', () => {
+    expect(libraryOverviewStats([])).toEqual({
+      total: 0,
+      needsAttention: 0,
+      totalRuns: 0,
+      openProposals: 0,
+    });
+  });
+
+  it('total and needsAttention match facetCounts exactly — never a second count', () => {
+    const rows = [
+      row({ id: 'a', status: 'needs_attention' }),
+      row({ id: 'b', status: 'in_review' }),
+      row({ id: 'c', status: 'needs_attention' }),
+    ];
+    const stats = libraryOverviewStats(rows);
+    const counts = facetCounts(rows);
+    expect(stats.total).toBe(counts.all);
+    expect(stats.needsAttention).toBe(counts.needsAttention);
+    expect(stats.total).toBe(3);
+    expect(stats.needsAttention).toBe(2);
+  });
+
+  it('totalRuns and openProposals are SUMS, not a count of matching records', () => {
+    const rows = [
+      row({ id: 'a', run_count: 3, open_proposal_count: 2 }),
+      row({ id: 'b', run_count: 0, open_proposal_count: 0 }),
+      row({ id: 'c', run_count: 5, open_proposal_count: 1 }),
+    ];
+    const stats = libraryOverviewStats(rows);
+    // 3 + 0 + 5, NOT "2 records have at least one run"
+    expect(stats.totalRuns).toBe(8);
+    // 2 + 0 + 1, NOT the `proposals` facet's "1 record has an open proposal"
+    // — that facet would count `b` and `c`'s records with count > 0, i.e. 2
+    // records, which is a DIFFERENT number from the true sum of 3.
+    expect(stats.openProposals).toBe(3);
+    const counts = facetCounts(rows);
+    expect(counts.proposals).toBe(2);
+    expect(counts.proposals).not.toBe(stats.openProposals);
+  });
+
+  it('tolerates a wrong-typed run_count / open_proposal_count rather than producing NaN', () => {
+    const partial = {
+      ...row(),
+      run_count: 'seven' as unknown as number,
+      open_proposal_count: undefined as unknown as number,
+    };
+    const stats = libraryOverviewStats([partial]);
+    expect(Number.isNaN(stats.totalRuns)).toBe(false);
+    expect(Number.isNaN(stats.openProposals)).toBe(false);
+    expect(stats.totalRuns).toBe(0);
+    expect(stats.openProposals).toBe(0);
   });
 });
