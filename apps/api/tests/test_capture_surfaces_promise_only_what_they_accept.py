@@ -891,7 +891,31 @@ def test_the_transcript_route_is_a_second_note_producer(client):
     assert {"csv_column", "file_listing_line", "extraction_residue"} < notes.NOTE_SOURCES
     routes_src = __import__("pathlib").Path(routes.__file__).read_text()
     assert "capture_note" in routes_src
-    assert routes_src.count("exp.capture_note(") == 2, "a third producer needs the prose updated"
+    # ── 2 -> 3 ON 2026-09-13, AND THE COUNT IS A TRIPWIRE RATHER THAN A BUDGET ──
+    #
+    # The THIRD producer is `POST /api/imports/{id}/candidates/{cid}/propose`
+    # (Historical Import). A proposal REQUIRES a `note_id`, so sending a
+    # reconstructed candidate to review must mint the note that carries the
+    # source's own words — one note plus one open proposal, in one `record_lock`
+    # and one `save_versioned`, which is the transcript route's arrangement for
+    # the transcript route's reason.
+    #
+    # ITS `source` IS `historical_source_line`, THE SEVENTH `NOTE_SOURCES`
+    # MEMBER, added in the same change. None of the six that existed was true of
+    # it: `typed_note` claims a person typed it, `csv_column` claims a column
+    # nothing recognised, `file_listing_line` claims a listing line that matched
+    # no asset rule, `extraction_residue` claims a label the extractor refused to
+    # guess at, and `transcript`/`connected_agent` are a different channel. That
+    # is the argument `connected_agent` itself rests on.
+    #
+    # THE THREE PRODUCERLESS SOURCES ASSERTED ABOVE ARE UNCHANGED — the new member
+    # is a fourth source WITH a producer, not one of those three gaining one.
+    assert routes_src.count("exp.capture_note(") == 3, (
+        "a fourth producer needs the prose updated — and the prose is the point: "
+        "this count exists so a new note producer cannot land without somebody "
+        "stating which `NOTE_SOURCES` member it claims and why that member is true "
+        "of it"
+    )
 
 
 def test_no_surface_still_promises_a_value_can_be_entered_at_every_mapped_path(client):

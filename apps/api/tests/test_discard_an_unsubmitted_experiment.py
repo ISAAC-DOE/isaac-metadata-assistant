@@ -1379,17 +1379,64 @@ def test_there_is_no_HTTP_DELETE_verb_on_any_experiment_route(workspace):
     """A domain operation, not a generic delete — asserted on the route table.
 
     A `DELETE` on `/experiments/{id}` would tell every client the resource is
-    generically deletable, which is exactly what was not authorized. The only
-    `DELETE` this API publishes is the worked-example session's own lifecycle.
+    generically deletable, which is exactly what was not authorized.
+
+    ── THE LIST GREW FROM ONE TO THREE ON 2026-09-13, AND THE PROPERTY THIS TEST
+    ── NAMES IS UNCHANGED. The assertion is rewritten to pin the PROPERTY rather
+    than the single literal, because the literal was never the point:
+    ~~`assert deletes == ["/api/tutorial/sessions/{session_id}"]`~~.
+
+    Historical Import publishes two: `DELETE /api/imports/{import_id}` discards
+    an import SESSION — a working area the server itself describes as not part of
+    the durable record store — and `DELETE .../sources/{source_id}` removes one
+    entry from that session's manifest, which is metadata about a file this build
+    never opened. Neither names an experiment, and every proposal a session sent
+    stays on the record it was sent to.
+
+    SO THE PROPERTY IS ASSERTED AS A PREDICATE: no published `DELETE` may be
+    addressed to an experiment. A fourth `DELETE` on a working area passes; a
+    first one on `/experiments/{id}` fails. The enumeration is kept BESIDE it,
+    because a reviewer seeing a new entry is how the reason gets stated at all.
     """
     from isaac_api.app import create_app
 
     schema = create_app().openapi()
-    deletes = [
+    deletes = sorted(
         path for path, ops in schema["paths"].items() if "delete" in ops
-    ]
-    assert deletes == ["/api/tutorial/sessions/{session_id}"], deletes
+    )
+    assert deletes == [
+        "/api/imports/{import_id}",
+        "/api/imports/{import_id}/sources/{source_id}",
+        "/api/tutorial/sessions/{session_id}",
+    ], deletes
+    # THE PROPERTY. `/experiments` in the path is the test: a `DELETE` addressed
+    # to an experiment, its runs, its notes, its proposals or its assets would all
+    # carry it.
+    for path in deletes:
+        assert "/experiments" not in path, f"{path} is a DELETE addressed to an experiment"
     assert "post" in schema["paths"]["/api/experiments/{experiment_id}/discard"]
+
+
+def test_the_no_experiment_DELETE_predicate_can_actually_fail(workspace):
+    """MUTATION CONTROL for the predicate above.
+
+    A `not in` over three paths that never contained the substring passes
+    trivially, which is precisely how widening the enumeration could have quietly
+    widened the property. These are the shapes it must refuse.
+    """
+    for forbidden in (
+        "/api/experiments/{experiment_id}",
+        "/api/experiments/{experiment_id}/runs/{run_id}",
+        "/api/experiments/{experiment_id}/notes/{note_id}",
+        "/api/experiments/{experiment_id}/proposals/{proposal_id}",
+    ):
+        assert "/experiments" in forbidden
+    for allowed in (
+        "/api/imports/{import_id}",
+        "/api/imports/{import_id}/sources/{source_id}",
+        "/api/tutorial/sessions/{session_id}",
+    ):
+        assert "/experiments" not in allowed
 
 
 # =============================================================================

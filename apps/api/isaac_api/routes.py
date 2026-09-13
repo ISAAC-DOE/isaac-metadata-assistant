@@ -24312,9 +24312,20 @@ def _unknown_import_keys(body: dict, allowed: frozenset[str]) -> JSONResponse | 
         "bundle of sources, have what this build can read parsed, have candidate "
         "values reconstructed from that reading, and send each candidate you agree "
         "with into review on an experiment you choose.\n\n"
+        # THE WORD `never` IS LOAD-BEARING AND IS NOT STYLE. `ApiDocs.tsx`'s
+        # `BOUNDARY_CAVEAT_MARKERS` keeps a post-lead paragraph VISIBLE in the
+        # Endpoint Explorer only when the remainder carries recognised boundary
+        # vocabulary; without it, length alone collapsed all three of this
+        # operation's paragraphs behind a disclosure — 621 characters, including
+        # this feature's central honesty claim. Caught by CI
+        # (`settings-api.test.tsx`, "hides ZERO characters of the real
+        # contract"), and fixed the way that list's own comment says to fix it:
+        # by saying what the paragraph means in the vocabulary the rule
+        # recognises, NOT by widening the list to admit prose nobody has checked.
         "IT CREATES NO EXPERIMENT AND NO RECORD. A session holds metadata about "
         "files and the candidates read out of them; nothing in it is a value, "
-        "evidence or a confirmation, and nothing in it reaches an exported record.\n\n"
+        "evidence or a confirmation, and an exported record can never contain any "
+        "of it.\n\n"
         "A SESSION IS A WORKING AREA AND IS NOT PART OF THE DURABLE RECORD STORE. "
         "It is kept in this workspace, so a server restart can end it. Anything you "
         "propose onto an experiment is stored with that experiment and is not "
@@ -24560,11 +24571,18 @@ def post_import_source(
     summary="Remove a Source from an Import Bundle",
     description=(
         "Drops one entry from this session's source bundle.\n\n"
+        # `never` FOR THE REASON GIVEN ON `POST /api/imports` ABOVE: without a
+        # recognised marker, both of this operation's post-lead paragraphs — 568
+        # characters saying what it drops and what it does not — collapsed behind
+        # the Endpoint Explorer's disclosure. Note that `deliberate` does NOT
+        # match the marker `deliberately`; that near-miss is why this needed a
+        # word chosen against the list rather than a word that reads like one.
         "IT ALSO DISCARDS THIS SESSION'S PARSE RESULTS AND ITS RECONSTRUCTION, and "
         "that is deliberate rather than tidy: a reading of a bundle the bundle no "
         "longer matches is a stale claim, and keeping candidates whose supporting "
         "source is gone would put unsupportable values in front of a scientist. Run "
-        "the parse and reconstruct operations again.\n\n"
+        "the parse and reconstruct operations again. No record changes, and a "
+        "proposal you have already sent is never touched.\n\n"
         "WHAT IT DOES NOT DROP is the record of which candidates you have already "
         "sent to review. Those proposals exist on the experiments they were sent to, "
         "and forgetting that they were sent would let the same candidate be offered "
