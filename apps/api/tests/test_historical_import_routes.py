@@ -36,6 +36,7 @@ connection is opened and nothing under ``examples/`` is read.
 from __future__ import annotations
 
 import copy
+import json
 
 import pytest
 from fastapi.testclient import TestClient
@@ -1089,3 +1090,35 @@ def test_discarding_a_worked_example_session_takes_its_imports_with_it(client):
     # ordinary workspace never held it in the first place.
     assert hist.list_sessions() == []
     assert not (hist.imports_root() / scoped_id).exists()
+
+
+def test_an_unreadable_shipped_source_refuses_with_no_filesystem_path(client, monkeypatch, tmp_path):
+    """A deployment fault, refused with a STABLE CODE and NO PATH.
+
+    An `OSError` message carries the filename it failed on, which is why this
+    route catches `OSError` and answers a fixed sentence instead of interpolating
+    the exception. `workspace._log`'s own rule is the same: a log line is an
+    exfiltration surface too, and an `OSError` in particular names the file.
+
+    MUTATION: interpolating `str(exc)` into the body makes this RED.
+    """
+    import_id = _new_import(client)
+    assert _add_fixture(client, import_id, BUNDLE_A).status_code == 200
+
+    secret = tmp_path / "a-path-nobody-should-see" / "secret.txt"
+
+    def explode(_source):
+        raise OSError(f"[Errno 13] Permission denied: '{secret}'")
+
+    monkeypatch.setattr(hist, "_fixture_text", explode)
+    response = client.post(f"/api/imports/{import_id}/parse")
+    assert response.status_code == 503, response.text
+    body = response.json()
+    assert body["error"] == "source_unreadable"
+    assert "problem with the deployment" in body["message"]
+    # THE PATH IS NOT IN THE RESPONSE, anywhere in it.
+    serialized = json.dumps(body)
+    assert str(secret) not in serialized
+    assert "a-path-nobody-should-see" not in serialized
+    assert str(tmp_path) not in serialized
+    assert "Errno" not in serialized
