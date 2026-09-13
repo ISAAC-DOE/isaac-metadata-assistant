@@ -1839,13 +1839,37 @@ Current state:
   so a caller reading only stdout or the exit code sees silence. Node here is **v24.15.0**; the skill
   pins no versions (it has no `package.json`).
 
-  **Named rather than implied, and still not done:** **pause/resume during recording** (this
-  session's last unbuilt item at the time of writing); a `capture_summary` on the record detail
+  **Named rather than implied, and still not done:** ~~**pause/resume during recording** (this
+  session's last unbuilt item at the time of writing)~~ — **DONE and ON `main`, corrected
+  2026-09-13.** It shipped in `108bfb0f` *"feat(capture): pause and resume a recording, and a clock
+  that excludes paused time"*. `paused` is a **fourth** voice state with its own word and shape
+  rather than `recording` wearing a different label, and the elapsed clock counts **recorded**
+  duration, not wall time. Eight tests pin it, six of them `MUTATION-GUARDED`, and the three that
+  matter most are the refusal paths a happy-path suite would never reach: a browser whose recorder
+  has **no `pause()`** is offered no Pause control at all, a pause the browser **refuses** leaves
+  the bar saying `Recording`, and a refused **resume** leaves it saying `Paused` with the clock
+  stopped. `MediaRecorder.pause()` deliberately does **not** release the microphone — the spec
+  suspends rather than stops, and the code says so at
+  `TranscriptCapturePanel.tsx:1162` so nobody "fixes" it into a release; a `capture_summary` on the record detail
   payload, which would delete `useCaptureSummary.ts` entirely and remove the two extra requests the
   sidebar now makes on three of four workspaces (the `?state=dismissed` trick cuts the notes payload
   **73%** — `_notes_payload`'s totals ignore the filter — but does not remove the request);
   `IngestionProposalsPanel`'s and `UnmappedNotesPanel`'s remaining latent in-flight-first-load case;
-  the three fallback-rescued phantoms in `record-description.css` and `tutorial.css`; the native
+  ~~the three fallback-rescued phantoms in `record-description.css` and `tutorial.css`~~ —
+  **DONE, and re-measured TREE-WIDE 2026-09-13 rather than per-file.** They were repointed on
+  2026-09-11 (`record-description.css` and `tutorial.css` now read `var(--border-strong)` and
+  `var(--surface)` directly; `FALLBACK_RESCUED_PHANTOMS` is retired in
+  `palette-contrast.test.ts:914`). Measured over **all 42** stylesheets under `apps/web/src`
+  against **161** declared custom properties: **zero** live phantoms, rescued or otherwise. **The
+  first run of that sweep reported FOUR and every one was a false positive** — the tool did not
+  strip CSS comments, so it counted `var()` written inside the very comments that DOCUMENT the
+  retired phantoms (including `transcriptCapture.css:43`'s prose about the ten `--text-body`
+  sites). Stripping comments also dropped `declared` 162 → 161, so a commented-out declaration had
+  been masking as real. **Same shape as the `tr`-on-binary and `ugrep`-complexity traps §11
+  already records: the tool answered confidently and wrong, and only a second method disagreed.**
+  The guard is genuinely tree-wide — it globs `../**/*.css` — and that was **proven by negative
+  control, not assumed**: injecting `var(--isaac-nonexistent-token)` into a live stylesheet turned
+  the suite **exit 1, 2 failed**, with the injected name in the output, then reverted clean; the native
   player showing `0:00 / 0:00` (MediaRecorder webm carries no duration header — the seek hack was
   deliberately declined); the human live-microphone check, true 200%-zoom sign-off and hosted
   narrow widths, **none of which this tooling can perform**; and every hosted QA.
