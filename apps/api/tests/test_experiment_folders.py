@@ -731,8 +731,37 @@ def test_run_count_is_the_documents_own_runs_and_costs_no_extra_read(seeded):
     `2026-09-12-isaac-ux-ia-plan.md` §1.6: "No run count. The Library cannot show
     'how many Runs' without N further requests." The runs live INSIDE the experiment
     state document, so the count is a `len()` over data the list read already paid
-    for — proven here by counting `Path.read_text` calls across a list read with the
-    Library's columns and without them.
+    for.
+
+    *** C-5, FOUND BY INDEPENDENT REVIEW 2026-09-13: THE ORIGINAL VERSION OF THIS
+    TEST COULD NOT FAIL, AND ITS DOCSTRING CLAIMED A COMPARISON IT DID NOT MAKE. ***
+
+    It read: "proven here by counting `Path.read_text` calls across a list read with
+    the Library's columns and without them." The "without" arm was:
+
+        def stripped_summary(exp, **kwargs):
+            row = real_summary(exp, **kwargs)   # computes ALL six columns first
+            for key in (...): row.pop(key, None)
+
+    Popping a key from a dict removes no file read. Both arms executed identical
+    I/O, so the two counts were equal by construction. It was
+    with-columns versus with-columns-then-popped. The reviewer demonstrated it by
+    adding an unguarded `Path.read_text` inside `_evidenced_field_value`:
+    `MUTANT HITS: 32 | with_count=15 without_count=15 -> 1 passed`.
+
+    ── THE REPLACEMENT IS ATTRIBUTABLE RATHER THAN COMPARATIVE ─────────────────
+
+    There is no honest "without" arm available: any control that calls `_summary`
+    pays its I/O, and one that reimplements `_summary`'s other nine fields would be
+    a second copy of the code under test. So the claim is now measured DIRECTLY, on
+    the only thing it was ever about: **`_summary` itself must perform ZERO file
+    reads.** Every `_summary` call is wrapped, the read counter is sampled on entry
+    and exit, and any non-zero delta fails and names the paths it read.
+
+    That is a STRICTLY STRONGER property than the comparison claimed. The
+    comparison would have tolerated a read that happened to occur in both arms;
+    this tolerates none, and it localises the cost to the function that would carry
+    it instead of to a whole-request total that a dozen unrelated reads move.
     """
     import pathlib
 
@@ -760,42 +789,45 @@ def test_run_count_is_the_documents_own_runs_and_costs_no_extra_read(seeded):
 
     real_summary = routes_module._summary
 
-    # WITH the columns.
-    pathlib.Path.read_text = counting_read_text
-    try:
-        with_columns = scope_client.get("/api/experiments").json()["experiments"]
-        with_count = len(reads)
-    finally:
-        pathlib.Path.read_text = real_read_text
+    # Every `_summary` call, with the reads it performed. A row whose six Library
+    # columns reached the filesystem shows up here as a non-empty list.
+    per_row_reads: list[tuple[str, list[str]]] = []
 
-    assert next(r for r in with_columns if r["id"] == target)["run_count"] == 1
-
-    # WITHOUT them — the same route with the six keys stripped at the summary, which
-    # is the only difference that could cost a read.
-    def stripped_summary(exp, **kwargs):
+    def measured_summary(exp, **kwargs):
+        before = len(reads)
         row = real_summary(exp, **kwargs)
-        for key in (
-            "updated_utc",
-            "run_count",
-            "open_proposal_count",
-            "folder",
-            "technique",
-            "beamline",
-        ):
-            row.pop(key, None)
+        per_row_reads.append((getattr(exp, "id", "?"), reads[before:]))
         return row
 
-    reads.clear()
-    routes_module._summary = stripped_summary
+    routes_module._summary = measured_summary
     pathlib.Path.read_text = counting_read_text
     try:
-        scope_client.get("/api/experiments")
-        without_count = len(reads)
+        rows = scope_client.get("/api/experiments").json()["experiments"]
     finally:
         pathlib.Path.read_text = real_read_text
         routes_module._summary = real_summary
 
-    assert with_count == without_count, (
-        f"the Library columns cost {with_count - without_count} extra file reads; "
-        "they are supposed to be free, read out of a document the list already loads"
+    # The columns are actually populated — without this the assertion below would
+    # pass for a build that stopped computing them entirely.
+    row = next(r for r in rows if r["id"] == target)
+    assert row["run_count"] == 1, row
+    for key in (
+        "updated_utc",
+        "run_count",
+        "open_proposal_count",
+        "folder",
+        "technique",
+        "beamline",
+    ):
+        assert key in row, f"{key} is not being served at all; this test proves nothing"
+
+    # The fixture must actually have exercised the function, or "zero reads" is the
+    # arithmetic of an empty list.
+    assert per_row_reads, "no _summary call was observed; the instrumentation missed"
+
+    offenders = {eid: paths for eid, paths in per_row_reads if paths}
+    assert not offenders, (
+        "building a Library row reached the filesystem, so the six columns are NOT "
+        f"free: {offenders}. They are supposed to be read out of the experiment "
+        "document the list read already loaded."
     )
