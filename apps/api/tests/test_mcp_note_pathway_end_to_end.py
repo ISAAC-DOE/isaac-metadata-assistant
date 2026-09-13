@@ -562,6 +562,9 @@ def test_ambiguous_prose_becomes_a_note_and_no_value_is_invented(http):
     eid, _rid, etag = _record_with_a_run(http)
     agent = _agent(http.app, Scope.READ, Scope.PROPOSALS_WRITE)
     before = http.get(f"/api/experiments/{eid}/pending").json()
+    # Captured BEFORE the capture, so the comparison at the end of this test is
+    # against a real earlier state rather than against itself — see the note there.
+    evidenced_before = http.get(f"/api/experiments/{eid}").json()["evidenced_field_count"]
     ambiguous = "The temperature was around 425, maybe 430 — I would have to check."
 
     captured = _tool(
@@ -589,8 +592,30 @@ def test_ambiguous_prose_becomes_a_note_and_no_value_is_invented(http):
         q.get("blocker_key") for q in before["pending"]
     }
     # No field acquired a value.
-    assert http.get(f"/api/experiments/{eid}").json()["evidenced_field_count"] == (
-        http.get(f"/api/experiments/{eid}").json()["evidenced_field_count"]
+    #
+    # *** THIS ASSERTION WAS `x == x` AND PROVED NOTHING. Found by independent
+    # review, 2026-09-13, under a module header declaring every assertion here
+    # behavioural. *** It read:
+    #
+    #     assert http.get(f".../{eid}").json()["evidenced_field_count"] == (
+    #         http.get(f".../{eid}").json()["evidenced_field_count"]
+    #     )
+    #
+    # Two identical GETs compared to each other — a tautology that holds for ANY
+    # value, including one a capture had just fabricated. It is the shape the
+    # ledger records for `MCP-019:592`, and the reason it survived is instructive:
+    # it LOOKS like a before/after comparison, and the line above it genuinely is
+    # one, so the eye supplies the missing `before`.
+    #
+    # Now compared against `evidenced_before`, read before the capture. The
+    # non-strict `>= 0` guard is deliberate rather than decorative: a fixture that
+    # started at a value this route does not serve would make the equality vacuous
+    # in a different way, so the count is also asserted to be a real number.
+    evidenced_after = http.get(f"/api/experiments/{eid}").json()["evidenced_field_count"]
+    assert isinstance(evidenced_before, int) and evidenced_before >= 0, evidenced_before
+    assert evidenced_after == evidenced_before, (
+        f"the capture changed evidenced_field_count from {evidenced_before} to "
+        f"{evidenced_after}; a note must close no field"
     )
 
 
