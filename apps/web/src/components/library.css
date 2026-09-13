@@ -1,5 +1,12 @@
 /*
- * THE EXPERIMENT LIBRARY — toolbar, folder trail, folder list, row metadata.
+ * THE EXPERIMENT LIBRARY — toolbar, folder trail, folder list.
+ *
+ * THE ROW METADATA LINE IS NOT HERE. `.exp-meta*` was written in this file and
+ * MOVED to `queue.css`, where every other `.exp-*` rule lives, because
+ * `ExperimentRow` imports that file and not this one — so the rules were applying
+ * only because a Library component that DOES import this happens to be mounted on
+ * the same screen. That is incidental coupling, and it would have rendered the row
+ * unstyled the first time it was used anywhere else.
  *
  * THREE MECHANICAL CONSTRAINTS THIS FILE IS WRITTEN AGAINST, each of which caught
  * an earlier draft of it rather than being anticipated:
@@ -441,40 +448,4 @@
      that a declaration silently disappears. Never a raw hex: a token keeps this
      consistent with every other refusal a reader meets. */
   color: var(--fail-text);
-}
-
-/* --- the row metadata line ------------------------------------------------- */
-
-.exp-meta {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--space-2xs) var(--space-sm);
-  margin-top: var(--space-2xs);
-  font-size: var(--font-size-meta);
-  color: var(--text-muted);
-}
-
-.exp-meta-item {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-xs);
-}
-
-.exp-meta-mono {
-  font-family: var(--font-mono);
-  letter-spacing: -0.01em;
-}
-
-.exp-meta-folder svg {
-  flex: none;
-}
-
-/* The proposals item is the one a reader is meant to act on, so it is the one
-   item in this line that is not plain muted text. The ACTION hue, not a warning
-   or an alert hue: a waiting proposal is work available, not a problem — and
-   this file's rule 3 forbids a verdict colour here in any case. */
-.exp-meta-proposals {
-  color: var(--action-hover);
-  font-weight: var(--font-weight-medium);
 }

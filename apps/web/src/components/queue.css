@@ -590,3 +590,49 @@
   gap: 8px;
   margin-top: 2px;
 }
+
+/* --- the Experiment Library's row metadata line ---------------------------- */
+/*
+ * HERE AND NOT IN `library.css`, and the placement is a correctness fix rather
+ * than tidying. `ExperimentRow` imports THIS file and not `library.css`, so
+ * these rules were applying only because a Library component that does import
+ * it happens to be mounted on the same screen. The row renders correctly today
+ * and would have rendered unstyled the first time it was used anywhere else.
+ *
+ * Every value is a token rung: `__tests__/type-scale-and-spacing.test.ts`
+ * ratchets hand-authored `font-size`/`font-weight`/`line-height`/spacing values
+ * and refuses a net increase.
+ */
+.exp-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2xs) var(--space-sm);
+  margin-top: var(--space-2xs);
+  font-size: var(--font-size-meta);
+  color: var(--text-muted);
+}
+
+.exp-meta-item {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+}
+
+.exp-meta-mono {
+  font-family: var(--font-mono);
+  letter-spacing: -0.01em;
+}
+
+.exp-meta-folder svg {
+  flex: none;
+}
+
+/* The proposals item is the one a reader is meant to act on, so it is the one
+   item in this line that is not plain muted text. The ACTION hue, not a warning
+   or an alert hue: a waiting proposal is work available, not a problem — and
+   this file's rule 3 forbids a verdict colour here in any case. */
+.exp-meta-proposals {
+  color: var(--action-hover);
+  font-weight: var(--font-weight-medium);
+}
