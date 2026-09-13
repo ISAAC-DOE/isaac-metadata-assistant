@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { cleanup, render, screen, fireEvent, waitFor, within, act } from '@testing-library/react';
-import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import { MemoryRouter, Route, Routes, useNavigate } from 'react-router-dom';
 
 import { AppRoutes } from '../App';
 import { SchemaBrowser } from '../components/SchemaBrowser';
@@ -153,6 +153,26 @@ function renderStatistics(routes: Record<string, RouteEntry>) {
  * (`BackendDown` is `role="alert"`), so this settles a round without the caller
  * having to know which of the five sources answered.
  */
+/**
+ * A ROUTER NAVIGATION the test can trigger, for the one case that needs it.
+ *
+ * The worked-example scope must mount on `/experiments` so the guided
+ * walkthrough's per-step navigation claim is spent there (see `renderIn`), then
+ * move. Rendered only inside that branch's tree.
+ */
+function ScopeProbe() {
+  const navigate = useNavigate();
+  return (
+    <button
+      type="button"
+      data-testid="scope-probe-to-statistics"
+      onClick={() => navigate(ROUTES.statistics)}
+    >
+      to statistics
+    </button>
+  );
+}
+
 async function settled(): Promise<void> {
   await waitFor(() =>
     expect(document.querySelectorAll('.fetch-state[role="status"]')).toHaveLength(0),
@@ -355,6 +375,40 @@ describe('the lead sentence is truthful in each workspace scope', () => {
     });
     expect(getTutorialState().sessionId).not.toBeNull();
     let view!: ReturnType<typeof render>;
+    /*
+     * STILL MOUNTS ON `/experiments`, THEN NAVIGATES — and the mount route is
+     * load-bearing for a reason worth recording, because two wrong fixes were
+     * tried before it was measured.
+     *
+     * This block used to reach Statistics by clicking the `Statistics` item in
+     * the PRIMARY NAVIGATION. That item no longer exists: Statistics was demoted
+     * out of the primary list (`UX-017`, 2026-09-13) and is now reached from
+     * `Settings & API → Overview`.
+     *
+     * ── WHY MOUNTING DIRECTLY ON `/statistics` DOES NOT WORK ────────────────
+     *
+     * **Wrong fix 1** was `initialEntries={[ROUTES.statistics]}`. It rendered
+     * **My Experiments** — measured, by dumping every `<h1>`: `['My
+     * Experiments']`. **Wrong fix 2** was reordering `settled()`, on the theory
+     * that `findByRole`'s 1,000 ms budget had expired at 1,061 ms. It had, but
+     * that was a symptom.
+     *
+     * The cause is product behaviour, not test scaffolding:
+     * `GuidedTutorial.tsx:182-193` navigates to the current step's `targetPath`
+     * **once per step**, spending a one-time claim (`claimStepNavigation`). When
+     * the router opens ALREADY on the target, `markStepArrived` spends the claim
+     * without moving; when it opens anywhere else, the tutorial routes the
+     * reader to the step — which is exactly what a guided walkthrough should do.
+     * The first step targets `/experiments`, so mounting there spends the claim
+     * and a subsequent navigation sticks. Mounting on `/statistics` leaves it
+     * unspent and gets steered.
+     *
+     * So the navigation is kept, and it is deliberately a ROUTER navigation
+     * rather than a click: this file's subject is the lead sentence's wording
+     * per workspace scope, not wayfinding. The replacement navigation PATH is
+     * covered where it belongs — `statistics-nav.test.tsx`'s Back/Forward walk
+     * clicks the real `Settings → Statistics` link.
+     */
     await act(async () => {
       view = render(
         <MemoryRouter
@@ -362,17 +416,18 @@ describe('the lead sentence is truthful in each workspace scope', () => {
           future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
         >
           <AppRoutes />
+          <ScopeProbe />
         </MemoryRouter>,
       );
     });
-    const toStatistics = await screen.findByRole('link', { name: LABELS.navStatistics });
+    await screen.findByRole('heading', { level: 1, name: LABELS.screenExperiments });
     await act(async () => {
-      fireEvent.click(toStatistics);
+      fireEvent.click(screen.getByTestId('scope-probe-to-statistics'));
     });
+    await settled();
     expect(
       await screen.findByRole('heading', { level: 1, name: 'Statistics' }),
     ).toBeInTheDocument();
-    await settled();
     return view;
   }
 

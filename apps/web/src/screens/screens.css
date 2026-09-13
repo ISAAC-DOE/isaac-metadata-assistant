@@ -2007,6 +2007,42 @@
   outline: 2px solid var(--action);
   outline-offset: 2px;
 }
+/*
+ * The same affordance as an `<a>`.
+ *
+ * `.settings-jump` originally held only tab-switching `<button>`s. The
+ * advanced-surfaces group (2026-09-13) holds real cross-route `<Link>`s — a
+ * button there would be unopenable in a new tab and unlinkable — and an anchor
+ * arrives with a user-agent underline the pill shape does not want. Only the
+ * default decoration is reset: colour, border, hover and focus-visible are
+ * shared with the buttons above, so the two groups stay one control idiom.
+ */
+a.settings-jump-btn {
+  text-decoration: none;
+}
+
+/*
+ * The one-line scoping note above the advanced-surfaces group.
+ *
+ * It says what those destinations are NOT ("not part of recording an
+ * experiment") because that is the question a scientist who just lost two
+ * navigation items will have, and because the alternative — saying nothing —
+ * leaves the demotion looking like a removal.
+ */
+.settings-advanced-note {
+  margin-top: var(--space-xs);
+  max-width: 80ch;
+  color: var(--text-secondary);
+  /* UX-001's declared axes. The first draft of this rule invented
+     `--text-sm`/`--leading-normal`, which are declared NOWHERE — the exact
+     phantom-custom-property class that shipped nine times in
+     `capture.css`/`transcriptCapture.css` and made the primary input of the
+     capture surface borderless. Caught here by reading `tokens.css` rather than
+     by the ratchet, because a fallback value hides a phantom from the renderer
+     while still seeding the name for the next file to copy bare. */
+  font-size: var(--font-size-body);
+  line-height: var(--line-height-normal);
+}
 
 .settings-provenance-note {
   margin-top: 8px;

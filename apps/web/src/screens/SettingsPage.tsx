@@ -484,6 +484,78 @@ function OverviewBody({
           <ChevronRight size={13} strokeWidth={2.2} aria-hidden="true" />
         </button>
       </nav>
+
+      <AdvancedSurfaces />
+    </>
+  );
+}
+
+/**
+ * THE TWO DEMOTED DESTINATIONS — and the reason this section exists BEFORE the
+ * primary navigation shrank rather than after.
+ *
+ * Project Memory (`UX-015`/**DEC-19**) and Statistics (`UX-017`) each held one
+ * of five slots in a scientist's primary navigation on 2026-09-13. Neither is a
+ * scientist's destination: Project Memory renders a graph of *this project's own
+ * source and documentation*, and Statistics is the densest screen in the
+ * application (3,820 px, 422 visible text elements). §19's sequencing rule for a
+ * demotion is *provide the capability elsewhere first, verify nothing becomes
+ * inaccessible, and only then remove it from primary navigation* — this is the
+ * "elsewhere", and it is why `LeftNav`'s `NAV_PARENT` can truthfully say these
+ * two now live under Settings.
+ *
+ * ── WHAT THESE LINKS DO AND DO NOT CLAIM ────────────────────────────────────
+ *
+ * **Nothing was deleted and nothing became unreachable.** Both routes are
+ * unchanged, both screens render exactly as before, every existing deep link and
+ * bookmark still resolves, and none of Project Memory's 578 test cases was
+ * removed. These are real `<a href>` links rather than the tab-switching
+ * `<button>`s above them, because they navigate to another ROUTE — a button
+ * here would be unopenable in a new tab and unlinkable.
+ *
+ * **The descriptions are scoped to what each surface actually is**, taken from
+ * the screens' own copy rather than authored here. Project Memory's own page
+ * says it *"never validates, completes, or supplies a value"* and that its
+ * content is *leads to verify*; the snapshot it reads is committed and
+ * point-in-time, which is disclosed on that screen and is why the word
+ * "snapshot" appears here rather than a claim of liveness.
+ */
+function AdvancedSurfaces() {
+  return (
+    <>
+      <h3 className="settings-subheading">Advanced &amp; Developer Surfaces</h3>
+      <p className="settings-advanced-note">
+        These are not part of recording an experiment. They describe this build and this project
+        rather than your science, and they are here rather than in the main navigation for that
+        reason.
+      </p>
+      <nav className="settings-jump" aria-label="Advanced and developer surfaces">
+        <Link to={ROUTES.memory} className="settings-jump-btn">
+          {LABELS.navMemory}
+          <ChevronRight size={13} strokeWidth={2.2} aria-hidden="true" />
+        </Link>
+        <Link to={ROUTES.statistics} className="settings-jump-btn">
+          {LABELS.navStatistics}
+          <ChevronRight size={13} strokeWidth={2.2} aria-hidden="true" />
+        </Link>
+      </nav>
+      <dl className="settings-summary-list">
+        <div className="settings-summary-row">
+          <dt className="settings-summary-label">{LABELS.navMemory}</dt>
+          <dd className="settings-summary-text">
+            A read-only view of a committed, point-in-time snapshot of this project's own source
+            and documentation. It surfaces related files and concepts as leads to verify — it never
+            validates a record, completes a field, or supplies a value.
+          </dd>
+        </div>
+        <div className="settings-summary-row">
+          <dt className="settings-summary-label">{LABELS.navStatistics}</dt>
+          <dd className="settings-summary-text">
+            Counts over the records in this workspace, and over your own activity in it. Summary
+            figures only; nothing here gates export or changes a record.
+          </dd>
+        </div>
+      </dl>
     </>
   );
 }

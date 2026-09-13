@@ -1,39 +1,103 @@
 import './chrome.css';
 import { Link } from 'react-router-dom';
-import { LayoutList, Network, ShieldCheck, BarChart3, Settings } from './icons';
+import { LayoutList, ShieldCheck, Settings } from './icons';
 import { LABELS } from '../lib/labels';
 import { ROUTES } from '../lib/routes';
 import type { LucideIcon } from './icons';
 
 export type NavKey = 'experiments' | 'memory' | 'governance' | 'statistics' | 'settings';
 
+/**
+ * THE PRIMARY DESTINATIONS — THREE, down from five (2026-09-13).
+ *
+ * ── WHAT WAS MEASURED ───────────────────────────────────────────────────────
+ *
+ * Five top-level slots, and two of them were not scientists' destinations:
+ *
+ * * **Project Memory** (`UX-015`/**DEC-19**) — ~7,800 lines and **578 test
+ *   cases, the largest single test mass in the application** — renders a graph
+ *   of *this repository's own source code*. It occupied one of five slots in a
+ *   scientist's primary navigation.
+ * * **Statistics** (`UX-017`) — the densest screen in the application
+ *   (**3,820 px, 422 visible text elements**), of which the scientist-relevant
+ *   half is per-record summary that belongs beside the records.
+ *
+ * ── WHAT THIS CHANGE IS AND IS NOT ──────────────────────────────────────────
+ *
+ * **It is a NAVIGATION change, not a deletion.** `DEC-19` says so in terms for
+ * Project Memory: *"Capability and tests PRESERVED."* Both routes are untouched,
+ * both screens render exactly as before, every deep link and bookmark still
+ * resolves, and not one of those 578 test cases is removed. What changes is
+ * which three things a scientist is offered first.
+ *
+ * **Nothing became unreachable, and that ordering was deliberate.** §19's own
+ * sequencing rule for a demotion is: provide the capability elsewhere first,
+ * verify nothing becomes inaccessible, and only then remove it from primary
+ * navigation. Both destinations are linked from `Settings & API → Overview`
+ * before this list shrank — see `SettingsPage`'s advanced-surfaces section —
+ * which is what makes `NAV_PARENT` below true rather than decorative.
+ *
+ * ── WHAT WAS DELIBERATELY *NOT* DEMOTED, AND WHY ────────────────────────────
+ *
+ * **Governance & Safety stays.** The authorizing direction lists three
+ * top-level destinations (`Experiments`, `Historical Import`, `Settings`) and
+ * §19 enumerates the surfaces to demote — the Evidence Graph, Project Memory,
+ * Statistics, and the schema/API/agent developer surfaces. **Governance is
+ * named in neither list.** It is a scientist-facing honesty surface rather than
+ * a developer one, and inferring its removal from a list that does not mention
+ * it would be taking a product decision nobody took. Raised in the ledger as an
+ * open question for Krish instead.
+ *
+ * **`Historical Import` is NOT added here.** It is one of the three named
+ * top-level destinations, and there is no import pipeline behind it yet. §15's
+ * *"build nothing that implies any of it exists"* forbids offering the slot
+ * before the destination; adding it would be a nav item that teaches a
+ * scientist a capability this build does not have.
+ */
 const ITEMS: { key: NavKey; label: string; icon: LucideIcon; to: string }[] = [
   { key: 'experiments', label: LABELS.navExperiments, icon: LayoutList, to: ROUTES.experiments },
-  { key: 'memory', label: LABELS.navMemory, icon: Network, to: ROUTES.memory },
   { key: 'governance', label: LABELS.navGovernance, icon: ShieldCheck, to: ROUTES.governance },
-  { key: 'statistics', label: LABELS.navStatistics, icon: BarChart3, to: ROUTES.statistics },
   { key: 'settings', label: LABELS.navSettings, icon: Settings, to: ROUTES.settings },
 ];
+
+/**
+ * WHERE A DEMOTED DESTINATION NOW LIVES — so a reader standing on one is not
+ * looking at a navigation list with nothing marked in it.
+ *
+ * The demoted item's parent slot is tinted, and **`aria-current` is deliberately
+ * NOT set on it.** `aria-current="page"` means *this link points at the page you
+ * are on*, and on Project Memory the Settings link does not. Claiming otherwise
+ * would tell a screen-reader user they are somewhere they are not — a smaller
+ * version of exactly the honesty defect class this application keeps finding. So
+ * the ancestor gets a visual affordance and no assertion; the class name says
+ * which it is.
+ */
+const NAV_PARENT: Partial<Record<NavKey, NavKey>> = {
+  memory: 'settings',
+  statistics: 'settings',
+};
 
 interface LeftNavProps {
   active: NavKey;
 }
 
 /**
- * Top-level destinations. Project Memory is a deliberately separate destination
- * — never blended into the experiment queue. Active item = tint + weight + label
- * color (no colored rail).
+ * Top-level destinations. Active item = tint + weight + label colour (no
+ * coloured rail). A demoted destination's parent slot is tinted as an ANCESTOR
+ * — see `NAV_PARENT` for why that is a weaker claim than `active`.
  */
 export function LeftNav({ active }: LeftNavProps) {
+  const ancestor = NAV_PARENT[active];
   return (
     <nav className="leftnav" aria-label="Primary">
       {ITEMS.map(({ key, label, icon: Icon, to }) => {
         const isActive = key === active;
+        const isAncestor = !isActive && key === ancestor;
         return (
           <Link
             key={key}
             to={to}
-            className={`nav-item${isActive ? ' active' : ''}`}
+            className={`nav-item${isActive ? ' active' : ''}${isAncestor ? ' ancestor' : ''}`}
             aria-current={isActive ? 'page' : undefined}
           >
             <Icon size={16} strokeWidth={2} aria-hidden="true" />

@@ -329,6 +329,29 @@
   color: var(--action-hover);
   font-weight: 600;
 }
+/*
+ * A DEMOTED DESTINATION'S PARENT SLOT — weaker than `.active`, deliberately.
+ *
+ * Project Memory and Statistics left the primary list (2026-09-13) and are now
+ * reached from `Settings & API`. A reader standing on one of them would
+ * otherwise see a navigation list with nothing marked in it at all. This marks
+ * the ANCESTOR: the same tint as `.active` at a lower weight and without the
+ * accent label colour, so it reads as "the section you are inside" rather than
+ * "the page you are on".
+ *
+ * It carries **no `aria-current`** — `LeftNav.tsx`'s `NAV_PARENT` comment
+ * explains why claiming one would be false — so this rule is the entire
+ * affordance and it must stay visually distinguishable from `.active`.
+ */
+.nav-item.ancestor {
+  background: var(--action-tint);
+  color: var(--text-secondary);
+  /* The SAME rung `.nav-item` already rests at — the ancestor is distinguished
+     by tint alone, not by weight, which is what keeps it visibly weaker than
+     `.active`'s semibold. `var()` rather than `500`: UX-001's ratchet refused
+     the raw literal, correctly. */
+  font-weight: var(--font-weight-medium);
+}
 .nav-item svg { flex: none; color: var(--text-tertiary); }
 .nav-item.active svg { color: var(--action-hover); }
 .nav-footer {
