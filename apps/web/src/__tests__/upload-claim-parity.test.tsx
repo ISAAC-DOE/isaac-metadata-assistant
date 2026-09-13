@@ -51,6 +51,26 @@
  * `apps/web/src` only: backend-served copy (`routes.py`'s refusal reason, the
  * OpenAPI descriptions the Endpoint Explorer renders) is invisible to it.
  *
+ * A SIXTH SITE, ADDED FOR I-2, AND ALSO DELIBERATELY KEPT OUT OF §§2–4.
+ * `components/HelpPanel.tsx`'s "Where values come from" section shipped
+ * *"file upload is refused, and the campaign-sheet CSV comparison is read-only
+ * with no route that applies what it found"* — which NAMED ONE READER AND
+ * OMITTED THE OTHER, while the panel's own correction comment claimed it "names
+ * no file READER". That is the half-disclosure this whole file exists to stop,
+ * arriving in the fix for a different false claim, with a comment vouching for
+ * the property the copy did not have. And "file upload is refused" was
+ * UNSCOPED, on a build whose Governance page mounts a button labelled "Upload
+ * JSON File" one tab away (`components/RecordValidator.tsx:241`).
+ *
+ * IT IS NOT FORCED INTO `SITES`/`SHARED_CLAIM`, for the same reason the fifth
+ * site is not: §2 additionally requires the two RETENTION bounds (in memory,
+ * never stored; only the outcome, never the content), and those answer a
+ * data-governance question that a section titled "Where values come from" does
+ * not raise. Adding them would put ~25 more words on the surface the Impeccable
+ * critique measured at 89% over length (`UX-021`). §6 pins the narrower, real
+ * invariant instead: that section must name BOTH readers, and must not state the
+ * refusal as anything other than a property of the upload ROUTE.
+ *
  * A FIFTH SITE, ADDED LATER, AND DELIBERATELY KEPT OUT OF §§2–4. Found by
  * review: `lib/transcriptCaptureContent.ts`'s `voiceAudioHandling` claimed
  * "This application declares no upload endpoint for it to reach" — false;
@@ -68,9 +88,10 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { describe, it, expect, afterEach } from 'vitest';
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, render, screen, fireEvent } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 
+import { HelpPanel } from '../components/HelpPanel';
 import { GovernancePage } from '../screens/GovernancePage';
 import { LoadMaterials } from '../screens/LoadMaterials';
 import { ConnectYourAgentPanel } from '../screens/settings/ConnectYourAgent';
@@ -613,5 +634,146 @@ describe('R1b §5b · the capture site states the affirmative claim, tolerant of
     }
     // ...and the reword must still pass the ban above.
     expect(noEndpointClaims(reword)).toEqual([]);
+  });
+});
+
+// --- §6 the Help popover's "Where values come from" section ------------------
+//
+// See the file header for why this is a SIXTH site with its own narrow ban
+// rather than a fifth member of `SITES`. Two invariants, each polarity-proven on
+// the exact sentence that shipped at `43544c6c`:
+//
+//   6a — the section names BOTH file-reading controls. Naming one is worse than
+//        naming neither: the reader is told the exhaustive-sounding truth about
+//        the control that changes nothing, and nothing at all about the control
+//        with the word "Upload" on its face.
+//   6b — every upload refusal in the section is predicated of the upload ROUTE
+//        (or endpoint, or path), never of the application. `CLAUDE.md` §11
+//        records the refusal claim as true of `POST /api/uploads` ONLY, and
+//        records this claim class shipping false three times before, each time
+//        repaired by SCOPING it rather than deleting it.
+//
+// SCOPED TO ONE SECTION, ON PURPOSE, and the boundary is worth stating because
+// it was examined rather than assumed. The popover's "Synthetic workspace"
+// section says "uploads are disabled", which §6b would flag — and it is
+// DELIBERATELY out of scope. That sentence's subject is the WORKSPACE, it is
+// qualified in the same breath ("this deployment is configured for
+// synthetic-only operation ... What the app enforces is that mode, not the
+// contents of what it is handed"), and the identical requirement is imposed on
+// three surfaces at once by `__tests__/db-recon-truthfulness.test.tsx:427,593`
+// — including two this slice did not own. Changing it on one surface would
+// break the cross-surface parity that guard exists to hold. It is named here as
+// examined-and-left, not overlooked.
+
+/** Just the one section, located by its own heading — so a neighbouring
+ *  section cannot supply half of the claim and count as compliance. Same
+ *  technique `db-recon-truthfulness.test.tsx`'s `helpSyntheticSection` uses. */
+function helpValuesSection(): string {
+  const view = render(<HelpPanel />);
+  fireEvent.click(view.getByRole('button', { name: 'Help' }));
+  const section = [...view.container.querySelectorAll('.help-section')].find(
+    (el) => el.querySelector('h3')?.textContent === 'Where values come from',
+  );
+  expect(section, 'no "Where values come from" section in the Help popover').toBeTruthy();
+  return section!.textContent ?? '';
+}
+
+/** Both file-reading controls, as the claim must name them. */
+const BOTH_READERS_NAMED: [string, RegExp][] = [
+  ['the record validator', /validator/i],
+  ['the campaign-sheet CSV comparison', /(csv|campaign[- ]sheet)/i],
+];
+
+/**
+ * Every sentence that refuses an upload WITHOUT scoping the refusal to the
+ * route. Empty is the pass.
+ *
+ * Sentence-split rather than clause-split: the scoping noun and the refusal verb
+ * are the SAME predicate ("the upload route refuses every request"), so a
+ * comma-level window would separate them and flag correct copy. `(?<=\.)\s+`
+ * requires whitespace after the period, so a version number like `v1.05` cannot
+ * split a sentence in two — the `[^.]`-as-sentence-proxy hazard `QA-010` records.
+ */
+function unscopedUploadRefusals(text: string): string[] {
+  return text
+    .split(/(?<=\.)\s+/)
+    .map((t) => t.trim())
+    .filter(
+      (t) =>
+        /\bupload/i.test(t) &&
+        /\b(refus\w+|disabled|blocked|declin\w+|reject\w+)\b/i.test(t) &&
+        !/\bupload\s+(route|endpoint|path)\b/i.test(t) &&
+        !/POST\s+\/api\/uploads/i.test(t),
+    );
+}
+
+/** `components/HelpPanel.tsx:221-227` at `43544c6c`, verbatim — the sentence
+ *  that named one reader and left the refusal unscoped. */
+const RETIRED_HELP_VALUES_SENTENCE =
+  'A value gets into a record because a person put it there — typed into a record or run ' +
+  'field, or given as an answer to one of the questions above. No control here reads one of ' +
+  'your files and fills a field from it: file upload is refused, and the campaign-sheet CSV ' +
+  'comparison is read-only with no route that applies what it found.';
+
+describe('R1b §6a · the Help "Where values come from" section names BOTH readers', () => {
+  it.each(BOTH_READERS_NAMED)('names %s', (_what, pattern) => {
+    expect(helpValuesSection()).toMatch(pattern);
+  });
+
+  it('POLARITY: the sentence that shipped names only one of the two', () => {
+    const named = BOTH_READERS_NAMED.filter(([, p]) => p.test(RETIRED_HELP_VALUES_SENTENCE)).map(
+      ([label]) => label,
+    );
+    expect(
+      named,
+      'the retired sentence is expected to name exactly ONE reader (the CSV comparison). ' +
+        'If it now reads as naming both, this fixture has been edited and the polarity ' +
+        'proof is worthless.',
+    ).toEqual(['the campaign-sheet CSV comparison']);
+  });
+});
+
+describe('R1b §6b · no upload refusal in that section is left unscoped', () => {
+  it('the shipped section scopes every refusal to the upload route', () => {
+    const rendered = helpValuesSection();
+    expect(
+      unscopedUploadRefusals(rendered),
+      'an upload refusal in the Help popover is predicated of the application rather ' +
+        'than of the upload route. CLAUDE.md §11: the refusal claim is true of ' +
+        'POST /api/uploads ONLY, and this build ships a button labelled "Upload JSON ' +
+        'File" (components/RecordValidator.tsx:241) that reads a file and POSTs its ' +
+        'contents.',
+    ).toEqual([]);
+  });
+
+  it('POLARITY: the sentence that shipped IS flagged', () => {
+    const flagged = unscopedUploadRefusals(RETIRED_HELP_VALUES_SENTENCE);
+    expect(
+      flagged,
+      'the exact sentence that shipped is not flagged, so this ban would not have ' +
+        'caught the defect it was written for.',
+    ).not.toHaveLength(0);
+  });
+
+  it.each([
+    ['the bare absolute', 'File upload is refused.'],
+    ['the app-wide form', 'This application refuses every file upload.'],
+    ['the passive form', 'Uploads are blocked in this build.'],
+    ['the deployment-wide form', 'File ingestion and upload are disabled for this deployment.'],
+  ])('POLARITY: %s is flagged too', (_what, sentence) => {
+    expect(unscopedUploadRefusals(sentence)).not.toHaveLength(0);
+  });
+
+  it.each([
+    ['the route form', 'The upload route refuses every request it gets.'],
+    ['the endpoint form', 'Its single upload endpoint declines all requests.'],
+    ['the path form', 'The upload path is blocked; nothing it receives is read.'],
+    ['the named-route form', 'POST /api/uploads is refused unconditionally.'],
+  ])('and the scoped %s is NOT flagged', (_what, sentence) => {
+    expect(
+      unscopedUploadRefusals(sentence),
+      'a correctly scoped refusal must stay sayable. A guard that fires on true copy ' +
+        'teaches the next reader to weaken it (§3b).',
+    ).toEqual([]);
   });
 });

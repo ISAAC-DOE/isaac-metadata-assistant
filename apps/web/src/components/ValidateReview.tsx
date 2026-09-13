@@ -408,21 +408,42 @@ export function ValidateReview({ experimentId }: { experimentId: string }) {
           {/*
             WHAT THIS SCREEN CANNOT TELL YOU, said once, here.
 
-            `export_draft` folds an anchored-pattern exactness refusal into the
-            no-guessing draft report and returns no official report, so on a
-            candidate record those findings arrive in the same undifferentiated
-            list as everything else. The Standalone Validator reports the schema
-            verdict, ISAAC's exactness findings and the combined verdict as three
-            separate things; this per-run channel has only one of them. Saying so
-            is what stops a reader taking a dry-run finding for a schema error.
+            `export_draft` refuses in THREE places — the no-guessing draft report
+            (`export.py:305`), `check_exactness` (`:343`) and `validate_official`
+            (`:347`). TWO of those gates are ISAAC's own and the third is upstream's.
+            A refusal by either of ISAAC's two arrives through the SAME
+            `draft_report` list — `check_exactness`'s findings are folded into it at
+            `export.py:342` — and returns no official report, so this response
+            cannot say which of the two refused. `lib/officialAttribution.ts`'s
+            register forbids naming one of them for exactly that reason: singling out
+            the exactness gate would be the `CLAUDE.md` §12 conflation one level
+            finer, so the note below names both as candidates and claims neither.
+
+            TWO CLAIMS SHIPPED HERE AND ARE WITHDRAWN, kept named so neither is
+            rewritten back in. ~~"ISAAC applies one gate of its own (anchored-pattern
+            exactness)"~~ undercounted ISAAC's gates AND named the one it counted.
+            ~~"nothing below names the official ISAAC schema as the source unless a
+            written record was checked"~~ predates the `official_validator_ran`
+            discriminator: `_validate_unit`'s dry-run branch publishes it as `true`
+            whenever `validate_official` produced the findings, so a CANDIDATE record
+            is headed "Official ISAAC schema findings" by `officialFindingsHeading`.
+            That is what the discriminator is FOR, and it is why the note points a
+            reader at each unit's own heading rather than at the document.
+
+            The Standalone Validator reports the schema verdict, ISAAC's exactness
+            findings and the combined verdict as three separate things; this per-run
+            channel has one list per unit. Saying so is what stops a reader taking a
+            dry-run finding for a schema error.
           */}
           <p className="vr-note">
-            Beyond the official schema, ISAAC applies one gate of its own (anchored-pattern
-            exactness). On a candidate record its findings arrive in the same list as the
-            rest and are not labelled apart, so nothing below names the official ISAAC schema
-            as the source unless a written record was checked. To see the schema verdict,
-            ISAAC&rsquo;s own findings and the combined verdict reported separately, use the
-            Standalone Validator on Governance &amp; Safety.
+            Beyond the official schema there are ISAAC&rsquo;s own two gates &mdash; the
+            no-guessing checks and its anchored-pattern exactness gate. When either
+            refuses, their findings arrive in one list, are not labelled apart from each
+            other, and this check does not record which of the two produced them. Each
+            unit below says whether the official ISAAC schema produced the findings it
+            shows, so read nothing here as a schema error unless it says so. To see the
+            schema verdict, ISAAC&rsquo;s own findings and the combined verdict reported
+            separately, use the Standalone Validator on Governance &amp; Safety.
           </p>
 
           <ul className="vr-list">

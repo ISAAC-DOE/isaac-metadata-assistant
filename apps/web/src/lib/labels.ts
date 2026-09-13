@@ -119,6 +119,17 @@ export const LABELS = {
   // Screen titles
   screenExperiments: 'My Experiments',
   screenLoad: 'Load Materials',
+  /*
+   * THE NAME OF THE RECORD SCREEN THAT HAS NOT LOADED — not of the loaded one.
+   *
+   * It reaches the UI at exactly two sites, both inside `RecordWorkbench`'s
+   * `bundle.status !== 'data'` branch (`:401` the top bar, `:405` the `sr-only`
+   * `<h1>`): the loading and backend-down states, where there is no record title
+   * to name. A LOADED record is titled from its own data — `workspaceLabel` plus
+   * the record's title — and says "Review Record" on none of its four
+   * workspaces; `RecordWorkbench.tsx:864-871` records why. Reading this as the
+   * loaded screen's name is what produced review finding I-1.
+   */
   screenReview: 'Review Record',
   screenComplete: 'Complete Missing Fields',
   screenEvidence: 'Evidence & File Preview',

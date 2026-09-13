@@ -290,7 +290,15 @@ test.describe('R4 · edit', () => {
     await editor(page).getByLabel('Asset Hash').fill(HASH_B);
 
     // Leave through the screen's own control, then come back.
-    await page.getByRole('button', { name: '← Back to Review Record' }).click();
+    //
+    // The name tracks `LABELS.workspaceFields`, not `LABELS.screenReview`. This read
+    // `'← Back to Review Record'`, which stopped being the shipped accessible name
+    // when `GuidedCompletion` retitled both of its back buttons (`:1318`, `:1648`) to
+    // name the destination as the destination names itself: `ROUTES.record(id)`
+    // resolves to `?view=fields`, whose own name is 'Record Fields'. 'Review Record'
+    // now reaches the UI only in `RecordWorkbench`'s `bundle.status !== 'data'`
+    // branch, so it was never a name a LOADED record screen answered to.
+    await page.getByRole('button', { name: '← Back to Record Fields' }).click();
     await expect(page).toHaveURL(new RegExp(`/record/${SEED.fresh}$`));
     await openComplete(page, SEED.fresh);
 
