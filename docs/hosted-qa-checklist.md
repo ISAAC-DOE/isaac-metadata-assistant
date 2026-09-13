@@ -261,6 +261,20 @@ Details in [`browser-accessibility-testing.md`](browser-accessibility-testing.md
 Surfaces: My Experiments · Record Detail · Guided Completion · Evidence · Export Readiness ·
 Project Memory (incl. Graph) · Governance (incl. Validator) · Statistics · Settings (all five tabs).
 
+> **HOW TWO OF THOSE SURFACES ARE REACHED CHANGED ON 2026-09-13, and the surfaces themselves did
+> not.** `UX-015`/**DEC-19** and `UX-017` demoted **Project Memory** and **Statistics** out of the
+> primary navigation; both are now linked from **`Settings & API` → Overview → *Advanced &
+> Developer Surfaces***, and both routes (`/memory`, `/statistics`) still resolve, so typing the
+> route works as before. Nothing about what to check on them changed.
+>
+> Separately, the record screen's **Graph** workspace left the record sidebar (`EVG-002`/**DEC-04**).
+> `?view=graph` still opens it and existing bookmarks still work, but **there is no link to click**
+> — reach it by address.
+>
+> The primary navigation now holds **three** items: My Experiments · Governance & Safety ·
+> Settings & API. On a demoted route the `Settings & API` slot is tinted as the ANCESTOR and **no**
+> item carries `aria-current="page"` — that is deliberate, not a defect to report.
+
 Viewports: **1280×800**, **1024×768**, **768×1024**, **375×812**.
 
 Then **real browser zoom at 200%** (`Cmd +` / `Ctrl +`, not a narrow window — they are genuinely

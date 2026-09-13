@@ -333,7 +333,14 @@ Record + Sidecar**.
 
 ## Step 12 — Project Memory, and its advisory boundary
 
-- **Route:** left nav → Project Memory → `/memory` (Overview tab)
+- **Route:** ~~left nav → Project Memory~~ → **`Settings & API` → Overview → *Advanced &
+  Developer Surfaces* → Project Memory** → `/memory` (Overview tab). **CORRECTED 2026-09-13:
+  Project Memory was demoted out of the primary navigation (`UX-015`/**DEC-19**), so there is no
+  longer a `Project Memory` item in the left nav to click.** The screen, the route and everything
+  this step demonstrates are UNCHANGED — only the path to it moved. Typing `/memory` still works
+  and is the faster move if you are running short; note that while you are on it the left nav
+  marks `Settings & API` as the ancestor and marks nothing as the current page, which is
+  deliberate and is worth one sentence if anyone asks.
 - **Expected visible state:** memory health/status figures, and the standing line "Project memory
   returns leads to verify — never a validation verdict."
 - **Action:** In the rail composer ask **`What does project memory know about the evidence sidecar?`**
@@ -488,7 +495,7 @@ fails becomes a thing you do not demo — not a thing you improvise around.
 | 9 | **Unsupported question refuses** | `Is this sample scientifically plausible?` returns the `unsupported` refusal naming the eight families. | Use one of the alternates in step 11. |
 | 9a | **What Can I Ask? panel** | On a record surface the composer dock shows **What Can I Ask?**; opening it lists the six headings (Workflow and Current Step · Missing Fields and Confirmations · Export Blockers and Readiness · Evidence and Provenance · Record Summary · Project Memory) and the boundary line "…anything outside them is refused, not guessed." With the composer **empty**, clicking `Summarize this record.` puts that text in the composer **without sending it**; with a draft already typed the panel deliberately keeps the draft and says so. Escape closes it. On `/memory` only the **Project Memory** heading appears; a **Graph Navigation** heading appears there only on the Graph tab. | Cut step 10a. The eight families are still named verbatim in step 11's refusal, so the bounded-catalog point survives. |
 | 10 | **Open Validator works** | The **Open Validator** button on an `export_blockers` answer lands on `/governance?tab=validator` with the Validator tab genuinely selected. | Navigate to the tab manually; do not click a control you have not tested. |
-| 11 | **Browser Back behaves** | Back from a record sub-surface returns to the record, and from `/memory?tab=graph` does not strand you on a blank canvas. In-page tab switches deliberately do **not** create history stops. | Navigate with the left nav only. |
+| 11 | **Browser Back behaves** | Back from a record sub-surface returns to the record, and from `/memory?tab=graph` does not strand you on a blank canvas. In-page tab switches deliberately do **not** create history stops. | ~~Navigate with the left nav only.~~ **The left nav can no longer reach `/memory` (`UX-015`, 2026-09-13)** — reach it once via `Settings & API` → Overview → *Advanced & Developer Surfaces*, or type the route. The Back behaviour under test is unchanged either way. |
 | 12 | **Evidence page** | `/record/…0001/evidence` renders the trail, a source preview with cited lines, and the sidecar convention note. | Cut step 6. |
 | 13 | **Export Readiness** | `…0003` shows `dry-run · would validate` and an enabled Export button; `…0001` shows "5 fields still block export". | Cut step 8; demo only the exported artifacts (step 9 Option A). |
 | 14 | **Exported artifacts readable** | `/record/…0005/export` shows both artifact cards and both View dialogs open with real JSON. | Do not use step 9 Option B as a substitute under time pressure — it mutates state. |
