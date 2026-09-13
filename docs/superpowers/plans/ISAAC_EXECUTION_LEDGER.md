@@ -16,7 +16,15 @@ CANONICAL REPO:        /Users/krishverma/Documents/ISAAC
                        origin = https://github.com/ISAAC-DOE/isaac-metadata-assistant.git
                        personal = https://github.com/Krish-Verma/isaac-metadata-assistant.git (historical mirror)
 BRANCH:                docs/product-scope-v2-planning  — UNPUSHED. `main` is UNTOUCHED.
-HEAD:                  782082bb  — ~~0a1c7434~~ **the header was STALE BY EIGHT COMMITS and is
+HEAD:                  cb0494a2  — **ALL FOUR LANES INTEGRATED.** 62 commits on the branch
+                       (`git rev-list --count main..HEAD`). Lanes, in merge order:
+                       `4d6c74d9` §5 label-overreach + ramp semantics (committed, not merged —
+                       it worked in the main tree); `4e50df81` merge of `feat/experiment-library`
+                       (clean, 0 conflicts); `107812ea` merge of `feat/mcp-note-pathway`
+                       (THREE conflicts, all resolved — see that commit); `cb0494a2` the ONE
+                       snapshot regeneration, both artifacts, hashes only.
+                       ~~782082bb~~ was the session-open HEAD. ~~0a1c7434~~ **the header was
+                       STALE BY EIGHT COMMITS at session open and is
                        corrected here first, per §37/the continuation protocol's own instruction
                        that a stale header is worse than none.** Re-derived 2026-09-13:
                        `git rev-parse HEAD` -> 782082bb627eac59e3bcd979026ca81c3a5afd7d.
@@ -65,7 +73,15 @@ ORCHESTRATOR:          Opus 5 (claude-opus-5[1m]) — **DISCLOSED FALLBACK, RE-D
                        the substitution (2026-09-12). Orchestrator-only discipline preserved: plan, delegate,
                        review, integrate, verify, commit — no production code written by the
                        orchestrator. No other model silently substituted.
-SUBORDINATE AGENTS:    *** SUPERSEDED AGAIN, 2026-09-13, BY AN EXPLICIT OWNER INSTRUCTION THAT
+SUBORDINATE AGENTS:    **SPENT: 5 of 5. The budget is exhausted and no replacement may be
+                       spawned.** (1) independent review of the unreviewed tail
+                       `ebc5c331..782082bb` — MERGE-after-fixes, one Critical; (2) the §5
+                       label-overreach + ramp-semantics slice; (3) the Experiment Library;
+                       (4) the MCP note pathway; (5) **the final independent review of
+                       `782082bb..cb0494a2`**, which is the gate before any push and which
+                       covers the orchestrator's own six unreviewed slices and the three merge
+                       resolutions. Nested agents: NONE spawned, as required.
+                       *** SUPERSEDED AGAIN, 2026-09-13, BY AN EXPLICIT OWNER INSTRUCTION THAT
                        NAMES AND OVERRIDES EVERY PRIOR READING. The budget for THIS session is
                        **5 SUBORDINATE AGENTS TOTAL, SESSION-WIDE** — not five concurrent, not
                        five-plus-two, not seven. Reviewer agents count. Impeccable agents count.
@@ -117,8 +133,38 @@ BRANCH VERDICT:        *** MERGE-READY on the four original findings; the branch
                        ~~*** STILL DO NOT MERGE — the reason is now MINE ***~~ — superseded.
                        ~~4 BLOCKING findings from the earlier independent review~~ — addressed.
 
-VERIFIED ON THE FULLY SETTLED TREE (orchestrator's own runs; exit codes from a redirect, NEVER
-through a pipe; checkout named with every count):
+*** VERIFIED ON THE INTEGRATED TREE AT `cb0494a2`, MAIN CHECKOUT (orchestrator's own runs; exit
+codes from a redirect, NEVER through a pipe): ***
+  types      npx tsc -b                        -> exit 0
+  e2e types  npx tsc -p e2e/tsconfig.json      -> exit 0
+  frontend   npx vitest run                    -> **212 files / 5748 tests, exit 0**
+                                                  (session-open baseline 208 / 5638 -> +4 / +110)
+  ratchet    type-scale-and-spacing            -> 19 passed (the UX-001 token guard, UNEDITED —
+                                                  the MCP lane fixed its CSS rather than raising
+                                                  a ceiling, which is what the guard exists for)
+  contract   test_contract_description_parity  -> 4 passed, BOTH directions
+  openapi    settings-api.test.tsx             -> 78 passed; the two figures RE-DERIVED at merge
+                                                  time TWO independent ways that agree —
+                                                  **78 operations / 142,351 chars / 270 post-lead
+                                                  paragraphs** — because NEITHER lane's number was
+                                                  correct for the union and incrementing either is
+                                                  the one move that block forbids
+  snapshot   --check with BOTH --out and --detail-out -> exit 0, no drift, **201 served paths /
+                                                  200 manifest entries** intact, and not one
+                                                  `"path"` line moved (22 sha256 changes only)
+  backend    .venv/bin/pytest -q -rs           -> IN FLIGHT at the time this header was written.
+                                                  **Reported separately rather than predicted.**
+  browser    playwright — **NOT RUN on the integrated tree.** The last read-only run
+             (1040 passed / 557 skipped / 3 failed → the 3 were ONE real narrow-width defect,
+             fixed in `8f961ed7`) predates TWO of the four lanes, so it does not describe this
+             tree and is not quoted as if it did.
+  a11y       **LINUX CI IS THE AUTHORITY AND HAS NOT RUN.** Both merged lanes state they move
+             `settings-explorer` cells, because the Endpoint Explorer renders each post-lead
+             OpenAPI paragraph as its own `<p>`. Named, not silent.
+
+~~VERIFIED ON THE FULLY SETTLED TREE (orchestrator's own runs; exit codes from a redirect, NEVER
+through a pipe; checkout named with every count):~~ — the block below describes `782082bb`,
+the session-open state, and is kept for that:
   backend    .venv/bin/pytest -q -rs  (MAIN CHECKOUT) -> 7412 passed, 45 skipped, exit 0
                                        baseline 7239/45 at 97c44c84 -> +173, skips UNCHANGED
   frontend   npx vitest run           -> 208 files / 5638 tests, exit 0   (baseline 208/5525 -> +113)
