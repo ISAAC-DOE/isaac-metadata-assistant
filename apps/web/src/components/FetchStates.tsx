@@ -233,6 +233,12 @@ export const SUB_RESOURCE_LABELS: Readonly<Record<string, string>> = {
   evidence: 'the evidence trail',
   'evidence-classification': 'evidence support',
   export: 'the export',
+  // `PATCH .../folder`. "Which folder this is in" rather than "the folder": the
+  // reader is being told which read or write failed, and a folder is a LABEL ON
+  // THIS RECORD rather than a container that could be fetched — so "the folder"
+  // would name a thing this application does not have. There is no folder entity
+  // anywhere: a path exists exactly while some experiment names it.
+  folder: 'which folder this is in',
   ingestion: 'a CSV comparison',
   notes: 'the unmapped notes',
   pending: 'the missing fields',

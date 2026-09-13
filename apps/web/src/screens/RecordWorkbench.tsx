@@ -10,6 +10,7 @@ import { StatusBar } from '../components/StatusBar';
 import { FieldGroup } from '../components/FieldGroup';
 import { RecordInfoPanel, RecordLinksPanel } from '../components/RecordInfoPanel';
 import { RenameExperimentPanel } from '../components/RenameExperimentPanel';
+import { MoveExperimentPanel } from '../components/MoveExperimentPanel';
 import { RecordDescriptionPanel } from '../components/RecordDescriptionPanel';
 import { RunsSection } from '../components/RunsSection';
 import { TranscriptCapturePanel } from '../components/TranscriptCapturePanel';
@@ -1020,6 +1021,20 @@ function LoadedWorkbench({
                 refetch plus the record-session recompute, which is what a version
                 change actually calls for. */}
             <RenameExperimentPanel detail={detail} onSaved={onAgentRefresh} />
+            {/* THE FOLDER, immediately beside the name, because they are the record's
+                TWO organizational labels: both are written under the same precondition,
+                both reach no exported record and no evidence sidecar, and neither
+                changes a scientific value or a validation result. Same
+                `onAgentRefresh`, for the identical reason the note above gives.
+
+                `existingFolders` IS DELIBERATELY NOT PASSED HERE. The suggestion list
+                would need every folder path in the workspace, and this screen holds one
+                record — fetching the whole experiment list to populate a `<datalist>`
+                on a collapsed panel would be a request nobody asked for. The box is
+                free text either way, which is what it has to be: a folder is made by
+                naming one that does not exist yet. The Library screen, which already
+                holds the whole list, is where the suggestions belong. */}
+            <MoveExperimentPanel detail={detail} onSaved={onAgentRefresh} />
             {/*
               THE RECORD DESCRIPTION — the capture surface for what the record IS: its
               technique and domain, the facility it was measured at, the sample, the

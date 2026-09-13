@@ -167,6 +167,109 @@ export const LABELS = {
   groupDone: 'Done',
 
   /*
+   * THE EXPERIMENT LIBRARY. Six of its seven filter chips REUSE the four group
+   * labels above plus `chipDraft`, and that reuse is the point rather than a
+   * shortcut: this app has already been measured carrying three competing
+   * navigation vocabularies in one 212 px rail, and a chip called `Blocked` beside
+   * a group called `Needs Attention` for the same records is how that happens. The
+   * chips ARE the groups, viewed as lenses — which is the shape
+   * `ISAAC_PRODUCT_DECISIONS.md` DEC-09 confirms for them ("`Needs Review` and
+   * `Recent` are Library views/filters, not top-level destinations").
+   *
+   * TWO LABELS ARE NEW, AND EACH NAMES SOMETHING THAT HAD NO NAME.
+   *
+   * `libraryFacetProposals` is the cross-experiment review lens: "somebody, or
+   * some ingestion, left me a value to judge". It is `Proposals Waiting` and
+   * deliberately NOT `Needs Review`, even though the plan asked for that word —
+   * `In Review` is already a chip in the same row, and two chips one word apart
+   * meaning different things is a worse outcome than one slightly longer name.
+   *
+   * `libraryFacetAll` is the escape from every filter, named for the SET rather
+   * than for the act ("All Experiments", not "Clear Filters"), so the chip row
+   * reads as one list of lenses instead of six lenses and a reset button.
+   *
+   * THERE IS NO `Submitted` CHIP, and its absence is measured rather than
+   * preferred. Whether a record is submitted needs a content signature plus a
+   * revision-history read PER RECORD — a real N+1 — and the history reader
+   * answers nothing at all in a deployment without a database, while the
+   * migrations that would give it one are approved and applied nowhere. The chip
+   * would match zero rows in every deployment that exists, and a permanently
+   * empty filter tells a reader they have no submitted work rather than that we
+   * cannot tell. See `lib/library.ts`.
+   */
+  libraryFacetAll: 'All Experiments',
+  libraryFacetProposals: 'Proposals Waiting',
+
+  librarySortUpdated: 'Last Updated',
+  librarySortCreated: 'Date Created',
+  librarySortTitle: 'Name',
+  librarySortRuns: 'Most Runs',
+  librarySortLabel: 'Sort by',
+
+  librarySearchLabel: 'Search experiments',
+  /*
+   * IT NAMES WHAT IS SEARCHED, because a search box that silently searches more
+   * than its placeholder admits is a box a reader cannot predict. These five are
+   * exactly the fields `matchesQuery` reads, and a test pins the two lists
+   * against each other so the promise cannot drift from the behaviour.
+   */
+  librarySearchPlaceholder: 'Search by name, folder, technique, beamline or ID',
+  librarySearchHint:
+    'Searches every folder, not just the one you are looking at.',
+
+  libraryNoResultsTitle: 'No experiments match this view',
+  libraryNoResultsBody:
+    'Nothing here is hidden or lost — the filters above are narrowing the list. Clear them to ' +
+    'see everything again.',
+  libraryClearFilters: 'Show all experiments',
+
+  /*
+   * THE ROOT CRUMB. What the top of the folder trail is called is a product
+   * decision and not a fact about the data, which is why `folderBreadcrumbs`
+   * returns nothing for it and this string lives here.
+   */
+  libraryRootFolder: 'All experiments',
+  libraryFoldersHeading: 'Folders',
+  libraryUnfiled: 'Not in a folder',
+
+  /*
+   * THE FOLDER MODEL, STATED ON THE SCREEN. This sentence exists because every
+   * reader arrives expecting Google Drive, and four of Drive's behaviours are
+   * absent here: there is no empty folder, no folder rename, no sharing and no
+   * folder owner. Saying what a folder IS is the honest way to convey that
+   * without listing four things we do not have — and `CLAUDE.md` §15's "build
+   * nothing that implies any of it exists" is the rule it satisfies.
+   */
+  libraryFolderModelNote:
+    'A folder is a label on an experiment. It appears when you file something under it and ' +
+    'disappears when the last experiment leaves, so there are no empty folders to manage.',
+  libraryMoveLabel: 'Folder',
+  libraryMoveHint:
+    'Type a new path to file this experiment somewhere new, or pick a folder that already ' +
+    'exists. Use “/” to nest. Leave it empty to take it out of every folder.',
+  libraryMoveSubmit: 'Save folder',
+  libraryMoveCancel: 'Cancel',
+  libraryMoveAction: 'Change folder',
+  /*
+   * The create form's optional destination. Same field, same rules, said shorter.
+   *
+   * THE EXAMPLE PATH DELIBERATELY CARRIES NO SCIENTIFIC VOCABULARY, and the first
+   * draft of it did. It read “Cu K-edge/2026 campaign”, and
+   * `__tests__/create-experiment.test.tsx` refused it — that test asserts the
+   * create form offers nowhere to type an evidence-bearing scientific value, and
+   * enforces it by scanning the whole form's text for `technique`, `facility`,
+   * `sample`, `energy`, `edge` and `sha256`. It was RIGHT to fire. A scientist is
+   * of course free to NAME a folder after an edge; putting that word in our own
+   * example on this form invites reading the field as somewhere to record the
+   * edge, which is precisely the confusion the guard exists to prevent. The guard
+   * was left untouched and the copy changed.
+   */
+  createExperimentFolderLabel: 'Folder (optional)',
+  createExperimentFolderHint:
+    'File it straight into a folder, e.g. “2026 campaign/October”. Use “/” to nest. Leave it ' +
+    'empty to decide later.',
+
+  /*
    * RETIRED — a SECOND five-step workflow vocabulary, deleted rather than
    * renamed. It read:
    *
@@ -1070,6 +1173,33 @@ export interface FormattedDate {
  * environment. `iso` is the exact date prefix so a `<time dateTime>` carries a
  * valid machine value.
  */
+/**
+ * The SAME machine + display + accessible triple `formatCreatedDate` produces,
+ * worded for a LAST-CHANGED date instead of a creation date.
+ *
+ * IT IS A SEPARATE FUNCTION AND NOT A PARAMETER, because the only thing that
+ * differs is one word of prose in the accessible string, and threading a verb
+ * through `formatCreatedDate` would put the two callers' wording in one place
+ * where a later edit silently changes both. The date arithmetic is shared by
+ * delegation, so the two can never disagree about what day a timestamp is.
+ *
+ * **THE DAY IS ALL IT SHOWS, and the server's value is finer than that** —
+ * `updated_utc` is a whole-SECOND timestamp. Two changes in one second are
+ * already indistinguishable on the wire; rendering only the date makes the
+ * granularity visible rather than implying a precision the sort does not have.
+ * If a time of day is ever shown here, it must not be presented as ordering
+ * evidence: the record change feed keys on a durable revision position precisely
+ * because this value cannot carry that weight.
+ */
+export function formatUpdatedDate(isoDate: string): FormattedDate | undefined {
+  const created = formatCreatedDate(isoDate);
+  if (created === undefined) return undefined;
+  return {
+    ...created,
+    accessible: created.accessible.replace(/^Created /, 'Last updated '),
+  };
+}
+
 export function formatCreatedDate(isoDate: string): FormattedDate | undefined {
   const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(isoDate);
   if (!m) return undefined;

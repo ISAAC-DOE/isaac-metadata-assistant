@@ -994,8 +994,30 @@ def test_the_persisted_state_keys_are_unchanged_by_scoping():
         # moves. That is checked STRUCTURALLY immediately below rather than by a
         # per-entry loop, and the note there says why a loop would be vacuous here.
         "proposal_change_revs",
+        # ``folder`` was added with the Experiment Library, and it is ADMITTED HERE
+        # DELIBERATELY rather than because a test went red — the rule the four keys
+        # above each earned. It belongs in the persisted document because it is a
+        # label on THIS record, exactly as ``title`` is, and it satisfies the property
+        # this test defends by construction rather than by argument: it is ONE STRING
+        # with no sub-structure, so it has no room for a ``session_id`` to hide in and
+        # the per-entry ``all(...)`` checks below do not apply to it.
+        #
+        # THE CONFUSION THIS KEY IS MOST LIKELY TO CAUSE, named so it is not
+        # re-derived: a folder is NOT a scope and NOT a directory. Nothing derives a
+        # filesystem path from it — every path this module builds comes from
+        # ``Experiment.id`` — and ``normalize_folder_path`` refuses ``.`` and ``..``
+        # segments so it cannot even be read as one.
+        # ``test_experiment_folders.py`` asserts that separately, over the whole
+        # workspace tree, so this admission rests on a measurement rather than on
+        # this comment.
+        "folder",
     }
     assert "session_id" not in state and "scope" not in state and "root" not in state
+    # THE FOLDER IS ``""`` HERE AND THAT IS ASSERTED, not merely stated: a record
+    # constructed without one is UNFILED, which is the state every experiment
+    # created before folders existed is also in. If the default ever became
+    # something else, a fresh record would arrive pre-filed somewhere nobody chose.
+    assert state["folder"] == ""
     # ``proposal_change_revs`` IS EMPTY HERE, AND THAT IS SAID RATHER THAN ASSERTED
     # OVER. Only ``_bump_changed_proposals`` writes it, and only from the write branch
     # of ``save_versioned``, which this test deliberately does not call — it is about

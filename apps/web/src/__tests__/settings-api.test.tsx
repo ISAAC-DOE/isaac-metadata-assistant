@@ -1728,7 +1728,25 @@ describe('the Full Description rule over the REAL generated contract', () => {
     // description publishes `checked_reachable: false` rather than leaving a reader to
     // infer that a `configured` link was never fetched. RE-MEASURED from the served
     // document, not incremented.
-    expect(REAL_CONTRACT_DESCRIPTIONS).toHaveLength(77);
+    // 77 -> 78: `PATCH /api/experiments/{experiment_id}/folder`, the Experiment
+    // Library's file/move/unfile write. It is a SEPARATE operation from the rename
+    // rather than a second field on it, deliberately: the rename's own contract says
+    // it writes the title and nothing else, and `test_about_and_openapi.py` quotes
+    // that sentence, so widening its body would have falsified a committed claim to
+    // save a route.
+    //
+    // NO TABLE AND NO MIGRATION CAME WITH IT. A folder is one string at
+    // `state["folder"]` in the experiment's own document, beside `notes` and
+    // `proposals`, so `db_write.OWNED_TABLES` is unchanged and nothing stands between
+    // this operation and working. Its description is the longest single addition in
+    // this arc because it has to say what a folder IS — there is no folder entity, so
+    // there is no create, no delete, no rename and no ACL, and a reader who assumes
+    // otherwise would look for four controls that do not exist.
+    //
+    // RE-MEASURED from the served document via `test_contract_description_parity.py`,
+    // which re-transcribed this entry mechanically rather than by hand, and read out
+    // of this test's own failure output (`expected […(78)] to have a length of 77`).
+    expect(REAL_CONTRACT_DESCRIPTIONS).toHaveLength(78);
     // 84,501 -> 84,584 (+83): the assistant seam's own description was corrected, in
     // ONE operation and with the paragraph count unchanged. It read "so every request
     // is answered `501`" while the paragraph two below it documented the `422` — a
@@ -2245,7 +2263,33 @@ describe('the Full Description rule over the REAL generated contract', () => {
     // Internal consistency as a CHECK, not the derivation: raw sum 134,572 minus 2
     // per `\n\n` separator (254 x 2 = 508) = 134,064. The entry was re-transcribed
     // from `create_app().openapi()` by script, never hand-edited.
-    expect(total).toBe(134064);
+    // 134,064 -> 138,714 (+4,650) and 254 -> 265 post-lead paragraphs: ONE new
+    // operation, `PATCH /api/experiments/{experiment_id}/folder`, plus a refresh of
+    // `GET /api/experiments` whose description grew when the Library's six columns
+    // were added to it.
+    //
+    // IT IS THE LONGEST SINGLE ADDITION IN THIS ARC, and the reason is worth stating
+    // rather than leaving as an outlier: the folder operation's description has to
+    // say what a folder IS. There is no folder entity anywhere in this build, so
+    // there is no create, no delete, no rename and no ACL — and a reader who assumes
+    // otherwise goes looking for four controls that do not exist. Eleven paragraphs
+    // is what it costs to say that once, in the place a client reads the contract.
+    //
+    // THE PARAGRAPH COUNT DOES MOVE HERE, unlike the +2,079 entry below which was
+    // written specifically to avoid moving it. That is a real cost and is named:
+    // the Endpoint Explorer renders each paragraph as its own
+    // `<p class="api-docs-description">`, so the `settings-explorer` accessibility
+    // cells will need a two-platform re-baseline. It could not be avoided — a new
+    // operation cannot be woven into an existing paragraph.
+    //
+    // DERIVED TWO WAYS THAT AGREE, neither an increment: the `splitPurpose` rule
+    // transcribed into Python over `create_app().openapi()`, restricted to the 78
+    // named operations -> 138,714 / 265; and the same rule over the transcribed array
+    // read back out of `apiFixtures.ts` as text -> the same two numbers. Internal
+    // consistency as a CHECK, not the derivation: raw sum 139,244 minus 2 per `\n\n`
+    // separator (265 x 2 = 530) = 138,714. Both entries were re-transcribed from
+    // `create_app().openapi()` by script, never hand-edited.
+    expect(total).toBe(138714);
     // 104,045 -> 114,959 (+10,914): the four new operations, and NO existing
     // description changed — `test_contract_description_parity.py` proves that rather
     // than leaving it asserted here. RE-DERIVED from the served document and never
@@ -2460,7 +2504,13 @@ describe('the Full Description rule over the REAL generated contract', () => {
     // normalised `url`, the refusal-names-its-category rule, deep-link-only,
     // `checked_reachable`, the connector prerequisite), and a reader who stops early
     // must not have skipped one. RE-DERIVED from the served document, not incremented.
-    expect(REAL_CONTRACT_DESCRIPTIONS.reduce((n, d) => n + rest(d).length, 0)).toBe(254);
+    // 254 -> 265 (+11): the folder operation and the refreshed experiment-list
+    // description. BOTH numbers moved together, which is the signature of prose
+    // appended as new paragraphs — here unavoidably, because one of the two changes
+    // is a whole new operation. See the character-total entry above for the full
+    // derivation and for the `settings-explorer` re-baseline this costs.
+    // RE-DERIVED from the served document two ways that agree, not incremented.
+    expect(REAL_CONTRACT_DESCRIPTIONS.reduce((n, d) => n + rest(d).length, 0)).toBe(265);
     // 211 -> 235 (+24): the four new operations carry a lead plus 24 post-lead
     // paragraphs between them. It is asserted separately from the character total
     // for the reason every entry above gives: a change that moved one and not the

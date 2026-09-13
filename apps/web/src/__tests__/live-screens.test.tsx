@@ -56,11 +56,42 @@ describe('S1 · My Experiments renders live queue groups from injected data', ()
         body: { experiments: [experimentSummary, exportedSummary] },
       },
     });
-    const { findByText, queryByText, getByText } = renderAt('/experiments');
+    const { findByText, queryByText, getByText, container } = renderAt('/experiments');
 
-    // group headers from the server statuses present (and only those)
-    expect(await findByText('Needs Attention')).toBeInTheDocument();
-    expect(getByText('Done')).toBeInTheDocument();
+    /*
+     * THE QUERIES ARE NOW SCOPED TO THE QUEUE, and the scoping is a
+     * STRENGTHENING rather than an accommodation.
+     *
+     * WHAT CHANGED ON THE SCREEN. My Experiments is now the Experiment Library:
+     * the same four status groups still render as group headers, and the same
+     * four words ALSO appear as filter chips above them (they are the same four
+     * states used as lenses — `ISAAC_PRODUCT_DECISIONS.md` DEC-09 — deliberately
+     * reusing one vocabulary rather than inventing a parallel set). So
+     * `getByText('Needs Attention')` now matches two nodes and throws.
+     *
+     * WHY SCOPING IS STRONGER. The unscoped version asserted only that the words
+     * appeared SOMEWHERE on the screen. Scoped to `.queue`, it asserts the group
+     * headers themselves — which is what the test's name has always claimed to
+     * check and what it could not previously distinguish from a chip, a heading,
+     * or an unrelated mention.
+     *
+     * AND THE ABSENCE ASSERTIONS STAY UNSCOPED AND SO GET STRONGER STILL. `In
+     * Review` and `Ready to Export` must appear NOWHERE — not as a group and not
+     * as a chip — which holds because a facet chip is only rendered when it would
+     * match at least one row, and these two statuses are absent from this fixture.
+     */
+    // AWAITED ON THE ROW TITLE, NOT ON THE STATE WORD. `findByText('Needs
+    // Attention')` throws on MULTIPLE matches, and the word now legitimately appears
+    // twice — once as a group header and once as the filter chip that selects it.
+    // The row title is unique and arrives in the same render, so it is the honest
+    // thing to wait for.
+    await findByText('Synthetic XANES — CuO (Cu K-edge) Demo');
+    const queue = container.querySelector<HTMLElement>('.queue')!;
+    expect(queue).not.toBeNull();
+    const groupLabels = [...queue.querySelectorAll('.queue-group-label')].map(
+      (n) => n.textContent,
+    );
+    expect(groupLabels).toEqual(['Needs Attention', 'Done']);
     expect(queryByText('In Review')).toBeNull();
     expect(queryByText('Ready to Export')).toBeNull();
 

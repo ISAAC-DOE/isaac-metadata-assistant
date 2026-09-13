@@ -753,7 +753,23 @@ describe('the sub-read inventory this file derives from api.ts', () => {
     // in this arc. If that slice does not land, the method goes the way `getProposal`
     // went and this number returns to 45. It is NOT kept alive by this counter — see
     // the ruling in `api.ts`'s proposals block, which says so in those terms.
-    expect(experimentPathLiterals.length).toBe(46);
+    //
+    // 46 -> 47: `moveExperimentToFolder`, the Experiment Library's file/move/unfile
+    // write (`PATCH .../folder`). It has a REAL CALLER at this HEAD — the Library
+    // screen's own move control — which is the condition the `getProposal` ruling
+    // above set and the condition `createProposal` is still waiting on, so this bump
+    // is consumed rather than reserved.
+    //
+    // THIS IS THE `getProvenance` SHAPE, NOT THE `renameExperiment` ONE: it adds a
+    // NEW sub-path segment, so `SUB_READ_SUFFIXES`/`SUB_READ_SEGMENTS` move with it
+    // and `SUB_RESOURCE_LABELS` needs a product word. The word is "which folder this
+    // is in" rather than "the folder", deliberately — a folder here is a LABEL on
+    // the record, not a container that could be fetched, and naming it as a thing
+    // would describe a capability this build does not have.
+    //
+    // Read out of this test's own failure output (`expected 47 to be 46`), not
+    // derived by adding a delta.
+    expect(experimentPathLiterals.length).toBe(47);
     expect(bareRecordLiterals.length).toBeGreaterThan(0);
     // 31 -> 33: `runs/SEG-1/answers` and `runs/SEG-1/edit`, the two run-level write
     // suffixes. Both are WRITES rather than reads, and they appear here because this
@@ -769,7 +785,14 @@ describe('the sub-read inventory this file derives from api.ts', () => {
     // under one first segment. It was briefly 38, with a `proposals/SEG-1` detail
     // suffix that no caller reached — see the note on the literal count above. Read out
     // of this test's own failure output, not derived by adding a delta.
-    expect(SUB_READ_SUFFIXES).toHaveLength(37);
+    // 37 -> 38: `folder`, the Experiment Library's file/move/unfile write. This is
+    // the `provenance` shape rather than the `renameExperiment` one — a NEW first
+    // segment, so `SUB_RESOURCE_LABELS` needs a product word for it, and the word is
+    // "which folder this is in" rather than "the folder" because a folder here is a
+    // LABEL on the record and not a container that could be fetched. Read out of this
+    // test's own failure output (`have a length of 37 but got 38`), not derived by
+    // adding a delta.
+    expect(SUB_READ_SUFFIXES).toHaveLength(38);
     // 19, AND THE ROUTE TO THAT NUMBER IS WORTH KEEPING.
     //
     // THIS INCIDENT RECORD WAS LOST IN A MERGE RESOLUTION AND IS RESTORED HERE, an
@@ -806,7 +829,20 @@ describe('the sub-read inventory this file derives from api.ts', () => {
     // proposals"), and the guard below this line is what surfaced that. Read out of
     // this test's own failure output (`have a length of 22 but got 23`), not derived
     // by adding a delta.
-    expect(SUB_READ_SEGMENTS).toHaveLength(23);
+    // 23 -> 24: `folder`. Like `provenance` and `changes` it is a FIRST segment
+    // nothing else used, so it moves this counter as well as the suffix one and
+    // needed its own product word in `SUB_RESOURCE_LABELS` ("which folder this is
+    // in", not "the folder" — a folder here is a LABEL on the record and not a
+    // container that could be fetched) — and the guard below this line is what
+    // surfaced that, which is exactly the leak it was written to catch.
+    //
+    // THREE COUNTS IN THIS FILE MOVED FOR THIS ONE ROUTE, and the third was found
+    // only by the full serial suite: the literal count (46 -> 47), the suffix count
+    // (37 -> 38) and this one. Two targeted runs passed over it because the file's
+    // first failure aborted its own test before reaching this assertion. Read out of
+    // this test's own failure output (`have a length of 23 but got 24`), not derived
+    // by adding a delta.
+    expect(SUB_READ_SEGMENTS).toHaveLength(24);
     // THE CONFLICT-RESOLUTION PAIR, and how these three numbers were arrived at.
     // `listConflicts` and `resolveConflict` add TWO literals and TWO suffixes —
     // `conflicts` and `conflicts/resolve`, the second of which carries no `${…}`

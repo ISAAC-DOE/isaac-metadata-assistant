@@ -53,6 +53,19 @@ import {
   Equal,
   ArrowLeftRight,
   Columns2,
+  // THE FOLDER GLYPH, for the Experiment Library. A plain outline folder, and
+  // it is the ONE place in this app where a folder metaphor is drawn — so it
+  // carries a risk this file's other glyphs do not: a reader who sees a folder
+  // expects Drive, and ISAAC has no empty folders, no folder rename, no sharing
+  // and no folder owner. The mark is therefore always paired with the text of
+  // the path, never used as a standalone control, and the screen states what a
+  // folder IS (`LABELS.libraryFolderModelNote`). Deliberately NOT `FolderPlus`,
+  // which would name an act — creating an empty folder — that cannot happen.
+  Folder as FolderIcon,
+  // The Library's filter mark. `SlidersHorizontal`, not `Filter`: a funnel says
+  // "things have been removed", and these chips are lenses over one list whose
+  // counts are stated over the WHOLE list beside each one.
+  SlidersHorizontal,
   // The four provenance glyphs this file did not already have. Each is a plain
   // line mark and none of them is a verdict: `CornerRightUp` points at the record
   // an inherited value lives on, `Cpu` is a processor outline (deliberately NOT a
@@ -208,5 +221,7 @@ export {
   Equal,
   ArrowLeftRight,
   Columns2,
+  FolderIcon,
+  SlidersHorizontal,
 };
 export type { LucideIcon };

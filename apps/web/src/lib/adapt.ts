@@ -5,7 +5,8 @@
  * from the server and are passed through faithfully.
  */
 
-import { LABELS, formatCreatedDate, titleCase } from './labels';
+import { LABELS, formatCreatedDate, formatUpdatedDate, titleCase } from './labels';
+import { duplicateDisplayTitles, isAmbiguousTitle } from './library';
 import type {
   AdvisoryResult,
   ApiAuditResponse,
@@ -93,13 +94,70 @@ export function trailingFor(s: ApiExperimentSummary, group: QueueGroupKey): Expe
   }
 }
 
+/**
+ * WHY A ROW MAY CARRY A DISAMBIGUATOR, and why it is computed by the CALLER.
+ *
+ * `stripLifecycleSuffix` above removes a known suffix for display, which is the
+ * single reason the five shipped example records render as one identical line: on
+ * the wire their titles are five DISTINCT strings (`… · New Draft`, `… ·
+ * Partially Completed`, …) and this function collapses them. Two experiments a
+ * scientist genuinely names the same thing collide for the plainer reason.
+ *
+ * The remedy is to differentiate ONLY the rows that collide, which is a fact
+ * about the SET being rendered and therefore not knowable here — one row cannot
+ * tell whether another row looks like it. So `duplicateDisplayTitles` in
+ * `lib/library.ts` computes the collisions and `libraryRows` passes the result
+ * back in. The precedent is `IngestionProposalsPanel`, which surfaces a run id
+ * only when `duplicateRunLabels` shows the label is ambiguous among the runs on
+ * screen, for exactly this reason: an id on every row is noise, an id on the two
+ * ambiguous rows is information.
+ */
+export interface RowContext {
+  /** True when another row on screen renders the same display title. */
+  ambiguousTitle?: boolean;
+}
+
 /** Exported for direct unit testing (P33 S1); the queue mapping below is the
  * only real caller. */
-export function toExperimentSummary(s: ApiExperimentSummary): ExperimentSummary {
+export function toExperimentSummary(
+  s: ApiExperimentSummary,
+  context: RowContext = {},
+): ExperimentSummary {
   const group = STATUS_TO_GROUP[s.status];
   return {
     id: s.id,
     title: stripLifecycleSuffix(s.title),
+    // --- the Experiment Library's row metadata, PASSED THROUGH VERBATIM ------
+    //
+    // Nothing here is computed, defaulted or inferred. `run_count` and
+    // `open_proposal_count` are the server's own counts over the record's own
+    // document; `technique` and `beamline` are `null` unless the draft actually
+    // carries an established value, and `undefined` here renders nothing at all
+    // rather than a dash, an "unknown", or an empty chip shell.
+    //
+    // `?? undefined` RATHER THAN `?? ''`, deliberately and for the reason
+    // `scenario` one line down already uses it: an empty string is a value that
+    // renders as a blank element, and a blank element in a metadata row reads as
+    // "we know this and it is nothing". `undefined` is the absence.
+    runCount: s.run_count,
+    openProposalCount: s.open_proposal_count,
+    folder: s.folder || undefined,
+    technique: s.technique ?? undefined,
+    beamline: s.beamline ?? undefined,
+    updated: s.updated_utc ? formatUpdatedDate(s.updated_utc) : undefined,
+    /*
+     * THE DISAMBIGUATOR. Present ONLY when the caller established that this row's
+     * display title collides with another on screen, and it is the RECORD ID
+     * because that is the one thing about a record that is unique by construction
+     * and that a person can carry to a filename, a URL or a colleague. A date
+     * would not do: the five example records are one second apart, so their
+     * created dates are identical to the day.
+     *
+     * It is DELIBERATELY NOT shown on every row. An id beside every title is
+     * noise a reader learns to skip, which is how it would fail to help on the
+     * two rows where it matters.
+     */
+    disambiguator: context.ambiguousTitle ? s.id : undefined,
     // Passed through verbatim — the label text is authored by the backend from the
     // same seed spec that builds the title. Nothing here parses a title to recover
     // it, and a missing/null value stays undefined so the row renders nothing.
@@ -113,13 +171,41 @@ export function toExperimentSummary(s: ApiExperimentSummary): ExperimentSummary 
   };
 }
 
-/** Group the live experiment list by server status; empty groups are hidden. */
+/**
+ * Group the live experiment list by server status; empty groups are hidden.
+ *
+ * ORDER WITHIN A GROUP IS THE CALLER'S. This preserves the incoming order rather
+ * than imposing one, so the Library's chosen sort survives the grouping — pass
+ * rows through `sortLibraryRows` first and each group keeps that order.
+ *
+ * THE DISAMBIGUATOR IS COMPUTED OVER THE WHOLE INPUT, NOT PER GROUP, and that is
+ * the correct scope rather than the convenient one: all four groups render on one
+ * screen, so two identically-titled records in different groups are just as
+ * confusable as two in the same one.
+ */
 export function summariesToQueueGroups(summaries: ApiExperimentSummary[]): QueueGroup[] {
-  const rows = summaries.map(toExperimentSummary);
+  const rows = libraryRows(summaries);
   return GROUP_ORDER.map(({ key, label }) => {
     const groupRows = rows.filter((r) => r.group === key);
     return { key, label, count: groupRows.length, rows: groupRows };
   }).filter((g) => g.count > 0);
+}
+
+/**
+ * The display rows for one rendered set, WITH collisions resolved.
+ *
+ * Two passes, and they cannot be collapsed into one: the first maps every summary
+ * so the display titles exist, and only then can the second know which of them
+ * collide. A single pass would have to guess.
+ */
+export function libraryRows(summaries: ApiExperimentSummary[]): ExperimentSummary[] {
+  const displayTitles = summaries.map((s) => stripLifecycleSuffix(s.title));
+  const duplicates = duplicateDisplayTitles(displayTitles);
+  return summaries.map((s, i) =>
+    toExperimentSummary(s, {
+      ambiguousTitle: isAmbiguousTitle(displayTitles[i], duplicates),
+    }),
+  );
 }
 
 /** The subcount line under the S1 title, e.g. "3 experiments · 1 ready to export". */

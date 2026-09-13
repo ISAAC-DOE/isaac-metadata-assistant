@@ -1,0 +1,480 @@
+/*
+ * THE EXPERIMENT LIBRARY — toolbar, folder trail, folder list, row metadata.
+ *
+ * THREE MECHANICAL CONSTRAINTS THIS FILE IS WRITTEN AGAINST, each of which caught
+ * an earlier draft of it rather than being anticipated:
+ *
+ * 1. EVERY CUSTOM PROPERTY NAMED HERE IS DECLARED IN `styles/tokens.css`. An
+ *    undeclared one makes its whole declaration invalid at computed-value time, so
+ *    it is DROPPED SILENTLY — which is how this repository shipped a capture
+ *    textarea computing `border-style: none` for an unknown number of releases.
+ *    The first draft of this file named THREE properties that exist nowhere
+ *    (`--surface-sunken`, `--action-strong`, `--danger-text`); they were found by
+ *    checking each name against `tokens.css`, not by looking at the screen, which
+ *    is the only method that works for a defect whose symptom is nothing.
+ *
+ * 2. NO RAW LITERAL IN A TOKENIZED AXIS. `__tests__/type-scale-and-spacing.test.ts`
+ *    ratchets the count of hand-authored `font-size` / `font-weight` /
+ *    `line-height` / spacing values and REFUSES a net increase. The first draft
+ *    added 21 font sizes, 8 weights, 4 line heights and 43 spacing literals; every
+ *    one is now a rung (`--font-size-*`, `--font-weight-*`, `--line-height-*`,
+ *    `--space-*`). Where a rung genuinely does not exist the site says so — see
+ *    the `border-radius` and `999px` notes, which are not in a ratcheted axis.
+ *
+ * 3. NO GREEN, NO RED, NO PASS/FAIL HUE. `__tests__/interaction-states.test.ts`
+ *    bans a reserved verdict colour in any interaction-state rule, and a filter
+ *    chip is not a verdict: `Ready to Export` selected must not read as a PASS
+ *    about the records inside it. The selected state is the ACTION blue plus a
+ *    border weight plus `aria-checked`, so it survives a reader who can see
+ *    neither hue.
+ */
+
+.library-toolbar {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  margin-bottom: var(--space-lg);
+}
+
+.library-toolbar-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-md);
+}
+
+/* --- search ---------------------------------------------------------------- */
+
+.library-search {
+  position: relative;
+  display: flex;
+  align-items: center;
+  /* `flex: 1 1 20rem` — a flex BASIS, which is a layout dimension and not part of
+     the 4px spacing rhythm the ratchet governs. Stated so the next reader does not
+     hunt for a `--space-*` rung that would be the wrong kind of value. */
+  flex: 1 1 20rem;
+  min-width: 14rem;
+}
+
+.library-search-icon {
+  position: absolute;
+  left: var(--space-sm);
+  color: var(--text-muted);
+  pointer-events: none;
+}
+
+.library-search-input {
+  width: 100%;
+  /* The right padding is reserved UNCONDITIONALLY, even with no clear control
+     rendered, so the text does not reflow the moment the first character is
+     typed. Both insets clear an absolutely-positioned child, so they are
+     optical alignment rather than rhythm: `--space-xl` on the left clears the
+     16px icon at `--space-sm`, `--space-lg` on the right clears the 22px
+     button. */
+  padding: var(--space-sm) var(--space-lg) var(--space-sm) var(--space-xl);
+  font: inherit;
+  font-size: var(--font-size-body);
+  color: var(--text-primary);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+}
+
+.library-search-input::placeholder {
+  color: var(--text-muted);
+}
+
+.library-search-input:focus-visible {
+  outline: 2px solid var(--action);
+  outline-offset: 1px;
+  border-color: var(--action);
+}
+
+/* The browser's own search affordance is suppressed: it clears the field without
+   telling this component, so the value and the rendered list would disagree. The
+   control beside it does the same job through the same state. */
+.library-search-input::-webkit-search-cancel-button {
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.library-search-clear {
+  position: absolute;
+  right: var(--space-xs);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  /* A hit target, not rhythm — 22px is the smallest square that keeps the 14px
+     glyph optically centred inside the input's own height. */
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  color: var(--text-muted);
+  background: none;
+  border: 0;
+  border-radius: 5px;
+  cursor: pointer;
+}
+
+.library-search-clear:hover {
+  color: var(--text-primary);
+  background: var(--surface-subtle);
+}
+
+.library-search-clear:focus-visible {
+  outline: 2px solid var(--action);
+  outline-offset: 1px;
+}
+
+.library-search-hint {
+  margin: 0;
+  font-size: var(--font-size-meta);
+  color: var(--text-muted);
+}
+
+/* --- sort ------------------------------------------------------------------ */
+
+.library-sort {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+}
+
+.library-sort-label {
+  font-size: var(--font-size-meta);
+  font-weight: var(--font-weight-medium);
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.library-sort-select {
+  padding: var(--space-sm) var(--space-sm);
+  font: inherit;
+  font-size: var(--font-size-body);
+  color: var(--text-primary);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+}
+
+.library-sort-select:focus-visible {
+  outline: 2px solid var(--action);
+  outline-offset: 1px;
+}
+
+/* --- facet chips ----------------------------------------------------------- */
+
+.library-facets {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-sm);
+}
+
+.library-facets-icon {
+  color: var(--text-muted);
+}
+
+.library-facet {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--space-xs);
+  padding: var(--space-xs) var(--space-sm);
+  font: inherit;
+  font-size: var(--font-size-meta);
+  font-weight: var(--font-weight-medium);
+  /* `--text-muted`, NOT `--text-tertiary`. The tertiary token is the app-wide
+     contrast debt this repository spent a session measuring; `--text-muted` is
+     the token the accessible fix landed on for small, weighted UI text. */
+  color: var(--text-muted);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  /* A pill. `999px` is the idiom for "fully rounded" and is not a spacing value —
+     `border-radius` is not one of the four ratcheted axes. */
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.library-facet:hover {
+  color: var(--text-primary);
+  border-color: var(--border-strong);
+}
+
+.library-facet:focus-visible {
+  outline: 2px solid var(--action);
+  outline-offset: 1px;
+}
+
+/* THE SELECTED STATE IS THREE SIGNALS, NOT ONE. The action tint, the stronger
+   border, and `aria-checked` on the element itself — so it survives both a reader
+   who cannot distinguish the hues and a reader who cannot see it at all. It is
+   deliberately NOT a green fill: `Ready to Export` selected must not read as a
+   verdict about the records inside it. */
+.library-facet.is-selected {
+  color: var(--action-hover);
+  background: var(--action-tint);
+  border-color: var(--action);
+}
+
+.library-facet-count {
+  font-variant-numeric: tabular-nums;
+  color: inherit;
+  opacity: 0.85;
+}
+
+/* --- folder trail ---------------------------------------------------------- */
+
+.library-breadcrumbs {
+  margin-bottom: var(--space-sm);
+}
+
+.library-crumbs {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2xs);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.library-crumb {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2xs);
+}
+
+.library-crumb-sep {
+  color: var(--text-muted);
+}
+
+.library-crumb-link {
+  padding: var(--space-2xs) var(--space-xs);
+  font: inherit;
+  font-size: var(--font-size-meta);
+  color: var(--action-hover);
+  background: none;
+  border: 0;
+  border-radius: 5px;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.library-crumb-link:hover {
+  background: var(--action-tint);
+}
+
+.library-crumb-link:focus-visible {
+  outline: 2px solid var(--action);
+  outline-offset: 1px;
+}
+
+.library-crumb-current {
+  padding: var(--space-2xs) var(--space-xs);
+  font-size: var(--font-size-meta);
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-primary);
+}
+
+/* --- folder list ----------------------------------------------------------- */
+
+.library-folders {
+  margin-bottom: var(--space-lg);
+}
+
+.library-folders-heading {
+  margin: 0 0 var(--space-xs);
+  font-size: var(--font-size-meta);
+  font-weight: var(--font-weight-semibold);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.library-folders-note {
+  margin: 0 0 var(--space-sm);
+  max-width: 62ch;
+  font-size: var(--font-size-meta);
+  line-height: var(--line-height-normal);
+  color: var(--text-muted);
+}
+
+.library-folder-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-sm);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.library-folder {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: var(--space-sm);
+  font: inherit;
+  font-size: var(--font-size-body);
+  color: var(--text-primary);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.library-folder:hover {
+  border-color: var(--border-strong);
+  background: var(--surface-subtle);
+}
+
+.library-folder:focus-visible {
+  outline: 2px solid var(--action);
+  outline-offset: 1px;
+}
+
+.library-folder-icon {
+  color: var(--text-muted);
+  flex: none;
+}
+
+.library-folder-name {
+  font-weight: var(--font-weight-medium);
+}
+
+.library-folder-count {
+  font-variant-numeric: tabular-nums;
+  font-size: var(--font-size-meta);
+  color: var(--text-muted);
+}
+
+.library-folder-chevron {
+  color: var(--text-muted);
+  flex: none;
+}
+
+/* --- results heading + empty result ---------------------------------------- */
+
+.library-result-count {
+  margin: 0 0 var(--space-sm);
+  font-size: var(--font-size-meta);
+  color: var(--text-muted);
+}
+
+.library-no-results {
+  padding: var(--space-xl);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+.library-no-results-title {
+  margin: 0 0 var(--space-xs);
+  font-size: var(--font-size-heading-sm);
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-primary);
+}
+
+.library-no-results-body {
+  margin: 0 0 var(--space-md);
+  max-width: 60ch;
+  font-size: var(--font-size-body);
+  line-height: var(--line-height-normal);
+  color: var(--text-muted);
+}
+
+/* --- the move-to-folder form ---------------------------------------------- */
+
+.library-move {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  padding: var(--space-md);
+  background: var(--surface-subtle);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.library-move-label {
+  font-size: var(--font-size-meta);
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-primary);
+}
+
+.library-move-hint {
+  margin: 0;
+  max-width: 62ch;
+  font-size: var(--font-size-meta);
+  line-height: var(--line-height-normal);
+  color: var(--text-muted);
+}
+
+.library-move-input {
+  padding: var(--space-sm);
+  font: inherit;
+  font-size: var(--font-size-body);
+  color: var(--text-primary);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+}
+
+.library-move-input:focus-visible {
+  outline: 2px solid var(--action);
+  outline-offset: 1px;
+  border-color: var(--action);
+}
+
+.library-move-actions {
+  display: flex;
+  gap: var(--space-sm);
+}
+
+.library-move-error {
+  margin: 0;
+  font-size: var(--font-size-meta);
+  line-height: var(--line-height-normal);
+  /* `--fail-text`, the token the rest of this app uses for a refusal sentence
+     (`.create-experiment-error`, queue.css). `--danger-text` was written here
+     first and IS DECLARED NOWHERE — measured against tokens.css before this file
+     ever rendered, which is the only method that finds a defect whose symptom is
+     that a declaration silently disappears. Never a raw hex: a token keeps this
+     consistent with every other refusal a reader meets. */
+  color: var(--fail-text);
+}
+
+/* --- the row metadata line ------------------------------------------------- */
+
+.exp-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2xs) var(--space-sm);
+  margin-top: var(--space-2xs);
+  font-size: var(--font-size-meta);
+  color: var(--text-muted);
+}
+
+.exp-meta-item {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+}
+
+.exp-meta-mono {
+  font-family: var(--font-mono);
+  letter-spacing: -0.01em;
+}
+
+.exp-meta-folder svg {
+  flex: none;
+}
+
+/* The proposals item is the one a reader is meant to act on, so it is the one
+   item in this line that is not plain muted text. The ACTION hue, not a warning
+   or an alert hue: a waiting proposal is work available, not a problem — and
+   this file's rule 3 forbids a verdict colour here in any case. */
+.exp-meta-proposals {
+  color: var(--action-hover);
+  font-weight: var(--font-weight-medium);
+}

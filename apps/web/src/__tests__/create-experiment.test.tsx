@@ -498,7 +498,26 @@ describe('My Experiments · Create Experiment', () => {
      * where an answer is recorded with its confirmation.
      */
     const form = document.querySelector<HTMLElement>('.create-experiment')!;
-    expect(form.querySelectorAll('input, textarea, select')).toHaveLength(2);
+    /*
+     * THREE CONTROLS, AND THEY ARE NAMED RATHER THAN COUNTED — the count was `2`
+     * and a bare number tells a future reader nothing about which two, so a third
+     * control could be added by bumping the digit and the assertion would go on
+     * reading as though it had checked something.
+     *
+     * The third is the optional FOLDER. It is not a scientific field and does not
+     * weaken the claim this block makes: a folder is an organizational path label
+     * with `title`'s properties — no evidence attached, reaching no exported
+     * record and no evidence sidecar — and the vocabulary scan below runs over the
+     * whole form including it. (It caught the first draft of that field's own hint
+     * copy, which used “Cu K-edge” as its example path.)
+     */
+    const controls = [...form.querySelectorAll<HTMLElement>('input, textarea, select')];
+    expect(controls.map((c) => c.tagName.toLowerCase())).toEqual([
+      'input', // title
+      'textarea', // the free-text note
+      'input', // folder (optional)
+    ]);
+    expect(screen.getByLabelText(LABELS.createExperimentFolderLabel)).toBeInTheDocument();
     for (const forbidden of [/technique/i, /facility/i, /sample/i, /energy/i, /edge/i, /sha256/i]) {
       expect(form.textContent, `${forbidden} is offered by the create form`).not.toMatch(forbidden);
     }

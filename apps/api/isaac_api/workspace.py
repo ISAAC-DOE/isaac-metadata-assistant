@@ -1805,6 +1805,29 @@ def _authoritative_signature(exp: "Experiment") -> str:
         "source": exp.source,
         "draft": exp.draft,
         "record_id": exp.record_id,
+        # ``folder`` IS IN HERE, AND IT HAS TO BE. It is not scientific state, and
+        # the key is named ``folder`` in a payload this docstring calls "the
+        # AUTHORITATIVE SCIENTIFIC state", so the tension is worth stating rather
+        # than leaving for a reader to spot. Two reasons, and the first is
+        # mechanical: ``save_versioned`` returns ``False`` and writes NOTHING when
+        # this hash is unchanged, so a ``folder`` outside this payload would make
+        # every first assignment a silent no-op — a route answering 200 over a value
+        # that never reached disk. The second is the ``If-Match`` contract, and it
+        # is the identical argument ``title`` rests on: a move that did not move
+        # ``version_token()`` could be silently overwritten by a second client
+        # holding the pre-move ETag.
+        #
+        # WHAT IT DOES NOT DO, which is the reason including it is safe: it does not
+        # reach ``submissions.content_signature``, which is computed from export
+        # units and never reads this field. So a folder move bumps ``rev`` and
+        # invalidates ETags while leaving an exported artifact `current` and a
+        # submitted revision still submitted — exactly as a rename does.
+        #
+        # An experiment written before folders existed hashes with ``"folder": ""``,
+        # and so does the same experiment re-read from disk (``from_state`` yields
+        # ``""`` for an absent key), so the added key causes NO spurious rev bump on
+        # legacy state — the property runs, notes and proposals each relied on.
+        "folder": exp.folder,
         "runs": [_run_signature_payload(r) for r in exp.sorted_runs()],
         # NOTES ARE AUTHORITATIVE STATE, and the argument is the one made for runs
         # one paragraph up rather than a new one. Capturing a note, mapping it,
@@ -2903,6 +2926,164 @@ def _run_artifact_presence(experiment: "Experiment", run: "Run") -> list:
     ]
 
 
+# --- folders: a VIRTUAL NESTED PATH LABEL, and nothing more -------------------
+#
+# WHAT THIS IS. One string on the experiment state document, e.g.
+# ``"Cu K-edge/2026 campaign"``. A folder PATH MATERIALISES when at least one
+# experiment is assigned to it, and there is NO durable folder entity anywhere —
+# no table, no row, no id, no owner. "Browse the folders" is therefore a
+# projection of the experiment list, computed by whoever is reading it.
+#
+# WHY NO ENTITY, stated so a future slice does not read the absence as an
+# oversight. A durable folder would need a table, a table needs a migration, and
+# a migration needs an operator to act before the feature works at all —
+# ``CLAUDE.md`` §15's hard stop, which no agent may lift. So the design was chosen
+# to fit the persistence that already exists: ``CLAUDE.md`` §15's 2026-08-07 lift
+# covers "app-owned tables for experiments and **their normal application state**",
+# which is the same sentence ``docs/ingestion-proposal-contract.md`` §8.1 cites for
+# storing proposals at ``state["proposals"]``. ``db_write.OWNED_TABLES`` is
+# UNCHANGED by folders, and `isaac_experiments` stores the whole document as one
+# ``jsonb`` column (``experiment_repository.Q_UPSERT_EXPERIMENT``), so a new key
+# needs no schema change of any kind.
+#
+# FOUR THINGS IT DELIBERATELY IS NOT, because shipping UI that implies any of them
+# would be claiming a capability this build does not have:
+#
+#   * a durable EMPTY folder — clear the last experiment out of a path and the
+#     path is gone, because the path was only ever the set of members;
+#   * an ACL, a share, or an ownership boundary — those need the trusted
+#     authentication boundary ISAAC does not have (§15, Dean 2026-08-12);
+#   * an ATOMIC RENAME — renaming a path means rewriting every member, which is
+#     N independent versioned writes with no transaction around them;
+#   * a FILESYSTEM PATH. Nothing derives a directory from this value: every path
+#     this module builds comes from ``Experiment.id`` (``scope_root`` /
+#     ``records_dir``). :func:`normalize_folder_path` additionally refuses ``.``
+#     and ``..`` segments so the value cannot even be mistaken for one.
+#
+# THE PRECEDENT IS ``title``: assistant-side, mutable, organizational, carrying no
+# evidence, reaching neither an official record nor a sidecar nor
+# ``submissions.content_signature``. ``folder`` has exactly that shape, and
+# ``test_experiment_folders.py`` pins each half of it.
+
+#: The one separator. A LABEL separator, not a path separator — see the block above.
+FOLDER_SEPARATOR = "/"
+#: Deepest path accepted. Not a storage limit — it is a legibility limit, and it is
+#: stated rather than silently enforced so a refusal can name it.
+FOLDER_MAX_DEPTH = 8
+#: Longest single segment. Matches nothing in the schema and claims to: a folder
+#: name is organizational text, and this is the point past which a breadcrumb stops
+#: being readable.
+FOLDER_MAX_SEGMENT_LENGTH = 64
+#: Longest whole path, separators included.
+FOLDER_MAX_PATH_LENGTH = 300
+
+#: Segments that are refused outright, because each of them makes the value LOOK
+#: like a filesystem path. It is not one and never becomes one (see the block
+#: above); this refusal is defence in depth against a later reader assuming
+#: otherwise, and costs a scientist nothing — no real folder is called ``..``.
+_FOLDER_REFUSED_SEGMENTS = frozenset({".", ".."})
+
+
+class FolderPathRefused(ValueError):
+    """A proposed folder path this application will not store.
+
+    Carries ``reason`` (a stable machine token) and ``message`` (a sentence for a
+    person) so a route can answer a typed refusal without re-deriving either. It is
+    a REFUSAL and never a truncation: nothing silently shortens or rewrites what a
+    scientist typed, for the reason ``routes.py`` records for the notes path —
+    converting a loud refusal into a silent edit of the reader's text is the
+    inversion this codebase has already had to undo once.
+
+    ``message`` DELIBERATELY DOES NOT SAY WHAT DID OR DID NOT HAPPEN, and the
+    omission is the point. The same refusal is raised on the create path (where the
+    honest sentence is "Nothing was created") and on the move path (where it is
+    "Nothing was changed"), and a single message cannot be true on both. Each route
+    appends its own outcome — a message that asserted the wrong one would be a
+    false claim about a write, which is the exact defect class this repository keeps
+    finding.
+    """
+
+    def __init__(self, reason: str, message: str) -> None:
+        super().__init__(message)
+        self.reason = reason
+        self.message = message
+
+
+def normalize_folder_path(raw: object) -> str:
+    """A storable folder path, or raise :class:`FolderPathRefused`.
+
+    ``""`` means UNFILED, and it is a real state rather than a missing one: every
+    experiment that has never been assigned reads ``""``, and clearing an
+    assignment returns it there. ``None`` and a whitespace-only string both
+    normalise to ``""`` — "put this nowhere" and "clear this" are the same act.
+
+    WHAT NORMALISATION DOES, exhaustively: split on :data:`FOLDER_SEPARATOR`, strip
+    surrounding whitespace from each segment, DROP empty segments (so ``"a//b"``,
+    ``"/a/b"`` and ``"a/b/"`` are all ``"a/b"``), then re-join. That is the whole
+    list. It never lower-cases, never transliterates, never substitutes a
+    character: a scientist's capitalisation and punctuation survive, because a
+    folder name is their label and not our identifier.
+
+    WHAT IT REFUSES, and each of these is a refusal rather than a repair:
+
+    * a non-string — a caller sent the wrong type, and no string is evidence for
+      what they meant;
+    * a segment that is ``.`` or ``..``, which would make a label read as a
+      relative path;
+    * a segment carrying a control character (including a newline or a ``NUL``),
+      which cannot be rendered and — measured in this repository three times over
+      — makes the file holding it invisible to ``grep``;
+    * a segment longer than :data:`FOLDER_MAX_SEGMENT_LENGTH`, a path deeper than
+      :data:`FOLDER_MAX_DEPTH`, or a whole path longer than
+      :data:`FOLDER_MAX_PATH_LENGTH`.
+
+    THE LIMITS ARE CHECKED AFTER STRIPPING, not before, so trailing whitespace a
+    scientist cannot see never pushes a legible name over a limit.
+    """
+    if raw is None:
+        return ""
+    if not isinstance(raw, str):
+        raise FolderPathRefused(
+            "invalid_folder",
+            "A folder is a text path such as “Cu K-edge/2026 campaign”.",
+        )
+    segments = [part.strip() for part in raw.split(FOLDER_SEPARATOR)]
+    segments = [part for part in segments if part]
+    if not segments:
+        return ""
+    if len(segments) > FOLDER_MAX_DEPTH:
+        raise FolderPathRefused(
+            "folder_too_deep",
+            f"A folder path can be at most {FOLDER_MAX_DEPTH} levels deep, and this one "
+            f"has {len(segments)}.",
+        )
+    for part in segments:
+        if part in _FOLDER_REFUSED_SEGMENTS:
+            raise FolderPathRefused(
+                "invalid_folder_segment",
+                "A folder name cannot be “.” or “..”.",
+            )
+        if any(ch < " " or ch == "\x7f" for ch in part):
+            raise FolderPathRefused(
+                "invalid_folder_segment",
+                "A folder name cannot contain control characters.",
+            )
+        if len(part) > FOLDER_MAX_SEGMENT_LENGTH:
+            raise FolderPathRefused(
+                "folder_segment_too_long",
+                f"Each folder name can be at most {FOLDER_MAX_SEGMENT_LENGTH} characters, "
+                f"and “{part[:20]}…” is {len(part)}.",
+            )
+    path = FOLDER_SEPARATOR.join(segments)
+    if len(path) > FOLDER_MAX_PATH_LENGTH:
+        raise FolderPathRefused(
+            "folder_path_too_long",
+            f"A whole folder path can be at most {FOLDER_MAX_PATH_LENGTH} characters, and "
+            f"this one is {len(path)}.",
+        )
+    return path
+
+
 @dataclass
 class Experiment:
     id: str
@@ -2912,6 +3093,36 @@ class Experiment:
     draft: dict
     answer_log: list = field(default_factory=list)
     record_id: str | None = None
+    #: This experiment's FOLDER PATH LABEL, or ``""`` for unfiled. Read the block
+    #: above :func:`normalize_folder_path` for the whole model; the two properties
+    #: that matter here are that it is ORGANIZATIONAL — it reaches no official
+    #: record, no evidence sidecar and no ``submissions.content_signature`` — and
+    #: that it IS part of :func:`_authoritative_signature`.
+    #:
+    #: THE SIGNATURE MEMBERSHIP IS FORCED, NOT A PREFERENCE, and it is the one
+    #: mechanical trap this field has. ``save_versioned`` returns ``False`` and
+    #: WRITES NOTHING when the authoritative signature is unchanged, so a ``folder``
+    #: outside that payload would make every first assignment a silent no-op: the
+    #: route would answer 200, the field would be set in memory, and the value would
+    #: never reach disk. Being inside it also makes the ``If-Match`` contract hold —
+    #: a second client holding the pre-move ETag is refused rather than silently
+    #: overwriting the move — which is exactly the argument ``title`` already rests
+    #: on, and ``title`` is this field's precedent in every other respect too.
+    #:
+    #: ITS TWO DISCLOSED COSTS, stated here rather than discovered later. An
+    #: assignment bumps ``rev`` and invalidates every held ETag (as a rename
+    #: already does), and because the change feed keys on this same signature, an
+    #: assignment emits an ``experiment`` event and costs every open client one
+    #: bundle refetch. It does NOT move ``submissions.content_signature``, which is
+    #: computed from export units and never reads this field — so a folder move can
+    #: never make a submitted record look un-submitted, and can never ask anyone to
+    #: re-export.
+    #:
+    #: A document written before folders existed has no ``folder`` key and hydrates
+    #: to ``""``, which is what a re-read of a freshly-assigned-then-cleared record
+    #: also yields — so the added signature key causes NO spurious ``rev`` bump on
+    #: legacy state, the same property runs, notes and proposals each relied on.
+    folder: str = ""
     #: Monotonic per-record version. Starts at 0 on create and on the canonical
     #: seed; bumped ONLY by ``save_versioned`` when the authoritative scientific
     #: state actually changes. Never derived — it is stored.
@@ -3099,6 +3310,11 @@ class Experiment:
             "draft": self.draft,
             "answer_log": self.answer_log,
             "record_id": self.record_id,
+            # ALWAYS WRITTEN, including as ``""``. Omitting the key when unfiled
+            # would make "no folder" and "written by a build without folders"
+            # indistinguishable on disk, and both hydrate to ``""`` anyway — so the
+            # omission would buy nothing and cost a reader the ability to tell.
+            "folder": self.folder,
             "rev": self.rev,
             "updated_utc": self.updated_utc,
             "generation": self.generation,
@@ -4171,6 +4387,18 @@ class Experiment:
             # only resolves in a workspace where ``records_dir`` exists, i.e. one where
             # something has been exported.
             record_id=_as_record_id(state.get("record_id")),
+            # READ VERBATIM, AND DELIBERATELY NOT RE-NORMALISED. What is persisted
+            # is what is served: normalising here would let a read silently change
+            # a scientist's label, and every value this application writes has
+            # already been through :func:`normalize_folder_path` at the route. A
+            # wrong-typed persisted value reads as ``""`` (unfiled) through
+            # :func:`_as_str` rather than raising — §11's rule is that a malformed
+            # PERSISTED value must be read, not refused, because the reader did
+            # nothing wrong and their record must not vanish. The bounded cost is
+            # disclosed rather than hidden: such a value is rewritten as ``""`` by
+            # the next versioned save, which loses an organizational label that NO
+            # route in this application can produce in the first place.
+            folder=_as_str(state.get("folder")),
             rev=int(state.get("rev") or 0),  # missing/legacy -> 0
             updated_utc=state.get("updated_utc") or "",  # __post_init__ -> created_utc
             generation=state.get("generation") or "",  # missing/legacy -> deterministic fallback
@@ -4360,8 +4588,39 @@ class Experiment:
         )
 
     def evidenced_field_count(self) -> int:
-        """Draft fields that carry a non-null value AND at least one evidence entry."""
-        fields = self.draft.get("fields") or {}
+        """Draft fields that carry a non-null value AND at least one evidence entry.
+
+        A WRONG-TYPED ``fields`` CONTAINER READS AS ZERO RATHER THAN RAISING, and
+        this is a PRE-EXISTING whole-list outage found while adding the Experiment
+        Library's columns — the third instance of a defect ``CLAUDE.md`` §11 records
+        twice already (a persisted non-iterable ``draft["pending"]``, and a
+        wrong-typed top-level ``assets``), each of which returned **500** from BOTH
+        ``GET /api/experiments/{id}`` and the whole-workspace ``GET /api/experiments``.
+
+        ``or {}`` WAS NOT A TYPE GUARD, and that is exactly what ``_as_str``'s own
+        docstring says about the same idiom: it catches ``None`` while every wrong
+        type here is TRUTHY. Measured with ``"fields": 7`` written into a persisted
+        state document: ``fields.values()`` raised ``AttributeError: 'int' object has
+        no attribute 'values'`` and one malformed record took My Experiments down for
+        every record in the workspace.
+
+        THE POLICY IS THE ONE §11 SETTLED, applied unchanged: *a malformed value in a
+        REQUEST can be refused, because the caller sent it and a typed 422 names what
+        to fix; a malformed value already PERSISTED cannot be refused to the reader,
+        who did nothing wrong and whose record would simply vanish.* So this is READ
+        as zero. Nothing is coerced and nothing is walked — ``enumerate(7)`` is not
+        available and ``str(7)`` would invent a field path the draft never named.
+
+        ZERO IS NOT A CLAIM THAT THE RECORD HAS NO EVIDENCE, and the distinction is
+        why this is safe to under-report here. This count is a SUMMARY and nothing
+        gates on it (the method's own C9 note records that); the export gate reads
+        the draft through ``draft_validator``, which refuses a malformed container
+        on its own terms. An under-reported summary beside a record that still
+        cannot export is strictly better than no record at all.
+        """
+        fields = self.draft.get("fields")
+        if not isinstance(fields, dict):
+            return 0
         return sum(
             1
             for env in fields.values()
@@ -4673,8 +4932,15 @@ def create_experiment(
     id: str | None = None,
     created_utc: str | None = None,
     session_id: str | None = None,
+    folder: str = "",
 ) -> Experiment:
     """Create (or upsert, given an explicit ``id``) and persist an experiment.
+
+    ``folder`` is an ALREADY-NORMALISED path label (``""`` = unfiled). It is not
+    normalised here deliberately: :func:`normalize_folder_path` REFUSES rather than
+    repairs, and a refusal belongs at the boundary that can answer a typed 422 to
+    the caller who sent the value. A programmatic caller passing an un-normalised
+    string gets it stored verbatim, which is the same contract ``title`` has.
 
     ``id`` / ``created_utc`` default to a random ULID + wall-clock timestamp for
     ad hoc use; the canonical seed passes EXPLICIT fixed
@@ -4695,6 +4961,7 @@ def create_experiment(
         draft=draft,
         generation=generation,
         session_id=session_id,
+        folder=folder,
     )
     exp.save()
     return exp

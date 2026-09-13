@@ -1234,6 +1234,55 @@ def _export_step_detail(result) -> str:
     )
 
 
+def _evidenced_field_value(exp: Experiment, path: str) -> str | None:
+    """One RECORD-LEVEL draft field's value, as a string, if it has actually been
+    established — else ``None``.
+
+    THE POINT OF THIS FUNCTION IS THE REFUSALS, not the lookup. It exists so that a
+    Library column can name a technique or a beamline without any of the four ways
+    that could become a false claim:
+
+    * ``status == "needs_confirmation"`` is WITHHELD. Such an entry is an open
+      question the draft is asking, and reporting it as a value would render a
+      question as a recorded fact — ``CLAUDE.md`` §5 in the most direct way this
+      function can breach it.
+    * A NON-STRING value is withheld. This is a display column; a dict or a number
+      here means the field is not the scalar this caller thinks it is, and
+      ``str()`` would manufacture a label out of a structure.
+    * An EMPTY or whitespace-only string is withheld — ``None`` and ``"   "`` are
+      the same absence, and one of them renders as a blank cell that looks like a
+      value.
+    * A MALFORMED draft is READ, NEVER RAISED. Every access below is a ``.get``
+      guarded by an ``isinstance``, so a persisted ``fields: 7`` or
+      ``"system.technique": "oops"`` answers ``None`` rather than taking the whole
+      list screen down — §11's measured rule, arrived at the hard way twice, that a
+      malformed PERSISTED value must be read and not refused to a reader who did
+      nothing wrong.
+
+    ``status`` IS NOT RESTRICTED TO ``verified``, and that is deliberate.
+    ``inferred`` is admissible because §5 permits a value inferred "by a
+    documented/stored rule" and the envelope carries that rule in its own
+    ``evidence`` array (measured: ``system.domain`` is exactly this shape). The one
+    status that is a question rather than an answer is the one excluded.
+
+    IT READS ``exp.draft`` AND NOT ``resolved_run_draft``, so it is the
+    RECORD-LEVEL declaration. See the disclosure beside its call sites in
+    :func:`_summary` for what that does and does not mean for a record with runs.
+    """
+    fields = exp.draft.get("fields")
+    if not isinstance(fields, dict):
+        return None
+    entry = fields.get(path)
+    if not isinstance(entry, dict):
+        return None
+    if entry.get("status") == "needs_confirmation":
+        return None
+    value = entry.get("value")
+    if not isinstance(value, str):
+        return None
+    return value.strip() or None
+
+
 def _summary(
     exp: Experiment,
     *,
@@ -1269,6 +1318,105 @@ def _summary(
         # would multiply-count inheritance and reporting the maximum would be
         # arbitrary. It is a summary count, not a verdict, and nothing gates on it.
         "evidenced_field_count": exp.evidenced_field_count(),
+        # --- LIB-001: the Experiment Library's own columns -------------------
+        #
+        # EVERY FIELD BELOW COSTS ZERO ADDITIONAL I/O, and that is a measurement
+        # rather than an expectation. `ws.list_experiments_with_hydration` reads each
+        # record's `experiment.json` ONCE and hands the whole document to
+        # `Experiment.from_state`, so `runs`, `proposals` and `folder` are already
+        # in memory by the time this function is called. There is no second read, no
+        # second query, and no N+1 —
+        # `test_experiment_library_list.py::test_the_library_columns_cost_no_extra_reads`
+        # instruments `Path.read_text` and pins the count against the same list read
+        # with the columns removed.
+        #
+        # THE PLANNING DOCUMENT SAID THE OPPOSITE AND IT WAS WRONG.
+        # `docs/superpowers/plans/2026-09-12-isaac-ux-ia-plan.md` §1.6 states "No run
+        # count. The Library cannot show 'how many Runs' without N further requests."
+        # Measured false: the runs live INSIDE the experiment state document (see
+        # `Experiment.runs`, whose own comment records that they are "inside ONE state
+        # document that is rewritten whole on every save"), so the count is a `len()`
+        # over data this read already paid for.
+        #
+        # WHAT IS DELIBERATELY ABSENT, named here so a future slice does not read the
+        # absence as an oversight:
+        #
+        #   * `submitted` — it needs `export_units()` + `submissions.content_signature()`
+        #     per record AND one `revision_history` read per record, which is a real
+        #     N+1 against the database. It is also `unknown` in every deployment that
+        #     exists today: `revision_history.reader()` returns `None` without `PGHOST`,
+        #     and migrations `0003`/`0004` are approved but NOT APPLIED anywhere
+        #     (`CLAUDE.md` §15). A `Submitted` filter would therefore match nothing,
+        #     always — which is worse than not offering one.
+        #   * a note count — nothing on the Library needs it, and `_capture_summary`
+        #     already serves it where it IS needed (the record screen).
+        "updated_utc": exp.updated_utc,
+        # WHOLE SECONDS, and the consequence travels with the value. `_now_iso`
+        # formats to second precision, so two writes inside one second are
+        # INDISTINGUISHABLE by this field — which is the measured defect that made
+        # the change feed abandon it as an ordering key in favour of
+        # `changed_at_rev`. It is published for DISPLAY and for the Library's sort,
+        # and it is load-bearing for NO correctness decision anywhere. Do not build
+        # a precondition, a cursor or a conflict check on it, and do not "fix" it by
+        # reaching for sub-second precision — the feed rejected that deliberately, as
+        # a repository-wide storage change trading a proven defect for an unproven
+        # assumption.
+        "run_count": len(exp.runs),
+        # OPEN PROPOSALS ONLY — the ones still awaiting a person's judgement. A
+        # decided proposal (`accepted`/`rejected`/`superseded`/`withdrawn`) is
+        # deliberately not counted: this number exists so the Library can offer
+        # "which records are waiting for me", and a record whose proposals were all
+        # answered is not waiting. `proposals.py` keeps decided proposals forever
+        # rather than deleting them, so a total would only ever grow and would
+        # answer a question nobody asked.
+        #
+        # `unreadable_proposals` are NOT counted either, and that is the honest
+        # reading rather than a convenient one: an entry this build cannot parse has
+        # no state, so it cannot be asserted to be open. They are preserved verbatim
+        # across saves (see `_hydrate_proposals`) and remain visible on the record's
+        # own proposals surface, which is where an unparseable entry can actually be
+        # looked at.
+        "open_proposal_count": sum(
+            1 for p in exp.proposals if p.state == proposals.STATE_OPEN
+        ),
+        # THE FOLDER PATH LABEL, or `""` for unfiled. There is no folder entity to
+        # report: a path exists exactly while some experiment names it, so the set of
+        # folders IS a projection of this column across this response. See the block
+        # above `workspace.normalize_folder_path`.
+        "folder": exp.folder,
+        # THE RECORD-LEVEL TECHNIQUE AND BEAMLINE, or `null`. Both are read from the
+        # draft envelope this list already holds, and both are EVIDENCED values a
+        # scientist or an extraction put there — nothing is inferred, defaulted or
+        # classified here (`CLAUDE.md` §5).
+        #
+        # THE PLANNING DOCUMENT WAS WRONG ABOUT THIS TOO, and more sharply:
+        # `2026-09-12-isaac-ux-ia-plan.md` §1.6 says "No technique / beamline /
+        # facility. The proposed `Beamline` column has no data source." Measured on
+        # the shipped worked example: `draft["fields"]["system.technique"]` is
+        # `{"value": "HERFD-XAS", "status": "verified", "evidence": [...]}` and
+        # `system.facility.beamline` is `{"value": "15-2", "status": "verified", ...}`.
+        # The data source is the draft the list already loads.
+        #
+        # THREE LIMITS, DISCLOSED RATHER THAN DISCOVERED — this is the same class of
+        # disclosure `evidenced_field_count` carries immediately above:
+        #
+        #   1. IT IS THE RECORD-LEVEL VALUE. Runs INHERIT BY REFERENCE (contract D2),
+        #      and measured on this build a run's own `draft["fields"]
+        #      ["system.technique"]` is `null` while `resolved_run_draft` resolves to
+        #      the record's value — so for the ordinary case this IS what every run
+        #      measured. A run that OVERRIDES it is not reflected here, which makes
+        #      this column incomplete for that record and never wrong about the level
+        #      it names.
+        #   2. A CREATED RECORD HAS NEITHER. Measured: `POST /api/experiments` yields
+        #      a draft with 0 fields, so both are `null` — the honest representation
+        #      of a value nothing has supplied, and the reason this is `null` rather
+        #      than a placeholder string.
+        #   3. A `needs_confirmation` FIELD IS NOT REPORTED. `_evidenced_field_value`
+        #      withholds it: an unconfirmed value is a question, not an answer, and
+        #      rendering it in a list column would present a pending question as a
+        #      recorded fact.
+        "technique": _evidenced_field_value(exp, "system.technique"),
+        "beamline": _evidenced_field_value(exp, "system.facility.beamline"),
         # REVIEW ITEM C5 — `all_units_exported()`, not `exported()`. For an
         # experiment with no runs these are the same function of the same field, so
         # the common case does not move. For a fan-out, `Experiment.record_id` stays
@@ -2530,6 +2678,36 @@ def _hydration_disclosure(outcome: ws.HydrationOutcome) -> dict | None:
         "five built-in example records also carry a derived, never-stored "
         "`scenario` label naming which example the row is; it is null for "
         "any other record. Read-only, and it states no validity verdict.\n\n"
+        "**Each row also carries what an experiment library has to show, and every "
+        "one of those fields is free** — this read already loads each record's whole "
+        "state document, so none of them costs an extra request or query:\n\n"
+        "* `updated_utc` — when the record's authoritative state last changed. It is "
+        "STORED, never derived. **It is formatted to whole seconds, so two changes "
+        "inside one second are indistinguishable by it.** Display it and sort by it; "
+        "it is deliberately load-bearing for no correctness decision, and the "
+        "record's change feed uses a durable revision position instead for exactly "
+        "that reason.\n"
+        "* `run_count` — how many runs this experiment holds. Each run exports its "
+        "own official record, so this is also how many records it will produce.\n"
+        "* `open_proposal_count` — ingestion proposals still awaiting a person's "
+        "judgement. Decided proposals are not counted (they are kept, never deleted, "
+        "so a total would only grow), and an entry this server could not parse is "
+        "not counted either, because it has no state to be open.\n"
+        "* `folder` — this experiment's folder path label, or `\"\"` when it is "
+        "unfiled. **There is no folder entity to ask about:** a path exists exactly "
+        "while at least one experiment names it, so the set of folders is a "
+        "projection of this column across this response. It is organizational only — "
+        "it reaches no exported record and no evidence sidecar, and it never alters a "
+        "scientific value or a validation result.\n"
+        "* `technique` and `beamline` — the record-level values from the draft, when "
+        "the draft actually carries them, else `null`. A value still awaiting "
+        "confirmation is reported as `null` rather than as a fact. **These are the "
+        "values declared at RECORD level.** Runs inherit them by reference, so for "
+        "the ordinary case they describe every run; a run that overrides one is not "
+        "reflected here. A freshly created experiment has neither, and says so with "
+        "`null` rather than a placeholder.\n\n"
+        "No other scientific content is added: there is no series, no descriptor, no "
+        "sample composition and no QC verdict on a list row.\n\n"
         "**This list is not a completeness claim, and on one deployment shape it "
         "cannot be — so it tells you when it is short.** Where experiments are "
         "stored in a database, a row whose working copy is missing — a pod restart "
@@ -2626,6 +2804,14 @@ class CreateExperimentRequest(BaseModel):
     for by the Guided Completion workflow, where an answer is recorded with its
     confirmation, rather than typed into a create form where it would arrive as
     an unsourced assertion.
+
+    ``folder`` IS NOT A SCIENTIFIC FIELD AND SO DOES NOT BREACH THE PARAGRAPH
+    ABOVE. It is an organizational path label with exactly ``title``'s properties —
+    assistant-side, mutable, carrying no evidence, reaching no official record and
+    no sidecar — and it is accepted here because "file it as I create it" is one of
+    the three moments the folder model has to support (create, move, import). An
+    absent or ``null`` value means unfiled, which is what every experiment created
+    before this field existed is.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -2642,6 +2828,17 @@ class CreateExperimentRequest(BaseModel):
             "Optional free-text note about what this experiment is. Stored as the "
             "record's source description; it is never parsed and never becomes a "
             "scientific value."
+        ),
+    )
+    folder: str | None = Field(
+        default=None,
+        max_length=ws.FOLDER_MAX_PATH_LENGTH,
+        description=(
+            "Optional folder path label to file this experiment under, e.g. "
+            "`Cu K-edge/2026 campaign`. Organizational only: it reaches no exported "
+            "record and no evidence sidecar. Absent, `null` or empty means unfiled. "
+            "A folder is not created as a thing — it exists because this experiment "
+            "names it, and it stops existing when nothing does."
         ),
     )
 
@@ -2738,10 +2935,28 @@ def create_experiment_route(
             },
         )
     description = (body.description or "").strip() or None
+    # NORMALISED AT THE BOUNDARY, AND REFUSED HERE RATHER THAN REPAIRED. The
+    # workspace layer stores what it is given; this is the one place that can tell
+    # the caller which of their value it would not accept, and answering a typed
+    # 422 is the same shape the blank-title refusal above returns. Nothing is
+    # created when the folder is refused — the record does not land unfiled with a
+    # warning, because a scientist who named a destination did not ask for that.
+    try:
+        folder = ws.normalize_folder_path(body.folder)
+    except ws.FolderPathRefused as refused:
+        return JSONResponse(
+            status_code=422,
+            content={
+                "error": refused.reason,
+                "message": f"{refused.message} Nothing was created.",
+            },
+        )
     # The ONE call. Which backend stores it is `experiment_repository`'s decision
     # and this route deliberately cannot tell — that is what keeps a future
     # durable repository from needing a route change.
-    exp = experiment_repository.repository().create(title=title, description=description)
+    exp = experiment_repository.repository().create(
+        title=title, description=description, folder=folder
+    )
     detail = _detail(exp)
     detail.update(vc.version_fields(exp))
     response.headers["ETag"] = exp.etag()
@@ -3035,6 +3250,233 @@ def rename_experiment(
         response.headers["ETag"] = exp.etag()
         return detail
 
+
+# --- 4a2. move into (or out of) a folder --------------------------------------
+#
+# WHY THIS IS A SEPARATE OPERATION AND NOT A SECOND FIELD ON THE RENAME.
+# `RenameExperimentRequest`'s docstring says, in terms, that `extra="forbid"` makes
+# "this operation writes the title and nothing else" a property of the CONTRACT —
+# and `test_about_and_openapi.py:620` quotes that sentence. Adding `folder` to that
+# body would have falsified a committed claim in order to save a route, which is
+# the trade this repository has been caught making before. So the move is its own
+# operation, following the domain-operation shape the discard block below argues
+# for (`.../runs/{id}/remove`, `.../assets/{id}/remove`, `.../overrides/clear`).
+#
+# ITS AUTHORIZATION BASIS, cited rather than assumed. The FEATURE is authorized by
+# `CLAUDE.md` §15's 2026-08-29 application-side extension, which names "the
+# scientist-facing Experiment Data Workspace" and the associated UI and tests. The
+# PERSISTENCE LOCATION is authorized by the 2026-08-07 lift's "app-owned tables for
+# experiments and **their normal application state**" — the same sentence
+# `docs/ingestion-proposal-contract.md` §8.1 cites for `state["proposals"]`, and
+# cited here for the same reason rather than re-argued. **NO new table, NO
+# migration, and `db_write.OWNED_TABLES` is UNCHANGED**: `isaac_experiments` stores
+# the whole document in one `jsonb` column, so a new key in it needs no schema
+# change and no operator action.
+#
+# WHAT THIS OPERATION CANNOT DO, and must not be extended to imply:
+#   * create an EMPTY folder — there is nothing to create; a path is its members;
+#   * rename a folder ATOMICALLY — that is N independent versioned writes with no
+#     transaction around them, and it is not offered rather than offered unsafely;
+#   * set an owner, a share or a permission — those need the trusted
+#     authentication boundary ISAAC does not have.
+
+
+class MoveExperimentRequest(BaseModel):
+    """Where to file an experiment, or `null`/`""` to unfile it.
+
+    ``extra="forbid"``, for the reason the two request models above give: it makes
+    "this operation writes the folder and nothing else" a property of the contract
+    rather than of this handler remembering. A body naming ``title``,
+    ``description``, ``draft`` or ``rev`` is a ``422``, never a partial write.
+
+    ``folder`` IS REQUIRED AND NULLABLE, rather than optional with a default. An
+    absent key would be ambiguous between "leave it where it is" (which this
+    operation has no use for — that is simply not calling it) and "unfile it", and
+    guessing between them on a write is exactly the kind of inference this project
+    forbids. Sending ``null`` or ``""`` unfiles; both mean the same thing and
+    neither is an error.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    folder: str | None = Field(
+        ...,
+        max_length=ws.FOLDER_MAX_PATH_LENGTH,
+        description=(
+            "The folder path label to file this experiment under, e.g. "
+            "`Cu K-edge/2026 campaign`. `null` or `\"\"` unfiles it. Required — an "
+            "absent key is rejected rather than read as either."
+        ),
+    )
+
+
+@router.patch(
+    "/experiments/{experiment_id}/folder",
+    tags=[TAG_EXPERIMENTS],
+    summary="File an Experiment in a Folder",
+    description=(
+        "Files an experiment under a folder path label, moves it to a different "
+        "one, or unfiles it — and returns the refreshed detail bundle. Nothing else "
+        "about the record is touched.\n\n"
+        "**A folder is a label on this experiment, not a container that exists "
+        "separately.** A path comes into existence because at least one experiment "
+        "names it, and it stops existing when the last one stops. There is "
+        "therefore nothing here to create and nothing to delete: filing the first "
+        "experiment under `Cu K-edge/2026` is what makes that path real, and moving "
+        "the last one out is what ends it. Paths nest with `/`, up to "
+        f"{ws.FOLDER_MAX_DEPTH} levels.\n\n"
+        "**This operation cannot make an empty folder, rename a folder, or set a "
+        "folder's owner or permissions, and no such capability exists anywhere in "
+        "this build.** Renaming a path means rewriting every member, which is many "
+        "independent writes with no transaction around them; ownership and sharing "
+        "need a trusted authentication boundary this deployment does not have.\n\n"
+        "**It changes no science.** The folder reaches no exported record, no "
+        "evidence sidecar and no content signature, and it alters no field value, no "
+        "run, no evidence and no validation result. Because the export-freshness "
+        "signal compares record CONTENT, filing an already-exported record leaves "
+        "its artifact `current` and never asks anyone to re-export; a submitted "
+        "revision stays submitted.\n\n"
+        "**It does move the record's version.** The folder is part of the record's "
+        "authoritative signature — it has to be, or the first assignment would be "
+        "silently discarded by the write path — so a successful move bumps `rev`, "
+        "issues a new `ETag`, and appears in the record's change feed as an "
+        "`experiment` change. A client holding the old `ETag` must re-read.\n\n"
+        "Requires the record's current `ETag` in `If-Match`. Omitted is `428`, "
+        "malformed is `400`, and stale is `412` with nothing written and the "
+        "record's current `ETag` echoed.\n\n"
+        "Whitespace around each name is trimmed and empty levels are dropped, so "
+        "`/a//b/` and `a/b` are the same path. Anything this server will not store "
+        "is REFUSED with a typed `422` and nothing is written — it is never "
+        "silently shortened or rewritten. Refused: a level called `.` or `..`, a "
+        "level containing a control character, a level over "
+        f"{ws.FOLDER_MAX_SEGMENT_LENGTH} characters, a path over "
+        f"{ws.FOLDER_MAX_DEPTH} levels deep, and a whole path over "
+        f"{ws.FOLDER_MAX_PATH_LENGTH} characters.\n\n"
+        "Re-sending the folder the record already holds is a no-op: it rewrites "
+        "nothing, does not advance the revision, and returns the same `ETag`.\n\n"
+        "It refuses with `409` when the `X-Isaac-Tutorial-Session` header is "
+        "present, and writes nothing. The built-in worked examples are fixed "
+        "teaching material, and a reset would revert the change anyway."
+    ),
+    response_description="The refreshed experiment detail bundle, with the record's `ETag`.",
+    responses={
+        **_R_STORAGE_UNAVAILABLE,
+        **_R_UNAUTHORIZED,
+        **_R_EXPERIMENT_NOT_FOUND,
+        **_R_PRECONDITION,
+        409: {
+            "description": (
+                "The request carried a worked-example session header. This "
+                "operation acts only on the ordinary workspace. Nothing was changed."
+            )
+        },
+        422: {
+            "description": (
+                "The folder path is not one this server will store, and NOTHING WAS "
+                "CHANGED. The typed `error` says which: `invalid_folder` (not text), "
+                "`invalid_folder_segment` (a level called `.`/`..`, or one carrying a "
+                "control character), `folder_segment_too_long`, `folder_too_deep`, or "
+                "`folder_path_too_long`. The value is never truncated to fit. This "
+                "status is also what the request layer returns for a body with no "
+                "`folder` key at all, or with any other key — an absent key is "
+                "refused rather than read as either “leave it” or “unfile it”."
+            ),
+            # THE `HTTPValidationError` REF IS CARRIED DELIBERATELY, for exactly the
+            # reason `_R_MALFORMED_CURSOR` and `_R_ANSWER_REFUSED` carry it:
+            # declaring a `422` of one's own makes FastAPI SKIP generating its own,
+            # which silently drops the framework's content ref on an operation that
+            # still has a path parameter and a request body it can reject on type.
+            # `test_operations_with_parameters_keep_the_validation_error_schema`
+            # caught its absence here on the first run, which is the guard working.
+            "content": {
+                "application/json": {
+                    "schema": {"$ref": "#/components/schemas/HTTPValidationError"}
+                }
+            },
+        },
+    },
+)
+def move_experiment_to_folder(
+    scope: TutorialScopeDep,
+    experiment_id: ExperimentId,
+    response: Response,
+    body: MoveExperimentRequest = Body(
+        ...,
+        description=(
+            "`{\"folder\": \"Cu K-edge/2026 campaign\"}` to file it, or "
+            "`{\"folder\": null}` to unfile it. Any other key is `422`."
+        ),
+    ),
+    if_match: str | None = Header(
+        default=None,
+        alias="If-Match",
+        description=(
+            "Required. The RECORD's current `ETag`, exactly as a record read "
+            "operation returned it."
+        ),
+    ),
+):
+    if scope is not None:
+        return JSONResponse(
+            status_code=409,
+            content={
+                "error": "ordinary_scope_required",
+                "operation": "PATCH /api/experiments/{experiment_id}/folder",
+                "header": TUTORIAL_SESSION_HEADER,
+                "message": (
+                    "Experiments are filed in the ordinary workspace. The built-in "
+                    "worked examples are fixed teaching material and a reset would "
+                    "revert the change. Nothing was changed."
+                ),
+            },
+        )
+    # NORMALISED AND REFUSED BEFORE THE LOCK IS TAKEN. A body this server will not
+    # store cannot become a write however the record turns out, so holding the
+    # record lock while deciding that would serialise other writers behind a
+    # request that was always going to fail.
+    try:
+        folder = ws.normalize_folder_path(body.folder)
+    except ws.FolderPathRefused as refused:
+        return JSONResponse(
+            status_code=422,
+            content={
+                "error": refused.reason,
+                "message": f"{refused.message} Nothing was changed.",
+            },
+        )
+    # Existence pre-check OUTSIDE the lock, as every other mutation does.
+    if ws.load_experiment(experiment_id, session_id=scope) is None:
+        return _not_found(experiment_id)
+    with ws.record_lock(experiment_id, session_id=scope):
+        exp = ws.load_experiment(experiment_id, session_id=scope)
+        if exp is None:
+            return _not_found(experiment_id)  # deleted in the pre-check->lock window
+        precondition = _check_if_match(if_match, exp)
+        if precondition is not None:
+            return precondition
+
+        exp.folder = folder
+        # `save_versioned`, NOT `save`, and for `folder` this is not merely the
+        # better choice — it is the only one that works. `folder` is inside
+        # `_authoritative_signature`, so this is what bumps `rev` and moves the
+        # ETag when the path actually changes, and what writes nothing and leaves
+        # the ETag alone when the client re-sent the path the record already had.
+        # Calling `save` would file the record while leaving its validator unmoved,
+        # and a second client holding the pre-move ETag would then pass its own
+        # precondition and silently overwrite this write.
+        _changed, stale = _save_versioned(exp, if_match)
+        if stale is not None:
+            return stale
+        # The full detail bundle, the same shape the rename returns and for the same
+        # reason: a client replaces its state in one hop. Its cost is the one the
+        # rename discloses — on a fully-answered record this pays one
+        # `dry_run_verdict`, which `pending_count() > 0` short-circuits on every
+        # record that still owes questions. Filing a record is a rare, human-paced
+        # act, not a hot path.
+        detail = _detail(exp)
+        detail.update(vc.version_fields(exp))
+        response.headers["ETag"] = exp.etag()
+        return detail
 
 
 # --- 4b. discard --------------------------------------------------------------

@@ -444,6 +444,15 @@ def test_the_record_level_routes_accept_exactly_the_record_level_paths(client):
 #: decides which side of the line it is on — which is the whole mechanism, not overhead.
 _NOT_A_FIELD_PATH_WRITE: dict[str, str] = {
     "PATCH /api/experiments/{experiment_id}": "renames the record; takes `title`, no field path",
+    # THE FOLDER MOVE, classified on exactly the rename's grounds one line up. It
+    # takes ONE organizational path label and no field path, and the label reaches
+    # no draft, no `fields` map, no run, no export unit and no sidecar — so there is
+    # no field for this probe to address it by and nothing for it to check the
+    # promise of. `test_experiment_folders.py` is where that claim is measured
+    # rather than asserted: it proves a move leaves `export_draft`, every run's
+    # `resolved_run_draft`, the official validation verdict and
+    # `submissions.content_signature` byte-identical.
+    "PATCH /api/experiments/{experiment_id}/folder": "files the record; takes `folder`, no field path",
     "POST /api/experiments/{experiment_id}/assets": "an asset row, addressed by asset id",
     "PATCH /api/experiments/{experiment_id}/assets/{asset_id}": "an asset row",
     "POST /api/experiments/{experiment_id}/assets/{asset_id}/remove": "an asset row",
