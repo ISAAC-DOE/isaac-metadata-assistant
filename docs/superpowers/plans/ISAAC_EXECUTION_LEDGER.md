@@ -68,19 +68,33 @@ BRANCH VERDICT:        *** MERGE-READY on the four original findings; the branch
                        ~~*** STILL DO NOT MERGE — the reason is now MINE ***~~ — superseded.
                        ~~4 BLOCKING findings from the earlier independent review~~ — addressed.
 
-VERIFIED ON THE FULLY SETTLED TREE (orchestrator's own runs, exit codes captured NOT piped,
-checkout named with every count per the measurement rules):
-  backend    .venv/bin/pytest -q -rs  (MAIN CHECKOUT) -> 7390 passed, 45 skipped, exit 0
-                                       baseline 7239/45 at 97c44c84 -> +151, skips UNCHANGED
-  frontend   npx vitest run           -> 208 files / 5638 tests, exit 0
-                                       baseline 208/5525 -> +113
+VERIFIED ON THE FULLY SETTLED TREE (orchestrator's own runs; exit codes from a redirect, NEVER
+through a pipe; checkout named with every count):
+  backend    .venv/bin/pytest -q -rs  (MAIN CHECKOUT) -> 7412 passed, 45 skipped, exit 0
+                                       baseline 7239/45 at 97c44c84 -> +173, skips UNCHANGED
+  frontend   npx vitest run           -> 208 files / 5638 tests, exit 0   (baseline 208/5525 -> +113)
   types      npx tsc -b               -> exit 0
   snapshot   --check with BOTH --out and --detail-out -> exit 0, both artifacts, no drift
-  browser    read-only 1043 passed / 557 skipped · mutation 121 · trusted 8 — all exit 0,
-             re-run on the settled tree. bench NOT RUN and reported unrun, never as passing.
-  a11y       darwin MEASURED, nothing moved: 560 passed / 200 skipped / 0 failed;
+  browser    re-run after the final BACKEND change, because the mutation and trusted suites
+             exercise the capture write path and a passing earlier run would not have covered it
+  a11y       darwin MEASURED, unmoved: 560 passed / 200 skipped / 0 failed;
              A11Y_BASELINE_TOTAL_NODES 877/877, 70 cells, DARWIN_CARRIED_FORWARD = [].
-             LINUX STILL UNVERIFIED — CI is the authority and a green macOS run is not evidence.
+             LINUX UNVERIFIED — CI is the authority; a green macOS run is not evidence of one.
+
+TEN ORCHESTRATOR ERRORS, every one caught by an implementer or a reviewer, every one recorded in
+place rather than quietly fixed. Errors 8-10 were found by the SECOND review, checking my own
+WITHDRAWAL of error 2 — which is the right thing to check, because a withdrawal can be as wrong as
+the claim it withdraws:
+  8  **I diagnosed the drifted line number and then left it in place.** §1 of the operator packet
+     still cited `:480`, and `:480` is no longer stale — it now resolves to **`DECISION D3`**, a
+     DIFFERENT decision. An operator following it would have read D3 believing it was D7.
+  9  my withdrawal **over-counted its own damage** — two sentences restored, not three.
+  10 I published a `grep` count with **no vantage point** — five when measured, **eight** at HEAD,
+     because the withdrawal itself added mentions. §17's rule about quoting the checkout applies to
+     a `grep` count exactly as it does to a test count.
+  Plus, from the fix slice: **seven** of my briefed findings were wrong, including an entire
+  reviewer table that was unreachable through the route, and a prescribed "exact" measure that
+  would have refused a legitimate transcript.
 
 SEVEN ORCHESTRATOR ERRORS, all caught by implementers or the reviewer, all recorded rather than
 quietly fixed. The worst was #2, published into an OPERATOR MIGRATION PACKET:
@@ -102,7 +116,13 @@ quietly fixed. The worst was #2, published into an OPERATOR MIGRATION PACKET:
   Plus: instructed a slice to add a site to `SITES` (would have made one guard mandate a copy
   change another guard fails) and to "remove the exemption and let the detector cover the site"
   (the detector did not cover it at all — removal would have left it SILENTLY UNCOVERED).
-  **FIVE slices refused an instruction of mine with evidence. All five were right.**
+  **SEVEN slices refused or corrected an instruction of mine with evidence. All seven were
+  right.** That is the single most useful pattern of this session, and the two most valuable were
+  refusals of things that would have LOOKED fine: adding a site to `SITES` (would have made one
+  committed guard mandate a copy change another committed guard fails) and "remove the exemption
+  and let the detector cover the site" (the detector did not cover it at all, so removal would have
+  left it **silently uncovered** — an exemption can conceal an ABSENCE of coverage rather than an
+  excess of it).
 
 A SIXTH E2E TRAP, found here because it produced a false regression signal: the READ-ONLY
   playwright config does NOT start a backend — `global-setup.ts:173` only PROBES
@@ -573,6 +593,75 @@ Recorded here so the ledger and the plan cannot disagree. Full rationale in the 
   `experiment` event and causes a bundle refetch on every open client.** It is the same cost a
   rename already pays, and it is a second, independent reason to defer folder rename (O(N) writes
   would be O(N) events).
+
+---
+
+## SECOND INDEPENDENT REVIEW (of `846f43ce..HEAD`) — **MERGE-after-fixes**, one BLOCKING defect, all fixed
+
+**The blocker was a §5 fabrication this branch INTRODUCED**, and it reached a durable proposal:
+`"The scan started <A>, and again <B>."` proposed **two** `acquired_start_utc` values, **silently**,
+and `_mint_transcript_proposals` mints one durable OPEN proposal per candidate — so a scientist
+could accept an acquisition timestamp the transcript never stated into a field that reaches an
+exported official record. `and again` sat in `_BARE_HEDGES` while **bare `again` had already been
+moved behind a mandatory `or` precisely because before a full instant it means REPEATED**, and
+`and again` is the stronger repeat marker. The module's two justifications contradicted each other
+about the same word, and the shipped `rule` string contradicted itself in one sentence.
+
+**WHY NO TEST SAW IT — and this is the durable lesson, not the regex.** The 510-cell sweep this
+ledger quoted approvingly is `f"The temperature was 425 K{sep}{connective} 3 K {tail}"`:
+**temperature-only, and every tail NON-EMPTY.** The instant rules and the terminal case are
+structurally outside it. **A cell count published without its shape reads as coverage it does not
+have** — the number was in this file, the scope was not, and the blocker lived exactly in the gap.
+The sweeps now state their own scope, and a second **1,134-cell** sweep covers all three
+restatement-carrying rules × 21 connectives (including every non-bridging bare form) × tails
+**including the empty one** × 2 separators.
+
+**FIVE SIBLINGS, ALL FIXED:** a valid restatement sandwiched between two label matches was withheld
+**silently** (measured **870 → 0** over 1,300 multi-label cells); the start rule disclosed "was not
+read" about values the **end** rule had read; **nine** whitespace characters bridged a hedge against
+a comment claiming none could; refusals quoted the wrong clause; and the pass-one residue tuple went
+**7 → 13** rows.
+
+### AND SEVEN OF MY BRIEFED FINDINGS WERE WRONG — including the reviewer's entire F2 table
+
+- **The F2 payload is UNREACHABLE.** `"the first run. " * 1999` has a **trailing period**, so it is
+  **1,999 segments against `MAX_SEGMENTS` 100** and is already refused `422 transcript_too_long`.
+  **I verified the segment count myself.** The 49.2 / 245.9 / 1,245.4 MB figures were **in-process
+  readings of a response the route never serialises.** The defect IS real through a *period-free*
+  payload, at **28.9 / 144.0 / 735.7 MB** — so *"245.9 MB is LARGER than the 165 MB the first two
+  ceilings closed"* is also wrong: **144.0 MB is SMALLER.** *The lesson: a resource figure measured
+  in-process is not the figure a client experiences, and the route is the only vantage point that
+  settles it.*
+- **My prescribed measure was not exact and would have refused a legitimate transcript.** I asked
+  for `disclosure_count × len(known_runs)` as "a fourth **exact** number". An `Abstention` carries
+  **no** `options`, so on this module's own documented worst legitimate case the product reads
+  **700 × 200 = 140,000** against a 20,000 ceiling and **refuses the transcript the third ceiling
+  exists to admit.** Shipped instead: the exact served sum over clarification options — **0** there,
+  **399,800** on the attack — and a mutant substituting my product is killed.
+- **F1's premise was BACKWARDS.** I said the justification was rule-specific ("*before a full
+  instant*") so a flat list could not express it. The opposite is true: **the repeat sense belongs to
+  the WORD, not the field** — `"425 K, and again 430 K"` is a second *measurement* exactly as
+  `"started X, and again Y"` is a second *start*. The justification was **under-general**.
+- **F5 listed five characters; there are NINE** (`\x1c \x1d \x1e \x85` too) — and my fix was
+  insufficient: `_STATEMENT_END` shares `_H_SPACE`, so narrowing it alone **created a new false
+  refusal**. The two predicates ask opposite questions about a line break and now use different
+  classes.
+- **F6's "`matches[-1]` is the statement the anchor came from"** holds only for the last region; a
+  `matches[-1]` mutant is killed by the first-region case.
+- **F3's framing implied the middle value becomes readable.** It is refused and **disclosed** —
+  condition 3 can never hold in a non-final region, so the fix provably adds disclosures and cannot
+  add a candidate.
+
+**An operational trap worth carrying:** the mutation harness's first version reported *"no tests
+ran"* as **SURVIVED for all thirteen** mutations — a plausible non-answer of exactly the class §11
+records for `tr`, `ugrep` and piped exit codes. It was caught by self-checking on the **unmutated**
+tree before use. **A mutation harness must be proved able to report RED before its greens mean
+anything.**
+
+**STATE AFTER THE FIXES, answered in one word each:** silent §5 **withholding — NONE** (measured
+870 → 0). Silent §5 **fabrication — STILL YES**, and named rather than rounded down: the **13**
+pass-one `_LABEL_OVERREACH_RESIDUE` rows, **pre-existing**, byte-identical to `main`, pinned
+wrong-way-round, out of scope by instruction.
 
 ---
 
