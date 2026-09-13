@@ -312,9 +312,26 @@ describe('the graph draws an experiment, and explains itself', () => {
      * this node come from?" verbatim — and the producer assertion in the test
      * above this one covers that side.
      */
+    /*
+     * ~~/one of the eight stable sections/~~ — the COUNT left this sentence on
+     * 2026-09-13. `serialize._GROUP_TITLES` declares eight, but `_OTHER`
+     * ("Other") is a producible NINTH (`serialize.py:248` falls back to it for
+     * any unrecognised top-level segment), so "eight" was wrong — found by
+     * independent review.
+     *
+     * The assertion now pins the MECHANISM, which is what a reader needs and
+     * what cannot go stale: grouping by the top-level segment of the official
+     * field path. A number here would be a transcription of a dict this file
+     * does not import — the same class of stale counter this session has now
+     * corrected three times.
+     */
     expect(
-      within(detail).getByText(/one of the eight stable sections a draft is grouped into/),
+      within(detail).getByText(/one of the stable sections a draft is grouped into/),
     ).toBeInTheDocument();
+    // And no count is asserted anywhere in the prose, so re-adding one fails here.
+    for (const why of detail.querySelectorAll('.expgraph-conn-why')) {
+      expect(why.textContent ?? '').not.toMatch(/(eight|nine|8|9) stable sections/);
+    }
     /*
      * SCOPED TO THE "WHY" PROSE, and the first version of this line was not —
      * which is worth recording because it would have forced the WRONG fix.

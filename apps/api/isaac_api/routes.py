@@ -1326,7 +1326,13 @@ def _summary(
         # `Experiment.from_state`, so `runs`, `proposals` and `folder` are already
         # in memory by the time this function is called. There is no second read, no
         # second query, and no N+1 —
-        # `test_experiment_library_list.py::test_the_library_columns_cost_no_extra_reads`
+        # `test_experiment_folders.py::test_run_count_is_the_documents_own_runs_and_costs_no_extra_read`
+        # — CORRECTED 2026-09-13: the file and test this used to name
+        # (`test_experiment_library_list.py::test_the_library_columns_cost_no_extra_reads`)
+        # DO NOT EXIST. A citation to a nonexistent guard is worse than none: it
+        # tells the next reader the property is pinned when nothing pins it there.
+        # Found by independent review; the real guard is named above and was itself
+        # rewritten in this session, because its original control arm could not fail.
         # instruments `Path.read_text` and pins the count against the same list read
         # with the columns removed.
         #

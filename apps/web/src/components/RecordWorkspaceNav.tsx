@@ -58,9 +58,12 @@ import type { ApiCaptureSummary } from '../lib/types';
  * A destination is an address. Rendering `<Link>` gives a real `href`, so a
  * workspace can be middle-clicked, copied, bookmarked and — the reason the
  * switch is a PUSH rather than the `replace` the old tab bar used — reached
- * again with the browser Back button. A reader who goes Fields -> Runs -> Graph
- * and presses Back twice is on Fields, which is what the control looks like it
- * promises.
+ * again with the browser Back button. A reader who goes Fields -> Runs ->
+ * Capture & Proposals and presses Back twice is on Fields, which is what the
+ * control looks like it promises. (~~Fields -> Runs -> Graph~~ — the Graph left
+ * this list on 2026-09-13, `EVG-002`; the example is re-pointed rather than the
+ * paragraph rewritten, because the PUSH-not-replace property it describes is
+ * unchanged.)
  *
  * ── THE SEARCH STRING IS COPIED, NEVER REBUILT ──────────────────────────────
  *

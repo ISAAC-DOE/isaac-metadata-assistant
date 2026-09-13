@@ -698,7 +698,24 @@ export function buildExperimentGraph(
          * removed — so it is not; it just stops being the explanation offered
          * to someone reading why two things are connected.
          */
-        why: `"${title}" is one of the eight stable sections a draft is grouped into, by the top-level segment of its official field paths.`,
+        /*
+         * ~~"one of the eight stable sections"~~ — **NINE, corrected 2026-09-13
+         * after an independent review counted them.** `serialize._GROUP_TITLES`
+         * declares eight (verified: 8 keys), but `_OTHER` — `"Other"` — is a
+         * PRODUCIBLE ninth: `serialize.py:248` is
+         * `_GROUP_TITLES.get(path.split(".")[0], _OTHER)`, so any official path
+         * whose top-level segment is not one of the eight lands in it.
+         *
+         * The sentence now says "one of the stable sections" without a count. That
+         * is deliberate rather than lazy: the count is derived from a dict this file
+         * does not import, so any number here is a transcription that goes stale the
+         * moment a section is added — which is exactly what happened. The MECHANISM
+         * (grouping by the top-level segment) is what a reader needs, and it is
+         * stated; `NODE_PRODUCERS.section` still carries the precise
+         * `_GROUP_TITLES (8 stable sections + Other)` for anyone who wants the
+         * inventory.
+         */
+        why: `"${title}" is one of the stable sections a draft is grouped into, by the top-level segment of its official field paths.`,
         label: null,
       });
     }
