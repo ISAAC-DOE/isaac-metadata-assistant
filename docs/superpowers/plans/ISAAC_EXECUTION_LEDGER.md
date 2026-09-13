@@ -613,15 +613,66 @@ data-governance boundaries are unchanged.
 
 | ID | Objective | Status | Depends | Key evidence / acceptance |
 |---|---|---|---|---|
-| MCP-001 | **MCP note creation + `client_request_key`** | PLANNED | CAP-006 | **THE LARGEST GAP IN THE PROGRAMME, and nobody had filed it.** There is no MCP note-creation operation and `isaac_propose_field_value` **requires** an existing `note_id` (`tools.py:1654-1657`). **Without this, not one word of a Claude conversation can enter ISAAC, even with every external gate open.** Vendor **retry behaviour is UNKNOWN** — hence the idempotency key is not optional |
-| MCP-002 | Default read bounds | PLANNED | — | now a **vendor-compatibility** requirement: documented tool-result ceiling ≈ **150,000 characters**; ISAAC's unbounded reads exceed it ≈ **50×** at 1,000 runs |
-| MCP-003 | `/api/health` MCP disclosure | PLANNED | — | **MCP is the only seam that says nothing about itself on the wire** — which is exactly why the hosted 404's cause is unresolvable from outside *by construction* |
-| MCP-004 | Operator preflight tooling | PLANNED | MCP-003 | must prove a token's `aud` matches **character-for-character**: RFC 8707 permits audience *mapping*, ISAAC's check is exact, so a mapping AS gives a **100%-failing deployment that looks correct from both ends**. Ship the status-code decision table: 404 unmounted / 405 mounted / 403 loopback+remote / 401 OAuth-no-token |
-| MCP-005 | `note` kind in the change feed | PLANNED | — | notes reach the feed today only via `_authoritative_signature` hashing, so the trigger fires on **any** authoritative change |
-| MCP-006 | Proposal deep link | PLANNED | UX-011 | **no `?proposal=` parameter exists** |
-| MCP-007 | `create_run` retry-ambiguity sentence | PLANNED | — | one free sentence |
-| MCP-008 | `IngestionProposalsPanel` destructive-silent-failure fix | PLANNED | — | `IngestionProposalsPanel.tsx:786` — a failed background refresh replaces the list and can destroy typed text **with no user action at all**. `UnmappedNotesPanel` has the fixed shape; this one does not |
+| MCP-001 | **MCP note creation + `client_request_key`** | **IMPLEMENTED + INDEPENDENTLY REVIEWED (`23fa2256`, review fixes `e0d6ee9d`) — on the branch, PR #248, NOT YET ON `main`; row was stale, corrected 2026-09-13** | CAP-006 | **THE LARGEST GAP IN THE PROGRAMME, and nobody had filed it.** There is no MCP note-creation operation and `isaac_propose_field_value` **requires** an existing `note_id` (`tools.py:1654-1657`). **Without this, not one word of a Claude conversation can enter ISAAC, even with every external gate open.** Vendor **retry behaviour is UNKNOWN** — hence the idempotency key is not optional |
+| MCP-002 | Default read bounds | **IMPLEMENTED + INDEPENDENTLY REVIEWED (`23fa2256`, review fixes `e0d6ee9d`) — on the branch, PR #248, NOT YET ON `main`; row was stale, corrected 2026-09-13** | — | now a **vendor-compatibility** requirement: documented tool-result ceiling ≈ **150,000 characters**; ISAAC's unbounded reads exceed it ≈ **50×** at 1,000 runs |
+| MCP-003 | `/api/health` MCP disclosure | **IMPLEMENTED + INDEPENDENTLY REVIEWED (`23fa2256`, review fixes `e0d6ee9d`) — on the branch, PR #248, NOT YET ON `main`; row was stale, corrected 2026-09-13** | — | **MCP is the only seam that says nothing about itself on the wire** — which is exactly why the hosted 404's cause is unresolvable from outside *by construction* |
+| MCP-004 | Operator preflight tooling | **IMPLEMENTED + INDEPENDENTLY REVIEWED (`23fa2256`, review fixes `e0d6ee9d`) — on the branch, PR #248, NOT YET ON `main`; row was stale, corrected 2026-09-13** | MCP-003 | must prove a token's `aud` matches **character-for-character**: RFC 8707 permits audience *mapping*, ISAAC's check is exact, so a mapping AS gives a **100%-failing deployment that looks correct from both ends**. Ship the status-code decision table: 404 unmounted / 405 mounted / 403 loopback+remote / 401 OAuth-no-token |
+| MCP-005 | `note` kind in the change feed | **IMPLEMENTED + INDEPENDENTLY REVIEWED (`23fa2256`, review fixes `e0d6ee9d`) — on the branch, PR #248, NOT YET ON `main`; row was stale, corrected 2026-09-13** | — | notes reach the feed today only via `_authoritative_signature` hashing, so the trigger fires on **any** authoritative change |
+| MCP-006 | Proposal deep link | **IMPLEMENTED + INDEPENDENTLY REVIEWED (`23fa2256`, review fixes `e0d6ee9d`) — on the branch, PR #248, NOT YET ON `main`; row was stale, corrected 2026-09-13** | UX-011 | **no `?proposal=` parameter exists** |
+| MCP-007 | `create_run` retry-ambiguity sentence | **IMPLEMENTED + INDEPENDENTLY REVIEWED (`23fa2256`, review fixes `e0d6ee9d`) — on the branch, PR #248, NOT YET ON `main`; row was stale, corrected 2026-09-13** | — | one free sentence |
+| MCP-008 | ~~`IngestionProposalsPanel` destructive-silent-failure fix~~ | **CLOSED — ALREADY SHIPPED; the row was stale, measured 2026-09-13** | — | ~~`IngestionProposalsPanel.tsx:786` — a failed background refresh replaces the list and can destroy typed text **with no user action at all**. `UnmappedNotesPanel` has the fixed shape; this one does not~~ — **the last clause was the stale half.** The fix landed in `6a4296b6` (an ancestor of `main`) **six hours after** the residue was named in `49a26e1f` — `git merge-base --is-ancestor 49a26e1f 6a4296b6` exits 0 — so this row was TRUE when written and was never updated. **Both panels carry the identical gate** `wasSilent && listStatusRef.current === 'data'` (`IngestionProposalsPanel.tsx:1029`, `UnmappedNotesPanel.tsx:516`), which is the non-obvious part: branching on `wasSilent` alone swallowed a silent failure arriving while the first LOUD load was in flight, leaving a permanent spinner with no disclosure and no way out. Pinned by `I-2` (`:2073`) with a **negative control** at `:2119` and two `MUTATION-GUARDED` editor cases; **80 passed, exit 0**, measured directly. **Cited `:786` without reading it** — that line is a *comment describing the fix*, which is how the row survived. `:1821`'s narrower "latent in-flight-first-load case" is a DIFFERENT claim and stays open. |
 | MCP-009 | **Decision to surface, not a task:** authless remote MCP is vendor-**permitted** | PROPOSED | — | auth type `none` is documented "Supported". **So OAuth is ISAAC's choice, not a vendor gate** — a stronger and cheaper argument to Dean. **But it does not close EXT-01:** an OAuth bearer yields a `ServicePrincipal`, so **EXT-01 survives EXT-02** |
+
+### EIGHT OF THE NINE PHASE-E ROWS WERE STALE, AND THE STALENESS WENT BOTH WAYS (2026-09-13)
+
+**Every `MCP-001`…`MCP-008` row above read `PLANNED` while the work was done.** Seven were built in
+`23fa2256` and reviewed in `e0d6ee9d`, and `MCP-008` was fixed on `main` in `6a4296b6` — **before
+this branch even started**. Nobody updated a row.
+
+**This is the mirror image of the failure mode CLAUDE.md §11 warns about**, and it is worth naming
+separately because the remedy is different. That file's repeated lesson is that a stale *"still
+open"* list sends a future session to build what exists. Here the same rows *also* made seven
+genuinely-delivered items **invisible as progress**, so the programme under-reported itself by a
+whole phase. A status column that is never revised is not conservative; it is wrong in whichever
+direction the work moved.
+
+**How `MCP-008` in particular survived: the row cited `IngestionProposalsPanel.tsx:786` and that
+line is a comment *describing the fix*.** Anyone who grepped the file found the string, and anyone
+who opened the line found prose about the defect — which reads exactly like an open defect if you
+do not read the surrounding thirty lines. I made this error earlier in this same session, cited the
+line as a live defect, and was corrected by measurement. **A `file:line` citation in a ledger row
+decays faster than the claim it supports**, because the line moves and the row does not.
+
+**What was measured, per row, rather than inferred from the commit message** (the message says
+`MCP-001..019`, which is not evidence that any particular row shipped):
+
+| Row | Measured at | Evidence |
+|---|---|---|
+| MCP-001 | `mcp/tools.py` | `name="isaac_capture_note"` present; **17** `client_request_key` sites |
+| MCP-002 | `mcp/tools.py:464` | `_BOUNDED_PENDING_NOTE`; `test_sending_only_the_id_is_now_bounded_and_always_carries_a_page_block` |
+| MCP-003 | `routes.py` | `"mcp"` block on the health payload |
+| MCP-004 | `docs/mcp-operator-preflight.md` | **240** lines; `test_mcp_preflight.py` (+900) |
+| MCP-005 | `change_feed.py:659,681` | `KindCollector(kind="note", …)` — the precise signal, no longer keyed on `experiment` |
+| MCP-006 | `routes.ts:230` | `RECORD_PROPOSAL_PARAM = 'proposal'`; `proposal-deep-link.test.tsx` (+745) |
+| MCP-007 | `mcp/tools.py` | the retry-ambiguity sentence, in the **description** and not a comment — *"the description is the only part a model reads before calling"* |
+| MCP-008 | both panels | `wasSilent && listStatusRef.current === 'data'`; **80 passed, exit 0** |
+
+**`MCP-002`'s first measurement was a FALSE NEGATIVE and is the reason this table quotes a site
+rather than a count.** A grep for `DEFAULT_(READ|LIST)_LIMIT|_MAX_LIMIT` returned **0**, which reads
+as "not built"; the bound is real and is named `_BOUNDED_PENDING_NOTE`. **A zero-hit grep for a
+name you invented is not a measurement of absence** — it is a measurement of your guess about the
+name, which is the same trap §11 records for `rg` without `-a`, arriving through vocabulary instead
+of bytes.
+
+**`MCP-005` closes an item CLAUDE.md's 2026-09-10 entry named as residue** (*"a `note` kind in the
+change feed (the precise signal)"*): notes previously reached the feed only by being hashed into
+`_authoritative_signature`, so the trigger fired on **any** authoritative record change. That
+imprecision was stated in the code rather than hidden, and it is now gone.
+
+**Deliberately NOT re-statused:** `MCP-009` stays `PROPOSED` — it is a decision to surface, not
+work, and nothing about it has been decided. `MCP-020`/`MCP-021`/`SEC-001` stay `BLOCKED` on
+`EXT-02`; no application-side change can move them, and none of the above touches an external gate.
+**Nothing here is on `main`** — all seven sit on PR #248.
 
 ---
 

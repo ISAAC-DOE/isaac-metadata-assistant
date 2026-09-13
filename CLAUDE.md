@@ -1630,8 +1630,29 @@ Current state:
   `{status:'error'}` regardless of silence, replacing the whole list with `BackendDown` beside a
   **stale** count. Before this change a failure was always the consequence of something the reader
   did; the live refresh made the loss reachable with **no user action at all**. Now a silent
-  failure leaves the list untouched and discloses inline. `IngestionProposalsPanel.tsx:786` has the
-  **identical shape and is unfixed** — named residue.
+  failure leaves the list untouched and discloses inline. ~~`IngestionProposalsPanel.tsx:786` has the
+  **identical shape and is unfixed** — named residue.~~ — **OVERTAKEN, NOT FALSE, and corrected
+  2026-09-13; it is struck rather than deleted because "is unfixed — named residue" is exactly the
+  kind of claim a future session acts on by building it a second time.** The claim was TRUE when it
+  was committed and was fixed **six hours later the same day**: the residue was named in `49a26e1f`
+  (12:41:10 -0700) and `IngestionProposalsPanel` received the identical fix in `6a4296b6`
+  (18:50:34 -0700), an ancestor of `main`. Re-derive rather than quoting:
+  `git merge-base --is-ancestor 49a26e1f 6a4296b6` exits 0, so the ordering is mechanical.
+  **Both panels now carry the SAME gate**, which is the part worth keeping: the naive repair
+  (branch on `wasSilent` alone) swallowed a silent failure that arrived while the very first LOUD
+  load was still in flight, leaving a permanent spinner with no disclosure and **no way out** —
+  worse than the `BackendDown` it replaced. The shipped condition is
+  `wasSilent && listStatusRef.current === 'data'` — intent AND something on screen to protect — at
+  `IngestionProposalsPanel.tsx:1029` and `UnmappedNotesPanel.tsx:516`. It is **pinned, not merely
+  present**: `ingestion-proposals-panel.test.tsx` holds `I-2: a background reload that FAILS does
+  not destroy an open reason box (Reject)` (`:2073`) beside a **negative control** proving a LOUD
+  first-read failure still shows `BackendDown` (`:2119`), plus two `MUTATION-GUARDED` cases for an
+  open "Correct the Value" editor and an open Supersede box. Measured this session: **80 passed,
+  exit 0** (`npx vitest run src/__tests__/ingestion-proposals-panel.test.tsx`, exit read directly
+  and not through a pipe). **`:1821`'s "remaining latent in-flight-first-load case" is a DIFFERENT
+  and NARROWER claim and is deliberately NOT touched here** — this correction closes the
+  destructive-silent-failure shape only, and claiming the other closed without measuring it would
+  repeat the very error §15 records four times.
 
   **A FALSE PRIVACY DISCLOSURE, AND THE GUARD THAT SHOULD HAVE CAUGHT IT DID NOT COVER IT.**
   `voiceAudioHandling` told scientists *"This application declares no upload endpoint for it to
@@ -1668,7 +1689,12 @@ Current state:
   the same claim — it is about inferability suggestions and remains true; do not "correct" it.
 
   **Named rather than implied, and still not done:** a `note` kind in the change feed (the precise
-  signal); `IngestionProposalsPanel`'s identical destructive-silent-failure shape; pinning an
+  signal); ~~`IngestionProposalsPanel`'s identical destructive-silent-failure shape~~ — **DONE,
+  corrected 2026-09-13; see the struck residue claim earlier in this same session entry for the
+  evidence, the two `file:line` sites and the measured 80/80. This is the SECOND site in §11
+  asserting the one stale item, and both are corrected in the same change, because "the item is
+  still open" is itself a checkable claim and a partially-swept correction is what this file has
+  been caught publishing before**; pinning an
   open-form note across ANY refetch (the reader's own write-success reload reproduces the same
   unmount, so gating only the `activity` trigger would look closed and not be); **pause/resume
   during recording**, which `MediaRecorder` supports and this build does not offer — deliberately
