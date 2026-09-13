@@ -524,6 +524,73 @@ Recorded here so the ledger and the plan cannot disagree. Full rationale in the 
 
 ---
 
+## REMEDIATION OF THE FOUR BLOCKING FINDINGS (2026-09-12) — and FOUR orchestrator errors
+
+Every finding was reproduced FIRST-HAND by the orchestrator before any brief was written. What
+follows is what the remediation slices found that the briefs did not, kept because a brief's
+errors are the most useful thing a slice reports.
+
+### FOUR ERRORS IN MY OWN BRIEFS, each caught by an implementer and each recorded rather than fixed quietly
+
+1. **I ASSERTED MANIFEST MEMBERSHIP I HAD NOT MEASURED, and got it backwards.** My I-2 brief said
+   *"`ExportReadiness.tsx` IS [in the served manifest]; `HelpPanel.tsx` and `GuidedCompletion.tsx`
+   are NOT."* Measured: **both `apps/web/src/components/HelpPanel.tsx` and
+   `apps/web/src/screens/GuidedCompletion.tsx` ARE in `served_content_manifest`.** I never checked
+   `HelpPanel.tsx` at all, and I checked `components/GuidedCompletion.tsx` — **a path that does not
+   exist** — and reported its absence as the file's absence. So the slice was told its work could
+   not drift the snapshot when it was guaranteed to. **The durable lesson is §17's own, arriving by
+   a new route: a manifest claim is a measurement, and "frontend only, so the snapshot is not my
+   problem" has now misled a fourth slice.**
+2. **I DEFENDED A REAL DEFECT AS A FALSE POSITIVE, in writing, in an addendum.** I told the I-2
+   slice that `ValidateReview.tsx:420`'s *"Beyond the official schema, ISAAC applies **one gate of
+   its own**"* was correct because that screen validates a pasted record through
+   `POST /api/validate/record`, where two gates is right. **It does not.** That sentence's own last
+   clause sends the reader to the Standalone Validator — so it is not the standalone validator —
+   and the comment nine lines above it (`ValidateReview.tsx:411`) names **`export_draft`**. On that
+   path `export.py` has three refusal returns, **two of them ISAAC's own**. Worse, the copy breaks
+   `lib/officialAttribution.ts`'s own register, whose header (`:163-168`) says export-gate copy
+   *"may not name ONE of ISAAC's two gates either … so 'this is an exactness refusal' would be the
+   same defect one level finer"* — and the sentence both undercounts AND names it. **The slice was
+   right to mark it CONTESTED and right not to touch a file outside its lane; my defence is
+   retracted.** It is now its own slice.
+3. **My I-1 brief said "four axe/layout-measured surfaces" and "four e2e sites".** Three surfaces
+   are axe-measured (`QA-018`), and the true count of inverted *assertions* is three plus one ready
+   gate — `visual-sweep.spec.ts:1680` is a synthetic node, as the brief suspected but asserted
+   anyway.
+4. **I listed the back buttons at `GuidedCompletion.tsx:1253`/`:1579`; the slice reported
+   `:1292`/`:1618`.** **NEITHER of us was wrong** — the slice added 91 lines above them between the
+   two readings. Recorded because a line-number "correction" that is really a moving file is worth
+   distinguishing from an error, and this file has conflated the two before.
+
+### What the slices found that the review did not
+
+- **The export-gate claim class had FIVE live sites, not two.** Beyond `HelpPanel.tsx:294` and
+  `GuidedCompletion.tsx:826`, the I-2 slice found `HelpPanel.tsx:60` (*"only when **both** export
+  gates pass"*, rendered in the workflow list), `GuidedCompletion.tsx:1235` and a comment at
+  `:1198` vouching for it. All five corrected; the sixth (`ValidateReview.tsx:420`) is its own
+  slice.
+- **A SUITE WAS LEFT RED BY A CROSS-LANE RENAME.** `GuidedCompletion`'s back button became
+  *"← Back to Record Fields"*, and the only assertion on the retired string is
+  `apps/web/e2e/mutation/edit.spec.ts:293` — another agent's lane, so it could not be fixed by the
+  slice that broke it. **Verified red by the orchestrator.** This is the concrete cost of lane
+  discipline and the reason a cross-lane residue must be dispatched, never noted.
+- **Two of the I-2 slice's OWN guards were defective and its mutation round caught both**: the
+  `ValidateReview` exemption was **dead code** (an inline lookahead did the exempting, so the
+  documented mask achieved nothing), and a citation pattern's leading `\b` **cannot match** where
+  an `<h3>` runs straight onto a `<p>` in `textContent` — the `QA-011` family, hit live.
+- **The reviewer's guard ratios did not reproduce.** Reviewer: Family A 10/20, Family B 2/12.
+  Slice's corpora: **14/19** and **10/20** pre-fix → **19/19** and **20/20** after, plus a new
+  Family C at 6/6. Direction and cause reproduce exactly; the numbers do not, and they are labelled
+  as the slice's own rather than the reviewer's. **Neither set is "the" ratio** — a detector's score
+  is a property of the corpus it is scored on, which is why both are recorded with their owner.
+- **`UX-021` is PARTIALLY closed and measured**: rendered body words **486 → 486** and sections
+  **7 → 7** (word-neutrality paid for by trimming a restatement, flagged as deliberate), the
+  "gates" section 82 → 66, and the `^…$` / *"Python's `$` also matches before a trailing newline"*
+  jargon is **gone from rendered copy** and lives in the source comment. 486 is still far above the
+  critique's target, so the row stays open.
+
+---
+
 ## INDEPENDENT REVIEW OF THE INTEGRATED PHASE A — **MERGE-after-fixes**
 
 Reviewer implemented none of the work. It **re-derived every reported number exactly** (backend
