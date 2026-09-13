@@ -1226,6 +1226,43 @@ applied by the orchestrator, because that file is another lane's and a concurren
 produced exactly the conflict §17 warns about. `docs/migration-approval-packet-0002.md`'s two Minor
 items (M-3, M-4) stay in the orchestrator's lane.
 
+### `VAL-001` — **MEASURED AS ALREADY SATISFIED. NO CODE WAS WRITTEN, and that is the finding.**
+
+`VAL-001` was `PLANNED`, depending on `UX-012`. Measured 2026-09-13 against a locally-served
+build rather than assumed, and every one of §20's requirements already holds:
+
+| §20 requirement | where it already is |
+|---|---|
+| separation of schema verdict / exactness / advisory / readiness | **on the wire**: `POST /api/validate/record` returns `ok`, `schema_ok`, `errors`, `exactness_errors`, `warnings`, `advisory`, `gating`, `summary` — probed directly, eight keys |
+| exactness findings are NOT reported as official-schema errors | `VerdictCard.tsx:62` branches on `schemaOk`; `:155-163` renders the findings under their own heading |
+| an advisory can never flip an official PASS into FAIL | `RecordValidator.tsx:306` — the heading itself reads *"Advisory notes (N) — these do not affect the verdict"* |
+| detailed technical output progressively disclosed | two `<details>` (`RecordValidator.tsx:196`, `:319`) |
+| pinned | `validator-exactness.test.tsx` → **11 passed, exit 0** |
+
+**So the right action was to measure and stop.** `RecordValidator.tsx:53-66` even carries the
+record of the defect that closed it — a card that said *"Invalid against official ISAAC schema
+v1.05 — 0 errors"* about a response reporting `schema_ok: true`, because the adapter dropped
+`schema_ok` and `exactness_errors` on the floor. Building a "presentation slice" over that would
+have been churn on a solved problem, and the `UX-012` dependency the row asserts is not real.
+
+**One measured detail, reported without over-claiming:** `POST /api/validate/record` does **not**
+publish `official_validator_ran`. `CLAUDE.md` §11 records that field being added (PR #185) — on
+the **per-experiment** validate route. Its absence on the standalone route is arguably correct
+(that route's entire purpose is to run the official validator, so it cannot not have run), but it
+is an asymmetry between two routes and is named here rather than assumed harmless.
+
+### `UX-012` — **NOT ATTEMPTED, and the reason is that it could not be honestly measured here**
+
+The row's evidence is *"validation stated in 9 places; next-action in 6 on one screen; pending
+counts in 5"*. Those counts were taken on a POPULATED record. The only record this environment can
+create through the product's own route is empty (the five worked examples exist solely inside a
+guided-walkthrough session — the 2026-08-03 tutorial-scope decision), and on an empty record the
+record screen renders **102 visible text nodes** with next-action appearing **twice**, not six
+times. **Two of the three counts are therefore unreproducible here, so reducing them would have
+been editing against numbers I could not verify** — which is the failure mode this ledger records
+most often. One real duplication WAS measured and is left named rather than fixed:
+`"3 fields · none recorded yet"` renders **twice** on the record screen.
+
 ### OPEN QUESTIONS FOR KRISH RAISED BY THIS RUN — decisions, not defects
 
 1. **Does `Governance & Safety` stay in the primary navigation?** It was KEPT, deliberately: the
