@@ -1237,3 +1237,92 @@ def test_disposing_a_session_does_not_disturb_the_ordinary_workspace(app, tmp_pa
     assert client.delete(f"/api/tutorial/sessions/{client.tutorial_session_id}").status_code == 204
     assert ws.load_experiment(ordinary.id) is not None
     assert shutil.which("true") is not None or True  # keep the import used
+
+
+def test_the_two_change_rev_MAPS_cannot_carry_a_scope_and_this_is_not_vacuous():
+    """*** FOUND BY INDEPENDENT REVIEW, 2026-09-13: `note_change_revs` joined the
+    persisted-state allowlist with a COMMENT and no assertion. ***
+
+    Its sibling `folder` got two (`state["folder"] == ""` plus the
+    directory-derivation note), and `proposal_change_revs` got the same prose.
+    Both comments argue the maps "cannot encode a scope because the keys are
+    entity ids and the values are integers" — an argument, not a measurement, and
+    the review reported that two session-id-bearing mutants pass against it.
+
+    ── WHY THE OBVIOUS TEST WOULD BE VACUOUS, WHICH THE COMMENT ITSELF SAYS ────
+
+    On a freshly constructed record both maps are `{}`, so `all(... for e in
+    map)` cannot fail: it is the empty-collection vacuity the allowlist test's own
+    comments exist to prevent. That is exactly why no assertion was added, and it
+    is the wrong conclusion — the fix is to POPULATE the map, not to skip it.
+
+    ── WHAT THIS ESTABLISHES ───────────────────────────────────────────────────
+
+    `_hydrate_change_revs` is the single gate both maps pass through on the read
+    path. It is fed a legitimate entry PLUS four scope-bearing plants, and the
+    assertions are that the legitimate one survives and every plant is DROPPED —
+    not coerced, not renamed, dropped. The negative control at the end proves the
+    predicate discriminates: it is shown to FAIL on a map that really does carry a
+    string value, so a hydrator that passed everything through could not satisfy
+    it.
+    """
+    from isaac_api import workspace as ws
+
+    legit_id = "01JQZZ2NOTE00000000000000"
+    planted = {
+        legit_id: 3,
+        # A scope smuggled as a value, in the four shapes it could take.
+        "sneak_string": "SESSION-abcdef",
+        "sneak_dict": {"session_id": "S"},
+        "sneak_bool": True,  # isinstance(True, int) is True in Python
+        "sneak_negative": -1,
+    }
+    hydrated = ws._hydrate_change_revs(planted)
+
+    # 1. NOT VACUOUS: the map really does have an entry to reason about.
+    assert hydrated, "the fixture must survive hydration or this test proves nothing"
+    assert hydrated == {legit_id: 3}, hydrated
+
+    # 2. EVERY PLANT IS GONE. Named individually so a partial regression says which.
+    for key in ("sneak_string", "sneak_dict", "sneak_bool", "sneak_negative"):
+        assert key not in hydrated, f"{key} survived hydration: {hydrated}"
+
+    # 3. AND THE SURVIVORS CANNOT ENCODE A SCOPE BY TYPE, which is the property the
+    #    two comments assert in prose. `bool` is excluded explicitly because it is an
+    #    `int` in Python and would otherwise satisfy this check.
+    for key, value in hydrated.items():
+        assert isinstance(key, str), (key, type(key))
+        assert isinstance(value, int) and not isinstance(value, bool), (key, value)
+        assert value >= 0, (key, value)
+
+    # 4. NEGATIVE CONTROL — the predicate in (3) must be able to FAIL. Without this,
+    #    a hydrator that returned everything unchanged would still pass (2) only by
+    #    luck of the assertion order, and (3) would be untested as a discriminator.
+    unfiltered = dict(planted)
+    offenders = [
+        k
+        for k, v in unfiltered.items()
+        if not (isinstance(v, int) and not isinstance(v, bool) and v >= 0)
+    ]
+    assert sorted(offenders) == ["sneak_bool", "sneak_dict", "sneak_negative", "sneak_string"], (
+        "the type predicate does not discriminate, so assertion (3) proves nothing"
+    )
+
+    # 5. AND IT HOLDS THROUGH A REAL ROUND TRIP, not only at the helper. Both maps
+    #    reach `to_state` through the same hydration, so a record carrying plants on
+    #    disk serialises without them.
+    exp = ws.Experiment(
+        id="01JQZZ2EXPERIMENT000000AA",
+        title="scope probe",
+        created_utc="2026-01-01T00:00:00Z",
+        source={},
+        draft={},
+    )
+    state = exp.to_state()
+    state["note_change_revs"] = dict(planted)
+    state["proposal_change_revs"] = dict(planted)
+    round_tripped = ws.Experiment.from_state(state, session_id=None).to_state()
+    for key in ("note_change_revs", "proposal_change_revs"):
+        assert round_tripped[key] == {legit_id: 3}, (key, round_tripped[key])
+        assert "session_id" not in str(round_tripped[key])
+        assert "SESSION" not in str(round_tripped[key])
