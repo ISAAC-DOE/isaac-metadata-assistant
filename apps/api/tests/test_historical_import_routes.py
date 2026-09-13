@@ -986,3 +986,78 @@ def test_an_import_id_that_could_name_a_path_never_reaches_a_filesystem_read(cli
         ):
             response = getattr(client, method)(path)
             assert response.status_code in (404, 422), f"{method} {path}: {response.text}"
+
+
+# --- §9 the per-record ceilings bind on THIS route too -----------------------
+
+
+def test_the_note_ceilings_bind_on_the_propose_route(client, monkeypatch):
+    """FOUND IN MY OWN CODE, BY READING `post_note` RATHER THAN BY A FAILING TEST.
+
+    This operation mints a NOTE as well as a proposal, and the note lands in the
+    same document — which is parsed on every read and hashed on every save, the
+    reason the bound exists at all. The first version of this route checked the
+    proposal ROW count and neither note ceiling, so a large import could have
+    grown the notes block past what `POST .../notes` refuses.
+
+    `_note_capacity_refusal` is CALLED rather than reimplemented, so this route is
+    its SECOND caller. **A PRE-EXISTING GAP IS NAMED AND NOT FIXED:**
+    `POST .../transcript` mints one note per segment and calls that helper at no
+    point, so the note ceilings do not bind there either. That is a separate change.
+
+    MUTATION: removing the `capacity` check makes this RED.
+    """
+    monkeypatch.setattr(routes, "_MAX_NOTES_PER_RECORD", 0)
+    import_id = _bundle(client)
+    eid = _record(client)
+    candidate = _candidate(client, import_id, RECORD_PATH)
+    response = _propose(client, import_id, candidate["candidate_id"], eid)
+    assert response.status_code == 422, response.text
+    assert response.json()["error"] == "too_many_notes"
+    assert response.json()["max_per_record"] == 0
+    # NOTHING WAS WRITTEN — neither half of the pair.
+    assert client.get(f"/api/experiments/{eid}/notes").json()["notes"] == []
+    assert client.get(f"/api/experiments/{eid}/proposals").json()["proposals"] == []
+
+
+def test_the_proposal_byte_ceiling_binds_on_the_propose_route(client, monkeypatch):
+    """The other half of the parity with `POST .../proposals`.
+
+    MUTATION: removing the projected-byte check makes this RED.
+    """
+    monkeypatch.setattr(routes, "_MAX_PROPOSAL_STATE_BYTES", 1)
+    import_id = _bundle(client)
+    eid = _record(client)
+    candidate = _candidate(client, import_id, RECORD_PATH)
+    response = _propose(client, import_id, candidate["candidate_id"], eid)
+    assert response.status_code == 422, response.text
+    assert response.json()["error"] == "proposals_too_large"
+    assert client.get(f"/api/experiments/{eid}/proposals").json()["proposals"] == []
+
+
+def test_the_proposal_row_ceiling_binds_on_the_propose_route(client, monkeypatch):
+    monkeypatch.setattr(routes, "_MAX_PROPOSALS_PER_RECORD", 0)
+    import_id = _bundle(client)
+    eid = _record(client)
+    candidate = _candidate(client, import_id, RECORD_PATH)
+    response = _propose(client, import_id, candidate["candidate_id"], eid)
+    assert response.status_code == 422, response.text
+    assert response.json()["error"] == "too_many_proposals"
+
+
+def test_all_three_ceilings_leave_the_import_session_untouched(client, monkeypatch):
+    """A refused send must not record itself as sent.
+
+    The session's `proposed` map is written AFTER the record and outside the
+    record lock, so a refusal that returned before the write is the case that
+    matters: the surface must not show a candidate as sent when no proposal
+    exists.
+    """
+    monkeypatch.setattr(routes, "_MAX_PROPOSALS_PER_RECORD", 0)
+    import_id = _bundle(client)
+    eid = _record(client)
+    candidate = _candidate(client, import_id, RECORD_PATH)
+    assert _propose(client, import_id, candidate["candidate_id"], eid).status_code == 422
+    body = client.get(f"/api/imports/{import_id}").json()["import"]
+    assert body["proposed"] == {}
+    assert body["furthest_step"] == "reconstruct"

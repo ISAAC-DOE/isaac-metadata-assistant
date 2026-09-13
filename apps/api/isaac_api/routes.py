@@ -24989,6 +24989,30 @@ def post_import_candidate_proposal(
                 total=len(exp.proposals),
             )
 
+        # THE TWO NOTE CEILINGS TOO, because this operation mints a NOTE as well as
+        # a proposal and the note lands in the same document.
+        #
+        # `_note_capacity_refusal` is CALLED rather than reimplemented, and this is
+        # its SECOND caller. A second expression of the same bound is the drift
+        # `test_each_capture_count_has_exactly_one_expression_in_the_route_module`
+        # exists to forbid, and this bound's whole reason is that the record
+        # document is parsed on every read and hashed on every save — a reason that
+        # does not care which route grew it.
+        #
+        # AFTER THE DEDUPLICATION BRANCH, for `post_note`'s reason: a retry of a
+        # candidate the record already holds adds nothing, so refusing it for want
+        # of capacity would make a record at its ceiling unable to confirm work it
+        # had already done.
+        #
+        # **A PRE-EXISTING GAP IS NAMED HERE RATHER THAN FIXED**, because it is not
+        # this slice's to close: `POST .../transcript` mints one note per segment
+        # and calls this helper at NO point, so the note ceilings do not bind there.
+        # That route has its own all-or-nothing proposal byte ceiling and its own
+        # argument for it; widening it is a separate change with its own review.
+        capacity = _note_capacity_refusal(exp)
+        if capacity is not None:
+            return capacity
+
         problem = _proposal_value_problem(candidate.proposed_value, candidate.rule)
         if problem is not None:
             error, message, extra = problem
@@ -25052,6 +25076,39 @@ def post_import_candidate_proposal(
             )
         except proposals.UnsupportedProposal as refusal:
             return _proposal_refusal("unsupported_proposal", str(refusal))
+
+        # THE PER-RECORD PROPOSAL BYTE CEILING, measured over the proposal that
+        # WOULD be stored — `post_proposal`'s check, at its position, for its
+        # reason. Minting is pure: nothing is on the record until `add_proposal`
+        # below, so measuring here and refusing costs the caller nothing and
+        # writes nothing. The note this request also minted is already in
+        # `exp.notes` and was bounded by `_note_capacity_refusal` above.
+        try:
+            projected = _render_exactly_as_a_response_would(
+                [existing.to_state() for existing in exp.proposals]
+                + [proposal.to_state()]
+            )
+        except (ValueError, TypeError, UnicodeEncodeError):  # pragma: no cover
+            return _proposal_refusal(
+                "unrepresentable_value",
+                (
+                    "This record already holds a proposal that could not be "
+                    "measured, so the per-record ceiling could not be checked and "
+                    "nothing was written."
+                ),
+            )
+        if len(projected) > _MAX_PROPOSAL_STATE_BYTES:
+            return _proposal_refusal(
+                "proposals_too_large",
+                (
+                    "This record's proposals would be larger together than one "
+                    "record's may be. They are REFUSED rather than trimmed to make "
+                    "room. Nothing was written."
+                ),
+                max_bytes=_MAX_PROPOSAL_STATE_BYTES,
+                bytes=len(projected),
+                total=len(exp.proposals),
+            )
 
         exp.add_proposal(proposal)
         _changed, stale = _save_versioned(exp, if_match)
