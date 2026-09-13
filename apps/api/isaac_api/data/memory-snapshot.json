@@ -10276,7 +10276,7 @@
       },
       {
         "path": "apps/api/isaac_api/routes.py",
-        "sha256": "c462e5a7433a03e4c4f57df3f5709ea064427022638750f68615ea4e128678c1"
+        "sha256": "f58dae9905b2b8330c6016c5eabeaf2e49e61e643023501977a3dc6f57029880"
       },
       {
         "path": "apps/api/isaac_api/serialize.py",
@@ -10460,7 +10460,7 @@
       },
       {
         "path": "apps/web/src/components/HelpPanel.tsx",
-        "sha256": "e16e846ff175ebe1029b7ec5eec01383fa61b8a73f39d0e80f8f459f3f871043"
+        "sha256": "fb85980d9c85bc408462a29d5fccbac7115154840c946d7cdaca664b41f7d469"
       },
       {
         "path": "apps/web/src/components/LeftNav.tsx",
@@ -10512,7 +10512,7 @@
       },
       {
         "path": "apps/web/src/lib/labels.ts",
-        "sha256": "52da7a3c1ee73c6080f8b3c32192b48d0cd73df4c272117d088a598ec1916bdf"
+        "sha256": "5d8c9af7787a17ae1167bf9816ec86d729815a87883b78399d89eda4626abba1"
       },
       {
         "path": "apps/web/src/lib/routes.ts",
@@ -10552,7 +10552,7 @@
       },
       {
         "path": "apps/web/src/screens/GuidedCompletion.tsx",
-        "sha256": "fe01526f62ba46a00ff313e13d3359a24e8d6b631033e912180ffc337b2f072a"
+        "sha256": "c5406d888067603bbfb55836bb2d0ba9fc9f842d1abaf56e53060dd7ecb5ef59"
       },
       {
         "path": "apps/web/src/screens/LoadMaterials.tsx",
@@ -11012,7 +11012,7 @@
       }
     ],
     "served_file_count": 200,
-    "served_manifest_fingerprint": "fe96cb73d3e9d7ce61ad44694e29bf50025b8edc1edb7eacde8e6ba18298234a"
+    "served_manifest_fingerprint": "46e22a790829b62b44f04b5a61a823e6752ec2ed1ea1490a87af7b5902633913"
   },
   "overview": {
     "built_at_commit": "caab1d0a69c1733524bda5dde495623bc4b7bad1",
