@@ -115,7 +115,7 @@ not state"* as a property of pass two. The LABEL-ANCHORED rule of pass one has t
 same defect: ``_TEMPERATURE_K`` bridges label to value with ``[^.;:]{0,40}?``, so
 *"The temperature drift was 3 K"* proposes ``context.temperature_K = 3``, silently,
 and has done since the rule was written. Seven such sentences are carried by
-``tc._LABEL_OVERREACH_RESIDUE`` and asserted BELOW to still occur, deliberately, so
+``tc._LABEL_OVERREACH_CLOSED`` and asserted BELOW to still occur, deliberately, so
 closing the class requires deleting a row rather than discovering a surprise. They
 are **pre-existing and measured as such** — identical readings against the pristine
 module at ``ebc5c331`` — and are **not** what the three restatement conditions are
@@ -139,6 +139,11 @@ RUN = tc.RunRef(id="r1", label="Run 1", ordinal=1)
 TEMPERATURE = "context.temperature_K"
 START = "timestamps.acquired_start_utc"
 END = "timestamps.acquired_end_utc"
+# The two FREE-PHRASE paths, added 2026-09-13 so scope item 8 of the closing brief
+# -- "apply the same analysis to the other four readable fields" -- is asserted
+# here rather than only reasoned about in a comment.
+ATMOSPHERE = "context.thermodynamics.atmosphere"
+ENVIRONMENT = "context.environment"
 
 
 def _read(text: str) -> tc.TranscriptReading:
@@ -258,6 +263,31 @@ FALSE_RESTATEMENTS: tuple[tuple[str, str, str, str], ...] = (
 )
 
 
+#: The rows of ``FALSE_RESTATEMENTS`` on which the SEQUENCE GATE (2026-09-13)
+#: ADDITIONALLY withholds the label-anchored value, so the reading has ZERO
+#: candidates rather than one.
+#:
+#: **NAMED AS A SET RATHER THAN BY RELABELLING THE ROW**, deliberately. The
+#: ``refused_by`` column answers *"which half of the RESTATEMENT gate refuses the
+#: second value?"* and the answer for this row is still ``hedge`` — bare ``again``
+#: is in ``_OR_REQUIRED_HEDGES`` and that is unchanged and is still what
+#: ``test_which_HALF_of_the_gate_refuses_each_row`` measures. What changed is a
+#: DIFFERENT question about the FIRST value, and folding the two into one column
+#: would make a label overstate which guard does the work — which is exactly the
+#: mistake the "both" row's own comment records.
+#:
+#: Only ONE row qualifies, and the reason is the sequence gate's own conditions:
+#: every other row puts an approximation (``about``), a rate (``per minute``,
+#: ``K/min``) or a qualifying phrase after the second value, so the second value is
+#: positively identified as a different quantity and the first survives. Here the
+#: gap is ``, again `` — pure coordination — and the second instant is a complete,
+#: unqualified instant, so the sentence states the field twice and says nothing
+#: about which statement is the field's.
+_ALSO_SEQUENCE_GATED: frozenset[str] = frozenset(
+    {"The scan started 2026-01-01T00:00:00Z, again 2026-01-02T00:00:00Z."}
+)
+
+
 @pytest.mark.parametrize(
     "label,sentence,field_path,refused_by",
     FALSE_RESTATEMENTS,
@@ -268,12 +298,28 @@ def test_a_non_restatement_is_NOT_read_as_a_restatement(
 ):
     """Exactly ONE candidate — the label-anchored one — and it is not a restatement.
 
+    ~~"Exactly ONE candidate"~~ — **true of 12 of the 13 rows since 2026-09-13.**
+    See ``_ALSO_SEQUENCE_GATED`` for the one row where the sequence gate withholds
+    the label value too, and for why it is expressed as a set rather than as a new
+    ``refused_by`` label. The property this test exists for is unchanged on every
+    row: **the SECOND value is never read**, and nothing is manufactured.
+
     MUTATION: reverting ``_OR_REQUIRED_HEDGES`` into ``_BARE_HEDGES`` turns the ten
     ``hedge`` rows RED; deleting the ``_unit_is_complete`` guard turns the three
     ``unit`` rows RED. Neither mutation touches the other's rows, which is the
     independence of the two halves measured rather than asserted.
     """
     reading = _read(sentence)
+    if sentence in _ALSO_SEQUENCE_GATED:
+        assert reading.candidates == ()
+        # AND IT IS DISCLOSED, which is the whole basis for the trade.
+        assert [entry.kind for entry in reading.abstentions] == [
+            "several_values_and_none_selected"
+        ]
+        assert field_path in reading.abstentions[0].reason
+        assert reading.review_required == ()
+        assert [segment.text for segment in reading.segments] == [sentence]
+        return
     assert len(reading.candidates) == 1, [
         (candidate.field_path, candidate.proposed_value)
         for candidate in reading.candidates
@@ -708,50 +754,114 @@ def test_the_NINE_recorded_residue_SENTENCES_ARE_NOW_CLOSED(sentence):
     ]
 
 
-@pytest.mark.parametrize("sentence", tc._LABEL_OVERREACH_RESIDUE)
+@pytest.mark.parametrize("sentence", tc._LABEL_OVERREACH_CLOSED)
 def test_the_LABEL_ANCHORED_overreach_is_still_a_FALSE_POSITIVE(sentence):
-    """A KNOWN-OPEN §5 defect, asserted to still occur. **NOT rounded down.**
+    """~~A KNOWN-OPEN §5 defect, asserted to still occur. **NOT rounded down.**~~
 
-    ~~"Condition 3 is scoped to the BARE-hedge branch, so the same shape behind an
-    explicit ``or`` still proposes a drift figure as a temperature, and still does
-    it silently."~~ — **that class is CLOSED (2026-09-12, third pass) and its five
-    sentences are now in ``_RESTATEMENT_RESIDUE_CLOSED``. This test is repointed,
-    not deleted, and what it points at is more important than what it left.**
+    **INVERTED 2026-09-13. THE CLASS IS CLOSED AND THIS TEST NOW ASSERTS THE
+    REFUSAL.** The constant it parametrises over is renamed
+    ``_LABEL_OVERREACH_CLOSED`` and every row is KEPT, following the precedent
+    ``_RESTATEMENT_RESIDUE_CLOSED`` set: a tuple whose rows were deleted on being
+    fixed cannot answer the question *"is the class still closed?"*, and this
+    module's own comment records why an emptied ratcheted tuple is worse than
+    either state — it makes a parametrised test vacuous.
 
-    Three passes over this reader have treated *"the reader proposes values the
-    transcript does not state"* as a property of the RESTATEMENT scan. It is not.
-    ``_TEMPERATURE_K`` bridges label to value with ``[^.;:]{0,40}?``, so ~40
-    characters of anything may sit between the word ``temperature`` and the number
-    it reads — and *"The temperature drift was 3 K"* proposes 3 K as an absolute
-    temperature with **no abstention at all**. Every one of these is more natural
-    dictation than any of the five ``or``-branch sentences that were argued about at
-    length.
+    **THE OLD ASSERTIONS, KEPT VERBATIM BECAUSE THEY ARE THE RECORD OF WHAT WAS
+    SHIPPING:**
 
-    **PRE-EXISTING, AND THAT IS MEASURED RATHER THAN ASSUMED**: the identical rows
-    read identically against the pristine module at ``ebc5c331`` and against the
-    universal rule, because no restatement condition is involved on any of them —
-    each candidate reports ``restated_in_same_sentence is False``.
+    ~~``assert len(rows) == 1``~~ with the message *"if this reads nothing the
+    class is CLOSED — delete the row from _LABEL_OVERREACH_RESIDUE and say so, do
+    not weaken this assertion"*; ~~``assert rows[0][1] is False``~~ (it came from
+    pass ONE); ~~``assert _read(sentence).abstentions == ()``~~ (*"AND IT IS
+    SILENT, which is what makes it a §5 defect rather than a disclosed
+    omission"*); ~~``assert rows[0][0] not in (425, 430, 435)``~~ (the value
+    proposed was the modifier's figure, so a scientist reviewing the proposal saw
+    a plausible kelvin number).
 
-    Asserting the defect means that closing it requires DELETING a row here — a
-    reviewed change — rather than discovering that a documented open item quietly
-    went away, or that a documented open item is still being published after it was
-    fixed.
+    **The old test's reasoning was RIGHT IN EVERY PARTICULAR and is the reason
+    this is an inversion rather than a rewrite.** Three passes over this reader
+    treated *"the reader proposes values the transcript does not state"* as a
+    property of the RESTATEMENT scan; it was not. ``_TEMPERATURE_K`` bridged label
+    to value with ``[^.;:]{0,40}?``, so ~40 characters of anything could sit
+    between the word ``temperature`` and the number it read, and *"The temperature
+    drift was 3 K"* proposed 3 K as an absolute temperature with no abstention at
+    all. Every row here is more natural dictation than any of the five
+    ``or``-branch sentences that were argued about at length.
+
+    **WHAT CLOSED IT, and why it is not the proxy the old comment rejected.** The
+    old comment named three proxies and rejected all three: a denylist of
+    ``drift``/``error``/``step`` (fails OPEN), a shorter bridge (kills *"Sample
+    temperature at the second scan was 425 K"*), and requiring a copula (kills
+    *"temperature 425 K"*). All three rejections were correct. What was missing is
+    that the bridge's SHAPE can be constrained without constraining its LENGTH:
+    :data:`~isaac_api.transcript_capture._ASSERTION_BRIDGE` is an ALLOWLIST
+    grammar — prepositional modifiers of the label, a closed set of assertions, an
+    approximation — so the 40-character bridge is unchanged and *"at the second
+    scan was"* still parses, while a bare nominal head never can.
+
+    **EVERY ROW IS NOW REFUSED AND DISCLOSED, which is the §5 requirement rather
+    than merely the absence of the defect.** A silent refusal would be a different
+    defect of the same rank; this asserts the abstention exists and names the
+    field, so a future change that turns a refusal silent comes through here.
     """
-    rows = _rows(sentence)
-    assert len(rows) == 1, (
-        "if this reads nothing the class is CLOSED — delete the row from "
-        "_LABEL_OVERREACH_RESIDUE and say so, do not weaken this assertion"
+    assert _rows(sentence) == [], (
+        "if this reads a value again the class has REOPENED; the value is a "
+        "drift, an error, a step, a tolerance, a delta or a rate, not a "
+        "temperature -- do not weaken this assertion"
     )
-    # It came from PASS ONE, so it is not the restatement gate's to refuse and a
-    # future change to any of the three conditions cannot close it.
-    assert rows[0][1] is False
-    # AND IT IS SILENT, which is what makes it a §5 defect rather than a disclosed
-    # omission. Pinned so a slice that makes it merely disclosed comes through here.
-    assert _read(sentence).abstentions == ()
-    # The value proposed is the modifier's figure and not the 425-style absolute a
-    # reader would expect, which is the substance of the defect rather than its
-    # shape: a scientist reviewing the proposal sees a plausible kelvin number.
-    assert rows[0][0] not in (425, 430, 435)
+    reading = _read(sentence)
+    # REFUSED AND DISCLOSED, never silent: the whole point of the inversion.
+    assert [entry.kind for entry in reading.abstentions] == [
+        "label_does_not_assert_this_value"
+    ]
+    disclosure = reading.abstentions[0]
+    assert "context.temperature_K" in disclosure.reason
+    # The quote points at the clause the scientist has to re-read, and it does NOT
+    # assert what the withheld number is -- this reader does not know.
+    assert disclosure.quote in sentence
+    # AND THE WORDS SURVIVE. Rule (4) stores every segment regardless.
+    assert [segment.text for segment in reading.segments] == [sentence]
+
+
+def test_the_LABEL_ANCHORED_instant_overreach_is_CLOSED_TOO():
+    """The one row of the class's own table that was never in the tuple.
+
+    ``_LABEL_OVERREACH_RESIDUE`` was temperature-only while the table documenting
+    the class named an INSTANT row too — *"It started drifting at
+    2026-01-01T00:00:00Z"* proposing an acquisition START for a DRIFT ONSET — and
+    the old comment said so explicitly, "named so a reader does not count the two
+    and conclude one is stale". It is asserted here rather than added to the tuple,
+    because the tuple's parametrised test asserts a TEMPERATURE field path.
+
+    MUTATION: dropping ``label_head`` from the ``acquisition_start`` rule turns
+    this RED, and so does admitting a bare gerund to ``_ASSERTION_AT_VERB``.
+    """
+    for sentence in (
+        "It started drifting at 2026-01-01T00:00:00Z",
+        "It started warming at 2026-01-01T00:00:00Z",
+        "The scan started logging at 2026-01-01T00:00:00Z",
+        "It ended cooling at 2026-01-01T00:00:00Z",
+    ):
+        reading = _read(sentence)
+        assert reading.candidates == (), sentence
+        assert [entry.kind for entry in reading.abstentions] == [
+            "label_does_not_assert_this_value"
+        ], sentence
+    # AND THE LEGITIMATE FORMS THE SAME RULE EXISTS FOR ARE UNTOUCHED.
+    for sentence, path in (
+        ("The scan started 2026-01-01T00:00:00Z", "timestamps.acquired_start_utc"),
+        ("The scan started at 2026-01-01T00:00:00Z", "timestamps.acquired_start_utc"),
+        ("The scan started around 2026-01-01T00:00:00Z", "timestamps.acquired_start_utc"),
+        ("The scan ended 2026-01-01T00:00:00Z", "timestamps.acquired_end_utc"),
+        ("The scan ended at 2026-01-01T00:00:00Z", "timestamps.acquired_end_utc"),
+    ):
+        reading = _read(sentence)
+        assert [
+            candidate.proposed_value
+            for candidate in reading.candidates
+            if candidate.field_path == path
+        ] == ["2026-01-01T00:00:00Z"], sentence
+        assert reading.abstentions == (), sentence
 
 
 def test_the_residue_lists_are_two_way_ratchets():
@@ -797,17 +907,26 @@ def test_the_residue_lists_are_two_way_ratchets():
     # ~~`_RESTATEMENT_RESIDUE`~~ IS GONE. An empty ratcheted tuple would make the
     # parametrised test that walks it vacuous — pytest reports one skipped
     # "empty parameter set" and nothing fails — which is exactly the silent loss of
-    # coverage this repository has been caught by before. The open-class test is
+    # coverage this repository has been caught by before. The open-class test was
     # repointed at `_LABEL_OVERREACH_RESIDUE` instead.
     assert not hasattr(tc, "_RESTATEMENT_RESIDUE")
+    # AND THE SAME DISCIPLINE APPLIED AGAIN ON 2026-09-13: that class is now closed
+    # too, the constant is RENAMED `_LABEL_OVERREACH_CLOSED` with all 13 rows kept,
+    # and its parametrised test is INVERTED to assert the refusal. The old name is
+    # asserted gone, for the same reason `_RESTATEMENT_RESIDUE` is: a stale name
+    # left as an alias is how a reader concludes a closed class is still open.
+    assert not hasattr(tc, "_LABEL_OVERREACH_RESIDUE")
     # ~~7~~ **13 (2026-09-12, fourth pass).** Six rows of the identical class were
-    # measured by independent review and added; the class is described, not closed,
-    # and the OPEN-class test below still asserts every row STILL fabricates.
-    assert len(tc._LABEL_OVERREACH_RESIDUE) == 13
-    assert len(set(tc._LABEL_OVERREACH_RESIDUE)) == 13
-    assert "The temperature drift was 3 K" in tc._LABEL_OVERREACH_RESIDUE
+    # measured by independent review and added; ~~the class is described, not
+    # closed, and the OPEN-class test below still asserts every row STILL
+    # fabricates~~ — **the class is CLOSED as of 2026-09-13 and that test now
+    # asserts every row is REFUSED AND DISCLOSED.** The rows are kept so "is it
+    # still closed?" stays a checkable question.
+    assert len(tc._LABEL_OVERREACH_CLOSED) == 13
+    assert len(set(tc._LABEL_OVERREACH_CLOSED)) == 13
+    assert "The temperature drift was 3 K" in tc._LABEL_OVERREACH_CLOSED
     assert (
-        "temperature resolution 0.5 K" in tc._LABEL_OVERREACH_RESIDUE
+        "temperature resolution 0.5 K" in tc._LABEL_OVERREACH_CLOSED
     ), "the row with no copula, which a 'require a copula' proxy would not reach"
     # The six added in the fourth pass, named individually for the reason the
     # third pass's five are: a slice that dropped them while editing this test
@@ -820,15 +939,15 @@ def test_the_residue_lists_are_two_way_ratchets():
         "The temperature gradient was 5 K",
         "We corrected the temperature by 7 K",
     ):
-        assert row in tc._LABEL_OVERREACH_RESIDUE, row
+        assert row in tc._LABEL_OVERREACH_CLOSED, row
     # `fell by` and `corrected ... by` are the two shapes no earlier row had: a
     # DECREASE, and a label that is not the subject of the sentence.
-    assert "The temperature fell by 12 K" in tc._LABEL_OVERREACH_RESIDUE
-    assert "We corrected the temperature by 7 K" in tc._LABEL_OVERREACH_RESIDUE
+    assert "The temperature fell by 12 K" in tc._LABEL_OVERREACH_CLOSED
+    assert "We corrected the temperature by 7 K" in tc._LABEL_OVERREACH_CLOSED
     # The two lists are disjoint: a sentence cannot be both closed and open, and an
     # edit that moved one without removing it from the other would say it is.
     assert not (
-        set(tc._LABEL_OVERREACH_RESIDUE) & set(tc._RESTATEMENT_RESIDUE_CLOSED)
+        set(tc._LABEL_OVERREACH_CLOSED) & set(tc._RESTATEMENT_RESIDUE_CLOSED)
     )
 
 
@@ -870,11 +989,30 @@ def test_a_refused_restatement_now_produces_a_disclosure():
     filed as a note about 300, with nothing anywhere saying a value had been
     declined. The refusal is CORRECT; its invisibility was the defect.
 
+    **THE SENTENCE THIS TEST USES NOW FAILS AN EARLIER GATE, AND THE OLD
+    ASSERTION IS KEPT RATHER THAN MOVED — added 2026-09-13.** ~~``assert [... for
+    candidate in reading.candidates] == [300]``~~ and ~~``== ["unhedged_further_
+    values"]``~~ and ~~``disclosure.quote == "Temperature ramped 300 K"``~~.
+    *"Temperature ramped 300 K"* never asserted 300 as the temperature in the first
+    place: ``ramped`` is a bare verb between the label and the value, so a ramp of
+    300 K and a ramp TO 300 K are both readings of it and this reader cannot tell
+    which. The PASS-ONE ASSERTION GATE refuses the bridge, so the disclosure this
+    test exists for is now ``label_does_not_assert_this_value`` — reached one gate
+    earlier, for a stricter reason.
+
+    **What the test is FOR is unchanged and is still what is asserted: a refusal is
+    not silent, the disclosure names the field, it asserts nothing about the
+    withheld numbers, and the quote is short.** A second sentence — same shape,
+    legitimate bridge — is added so the RESTATEMENT disclosure this test was
+    originally written for is still exercised.
+
     MUTATION: deleting the abstention loop from ``read_transcript`` turns this RED.
     """
     reading = _read("Temperature ramped 300 K, then 350 K, then 400 K.")
-    assert [candidate.proposed_value for candidate in reading.candidates] == [300]
-    assert [entry.kind for entry in reading.abstentions] == ["unhedged_further_values"]
+    assert reading.candidates == ()
+    assert [entry.kind for entry in reading.abstentions] == [
+        "label_does_not_assert_this_value"
+    ]
     disclosure = reading.abstentions[0]
     assert disclosure.segment_index == 0
     assert "context.temperature_K" in disclosure.reason
@@ -890,6 +1028,20 @@ def test_a_refused_restatement_now_produces_a_disclosure():
     assert disclosure.quote == "Temperature ramped 300 K"
     assert len(disclosure.quote) < len(reading.segments[0].text)
 
+    # THE SAME SHAPE WITH A BRIDGE THE GATE ADMITS, so the restatement disclosure
+    # this test was written for is still exercised rather than only described. Here
+    # the SEQUENCE GATE fires, because three progressive values with pure
+    # coordination between them are three values of one scalar field.
+    ramp = _read("The temperature was 300 K, then 350 K, then 400 K.")
+    assert ramp.candidates == ()
+    assert [entry.kind for entry in ramp.abstentions] == [
+        "several_values_and_none_selected"
+    ]
+    for withheld in ("350", "400"):
+        assert withheld not in ramp.abstentions[0].reason
+        assert withheld not in ramp.abstentions[0].quote
+    assert ramp.abstentions[0].quote == "temperature was 300 K"
+
 
 def test_the_disclosure_is_deduplicated_and_bounded_by_construction():
     """At most ONE disclosure per segment per rule, whatever the transcript says.
@@ -899,6 +1051,12 @@ def test_the_disclosure_is_deduplicated_and_bounded_by_construction():
     (``_DISCLOSURE_CEILING_GAP``). This one cannot: the refusal set is keyed on the
     rule NAME.
 
+    ~~``assert [candidate.proposed_value for candidate in reading.candidates] ==
+    [425]``~~ — **the payload is 1,000 comma-separated kelvin values after a
+    labelled one, so the SEQUENCE GATE withholds 425 too (2026-09-13).** The
+    DEDUPLICATION property this test exists for is unchanged and is what is still
+    asserted: one disclosure, not a thousand.
+
     MUTATION: changing ``refused`` from a per-rule mapping to a list turns this RED.
     """
     many = "The temperature was 425 K, " + ", ".join(
@@ -906,13 +1064,35 @@ def test_the_disclosure_is_deduplicated_and_bounded_by_construction():
     )
     reading = _read(many)
     assert len(reading.segments) == 1
-    assert [candidate.proposed_value for candidate in reading.candidates] == [425]
+    assert reading.candidates == ()
     assert len(reading.abstentions) == 1
+
+    # And a payload whose further values are a DIFFERENT quantity, so the label
+    # reading survives and the single disclosure is the restatement gate's. Both
+    # shapes must deduplicate, and only this one used to be covered.
+    other = "The temperature was 425 K, " + ", ".join(
+        f"cryostat setpoint {value} K" for value in range(10000, 11000)
+    )
+    survives = _read(other)
+    assert len(survives.segments) == 1
+    assert [candidate.proposed_value for candidate in survives.candidates] == [425]
+    assert len(survives.abstentions) == 1
 
     # And the ceiling that follows from it, stated as arithmetic over the real
     # constants rather than as a quoted number.
+    #
+    # ~~`MAX_SEGMENTS * len(_RULES) == 500`~~ is still true and is still a bound,
+    # but it is no longer the TIGHT one: the PASS-ONE ASSERTION GATE added three
+    # refusal kinds on 2026-09-13, so the per-segment worst case is the three
+    # label-gated rules x FIVE kinds = 15, and the construction bound is 1,500.
+    # Both are stated because `MAX_DISCLOSURES` is set against them and a bound
+    # nobody can re-derive is not a bound. 1,500 < MAX_DISCLOSURES, so the ceiling
+    # still admits the by-construction worst case without being raised.
     assert len(tc._RULES) == 5
     assert tc.MAX_SEGMENTS * len(tc._RULES) == 500
+    gated = [rule for rule in tc._RULES if rule.label_head is not None]
+    assert len(gated) == 3
+    assert tc.MAX_SEGMENTS * len(gated) * 5 == 1500 <= tc.MAX_DISCLOSURES
 
 
 def test_a_cross_rule_overlap_is_NOT_disclosed_as_a_withheld_value():
@@ -1509,45 +1689,93 @@ AND_AGAIN_RESIDUE: tuple[tuple[str, str, object], ...] = (
     AND_AGAIN_RESIDUE,
     ids=["started", "ended", "chain of three", "temperature"],
 )
-def test_a_BARE_and_again_reads_one_value_and_DISCLOSES_the_rest(
+def test_a_BARE_and_again_now_SELECTS_NO_VALUE_and_DISCLOSES(
     sentence, field_path, only
 ):
     """`and again` is a REPEAT marker, so a second value is a second EVENT.
 
-    **THE DEFECT THIS PINS SHUT.** `and again` sat in `_BARE_HEDGES` while bare
-    `again` sat in `_OR_REQUIRED_HEDGES` *because* before a full instant `again`
-    means the scan was REPEATED — two justifications, one module, opposite
-    conclusions about the same word, with `and again` the STRONGER marker. Measured
-    at `22d794a5`, the first two rows proposed BOTH instants as one field's value,
-    `restated_in_same_sentence is True`, with `abstentions == ()`. `routes.
-    _mint_transcript_proposals` mints one durable OPEN proposal per candidate, so a
-    scientist could accept a `timestamps` value nobody stated into a record that
-    reaches an official export. §5 forbids an assertion in terms.
+    ~~``test_a_BARE_and_again_reads_one_value_and_DISCLOSES_the_rest``~~ —
+    **INVERTED 2026-09-13 BY THE SEQUENCE GATE, and the `only` column of
+    ``AND_AGAIN_RESIDUE`` is now the value that is NO LONGER SELECTED.** The old
+    assertions are kept here verbatim, because this is a genuine change of
+    behaviour and not a tidy-up:
 
-    **AND THE COST IS NAMED RATHER THAN HIDDEN.** The temperature row was a
-    MUST-PASS in `TRUE_RESTATEMENTS` and is withdrawn: a legitimate-looking
-    temperature restatement is now lost. It is lost as a DISCLOSED omission, which
-    is the trade §5 ranks the right way round — asserted below, not claimed.
+        ~~``assert [c.proposed_value for c in reading.candidates
+        if c.field_path == field_path] == [only]``~~
+        ~~``assert [c.field_path for c in reading.candidates] == [field_path]``~~
+        ~~``assert [e.kind for e in reading.abstentions] ==
+        ["unhedged_further_values"]``~~
 
-    MUTATION: moving `and again` back into `_BARE_HEDGES` turns every row RED on
-    the value assertion. Dropping the disclosure turns every row RED on the
-    abstention assertion.
+    **WHY IT CHANGED, AND WHY THE OLD BEHAVIOUR WAS THE DEFECT DEFECT-B NAMES.**
+    Reading the FIRST value of *"the scan started A, and again B"* let a scientist
+    accept A as the run's start while the sentence says the scan ran twice. The
+    reader has no grounds to prefer A: nothing in the gap between the two values
+    characterises either — `and` and `again` are pure coordination — so both are
+    values of the field and neither is THE value. That is exactly the condition
+    ``_SIBLING_GAP`` tests, and the outcome is that NO value is selected and the
+    sentence is disclosed once.
+
+    **THE LIKELIHOOD ARGUMENT FOR KEEPING A IS DELIBERATELY NOT TAKEN**, and this
+    module has already recorded why: *"`again` before a full instant most naturally
+    means the scan was REPEATED, which is a different run's instant"* is an argument
+    about LIKELIHOOD, and ``_RESTATEMENT_RESIDUE_CLOSED``'s own comment records that
+    a likelihood argument is not a §5 argument — it was the reason five silent
+    fabrications shipped.
+
+    **THE DEFECT THIS ROW ORIGINALLY PINNED SHUT IS UNCHANGED AND IS STILL PINNED.**
+    `and again` sat in `_BARE_HEDGES` while bare `again` sat in
+    `_OR_REQUIRED_HEDGES` *because* before a full instant `again` means the scan was
+    REPEATED — two justifications, one module, opposite conclusions about the same
+    word, with `and again` the STRONGER marker. Measured at `22d794a5`, the first
+    two rows proposed BOTH instants as one field's value,
+    `restated_in_same_sentence is True`, with `abstentions == ()`.
+    `routes._mint_transcript_proposals` mints one durable OPEN proposal per
+    candidate, so a scientist could accept a `timestamps` value nobody stated into a
+    record that reaches an official export. §5 forbids an assertion in terms. That
+    is now refused twice over, by the hedge gate and by the sequence gate.
+
+    MUTATION: moving `and again` back into `_BARE_HEDGES` turns every row RED (two
+    candidates instead of none). Removing `again` from `_SIBLING_COORDINATOR` turns
+    every row RED by restoring `[only]`. Dropping the disclosure turns every row
+    RED on the abstention assertion.
     """
     reading = _read(sentence)
-    assert [
-        candidate.proposed_value
-        for candidate in reading.candidates
-        if candidate.field_path == field_path
-    ] == [only]
-    # Nothing else was proposed for any other field either.
-    assert [candidate.field_path for candidate in reading.candidates] == [field_path]
-    # THE WITHHOLDING IS DISCLOSED. Exactly the field that withheld is named.
+    # NO value is selected -- including the one the old test asserted.
+    assert reading.candidates == ()
+    assert only not in [candidate.proposed_value for candidate in reading.candidates]
+    # THE WITHHOLDING IS DISCLOSED EXACTLY ONCE, and names exactly the field.
     assert [entry.kind for entry in reading.abstentions] == [
-        "unhedged_further_values"
+        "several_values_and_none_selected"
     ]
     assert field_path in reading.abstentions[0].reason
     # And the words survive whatever the reader proposed — rule (4).
     assert [segment.text for segment in reading.segments] == [sentence]
+
+
+def test_the_SAME_value_said_again_is_NOT_a_sequence_and_keeps_its_reading():
+    """The cost the SEQUENCE GATE was briefed with, and the condition that avoids it.
+
+    The orchestrator's brief named *"The temperature was 425 K, still 425 K at the
+    end"* as a known consequence of withholding on "more than one UNHEDGED value",
+    and asked whether disclosure made it acceptable. It does not have to be
+    acceptable: the gate tests for more than one DISTINCT value, so a value restated
+    identically is emphasis rather than a progression and keeps its reading. Two
+    statements of the same number say the same thing about the field, so there is
+    nothing to choose between.
+
+    MUTATION: deleting the `_value_of(rule, extra) != _value_of(rule, match)`
+    condition turns every row here RED.
+    """
+    for sentence in (
+        "The temperature was 425 K, still 425 K at the end",
+        "The temperature was 425 K, and again 425 K.",
+        "The temperature was 425 K and 425 K",
+        "The temperature was 425 K, then 425 K",
+    ):
+        assert _values(sentence) == [425], sentence
+        # 425.0 and 425 must not count as two values to one test and one to the
+        # other -- `_value_of` is shared with the de-duplication for that reason.
+        assert _values("temperature 425 K, then 425.0 K") == [425], "int vs float"
 
 
 def test_an_explicit_or_still_rescues_and_again():
@@ -1658,6 +1886,26 @@ _INSTANT_TAILS: tuple[str, ...] = (
 )
 
 
+#: The temperature row's tails, WITH THE TERMINAL (empty) CASE — added 2026-09-13
+#: after an independent review measured that neither committed sweep built it.
+#:
+#: The claim was *"tails including the EMPTY one … all three restatement-carrying
+#: rules"*, and it was true of TWO of three: `_MODIFIER_TAILS` has a non-empty tail
+#: in every entry by construction, and the tuple that DOES contain `""` —
+#: `_INSTANT_TAILS` — was handed only to the two instant rules. So the 42
+#: temperature terminal cells (21 connectives x 2 separators) existed in no sweep.
+#: The review built them and found them clean; they are added here so the coverage
+#: claim is true MECHANICALLY rather than by having been checked once.
+_TEMPERATURE_TAILS: tuple[str, ...] = ("",) + _MODIFIER_TAILS
+
+
+#: How many of the cells the SEQUENCE GATE withholds, MEASURED rather than
+#: predicted. Named as a constant so the number appears once and so the assertion
+#: that reads it cannot be mistaken for arithmetic. ~~36~~ at 17 temperature tails;
+#: the 42 terminal cells added on 2026-09-13 moved it.
+_SEQUENCE_GATE_CELLS = 40
+
+
 def test_the_INSTANT_AND_EMPTY_TAIL_SWEEP_fabricates_nothing_in_silence():
     """The sweep the 476-cell grid's SHAPE excludes, and stating that is the fix.
 
@@ -1671,7 +1919,12 @@ def test_the_INSTANT_AND_EMPTY_TAIL_SWEEP_fabricates_nothing_in_silence():
 
     **THE SCOPE OF THIS ONE, STATED BESIDE ITS NUMBER.** Three rules (the three that
     HAVE a restatement pattern), `_ALL_CONNECTIVES` + every non-bridging BARE form,
-    tails including the EMPTY one, two separators. The phrase rules
+    tails including the EMPTY one **for all three rules — corrected 2026-09-13, when
+    an independent review measured that the empty tail reached only the two INSTANT
+    rules.** `_MODIFIER_TAILS` has a non-empty tail in every entry by construction
+    and was the temperature row's whole tail set, so the 42 temperature terminal
+    cells were in no committed sweep at all; `_TEMPERATURE_TAILS` adds them. Two
+    separators. The phrase rules
     (`atmosphere`, `environment`) are absent because they carry no restatement and
     can refuse nothing.
 
@@ -1692,7 +1945,14 @@ def test_the_INSTANT_AND_EMPTY_TAIL_SWEEP_fabricates_nothing_in_silence():
     2 RED. Deleting either refusal `pending.append` turns property 4 RED.
     """
     grid = (
-        (TEMPERATURE, "The temperature was 425 K", "430 K", 425, 430, _MODIFIER_TAILS),
+        (
+            TEMPERATURE,
+            "The temperature was 425 K",
+            "430 K",
+            425,
+            430,
+            _TEMPERATURE_TAILS,
+        ),
         (
             START,
             "The scan started 2026-01-01T00:00:00Z",
@@ -1716,6 +1976,10 @@ def test_the_INSTANT_AND_EMPTY_TAIL_SWEEP_fabricates_nothing_in_silence():
     read_behind_a_tail: list[tuple[str, list]] = []
     read_behind_a_bare_repeat: list[tuple[str, list]] = []
     silent: list[str] = []
+    #: Cells where the SEQUENCE GATE selected NO value. Collected and asserted
+    #: below rather than merely tolerated, so the gate's reach over this grid is a
+    #: measured number and a later change to it moves a visible assertion.
+    none_selected: list[str] = []
     checked = 0
     for field_path, head, second, first_value, second_value, tails in grid:
         for connective in connectives:
@@ -1735,25 +1999,64 @@ def test_the_INSTANT_AND_EMPTY_TAIL_SWEEP_fabricates_nothing_in_silence():
                         for candidate in reading.candidates
                         if candidate.field_path == field_path
                     ]
-                    assert values, sentence
+                    # ~~`assert values, sentence`~~ — **WITHDRAWN 2026-09-13.**
+                    # It required every cell to propose SOMETHING, which the
+                    # SEQUENCE GATE deliberately stops doing: when the second
+                    # value is an indistinguishable sibling of the first (complete
+                    # unit, clean continuation, pure coordination in the gap, and a
+                    # different value) the sentence states the field twice and says
+                    # nothing about which statement is the field's, so NO value is
+                    # selected. Withdrawing it does not weaken the sweep, because
+                    # property (4) below is what carried the §5 content — every
+                    # withholding is DISCLOSED — and it now covers the first value
+                    # as well as the second. Counted and asserted instead, so the
+                    # size of the change is visible rather than absorbed.
+                    if not values:
+                        none_selected.append(sentence)
+                        assert [
+                            entry.kind for entry in reading.abstentions
+                        ] == ["several_values_and_none_selected"], sentence
                     # (1) nothing invented
                     if any(str(value) not in sentence for value in values):
                         invented.append((sentence, values))
-                    # (2) a trailing phrase always wins
-                    if tail and values != [first_value]:
+                    # (2) a trailing phrase always wins -- restated 2026-09-13 as
+                    # "the SECOND value is never proposed behind a tail", which is
+                    # the §5 half. The first value may additionally be withheld by
+                    # the sequence gate, and when it is, the cell is in
+                    # `none_selected` and its disclosure is asserted above.
+                    if tail and values not in ([first_value], []):
                         read_behind_a_tail.append((sentence, values))
                     # (3) a non-bridging BARE connective never yields a second value
-                    if connective in _NON_BRIDGING_BARE and values != [first_value]:
+                    if connective in _NON_BRIDGING_BARE and values not in (
+                        [first_value],
+                        [],
+                    ):
                         read_behind_a_bare_repeat.append((sentence, values))
                     # (4) no withholding is silent
                     if second_value not in values and not reading.abstentions:
                         silent.append(sentence)
-    assert checked == 21 * 2 * (len(_MODIFIER_TAILS) + 2 * len(_INSTANT_TAILS))
-    assert checked == 1134, checked
+    assert checked == 21 * 2 * (
+        len(_TEMPERATURE_TAILS) + 2 * len(_INSTANT_TAILS)
+    )
+    # ~~1134~~ at 17 temperature tails. The 42 terminal cells added 2026-09-13 take
+    # it to 1,176, and the arithmetic above is what holds the relationship.
+    assert checked == 1176, checked
+    assert len(_TEMPERATURE_TAILS) == len(_MODIFIER_TAILS) + 1 == 18
     assert invented == [], invented[:5]
     assert read_behind_a_tail == [], read_behind_a_tail[:5]
     assert read_behind_a_bare_repeat == [], read_behind_a_bare_repeat[:5]
     assert silent == [], silent[:5]
+    # THE SEQUENCE GATE'S REACH OVER THIS GRID, as an exact number rather than as
+    # a tolerated absence. MEASURED at the commit that added the gate. Every one of
+    # these cells is asserted above to carry exactly one
+    # `several_values_and_none_selected` disclosure, so a change that grew this set
+    # silently would have to make a withholding silent first — which property (4)
+    # refuses — and a change that SHRANK it moves this line.
+    assert len(none_selected) == _SEQUENCE_GATE_CELLS, len(none_selected)
+    # It is a MINORITY of the grid: the gate fires only where the gap between the
+    # two values is pure coordination, and most of these 1,134 cells put a hedging
+    # or approximating connective there instead.
+    assert 0 < len(none_selected) < checked // 2
 
 
 def test_the_option_ceilings_derivation_is_held_by_this_test_not_by_arithmetic():
@@ -1787,3 +2090,784 @@ def test_the_option_ceilings_derivation_is_held_by_this_test_not_by_arithmetic()
     # of the two (so it is not merely `MAX_DISCLOSURES` restated).
     assert tc.MAX_DISCLOSURE_OPTIONS > tc.MAX_DISCLOSURES
     assert tc.MAX_DISCLOSURE_OPTIONS < tc.MAX_DISCLOSURES * routes.RUN_PAGE_MAX
+
+
+# =============================================================================
+# 11. THE FIFTH PASS (2026-09-13). The PASS-ONE ASSERTION GATE, the SEQUENCE
+#     GATE, and the parity guard the served policy has never had.
+# =============================================================================
+
+
+#: The twenty members of the label-overreach class an INDEPENDENT REVIEW found on
+#: 2026-09-13, none of which was in `_LABEL_OVERREACH_CLOSED`'s thirteen rows.
+#:
+#: **THIS TUPLE IS THE EVIDENCE THAT THE FIX IS A CLASS AND NOT A TABLE, which is
+#: the one thing a table of known reproductions cannot establish about itself.**
+#: Nineteen of the twenty are refused by `_ASSERTION_BRIDGE` without any of them
+#: having been known to it when it was written. The twentieth is in
+#: `tc._PRE_LABEL_OVERREACH_RESIDUE` and is asserted STILL OPEN below, because its
+#: re-subjecting word is to the LEFT of the label where the bridge has no reach.
+_REVIEW_CORPUS_2026_09_13: tuple[str, ...] = (
+    "The temperature setpoint was 350 K",
+    "The temperature tolerance was 1 K",
+    "The temperature noise was 0.3 K",
+    "The temperature ramp was 5 K",
+    "The temperature range was 300 K",
+    "The temperature spread was 4 K",
+    "temperature FWHM 2 K",
+    "We raised the temperature by 40 K",
+    "The temperature differed by 6 K",
+    "The temperature is accurate to 0.5 K",
+    "The temperature was within 3 K of target",
+    "Temperature control was good to 1 K",
+    "The temperature scale is calibrated to 2 K",
+    "The cryostat temperature offset is 9 K",
+    "The temperature drifted 2 K over the hour",
+    "The second temperature step was 5 K",
+    "It finished drifting at 2026-01-01T00:00:00Z",
+    "The beam started tripping at 2026-01-01T00:00:00Z",
+    "The cooldown ended dripping at 2026-01-01T00:00:00Z",
+)
+
+
+@pytest.mark.parametrize("sentence", _REVIEW_CORPUS_2026_09_13)
+def test_an_INDEPENDENTLY_FOUND_member_of_the_class_is_also_closed(sentence):
+    """A corpus the gate was NOT built against, refused by the gate anyway.
+
+    Nineteen rows, found by a reviewer hunting the same class from scratch. Not one
+    of them appears in `_LABEL_OVERREACH_CLOSED`, in the bridge grammar, or in the
+    adversarial generator the fix was developed against — so each is an out-of-sample
+    test of the grammar rather than a confirmation of a list.
+
+    **THREE OF THEM ARE THE INSTANT SUB-CLASS** (`finished drifting at`,
+    `started tripping at`, `ended dripping at`), which the module's own comment
+    records its temperature-only tuple has never covered.
+
+    MUTATION: replacing `_ASSERTION_BRIDGE` with a denylist of the thirteen closed
+    rows' nouns (`drift|error|step|…`) leaves the thirteen green and turns MOST of
+    these RED — which is precisely why the fix is a grammar.
+    """
+    reading = _read(sentence)
+    assert reading.candidates == (), [
+        (candidate.field_path, candidate.proposed_value)
+        for candidate in reading.candidates
+    ]
+    # AND IT IS DISCLOSED. A silent refusal would be a different defect of the same
+    # §5 rank, so this is asserted and not assumed.
+    assert [entry.kind for entry in reading.abstentions] == [
+        "label_does_not_assert_this_value"
+    ]
+    assert [segment.text for segment in reading.segments] == [sentence]
+
+
+@pytest.mark.parametrize("sentence", tc._PRE_LABEL_OVERREACH_RESIDUE)
+def test_the_PRE_LABEL_overreach_is_STILL_OPEN(sentence):
+    """A KNOWN-OPEN §5 defect of a DIFFERENT sub-class, asserted to still occur.
+
+    The twentieth row of the reviewer's corpus. Its bridge is EMPTY — the value is
+    juxtaposed, exactly as in `"temperature 425 K"`, which this reader must keep
+    reading — and the word that re-subjects the quantity (`lowered`) sits to the
+    LEFT of the label, where a bridge grammar has no reach by construction.
+
+    Asserted the WRONG WAY ROUND on purpose, the same discipline
+    `_LABEL_OVERREACH_CLOSED` was held to before it was closed: shutting this
+    requires DELETING a row from `tc._PRE_LABEL_OVERREACH_RESIDUE` — a reviewed
+    change — rather than discovering that a documented open item quietly went away.
+
+    See that constant for the three proxies considered and why each fails: a verb
+    denylist fails OPEN, "no determiner before the label" refuses
+    `"The temperature 425 K"`, and a word-count rule cannot separate
+    `"The sample temperature 425 K"` from this by one word.
+    """
+    rows = _rows(sentence)
+    assert len(rows) == 1, (
+        "if this reads nothing the PRE-LABEL sub-class is CLOSED — delete the row "
+        "from _PRE_LABEL_OVERREACH_RESIDUE and say so, do not weaken this"
+    )
+    assert rows[0][1] is False, "pass ONE, so no restatement condition can close it"
+    # AND IT IS SILENT, which is what makes it a §5 defect rather than a disclosed
+    # omission. Pinned so a slice that makes it merely disclosed comes through here.
+    assert _read(sentence).abstentions == ()
+
+
+def test_the_PREPOSITIONAL_forms_of_the_same_sentence_ARE_closed():
+    """The pre-label residue is one FORM, not one family, and this is the boundary.
+
+    Every version of that sentence whose re-subjecting word reaches INSIDE the
+    bridge is refused. It is here so the open row above cannot be read as "verbs of
+    change before the label are unhandled" — they are handled whenever a preposition
+    puts them in the bridge's reach, which is the commoner phrasing.
+    """
+    for sentence in (
+        "We lowered the temperature by 15 K",
+        "We raised the temperature by 40 K",
+        "We corrected the temperature by 7 K",
+        "We dropped the temperature by 5 K",
+        "We brought the temperature down by 5 K",
+    ):
+        reading = _read(sentence)
+        assert reading.candidates == (), sentence
+        assert [entry.kind for entry in reading.abstentions] == [
+            "label_does_not_assert_this_value"
+        ], sentence
+
+
+def test_the_instant_VALUE_BOUNDARY_overreach_is_refused_AND_disclosed():
+    """A sub-class the review separates explicitly: the value's own boundaries.
+
+    `_INSTANT` carries neither of the boundary guards `_TEMPERATURE_K_RESTATED` was
+    deliberately given, so a five-digit year matched the SUBSTRING and a trailing
+    `ulu` matched with an overreach — each proposing an instant the transcript does
+    not state AS A TOKEN. Both are refused, and **neither is refused by a
+    lookbehind**: the review's suggested `(?<![\\d.])` was added, measured and
+    REVERTED, because with it the rule stops matching and the leading-digit form
+    produces NO abstention at all. §5 ranks a disclosed omission above a silent one.
+
+    This test is what makes that choice safe: it pins the outcomes rather than the
+    mechanism, so if the pass-one gate ever stops covering them it goes RED here.
+
+    MUTATION: admitting a digit to `_ASSERTION_BRIDGE` turns the first row RED;
+    admitting a bare unknown word to `_VALUE_CONTINUATION` turns the second RED.
+    """
+    leading = _read("The scan started 12026-01-01T00:00:00Z")
+    assert leading.candidates == ()
+    assert [entry.kind for entry in leading.abstentions] == [
+        "label_does_not_assert_this_value"
+    ]
+    trailing = _read("The scan started 2026-01-01T00:00:00Zulu")
+    assert trailing.candidates == ()
+    assert [entry.kind for entry in trailing.abstentions] == [
+        "value_qualified_by_what_follows"
+    ]
+    # AND THE CALENDAR IS DELIBERATELY NOT RANGE-CHECKED. Asserted so the decision
+    # is visible rather than implied by an absence — see `_INSTANT`'s comment for
+    # the three reasons, of which the load-bearing one is that CLAUDE.md §15's Q20
+    # ruling keeps `format` enforcement non-gating and OUTSIDE the truth plane, so
+    # an extraction-time calendar check would be stricter than the official
+    # validator is authorized to be.
+    absurd = _read("The scan started 2026-13-45T99:99:99Z")
+    assert [candidate.proposed_value for candidate in absurd.candidates] == [
+        "2026-13-45T99:99:99Z"
+    ]
+    # It is a VERBATIM quote of what the scientist wrote, which is the whole basis
+    # for not refusing it: they are shown their own typo, not a reader's guess.
+    assert absurd.candidates[0].proposed_value in absurd.segments[0].text
+
+
+# =============================================================================
+# 12. C-1: THE SERVED POLICY AGAINST THE HEDGE LISTS. The parity guard that has
+#     never existed, on a claim that has now been wrong five times.
+# =============================================================================
+
+
+def test_the_SERVED_policy_enumeration_is_DERIVED_from_the_hedge_lists():
+    """The served `ambiguity_policy` versus `_BARE_HEDGES`/`_OR_REQUIRED_HEDGES`.
+
+    **THE DEFECT THIS CLOSES WAS A SINGLE RESPONSE BODY CONTRADICTING ITSELF.**
+    `7afbe633` moved `and again` out of `_BARE_HEDGES` into `_OR_REQUIRED_HEDGES`,
+    correctly updated all three `_RULES.restated_sentence` strings, and did not
+    sweep the two `AMBIGUITY_POLICY` rows — which are SERVED (`routes.py:15406`),
+    TYPED (`apps/web/src/lib/types.ts`), and whose route docstring says
+    `ambiguity_policy` "states each rule". Measured at the route by an independent
+    review: one response carried a candidate, a policy string saying `and again`
+    bridges on its own, and an abstention saying it did not. A client rendering that
+    policy promises a reader that a second value WILL be read when it will not.
+
+    **TWO GUARDS WERE WRITTEN FOR THIS AND BOTH WERE DECORATIVE, WHICH IS WHY THE
+    TEST NOW CHECKS DERIVATION RATHER THAN WORDING. Recording both failures, because
+    each is the exact defect class this module keeps producing:**
+
+    1. `"or" in clause` — the word **"word"** contains `or`, and the clause this
+       guard selected rows by is *"a hedging word from a closed list"*. It passed
+       every row for a reason having nothing to do with the claim. Caught only by
+       `test_the_parity_guard_can_report_RED`.
+    2. `re.search(r"\bor\b", clause)` — correct as a word test, and STILL GREEN on
+       the exact pre-fix text, measured. That enumeration is ONE clause and it ends
+       *"a bare 'or', or an approximation behind an explicit 'or'"*, so `or` is
+       always present in the window. **A guard that cannot fail on the defect it
+       was written for is worse than no guard**, because it reads as coverage.
+
+    So the served strings are now BUILT from the two lists (`_BARE_BRIDGING_WORDS`,
+    `_OR_ONLY_BRIDGING_WORDS`), and this test asserts that derivation. The class of
+    defect is removed rather than detected: the served text cannot place a
+    connective in the wrong group because it does not name them individually.
+
+    MUTATION: retyping either enumeration as a literal turns this RED. Moving a
+    connective between the two lists changes the served text automatically, so the
+    drift C-1 was cannot recur — proved by
+    `test_the_derivation_tracks_a_connective_moving_between_the_lists`.
+    """
+    import re
+
+    rows = [
+        row
+        for row in tc.AMBIGUITY_POLICY
+        if tc._OR_ONLY_BRIDGING_WORDS in row["rule"]
+    ]
+    assert {row["kind"] for row in rows} == {
+        "conflicting_values_for_one_field",
+        "unhedged_further_values",
+    }, "the two rows that enumerate the connectives, by derivation not by name"
+
+    for row in rows:
+        text = row["rule"]
+        # BOTH derived strings, so a row cannot serve one group and retype the other.
+        assert tc._BARE_BRIDGING_WORDS in text, row["kind"]
+        assert tc._OR_ONLY_BRIDGING_WORDS in text, row["kind"]
+        # AND NO OR-REQUIRED CONNECTIVE IS QUOTED OUTSIDE THE DERIVED SEGMENT. This
+        # is the assertion the two failed guards were reaching for, and it is exact
+        # rather than windowed: a position test, not a keyword search.
+        span = text.index(tc._OR_ONLY_BRIDGING_WORDS)
+        derived = range(span, span + len(tc._OR_ONLY_BRIDGING_WORDS))
+        for connective in tc._OR_REQUIRED_HEDGES:
+            # The mechanical truth the row must not contradict.
+            assert tc._HEDGE_BRIDGE.fullmatch(f" {connective} ") is None, connective
+            for occurrence in re.finditer(rf"'{re.escape(connective)}'", text):
+                assert occurrence.start() in derived, (
+                    f"{row['kind']}: {connective!r} is quoted OUTSIDE the derived "
+                    f"or-required enumeration, which is how C-1 read as a promise "
+                    f"that a bare {connective!r} bridges"
+                )
+        # The bare-bridging words ARE allowed to appear on their own, and each one
+        # genuinely does bridge on its own.
+        for connective in tc._BARE_HEDGES:
+            assert tc._HEDGE_BRIDGE.fullmatch(f" {connective} ") is not None
+
+
+def test_the_derivation_tracks_a_connective_moving_between_the_lists():
+    """The property C-1 violated, proved by MOVING one rather than by reasoning.
+
+    `and again` moved between the two lists and five copies of the claim had to be
+    swept by hand; two were missed. This rebuilds the derived strings from mutated
+    lists and asserts the served enumeration would have followed automatically —
+    which is what makes the derivation a fix and not a restatement.
+    """
+    moved_bare = tuple(
+        word for word in tc._OR_REQUIRED_HEDGES if word != "and again"
+    )
+    rebuilt_or_only = ", ".join(f"'{word}'" for word in moved_bare)
+    # The CURRENT served text contains `and again` in the or-only group...
+    assert "'and again'" in tc._OR_ONLY_BRIDGING_WORDS
+    # ...and a rebuild after the move would not, without any prose being edited.
+    assert "'and again'" not in rebuilt_or_only
+    assert rebuilt_or_only != tc._OR_ONLY_BRIDGING_WORDS
+    # And the two groups are disjoint, so no connective can be in both.
+    assert not set(tc._BARE_HEDGES) & set(tc._OR_REQUIRED_HEDGES)
+
+
+def test_the_parity_guard_can_report_RED():
+    """The guard above, proved falsifiable ON THE REAL PRE-FIX TEXT.
+
+    **THIS TEST IS THE REASON TWO EARLIER GUARDS WERE THROWN AWAY, so it asserts
+    against the actual strings that shipped rather than against a hand-made mutant
+    that happens to trip it.** The two rows are quoted verbatim as they read before
+    the fix, and all three candidate predicates are run over them:
+
+    * `"or" in clause` — GREEN on both (vacuous: "word" contains "or");
+    * `\bor\b` — GREEN on both (the enumeration is one clause and mentions "or");
+    * the DERIVED check — RED on both, which is the one that shipped.
+    """
+    import re
+
+    pre_fix = (
+        "A sentence states more than one value of the same form for one field, and "
+        "only the labelled one was read. A second value is read as an alternative "
+        "for the same field only when THREE things hold, and this row is the first "
+        "two of them: a hedging word from a closed list links it to the first with "
+        "nothing else in the gap - 'maybe', 'perhaps', 'and again', "
+        "'alternatively', a bare 'or', or an approximation behind an explicit 'or' "
+        "such as 'or about' - and the value is not part of a larger unit such as "
+        "K/min",
+        "Inside ONE sentence a second value is read only when a hedging word - "
+        "'maybe', 'perhaps', 'or', 'about', 'and again' and the like, from a closed "
+        "list - sits immediately between the two, with nothing else in the gap",
+    )
+
+    def clause_of(text: str, at: int) -> str:
+        start = text.rfind(".", 0, at) + 1
+        end = text.find(".", at)
+        return text[start : end if end != -1 else len(text)]
+
+    def substring_guard(text: str) -> bool:
+        for connective in tc._OR_REQUIRED_HEDGES:
+            for occ in re.finditer(rf"'{re.escape(connective)}'", text):
+                if "or" not in clause_of(text, occ.start()):
+                    return False
+        return True
+
+    def word_guard(text: str) -> bool:
+        for connective in tc._OR_REQUIRED_HEDGES:
+            for occ in re.finditer(rf"'{re.escape(connective)}'", text):
+                if not re.search(r"\bor\b", clause_of(text, occ.start())):
+                    return False
+        return True
+
+    def derived_guard(text: str) -> bool:
+        if tc._OR_ONLY_BRIDGING_WORDS not in text:
+            return False
+        span = text.index(tc._OR_ONLY_BRIDGING_WORDS)
+        derived = range(span, span + len(tc._OR_ONLY_BRIDGING_WORDS))
+        for connective in tc._OR_REQUIRED_HEDGES:
+            for occ in re.finditer(rf"'{re.escape(connective)}'", text):
+                if occ.start() not in derived:
+                    return False
+        return True
+
+    for text in pre_fix:
+        # BOTH REJECTED GUARDS PASS THE DEFECT. This is the measurement, committed.
+        assert substring_guard(text), "recorded: the substring guard was vacuous"
+        assert word_guard(text), "recorded: \\bor\\b was GREEN on the real defect"
+        # AND THE ONE THAT SHIPPED FAILS IT.
+        assert not derived_guard(text), "the derived check must reject the pre-fix row"
+
+    # And it PASSES every row actually served, so it is not merely strict.
+    for row in tc.AMBIGUITY_POLICY:
+        if tc._OR_ONLY_BRIDGING_WORDS in row["rule"]:
+            assert derived_guard(row["rule"]), row["kind"]
+
+
+def test_no_refusal_reason_CONTAINS_A_DIGIT_at_all():
+    """The module's own standing rule, applied to all five reasons mechanically.
+
+    `_REFUSAL_REASONS`' comment states it for one entry: *"every digit that would
+    read naturally there ('3 K of drift') also appears in the measured sentences
+    this closes, so an example would look like a leak of the withheld value and a
+    test asserting it was not one would be asserting a coincidence."*
+
+    **THAT RULE WAS THEN BROKEN BY THE NEXT THREE REASONS ADDED AFTER IT, TWICE IN
+    ONE SLICE.** `several_values_and_none_selected` shipped illustrating itself with
+    *"was 300 K, then 350 K, then 400 K"* and an existing test caught it, because on
+    that very sentence the illustration IS the withheld values.
+    `label_does_not_assert_this_value` and `value_qualified_by_what_follows` then
+    shipped with the same defect (*"rose by 30 K"*, *"3 K above target"*) and were
+    caught by a sweep rather than by a test. So the rule is now MECHANICAL and
+    applies to every reason, present and future: no digit, anywhere.
+
+    It is a stronger assertion than "does not leak the withheld value", and
+    deliberately so — the leaking version is unprovable in general (it depends on
+    which sentence fired the reason) while this one is decidable by reading the
+    string. The named constructions ("a drift, an error, a step") carry the same
+    information to the scientist without the coincidence.
+
+    MUTATION: putting any numeric example back into any reason turns this RED.
+    """
+    import re
+
+    assert len(tc._REFUSAL_REASONS) == 5
+    for kind, reason in tc._REFUSAL_REASONS.items():
+        digits = sorted(set(re.findall(r"[0-9]", reason)))
+        assert digits == [], f"{kind} names digit(s) {digits}: {reason!r}"
+        # And each is still parameterised on the field path, so a disclosure always
+        # says WHICH field withheld -- the half that makes the omission §5-acceptable.
+        assert "{field_path}" in reason, kind
+
+    # AND THE SAME SWEEP OVER WHAT IS ACTUALLY SERVED, on sentences that fire every
+    # one of the five kinds, because a digit-free template could still be formatted
+    # with one.
+    fired: set[str] = set()
+    for sentence in (
+        "The temperature drift was 3 K.",
+        "The temperature was 3 K above target.",
+        "The temperature was 300 K, then 350 K, then 400 K.",
+        "The temperature was 425 K, ramped at 3 K/min",
+        "The temperature was 425 K, maybe 3 K of drift",
+    ):
+        reading = _read(sentence)
+        numbers = set(re.findall(r"[0-9]+(?:\.[0-9]+)?", sentence))
+        for entry in reading.abstentions:
+            fired.add(entry.kind)
+            leaked = sorted(n for n in numbers if n in entry.reason)
+            assert leaked == [], (sentence, entry.kind, leaked)
+    assert fired == set(tc._REFUSAL_REASONS), (
+        "this sweep must fire every refusal kind, or it clears kinds it never ran"
+    )
+
+
+def test_every_label_head_matches_at_offset_zero_and_before_the_value():
+    """The invariant `_label_bridge` rests on, asserted rather than assumed.
+
+    `_LABEL_HEAD_*` recovers where a rule's LABEL ends inside its own whole match,
+    which is what makes the bridge extractable without renumbering a capture group.
+    It is a mirror of each pattern's leading alternation, so it can drift from the
+    pattern it mirrors — and the drift is silent in the dangerous direction: an
+    alternation ordered `start|started` would match three characters of a
+    four-character label and leave `ed` in the bridge, which no assertion grammar
+    admits, so EVERY instant would quietly stop being read.
+
+    **THE MODULE'S COMMENT CLAIMED THIS TEST EXISTED BEFORE IT DID.** It was written
+    as "a test asserts, over every rule and every measured sentence, that the head
+    matches at offset 0 and ends at or before the value" — which is the kind of
+    claim this file has been caught publishing unchecked. It is now true.
+
+    MUTATION: reordering any `_LABEL_HEAD_*` alternation so a prefix precedes its
+    longer form turns this RED; so does pointing a rule at another rule's head.
+    """
+    sentences = (
+        "The temperature was 425 K",
+        "temperature 425 K",
+        "Sample temperature at the second scan was 425 K",
+        "temperatures were 425 K",
+        "The scan started 2026-01-01T00:00:00Z",
+        "The scan start 2026-01-01T00:00:00Z",
+        "The beginning was 2026-01-01T00:00:00Z",
+        "The scan began 2026-01-01T00:00:00Z",
+        "The scan ended 2026-01-01T00:00:00Z",
+        "At the end 2026-01-01T00:00:00Z",
+        "The scan finished 2026-01-01T00:00:00Z",
+        "The scan stopped 2026-01-01T00:00:00Z",
+    )
+    checked = 0
+    gated = [rule for rule in tc._RULES if rule.label_head is not None]
+    assert len(gated) == 3, "the three label-anchored value rules"
+    for rule in gated:
+        for sentence in sentences:
+            for match in rule.pattern.finditer(sentence):
+                checked += 1
+                whole = match.group(0)
+                head = rule.label_head.match(whole)
+                assert head is not None, (rule.name, whole)
+                # At offset zero: every pattern begins with `\b` + its label.
+                assert head.start() == 0, (rule.name, whole)
+                # And ending at or before the value, so the bridge slice is valid.
+                value_start = match.start(1) - match.start()
+                assert head.end() <= value_start, (rule.name, whole, head.group(0))
+                # The head is the WHOLE label word, never a prefix of it: the
+                # character after it is not a letter.
+                rest = whole[head.end() :]
+                assert not rest[:1].isalpha(), (
+                    f"{rule.name}: `{head.group(0)}` is a PREFIX of the label in "
+                    f"`{whole}` -- the alternation is ordered wrong and every "
+                    f"reading of this rule would silently stop"
+                )
+                # And the bridge that comes out of it really does parse, on these
+                # deliberately-legitimate sentences.
+                assert tc._asserts_the_value(rule, match), (rule.name, whole)
+    assert checked >= 12, checked
+
+
+def test_the_sequence_gate_is_PER_REGION_and_not_per_segment():
+    """One sloppy clause must not delete a clean one in the same sentence.
+
+    The claim is written into `_segment_readings` as prose — *"'The temperature was
+    425 K and 430 K and the temperature was 500 K' withholds the first clause and
+    still reads 500"* — so it is pinned here rather than left as a comment.
+
+    Each label match owns a REGION, and the gate decides over that region alone. A
+    segment-wide gate would be simpler and would be wrong: the ambiguity belongs to
+    the clause that contains it, and the second clause asserts 500 with its own
+    label and its own copula.
+
+    MUTATION: hoisting the `siblings` check out of the region loop to a per-rule or
+    per-segment decision turns this RED on the 500.
+    """
+    sentence = "The temperature was 425 K and 430 K and the temperature was 500 K."
+    reading = _read(sentence)
+    # `_values` in THIS file takes TEXT (it takes a READING in
+    # `test_transcript_capture_multiple_values.py`) -- a trap this test fell into
+    # once, with a `TypeError` rather than a wrong answer, which is the good case.
+    assert _values(sentence, TEMPERATURE) == [500]
+    assert [entry.kind for entry in reading.abstentions] == [
+        "several_values_and_none_selected"
+    ]
+    # NOT a conflict: only one value was read, so there is nothing to choose between.
+    assert reading.review_required == ()
+
+    # And a gated match next to an accepted one, in both orders, so neither
+    # position is privileged.
+    for sentence in (
+        "The temperature drift was 3 K and the temperature was 425 K.",
+        "The temperature was 425 K and the temperature drift was 3 K.",
+    ):
+        both = _read(sentence)
+        assert _values(sentence, TEMPERATURE) == [425], sentence
+        assert "label_does_not_assert_this_value" in [
+            entry.kind for entry in both.abstentions
+        ], sentence
+
+    # The instant rules likewise: a drift ONSET is refused beside a real start.
+    instants = _read(
+        "It started drifting at 2026-01-01T00:00:00Z and the scan started "
+        "2026-01-02T00:00:00Z."
+    )
+    assert [
+        candidate.proposed_value
+        for candidate in instants.candidates
+        if candidate.field_path == START
+    ] == ["2026-01-02T00:00:00Z"]
+    assert "label_does_not_assert_this_value" in [
+        entry.kind for entry in instants.abstentions
+    ]
+
+
+#: Natural ways of asserting a temperature, written INDEPENDENTLY of the bridge
+#: grammar rather than derived from it — which is the whole point of them.
+#:
+#: **THE FIRST VERSION OF `_ASSERTION_BRIDGE` REFUSED THIRTEEN OF THESE FIFTEEN,
+#: and the adversarial corpus it was developed against reported 1,365 legitimate
+#: sentences read and ZERO lost.** That corpus drew its bridges from the same list
+#: the grammar was built from, so it measured the grammar's REACH and not its
+#: PREMISE. These are here so a future narrowing of the grammar costs a test rather
+#: than costing a scientist their reading.
+_BENIGN_BRIDGE_FORMS: tuple[str, ...] = (
+    "The temperature here was 425 K.",
+    "The temperature today was 425 K.",
+    "The temperature throughout was 425 K.",
+    "The temperature read 425 K.",
+    "The temperature showed 425 K.",
+    "The temperature registered 425 K.",
+    "The temperature came out at 425 K.",
+    "The temperature settled at 425 K.",
+    "The temperature stayed at 425 K.",
+    "The temperature remained at 425 K.",
+    "The temperature stabilised around 425 K.",
+    "The temperature sat around 425 K.",
+    "The sample temperature was 425 K.",
+    "The temperature on the sensor was 425 K.",
+    "The temperature according to the log was 425 K.",
+    "The temperature we recorded was 425 K.",
+    "The temperature I measured was 425 K.",
+    "The temperature was held at 425 K.",
+    "The temperature was set to 425 K.",
+    "The temperature reached 425 K.",
+)
+
+
+@pytest.mark.parametrize("sentence", _BENIGN_BRIDGE_FORMS)
+def test_a_natural_way_of_asserting_the_field_is_still_READ(sentence):
+    """The false-negative side of the gate, measured on an INDEPENDENT list.
+
+    A fail-closed gate is only acceptable if what it closes on is genuinely
+    unreadable. Measured on this list, the first version was at **86%** loss — a
+    reader that refuses most of the ways a person says a thing is not usable, and
+    "every loss is disclosed" is not a defence against that. It is now at one
+    (`"The temperature, measured carefully, was 425 K"`, a parenthetical, named as
+    residue).
+
+    MUTATION: reverting any of `_ASSERTION_AT_VERB`'s 2026-09-13 additions,
+    `_ASSERTION_REPORT_VERB`, `_LABEL_ADVERB` or `_LABEL_CLAUSE` turns rows here
+    RED.
+    """
+    assert _values(sentence) == [425], sentence
+    assert _read(sentence).abstentions == (), sentence
+
+
+def test_widening_the_bridge_did_NOT_reopen_the_nominal_head_class():
+    """The structural argument for the widening, asserted rather than reasoned.
+
+    Every verb added to the bridge grammar on 2026-09-13 is safe for ONE reason: a
+    NOMINAL HEAD still fails, wherever the verb after it comes from. `drift` is
+    neither a modifier preposition nor an assertion, so it cannot reach the value
+    however the clause continues. That is the claim, and these are the controls.
+
+    MUTATION: admitting an open `[A-Za-z]+` anywhere in `_LABEL_ADVERB` or
+    `_LABEL_MODIFIER` turns every row here RED, which is exactly the failure the
+    closed lists exist to prevent.
+    """
+    for sentence in (
+        "The temperature drift read 3 K",
+        "The temperature error settled at 2 K",
+        "The temperature step showed 5 K",
+        "The temperature noise read 0.3 K",
+        "The temperature spread registered 4 K",
+        "The temperature setpoint came out at 350 K",
+        "The temperature tolerance remained at 1 K",
+        "The temperature ramp stayed at 5 K",
+    ):
+        reading = _read(sentence)
+        assert reading.candidates == (), sentence
+        assert [entry.kind for entry in reading.abstentions] == [
+            "label_does_not_assert_this_value"
+        ], sentence
+    # AND THE THIRTEEN CLOSED ROWS ARE RE-CHECKED HERE TOO, so a widening that
+    # reopened one could not hide behind the parametrised test above passing.
+    for row in tc._LABEL_OVERREACH_CLOSED:
+        assert _rows(row) == [], f"the widening REOPENED {row!r}"
+
+
+@pytest.mark.parametrize("sentence", tc._PARENTHETICAL_BRIDGE_RESIDUE)
+def test_the_PARENTHETICAL_bridge_is_STILL_REFUSED(sentence):
+    """The one benign bridge form the gate still costs, asserted so it is visible.
+
+    A parenthetical between the label and its copula. It is a DISCLOSED omission
+    rather than a fabrication, so it is a cost and not a §5 defect — but it is a
+    cost, and a percentage hides it. Admitting it means admitting arbitrary text
+    inside `, … ,`, and *"the temperature, which was a drift of, was 3 K"* is why
+    that needs its own allowlist grammar rather than a wildcard.
+
+    Asserted the WRONG WAY ROUND, like the two residue tuples: reading it requires
+    DELETING a row here.
+    """
+    reading = _read(sentence)
+    assert reading.candidates == (), (
+        "if this now READS, the parenthetical form is handled -- delete the row "
+        "from _PARENTHETICAL_BRIDGE_RESIDUE and say so"
+    )
+    # AND IT IS DISCLOSED, which is the difference between this and the pre-label row.
+    assert [entry.kind for entry in reading.abstentions] == [
+        "label_does_not_assert_this_value"
+    ]
+
+
+def test_the_two_PHRASE_rules_do_not_share_the_label_overreach_defect():
+    """Scope item 8 of the closing brief: the OTHER readable fields, measured.
+
+    `_ATMOSPHERE`/`_ENVIRONMENT` were already fail-closed in the shape
+    `_ASSERTION_BRIDGE` gives the other three — `_LABEL_SEPARATOR` requires a
+    copula, colon or equals sign IMMEDIATELY after the label, and the phrase is
+    anchored to the end of the segment. So they carry no `label_head` and this
+    slice changed neither. Asserted rather than asserted-about, because "the other
+    rules are fine" is exactly the kind of claim this file has published unchecked.
+    """
+    for sentence in (
+        "The atmosphere change was dry nitrogen",
+        "The atmosphere drift was dry nitrogen",
+        "The environment control was ambient air",
+        "The atmosphere step was argon",
+    ):
+        assert _read(sentence).candidates == (), sentence
+    for sentence, path, value in (
+        ("The atmosphere was dry nitrogen", ATMOSPHERE, "dry nitrogen"),
+        ("atmosphere: dry nitrogen", ATMOSPHERE, "dry nitrogen"),
+        ("The environment was ambient air", ENVIRONMENT, "ambient air"),
+    ):
+        assert [
+            candidate.proposed_value
+            for candidate in _read(sentence).candidates
+            if candidate.field_path == path
+        ] == [value], sentence
+    # And they are UNGATED by construction, which is what makes the above a
+    # property of those rules rather than a coincidence of these sentences.
+    for rule in tc._RULES:
+        if rule.field_path in (ATMOSPHERE, ENVIRONMENT):
+            assert rule.label_head is None, rule.name
+            assert rule.restatement is None, rule.name
+
+
+@pytest.mark.parametrize("sentence,proposed", tc._PHRASE_BOUNDARY_RESIDUE)
+def test_the_PHRASE_BOUNDARY_imperfection_is_STILL_OPEN(sentence, proposed):
+    """A DIFFERENT imperfection in the phrase rules, asserted the wrong way round.
+
+    `_LABEL_SEPARATOR` admits `of`, so *"The atmosphere OF THE GLOVEBOX was dry
+    nitrogen"* proposes the sentence's whole tail as the atmosphere.
+
+    **It is not the class this slice closes and the difference is the point:** no
+    quantity is re-subjected and no number is invented — the value is a VERBATIM
+    substring of the scientist's own sentence, shown to them for confirmation — so
+    what is wrong is the phrase BOUNDARY, not the claim. A scalar fabrication
+    offers a plausible number nobody stated; this offers an obviously-wrong string.
+
+    Pinned so closing it is a reviewed change. `of` is measured UNUSED by every
+    phrase bridge in this repository's corpus, so dropping it from
+    `_LABEL_SEPARATOR` is a plausible fix — for its own slice, since that constant
+    governs two rules this slice deliberately left untouched.
+    """
+    values = [
+        candidate.proposed_value
+        for candidate in _read(sentence).candidates
+        if candidate.field_path == ATMOSPHERE
+    ]
+    assert values == [proposed], (
+        "if this changed, the phrase-boundary imperfection moved -- update or "
+        "delete the row in _PHRASE_BOUNDARY_RESIDUE and say which"
+    )
+
+
+def test_the_gate_ledger_constants_are_not_DEAD():
+    """`_GATE_FALSE_NEGATIVES` and the three residue tuples must be reachable.
+
+    This module already carries `_DISCLOSURE_CEILING_GAP`, a prose constant whose
+    only protection is a test asserting its content — the pattern exists because a
+    documentation constant nothing reads is a claim that can go stale without any
+    test noticing. The 2026-09-13 ledger gets the same treatment: the numbers it
+    publishes are the ones asserted elsewhere in this file, so they cannot drift
+    apart, and each residue tuple has a parametrised test that walks it.
+
+    MUTATION: editing a figure in `_GATE_FALSE_NEGATIVES` without editing the
+    corresponding assertion turns this RED.
+    """
+    ledger = tc._GATE_FALSE_NEGATIVES
+    # The two measured rates, as they are published.
+    assert "1 of 15" in ledger
+    assert "16 of 57" in ledger
+    assert "13 of 15 before the 2026-09-13 widening" in ledger
+    # And the claim that makes the trade §5-acceptable at all.
+    assert "Every loss is DISCLOSED" in ledger
+    # The 20-form tuple this file walks matches the ledger's own parenthetical.
+    assert len(_BENIGN_BRIDGE_FORMS) == 20
+
+    # Each residue tuple is non-empty AND walked by a parametrised test, so none
+    # can become a vacuous parameter set -- the exact failure mode
+    # `_RESTATEMENT_RESIDUE` was deleted to avoid.
+    for name, tup in (
+        ("_PRE_LABEL_OVERREACH_RESIDUE", tc._PRE_LABEL_OVERREACH_RESIDUE),
+        ("_MODIFIER_OBJECT_OVERREACH_RESIDUE",
+         tc._MODIFIER_OBJECT_OVERREACH_RESIDUE),
+        ("_PARENTHETICAL_BRIDGE_RESIDUE", tc._PARENTHETICAL_BRIDGE_RESIDUE),
+        ("_PHRASE_BOUNDARY_RESIDUE", tc._PHRASE_BOUNDARY_RESIDUE),
+        ("_LABEL_OVERREACH_CLOSED", tc._LABEL_OVERREACH_CLOSED),
+        ("_RESTATEMENT_RESIDUE_CLOSED", tc._RESTATEMENT_RESIDUE_CLOSED),
+    ):
+        assert tup, f"{name} is EMPTY, which makes its parametrised test vacuous"
+        assert len(set(tup)) == len(tup), f"{name} has a duplicate row"
+
+    # The three residue tuples are DISJOINT from the closed one: a sentence cannot
+    # be both open and closed, and an edit that moved one without removing it from
+    # the other would say it is.
+    closed = set(tc._LABEL_OVERREACH_CLOSED) | set(tc._RESTATEMENT_RESIDUE_CLOSED)
+    open_rows = (
+        set(tc._PRE_LABEL_OVERREACH_RESIDUE)
+        | set(tc._MODIFIER_OBJECT_OVERREACH_RESIDUE)
+        | set(tc._PARENTHETICAL_BRIDGE_RESIDUE)
+        | {row[0] for row in tc._PHRASE_BOUNDARY_RESIDUE}
+    )
+    assert not (closed & open_rows)
+
+
+@pytest.mark.parametrize("sentence", tc._MODIFIER_OBJECT_OVERREACH_RESIDUE)
+def test_the_MODIFIER_OBJECT_overreach_is_STILL_OPEN(sentence):
+    """A third open sub-class, found by SELF-REVIEW of this slice's own grammar.
+
+    `_LABEL_MODIFIER` admits a preposition + DETERMINER + up to three words,
+    because that is what makes `"Sample temperature at the second scan was 425 K"`
+    readable. When the modifier's OBJECT is itself a quantity noun the bridge
+    parses and the value is read, silently.
+
+    **The BARE forms are all closed** (`"The temperature drift was 3 K"` is
+    refused), so what is open is specifically the determiner-led genitive — and
+    telling `"of the SAMPLE"` from `"of the DRIFT"` needs a lexicon of which nouns
+    name a thing that HAS a temperature versus a quantity DERIVED from one. That is
+    the same wall as `per the log` versus `per minute`.
+
+    Asserted the WRONG WAY ROUND, so closing it requires deleting a row.
+
+    **Recorded because a slice that finds a hole in its own fix and does not pin it
+    has published a stronger result than it measured** — which is the defect class
+    this whole file exists to document.
+    """
+    rows = _rows(sentence)
+    assert len(rows) == 1, (
+        "if this reads nothing the MODIFIER-OBJECT sub-class is CLOSED -- delete "
+        "the row from _MODIFIER_OBJECT_OVERREACH_RESIDUE and say so"
+    )
+    assert rows[0][1] is False, "pass ONE"
+    assert _read(sentence).abstentions == (), "and it is SILENT, which is the defect"
+
+
+def test_the_BARE_forms_of_the_modifier_object_class_ARE_closed():
+    """The boundary of the sub-class above, so it is not read as wider than it is.
+
+    Remove the determiner and every one of them is refused. That is what makes the
+    open rows a determiner-led GENITIVE problem rather than "the gate does not
+    handle quantity nouns".
+    """
+    for sentence in (
+        "The temperature drift was 3 K",
+        "The temperature error was 2 K",
+        "The temperature ramp was 5 K",
+        "The temperature tolerance was 1 K",
+        "The temperature of drift was 3 K",
+        "The temperature for tolerance was 1 K",
+    ):
+        reading = _read(sentence)
+        assert reading.candidates == (), sentence
+        assert reading.abstentions, f"{sentence!r} must at least DISCLOSE"

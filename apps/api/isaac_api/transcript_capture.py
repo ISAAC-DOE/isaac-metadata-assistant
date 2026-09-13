@@ -80,7 +80,7 @@ case is recorded in :data:`AMBIGUITY_POLICY`:
   class is closed as far as measurement here can tell; the claim class is NOT** —
   the LABEL-ANCHORED rule of pass one over-reads the same way, silently and
   pre-existingly, and that is measured and named in
-  :data:`_LABEL_OVERREACH_RESIDUE`.
+  :data:`_LABEL_OVERREACH_CLOSED` (CLOSED 2026-09-13).
   Note what is still refused: ``[425, 430]`` is never constructed. That asserts a
   continuous interval nobody stated, and the official schema's only uncertainty
   representation is ``$.descriptors.outputs[].descriptors[].uncertainty``, which
@@ -329,15 +329,34 @@ MAX_CANDIDATE_QUOTE_BYTES = 4 * 256 * 1024
 #: (``test_the_worst_legitimate_disclosure_load_is_admitted``): a transcript at the
 #: segment ceiling whose every sentence is maximally ambiguous — an absorption-edge
 #: mention, a non-kelvin temperature, and BOTH refusal kinds for two of the three
-#: rules that can refuse — reports **6 disclosures per sentence and 600 in total**,
-#: and is ADMITTED. (That transcript also reads **500** candidates, which is
-#: ``MAX_CANDIDATES`` exactly, so it is admitted by the narrowest possible margin on
-#: a different axis. The coincidence is named rather than relied on.)
+#: rules that can refuse — reports ~~**6 disclosures per sentence and 600 in
+#: total**~~ **9 per sentence and 900 in total**, and is ADMITTED.
+#:
+#: **THIS NUMBER HAS NOW BEEN WRONG TWICE AND THE WHOLE SEQUENCE IS KEPT, because a
+#: reader who sees only the latest figure cannot tell a corrected claim from a
+#: drifting one: 600 (false) → 700 (true, and what the test measured) → 900 (true
+#: now).** 600 was made false by the 2026-09-12 region walk, which added a seventh
+#: disclosure to that fixture, and was not swept; an independent review measured
+#: **700** on 2026-09-13 and was right. 900 is this slice's own PASS-ONE ASSERTION
+#: GATE adding two more to the same fixture — both of which are FABRICATIONS it
+#: refused, not noise: the word ``end`` inside *"at the end, then <instant>"* is not
+#: the assertion *"the scan ended"*, and that fixture had been reading two instants
+#: off it. Re-derive rather than quoting: the test itself measures it.
+#:
+#: (~~That transcript also reads **500** candidates, which is ``MAX_CANDIDATES``
+#: exactly, so it is admitted by the narrowest possible margin on a different axis.
+#: The coincidence is named rather than relied on.~~ — **STRUCK 2026-09-13: it now
+#: reads 300, for exactly the two refusals above, and the coincidence is gone.
+#: ``_COUNT_ONLY`` in the ceilings file, at 600 candidates, is what exercises that
+#: axis at its margin.**)
 #:
 #: **THE 600 IS NOT A BOUND BY CONSTRUCTION AND MUST NOT BE READ AS ONE.** The two
 #: RESTATEMENT-refusal kinds are deduplicated per segment per rule, so those are
 #: bounded at ``MAX_SEGMENTS`` × 3 restatement-carrying rules × 2 kinds = 600
-#: whatever a transcript says. ``temperature_not_in_kelvin`` and every run
+#: whatever a transcript says — and since 2026-09-13 the PASS-ONE gate's THREE
+#: kinds are deduplicated the same way over the same 3 label-gated rules, so the
+#: construction bound over all five refusal kinds is ``MAX_SEGMENTS`` × 3 × 5 =
+#: **1,500**, which is still inside this ceiling and is why it did not have to move. ``temperature_not_in_kelvin`` and every run
 #: clarification are **not**: they are appended one per regex MATCH, which is
 #: exactly how the 16,384 and 17,476 above arise. A sentence stating six
 #: temperatures in celsius reports six. So the total has no construction bound at
@@ -395,10 +414,31 @@ MAX_DISCLOSURES = 2000
 #: that is part of the fix.** ``"the first run. " * 1999`` — the same text WITH the
 #: sentence-ending period — was cited as ADMITTED at 49.2 / 245.9 / 1,245.4 MB. It
 #: is not: the period makes it **1,999 SEGMENTS**, so ``MAX_SEGMENTS`` (100) refuses
-#: it at the route with a **422** and a **294-byte** body, at every run count
-#: measured. Those three figures are in-process readings of a reading whose response
-#: the route never serialises. The defect is real; the payload that reaches it has
-#: no periods, and the numbers are the table above.
+#: it at the route with a **422** and a **294-byte** body, ~~at every run count
+#: measured~~ — **FALSE AT EVERY RUN COUNT THAT SENTENCE CITED, corrected 2026-09-13
+#: after an independent review measured it.** The payload IS refused at every run
+#: count; the REASON is not the one stated, and the reason is what the sentence was
+#: offering. ``routes`` calls ``read_transcript`` (``routes.py:15256``) BEFORE it
+#: checks ``len(reading.segments) > MAX_SEGMENTS`` (``routes.py:15292``), so this
+#: reader's own ceilings get the first refusal. Re-measured in-process at each count:
+#:
+#: =========  ===============================  ======================
+#: runs       which bound refuses first        error
+#: =========  ===============================  ======================
+#: 1          ``MAX_SEGMENTS``, at the route   ``transcript_too_long``
+#: 10         ``MAX_SEGMENTS``, at the route   ``transcript_too_long``
+#: 11         ``MAX_DISCLOSURE_OPTIONS``       ``transcript_too_dense``
+#: 200        ``MAX_DISCLOSURE_OPTIONS``       ``transcript_too_dense``
+#: 1,000      ``MAX_DISCLOSURE_OPTIONS``       ``transcript_too_dense``
+#: 5,000      ``MAX_DISCLOSURE_OPTIONS``       ``transcript_too_dense``
+#: =========  ===============================  ======================
+#:
+#: The threshold is **11 runs** (1,999 clarifications × 11 = 21,989 > 20,000), and
+#: the three counts the struck sentence named — 200, 1,000, 5,000 — are all above
+#: it. So the segment reason is reachable only BELOW 11 runs. Those three MB figures
+#: are still in-process readings of a reading whose response the route never
+#: serialises, which is the point that survives; the defect is real; the payload that
+#: reaches it has no periods, and the numbers are the table above.
 #:
 #: **THE NUMBER IS A JUDGEMENT, NOT A MEASUREMENT, AND SAYING SO IS PART OF IT** —
 #: the same disclosure the other three make. Nothing here has measured a
@@ -406,7 +446,31 @@ MAX_DISCLOSURES = 2000
 #: is the worst LEGITIMATE case it must still admit: a transcript at the segment
 #: ceiling (``MAX_SEGMENTS`` = 100) whose every sentence names one unresolvable run,
 #: on a record holding ``routes.RUN_PAGE_MAX`` = 200 runs — this repository's own
-#: statement of the magnitude a run list is designed around. 100 × 200 = 20,000
+#: statement of the magnitude a run list is designed around.
+#:
+#: **AND IT IS ADMITTED ONLY WHEN A RUN HAS ALREADY BEEN SELECTED — corrected
+#: 2026-09-13.** With ``selected_run=None``, which is the ORDINARY FIRST-CAPTURE
+#: PATH, ``read_transcript`` inserts a ``run_target_required`` clarification
+#: carrying EVERY run, so this very case becomes 101 × 200 = **20,200** and is
+#: REFUSED. Measured both ways on that exact payload
+#: (``"We looked at run zzz and it was fine."`` × 100, 200 runs):
+#: ``selected_run="run-1"`` → 100 disclosures / **20,000** options / ADMITTED,
+#: exactly at the ceiling; ``selected_run=None`` → **20,200** / REFUSED. So the
+#: ceiling sits exactly ON the boundary of its own stated worst case, and one extra
+#: clarification crosses it.
+#:
+#: **THE REVIEW THAT FOUND THIS DEMONSTRATED IT ON THE WRONG FIXTURE, and saying so
+#: is part of recording it.** It cited
+#: ``test_the_worst_legitimate_disclosure_load_is_admitted``; on THAT fixture the
+#: claim is TRUE with no run selected — measured 201 disclosures / 200 options /
+#: ADMITTED — because an unsettled run target makes ``read_transcript`` skip
+#: ``_segment_readings`` for every segment, so its 900 refusal disclosures are never
+#: produced, and its sentences name no run. The two fixtures are not
+#: interchangeable: one floods REFUSALS and carries no options, the other floods RUN
+#: REFERENCES and carries all of them. The FINDING is real on the constant's own
+#: stated case; the DEMONSTRATION was not.
+#:
+#: 100 × 200 = 20,000
 #: options ≈ 1.4 MB serialised, which is the same order as the ~2 MiB
 #: :data:`MAX_CANDIDATE_QUOTE_BYTES` admits at its own ceiling. Like that constant
 #: this is a bare literal and CANNOT reference ``routes`` (``routes`` imports this
@@ -416,16 +480,58 @@ MAX_DISCLOSURES = 2000
 #: AND THE DIFFERENCE IS MEASURED RATHER THAN STYLISTIC.** The product over-counts
 #: twice: an :class:`Abstention` carries NO options at all, and
 #: ``ambiguous_run_reference`` / ``conflicting_run_reference`` carry a SUBSET of the
-#: runs. Applied to this module's own documented worst legitimate case — 600
-#: disclosures, every one an abstention — the product reads 600 × 200 = 120,000 and
+#: runs. Applied to this module's own documented worst legitimate case — ~~600~~
+#: **900**
+#: disclosures, every one an abstention — the product reads ~~600 × 200 = 120,000~~
+#: **900 × 200 = 180,000** and
 #: would refuse a transcript that serves **zero** options, i.e. it would refuse the
 #: case the third ceiling was explicitly set to admit. The exact sum reads 0 there
 #: and 399,800 on the 200-run attack above, so it separates the two rather than
-#: ranking them.
+#: ranking them. (The struck pair was ALSO wrong when it was committed, by a
+#: different amount: the fixture measured 700 that day, not 600. Both corrections
+#: are kept — see :data:`MAX_DISCLOSURES` for the 600 → 700 → 900 sequence.)
 #:
 #: **WHAT IT DOES NOT BOUND, NAMED SO THE NEXT SLICE DOES NOT HAVE TO FIND IT.**
-#: It bounds the option COUNT, and an option is three short identifier fields, so
-#: count is a good proxy for bytes HERE — but it is still a proxy. The structural
+#: It bounds the option COUNT, and ~~an option is three short identifier fields, so
+#: count is a good proxy for bytes HERE — but it is still a proxy.~~ — **THE PROXY
+#: IS WRONG BY ~8×, measured 2026-09-13 by independent review and re-measured here.
+#: The sentence is struck rather than softened, because "a good proxy for bytes" is
+#: what the ~72 B/option derivation above rests on.** One of those three fields is
+#: the run's ``label``, which is CALLER-SUPPLIED and capped at **510 characters**
+#: (511 → ``422 unrepresentable_value``), and ``RunRef.to_option()`` serialises it
+#: into every option. Re-measured here over ``json.dumps(run.to_option())``:
+#:
+#: ===================  ====================
+#: label length         served option bytes
+#: ===================  ====================
+#: 7 (default label)    73 B
+#: 200                  266 B
+#: 510 (the cap)        576 B
+#: ===================  ====================
+#:
+#: At the route with 200 runs the review measured whole responses of 2,146,142 B
+#: (default labels), 5,997,442 B (200-char) and 12,166,442 B (510-char) — 608
+#: B/option including per-entry framing — with ALL FOUR ceilings inside their
+#: limits, so it is ADMITTED and serialised inside ``record_lock``. That is more
+#: than twice the ~5.1 MB :data:`MAX_DISCLOSURES` was created to close, and it is
+#: the same defeat the ceilings' own precedent names: *"a bound on rows that a
+#: client can defeat by making each row large is not a bound."*
+#:
+#: **THE CONSTANT IS DELIBERATELY NOT CHANGED, AND THE CHOICE IS ARGUED RATHER THAN
+#: ASSUMED.** Two fixes were available and both are rejected here:
+#:
+#: * **Re-deriving the constant against measured bytes** — lowering it so the
+#:   admitted worst case is ~1.4 MB again — would REFUSE a legitimate first capture
+#:   on any record whose scientist wrote long run labels. Refusing a transcript
+#:   because the run NAMES are verbose is a worse failure than a large response,
+#:   and it would refuse the case the ceiling above was explicitly set to admit.
+#: * **Bounding the label's contribution** means truncating caller-supplied text
+#:   inside a served option — a change to a payload shape frontend consumers read,
+#:   which is the same reason the structural fix below is already deferred.
+#:
+#: So what is corrected is the CLAIM: the admitted worst case is ~12 MiB, not
+#: ~1.4 MB, and the axis is the LABEL rather than the count. The bound still
+#: bounds; its stated derivation was wrong. The structural
 #: fix is to serve ``options`` ONCE per response and have each clarification carry
 #: run IDS, which would make the response O(runs + clarifications) instead of
 #: O(runs × clarifications) and would need no ceiling at all. That is the better
@@ -486,154 +592,6 @@ RETENTION_STATES_NOT_IMPLEMENTED: tuple[dict[str, str], ...] = (
 #: EVERY ambiguity this reader can encounter, with the outcome it produces and why
 #: that outcome rather than another. Served by the route so the policy a client
 #: explains and the policy the reader applies are one expression.
-AMBIGUITY_POLICY: tuple[dict[str, str], ...] = (
-    {
-        "kind": "run_target_required",
-        "outcome": OUTCOME_CLARIFICATION,
-        "rule": (
-            "No run was selected for this capture. Every value this reader can "
-            "propose is a run-level field, so it asks which run rather than "
-            "choosing one. A record with exactly one run is not an exception: "
-            "attaching content to the only run that happens to exist is an "
-            "invention, and this build already refuses it when capturing a note."
-        ),
-    },
-    {
-        "kind": "unknown_run_reference",
-        "outcome": OUTCOME_CLARIFICATION,
-        "rule": (
-            "The transcript names a run this record does not have. The reference "
-            "is reported with the runs that do exist, and no candidate is "
-            "proposed from this transcript — the scientist may have selected the "
-            "wrong run, or may be describing work not yet recorded here."
-        ),
-    },
-    {
-        "kind": "ambiguous_run_reference",
-        "outcome": OUTCOME_CLARIFICATION,
-        "rule": (
-            "The transcript names something that matches more than one run of "
-            "this record. The matching runs are listed and none is chosen; "
-            "preferring the first would make the target depend on creation order "
-            "rather than on what was said."
-        ),
-    },
-    {
-        "kind": "conflicting_run_reference",
-        "outcome": OUTCOME_CLARIFICATION,
-        "rule": (
-            "The transcript names a run other than the one selected for this "
-            "capture. Both are reported and neither wins: a selection is a "
-            "deliberate act and so is saying a run's name, and this reader has no "
-            "grounds to decide which one the scientist meant."
-        ),
-    },
-    {
-        "kind": "vague_run_reference",
-        "outcome": OUTCOME_CLARIFICATION,
-        "rule": (
-            "The transcript refers to a run by position or by relation — 'the "
-            "second run', 'the previous run' — rather than by name, number or id. "
-            "This reader performs no positional arithmetic: 'the second run' is "
-            "not the same claim as 'run 2', and treating them as equal would "
-            "silently retarget a value."
-        ),
-    },
-    {
-        "kind": "conflicting_values_for_one_field",
-        "outcome": OUTCOME_NEEDS_REVIEW,
-        "rule": (
-            "Two statements propose different values for the same field — in two "
-            "sentences, or inside ONE sentence such as 'around 425 K, maybe 430 "
-            "K'. Both candidates are returned and grouped, so the scientist "
-            "resolves the contradiction. Choosing the later one would be a guess "
-            "dressed as a convention, and dropping both would lose something that "
-            "was said twice. The same value restated inside one sentence is not a "
-            "contradiction and produces one candidate. Inside ONE sentence a "
-            "second value is read only when a hedging word — 'maybe', 'perhaps', "
-            "'or', 'about', 'and again' and the like, from a closed list — sits "
-            "immediately between the two, with nothing else in the gap; "
-            "'425 K and the pressure was 3 K' states two different quantities, "
-            "and reading the second as a temperature would invent a value the "
-            "transcript does not give."
-        ),
-    },
-    {
-        "kind": "temperature_not_in_kelvin",
-        "outcome": OUTCOME_ABSTENTION,
-        "rule": (
-            "A temperature was stated in a unit other than kelvin, and the field "
-            "records kelvin. Converting it would put a number in the record that "
-            "nobody said, so nothing is proposed and the statement is reported. "
-            "The scientist can state the kelvin value, or accept nothing."
-        ),
-    },
-    {
-        "kind": "implicit_only_subject",
-        "outcome": OUTCOME_ABSTENTION,
-        "rule": (
-            "The transcript describes the absorbing element or the absorption "
-            "edge. This build treats both as implicit, sidecar-only content "
-            "because the official record schema it validates against provides no "
-            "native field for them, so there is no path to propose and none is "
-            "invented."
-        ),
-    },
-    {
-        "kind": "unhedged_further_values",
-        "outcome": OUTCOME_ABSTENTION,
-        "rule": (
-            "A sentence states more than one value of the same form for one "
-            "field, and only the labelled one was read. A second value is read "
-            "as an alternative for the same field only when THREE things hold, "
-            "and this row is the first two of them: a hedging word from a closed "
-            "list links it to the first with nothing else in the gap — 'maybe', "
-            "'perhaps', 'and again', 'alternatively', a bare 'or', or an "
-            "approximation behind an explicit 'or' such as 'or about' — and the "
-            "value is not part of a larger unit such as K/min. Without those "
-            "two, a later value of the same form is usually a different "
-            "quantity: 'about 3 K above target' is an offset and 'or 3 K/min' is "
-            "a ramp rate, and reading either as a temperature would invent a "
-            "value the transcript does not give. The third condition has its own "
-            "row below. The withheld values are NOT "
-            "quoted, counted or classified here, because not knowing what they "
-            "are is the reason they were withheld; the sentence is reported so "
-            "the scientist can read it and state any value they want recorded."
-        ),
-    },
-    {
-        "kind": "trailing_text_after_further_values",
-        "outcome": OUTCOME_ABSTENTION,
-        "rule": (
-            "The THIRD condition: a further value linked by a hedging word is "
-            "read only when it ENDS the statement. Either the sentence finishes "
-            "after it, or the only thing following is another hedged value that "
-            "was itself read. When something else follows, the value is not "
-            "read: '425 K, maybe 3 K of drift' states a drift and not a second "
-            "temperature, and the difference between that and '425 K, maybe 430 "
-            "K and the atmosphere was dry nitrogen' is a judgement about English "
-            "that no rule here can make. So the same proxy refuses both, and "
-            "this disclosure is why that is acceptable — a value that was not "
-            "read is REPORTED, never dropped in silence, and the sentence itself "
-            "is kept verbatim as a note. This condition applies to EVERY hedging "
-            "word, including behind an explicit 'or'. It was scoped to hedges "
-            "standing alone for one release, on the reasoning that 'or' "
-            "coordinates the new value with the old one and so marks it as an "
-            "alternative grammatically rather than by position; that reasoning "
-            "is sound about the words BEFORE the value and says nothing about "
-            "the words after it, and '425 K or 3 K of drift' was read as two "
-            "temperatures while it held."
-        ),
-    },
-    {
-        "kind": "unmatched_text",
-        "outcome": OUTCOME_UNMAPPED,
-        "rule": (
-            "No rule matched. The text is stored verbatim as an Unmapped Note for "
-            "review; it is never dropped and never guessed at."
-        ),
-    },
-)
 
 
 # --- the value shapes ---------------------------------------------------------
@@ -887,6 +845,45 @@ _ENVIRONMENT = re.compile(
 
 #: An ISO-8601 instant in UTC, written out. Taken VERBATIM — never reformatted,
 #: never completed from a partial date, never defaulted to today.
+#:
+#: **THE VALUE-BOUNDARY SUB-CLASS, AND A REVIEW SUGGESTION MEASURED AND DECLINED
+#: (2026-09-13).** An independent review found that this pattern carries neither of
+#: the boundary guards ``_TEMPERATURE_K_RESTATED`` was deliberately given, so
+#: *"The scan started 12026-01-01T00:00:00Z"* (a five-digit year, or a stray
+#: keystroke) matched the SUBSTRING ``2026-01-01T00:00:00Z``, and
+#: *"…00:00:00Zulu"* matched with a trailing overreach — each proposing an instant
+#: the transcript does not state AS A TOKEN. **Both were real, both are now
+#: refused, and neither is refused by a lookbehind.** The PASS-ONE ASSERTION GATE
+#: closes them: the leading digit lands INSIDE the bridge and no assertion grammar
+#: admits a digit (``label_does_not_assert_this_value``), and ``ulu`` is not an
+#: admitted continuation (``value_qualified_by_what_follows``).
+#:
+#: **AND ADDING THE SUGGESTED ``(?<![\d.])`` HERE WAS TRIED, MEASURED, AND REVERTED,
+#: because it makes the outcome WORSE ON THE §5 AXIS.** With the lookbehind the
+#: rule stops MATCHING at all, so there is no detector match to disclose and
+#: *"The scan started 12026-01-01T00:00:00Z"* produces **no abstention** — measured
+#: both ways. §5 ranks a disclosed omission above a silent one, so a guard that
+#: converts *"this sentence does not state a value for this field, here is the
+#: clause"* into silence is a regression even though it refuses the same input. The
+#: sibling pattern's guard is right FOR THE SIBLING, whose refusals are disclosed by
+#: ``_HEDGE_BRIDGE`` either way. Pinned by
+#: ``test_the_instant_VALUE_BOUNDARY_overreach_is_refused_AND_disclosed``, so the
+#: pass-one gate cannot stop covering it unnoticed.
+#:
+#: **THE CALENDAR IS DELIBERATELY NOT RANGE-CHECKED, and that is a decision rather
+#: than an omission.** *"The scan started 2026-13-45T99:99:99Z"* still reads
+#: ``2026-13-45T99:99:99Z``. Three reasons, in order of weight: (1) the value is a
+#: VERBATIM QUOTE of what the scientist wrote, and §5 forbids INVENTING a value, not
+#: quoting one — a scientist reviewing this candidate is shown their own typo, which
+#: is the outcome the module's "always a quote" principle is designed for; (2)
+#: calendar validity is the TRUTH PLANE's question, and ``CLAUDE.md`` §15's Q20
+#: ruling puts JSON-Schema ``format`` enforcement in shadow mode, non-gating and
+#: OUTSIDE the truth plane — an extraction-time calendar check here would be a
+#: stricter gate than the official validator is authorized to apply; (3) refusing it
+#: would convert an extraction decision into a validation one inside the reader,
+#: which is the boundary this module is built on. The two boundary cases above are a
+#: different question and are guarded, because there the reader would be proposing a
+#: token the transcript never contained.
 _INSTANT = r"(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z)"
 _ACQUIRED_START = re.compile(
     rf"\b(?:started|start|beginning|began)\b[^.;:]{{0,40}}?{_INSTANT}", re.IGNORECASE
@@ -912,6 +909,319 @@ _ACQUIRED_END = re.compile(
 #: and the phrase rules still get no restatement pattern, for the separate and
 #: still-correct reason ``_Rule`` gives.
 _INSTANT_RESTATED = re.compile(_INSTANT)
+
+# --- THE PASS-ONE ASSERTION GATE ----------------------------------------------
+#
+# **WHY IT EXISTS.** Every label-anchored pattern above bridges its label to its
+# value with ``[^.;:]{0,40}?`` — ~40 characters of *anything*. So a number
+# carrying kelvin anywhere near the word ``temperature`` became a candidate
+# temperature, and an instant anywhere near ``started`` became an acquisition
+# start. Measured at ``782082bb``, each SILENT — no abstention, no clarification,
+# and each shipping a ``rule`` sentence asserting the transcript stated the field:
+#
+# ===============================================  ======================  ==========
+# sentence                                          proposed                really is
+# ===============================================  ======================  ==========
+# ``The temperature drift was 3 K.``                ``temperature_K = 3``   a DRIFT
+# ``The temperature rose by 30 K.``                 ``temperature_K = 30``  a DELTA
+# ``The temperature was stable to 1 K.``            ``temperature_K = 1``   a TOLERANCE
+# ``The temperature was 3 K above target.``         ``temperature_K = 3``   an OFFSET
+# ``It started drifting at 2026-01-01T00:00:00Z.``  an acquisition START    a DRIFT ONSET
+# ===============================================  ======================  ==========
+#
+# **THE TARGET, STATED AS THE RULE RATHER THAN AS THE TABLE.** A quantity becomes
+# a candidate only when the sentence ASSERTS that quantity as the field's value —
+# never merely because the number carries the field's unit. Two things can defeat
+# that, and each gets its own gate below:
+#
+#   (1) something between the label and the value RE-SUBJECTS the quantity, so the
+#       sentence is about a drift / an error / a step and not about the field
+#       (``_ASSERTION_BRIDGE``); or
+#   (2) something immediately AFTER the value QUALIFIES it, so the number measures
+#       a relation, a rate or a bound rather than the field
+#       (``_VALUE_CONTINUATION``).
+#
+# **BOTH ARE ALLOWLISTS, AND THAT IS THE WHOLE DESIGN DECISION.** A denylist of
+# ``drift``/``error``/``step`` fails OPEN: the next unanticipated noun becomes a
+# fabricated scientific value, which is the failure mode this module has already
+# shipped twice (see ``_RESTATEMENT_RESIDUE_CLOSED`` and the struck reasoning in
+# ``_LABEL_OVERREACH_CLOSED``). An allowlist fails CLOSED: an unanticipated word
+# costs a READING, and a lost reading is DISCLOSED, which §5 ranks above a silent
+# assertion. The proxy the previous slice rejected — "a shorter bridge" — was
+# rejected for a reason that still holds and that these grammars respect: the
+# bridge is what makes *"Sample temperature at the second scan was 425 K"* read at
+# all, so the fix had to constrain the bridge's SHAPE and not its LENGTH.
+
+#: An article, demonstrative or possessive. It is what separates a prepositional
+#: modifier of the LABEL from a genitive of a different quantity: *"temperature OF
+#: THE SAMPLE"* modifies the temperature, *"temperature OF DRIFT"* names a
+#: different thing. Requiring a determiner is what refuses the second without a
+#: list of forbidden nouns.
+_DETERMINER = (
+    r"(?:the|this|that|these|those|a|an|its|our|their|his|her|my|each|every"
+    r"|both|all)"
+)
+
+#: A prepositional phrase that may sit between the label and the assertion WITHOUT
+#: changing what the sentence asserts about. Grammatically: a PP modifies the
+#: label, so the subject of the copula is still the label — *"the temperature at
+#: the second scan was 425 K"* is a claim about a temperature. A BARE NOUN in the
+#: same position is a compound noun whose head is that noun, so *"the temperature
+#: drift was 3 K"* is a claim about a drift, and this pattern does not admit one.
+#:
+#: The object is bounded (a determiner plus at most three words) and ``from`` is
+#: deliberately ABSENT: *"ramped the temperature from 300 K to 400 K"* would
+#: otherwise parse as a modifier with no assertion at all and read 300.
+_LABEL_MODIFIER = (
+    r"(?:at|in|on|of|during|for|throughout|across|inside|near|about)\s+"
+    rf"{_DETERMINER}(?:\s+[A-Za-z][A-Za-z0-9-]*){{0,3}}"
+)
+
+#: Verbs that, followed by ``at``, assert the value AS the quantity. ``to`` is
+#: admitted after ``set`` ALONE and that is measured, not stylistic: ``stable at``
+#: asserts a temperature and ``stable to`` states a TOLERANCE, and the only thing
+#: distinguishing them is the preposition.
+#: **WIDENED 2026-09-13, AFTER MEASURING THAT THE FIRST VERSION REFUSED 86% OF
+#: BENIGN BRIDGE FORMS.** The adversarial corpus this gate was developed against
+#: reported 1,365 legitimate sentences read correctly and **0** lost — because its
+#: ``GOOD_BRIDGES`` table was drawn from the same mental model as this grammar, so
+#: it measured the grammar's REACH and not its PREMISE. An independently-written
+#: list of fifteen natural forms lost thirteen: *"the temperature READ 425 K"*,
+#: *"SETTLED AT 425 K"*, *"CAME OUT AT 425 K"*, *"HERE was 425 K"*, *"ACCORDING TO
+#: THE LOG was 425 K"*, *"WE RECORDED was 425 K"*. Every loss was disclosed, so
+#: none was a §5 violation — but a reader that refuses most of the ways a person
+#: says a thing is not usable, and "disclosed" is not a defence against that.
+#:
+#: **EVERY ADDITION BELOW IS SAFE FOR ONE STRUCTURAL REASON, stated once: a
+#: NOMINAL HEAD still fails.** *"The temperature DRIFT read 3 K"*, *"the
+#: temperature ERROR settled at 2 K"* and *"the temperature STEP showed 5 K"* are
+#: all still refused, because ``drift``/``error``/``step`` is neither a modifier
+#: preposition nor an assertion, wherever the verb after it comes from. Widening
+#: the VERB set therefore cannot reopen the class this gate closed; it can only
+#: admit more ways of asserting the label itself. Re-measured after the widening
+#: over all three corpora, which is what makes that a measurement and not an
+#: argument.
+_ASSERTION_AT_VERB = (
+    r"(?:held|kept|set|sat|parked|maintained|stable|steady|stabilised"
+    r"|stabilized|recorded|measured|logged|settled|stayed|remained|hovered"
+    r"|levelled|leveled|sits|stands|rested|came\s+out|ended\s+up|wound\s+up"
+    r"|read|sitting)"
+)
+
+#: Verbs that report a value DIRECTLY, with no preposition: *"the temperature read
+#: 425 K"*, *"showed 425 K"*, *"registered 425 K"*. Admitted for the reason above —
+#: a nominal head in front of one still fails — and protected on the other side by
+#: :data:`_VALUE_CONTINUATION`, which refuses *"read 3 K of drift"* on the tail.
+_ASSERTION_REPORT_VERB = (
+    r"(?:read|reads|showed|shows|gave|gives|indicated|indicates|registered"
+    r"|registers|reported|reports|measured|logged|recorded|hit|reached|touched"
+    r"|peaked\s+at|bottomed\s+out\s+at)"
+)
+
+#: A bare adverbial between the label and its assertion: *"the temperature HERE was
+#: 425 K"*, *"TODAY was 425 K"*, *"THROUGHOUT was 425 K"*. A CLOSED list, which is
+#: what keeps the nominal-head class shut — an open ``[A-Za-z]+`` here would admit
+#: ``drift`` and undo the whole gate.
+#: **`then`, `now`, `meanwhile` AND `afterwards` ARE DELIBERATELY ABSENT, and the
+#: first version of this list contained `then`.** It reopened a measured
+#: fabrication within minutes: the fixture
+#: ``test_the_worst_legitimate_disclosure_load_is_admitted`` contains *"…at the
+#: END, THEN 2026-01-03T00:00:00Z"*, where the ``_ACQUIRED_END`` rule anchors on
+#: the word ``end`` inside *"at the end"* — and admitting ``then`` as a label
+#: adverb let that bridge parse, so the reader proposed a FUTURE instant as this
+#: run's acquisition end again. It was caught by that existing test going 9 → 7
+#: abstentions, which is the ceiling fixture earning its keep for the second time
+#: in one slice. ``then`` is a SEQUENCER, not an adverbial of the label; the
+#: sequence gate exists precisely because it separates two values rather than
+#: qualifying one.
+#:
+#: **NOTE THE ASYMMETRY WITH `_CONTINUATION_WORD`, which is real rather than an
+#: inconsistency:** ``consistently``/``nominally``/``apparently``/``steadily`` are
+#: admitted HERE and refused THERE. Before the value an adverb occupies the whole
+#: slot and a nominal head after it still fails (*"the temperature CONSISTENTLY
+#: DRIFT was 3 K"* is refused); after the value the same adverb SHIELDS a qualifier
+#: (*"3 K CONSISTENTLY ABOVE TARGET"* would read as a temperature). The same word
+#: is safe on one side and not the other, which is why the two lists are not one.
+_LABEL_ADVERB = (
+    r"(?:here|there|today|yesterday|tonight|overnight|throughout|overall"
+    r"|everywhere|initially|briefly"
+    r"|nominally|apparently|consistently|steadily)"
+)
+
+#: A provenance or relative-clause modifier of the label, each with a closed verb
+#: set: *"the temperature ACCORDING TO THE LOG was 425 K"*, *"the temperature WE
+#: RECORDED was 425 K"*, *"the temperature I MEASURED was 425 K"*.
+_LABEL_CLAUSE = (
+    r"(?:according\s+to\s+" + _DETERMINER + r"(?:\s+[A-Za-z][A-Za-z0-9-]*){0,3}"
+    r"|(?:we|i|they|he|she)\s+"
+    r"(?:recorded|measured|logged|read|saw|got|observed|noted|found|took)"
+    r"|that\s+(?:we|i|they)\s+"
+    r"(?:recorded|measured|logged|read|saw|got|observed|noted|found|took))"
+)
+#: The same, in the progressive — admitted ONLY behind a copula. A bare gerund is
+#: a different verb's complement, not an assertion: *"It started LOGGING at
+#: <instant>"* is about logging, while *"the temperature was SITTING at 425 K"* is
+#: about the temperature.
+_ASSERTION_PROGRESSIVE = (
+    r"(?:holding|keeping|sitting|resting|hovering|running|steady|stable|parked)"
+)
+_ASSERTION_TO_VERB = r"(?:set|brought|adjusted)"
+_COPULA = r"(?:was|were|is|are)"
+
+#: The closed set of ways a sentence may ASSERT a value as the field's. Everything
+#: outside it is refused, which is the fail-closed direction: ``rose by``, ``fell
+#: by``, ``to within``, ``by``, ``ramped``, ``rose to``, ``went to``, ``from`` and
+#: every bare nominal head are simply absent rather than forbidden by name.
+_ASSERTION = (
+    r"(?:"
+    rf"{_COPULA}\s+(?:{_ASSERTION_AT_VERB}|{_ASSERTION_PROGRESSIVE})"
+    rf"\s+(?:at|on|around|about)"
+    rf"|{_ASSERTION_AT_VERB}\s+(?:at|on|around|about)"
+    rf"|(?:{_COPULA}\s+)?{_ASSERTION_TO_VERB}\s+to"
+    rf"|{_COPULA}"
+    rf"|{_ASSERTION_REPORT_VERB}"
+    r"|at|on|="
+    r")"
+)
+
+#: An approximation or hedge that modifies the value that FOLLOWS it. Admitted
+#: last in the bridge, because it qualifies the number without re-subjecting it:
+#: *"the temperature was around 425 K"* still states a temperature. This is the
+#: same closed-list reasoning ``_OR_REQUIRED_HEDGES`` records for pass two, and is
+#: why ``CAP-001`` (*"around 425 K, maybe 430 K"* → TWO candidates) is untouched.
+_ASSERTION_APPROX = (
+    r"(?:about|around|roughly|approximately|nearly|circa|maybe|perhaps"
+    r"|possibly|some|~)"
+)
+
+#: **GATE (1).** The WHOLE text between the label and the value must be one of:
+#: nothing at all (*"temperature 425 K"*), prepositional modifiers of the label,
+#: an assertion, and an approximation — in that order. ``fullmatch``, never ``$``,
+#: for the reason :data:`_HEDGE_BRIDGE` gives.
+_ASSERTION_BRIDGE = re.compile(
+    rf"\s*[,(]?\s*"
+    rf"(?:(?:{_LABEL_MODIFIER}|{_LABEL_ADVERB}|{_LABEL_CLAUSE})\s*[,)]?\s+)*"
+    rf"(?:{_ASSERTION}\s*)?(?:{_ASSERTION_APPROX}\s+)?",
+    re.IGNORECASE,
+)
+
+#: Punctuation that ENDS the clause the value belongs to. Anything after it is a
+#: new statement and is not this value's business, which is why *"temperature 425
+#: K, pressure 2 bar"* keeps its reading while *"temperature 425 K of drift"* does
+#: not: the second has no boundary, so ``of drift`` attaches to the number.
+_CLAUSE_BOUNDARY = r"[,;.!?:)\]}\"'—–]"
+
+#: Words that may open a continuation without qualifying the value: coordinators,
+#: subordinators, and the hedging connectives pass two needs to still see.
+#: ``per``, ``of``, ``above``, ``below``, ``than``, ``from``, ``off``, ``over``,
+#: ``under``, ``plus`` and ``minus`` are ABSENT rather than forbidden — that is the
+#: allowlist doing its job.
+#:
+#: **THE ONE RULE GOVERNING WHAT MAY BE ADDED HERE, and it is the rule
+#: ``_OR_REQUIRED_HEDGES`` already learned for pass two: a token may be admitted
+#: only if it OPENS A NEW CLAUSE or LOCATES the measurement — NEVER if it modifies
+#: what follows it.** A bare adverb modifies what follows, so admitting one SHIELDS
+#: a qualifier behind it: ``just above target``, ``well below the setpoint``,
+#: ``slightly over target``, ``consistently above target`` and ``nominally 3 K
+#: above target`` would every one be read as a temperature the moment ``just``,
+#: ``well``, ``slightly``, ``consistently`` or ``nominally`` were allowlisted. That
+#: is why the measured cost below is PAID rather than engineered away: the adverbs
+#: whose loss it consists of are exactly the tokens that cannot safely be added.
+_CONTINUATION_WORD = (
+    r"(?:and|but|so|or|while|whilst|because|although|though|as|when|after"
+    r"|before|once|maybe|perhaps|alternatively|again|possibly|throughout"
+    r"|according|with|without|which|that|until"
+    # Bare TIME adverbials. Admitted because none can take a relational
+    # complement — there is no reading of "3 K yesterday above target" on which
+    # the number is a temperature — so none can shield.
+    r"|yesterday|today|tonight|overnight|afterwards|afterward|initially"
+    r"|briefly|meanwhile|thereafter|subsequently|beforehand|already"
+    r")"
+)
+#: An APPROXIMATION IMMEDIATELY IN FRONT OF ANOTHER NUMBER. Admitted, and the
+#: ``\d`` is the whole reason it is safe: ``about``/``around``/``roughly``/
+#: ``approximately`` modify what FOLLOWS them (``_OR_REQUIRED_HEDGES`` records the
+#: measurement that established this), so in front of a NUMBER they introduce a new
+#: quantity and say nothing about the value just read — *"the temperature was 425 K
+#: about 430 K of drift"* still asserts 425, and pass two refuses the 430 on its
+#: own terms. Without the digit they WOULD shield: *"3 K roughly above target"*
+#: would be read as a temperature of 3, which is the defect class this gate exists
+#: for. So they are admitted in exactly the position where they cannot qualify our
+#: value, and refused everywhere else.
+_CONTINUATION_APPROX = r"(?:about|around|roughly|approximately|nearly|circa)\s+-?\d"
+
+#: A determiner-led noun phrase of TIME, and a first-person epistemic clause.
+#: Both open a new constituent that a measure phrase cannot reach back through:
+#: *"425 K this morning"*, *"425 K the whole time"*, *"425 K, I think"*.
+_CONTINUATION_PHRASE = (
+    rf"(?:{_DETERMINER}\s+(?:whole|entire|first|second|last|rest)\s+"
+    r"(?:time|run|scan|night|day|morning|afternoon|while)"
+    rf"|{_DETERMINER}\s+(?:morning|afternoon|evening|night|time)"
+    r"|i\s+(?:think|believe|reckon|guess|recall|suppose|assume)"
+    r"|(?:measured|recorded|logged|reported|observed)\s+"
+    rf"(?:by|on|at|in|with)\s+{_DETERMINER}\b)"
+)
+#: A locating preposition, which must take a determiner. That single requirement
+#: is what separates *"425 K at the second scan"* (a locator — read it) from
+#: *"425 K at most"* (a bound — do not).
+#:
+#: **THE QUANTIFIER FORM IS SPLIT OFF DELIBERATELY.** *"for most of the scan"* is
+#: ordinary dictation, and admitting ``most`` as an object of EVERY preposition
+#: here would admit ``at most`` — the bound this pattern exists to refuse. So
+#: quantifier objects are allowed after the three DURATION prepositions only, and
+#: ``at``/``in``/``on``/``by``/``via``/``near``/``across``/``inside`` keep
+#: requiring a determiner.
+_CONTINUATION_PREP = (
+    rf"(?:at|in|on|during|for|across|inside|near|by|via)\s+{_DETERMINER}\b"
+    r"|(?:during|for|throughout)\s+(?:most|all|much|part|some|the\s+rest)\b"
+)
+
+#: **GATE (2).** What may immediately follow the value AND ITS UNIT. Anchored with
+#: :meth:`re.Pattern.match` at :meth:`re.Match.end` — the end of the value and its
+#: unit, never ``end(1)``, which is the end of the NUMBER and would make ``" K"``
+#: itself fail every check. :func:`_unit_is_complete` records the same offset trap.
+_VALUE_CONTINUATION = re.compile(
+    rf"\s*(?:$|{_CLAUSE_BOUNDARY}|{_CONTINUATION_PREP}|{_CONTINUATION_APPROX}"
+    rf"|{_CONTINUATION_PHRASE}|{_CONTINUATION_WORD}\b)",
+    re.IGNORECASE,
+)
+
+#: **GATE (3) — THE SEQUENCE GATE.** Pure coordination: a gap between two values
+#: of one field that introduces NOTHING to tell them apart.
+#:
+#: This is what distinguishes *"300 K, then 350 K, then 400 K"* — a progression,
+#: where nothing in the gap says which value is the field's — from *"425 K,
+#: cryostat setpoint 80 K"*, where the gap names a different instrument and so
+#: positively identifies 80 as something else. An allowlist again: a marker list
+#: of ``then``/``followed by``/``→`` would fail open on the next sequencer, while
+#: an unanticipated word here simply means the second value is NOT treated as an
+#: indistinguishable sibling and the first reading survives.
+_SIBLING_COORDINATOR = (
+    r"(?:then|and|next|later|followed|by|after|that|to|or|also|again|up|down"
+    r"|finally|eventually|subsequently|now|so)"
+)
+_SIBLING_GAP = re.compile(
+    rf"[\s,;:—–>→-]*"
+    rf"(?:{_SIBLING_COORDINATOR}[\s,;:—–>→-]*)*",
+    re.IGNORECASE,
+)
+
+#: THE LABEL EACH RULE IS ANCHORED ON, as it appears at the START of that rule's
+#: own whole match. Every label-anchored pattern above begins with ``\b`` and its
+#: label alternation, so ``match.group(0)`` starts exactly at the label and these
+#: recover where it ENDS — which is what makes the bridge extractable without
+#: renumbering any capture group (``group(1)`` is the VALUE everywhere in this
+#: module, and a ``(?P<bridge>…)`` group would have taken that number).
+#:
+#: **THE ALTERNATION ORDER IS LOAD-BEARING AND IS MIRRORED, NOT RE-INVENTED.**
+#: ``start`` before ``started`` would match three characters of a four-character
+#: label and leave ``ed`` sitting in the bridge, which no assertion grammar
+#: admits — so every instant would silently stop being read. A test asserts, over
+#: every rule and every measured sentence, that the head matches at offset 0 and
+#: ends at or before the value.
+_LABEL_HEAD_TEMPERATURE = re.compile(r"temperatures?", re.IGNORECASE)
+_LABEL_HEAD_START = re.compile(r"(?:started|start|beginning|began)", re.IGNORECASE)
+_LABEL_HEAD_END = re.compile(r"(?:ended|end|finished|stopped)", re.IGNORECASE)
 
 #: THE GATE THAT MAKES A RESTATEMENT READABLE AS A RESTATEMENT.
 #:
@@ -1140,6 +1450,247 @@ _OR_REQUIRED_HEDGES: tuple[str, ...] = (
 #: alone — so it is named separately rather than folded into either tuple.
 _BARE_OR = "or"
 
+#: **THE CONNECTIVE ENUMERATION, DERIVED FROM THE TWO LISTS RATHER THAN RETYPED.**
+#:
+#: This exists because the same claim has now been published wrong FIVE TIMES, and
+#: the fifth was found by independent review in SERVED text: ``7afbe633`` moved
+#: ``and again`` from :data:`_BARE_HEDGES` to :data:`_OR_REQUIRED_HEDGES`, correctly
+#: swept all three ``_RULES.restated_sentence`` strings, and left BOTH
+#: :data:`AMBIGUITY_POLICY` rows telling clients that ``and again`` bridges on its
+#: own. One response body then carried a policy promising a second value would be
+#: read and an abstention saying it had not been.
+#:
+#: **A GUARD WAS TRIED FIRST AND IT WAS DECORATIVE, which is why the text is
+#: derived instead.** The obvious guard — "an or-required connective may be named
+#: only in a clause that also says ``or``" — reports **GREEN on the exact pre-fix
+#: text**, measured: that enumeration is a single clause and it ends with *"a bare
+#: 'or', or an approximation behind an explicit 'or'"*, so the word ``or`` is always
+#: present and the test always passes. A second attempt using ``"or" in clause``
+#: was worse still: the word **"word"** contains ``or``, so it passed every row for
+#: a reason having nothing to do with the claim.
+#:
+#: Deriving the strings removes the class of defect instead of detecting it: the
+#: served text cannot place a connective in the wrong group because it does not
+#: name them individually at all. A test then asserts the derived strings ARE the
+#: ones served, which is a parity check that cannot pass vacuously.
+_BARE_BRIDGING_WORDS = ", ".join(f"'{word}'" for word in _BARE_HEDGES)
+_OR_ONLY_BRIDGING_WORDS = ", ".join(f"'{word}'" for word in _OR_REQUIRED_HEDGES)
+
+# --- the published ambiguity policy -------------------------------------------
+#
+# RELOCATED 2026-09-13, from immediately after the `OUTCOME_*` constants above.
+# Two of its rows enumerate the hedging connectives, and that enumeration is now
+# DERIVED from `_BARE_HEDGES`/`_OR_REQUIRED_HEDGES` rather than retyped — see
+# `_BARE_BRIDGING_WORDS` for the five-times-wrong claim that forced it — so this
+# constant has to be built AFTER those lists exist. Nothing in this module reads
+# it, and `__all__` still exports it, so the move changes no import and no
+# served value; only the definition order.
+AMBIGUITY_POLICY: tuple[dict[str, str], ...] = (
+    {
+        "kind": "run_target_required",
+        "outcome": OUTCOME_CLARIFICATION,
+        "rule": (
+            "No run was selected for this capture. Every value this reader can "
+            "propose is a run-level field, so it asks which run rather than "
+            "choosing one. A record with exactly one run is not an exception: "
+            "attaching content to the only run that happens to exist is an "
+            "invention, and this build already refuses it when capturing a note."
+        ),
+    },
+    {
+        "kind": "unknown_run_reference",
+        "outcome": OUTCOME_CLARIFICATION,
+        "rule": (
+            "The transcript names a run this record does not have. The reference "
+            "is reported with the runs that do exist, and no candidate is "
+            "proposed from this transcript — the scientist may have selected the "
+            "wrong run, or may be describing work not yet recorded here."
+        ),
+    },
+    {
+        "kind": "ambiguous_run_reference",
+        "outcome": OUTCOME_CLARIFICATION,
+        "rule": (
+            "The transcript names something that matches more than one run of "
+            "this record. The matching runs are listed and none is chosen; "
+            "preferring the first would make the target depend on creation order "
+            "rather than on what was said."
+        ),
+    },
+    {
+        "kind": "conflicting_run_reference",
+        "outcome": OUTCOME_CLARIFICATION,
+        "rule": (
+            "The transcript names a run other than the one selected for this "
+            "capture. Both are reported and neither wins: a selection is a "
+            "deliberate act and so is saying a run's name, and this reader has no "
+            "grounds to decide which one the scientist meant."
+        ),
+    },
+    {
+        "kind": "vague_run_reference",
+        "outcome": OUTCOME_CLARIFICATION,
+        "rule": (
+            "The transcript refers to a run by position or by relation — 'the "
+            "second run', 'the previous run' — rather than by name, number or id. "
+            "This reader performs no positional arithmetic: 'the second run' is "
+            "not the same claim as 'run 2', and treating them as equal would "
+            "silently retarget a value."
+        ),
+    },
+    {
+        "kind": "conflicting_values_for_one_field",
+        "outcome": OUTCOME_NEEDS_REVIEW,
+        "rule": (
+            "Two statements propose different values for the same field — in two "
+            "sentences, or inside ONE sentence such as 'around 425 K, maybe 430 "
+            "K'. Both candidates are returned and grouped, so the scientist "
+            "resolves the contradiction. Choosing the later one would be a guess "
+            "dressed as a convention, and dropping both would lose something that "
+            "was said twice. The same value restated inside one sentence is not a "
+            "contradiction and produces one candidate. Inside ONE sentence a "
+            "second value is read only when a hedging word — "
+            + _BARE_BRIDGING_WORDS
+            + " on their own, or a bare 'or'; "
+            + _OR_ONLY_BRIDGING_WORDS
+            + " count only behind an explicit 'or', because each describes what "
+            "FOLLOWS it rather than hedging the value before it — sits "
+            "immediately between the two, with nothing else in the gap; "
+            "'425 K and the pressure was 3 K' states two different quantities, "
+            "and reading the second as a temperature would invent a value the "
+            "transcript does not give."
+        ),
+    },
+    {
+        "kind": "temperature_not_in_kelvin",
+        "outcome": OUTCOME_ABSTENTION,
+        "rule": (
+            "A temperature was stated in a unit other than kelvin, and the field "
+            "records kelvin. Converting it would put a number in the record that "
+            "nobody said, so nothing is proposed and the statement is reported. "
+            "The scientist can state the kelvin value, or accept nothing."
+        ),
+    },
+    {
+        "kind": "implicit_only_subject",
+        "outcome": OUTCOME_ABSTENTION,
+        "rule": (
+            "The transcript describes the absorbing element or the absorption "
+            "edge. This build treats both as implicit, sidecar-only content "
+            "because the official record schema it validates against provides no "
+            "native field for them, so there is no path to propose and none is "
+            "invented."
+        ),
+    },
+    {
+        "kind": "unhedged_further_values",
+        "outcome": OUTCOME_ABSTENTION,
+        "rule": (
+            "A sentence states more than one value of the same form for one "
+            "field, and only the labelled one was read. A second value is read "
+            "as an alternative for the same field only when THREE things hold, "
+            "and this row is the first two of them: a hedging word from a closed "
+            "list links it to the first with nothing else in the gap — "
+            + _BARE_BRIDGING_WORDS
+            + " on their own, or a bare 'or'; "
+            + _OR_ONLY_BRIDGING_WORDS
+            + " count only behind an explicit 'or', because each describes what "
+            "FOLLOWS it rather than hedging the value before it — and the "
+            "value is not part of a larger unit such as K/min. Without those "
+            "two, a later value of the same form is usually a different "
+            "quantity: 'about 3 K above target' is an offset and 'or 3 K/min' is "
+            "a ramp rate, and reading either as a temperature would invent a "
+            "value the transcript does not give. The third condition has its own "
+            "row below. The withheld values are NOT "
+            "quoted, counted or classified here, because not knowing what they "
+            "are is the reason they were withheld; the sentence is reported so "
+            "the scientist can read it and state any value they want recorded."
+        ),
+    },
+    {
+        "kind": "trailing_text_after_further_values",
+        "outcome": OUTCOME_ABSTENTION,
+        "rule": (
+            "The THIRD condition: a further value linked by a hedging word is "
+            "read only when it ENDS the statement. Either the sentence finishes "
+            "after it, or the only thing following is another hedged value that "
+            "was itself read. When something else follows, the value is not "
+            "read: '425 K, maybe 3 K of drift' states a drift and not a second "
+            "temperature, and the difference between that and '425 K, maybe 430 "
+            "K and the atmosphere was dry nitrogen' is a judgement about English "
+            "that no rule here can make. So the same proxy refuses both, and "
+            "this disclosure is why that is acceptable — a value that was not "
+            "read is REPORTED, never dropped in silence, and the sentence itself "
+            "is kept verbatim as a note. This condition applies to EVERY hedging "
+            "word, including behind an explicit 'or'. It was scoped to hedges "
+            "standing alone for one release, on the reasoning that 'or' "
+            "coordinates the new value with the old one and so marks it as an "
+            "alternative grammatically rather than by position; that reasoning "
+            "is sound about the words BEFORE the value and says nothing about "
+            "the words after it, and '425 K or 3 K of drift' was read as two "
+            "temperatures while it held."
+        ),
+    },
+    {
+        "kind": "label_does_not_assert_this_value",
+        "outcome": OUTCOME_ABSTENTION,
+        "rule": (
+            "A sentence put a value near the words a rule looks for without "
+            "asserting it as that field. The label-to-value bridge is an "
+            "ALLOWLIST — a copula, a locating phrase, 'held at', 'set to', "
+            "'reached', an approximation, or nothing at all — and anything else "
+            "refuses. That direction is the decision: a list of forbidden nouns "
+            "('drift', 'error', 'step') fails OPEN, so the next unanticipated "
+            "noun becomes a fabricated scientific value, while an allowlist costs "
+            "a reading and DISCLOSES it. 'The temperature drift was 3 K' states a "
+            "drift; nothing is proposed and the sentence is reported."
+        ),
+    },
+    {
+        "kind": "value_qualified_by_what_follows",
+        "outcome": OUTCOME_ABSTENTION,
+        "rule": (
+            "A sentence asserted a value for a field and then qualified it, so "
+            "the number measures a relation, a rate or a bound rather than the "
+            "field: '3 K above target', '3 K of drift', '2 K per minute', '1 K at "
+            "most'. What may follow a value is likewise an ALLOWLIST — the end of "
+            "the clause, any punctuation, a coordinator, or where and when it was "
+            "measured — so an unanticipated qualifier costs the reading instead of "
+            "converting a relative number into an absolute one. The value is not "
+            "read, the statement is reported, and the text is kept verbatim."
+        ),
+    },
+    {
+        "kind": "several_values_and_none_selected",
+        "outcome": OUTCOME_ABSTENTION,
+        "rule": (
+            "A sentence states several values for ONE scalar field with nothing "
+            "between them but sequencing — 'was 300 K, then 350 K, then 400 K', "
+            "'ramped from 300 K to 400 K'. NO value is selected, including the "
+            "first: promoting it would let a scientist accept a starting point as "
+            "the run's temperature, which is what this reader did before and is "
+            "the defect this row records. It is not "
+            "'conflicting_values_for_one_field' either — that outcome returns BOTH "
+            "candidates for a person to choose between, and its served reason says "
+            "'Accept at most one', which is a claim about ALTERNATIVES. A "
+            "progression is not a disagreement, so offering its values as "
+            "alternatives would state something the transcript does not. The gap "
+            "test is an allowlist of coordinators, so a gap that names a different "
+            "instrument ('425 K, cryostat setpoint 80 K') is NOT a progression and "
+            "the asserted value survives; and two statements of the SAME value are "
+            "emphasis, not a progression."
+        ),
+    },
+    {
+        "kind": "unmatched_text",
+        "outcome": OUTCOME_UNMAPPED,
+        "rule": (
+            "No rule matched. The text is stored verbatim as an Unmapped Note for "
+            "review; it is never dropped and never guessed at."
+        ),
+    },
+)
+
 #: The reviewed closed set, as ONE union, so a reader and a ratchet can ask "which
 #: words may appear in the gap at all?" without reading the pattern. It is DERIVED
 #: from the three constants above rather than retyped, so it cannot disagree with
@@ -1314,7 +1865,8 @@ _HEDGE_BRIDGE = re.compile(
 #: the atmosphere rule's own text is the tail. ~~See ``_RESTATEMENT_RESIDUE`` for
 #: the one class this leaves open~~ — that class is CLOSED (see
 #: :data:`_RESTATEMENT_RESIDUE_CLOSED`); the open one is now
-#: :data:`_LABEL_OVERREACH_RESIDUE`, which this condition does not reach at all.
+#: :data:`_LABEL_OVERREACH_CLOSED`, which this condition never reached at all
+#: and which its own gate closed on 2026-09-13.
 _UNIT_TERMINATORS: frozenset[str] = frozenset(",.;:!?)]}\"'")
 
 #: THE THIRD CONDITION: ~~A RESTATEMENT BEHIND A **BARE** HEDGE~~ **EVERY
@@ -1460,6 +2012,17 @@ def _statement_ends_after(text: str, position: int) -> bool:
 _KIND_UNHEDGED = "unhedged_further_values"
 _KIND_TRAILING = "trailing_text_after_further_values"
 
+#: The three kinds the PASS-ONE assertion gate discloses. They are three and not
+#: one for the reason the two above are two and not one: each names a DIFFERENT
+#: fact about the sentence, and a shared name would publish a reason the quote
+#: beside it contradicts. ``_KIND_NOT_ASSERTED`` says the label did not assert
+#: this value; ``_KIND_QUALIFIED`` says it did and the following words changed what
+#: the number measures; ``_KIND_NONE_SELECTED`` says the sentence asserted the
+#: field more than once and this reader cannot say which value is the field's.
+_KIND_NOT_ASSERTED = "label_does_not_assert_this_value"
+_KIND_QUALIFIED = "value_qualified_by_what_follows"
+_KIND_NONE_SELECTED = "several_values_and_none_selected"
+
 #: The reason served for each, keyed by kind so the gate cannot record one and
 #: serve the other's sentence. ``{field_path}`` is the only substitution.
 #:
@@ -1491,6 +2054,75 @@ _REFUSAL_REASONS: dict[str, str] = {
         "— rather than another statement of this field. Nothing is guessed and "
         "nothing is proposed for it; read the sentence and state any value you "
         "want recorded on its own."
+    ),
+    # THE PASS-ONE GATE'S THREE REASONS. Like the two above, none quotes, counts
+    # or classifies the value it withheld: this reader does not know what the
+    # quantity is, which is exactly why it did not propose it. Each says what the
+    # SENTENCE did, which the scientist can check against the quote beside it.
+    # NEITHER OF THESE TWO CARRIES A NUMERIC EXAMPLE EITHER, and both were written
+    # with one and corrected before shipping. The rule is the one stated one entry
+    # above for `_KIND_TRAILING`: every digit that reads naturally in an example
+    # here ("3 K of drift", "rose by 30 K") also appears in the measured sentences
+    # these close, so the example would sit in the same response as the value it
+    # withheld and read as a leak of it. The constructions are NAMED instead, which
+    # is what the scientist needs in order to re-read their own sentence.
+    # SAME DISCIPLINE AS THE ROW BELOW, and it was corrected for the same reason:
+    # the first version said "Something between the label and the value CHANGES
+    # what the number measures", which asserts a reading of the sentence. On the
+    # measured false-negative class that is false — in "the temperature, measured
+    # carefully, was 425 K" nothing changes what the number measures and the reader
+    # simply does not recognise the words in between. It now reports the reader's
+    # own limit and offers the interpretation as the common case.
+    _KIND_NOT_ASSERTED: (
+        "This sentence puts a value near the words this reader looks for, but the "
+        "words between them are ones it does not recognise as stating that value "
+        "as {field_path}. Very often they change what the number measures: a "
+        "drift, an error, a step, a resolution, a tolerance, a gradient, an "
+        "uncertainty, a rise or a fall, a correction, a ramp to somewhere else. "
+        "This reader cannot tell, so nothing is guessed and nothing is proposed. "
+        "What it DOES read is a value the sentence asserts as the field itself — "
+        "'was', 'is', 'was around', 'held at', 'settled at', 'read', 'set to', "
+        "'reached', or the value written straight after the label — so if this is "
+        "the field's value, state it that way and it will be read."
+    ),
+    # **THIS REASON SAYS WHAT THE READER DID, NOT WHAT THE SENTENCE MEANS, and the
+    # first version got that wrong.** It read "…and then qualifies it, so the number
+    # measures something else", which ASSERTS an interpretation — and on the
+    # measured false-negative class it is false: in "the temperature was 425 K
+    # consistently" nothing qualifies the value, the reader simply does not
+    # recognise the word after it. Publishing a confident misreading of a
+    # scientist's own sentence is the defect class this module exists to avoid, so
+    # the reason now reports the reader's own limit and offers the interpretation
+    # as the COMMON case rather than as the fact.
+    _KIND_QUALIFIED: (
+        "This sentence states a value for {field_path} and then continues with "
+        "words this reader does not recognise, so it cannot tell whether the "
+        "value stands on its own. Very often it does not: a difference from a "
+        "target or a setpoint, an amount of drift or scatter, a rate per minute "
+        "or per step, an upper or lower bound, or a comparison with another run "
+        "all read this way, and recording one of those as an absolute value would "
+        "put a number in the record nobody stated. So nothing is proposed. What "
+        "this reader DOES read is a value followed by the end of the clause, by "
+        "punctuation, by a new clause, or by where and when it was measured — so "
+        "if the value does stand on its own, state it on its own and it will be "
+        "read."
+    ),
+    _KIND_NONE_SELECTED: (
+        # NO NUMERIC EXAMPLE, and the reason is not style: this reason shipped for
+        # one commit reading "'was 300 K, then 350 K, then 400 K'", and an existing
+        # test caught it, because on that very sentence the illustration coincides
+        # with the WITHHELD values and so reads as a leak of them. That is the trap
+        # `_REFUSAL_REASONS`' own comment already documented one entry above —
+        # "every digit that would read naturally there also appears in the measured
+        # sentences this closes" — walked into by the next reason added after it.
+        "This sentence states more than one value for {field_path} with nothing "
+        "between them but sequencing — one value, then another, then another — and "
+        "{field_path} holds ONE value. So no value was selected. Taking the first "
+        "would record a starting point as the value, and taking the last would "
+        "record an endpoint; either is a choice this reader has no grounds to "
+        "make, and the sentence describes a progression rather than a "
+        "disagreement, so neither is offered as an alternative. The sentence is "
+        "kept in full; state the one value you want recorded on its own."
     ),
 }
 
@@ -1598,8 +2230,9 @@ _REFUSAL_REASONS: dict[str, str] = {
 #: ``_RESTATEMENT_RESIDUE`` is GONE, because an empty ratcheted tuple makes a
 #: parametrised test vacuous, which is worse than either an open row or an absence.
 #: What replaced it, and is a DIFFERENT entrance to the same claim class, is
-#: :data:`_LABEL_OVERREACH_RESIDUE` — read that before concluding this reader no
-#: longer over-reads.
+#: :data:`_LABEL_OVERREACH_CLOSED` — which was OPEN when this
+#: sentence was written ("read that before concluding this reader no longer
+#: over-reads") and was closed on 2026-09-13 by :data:`_ASSERTION_BRIDGE`.
 #:
 #: **THE ARGUMENT THAT WAS MADE FOR LEAVING THEM OPEN IS KEPT, BECAUSE BOTH HALVES
 #: OF IT WERE WRONG IN INSTRUCTIVE WAYS.** ~~"all five were CONSTRUCTED here to
@@ -1634,9 +2267,18 @@ _REFUSAL_REASONS: dict[str, str] = {
 #: whose genuine alternative is followed by trailing prose loses the alternative —
 #: all six rows of ``TERMINAL_RULE_WOULD_HAVE_LOST`` (scoped, it was five) plus
 #: *"425 K or 430 K at the end."*. **Every one is disclosed**, and that is the
-#: condition the trade was taken on: a sweep of 510 constructed sentences (fifteen
+#: condition the trade was taken on: a sweep of ~~510~~ **476** constructed
+#: sentences (~~fifteen~~ **fourteen**
 #: connectives × seventeen modifier tails × two separators) found **0** second
 #: values read and **0** withheld-and-silent refusals.
+#:
+#: **510 WAS FALSIFIED BY A LATER COMMIT IN THE SAME RANGE AND NOT SWEPT, and it is
+#: corrected here because it is the recorded ACCEPTANCE CONDITION for the universal
+#: terminality trade — a stale denominator makes the condition unfalsifiable.** The
+#: grid is DERIVED from ``_ALL_CONNECTIVES``, so moving ``and again`` out of
+#: ``_BARE_HEDGES`` took it from 15 connectives to 14 and the grid from 510 to 476;
+#: the test was updated and this comment was not. The companion figure "RED with 374
+#: of the rows" is unaffected and correct — it is a count of rows, not of the grid.
 _RESTATEMENT_RESIDUE_CLOSED: tuple[str, ...] = (
     # Closed 2026-09-12, SECOND pass — condition 3 scoped to the bare-hedge branch.
     "The temperature was 425 K, maybe 3 K of drift",
@@ -1720,17 +2362,262 @@ _RESTATEMENT_RESIDUE_CLOSED: tuple[str, ...] = (
 #:
 #: Each is SILENT — no abstention, no clarification — exactly like the original
 #: seven, and each ships a ``rule`` sentence asserting the transcript stated the
-#: field. **THE PASS-ONE OVER-REACH ITSELF IS DELIBERATELY NOT FIXED HERE**: it is
+#: field. ~~**THE PASS-ONE OVER-REACH ITSELF IS DELIBERATELY NOT FIXED HERE**: it is
 #: pre-existing, ``main`` shares it, and constraining what may sit BETWEEN a label
 #: and its value is a different shape of change from constraining the gap AFTER a
 #: value — it needs its own slice and its own argument, for the reasons this
-#: comment's earlier paragraphs give.
+#: comment's earlier paragraphs give.~~
+#:
+#: **CLOSED 2026-09-13 BY THE PASS-ONE ASSERTION GATE, AND THE CONSTANT IS RENAMED
+#: ``_LABEL_OVERREACH_CLOSED`` RATHER THAN EMPTIED — the precedent
+#: :data:`_RESTATEMENT_RESIDUE_CLOSED` set one screen above.** Every row above now
+#: proposes NOTHING and raises exactly one ``label_does_not_assert_this_value``
+#: abstention naming the field. The referral WAS the right call and its reasoning
+#: is kept: it did get its own slice and its own argument.
+#:
+#: **AND THE THREE PROXIES THIS COMMENT REJECTED WERE ALL CORRECTLY REJECTED.** A
+#: denylist of ``drift``/``error``/``step`` fails open; a shorter bridge kills
+#: *"Sample temperature at the second scan was 425 K"*; requiring a copula kills
+#: *"temperature 425 K"*. What the comment did not consider is that the bridge's
+#: **SHAPE** can be constrained without constraining its **LENGTH**:
+#: :data:`_ASSERTION_BRIDGE` still admits a 40-character bridge, and admits that
+#: exact sentence, while admitting no bare nominal head at all. Measured on the
+#: closing slice: **1,645** generated adversarial sentences over **15** declared
+#: families (~~eleven~~ — counted from the generator rather than from memory),
+#: **0** fabrications and **0** silent refusals, against **240** silent
+#: fabrications and **19** silently-selected progressions before. The corpus is an
+#: ORACLE and not a sample: each family declares the verdict its rows must get, so
+#: a "clean sweep" cannot be produced by rows that happen to read nothing. Its
+#: SHAPE, which a bare count would overstate: single-segment English sentences over
+#: the two numeric/instant label families, with the quantity re-subjected by a
+#: nominal head, a verb of change, a tolerance phrase, a relational or rate tail, a
+#: sequence connective, or nothing at all. It does NOT produce multi-sentence
+#: transcripts, run references, the two free-phrase rules, non-English, or
+#: unicode digit forms. Over the **156**
+#: sentences this repository's own tests already contained, **23** readings changed,
+#: **every one of the 23 removed a fabrication or withheld a progression**, and
+#: **0 gained a candidate** — so no legitimate reading in the corpus was lost.
+#:
+#: **AND THE STRONGEST EVIDENCE IS OUT-OF-SAMPLE RATHER THAN ANY OF THOSE
+#: NUMBERS.** An independent review hunted this class from scratch on the same day
+#: and produced **twenty** members, not one of which appears in the thirteen rows
+#: below, in the bridge grammar, or in the generator the fix was developed against.
+#: **Nineteen are refused and disclosed** with no change to the gate.
+#: `_PRE_LABEL_OVERREACH_RESIDUE` is the twentieth and is a different sub-class,
+#: named and left open. A table of thirteen entrances cannot produce that result;
+#: a grammar can, and that is the whole argument for the shape of this fix.
 #:
 #: The one row of the table above that is NOT in this tuple is the instant row
 #: (*"It started drifting at 2026-01-01T00:00:00Z"*), and that is unchanged: this
 #: tuple has always been temperature-only while the table above describes the whole
-#: class. Named so a reader does not count the two and conclude one is stale.
-_LABEL_OVERREACH_RESIDUE: tuple[str, ...] = (
+#: class. Named so a reader does not count the two and conclude one is stale — it
+#: is closed too, and asserted separately by
+#: ``test_the_LABEL_ANCHORED_instant_overreach_is_CLOSED_TOO``.
+#: **THE ONE MEMBER OF THE CLASS THE PASS-ONE ASSERTION GATE DOES NOT CLOSE, and it
+#: is a structurally DIFFERENT sub-class rather than a leftover row.**
+#:
+#: An independent review hunted this class on 2026-09-13 and produced twenty rows
+#: none of which was in the thirteen above. **Nineteen are closed** by
+#: :data:`_ASSERTION_BRIDGE` without any of them being known to it — which is what a
+#: class-level grammar buys over a table, and is the strongest evidence available
+#: that the fix is not a patch of the thirteen entrances it was built against.
+#: **This is the twentieth:**
+#:
+#: ==========================================  ==========================  =========
+#: sentence                                     proposes                    really is
+#: ==========================================  ==========================  =========
+#: ``We lowered the temperature 15 K``          ``temperature_K = 15``      a DELTA
+#: ==========================================  ==========================  =========
+#:
+#: **WHY THE BRIDGE CANNOT SEE IT.** The bridge is, by construction, the text
+#: BETWEEN the label and the value, and here that text is EMPTY — the value is
+#: juxtaposed, exactly as in *"temperature 425 K"*, which this reader must keep
+#: reading. The word that re-subjects the quantity (``lowered``) sits to the LEFT of
+#: the label, where the bridge grammar has no reach. The prepositional forms of the
+#: same sentence ARE closed, because their preposition falls inside the bridge:
+#: *"We lowered the temperature BY 15 K"*, *"We raised the temperature BY 40 K"* and
+#: *"We corrected the temperature BY 7 K"* all refuse.
+#:
+#: **WHY IT IS NOT FIXED HERE, with the proxies named so they are not re-derived.**
+#: Constraining the text BEFORE a label is a different question and every proxy
+#: considered fails one of this module's own standing rules:
+#:
+#: * a denylist of change verbs (``lowered``/``raised``/``dropped``) FAILS OPEN on
+#:   the next verb, which is the failure mode §5 and this file's own history rank
+#:   worst;
+#: * "no determiner immediately before the label" refuses *"The temperature 425 K"*,
+#:   which is legitimate, and still admits *"We dropped temperature 5 K"*;
+#: * "at most N words between a clause boundary and the label" is a word-count
+#:   heuristic with no grammatical story, and *"The sample temperature 425 K"* and
+#:   *"We lowered the temperature 15 K"* differ by one word.
+#:
+#: A fail-closed formulation over the PRE-LABEL context needs its own slice and its
+#: own argument, exactly as the bridge did. Asserted as still-fabricating by
+#: ``test_the_PRE_LABEL_overreach_is_STILL_OPEN`` so closing it requires deleting a
+#: row here rather than discovering the item quietly went away.
+#:
+#: **AND THE ADVERSARIAL GENERATOR THIS FIX WAS BUILT AGAINST HAD THE SAME BLIND
+#: SPOT AS THE FIX, which is the most useful thing measured about it.** That
+#: generator crossed 43 nominal heads and 20 verbs of change against the label; it
+#: produced **not one** of the review's twenty rows verbatim, and specifically its
+#: change-verb table held ``raised by``, ``lowered by``, ``dropped by`` and
+#: seventeen more — **every one with a preposition**. The BARE form (``lowered the
+#: temperature 15 K``, no ``by``) is the single entry it lacked, and it is the
+#: single row that still fabricates. A generator that only ever puts the
+#: re-subjecting word where the bridge can see it cannot discover that the bridge
+#: has a blind side. The lesson is not "add ``lowered``": it is that a corpus
+#: generated from the same mental model as the fix tests the fix's reach and not its
+#: premise, and only an independent hunt found the premise.
+_PRE_LABEL_OVERREACH_RESIDUE: tuple[str, ...] = (
+    "We lowered the temperature 15 K",
+)
+
+#: **THE OTHER SIDE OF THE SAME LEDGER: the false NEGATIVES this gate costs,
+#: measured rather than asserted, because "fail-closed" is only acceptable if what
+#: it closes on is genuinely unreadable.**
+#:
+#: ==================================================  =========================
+#: measured over                                        reading lost, disclosed
+#: ==================================================  =========================
+#: 15 independently-written benign BRIDGE forms          **1** (7%)
+#: 57 independently-written benign TAIL continuations    **16** (28%)
+#: 1,365 generated legitimate sentences                  **0**
+#: 156 sentences this repository's tests already had     **0**
+#: ==================================================  =========================
+#:
+#: (The ratcheted ``_BENIGN_BRIDGE_FORMS`` tuple in the test file holds **20** of
+#: these forms and loses **0**, because the one that IS lost is named below as
+#: residue rather than pinned as passing. Both numbers are stated so neither reads
+#: as the other.)
+#:
+#: **The bridge figure was 86% before it was measured**, and the generated corpus
+#: reported 0 — see :data:`_ASSERTION_AT_VERB` for why a corpus built from the
+#: grammar's own vocabulary cannot see that. The widening that fixed it reopened
+#: nothing, asserted over all three defect corpora.
+#:
+#: **THE 16 TAIL LOSSES ARE NOT FIXABLE BY WIDENING, and that is the honest
+#: residue.** Each is a BARE ADVERB or a relational preposition used benignly —
+#: ``consistently``, ``steadily``, ``apparently``, ``nominally``, ``roughly``,
+#: ``stable``, ``per the log``, ``from the log``. Admitting a bare adverb SHIELDS a
+#: qualifier behind it (``just above target``, ``well below the setpoint``,
+#: ``consistently above target``, ``nominally 3 K above target`` would every one
+#: read as a temperature), and ``per``/``from`` cannot be told from ``per minute``
+#: and ``from the setpoint`` without a domain lexicon this reader does not have.
+#: So the 28% is PAID, knowingly, and every one of the 16 is disclosed with an
+#: instruction that works ("state the value on its own"). A denylist of relational
+#: heads would take it to ~0% and is refused on §5 grounds: its leak class
+#: (appositive unit qualifiers — ``RMS``, ``peak to peak``, ``FWHM``, ``sigma``) is
+#: OPEN and domain-specific, which is the shape that has bitten this module twice.
+#: **A THIRD OPEN SUB-CLASS, FOUND BY SELF-REVIEW OF THIS SLICE'S OWN GRAMMAR AND
+#: MEASURED RATHER THAN REASONED ABOUT.** :data:`_LABEL_MODIFIER` admits a
+#: preposition plus a DETERMINER plus up to three arbitrary words, because that is
+#: what makes *"Sample temperature at the second scan was 425 K"* and *"The
+#: temperature of the sample was 425 K"* readable. When the modifier's OBJECT is
+#: itself a quantity noun, the bridge parses and the value is read:
+#:
+#: ==============================================  =======================
+#: sentence                                         proposes
+#: ==============================================  =======================
+#: ``The temperature of the drift was 3 K``         ``temperature_K = 3``
+#: ``The temperature of the error was 2 K``         ``temperature_K = 2``
+#: ``The temperature in the drift was 3 K``         ``temperature_K = 3``
+#: ``The temperature of the ramp was 5 K``          ``temperature_K = 5``
+#: ``The temperature for the tolerance was 1 K``    ``temperature_K = 1``
+#: ==============================================  =======================
+#:
+#: Each is SILENT, so each is a §5 defect of the same rank as the thirteen this
+#: slice closed. **The BARE forms are all closed** — ``The temperature DRIFT was
+#: 3 K`` is refused — so what is open is specifically the determiner-led genitive.
+#:
+#: **WHY IT IS NOT CLOSED, and the reason is the same irreducible one the tail
+#: gate records.** The discriminating fact is the SEMANTIC CLASS of the modifier's
+#: object: *"the temperature of the SAMPLE"* is the sample's temperature and
+#: *"the temperature of the DRIFT"* is a drift figure, and both are
+#: preposition + determiner + noun. Telling them apart needs a lexicon of which
+#: nouns name a THING that has a temperature versus a QUANTITY derived from one,
+#: and this reader has none — the same wall as ``per the log`` versus
+#: ``per minute``. Dropping ``of`` from :data:`_LABEL_MODIFIER` would close three
+#: of the five rows at the cost of *"The temperature of the sample was 425 K"*,
+#: which is ordinary dictation; that trade is a judgement for its own slice with
+#: its own measurement, not one to make in a comment.
+#:
+#: ``at the step`` is listed with the others and is the case that shows why the
+#: trade is not obvious: *"The temperature at the step was 5 K"* most likely
+#: DOES state the temperature at that step, so reading 5 may be CORRECT there. A
+#: rule that refused the whole family would lose it.
+#:
+#: **NO LIKELIHOOD ARGUMENT IS OFFERED FOR LEAVING IT OPEN.** These forms are less
+#: natural than the thirteen bare compounds, and that is deliberately NOT the
+#: reason recorded: ``_RESTATEMENT_RESIDUE_CLOSED`` documents a likelihood argument
+#: being the stated basis for shipping five silent fabrications, and the correction
+#: there was that a likelihood argument is not a §5 argument. The reason is the
+#: missing lexicon, which is a statement about what is decidable here.
+_MODIFIER_OBJECT_OVERREACH_RESIDUE: tuple[str, ...] = (
+    "The temperature of the drift was 3 K",
+    "The temperature of the error was 2 K",
+    "The temperature in the drift was 3 K",
+    "The temperature of the ramp was 5 K",
+    "The temperature for the tolerance was 1 K",
+)
+
+#: THE ONE BRIDGE FORM STILL LOST, named rather than folded into a percentage.
+#: A PARENTHETICAL between the label and its copula. Admitting it means admitting
+#: arbitrary text inside ``, … ,`` — *"the temperature, which was a drift of, was
+#: 3 K"* is the shape that makes that unsafe — so it needs the same
+#: allowlist-grammar treatment the bridge itself got, over a different
+#: constituent. Not built.
+#: **THE TWO FREE-PHRASE RULES DO NOT SHARE THE LABEL-OVERREACH DEFECT, and this
+#: is how that was established rather than assumed.** ``_ATMOSPHERE`` and
+#: ``_ENVIRONMENT`` require :data:`_LABEL_SEPARATOR` — a copula, a colon or an
+#: equals sign — IMMEDIATELY after the label, and anchor the phrase to the end of
+#: the segment, so they were already gated in the shape ``_ASSERTION_BRIDGE`` gives
+#: the other three. Measured: *"The atmosphere CHANGE was dry nitrogen"*, *"The
+#: atmosphere DRIFT was dry nitrogen"* and *"The environment CONTROL was ambient
+#: air"* all match nothing at all, while *"The atmosphere was dry nitrogen"* and
+#: *"atmosphere: dry nitrogen"* read normally. They are therefore UNCHANGED by this
+#: slice and carry no ``label_head``.
+#:
+#: **THEY HAVE A DIFFERENT IMPERFECTION, measured and named rather than fixed.**
+#: ``_LABEL_SEPARATOR`` admits ``of``, so:
+#:
+#: ===================================================  ==========================
+#: sentence                                              proposes as the atmosphere
+#: ===================================================  ==========================
+#: ``The atmosphere of the glovebox was dry nitrogen``   ``the glovebox was dry
+#:                                                        nitrogen``
+#: ===================================================  ==========================
+#:
+#: **It is NOT the class this slice closes, and the difference matters.** No
+#: quantity is re-subjected and no number is invented: the proposed value is a
+#: VERBATIM substring of the scientist's own sentence, shown to them for
+#: confirmation, so what is wrong is the phrase BOUNDARY rather than the claim. A
+#: scalar fabrication offers a plausible number nobody stated; this offers an
+#: obviously-wrong string. Left alone because fixing it means editing
+#: ``_LABEL_SEPARATOR``, which governs two rules this slice deliberately did not
+#: change — and ``of`` is measured UNUSED by every phrase bridge in the repository's
+#: corpus (``' was '``, ``' was: '``, ``': '``), so dropping it is a plausible fix
+#: for its own slice.
+_PHRASE_BOUNDARY_RESIDUE: tuple[tuple[str, str], ...] = (
+    (
+        "The atmosphere of the glovebox was dry nitrogen",
+        "the glovebox was dry nitrogen",
+    ),
+)
+
+_PARENTHETICAL_BRIDGE_RESIDUE: tuple[str, ...] = (
+    "The temperature, measured carefully, was 425 K.",
+)
+
+_GATE_FALSE_NEGATIVES = (
+    "bridge: 1 of 15 independently-written benign forms, a PARENTHETICAL (was 13 "
+    "of 15 before the 2026-09-13 widening); "
+    "tail: 16 of 57 benign continuations, every one a bare adverb or a benignly-"
+    "used relational preposition, none of which can be admitted without shielding "
+    "a qualifier behind it; 0 of 1,365 generated legitimate sentences and 0 of the "
+    "156 in this repository's own tests. Every loss is DISCLOSED."
+)
+
+_LABEL_OVERREACH_CLOSED: tuple[str, ...] = (
     "The temperature drift was 3 K",
     "The temperature error was 2 K",
     "temperature resolution 0.5 K",
@@ -1875,6 +2762,16 @@ class _Rule:
     in :data:`_RESTATEMENT_RESIDUE_CLOSED`. See
     :data:`_HEDGE_BRIDGE`, :data:`_OR_REQUIRED_HEDGES`,
     :data:`_UNIT_TERMINATORS` and :data:`_STATEMENT_END`.
+
+    ``label_head`` is the rule's own label as it appears at the start of its whole
+    match, and it is what makes the PASS-ONE ASSERTION GATE applicable — see
+    :data:`_ASSERTION_BRIDGE`. It is ``None`` for the two free-phrase rules, and
+    that is a property of those rules rather than an exemption: ``_ATMOSPHERE`` and
+    ``_ENVIRONMENT`` already require :data:`_LABEL_SEPARATOR` (a copula, a colon or
+    an equals sign) immediately after the label AND anchor the phrase to the end of
+    the segment, so they are gated in exactly the shape the bridge grammar gives
+    the other three. Measured rather than assumed: *"The atmosphere CHANGE was dry
+    nitrogen"* does not match at all, because ``change`` is not a separator.
     """
 
     name: str
@@ -1884,6 +2781,56 @@ class _Rule:
     sentence: str
     restatement: re.Pattern[str] | None = None
     restated_sentence: str | None = None
+    label_head: re.Pattern[str] | None = None
+
+
+def _label_bridge(rule: "_Rule", match: re.Match[str]) -> str | None:
+    """The text between ``rule``'s label and the value, or ``None`` if ungated.
+
+    Sliced out of ``match.group(0)`` rather than out of the segment, so it cannot
+    accidentally reach behind the label or past the value.
+    """
+    if rule.label_head is None:
+        return None
+    whole = match.group(0)
+    head = rule.label_head.match(whole)
+    if head is None:  # pragma: no cover - pinned by a test over every rule
+        return None
+    return whole[head.end() : match.start(1) - match.start()]
+
+
+def _asserts_the_value(rule: "_Rule", match: re.Match[str]) -> bool:
+    """GATE (1): does the sentence assert this value AS ``rule``'s field?
+
+    True for an ungated rule, so the two phrase rules keep the behaviour their own
+    separator and end-anchoring already give them.
+    """
+    bridge = _label_bridge(rule, match)
+    return bridge is None or _ASSERTION_BRIDGE.fullmatch(bridge) is not None
+
+
+def _value_of(rule: "_Rule", match: re.Match[str]) -> Any:
+    """The value a match states, read exactly as the reading pass reads it.
+
+    Shared with the construction loop below so the SEQUENCE GATE's "is it a
+    DIFFERENT value?" test and the de-duplication's "is it the SAME value?" test
+    cannot disagree — ``425`` and ``425.0`` must not be one to one of them and two
+    to the other.
+    """
+    raw = match.group(1).strip()
+    return _read_number(raw) if rule.numeric and raw else raw
+
+
+def _continuation_is_clean(rule: "_Rule", text: str, match: re.Match[str]) -> bool:
+    """GATE (2): does what follows the value leave it measuring ``rule``'s field?
+
+    ``match.end()`` — the end of the value AND its unit. See
+    :data:`_VALUE_CONTINUATION` and :func:`_unit_is_complete` for the offset trap
+    this shares with them.
+    """
+    if rule.label_head is None:
+        return True
+    return _VALUE_CONTINUATION.match(text, match.end()) is not None
 
 
 _RULES: tuple[_Rule, ...] = (
@@ -1897,6 +2844,7 @@ _RULES: tuple[_Rule, ...] = (
             "in one clause; the number is read as written and the unit is not "
             "converted"
         ),
+        label_head=_LABEL_HEAD_TEMPERATURE,
         restatement=_TEMPERATURE_K_RESTATED,
         restated_sentence=(
             "the same sentence restates the temperature, and THREE conditions "
@@ -1935,6 +2883,7 @@ _RULES: tuple[_Rule, ...] = (
             "a start word and a full UTC instant appear in one clause; the instant "
             "is taken exactly as written and is never completed or reformatted"
         ),
+        label_head=_LABEL_HEAD_START,
         restatement=_INSTANT_RESTATED,
         restated_sentence=(
             "the same sentence restates the start, and THREE conditions all "
@@ -1967,6 +2916,7 @@ _RULES: tuple[_Rule, ...] = (
             "an end word and a full UTC instant appear in one clause; the instant "
             "is taken exactly as written and is never completed or reformatted"
         ),
+        label_head=_LABEL_HEAD_END,
         restatement=_INSTANT_RESTATED,
         restated_sentence=(
             "the same sentence restates the end, and THREE conditions all held. "
@@ -2101,6 +3051,18 @@ def _segment_readings(
     label match (see the walk below) the region's own match is right for every
     region, and the last match is right only for the last one.
 
+    **AND WHEN TWO REGIONS OF ONE RULE REFUSE THE SAME KIND, THE SERVED QUOTE NAMES
+    THE FIRST OF THEM — corrected 2026-09-13, because the sentence above is stronger
+    than the code.** ``refused.setdefault((rule_name, kind), quote)`` keeps the first
+    writer, so *"each refusal carries the label match whose region the refused
+    restatement was found in"* is true of the refusal DECISION and of the surviving
+    entry, not of every refusal collapsed into it. Nothing is silent and nothing is
+    false: the ``reason`` is plural throughout (*"This sentence states further
+    values…"*) and the quote is a real clause of the real sentence. It is the
+    docstring that overstated. The alternative — one disclosure per region — would
+    multiply the disclosure count by the region count on exactly the payloads
+    ``MAX_DISCLOSURES`` exists to bound, so the code is left alone deliberately.
+
     Deduplicated to at most one entry per segment per rule per kind, so the
     disclosure is bounded by ``MAX_SEGMENTS`` × the rules that HAVE a restatement
     × 2 = 600 by construction and cannot be inflated by a transcript that repeats a
@@ -2132,7 +3094,43 @@ def _segment_readings(
     # clarification, no abstention, no `review_required` row. The transcript
     # survived as a note, so nothing was destroyed — what was lost was the
     # READING, and with it the scientist's chance to accept either value.
-    labelled = [list(rule.pattern.finditer(segment.text)) for rule in _RULES]
+    #
+    # AND EVERY MATCH IS NOW PUT THROUGH THE PASS-ONE ASSERTION GATE, which is the
+    # 2026-09-13 change. `rule.pattern` bridges its label to its value with
+    # `[^.;:]{0,40}?`, so it MATCHES far more than it may READ: "the temperature
+    # drift was 3 K" is a match and is not a temperature. The permissive pattern is
+    # kept as the DETECTOR — that is what makes a refusal disclosable instead of
+    # silent — and `_asserts_the_value` / `_continuation_is_clean` decide which
+    # matches become readings.
+    #
+    # DETECTING AND READING WITH THE SAME PATTERN IS DELIBERATE, and the
+    # alternative was measured and rejected: building the grammar INTO the pattern
+    # would let the regex engine retry a longer bridge, but a refusal would then
+    # produce NO MATCH and therefore no disclosure — a silent omission, which §5
+    # ranks below a disclosed one. The cost of this direction is named in
+    # `_LABEL_OVERREACH_CLOSED`: a sentence whose FIRST value fails the gate does
+    # not get a second chance at a later value reachable from the same label.
+    detected = [list(rule.pattern.finditer(segment.text)) for rule in _RULES]
+    labelled: list[list[re.Match[str]]] = []
+    #: `(rule_name, kind, quote, value_span)` for every match the gate refused.
+    #: Written into `pending` below, with the same "was it read anyway?" filter
+    #: every other refusal goes through.
+    gate_refusals: list[tuple[str, str, str, tuple[int, int]]] = []
+    for rule, matches in zip(_RULES, detected, strict=True):
+        kept: list[re.Match[str]] = []
+        for match in matches:
+            if not _asserts_the_value(rule, match):
+                gate_refusals.append(
+                    (rule.name, _KIND_NOT_ASSERTED, match.group(0), match.span(1))
+                )
+                continue
+            if not _continuation_is_clean(rule, segment.text, match):
+                gate_refusals.append(
+                    (rule.name, _KIND_QUALIFIED, match.group(0), match.span(1))
+                )
+                continue
+            kept.append(match)
+        labelled.append(kept)
 
     # The VALUE spans every label-anchored match of every rule has claimed.
     # ACROSS rules, which is what stops pass two from reading a value another
@@ -2160,6 +3158,12 @@ def _segment_readings(
     #: above is pass ONE's equivalent; together they are "every value this segment
     #: was read for", which is exactly the set a refusal must not contradict.
     accepted_value_spans: list[tuple[int, int]] = []
+    #: The label-anchored value spans THE SEQUENCE GATE withheld. `claimed` is
+    #: computed before the gate runs, so without this subtraction a withheld value
+    #: would still count as "read" and the filter below would DROP its own
+    #: disclosure — the gate would withhold in silence, which is the one outcome
+    #: §5 ranks below the defect it closes.
+    withheld_value_spans: list[tuple[int, int]] = []
 
     found: list["_Reading"] = []
     for rule, matches in zip(_RULES, labelled, strict=True):
@@ -2167,9 +3171,13 @@ def _segment_readings(
             continue
         # `(match, restated)`, label-anchored readings first so a field's
         # candidates stay contiguous and in the order they were said.
-        readings: list[tuple[re.Match[str], bool]] = [
-            (match, False) for match in matches
-        ]
+        #
+        # ~~`readings = [(match, False) for match in matches]`~~ — CHANGED
+        # 2026-09-13: the list is now assembled PER REGION, below, because THE
+        # SEQUENCE GATE can withhold a region's label reading. Assembling it up
+        # front made that structurally impossible to express, which is part of why
+        # the reader promoted the first value of a progression for so long.
+        readings: list[tuple[re.Match[str], bool]] = []
 
         # PASS TWO — the same sentence restating the quantity WITHOUT restating
         # the label. Gated on pass one having matched, so a bare number is never
@@ -2218,140 +3226,214 @@ def _segment_readings(
         # A segment cannot contain a newline today (`_SEGMENT_BOUNDARY` splits on
         # them), so this is not a live hole being closed; it is a guard written so
         # it does not become one if segmentation ever changes.
-        if rule.restatement is not None:
-            # ONE REGION PER LABEL MATCH, NOT ONE REGION PER RULE.
-            #
-            # ~~`anchor = max(match.end() for match in matches)`~~ — CORRECTED
-            # 2026-09-12 (fourth pass) by independent review. That scanned from the
-            # end of the LAST label match, so a restatement sandwiched BETWEEN two
-            # label matches was never evaluated, therefore never refused, therefore
-            # never disclosed — which falsified the claim the whole three-condition
-            # trade rests on. §5 ranks a silent omission below a disclosed one, and
-            # "no withholding is silent" was true only of single-label sentences,
-            # which is the only shape the 510-cell sweep covers. Measured at
-            # `22d794a5`:
-            #
-            #   "The temperature was 425 K, maybe 428 K, and the temperature was
-            #    430 K."                    -> [425, 430], 428 NEVER READ, no
-            #                                  abstention at all
-            #   "...started A, maybe B, and the scan started C."
-            #                               -> [A, C], B silent
-            #
-            # It was an OMISSION and not an assertion, and it was NOT a regression:
-            # `main` loses both 428 and 430. What it broke is the disclosure
-            # guarantee.
-            #
-            # Each label match `Li` now owns the half-open region
-            # `[Li.end(), L(i+1).start())`, and the LAST match owns
-            # `[Lk.end(), len(text))` — byte-identical to the old single walk, which
-            # is why no previously-accepted reading moves. A restatement in an
-            # EARLIER region can only ever REFUSE, and that is a property rather than
-            # a hope: `_statement_ends_after` looks at the whole remaining text, and
-            # the remainder of an earlier region always contains the next label match,
-            # so condition 3 can never hold there. So this change adds DISCLOSURES and
-            # cannot add a candidate — asserted, not asserted-about.
-            for position, match in enumerate(matches):
-                region_start = match.end()
-                region_end = (
-                    matches[position + 1].start()
-                    if position + 1 < len(matches)
-                    else len(segment.text)
-                )
-                if region_start >= region_end:
+        # ONE REGION PER LABEL MATCH, NOT ONE REGION PER RULE.
+        #
+        # ~~`anchor = max(match.end() for match in matches)`~~ — CORRECTED
+        # 2026-09-12 (fourth pass) by independent review. That scanned from the
+        # end of the LAST label match, so a restatement sandwiched BETWEEN two
+        # label matches was never evaluated, therefore never refused, therefore
+        # never disclosed — which falsified the claim the whole three-condition
+        # trade rests on. §5 ranks a silent omission below a disclosed one, and
+        # "no withholding is silent" was true only of single-label sentences,
+        # which is the only shape the 476-cell sweep covers (~~510~~: that grid is
+        # DERIVED, and `and again` left `_BARE_HEDGES` in the same commit range).
+        # Measured at
+        # `22d794a5`:
+        #
+        #   "The temperature was 425 K, maybe 428 K, and the temperature was
+        #    430 K."                    -> [425, 430], 428 NEVER READ, no
+        #                                  abstention at all
+        #   "...started A, maybe B, and the scan started C."
+        #                               -> [A, C], B silent
+        #
+        # It was an OMISSION and not an assertion, and it was NOT a regression:
+        # `main` loses both 428 and 430. What it broke is the disclosure
+        # guarantee.
+        #
+        # Each label match `Li` now owns the half-open region
+        # `[Li.end(), L(i+1).start())`, and the LAST match owns
+        # `[Lk.end(), len(text))` — byte-identical to the old single walk, which
+        # is why no previously-accepted reading moves. A restatement in an
+        # EARLIER region can only ever REFUSE, and that is a property rather than
+        # a hope: `_statement_ends_after` looks at the whole remaining text, and
+        # the remainder of an earlier region always contains the next label match,
+        # so condition 3 can never hold there. So this change adds DISCLOSURES and
+        # cannot add a candidate — asserted, not asserted-about.
+        #
+        # ~~`if rule.restatement is not None:` wrapped this whole walk~~ — REMOVED
+        # 2026-09-13. The region is now walked for EVERY rule, because a region
+        # decides whether its own label reading survives THE SEQUENCE GATE, and a
+        # rule without a restatement pattern simply finds no siblings. The walk's
+        # restatement half is guarded where it is used instead, which is also why
+        # `if region_start >= region_end: continue` became a guard rather than a
+        # `continue`: skipping the region used to skip nothing that mattered, and
+        # now it would skip the label reading itself.
+        for position, match in enumerate(matches):
+            region_start = match.end()
+            region_end = (
+                matches[position + 1].start()
+                if position + 1 < len(matches)
+                else len(segment.text)
+            )
+            anchor = region_start
+            #: Each ACCEPTED restatement, in text order. Held separately from
+            #: `readings` because the third condition is decided over the chain and
+            #: not over one restatement: see the tail walk below.
+            #:
+            #: ~~`(match, bridged_by_a_BARE_hedge)`~~ — the second element is GONE
+            #: (2026-09-12, third pass). Condition 3 became UNIVERSAL, so nothing
+            #: asks which branch admitted the gap, and a flag every iteration
+            #: computed and every reader discarded is dead weight with a rationale
+            #: that no longer describes the code. `_BARE_HEDGE_BRIDGE`, which
+            #: existed only to compute it, is deleted for the same reason.
+            accepted: list[re.Match[str]] = []
+            #: **THE SEQUENCE GATE'S EVIDENCE.** Every further value of this field
+            #: in this region that this reader cannot tell apart from the label's
+            #: own: a complete unit, a clean continuation, a gap of pure
+            #: coordination, and a DIFFERENT value. One of these means the sentence
+            #: states the field more than once and says nothing about which
+            #: statement is the field's — *"was 300 K, then 350 K, then 400 K"* —
+            #: so no value is selected, INCLUDING the label's own.
+            siblings: list[re.Match[str]] = []
+            #: THIS REGION's refusals, held locally rather than written straight
+            #: into `pending`. THE SEQUENCE GATE below can withhold the region's
+            #: label reading, and both other refusal reasons say the labelled value
+            #: WAS read ("only the labelled one was read"). Serving one of those
+            #: beside a region that read nothing would publish a sentence the
+            #: response itself contradicts — the exact defect class this module
+            #: keeps finding. So a withheld region discloses ONCE, truthfully.
+            region_pending: list[tuple[str, str, str, tuple[int, int]]] = []
+            restatements = (
+                rule.restatement.finditer(segment.text, anchor, region_end)
+                if rule.restatement is not None and region_start < region_end
+                else ()
+            )
+            for extra in restatements:
+                if any(
+                    _spans_overlap(extra.span(1), claimed)
+                    for claimed in claimed_value_spans
+                ):
+                    # NOT recorded as a refusal, deliberately. This value WAS
+                    # read — by another rule, under its own label — so nothing
+                    # was withheld from the scientist and a disclosure saying
+                    # "a value here was not read" would be false. Only the three
+                    # gates below withhold a reading.
                     continue
-                anchor = region_start
-                #: Each ACCEPTED restatement, in text order. Held separately from
-                #: `readings` because the third condition is decided over the chain and
-                #: not over one restatement: see the tail walk below.
-                #:
-                #: ~~`(match, bridged_by_a_BARE_hedge)`~~ — the second element is GONE
-                #: (2026-09-12, third pass). Condition 3 became UNIVERSAL, so nothing
-                #: asks which branch admitted the gap, and a flag every iteration
-                #: computed and every reader discarded is dead weight with a rationale
-                #: that no longer describes the code. `_BARE_HEDGE_BRIDGE`, which
-                #: existed only to compute it, is deleted for the same reason.
-                accepted: list[re.Match[str]] = []
-                for extra in rule.restatement.finditer(
-                    segment.text, anchor, region_end
-                ):
-                    if any(
-                        _spans_overlap(extra.span(1), claimed)
-                        for claimed in claimed_value_spans
+                gap = segment.text[anchor : extra.start(1)]
+                if _HEDGE_BRIDGE.fullmatch(gap) is None:
+                    # THE SEQUENCE GATE, decided HERE because this is the one
+                    # branch where the refused value is still a plausible value OF
+                    # THIS FIELD: no hedge linked it, and nothing has said it is
+                    # anything else. Three conditions, each of which must hold, and
+                    # each of which exists because a corpus row would otherwise
+                    # lose a legitimate reading:
+                    #
+                    #   * the unit is the WHOLE unit — "425 K, ramped at 3 K/min"
+                    #     names a rate, so 425 survives;
+                    #   * the continuation leaves the value absolute — "425 K,
+                    #     maybe 430 K, and again 3 K of drift" names a drift, so
+                    #     425 survives;
+                    #   * the gap is PURE COORDINATION — "425 K, cryostat setpoint
+                    #     80 K" names a different instrument, so 425 survives.
+                    #
+                    # And the value must DIFFER: "425 K, and again 425 K" is one
+                    # value said twice, which is emphasis and not a progression.
+                    # That condition is what answers the cost this gate was briefed
+                    # with — "425 K, still 425 K at the end" keeps its reading.
+                    if (
+                        _unit_is_complete(segment.text, extra)
+                        and _continuation_is_clean(rule, segment.text, extra)
+                        and _SIBLING_GAP.fullmatch(gap) is not None
+                        and _value_of(rule, extra) != _value_of(rule, match)
                     ):
-                        # NOT recorded as a refusal, deliberately. This value WAS
-                        # read — by another rule, under its own label — so nothing
-                        # was withheld from the scientist and a disclosure saying
-                        # "a value here was not read" would be false. Only the three
-                        # gates below withhold a reading.
-                        continue
-                    gap = segment.text[anchor : extra.start(1)]
-                    if _HEDGE_BRIDGE.fullmatch(gap) is None:
-                        pending.append(
-                            (rule.name, _KIND_UNHEDGED, match.group(0), extra.span(1))
-                        )
-                        continue
-                    # THE SECOND CONDITION. The connective is sound and the
-                    # unit may still not be this rule's unit: `3 K/min` is a ramp
-                    # rate, and `K\b` treats `K/` as a word boundary. See
-                    # `_UNIT_TERMINATORS` for the measured table and for why the
-                    # check is an allowlist over ONE following character rather than
-                    # a rule about the rest of the sentence.
-                    if not _unit_is_complete(segment.text, extra):
-                        pending.append(
-                            (rule.name, _KIND_UNHEDGED, match.group(0), extra.span(1))
-                        )
-                        continue
-                    accepted.append(extra)
-                    # THE ANCHOR ADVANCES ONLY ON AN ACCEPTED RESTATEMENT, so the
-                    # chain is a chain of hedges rather than a chain of positions:
-                    # "425 K, maybe 430 K, or perhaps 435 K" reads all three, while
-                    # "425 K, cryostat setpoint 80 K, base 4 K" refuses both — 4's gap
-                    # is measured from 425, not from the 80 that was just refused.
-                    #
-                    # It advances even for a restatement the de-duplication below then
-                    # drops as an identical value, deliberately: adjacency is a fact
-                    # about the TEXT, so "425 K, maybe 425 K, or perhaps 430 K" still
-                    # reads 430.
-                    #
-                    # AND IT ADVANCES BEFORE THE THIRD CONDITION IS APPLIED, which is
-                    # not an oversight: the third condition's clause 2 asks whether a
-                    # further restatement was accepted, so it cannot be decided until
-                    # the whole chain is known. A restatement dropped below therefore
-                    # never retroactively re-anchors the gap of one after it — the
-                    # chain loses a TAIL, not a link.
-                    anchor = extra.end()
-
-                # THE THIRD CONDITION, WALKED INWARD FROM THE TAIL. See
-                # `_STATEMENT_END`. EVERY accepted restatement must END the statement,
-                # and "another accepted restatement follows it" counts as ending it —
-                # which is exactly "it is not the last surviving link", because a link
-                # is only accepted when a hedge bridge sits immediately in front of it.
-                # So the predicate is decidable only at the tail, and dropping the tail
-                # can expose a new one. Measured:
-                # "425 K, maybe 430 K, and again 3 K of drift" loses BOTH — `3` for
-                # its own trailing phrase, `430` because what follows it is now a
-                # bridge to a refusal rather than to a reading.
-                #
-                # ~~"A restatement behind an explicit `or` is never popped: that branch
-                # carries a grammatical alternation marker, and the previous slice's own
-                # argument for it is unrefuted."~~ — **UNIVERSAL SINCE 2026-09-12 (third
-                # pass), and the exemption is struck rather than deleted because it was
-                # the reason a measured §5 false-positive class shipped twice.** The
-                # alternation marker is a real grammatical fact and it is still what
-                # CONDITION 1 rests on; what it does NOT do is say anything about the
-                # words AFTER the value, which is the only thing condition 3 asks. The
-                # five sentences that exemption left fabricating are in
-                # `_RESTATEMENT_RESIDUE_CLOSED`, measured before and after.
-                while accepted and not _statement_ends_after(
-                    segment.text, accepted[-1].end()
-                ):
-                    popped = accepted.pop()
-                    pending.append(
-                        (rule.name, _KIND_TRAILING, match.group(0), popped.span(1))
+                        siblings.append(extra)
+                    region_pending.append(
+                        (rule.name, _KIND_UNHEDGED, match.group(0), extra.span(1))
                     )
-                readings.extend((extra, True) for extra in accepted)
-                # AFTER the tail pops, so a popped restatement is NOT counted as read.
-                accepted_value_spans.extend(extra.span(1) for extra in accepted)
+                    continue
+                # THE SECOND CONDITION. The connective is sound and the
+                # unit may still not be this rule's unit: `3 K/min` is a ramp
+                # rate, and `K\b` treats `K/` as a word boundary. See
+                # `_UNIT_TERMINATORS` for the measured table and for why the
+                # check is an allowlist over ONE following character rather than
+                # a rule about the rest of the sentence.
+                if not _unit_is_complete(segment.text, extra):
+                    region_pending.append(
+                        (rule.name, _KIND_UNHEDGED, match.group(0), extra.span(1))
+                    )
+                    continue
+                accepted.append(extra)
+                # THE ANCHOR ADVANCES ONLY ON AN ACCEPTED RESTATEMENT, so the
+                # chain is a chain of hedges rather than a chain of positions:
+                # "425 K, maybe 430 K, or perhaps 435 K" reads all three, while
+                # "425 K, cryostat setpoint 80 K, base 4 K" refuses both — 4's gap
+                # is measured from 425, not from the 80 that was just refused.
+                #
+                # It advances even for a restatement the de-duplication below then
+                # drops as an identical value, deliberately: adjacency is a fact
+                # about the TEXT, so "425 K, maybe 425 K, or perhaps 430 K" still
+                # reads 430.
+                #
+                # AND IT ADVANCES BEFORE THE THIRD CONDITION IS APPLIED, which is
+                # not an oversight: the third condition's clause 2 asks whether a
+                # further restatement was accepted, so it cannot be decided until
+                # the whole chain is known. A restatement dropped below therefore
+                # never retroactively re-anchors the gap of one after it — the
+                # chain loses a TAIL, not a link.
+                anchor = extra.end()
+
+            # THE THIRD CONDITION, WALKED INWARD FROM THE TAIL. See
+            # `_STATEMENT_END`. EVERY accepted restatement must END the statement,
+            # and "another accepted restatement follows it" counts as ending it —
+            # which is exactly "it is not the last surviving link", because a link
+            # is only accepted when a hedge bridge sits immediately in front of it.
+            # So the predicate is decidable only at the tail, and dropping the tail
+            # can expose a new one. Measured:
+            # "425 K, maybe 430 K, and again 3 K of drift" loses BOTH — `3` for
+            # its own trailing phrase, `430` because what follows it is now a
+            # bridge to a refusal rather than to a reading.
+            #
+            # ~~"A restatement behind an explicit `or` is never popped: that branch
+            # carries a grammatical alternation marker, and the previous slice's own
+            # argument for it is unrefuted."~~ — **UNIVERSAL SINCE 2026-09-12 (third
+            # pass), and the exemption is struck rather than deleted because it was
+            # the reason a measured §5 false-positive class shipped twice.** The
+            # alternation marker is a real grammatical fact and it is still what
+            # CONDITION 1 rests on; what it does NOT do is say anything about the
+            # words AFTER the value, which is the only thing condition 3 asks. The
+            # five sentences that exemption left fabricating are in
+            # `_RESTATEMENT_RESIDUE_CLOSED`, measured before and after.
+            while accepted and not _statement_ends_after(
+                segment.text, accepted[-1].end()
+            ):
+                popped = accepted.pop()
+                region_pending.append(
+                    (rule.name, _KIND_TRAILING, match.group(0), popped.span(1))
+                )
+
+            # THE SEQUENCE GATE APPLIED. Decided after the tail walk, so a
+            # restatement that condition 3 popped is not counted twice, and applied
+            # to the WHOLE region: if this reader cannot say which value is the
+            # field's, it cannot offer an alternative either, so the label reading
+            # and every accepted restatement of this region go together.
+            #
+            # PER REGION AND NOT PER SEGMENT, deliberately. "The temperature was
+            # 425 K and 430 K and the temperature was 500 K" withholds the first
+            # clause and still reads 500: the ambiguity is local to the clause that
+            # contains it, and widening it to the segment would let one sloppy
+            # clause delete a clean one.
+            if siblings:
+                pending.append(
+                    (rule.name, _KIND_NONE_SELECTED, match.group(0), match.span(1))
+                )
+                withheld_value_spans.append(match.span(1))
+                continue
+
+            pending.extend(region_pending)
+            readings.append((match, False))
+            readings.extend((extra, True) for extra in accepted)
+            # AFTER the tail pops, so a popped restatement is NOT counted as read.
+            accepted_value_spans.extend(extra.span(1) for extra in accepted)
 
         # ONE VALUE STATED TWICE IN ONE SENTENCE IS ONE CANDIDATE.
         # "425 K, and again 425 K" is emphasis, not disagreement. Two identical
@@ -2397,11 +3479,29 @@ def _segment_readings(
     # order-dependent.
     #
     # A REFUSAL IS NEVER WEAKENED INTO SILENCE BY THIS: it is dropped only when the
-    # exact span it withholds was READ, which means nothing is withheld and there is
-    # nothing to disclose. A rule's own accepted spans are in the set too, which is
+    # ~~exact~~ span it withholds OVERLAPS one that was READ, which means nothing is
+    # withheld and there is nothing to disclose.
+    #
+    # ~~"the exact span"~~ — **CORRECTED 2026-09-13: the predicate is
+    # `_spans_overlap`, not equality, and the difference is reachable.**
+    # `_ATMOSPHERE`/`_ENVIRONMENT` claim a `_PHRASE` span up to 61 characters, so a
+    # kelvin refusal whose value falls INSIDE a phrase candidate is dropped without
+    # its own disclosure — an independent review measured 32 such cells in 40,000.
+    # It is not a §5 loss and that is measured too: in all 32 the number still
+    # reaches the scientist, quoted verbatim inside the phrase candidate they are
+    # being asked to confirm. So the COMMENT is corrected and the predicate is not:
+    # requiring equality would emit a disclosure saying a value "was not read"
+    # about text sitting in a candidate on the same screen. A rule's own accepted spans are in the set too, which is
     # harmless — a span is visited once per rule, so a rule cannot both accept and
     # refuse one.
-    read_value_spans = claimed_value_spans + accepted_value_spans
+    # AND THE PASS-ONE GATE'S REFUSALS GO THROUGH THE SAME FILTER, for the same
+    # reason: a permissive detector match whose value some OTHER rule read under
+    # its own label withholds nothing, so a disclosure about it would be false.
+    pending.extend(gate_refusals)
+    withheld = set(withheld_value_spans)
+    read_value_spans = [
+        span for span in claimed_value_spans if span not in withheld
+    ] + accepted_value_spans
     for rule_name, kind, quote, value_span in pending:
         if any(_spans_overlap(value_span, read) for read in read_value_spans):
             continue
@@ -2413,7 +3513,13 @@ def _segment_readings(
     return found, tuple(
         (rule.name, kind, refused[(rule.name, kind)])
         for rule in _RULES
-        for kind in (_KIND_UNHEDGED, _KIND_TRAILING)
+        for kind in (
+            _KIND_NOT_ASSERTED,
+            _KIND_QUALIFIED,
+            _KIND_NONE_SELECTED,
+            _KIND_UNHEDGED,
+            _KIND_TRAILING,
+        )
         if (rule.name, kind) in refused
     )
 

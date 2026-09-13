@@ -326,12 +326,34 @@ def test_a_ramp_is_not_a_disagreement():
     violation.
     """
     reading = _read("Temperature ramped 300 K, then 350 K, then 400 K.")
-    assert _values(reading, TEMPERATURE) == [300]
+    # ~~`== [300]`~~ — **INVERTED 2026-09-13, and this is Defect B closed.** The
+    # old assertion is the whole defect in one line: a sentence saying the
+    # temperature went to 400 proposed 300, and `_mint_transcript_proposals` mints
+    # one durable OPEN proposal per candidate, so a scientist could accept the
+    # STARTING POINT of a ramp as the run's temperature. Two independent gates now
+    # refuse it: `ramped` is not an assertion of the value (the bridge), and three
+    # progressive values with pure coordination between them are three values of
+    # one scalar field (the sequence gate). Here the bridge is reached first.
+    assert _values(reading, TEMPERATURE) == []
+    assert [entry.kind for entry in reading.abstentions] == [
+        "label_does_not_assert_this_value"
+    ]
+    # NOT `conflicting_values_for_one_field`: that outcome returns BOTH candidates
+    # and its served reason says "Accept at most one", which is a claim about
+    # ALTERNATIVES. A progression is not a disagreement.
     assert reading.review_required == ()
     # And the words survive: rule (4) stores every segment regardless.
     assert [segment.text for segment in reading.segments] == [
         "Temperature ramped 300 K, then 350 K, then 400 K."
     ]
+    # THE SAME SENTENCE WITH AN ASSERTING BRIDGE, so the sequence gate is exercised
+    # in its own right rather than only reached when the bridge already refused.
+    asserted = _read("The temperature was 300 K, then 350 K, then 400 K.")
+    assert _values(asserted, TEMPERATURE) == []
+    assert [entry.kind for entry in asserted.abstentions] == [
+        "several_values_and_none_selected"
+    ]
+    assert asserted.review_required == ()
 
 
 def test_the_same_value_restated_in_one_sentence_is_one_candidate_not_two():
@@ -1200,9 +1222,20 @@ def test_bare_and_is_not_a_hedge_because_it_is_conjunctive():
     member of ``_HEDGE_CONNECTIVES`` — the union is unchanged, which is the point of
     the split being the thing a test pins separately.
 
+    ~~"``_values(...) == [425]``"~~ on both sentences — **INVERTED 2026-09-13 BY
+    THE SEQUENCE GATE, and the old assertions are kept because the change is the
+    substance of Defect B.** *"The temperature was 425 K and 430 K"* states the
+    field twice with nothing but a coordinator between the two values, so reading
+    425 let a scientist accept one of two unranked values as THE temperature. No
+    value is now selected and the sentence discloses once. Every assertion about
+    the hedge lists themselves is unchanged, because nothing about them changed:
+    ``and`` still does not bridge, and that is still what keeps *"425 K and the
+    pressure was 3 K"* from reading 3.
+
     MUTATION: adding ``and`` to ``_HEDGE_CONNECTIVES`` turns this RED, and would
     reopen "425 K and the pressure was 3 K". Moving ``and again`` back into
-    ``_BARE_HEDGES`` turns the last two assertions RED.
+    ``_BARE_HEDGES`` turns the last assertions RED. Removing ``and`` from
+    ``_SIBLING_COORDINATOR`` restores the struck ``[425]`` and turns them RED too.
     """
     assert "and" not in tc._HEDGE_CONNECTIVES
     assert "and again" in tc._HEDGE_CONNECTIVES
@@ -1211,12 +1244,23 @@ def test_bare_and_is_not_a_hedge_because_it_is_conjunctive():
     assert tc._HEDGE_BRIDGE.fullmatch(" and ") is None
     assert tc._HEDGE_BRIDGE.fullmatch(" and again ") is None
     assert tc._HEDGE_BRIDGE.fullmatch(" or and again ") is not None
-    assert _values(_read("The temperature was 425 K and 430 K"), TEMPERATURE) == [425]
-    # The withholding is DISCLOSED rather than silent, which is the trade §5 ranks
-    # the right way round and is what makes losing this reading acceptable.
-    bare = _read("The temperature was 425 K and again 430 K")
-    assert _values(bare, TEMPERATURE) == [425]
-    assert [entry.kind for entry in bare.abstentions] == ["unhedged_further_values"]
+    # ~~`== [425]`~~ -- the sequence gate withholds the first value too, and
+    # DISCLOSES, which is the trade §5 ranks the right way round.
+    for sentence in (
+        "The temperature was 425 K and 430 K",
+        "The temperature was 425 K and again 430 K",
+    ):
+        reading = _read(sentence)
+        assert _values(reading, TEMPERATURE) == [], sentence
+        assert [entry.kind for entry in reading.abstentions] == [
+            "several_values_and_none_selected"
+        ], sentence
+    # AND A SECOND QUANTITY IS STILL DISTINGUISHED FROM A SECOND STATEMENT, which
+    # is the half the sequence gate must not swallow: the gap names a different
+    # thing, so 425 survives and the disclosure is the restatement gate's.
+    other = _read("The temperature was 425 K and the pressure was 3 K")
+    assert _values(other, TEMPERATURE) == [425]
+    assert [entry.kind for entry in other.abstentions] == ["unhedged_further_values"]
 
 
 def test_a_BARE_or_bridges_on_its_own():
@@ -1407,8 +1451,25 @@ def test_every_declared_connective_actually_bridges():
 
     for connective in tc._OR_REQUIRED_HEDGES:
         # BARE is refused — this half is the point of the split.
+        #
+        # ~~`== [425]`~~ — **AMENDED 2026-09-13.** For `again` and `and again` the
+        # SEQUENCE GATE additionally withholds the first value, because those two
+        # are PURE COORDINATION (they appear in `_SIBLING_COORDINATOR`) while
+        # `about`/`around`/`roughly`/`approximately`/`possibly` are approximations
+        # and are not. So the assertion is expressed over what this test is FOR —
+        # the second value is never read bare — and the sequence gate's extra
+        # withholding is asserted rather than tolerated.
         bare = f"The temperature was 425 K, {connective} 430 K"
-        assert _values(_read(bare), TEMPERATURE) == [425], bare
+        reading = _read(bare)
+        values = _values(reading, TEMPERATURE)
+        assert 430 not in values, bare
+        if values == []:
+            assert set(connective.split()) <= {"and", "again"}, bare
+            assert [entry.kind for entry in reading.abstentions] == [
+                "several_values_and_none_selected"
+            ], bare
+        else:
+            assert values == [425], bare
         prefixed = f"The temperature was 425 K, or {connective} 430 K"
         assert _values(_read(prefixed), TEMPERATURE) == [425, 430], prefixed
 

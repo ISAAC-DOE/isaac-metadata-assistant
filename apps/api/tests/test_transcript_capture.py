@@ -543,6 +543,17 @@ def test_every_ambiguity_kind_is_covered_by_the_published_policy():
         # value IS hedged — serving it would publish a reason contradicted by the
         # quote beside it.
         "trailing_text_after_further_values",
+        # THE PASS-ONE ASSERTION GATE's three, added 2026-09-13, and three for the
+        # same reason the two above are two: each names a different fact about the
+        # sentence, so a shared name would publish a reason its own quote
+        # contradicts. The first says the label did not assert this value ("the
+        # temperature DRIFT was 3 K"); the second says it did and the following
+        # words changed what the number measures ("3 K ABOVE TARGET"); the third
+        # says the field was asserted more than once and no value could be
+        # selected ("300 K, then 350 K, then 400 K").
+        "label_does_not_assert_this_value",
+        "value_qualified_by_what_follows",
+        "several_values_and_none_selected",
         "unmatched_text",
     } == published
 

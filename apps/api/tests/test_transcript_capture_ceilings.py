@@ -187,11 +187,24 @@ def _bytes_only() -> str:
     The slice is exact rather than arithmetic (``"ab " * n`` does not divide
     250,000) so the byte figures in the assertions are round. The tail may be a
     partial ``"ab "``; it carries no digit and no ``K``, so it reads as nothing.
+
+    **THE COMMA AFTER THE LAST INSTANT IS LOAD-BEARING — ADDED 2026-09-13.**
+    Without it the filler ``ab ab ab…`` sits directly after
+    ``ended 2026-01-02T00:00:00Z``, and the PASS-ONE CONTINUATION GATE refuses a
+    value followed by a word it does not recognise, so the fixture lost its FIFTH
+    candidate (4 × 250,000 B = 1,000,000 B, which is UNDER the 1,048,576 B cap —
+    the ceiling would have stopped firing, exactly the way the hedged fixture this
+    one replaced used to stop firing). A comma is a clause boundary, keeps the
+    payload ONE segment (``_SEGMENT_BOUNDARY`` splits on ``.!?`` and newlines, not
+    on commas), and costs no bytes that matter. The general lesson is the one this
+    fixture already records: **a resource-ceiling fixture must not depend on a
+    semantic gate**, and "arbitrary prose after the last value" turned out to be
+    one such dependency.
     """
     head = (
         "The temperature was 425 K and the temperature was 430 K and the "
         "temperature was 435 K and it started 2026-01-01T00:00:00Z and ended "
-        "2026-01-02T00:00:00Z "
+        "2026-01-02T00:00:00Z, "
     )
     filler = "ab " * (_BYTES_ONLY_SEGMENT_BYTES // 3 + 1)
     return (head + filler)[:_BYTES_ONLY_SEGMENT_BYTES]
@@ -276,9 +289,20 @@ def test_the_bare_dense_transcript_is_now_harmless_because_C1_refuses_it(
 ):
     """The reviewer's FIRST payload, for completeness: ``", "`` is not a hedge.
 
-    It is accepted, with exactly ONE candidate, and the response is proportional to
-    the transcript rather than to transcript × values. Recorded because "the same
-    payload now returns 200" would otherwise look like the ceiling failing to fire.
+    ~~"It is accepted, with exactly ONE candidate"~~ — **INVERTED 2026-09-13, and
+    the old assertion is kept because it recorded a real property that the SEQUENCE
+    GATE deliberately changed.** ``_one_segment(", ")`` is
+    *"The temperature was 425 K, 10000 K, 10001 K, …"* — 3,001 comma-separated
+    kelvin values, which is a PROGRESSION with 3,000 further values and nothing
+    anywhere saying which one is the run's temperature. Promoting 425 let a
+    scientist accept the first number of a list as the field's value, which is
+    Defect B exactly. So the payload now yields **ZERO** candidates and ONE
+    ``several_values_and_none_selected`` disclosure.
+
+    What the old test was FOR is unchanged and is still asserted: the response is
+    proportional to the transcript rather than to transcript × values, and a 200
+    here is not the ceiling failing to fire. Both facts are now stronger, not
+    weaker — the response got smaller.
     """
     run = _make_run(client, experiment_id)
     text = _one_segment(", ")
@@ -287,7 +311,11 @@ def test_the_bare_dense_transcript_is_now_harmless_because_C1_refuses_it(
     response = _finalize(client, experiment_id, text, run_id=run["id"])
     assert response.status_code == 200, response.text
     payload = response.json()
-    assert [entry["proposed_value"] for entry in payload["candidates"]] == [425]
+    assert [entry["proposed_value"] for entry in payload["candidates"]] == []
+    # AND IT IS NOT SILENT. A withheld progression discloses exactly once.
+    assert [entry["kind"] for entry in payload["abstentions"]] == [
+        "several_values_and_none_selected"
+    ]
     # 165,828,285 B before; now linear in the transcript, which one note requires.
     assert len(response.content) < 8 * len(_encode(text)), len(response.content)
 
@@ -839,7 +867,8 @@ def test_the_worst_legitimate_disclosure_load_is_admitted():
     A transcript at the SEGMENT ceiling whose every sentence is maximally
     ambiguous: an absorption-edge mention, a non-kelvin temperature, and BOTH
     refusal kinds for ~~two~~ **all three** of the three rules that can refuse one.
-    ~~Six~~ **SEVEN** disclosures a sentence, ~~600~~ **700** in total, ADMITTED.
+    ~~Six~~ ~~**SEVEN**~~ **NINE** disclosures a sentence, ~~600~~ ~~**700**~~
+    **900** in total, ADMITTED.
 
     **THE SIXTH BECAME A SEVENTH ON 2026-09-12 (fourth pass), AND THE NEW ONE IS
     THIS FIXTURE FINDING A SILENT WITHHOLDING OF ITS OWN.** The numbers are updated
@@ -855,18 +884,26 @@ def test_the_worst_legitimate_disclosure_load_is_admitted():
     a restatement in a non-final region can never satisfy
     `_statement_ends_after` (the next label match is always in the remainder).
 
-    It also reads exactly `MAX_CANDIDATES` candidates, which is admitted by the
+    ~~It also reads exactly `MAX_CANDIDATES` candidates, which is admitted by the
     narrowest possible margin on a DIFFERENT axis. That is a coincidence of this
-    fixture and is asserted so it is visible rather than surprising.
+    fixture and is asserted so it is visible rather than surprising.~~ — **STRUCK
+    2026-09-13: it now reads 300, and the coincidence is gone.** The two candidates
+    this fixture lost per sentence were FABRICATIONS nobody had noticed: the word
+    ``end`` inside *"at the end, then 2026-01-03T00:00:00Z"* is not the assertion
+    *"the scan ended"*, and the PASS-ONE ASSERTION GATE now refuses that bridge and
+    discloses it as `label_does_not_assert_this_value`. So this fixture no longer
+    exercises the candidate ceiling at its margin — `_COUNT_ONLY` (600 > 500) does,
+    which is why nothing is added here to restore the coincidence.
 
-    **AND IT IS THE CASE THAT SETTLES THE FOURTH CEILING'S MEASURE.** All 700
+    **AND IT IS THE CASE THAT SETTLES THE FOURTH CEILING'S MEASURE.** All ~~700~~
+    **900**
     disclosures here are abstentions, so they carry **ZERO** run options — asserted
     below. A `MAX_DISCLOSURE_OPTIONS` implemented as `disclosures x
-    len(known_runs)` would read 700 x 200 = 140,000 against a 20,000 ceiling and
+    len(known_runs)` would read 900 x 200 = 180,000 against a 20,000 ceiling and
     refuse THIS transcript, the one the third ceiling exists to admit. The exact
     served sum reads 0. That is why the measure is the sum and not the product.
 
-    MUTATION: lowering `MAX_DISCLOSURES` to 700 turns this RED, which is the
+    MUTATION: lowering `MAX_DISCLOSURES` to 900 turns this RED, which is the
     headroom being real rather than asserted. Replacing
     `sum(len(entry.options) for entry in clarifications)` with
     `disclosure_count * len(known_runs)` turns the options assertion RED.
@@ -880,9 +917,13 @@ def test_the_worst_legitimate_disclosure_load_is_admitted():
     )
     one = _read(sentence)
     assert len(tc.segment_transcript(sentence)) == 1
-    assert len(one.abstentions) == 7
+    assert len(one.abstentions) == 9
     assert sorted({entry.kind for entry in one.abstentions}) == [
         "implicit_only_subject",
+        # The PASS-ONE ASSERTION GATE's own kind, added 2026-09-13: the word `end`
+        # in "at the end, then <instant>" is not the assertion "the scan ended",
+        # and this fixture had been reading TWO instants off it.
+        "label_does_not_assert_this_value",
         "temperature_not_in_kelvin",
         "trailing_text_after_further_values",
         "unhedged_further_values",
@@ -892,9 +933,11 @@ def test_the_worst_legitimate_disclosure_load_is_admitted():
     assert len(_encode(text)) <= routes._MAX_TRANSCRIPT_BYTES
     assert len(tc.segment_transcript(text)) == tc.MAX_SEGMENTS
     reading = _read(text)
-    assert len(reading.abstentions) + len(reading.clarifications) == 700
-    assert 700 <= tc.MAX_DISCLOSURES
-    assert len(reading.candidates) == tc.MAX_CANDIDATES == 500
+    assert len(reading.abstentions) + len(reading.clarifications) == 900
+    assert 900 <= tc.MAX_DISCLOSURES
+    # ~~`== tc.MAX_CANDIDATES == 500`~~ -- see the docstring: the two fabrications
+    # this fixture lost per sentence took it to 300, so the coincidence is gone.
+    assert len(reading.candidates) == 300 < tc.MAX_CANDIDATES
     # THE FOURTH CEILING, on the case it must admit. Every disclosure here is an
     # abstention, so the served option total is zero however many runs the record
     # has — see this test's docstring for why the product measure would refuse it.
