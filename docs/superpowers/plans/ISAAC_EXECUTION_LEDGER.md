@@ -1178,7 +1178,7 @@ so it is not re-derived.
 | ~~`QA-013`~~ | ~~**`HelpPanel`'s claim *"Every field links to its evidence trail in the record"* is UNMEASURED.**~~ **MEASURED 2026-09-12 AND THE CLAIM IS FALSE — three ways.** Struck rather than deleted because "unmeasured" and "false" are different states and the row was right to withhold the second. | **(1)** `EvidenceRow.tsx` contains **zero** `<a>`, `href`, `Link`, `button` or `onClick` — it renders `<div className="ev-row">` and `<span>`s (`:44-65`), and its own docstring calls it "the compact citation on S3 field rows". **Nothing links.** **(2)** `FieldRow.tsx:81` gates the evidence block on `field.evidence && field.evidence.length > 0`, and `:68` renders the literal `'honestly missing'` — so **fields with no trail ship BY DESIGN** (CLAUDE.md §5). **(3)** the same condition's `&& !needsYou` suppresses the citation **even where evidence exists**. | **Handed to remediation slice R3**, which owns `HelpPanel.tsx`. The second sentence of the claim (the export sidecar) is probably true and was deliberately NOT asserted here — R3 verifies it from `export.py`. **The row's warning "do not read UX-003/004 as having validated it" was right to be there.** |
 | ~~`QA-014`~~ | **CLOSED 2026-09-12, `0a1c7434`.** ~~`migration-approval-packet-0002.md` cites the phantom "contract §8 D7" unflagged~~ — true, and **understated**: it is cited **FOUR** times (§2, §12B, §12C, §13), in the one document an operator reads before applying a migration. | The contract's last section is **§7.7** — there is no §8. **And the list the phantom carries disagrees with what shipped IN BOTH DIRECTIONS:** of the "five deferred", **three** were created (`isaac_experiment_revisions`, `isaac_run_revisions` by `0003`; `isaac_submissions` by `0004`) and **two** never were and are absent from `OWNED_TABLES` (`isaac_assets`, `isaac_run_assets`); while **two the list never mentioned shipped anyway** (`isaac_revision_changes`, `isaac_submission_runs`), plus `isaac_run_projection`. So §12C's *"Five tables … remain uncreated, and a test still pins their absence"* was false in **both** halves — `test_0002_creates_only_the_run_table_and_its_one_index` pins those names as absent from **`0002`'s own two statements**, never from the repository or a database. | ~~"One-line docs fix"~~ — **the estimate was wrong, and that is the transferable lesson: the SIZE of a correction is itself a checkable claim.** Fixed in place, old wording struck, per house style. `0002` is unaffected; `0003`/`0004` remain owner-approved and applied **nowhere**; applying them is still the operator's act. This file is not manifest-listed, so no snapshot drift. |
 | `QA-015` | **Two `settings-explorer` accessibility platform splits remain**, and the cause is known: that surface renders from the **live OpenAPI document**, so its cell count tracks API prose rather than a platform difference. | `a11y-baseline.ts`, confirmed during DOC-007. A3 did **not** regress. | Expected behaviour of a live-document surface, not a defect to chase. |
-| `QA-018` | **The `?view=graph` record workspace has NEVER been accessibility-scanned — before or after UX-002.** Found by the I-1 slice while measuring QA-016; **independently re-verified by the orchestrator.** | `apps/web/e2e/surfaces.ts`'s `SURFACES` holds exactly `record-detail`, `record-runs`, `record-capture` (`:120`, `:143`, `:160`). `record-graph` appears in the whole of `apps/web/e2e/` at **two** lines, both inside `specs/visual-sweep.spec.ts` (`:284`, `:757`). So three of the four record workspaces are axe- and narrow-width-measured and the fourth is screenshot-swept only. | **Pre-existing coverage gap, NOT created by UX-002** — stated that way deliberately, because UX-002 is what put a visible `h1` on that workspace and it would be easy to misfile this as its regression. Adding a `SURFACES` entry mints fresh baseline cells on **both** platforms, so it needs a **Linux-CI round-trip** and is not a one-line change. |
+| `QA-018` | **CLOSED 2026-09-13 — scanned, one `serious` defect fixed, surface added with ZERO baseline cells; see the dated block in the CONTINUATION RUN section.** ~~The `?view=graph` record workspace has NEVER been accessibility-scanned — before or after UX-002.** Found by the I-1 slice while measuring QA-016; **independently re-verified by the orchestrator.** | `apps/web/e2e/surfaces.ts`'s `SURFACES` holds exactly `record-detail`, `record-runs`, `record-capture` (`:120`, `:143`, `:160`). `record-graph` appears in the whole of `apps/web/e2e/` at **two** lines, both inside `specs/visual-sweep.spec.ts` (`:284`, `:757`). So three of the four record workspaces are axe- and narrow-width-measured and the fourth is screenshot-swept only. | **Pre-existing coverage gap, NOT created by UX-002** — stated that way deliberately, because UX-002 is what put a visible `h1` on that workspace and it would be easy to misfile this as its regression. Adding a `SURFACES` entry mints fresh baseline cells on **both** platforms, so it needs a **Linux-CI round-trip** and is not a one-line change. |
 | `QA-019` | **No route in this SPA has ever satisfied WCAG 2.4.2 *Page Titled*, and UX-002 removed the one accidental compensation on the record screen.** Raised by the I-1 slice as a judgement call rather than acted on; **re-measured by the orchestrator.** | `grep -ran 'document\.title\|useDocumentTitle' apps/web/src/` → **0 hits**; `apps/web/index.html:7` is a static `<title>ISAAC Metadata Assistant</title>`. Separately: `LABELS.screenReview` (`'Review Record'`) now reaches the UI at exactly two sites, **both inside `RecordWorkbench`'s `bundle.status !== 'data'` branch** (`:401`, `:405`), so the loaded record screen carries no stable screen name at all. | **NEEDS THE OWNER'S DECISION, and is deliberately NOT built.** The proportionate fix is a per-route `document.title`, **not** a second `h1` — `specs/structure.spec.ts` holds every surface to exactly one `<h1>` and is right to. **The authorization is the blocker, not the difficulty:** the 2026-08-29 app-side grant enumerates `A11Y-01`, `A11Y-06`, `LAYOUT-01` and `LAYOUT-02`, and **2.4.2 is not among them** — §15's rule is that a slice which cannot cite a committed sentence permitting what it does has not established its basis, and this repository records **five** instances of that failing. |
 | `A11Y-01` | **NOT CLOSED.** A3 closed **one of three** causes. | `e2e/a11y-baseline.ts:634` and `:3562` say so in terms; `:2221`/`:3479`/`:3491` still describe live palette debt. | A palette decision, and two causes remain — including ancestor-`opacity` composites A3 cannot reach without destroying the ramp. |
 
@@ -1595,6 +1595,41 @@ requires every split to be declared with *"both halves MEASURED SEPARATELY"*. A 
 half could never satisfy that honestly — declaring it to unblock CI would have written a false
 declaration into the one place that exists to prevent them, **and it would have been unnecessary**,
 because the real measurement made the splits disappear.
+
+### *** `QA-018` CLOSED — and the ledger's own estimate of it was wrong in the useful direction ***
+
+`QA-018` recorded that *"the `?view=graph` record workspace has NEVER been
+accessibility-scanned — before or after UX-002"*, and judged that closing it **"mints fresh
+baseline cells on BOTH platforms, so it needs a Linux-CI round-trip and is not a one-line
+change."** Both halves of the premise were right; the estimate was not.
+
+**Re-verified first:** `grep -c record-graph apps/web/e2e/surfaces.ts` → **0**, and its only two
+references in all of `e2e/` were inside `specs/visual-sweep.spec.ts`, which screenshots and asserts
+nothing about accessibility. So three of four record workspaces were axe- and narrow-width-measured
+and the fourth was screenshot-swept only.
+
+**THE FIRST SCAN OF IT FOUND A `serious` DEFECT, and two rules with ONE root cause:**
+
+```
+[serious] list              <ul>/<ol> must only directly contain <li>/<script>/<template>  (1 node)
+[minor]   aria-allowed-role ARIA role should be appropriate for the element                (3 nodes)
+```
+
+`role="note"` on three `<li>` elements **overrides their implicit `listitem` role**
+(`ExperimentGraphPanel.tsx:519`). The items stop being list items, so the `<ul>` becomes a list
+containing none — which is why the SERIOUS rule fires on the PARENT while the minor one fires on
+the CHILDREN. One line removed it. The role was not load-bearing: `listitem` inside a `<ul>` is the
+correct semantic, and a screen reader now gets *"list, 3 items"* instead of three roles that say
+nothing about their relationship. The sibling `<p role="note">` uses are untouched and remain
+correct — `note` on a `<p>` overrides nothing.
+
+**SO THE SURFACE IS ADDED WITH NO BASELINE ENTRY AT ALL: it audits clean.** That is the outcome to
+preserve — a cell here would be recorded debt, and there is none to record. It was the estimate of
+minted cells that made this look expensive, and the estimate was made without scanning.
+
+**It is still reached by ADDRESS only**, deliberately (`EVG-002` removed the sidebar link), and
+that is precisely why it had to be scanned: a destination a scientist can still bookmark and open
+is a destination that has to be usable.
 
 ### THREE OPERATIONAL TRAPS, ALL SELF-INFLICTED THIS ROUND
 
