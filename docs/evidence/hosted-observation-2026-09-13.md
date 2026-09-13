@@ -202,3 +202,136 @@ await fetch('/krish/api/health').then(r => r.json())
 await fetch('/krish/api/runtime/database/recon').then(r => r.json())
 // enumerate Object.keys(payload.dataset) — do NOT grep the serialized payload
 ```
+
+---
+
+## 8. Three honesty constraints, verified on the LIVE deployment
+
+Each of these has a history in this repository of being asserted falsely and then corrected. All
+three are now correct **on the deployed product**, not merely in source.
+
+### 8.1 The upload claim is SCOPED, not app-wide
+
+`Governance & Safety` (`/krish/governance`, 1,723 characters of copy) reads:
+
+> Adding a file to this workspace is closed off entirely: every file upload is refused outright,
+> whatever it contains, and **the refused request** is never read, parsed, or inspected.
+
+The load-bearing words are *"the refused request"*. The 2026-08-03 product-hardening entry records
+that this screen once asserted *"no file is read, parsed, or inspected"* while `RecordValidator` and
+`CsvReconcilePanel` — one tab away — read and POST a chosen file. Measured on the live page:
+
+| Probe | Result |
+|---|---|
+| unqualified `no file is read, parsed, or inspected` | **absent** |
+| `refused before anything is read` | **absent** |
+| any claim of real-vs-synthetic detection | **absent** |
+
+The third matters as much as the first two: **no real-vs-synthetic detection exists anywhere in this
+codebase**, and the R9 finding was that a prior revision implied it did. The live copy claims
+synthetic *mode*, never synthetic *data*.
+
+### 8.2 There is NO fake `Connected` state
+
+`ai-integration-decision-packet.md` §6 binds the continued AI work with, above all, **no fake
+`Connected` state**. Measured over the whole of `Settings & API`:
+
+```
+/\bconnected\b/i          →  false      (zero matching sentences)
+/not connected/i          →  false
+```
+
+The word does not appear at all — which is stronger than the guard requires and is the right
+outcome, since a screen that says *"Not connected"* still implies a connection is a thing this build
+attempts. Settings' seven tabs are `Overview`, `Data & Privacy`, `About`, `API Access`,
+`Endpoint Explorer`, `Connect Your Agent`, `Help & Tutorial`.
+
+### 8.3 The no-model claim renders, and is true
+
+> No language model at all — the assistant answers from a bounded in-repository catalog.
+
+This is `ASSISTANT_NO_MODEL_CLAIM`'s substance, rendered rather than buried behind a tab — the gap
+§11's 2026-08-25 note was added to close. It is true of this deployment: every provider seam answers
+`501 no_provider_configured`.
+
+## 9. QA-019 measured on FOUR hosted routes
+
+`document.title` on the deployed product, read from the live DOM:
+
+| Route | `document.title` | `<h1>` |
+|---|---|---|
+| `/krish/experiments` | `ISAAC Metadata Assistant` | My Experiments |
+| `/krish/record/<ULID>` | `ISAAC Metadata Assistant` | Review Record |
+| `/krish/governance` | `ISAAC Metadata Assistant` | Governance & Safety |
+| `/krish/settings` | `ISAAC Metadata Assistant` | Settings & API |
+
+**Four distinct routes, four distinct `<h1>`s, one identical title.** Each page knows what it is and
+the title does not say. That is the WCAG 2.4.2 failure `QA-019` fixes, and it is now observed on the
+deployed product rather than argued from source. The local dev tab in the same browser, running this
+branch, reads `Review Export Readiness · ISAAC Metadata Assistant`.
+
+**An exhaustive hosted title count was attempted and abandoned rather than estimated.** Driving the
+nav links in one evaluation failed with *"Inspected target navigated or closed"* — those links are
+real `<a href>`s causing full document loads, so the evaluation context dies with each one. Four
+measured routes are reported; the full route set is covered by this branch's own suite locally, and
+no hosted total is claimed.
+
+## 10. UX-014's premise, confirmed verbatim on hosted
+
+The record screen renders schema identifiers as product copy, exactly as `UX-014` describes. Read
+from live `<h2>` and banner text (concatenated by `textContent`, so the identifier is a sibling
+badge rather than part of the sentence):
+
+- `System & Instrument` **`system`** `13 fields · none recorded yet`
+- `Environment & Context` **`context`**  ← the *"Environment & Context context"* duplication the
+  ledger row names
+- `Reduced Spectrum` **`reduced_spectrum`**  ← in the confirmation banner
+
+The banner's own copy is good and should be preserved by any `UX-014` work:
+
+> 3 Fields Need Your Confirmation — These are values the system refuses to guess. Confirm each
+> before this record can export — expected, not a failure.
+
+The hosted record workspace nav shows `Record Fields`, `Runs`, **`Graph`** — `Graph` is still linked
+on `main`; this branch's `EVG-002` removes that link while keeping the address reachable, which is
+why `QA-018` had to scan it.
+
+## 11. A NEW defect this observation found: there is no not-found state at all
+
+Navigating to `https://isaac.slac.stanford.edu/krish/validator` — a plausible guess at the
+Standalone Validator's address — landed on **My Experiments**, with `<h1>My Experiments</h1>` and
+`location.pathname` rewritten to `/krish/experiments`. No message, no explanation.
+
+The cause is one line, and `App.tsx` declares only two route patterns in total:
+
+```tsx
+<Route path="*" element={<Navigate to={ROUTES.experiments} replace />} />
+```
+
+**Every unknown path silently becomes My Experiments, and `replace` erases the attempted URL from
+history**, so Back does not return the reader to wherever the bad link came from. There is no 404,
+no not-found screen, and nothing that says the address was not understood.
+
+**Why this is worth a row rather than a shrug.** A scientist following a stale link — a route
+renamed between images, a URL copied from an older build, a typo in a shared address — is told
+that their destination *is* My Experiments. The app makes a claim about the address it did not
+honour, which is the same class as the honesty defects this programme keeps finding, arriving
+through routing instead of copy.
+
+**What it is NOT.** `/record/<unknown-ULID>` does **not** reach this branch: `/record/:id` matches,
+and the record screen renders the API's own not-found handling. So the discarded-record case, which
+is the one a reader is most likely to hit, is already handled correctly. This defect is confined to
+genuinely unrecognised **paths**.
+
+**Deliberately NOT fixed in PR #248, and the reason is scope rather than difficulty.** Eight test
+files reference the catch-all or a not-found concept
+(`navigation.test.tsx`, `proposal-deep-link.test.tsx`, `record-identity.test.ts`,
+`tutorial-anchors.test.tsx`, `memory-sources.test.tsx`, `assistant-capabilities.test.tsx`,
+`evidence-selection-state-affordance.test.tsx`, `palette-contrast.test.ts`), so replacing the
+redirect with a not-found screen is a behaviour change with a real blast radius. Bundling it into a
+93-commit PR whose CI is already green would risk the whole merge to add one screen. It is filed as
+`QA-020` with this measurement attached.
+
+**One measurement a follow-up must make first, because I did not:** whether any *shipped* link,
+redirect or documented URL currently depends on the catch-all to land somewhere sensible. If one
+does, a not-found screen would surface a defect rather than fix one, and that link is the real bug.
