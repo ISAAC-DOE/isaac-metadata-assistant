@@ -1538,6 +1538,87 @@ link `EVG-002` removed and could reasonably have filed its absence as a regressi
 commit this session swept three other human-followed docs and **missed this one**: the same
 partial-sweep failure, which is why the reviewer checked. Fixed in `eb192809`.
 
+### REMEDIATION, ROUND 2 — all 5 Criticals, 6 Importants and 8 Minors CLOSED, each with a polarity proof
+
+Every fix below was reproduced first-hand before being made and mutation-proved after. The list is
+what a future session needs; the commit messages carry the measurements.
+
+| item | what it was | commit |
+|---|---|---|
+| **C-1** | `/api/health` echoed a password-bearing `ISAAC_MCP_DEPLOYMENT` **unauthenticated**, under a claim added in the same change saying *"Nothing confidential is in it"*. **The claim was KEPT and the leak redacted** | `e0d6ee9d` |
+| **C-2** | That lane's own leak guard never SET those two env vars, so it swept a body where both were `null` — *"true and inert"* | `e0d6ee9d` |
+| **C-3** | **My** slice reported `not_applicable` — which the server calls *"a fact rather than an inability"*, served **200** — as *"could not read the submission history"* | `f8bb87db` |
+| **C-4** | **My** slice rendered `Last Submitted Revision · None` about a history that was **not read** | `f8bb87db` |
+| **C-5** | A test whose control arm computed the columns **then popped the keys** — identical I/O, could not fail | `61b59cd6` |
+| **I-3/4/5** | Three claims this session itself falsified, in documents that get **followed** | `eb192809` |
+| **I-6** | `folder_path_too_long` **unreachable** — Pydantic's `max_length` shadowed the typed refusal, so the description promised five tokens and delivered three | `0177364c` |
+| **I-7** | The move panel rendered `"Request failed (422)."` while its comment claimed the server's sentence — `mutationError` puts the body on `err.body` and leaves `err.message` a STATUS | `0177364c` |
+| **I-8** | Settings promised statistics *"over your own activity"* that `MyStats` cannot produce on any branch | `8ce85a87` |
+| **§5 residue** | *"THE ONE MEMBER OF THE CLASS"* was **nine** — plus a **second, worse class** | `91290da6` |
+| **Minor ×8** | signature docstring said 5 keys/hashes 8 · citation to a **nonexistent** test · *"eight stable sections"* with a producible ninth · stale Graph prose · **my own** tautological polarity block · `note_change_revs` admitted with a comment and no assertion · a Library row that could contradict itself · a Unicode guard false for two whole categories | `767243e9` `e46c0a6b` `930c0d3b` `5245f4cf` `2a9def22` `da9a62cf` |
+
+### *** THE ACCESSIBILITY ARC — CI FOUND WHAT NO LOCAL RUN COULD, AND THEN CORRECTED MY FIX'S BASELINE ***
+
+**Both merged lanes predicted the wrong failure.** Each independently forecast that
+`settings-explorer` cells would move, because the Endpoint Explorer renders every new OpenAPI
+paragraph as its own `<p>` and the contract grew by 16 paragraphs. **Not one cell moved there.**
+What moved was the product's **new home screen**: `color-contrast` at `experiments-example` grew
+**3 → 6 across all seven viewport projects** — three new sub-AA nodes — and **only on Linux.**
+
+**Not a new cause.** `tokens.css` already names `.exp-row.done { opacity: 0.82 }` as an A11Y-01
+cause-(b) site with the exact figure `#626c77 → #7e868f, 3.69:1` and the verdict *"THE OPACITY HAS
+TO GO"*. The Library row simply rendered more text inside a row that already failed. The composite
+was **recomputed rather than quoted** and reproduces that committed figure exactly;
+`--text-secondary` is the first rung that survives at 0.82 (**5.02:1**), so the dimmed row's text
+is raised one tier, scoped to `.exp-row.done`.
+
+**Three alternatives rejected, each for a stated reason:** transcribing 3→6 records sub-AA nodes on
+the new home screen as *expected*; removing the opacity decides a three-site palette question
+recorded as open, by accident, inside a feature PR; darkening the tokens is arithmetically possible
+but `tokens.css` already showed the compliant value lands **below the tier it exists to sit below**.
+
+**THE PLATFORM DIVERGENCE IS THE FINDING.** Those seven cells were **scalars** — the platforms
+agreed. Then three identical spans **failed on Linux and passed on macOS**. Same code, same markup,
+three-node difference. So the local run could not have found the defect, and the CI run that found
+it could not state the fixed number.
+
+**AND MY CARRY-FORWARD WAS WRONG, WHICH IS THE PART WORTH CARRYING.** With linux having just
+measured 6, I recorded `{darwin: 2, linux: 3}` — taking the last RECORDED value over the 6, on the
+grounds that 6 was the defect and not a baseline. **That reasoning holds and should be applied
+again.** The number it produced did not: CI measured **linux 2 at all seven cells**, reporting
+`IMPROVED` rather than passing silently. *A stale-but-conservative figure is still a figure nothing
+measured.* So the cells are **scalars at 2**, both totals fall **877 → 870**,
+`DARWIN_CARRIED_FORWARD` stays `[]`, and the split-declaration invariant needed **no** new entry.
+
+**IT ALSO VINDICATES NOT FORCING THE INVARIANT GREEN.** `baseline-aggregate.invariant.test.ts`
+requires every split to be declared with *"both halves MEASURED SEPARATELY"*. A carried-forward
+half could never satisfy that honestly — declaring it to unblock CI would have written a false
+declaration into the one place that exists to prevent them, **and it would have been unnecessary**,
+because the real measurement made the splits disappear.
+
+### THREE OPERATIONAL TRAPS, ALL SELF-INFLICTED THIS ROUND
+
+1. *** A BROAD `pkill -f "uvicorn isaac_api.app:app"` KILLS OTHER SUITES' BACKENDS. *** Restarting
+   a manual backend for an unrelated probe killed the **trusted** suite's own server mid-run;
+   five specs failed `ECONNREFUSED 127.0.0.1:8101`, which reads exactly like a product regression.
+   Never pattern-kill uvicorn while a mutation or trusted suite is running.
+2. **`pgrep -f "bin/pytest"` matches the WAITER SHELLS** whose own command lines contain the
+   literal, so it never goes quiet. Use `pgrep -f '\.venv/bin/pytest'`. This cost two misreadings
+   of the session's own suite state.
+3. **`global-setup` refuses if the ordinary workspace holds ANY record** — correctly. Probe records
+   created for manual measurement must be discarded, or the backend restarted on a fresh
+   `ISAAC_UI_WORKSPACE`, before any browser suite.
+
+### AND ONE REAL EVG-002 MISS THAT A SWEEP COULD NOT HAVE FOUND
+
+The trusted suite's keyboard walk reached the Graph link **by tabbing and matching its accessible
+name**, so the string `'Graph'` appeared only as a loop member. My repository-wide sweep for
+`getByRole('link', { name: 'Graph' })` could never have matched it. It failed as *"step 11: the
+Graph workspace link was not reached by 150 Tab presses"*. **Sweep for the THING, not for the idiom
+you expect it to be reached by** — §11's `rg`/NUL lesson in a new form. An absence assertion was
+added beside the fix, because a loop that merely stopped naming Graph would also pass if the link
+came silently back.
+
 ### WHAT THE REVIEWER ATTACKED AND DID NOT BREAK — as valuable as the findings
 
 The three §5 headline closures hold **behaviourally and end-to-end**. Its own from-scratch
