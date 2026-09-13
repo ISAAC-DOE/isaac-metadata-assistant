@@ -994,8 +994,48 @@ def test_the_persisted_state_keys_are_unchanged_by_scoping():
         # moves. That is checked STRUCTURALLY immediately below rather than by a
         # per-entry loop, and the note there says why a loop would be vacuous here.
         "proposal_change_revs",
+        # ``folder`` was added with the Experiment Library, and it is ADMITTED HERE
+        # DELIBERATELY rather than because a test went red — the rule the four keys
+        # above each earned. It belongs in the persisted document because it is a
+        # label on THIS record, exactly as ``title`` is, and it satisfies the property
+        # this test defends by construction rather than by argument: it is ONE STRING
+        # with no sub-structure, so it has no room for a ``session_id`` to hide in and
+        # the per-entry ``all(...)`` checks below do not apply to it.
+        #
+        # THE CONFUSION THIS KEY IS MOST LIKELY TO CAUSE, named so it is not
+        # re-derived: a folder is NOT a scope and NOT a directory. Nothing derives a
+        # filesystem path from it — every path this module builds comes from
+        # ``Experiment.id`` — and ``normalize_folder_path`` refuses ``.`` and ``..``
+        # segments so it cannot even be read as one.
+        # ``test_experiment_folders.py`` asserts that separately, over the whole
+        # workspace tree, so this admission rests on a measurement rather than on
+        # this comment.
+        "folder",
+        # ``note_change_revs`` was added with MCP-005's ``note`` change-feed kind, and
+        # is ADMITTED HERE DELIBERATELY rather than because a test went red — the same
+        # rule the four keys above follow. Everything ``proposal_change_revs``' note
+        # says applies unchanged, one entity kind over: it is a version coordinate and
+        # NOT content, it is ``{note_id: this record's rev at the save that last
+        # changed that note}``, it sits in a map beside the notes because a field on
+        # the ``Note`` would be hashed by ``_authoritative_signature``, and it belongs
+        # in the persisted document because no other store holds it.
+        #
+        # IT IS A SECOND MAP RATHER THAN A SHARED ONE, and that is the one thing worth
+        # adding here: a note id and a proposal id are both opaque ULIDs from the same
+        # minter, so a shared dict would be keyed from two id spaces with nothing but
+        # convention keeping them apart, and a collision would silently hand one
+        # entity the other's feed position.
+        #
+        # It satisfies the property THIS test defends for the identical reason: the
+        # keys are note ids, the values are integers, and neither can encode a scope.
+        "note_change_revs",
     }
     assert "session_id" not in state and "scope" not in state and "root" not in state
+    # THE FOLDER IS ``""`` HERE AND THAT IS ASSERTED, not merely stated: a record
+    # constructed without one is UNFILED, which is the state every experiment
+    # created before folders existed is also in. If the default ever became
+    # something else, a fresh record would arrive pre-filed somewhere nobody chose.
+    assert state["folder"] == ""
     # ``proposal_change_revs`` IS EMPTY HERE, AND THAT IS SAID RATHER THAN ASSERTED
     # OVER. Only ``_bump_changed_proposals`` writes it, and only from the write branch
     # of ``save_versioned``, which this test deliberately does not call — it is about
@@ -1197,3 +1237,92 @@ def test_disposing_a_session_does_not_disturb_the_ordinary_workspace(app, tmp_pa
     assert client.delete(f"/api/tutorial/sessions/{client.tutorial_session_id}").status_code == 204
     assert ws.load_experiment(ordinary.id) is not None
     assert shutil.which("true") is not None or True  # keep the import used
+
+
+def test_the_two_change_rev_MAPS_cannot_carry_a_scope_and_this_is_not_vacuous():
+    """*** FOUND BY INDEPENDENT REVIEW, 2026-09-13: `note_change_revs` joined the
+    persisted-state allowlist with a COMMENT and no assertion. ***
+
+    Its sibling `folder` got two (`state["folder"] == ""` plus the
+    directory-derivation note), and `proposal_change_revs` got the same prose.
+    Both comments argue the maps "cannot encode a scope because the keys are
+    entity ids and the values are integers" — an argument, not a measurement, and
+    the review reported that two session-id-bearing mutants pass against it.
+
+    ── WHY THE OBVIOUS TEST WOULD BE VACUOUS, WHICH THE COMMENT ITSELF SAYS ────
+
+    On a freshly constructed record both maps are `{}`, so `all(... for e in
+    map)` cannot fail: it is the empty-collection vacuity the allowlist test's own
+    comments exist to prevent. That is exactly why no assertion was added, and it
+    is the wrong conclusion — the fix is to POPULATE the map, not to skip it.
+
+    ── WHAT THIS ESTABLISHES ───────────────────────────────────────────────────
+
+    `_hydrate_change_revs` is the single gate both maps pass through on the read
+    path. It is fed a legitimate entry PLUS four scope-bearing plants, and the
+    assertions are that the legitimate one survives and every plant is DROPPED —
+    not coerced, not renamed, dropped. The negative control at the end proves the
+    predicate discriminates: it is shown to FAIL on a map that really does carry a
+    string value, so a hydrator that passed everything through could not satisfy
+    it.
+    """
+    from isaac_api import workspace as ws
+
+    legit_id = "01JQZZ2NOTE00000000000000"
+    planted = {
+        legit_id: 3,
+        # A scope smuggled as a value, in the four shapes it could take.
+        "sneak_string": "SESSION-abcdef",
+        "sneak_dict": {"session_id": "S"},
+        "sneak_bool": True,  # isinstance(True, int) is True in Python
+        "sneak_negative": -1,
+    }
+    hydrated = ws._hydrate_change_revs(planted)
+
+    # 1. NOT VACUOUS: the map really does have an entry to reason about.
+    assert hydrated, "the fixture must survive hydration or this test proves nothing"
+    assert hydrated == {legit_id: 3}, hydrated
+
+    # 2. EVERY PLANT IS GONE. Named individually so a partial regression says which.
+    for key in ("sneak_string", "sneak_dict", "sneak_bool", "sneak_negative"):
+        assert key not in hydrated, f"{key} survived hydration: {hydrated}"
+
+    # 3. AND THE SURVIVORS CANNOT ENCODE A SCOPE BY TYPE, which is the property the
+    #    two comments assert in prose. `bool` is excluded explicitly because it is an
+    #    `int` in Python and would otherwise satisfy this check.
+    for key, value in hydrated.items():
+        assert isinstance(key, str), (key, type(key))
+        assert isinstance(value, int) and not isinstance(value, bool), (key, value)
+        assert value >= 0, (key, value)
+
+    # 4. NEGATIVE CONTROL — the predicate in (3) must be able to FAIL. Without this,
+    #    a hydrator that returned everything unchanged would still pass (2) only by
+    #    luck of the assertion order, and (3) would be untested as a discriminator.
+    unfiltered = dict(planted)
+    offenders = [
+        k
+        for k, v in unfiltered.items()
+        if not (isinstance(v, int) and not isinstance(v, bool) and v >= 0)
+    ]
+    assert sorted(offenders) == ["sneak_bool", "sneak_dict", "sneak_negative", "sneak_string"], (
+        "the type predicate does not discriminate, so assertion (3) proves nothing"
+    )
+
+    # 5. AND IT HOLDS THROUGH A REAL ROUND TRIP, not only at the helper. Both maps
+    #    reach `to_state` through the same hydration, so a record carrying plants on
+    #    disk serialises without them.
+    exp = ws.Experiment(
+        id="01JQZZ2EXPERIMENT000000AA",
+        title="scope probe",
+        created_utc="2026-01-01T00:00:00Z",
+        source={},
+        draft={},
+    )
+    state = exp.to_state()
+    state["note_change_revs"] = dict(planted)
+    state["proposal_change_revs"] = dict(planted)
+    round_tripped = ws.Experiment.from_state(state, session_id=None).to_state()
+    for key in ("note_change_revs", "proposal_change_revs"):
+        assert round_tripped[key] == {legit_id: 3}, (key, round_tripped[key])
+        assert "session_id" not in str(round_tripped[key])
+        assert "SESSION" not in str(round_tripped[key])

@@ -260,3 +260,75 @@
   font-weight: 500;
   color: var(--text-primary);
 }
+
+/*
+ * REV-002 — `Last Submitted Revision` versus `Current Working Changes`.
+ *
+ * A definition list rather than two cards, because the two are ONE comparison
+ * and reading them as separate panels is what let the distinction go unmade for
+ * so long. Each row is label + value + an optional note beneath, and the note is
+ * a block so a sentence never runs on from the value it qualifies.
+ *
+ * Tokens only — UX-001's axes. An earlier rule in this session invented
+ * `--text-sm`/`--leading-normal`, which are declared nowhere, in the repository
+ * whose section 11 records nine such phantoms making the capture surface's
+ * primary input borderless.
+ */
+.revhist-working {
+  margin: var(--space-md) 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+}
+.revhist-working-row {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2xs);
+}
+.revhist-working-label {
+  font-size: var(--font-size-meta);
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.revhist-working-value {
+  margin: 0;
+  font-size: var(--font-size-body);
+  line-height: var(--line-height-normal);
+  color: var(--text-primary);
+}
+/* The qualifying sentence. A block, and a rung quieter than the value it sits
+   under — never lighter than `--text-muted`, which is the last rung that clears
+   AA on every ground this panel is painted on (see `tokens.css`' A3 note). */
+.revhist-working-note {
+  display: block;
+  margin-top: var(--space-2xs);
+  max-width: 80ch;
+  font-size: var(--font-size-body);
+  line-height: var(--line-height-normal);
+  color: var(--text-muted);
+}
+
+/*
+ * THE SERVER'S SCOPE IDENTIFIER MUST BE ABLE TO WRAP.
+ *
+ * `export_unit_ids_drafts_and_conflict_decisions` is a 45-character unbroken
+ * token in a monospace face, and an unbroken token does not wrap: it forced
+ * `div.screen-card` into a sideways scroller at 390 / 375 / 320 px. Measured by
+ * `e2e/specs/layout-widths.spec.ts`, which named the culprit exactly —
+ * `span.mono < dd.revhist-working-value`, right edge 406 vs 379, scrollWidth 395
+ * vs clientWidth 368 — on `export-readiness` and `export-readiness-done`.
+ *
+ * FIXED RATHER THAN BASELINED. `e2e/layout-baseline.ts` exists to record known
+ * debt, and adding an entry would have made the suite green while leaving a
+ * scientist on a phone reading sideways. `overflow-wrap: anywhere` is the idiom
+ * this repository already uses for exactly this shape (`.settings-jump-btn`).
+ *
+ * Scoped to its own class rather than applied to `.mono`, because most `.mono`
+ * content in this app is a digest or an id where a mid-token break would make
+ * two different values look alike.
+ */
+.revhist-working-scope {
+  overflow-wrap: anywhere;
+}

@@ -99,7 +99,34 @@ export function ConnectAnAgent({
     },
     {
       heading: 'Respect Read and Write Boundaries',
-      body: "Read operations are safe to repeat. Writes change a record and require explicit user intent — an agent should never write on someone's behalf unless that person asked for that specific change. Several writes also require the record's current ETag, so a blind overwrite is refused rather than applied, and file upload is refused outright.",
+      // THE EIGHTH SITE of the unscoped-upload-refusal claim class, and the one
+      // that was covered by NO guard at all. The trailing clause read "and file
+      // upload is refused outright" — the refusal predicated of the
+      // APPLICATION, on a build where `components/RecordValidator.tsx:245` and
+      // `components/CsvReconcilePanel.tsx:226` each read a file the user picks.
+      // `CLAUDE.md` §11 records that refusal as true of `POST /api/uploads`
+      // ONLY, and records this claim class shipping false three times before,
+      // each time repaired by SCOPING it rather than deleting it.
+      //
+      // Scoped, not deleted, and not reworded into a new phrasing: this is the
+      // in-repo form already used by `lib/transcriptCaptureContent.ts:261` and
+      // `lib/settingsContent.ts:298,301` — "the upload route refuses every
+      // request outright". MEASURED, because the first version of this comment
+      // guessed "five words longer" and was wrong: "file upload is refused
+      // outright" (5 words / 31 chars) → "the upload route refuses every
+      // request outright" (7 / 47), so +2 words and +16 characters. The row
+      // stays a row: `UX-021` measured this product's Settings/Help surfaces
+      // as over-long, so the two
+      // in-app readers are deliberately NOT enumerated here. They are named in
+      // full on the four `SITES` surfaces the parity guard holds; an integrator
+      // reading an operational contract cannot reach either one (no agent tool
+      // does), so naming them here would add length without adding a fact this
+      // audience can act on. What the scoping buys is that the sentence is no
+      // longer readable as an app-wide guarantee.
+      //
+      // Pinned by `__tests__/upload-claim-parity.test.tsx` §8, and the row is
+      // in that file's `ALL_BAN_SURFACES` so §3, §3b and §5 hold it too.
+      body: "Read operations are safe to repeat. Writes change a record and require explicit user intent — an agent should never write on someone's behalf unless that person asked for that specific change. Several writes also require the record's current ETag, so a blind overwrite is refused rather than applied, and the upload route refuses every request outright.",
     },
     {
       heading: 'Validate Responses',

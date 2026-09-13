@@ -45,7 +45,7 @@
 
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
 import { act, configure, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter, useLocation, useNavigate } from 'react-router-dom';
 
 import { AppRoutes } from '../App';
 import { __resetRunAutosaveStore } from '../lib/runAutosaveStore';
@@ -110,7 +110,37 @@ function renderRecord(extra: Record<string, RouteEntry> = {}, view = '') {
       future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
     >
       <AppRoutes />
+      <ViewProbe />
     </MemoryRouter>,
+  );
+}
+
+/**
+ * A ROUTER NAVIGATION to a `?view=`, for the one workspace that has no link.
+ *
+ * The Graph left the record's sidebar on 2026-09-13 (`EVG-002`/`DEC-04`) and is
+ * now reachable by address only (`RecordWorkspaceNav`'s `URL_ONLY`). These
+ * cases still need the Graph round trip specifically — it is the heaviest panel
+ * and the one whose lazy mount the hidden-but-mounted guarantee has to survive —
+ * so the trip is preserved and only the mechanism changes. `go()` below still
+ * clicks a real link for the three workspaces that have one, because for those
+ * the click IS part of what is being tested.
+ */
+function ViewProbe() {
+  const navigate = useNavigate();
+  const location = useLocation();
+  return (
+    <button
+      type="button"
+      data-testid="view-probe-graph"
+      onClick={() => {
+        const next = new URLSearchParams(location.search);
+        next.set('view', 'graph');
+        navigate(`/record/${ID}?${next.toString()}`);
+      }}
+    >
+      to graph
+    </button>
   );
 }
 
@@ -118,6 +148,12 @@ function renderRecord(extra: Record<string, RouteEntry> = {}, view = '') {
    `role="tab"`. The `?view=` mechanism these cases turn on is unchanged. */
 const go = (name: string) =>
   act(async () => {
+    if (name === 'Graph') {
+      // No link exists for it; the address is the only way in. Same navigation,
+      // same router, same `?view=` mechanism — see `ViewProbe`.
+      fireEvent.click(screen.getByTestId('view-probe-graph'));
+      return;
+    }
     fireEvent.click(screen.getByRole('link', { name }));
   });
 

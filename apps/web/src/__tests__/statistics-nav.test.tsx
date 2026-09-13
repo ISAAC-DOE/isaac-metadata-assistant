@@ -7,7 +7,6 @@ import { LABELS } from '../lib/labels';
 import { ROUTES } from '../lib/routes';
 import {
   aboutResponse,
-  experimentSummary,
   graphStatusAvailable,
   openApiFixture,
   stubFetchDown,
@@ -97,9 +96,21 @@ const settingsRoutes = () => ({
   'GET /api/graph/status': { body: graphStatusAvailable },
 });
 
-const experimentsRoutes = () => ({
-  'GET /api/experiments': { body: { experiments: [experimentSummary] } },
-});
+/*
+ * ~~`experimentsRoutes`~~ — REMOVED, and the reason is recorded because a
+ * deleted fixture looks like lost coverage. Its only consumer was the
+ * Back/Forward walk, which used to start on `/experiments` and click the
+ * `Statistics` item in the primary navigation. That item was demoted
+ * (`UX-017`), so the walk now starts on `/settings` and clicks the
+ * advanced-surfaces link — the path a scientist now actually takes — and needs
+ * `settingsRoutes()` instead.
+ *
+ * **`experimentSummary` went with it, and the first version of this comment
+ * asserted it was "still imported and used by the routing assertions below" —
+ * which `tsc -b` immediately measured FALSE (`TS6133`).** Recorded rather than
+ * quietly corrected: an unused-fixture note is exactly the kind of claim that
+ * gets copied forward, and this one was wrong the moment it was written.
+ */
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -108,29 +119,60 @@ afterEach(() => {
 // --- sidebar structure --------------------------------------------------------
 
 describe('sidebar destinations', () => {
-  it('renders exactly the five destinations, in the specified order', () => {
+  /*
+   * *** THE PRIMARY LIST IS THREE, NOT FIVE, SINCE 2026-09-13 — and these
+   * assertions are INVERTED IN PLACE rather than deleted, because this file's
+   * own five-destination expectations are what a future session would otherwise
+   * read as the intended design. ***
+   *
+   * ~~'renders exactly the five destinations, in the specified order' →
+   *   ['My Experiments', 'Project Memory', 'Governance & Safety', 'Statistics',
+   *    'Settings & API']~~
+   * ~~'places Statistics immediately before Settings & API'~~
+   * ~~'every destination is a real <a href>' → expect(links).toHaveLength(5)~~
+   * ~~hrefs → [experiments, memory, governance, statistics, settings]~~
+   * ~~'the Statistics icon is aria-hidden…' (the item is no longer in this list)~~
+   *
+   * **Project Memory (`UX-015`/DEC-19) and Statistics (`UX-017`) were DEMOTED,
+   * not deleted.** Both routes, both screens and all of their tests are
+   * unchanged — including Project Memory's 578 test cases. What moved is which
+   * destinations a scientist is offered first. `LeftNav.tsx` carries the
+   * measurements; §19's sequencing rule required the replacement home to exist
+   * FIRST, which is what the `reachable from Settings` block below asserts.
+   *
+   * **Governance & Safety deliberately stays**, and that is a decision rather
+   * than an omission: the authorizing direction enumerates the surfaces to
+   * demote and Governance is in neither that list nor the three named top-level
+   * destinations, so removing it would be a product decision nobody took.
+   */
+  it('renders exactly the three primary destinations, in the specified order', () => {
     stubFetchDown();
     const { container } = renderAt('/governance');
 
-    // One ordered read of the rendered DOM — not five independent lookups, which
-    // would pass for any order at all.
+    // One ordered read of the rendered DOM — not three independent lookups,
+    // which would pass for any order at all.
     expect(navLinks(container).map((a) => a.textContent)).toEqual([
       'My Experiments',
-      'Project Memory',
       'Governance & Safety',
-      'Statistics',
       'Settings & API',
     ]);
   });
 
-  it('places Statistics immediately before Settings & API', () => {
+  it('no longer offers Project Memory or Statistics as primary destinations', () => {
     stubFetchDown();
     const { container } = renderAt('/governance');
     const labels = navLinks(container).map((a) => a.textContent);
 
-    const statistics = labels.indexOf('Statistics');
-    expect(statistics).toBeGreaterThanOrEqual(0);
-    expect(labels[statistics + 1]).toBe('Settings & API');
+    expect(labels).not.toContain('Project Memory');
+    expect(labels).not.toContain('Statistics');
+  });
+
+  it('places Settings & API last', () => {
+    stubFetchDown();
+    const { container } = renderAt('/governance');
+    const labels = navLinks(container).map((a) => a.textContent);
+
+    expect(labels[labels.length - 1]).toBe('Settings & API');
   });
 
   it('every destination is a real <a href> — keyboard reachable, not a click handler', () => {
@@ -138,7 +180,7 @@ describe('sidebar destinations', () => {
     const { container } = renderAt('/governance');
     const links = navLinks(container);
 
-    expect(links).toHaveLength(5);
+    expect(links).toHaveLength(3);
     for (const link of links) {
       expect(link.tagName).toBe('A');
       expect(link).toHaveAttribute('href');
@@ -153,29 +195,89 @@ describe('sidebar destinations', () => {
 
     // The basename is applied ONCE, by the <BrowserRouter> in App.tsx; under
     // MemoryRouter there is none, so a '/krish' here could only be a literal.
-    expect(hrefs).toEqual([
-      ROUTES.experiments,
-      ROUTES.memory,
-      ROUTES.governance,
-      ROUTES.statistics,
-      ROUTES.settings,
-    ]);
+    expect(hrefs).toEqual([ROUTES.experiments, ROUTES.governance, ROUTES.settings]);
     for (const href of hrefs) {
       expect(href).not.toContain('/krish');
     }
   });
 
-  it('the Statistics icon is aria-hidden and the item still has an accessible text name', () => {
+  it('every destination icon is aria-hidden and every item has an accessible text name', () => {
     stubFetchDown();
     const { container } = renderAt('/governance');
-    const statistics = navLinks(container).find((a) => a.textContent === 'Statistics');
 
-    expect(statistics).toBeDefined();
-    const icon = statistics!.querySelector('svg');
-    expect(icon).not.toBeNull();
-    expect(icon).toHaveAttribute('aria-hidden', 'true');
-    // The glyph is decorative; the name comes from the text beside it.
-    expect(statistics!).toHaveAccessibleName('Statistics');
+    // Asserted over the WHOLE list rather than over one named item: the original
+    // version of this test named `Statistics`, so demoting that one destination
+    // would have removed the only coverage of the property.
+    for (const link of navLinks(container)) {
+      const icon = link.querySelector('svg');
+      expect(icon).not.toBeNull();
+      expect(icon).toHaveAttribute('aria-hidden', 'true');
+      // The glyph is decorative; the name comes from the text beside it.
+      expect(link).toHaveAccessibleName(link.textContent ?? '');
+    }
+  });
+});
+
+describe('the two demoted destinations are still reachable', () => {
+  /*
+   * §19's SEQUENCING RULE, ASSERTED. The rule for a demotion is: provide the
+   * capability elsewhere FIRST, verify nothing becomes inaccessible, and only
+   * then remove it from primary navigation. Without this block the demotion
+   * above would be indistinguishable from a removal, and a green suite would
+   * report a regression as a simplification.
+   */
+  it('Settings & API → Overview links to both of them, as real anchors', async () => {
+    stubFetchRoutes(settingsRoutes());
+    renderAt(ROUTES.settings);
+
+    const group = await screen.findByRole('navigation', {
+      name: 'Advanced and developer surfaces',
+    });
+    const links = Array.from(group.querySelectorAll<HTMLAnchorElement>('a'));
+
+    expect(links.map((a) => a.getAttribute('href'))).toEqual([
+      ROUTES.memory,
+      ROUTES.statistics,
+    ]);
+    for (const link of links) {
+      // A <button> here would be unopenable in a new tab and unlinkable — these
+      // navigate to another ROUTE, not to another tab of this page.
+      expect(link.tagName).toBe('A');
+      expect(link.getAttribute('href')).not.toContain('/krish');
+    }
+  });
+
+  it('both routes still render their own screen', async () => {
+    stubFetchDown();
+    const memory = renderAt(ROUTES.memory);
+    expect(
+      await screen.findByRole('heading', { level: 1, name: LABELS.navMemory }),
+    ).toBeInTheDocument();
+    memory.unmount();
+
+    stubFetchDown();
+    renderAt(ROUTES.statistics);
+    expect(
+      await screen.findByRole('heading', { level: 1, name: LABELS.navStatistics }),
+    ).toBeInTheDocument();
+  });
+
+  it('marks Settings as the ANCESTOR on a demoted route — and never claims it is the page', () => {
+    stubFetchDown();
+    const { container } = renderAt(ROUTES.memory);
+    const links = navLinks(container);
+    const settings = links.find((a) => a.getAttribute('href') === ROUTES.settings);
+
+    expect(settings).toBeDefined();
+    expect(settings!.className).toContain('ancestor');
+    /*
+     * THE HONESTY HALF, and it is the reason `NAV_PARENT` exists rather than
+     * just reusing `active`. `aria-current="page"` means *this link points at
+     * the page you are on*; on Project Memory the Settings link does not. A
+     * screen-reader user must not be told they are somewhere they are not.
+     */
+    expect(settings!).not.toHaveAttribute('aria-current');
+    expect(links.filter((a) => a.hasAttribute('aria-current'))).toHaveLength(0);
   });
 });
 
@@ -232,12 +334,24 @@ describe('routing', () => {
       await screen.findByRole('heading', { level: 1, name: 'Statistics' }),
     ).toBeInTheDocument();
 
-    // The catch-all redirects to /experiments, which would mount My Experiments
-    // and mark ITS nav item current. Reading the active item proves which route
-    // actually matched, independent of any text the page happens to share.
+    /*
+     * WHICH ROUTE ACTUALLY MATCHED, read off the navigation rather than off page
+     * text — and the mechanism had to change when Statistics was demoted.
+     *
+     * ~~Previously: `aria-current="page"` is on the `Statistics` link.~~ There
+     * is no Statistics link now, and a demoted route deliberately marks NO link
+     * as the current page (see `LeftNav`'s `NAV_PARENT`). The discriminator is
+     * the ANCESTOR marking instead, and it is still route-specific: the
+     * catch-all redirects to `/experiments`, which marks its own link
+     * `aria-current="page"` and marks no ancestor at all. So "Settings is the
+     * ancestor and nothing is the current page" is reachable only from a
+     * demoted route.
+     */
     await waitFor(() => {
-      const current = navLinks(container).filter((a) => a.getAttribute('aria-current') === 'page');
-      expect(current.map((a) => a.textContent)).toEqual(['Statistics']);
+      const links = navLinks(container);
+      const ancestors = links.filter((a) => a.className.includes('ancestor'));
+      expect(ancestors.map((a) => a.textContent)).toEqual(['Settings & API']);
+      expect(links.filter((a) => a.hasAttribute('aria-current'))).toHaveLength(0);
     });
     expect(
       screen.queryByRole('heading', { level: 1, name: LABELS.screenExperiments }),
@@ -290,17 +404,25 @@ describe('routing', () => {
 // --- active state -------------------------------------------------------------
 
 describe('active destination', () => {
-  it('on /statistics only the Statistics link is aria-current="page"', async () => {
+  /*
+   * ~~'on /statistics only the Statistics link is aria-current="page"'~~ —
+   * INVERTED IN PLACE. Statistics left the primary list (`UX-017`), so the
+   * correct claim is the opposite one, and it is the claim that carries the
+   * honesty property: a demoted route marks NO link as the page you are on,
+   * because none of the three links points at it. The sibling assertion for
+   * `/memory` lives in `the two demoted destinations are still reachable`
+   * above; both are kept, because a single one would leave the other route's
+   * marking unpinned.
+   */
+  it('on /statistics NO link is aria-current — Settings is only the ancestor', async () => {
     stubFetchDown();
     const { container } = renderAt(ROUTES.statistics);
     await screen.findByRole('heading', { level: 1, name: 'Statistics' });
 
     const links = navLinks(container);
-    const current = links.filter((a) => a.getAttribute('aria-current') === 'page');
-    expect(current.map((a) => a.textContent)).toEqual(['Statistics']);
-    for (const link of links.filter((a) => a.textContent !== 'Statistics')) {
-      expect(link).not.toHaveAttribute('aria-current');
-    }
+    expect(links.filter((a) => a.hasAttribute('aria-current'))).toHaveLength(0);
+    const settings = links.find((a) => a.getAttribute('href') === ROUTES.settings);
+    expect(settings!.className).toContain('ancestor');
   });
 
   it('on /settings only the Settings & API link is aria-current="page"', async () => {
@@ -320,17 +442,34 @@ describe('active destination', () => {
 // --- Back / Forward -----------------------------------------------------------
 
 describe('Back / Forward across the new destination', () => {
-  it('walks /experiments → /statistics → Back → Forward, rendering the right surface each time', async () => {
-    // Only the experiments list is stubbed; the Statistics body's own reads fall
-    // through to per-section error states, which is irrelevant here — this test
-    // is about which SURFACE the history entry resolves to.
-    stubFetchRoutes(experimentsRoutes());
-    const { container } = renderWithProbeAt(ROUTES.experiments);
+  /*
+   * ~~'walks /experiments → /statistics → Back → Forward'~~ — the WALK IS
+   * REROUTED, not weakened, and the property under test is unchanged: a real
+   * link click makes a history entry, and Back/Forward resolve each entry to
+   * the right surface.
+   *
+   * It used to click the `Statistics` item in the primary navigation. That item
+   * no longer exists (`UX-017`), so the walk now starts where a scientist now
+   * actually starts — `Settings & API` → the advanced-surfaces group — which
+   * makes this ALSO the end-to-end proof that §19's replacement path works by
+   * clicking rather than by asserting an `href`.
+   */
+  it('walks /settings → /statistics → Back → Forward, rendering the right surface each time', async () => {
+    // The Statistics body's own reads fall through to per-section error states,
+    // which is irrelevant here — this test is about which SURFACE the history
+    // entry resolves to.
+    stubFetchRoutes(settingsRoutes());
+    renderWithProbeAt(ROUTES.settings);
 
-    await screen.findByRole('heading', { level: 1, name: LABELS.screenExperiments });
-    expect(probePath).toBe(ROUTES.experiments);
+    await screen.findByRole('heading', { level: 1, name: 'Settings & API' });
+    expect(probePath).toBe(ROUTES.settings);
 
-    const statisticsLink = navLinks(container).find((a) => a.textContent === 'Statistics');
+    const group = await screen.findByRole('navigation', {
+      name: 'Advanced and developer surfaces',
+    });
+    const statisticsLink = Array.from(
+      group.querySelectorAll<HTMLAnchorElement>('a'),
+    ).find((a) => a.getAttribute('href') === ROUTES.statistics);
     expect(statisticsLink).toBeDefined();
     fireEvent.click(statisticsLink!);
 
@@ -338,15 +477,69 @@ describe('Back / Forward across the new destination', () => {
     expect(probePath).toBe(ROUTES.statistics);
 
     back();
-    await screen.findByRole('heading', { level: 1, name: LABELS.screenExperiments });
-    expect(probePath).toBe(ROUTES.experiments);
+    await screen.findByRole('heading', { level: 1, name: 'Settings & API' });
+    expect(probePath).toBe(ROUTES.settings);
     expect(screen.queryByRole('heading', { level: 1, name: 'Statistics' })).toBeNull();
 
     forward();
     await screen.findByRole('heading', { level: 1, name: 'Statistics' });
     expect(probePath).toBe(ROUTES.statistics);
-    expect(
-      screen.queryByRole('heading', { level: 1, name: LABELS.screenExperiments }),
-    ).toBeNull();
+    expect(screen.queryByRole('heading', { level: 1, name: 'Settings & API' })).toBeNull();
+  });
+});
+
+/* ── the Settings description of Statistics must not promise personal figures ── */
+
+describe('the Advanced surfaces description of Statistics', () => {
+  /*
+   * FOUND BY INDEPENDENT REVIEW, 2026-09-13. The description read "Counts over the
+   * records in this workspace, **and over your own activity in it**".
+   *
+   * That second clause was FALSE. `MyStats.tsx` renders `ChartAccessPending` on
+   * EVERY branch — its own header says "there is no personal figure in this build to
+   * appear" — because all three reasons in `lib/myStatsContract.ts`
+   * (`no_signed_in_account`, `no_record_ownership`, `not_recorded`) are downstream of
+   * the absent trusted authentication boundary. A scientist following that sentence
+   * would have gone looking for their own figures and found a gated panel.
+   *
+   * Pinned as a BAN rather than as an exact string, because the defect is the CLAIM
+   * and not its wording: any phrasing that promises per-person figures from this
+   * description is the same defect. §15's "build nothing that implies any of it
+   * exists" governs a DESCRIPTION of a destination as much as the destination.
+   */
+  const PERSONAL_CLAIM_PHRASINGS = [
+    /your own activity/i,
+    /your activity/i,
+    /\byour\b[^.]{0,40}\b(figures|statistics|stats|records|contributions)\b/i,
+    /per-person/i,
+    /who did what/i,
+    /activity (?:by|per) (?:user|person|scientist|you)/i,
+  ];
+
+  it('never promises per-person figures, in any of six phrasings', async () => {
+    stubFetchRoutes(settingsRoutes());
+    const { container } = renderAt(ROUTES.settings);
+    await screen.findByRole('heading', { level: 1, name: 'Settings & API' });
+
+    const group = await screen.findByRole('navigation', {
+      name: 'Advanced and developer surfaces',
+    });
+    // The whole Overview panel, not just the group: the description sits in a
+    // sibling list, and scoping too tightly is how this kind of guard goes vacuous.
+    const panel = group.closest('.settings-panel') ?? container;
+    const text = (panel.textContent ?? '').replace(/\s+/g, ' ');
+
+    // The honest half must still be there, or this test would pass on a panel that
+    // simply stopped describing Statistics at all.
+    expect(text).toMatch(/Counts over the records in this workspace/);
+
+    for (const pattern of PERSONAL_CLAIM_PHRASINGS) {
+      expect(
+        text,
+        `the Statistics description promises per-person figures (${pattern}), but ` +
+          `MyStats renders ChartAccessPending on every branch — there is no personal ` +
+          `figure in this build to show`
+      ).not.toMatch(pattern);
+    }
   });
 });

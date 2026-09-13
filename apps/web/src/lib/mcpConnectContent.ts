@@ -428,8 +428,43 @@ export const MCP_CAPABILITIES_ALLOWED: readonly McpCapability[] = [
     id: 'propose-a-value',
     action: 'Suggest a value for you to review',
     detail:
-      'Record a suggestion against a record — a value, the field it is for, and the sentence explaining where it came from — for you to accept or refuse later. A suggestion is not an entry: it writes nothing into the record, counts as no evidence, changes nothing about what the record would export, and cannot make a blocked record exportable. It stays a suggestion until you accept it on the website, and no agent will be able to accept one — the tool that would is not built, and the same refusal that stops an agent submitting stops it. Every suggestion has to cite a note the record already holds, so the words behind it survive whatever you decide; no agent tool can create that note. Retrying is safe: a repeated suggestion returns the first one rather than making a second.',
+      'Record a suggestion against a record — a value, the field it is for, and the sentence explaining where it came from — for you to accept or refuse later. A suggestion is not an entry: it writes nothing into the record, counts as no evidence, changes nothing about what the record would export, and cannot make a blocked record exportable. It stays a suggestion until you accept it on the website, and no agent will be able to accept one — the tool that would is not built, and the same refusal that stops an agent submitting stops it. Every suggestion has to cite a note the record already holds, so the words behind it survive whatever you decide. Retrying is safe: a repeated suggestion returns the first one rather than making a second.',
     tools: ['isaac_propose_field_value'],
+  },
+  {
+    /*
+     * THE ROW THAT MAKES THE ONE ABOVE REACHABLE, and the sentence it had to correct.
+     *
+     * The `propose-a-value` row used to end *"no agent tool can create that note"*.
+     * That was true when it was written and is FALSE now — `isaac_capture_note`
+     * creates one — so the clause is DELETED from that row rather than softened, and
+     * the correction is recorded here because a stale denial in scientist-facing copy
+     * is the honesty-defect class this repository has shipped and fixed repeatedly.
+     * The sentence's surviving half is the half that mattered: a suggestion must cite
+     * a note, so the words behind it survive whatever the scientist decides.
+     *
+     * WHY THIS ROW IS SAFE TO OFFER AT ALL, in the scientist's terms rather than the
+     * schema's. A note is not a value and cannot become one by itself:
+     * `apps/api/isaac_api/notes.py` has no field on a note in which a value could sit,
+     * its `status`/`verified`/`is_evidence`/`is_field_value` are read-only constants on
+     * a frozen slotted class, and a note is stored at `state["notes"]`, OUTSIDE
+     * `draft`, so no exported record and no submission signature reads it. So the row
+     * leads with what the agent is doing — writing down what was said — and says
+     * plainly that it changes nothing about the record itself.
+     *
+     * IT NAMES NO PERSON, DELIBERATELY. The server records that the content arrived
+     * through the agent interface; that is a channel, not an identity, and this build
+     * establishes no identity for an agent call at all. The copy must not imply the
+     * note is attributed to the reader.
+     *
+     * DELIBERATELY NOT MENTIONED, as everywhere on this tab: any suggestion that a
+     * connector exists. Future tense throughout.
+     */
+    id: 'capture-a-note',
+    action: 'Write down what you said, word for word',
+    detail:
+      'Store what you told your agent against a record, exactly as you said it, as a note. This is how your own words reach ISAAC. A note is not an entry and not evidence: there is no value in it, it changes nothing about the record, it cannot make a blocked record exportable, and it will never appear in an exported record — which is exactly why writing your words down is safe when filling in a field from them would not be. The words are stored unedited and are refused rather than shortened if they are too long, so nothing is quietly trimmed. Deciding what a note means stays yours: no agent tool can map one to a field, edit it, set it aside or delete it. The note also survives your refusing any suggestion made from it. Retrying is safe: a repeated capture returns the first note rather than storing a second, and a record will not accept notes without limit — past its ceiling it refuses rather than dropping anything older.',
+    tools: ['isaac_capture_note'],
   },
   {
     id: 'read-proposals',

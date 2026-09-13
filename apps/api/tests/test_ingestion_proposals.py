@@ -1926,12 +1926,36 @@ def test_DEC7_no_mcp_operation_or_tool_reaches_the_proposal_REVIEW_route():
     assert (
         policy.OPERATIONS["create_proposal"].scope is policy.Scope.PROPOSALS_WRITE
     )
-    assert policy.Scope.PROPOSALS_WRITE not in {
-        policy.OPERATIONS[op].scope
-        for op in policy.OPERATIONS
-        if op != "create_proposal"
-    }
-    assert len(policy.PERMITTED_TOOL_NAMES) == 14
+    # ~~`PROPOSALS_WRITE` is held by `create_proposal` ALONE.~~ — **CORRECTED for
+    # MCP-001, and the assertion is STRENGTHENED rather than relaxed.** The old form
+    # was `PROPOSALS_WRITE not in {every other operation's scope}`, i.e. an
+    # exclusivity claim about a COUNT. `create_note` now also costs it, so that form
+    # would have to be deleted; instead the membership is ENUMERATED, which is
+    # strictly stronger — the old version permitted any set of one, this permits
+    # exactly these two and fails on a third.
+    #
+    # WHAT THE OLD ASSERTION WAS PROTECTING, AND WHY THE ENUMERATION STILL PROTECTS
+    # IT: that the model-derived channel never acquires `DRAFT_WRITE`, which would
+    # let it change draft content directly (§5 I1/I2). That is asserted below,
+    # positively, over both members — so the property survives the count changing.
+    assert {
+        op_id
+        for op_id, op in policy.OPERATIONS.items()
+        if op.scope is policy.Scope.PROPOSALS_WRITE
+    } == {"create_proposal", "create_note"}
+    # NEITHER MEMBER COSTS THE DRAFT-WRITE SCOPE. This is the property, stated over
+    # the members rather than inferred from there being only one.
+    for op_id in ("create_proposal", "create_note"):
+        assert policy.OPERATIONS[op_id].scope is not policy.Scope.DRAFT_WRITE
+    # AND `create_note` IS THE WEAKER OF THE TWO, structurally: its route stores a
+    # `Note`, which has no field in which a value could be placed at all.
+    assert policy.OPERATIONS["create_note"].path_template.endswith("/notes")
+    # 14 -> 15: MCP-001's `isaac_capture_note`. THE THIRD OF THREE SITES holding this
+    # same count — `test_mcp_boundaries.py` and `test_mcp_transport.py` hold the other
+    # two — and all three were swept in one change, because "every tripwire is
+    # updated" is itself a checkable claim and a partially-swept correction is the
+    # failure mode §15 records.
+    assert len(policy.PERMITTED_TOOL_NAMES) == 15
 
 
 # --- DEC-8: still_current is derived, never stored ----------------------------

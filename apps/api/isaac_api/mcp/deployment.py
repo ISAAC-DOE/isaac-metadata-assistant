@@ -131,10 +131,17 @@ __all__ = [
     "LOCAL_LOOPBACK",
     "OAUTH_RESOURCE_SERVER",
     "LocalLoopbackDeployment",
+    "POSTURES",
+    "POSTURE_LOCAL_ONLY",
+    "POSTURE_OAUTH_MOUNTED",
+    "POSTURE_REMOTE_READY",
+    "POSTURE_UNMOUNTED",
     "Principal",
     "RESERVED_BINDING_NAMES",
     "UNCONFIGURED",
     "UnconfiguredDeployment",
+    "disclosure",
+    "posture",
     "resolve_binding",
 ]
 
@@ -437,7 +444,10 @@ class UnconfiguredDeployment:
             "binding": self.name,
             "reason": self.reason,
             "selected_by": DEPLOYMENT_ENV,
-            "supplied_value": self.supplied,
+            # REDACTED HERE rather than at the HTTP boundary, so BOTH consumers get
+            # it: this dict is also the `data=` payload of the `deployment_unconfigured`
+            # refusal an MCP caller receives. One redaction, both paths.
+            "supplied_value": redact_supplied_value(self.supplied),
             "outstanding_decisions": [
                 {
                     "id": "D1",
@@ -630,6 +640,235 @@ def resolve_binding(env: Mapping[str, str] | None = None) -> DeploymentBinding:
 
     scopes = _parse_scopes(environ.get(LOCAL_SCOPES_ENV))
     if isinstance(scopes, str):
-        return UnconfiguredDeployment(supplied=raw, reason=f"misconfigured: {scopes}")
+        # *** THE SCOPE TOKEN IS NOT INTERPOLATED, AND THAT IS THE SECOND HALF OF
+        # C-1. *** `_parse_scopes`' error names the offending token, and `reason` is
+        # served on the uncredentialed `/api/health`. `ISAAC_MCP_LOCAL_SCOPES` is
+        # another free-form operator string, so echoing a token out of it is the same
+        # channel as `supplied_value` was. The PREFIX is preserved because two tests
+        # discriminate on it (`reason.startswith("misconfigured:")`), and the specific
+        # token is available to the operator in their own environment and in this
+        # process's own logs -- neither of which is a public route.
+        _ = scopes  # the specific token is deliberately not served
+        return UnconfiguredDeployment(supplied=raw, reason="misconfigured: unrecognised scope")
     session = (environ.get(LOCAL_SESSION_ENV) or "").strip() or None
     return LocalLoopbackDeployment(scopes=scopes, tutorial_session_id=session)
+
+
+#: What `supplied_value` says when the operator's value is NOT one of the two
+#: binding names this build ships as literals.
+#:
+#: *** C-1, FOUND BY INDEPENDENT REVIEW 2026-09-13. THE VALUE USED TO BE ECHOED
+#: RAW, ON `/api/health`, WHICH ANSWERS `200` WITH NO CREDENTIAL. *** Reproduced:
+#: with `ISAAC_MCP_DEPLOYMENT=postgres://user:S3cr3tP@ss@db.internal.slac.stanford.edu:5432/isaac`
+#: an unauthenticated `GET /api/health` returned that string verbatim, while
+#: `GET /api/experiments` returned `401` on the same request. `ISAAC_MCP_DEPLOYMENT`
+#: is a free-form operator string; nothing stops a mistaken paste of a connection
+#: string, a bearer token or an internal hostname into it, and this operation is
+#: exactly where a mistaken paste becomes public.
+#:
+#: **AND THE SAME CHANGE THAT ADDED THE ECHO ADDED A SERVED CLAIM DENYING IT.**
+#: The operation's own OpenAPI description says "**Nothing confidential is in it**
+#: — no credential of any kind ... and nothing describing the environment this
+#: service runs in". That was false for one commit. The claim is KEPT and the echo
+#: is redacted, rather than the reverse: the claim is the behaviour this surface
+#: should have, and weakening it to match a leak would have been the wrong repair.
+#:
+#: **WHY A FIXED MARKER AND NOT A LENGTH OR A PREFIX.** A character count of an
+#: unrecognised value is a (small) fact about a possible secret, and a prefix is a
+#: larger one. `reason` already distinguishes `unset` from `unrecognised` from
+#: `reserved_pending_decision` from `misconfigured: ...`, which is what an operator
+#: needs to act; the VALUE only ever helped spot a typo, and a typo is not worth a
+#: disclosure channel on an uncredentialed route. An operator who needs to see what
+#: they set can read their own environment.
+WITHHELD_SUPPLIED_VALUE = "withheld"
+
+#: The two values that ARE safe to echo: this build's own published binding names,
+#: which appear in this module, in the OpenAPI document and in the public
+#: repository. Echoing one back tells an operator "I recognised your name and
+#: something else is wrong", which is the one case where the value is informative
+#: and carries nothing the reader did not already have.
+#:
+#: `RESERVED_BINDING_NAMES` is deliberately NOT in this set. Those are withheld from
+#: the served block already -- see `disclosure()`'s note on withdrawing them -- and a
+#: reserved name is a placeholder for an infrastructure decision, so confirming which
+#: one an operator selected says something about intent rather than about code.
+_ECHOABLE_BINDING_NAMES: frozenset[str] = frozenset({LOCAL_LOOPBACK, OAUTH_RESOURCE_SERVER})
+
+
+def redact_supplied_value(raw: str | None) -> str | None:
+    """The operator's `ISAAC_MCP_DEPLOYMENT` value, safe to serve.
+
+    `None` stays `None` -- nothing was supplied, and an empty disclosure is the
+    honest one. A recognised binding name is echoed. **Everything else becomes
+    :data:`WITHHELD_SUPPLIED_VALUE`, unconditionally and without inspecting the
+    content**, which is what makes this fail closed: a future value nobody
+    anticipated is withheld by default rather than by a rule that has to have
+    predicted it.
+    """
+    if raw is None:
+        return None
+    return raw if raw in _ECHOABLE_BINDING_NAMES else WITHHELD_SUPPLIED_VALUE
+
+
+#: The four postures an operator has to be able to tell apart. **MCP-003.**
+#:
+#: Named constants rather than free strings, so a surface cannot invent a fifth and a
+#: test can enumerate them.
+POSTURE_UNMOUNTED = "unmounted"
+POSTURE_LOCAL_ONLY = "local-only"
+POSTURE_OAUTH_MOUNTED = "oauth-mounted"
+POSTURE_REMOTE_READY = "remote-ready"
+
+#: Every posture :func:`disclosure` can report. Closed, and asserted closed.
+POSTURES: frozenset[str] = frozenset(
+    {
+        POSTURE_UNMOUNTED,
+        POSTURE_LOCAL_ONLY,
+        POSTURE_OAUTH_MOUNTED,
+        POSTURE_REMOTE_READY,
+    }
+)
+
+
+def posture(binding: DeploymentBinding) -> str:
+    """Which of :data:`POSTURES` this binding is. DERIVED, never stored.
+
+    The three inputs are the ones the application itself consults, so this cannot
+    disagree with what the deployment actually does:
+
+    * ``serves_transport`` is what ``app.py`` reads to decide whether to mount the
+      route at all, so ``False`` is exactly the state in which the MCP path 404s.
+    * ``requires_loopback_peer`` is what separates a development binding from one a
+      remote caller can reach.
+    * the binding NAME distinguishes a mounted OAuth resource server from any other
+      mounted binding, and is checked last so a future binding does not silently
+      inherit ``oauth-mounted``.
+
+    ``remote-ready`` IS THE ONE POSTURE NO CONFIGURATION OF THIS BUILD CAN REACH, and
+    reporting it would be a fiction — so nothing returns it. It is kept in
+    :data:`POSTURES` as the NAME OF THE STATE an operator is trying to get to, which
+    is what makes *"you are at `oauth-mounted`, not `remote-ready`"* a sentence this
+    disclosure can support. What separates the two is D1 and D2, which are external
+    decisions deferred by the infrastructure owner and are not an agent's to close.
+    """
+    if not binding.serves_transport:
+        return POSTURE_UNMOUNTED
+    if binding.requires_loopback_peer:
+        return POSTURE_LOCAL_ONLY
+    if binding.name == OAUTH_RESOURCE_SERVER:
+        return POSTURE_OAUTH_MOUNTED
+    # A MOUNTED, NON-LOOPBACK BINDING THAT IS NOT THE OAUTH ONE. No such binding
+    # exists in this build. It reports the WEAKEST honest answer rather than guessing
+    # upward: what has been established is that it is mounted and not
+    # loopback-restricted, which is what `oauth-mounted` says. It deliberately does
+    # NOT report `remote-ready`, because nothing here has established that anything
+    # can reach it.
+    return POSTURE_OAUTH_MOUNTED
+
+
+def disclosure(env: Mapping[str, str] | None = None) -> dict:
+    """Read-only MCP state for ``/api/health``. **MCP-003.**
+
+    WHY THIS EXISTS, which is the finding rather than the feature: **MCP was the only
+    seam in this application that said nothing about itself on the wire.** Every other
+    one discloses — ``database``, ``experiment_storage`` and ``submission`` each have
+    their own block in ``/api/health`` — so when the hosted MCP path returned ``404``
+    there was no way to tell, from outside, whether the route was unmounted, whether
+    the edge had not forwarded it, or whether the binding had failed closed on a typo.
+    That was unresolvable *by construction*, not by accident, and no amount of probing
+    from outside could have settled it.
+
+    **ZERO I/O, exactly like the three blocks it sits beside.** It resolves the
+    binding from the environment and reads fields off it. It opens no socket, issues
+    no request, validates no token and fetches no metadata document, so an MCP
+    misconfiguration can never change ``/api/health``'s status code or fail a
+    container readiness probe.
+
+    **IT EXPOSES NO SECRET, AND THE RULE IS STATED RATHER THAN ASSUMED.** No token, no
+    signature, no key material, no client secret, no ``Authorization`` header value,
+    no audience, no resource URI and no caller's scope grant appears here. What DOES
+    appear is documented constants plus one operator-supplied value: the binding
+    SELECTOR, i.e. ``ISAAC_MCP_DEPLOYMENT``'s value, which is a documented binding
+    name or a typo of one and never a credential. ``UnconfiguredDeployment.detail``
+    already publishes it and says so in its own comment; it is carried here because a
+    typo an operator cannot see is the single most likely cause of an unexplained
+    ``404``. The local binding's tutorial-session id and its scope list are
+    deliberately NOT published: the first is a workspace identifier and the second is
+    a grant.
+
+    **IT MAKES NO CLAIM ABOUT REACHABILITY.** ``posture`` describes how this PROCESS is
+    configured. Whether anything can actually reach the path depends on the ingress,
+    on Authentik and on network policy, none of which this process can observe — so a
+    reader who needs that must still probe, and the status-code decision table for
+    doing so lives in ``docs/mcp-operator-preflight.md``. This block is what makes
+    that probe INTERPRETABLE; it is not a substitute for it.
+    """
+    binding = resolve_binding(env)
+    detail = binding.detail() if hasattr(binding, "detail") else {}
+    return {
+        "posture": posture(binding),
+        # The closed set, served so a client learns it from the server rather than
+        # from a literal in its bundle — `change_feed.feed_kinds`' reason.
+        "postures": sorted(POSTURES),
+        "binding": binding.name,
+        # Why this binding and not a working one. `"unset"` is the shipped default and
+        # is not an error; `"unrecognised"`, `"reserved_pending_decision"` and a
+        # `"misconfigured: ..."` string are the ones that explain a 404 nobody
+        # expected. `None` for a binding that carries no `detail()`.
+        "reason": detail.get("reason"),
+        "selected_by": DEPLOYMENT_ENV,
+        "supplied_value": detail.get("supplied_value"),
+        # THE THREE FLAGS THE POSTURE IS DERIVED FROM, published so an operator can
+        # re-derive it rather than take it on faith. A disclosure serving only a
+        # verdict would be one more thing to believe.
+        "serves_transport": binding.serves_transport,
+        "requires_loopback_peer": binding.requires_loopback_peer,
+        "refuses_proxy_headers": binding.refuses_proxy_headers,
+        # WHAT SEPARATES THIS DEPLOYMENT FROM `remote-ready`, stated as the external
+        # decisions they are rather than as work somebody forgot. Both were DEFERRED
+        # by the infrastructure owner on 2026-08-12; neither is an agent's to close,
+        # and no endpoint, credential, network path or provider approval exists or is
+        # authorized. Empty for a binding that carries no `detail()`.
+        #
+        # **IDS AND STATUSES ONLY — THE QUESTION PROSE IS DELIBERATELY WITHHELD, AND
+        # THAT IS A CORRECTION RATHER THAN A DESIGN I CHOSE FIRST.** The first version
+        # of this block forwarded `UnconfiguredDeployment.detail()`'s
+        # `outstanding_decisions` whole, and `reserved_binding_names` as a full
+        # name->explanation map. Both carry INFRASTRUCTURE VOCABULARY — D2's text
+        # names the institution's identity provider, and the reserved binding's
+        # explanation names it again — and `/api/health` is the one operation that
+        # stays reachable WITHOUT CREDENTIALS. `test_about_and_openapi.py`'s
+        # `_FORBIDDEN_SUBSTRINGS` bans exactly that class of word from a served
+        # document and says there is "deliberately NO exception list"; it caught the
+        # route DESCRIPTION, and the same reasoning applies with more force to the
+        # BODY, which is served to anyone who can reach the pod.
+        #
+        # WHAT IS LOST AND WHY IT IS ACCEPTABLE: an operator reading only this block
+        # learns WHICH decisions gate remote operation and that both are deferred —
+        # which is the actionable part — and has to open
+        # `docs/mcp-operator-preflight.md` for what D1 and D2 ask. That is a document
+        # behind the same access controls as the rest of the repository, rather than
+        # an unauthenticated endpoint.
+        "outstanding_decisions": [
+            {"id": decision.get("id"), "status": decision.get("status")}
+            for decision in detail.get("outstanding_decisions", [])
+            if isinstance(decision, dict)
+        ],
+        # ~~"reserved_binding_names": sorted(RESERVED_BINDING_NAMES)~~ —
+        # **WITHDRAWN, AND THIS IS THE SECOND NARROWING OF THIS BLOCK IN ONE SLICE.**
+        # First the explanations were dropped (they name the environment); then the
+        # NAMES themselves were dropped, because the slice's own leak guard measured
+        # `edge-issued-bearer` against `_FORBIDDEN_SUBSTRINGS` and flagged `bearer`.
+        #
+        # THE GUARD WAS RIGHT AND THE OBJECTION IS WORTH RECORDING. That string is a
+        # documented constant, not a credential, so the match is in one sense a false
+        # positive — and the correct response is still to withhold it, for two
+        # reasons. It is a DOCUMENTED CONSTANT, i.e. documentation, and `/api/health`
+        # answers without credentials; and `_FORBIDDEN_SUBSTRINGS` says of itself
+        # that there is "deliberately NO exception list", so arguing an exemption
+        # here would be the first one. An operator who typed a reserved name still
+        # sees it echoed in `supplied_value`, which is the field that actually
+        # diagnoses their typo — so nothing diagnostic is lost.
+        #
+        # The names live in `docs/mcp-operator-preflight.md`.
+    }

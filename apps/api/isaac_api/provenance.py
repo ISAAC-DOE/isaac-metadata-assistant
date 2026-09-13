@@ -83,14 +83,40 @@ ORIGIN_VOICE = "voice"
 #: (contract §2 D2: inheritance is by reference, never by copy).
 ORIGIN_INHERITED = "inherited"
 
-#: An assistant produced the value. **NOTHING IN THIS BUILD PRODUCES THIS.**
-#: ``isaac_records.models.SOURCE_TYPES`` has no ``assistant`` member and
-#: ``notes.NOTE_SOURCES`` has none either, so no mapping below can emit it and no
-#: stored document can be read into it. The member exists so that the dimension
-#: is describable as a whole; it is pinned as unreachable by
-#: ``test_provenance.py``. Do not add a mapping to it without an actual producer,
-#: and do not surface it in any static UI list — that would advertise a
-#: capability this build does not have.
+#: An assistant produced the prose this came from.
+#:
+#: ~~**NOTHING IN THIS BUILD PRODUCES THIS.** ``isaac_records.models.SOURCE_TYPES``
+#: has no ``assistant`` member and ``notes.NOTE_SOURCES`` has none either, so no
+#: mapping below can emit it and no stored document can be read into it. The member
+#: exists so that the dimension is describable as a whole; it is pinned as unreachable
+#: by ``test_provenance.py``. Do not add a mapping to it without an actual producer,
+#: and do not surface it in any static UI list — that would advertise a capability
+#: this build does not have.~~
+#:
+#: **REACHABLE SINCE MCP-001, AND THE OLD PARAGRAPH IS STRUCK RATHER THAN DELETED
+#: BECAUSE IT NAMED ITS OWN PRECONDITION AND THAT PRECONDITION IS NOW MET.** It said
+#: not to add a mapping "without an actual producer". There is one: ``notes``' new
+#: ``connected_agent`` member, written by ``isaac_capture_note`` when an external
+#: agent puts content into ISAAC over the machine-callable interface. So the second
+#: sentence's premise — that ``NOTE_SOURCES`` has no such member — expired, and
+#: :data:`NOTE_SOURCE_ORIGIN` maps it here.
+#:
+#: **READ WHAT IT CLAIMS, BECAUSE IT IS WEAKER THAN THE NAME SUGGESTS.** It does NOT
+#: assert that a language model wrote the words. An MCP note usually carries what a
+#: scientist *said* to their agent, relayed verbatim, and a deterministic script
+#: speaking MCP is the same channel; this application cannot tell those apart and
+#: does not try. What it does assert is the only thing the server observes: **a
+#: machine handed us this prose.** That is why this is the right member rather than
+#: ``ORIGIN_MANUAL`` — which would claim a person typed it here — and why the
+#: conservative placement in :data:`ORIGIN_PRECEDENCE` (first among the produced
+#: origins, so it can never be masked by a reassuring one) is now load-bearing rather
+#: than hypothetical.
+#:
+#: **THE "DO NOT SURFACE IT IN A STATIC UI LIST" WARNING SURVIVES, NARROWED.** Its
+#: reason was that listing an unreachable origin advertises a capability the build
+#: lacks. The origin is now reachable, so displaying it where it actually occurs is
+#: honest — but §9's *"build nothing that implies any of it exists"* still forbids a
+#: product screen presenting the agent channel as available, and no screen does.
 ORIGIN_ASSISTANT = "assistant"
 
 #: Produced by a documented derivation RULE (``source_type == "derivation"``).
@@ -216,6 +242,14 @@ NOTE_SOURCE_ORIGIN: dict[str, str] = {
     "csv_column": ORIGIN_FILE,
     "file_listing_line": ORIGIN_FILE,
     "extraction_residue": ORIGIN_FILE,
+    # AN EXTERNAL AGENT HANDED THIS TO US over the machine-callable interface.
+    # **MCP-001 / CAP-006.** The first and only mapping to :data:`ORIGIN_ASSISTANT` —
+    # read its docstring for what the member does and does not claim, and for why the
+    # alternative (``ORIGIN_MANUAL``, "a person typed it here") would be the false
+    # attribution this mapping exists to avoid. It names the CHANNEL, never an actor:
+    # no note is attributed to anybody, and this build establishes no identity for an
+    # agent call at all.
+    "connected_agent": ORIGIN_ASSISTANT,
 }
 
 #: THE ORDER :func:`primary_origin` READS, HIGHEST FIRST. Explicit, total, and

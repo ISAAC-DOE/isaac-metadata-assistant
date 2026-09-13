@@ -1915,6 +1915,14 @@ def test_health_keeps_its_original_keys_byte_identical(client, monkeypatch):
         # attributable person and the 0003/0004 tables. It is a sibling of
         # `database`, never a member of it, and it opens no connection either.
         "submission",
+        # A FOURTH SIBLING (MCP-003), added under the identical rule. How the
+        # machine-callable (agent) interface is configured is a fourth distinct
+        # question, and MCP was the only seam in the application that said NOTHING
+        # about itself on the wire — which is exactly why a hosted `404` on that path
+        # was undiagnosable from outside. Like the three above it opens no socket and
+        # is derived from configuration alone, so it cannot influence this
+        # operation's status code or fail a readiness probe.
+        "mcp",
     }
 
 

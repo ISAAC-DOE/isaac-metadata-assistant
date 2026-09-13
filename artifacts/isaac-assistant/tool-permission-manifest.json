@@ -93,6 +93,13 @@
       "purpose": "List the runs belonging to a record."
     },
     {
+      "tool": "isaac_capture_note",
+      "title": "Capture what was said, verbatim, as a note",
+      "scope": "isaac:proposals.write",
+      "mutates": true,
+      "purpose": "Store what a scientist said against a record, word for word, as a note. Not a field value and not evidence, carries no value at all, and never appears in an exported record; only a person decides what it means, and no tool here maps, edits or discards one."
+    },
+    {
       "tool": "isaac_propose_field_value",
       "title": "Propose a value for a record field",
       "scope": "isaac:proposals.write",
@@ -138,5 +145,5 @@
       "truncate"
     ]
   },
-  "scopes_requested_why": "The UNION of the scopes the tools declared above cost, and nothing more. It is NOT 'every scope policy.py can express': that phrasing made this companion request a new scope automatically on the day one was added, which is the opposite of policy.py's own rule that no scope implies another and every grant is explicit. isaac:proposals.write is requested because this companion declares isaac_propose_field_value, which records an ingestion proposal \u2014 a suggestion a person must accept on the website. No tool here, at any scope, can accept, review, submit, export or delete anything."
+  "scopes_requested_why": "The UNION of the scopes the tools declared above cost, and nothing more. It is NOT 'every scope policy.py can express': that phrasing made this companion request a new scope automatically on the day one was added, which is the opposite of policy.py's own rule that no scope implies another and every grant is explicit. isaac:proposals.write is requested because this companion declares isaac_propose_field_value, which records an ingestion proposal — a suggestion a person must accept on the website. No tool here, at any scope, can accept, review, submit, export or delete anything."
 }

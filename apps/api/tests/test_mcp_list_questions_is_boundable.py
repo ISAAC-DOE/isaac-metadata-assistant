@@ -14,11 +14,33 @@ TWO THINGS ARE ASSERTED, AND THE SECOND IS THE ONE THAT KEEPS THE FIRST HONEST:
 1. the three parameters are exposed, DERIVED from the route rather than transcribed, with
    the route's own bounds and its own descriptions, and the policy's query-parameter
    review gate covers them exactly as it covers ``list_runs``';
-2. **the default did not move.** ``experiment_id`` alone still returns every open question
-   with no ``pending_page`` block, and the tool description does not tell an agent its
-   complete list is a window. Bounding is something a caller ASKS for; a tool that started
-   truncating by default would be the silent truncation the bound exists to prevent, and a
-   tool that CLAIMED to truncate when it does not would be the mirror-image lie.
+2. ~~**the default did not move.** ``experiment_id`` alone still returns every open
+   question with no ``pending_page`` block, and the tool description does not tell an
+   agent its complete list is a window. Bounding is something a caller ASKS for; a tool
+   that started truncating by default would be the silent truncation the bound exists to
+   prevent, and a tool that CLAIMED to truncate when it does not would be the
+   mirror-image lie.~~
+
+**THE SECOND POINT IS REVERSED BY MCP-002, AND IS STRUCK RATHER THAN REWRITTEN BECAUSE
+IT WAS A DELIBERATE DECISION.** The tool now supplies its own ``limit`` when the caller
+sends none, so ``experiment_id`` alone returns a PAGE and always carries a
+``pending_page`` block. The route is untouched and still answers completely over HTTP.
+
+What changed the answer was measuring the other side of the trade. The reasoning above
+weighed silent truncation against completeness and never priced the transport: **the
+documented MCP tool-result ceiling is ≈150,000 characters, and this read measures
+212,443 B on a record with 120 runs** (over HTTP, `len(response.content)`). So
+"complete" was not the safe option — it was a response the caller's transport
+truncates or refuses, which is silent truncation arriving from the other direction and
+with nobody able to see it. Both halves of the old worry are still honoured: nothing
+is truncated silently, because ``pending_page`` is now ALWAYS present; and the tool
+does not claim to truncate when it does not, because it always does.
+
+**WHAT IS STILL TRUE AND IS WHAT THIS FILE NOW PINS:** a page can never be mistaken
+for the set (``pending_page.record_total`` is the server's count over the whole
+record), a small record's answer is byte-for-byte what it always was, an explicit
+``limit`` always wins over the default, and no question is unreachable — paging and a
+raisable ``limit`` reach all of them.
 """
 
 from __future__ import annotations
@@ -32,6 +54,7 @@ import isaac_api.routes as routes
 from isaac_api.mcp import policy
 from isaac_api.mcp.policy import OPERATIONS
 from isaac_api.mcp.tools import TOOLS
+from isaac_api.mcp.policy import MCP_READ_WINDOW
 
 from isaac_api.mcp.server import INVALID_PARAMS
 
@@ -169,12 +192,42 @@ def test_an_unsupported_query_parameter_is_refused_before_a_request_is_built(rea
 # --- 2. the default did not move ------------------------------------------------
 
 
-def test_sending_only_the_id_still_answers_completely_with_no_page_block(writer):
-    """THE DEFAULT, unchanged. One `pending` key, the whole set, nothing new to
-    interpret — which is the entire point of leaving it alone."""
+def test_sending_only_the_id_is_now_bounded_and_always_carries_a_page_block(writer):
+    """~~``test_sending_only_the_id_still_answers_completely_with_no_page_block``~~ —
+    **INVERTED FOR MCP-002, NOT DELETED, because it was pinning the decision MCP-002
+    reverses.**
+
+    It asserted *"THE DEFAULT, unchanged. One `pending` key, the whole set, nothing
+    new to interpret — which is the entire point of leaving it alone."* That was a
+    deliberate decision and the right one for the ROUTE, which is untouched and still
+    answers completely for the website. It was wrong for the MCP CALLER: the
+    documented tool-result ceiling is ≈150,000 characters and this read measured
+    **212,443 B at 120 runs**, so "complete" meant "over the ceiling on a record
+    nobody would call large", and a truncated result is a page the caller cannot tell
+    is one.
+
+    So the tool now sends ``limit=MCP_READ_WINDOW`` when the caller sends none, and
+    the assertion flips: the page block is ALWAYS present.
+
+    **THE RECORD IN THIS FIXTURE HAS TWO QUESTIONS, SO THE WINDOW WITHHOLDS NOTHING
+    AND THE CONTENT IS UNCHANGED** — which is the property that matters and is
+    asserted first. Bounding a caller must not change what a small record reports;
+    only what a large one sends.
+    """
     data = payload(writer, "isaac_list_questions", experiment_id=PARTIAL_ID)["data"]
+    # THE CONTENT IS IDENTICAL to what the unbounded default produced. A window that
+    # changed a two-question record's answer would be a regression, not a bound.
     assert {q["id"] for q in data["pending"]} == {"series", "descriptor"}
-    assert "pending_page" not in data, data.get("pending_page")
+    # AND THE BLOCK IS THERE, so a caller can always tell a page from a whole set.
+    assert "pending_page" in data, data
+    page = data["pending_page"]
+    assert page["limit"] == MCP_READ_WINDOW, page
+    # THE COUNTS ARE THE SERVER'S AND THEY AGREE HERE, because nothing was withheld.
+    # `record_total` is the key an agent must report; it is asserted explicitly rather
+    # than inferred from `returned`, because the whole point of the window is that
+    # those two diverge on a record large enough to matter.
+    assert page["returned"] == 2, page
+    assert page["record_total"] == 2, page
 
 
 def test_the_tool_does_not_tell_an_agent_its_complete_list_is_a_window():
@@ -207,11 +260,26 @@ def test_the_description_does_not_promise_a_page_block_that_offset_zero_never_ge
     those key NAMES appear, never that the sentence around them is true.
 
     Both halves are pinned: the behaviour, over the real dispatch, and the sentence.
+
+    **AND THE DEFECT IT RECORDS IS NOW UNREACHABLE RATHER THAN MERELY DOCUMENTED —
+    MCP-002.** ``offset: 0`` used to be the odd one out because it could not bound and
+    therefore produced no page block. The tool now always sends a ``limit``, so
+    ``bounded`` is true for every MCP call and ``offset: 0`` gets a page block like
+    everything else. The paging loop the old description would have misled an agent
+    into is now the loop that works.
+
+    The assertions are inverted rather than removed, and the sentence ban is KEPT:
+    the description must still not tell an agent to send any of the three and expect a
+    block, and it must still carry the correction as a correction rather than silently
+    dropping it — a client written against the old unpaged shape needs to be able to
+    see that it changed.
     """
     at_zero = payload(writer, "isaac_list_questions", experiment_id=PARTIAL_ID, offset=0)[
         "data"
     ]
-    assert "pending_page" not in at_zero, at_zero.get("pending_page")
+    # WAS `not in`. A page block is now always present, including at `offset: 0`.
+    assert "pending_page" in at_zero, at_zero
+    assert at_zero["pending_page"]["limit"] == MCP_READ_WINDOW, at_zero["pending_page"]
     assert {q["id"] for q in at_zero["pending"]} == {"series", "descriptor"}
 
     at_one = payload(writer, "isaac_list_questions", experiment_id=PARTIAL_ID, offset=1)[
@@ -220,9 +288,14 @@ def test_the_description_does_not_promise_a_page_block_that_offset_zero_never_ge
     assert "pending_page" in at_one, at_one
 
     description = TOOLS["isaac_list_questions"].description
+    # THE ORIGINAL BAN SURVIVES: the false sentence may not come back.
     assert "Send any of the three" not in description, description
-    assert "NON-ZERO `offset`" in description, description
-    assert "`offset: 0` ON ITS OWN BOUNDS NOTHING" in description, description
+    # AND THE WITHDRAWN CLAIM IS STRUCK IN PLACE rather than deleted, so the
+    # description reads as a corrected contract. Asserting the strikethrough marker
+    # is what stops a future edit from quietly removing the history — the same
+    # discipline `test_the_packets_do_not_claim_a_hosted_application` settled on.
+    assert "~~**`offset: 0` ON ITS OWN BOUNDS NOTHING**" in description, description
+    assert "BOUNDED BY DEFAULT" in description, description
 
 
 def test_the_description_qualifies_complete_the_way_the_server_does(writer):

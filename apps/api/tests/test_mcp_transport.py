@@ -474,7 +474,8 @@ def test_a_full_json_rpc_session_runs_over_http_and_exposes_exactly_the_registry
 
     listed = {tool["name"] for tool in result_of(client, "tools/list")["tools"]}
     assert listed == set(PERMITTED_TOOL_NAMES)
-    assert len(listed) == 14
+    # 14 -> 15: MCP-001's `isaac_capture_note`, reaching a client over the wire.
+    assert len(listed) == 15
 
     body = structured(client, "isaac_list_experiments")
     assert body["status"] == 200
@@ -1018,6 +1019,11 @@ def test_the_read_grant_is_the_default_and_the_write_tools_are_absent(workspace)
     # the count, because a count catches a tool that vanished and not one that leaked
     # into the wrong grant.
     assert "isaac_propose_field_value" not in listed
+    # And MCP-001's note capture, which costs the same `PROPOSALS_WRITE` scope. Named
+    # for the reason the line above is named: the count stayed 10 when this tool was
+    # added, which is the RIGHT outcome and is therefore indistinguishable from the
+    # tool not existing — only naming it proves the read grant excludes it.
+    assert "isaac_capture_note" not in listed
     assert len(listed) == 10
 
 

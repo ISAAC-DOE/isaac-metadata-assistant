@@ -516,7 +516,31 @@ function LoadedExperimentGraph({ graph }: { graph: ExperimentGraph }) {
       {graph.notes.length > 0 && (
         <ul className="expgraph-notes">
           {graph.notes.map((note) => (
-            <li key={note.kind} className="expgraph-note" role="note" data-note={note.kind}>
+            /*
+             * NO `role="note"` HERE, and its removal fixes TWO axe rules with one
+             * root cause. *** QA-018, 2026-09-13: this workspace had NEVER been
+             * accessibility-scanned *** — `record-graph` appears nowhere in
+             * `e2e/surfaces.ts`, only in the screenshot sweep — and the first scan
+             * of it reported:
+             *
+             *   [serious] list              <ul> and <ol> must only directly
+             *                               contain <li>/<script>/<template>  (1)
+             *   [minor]   aria-allowed-role ARIA role should be appropriate for
+             *                               the element                        (3)
+             *
+             * One cause: `role="note"` OVERRIDES an `<li>`'s implicit `listitem`
+             * role. The three items stop being list items, so the `<ul>` is a list
+             * containing no list items — which is why the SERIOUS rule fires on the
+             * parent while the minor one fires on the children.
+             *
+             * The role was not load-bearing: these are explanatory lines in a list,
+             * `listitem` inside a `<ul>` is the correct semantic, and a screen
+             * reader gets "list, 3 items" instead of three roles that tell it
+             * nothing about their relationship. The sibling `<p role="note">` uses
+             * below are UNTOUCHED and remain correct — `note` on a `<p>` overrides
+             * nothing.
+             */
+            <li key={note.kind} className="expgraph-note" data-note={note.kind}>
               {note.text}
             </li>
           ))}

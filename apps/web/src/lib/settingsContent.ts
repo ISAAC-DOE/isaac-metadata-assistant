@@ -295,10 +295,10 @@ export function settingsConcepts(facts: SettingsFacts): SettingsConcept[] {
       id: 'synthetic-data-only',
       heading: 'Synthetic-Only Mode',
       summary: syntheticOnly
-        ? 'Synthetic-only mode — file upload is refused outright, and the app cannot tell real data from synthetic.'
+        ? 'Synthetic-only mode — the upload route refuses every request outright, and the app cannot tell real data from synthetic.'
         : `The backend reports the data regime as "${dataRegime}".`,
       detail: syntheticOnly
-        ? 'This deployment runs in synthetic-only mode: file upload is refused outright, and the records in this workspace are synthetic. Real mode intentionally refuses to start, because the ingestion and governance guardrails it would need do not exist yet. What the app enforces is that mode, not the contents of what it is handed — it cannot tell real data from synthetic, so keeping real artifacts out of the workspace is a responsibility of whoever operates it, not a check the software performs. The mode is not the whole picture: a protected, read-only diagnostic may separately read production-derived records from an isolated SLAC test database. Every bound on that is stated once on this tab, by the card No Real Experiment Data in the Workspace, rather than a second time here.'
+        ? 'This deployment runs in synthetic-only mode: the upload route refuses every request outright, and the records in this workspace are synthetic. Real mode intentionally refuses to start, because the ingestion and governance guardrails it would need do not exist yet. What the app enforces is that mode, not the contents of what it is handed — it cannot tell real data from synthetic, so keeping real artifacts out of the workspace is a responsibility of whoever operates it, not a check the software performs. The mode is not the whole picture: a protected, read-only diagnostic may separately read production-derived records from an isolated SLAC test database. Every bound on that is stated once on this tab, by the card No Real Experiment Data in the Workspace, rather than a second time here.'
         : `The backend reports the data regime as "${dataRegime}". This screen states only what the backend reports.`,
     },
     {

@@ -38,6 +38,7 @@ import { isUnrenderableValue, valueText } from './runOverrides';
 import type {
   ApiHistoryAvailability,
   ApiRevisionActor,
+  ApiRevisionHistory,
   LifecycleState,
   RevisionChangeKind,
 } from './types';
@@ -210,4 +211,242 @@ export function availabilityHeading(availability: ApiHistoryAvailability): strin
   if (availability.state === 'available') return 'Submission history';
   if (availability.state === 'not_applicable') return 'This record has no submission history';
   return 'Submission history could not be read';
+}
+
+/* ── REV-002 · the submitted snapshot versus the record now ────────────────── */
+
+/**
+ * *** DEC-21's DISTINCTION, AS A PURE FUNCTION OVER WHAT THE SERVER ALREADY
+ * SENDS. ***
+ *
+ * ── THE DECISION THIS IMPLEMENTS, AND WHY IT IS NOT A RE-WORDING ────────────
+ *
+ * `DEC-21` is CONFIRMED **and CORRECTED**: the planning run proposed describing
+ * a resubmission as *"keep editing, then submit again"*, which is mechanically
+ * what happens and **understates the modelling requirement**. The owner's
+ * correction is that the UI must explicitly distinguish **`Last Submitted
+ * Revision`** from **`Current Working Changes`**, and must **never describe the
+ * historical submitted revision as mutable**.
+ *
+ * Measured 2026-09-13: neither phrase existed anywhere in `apps/web/src`.
+ * `RevisionHistoryPanel` already rendered the history and already had the
+ * per-address vocabulary (`SIDE_REVISION` / `SIDE_NOW`) — what was missing was
+ * the screen-level framing those two sides belong to.
+ *
+ * ── WHY THIS NEEDS NO NEW REQUEST, AND NO GUESS ─────────────────────────────
+ *
+ * `GET .../revisions` already serves `current_content_signature`, and every
+ * `ApiRevisionSummary` already carries its own `content_signature`. So "has the
+ * record changed since it was last submitted?" is an **exact string comparison
+ * over two values the server computed**, not a diff this client re-derives and
+ * not a count it estimates. Confirmed on the wire before this was written:
+ * `current_content_signature` and
+ * `signature_scope: "export_unit_ids_drafts_and_conflict_decisions"` are both
+ * present on a record with no history at all.
+ *
+ * ── THE THREE ANSWERS, AND WHY THERE ARE THREE RATHER THAN TWO ──────────────
+ *
+ * `unknown` is a first-class answer and the reason is the one this panel's
+ * header already gives about empty lists: the submission-history tables are
+ * created by a migration an **operator** applies, so "this record has never
+ * been submitted" and "this deployment could not find out" are both reachable
+ * and look identical if you are careless. On every deployment shipped today the
+ * second is the true one — the server answers `503` and its own lifecycle
+ * reason reads *"whether this content has already been submitted is unknown
+ * rather than no"*. Collapsing `unknown` into `never` would turn that into a
+ * false negative on every current deployment.
+ */
+export type WorkingStateKind = 'unknown' | 'never_submitted' | 'unchanged' | 'changed';
+
+export interface WorkingState {
+  kind: WorkingStateKind;
+  /** The revision the comparison is against, or `null` when there is none. */
+  revisionNo: number | null;
+}
+
+/**
+ * Compare the record as it stands against its most recent SUBMITTED revision.
+ *
+ * Deliberately the most recent **submitted** one, not the most recent revision:
+ * a revision row exists for changes that were never declared finished, and
+ * comparing against one would answer a question nobody asked. `submission` is
+ * `null` on an unsubmitted revision, which is what this filters on.
+ *
+ * The list's order is not assumed — the newest submitted revision is taken by
+ * `revision_no`, so a server that returns ascending or descending gives the same
+ * answer.
+ */
+export function workingState(history: ApiRevisionHistory): WorkingState {
+  /*
+   * *** C-3, FOUND BY INDEPENDENT REVIEW 2026-09-13. `not_applicable` IS A FACT,
+   * NOT AN INABILITY, AND THIS FUNCTION USED TO REPORT IT AS ONE. ***
+   *
+   * `RevisionHistoryState` has THREE members — `available`, `unavailable`,
+   * `not_applicable` — and the first version of this function branched on
+   * `!== 'available'`, sending `not_applicable` to `unknown`, whose sentence reads
+   * *"This deployment could not read the submission history"*.
+   *
+   * The server says the opposite, in the served description of that very
+   * operation: a worked-example record answers **`200`** with
+   * `availability.state: "not_applicable"`, *"which is a fact rather than an
+   * inability: such records are never submitted."* So the reader of a
+   * worked-example record was told the deployment had failed to read something,
+   * when it had read it successfully and the answer was "there is nothing here".
+   * It also contradicted `availabilityHeading` two blocks below on the same card.
+   *
+   * The irony is the useful part: this function was written with deliberate care
+   * NOT to collapse `unknown` into `never_submitted` — that would be a false
+   * negative on every deployment shipped today — and it collapsed
+   * `not_applicable` into `unknown` in the same breath. **Being careful about one
+   * direction of a three-way distinction is not being careful about the
+   * distinction.**
+   *
+   * Written as an explicit switch over the three states rather than as a second
+   * inequality, so a FOURTH state added later fails to compile here instead of
+   * silently inheriting whichever branch the inequality happened to send it to.
+   */
+  switch (history.availability.state) {
+    case 'not_applicable':
+      return { kind: 'never_submitted', revisionNo: null };
+    case 'unavailable':
+      return { kind: 'unknown', revisionNo: null };
+    case 'available':
+      break;
+  }
+  if (history.revisions === undefined) {
+    // `available` with no `revisions` key is not a shape the server documents, so
+    // it is read as an inability rather than as an empty history: claiming "never
+    // submitted" about a payload we cannot interpret is the false negative this
+    // whole function exists to avoid.
+    return { kind: 'unknown', revisionNo: null };
+  }
+  const submitted = history.revisions.filter((r) => r.submission !== null);
+  if (submitted.length === 0) return { kind: 'never_submitted', revisionNo: null };
+  const latest = submitted.reduce((a, b) => (b.revision_no > a.revision_no ? b : a));
+  return {
+    kind:
+      latest.content_signature === history.current_content_signature ? 'unchanged' : 'changed',
+    revisionNo: latest.revision_no,
+  };
+}
+
+/**
+ * WHAT THE `Last Submitted Revision` CELL SAYS — and why `'None'` is wrong for one
+ * of the four states.
+ *
+ * *** C-4, FOUND BY INDEPENDENT REVIEW 2026-09-13. *** The panel rendered
+ * `state.revisionNo === null ? 'None' : 'Revision N'`, and `revisionNo` is `null`
+ * for **both** `unknown` and `never_submitted`. On every deployment shipped today
+ * the submission-history tables are unapplied, so the state IS `unknown` — and a
+ * scientist read **"Last Submitted Revision · None"** about a record whose history
+ * had not been read at all.
+ *
+ * That is this module's own Rule 1 broken by this module: *"ABSENCE IS NOT A
+ * VALUE. 'The record now holds nothing here' and 'the record now holds something
+ * else here' are different facts and get different words."* `None` is an answer;
+ * the truth was that there was no answer.
+ *
+ * The distinction is not cosmetic. `None` tells a scientist their work has never
+ * been submitted — which, if it has been and this deployment simply cannot see the
+ * history, is exactly backwards, and is the kind of thing someone acts on.
+ */
+export function submittedRevisionText(state: WorkingState): string {
+  switch (state.kind) {
+    case 'unknown':
+      return 'Not read on this deployment';
+    case 'never_submitted':
+      return 'None';
+    case 'unchanged':
+    case 'changed':
+      return `Revision ${state.revisionNo}`;
+  }
+}
+
+/** The heading for the immutable half. Never varies: it names a kind of thing. */
+export const SUBMITTED_REVISION_HEADING = 'Last Submitted Revision';
+
+/** The heading for the mutable half. */
+export const WORKING_CHANGES_HEADING = 'Current Working Changes';
+
+/**
+ * The immutability sentence — the one `DEC-21` requires and the one this
+ * application can actually stand behind.
+ *
+ * It says what no route does, rather than asserting a database-level guarantee:
+ * the five submission-history tables are append-only in
+ * `db_write._APPEND_ONLY_TABLES`, but this sentence is read by a scientist about
+ * the PRODUCT, and the product-level truth is that nothing here edits, reverts,
+ * restores or republishes a submitted revision. The panel's own header already
+ * commits to there being no "restore this revision" control until a route exists
+ * that could honour it.
+ */
+export const SUBMITTED_IMMUTABLE_NOTE =
+  'A submitted revision is a permanent snapshot of what was declared finished. ' +
+  'Nothing in this application edits, reverts, restores or republishes one — ' +
+  'further work becomes the next submission, not a change to this one.';
+
+/** What each working state says. One sentence, no verdict, no instruction to obey. */
+export function workingStateSentence(state: WorkingState): string {
+  switch (state.kind) {
+    case 'unknown':
+      return (
+        'This deployment could not read the submission history, so whether this ' +
+        'record has been submitted — and whether it has changed since — is unknown ' +
+        'rather than no.'
+      );
+    case 'never_submitted':
+      return 'This record has no submitted revision yet, so there is nothing to compare it against.';
+    case 'unchanged':
+      return (
+        `Nothing that a submission covers has changed since revision ${state.revisionNo} ` +
+        'was submitted.'
+      );
+    case 'changed':
+      return (
+        `This record has changed since revision ${state.revisionNo} was submitted. ` +
+        'Those changes are held here and are not part of any submitted revision.'
+      );
+  }
+}
+
+/**
+ * *** THE RENAME TRAP, SURFACED RATHER THAN HIDDEN — and shown ONLY where it can
+ * actually bite. ***
+ *
+ * `DEC-21` requires it: a rename does **not** move `content_signature`, so
+ * submit → rename → resubmit yields **`409 already_submitted`**. Verified at the
+ * source of truth rather than taken from the decision row —
+ * `submissions.content_signature`'s own docstring: *"WHAT IT COVERS: the
+ * experiment id, each export unit's id and fully resolved draft, and the
+ * record's stored conflict decisions. **Nothing else.**"* A title is none of the
+ * three.
+ *
+ * ── WHY THE SCOPE IS QUOTED FROM THE SERVER AND NOT WRITTEN HERE ────────────
+ *
+ * The response carries `signature_scope`
+ * (`"export_unit_ids_drafts_and_conflict_decisions"`), so the boundary this
+ * sentence describes is read from the server that enforces it. Hard-coding the
+ * list would be a second expression of one rule, and it would go quietly false
+ * the day the scope changes — which is exactly how this repository's measured
+ * defects get made. `signature_scope` is rendered verbatim beside the sentence
+ * by the panel, under its own label, because it is an identifier a curator maps
+ * by rather than a word.
+ *
+ * ── AND WHY IT IS CONDITIONAL ───────────────────────────────────────────────
+ *
+ * It is offered only for `unchanged` — the one state where the reader is looking
+ * at a record that LOOKS different to them (they may well have just renamed it)
+ * and where a resubmission would in fact be refused. On `changed` the
+ * resubmission will be accepted and the warning would be noise; on `unknown` and
+ * `never_submitted` there is nothing to be refused against. A caution shown in
+ * states where it cannot apply is how a true sentence becomes ignored.
+ */
+export function renameTrapNote(state: WorkingState): string | null {
+  if (state.kind !== 'unchanged') return null;
+  return (
+    'Renaming this record does not count as a change here, and neither does ' +
+    'anything else outside the scope named below — so submitting again now would ' +
+    'be refused as already submitted. To create a new revision, change something ' +
+    'the submission itself covers.'
+  );
 }

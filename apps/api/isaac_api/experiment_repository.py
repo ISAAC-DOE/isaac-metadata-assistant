@@ -2739,7 +2739,9 @@ class ExperimentRepository(Protocol):
     backend: str
     durable: bool
 
-    def create(self, *, title: str, description: str | None) -> "ws.Experiment": ...
+    def create(
+        self, *, title: str, description: str | None, folder: str = ""
+    ) -> "ws.Experiment": ...
 
     def hydrate(self) -> int: ...
 
@@ -2756,7 +2758,9 @@ class _BaseRepository:
     backend = BACKEND_FILESYSTEM
     durable = False
 
-    def create(self, *, title: str, description: str | None) -> "ws.Experiment":
+    def create(
+        self, *, title: str, description: str | None, folder: str = ""
+    ) -> "ws.Experiment":
         source = new_experiment_source()
         if description:
             source["description"] = description
@@ -2767,7 +2771,15 @@ class _BaseRepository:
         # fields, so a client cannot even name one — this is the second guard.
         # `session_id` is likewise never passed: the ordinary scope is the only
         # scope this repository addresses.
-        return ws.create_experiment(title=title, source=source, draft=blank_draft())
+        # `folder` IS passed and `id`/`session_id` still are not, and the
+        # asymmetry is the whole point of the comment above. A folder is an
+        # ORGANIZATIONAL label the caller is entitled to choose (the precedent is
+        # `title`, one argument to the left); a record id and a scope are things
+        # only the server may decide. It arrives already normalised — the route
+        # refuses rather than repairs — and `""` means unfiled.
+        return ws.create_experiment(
+            title=title, source=source, draft=blank_draft(), folder=folder
+        )
 
     def hydrate(self) -> int:
         return 0

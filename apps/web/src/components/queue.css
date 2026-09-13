@@ -141,6 +141,68 @@
   border-color: var(--border-faint);
   opacity: 0.82;
 }
+
+/*
+ * *** TEXT INSIDE A DIMMED ROW IS RAISED ONE TIER, BECAUSE THE DIM COSTS ONE. ***
+ *
+ * Found by LINUX CI, 2026-09-13, on the Experiment Library PR: `color-contrast`
+ * at `experiments-example` grew **3 -> 6 nodes** across all seven viewport
+ * projects. The three new ones are this row's new metadata —
+ * `.exp-scenario-text`, `.exp-meta-item` and `.exp-meta-mono`.
+ *
+ * ── IT IS NOT A NEW CAUSE, AND THAT IS WHY THE FIX IS SHAPED THIS WAY ───────
+ *
+ * `opacity: 0.82` above is a KNOWN, DOCUMENTED A11Y-01 cause-(b) site.
+ * `styles/tokens.css` names it explicitly: *"queue.css `.exp-row.done` .82
+ * `--text-tertiary` #626c77 -> #7e868f, 3.69:1 on --surface"*, and says of the
+ * three composite sites that **"THE OPACITY HAS TO GO"**. So the Library's new
+ * row did not introduce a defect — it rendered MORE TEXT inside a row that
+ * already failed, and each new span inherited the failure.
+ *
+ * Recomputed here rather than quoted, and it reproduces that committed figure
+ * exactly (composite over `--surface` #ffffff at a = 0.82):
+ *
+ *     --text-tertiary  #626c77 -> rgb(126,134,143)  3.69:1  fail   <- the note's figure
+ *     --text-muted     #5b6570 -> rgb(121,129,138)  3.95:1  fail
+ *     --text-slate     #5b6b7d -> rgb(121,134,148)  3.72:1  fail
+ *     --text-secondary #46515f -> rgb(103,112,124)  5.02:1  PASS
+ *
+ * So `--text-secondary` is the first rung that survives the composite, and it is
+ * the one used.
+ *
+ * ── WHY NOT THE THREE ALTERNATIVES ─────────────────────────────────────────
+ *
+ * **Not a baseline transcription 3 -> 6.** The guard exists to refuse a NEW
+ * failing node, and recording three would ship three sub-AA nodes on the
+ * product's new home screen as "expected".
+ *
+ * **Not removing the opacity.** `tokens.css` is right that it has to go, but that
+ * is a palette-wide decision across three sites (`.exp-row.done`,
+ * `.upcoming-row`, `.advisory-nongating`) with its own visual argument, and it is
+ * recorded as open. Taking it inside a feature PR would decide it by accident.
+ *
+ * **Not darkening the tokens themselves.** `tokens.css` already worked this out:
+ * a value that clears the composite is darker than the rung above it, so the
+ * token "would have to sit below the tiers it exists to sit below".
+ *
+ * ── WHAT THIS SCOPE DOES AND DOES NOT CLAIM ────────────────────────────────
+ *
+ * Scoped to `.exp-row.done`, so an ordinary row keeps its tier and the ramp is
+ * untouched everywhere else. It raises the row's own text; it does NOT reach
+ * `.chip-exported > span` or the `time` element, which are among the THREE
+ * PRE-EXISTING failures and are left exactly as they were — this change is
+ * scoped to the regression it caused, not to the debt it sits on. The expected
+ * outcome is therefore a return to the recorded baseline of 3, not an
+ * improvement to 0.
+ */
+.exp-row.done .exp-scenario,
+.exp-row.done .exp-scenario-text,
+.exp-row.done .exp-scenario-icon,
+.exp-row.done .exp-meta,
+.exp-row.done .exp-meta-item,
+.exp-row.done .exp-meta-mono {
+  color: var(--text-secondary);
+}
 .exp-main {
   flex: 1;
   /* NOT `min-width: 0` (see `.exp-row`). Zero is what let this column be handed
@@ -589,4 +651,50 @@
   flex-wrap: wrap;
   gap: 8px;
   margin-top: 2px;
+}
+
+/* --- the Experiment Library's row metadata line ---------------------------- */
+/*
+ * HERE AND NOT IN `library.css`, and the placement is a correctness fix rather
+ * than tidying. `ExperimentRow` imports THIS file and not `library.css`, so
+ * these rules were applying only because a Library component that does import
+ * it happens to be mounted on the same screen. The row renders correctly today
+ * and would have rendered unstyled the first time it was used anywhere else.
+ *
+ * Every value is a token rung: `__tests__/type-scale-and-spacing.test.ts`
+ * ratchets hand-authored `font-size`/`font-weight`/`line-height`/spacing values
+ * and refuses a net increase.
+ */
+.exp-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2xs) var(--space-sm);
+  margin-top: var(--space-2xs);
+  font-size: var(--font-size-meta);
+  color: var(--text-muted);
+}
+
+.exp-meta-item {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+}
+
+.exp-meta-mono {
+  font-family: var(--font-mono);
+  letter-spacing: -0.01em;
+}
+
+.exp-meta-folder svg {
+  flex: none;
+}
+
+/* The proposals item is the one a reader is meant to act on, so it is the one
+   item in this line that is not plain muted text. The ACTION hue, not a warning
+   or an alert hue: a waiting proposal is work available, not a problem — and
+   this file's rule 3 forbids a verdict colour here in any case. */
+.exp-meta-proposals {
+  color: var(--action-hover);
+  font-weight: var(--font-weight-medium);
 }

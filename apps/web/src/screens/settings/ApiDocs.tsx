@@ -689,7 +689,11 @@ export function isBoundaryCaveat(paragraph: string): boolean {
  * A remainder is collapsed only when it is BOTH long enough to be a wall
  * ({@link PURPOSE_DISCLOSURE_MIN_CHARS}) AND free of boundary copy
  * ({@link BOUNDARY_CAVEAT_MARKERS}). Against the real contract that is currently
- * zero of 39 operations, which is the honest outcome: this API's descriptions are
+ * zero of ~~39~~ **78** operations (re-derived 2026-09-13 over
+ * `create_app().openapi()`; the 39 was a stale denominator an independent review
+ * caught, and this is the fourth stale operation count corrected in this session
+ * alone — quote it from a measurement, never from memory), which is the honest
+ * outcome: this API's descriptions are
  * short-to-medium and boundary-laden, so nothing about them needs hiding. The
  * disclosure remains for a future docstring that is genuinely long and carries no
  * caveat.

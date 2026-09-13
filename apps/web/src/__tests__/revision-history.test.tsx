@@ -28,12 +28,19 @@ import { render, screen, fireEvent, waitFor, within } from '@testing-library/rea
 import { RevisionHistoryPanel } from '../components/RevisionHistoryPanel';
 import {
   NO_ACTOR_TEXT,
+  SUBMITTED_IMMUTABLE_NOTE,
+  SUBMITTED_REVISION_HEADING,
+  WORKING_CHANGES_HEADING,
   actorBasisNote,
   actorText,
   diffChangeWord,
   recordedChangeWord,
+  renameTrapNote,
   sideSentence,
   sideText,
+  submittedRevisionText,
+  workingState,
+  workingStateSentence,
 } from '../lib/revisionHistory';
 import { stubFetchRoutes } from '../test/apiFixtures';
 import type {
@@ -735,5 +742,320 @@ describe('unit attribution in the diff table', () => {
     expect(
       await screen.findByText(/In this revision and not recorded now: this record/),
     ).toBeTruthy();
+  });
+});
+
+/* ── REV-002 · the submitted snapshot versus the record now ───────────────── */
+
+describe('REV-002 · Last Submitted Revision versus Current Working Changes', () => {
+  /*
+   * DEC-21, and the correction inside it. The owner rejected describing a
+   * resubmission as "keep editing, then submit again" — mechanically true, and
+   * an understatement of the modelling requirement. The UI must show the two as
+   * TWO THINGS and must never describe a submitted revision as mutable.
+   *
+   * Measured 2026-09-13 before this block was written: neither phrase existed
+   * anywhere in `apps/web/src`. So there is no failing assertion to invert here
+   * and no prior coverage to preserve — there was none.
+   *
+   * WHAT EACH ASSERTION IS LOAD-BEARING FOR:
+   *  · §1 the comparison is EXACT, over two signatures the server computed. The
+   *    fixtures differ only in `content_signature`, so nothing else can be what
+   *    moved the verdict.
+   *  · §2 `unknown` is a first-class state. Collapsing it into "never
+   *    submitted" would be a FALSE NEGATIVE on every deployment shipped today,
+   *    where the history tables are unapplied and the server says so.
+   *  · §3 an unsubmitted revision row is not a submission. Comparing against one
+   *    answers a question nobody asked.
+   *  · §4 the rename trap appears ONLY where it can bite.
+   *  · §5 the scope is the SERVER's string, never a list written in the client.
+   *  · §6 polarity — each of the four verdicts is shown to be reachable and
+   *    distinct, so none of the above can be passing vacuously.
+   */
+
+  const SIG_SUBMITTED = 'c'.repeat(64);
+  const SIG_NOW = 'd'.repeat(64);
+
+  /** A submitted revision at `no`, carrying `sig`. */
+  const submittedAt = (no: number, sig: string) => ({
+    ...revision({ revision_no: no, content_signature: sig }),
+  });
+
+  it('§1 · says UNCHANGED when the record still matches the last submitted revision', () => {
+    const state = workingState(
+      history({
+        current_content_signature: SIG_SUBMITTED,
+        revisions: [submittedAt(4, SIG_SUBMITTED)],
+        total: 1,
+        returned: 1,
+      }),
+    );
+    expect(state).toEqual({ kind: 'unchanged', revisionNo: 4 });
+    expect(workingStateSentence(state)).toContain('revision 4');
+    expect(workingStateSentence(state)).toMatch(/Nothing that a submission covers has changed/);
+  });
+
+  it('§1 · says CHANGED when only the signature differs', () => {
+    const state = workingState(
+      history({
+        current_content_signature: SIG_NOW,
+        revisions: [submittedAt(4, SIG_SUBMITTED)],
+        total: 1,
+        returned: 1,
+      }),
+    );
+    expect(state).toEqual({ kind: 'changed', revisionNo: 4 });
+    expect(workingStateSentence(state)).toMatch(
+      /has changed since revision 4 was submitted/,
+    );
+    // It must not describe the submitted revision as having been edited.
+    expect(workingStateSentence(state)).not.toMatch(/edit|revert|restore|updated the/i);
+  });
+
+  it('§1 · takes the NEWEST submitted revision, whatever order the server returned', () => {
+    const ascending = workingState(
+      history({
+        current_content_signature: SIG_NOW,
+        revisions: [submittedAt(1, SIG_NOW), submittedAt(7, SIG_SUBMITTED)],
+      }),
+    );
+    const descending = workingState(
+      history({
+        current_content_signature: SIG_NOW,
+        revisions: [submittedAt(7, SIG_SUBMITTED), submittedAt(1, SIG_NOW)],
+      }),
+    );
+    // Revision 1 happens to MATCH the record now; revision 7 does not. If order
+    // decided the answer, these two would disagree — and the one that read
+    // revision 1 would report `unchanged`, the exact false reassurance this
+    // assertion exists to refuse.
+    expect(ascending).toEqual({ kind: 'changed', revisionNo: 7 });
+    expect(descending).toEqual(ascending);
+  });
+
+  it('§2 · says UNKNOWN when the history could not be read — never "never submitted"', () => {
+    for (const h of [
+      /* `tables_absent` is the real reason on every deployment shipped today:
+         the five submission-history tables are created by a migration an
+         OPERATOR applies, separately from the image, and none has been applied
+         anywhere. Taken from `RevisionHistoryReason` rather than invented — the
+         first draft of this line used `migration_not_applied`, which is not a
+         member, and `tsc -b` refused it. */
+      history({ availability: { state: 'unavailable', reason: 'tables_absent', message: 'x' } }),
+      history({ revisions: undefined }),
+    ]) {
+      const state = workingState(h);
+      expect(state.kind).toBe('unknown');
+      expect(state.revisionNo).toBeNull();
+      const sentence = workingStateSentence(state);
+      expect(sentence).toMatch(/unknown rather than no/);
+      // The false negative this exists to refuse.
+      expect(sentence).not.toMatch(/no submitted revision|has not been submitted/i);
+    }
+  });
+
+  it('§3 · a revision with no submission is not compared against', () => {
+    const state = workingState(
+      history({
+        current_content_signature: SIG_NOW,
+        // A recorded revision that was never declared finished.
+        revisions: [revision({ revision_no: 9, content_signature: SIG_NOW, submission: null })],
+      }),
+    );
+    expect(state).toEqual({ kind: 'never_submitted', revisionNo: null });
+    // Had it been compared, the matching signature would have said `unchanged` —
+    // i.e. "already submitted" about a record that never was.
+    expect(workingStateSentence(state)).toMatch(/no submitted revision yet/);
+  });
+
+  it('§4 · the rename trap is offered on UNCHANGED and on nothing else', () => {
+    const unchanged = workingState(
+      history({ current_content_signature: SIG_SUBMITTED, revisions: [submittedAt(4, SIG_SUBMITTED)] }),
+    );
+    expect(renameTrapNote(unchanged)).toMatch(/Renaming this record does not count as a change/);
+    expect(renameTrapNote(unchanged)).toMatch(/already submitted/);
+
+    for (const other of [
+      workingState(history({ current_content_signature: SIG_NOW, revisions: [submittedAt(4, SIG_SUBMITTED)] })),
+      workingState(history({ revisions: [] })),
+      workingState(history({ revisions: undefined })),
+    ]) {
+      // A caution shown where it cannot apply is how a true sentence becomes
+      // ignored. On `changed` the resubmission is accepted; on the other two
+      // there is nothing to be refused against.
+      expect(renameTrapNote(other)).toBeNull();
+    }
+  });
+
+  it('§5 · renders both headings and the SERVER\'s scope string, not a local list', async () => {
+    stubFetchRoutes({
+      [`GET /api/experiments/${EXP}/revisions`]: {
+        body: history({
+          current_content_signature: SIG_SUBMITTED,
+          revisions: [submittedAt(4, SIG_SUBMITTED)],
+          total: 1,
+          returned: 1,
+        }),
+      },
+    } as never);
+    render(<RevisionHistoryPanel experimentId={EXP} />);
+
+    const card = await screen.findByRole('region', {
+      name: `${SUBMITTED_REVISION_HEADING} and ${WORKING_CHANGES_HEADING}`,
+    });
+    expect(within(card).getByText(SUBMITTED_REVISION_HEADING)).toBeInTheDocument();
+    expect(within(card).getByText(WORKING_CHANGES_HEADING)).toBeInTheDocument();
+    expect(within(card).getByText(SUBMITTED_IMMUTABLE_NOTE)).toBeInTheDocument();
+    // Verbatim, from the response. A client-authored list would go quietly false
+    // the day the server's scope changes.
+    expect(
+      within(card).getByText('export_unit_ids_drafts_and_conflict_decisions'),
+    ).toBeInTheDocument();
+    expect(within(card).getByText(/Renaming this record does not count/)).toBeInTheDocument();
+  });
+
+  it('§6 · POLARITY — the four verdicts are reachable and pairwise distinct', () => {
+    const seen = [
+      workingState(history({ revisions: undefined })),
+      workingState(history({ revisions: [] })),
+      workingState(
+        history({ current_content_signature: SIG_SUBMITTED, revisions: [submittedAt(4, SIG_SUBMITTED)] }),
+      ),
+      workingState(
+        history({ current_content_signature: SIG_NOW, revisions: [submittedAt(4, SIG_SUBMITTED)] }),
+      ),
+    ];
+    expect(seen.map((s) => s.kind)).toEqual([
+      'unknown',
+      'never_submitted',
+      'unchanged',
+      'changed',
+    ]);
+    // Four verdicts, four DIFFERENT sentences. A shared sentence would make the
+    // assertions above pass while telling the reader nothing.
+    const sentences = seen.map(workingStateSentence);
+    expect(new Set(sentences).size).toBe(4);
+  });
+});
+
+/* ── C-3 / C-4 · the two states the first version of REV-002 got wrong ────── */
+
+describe('REV-002 · the third availability state, and the cell that read "None"', () => {
+  /*
+   * BOTH FOUND BY INDEPENDENT REVIEW, 2026-09-13, and both in the state that is
+   * the ONLY one any shipped deployment reaches.
+   *
+   * C-3 · `RevisionHistoryState` has THREE members. `workingState` branched on
+   *       `!== 'available'`, so `not_applicable` — which the server's own
+   *       description calls "a fact rather than an inability: such records are
+   *       never submitted", served with **200** — was reported as "This
+   *       deployment could not read the submission history".
+   *
+   * C-4 · `revisionNo` is `null` for BOTH `unknown` and `never_submitted`, and the
+   *       panel rendered `'None'` for either. On every deployment shipped today
+   *       the tables are unapplied, so the state is `unknown` and a scientist read
+   *       **"Last Submitted Revision · None"** about a history that had not been
+   *       read — this module's own Rule 1 ("ABSENCE IS NOT A VALUE") broken by
+   *       this module.
+   *
+   * The review also noted WHY neither was caught: the `unknown` render path, the
+   * only one that ships, had no rendering coverage at all — the single test that
+   * rendered the block rendered `unchanged`. That gap is closed here too.
+   */
+
+  const NOT_APPLICABLE = {
+    state: 'not_applicable' as const,
+    reason: 'worked_example_session' as const,
+    message: 'A worked-example record is never submitted.',
+  };
+
+  it('C-3 · not_applicable is NEVER SUBMITTED, not "could not read"', () => {
+    const state = workingState(history({ availability: NOT_APPLICABLE, revisions: [] }));
+    expect(state).toEqual({ kind: 'never_submitted', revisionNo: null });
+
+    const sentence = workingStateSentence(state);
+    expect(sentence).toMatch(/no submitted revision yet/);
+    // The exact inversion this closes: an inability claimed about a successful read.
+    expect(sentence).not.toMatch(/could not read/i);
+    expect(sentence).not.toMatch(/unknown rather than no/);
+  });
+
+  it('C-3 · not_applicable stays NEVER SUBMITTED even with revisions absent', () => {
+    // The server sends no `revisions` key for a non-available state. The state must
+    // decide, not the presence of the key — otherwise the `undefined` guard below
+    // would drag it back into `unknown`.
+    const state = workingState(
+      history({ availability: NOT_APPLICABLE, revisions: undefined }),
+    );
+    expect(state.kind).toBe('never_submitted');
+  });
+
+  it('C-3 · unavailable is STILL unknown — the other direction is not broken', () => {
+    const state = workingState(
+      history({
+        availability: { state: 'unavailable', reason: 'tables_absent', message: 'x' },
+        revisions: undefined,
+      }),
+    );
+    expect(state.kind).toBe('unknown');
+    expect(workingStateSentence(state)).toMatch(/unknown rather than no/);
+  });
+
+  it('C-4 · the submitted-revision cell distinguishes "none" from "not read"', () => {
+    // The two states `revisionNo === null` could not tell apart.
+    expect(submittedRevisionText({ kind: 'unknown', revisionNo: null })).toBe(
+      'Not read on this deployment',
+    );
+    expect(submittedRevisionText({ kind: 'never_submitted', revisionNo: null })).toBe(
+      'None',
+    );
+    // ...and the two that carry a number still read as one.
+    expect(submittedRevisionText({ kind: 'unchanged', revisionNo: 4 })).toBe('Revision 4');
+    expect(submittedRevisionText({ kind: 'changed', revisionNo: 9 })).toBe('Revision 9');
+
+    // POLARITY: the four are pairwise distinct, so a helper returning one constant
+    // would fail rather than satisfy the assertions above.
+    const all = [
+      submittedRevisionText({ kind: 'unknown', revisionNo: null }),
+      submittedRevisionText({ kind: 'never_submitted', revisionNo: null }),
+      submittedRevisionText({ kind: 'unchanged', revisionNo: 4 }),
+      submittedRevisionText({ kind: 'changed', revisionNo: 9 }),
+    ];
+    expect(new Set(all).size).toBe(4);
+  });
+
+  it('C-4 · RENDERS the unknown state without the word "None" — the path that ships', async () => {
+    /*
+     * THE MISSING COVERAGE. `PGHOST` is unset in every shipped deployment, so the
+     * server answers 503 with `no_durable_storage` and this is the branch a
+     * scientist actually sees. It had no rendering test.
+     */
+    stubFetchRoutes({
+      [`GET /api/experiments/${EXP}/revisions`]: {
+        status: 503,
+        body: history({
+          availability: {
+            state: 'unavailable',
+            reason: 'no_durable_storage',
+            message: 'This deployment has no durable storage, so no submission history exists.',
+          },
+          revisions: undefined,
+          total: undefined,
+          returned: undefined,
+        }),
+      },
+    } as never);
+    render(<RevisionHistoryPanel experimentId={EXP} />);
+
+    const card = await screen.findByRole('region', {
+      name: `${SUBMITTED_REVISION_HEADING} and ${WORKING_CHANGES_HEADING}`,
+    });
+    const row = within(card).getByText(SUBMITTED_REVISION_HEADING).parentElement!;
+    expect(row.textContent).toContain('Not read on this deployment');
+    // The defect, asserted as absent rather than merely as "the new text is there".
+    expect(row.textContent).not.toContain('None');
+    // And the rename caution must NOT appear: it belongs to `unchanged` only, and
+    // there is nothing here for a resubmission to be refused against.
+    expect(within(card).queryByText(/Renaming this record does not count/)).toBeNull();
   });
 });

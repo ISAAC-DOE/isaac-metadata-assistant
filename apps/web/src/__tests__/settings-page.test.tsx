@@ -1039,8 +1039,18 @@ describe('Settings — Data & Privacy', () => {
     //   · /there is no database/ → the workspace-scoped storage sentence.
     // Each string is still asserted to be rendered on Data & Privacy exactly as
     // `settingsContent.ts` authors it; only the wording being pinned moved.
+    //
+    // MOVED AGAIN, 2026-09-12, and for a reason rather than a reword. The needle
+    // was `/this deployment runs in synthetic-only mode: file upload is refused/`
+    // — the UNSCOPED refusal, which was false of a build shipping two controls
+    // that read a user-picked file. The card now scopes it to the upload ROUTE
+    // (`upload-claim-parity.test.tsx` §7 holds that, with the polarity proven on
+    // the exact retired string). The needle deliberately includes the scoping
+    // noun, so this render check cannot pass on a future unscoped reword.
     expect(
-      screen.getByText(/this deployment runs in synthetic-only mode: file upload is refused/i),
+      screen.getByText(
+        /this deployment runs in synthetic-only mode: the upload route refuses every request/i,
+      ),
     ).toBeInTheDocument();
     expect(screen.getByText(/the workspace is not stored in a database/i)).toBeInTheDocument();
     expect(screen.getByText(/no analytics, no usage tracking/i)).toBeInTheDocument();

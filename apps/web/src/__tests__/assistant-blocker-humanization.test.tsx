@@ -469,7 +469,17 @@ describe('P36V.1 Unit B · activating the free-form Open Validator reaches the V
 
   it('mutates NO record: the only writes are the record screen dry-runs and the read-only query', async () => {
     await askFreeForm(rootBlockerAnswer());
-    const titleBefore = (await screen.findByText(/Synthetic XANES/)).textContent;
+    // THE RECORD'S OWN PAGE TITLE, not any node containing the name. Since
+    // UX-002 the record screen renders a visible `h1` (workspace eyebrow + record
+    // title) AND the TopBar still renders the name in its breadcrumb, so a bare
+    // `findByText(/Synthetic XANES/)` is ambiguous and threw "Found multiple
+    // elements". The level-1 heading is also the stronger anchor for what this
+    // test actually claims: the RECORD was not mutated, which is a statement
+    // about the record's title, not about a navigation crumb that happens to
+    // quote it.
+    const titleBefore = (
+      await screen.findByRole('heading', { level: 1, name: /Synthetic XANES/ })
+    ).textContent;
 
     fireEvent.click(openValidator());
     await waitFor(() =>
@@ -490,7 +500,9 @@ describe('P36V.1 Unit B · activating the free-form Open Validator reaches the V
     // same record, with still no mutating request having been issued.)
     fireEvent.click(screen.getByRole('button', { name: 'probe back' }));
     await waitFor(() => expect(screen.getByTestId('loc').textContent).toBe(RECORD_ROUTE));
-    expect((await screen.findByText(/Synthetic XANES/)).textContent).toBe(titleBefore);
+    expect(
+      (await screen.findByRole('heading', { level: 1, name: /Synthetic XANES/ })).textContent,
+    ).toBe(titleBefore);
     for (const req of writeRequests()) {
       expect(req).toMatch(/\/(validate|audit|assistant\/query)$/);
     }

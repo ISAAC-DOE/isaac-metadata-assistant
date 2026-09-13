@@ -1,4 +1,5 @@
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
+import { DocumentTitle } from './lib/useDocumentTitle';
 import { ROUTE_PATTERNS, ROUTES } from './lib/routes';
 import { ExperimentsHome } from './screens/ExperimentsHome';
 import { LoadMaterials } from './screens/LoadMaterials';
@@ -15,20 +16,34 @@ import { SettingsPage } from './screens/SettingsPage';
  * under /record/:id. Exported separately so tests can mount it under a router. */
 export function AppRoutes() {
   return (
-    <Routes>
-      <Route path="/" element={<Navigate to={ROUTES.experiments} replace />} />
-      <Route path={ROUTE_PATTERNS.experiments} element={<ExperimentsHome />} />
-      <Route path={ROUTE_PATTERNS.load} element={<LoadMaterials />} />
-      <Route path={ROUTE_PATTERNS.record} element={<RecordWorkbench />} />
-      <Route path={ROUTE_PATTERNS.complete} element={<GuidedCompletion />} />
-      <Route path={ROUTE_PATTERNS.evidence} element={<EvidenceExplorer />} />
-      <Route path={ROUTE_PATTERNS.export} element={<ExportReadiness />} />
-      <Route path={ROUTE_PATTERNS.memory} element={<ProjectMemory />} />
-      <Route path={ROUTE_PATTERNS.governance} element={<GovernancePage />} />
-      <Route path={ROUTE_PATTERNS.statistics} element={<StatisticsPage />} />
-      <Route path={ROUTE_PATTERNS.settings} element={<SettingsPage />} />
-      <Route path="*" element={<Navigate to={ROUTES.experiments} replace />} />
-    </Routes>
+    <>
+      {/*
+        WCAG 2.4.2 *Page Titled*. `<DocumentTitle />` MUST stay an EARLIER
+        SIBLING of `<Routes />`: React flushes effects in tree order, so this
+        writes the route-derived title first and a screen's `useDocumentTitle`
+        refinement (today only the record screen, which adds the record's name
+        once its bundle has loaded) overwrites it in the same commit. Swapping
+        these two lines silently reverses that precedence.
+        `lib/useDocumentTitle.ts` carries the full reasoning;
+        `__tests__/document-title.test.tsx` pins the outcome rather than the
+        ordering, which is the property that actually matters.
+      */}
+      <DocumentTitle />
+      <Routes>
+        <Route path="/" element={<Navigate to={ROUTES.experiments} replace />} />
+        <Route path={ROUTE_PATTERNS.experiments} element={<ExperimentsHome />} />
+        <Route path={ROUTE_PATTERNS.load} element={<LoadMaterials />} />
+        <Route path={ROUTE_PATTERNS.record} element={<RecordWorkbench />} />
+        <Route path={ROUTE_PATTERNS.complete} element={<GuidedCompletion />} />
+        <Route path={ROUTE_PATTERNS.evidence} element={<EvidenceExplorer />} />
+        <Route path={ROUTE_PATTERNS.export} element={<ExportReadiness />} />
+        <Route path={ROUTE_PATTERNS.memory} element={<ProjectMemory />} />
+        <Route path={ROUTE_PATTERNS.governance} element={<GovernancePage />} />
+        <Route path={ROUTE_PATTERNS.statistics} element={<StatisticsPage />} />
+        <Route path={ROUTE_PATTERNS.settings} element={<SettingsPage />} />
+        <Route path="*" element={<Navigate to={ROUTES.experiments} replace />} />
+      </Routes>
+    </>
   );
 }
 

@@ -373,6 +373,31 @@ def test_no_shipped_write_route_mutates_a_submitted_records_history(client, db):
             ),
         ),
         (
+            # THE FOLDER MOVE IS GENUINELY SWEPT RATHER THAN EXEMPTED, and that is
+            # the point of putting it here instead of in
+            # `not_addressed_to_a_record`. It is `ACCEPTED` — filing a submitted
+            # record is allowed, deliberately, because a folder is organizational
+            # and a scientist tidying their workspace is not editing their science.
+            # So this attempt lands a real write on a submitted record, and the
+            # assertions this sweep makes about the submission history afterwards
+            # are the ones that have to hold: a move must move `rev` (it is inside
+            # the authoritative signature) while touching no revision row, no
+            # submission row, and no content signature.
+            #
+            # IT IS THE STRICTLY STRONGER CHOICE. Listing it as "not addressed to a
+            # record" would have been true of the FIELD PATHS and false of the
+            # RECORD — it writes the record's own document — and would have bought
+            # an exemption for the one write on a submitted record this feature
+            # newly makes reachable.
+            "PATCH /experiments/{id}/folder",
+            ACCEPTED,
+            lambda: client.patch(
+                f"/api/experiments/{eid}/folder",
+                json={"folder": "Submitted work/2026"},
+                headers={"If-Match": _etag(client, eid)},
+            ),
+        ),
+        (
             # MEASURED, AND IT IS A PROPERTY OF A RECORD A PERSON BUILT rather than of
             # this payload. Once a record has runs, every answerable key it holds is
             # run-owned, so the RECORD-level answer and correction routes have nothing
@@ -797,6 +822,15 @@ def test_no_mcp_write_reaches_a_submitted_records_history(client, app, db):
         # operation whose whole safety argument is "it touches nothing authoritative"
         # is precisely the one this sweep must exercise.
         "create_proposal",
+        # THE EIGHTH, added with MCP-001. `create_note` writes into `state["notes"]`,
+        # which is OUTSIDE `draft` exactly as `state["proposals"]` is — so it moves
+        # the record's `rev` and must still leave every submitted artifact and every
+        # history row precisely where they are. Driven below rather than exempted,
+        # for the seventh's reason: an operation whose whole safety argument is "it
+        # touches nothing authoritative" is the one this sweep most needs to
+        # exercise. It is also the operation an UNTRUSTED caller can now reach, so
+        # "it cannot disturb a submitted record" is the claim that matters about it.
+        "create_note",
     }, f"the MCP mutating surface changed: {sorted(mutating)}"
     for forbidden in (
         "submit",
@@ -905,6 +939,28 @@ def test_no_mcp_write_reaches_a_submitted_records_history(client, app, db):
                 )
             )(_a_note(client, eid)),
         ),
+        (
+            # A REAL NOTE CAPTURE THROUGH MCP, NOT A REFUSAL, for the reason the
+            # proposal case gives. It carries no `run_id` deliberately: a note with
+            # none belongs to the RECORD, which is the shape that touches the
+            # record document most directly and therefore the one worth driving
+            # against a submitted record.
+            #
+            # LAST IN THE TUPLE, so the etag it reads is the freshest — the ordering
+            # trap the `create_proposal` comment above records applies to every case
+            # here, and adding one in the middle would have handed the proposal case
+            # a stale validator.
+            "create_note",
+            lambda: (
+                {"experiment_id": eid},
+                _etag(client, eid),
+                {
+                    "text": "the operator noted the shutter stuck once",
+                    "source": "connected_agent",
+                    "client_request_key": "mcp-history-sweep-note-1",
+                },
+            ),
+        ),
     )
     reached = 0
     landed: set[str] = set()
@@ -933,6 +989,21 @@ def test_no_mcp_write_reaches_a_submitted_records_history(client, app, db):
     )
     assert ws.load_experiment(eid).proposals, (
         "the proposal was reported stored and is not"
+    )
+    # THE SAME NAMED CHECK FOR THE EIGHTH OPERATION, and not left to `reached`: this
+    # is the operation an untrusted caller can reach, so a version of this test that
+    # was green while the capture had been refused would be asserting the invariant
+    # over precisely the request it exists to cover.
+    assert "create_note" in landed, (
+        "the MCP note capture did not land, so the invariant is being asserted over "
+        "a refusal"
+    )
+    assert any(
+        note.source == "connected_agent"
+        for note in ws.load_experiment(eid).notes
+    ), (
+        "the note was reported stored, and no note on the record carries the agent "
+        "channel — so either nothing was stored or the channel was not stamped"
     )
     assert len(db.submissions) == len(history["submissions"]), (
         "no MCP operation may record a submission"
@@ -994,6 +1065,7 @@ def test_the_sweep_covers_every_mutating_route_this_api_publishes(app):
     #: a path template. Keyed by the published (method, path).
     swept_names = {
         ("PATCH", "/api/experiments/{experiment_id}"): "PATCH /experiments/{id}",
+        ("PATCH", "/api/experiments/{experiment_id}/folder"): "PATCH /experiments/{id}/folder",
         ("POST", "/api/experiments/{experiment_id}/answers"): "POST /answers",
         ("POST", "/api/experiments/{experiment_id}/edit"): "POST /edit",
         ("POST", "/api/experiments/{experiment_id}/runs"): "POST /runs (add)",

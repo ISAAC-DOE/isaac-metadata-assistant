@@ -68,13 +68,16 @@ from typing import Any, Awaitable, Callable, Mapping
 
 from .. import serialize
 from ..identity import IdentityRefusal, RequestIdentity
+from . import links
 from .client import ApiResult, IsaacApiClient
 from .policy import (
+    MCP_READ_WINDOW,
     OPERATIONS,
     PERMITTED_TOOL_NAMES,
     Scope,
     changes_query_parameters,
     forbidden_tool_reason,
+    note_text_byte_ceiling,
     pending_query_parameters,
     proposal_list_query_parameters,
     proposal_target_field_paths,
@@ -467,8 +470,23 @@ _BOUNDED_PENDING_NOTE = (
     "it. `data.pending_page` is ALWAYS present and reports `total`, `returned`, "
     "`offset`, `limit`, `withheld`, `complete` and `record_total`, so a page can never "
     "be mistaken for the set: read `pending_page.total`, never `len(data.pending)`, "
-    "for how much is left. `isaac_list_questions` still answers COMPLETELY and is "
-    "where to go for the whole list, so no question becomes unreachable."
+    "for how much is left. "
+    # ~~"`isaac_list_questions` still answers COMPLETELY and is where to go for the
+    # whole list, so no question becomes unreachable."~~ — **FALSE AS OF MCP-002, and
+    # corrected here rather than only in that tool, because this sentence is
+    # interpolated into THREE write tools' descriptions and would have told every
+    # agent in the fleet to go somewhere for a complete answer it no longer gives.**
+    # That is the multi-site stale-claim failure §15 records: the change was made in
+    # one tool and the claim about it lived in another.
+    #
+    # The GUARANTEE it was defending survives and is restated over the mechanism that
+    # now delivers it: reachability comes from paging and from a raisable `limit`, not
+    # from an unbounded default.
+    "`isaac_list_questions` is ALSO bounded by default — it is where to go for the "
+    "whole list, and reaching it means paging: raise its `limit` (up to the "
+    "maximum its schema publishes) or walk `offset`, reading "
+    "`pending_page.record_total` to know when you are done. So no question is "
+    "unreachable; none of them simply arrives unasked."
 )
 
 
@@ -512,6 +530,34 @@ def _settle(operation_id: str, result: ApiResult, data: Any = None) -> ToolOutco
     return _ok(operation_id, result, data) if result.ok else _failed(operation_id, result)
 
 
+def _with_links(result: ApiResult, links: Mapping[str, str | None]) -> Any:
+    """The route's body with a ``links`` key added. **MCP-006.**
+
+    **ADDITIVE, AND THAT IS THE WHOLE DISTINCTION FROM THE PROJECTION THIS FILE
+    REMOVED.** ``Tool.required_scopes``' docstring records a projection that withheld
+    parts of a route's body and was withdrawn after measurement, and a reader meeting
+    a second "shaped body" here would reasonably suspect the same thing is back. It is
+    not: **nothing is dropped, filtered, renamed or reworded.** Every key the route
+    sent is forwarded unchanged and one key is added, so the failure-branch reasoning
+    that killed the projection — that ``_failed`` forwards refusal bodies a caller
+    needs — is untouched, and this only ever runs on the success path anyway.
+
+    A LINK WHOSE VALUE IS ``None`` IS OMITTED, not served as null. An agent reading
+    ``{"run": null}`` has to decide what a null link means; an absent key says the same
+    thing and cannot be mistaken for a navigable value. ``links`` itself is omitted
+    when every member is absent, so its presence always means at least one usable
+    address.
+
+    A NON-DICT BODY IS RETURNED UNTOUCHED. No route reached here sends one, and the
+    alternative to passing it through is wrapping a body this layer does not
+    understand — inventing a shape rather than forwarding one.
+    """
+    usable = {name: href for name, href in links.items() if isinstance(href, str) and href}
+    if not isinstance(result.body, dict) or not usable:
+        return None if not isinstance(result.body, dict) else result.body
+    return {**result.body, "links": usable}
+
+
 # --------------------------------------------------------------------------
 # Handlers
 # --------------------------------------------------------------------------
@@ -529,7 +575,24 @@ async def _get_experiment(ctx: ToolContext, args: Mapping[str, Any]) -> ToolOutc
 
 
 async def _list_runs(ctx: ToolContext, args: Mapping[str, Any]) -> ToolOutcome:
+    """One window of the record's runs. **BOUNDED BY DEFAULT — MCP-002.**
+
+    ``limit`` defaults to :data:`~.policy.MCP_READ_WINDOW` at this layer, for
+    ``_list_questions``' reason and with its measurement: 50,888 B unbounded at 120
+    runs against a ≈150,000-character tool-result ceiling, 21,236 B bounded. The route
+    keeps its complete default for the website; only the MCP caller is bounded.
+
+    **THE COUNTS ARE THE SERVER'S, AND THEY ARE NOT IN A NESTED BLOCK HERE.** This
+    route publishes ``total``, ``matched``, ``returned`` and ``offset`` at the TOP
+    LEVEL of the response, not inside a ``run_page`` object — measured, after a first
+    probe looked for the nested shape and wrongly read "no page block". ``total``
+    counts what the record holds; ``len(runs)`` counts what was fetched. An agent must
+    report the first.
+    """
     query = {k: v for k, v in args.items() if k != "experiment_id"}
+    # `setdefault`: an explicit `limit` always wins, including one larger than the
+    # window. See `_list_questions` for why this bounds rather than caps.
+    query.setdefault("limit", MCP_READ_WINDOW)
     result = await ctx.client.call(
         "list_runs",
         path_params={"experiment_id": args["experiment_id"]},
@@ -559,7 +622,20 @@ async def _create_run(ctx: ToolContext, args: Mapping[str, Any]) -> ToolOutcome:
         json_body=body,
         if_match=args["if_match"],
     )
-    return _settle("create_run", result)
+    # ONE KEY IS ADDED (MCP-006): the deep link to the run that was created. Its id is
+    # read off the ROUTE's body — it is server-assigned and the request never carried
+    # it — so a link is emitted only when the route actually named one. `_with_links`
+    # omits the key otherwise rather than serving a link to nothing.
+    created = result.body if isinstance(result.body, dict) else {}
+    run = created.get("run") if isinstance(created.get("run"), dict) else {}
+    return _settle(
+        "create_run",
+        result,
+        _with_links(
+            result,
+            {"run": links.run_link(args["experiment_id"], run.get("id"))},
+        ),
+    )
 
 
 async def _update_draft(ctx: ToolContext, args: Mapping[str, Any]) -> ToolOutcome:
@@ -626,13 +702,37 @@ async def _list_questions(ctx: ToolContext, args: Mapping[str, Any]) -> ToolOutc
     questions, and ``isaac_check_run`` carries one run's. Neither answers "what is
     this record waiting for", which is the question an agent actually starts with.
 
-    **THE DEFAULT IS STILL COMPLETE.** ``run_id``/``offset``/``limit`` are forwarded ONLY
-    when the caller sent them — the same shape ``_list_runs`` has — so a client that never
-    learned to page is handed exactly what it was always handed, with no ``pending_page``
-    block to interpret. Bounding is something a caller ASKS for here, never something
-    imposed on one that does not know to ask, which is the route's own rule.
+    ~~**THE DEFAULT IS STILL COMPLETE.** ``run_id``/``offset``/``limit`` are forwarded
+    ONLY when the caller sent them — the same shape ``_list_runs`` has — so a client
+    that never learned to page is handed exactly what it was always handed, with no
+    ``pending_page`` block to interpret. Bounding is something a caller ASKS for here,
+    never something imposed on one that does not know to ask, which is the route's own
+    rule.~~
+
+    **REVERSED FOR MCP-002, AND STRUCK RATHER THAN REWRITTEN BECAUSE IT WAS A
+    DELIBERATE DECISION AND A READER HAS TO SEE THAT IT CHANGED.** Every sentence in
+    it was true of the ROUTE's contract and remains the right rule for a browser,
+    which is why the route is untouched. What it did not account for is the caller:
+    **the documented MCP tool-result ceiling is ≈150,000 characters, and this read
+    measured 212,443 B at 120 runs** — over the ceiling on a record nobody would call
+    large. "Complete" is not a kindness to a client whose transport will truncate or
+    refuse it; it is a response that arrives unusable, and the caller cannot tell that
+    from a short one.
+
+    So ``limit`` now defaults to :data:`~.policy.MCP_READ_WINDOW` **at this layer
+    only**, and the route keeps its complete default for the website.
+
+    **THE WINDOW BOUNDS WHAT IS FETCHED, NEVER WHAT IS CLAIMED.** The response's
+    ``pending_page.total`` is the server's count over the WHOLE record — measured 360
+    while ``returned`` was 50 — so any count an agent reports must come from ``total``
+    and never from ``len(pending)``. The tool description says so to the model, which
+    is the only reader that can act on it.
     """
     query = {k: v for k, v in args.items() if k != "experiment_id"}
+    # THE DEFAULT IS A `setdefault`, SO AN EXPLICIT CALLER ALWAYS WINS — including a
+    # caller asking for MORE than the window, up to the route's own maximum. This
+    # bounds the caller that does not know to ask; it does not cap the one that does.
+    query.setdefault("limit", MCP_READ_WINDOW)
     result = await ctx.client.call(
         "list_questions",
         path_params={"experiment_id": args["experiment_id"]},
@@ -820,7 +920,124 @@ async def _propose_field_value(ctx: ToolContext, args: Mapping[str, Any]) -> Too
     # here.~~ See the block above this function for what it was, why it was correct, and
     # why it was still removed — and for the measurement that must be re-read before
     # anyone rebuilds it.
-    return _settle("create_proposal", result)
+    #
+    # ONE KEY IS ADDED (MCP-006): the deep link to THIS proposal. Read off the body the
+    # route returned rather than from the request, because on a `deduplicated: true`
+    # answer the stored proposal's id is the FIRST attempt's and not this call's — a
+    # link built from anything else would address a proposal that was never minted.
+    body = result.body if isinstance(result.body, dict) else {}
+    proposal = body.get("proposal") if isinstance(body.get("proposal"), dict) else {}
+    return _settle(
+        "create_proposal",
+        result,
+        _with_links(
+            result,
+            {
+                "proposal": links.proposal_link(
+                    args["experiment_id"], proposal.get("proposal_id")
+                ),
+                "capture": links.capture_link(args["experiment_id"]),
+            },
+        ),
+    )
+
+
+#: WHAT AN MCP-ORIGINATED NOTE SAYS ABOUT WHERE IT CAME FROM. **CAP-006.**
+#:
+#: A member of ``notes.NOTE_SOURCES``, which ``proposals.PROPOSAL_SOURCES`` aliases —
+#: ONE vocabulary, not a second one, so a proposal minted from this note inherits a
+#: source that means the same thing on both sides. Read off the note model rather than
+#: transcribed, below, so a rename cannot leave this file asserting a member that no
+#: longer exists.
+#:
+#: **IT IS STAMPED BY THE SERVER AND IS NOT AN ARGUMENT, WHICH IS THE WHOLE POINT.**
+#: Before it, the only members available to an agent asserted something false about
+#: the producer — ``typed_note`` says a person typed it, and putting that on
+#: model-derived text is a lie in the one field a reviewer uses to decide how much to
+#: trust what they are reading. The HTTP route lets a caller choose `source`, as it
+#: always has for every member; this layer does not, because the claim "this arrived
+#: through the agent interface" is a fact the SERVER observes about itself.
+#: ``RESERVED_ARGUMENT_NAMES`` is the same principle applied to identity, and
+#: ``source`` is deliberately absent from this tool's schema for the same reason a
+#: ``principal`` argument is.
+#:
+#: **IT IS A CHANNEL AND NOT AN ACTOR, AND THE TWO MUST NOT BE COLLAPSED.** It says
+#: nothing about WHO the agent was acting for. ``attribution.uploaded_by`` requires
+#: ``trust_basis == verified_edge_assertion`` and no verifier in this build mints
+#: that, so no actor identity is established for an MCP call at all and the seam
+#: stays unset. It also does not say a language model was involved: a deterministic
+#: script speaking MCP is equally this channel. What a reviewer gains is exactly the
+#: distinction ``CAP-006`` names — telling "my Claude" from "the CSV importer" — and
+#: not one step more.
+_AGENT_NOTE_SOURCE = "connected_agent"
+
+
+async def _capture_note(ctx: ToolContext, args: Mapping[str, Any]) -> ToolOutcome:
+    """Store one piece of verbatim content against a record, as a NOTE. **MCP-001.**
+
+    THE GAP THIS CLOSES, because it is worth stating once in the code that closes it:
+    ``_propose_field_value`` requires a ``note_id`` naming a note the record already
+    holds, and no operation in this server created one. So an agent could suggest a
+    value only for words some OTHER producer had already stored, and **not one word of
+    an agent conversation could enter ISAAC** with every external gate open.
+
+    ``source`` IS STAMPED HERE AND IS NOT TAKEN FROM ``args`` — see
+    :data:`_AGENT_NOTE_SOURCE`. The schema declares no such property, so a caller
+    cannot supply one even by accident; ``validate_arguments`` refuses an undeclared
+    key.
+
+    ``candidate_field_path`` AND ``candidate_rule`` ARE DELIBERATELY NOT OFFERED, and
+    this is a §5 decision rather than an omission. The route accepts them, and
+    ``notes.py``'s own docstring says a candidate is *"absent unless something
+    DETERMINISTIC produced it"*. A language model is not that. Letting this tool set
+    one would put a model's field-targeting guess on the note itself, where it renders
+    as a candidate the application proposed — laundering a guess through the one
+    artifact whose whole value is that it is only what was said. An agent that wants
+    to name a field has a channel for it, ``isaac_propose_field_value``, which demands
+    the ``rule`` sentence and produces a reviewable proposal rather than a quiet
+    annotation.
+
+    ``client_request_key`` IS REQUIRED HERE AND OPTIONAL ON THE HTTP ROUTE, exactly as
+    it is for ``_propose_field_value`` and for that function's stated reason: a person
+    clicking a button can see whether their capture landed and a retrying agent
+    cannot. It matters more here than there, because vendor retry behaviour is
+    **UNKNOWN** (``REC-012``) and an unknown retry policy plus a non-idempotent create
+    is duplicate scientific notes in a scientist's review queue. Making it required is
+    what lets this tool declare ``idempotentHint: true`` truthfully rather than
+    aspirationally.
+    """
+    body: dict[str, Any] = {
+        "text": args["text"],
+        "source": _AGENT_NOTE_SOURCE,
+        "client_request_key": args["client_request_key"],
+    }
+    # ABSENT RATHER THAN NULL, and never defaulted. A note with no `run_id` belongs to
+    # the record, and filling it in from the only run that happens to exist is an
+    # inference about the science — `capture_note`'s own docstring refuses it.
+    if "run_id" in args:
+        body["run_id"] = args["run_id"]
+
+    result = await ctx.client.call(
+        "create_note",
+        path_params={"experiment_id": args["experiment_id"]},
+        json_body=body,
+        if_match=args["if_match"],
+    )
+    # `_settle`, exactly as every other handler does, and NO PROJECTION — the route's
+    # body is a note, its `deduplicated` flag and the record's version, all of which an
+    # agent needs: the `id` is what `isaac_propose_field_value` cites, and withholding
+    # `deduplicated` would leave a retry unable to tell what it had just done.
+    #
+    # ONE KEY IS ADDED (MCP-006): where to look. A note is reviewed on the record's
+    # `capture` workspace, which is the same screen a proposal is reviewed on, so the
+    # record-scoped capture link is the honest address — there is no per-note
+    # parameter and minting one would publish a navigational distinction the
+    # application does not make.
+    return _settle(
+        "create_note",
+        result,
+        _with_links(result, {"capture": links.capture_link(args["experiment_id"])}),
+    )
 
 
 # --------------------------------------------------------------------------
@@ -1016,7 +1233,18 @@ def _tools() -> tuple[Tool, ...]:
                 "`returned` and `offset`, so a short page is visibly a page rather "
                 "than a complete list. Paging is not snapshot-consistent: compare "
                 "`experiment_version` across pages and re-read from the start when "
-                "it moves. Read-only."
+                "it moves. Read-only.\n\n"
+                f"**BOUNDED BY DEFAULT: omitting `limit` returns at most "
+                f"{MCP_READ_WINDOW} runs, not all of them.** That is deliberate and "
+                "is about your transport, not about this record: a tool result has a "
+                "ceiling of roughly 150,000 characters, and this read measured over "
+                "50,000 bytes on a record with 120 runs. Ask for more with `limit` "
+                "when you need it, up to the maximum this schema publishes.\n\n"
+                "**REPORT `total`, NEVER THE LENGTH OF THE `runs` ARRAY.** They are "
+                "different numbers whenever you are looking at a page. `total` is "
+                "how many runs the record holds; the array is how many arrived. "
+                "Saying \"this record has 50 runs\" from a 50-entry page on a "
+                "320-run record is a false statement about someone's experiment."
             ),
             scope=Scope.READ,
             operation_ids=("list_runs",),
@@ -1083,7 +1311,26 @@ def _tools() -> tuple[Tool, ...]:
                 "inherited by reference at read time — and no scientific value is "
                 "invented anywhere. Requires the RECORD's current `etag` "
                 "in `if_match`; omitted is refused, stale is refused with nothing "
-                "written."
+                "written.\n\n"
+                # MCP-007. THE ONE SENTENCE THIS TOOL WAS MISSING, and it belongs in
+                # the DESCRIPTION rather than in the comment below it, because the
+                # description is the only part a model reads before calling. The
+                # `idempotent=False` annotation is a hint a client MAY render; this is
+                # the instruction.
+                "**THERE IS NO IDEMPOTENCY KEY HERE, SO A RETRY IS NOT SAFE THE WAY "
+                "IT IS ELSEWHERE IN THIS SERVER.** `isaac_capture_note` and "
+                "`isaac_propose_field_value` take a `client_request_key` and this "
+                "tool does not, so two identical calls add TWO runs. What protects "
+                "you from a lost RESPONSE is the precondition, not a key: if your "
+                "first call actually landed, the etag you still hold is stale and the "
+                "retry is refused `412` with nothing added. **The trap is what you do "
+                "next.** Re-reading the record and calling again with the fresh etag "
+                "is a NEW request, and it will add a second run. If a call times out "
+                "or you are unsure whether it landed, do not retry — call "
+                "`isaac_list_runs` and look. A duplicate run is not a harmless "
+                "retry artifact: it is an extra measurement condition on a "
+                "scientific record, it carries its own questions, and removing one "
+                "is not something this server can do for you."
             ),
             scope=Scope.DRAFT_WRITE,
             operation_ids=("create_run",),
@@ -1250,18 +1497,37 @@ def _tools() -> tuple[Tool, ...]:
                 "labelled `demo_answer`. It is a suggestion for a person to read and "
                 "is never applied automatically — sending it back is asserting that "
                 "the scientist confirmed it. Read-only; writes nothing.\n\n"
-                "**SEND NOTHING BUT `experiment_id` AND THE ANSWER IS COMPLETE** — every "
-                "open question on the record, its runs' included, in one `pending` list "
-                "with no page block to interpret. A record's question count grows with "
+                f"**BOUNDED BY DEFAULT: omitting `limit` returns at most "
+                f"{MCP_READ_WINDOW} questions, not all of them, and the response "
+                "carries a `pending_page` block.** ~~\"Send nothing but "
+                "`experiment_id` and the answer is complete.\"~~ That was this tool's "
+                "documented behaviour and it is WITHDRAWN, because completeness was "
+                "the wrong goal for this caller: a tool result has a ceiling of "
+                "roughly 150,000 characters, and this read measured **212,443 bytes "
+                "on a record with 120 runs** — already over the ceiling on a record "
+                "nobody would call large. A response your transport truncates is not "
+                "more complete than a page; it is a page you cannot tell is one.\n\n"
+                "**SO READ `pending_page.record_total` BEFORE YOU SAY WHAT THE RECORD "
+                "OWES.** On that measured record it was 360 while `returned` was 50. "
+                "Never count the `pending` array and report the result as the "
+                "record's outstanding work — that understates it by however much you "
+                "did not fetch, and telling a scientist their record needs 50 answers "
+                "when it needs 360 is worse than saying nothing.\n\n"
+                "A record's question count grows with "
                 "its runs, so `run_id`, `offset` and `limit` are there for a caller that "
-                "wants LESS: pass `run_id` to get one run's questions, `offset`/`limit` "
-                "to walk the set a page at a time. A `run_id`, a NON-ZERO `offset`, or a "
-                "`limit` bounds the read, and the response then gains a `pending_page` "
+                "wants something different: pass `run_id` to get one run's questions, "
+                "`offset`/`limit` "
+                "to walk the set a page at a time, or a larger `limit` to fetch more "
+                "than the default window. The response carries a `pending_page` "
                 "block reporting `total`, `returned`, `withheld`, `complete` and "
-                "`record_total`. **`offset: 0` ON ITS OWN BOUNDS NOTHING** — it is the "
-                "route's default, so a call sending only it gets the complete unpaged "
-                "answer and NO `pending_page` to act on; send `limit` if you mean to "
-                "page. Read `pending_page.record_total` for the WHOLE record's open "
+                "`record_total`. ~~**`offset: 0` ON ITS OWN BOUNDS NOTHING** — it is "
+                "the route's default, so a call sending only it gets the complete "
+                "unpaged answer and NO `pending_page` to act on.~~ That was true "
+                "while this tool had no default `limit`; it no longer is, because a "
+                "`limit` is always sent and a `pending_page` is therefore always "
+                "present. The sentence is struck rather than deleted because a client "
+                "written against it would have been relying on the unpaged shape. "
+                "Read `pending_page.record_total` for the WHOLE record's open "
                 "count, so a page you asked for can never be mistaken for the record's "
                 "state, and read `complete` AS RELATIVE TO THE FILTER: under a `run_id` "
                 "it means \"this run has nothing further\", never \"this record has "
@@ -1617,6 +1883,151 @@ def _tools() -> tuple[Tool, ...]:
         # there is no accept tool, no review tool, no supersede tool and no
         # withdraw tool, at any scope, and `POST .../proposals/{id}/review` is not
         # in `policy.OPERATIONS` at all. See the block above `list_proposals` there.
+        Tool(
+            name="isaac_capture_note",
+            title="Capture what was said, verbatim, as a note",
+            description=(
+                "Store one piece of content against a record, WORD FOR WORD, as a "
+                "note. This is how what a scientist told you gets into ISAAC, and "
+                "it is the first call of the two-step workflow: capture the words "
+                "here, then — only if a value is genuinely stated in them — cite "
+                "this note from `isaac_propose_field_value`.\n\n"
+                # THE ROUTE'S OWN CLAIM, in the route's own words, so the two
+                # published contracts cannot drift by wording.
+                # `test_mcp_and_route_descriptions_agree.py` pins this class of
+                # sentence in BOTH.
+                "**IT IS NOT A FIELD VALUE AND NOT EVIDENCE.** A note carries no "
+                "value at all — there is no field on it to put one in. Every note "
+                "carries `verified: false`, `is_evidence: false`, "
+                "`is_field_value: false` and a `status` of `unmapped_note`, which "
+                "are constants of the shape rather than fields a request can set. "
+                "It is stored OUTSIDE the record's draft, so it is inert to export "
+                "and to submission: it cannot make a record exportable, cannot make "
+                "one un-exportable, and **will not appear in any exported "
+                "record**. That is exactly why capturing words is safe and writing "
+                "a value from them is not.\n\n"
+                "**THE WORDS ARE STORED EXACTLY AS SENT.** Not trimmed, not "
+                "normalised, not summarised, not translated, not tidied. Send what "
+                "was actually said. If it is too large to store it is REFUSED "
+                "rather than shortened, because a shortened note misrepresents "
+                "what was written — so do not pre-truncate to fit, and do not "
+                "paraphrase to save space. A note survives every later outcome "
+                "including the rejection of a proposal made from it, which is what "
+                "makes it safe for a scientist to refuse your suggestion.\n\n"
+                "**WHAT NOT TO PUT IN IT.** Your own summary, your inference, your "
+                "confidence, or a value you worked out. Those are not what was "
+                "said. If the content states a value, the honest route is to "
+                "capture the words here and propose the value separately, where you "
+                "must state the rule that produced it and a person decides. If it "
+                "states no value, a note is the whole of the correct outcome and "
+                "there is nothing further to do.\n\n"
+                "`run_id` is OPTIONAL and is never inferred. Omit it and the note "
+                "belongs to the record as a whole; that is the right answer when "
+                "you do not know which run the remark is about, EVEN IF the record "
+                "has exactly one run — 'the only run' is a guess about the science. "
+                "A run id this record does not have is refused.\n\n"
+                "`client_request_key` is REQUIRED HERE, and it is optional on the "
+                "HTTP API. That is deliberate: a person typing into the product can "
+                "see whether their note landed and an agent retrying a timed-out "
+                "call cannot, so exactly-once is made a property of the call rather "
+                "than of your care. Send the SAME key when you retry and you get "
+                "the SAME note back with `deduplicated: true` and nothing stored; "
+                "send a new key and you have captured a second, separate note. Use "
+                "a fresh key for genuinely new content and reuse one only for a "
+                "retry.\n\n"
+                "`if_match` is the RECORD's current `etag` from "
+                "`isaac_get_experiment`. Storing a note rewrites the record, so the "
+                "precondition is checked BEFORE the deduplication branch: a retry "
+                "carrying the etag you held before your first attempt is refused "
+                "`412`, and the remedy is to read the record again and retry with "
+                "the same `client_request_key`.\n\n"
+                "**READ `deduplicated` BEFORE YOU REPORT WHAT HAPPENED.** `false` "
+                "means this request stored the note in the result. `true` means a "
+                "note with your `client_request_key` was already on the record, so "
+                "nothing was stored and the EXISTING one is returned — its text, "
+                "its run and its review state may differ from what you just sent, "
+                "and a person may already have mapped, kept or dismissed it. Do not "
+                "describe a deduplicated result as words you just captured.\n\n"
+                "A record will not accept notes without limit. Two per-record "
+                "ceilings apply — a maximum number of notes and a maximum total "
+                "size — and both REFUSE rather than deleting anything to make room, "
+                "because an old note is somebody's verbatim words. A refusal names "
+                "the ceiling it hit; tell the scientist rather than retrying.\n\n"
+                "**ONLY A PERSON DECIDES WHAT A NOTE MEANS, AND THIS SERVER HAS NO "
+                "TOOL THAT DECIDES FOR THEM.** There is no tool here that maps a "
+                "note to a field, edits one, keeps one, dismisses one, deletes one, "
+                "or accepts anything — and none will be added. After capturing, "
+                "stop and tell the scientist what you stored.\n\n"
+                "Provenance: this API records the note as having arrived through "
+                "the agent interface. That names the CHANNEL and not a person — it "
+                "attributes the note to nobody, and you must not tell anyone a note "
+                "was captured in their name. You cannot set it; the server states "
+                "it."
+            ),
+            scope=Scope.PROPOSALS_WRITE,
+            operation_ids=("create_note",),
+            input_schema=_object_schema(
+                {
+                    "experiment_id": dict(_EXPERIMENT_ID),
+                    "if_match": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 256,
+                        "description": (
+                            "The RECORD's current ETag, exactly as isaac_get_experiment "
+                            "returned it. It must be a validator a read returned: `*` "
+                            "is refused, because it would apply this write whatever the "
+                            "record now says and overwrite a change made since your "
+                            "last read without reporting a conflict."
+                        ),
+                    },
+                    "text": {
+                        "type": "string",
+                        "minLength": 1,
+                        # DERIVED FROM THE ROUTE'S OWN BYTE CEILING, as an upper bound
+                        # only — see `policy.note_text_byte_ceiling`. A UTF-8 string of
+                        # n characters is at least n bytes, so text longer than this
+                        # cannot fit under the route's ceiling and refusing it here
+                        # refuses nothing the route would have stored. The exact check
+                        # stays at the route, where it can also catch a lone surrogate.
+                        "maxLength": note_text_byte_ceiling(),
+                        "description": (
+                            "Required. The content, verbatim. Stored exactly as sent — "
+                            "do not trim, normalise, summarise or paraphrase it, and "
+                            "do not shorten it to fit: over-long text is refused "
+                            "rather than truncated."
+                        ),
+                    },
+                    "client_request_key": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128,
+                        "description": (
+                            "Required here, though optional on the HTTP API. Retrying "
+                            "with the same key returns the SAME note and stores "
+                            "nothing; a new key captures a second, separate note."
+                        ),
+                    },
+                    "run_id": {
+                        **_RUN_ID,
+                        "description": (
+                            "Optional. The run this content is about. Omit it when you "
+                            "do not know, and the note belongs to the record as a "
+                            "whole; it is NEVER inferred from the only run that "
+                            "happens to exist."
+                        ),
+                    },
+                },
+                ["experiment_id", "if_match", "text", "client_request_key"],
+            ),
+            handler=_capture_note,
+            read_only=False,
+            # TRUE, AND EARNED RATHER THAN ASSERTED: `client_request_key` is REQUIRED
+            # by this tool's schema, so the same call twice returns the same note and
+            # stores one. `isaac_create_run` declares `False` for the opposite reason
+            # — it has no such key, so the same call twice adds two runs.
+            idempotent=True,
+        ),
         Tool(
             name="isaac_propose_field_value",
             title="Propose a value for a record field",

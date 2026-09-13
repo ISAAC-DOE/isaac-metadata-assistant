@@ -681,7 +681,29 @@ def test_every_operation_has_a_summary_that_is_not_the_function_name(client):
     # never repeats a refused value back to its caller.
     #
     # MEASURED from `create_app().openapi()`, not derived from the line above it.
-    assert checked == 77, f"expected 77 documented operations, found {checked}"
+    #
+    # ── 77 -> 78, 2026-09-13: `PATCH /api/experiments/{experiment_id}/folder` ───
+    # The Experiment Library's move operation. It writes ONE organizational path
+    # label and nothing else, and it is a SEPARATE operation from the rename
+    # deliberately: `RenameExperimentRequest`'s docstring makes "this operation
+    # writes the title and nothing else" a property of the contract, and the comment
+    # at :620 above quotes that sentence, so adding `folder` to that body would have
+    # falsified a committed claim to save a route.
+    #
+    # NO TABLE AND NO MIGRATION WAS ADDED — the second scope extension in this file's
+    # history that adds none. `folder` lives at `state["folder"]` in the experiment's
+    # own state document, beside `notes` and `proposals`, and `isaac_experiments`
+    # stores that whole document in one `jsonb` column, so `db_write.OWNED_TABLES` is
+    # unchanged and no operator action stands between this feature and working.
+    #
+    # WHAT IT IS NOT, because the absence is a decision rather than a gap: there is
+    # no create-folder operation (a path exists because an experiment names it), no
+    # delete-folder operation (it stops existing when the last member leaves), no
+    # folder-rename operation (that is N unsynchronised writes), and no folder ACL
+    # (that needs the trusted authentication boundary this deployment lacks).
+    #
+    # MEASURED from `create_app().openapi()`, not derived from the line above it.
+    assert checked == 78, f"expected 78 documented operations, found {checked}"
 
 
 def test_the_auto_summary_check_can_actually_fail(client):
@@ -895,6 +917,23 @@ EXPECTED_RESPONSE_CODES: dict[tuple[str, str], list[str]] = {
     # pin the contract was certifying one that omitted a status a client will see.
     ("/api/experiments/{experiment_id}/answers", "post"): ["200", "400", "401", "404", "409", "412", "422", "428", "503"],
     ("/api/experiments/{experiment_id}/artifacts", "get"): ["200", "401", "404", "422", "503"],
+    # THE FOLDER MOVE, and its nine codes are DELIBERATELY THE RENAME'S NINE. Both
+    # write one organizational label on one record under the same precondition, so a
+    # client that handles one handles the other; a tenth code here would mean this
+    # operation had acquired a failure mode a rename does not have, which would be
+    # worth noticing. The `409` is the worked-example refusal. The `422` carries the
+    # five typed folder refusals (`invalid_folder`, `invalid_folder_segment`,
+    # `folder_segment_too_long`, `folder_too_deep`, `folder_path_too_long`) as well
+    # as the parameter layer's own type rejection — including an ABSENT `folder` key,
+    # which is refused rather than read as either "leave it" or "unfile it".
+    #
+    # There is no code for "that folder does not exist", and there cannot be: a
+    # folder is a label this write creates by being made, not a container that has
+    # to be there first.
+    (
+        "/api/experiments/{experiment_id}/folder",
+        "patch",
+    ): ["200", "400", "401", "404", "409", "412", "422", "428", "503"],
     ("/api/experiments/{experiment_id}/assistant/query", "post"): ["200", "400", "401", "404", "422", "503"],
     ("/api/experiments/{experiment_id}/audit", "post"): ["200", "401", "404", "422", "503"],
     # THE CHANGE FEED, and its `422` is doing two jobs that its own description
@@ -1158,12 +1197,30 @@ EXPECTED_COMPONENT_SCHEMAS: dict[str, dict] = {
     },
     # `extra="forbid"` is what makes "no client-supplied record id" a property of
     # the contract rather than of the handler remembering not to read one, so the
-    # SHORTNESS of this property list is the assertion that matters: two fields, one
-    # required, and anything else is a 422.
+    # SHORTNESS of this property list is the assertion that matters: three fields,
+    # one required, and anything else is a 422.
+    #
+    # `folder` WAS ADDED WITH THE EXPERIMENT LIBRARY, and it is admitted here
+    # deliberately. It does not weaken the claim above: it is an ORGANIZATIONAL path
+    # label with `title`'s properties — no evidence, reaching no exported record and
+    # no sidecar — so the list is still free of every scientific field, which is the
+    # other property this model's docstring asserts. What it must never grow is a
+    # technique, a facility, a sample or an energy: those are evidence-bearing, and
+    # a create form has no evidence to attach to them.
     "CreateExperimentRequest": {
-        "properties": ["description", "title"],
+        "properties": ["description", "folder", "title"],
         "required": ["title"],
     },
+    # The folder move. ONE property, and — like the rename below — the shortness IS
+    # the assertion: `folder` and nothing else, so a body naming `title`,
+    # `description` or `rev` is a 422 rather than a partial write.
+    #
+    # IT IS `required` AND NULLABLE, which reads like a contradiction and is not.
+    # `null` and `""` both mean UNFILE; an ABSENT key would be ambiguous between
+    # "unfile it" and "leave it where it is", and guessing between those on a write
+    # is the kind of inference this project forbids. So the key must be present and
+    # its value may be `null`.
+    "MoveExperimentRequest": {"properties": ["folder"], "required": ["folder"]},
     # The rename. ONE property, and the shortness is again the assertion: `title`
     # and nothing else. `description` is deliberately absent — the create operation
     # accepts one and stores it at `source.description`, which

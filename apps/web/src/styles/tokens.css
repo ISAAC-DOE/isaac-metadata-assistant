@@ -319,3 +319,195 @@
   --shadow-emphasis: 0 8px 22px rgba(44, 106, 176, 0.08);
   --ring-active: 0 0 0 4px rgba(44, 106, 176, 0.15);
 }
+
+/*
+ * ══ UX-001 · THE FOUR AXES THIS FILE NEVER DECLARED ════════════════════════
+ *
+ * Before this block `tokens.css` declared 82 custom properties: 70 colour, 6
+ * radii, 4 shadow, 2 font-family — and ZERO font-size, font-weight, line-height
+ * or spacing. Colour is 99.3% tokenized with no phantom property live anywhere,
+ * which is disciplined work; type, weight, rhythm and spacing were simply never
+ * given anything to conform TO. The consequence, re-measured here over every
+ * `.css` file under `apps/web/src` with comments stripped (the command is in
+ * `__tests__/type-scale-and-spacing.test.ts`, which also ratchets these counts):
+ *
+ *     font-size      1 073 declarations   20 distinct values
+ *     font-weight      428 declarations    8 distinct (7 numeric + `inherit`)
+ *     line-height      423 declarations   16 distinct values
+ *     spacing        2 406 literals       32 distinct values
+ *
+ * On the record screen — the primary work surface — that renders as NINE font
+ * sizes spanning 10.5px–15px in 0.5px steps, with 90 of 95 text-bearing
+ * elements inside a 3px band. A 0.5px step is 4% of a 12px glyph. It is not a
+ * hierarchy level; it is noise, and it is why nothing on that screen reads as
+ * ranked.
+ *
+ * SO THE STEP RATIO IS THE DESIGN DECISION, and it is stated rather than
+ * inherited from a framework: **every adjacent rung differs by at least 2px AND
+ * at least 13%.** 13% is roughly four times the 4% the product currently
+ * spends a rung on, and 2px is the smallest difference that survives hinting at
+ * these sizes on a non-retina display. Nothing here is a "perfect fourth" or a
+ * 1.25 modular scale: a 1.25 ratio from a 13px base lands on 10.4 / 16.25 /
+ * 20.3px, none of which this product uses, and adopting it would have meant
+ * re-sizing every surface in a slice that is supposed to be establishing a
+ * system rather than restyling an app.
+ *
+ * ── THE BASE FONT SIZE STAYS AT 13px, AND THAT IS A DECISION ───────────────
+ *
+ * `styles/base.css` sets `body { font-size: 13px }` — 81% of the browser
+ * default. It is now `var(--font-size-body)` rather than a literal, so the base
+ * is a ONE-TOKEN edit for whoever takes that decision. This slice deliberately
+ * does not take it, for three reasons, the third of which is the binding one:
+ *
+ *   1. `base.css` gives `button`, `input`, `select` and `textarea`
+ *      `font-size: inherit`, so the base is the resolved size of every control
+ *      the app does not size explicitly. Moving it moves those, plus every
+ *      `em`-relative length that resolves against them.
+ *   2. The defect Part 1.5 of the UX plan measured is the ABSENCE OF RANGE
+ *      (nine sizes in a 3px band), not the value of the base. A scale layered
+ *      above 13px fixes the ranking; raising the base is an orthogonal density
+ *      decision that would still leave the app with 20 unranked sizes.
+ *   3. IT IS NOT VERIFIABLE FROM HERE. `e2e/a11y-baseline.ts` is keyed to
+ *      rendered geometry at 390px, 320px and 200% zoom, and this repository has
+ *      twice paid for a Linux-CI round-trip to re-transcribe it (119 cells on
+ *      2026-08-27 alone). A base change would move text metrics on every
+ *      surface at every viewport, and no slice that cannot run that suite may
+ *      claim the result is safe. Raising the base and raising the 11px floor are
+ *      ONE decision, taken together, with a CI round-trip budgeted for it.
+ *
+ * ── FONT SIZE — five rungs ──────────────────────────────────────────────────
+ *
+ * Chosen so that every rung is a value the product ALREADY renders, which is
+ * what makes this slice a zero-pixel change everywhere it migrates. The
+ * collapse column is the instruction to the migration slice; it is a mapping by
+ * ROLE, never arithmetic rounding, because the 12/12.5px band is the product's
+ * ambiguous middle and splits by what the text is for.
+ *
+ *   token                     value   step    collapses (declarations today)
+ *   --font-size-meta           11px     —     9.5 / 10 / 10.5 / 11 / 11.5   (503)
+ *   --font-size-body           13px   +18%    12 / 12.5 / 13 / 13.5         (502)
+ *   --font-size-heading-sm     15px   +15%    14 / 14.5 / 15 / 16            (49)
+ *   --font-size-heading-md     17px   +13%    17 / 19 / 20                    (7)
+ *   --font-size-heading-lg     22px   +29%    22                              (5)
+ *
+ * 11px IS A FLOOR, not merely the smallest rung: 100 declarations sit BELOW it
+ * today (9.5/10/10.5px) and the ratchet refuses any new one. Raising the floor
+ * further belongs with the base decision above, per reason 3.
+ *
+ * `--font-size-heading-md` is 17px and not the 18px an even ratio band would
+ * prefer, for exactly one reason: 17px is what the product renders at all four
+ * of its section-heading sites, so migrating them moves no pixel and needs no
+ * baseline round-trip. Regularising 17 → 18 is a legitimate later change and
+ * costs a CI round-trip; it is not worth spending one here.
+ *
+ * TWO DECLARATIONS ARE DELIBERATELY OFF-SCALE and are named rather than
+ * absorbed: `components/signals.css` renders `.verdict-word` at 27px and, when
+ * the verdict is FAIL, at 30px. That pair encodes a verdict distinction by SIZE
+ * over a 1.11 ratio — below this scale's own perceptibility bar, and arguably a
+ * device that should not exist — but collapsing them would delete a shipped
+ * distinction on the validation surface, which is not this slice's decision to
+ * take. They are enumerated in the ratchet as the only permitted exceptions.
+ *
+ * ── FONT WEIGHT — four rungs, and 550 / 620 / 650 ARE RETIRED ──────────────
+ *
+ * Measured: 600 (255), 500 (64), **650 (54)**, 700 (25), 400 (14), **550 (8)**,
+ * **620 (5)**, `inherit` (3). The three non-standard weights were checked
+ * against the shipped stack rather than preserved on sight, and the CSS Fonts 4
+ * weight-matching rule (§5.3: for a desired weight above 500, candidates >=
+ * target ascending, then < target descending) settles it:
+ *
+ *   platform / `system-ui` resolves to      550 ->   620 ->   650 ->
+ *   macOS, SF Pro (variable weight axis)    550      620      650
+ *   Windows 11, Segoe UI (400/600/700)      600      700      700
+ *   Linux CI, Cantarell/DejaVu (400/700)    700      700      700
+ *
+ * So all three render as their standard neighbour on two of three platforms,
+ * and are distinguishable ONLY on macOS with a variable SF Pro. A token that
+ * exists on one developer's laptop and nowhere else is not a hierarchy level.
+ * The four declared rungs are the four the stack can actually carry, and the
+ * migration target is 550 -> semibold, 620 -> bold, 650 -> bold, matching what
+ * a non-macOS reader already sees. That migration WILL look heavier on macOS at
+ * the 54 `650` sites, which is a visible change and is therefore NOT made here;
+ * the ratchet grandfathers the existing 67 declarations by count and refuses a
+ * FOURTH non-standard weight outright.
+ *
+ * (Worth recording because it reframes the whole axis: on Linux — the platform
+ * CI renders on — 400 and 500 both resolve to 400 and everything from 550 up
+ * resolves to 700, so the app's eight authored weights render as TWO. Weight is
+ * a weaker ranking device in this product than the declaration count suggests.)
+ *
+ * ── LINE HEIGHT — four rungs ────────────────────────────────────────────────
+ *
+ *   --line-height-tight      1.2    display and 22px headings
+ *   --line-height-snug      1.35    single-line labels, eyebrows, chips
+ *   --line-height-normal    1.55    running text (the `body` anchor)
+ *   --line-height-relaxed    1.7    long-form prose
+ *
+ * Steps of +0.15 / +0.20 / +0.15. The collapse: 1 / 1.1 / 1.15 / 1.2 / 1.25 ->
+ * tight; 1.3 / 1.35 / 1.4 -> snug; 1.45 / 1.5 / 1.55 / 1.6 -> normal (1.6 vs
+ * 1.55 is 3% — the same noise the font-size axis is fixing); 1.7 / 1.9 ->
+ * relaxed. `line-height: 0` and `line-height: 1` on an icon-only control are
+ * LAYOUT RESETS rather than typographic rhythm, are not part of this axis, and
+ * are exempt from the ratchet.
+ *
+ * ── SPACING — six rungs on a 4px grid, with one 2px half-step ───────────────
+ *
+ *   --space-2xs   2px     sub-grid: an optical nudge, a label/value pair
+ *   --space-xs    4px
+ *   --space-sm    8px
+ *   --space-md   12px
+ *   --space-lg   16px
+ *   --space-xl   24px
+ *
+ * Every step above the half-step is >= 4px. The collapse: 1/2/3 -> 2xs;
+ * 4/5 -> xs; 6/7/8/9 -> sm; 10/11/12/13/14 -> md; 15/16/17/18 -> lg;
+ * 20/22/23/24 -> xl.
+ *
+ * THE SCALE ENDS AT 24px ON EVIDENCE, not on taste. Of 2 406 spacing literals,
+ * exactly 11 (0.46%) exceed 24px — 26px x2, 28, 30, 32 x3, 34, 40 x2, 88 — and
+ * each is a one-off layout offset (a modal's top inset, an empty-state's inner
+ * gutter), not a rhythm anybody is composing with. A rung declared for eleven
+ * declarations would be a rung nobody could learn. Those values stay literals
+ * and the ratchet counts them as such.
+ *
+ * 1px is NOT `--space-2xs`'s job. 34 of the literals are 1px and nearly all are
+ * hairline rules or a border-collapse offset; border width is a fifth axis this
+ * slice does not open.
+ *
+ * ── WHAT THIS SLICE DID NOT DO ─────────────────────────────────────────────
+ *
+ * It did not migrate 1 073 font-size, 425 font-weight, 414 line-height and
+ * 2 406 spacing declarations. Every axis is anchored at real sites (listed in
+ * the ratchet test), the base is tokenized, and the ratchet stops the bleeding;
+ * the mass migration is a separate, reviewable slice per file. What must not
+ * happen is a half-migration that leaves two systems live with no guard, which
+ * is the state colour was rescued FROM.
+ */
+:root {
+  /* type scale — see the header for the step ratio and the collapse mapping */
+  --font-size-meta: 11px;
+  --font-size-body: 13px;
+  --font-size-heading-sm: 15px;
+  --font-size-heading-md: 17px;
+  --font-size-heading-lg: 22px;
+
+  /* weight — the four the shipped font stack can actually carry */
+  --font-weight-regular: 400;
+  --font-weight-medium: 500;
+  --font-weight-semibold: 600;
+  --font-weight-bold: 700;
+
+  /* vertical rhythm */
+  --line-height-tight: 1.2;
+  --line-height-snug: 1.35;
+  --line-height-normal: 1.55;
+  --line-height-relaxed: 1.7;
+
+  /* spacing — 4px grid, one 2px half-step, ends at 24px on the evidence above */
+  --space-2xs: 2px;
+  --space-xs: 4px;
+  --space-sm: 8px;
+  --space-md: 12px;
+  --space-lg: 16px;
+  --space-xl: 24px;
+}

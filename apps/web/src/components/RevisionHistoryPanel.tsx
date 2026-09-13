@@ -45,13 +45,20 @@ import {
   LIFECYCLE_UNKNOWN_NOTE,
   SIDE_NOW,
   SIDE_REVISION,
+  SUBMITTED_IMMUTABLE_NOTE,
+  SUBMITTED_REVISION_HEADING,
+  submittedRevisionText,
+  WORKING_CHANGES_HEADING,
   actorBasisNote,
   actorText,
   availabilityHeading,
   diffChangeWord,
   recordedChangeWord,
+  renameTrapNote,
   sideSentence,
   sideText,
+  workingState,
+  workingStateSentence,
 } from '../lib/revisionHistory';
 import type {
   ApiHistoryAvailability,
@@ -146,6 +153,7 @@ function RevisionHistoryBrowser({ experimentId }: { experimentId: string }) {
   return (
     <>
       <LifecycleCard lifecycle={history.lifecycle} />
+      <SubmittedVersusWorking history={history} />
       <DeploymentBlockNote lifecycle={history.lifecycle} />
       <AvailabilityBlock availability={history.availability} />
       {history.availability.state === 'available' && (
@@ -156,6 +164,87 @@ function RevisionHistoryBrowser({ experimentId }: { experimentId: string }) {
         />
       )}
     </>
+  );
+}
+
+/* ── REV-002 · the submitted snapshot versus the record now ───────────────── */
+
+/**
+ * *** THE TWO HALVES `DEC-21` REQUIRES, SIDE BY SIDE AND NAMED. ***
+ *
+ * The decision, quoted because the owner's correction is the whole point of this
+ * block: *"A submitted snapshot is IMMUTABLE. The Experiment workspace may
+ * accumulate 'Current Working Changes' after submission and later create the
+ * next immutable snapshot."* The planning run had proposed describing this as
+ * "keep editing, then submit again" and was told that understates the modelling
+ * requirement — the UI must show the two as two things.
+ *
+ * ── WHAT MAKES THIS HONEST RATHER THAN DECORATIVE ───────────────────────────
+ *
+ * Every word is derived from the response. The comparison is an exact match of
+ * two signatures the SERVER computed (`workingState`), not a diff this client
+ * re-derives; the scope of what a submission covers is the server's own
+ * `signature_scope` string rather than a list written here; and `unknown` is a
+ * first-class state, because on every deployment shipped today the history
+ * tables are unapplied and the server says so in terms.
+ *
+ * ── WHERE IT SITS, AND WHY THAT ORDER ───────────────────────────────────────
+ *
+ * Directly below the lifecycle chip and ABOVE the availability block. The chip
+ * answers "where does this record stand"; this answers "and is what I am looking
+ * at the thing that was submitted" — which is the question the chip invites and
+ * cannot itself answer. It is deliberately not inside `RevisionList`, because it
+ * must render in the `unknown` case too, when there is no list at all.
+ *
+ * It renders no control. Nothing here submits, and the immutability sentence
+ * describes what no route does rather than asserting a database guarantee.
+ */
+function SubmittedVersusWorking({ history }: { history: ApiRevisionHistory }) {
+  const state = workingState(history);
+  const headingId = useId();
+  const trap = renameTrapNote(state);
+  return (
+    <section className="revhist-card" aria-labelledby={headingId}>
+      <h3 className="revhist-card-title" id={headingId}>
+        {SUBMITTED_REVISION_HEADING} and {WORKING_CHANGES_HEADING}
+      </h3>
+      <dl className="revhist-working">
+        <div className="revhist-working-row">
+          <dt className="revhist-working-label">{SUBMITTED_REVISION_HEADING}</dt>
+          <dd className="revhist-working-value">
+            {/*
+              C-4 — `submittedRevisionText`, NOT `revisionNo === null ? 'None'`.
+              `revisionNo` is null for BOTH `unknown` and `never_submitted`, and on
+              every deployment shipped today the state is `unknown`, so this cell
+              read "None" about a history that had not been read. The helper carries
+              the reasoning; `None` survives for the one state where it is a fact.
+            */}
+            {submittedRevisionText(state)}
+            <span className="revhist-working-note">{SUBMITTED_IMMUTABLE_NOTE}</span>
+          </dd>
+        </div>
+        <div className="revhist-working-row">
+          <dt className="revhist-working-label">{WORKING_CHANGES_HEADING}</dt>
+          <dd className="revhist-working-value">
+            {workingStateSentence(state)}
+            {trap !== null && <span className="revhist-working-note">{trap}</span>}
+          </dd>
+        </div>
+        {/*
+          THE SCOPE, VERBATIM AND UNDER ITS OWN LABEL. It is an identifier a
+          curator maps by, not a word — the same reason `Experiment id` is not
+          humanized in the graph detail pane. Rendering it is what lets the
+          sentence above say "anything else outside the scope named below"
+          without this file asserting what that scope is.
+        */}
+        <div className="revhist-working-row">
+          <dt className="revhist-working-label">What a submission covers</dt>
+          <dd className="revhist-working-value">
+            <span className="mono revhist-working-scope">{history.signature_scope}</span>
+          </dd>
+        </div>
+      </dl>
+    </section>
   );
 }
 

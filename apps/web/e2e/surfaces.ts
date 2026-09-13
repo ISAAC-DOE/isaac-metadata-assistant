@@ -94,11 +94,34 @@ export const SURFACES: readonly Surface[] = [
     // structure.spec's own failure message instructs.
   },
   {
+    /*
+     * THE READY GATE IS THE PAGE `h1`'s WORKSPACE LINE, AND IT USED TO BE A RACE.
+     *
+     * It read `{ role: 'heading', name: 'Review Record' }`. That heading is
+     * `<h1 class="sr-only">` in `RecordWorkbench`'s `bundle.status !== 'data'`
+     * branch — i.e. it renders while the record is still LOADING and again when
+     * the API is down (`BackendDown`) — and until UX-002 the loaded branch
+     * rendered the same string, so the gate happened to resolve on both. UX-002
+     * replaced the loaded branch's heading with the visible
+     * `h1.record-page-title` (`<workspace>` / `<record title>`), which left
+     * `Review Record` as a heading that exists ONLY when the record has not
+     * resolved. A gate that resolves on the loading branch lets axe, the width
+     * sweep, the layout probes and the 200% pass measure a `role="status"`
+     * skeleton — or `BackendDown` — and report it as this surface.
+     *
+     * `Record Fields` is the `.eyebrow` inside that `h1`, so it cannot render
+     * before `bundle.status === 'data'`. It is the workspace name rather than
+     * the record title on purpose: this gate's job is "the loaded branch
+     * mounted", and pinning the seed's scientific title here would make every
+     * sweeping spec restate fixture content. That the `h1` names the RECORD is
+     * asserted where it belongs — `specs/workspace-scope.spec.ts` and
+     * `specs/record-identity.spec.ts`.
+     */
     id: 'record-detail',
     name: 'Record Detail (needs attention)',
     path: `/record/${SEED.partial}`,
     scope: 'example',
-    ready: { role: 'heading', name: 'Review Record' },
+    ready: { role: 'heading', name: /^Record Fields/ },
   },
   {
     /*
@@ -139,6 +162,39 @@ export const SURFACES: readonly Surface[] = [
     path: `/record/${SEED.partial}?view=capture`,
     scope: 'example',
     ready: { role: 'heading', name: /Transcript/i },
+  },
+  {
+    /*
+     * *** QA-018 CLOSED, 2026-09-13. THIS WORKSPACE HAD NEVER BEEN
+     * ACCESSIBILITY-SCANNED — before or after UX-002 put a visible `h1` on it. ***
+     *
+     * `record-graph` appeared nowhere in this file; its only two references in the
+     * whole of `e2e/` were inside `specs/visual-sweep.spec.ts`, which takes
+     * screenshots and asserts nothing about accessibility. So three of the record's
+     * four workspaces were axe- and narrow-width-measured and the fourth was
+     * screenshot-swept only — on what was, until `EVG-002`, the most control-dense
+     * surface on the record screen (34 buttons, 145 text elements).
+     *
+     * THE LEDGER SAID THIS WOULD MINT FRESH BASELINE CELLS ON BOTH PLATFORMS AND SO
+     * WAS "not a one-line change". It measured otherwise, and the measurement is why
+     * it could be closed here: the FIRST scan reported exactly two rules —
+     * `[serious] list` (1 node) and `[minor] aria-allowed-role` (3 nodes) — with ONE
+     * root cause, `role="note"` overriding the implicit `listitem` role on three
+     * `<li>`s. Removing it (see `ExperimentGraphPanel.tsx`) cleared both.
+     *
+     * **So this surface is added with NO baseline entry at all: it audits clean.**
+     * That is the outcome to preserve — a new cell here would be recorded debt, and
+     * there is none to record.
+     *
+     * It is still reached by ADDRESS only, which is deliberate (`EVG-002` removed
+     * the sidebar link) and is precisely why it must be scanned: a destination a
+     * scientist can still bookmark and open is a destination that has to be usable.
+     */
+    id: 'record-graph',
+    name: 'Record Detail — Graph',
+    path: `/record/${SEED.partial}?view=graph`,
+    scope: 'example',
+    ready: { role: 'heading', name: /Experiment Graph/i },
   },
   {
     id: 'guided-completion',

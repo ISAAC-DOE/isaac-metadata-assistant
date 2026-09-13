@@ -87,15 +87,30 @@ function routesFor(bundle: ExperimentGraphBundle) {
  * control being clicked moved: `role="tab"` + `aria-selected` became a real
  * `<Link>` with `aria-current="page"`.
  */
-const workspaceLink = (view: RenderResult, name: string) =>
-  view.getByRole('link', { name });
+/*
+ * ~~`workspaceLink`~~ — REMOVED, and recorded because a deleted helper reads as
+ * lost coverage. Its three call sites all asked whether the `Graph` sidebar
+ * link carried `aria-current`; that link no longer exists
+ * (`EVG-002`/`DEC-04`, 2026-09-13), and the replacements assert the stronger
+ * property — that no such link is rendered at all, and that none of the three
+ * surviving workspaces falsely claims to be the current page when the graph is
+ * open. `tsc -b` (`TS6133`) is what caught that the helper had gone unused.
+ */
 
-/** Open the record, switch to the Graph workspace, and wait for it to load. */
+/**
+ * Open the record ON the Graph workspace, and wait for it to load.
+ *
+ * ~~It used to render `/record/<id>` and CLICK the sidebar's `Graph` link.~~
+ * The Graph left the record's workspace list on 2026-09-13 (`EVG-002`/`DEC-04`);
+ * `?view=graph` is unchanged and still opens it, which is `DEC-11` step 6 and is
+ * what every one of this file's 100-plus assertions actually needs. The one
+ * property the click was carrying — that the graph is NOT fetched on page load —
+ * is asserted separately and directly by the first test below, so nothing is
+ * lost by opening on the address instead.
+ */
 async function openGraph(bundle: ExperimentGraphBundle = experimentGraphBundle()) {
   stubFetchRoutes(routesFor(bundle));
-  const view = renderAt(`/record/${GRAPH_EXP_ID}`);
-  const tab = await view.findByRole('link', { name: 'Graph' });
-  fireEvent.click(tab);
+  const view = renderAt(`/record/${GRAPH_EXP_ID}?view=graph`);
   await view.findByRole('heading', { name: 'Experiment Graph' });
   return view;
 }
@@ -114,7 +129,14 @@ describe('the graph lives inside the record, and is linkable', () => {
 
     const fieldsTab = await view.findByRole('link', { name: 'Record Fields' });
     expect(fieldsTab).toHaveAttribute('aria-current', 'page');
-    expect(workspaceLink(view, 'Graph')).not.toHaveAttribute('aria-current');
+    /*
+     * ~~expect(workspaceLink(view, 'Graph')).not.toHaveAttribute('aria-current')~~
+     * — the Graph has no sidebar link to carry the attribute since 2026-09-13
+     * (`EVG-002`/`DEC-04`). The stronger replacement asserts the ABSENCE, which
+     * is the actual current contract and which the old assertion could not
+     * distinguish from "present but not current".
+     */
+    expect(view.queryByRole('link', { name: 'Graph' })).toBeNull();
     // The graph has NOT been fetched yet: it is opt-in, not a page-load cost.
     expect(view.queryByRole('heading', { name: 'Experiment Graph' })).toBeNull();
   });
@@ -123,7 +145,17 @@ describe('the graph lives inside the record, and is linkable', () => {
     stubFetchRoutes(routesFor(experimentGraphBundle()));
     const view = renderAt(`/record/${GRAPH_EXP_ID}?view=graph`);
     expect(await view.findByRole('heading', { name: 'Experiment Graph' })).toBeInTheDocument();
-    expect(workspaceLink(view, 'Graph')).toHaveAttribute('aria-current', 'page');
+    /*
+     * ~~expect(workspaceLink(view, 'Graph')).toHaveAttribute('aria-current', 'page')~~
+     * — there is no such link to mark. The deep link still RESOLVES to the
+     * graph, which is the whole point of this test and of `DEC-11` step 6; what
+     * it can no longer do is mark itself in a list it is not in. The three
+     * remaining workspaces must also not falsely claim to be the current page.
+     */
+    expect(view.queryByRole('link', { name: 'Graph' })).toBeNull();
+    for (const name of ['Record Fields', 'Runs', 'Capture & Proposals']) {
+      expect(view.getByRole('link', { name })).not.toHaveAttribute('aria-current');
+    }
   });
 
   it('switching the view writes it to the URL, so the graph can be shared', async () => {
@@ -266,7 +298,56 @@ describe('the graph draws an experiment, and explains itself', () => {
     expect(
       within(detail).getByText(/Defined by schema field sample\.material\.formula/),
     ).toBeInTheDocument();
-    expect(within(detail).getByText(/one of the stable draft sections/)).toBeInTheDocument();
+    /*
+     * ~~/one of the stable draft sections/~~ — the sentence was rewritten by
+     * UX-014 (2026-09-13) because the version this matched named a PYTHON
+     * FUNCTION to a scientist: "(serialize.draft_to_groups groups official
+     * paths by their top-level segment)". Measured rendering eight times on one
+     * screen, in the prose AND in an edge tooltip.
+     *
+     * The assertion is STRENGTHENED rather than just re-pointed: it now also
+     * pins the absence of the module name, so the jargon cannot come back
+     * without failing here. The mechanism is still reachable — it stayed in
+     * `NODE_PRODUCERS.section`, whose documented job is to answer "where did
+     * this node come from?" verbatim — and the producer assertion in the test
+     * above this one covers that side.
+     */
+    /*
+     * ~~/one of the eight stable sections/~~ — the COUNT left this sentence on
+     * 2026-09-13. `serialize._GROUP_TITLES` declares eight, but `_OTHER`
+     * ("Other") is a producible NINTH (`serialize.py:248` falls back to it for
+     * any unrecognised top-level segment), so "eight" was wrong — found by
+     * independent review.
+     *
+     * The assertion now pins the MECHANISM, which is what a reader needs and
+     * what cannot go stale: grouping by the top-level segment of the official
+     * field path. A number here would be a transcription of a dict this file
+     * does not import — the same class of stale counter this session has now
+     * corrected three times.
+     */
+    expect(
+      within(detail).getByText(/one of the stable sections a draft is grouped into/),
+    ).toBeInTheDocument();
+    // And no count is asserted anywhere in the prose, so re-adding one fails here.
+    for (const why of detail.querySelectorAll('.expgraph-conn-why')) {
+      expect(why.textContent ?? '').not.toMatch(/(eight|nine|8|9) stable sections/);
+    }
+    /*
+     * SCOPED TO THE "WHY" PROSE, and the first version of this line was not —
+     * which is worth recording because it would have forced the WRONG fix.
+     *
+     * `queryByText(/draft_to_groups/)` over the whole detail pane FAILED,
+     * matching `.expgraph-detail-producer-value`: "serialize.draft_to_groups →
+     * _GROUP_TITLES (8 stable sections + Other)". That is the line the module
+     * name was deliberately RELOCATED to, so a guard that banned it there would
+     * have deleted the provenance UX-014 explicitly says never to remove. The
+     * ban belongs on the explanation a reader is offered, not on the mechanism
+     * a curator can look up.
+     */
+    for (const why of detail.querySelectorAll('.expgraph-conn-why')) {
+      expect(why.textContent ?? '').not.toMatch(/draft_to_groups/);
+    }
+    expect(detail.querySelectorAll('.expgraph-conn-why').length).toBeGreaterThan(0);
   });
 
   it('names the evidence source, the file and the locator — never a bare code', async () => {

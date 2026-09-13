@@ -62,13 +62,90 @@ const experiments = SURFACES.find((s) => s.id === 'experiments')!;
  * were DELETED from `a11y-baseline.ts`. Each proof's own message said what to do —
  * "this proof needs colour-contrast to be baselined here" — and this is doing it.
  *
- * `experiments-example` is the same screen with the worked-example records in it, which
- * keeps the proofs' intent intact; it holds 3 nodes at every viewport. It is one of the
- * ten surfaces that survived, and if a future fix empties it too, the same message will
- * fire and the same substitution is the answer. `experiments` stays the fixture for the
- * layout, focus and never-recorded-rule proofs, none of which needs a non-zero count.
+ * ~~`experiments-example` is the same screen with the worked-example records in it …
+ * it holds 3 nodes at every viewport.~~ — **MOVED AGAIN, 2026-09-13, and this is the
+ * SECOND time this constant has migrated for the reason it predicted.** The note above
+ * says "if a future fix empties it too, the same message will fire and the same
+ * substitution is the answer". A future fix did not empty it; it did something the
+ * note did not anticipate — it made the cell a **PLATFORM SPLIT**.
+ *
+ * ── WHAT HAPPENED, AND WHY A SPLIT BREAKS THE FIXTURE SPECIFICALLY ──────────
+ *
+ * The Experiment Library added three spans to the queue row. On **linux** those
+ * three FAILED contrast (3 -> 6, caught by CI); on **darwin** they PASSED (3 -> 3).
+ * The fix raised the dimmed row's text a tier, and darwin then fell to 2 while
+ * linux is still to be measured — so `experiments-example` is now
+ * `{ darwin: 2, linux: 3 }`.
+ *
+ * Two of the proofs below **require a SCALAR** and said so in their own failure
+ * messages, which is how this was found rather than guessed:
+ *
+ *   · the platform-resolution proof injects a `{ thisPlatform: n, other: n + 1 }`
+ *     pair built from the cell's own measured `n` — it cannot build one from a cell
+ *     that is already a pair. Its message: *"this proof needs
+ *     experiments-example@desktop-1280x800 to be a recorded SCALAR to build a split
+ *     from; it reads {"darwin":2,"linux":3}."*
+ *   · the tampering proof states the requirement directly: the fixture must have
+ *     "the SAME count on both platforms — that is what makes it a clean tampering
+ *     fixture".
+ *
+ * ── AND THE NEW-FOREGROUND PROOF NEEDED A BIGGER SURFACE, NOT JUST A SCALAR ──
+ *
+ * It recolours a node that ALREADY fails and asserts the count is unmoved. On a
+ * 2-node surface it instead returned **`improved`** — the audit short-circuits on a
+ * count change and never reaches the `foregrounds` check (a `continue` right after
+ * the `IMPROVED` push), so one node's fate dominated the whole proof. A surface with
+ * many failing nodes makes the injection's effect on the count negligible, which is
+ * what the proof assumes.
+ *
+ * ~~`record-detail` is the substitution: 25 nodes, scalar at every viewport …~~ —
+ * **TRIED AND REVERTED THE SAME DAY, MEASURED.** `record-detail` is baselined at 25
+ * and reported **ZERO** in this fixture: `FIXED? record-detail @ desktop-1280x800 …
+ * is baselined at 25 node(s) here on darwin but did not fire at all`. It is
+ * `scope: 'example'` at `recordSub(SEED.partial)` — a specific seeded RECORD — and
+ * this file's fixture does not bring that record's failing content up, whereas the
+ * same surface reports 25 under `a11y-axe.spec.ts`. **A surface's baselined count is
+ * a property of the SUITE THAT MEASURED IT, not of the surface**, and borrowing a
+ * cell across suites is how you get a proof that audits "clean" against a number
+ * nothing produced. Recorded so the third migration does not repeat the second.
+ *
+ * So the surface stays `experiments-example`, which does open correctly here, and the
+ * two genuine fixture requirements the split broke are fixed where they belong —
+ * at the two proofs that have them, not by moving everyone. `experiments` stays the
+ * fixture for the layout, focus and never-recorded-rule proofs, none of which needs a
+ * non-zero count.
+ *
+ * **ONE CLAIM BELOW IS CORRECTED BY THIS, and it was already false before today:**
+ * the tampering proof says "since 2026-09-01 EVERY cell in the file" has the same
+ * count on both platforms. `settings-explorer@mobile-375x812` has been
+ * `{ darwin: 20, linux: 21 }` since well before this change, so that sentence was
+ * stale independently of it.
  */
 const contrastBaselined = SURFACES.find((s) => s.id === 'experiments-example')!;
+
+/**
+ * THE SURFACE THE **NEW-FOREGROUND** PROOF USES, and why it needs its own.
+ *
+ * That proof recolours a node which already fails and asserts the node COUNT is
+ * unmoved — so it needs a failing node that is **not under an ancestor
+ * `opacity`**. A translucent victim makes it vacuous: forcing an opaque
+ * `background-color` on one stops axe resolving the composite, the node leaves
+ * `violations`, the count MOVES, and `auditScan` short-circuits on the count
+ * change before it ever reaches the `foregrounds` check.
+ *
+ * **MEASURED 2026-09-13: `experiments-example` has no such node left.** After the
+ * Experiment Library contrast fix its two remaining failures are BOTH inside
+ * `.exp-row.done` (`opacity: 0.82`), and the victim filter says so out loud rather
+ * than picking one and proving nothing — which is how this was found.
+ *
+ * `settings-explorer` is the substitution: `scope: 'ordinary'` (so it renders in
+ * this fixture, unlike the `record-detail` attempt — see the note on
+ * `contrastBaselined`), and **17 baselined nodes at desktop / 20 at mobile**,
+ * which both makes an opacity-free victim likely and makes any single node's fate
+ * negligible to the count. A SPLIT is fine here: only the platform-resolution
+ * proof needs a scalar, and `expectedNodeCount` resolves a pair per platform.
+ */
+const newForegroundSurface = SURFACES.find((s) => s.id === 'settings-explorer')!;
 
 test('@interaction the horizontal-scroll probe detects an injected overflow', async ({ page, app }) => {
   await app.open(experiments);
@@ -312,19 +389,59 @@ test('@interaction the a11y baseline reports a NEW foreground colour at an uncha
   page,
   app,
 }, testInfo) => {
-  await app.open(contrastBaselined);
+  await app.open(newForegroundSurface);
   const project = testInfo.project.name;
 
   const clean = await scan(page);
   expect(
-    auditScan(clean, contrastBaselined.id, project),
+    auditScan(clean, newForegroundSurface.id, project),
     'the unmodified surface must audit clean'
   ).toEqual([]);
 
-  // Recolour an element that ALREADY fails contrast to a colour the baseline
-  // has never recorded. The node count is unmoved; only the token changes.
-  const victim = clean.violations.find((v) => v.id === 'color-contrast')?.nodes[0]?.target[0];
-  expect(typeof victim, 'expected at least one baselined contrast node to recolour').toBe('string');
+  /*
+   * Recolour an element that ALREADY fails contrast to a colour the baseline has
+   * never recorded. The node count must be UNMOVED; only the token changes.
+   *
+   * *** THE VICTIM MUST NOT SIT UNDER AN ANCESTOR `opacity`, and that is not a
+   * detail — it decides whether this proof proves anything. *** It used to take
+   * `nodes[0]` unconditionally. On 2026-09-13, after a contrast fix left this
+   * surface with two failing nodes and `nodes[0]` among those inside
+   * `.exp-row.done` (`opacity: 0.82`), forcing an opaque `background-color` on it
+   * made axe unable to resolve the composite: the node left `violations`
+   * altogether, the COUNT fell, and `auditScan` short-circuited on the count
+   * change — there is a `continue` right after the `IMPROVED` push — so it never
+   * reached the `foregrounds` check and returned `["improved"]` instead of
+   * `new-foreground`.
+   *
+   * That is the same vacuity mechanism `CLAUDE.md` §11 records for this check
+   * ("`auditScan` reaches the `foregrounds` check only when a count already
+   * MATCHES"), reached from the other side: not a check that never fired, but a
+   * fixture that stopped being able to make it fire. Filtering the victim keeps
+   * the recolour a PURE colour change, which is what the proof claims to inject.
+   */
+  const contrastNodes = clean.violations.find((v) => v.id === 'color-contrast')?.nodes ?? [];
+  const victim = await page.evaluate((selectors) => {
+    for (const sel of selectors) {
+      const el = document.querySelector<HTMLElement>(sel);
+      if (!el) continue;
+      let node: HTMLElement | null = el;
+      let translucent = false;
+      while (node && node !== document.documentElement) {
+        if (Number(getComputedStyle(node).opacity) < 1) {
+          translucent = true;
+          break;
+        }
+        node = node.parentElement;
+      }
+      if (!translucent) return sel;
+    }
+    return null;
+  }, contrastNodes.map((n) => String(n.target[0])));
+  expect(
+    typeof victim,
+    'expected at least one baselined contrast node that is NOT under an ancestor ' +
+      'opacity — see the note above for why a translucent victim makes this proof vacuous'
+  ).toBe('string');
   await page.evaluate((sel) => {
     const el = document.querySelector<HTMLElement>(sel);
     if (!el) throw new Error(`self-check target vanished: ${sel}`);
@@ -332,7 +449,7 @@ test('@interaction the a11y baseline reports a NEW foreground colour at an uncha
     el.style.setProperty('background-color', '#ffffff', 'important');
   }, victim as string);
 
-  const failures = auditScan(await scan(page), contrastBaselined.id, project);
+  const failures = auditScan(await scan(page), newForegroundSurface.id, project);
   const contrast = failures.filter((f) => f.rule === 'color-contrast');
   expect(
     contrast.map((f) => f.kind),
@@ -412,9 +529,34 @@ test('@interaction platform resolution is this machine\'s, is exact, and refuses
   //    asserted afterwards on BOTH columns.
   const platform = currentPlatform();
   const other = BASELINE_PLATFORMS.find((p) => p !== platform)!;
+  /*
+   * *** THE CELL THIS PROOF INJECTS A SPLIT INTO IS NOT `contrastBaselined`, AND
+   * SINCE 2026-09-13 IT CANNOT BE. ***
+   *
+   * This proof builds a synthetic `{ thisPlatform: n, otherPlatform: n + 1 }` pair
+   * out of a cell's OWN measured `n`, to prove platform resolution reads this
+   * machine's column exactly. **It therefore requires a SCALAR** — you cannot
+   * inject a split into a cell that is already one — and its own failure message
+   * says so.
+   *
+   * `experiments-example@*` became `{ darwin: 2, linux: 3 }` on 2026-09-13, so it
+   * stopped being usable HERE while remaining the right surface to OPEN (its
+   * baselined content renders correctly in this fixture, which `record-detail`'s
+   * did not). Those are two different requirements and they are now met
+   * separately: the SURFACE is `contrastBaselined`, the CELL is this one.
+   *
+   * `record-detail@desktop-1280x800` is chosen as the cell because it is a scalar
+   * (25) — and note it is used ONLY as a map key here. Nothing opens it, nothing
+   * scans it, and the earlier failed migration is exactly why that distinction is
+   * spelled out: its 25 is a number `a11y-axe.spec.ts` produced, and borrowing it
+   * as a page in THIS fixture measured zero.
+   *
+   * If this cell ever becomes a split too, the message below fires and any other
+   * scalar `color-contrast` cell is the answer.
+   */
   const differing = {
     rule: 'color-contrast',
-    surface: contrastBaselined.id,
+    surface: 'record-detail',
     project: 'desktop-1280x800',
   } as const;
   const probeEntry = baselineEntryFor(differing.rule)!;
@@ -476,9 +618,14 @@ test('@interaction tampering with THIS platform\'s count fails the audit; tamper
   const other = BASELINE_PLATFORMS.find((p) => p !== platform)!;
 
   // Repeated from the test above on purpose. `contrastBaselined` has the SAME count
-  // on both platforms — that is what makes it a clean tampering fixture, and since
-  // 2026-09-01 EVERY cell in the file does, which is why it moved off `experiments`
-  // for the reason given at that constant — but
+  // on both platforms — that is what makes it a clean tampering fixture, and it is
+  // why the constant moved to `record-detail` on 2026-09-13 (see that constant).
+  // ~~since 2026-09-01 EVERY cell in the file does~~ — **FALSE, and it was already
+  // false when written:** `settings-explorer@mobile-375x812` is
+  // `{ darwin: 20, linux: 21 }` and predates that date, and
+  // `experiments-example@*` became a split on 2026-09-13. The requirement is a
+  // property of THIS FIXTURE, not of the file — which is the whole reason the
+  // constant has to be chosen rather than assumed — but
   // it also means everything below would pass unchanged if resolution were
   // hard-wired to the wrong column. Verified by sabotage: replacing
   // `resolvePlatform(process.platform)` with `resolvePlatform('linux')` left

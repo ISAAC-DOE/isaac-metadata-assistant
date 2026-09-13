@@ -447,7 +447,7 @@
   font-family: var(--font-mono);
   font-size: 11.5px;
   color: var(--text-secondary);
-  line-height: 1.7;
+  line-height: var(--line-height-relaxed);
 }
 .sidecar-obj .k { color: var(--src-derivation); }
 .sidecar-obj .s { color: var(--pass-text-soft); }

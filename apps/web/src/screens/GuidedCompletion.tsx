@@ -809,8 +809,41 @@ function LoadedCompletion({
        * THIS component's local state (`pending` comes from the answer responses),
        * so that workflow object can be a revision behind the sentence it would be
        * justifying. The honest claim from local state alone is that no confirmation
-       * questions remain, plus a statement of what decides export — which is what
-       * the body copy of the panel below has always said.
+       * questions remain, plus a statement of what decides export.
+       *
+       * I-2 — AND WHAT THAT STATEMENT SAID WAS FALSE, IN BOTH PLACES, INCLUDING
+       * THIS COMMENT. The note read "The official ISAAC schema check runs next and
+       * decides export." and the sentence above used to end "— which is what the
+       * body copy of the panel below has always said", vouching for a sibling that
+       * carried the SAME false claim (`:1234-1236`, corrected in the same change).
+       * That is the shape `CLAUDE.md` §11 records for the 2026-09-10 `routes.py`
+       * block: a slice announces the last remaining instance while an unstruck
+       * paragraph of its own block is a second one.
+       *
+       * RE-DERIVED FROM `src/isaac_records/export.py`, not from any comment about
+       * it: `export_draft` has THREE refusal returns — the no-guessing draft report
+       * at `:305`, `check_exactness` on the assembled record at `:343`, and
+       * `validate_official` at `:347` — and exactly ONE success return at `:350`.
+       * So the schema decides neither the whole verdict nor the FIRST of it, and
+       * "runs next" was wrong about the order too: exactness runs BEFORE the
+       * official validator. `screens/ExportReadiness.tsx:789-791` already said so
+       * in committed prose ("it clears THREE gates, not two"), and
+       * `lib/officialAttribution.ts:164` calls them "ISAAC's two gates" — ISAAC's
+       * OWN — beside the upstream schema.
+       *
+       * THAT CITATION USED TO READ `:11,164` AND "the first two", and both halves
+       * were wrong. `:11` is item **3** of that module's own three-item numbering
+       * of finding PRODUCERS (`:9` the vendored official schema, `:10` the
+       * no-guessing draft validator, `:11` the anchored-pattern exactness gate) and
+       * states no count at all; only `:164` does. And the pair is the LAST two,
+       * paired at `:13` ("`export.py` folds (2) and (3) together") — item 1 is the
+       * upstream schema, which is the one that is NOT ISAAC's. The substantive
+       * point is unchanged: two screens shipped two different counts of this
+       * product's own export gates.
+       *
+       * THE LENGTH BUDGET BELOW IS UNCHANGED AND WAS RESPECTED: 53 characters
+       * against the 61 of the string it replaces (measured), so the 640px /
+       * 200%-zoom wrap this block already documents cannot return.
        *
        * The dot is `progress`, not `ready`: `.dot-ready` is `var(--pass-solid)`,
        * reserved for the validation verdict (see `StatusBar`'s `phaseDot` type).
@@ -823,7 +856,7 @@ function LoadedCompletion({
       <StatusBar
         phase="All blockers resolved"
         phaseDot="progress"
-        note="The official ISAAC schema check runs next and decides export."
+        note="Three gates decide export; the schema is one of them."
       />
     ) : (
       // R1b — the note used to read "Export unlocks automatically once every field
@@ -1195,10 +1228,17 @@ function LoadedCompletion({
     </div>
   );
 
-  // Finished: 0 remaining -> the official schema check is what remains (route to
-  // S6). Also covers the "0 blockers on arrival" case. Deliberately no longer
-  // described as "-> ready to export": `pending_count == 0` is not export
-  // readiness (see the F4 note on `statusBar` above).
+  // Finished: 0 remaining -> the export gate is what remains (route to S6). Also
+  // covers the "0 blockers on arrival" case. Deliberately no longer described as
+  // "-> ready to export": `pending_count == 0` is not export readiness (see the F4
+  // note on `statusBar` above).
+  //
+  // I-2 — "the official schema check is what remains" was the third instance of
+  // the same false claim in this file, and it was in a COMMENT, which is how the
+  // other two survived a sweep: the rendered string at `:1235` and the status-bar
+  // note both named the official schema as what decides export, and this line
+  // vouched for them. `export_draft` runs THREE gates (`export.py:305`, `:343`,
+  // `:347`); the schema is the LAST of them, not the only one and not the next one.
   if (remaining === 0) {
     return shell(
       <>
@@ -1231,9 +1271,18 @@ function LoadedCompletion({
                 a readiness claim rather than a place (see `lib/labels.ts`). Left as
                 literals they would have gone on naming a screen that no longer
                 calls itself that, one navigation away. */}
+            {/* I-2 — the second half read "The official schema check runs next, on
+                the X screen." FALSE twice over: `export_draft` refuses on the
+                no-guessing draft report (`export.py:305`) and on `check_exactness`
+                (`:343`) BEFORE `validate_official` is reached (`:347`), so the schema
+                is neither the only gate nor the next one. Re-derived from
+                `export.py`, and consistent with `ExportReadiness.tsx:789-791`'s
+                committed "it clears THREE gates, not two". The destination is still
+                named by `LABELS.screenExport` rather than a literal, for the reason
+                below. */}
             <p className="completion-done-text">
-              Every blocker the system refused to guess is now confirmed or resolved. The official
-              schema check runs next, on the {LABELS.screenExport} screen.
+              Every blocker the system refused to guess is now confirmed or resolved. Three
+              gates decide export, and they run on the {LABELS.screenExport} screen.
             </p>
           </div>
         </div>
@@ -1245,12 +1294,38 @@ function LoadedCompletion({
           >
             Go to {LABELS.screenExport} →
           </button>
+          {/*
+            THE BUTTON NAMES ITS DESTINATION AS THE DESTINATION NAMES ITSELF.
+            This read "← Back to Review Record", and `LABELS.screenReview`
+            ('Review Record') no longer reaches a LOADED record screen at all:
+            measured, it survives at exactly two sites, `RecordWorkbench.tsx:401`
+            and `:405`, and BOTH are inside the `bundle.status !== 'data'` branch.
+            On a loaded record the top bar shows the record's own title and the
+            `h1` reads `<workspace> / <title>` — so a scientist told "Back to
+            Review Record" landed on a page whose every visible name was
+            different. `ROUTES.record(id)` resolves to `?view=fields`, and that
+            workspace's own name is `LABELS.workspaceFields` — the string the nav
+            item and the `h1`'s eyebrow both already read.
+
+            REUSED, NOT AUTHORED. `CLAUDE.md` §11 records UX-004 deleting a whole
+            parallel five-word workflow vocabulary that existed only in Help, so
+            the last thing this button should do is coin a sixth name for a screen
+            that already has one.
+
+            `LABELS.screenReview` IS DELIBERATELY KEPT, and the code says why
+            rather than this comment guessing: `RecordWorkbench.tsx:870-871`
+            records that the loading branch keeps the `sr-only` form "because with
+            no bundle there is no record title to name". A loading screen needs a
+            stable name and has nothing else to use. What a future reader must NOT
+            do is treat it as the loaded screen's name — it is the name of the
+            screen that has not loaded yet.
+          */}
           <button
             type="button"
             className="btn btn-secondary"
             onClick={() => navigate(ROUTES.record(id))}
           >
-            ← Back to Review Record
+            ← Back to {LABELS.workspaceFields}
           </button>
         </div>
       </>,
@@ -1571,12 +1646,16 @@ function LoadedCompletion({
       )}
 
       <div className="completion-actions" style={{ marginTop: 18 }}>
+        {/* Second site, same destination, same reasoning — see the long note on
+            the sibling button above. Both are changed in one edit on purpose: a
+            screen with two Back buttons naming the same destination differently
+            is the drift this slice exists to clear. */}
         <button
           type="button"
           className="btn btn-secondary"
           onClick={() => navigate(ROUTES.record(id))}
         >
-          ← Back to Review Record
+          ← Back to {LABELS.workspaceFields}
         </button>
       </div>
     </>,

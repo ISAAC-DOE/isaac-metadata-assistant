@@ -591,11 +591,52 @@ Current state:
       `--text-tertiary` contrast debt, is untouched and is a palette decision; and the darwin
       half of those 119 cells was **reasoned rather than measured** until a local macOS run on
       2026-08-27 confirmed all 119 and corrected 19 other cells.
-    - **backend-sourced jargon on product screens — UNCERTAIN, and the named exemplar is wrong.**
+    - ~~**backend-sourced jargon on product screens — UNCERTAIN, and the named exemplar is wrong.**
       `MANAGED_SOURCE_DESCRIPTION` reaches **no** frontend file: `rg "Synthetic XANES campaign"
       apps/web/` returns **0** hits. So the example this item rested on no longer supports it.
       Whether other backend jargon reaches a screen is UNMEASURED. Do not treat the item as
-      closed, and do not treat the old example as evidence.
+      closed, and do not treat the old example as evidence.~~ — **MEASURED 2026-09-13 AND THE ITEM
+      IS RESOLVED AS *CONFIRMED PRESENT*.** Both halves of the old entry were right and are kept:
+      `MANAGED_SOURCE_DESCRIPTION` really does reach no frontend file, and the class really was
+      unmeasured. **It is measured now, and a source sweep could never have settled it** — three
+      of the four exemplars appear nowhere in `apps/web/src` except fixtures, because they arrive
+      from the server as **data** and are rendered verbatim. Measured instead in a real Chromium
+      against a locally-served build (vite + uvicorn, synthetic-only, fresh `ISAAC_UI_WORKSPACE`),
+      on a record created through `POST /api/experiments`, by walking every visible text node of
+      all four record workspaces for snake_case of 2+ segments or a dotted path:
+      **`fields`** → `qc_status`, `reduced_spectrum`, `required_for_evidence_record`;
+      **`runs`** → none; **`capture`** → `isaac_propose_field_value`;
+      **`graph`** → `needs_attention`, `serialize.draft_to_groups` (a Python function named to a
+      scientist, rendering **eight times on one screen**).
+      **Two fixed** in `7da7271c` — `needs_attention` now reads "Needs Attention" through a label
+      **derived from** the queue's own two existing maps (no third vocabulary), and the graph's
+      "why" prose explains the grouping in English while `NODE_PRODUCERS.section` keeps the module
+      name, because `UX-014`'s rule is that the path is never removed.
+      **Three deliberately not fixed, and named rather than implied:** the `fields` trio are the
+      server's `locator` on a "needs you" question, rendered beside an already-correct human label
+      — ~~server-supplied **identifiers**, which that same rule protects, so whether they belong
+      under progressive disclosure is placement rather than jargon~~ — **MY EXEMPTION WAS WRONG,
+      corrected 2026-09-13 after an independent review challenged it and I measured the trio.**
+      They are **`blocker` keys** minted in `experiment_repository.py:769,778,786`
+      (`"blocker": "reduced_spectrum"`, `"qc_status"`, `"required_for_evidence_record"`), and
+      `grep -rao` over `schema/` and `vocabulary/` returns **0 hits for all three**. So they are
+      **not schema paths** — and `UX-014`'s rule protects a *schema path*, on the stated ground
+      that "it is how a curator maps a field". A key that appears nowhere in the schema maps
+      nothing; the rule I cited does not reach them, and the exemption rested on that citation.
+      **The item is therefore STILL OPEN as jargon, not exempt**, and the honest framing is that
+      three internal blocker identifiers are rendered to a scientist beside an already-correct
+      human label. The fix is a human wording for each blocker key — which is a copy decision
+      with a real constraint (the keys also appear in the Assistant's own sentences, e.g.
+      `routes.py:22778`'s *"3 fields still need you: reduced_spectrum, qc_status,
+      required_for_evidence_record"*), so it needs its own slice rather than a rename in one
+      place; `isaac_propose_field_value`
+      names a real MCP tool inside an honest explanation of how a proposal arrives, and editing it
+      touches §15's decision about what a product screen may say about the agent seam; and the
+      `NO_LINKS` / `NO_MEASUREMENT_SERIES` advisory codes each already carry their plain-English
+      meaning beside them.
+      **One exemplar of the original item DID NOT REPRODUCE:** "Environment & Context context".
+      `Environment & Context` renders as a section label, correctly, with no duplicated suffix. Do
+      not go looking for it.
   - **HOSTED QA PENDING (Krish)** for every image from this phase. `/krish` returns `302` here.
     Manual sequence: `docs/krish-manual-verification-checklist.md`.
 - **Session of 2026-08-18 — an honesty-defect sweep, conflict resolution, and two external packages.**
@@ -753,8 +794,29 @@ Current state:
   51435e7 32fe7a3` confirms that commit was already in history when this paragraph was written.
   `POST /api/transcription` shipped earlier still, in `72e2206` (2026-08-17). Both answer **`501`
   `no_provider_configured`** in every deployment, `POST /api/experiments/{id}/transcript` answers
-  **`200`** with no provider involved at all, and `/api/assistant/ask` is one of the ~~69~~ **71** operations (re-measured 2026-08-30; the test's
-  own comments record 68→69 assistant/ask, 69→70 rename, 70→71 discard)
+  **`200`** with no provider involved at all, and `/api/assistant/ask` is one of the ~~69~~ ~~**71**
+  operations (re-measured 2026-08-30; the test's own comments record 68→69 assistant/ask, 69→70
+  rename, 70→71 discard)~~ **77 — re-measured and corrected 2026-09-12.** `_operations()` in
+  `test_about_and_openapi.py` has always yielded one `(path, method)` pair per operation, so
+  `checked` has always been a METHOD-OPERATION count, not a path count; 69 and 71 were both
+  earlier readings of that same growing count, not a different metric. The assertion now reads
+  `assert checked == 77, f"expected 77 documented operations, found {checked}"`
+  (`test_about_and_openapi.py:684`), confirmed by running the suite. **A coincidence worth naming
+  so it is not conflated with the figure above:** the live `/api/openapi` document today also
+  happens to have **69 PATHS** (`len(schema["paths"])`, verified by hitting the route directly) —
+  the same number the operations count read at an earlier commit, for an unrelated reason (a path
+  can carry more than one HTTP method, so paths ≤ method-operations; today paths=69,
+  method-operations=77). ~~Quote **77** for "documented operations"~~ — **STALE SINCE 2026-09-13:
+  quote **78**.** Re-measured over `create_app().openapi()` in the same session that moved it:
+  **78 method-operations / 70 paths**, and `test_about_and_openapi.py:706` reads
+  `assert checked == 78`. The one new operation is `PATCH /api/experiments/{experiment_id}/folder`
+  (the Experiment Library); the MCP note pathway added an *MCP* operation over the already-existing
+  `POST .../notes` route and so moved neither number. **The paths/operations distinction this
+  paragraph exists to protect is UNCHANGED and is why both figures are restated:** a path can carry
+  several methods, so paths (70) ≤ method-operations (78), and the two were briefly equal at 69 for
+  unrelated reasons. Say "paths" explicitly if that is the count meant, and re-derive rather than
+  quoting — this figure has now been wrong four times, and the fourth time was in the paragraph
+  warning against it.
   `test_about_and_openapi.py` pins. So the sentence was not describing a gap; it was describing
   absent *routes* that existed. **The true residue, which is what the clause was reaching for and
   what still holds: no product screen advertises the assistant seam** — deliberately, per
@@ -1221,6 +1283,35 @@ Current state:
   large-text exemption** (max font-size 13px), so the old palette's "smaller text → lighter
   grey" was backwards, and meaningful scientific content sat at **2.53:1**.
 
+  ***RE-MEASURED 2026-09-12: BOTH FIGURES IN THIS BULLET HAVE MOVED, AND THE PLATFORM SPLITS
+  THIS BULLET SAYS "COLLAPSED" HAVE REAPPEARED — from later, unrelated churn, not from A3
+  regressing.*** `apps/web/e2e/a11y-baseline.ts`'s `A11Y_BASELINE_TOTAL_NODES` now reads
+  ~~**darwin 877, linux 877**~~ **— 870/870 as of 2026-09-13; see below** (both moved
+  together, not a new split), and there are **70**
+  recorded cells, matching "161 cells → 70" above exactly.
+
+  ***AND THE 877 WENT STALE THE SAME WAY, ONE DAY LATER, BY A CHANGE I MADE MYSELF — recorded
+  because this bullet's own instruction is "quote the live constants", and the figure in it was
+  the one that drifted.*** `A11Y_BASELINE_TOTAL_NODES` now reads **darwin 870, linux 870**.
+  The cause is arithmetic and checkable rather than mysterious: **seven `experiments-example@*`
+  cells moved `3` → `2`** when `queue.css` stopped painting the completed-row metadata in
+  `--text-tertiary`, and 877 − 7 = **870**. They are recorded as **scalars, not splits**, because
+  Linux CI independently measured 2 — which is also a correction worth keeping: I had first
+  carried forward the last recorded linux value of `3` on the reasoning that the just-measured 6
+  was the defect. *The reasoning was sound and the number was wrong*, and the a11y job caught it
+  by reporting `IMPROVED`. **`DARWIN_CARRIED_FORWARD` is `[]`**, so no half of any cell is
+  reasoned rather than measured. The two `settings-explorer` splits below are **unchanged and
+  still present**, and `70` is still the cell count — so of the three figures in this paragraph,
+  exactly one moved. Verified at this head: `baseline-aggregate.invariant.test.ts` → **47
+  passed**, and the full seven-viewport run → **582 passed, 0 movements**. **Two platform splits exist again,
+  both on `settings-explorer`** — `settings-explorer@mobile-375x812: { darwin: 20, linux: 21 }`
+  and `settings-explorer@width-390: { darwin: 21, linux: 20 }` — which is not a contradiction of
+  "All 7 platform splits collapsed" above (that sentence described the state immediately after
+  A3) but a later, separately-caused movement: the file's own contemporaneous note already
+  flagged `settings-explorer` as "ONE KNOWN, ALREADY-SCHEDULED MOVEMENT" because that surface
+  renders from the live `/api/openapi` document, so its node count tracks the API's own growth,
+  not the palette. Do not quote 871/871 or "0 splits" as current; quote the live constants.
+
   **THE PRESERVED WIP OF TWO SLICES WAS AUDITED RATHER THAN TRUSTED, AND BOTH WERE BROKEN.**
   A prior session left work uncommitted in two worktrees; it was committed first (nothing
   lost), then judged. The A3 WIP had **deleted** the `--text-quaternary` declaration while
@@ -1532,8 +1623,19 @@ Current state:
   (`transcript_capture.py` stores EVERY segment as a note precisely so the words survive rejection).
   Fixed through the **ONE existing** change-feed subscription (`useChangeFeed` call sites 1 → 1,
   measured), as a fourth derived summary `notesActivity` beside `proposalActivity`/`runActivity`.
-  **There is no `note` kind** — `change_feed.RECORD_COLLECTORS` serves exactly `experiment`, `run`,
-  `proposal` — so it keys on the `experiment` kind and therefore fires on ANY authoritative record
+  ~~**There is no `note` kind** — `change_feed.RECORD_COLLECTORS` serves exactly `experiment`, `run`,
+  `proposal`~~ — **FALSE SINCE 2026-09-13, and corrected by the same session that falsified it after
+  an independent review caught the sweep missing.** `MCP-005` added the `note` kind. Measured, not
+  read: `change_feed.RECORD_COLLECTORS` keys are `['experiment', 'run', 'proposal', 'note']` and
+  `change_feed.feed_kinds()` serves `['experiment', 'note', 'proposal', 'run']` on the wire.
+  **`CURSOR_VERSION` is 3, and the bump was MANDATORY rather than tidy:** `note` sorts between
+  `experiment` and `proposal`, so a v2 cursor resting at a `proposal` position would have walked
+  past every note at that revision and **never reported one**. A v2 cursor is refused, not
+  reinterpreted. The paragraph below — that notes reach the feed only via
+  `_authoritative_signature` hashing, so the trigger fires on ANY authoritative change — was the
+  reason a `note` kind was wanted and is now **historical**; it describes the state this correction
+  ends. The struck sentence is kept because "there is no `note` kind" is exactly the sort of claim a
+  future session builds against` — so it keys on the `experiment` kind and therefore fires on ANY authoritative record
   change, not only a note change. That imprecision is stated in the code, not hidden; a `note` kind
   is the precise answer and is **named residue, not built**. Notes reach the feed at all only
   because they are hashed into `_authoritative_signature` (`workspace.py:1832`).
@@ -1544,8 +1646,29 @@ Current state:
   `{status:'error'}` regardless of silence, replacing the whole list with `BackendDown` beside a
   **stale** count. Before this change a failure was always the consequence of something the reader
   did; the live refresh made the loss reachable with **no user action at all**. Now a silent
-  failure leaves the list untouched and discloses inline. `IngestionProposalsPanel.tsx:786` has the
-  **identical shape and is unfixed** — named residue.
+  failure leaves the list untouched and discloses inline. ~~`IngestionProposalsPanel.tsx:786` has the
+  **identical shape and is unfixed** — named residue.~~ — **OVERTAKEN, NOT FALSE, and corrected
+  2026-09-13; it is struck rather than deleted because "is unfixed — named residue" is exactly the
+  kind of claim a future session acts on by building it a second time.** The claim was TRUE when it
+  was committed and was fixed **six hours later the same day**: the residue was named in `49a26e1f`
+  (12:41:10 -0700) and `IngestionProposalsPanel` received the identical fix in `6a4296b6`
+  (18:50:34 -0700), an ancestor of `main`. Re-derive rather than quoting:
+  `git merge-base --is-ancestor 49a26e1f 6a4296b6` exits 0, so the ordering is mechanical.
+  **Both panels now carry the SAME gate**, which is the part worth keeping: the naive repair
+  (branch on `wasSilent` alone) swallowed a silent failure that arrived while the very first LOUD
+  load was still in flight, leaving a permanent spinner with no disclosure and **no way out** —
+  worse than the `BackendDown` it replaced. The shipped condition is
+  `wasSilent && listStatusRef.current === 'data'` — intent AND something on screen to protect — at
+  `IngestionProposalsPanel.tsx:1029` and `UnmappedNotesPanel.tsx:516`. It is **pinned, not merely
+  present**: `ingestion-proposals-panel.test.tsx` holds `I-2: a background reload that FAILS does
+  not destroy an open reason box (Reject)` (`:2073`) beside a **negative control** proving a LOUD
+  first-read failure still shows `BackendDown` (`:2119`), plus two `MUTATION-GUARDED` cases for an
+  open "Correct the Value" editor and an open Supersede box. Measured this session: **80 passed,
+  exit 0** (`npx vitest run src/__tests__/ingestion-proposals-panel.test.tsx`, exit read directly
+  and not through a pipe). **`:1821`'s "remaining latent in-flight-first-load case" is a DIFFERENT
+  and NARROWER claim and is deliberately NOT touched here** — this correction closes the
+  destructive-silent-failure shape only, and claiming the other closed without measuring it would
+  repeat the very error §15 records four times.
 
   **A FALSE PRIVACY DISCLOSURE, AND THE GUARD THAT SHOULD HAVE CAUGHT IT DID NOT COVER IT.**
   `voiceAudioHandling` told scientists *"This application declares no upload endpoint for it to
@@ -1582,7 +1705,12 @@ Current state:
   the same claim — it is about inferability suggestions and remains true; do not "correct" it.
 
   **Named rather than implied, and still not done:** a `note` kind in the change feed (the precise
-  signal); `IngestionProposalsPanel`'s identical destructive-silent-failure shape; pinning an
+  signal); ~~`IngestionProposalsPanel`'s identical destructive-silent-failure shape~~ — **DONE,
+  corrected 2026-09-13; see the struck residue claim earlier in this same session entry for the
+  evidence, the two `file:line` sites and the measured 80/80. This is the SECOND site in §11
+  asserting the one stale item, and both are corrected in the same change, because "the item is
+  still open" is itself a checkable claim and a partially-swept correction is what this file has
+  been caught publishing before**; pinning an
   open-form note across ANY refetch (the reader's own write-success reload reproduces the same
   unmount, so gating only the `activity` trigger would look closed and not be); **pause/resume
   during recording**, which `MediaRecorder` supports and this build does not offer — deliberately
@@ -1703,13 +1831,61 @@ Current state:
   2026-09-03 entry said to treat any historical "0 findings" as a non-answer; that still holds, and
   the negative control is how you tell.
 
-  **Named rather than implied, and still not done:** **pause/resume during recording** (this
-  session's last unbuilt item at the time of writing); a `capture_summary` on the record detail
+  ***THE DEPENDENCY DIAGNOSIS WAS RIGHT AND INCOMPLETE, AND THE SECOND REASON SURVIVES THE FIX —
+  measured 2026-09-12 by a dedicated repair pass.*** The four missing packages were installed into a
+  **sidecar** and injected with Node's `module.register()` + a `resolve` hook (`NODE_PATH` and a
+  cwd-inside-sidecar were both **tested and do NOT work** — ESM ignores them); nothing in the skill
+  install or this repository was modified, and the negative control then passed on `.html`: **exit 2
+  with two findings**, and a clean fixture **exit 0**. **And it changed NOTHING for ISAAC.** Those
+  four packages gate `detectHtml`, which runs **only** for `.html`/`.htm`
+  (`detector/engines/static-html/detect-html.mjs:127-135` — a single `Promise.all`, and that import
+  list is the complete set anywhere in the detector). A `.tsx`/`.jsx` file is routed unconditionally
+  to a **separate regex engine that never imports them**, proven by re-running the identical bad
+  `.tsx` fixture **with the sidecar loaded**: still `[]`, still exit 0, **byte-identical**. That
+  regex engine has **no ARIA or accessibility ruleset at all** — no missing-alt, no
+  clickable-`div`-role, no nested-interactive check — and even its copy rules
+  (`em-dash-overuse`, `marketing-buzzword`) fire only for `.html`/`.astro`/`.vue`/`.svelte`.
+  **This application's UI is entirely `.tsx`, so a mechanical `detect.mjs` scan of it is
+  STRUCTURALLY INCAPABLE of reporting the defect classes it is cited for — repaired or not.** Every
+  historical "0 findings" claim here was a non-answer for **two** reasons, and only the first is
+  fixable. **Consequence: for this codebase, mechanical design evidence must come from the
+  in-browser overlay (a different code path, which works) plus live-browser measurement — never from
+  `detect.mjs`.** One nuance that explains how this went unnoticed: on `.html` input the unrepaired
+  detector *does* print a one-time `DEGRADED — HTML parser modules unavailable` line to **stderr**,
+  so a caller reading only stdout or the exit code sees silence. Node here is **v24.15.0**; the skill
+  pins no versions (it has no `package.json`).
+
+  **Named rather than implied, and still not done:** ~~**pause/resume during recording** (this
+  session's last unbuilt item at the time of writing)~~ — **DONE and ON `main`, corrected
+  2026-09-13.** It shipped in `108bfb0f` *"feat(capture): pause and resume a recording, and a clock
+  that excludes paused time"*. `paused` is a **fourth** voice state with its own word and shape
+  rather than `recording` wearing a different label, and the elapsed clock counts **recorded**
+  duration, not wall time. Eight tests pin it, six of them `MUTATION-GUARDED`, and the three that
+  matter most are the refusal paths a happy-path suite would never reach: a browser whose recorder
+  has **no `pause()`** is offered no Pause control at all, a pause the browser **refuses** leaves
+  the bar saying `Recording`, and a refused **resume** leaves it saying `Paused` with the clock
+  stopped. `MediaRecorder.pause()` deliberately does **not** release the microphone — the spec
+  suspends rather than stops, and the code says so at
+  `TranscriptCapturePanel.tsx:1162` so nobody "fixes" it into a release; a `capture_summary` on the record detail
   payload, which would delete `useCaptureSummary.ts` entirely and remove the two extra requests the
   sidebar now makes on three of four workspaces (the `?state=dismissed` trick cuts the notes payload
   **73%** — `_notes_payload`'s totals ignore the filter — but does not remove the request);
   `IngestionProposalsPanel`'s and `UnmappedNotesPanel`'s remaining latent in-flight-first-load case;
-  the three fallback-rescued phantoms in `record-description.css` and `tutorial.css`; the native
+  ~~the three fallback-rescued phantoms in `record-description.css` and `tutorial.css`~~ —
+  **DONE, and re-measured TREE-WIDE 2026-09-13 rather than per-file.** They were repointed on
+  2026-09-11 (`record-description.css` and `tutorial.css` now read `var(--border-strong)` and
+  `var(--surface)` directly; `FALLBACK_RESCUED_PHANTOMS` is retired in
+  `palette-contrast.test.ts:914`). Measured over **all 42** stylesheets under `apps/web/src`
+  against **161** declared custom properties: **zero** live phantoms, rescued or otherwise. **The
+  first run of that sweep reported FOUR and every one was a false positive** — the tool did not
+  strip CSS comments, so it counted `var()` written inside the very comments that DOCUMENT the
+  retired phantoms (including `transcriptCapture.css:43`'s prose about the ten `--text-body`
+  sites). Stripping comments also dropped `declared` 162 → 161, so a commented-out declaration had
+  been masking as real. **Same shape as the `tr`-on-binary and `ugrep`-complexity traps §11
+  already records: the tool answered confidently and wrong, and only a second method disagreed.**
+  The guard is genuinely tree-wide — it globs `../**/*.css` — and that was **proven by negative
+  control, not assumed**: injecting `var(--isaac-nonexistent-token)` into a live stylesheet turned
+  the suite **exit 1, 2 failed**, with the injected name in the output, then reverted clean; the native
   player showing `0:00 / 0:00` (MediaRecorder webm carries no duration header — the seek hack was
   deliberately declined); the human live-microphone check, true 200%-zoom sign-off and hosted
   narrow widths, **none of which this tooling can perform**; and every hosted QA.
@@ -2012,9 +2188,23 @@ Out of scope unless explicitly approved:
   scope extension, not a pre-existing permission written down late.**
 
   **What listing those five covers, precisely:** creating them, by an owner-applied migration, and
-  writing them through `submission_store.py`'s append-only `INSERT`s. It covers **no** read surface
-  over the history, **no** change to `records`, and — per the hard stop below — **no hosted
-  application of `0003` or `0004`**.
+  writing them through `submission_store.py`'s append-only `INSERT`s. ~~It covers **no** read
+  surface over the history~~ — **STALE, corrected 2026-09-12: a read surface over the history now
+  exists.** `apps/api/isaac_api/revision_history.py` — "The READ path over the append-only
+  submission history. SELECTs only." — shipped later (`e85efa64`, 2026-08-17) and carries **nine
+  named `Q_*` query constants** covering all five of these tables. ~~nine `SELECT` statements
+  (`grep -c SELECT …`)~~ — **the COMMAND was wrong and is corrected the same day it was published,
+  found by an independent review**: `grep -c SELECT apps/api/isaac_api/revision_history.py` returns
+  **15**, because the word also appears in subqueries and prose. **Nine** is right for the query
+  constants, which is what the claim means; re-derive with
+  `grep -c '^Q_[A-Z_]* = ' apps/api/isaac_api/revision_history.py`. The figure held; the way I told
+  a reader to check it did not, which is the more useful kind of error to record. It is a separate module for exactly
+  this reason (its own docstring: growing `submission_store` with a read surface "would blur what
+  the module is *for*"), reuses `db_write.write_transaction` unchanged, and adds no new table and
+  no new connection path — so this correction narrows what "covers no read surface" meant without
+  reopening `db_write.OWNED_TABLES` or the append-only guarantee, which are both unaffected. It
+  covers **no** change to `records`, and — per the hard stop below — **no hosted application of
+  `0003` or `0004`**.
 
   ***APPROVAL STATUS CHANGED 2026-08-17, and only one of the two halves moved.*** The sentence above
   used to end *"both of which remain NOT APPROVED and NOT APPLIED anywhere"*, and it is corrected
@@ -2277,11 +2467,40 @@ holds under static review; note this is code review, **not** a runtime observati
 has still never run**~~ — **corrected 2026-08-01:** the scan **has** run, once, against image
 `v0.0.38` (`ceea656`), observed by Krish in an authenticated session and reported as no leaks, four
 matching allowlists, zero schema drift, 30/30. That is **operator testimony, not a captured artifact**
-(the endpoint keeps its result in process memory only, by design), so the masking claim above is still
+(the endpoint keeps its result in process memory only, by design), ~~so the masking claim above is still
 backed by code review rather than by an inspected response body — the caveat stands, its reason
-changes. See `docs/superpowers/plans/2026-07-31-baseline-completion-matrix.md` §0, Entry 2. **Never
+changes.~~ — **DISCHARGED 2026-09-13: the response body HAS now been inspected, in this environment,
+and is a captured artifact.** Evidence:
+[`docs/evidence/hosted-observation-2026-09-13.md`](docs/evidence/hosted-observation-2026-09-13.md).
+Read read-only from an already-authenticated browser tab the project owner said was signed in; **no
+credential was entered and no agent connected to any database** — the pod opened its own connection,
+which is the deployment-mediated design, so the `:48-52` prohibition on a laptop- or CI-originating
+connection is untouched. What the body shows: `dataset` carries **sixteen** keys and **not one** of
+the five is among them, `withheld_pending_visibility_decision` names exactly those five and nothing
+else, and `vocabulary_cache_present: true` is the boolean that replaced the withheld cardinality.
+The scan mutated nothing and says so on the wire — `ddl_statements_issued: 0`,
+`dml_statements_issued: 0`, `rows_before: 30`, `rows_after: 30`, `rows_modified: 0`,
+`transaction_read_only: true`, `schema_stable_across_run: true`, with all six preflight gates `true`
+and `refusal_class: null` — and official validation reads **30 passing / 0 failing / 0 issues**,
+agreeing with the 2026-08-08 operator-relayed figures while no longer depending on them.
+**`server_version_major` is 18**, so the hosted engine's major version matches CI's `postgres:18`
+container; that removes one way the CI-to-hosted inference could have been wrong and **does not**
+weaken §15's caveat that CI still does not prove behaviour against the real data, roles and grants.
+**MY FIRST LEAK CHECK WAS A FALSE POSITIVE OF MY OWN MAKING and the next person will write the same
+one:** `JSON.stringify(payload).includes('"'+key+'"')` returned **all five**, because it matched
+**the withheld list itself**, which necessarily names them as strings — the designed behaviour and
+its own violation have the identical signature under a flat-text search. *Enumerate the block's
+keys; never grep the serialized payload.* **G3 IS NOT CLOSED BY THIS** — it confirms the
+withholding is implemented, not that any of the five may be restored, which is still only Dean's to
+say; and **G2 is untouched**, `record_display` reading `closed` on the wire.
+**One recorded limitation is NARROWED, not lifted:** the 2026-08-08 entry's *"no database row was
+re-read and compared after the sweep"* remains true **of the private verification mode**, a
+different path — this route reports `rows_before`, `rows_after` and `rows_modified`, and the two must
+not be conflated.
+See `docs/superpowers/plans/2026-07-31-baseline-completion-matrix.md` §0, Entry 2. **Never
 write "the deployed database has never been contacted"**; the accurate form is "no database connection
-was opened during this session".
+was opened during this session" — **and that form is NOT available for 2026-09-13**: a connection
+was opened by the pod, at this agent's request, under Slice 2A's authorization.
 
 **They are no longer served.** The baseline-closure slice withheld all five from the HTTP response
 and names them in `dataset.withheld_pending_visibility_decision`; `vocabulary_term_count` is replaced

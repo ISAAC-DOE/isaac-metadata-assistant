@@ -1234,6 +1234,81 @@ def _export_step_detail(result) -> str:
     )
 
 
+def _evidenced_field_value(exp: Experiment, path: str) -> str | None:
+    """One RECORD-LEVEL draft field's value, as a string, if it has actually been
+    established — else ``None``.
+
+    THE POINT OF THIS FUNCTION IS THE REFUSALS, not the lookup. It exists so that a
+    Library column can name a technique or a beamline without any of the four ways
+    that could become a false claim:
+
+    * ``status == "needs_confirmation"`` is WITHHELD. Such an entry is an open
+      question the draft is asking, and reporting it as a value would render a
+      question as a recorded fact — ``CLAUDE.md`` §5 in the most direct way this
+      function can breach it.
+    * A NON-STRING value is withheld. This is a display column; a dict or a number
+      here means the field is not the scalar this caller thinks it is, and
+      ``str()`` would manufacture a label out of a structure.
+    * An EMPTY or whitespace-only string is withheld — ``None`` and ``"   "`` are
+      the same absence, and one of them renders as a blank cell that looks like a
+      value.
+    * A MALFORMED draft is READ, NEVER RAISED. Every access below is a ``.get``
+      guarded by an ``isinstance``, so a persisted ``fields: 7`` or
+      ``"system.technique": "oops"`` answers ``None`` rather than taking the whole
+      list screen down — §11's measured rule, arrived at the hard way twice, that a
+      malformed PERSISTED value must be read and not refused to a reader who did
+      nothing wrong.
+
+    ``status`` IS NOT RESTRICTED TO ``verified``, and that is deliberate.
+    ``inferred`` is admissible because §5 permits a value inferred "by a
+    documented/stored rule" and the envelope carries that rule in its own
+    ``evidence`` array (measured: ``system.domain`` is exactly this shape). The one
+    status that is a question rather than an answer is the one excluded.
+
+    IT READS ``exp.draft`` AND NOT ``resolved_run_draft``, so it is the
+    RECORD-LEVEL declaration. See the disclosure beside its call sites in
+    :func:`_summary` for what that does and does not mean for a record with runs.
+    """
+    fields = exp.draft.get("fields")
+    if not isinstance(fields, dict):
+        return None
+    entry = fields.get(path)
+    if not isinstance(entry, dict):
+        return None
+    if entry.get("status") == "needs_confirmation":
+        return None
+    value = entry.get("value")
+    if not isinstance(value, str):
+        return None
+    if not value.strip():
+        return None
+    # *** AND IT MUST ACTUALLY BE EVIDENCED, which this function did not check
+    # despite its name. Found by independent review, 2026-09-13. ***
+    #
+    # It withheld `needs_confirmation`, non-strings and blanks, and then returned any
+    # remaining value — so a Library row could report `technique: "HERFD-XAS"` beside
+    # `evidenced_field_count: 0`, two columns of the same row disagreeing about
+    # whether the same field is established. `Experiment.evidenced_field_count`'s own
+    # definition is "a non-null value AND at least one evidence entry"; this is now
+    # the same criterion, so the row cannot contradict itself.
+    #
+    # IT ALSO REPAIRS THIS FUNCTION'S OWN ARGUMENT FOR ADMITTING `inferred`. The
+    # docstring above says `inferred` is admissible because §5 permits a value
+    # inferred by a documented rule and "the envelope carries that rule in its own
+    # `evidence` array" — a justification that silently assumed the array is there.
+    # Without this check the justification held for the cases that have evidence and
+    # was simply absent for the ones that do not.
+    #
+    # MEASURED BEFORE CHANGING IT, so this costs no real column: all five seeded
+    # records carry `evidence` of length 1 for BOTH `system.technique` and
+    # `system.facility.beamline`, at `status: verified`. Nothing that was being
+    # displayed stops being displayed.
+    evidence = entry.get("evidence")
+    if not isinstance(evidence, list) or not evidence:
+        return None
+    return value.strip()
+
+
 def _summary(
     exp: Experiment,
     *,
@@ -1269,6 +1344,111 @@ def _summary(
         # would multiply-count inheritance and reporting the maximum would be
         # arbitrary. It is a summary count, not a verdict, and nothing gates on it.
         "evidenced_field_count": exp.evidenced_field_count(),
+        # --- LIB-001: the Experiment Library's own columns -------------------
+        #
+        # EVERY FIELD BELOW COSTS ZERO ADDITIONAL I/O, and that is a measurement
+        # rather than an expectation. `ws.list_experiments_with_hydration` reads each
+        # record's `experiment.json` ONCE and hands the whole document to
+        # `Experiment.from_state`, so `runs`, `proposals` and `folder` are already
+        # in memory by the time this function is called. There is no second read, no
+        # second query, and no N+1 —
+        # `test_experiment_folders.py::test_run_count_is_the_documents_own_runs_and_costs_no_extra_read`
+        # — CORRECTED 2026-09-13: the file and test this used to name
+        # (`test_experiment_library_list.py::test_the_library_columns_cost_no_extra_reads`)
+        # DO NOT EXIST. A citation to a nonexistent guard is worse than none: it
+        # tells the next reader the property is pinned when nothing pins it there.
+        # Found by independent review; the real guard is named above and was itself
+        # rewritten in this session, because its original control arm could not fail.
+        # instruments `Path.read_text` and pins the count against the same list read
+        # with the columns removed.
+        #
+        # THE PLANNING DOCUMENT SAID THE OPPOSITE AND IT WAS WRONG.
+        # `docs/superpowers/plans/2026-09-12-isaac-ux-ia-plan.md` §1.6 states "No run
+        # count. The Library cannot show 'how many Runs' without N further requests."
+        # Measured false: the runs live INSIDE the experiment state document (see
+        # `Experiment.runs`, whose own comment records that they are "inside ONE state
+        # document that is rewritten whole on every save"), so the count is a `len()`
+        # over data this read already paid for.
+        #
+        # WHAT IS DELIBERATELY ABSENT, named here so a future slice does not read the
+        # absence as an oversight:
+        #
+        #   * `submitted` — it needs `export_units()` + `submissions.content_signature()`
+        #     per record AND one `revision_history` read per record, which is a real
+        #     N+1 against the database. It is also `unknown` in every deployment that
+        #     exists today: `revision_history.reader()` returns `None` without `PGHOST`,
+        #     and migrations `0003`/`0004` are approved but NOT APPLIED anywhere
+        #     (`CLAUDE.md` §15). A `Submitted` filter would therefore match nothing,
+        #     always — which is worse than not offering one.
+        #   * a note count — nothing on the Library needs it, and `_capture_summary`
+        #     already serves it where it IS needed (the record screen).
+        "updated_utc": exp.updated_utc,
+        # WHOLE SECONDS, and the consequence travels with the value. `_now_iso`
+        # formats to second precision, so two writes inside one second are
+        # INDISTINGUISHABLE by this field — which is the measured defect that made
+        # the change feed abandon it as an ordering key in favour of
+        # `changed_at_rev`. It is published for DISPLAY and for the Library's sort,
+        # and it is load-bearing for NO correctness decision anywhere. Do not build
+        # a precondition, a cursor or a conflict check on it, and do not "fix" it by
+        # reaching for sub-second precision — the feed rejected that deliberately, as
+        # a repository-wide storage change trading a proven defect for an unproven
+        # assumption.
+        "run_count": len(exp.runs),
+        # OPEN PROPOSALS ONLY — the ones still awaiting a person's judgement. A
+        # decided proposal (`accepted`/`rejected`/`superseded`/`withdrawn`) is
+        # deliberately not counted: this number exists so the Library can offer
+        # "which records are waiting for me", and a record whose proposals were all
+        # answered is not waiting. `proposals.py` keeps decided proposals forever
+        # rather than deleting them, so a total would only ever grow and would
+        # answer a question nobody asked.
+        #
+        # `unreadable_proposals` are NOT counted either, and that is the honest
+        # reading rather than a convenient one: an entry this build cannot parse has
+        # no state, so it cannot be asserted to be open. They are preserved verbatim
+        # across saves (see `_hydrate_proposals`) and remain visible on the record's
+        # own proposals surface, which is where an unparseable entry can actually be
+        # looked at.
+        "open_proposal_count": sum(
+            1 for p in exp.proposals if p.state == proposals.STATE_OPEN
+        ),
+        # THE FOLDER PATH LABEL, or `""` for unfiled. There is no folder entity to
+        # report: a path exists exactly while some experiment names it, so the set of
+        # folders IS a projection of this column across this response. See the block
+        # above `workspace.normalize_folder_path`.
+        "folder": exp.folder,
+        # THE RECORD-LEVEL TECHNIQUE AND BEAMLINE, or `null`. Both are read from the
+        # draft envelope this list already holds, and both are EVIDENCED values a
+        # scientist or an extraction put there — nothing is inferred, defaulted or
+        # classified here (`CLAUDE.md` §5).
+        #
+        # THE PLANNING DOCUMENT WAS WRONG ABOUT THIS TOO, and more sharply:
+        # `2026-09-12-isaac-ux-ia-plan.md` §1.6 says "No technique / beamline /
+        # facility. The proposed `Beamline` column has no data source." Measured on
+        # the shipped worked example: `draft["fields"]["system.technique"]` is
+        # `{"value": "HERFD-XAS", "status": "verified", "evidence": [...]}` and
+        # `system.facility.beamline` is `{"value": "15-2", "status": "verified", ...}`.
+        # The data source is the draft the list already loads.
+        #
+        # THREE LIMITS, DISCLOSED RATHER THAN DISCOVERED — this is the same class of
+        # disclosure `evidenced_field_count` carries immediately above:
+        #
+        #   1. IT IS THE RECORD-LEVEL VALUE. Runs INHERIT BY REFERENCE (contract D2),
+        #      and measured on this build a run's own `draft["fields"]
+        #      ["system.technique"]` is `null` while `resolved_run_draft` resolves to
+        #      the record's value — so for the ordinary case this IS what every run
+        #      measured. A run that OVERRIDES it is not reflected here, which makes
+        #      this column incomplete for that record and never wrong about the level
+        #      it names.
+        #   2. A CREATED RECORD HAS NEITHER. Measured: `POST /api/experiments` yields
+        #      a draft with 0 fields, so both are `null` — the honest representation
+        #      of a value nothing has supplied, and the reason this is `null` rather
+        #      than a placeholder string.
+        #   3. A `needs_confirmation` FIELD IS NOT REPORTED. `_evidenced_field_value`
+        #      withholds it: an unconfirmed value is a question, not an answer, and
+        #      rendering it in a list column would present a pending question as a
+        #      recorded fact.
+        "technique": _evidenced_field_value(exp, "system.technique"),
+        "beamline": _evidenced_field_value(exp, "system.facility.beamline"),
         # REVIEW ITEM C5 — `all_units_exported()`, not `exported()`. For an
         # experiment with no runs these are the same function of the same field, so
         # the common case does not move. For a fan-out, `Experiment.record_id` stays
@@ -1663,6 +1843,38 @@ def _build_commit() -> str | None:
     )
 
 
+def _mcp_disclosure() -> dict:
+    """The `mcp` block of `/api/health`. **MCP-003.** Fails closed, never raises.
+
+    A LOCAL IMPORT, for the reason `health`'s own comment gives: `app.py` gates the
+    whole `isaac_api.mcp` package behind `_mcp_is_requested()` so a deployment that
+    never asked for MCP executes none of it, and `deployment` is the one submodule
+    reachable from here without pulling in the transport, the server or any OAuth
+    code.
+
+    THE `except` IS THE POINT, AND IT IS NOT DEFENSIVE PADDING. This operation is the
+    container readiness-probe target. `mcp.deployment` imports `mcp.policy`, which
+    introspects `routes.list_runs` at module scope and can raise if that derivation
+    ever breaks — so an import-time defect in a DISCLOSURE would otherwise take the
+    health endpoint down and, with it, the pod. A seam that cannot describe itself is
+    a much smaller problem than a pod that will not go ready, so this reports the
+    failure IN the block and keeps the rest of the banner truthful. It reports
+    `posture: null` rather than `"unmounted"`, because "I could not determine this"
+    and "it is not mounted" are different facts and guessing the safe-sounding one
+    would be the conflation this block exists to end.
+    """
+    try:
+        from .mcp import deployment as mcp_deployment
+
+        return mcp_deployment.disclosure()
+    except Exception as exc:  # pragma: no cover - an import-time defect in a probe path
+        return {
+            "posture": None,
+            "error": "mcp_state_unavailable",
+            "detail": type(exc).__name__,
+        }
+
+
 @router.get(
     "/health",
     tags=[TAG_META],
@@ -1712,7 +1924,35 @@ def _build_commit() -> str | None:
         "configuration is all this operation looked at, so it never promises the "
         "write would land. It also reports the basis on which an author would be "
         "recorded, so a deployment attributing on a test-fixture basis says so here "
-        "rather than only in its manifest."
+        "rather than only in its manifest.\n\n"
+        "It states, in `mcp`, how the machine-callable (agent) interface is "
+        "configured in this process: which of four postures it is in — `unmounted`, "
+        "`local-only`, `oauth-mounted` or `remote-ready` — which binding produced "
+        "that, why that binding was selected rather than a working one, the selector "
+        "value the operator supplied so a typo is visible, the three configuration "
+        "flags the posture is derived from so a reader can re-derive it rather than "
+        "trust it, and the identifiers and statuses of the outstanding external "
+        "decisions that separate this deployment from a remote one. Derived from "
+        # `token` AND `secret` ARE BOTH BANNED FROM A SERVED DOCUMENT by
+        # `test_about_and_openapi.py::_FORBIDDEN_SUBSTRINGS`, which says of itself
+        # that there is "deliberately NO exception list". This paragraph tripped it
+        # twice — once for a sentence PROMISING no secret is disclosed, and once for
+        # "validates no token" — which is the guard working as designed even though
+        # both uses were innocent: the list is a substring scan, and a scan that
+        # exempted reassuring sentences would exempt exactly the ones an attacker
+        # would write. Both are reworded rather than exempted, and `credential` is
+        # the more accurate word in any case.
+        "configuration alone: it opens no socket, verifies no credential and fetches no "
+        "metadata document, so an agent-interface misconfiguration can never change "
+        "this operation's result. **Nothing confidential is in it** — no "
+        "credential of any kind, no signing material, no audience or resource "
+        "identifier, no caller's permission grant, and nothing describing the "
+        "environment this service runs in; what each decision ASKS is documentation "
+        "rather than state, and is deliberately withheld by an operation that "
+        "answers without credentials. **It is not a reachability claim:** whether "
+        "anything can actually reach that path depends on how this service is "
+        "exposed, which this process cannot observe. It is what makes a probe of "
+        "that path interpretable, not a substitute for one."
     ),
     response_description="The liveness banner.",
 )
@@ -1746,6 +1986,36 @@ def health() -> dict:
         # APPLICATION'S OWN experiments are stored. A deployment can have the
         # second without the first ever being scanned.
         "experiment_storage": experiment_repository.storage_status(),
+        # A FOURTH BLOCK, ADJACENT TO THE OTHER THREE AND DELIBERATELY NOT PART OF
+        # ANY OF THEM. **MCP-003.** It answers a question none of them does: how is
+        # the machine-callable (agent) seam configured in THIS process?
+        #
+        # WHY IT WAS THE ONLY SEAM WITH NO BLOCK, which is the finding rather than
+        # the addition: `database`, `experiment_storage` and `submission` all
+        # disclose, so an operator meeting a `404` on the MCP path could not tell
+        # whether the route was unmounted, whether the edge had not forwarded it, or
+        # whether the binding had failed closed on a typo in its own selector. That
+        # was unresolvable BY CONSTRUCTION from outside the process.
+        #
+        # ZERO I/O, exactly like the three above — see `mcp.deployment.disclosure`,
+        # which resolves the binding from the environment and reads fields off it. No
+        # socket, no token validation, no metadata fetch. So an MCP misconfiguration
+        # cannot influence this operation's status code and cannot fail a readiness
+        # probe, which is the property every block here has to keep.
+        #
+        # IT EXPOSES NO SECRET, and that is enforced where it is derived rather than
+        # asserted here: no token, key, signature, audience, resource URI or caller
+        # scope grant is in the returned shape. The one operator-supplied value is
+        # the binding SELECTOR, which is a documented constant or a typo of one.
+        #
+        # IT IS IMPORTED LAZILY, AND THAT IS NOT A STYLE CHOICE. `app.py`'s
+        # `_mcp_is_requested` exists precisely so that a deployment which has not
+        # asked for MCP never executes a line of this package at import; `.mcp`'s
+        # `__init__` pulls in the transport and the server. `deployment` is the one
+        # module in it that is safe to reach from here — it imports no Starlette and
+        # no OAuth code, and `resolve_binding` defers the OAuth import to the branch
+        # that needs it — so this is a submodule import, never `from .mcp import`.
+        "mcp": _mcp_disclosure(),
         # A THIRD BLOCK, ADJACENT TO THE OTHER TWO AND DELIBERATELY NOT PART OF
         # EITHER. `database` is about the read-only diagnostic over the
         # production-derived sample; `experiment_storage` is about where this
@@ -2530,6 +2800,36 @@ def _hydration_disclosure(outcome: ws.HydrationOutcome) -> dict | None:
         "five built-in example records also carry a derived, never-stored "
         "`scenario` label naming which example the row is; it is null for "
         "any other record. Read-only, and it states no validity verdict.\n\n"
+        "**Each row also carries what an experiment library has to show, and every "
+        "one of those fields is free** — this read already loads each record's whole "
+        "state document, so none of them costs an extra request or query:\n\n"
+        "* `updated_utc` — when the record's authoritative state last changed. It is "
+        "STORED, never derived. **It is formatted to whole seconds, so two changes "
+        "inside one second are indistinguishable by it.** Display it and sort by it; "
+        "it is deliberately load-bearing for no correctness decision, and the "
+        "record's change feed uses a durable revision position instead for exactly "
+        "that reason.\n"
+        "* `run_count` — how many runs this experiment holds. Each run exports its "
+        "own official record, so this is also how many records it will produce.\n"
+        "* `open_proposal_count` — ingestion proposals still awaiting a person's "
+        "judgement. Decided proposals are not counted (they are kept, never deleted, "
+        "so a total would only grow), and an entry this server could not parse is "
+        "not counted either, because it has no state to be open.\n"
+        "* `folder` — this experiment's folder path label, or `\"\"` when it is "
+        "unfiled. **There is no folder entity to ask about:** a path exists exactly "
+        "while at least one experiment names it, so the set of folders is a "
+        "projection of this column across this response. It is organizational only — "
+        "it reaches no exported record and no evidence sidecar, and it never alters a "
+        "scientific value or a validation result.\n"
+        "* `technique` and `beamline` — the record-level values from the draft, when "
+        "the draft actually carries them, else `null`. A value still awaiting "
+        "confirmation is reported as `null` rather than as a fact. **These are the "
+        "values declared at RECORD level.** Runs inherit them by reference, so for "
+        "the ordinary case they describe every run; a run that overrides one is not "
+        "reflected here. A freshly created experiment has neither, and says so with "
+        "`null` rather than a placeholder.\n\n"
+        "No other scientific content is added: there is no series, no descriptor, no "
+        "sample composition and no QC verdict on a list row.\n\n"
         "**This list is not a completeness claim, and on one deployment shape it "
         "cannot be — so it tells you when it is short.** Where experiments are "
         "stored in a database, a row whose working copy is missing — a pod restart "
@@ -2626,6 +2926,14 @@ class CreateExperimentRequest(BaseModel):
     for by the Guided Completion workflow, where an answer is recorded with its
     confirmation, rather than typed into a create form where it would arrive as
     an unsourced assertion.
+
+    ``folder`` IS NOT A SCIENTIFIC FIELD AND SO DOES NOT BREACH THE PARAGRAPH
+    ABOVE. It is an organizational path label with exactly ``title``'s properties —
+    assistant-side, mutable, carrying no evidence, reaching no official record and
+    no sidecar — and it is accepted here because "file it as I create it" is one of
+    the three moments the folder model has to support (create, move, import). An
+    absent or ``null`` value means unfiled, which is what every experiment created
+    before this field existed is.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -2642,6 +2950,17 @@ class CreateExperimentRequest(BaseModel):
             "Optional free-text note about what this experiment is. Stored as the "
             "record's source description; it is never parsed and never becomes a "
             "scientific value."
+        ),
+    )
+    folder: str | None = Field(
+        default=None,
+        max_length=ws.FOLDER_MAX_PATH_LENGTH,
+        description=(
+            "Optional folder path label to file this experiment under, e.g. "
+            "`Cu K-edge/2026 campaign`. Organizational only: it reaches no exported "
+            "record and no evidence sidecar. Absent, `null` or empty means unfiled. "
+            "A folder is not created as a thing — it exists because this experiment "
+            "names it, and it stops existing when nothing does."
         ),
     )
 
@@ -2738,10 +3057,28 @@ def create_experiment_route(
             },
         )
     description = (body.description or "").strip() or None
+    # NORMALISED AT THE BOUNDARY, AND REFUSED HERE RATHER THAN REPAIRED. The
+    # workspace layer stores what it is given; this is the one place that can tell
+    # the caller which of their value it would not accept, and answering a typed
+    # 422 is the same shape the blank-title refusal above returns. Nothing is
+    # created when the folder is refused — the record does not land unfiled with a
+    # warning, because a scientist who named a destination did not ask for that.
+    try:
+        folder = ws.normalize_folder_path(body.folder)
+    except ws.FolderPathRefused as refused:
+        return JSONResponse(
+            status_code=422,
+            content={
+                "error": refused.reason,
+                "message": f"{refused.message} Nothing was created.",
+            },
+        )
     # The ONE call. Which backend stores it is `experiment_repository`'s decision
     # and this route deliberately cannot tell — that is what keeps a future
     # durable repository from needing a route change.
-    exp = experiment_repository.repository().create(title=title, description=description)
+    exp = experiment_repository.repository().create(
+        title=title, description=description, folder=folder
+    )
     detail = _detail(exp)
     detail.update(vc.version_fields(exp))
     response.headers["ETag"] = exp.etag()
@@ -3035,6 +3372,257 @@ def rename_experiment(
         response.headers["ETag"] = exp.etag()
         return detail
 
+
+# --- 4a2. move into (or out of) a folder --------------------------------------
+#
+# WHY THIS IS A SEPARATE OPERATION AND NOT A SECOND FIELD ON THE RENAME.
+# `RenameExperimentRequest`'s docstring says, in terms, that `extra="forbid"` makes
+# "this operation writes the title and nothing else" a property of the CONTRACT —
+# and `test_about_and_openapi.py:620` quotes that sentence. Adding `folder` to that
+# body would have falsified a committed claim in order to save a route, which is
+# the trade this repository has been caught making before. So the move is its own
+# operation, following the domain-operation shape the discard block below argues
+# for (`.../runs/{id}/remove`, `.../assets/{id}/remove`, `.../overrides/clear`).
+#
+# ITS AUTHORIZATION BASIS, cited rather than assumed. The FEATURE is authorized by
+# `CLAUDE.md` §15's 2026-08-29 application-side extension, which names "the
+# scientist-facing Experiment Data Workspace" and the associated UI and tests. The
+# PERSISTENCE LOCATION is authorized by the 2026-08-07 lift's "app-owned tables for
+# experiments and **their normal application state**" — the same sentence
+# `docs/ingestion-proposal-contract.md` §8.1 cites for `state["proposals"]`, and
+# cited here for the same reason rather than re-argued. **NO new table, NO
+# migration, and `db_write.OWNED_TABLES` is UNCHANGED**: `isaac_experiments` stores
+# the whole document in one `jsonb` column, so a new key in it needs no schema
+# change and no operator action.
+#
+# WHAT THIS OPERATION CANNOT DO, and must not be extended to imply:
+#   * create an EMPTY folder — there is nothing to create; a path is its members;
+#   * rename a folder ATOMICALLY — that is N independent versioned writes with no
+#     transaction around them, and it is not offered rather than offered unsafely;
+#   * set an owner, a share or a permission — those need the trusted
+#     authentication boundary ISAAC does not have.
+
+
+class MoveExperimentRequest(BaseModel):
+    """Where to file an experiment, or `null`/`""` to unfile it.
+
+    ``extra="forbid"``, for the reason the two request models above give: it makes
+    "this operation writes the folder and nothing else" a property of the contract
+    rather than of this handler remembering. A body naming ``title``,
+    ``description``, ``draft`` or ``rev`` is a ``422``, never a partial write.
+
+    ``folder`` IS REQUIRED AND NULLABLE, rather than optional with a default. An
+    absent key would be ambiguous between "leave it where it is" (which this
+    operation has no use for — that is simply not calling it) and "unfile it", and
+    guessing between them on a write is exactly the kind of inference this project
+    forbids. Sending ``null`` or ``""`` unfiles; both mean the same thing and
+    neither is an error.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    folder: str | None = Field(
+        ...,
+        # *** NO `max_length`, AND ITS ABSENCE IS THE FIX. Found by independent
+        # review, 2026-09-13. *** `max_length=ws.FOLDER_MAX_PATH_LENGTH` used to sit
+        # here and SHADOWED `workspace.normalize_folder_path`'s own
+        # `folder_path_too_long` refusal: Pydantic validated first and answered
+        # `{"detail": [{"type": "string_too_long", ...}]}` with **no `error` key at
+        # all**, so one of the five refusal tokens this operation's own description
+        # promises was UNREACHABLE over HTTP. Measured: a 301-character path returned
+        # the Pydantic shape, never the typed one.
+        #
+        # Removing it is safe rather than permissive: `normalize_folder_path` refuses
+        # anything over `FOLDER_MAX_PATH_LENGTH` immediately, before the value is
+        # stored or joined, and it does so with a sentence that names the limit AND
+        # the actual length and ends "Nothing was changed." That is strictly more
+        # useful than `string_too_long`, and it is the sentence the frontend renders.
+        description=(
+            "The folder path label to file this experiment under, e.g. "
+            "`Cu K-edge/2026 campaign`. `null` or `\"\"` unfiles it. Required — an "
+            "absent key is rejected rather than read as either."
+        ),
+    )
+
+
+@router.patch(
+    "/experiments/{experiment_id}/folder",
+    tags=[TAG_EXPERIMENTS],
+    summary="File an Experiment in a Folder",
+    description=(
+        "Files an experiment under a folder path label, moves it to a different "
+        "one, or unfiles it — and returns the refreshed detail bundle. Nothing else "
+        "about the record is touched.\n\n"
+        "**A folder is a label on this experiment, not a container that exists "
+        "separately.** A path comes into existence because at least one experiment "
+        "names it, and it stops existing when the last one stops. There is "
+        "therefore nothing here to create and nothing to delete: filing the first "
+        "experiment under `Cu K-edge/2026` is what makes that path real, and moving "
+        "the last one out is what ends it. Paths nest with `/`, up to "
+        f"{ws.FOLDER_MAX_DEPTH} levels.\n\n"
+        "**This operation cannot make an empty folder, rename a folder, or set a "
+        "folder's owner or permissions, and no such capability exists anywhere in "
+        "this build.** Renaming a path means rewriting every member, which is many "
+        "independent writes with no transaction around them; ownership and sharing "
+        "need a trusted authentication boundary this deployment does not have.\n\n"
+        "**It changes no science.** The folder reaches no exported record, no "
+        "evidence sidecar and no content signature, and it alters no field value, no "
+        "run, no evidence and no validation result. Because the export-freshness "
+        "signal compares record CONTENT, filing an already-exported record leaves "
+        "its artifact `current` and never asks anyone to re-export; a submitted "
+        "revision stays submitted.\n\n"
+        "**It does move the record's version.** The folder is part of the record's "
+        "authoritative signature — it has to be, or the first assignment would be "
+        "silently discarded by the write path — so a successful move bumps `rev`, "
+        "issues a new `ETag`, and appears in the record's change feed as an "
+        "`experiment` change. A client holding the old `ETag` must re-read.\n\n"
+        "Requires the record's current `ETag` in `If-Match`. Omitted is `428`, "
+        "malformed is `400`, and stale is `412` with nothing written and the "
+        "record's current `ETag` echoed.\n\n"
+        "Whitespace around each name is trimmed and empty levels are dropped, so "
+        "`/a//b/` and `a/b` are the same path. Anything this server will not store "
+        "is REFUSED with a typed `422` and nothing is written — it is never "
+        "silently shortened or rewritten. Refused: a level called `.` or `..`, a "
+        "level containing a control character, a level over "
+        f"{ws.FOLDER_MAX_SEGMENT_LENGTH} characters, a path over "
+        f"{ws.FOLDER_MAX_DEPTH} levels deep, and a whole path over "
+        f"{ws.FOLDER_MAX_PATH_LENGTH} characters.\n\n"
+        "Re-sending the folder the record already holds is a no-op: it rewrites "
+        "nothing, does not advance the revision, and returns the same `ETag`.\n\n"
+        "It refuses with `409` when the `X-Isaac-Tutorial-Session` header is "
+        "present, and writes nothing. The built-in worked examples are fixed "
+        "teaching material, and a reset would revert the change anyway."
+    ),
+    response_description="The refreshed experiment detail bundle, with the record's `ETag`.",
+    responses={
+        **_R_STORAGE_UNAVAILABLE,
+        **_R_UNAUTHORIZED,
+        **_R_EXPERIMENT_NOT_FOUND,
+        **_R_PRECONDITION,
+        409: {
+            "description": (
+                "The request carried a worked-example session header. This "
+                "operation acts only on the ordinary workspace. Nothing was changed."
+            )
+        },
+        422: {
+            "description": (
+                "The folder path is not one this server will store, and NOTHING WAS "
+                "CHANGED. **FOUR of these carry a typed `error`; the fifth is the "
+                "framework's, and the difference is stated rather than smoothed "
+                "over** (corrected 2026-09-13 after an independent review measured "
+                "that this list promised five and delivered three). A typed `error` "
+                "plus a `message` ending “Nothing was changed.” is returned for "
+                "`invalid_folder_segment` (a level called `.`/`..`, or one carrying a "
+                "control character), `folder_segment_too_long`, `folder_too_deep` and "
+                "`folder_path_too_long`. A `folder` that is **not text** is refused "
+                "first by request validation, as `{\"detail\": [{\"type\": "
+                "\"string_type\", \"loc\": [\"body\", \"folder\"], …}]}` — it names the "
+                "field and the expected type, which is more useful than a hand-rolled "
+                "equivalent, so it is left to the framework and NOT re-raised as "
+                "`invalid_folder`. (`invalid_folder` still exists in "
+                "`workspace.normalize_folder_path` for internal callers, which is why "
+                "it is named here at all.) The value is never truncated to fit. This "
+                "status is also what the request layer returns for a body with no "
+                "`folder` key at all, or with any other key — an absent key is "
+                "refused rather than read as either “leave it” or “unfile it”."
+            ),
+            # THE `HTTPValidationError` REF IS CARRIED DELIBERATELY, for exactly the
+            # reason `_R_MALFORMED_CURSOR` and `_R_ANSWER_REFUSED` carry it:
+            # declaring a `422` of one's own makes FastAPI SKIP generating its own,
+            # which silently drops the framework's content ref on an operation that
+            # still has a path parameter and a request body it can reject on type.
+            # `test_operations_with_parameters_keep_the_validation_error_schema`
+            # caught its absence here on the first run, which is the guard working.
+            "content": {
+                "application/json": {
+                    "schema": {"$ref": "#/components/schemas/HTTPValidationError"}
+                }
+            },
+        },
+    },
+)
+def move_experiment_to_folder(
+    scope: TutorialScopeDep,
+    experiment_id: ExperimentId,
+    response: Response,
+    body: MoveExperimentRequest = Body(
+        ...,
+        description=(
+            "`{\"folder\": \"Cu K-edge/2026 campaign\"}` to file it, or "
+            "`{\"folder\": null}` to unfile it. Any other key is `422`."
+        ),
+    ),
+    if_match: str | None = Header(
+        default=None,
+        alias="If-Match",
+        description=(
+            "Required. The RECORD's current `ETag`, exactly as a record read "
+            "operation returned it."
+        ),
+    ),
+):
+    if scope is not None:
+        return JSONResponse(
+            status_code=409,
+            content={
+                "error": "ordinary_scope_required",
+                "operation": "PATCH /api/experiments/{experiment_id}/folder",
+                "header": TUTORIAL_SESSION_HEADER,
+                "message": (
+                    "Experiments are filed in the ordinary workspace. The built-in "
+                    "worked examples are fixed teaching material and a reset would "
+                    "revert the change. Nothing was changed."
+                ),
+            },
+        )
+    # NORMALISED AND REFUSED BEFORE THE LOCK IS TAKEN. A body this server will not
+    # store cannot become a write however the record turns out, so holding the
+    # record lock while deciding that would serialise other writers behind a
+    # request that was always going to fail.
+    try:
+        folder = ws.normalize_folder_path(body.folder)
+    except ws.FolderPathRefused as refused:
+        return JSONResponse(
+            status_code=422,
+            content={
+                "error": refused.reason,
+                "message": f"{refused.message} Nothing was changed.",
+            },
+        )
+    # Existence pre-check OUTSIDE the lock, as every other mutation does.
+    if ws.load_experiment(experiment_id, session_id=scope) is None:
+        return _not_found(experiment_id)
+    with ws.record_lock(experiment_id, session_id=scope):
+        exp = ws.load_experiment(experiment_id, session_id=scope)
+        if exp is None:
+            return _not_found(experiment_id)  # deleted in the pre-check->lock window
+        precondition = _check_if_match(if_match, exp)
+        if precondition is not None:
+            return precondition
+
+        exp.folder = folder
+        # `save_versioned`, NOT `save`, and for `folder` this is not merely the
+        # better choice — it is the only one that works. `folder` is inside
+        # `_authoritative_signature`, so this is what bumps `rev` and moves the
+        # ETag when the path actually changes, and what writes nothing and leaves
+        # the ETag alone when the client re-sent the path the record already had.
+        # Calling `save` would file the record while leaving its validator unmoved,
+        # and a second client holding the pre-move ETag would then pass its own
+        # precondition and silently overwrite this write.
+        _changed, stale = _save_versioned(exp, if_match)
+        if stale is not None:
+            return stale
+        # The full detail bundle, the same shape the rename returns and for the same
+        # reason: a client replaces its state in one hop. Its cost is the one the
+        # rename discloses — on a fully-answered record this pays one
+        # `dry_run_verdict`, which `pending_count() > 0` short-circuits on every
+        # record that still owes questions. Filing a record is a rare, human-paced
+        # act, not a hot path.
+        detail = _detail(exp)
+        detail.update(vc.version_fields(exp))
+        response.headers["ETag"] = exp.etag()
+        return detail
 
 
 # --- 4b. discard --------------------------------------------------------------
@@ -3784,11 +4372,25 @@ _BOUNDED_PENDING_PARAGRAPH = (
 PENDING_PAGE_MAX: int = 500
 
 #: THE BOUND IS INTERPOLATED, NOT RETYPED — same reason as ``_RUN_LIMIT_DESC``.
+#: **WHAT "OMIT" MEANS DEPENDS ON THE TRANSPORT, AND THIS SENTENCE HAS TO SAY SO.**
+#: It is published VERBATIM into `isaac_list_questions`' tool schema — that
+#: verbatim-ness is the anti-drift property `test_the_descriptions_are_the_routes_own
+#: _words` exists to keep — so a sentence true only of HTTP is read by an agent for
+#: which it is false. MCP-002 made that concrete: the MCP tool now supplies a default
+#: `limit`, so "omit to return every open question" is exactly wrong there.
+#:
+#: The remedy is the one `_PENDING_RUN_ID_DESC` already settled on for `?run_id=`:
+#: **do not de-share the sentence — name which behaviour belongs to which transport**,
+#: so both readers are addressed and neither is misled.
 _PENDING_LIMIT_DESC = (
-    f"Maximum questions to return, 1–{PENDING_PAGE_MAX}. OMIT to return every open "
-    "question: this parameter bounds one response and is never a limit on how many "
-    "questions a record may have. When you send it, the response carries a "
-    "`pending_page` block reporting the total and how many were withheld."
+    f"Maximum questions to return, 1–{PENDING_PAGE_MAX}. This parameter bounds one "
+    "response and is never a limit on how many questions a record may have. OMITTING "
+    "IT MEANS DIFFERENT THINGS ON THE TWO TRANSPORTS: over HTTP the response is "
+    "complete and carries no `pending_page` block, while an MCP tool supplies its own "
+    "default window, so an MCP caller always gets a page and always gets a "
+    "`pending_page` block — raise this value, or walk `offset`, to see more. Whenever "
+    "a limit is in effect the response carries that block, reporting the total and "
+    "how many were withheld."
 )
 
 _PENDING_OFFSET_DESC = (
@@ -7919,10 +8521,17 @@ RUN_PAGE_MAX: int = 200
 #: a second copy of ``RUN_PAGE_MAX``, free to drift from it silently — and the copy
 #: that drifts is the one published in the OpenAPI document, where a reader has no way
 #: to check it against the constant. Changing the constant now changes the sentence.
+#: AND, like ``_PENDING_LIMIT_DESC``, IT NAMES BOTH TRANSPORTS. This sentence is
+#: published verbatim into ``isaac_list_runs``' tool schema, and MCP-002 gave that
+#: tool a default window, so an unqualified "omit to return every run" is true of
+#: HTTP and false of an agent. The route's own behaviour is UNCHANGED.
 _RUN_LIMIT_DESC = (
-    f"Maximum runs to return, 1–{RUN_PAGE_MAX}. OMIT to return every run: this "
-    "parameter bounds one response, and is never a limit on how many runs a record "
-    "may have. `total` always reports how many exist."
+    f"Maximum runs to return, 1–{RUN_PAGE_MAX}. This parameter bounds one response, "
+    "and is never a limit on how many runs a record may have. OMITTING IT MEANS "
+    "DIFFERENT THINGS ON THE TWO TRANSPORTS: over HTTP every run is returned, while "
+    "an MCP tool supplies its own default window and returns a page — raise this "
+    "value, or walk `offset`, to see more. `total` always reports how many exist, on "
+    "both, so a page is always distinguishable from the whole list."
 )
 
 _RUN_OFFSET_DESC = (
@@ -11164,6 +11773,77 @@ def capture_facts(paths) -> dict[str, dict]:
 _MAX_NOTE_BYTES = 256 * 1024
 
 
+#: The most notes ONE record may hold, and the most `state["notes"]` may serialise
+#: to for one record. **MCP-001a.**
+#:
+#: ***THEY DID NOT EXIST UNTIL THIS SLICE, AND `_MAX_PROPOSAL_STATE_BYTES`' OWN
+#: COMMENT SAYS SO IN PASSING:*** *"That matters here and not for notes because of
+#: what the document costs."* Re-measured before adding these: `_MAX_NOTE_BYTES`
+#: bounded ONE capture and **nothing bounded how many a record could hold** — no
+#: count ceiling, no document ceiling, no `too_many_notes` anywhere in this
+#: application. So the same arithmetic that comment performs for proposals ran for
+#: notes with no second factor at all: unbounded rows at 256 KiB each.
+#:
+#: WHY THE PROPOSAL COMMENT'S REASONING DOES NOT ACTUALLY EXEMPT NOTES, which is the
+#: finding rather than the constant. Its argument is about what the DOCUMENT costs —
+#: `load_experiment` parses the whole document on every read and
+#: `_authoritative_signature` sha256s the whole of it on every save. Notes live at
+#: `state["notes"]`, in the SAME document, and are hashed into that SAME signature
+#: (`workspace.py`'s `_authoritative_signature`). The cost is identical; only the
+#: bound was missing. The sentence was reasoning about which FEATURE needed a bound
+#: and read as though it had established which DATA was cheap.
+#:
+#: **WHAT MADE IT URGENT IS WHO CAN NOW REACH IT.** Note creation became an MCP
+#: operation in this slice, and with **EXT-01 open** — no trusted authentication
+#: boundary, Dean having reconfirmed the ClusterIP bypass on 2026-08-12 — an
+#: untrusted in-cluster caller can reach that operation. *Inert to export is not the
+#: same as harmless to the record*: a note cannot make a record un-exportable, and a
+#: document too large to parse makes it unreadable, which is worse.
+#:
+#: **THE NUMBERS ARE JUDGEMENTS, NOT MEASUREMENTS, AND SAYING SO IS PART OF THEM** —
+#: `_MAX_PROPOSALS_PER_RECORD` and `_MAX_PROPOSAL_STATE_BYTES` make the same
+#: disclosure for the same reason, and this constant deliberately copies their
+#: posture rather than inventing a more confident one. NOTHING HERE HAS MEASURED A
+#: PARSE OR A HASH COST at any document size, on this machine or on the deployed pod.
+#: The count matches `_MAX_PROPOSALS_PER_RECORD` because a record's notes and its
+#: proposals are the same order of thing to a reviewer, and the document bound is
+#: written as a multiple of `_MAX_NOTE_BYTES` so it follows that constant instead of
+#: drifting from it — the same expression `_MAX_PROPOSAL_STATE_BYTES` uses.
+#:
+#: **A CONSEQUENCE TO STATE RATHER THAN LET A CLIENT DISCOVER:** whichever binds
+#: first refuses, so a record whose notes are long meets the document ceiling BEFORE
+#: it reaches the count and never sees `too_many_notes`. The two carry different
+#: `error` values for exactly that reason, as the proposal pair does.
+#:
+#: **REFUSES, NEVER TRUNCATES, NEVER EVICTS.** Dropping the oldest note to make room
+#: would destroy a verbatim capture, which is invariant (1) of `notes.py` — the one
+#: thing the whole feature exists not to do. The record simply stops accepting new
+#: notes and says so, with both the ceiling and the measured value.
+#:
+#: **IT GATES `POST .../notes` ONLY, AND THAT SCOPE IS DELIBERATE.** The transcript
+#: reader is the other producer and already carries its own per-request bound
+#: (`transcript_capture.MAX_SEGMENTS`, 100), so it cannot mint an unbounded batch in
+#: one call; bringing it under this ceiling too is a real improvement and is NAMED
+#: RESIDUE rather than done here, because that route belongs to another slice in
+#: flight and a bound applied to half a producer set should not be described as a
+#: bound on the record. What this constant honestly claims is that the ONE route a
+#: connected agent reaches cannot grow a record without limit.
+_MAX_NOTES_PER_RECORD = 1000
+
+_MAX_NOTE_STATE_BYTES = _MAX_NOTE_BYTES * 16
+
+
+#: The largest a caller's own idempotency key may be. **MCP-001.**
+#:
+#: It is stored verbatim and echoed in no refusal, so the bound is about the
+#: DOCUMENT rather than about any parsing risk: an unbounded key would be an
+#: unbounded string a caller can write into the experiment state once per note.
+#: 128 is `proposals.py`'s figure for the identical field, transcribed deliberately
+#: rather than derived, because the two keys are the same concept and a client that
+#: generates one key format for both must not find one route stricter than the other.
+_MAX_CLIENT_REQUEST_KEY_LENGTH = 128
+
+
 #: The path parameter naming a note. One description, so the wording cannot drift.
 NoteId = Annotated[
     str,
@@ -11196,7 +11876,18 @@ _R_NOTE_NOT_FOUND: dict = {
 #: body reports `verified: false` while the caller believes otherwise. A note cannot
 #: be asked to be a value, not merely refused when it tries.
 _NOTE_CAPTURE_KEYS = frozenset(
-    {"text", "source", "run_id", "candidate_field_path", "candidate_rule"}
+    {
+        "text",
+        "source",
+        "run_id",
+        "candidate_field_path",
+        "candidate_rule",
+        # OPTIONAL HERE AND REQUIRED BY THE MCP TOOL, which is the same asymmetry
+        # `create_proposal` already carries and for the same stated reason: a person
+        # clicking a button can see whether their note landed, and an agent retrying
+        # a timed-out call cannot.
+        "client_request_key",
+    }
 )
 _NOTE_REVIEW_KEYS = frozenset(
     {"action", "confirmed_by_user", "field_path", "text", "reason"}
@@ -11330,6 +12021,101 @@ def _note_text_refusal(raw: object, *, what: str) -> JSONResponse | None:
                 "REFUSED rather than shortened: a truncated note misrepresents what "
                 "was written. Nothing was written."
             ),
+        )
+    return None
+
+
+def _note_capacity_refusal(exp: Experiment) -> JSONResponse | None:
+    """The two per-record note ceilings, or ``None``. **MCP-001a.**
+
+    See :data:`_MAX_NOTES_PER_RECORD` for why these exist and why the numbers are
+    judgements rather than measurements. Two things about the SHAPE of this check
+    rather than the numbers:
+
+    **THE DOCUMENT SIZE IS MEASURED, NOT ESTIMATED, AND THROUGH THE SAME HELPER THE
+    PROPOSAL CEILING USES** (:func:`_render_exactly_as_a_response_would`) rather than
+    a second encoding of my own. It serialises what is actually stored — every note's
+    own ``to_state()``, which is what ``save_versioned`` writes and what
+    ``_authoritative_signature`` hashes — rather than summing ``len(note.text)``. An
+    estimate would undercount the history, the transitions and the keys, i.e. exactly
+    the parts that grow when a record is reviewed a lot, so a record could pass an
+    estimate and still be the document this bound exists to prevent.
+
+    **IT MEASURES THE NOTES ALREADY STORED AND NOT THE INCOMING ONE**, so the true
+    ceiling is this bound plus one note, and the response key is ``stored_bytes``
+    rather than the proposal route's ``bytes`` precisely so the two are not read as
+    the same measurement. The proposal route can measure the projected list because
+    minting a proposal is pure; ``capture_note`` builds and appends in one step, so
+    the equivalent here would mean constructing the very note being refused. One
+    note of slack against a multi-megabyte bound is not the risk this protects
+    against — an unbounded sequence of them is.
+
+    **UNREADABLE STORED ENTRIES ARE DELIBERATELY OUTSIDE THE MEASUREMENT**, for the
+    reason the proposal ceiling gives: they are entries ``Note.from_state`` refused,
+    kept verbatim by ``_hydrate_notes`` so a save cannot discard them, and rendering
+    one to measure it would be this route choosing an encoding for content it has
+    already said it cannot read. They also cannot grow — nothing in this application
+    creates one. So the ceiling bounds what this feature can ADD, which is its job.
+
+    **IT FAILS CLOSED.** If the stored notes cannot be rendered at all, this refuses
+    rather than letting a ``TypeError`` escape a size check — unreachable through any
+    route, since every stored note's text passed :func:`_note_text_refusal`, but the
+    alternative to a refusal is a traceback, and fail-closed is the right direction
+    for a bound.
+
+    Both refusals name the ceiling and the measured value, so a client learns what it
+    is up against rather than only that it failed. Neither truncates and neither
+    evicts; see the constant's docstring.
+    """
+    # `_notes_total(exp)`, AND NEVER THE INLINE `len(...)` OF THE NOTE LIST. A guard
+    # (`test_each_capture_count_has_exactly_one_expression_in_the_route_module`)
+    # counts that expression's occurrences IN THIS MODULE'S SOURCE and requires
+    # exactly one — so this comment deliberately does not spell it either. Every surface
+    # that counts a record's notes counts it the same way — which is what stops the
+    # list payload, the capture summary and this ceiling ever disagreeing about how
+    # many notes a record holds.
+    total = _notes_total(exp)
+    if total >= _MAX_NOTES_PER_RECORD:
+        return _note_refusal(
+            "too_many_notes",
+            (
+                "This record already holds the maximum number of notes. Notes are "
+                "not removed by reviewing them — dismissing is a state, not a "
+                "delete, and this API has no delete — so the bound is on how many "
+                "one record may ever hold. Nothing was written, and nothing "
+                "already captured was altered."
+            ),
+            max_per_record=_MAX_NOTES_PER_RECORD,
+            total=total,
+        )
+    try:
+        stored = _render_exactly_as_a_response_would(
+            [note.to_state() for note in exp.notes]
+        )
+    except (ValueError, TypeError, UnicodeEncodeError):  # pragma: no cover - see above
+        return _note_refusal(
+            "unrepresentable_value",
+            (
+                "This record already holds a note that could not be measured, so "
+                "the per-record ceiling could not be checked and nothing was "
+                "written."
+            ),
+        )
+    if len(stored) >= _MAX_NOTE_STATE_BYTES:
+        return _note_refusal(
+            "notes_too_large",
+            (
+                "This record's stored notes have reached the maximum size one "
+                "record's notes may occupy. The whole record document is parsed on "
+                "every read and hashed on every save, so an unbounded notes block "
+                "would make the record slow to read and eventually impossible to "
+                "read at all. This is a DIFFERENT bound from `too_many_notes`, "
+                "which counts rows: whichever binds first refuses. Nothing was "
+                "written, and nothing already captured was altered or shortened."
+            ),
+            max_bytes=_MAX_NOTE_STATE_BYTES,
+            stored_bytes=len(stored),
+            total=total,
         )
     return None
 
@@ -11516,6 +12302,16 @@ def list_notes(
         "produced its own output is not described by inventing a label for it. "
         "These are this feature's own vocabulary and are deliberately not ISAAC "
         "evidence source types, because a note is not evidence.\n\n"
+        "**`source` IS ASSERTED BY THE CALLER ON THIS ROUTE, AND IS THEREFORE NOT "
+        "PROOF OF ANYTHING.** That has always been true of every member — nothing "
+        "stops a program sending `typed_note` — and it is stated explicitly because "
+        "one member now names a channel rather than a format: `connected_agent` "
+        "means the content arrived through the machine-callable (agent) interface. "
+        "Where that claim IS trustworthy is the agent interface itself, which stamps "
+        "it server-side and accepts no `source` argument at all, so a caller there "
+        "cannot choose. Treat the value as what the producer said about itself, "
+        "never as an identity, and never as an actor: no member of this vocabulary "
+        "names a person, and nothing on a note is attributed to one.\n\n"
         "`run_id`, `candidate_field_path` and `candidate_rule` are optional and "
         "nothing supplies them on a caller's behalf. An omitted `run_id` means the "
         "note belongs to the record rather than to a run, and it is never filled "
@@ -11525,13 +12321,36 @@ def list_notes(
         "arrive with the `candidate_rule` that produced it — an unexplained "
         "proposal is a guess, and either half without the other is `422`. Absent "
         "is absent: an empty string is refused, not stored.\n\n"
+        "`client_request_key` is OPTIONAL and makes this operation exactly-once. "
+        "Send the SAME key again and the SAME note is returned with "
+        "`deduplicated: true` and a `200` rather than a `201`, and nothing is "
+        "captured; send a new key, or none, and you have captured a separate note. "
+        "The key is checked INSIDE the record lock and AFTER `If-Match`, so a retry "
+        "carrying the ETag held before the first attempt is refused `412` — re-read "
+        "the record and retry with the same key. A blank key is refused rather than "
+        "treated as absent, because a caller that sent one is relying on "
+        "exactly-once and silently ignoring it would quietly downgrade that to "
+        "at-least-once.\n\n"
+        "**READ `deduplicated` BEFORE REPORTING WHAT HAPPENED.** `false` means this "
+        "request captured the note in the body. `true` means a note with your key "
+        "was already on the record, so nothing was captured and the EXISTING one is "
+        "returned — its text, source and run may differ from what you just sent, "
+        "and it may already have been mapped, kept or dismissed by a person. Do not "
+        "describe a deduplicated result as content you just captured.\n\n"
+        "TWO PER-RECORD CAPACITY BOUNDS apply, and both REFUSE rather than evict: "
+        "`too_many_notes` counts rows and `notes_too_large` bounds how much one "
+        "record's notes may occupy, whichever binds first. Dropping the oldest note "
+        "to make room would destroy a verbatim capture, which is the one thing this "
+        "feature exists not to do. Both name their ceiling and the measured value. "
+        "They are checked AFTER deduplication, so a retry of a note the record "
+        "already holds is always answerable even at the ceiling.\n\n"
         "Any other body key is refused with `422` naming it. A note carries no "
         "status, no verification and no evidence, so a request that tries to set "
         "one is rejected rather than accepted and quietly ignored."
     ),
     response_description=(
-        "The stored note and the record's new revision, with the record's new "
-        "`ETag`."
+        "The stored note, whether this request captured it or returned one it had "
+        "already captured, and the record's revision, with the record's `ETag`."
     ),
     responses={**_R_STORAGE_UNAVAILABLE, **_R_UNAUTHORIZED, **_R_TUTORIAL_SCOPE, **_R_PRECONDITION},
 )
@@ -11545,8 +12364,9 @@ def post_note(
             "`{\"text\": \"<verbatim content>\", \"source\": \"<one of the "
             "reported sources>\", \"run_id\": \"<optional>\", "
             "\"candidate_field_path\": \"<optional>\", \"candidate_rule\": "
-            "\"<required with a candidate path>\"}`. Any other key is refused with "
-            "`422`."
+            "\"<required with a candidate path>\", \"client_request_key\": "
+            "\"<optional; retrying with the same key captures nothing and returns "
+            "the same note>\"}`. Any other key is refused with `422`."
         ),
     ),
     if_match: str | None = Header(
@@ -11635,9 +12455,83 @@ def post_note(
                 ),
                 key=candidate if isinstance(candidate, str) else None,
             )
+        # RESOLVED WITH THE REST OF THE BODY, BEFORE THE PRECONDITION, because a
+        # malformed key is the caller's to fix whatever version it holds. The KEY IS
+        # NEVER ECHOED in this refusal: it is a caller-supplied string, and
+        # `_note_refusal`'s own docstring records that this route's echo enumeration
+        # has been wrong twice. The ceiling and the measured length are enough to fix
+        # the request.
+        request_key = body.get("client_request_key")
+        if request_key is not None and (
+            not isinstance(request_key, str)
+            or not request_key.strip()
+            or len(request_key) > _MAX_CLIENT_REQUEST_KEY_LENGTH
+        ):
+            return _note_refusal(
+                "invalid_client_request_key",
+                (
+                    "`client_request_key` must be a non-blank string no longer than "
+                    "the published ceiling, or absent entirely. A blank key is "
+                    "REFUSED rather than treated as absent: a caller that sent one "
+                    "is relying on exactly-once, and silently ignoring it would turn "
+                    "that into at-least-once with nothing on the wire saying so. "
+                    "Nothing was written."
+                ),
+                max_length=_MAX_CLIENT_REQUEST_KEY_LENGTH,
+                length=len(request_key) if isinstance(request_key, str) else None,
+            )
         precondition = _check_if_match(if_match, exp)
         if precondition is not None:
             return precondition
+
+        # EXACTLY-ONCE, INSIDE THE LOCK, AND AFTER THE PRECONDITION — `create_proposal`'s
+        # ordering, adopted deliberately rather than re-argued, so a client that
+        # generates one key format for both routes meets one behaviour. Every write to
+        # one experiment holds this lock, so a key already present cannot be missed by
+        # a concurrent capture and no uniqueness constraint is needed. The EXISTING
+        # note is returned, with the id the FIRST attempt established, because a
+        # retrying client's whole requirement is to end up with one note and know
+        # which — and because a note's id is what a proposal cites, so handing a retry
+        # a different id would break the very loop this key exists to protect.
+        #
+        # A consequence, stated rather than discovered: a client retrying with the
+        # `ETag` it held before its first attempt meets `412`, because that first
+        # attempt advanced the record. It re-reads and retries, and it is that second
+        # attempt this branch answers. Exactly-once is unchanged and is now delivered
+        # by two mechanisms rather than one.
+        if request_key is not None:
+            existing = notes.find_by_client_request_key(exp.sorted_notes(), request_key)
+            if existing is not None:
+                # A `JSONResponse` of its own, so the injected `Response`'s headers
+                # would not be applied — the `ETag` is set here explicitly, and
+                # `response.headers` is deliberately NOT touched, for the reason
+                # `create_proposal`'s identical branch states.
+                #
+                # **`200`, NOT `201`** — and that is the honest code rather than a
+                # convenience. `201 Created` would assert this request created
+                # something; it created nothing. `deduplicated` in the body says which
+                # of the two happened, so a client never has to infer it from a status.
+                return JSONResponse(
+                    status_code=200,
+                    headers={"ETag": exp.etag()},
+                    content=jsonable_encoder(
+                        {
+                            "note": _note_view(existing),
+                            "deduplicated": True,
+                            "experiment_version": exp.version_token(),
+                        }
+                    ),
+                )
+
+        # THE TWO CAPACITY CEILINGS — see `_MAX_NOTES_PER_RECORD`. AFTER the
+        # deduplication branch on purpose: a retry of a note the record ALREADY holds
+        # adds nothing, so refusing it for want of capacity would make a record at its
+        # ceiling unable to answer a question it had already answered, and would leave
+        # a client that legitimately minted a note unable ever to confirm it did.
+        capacity = _note_capacity_refusal(exp)
+        if capacity is not None:
+            return capacity
+
         try:
             note = exp.capture_note(
                 text=body["text"],
@@ -11645,6 +12539,7 @@ def post_note(
                 run_id=run_id,
                 candidate_field_path=candidate,
                 candidate_rule=body.get("candidate_rule"),
+                client_request_key=request_key,
             )
         except notes.UnsupportedNote as refusal:
             # THE MODEL'S OWN REFUSALS REACH THE CLIENT AS A TYPED 422, NEVER A 500.
@@ -11658,7 +12553,15 @@ def post_note(
         # `_changed` is structurally always True here: a new note with a fresh id
         # cannot leave the authoritative signature equal.
         response.headers["ETag"] = exp.etag()
-        return {"note": _note_view(note), "experiment_version": exp.version_token()}
+        # `deduplicated: false` ALWAYS ON THIS PATH, and published rather than
+        # implied by the `201`. A client reads ONE key to learn what happened instead
+        # of branching on a status code, which is what lets the deduplicated answer
+        # above be a plain `200` without becoming ambiguous.
+        return {
+            "note": _note_view(note),
+            "deduplicated": False,
+            "experiment_version": exp.version_token(),
+        }
 
 
 @router.get(
@@ -15195,9 +16098,100 @@ def post_transcript(
             )
             for run in exp.sorted_runs()
         )
-        reading = tc.read_transcript(
-            raw_text, selected_run=run_id, known_runs=known_runs
-        )
+        # THE DENSITY CEILINGS REFUSE HERE, BESIDE THE SEGMENT CEILING, AND BEFORE
+        # ANY NOTE IS STORED — the reader raises rather than reporting, so there is
+        # no ordering in which a caller receives a partial or empty-looking
+        # candidate list for a transcript that blew a ceiling. See
+        # `tc.TranscriptTooDense` for why an exception and not a marker.
+        #
+        # WHY THE READER NEEDS ITS OWN BOUNDS AT ALL, given `_MAX_TRANSCRIPT_BYTES`
+        # above and `_MAX_PROPOSALS_PER_RECORD` below: the transcript ceiling bounds
+        # the INPUT and the proposal ceiling bounds the DURABLE WRITE, and the cost
+        # measured on the code that shipped without these was in neither. It was the
+        # RESPONSE and the LOCK HOLD — a 27,025-byte single segment produced a
+        # 165,828,285-byte response with `proposals_too_large` refusing all 3,001
+        # rows and minting none, i.e. every existing bound working as designed.
+        #
+        # A CONSEQUENCE TO STATE RATHER THAN LET A CLIENT DISCOVER: whichever bound
+        # binds first refuses, so a transcript that is BOTH over the segment ceiling
+        # and over a density ceiling reports `transcript_too_dense` and never sees
+        # `transcript_too_long`. Both are true of it, both say "finalize it in
+        # smaller pieces", and both store nothing — so the precedence changes which
+        # reason a client is told, never whether it is refused. `MAX_CANDIDATES`
+        # (500) sits above `MAX_SEGMENTS` (100) times a realistic per-sentence
+        # count, so an ordinarily-long transcript still gets the segment reason.
+        #
+        # THERE ARE ~~THREE~~ **FOUR** DENSITY CEILINGS, NOT TWO, since 2026-09-12:
+        # candidate
+        # COUNT, candidate QUOTED BYTES, DISCLOSURE count (`tc.MAX_DISCLOSURES`
+        # — abstentions plus clarifications) and the RUN OPTIONS those disclosures
+        # carry (`tc.MAX_DISCLOSURE_OPTIONS`). The third exists because the first
+        # two are fed from inside the reader's `if not settled: continue` and so
+        # could never see a disclosure; the FOURTH exists because the third bounds
+        # the disclosure COUNT while a `Clarification` carries one option per run of
+        # `known_runs` above, which is EVERY run and not a page — measured 200 at
+        # 143,998,672 B on a 29,985-byte transcript against a 1,000-run record.
+        #
+        # MEASURED THROUGH THIS ROUTE at `bce43f19`,
+        # on a single segment filled to the largest size this route accepts
+        # (`_MAX_TRANSCRIPT_BYTES - 2`, because `_is_storable_value` measures the
+        # RENDERED bytes and a JSON string adds its two quotes):
+        #
+        #   `"temperature 1 C "` x 16,383  ->  **200**, 5,872,502 B, 16,383
+        #                                      abstentions, 1 note stored
+        #   `"run zzz at 1 K "`  x 17,476  ->  **200**, 5,477,376 B, 17,476
+        #                                      clarifications, 1 note stored
+        #
+        # with neither existing ceiling firing, all of it serialised inside
+        # `record_lock`. Both are now **422** at **455 B**, and nothing is stored.
+        # (The referring slice's figures — ~5.1 MB and ~4.3 MB — were in-process
+        # measurements of the disclosure lists alone, not of the response; they are
+        # the same defect measured one layer down and are not corrections of
+        # these.) All three share ONE error
+        # (`transcript_too_dense`) and ONE refusal, deliberately: they are the same
+        # decision — this transcript states more than one capture can read and
+        # report on, refuse it whole and keep every word — and a client that
+        # branches on the reason rather than on the numbers would have to learn a
+        # third name to do nothing different. The response carries all three
+        # measured counts beside all three ceilings, so which one bound is
+        # readable from the body rather than from the name.
+        try:
+            reading = tc.read_transcript(
+                raw_text, selected_run=run_id, known_runs=known_runs
+            )
+        except tc.TranscriptTooDense as refusal:
+            return _transcript_refusal(
+                "transcript_too_dense",
+                (
+                    "This transcript states more than one capture may read and "
+                    "report on. It is REFUSED whole rather than partly read, "
+                    "because a "
+                    "partly read transcript proposes some of what was said and "
+                    "silently drops the rest. Nothing was stored; finalize it in "
+                    "smaller pieces."
+                ),
+                candidates=refusal.candidates,
+                maximum_candidates=refusal.maximum_candidates,
+                candidate_quote_bytes=refusal.candidate_quote_bytes,
+                maximum_candidate_quote_bytes=(
+                    refusal.maximum_candidate_quote_bytes
+                ),
+                disclosures=refusal.disclosures,
+                maximum_disclosures=refusal.maximum_disclosures,
+                # THE FOURTH CEILING, added 2026-09-12 (fourth pass). See
+                # `tc.MAX_DISCLOSURE_OPTIONS`: `MAX_DISCLOSURES` bounds the COUNT
+                # of disclosures, and a `Clarification` carries one `options` entry
+                # per run of the record — `known_runs` above is EVERY run, not a
+                # page — so a transcript inside all three earlier ceilings served a
+                # 200 whose body grew without bound in the record's run count.
+                # Measured through this route at `22d794a5`, on ONE segment of
+                # `"run zzz at 1 K " * 1999` (29,985 B, 1,999 disclosures <= 2,000,
+                # 0 candidates, 0 quoted bytes): **200** at **143,998,672 B** with
+                # 1,000 runs and **735,702,672 B** with 5,000, all of it serialised
+                # inside `record_lock`. Now **422**, with nothing stored.
+                disclosure_options=refusal.disclosure_options,
+                maximum_disclosure_options=refusal.maximum_disclosure_options,
+            )
         if len(reading.segments) > tc.MAX_SEGMENTS:
             return _transcript_refusal(
                 "transcript_too_long",

@@ -58,9 +58,12 @@ import type { ApiCaptureSummary } from '../lib/types';
  * A destination is an address. Rendering `<Link>` gives a real `href`, so a
  * workspace can be middle-clicked, copied, bookmarked and — the reason the
  * switch is a PUSH rather than the `replace` the old tab bar used — reached
- * again with the browser Back button. A reader who goes Fields -> Runs -> Graph
- * and presses Back twice is on Fields, which is what the control looks like it
- * promises.
+ * again with the browser Back button. A reader who goes Fields -> Runs ->
+ * Capture & Proposals and presses Back twice is on Fields, which is what the
+ * control looks like it promises. (~~Fields -> Runs -> Graph~~ — the Graph left
+ * this list on 2026-09-13, `EVG-002`; the example is re-pointed rather than the
+ * paragraph rewritten, because the PUSH-not-replace property it describes is
+ * unchanged.)
  *
  * ── THE SEARCH STRING IS COPIED, NEVER REBUILT ──────────────────────────────
  *
@@ -89,6 +92,70 @@ export const RECORD_WORKSPACES: readonly { id: RecordViewId; label: string }[] =
  * own group, with the summary the others have no equivalent of.
  */
 const PROMOTED: RecordViewId = 'capture';
+
+/**
+ * *** EVG-002 / DEC-04 — THE GRAPH LEAVES THE RECORD'S SIDEBAR (2026-09-13). ***
+ *
+ * ── WHAT WAS DECIDED, AND HOW FAR IT GOES ───────────────────────────────────
+ *
+ * `DEC-04` is CONFIRMED: *"Evidence Graph is removed from primary scientist
+ * navigation; underlying provenance relationships are retained."* The
+ * measurement behind it: the Graph workspace is the most control-dense surface
+ * on the record screen — **34 buttons and 145 text elements** — in a product
+ * whose job is recording an experiment.
+ *
+ * `DEC-11` orders the removal in six steps. This is **step 3 only**, and steps
+ * 1, 2 and 6 are what make it safe:
+ *
+ * * **Steps 1–2 (provenance parity outside the graph) were ALREADY SATISFIED**
+ *   before this change, and `EVG-001` was dissolved on the measurement that
+ *   proved it: `derived_from` is not a provenance chain but one of the official
+ *   schema's `links[].rel` values, it is rendered today in the record's
+ *   `Relationships` section, and `EvidenceTrailPanel.tsx:163-175` renders an
+ *   origin + review chip pair computed by `lib/provenance.ts`. The graph never
+ *   owned it — `EvidenceGraphPanel.tsx:89` says `derived_from` links *"cannot be
+ *   edges of a tree"*, i.e. it EXCLUDES them.
+ * * **Step 6 (old deep links degrade safely).** `?view=graph` is unchanged and
+ *   still renders the graph: the route is not removed, the panel is not
+ *   deleted, and a bookmark a scientist already holds keeps working. A
+ *   still-working bookmark is the safest degradation available, so nothing here
+ *   needs a fallback.
+ *
+ * ── STEP 4 IS REFUSED BY ITS OWN CONDITION, AND THE LEDGER WAS WRONG ────────
+ *
+ * `DEC-11` step 4 deletes the frontend visualization *"if the dependency
+ * recheck is still clean"*. **It is not clean.** The ledger's `EVG-002` row
+ * records *"0 other consumers"*; measured 2026-09-13 with `grep -ran` (the `-a`
+ * is §11's rule — a zero-hit sweep of this tree without it is not a
+ * measurement), that is **FALSE in at least three ways**:
+ *
+ *   1. `EvidenceGraphPanel` is **RENDERED BY A DIFFERENT SCREEN** —
+ *      `screens/EvidenceExplorer.tsx:820`, the `/record/:id/evidence` route. It
+ *      is not the record graph workspace's private component.
+ *   2. `screens/graph/*` is **SHARED WITH PROJECT MEMORY**:
+ *      `screens/MemoryGraphCard.tsx` imports eight modules from it
+ *      (`GraphBrowse`, `GraphCanvas`, `GraphCommandBar`, `GraphDetail`,
+ *      `GraphHelp`, `GraphPathFinder`, `graph.css`, …).
+ *   3. `GraphAction` is shared with `components/AssistantPanel.tsx` — the ONE
+ *      typed action model the graph command bar and the Assistant's graph
+ *      intents both use, by design.
+ *
+ * So deleting it would break two other surfaces and the Assistant.
+ * **`DEC-11`'s own words are *"deletion is not a substitute for
+ * understanding"*, and the understanding is that the code is not unused.** The
+ * ledger row is corrected rather than quietly bypassed.
+ *
+ * ── WHY THIS IS A RENDERING FILTER AND NOT A SHORTER REGISTRY ───────────────
+ *
+ * `RECORD_WORKSPACES` stays the complete registry of the four, for exactly the
+ * reason the `PROMOTED` split above states: the Assistant reads a workspace's
+ * label from it, and so does the screen's region naming. Removing the entry
+ * would break a label lookup to move a link. This is the same mechanism,
+ * inverted: `capture` is rendered ABOVE the list, `graph` is rendered in NO
+ * list — and `graph` is still a first-class `?view=` id, still named, still
+ * addressable.
+ */
+export const URL_ONLY: readonly RecordViewId[] = ['graph'];
 
 /**
  * What the promoted row says beneath its label, built from the server's own
@@ -201,7 +268,9 @@ export function RecordWorkspaceNav({
       )}
       <div className="workspace-nav-eyebrow eyebrow">{LABELS.recordWorkspacesEyebrow}</div>
       <ul className="workspace-nav-list">
-        {RECORD_WORKSPACES.filter((workspace) => workspace.id !== PROMOTED).map((workspace) => {
+        {RECORD_WORKSPACES.filter(
+          (workspace) => workspace.id !== PROMOTED && !URL_ONLY.includes(workspace.id),
+        ).map((workspace) => {
           const next = new URLSearchParams(location.search);
           next.set(RECORD_VIEW_PARAM, workspace.id);
           const isActive = workspace.id === active;

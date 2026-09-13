@@ -1051,7 +1051,7 @@ def test_a_cursor_is_bound_to_its_scope_as_well_as_to_its_record():
 
 
 def test_the_served_kinds_are_derived_from_the_collectors(client):
-    """THE SERVED SET, and it is THREE now — `proposal` joined `experiment` and `run`.
+    """THE SERVED SET, and it is FOUR now — `note` joined it for MCP-005.
 
     Asserted as an equality against a literal rather than against `cf.feed_kinds()`
     alone, because the two halves are different claims: that the wire agrees with the
@@ -1062,7 +1062,7 @@ def test_the_served_kinds_are_derived_from_the_collectors(client):
     assert (
         _feed(client, exp_id)["kinds"]
         == cf.feed_kinds()
-        == ["experiment", "proposal", "run"]
+        == ["experiment", "note", "proposal", "run"]
     )
 
 
@@ -1080,6 +1080,25 @@ def test_a_FOURTH_kind_needs_no_change_to_this_module():
     globally: a module-level registry that tests append to leaks between tests. What it
     proves is unchanged — a new kind sorts by the SAME key as the built-in ones, so a
     collector cannot smuggle in its own ordering.
+
+    **THIS TEST'S NAME AND CLAIM ARE NARROWED BY MCP-005, WHICH ADDED A REAL FOURTH
+    KIND AND FOUND THAT IT DID NOT COME FREE.** The claim "no change to THIS MODULE"
+    is still exactly true and is why the collector tuple is the only edit: `note` was
+    added by appending one `KindCollector` and writing one generator, with no change
+    to the sorting, paging, cursor-comparison or drain machinery.
+
+    What is NOT true, and what a reader must not take from the title, is that a new
+    kind costs NOTHING. `note` sorts `experiment < note < proposal < run`, so it lands
+    UNDERNEATH two existing kinds — and a cursor already resting at `(R, "proposal",
+    X)` would have walked forward past every note at that rev and never reported one.
+    `CURSOR_VERSION` went 2 -> 3 for exactly that, and a v2 cursor is refused rather
+    than misread. **So the extensibility this test proves is mechanical, not
+    contractual:** the module absorbs a kind, and the CURSOR does not necessarily.
+    That distinction is asserted below rather than left in prose.
+
+    The stand-in is deliberately named `stand_in`, which sorts LAST, so this test
+    exercises the free case. `test_a_kind_that_sorts_below_an_existing_one_is_a_cursor
+    _contract_change` covers the other one.
     """
     entry = cf.ChangeEntry(
         kind="stand_in",
@@ -1091,7 +1110,13 @@ def test_a_FOURTH_kind_needs_no_change_to_this_module():
     )
     collectors = (*cf.RECORD_COLLECTORS, cf.KindCollector(kind="stand_in", read=lambda _e: [entry]))
 
-    assert cf.feed_kinds(collectors) == ["experiment", "proposal", "run", "stand_in"]
+    assert cf.feed_kinds(collectors) == [
+        "experiment",
+        "note",
+        "proposal",
+        "run",
+        "stand_in",
+    ]
 
     class _Bare:
         """The minimum an `Experiment` has to look like for the built-in collectors.
@@ -1110,15 +1135,80 @@ def test_a_FOURTH_kind_needs_no_change_to_this_module():
         runs: list = []
         proposals: list = []
         proposal_change_revs: dict = {}
+        # MCP-005, and for the reason the docstring above gives: the note collector
+        # reads these DIRECTLY with no `getattr` default, so a fake that omitted them
+        # would `AttributeError` rather than quietly serving an empty kind.
+        notes: list = []
+        note_change_revs: dict = {}
 
     page = cf.changes_page(_Bare(), scope_tag="tag", collectors=collectors)
-    assert page["kinds"] == ["experiment", "proposal", "run", "stand_in"]
+    assert page["kinds"] == ["experiment", "note", "proposal", "run", "stand_in"]
     assert [c["kind"] for c in page["changes"]] == ["experiment", "stand_in"]
     # And the new kind sorts by the SAME key as the built-in ones — a collector cannot
     # smuggle in its own ordering. The record sits at position 0 and the stand-in at 9,
     # so this is the SEQUENCE deciding, not the alphabet.
     assert [c["changed_at_rev"] for c in page["changes"]] == [0, 9]
     assert page["changes"][-1]["version"] == "deadbeefdeadbeef.3"
+
+
+def test_a_kind_that_sorts_below_an_existing_one_is_a_cursor_contract_change():
+    """THE OTHER HALF OF EXTENSIBILITY, AND THE REASON MCP-005 BUMPED THE CURSOR.
+
+    The test above proves a new kind needs no change to this module. It does NOT
+    prove a new kind is free, and MCP-005 is the case that separated the two: the
+    module absorbed `note` by appending one collector, and the CURSOR could not
+    absorb it at all.
+
+    **THE ARITHMETIC, DRIVEN RATHER THAN ARGUED.** The key is
+    `(changed_at_rev, kind, entity_id)` with `kind` compared as a string. `note`
+    sorts below `proposal` and `run`. So a cursor resting at `(R, "proposal", X)` is
+    already PAST every note at that same rev — walking forward from it would never
+    report them. Not late: never. This asserts the ordering fact the bump rests on,
+    so that a future kind added without checking it turns this red.
+    """
+    served = cf.feed_kinds()
+    assert served == sorted(served), served
+    # `note` IS BELOW TWO KINDS THAT PREDATE IT. This is the whole hazard, stated as
+    # a comparison rather than as a sentence.
+    assert "note" in served
+    assert "note" < "proposal"
+    assert "note" < "run"
+    assert "experiment" < "note"
+
+    # AND THE KEY REALLY DOES ORDER BY `kind` WHEN THE SEQUENCE TIES — so the
+    # comparison above is about the feed's behaviour and not merely about strings.
+    at_same_rev = [
+        cf.ChangeEntry(kind=kind, entity_id="e", changed_at_rev=7, updated_utc="t")
+        for kind in ("run", "proposal", "note", "experiment")
+    ]
+    assert [e.kind for e in sorted(at_same_rev, key=lambda e: e.key)] == [
+        "experiment",
+        "note",
+        "proposal",
+        "run",
+    ]
+
+    # THE CONSEQUENCE THE BUMP EXISTS FOR: a cursor at the proposal position of rev 7
+    # is strictly greater than the note position of rev 7, so a note there is behind
+    # it. Asserted over `key()` itself rather than over a sorted list, because this is
+    # the comparison `changes_page` performs against a decoded cursor. `key` is a
+    # PROPERTY, not a method — measured, after the first version of this test called it.
+    note_key = cf.ChangeEntry(
+        kind="note", entity_id="N", changed_at_rev=7, updated_utc="t"
+    ).key
+    proposal_cursor = cf.ChangeEntry(
+        kind="proposal", entity_id="P", changed_at_rev=7, updated_utc="t"
+    ).key
+    assert note_key < proposal_cursor
+
+    # SO THE VERSION MOVED, and a cursor from the previous generation is REFUSED
+    # rather than misread. Both halves are asserted: the number, and the refusal.
+    assert cf.CURSOR_VERSION == 3
+    stale = base64.urlsafe_b64encode(
+        json.dumps({"v": 2, "q": 7, "k": "proposal", "e": "P", "s": "tag"}).encode()
+    ).decode().rstrip("=")
+    with pytest.raises(cf.MalformedCursor):
+        cf.decode_cursor(stale, scope="tag")
 
 
 #: Every stored attribute of an `IngestionProposal` that is CONTENT — the value, what

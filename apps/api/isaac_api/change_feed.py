@@ -107,7 +107,36 @@ CHANGE_FEED_LIMIT_MAX = 200
 #: whole module's tone is aimed at. The payload's key for that component was also
 #: renamed `t` -> `q`, so a v1 token is missing a required component as well as
 #: carrying the wrong version — two independent refusals, not one.
-CURSOR_VERSION = 2
+#: **3 SINCE MCP-005, AND THE BUMP IS NOT CEREMONIAL — A v2 CURSOR WOULD HAVE LOST
+#: NOTE EVENTS SILENTLY.** This is the case where "adding a kind is just a server-side
+#: change" stops being true, so the arithmetic is written out rather than asserted.
+#:
+#: The key is `(changed_at_rev, kind, entity_id)` and `kind` is compared as a STRING.
+#: The kinds were `experiment`, `proposal`, `run`; `note` sorts `experiment < note <
+#: proposal < run`. So a v2 cursor resting at `(R, "proposal", X)` or `(R, "run", X)`
+#: is ALREADY PAST the position any note at that same rev occupies — and a feed that
+#: read such a cursor under v3 rules would walk forward from it and never report those
+#: notes. Not late; never. That is precisely the lose-an-event-silently failure the
+#: `(changed_at_rev, …)` key was introduced to end, arriving through the door marked
+#: "extension".
+#:
+#: **A v2 CURSOR IS THEREFORE REFUSED, NOT MIGRATED AND NOT MISREAD.** It cannot be
+#: migrated: recovering the skipped notes would mean rewinding the cursor to
+#: `(R, "note", "")`, and nothing in a v2 token says whether the client had already
+#: been told about the entries between there and where it sits — so a migration would
+#: either re-report an unknown amount or skip an unknown amount, and neither is a
+#: thing to do quietly. `decode_cursor` rejects any payload whose `v` is not this
+#: constant before it looks at anything else, and the published remedy is unchanged
+#: and already correct: `422 malformed_cursor`, drop the cursor and resync. A resync
+#: reports every entity from the start of the order, so **no note is lost — one
+#: refused request is the whole cost.**
+#:
+#: ~~2, and the v1 note below.~~ The v1 reasoning is kept verbatim below because it is
+#: the precedent this bump follows, and because a reader has to be able to see that
+#: this module has now refused two cursor generations for two different reasons — v1
+#: because its leading component was a timestamp no arithmetic recovers a `rev` from,
+#: v2 because a new kind sorts underneath where it sits.
+CURSOR_VERSION = 3
 
 #: The sort key that precedes every real entry, and the position an absent cursor
 #: resolves to. It is `(-1, "", "")` rather than a `None` special case so that "start
@@ -583,12 +612,73 @@ def _proposal_entries(exp: Any) -> Iterator[ChangeEntry]:
         )
 
 
+def _note_entries(exp: Any) -> Iterator[ChangeEntry]:
+    """One entry per readable note: its id, where it sits, and its review state.
+    **MCP-005.**
+
+    WHY THIS KIND EXISTS, because the feed worked without it and the imprecision was
+    documented rather than hidden. Notes reached the feed only by being hashed into
+    `_authoritative_signature`, so the `experiment` entry moved whenever a note did —
+    and also whenever anything ELSE authoritative did. A consumer watching for a
+    scientist's captured words had to re-read on every title edit, every run change
+    and every answer, and could never tell which of those had happened. `note` is the
+    precise signal; the `experiment` kind is unchanged and still coalesces everything.
+
+    WHAT IS AND IS NOT ON AN ENTRY — `_proposal_entries`' list, applied unchanged and
+    for its reasons. The id, the kind, the position, when it last moved, and the
+    review state. **NO `text`, no `revised_text`, no excerpt, no `candidate_field_path`,
+    no `candidate_rule`, no `source`, no `client_request_key`.** A note's whole value
+    is that it holds somebody's verbatim words, which makes it the entry kind where
+    carrying content would be most tempting and worst: a change feed that served note
+    text would be a second read surface for a scientist's own prose with none of the
+    review the first one got. The structural guarantee is the same one that module
+    relies on — this file imports nothing from `notes.py`, so it holds no function
+    that could render a note's text even by mistake.
+
+    `state` IS REPORTED, and read it for what it is: the note's CURRENT stored state,
+    one of `notes.NOTE_STATES`. It is NOT an event. A note mapped and then dismissed
+    between two polls is reported as `dismissed` NOW, with no entry saying a mapping
+    happened — this module's coalescing property applied to a review lifecycle. It is
+    passed through VERBATIM, so a state this build has never heard of reaches the
+    client unchanged rather than being mapped onto one this build does know.
+
+    UNREADABLE NOTES ARE NOT SERVED, for `_hydrate_runs`' reason. An entry the note
+    model refused is kept verbatim in `Experiment.unreadable_notes` so a save cannot
+    discard it, but this module cannot name it: there is no id this application is
+    willing to read, and an entity a client cannot address is one it could not act on
+    if it were told.
+
+    `updated_utc` IS THE LAST RECORDED ACT'S TIMESTAMP, falling back to the capture.
+    Both are stored on the entity; neither is computed. Display metadata, exactly as
+    non-load-bearing as it is for the other kinds.
+    """
+    positions = exp.note_change_revs
+    for note in exp.notes:
+        history = note.history
+        yield ChangeEntry(
+            kind="note",
+            entity_id=note.id,
+            changed_at_rev=_position(positions.get(note.id, 0)),
+            updated_utc=(history[-1].at if history else note.captured_utc),
+            state=note.state,
+        )
+
+
 #: The kinds a RECORD-SCOPED feed serves at this commit. Extended by passing a longer
 #: tuple, never by mutating this one.
+#:
+#: **ADDING A MEMBER IS A CURSOR-CONTRACT CHANGE, NOT A FREE ONE**, and `note` is the
+#: case that proved it — see `CURSOR_VERSION`. A kind whose name sorts below an
+#: existing kind is invisible to every cursor already resting past that point, so any
+#: future addition must check its name against this tuple's and bump the version if it
+#: does not sort last. `feed_kinds` derives the served set from here, so a client
+#: learns the membership from the server; it does not learn the ordering consequence,
+#: which is why that reasoning lives beside the constant a change has to move.
 RECORD_COLLECTORS: tuple[KindCollector, ...] = (
     KindCollector(kind="experiment", read=_experiment_entries),
     KindCollector(kind="run", read=_run_entries),
     KindCollector(kind="proposal", read=_proposal_entries),
+    KindCollector(kind="note", read=_note_entries),
 )
 
 

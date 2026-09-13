@@ -10,6 +10,7 @@ import { StatusBar } from '../components/StatusBar';
 import { FieldGroup } from '../components/FieldGroup';
 import { RecordInfoPanel, RecordLinksPanel } from '../components/RecordInfoPanel';
 import { RenameExperimentPanel } from '../components/RenameExperimentPanel';
+import { MoveExperimentPanel } from '../components/MoveExperimentPanel';
 import { RecordDescriptionPanel } from '../components/RecordDescriptionPanel';
 import { RunsSection } from '../components/RunsSection';
 import { TranscriptCapturePanel } from '../components/TranscriptCapturePanel';
@@ -28,15 +29,9 @@ import { LoadingPanel, BackendDown } from '../components/FetchStates';
 import { CircleAlert, ExternalLink } from '../components/icons';
 import { ExperimentGraphPanel } from './graph/ExperimentGraphPanel';
 import { LABELS } from '../lib/labels';
-import {
-  RECORD_COMPARE_PARAM,
-  RECORD_RUN_PARAM,
-  RECORD_VIEW_PARAM,
-  ROUTES,
-  isRecordView,
-  type RecordViewId,
-} from '../lib/routes';
+import { ROUTES, resolveRecordView, type RecordViewId } from '../lib/routes';
 import { api } from '../lib/api';
+import { useDocumentTitle } from '../lib/useDocumentTitle';
 import { useFetch } from '../lib/useFetch';
 import { useRecordSession } from '../lib/useRecordSession';
 import { useWorkspaceScope, useWorkspaceScopeChanged } from '../lib/workspaceScope';
@@ -583,15 +578,43 @@ function LoadedWorkbench({
    * and back precisely because the parameters are independent.
    */
   const [searchParams] = useSearchParams();
-  const requestedView = searchParams.get(RECORD_VIEW_PARAM);
-  const hasRunAddress =
-    (searchParams.get(RECORD_RUN_PARAM) ?? '') !== '' ||
-    searchParams.getAll(RECORD_COMPARE_PARAM).length > 0;
-  const activeView: RecordViewId = isRecordView(requestedView)
-    ? requestedView
-    : hasRunAddress
-      ? 'runs'
-      : 'fields';
+  /*
+   * THE WORKSPACE THIS URL RESOLVES TO - `resolveRecordView`, in `lib/routes.ts`.
+   *
+   * The rule used to be written out here. It moved (2026-09-13) because the WCAG
+   * 2.4.2 `document.title` floor needs the identical answer, and a title naming a
+   * workspace this screen is not rendering would be a false claim about the page.
+   * Two expressions of one decision is the drift shape this repository has been
+   * caught publishing before; there is now one.
+   *
+   * **THE `?proposal=` BRANCH LIVES THERE TOO, AND THAT WAS A MERGE DECISION.**
+   * It arrived inline here, from the lane that built the agent-facing proposal
+   * deep link, in the same hour this extraction landed. Keeping it inline would
+   * have restored the second expression; dropping it would have made a
+   * `?proposal=` link RENDER `Capture & Proposals` while the page TITLE said
+   * `Record Fields` - a false claim about the page in the one place a reader
+   * cannot see the page to check it. `resolveRecordView`'s own comment carries
+   * the reasoning and the branch ORDER, which is load-bearing: a run address
+   * still wins, so a URL carrying both lands exactly where it landed yesterday.
+   * Verified behaviourally rather than structurally: that lane's own 113
+   * frontend tests, `proposal-deep-link.test.tsx` included, pass unchanged.
+   */
+  const activeView: RecordViewId = resolveRecordView(searchParams);
+
+  /*
+   * WCAG 2.4.2 - REFINE THE ROUTE-DERIVED TITLE WITH THE RECORD'S OWN NAME.
+   *
+   * `<DocumentTitle />` in `App.tsx` has already titled this route from the URL
+   * alone. This adds the one thing the URL does not carry: which record. It runs
+   * only inside `LoadedWorkbench`, i.e. only when `bundle.status === 'data'`, so
+   * the name is read from loaded data and never guessed - the not-loaded branch
+   * above keeps the floor's title and asserts nothing about the record.
+   *
+   * `stripLifecycleSuffix` is the SAME transform the visible `<h1>` and the top
+   * bar apply, so the tab strip, the heading and the breadcrumb cannot disagree
+   * about what the record is called.
+   */
+  useDocumentTitle([workspaceLabel(activeView), stripLifecycleSuffix(detail.title)]);
 
   /*
    * THE CAPTURE DESTINATION'S COUNTS, for the promoted sidebar row.
@@ -861,7 +884,19 @@ function LoadedWorkbench({
       }
       mainPad="pad"
     >
-      <h1 className="sr-only">{LABELS.screenReview}</h1>
+      {/*
+        UX-002 — A VISIBLE PAGE TITLE, AND A HEADING THAT NAMES THE WORKSPACE.
+        This replaced `<h1 className="sr-only">{LABELS.screenReview}</h1>`, which
+        was invisible on the product's primary work surface AND said "Review
+        Record" on all four workspaces — correct on one of four. Both halves come
+        from data this screen already holds; `screens.css` carries the full
+        reasoning next to `.record-page-title`. The loading branch above keeps the
+        `sr-only` form, because with no bundle there is no record title to name.
+      */}
+      <h1 className="record-page-title">
+        <span className="eyebrow record-page-title-view">{workspaceLabel(activeView)}</span>
+        <span className="record-page-title-name">{stripLifecycleSuffix(detail.title)}</span>
+      </h1>
       <RecordActivityNote activity={activity} onRefresh={onManualRefresh} />
       <LiveSyncNote
         degraded={degraded}
@@ -1008,6 +1043,20 @@ function LoadedWorkbench({
                 refetch plus the record-session recompute, which is what a version
                 change actually calls for. */}
             <RenameExperimentPanel detail={detail} onSaved={onAgentRefresh} />
+            {/* THE FOLDER, immediately beside the name, because they are the record's
+                TWO organizational labels: both are written under the same precondition,
+                both reach no exported record and no evidence sidecar, and neither
+                changes a scientific value or a validation result. Same
+                `onAgentRefresh`, for the identical reason the note above gives.
+
+                `existingFolders` IS DELIBERATELY NOT PASSED HERE. The suggestion list
+                would need every folder path in the workspace, and this screen holds one
+                record — fetching the whole experiment list to populate a `<datalist>`
+                on a collapsed panel would be a request nobody asked for. The box is
+                free text either way, which is what it has to be: a folder is made by
+                naming one that does not exist yet. The Library screen, which already
+                holds the whole list, is where the suggestions belong. */}
+            <MoveExperimentPanel detail={detail} onSaved={onAgentRefresh} />
             {/*
               THE RECORD DESCRIPTION — the capture surface for what the record IS: its
               technique and domain, the facility it was measured at, the sample, the
@@ -1194,6 +1243,24 @@ function LoadedWorkbench({
 const workspacePanelId = (id: RecordViewId) => `record-workspace-${id}`;
 
 /**
+ * THE WORKSPACE'S OWN NAME, read from the one registry that declares it.
+ *
+ * `RECORD_WORKSPACES` is the complete registry of the four — the sidebar renders
+ * from it, the assistant reads a label from it, and the panel landmarks below
+ * name themselves from it. The page heading reads it too rather than authoring a
+ * fifth vocabulary for the same four destinations.
+ *
+ * The fallback is the raw `view` id, which is unreachable today: `activeView` is
+ * resolved through `resolveRecordView`, whose every branch returns a member of
+ * `RECORD_VIEW_IDS`, and
+ * `RECORD_WORKSPACES` covers all four (asserted by `record-workspaces.test.tsx`).
+ * It exists so that adding a fifth id to `RECORD_VIEW_IDS` without adding it to
+ * `RECORD_WORKSPACES` degrades to a usable name instead of `undefined`.
+ */
+export const workspaceLabel = (view: RecordViewId): string =>
+  RECORD_WORKSPACES.find((w) => w.id === view)?.label ?? view;
+
+/**
  * THE ACCESSIBLE NAME OF A WORKSPACE PANEL, and why it is not just the label.
  *
  * Each panel is a `<section>` with an accessible name, so it is a landmark a
@@ -1205,8 +1272,7 @@ const workspacePanelId = (id: RecordViewId) => `record-workspace-${id}`;
  * disambiguating suffix: the sidebar list these panels belong to is headed
  * `Workspaces`, so the landmark list now reads the way the navigation does.
  */
-const workspaceRegionName = (view: RecordViewId) =>
-  `${RECORD_WORKSPACES.find((w) => w.id === view)?.label ?? view} workspace`;
+const workspaceRegionName = (view: RecordViewId) => `${workspaceLabel(view)} workspace`;
 
 /**
  * HOW MANY OWNER GROUPS THE NEEDS-YOU BANNER LISTS.

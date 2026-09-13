@@ -17,7 +17,7 @@
  * than by trusting the status code.
  */
 
-import { API_BASE, SEED } from '../env';
+import { API_BASE, SEED, SEED_TITLE_BASE, UNRESOLVED_RECORD_HEADING } from '../env';
 import { TUTORIAL_SESSION_HEADER, readWorkedExampleSession } from '../worked-example';
 import { expect, test } from '../fixtures';
 import { SURFACES } from '../surfaces';
@@ -191,9 +191,36 @@ test.describe('@interaction the ordinary workspace', () => {
   test('the same canonical id DOES resolve inside the worked-example session', async ({ page, app }) => {
     // The other half of the pair. Without it, the test above would be satisfied
     // by a build in which the record simply does not exist anywhere.
+    //
+    // AND FOR ONE COMMIT IT WAS SATISFIED BY EXACTLY THAT BUILD (review finding
+    // I-1). It waited on `getByRole('heading', { name: 'Review Record' })`,
+    // which after UX-002 is the `sr-only` `<h1>` of `RecordWorkbench`'s
+    // `bundle.status !== 'data'` branch and of nothing else — so it passed while
+    // the record was still loading, and it passed on `BackendDown`, which is
+    // precisely the build the comment above says it must exclude.
+    //
+    // What it waits on now can only exist once `bundle.status === 'data'`: the
+    // visible `h1.record-page-title`, carrying the record's OWN title. The
+    // record is not merely reachable, it is named.
     await app.gotoExample(`/record/${SEED.partial}`);
-    await expect(page.getByRole('heading', { name: 'Review Record' })).toBeVisible({ timeout: 20_000 });
+    const pageTitle = page.locator('h1.record-page-title');
+    await expect(pageTitle).toBeVisible({ timeout: 20_000 });
+    await expect(
+      pageTitle,
+      'the page heading must name the record, not a workspace-independent screen name'
+    ).toContainText(SEED_TITLE_BASE);
+
+    // The unresolved branch is GONE, asserted rather than inferred. Both
+    // branches render exactly one `<h1>` (`specs/structure.spec.ts` holds every
+    // surface to that), so this is the positive assertion above restated as its
+    // own negative — and it is the assertion that would have caught I-1.
+    await expect(page.getByRole('heading', { name: UNRESOLVED_RECORD_HEADING })).toHaveCount(0);
     await expect(page.getByRole('alert')).toHaveCount(0);
+
+    // …and the record's CONTENT is on the page. The mirror of the 404 test
+    // above, which asserts `.fg-header` has count 0: a build that served the
+    // screen chrome without the record would satisfy neither.
+    await expect(page.locator('.fg-header').first()).toBeVisible({ timeout: 20_000 });
   });
 });
 

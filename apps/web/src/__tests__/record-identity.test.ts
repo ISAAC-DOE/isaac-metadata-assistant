@@ -487,6 +487,16 @@ describe('resolveTarget — what this app can and cannot say', () => {
       evidenced_field_count: 26,
       exported: true,
       record_id: ID_B,
+      // The LIB-001 Library columns. This test is about `resolveTarget`, which
+      // reads `id` and `record_id` and nothing else, so these are the neutral
+      // values — stated rather than omitted because the server sends all six on
+      // every row and the type says so.
+      updated_utc: '2099-01-15T09:00:00Z',
+      run_count: 0,
+      open_proposal_count: 0,
+      folder: '',
+      technique: null,
+      beamline: null,
     },
   ];
 

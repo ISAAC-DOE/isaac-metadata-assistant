@@ -204,7 +204,7 @@ from __future__ import annotations
 
 import dataclasses
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Iterable
 
 __all__ = [
     "NOTE_STATUS",
@@ -231,6 +231,7 @@ __all__ = [
     "edit_note",
     "keep_note",
     "dismiss_note",
+    "find_by_client_request_key",
 ]
 
 
@@ -289,6 +290,30 @@ NOTE_SOURCES: frozenset[str] = frozenset(
         #: A label the deterministic extractor saw and refused to guess at — the
         #: ``unrecognised_labels`` the capture/extraction seam already reports.
         "extraction_residue",
+        #: AN EXTERNAL AGENT PUT THIS HERE OVER THE MACHINE-CALLABLE (MCP)
+        #: INTERFACE — the surface the product calls "Connect Your Agent", which
+        #: is why the member is named after it rather than after any vendor.
+        #:
+        #: IT NAMES A CHANNEL, NOT AN ACTOR, and the distinction is the whole
+        #: reason it exists rather than being folded into ``typed_note``. Before
+        #: it, an agent had exactly one honest option and it was to lie: every
+        #: other member of this set asserts something specific about the producer
+        #: (a person typed it, a transcript line, a CSV cell, a file listing, the
+        #: extractor's own residue), and an MCP caller is none of them. Claiming
+        #: ``typed_note`` would put "a person typed this" on model-derived text,
+        #: in the one field a reviewer uses to decide how much to trust what they
+        #: are reading.
+        #:
+        #: WHAT IT DOES NOT SAY. It does not say WHO the agent was acting for, and
+        #: it must never be read that way. ``attribution.uploaded_by`` requires
+        #: ``trust_basis == verified_edge_assertion`` and no verifier in this build
+        #: mints that, so no actor identity is established for an MCP call at all;
+        #: the seam stays unset. It also does not say the content is a language
+        #: model's — a deterministic script speaking MCP is equally this channel.
+        #: The claim is exactly "this arrived through the agent interface", which
+        #: is a fact the server observes about itself rather than a fact a caller
+        #: asserts, and that is why the MCP tool has no ``source`` argument.
+        "connected_agent",
     }
 )
 
@@ -315,8 +340,11 @@ class ImmutableCapture(ValueError):
 #: dataclass field, here as everywhere. What it buys is that a NEW review action
 #: added later cannot rewrite the capture by accident, only by deliberately
 #: bypassing the only revision helper this module exposes.
+#: ``client_request_key`` is here for the same reason ``id`` is: it is the key a
+#: retrying caller's exactly-once guarantee is looked up by, so a later act that
+#: could rewrite it could make one create appear to have happened twice.
 IMMUTABLE_NOTE_FIELDS: frozenset[str] = frozenset(
-    {"id", "experiment_id", "captured_utc", "source", "text"}
+    {"id", "experiment_id", "captured_utc", "client_request_key", "source", "text"}
 )
 
 
@@ -451,6 +479,29 @@ class Note:
     mapped_field_path: str | None = None
     #: Append-only. Opens with a :data:`ACTION_CAPTURE` entry.
     history: tuple[NoteTransition, ...] = ()
+    #: THE CALLER'S OWN CREATION KEY, or ``None``. What makes capturing a note
+    #: exactly-once for a caller that cannot see whether its first attempt landed.
+    #:
+    #: ``proposals.IngestionProposal`` carries the identical field for the
+    #: identical reason and :func:`find_by_client_request_key` below is the same
+    #: lookup; this is the second use of one mechanism, not a second mechanism.
+    #:
+    #: WHY A NOTE NEEDS ONE AT ALL, stated because notes are inert to export and
+    #: that makes the need look smaller than it is. A duplicate note is not a
+    #: duplicate field value and cannot make a record un-exportable — but it is a
+    #: second row in a scientist's review queue saying the same thing, with its own
+    #: id, its own history and its own proposals hanging off it, and nothing in the
+    #: product can tell them the two are one observation captured twice. "Inert to
+    #: export" is not the same as "harmless to the record".
+    #:
+    #: ``None`` IS THE NORMAL CASE AND IS NOT A DEGRADED ONE. A person clicking a
+    #: button in the product can see whether their note landed, so the HTTP route
+    #: leaves this optional; a note captured before this field existed hydrates to
+    #: ``None`` and is unaffected. It is the MCP tool that makes it REQUIRED, for
+    #: the reason ``isaac_propose_field_value`` already makes its own required:
+    #: vendor retry behaviour is UNKNOWN, so exactly-once has to be a property of
+    #: the call rather than of the caller's care.
+    client_request_key: str | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.id, str) or not self.id:
@@ -486,6 +537,17 @@ class Note:
             self,
             "mapped_field_path",
             _clean_optional(self.mapped_field_path, "mapped_field_path"),
+        )
+        # THROUGH `_clean_optional` LIKE EVERY OTHER OPTIONAL STRING, which means a
+        # blank key is REFUSED rather than folded to `None`. That is load-bearing
+        # here and not merely consistent: `""` folded to `None` would make an
+        # exactly-once create silently become an at-least-once one, and the caller
+        # would have no way to tell — it sent a key and the server acted as though
+        # it had not. The refusal is the honest outcome.
+        object.__setattr__(
+            self,
+            "client_request_key",
+            _clean_optional(self.client_request_key, "client_request_key"),
         )
         # A CANDIDATE AND ITS RULE TRAVEL TOGETHER, in both directions. A path with
         # no rule is an unexplained proposal, which is a guess with a field name on
@@ -569,6 +631,11 @@ class Note:
             "candidate_rule": self.candidate_rule,
             "mapped_field_path": self.mapped_field_path,
             "history": [entry.to_state_dict() for entry in self.history],
+            # SERIALISED, so a retry after a process restart still deduplicates —
+            # the key has to survive the boundary to be worth anything. It is the
+            # caller's own opaque string and carries no identity claim; see the
+            # field's docstring for why it is not an actor.
+            "client_request_key": self.client_request_key,
             "status": self.status,
             "verified": self.verified,
             "is_evidence": self.is_evidence,
@@ -604,6 +671,7 @@ class Note:
             candidate_field_path=state.get("candidate_field_path"),
             candidate_rule=state.get("candidate_rule"),
             mapped_field_path=state.get("mapped_field_path"),
+            client_request_key=state.get("client_request_key"),
             history=tuple(
                 NoteTransition.from_state_dict(entry)
                 for entry in (history if isinstance(history, list) else [])
@@ -622,6 +690,7 @@ def new_note(
     run_id: str | None = None,
     candidate_field_path: str | None = None,
     candidate_rule: str | None = None,
+    client_request_key: str | None = None,
 ) -> Note:
     """Mint a note, with the opening :data:`ACTION_CAPTURE` entry already in it.
 
@@ -639,6 +708,7 @@ def new_note(
         run_id=run_id,
         candidate_field_path=candidate_field_path,
         candidate_rule=candidate_rule,
+        client_request_key=client_request_key,
         state=NOTE_UNREVIEWED,
         history=(
             NoteTransition(
@@ -836,3 +906,35 @@ def dismiss_note(note: Note, *, at: str, reason: str | None = None) -> Note:
             ),
         ),
     )
+
+
+def find_by_client_request_key(notes: Iterable[Note], key: str) -> Note | None:
+    """The EARLIEST note carrying this creation key, or ``None``.
+
+    THE SAME LOOKUP ``proposals.find_by_client_request_key`` PERFORMS, on the same
+    contract and for the same reason, and the docstring says so rather than
+    re-arguing it: this answers *"did this create already happen?"*, and the answer a
+    retrying client must get back is the note its FIRST attempt captured. Returning a
+    later one would hand a retry a different id from the one the original request
+    established — and a note's id is what a proposal cites, so a shifting id would
+    break the loop this key exists to protect.
+
+    ``None`` keys never match, including against a ``key`` of ``None`` reaching here
+    through an untyped caller: the comparison requires the stored key to be present
+    AND equal, so the large majority of notes — every one captured in the product by
+    a person, and every one captured before this field existed — are invisible to it.
+    That is the correct behaviour and not a gap. A note with no key made no
+    exactly-once claim, and treating "no key" as a key would make every unkeyed note
+    collide with every other one.
+
+    LINEAR, OVER ONE RECORD'S NOTES, AND DELIBERATELY NOT INDEXED. The alternative
+    is a stored key→id map beside ``proposal_change_revs``, which would be a second
+    piece of state to keep consistent with the notes themselves and could disagree
+    with them; the scan cannot. It runs inside the record lock on a create, where the
+    note list has already been hydrated for the write that is about to happen, so it
+    costs a walk of a list that is in memory either way.
+    """
+    for note in notes:
+        if note.client_request_key is not None and note.client_request_key == key:
+            return note
+    return None

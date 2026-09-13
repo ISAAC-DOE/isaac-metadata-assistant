@@ -384,6 +384,15 @@ export function TopBar({ variant, breadcrumb, title, filename, stateChip, record
           <div className="topbar-right">
             <SearchDialog />
             <WorkspaceChip />
+            {/* Help was mounted on the `home` variant ONLY, so it was unreachable on
+                every record surface — exactly where a first-time scientist is when the
+                questions it answers arise ("what does Review Evidence mean?", "why did
+                export refuse?"). Same trigger, same panel, same `topbar-right` slot as
+                `home`: no second help surface and no change to this bar's structure.
+                `breadcrumb` is deliberately left without it — that variant is the
+                approval-gated on-ramp, whose own copy is the disclosure a reader needs
+                there. Pinned by `__tests__/help-claim-parity.test.tsx` §4. */}
+            <HelpPanel />
           </div>
         </>
       )}

@@ -163,10 +163,32 @@ fails a test instead of drifting.
 
 Today a Run lives *inside* its experiment's `state` document — `Experiment.to_state()` serialises
 `runs` as an array (`apps/api/isaac_api/workspace.py:2249`). Contract §8 DECISION D7
-(`docs/superpowers/specs/2026-08-08-scientist-capture-data-contract.md:480`) rejects that shape on
+(`docs/superpowers/specs/2026-08-08-scientist-capture-data-contract.md:1100`, under `## 8.` at
+`:1089`) rejects that shape on
 the brief's own §5 requirement that Runs be independently persisted and loaded: *one jsonb document
 rewritten on every autosave keystroke, containing N runs, is precisely the "single enormous object"
 the brief forbids.*
+
+> **LINE NUMBER CORRECTED 2026-09-12 (`QA-014`), and this is the citation the withdrawal in §4
+> diagnosed and then failed to fix.** It read `…scientist-capture-data-contract.md:480`. **`:480`
+> is no longer stale — it is WRONG, which is worse:** it now lands **inside the section headed
+> `### DECISION D3 — 'submitted' is the one genuinely new *stored* state`**, a different decision
+> entirely. An operator following it would have read D3 and believed it was D7.
+>
+> **PRECISION CORRECTED 2026-09-13, by an independent review of the commit that wrote this note.**
+> The sentence above used to say `:480` *"resolves to"* that heading, which reads as though `:480`
+> **is** the heading line. It is not: measured, `:478` is the heading and `:480` is the second
+> line of D3's body (`Every existing status is recomputed from pending_count / draft_ok / …`). The
+> operator-facing conclusion is unchanged and is the reason this note exists — `:480` is inside
+> D3 — but quoting a heading at a line that is not the heading, in a document an operator reads
+> before applying a migration, is the same class of imprecision this whole note is about. `:1100` is D7; `:1089` is its
+> enclosing §8. Re-derive rather than trusting either number:
+> `grep -n 'DECISION D7' docs/superpowers/specs/2026-08-08-scientist-capture-data-contract.md`.
+>
+> **The section reference `§8 DECISION D7` was always correct** — §4 records at length why the
+> "phantom citation" finding that struck it was false, and how it went wrong. What was genuinely
+> broken here is the line number, and that this citation — **the one that names its own source** —
+> was the one an enumeration missed.
 
 This migration creates the table that makes a Run the unit of write. **It moves no data and changes
 no application behaviour** — see §4.
@@ -284,6 +306,84 @@ deliberate, reviewable act that lets a later slice write the table.
 `isaac_submissions`. Each belongs to the slice that needs it. An over-stuffed migration is harder to
 approve, harder to roll back, and creates tables nothing will write for months. A test pins their
 absence.
+
+> ### ~~"CONTRACT §8 D7" IS A PHANTOM CITATION~~ — **THE WHOLE FINDING IS WITHDRAWN, 2026-09-12.**
+>
+> **The note that stood here was FALSE, it was published into the document an operator reads before
+> applying a migration to a production database, and it struck out correct sentences to make room
+> for itself.** ~~three CORRECT sentences~~ — **corrected 2026-09-12, by the review that checked
+> this withdrawal: it is TWO.** §12B's and §13's are restored; §12C's stays struck because half of
+> that strike was right ("remain uncreated" was genuinely stale, and "a test still pins their
+> absence" genuinely imprecise). **A withdrawal can be as wrong as the claim it withdraws, and this
+> one over-counted its own damage** — which is the same enumeration failure, one level up. It is withdrawn in place rather than deleted, per house style, because
+> "this authority is a phantom" is exactly the kind of claim an operator acts on — and because the
+> way it went wrong is worth more than the finding ever was. Found by an independent review that
+> implemented none of it.
+>
+> **WHAT IT GOT WRONG: IT CHECKED THE WRONG DOCUMENT.** It tested the citation against
+> [`isaac-runs-stage-2-contract.md`](isaac-runs-stage-2-contract.md), which genuinely has no §8 —
+> and which is **not the document this packet cites.** §1 of this very file carries the path, four
+> lines of prose above where the note was written ~~four lines~~ ~~**it is 122 lines (`:166`
+> versus `:288`)**~~ — **BOTH FIGURES ARE WITHDRAWN, 2026-09-13, and no third one replaces them.**
+> "four lines above" made the miss sound careless; "122 lines" was measured once and then went
+> stale, because `:288` is no longer where this note sits — the file has been edited since, and
+> **a line-number distance inside a document that keeps being edited is not evidence of anything,
+> it is a hostage.** That is not a small irony: *the sentence's own point is that distance is
+> irrelevant*, so stating a distance at all was the defect, and stating a wrong one in an operator
+> packet is how this file has been caught before. Re-derive if the distance ever matters:
+> `grep -n 'scientist-capture-data-contract' docs/migration-approval-packet-0002.md | head -1`.
+> **The lesson that survives both figures is the one that was always the point: the sweep did not
+> grep, it recalled**:
+>
+> ```
+> :165  … Contract §8 DECISION D7
+> :166  (`docs/superpowers/specs/2026-08-08-scientist-capture-data-contract.md:480`)
+> ```
+>
+> That file is **tracked** (`git ls-files` returns it) and contains **`## 8. Persistence shape, and
+> why a second migration is needed`** at `:1089` and **`### DECISION D7 — Runs and revisions are
+> relational rows; each row's document stays jsonb`** at `:1100`. So the section reference is
+> **correct**, and D7 **is** already recorded.
+>
+> **AND THE ENUMERATION MISSED THE ONE CITATION THAT WOULD HAVE REFUTED IT.** The note said "cited
+> four times (here, §12B, §12C, §13)". Measured **at that time**: `grep -in "contract §8"` returned
+> **five** hits (**re-measured at HEAD it is eight, because this withdrawal itself added mentions —
+> a count published without its vantage point, corrected 2026-09-12; §17's rule about quoting the
+> checkout with a measurement applies to a `grep` count too**) —
+> and the one it omitted is **`:165`, in §1, unstruck, and the only one carrying a document path.**
+> A sweep that skips the citation naming its own source cannot test that source.
+>
+> **AND THE "the list is wrong in both directions" CRITIQUE WAS WRONG.** D7 reads: *"New tables for
+> migration `0002` **(names indicative)**: `isaac_runs` · `isaac_experiment_revisions` ·
+> `isaac_run_revisions` · `isaac_assets` · `isaac_run_assets` · `isaac_submissions`."* Minus
+> `isaac_runs`, that is **exactly** the five §4 lists. **This packet reproduced its source
+> faithfully**; the source marked the list indicative; D7's own `CORRECTION 2026-08-10` already
+> tracks it; and three of the five later shipping in `0003`/`0004` is a **later scope decision**,
+> not an error in D7 and not an error here.
+>
+> **AND THE NOTE'S OWN "re-derive rather than trusting this note" COMMAND REPRODUCED THE ERROR**,
+> because it pointed at the wrong file. A re-derivation instruction inherits the mistake it was
+> written to guard against.
+>
+> ### THE ACCURATE, NARROW FINDING THAT SURVIVES — and it is a line number, not a phantom
+>
+> 1. **`:166`'s line number has DRIFTED.** It cites `…scientist-capture-data-contract.md:480`;
+>    **D7 is at `:1100`** and its enclosing §8 at `:1089`. Cite the section, or re-derive with
+>    `grep -n 'DECISION D7' docs/superpowers/specs/2026-08-08-scientist-capture-data-contract.md`.
+> 2. **What IS genuinely uncommitted is the upstream BRIEF that D7 itself rests on** — D7 cites
+>    "the brief's own §5" and "brief §51", and no such brief is committed to this repository. That,
+>    and only that, is what
+>    [`isaac-runs-stage-2-contract.md:201`](isaac-runs-stage-2-contract.md) and `CLAUDE.md` §15
+>    support when they say the motivating brief is *"cited by several files and committed to none of
+>    them"*. **`CLAUDE.md` says "the brief that motivates it"; the withdrawn note read that as "the
+>    contract section".** Those are different documents, and conflating them is the whole error.
+>
+> **NOTHING HERE CHANGES WHAT `0002` DID, OR ITS STATUS.** `0002` still creates exactly `isaac_runs`
+> and one index; `test_0002_creates_only_the_run_table_and_its_one_index`
+> (`apps/api/tests/test_experiment_repository.py:2643`) is correct and unchanged — but read what it
+> pins precisely: those names are absent **from `0002`'s own two statements**, never from the
+> repository or from a database. `0002` remains hosted-applied by Dean; `0003`/`0004` remain
+> owner-approved and applied **nowhere**; applying them is the operator's act and never an agent's.
 
 **The `records` table — the production-derived 30-row sample — is not named anywhere** in the
 forward migration, the rollback, or the owned-table set. It is neither read, written, altered, nor
@@ -777,8 +877,12 @@ remains the operator's job and is not pre-answered by this.
   this database.
 - **The `ordinal`/`rev`/`generation` columns are unenforced projections** of the document (§2). No
   test and no constraint will catch a future writer that sets one inconsistently.
-- **Nothing here is a schema for run *revisions*, assets, or submissions.** Contract §8 D7's other
-  five tables are deferred and will each need their own migration and their own packet.
+- **Nothing here is a schema for run *revisions*, assets, or submissions.** Contract §8 D7's
+  other five tables are deferred and will each need their own migration and their own packet.
+  **RESTORED 2026-09-12** — this sentence was struck on 2026-09-12 as resting on a "phantom"
+  citation. **That finding was false and is withdrawn** (see §4); the citation is correct and the
+  sentence is restored verbatim. Its forecast also held: three of the five shipped in `0003`/`0004`,
+  and each did get its own migration and its own packet.
 
 ### 12C. HOSTED APPLICATION — 2026-08-12, and what it changes in §12B
 
@@ -816,8 +920,19 @@ remains the operator's job and is not pre-answered by this.
   **still unknown**, and now also un-counted either side of the apply.
 - *"The `ordinal`/`rev`/`generation` columns are unenforced projections"* — unchanged, and it becomes
   live the moment a writer exists.
-- *"Nothing here is a schema for run revisions, assets, or submissions"* — unchanged. Five tables from
-  contract §8 D7 remain uncreated, and a test still pins their absence.
+- *"Nothing here is a schema for run revisions, assets, or submissions"* — unchanged, and it is
+  still true of `0002`. ~~Five tables from contract §8 D7 remain uncreated, and a test still pins
+  their absence.~~ **PARTLY CORRECTED 2026-09-12, and then PARTLY UN-CORRECTED the same day. Both
+  layers are kept, because the sequence is the point.** (i) The sentence was struck as "false in
+  both halves". (ii) **Half of that was itself wrong**: the "citation is a phantom" half is
+  **WITHDRAWN** — the citation is correct, see §4. **The half that stands, and is the reason this
+  stays struck rather than restored:** *"remain uncreated"* was genuinely stale, and *"a test still
+  pins their absence"* was genuinely imprecise. Three of the five
+  (`isaac_experiment_revisions`, `isaac_run_revisions`, `isaac_submissions`) **were** created by
+  `0003`/`0004`; and `test_0002_creates_only_the_run_table_and_its_one_index` pins their absence
+  **from `0002`'s own two statements**, never from the repository or from a database. **What §12C is
+  actually about is unchanged: `0003` and `0004` are owner-approved but applied to NO database
+  anywhere, and applying them is the operator's act.**
 
 **§11 is still live.** The rollback procedure is not obsolete because the migration succeeded; it is
 now the *only* way back. Its "what rolling back costs" answer is still **nothing**, because the table
@@ -826,8 +941,14 @@ is empty and no code writes it — and that stops being true the moment the run 
 ## 13. What this packet does not cover
 
 - **When to run it.** Timing is yours.
-- **Whether Runs should be relational at all.** That is contract §8 DECISION D7, already recorded;
-  this packet covers the mechanics.
+- **Whether Runs should be relational at all.** That is contract §8 DECISION D7, already
+  recorded; this packet covers the mechanics. **RESTORED 2026-09-12.** This sentence was struck the
+  same day on the grounds that *"the citation is a phantom and 'already recorded' is therefore
+  unsupported"*. **That was false in both of its clauses** and is withdrawn: §8 DECISION D7 is at
+  `docs/superpowers/specs/2026-08-08-scientist-capture-data-contract.md:1089`/`:1100`, in a tracked
+  file, so it **is** already recorded. See §4 for the full withdrawal and for the one narrow finding
+  that survives (the cited **line number** `:480` has drifted; the upstream **brief** D7 rests on is
+  what is genuinely uncommitted).
 - **The run write path.** No code writes this table. The upsert, the per-run compare-and-swap, and
   the backfill of runs out of the experiment document are later slices, each independently reviewed.
 - **Any subsequent migration.** `0003` and later need their own packets.

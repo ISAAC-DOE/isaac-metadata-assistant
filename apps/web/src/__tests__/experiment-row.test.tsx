@@ -60,9 +60,57 @@ describe('ExperimentRow — D1 title & badges', () => {
     expect(getByText('Synthetic XANES — CuO (Cu K-edge)')).toBeTruthy();
   });
 
-  it('does NOT render a separate technique badge', () => {
-    const { queryByText } = renderRow(draftNeedsAttention);
+  /*
+   * THIS TEST REPLACES ONE THAT ASSERTED THE OPPOSITE, AND THE REPLACEMENT IS
+   * STRICTLY STRONGER RATHER THAN A RELAXATION. It read:
+   *
+   *     it('does NOT render a separate technique badge', () => {
+   *       expect(renderRow(draftNeedsAttention).queryByText('Cu K-edge XANES')).toBeNull();
+   *     });
+   *
+   * WHAT IT WAS REALLY PROTECTING. `adapt.ts` used to set `technique` on EVERY row
+   * from a module constant `const TECHNIQUE = 'Cu K-edge XANES'` — a scientific
+   * value invented in the client, for a schema-governed enum field, wrong for any
+   * record that was not Cu K-edge XANES and carrying no signal that it was
+   * fabricated. The constant was deleted; this assertion is what was left
+   * standing over the hole.
+   *
+   * WHY IT HAD TO CHANGE. `GET /api/experiments` now serves a record-level
+   * `technique` read from the draft envelope, with evidence behind it, and the row
+   * renders it. The old assertion would refuse a TRUE value on the grounds that a
+   * FALSE one used to be there.
+   *
+   * WHY THE REPLACEMENT IS STRONGER. The old test guarded the RENDERER, which was
+   * never where the defect was: the constant lived in the adapter, and a renderer
+   * test could only ever catch it by accident of which string it happened to be.
+   * The invariant is now asserted at the adapter itself — see "the adapter never
+   * invents a technique" below, which passes a response carrying `technique: null`
+   * and proves nothing appears. That is the property the deleted constant
+   * violated, checked where it can be violated again.
+   */
+  it('renders a technique the server supplied', () => {
+    expect(renderRow(draftNeedsAttention).getByText('Cu K-edge XANES')).toBeTruthy();
+  });
+
+  /*
+   * A SECOND `it`, NOT A SECOND RENDER IN THE FIRST ONE, and that is a correctness
+   * requirement rather than style. `cleanup` runs between TESTS and not between
+   * calls, so two `renderRow`s in one test leave BOTH trees in the document — the
+   * first render's technique is still there, and a `queryByText(...).toBeNull()`
+   * over the second would find it and fail while appearing to have measured the
+   * absence. (It did exactly that on the first attempt.) The scenario-badge test
+   * one file over records the same trap in its own words.
+   */
+  it('renders NO metadata line at all when the server supplied none of it', () => {
+    const { queryByText, container } = renderRow({
+      ...draftNeedsAttention,
+      technique: undefined,
+    });
     expect(queryByText('Cu K-edge XANES')).toBeNull();
+    // AND NO PLACEHOLDER IN ITS PLACE. A dash or an "unknown" would say "we looked
+    // and there is nothing", which is a claim; the absence says only that nothing
+    // has established it.
+    expect(container.querySelector('.exp-meta')).toBeNull();
   });
 
   it('renders exactly one lifecycle badge (Draft / Exported)', () => {

@@ -1009,8 +1009,15 @@ describe('Connect Your Agent — parity with the backend it describes', () => {
     // be added quietly. It is replaced by the same guarantee stated over the whole
     // partition: every declared tool falls into exactly one named bucket, so a fourth
     // scope is still invisible to nothing.
-    expect(byScope('PROPOSALS_WRITE')).toEqual(['isaac_propose_field_value']);
-    expect(byScope('READ')).toHaveLength(declared.length - 4);
+    // 1 -> 2 for MCP-001's `isaac_capture_note`, which costs this same permission.
+    // Its `create_note` operation writes into `state["notes"]` — outside `draft`,
+    // exactly as `state["proposals"]` is — so it belongs to this bucket rather than
+    // to `DRAFT_WRITE`, and the partition assertion below is what keeps that honest.
+    expect(byScope('PROPOSALS_WRITE')).toEqual([
+      'isaac_capture_note',
+      'isaac_propose_field_value',
+    ]);
+    expect(byScope('READ')).toHaveLength(declared.length - 5);
     expect(new Set(declared.map((t) => t.scope))).toEqual(
       new Set(['READ', 'DRAFT_WRITE', 'PROPOSALS_WRITE']),
     );
@@ -1038,8 +1045,15 @@ describe('Connect Your Agent — parity with the backend it describes', () => {
     // separation this permission exists for and is what the two lines after it pin.
     expect(callableWithOnly('PROPOSALS_WRITE')).toEqual([]);
     expect(callableWithOnly('DRAFT_WRITE')).toEqual([]);
-    expect(byScopeName('PROPOSALS_WRITE')).toEqual(['isaac_propose_field_value']);
+    expect(byScopeName('PROPOSALS_WRITE')).toEqual([
+      'isaac_capture_note',
+      'isaac_propose_field_value',
+    ]);
     expect(byScopeName('DRAFT_WRITE')).not.toContain('isaac_propose_field_value');
+    // THE SAME SEPARATION FOR THE SECOND MEMBER. Named rather than left to the list
+    // above, because the separation is the property this permission exists for and it
+    // has to hold for every tool that costs it, not only for the first one added.
+    expect(byScopeName('DRAFT_WRITE')).not.toContain('isaac_capture_note');
 
     const row = MCP_PERMISSIONS.find((p) => p.id === 'proposals-write');
     expect(row, 'the proposals-write permission row is gone').toBeDefined();
@@ -1077,9 +1091,90 @@ describe('Connect Your Agent — parity with the backend it describes', () => {
     expect(row!.detail).toMatch(/no agent will be able to accept one/i);
     expect(row!.detail).toMatch(/stays a suggestion until you accept it/i);
     // The note requirement, which is what keeps the words behind a suggestion safe
-    // whatever the scientist decides — and the fact that no tool can create that note.
+    // whatever the scientist decides. THIS HALF IS UNCHANGED.
     expect(row!.detail).toMatch(/cite a note the record already holds/i);
-    expect(row!.detail).toMatch(/no agent tool can create that note/i);
+    /*
+     * ~~`expect(row!.detail).toMatch(/no agent tool can create that note/i);`~~ —
+     * **INVERTED FOR MCP-001, NOT DELETED, because this test was REQUIRING a claim
+     * that has become false and was therefore mechanically holding a false sentence
+     * in scientist-facing copy.** That is the same remedy this repository has applied
+     * to the `0003`/`0004` packet literal and to three other pinned defects: a guard
+     * that enforces a stale denial reads as evidence of honesty while being the
+     * opposite.
+     *
+     * `isaac_capture_note` now creates exactly that note — it is the operation that
+     * makes the propose row reachable at all, since `create_proposal` requires a
+     * `note_id` and nothing in the registry could produce one. So the assertion flips
+     * to a BAN: the withdrawn sentence may not return, in this row or in the new one.
+     *
+     * IT IS A BAN ON THE CLAIM AND NOT ON THE WORDING, which is why it matches the
+     * shape rather than the exact string — the measured history here is that a
+     * one-word edit of a retired sentence walks straight through a literal ban, and
+     * that a widened guard caught 1 of 8 plausible rephrasings until it was written
+     * against the claim.
+     */
+    const noteCreationDenials = [
+      /no agent tool can create that note/i,
+      /no agent tool creates that note/i,
+      /no agent can create that note/i,
+      /no agent tool can create a note/i,
+      /cannot create that note/i,
+      /cannot create a note/i,
+      /no tool .{0,20}create .{0,10}note/i,
+      /note .{0,30}cannot be created by an agent/i,
+    ];
+    const captureRow = MCP_CAPABILITIES_ALLOWED.find((c) => c.id === 'capture-a-note');
+    expect(captureRow, 'the note-capture capability row is gone; re-read this test').toBeDefined();
+    for (const denial of noteCreationDenials) {
+      expect(row!.detail, `the withdrawn denial returned: ${denial}`).not.toMatch(denial);
+      expect(captureRow!.detail, `the withdrawn denial returned: ${denial}`).not.toMatch(denial);
+    }
+    /*
+     * AND THE POSITIVE HALF, so this is not only a ban. The capture row has to make
+     * the three claims that are the reason offering it is safe — it is not a value,
+     * it does not change the record, it never reaches an exported record — and has to
+     * keep the deciding with the scientist. Pinned on the REFUSALS, which are the
+     * half a reader skims, exactly as the propose row above is.
+     */
+    expect(captureRow!.detail).toMatch(/not an entry and not evidence/i);
+    expect(captureRow!.detail).toMatch(/changes nothing about the record/i);
+    expect(captureRow!.detail).toMatch(/never appear in an exported record/i);
+    expect(captureRow!.detail).toMatch(/deciding what a note means stays yours/i);
+    expect(captureRow!.detail).toMatch(/no agent tool can map one to a field/i);
+    // The words are not silently trimmed — the promise `notes.py` keeps by refusing
+    // over-long text rather than truncating it.
+    expect(captureRow!.detail).toMatch(/refused rather than shortened/i);
+    // And the bounds a caller will actually meet, so a refusal is one it was told
+    // about rather than a surprise.
+    expect(captureRow!.detail).toMatch(/will not accept notes without limit/i);
+    expect(captureRow!.detail).toMatch(/returns the first note rather than storing a second/i);
+    /*
+     * IT MUST NOT CLAIM THE NOTE IS ATTRIBUTED TO THE READER. The server records a
+     * CHANNEL — that the content arrived through the agent interface — and this build
+     * establishes no identity for an agent call at all, because the stamp requires a
+     * `trust_basis` no verifier here mints. Copy implying "recorded as yours" would be
+     * the false-attribution defect CAP-006 exists to prevent, arriving through the
+     * surface that describes the feature.
+     *
+     * THE FIRST VERSION OF THIS BAN WAS TOO LOOSE AND IS RECORDED RATHER THAN QUIETLY
+     * TIGHTENED. It included the alternative `as you`, which matched *"exactly as you
+     * said it"* — the row's VERBATIM promise, which is the opposite of an attribution
+     * claim and is a sentence this feature needs. So the guard went red on correct
+     * copy, which is the cries-wolf outcome a `.venv`-guard assertion in this
+     * repository was withdrawn for. The ban now names ATTRIBUTION constructions only.
+     */
+    const attributionClaims = [
+      /in your name/i,
+      /on your behalf/i,
+      /attributed to you/i,
+      /recorded as yours/i,
+      /as your note/i,
+      /under your name/i,
+      /signed .{0,15}by you/i,
+    ];
+    for (const claim of attributionClaims) {
+      expect(captureRow!.detail, `the capture row attributes the note: ${claim}`).not.toMatch(claim);
+    }
     // NEGATIVE CONTROLS: the phrasings that would make it read as data entry.
     expect(row!.detail).not.toMatch(/fills? in (a )?value/i);
     expect(row!.detail).not.toMatch(/enters? (a )?value/i);

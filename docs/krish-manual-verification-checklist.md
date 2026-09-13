@@ -54,12 +54,34 @@ once you are inside the walkthrough.
 ## 1b. Record workspaces — the 2026-09-03 redesign (10 min)
 
 Open any record (`/krish/record/<id>`, from `/krish/experiments` or the worked example
-per §2b). The single long record page is gone; the record sidebar now lists four
-**Workspaces** beneath the (unchanged, server-derived) workflow spine: **Record Fields**
-(the default — what `/record/<id>` still resolves to bare), **Runs**, **Capture &
-Proposals**, **Graph**. Each is a real link (`?view=fields|runs|capture|graph`), so you
-can middle-click, bookmark, and use Back/Forward normally — try Back after following one;
-it should land you on the workspace you left, not at the top of the record.
+per §2b). The single long record page is gone; the record sidebar now lists ~~four~~
+**THREE Workspaces** beneath the (unchanged, server-derived) workflow spine: **Record
+Fields** (the default — what `/record/<id>` still resolves to bare), **Runs**, and
+**Capture & Proposals**. Each is a real link (`?view=fields|runs|capture`), so you can
+middle-click, bookmark, and use Back/Forward normally — try Back after following one; it
+should land you on the workspace you left, not at the top of the record.
+
+> **CORRECTED 2026-09-13 — ~~**Graph**~~ LEFT THIS LIST, so do not go looking for it and
+> do not report its absence as a defect.** `EVG-002`/**DEC-04** removed the Evidence
+> Graph from primary scientist navigation; the measurement behind it is that the Graph
+> workspace was the most control-dense surface on the record screen (34 buttons, 145 text
+> elements) in a product whose job is recording an experiment.
+>
+> **NOTHING WAS DELETED.** `?view=graph` still resolves, still renders the graph, and
+> every bookmark you already hold still works — **there is simply no link to click**, so
+> reach it by address if you want to check it. `DEC-11`'s step 4, which would delete the
+> visualization, was REFUSED on a dependency audit: the panel is rendered by a different
+> screen (`/record/<id>/evidence`), `screens/graph/*` is shared with Project Memory, and
+> its typed action model is shared with the Assistant.
+>
+> Two more navigation changes in the same session, so a stale expectation does not read as
+> a fault: the PRIMARY navigation now holds **three** destinations (My Experiments ·
+> Governance & Safety · Settings & API) — **Project Memory** and **Statistics** were
+> demoted and are now reached from **Settings & API → Overview → *Advanced & Developer
+> Surfaces***, with both routes unchanged. And on one of those demoted routes the
+> `Settings & API` item is tinted as an ANCESTOR while **no** item carries
+> `aria-current="page"`; that is deliberate, because none of the three links points at the
+> page you are on.
 
 **Runs (master-detail).** The list is compact rows (label, ordinal, condition summary,
 "N of M run fields", override/exported/save-state chips). Click a row — its whole header
@@ -84,7 +106,7 @@ draft survives collapse and a workspace switch (it should — the panel is never
 unmounted). The Assistant's own copy should name the workspace you're on (e.g. "You are
 on Runs.").
 
-**Narrow widths (≤1024px).** The four workspaces become a wrapping pill row. The
+**Narrow widths (≤1024px).** The ~~four~~ **three** workspaces become a wrapping pill row. The
 workflow spine becomes a single-row compact stepper (same five steps, no re-derivation —
 if a step's blocking reason has changed from what you'd expect on wide, that is a
 regression to report). The Assistant reverts to the existing slide-over drawer behaviour

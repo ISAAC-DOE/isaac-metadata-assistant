@@ -1087,7 +1087,23 @@ describe('the Full Description rule over the REAL generated contract', () => {
    * merely noisy when they disagree; either way the only safe answer is to re-measure
    * the merged document, which is what these three figures are.
    */
-  it('describes the contract it claims to: 76 operations, MEASURED on the merged tree', () => {
+  /*
+   * *** THE TITLE'S COUNTER WAS STALE, IN THE BLOCK WHOSE OWN COMMENT FORBIDS
+   * EXACTLY THAT. Found by independent review, 2026-09-13. ***
+   *
+   * It read `76 operations` while `REAL_CONTRACT_DESCRIPTIONS` has had **78**
+   * entries since this session's merge, and while the comment directly above says
+   * the only safe answer is to re-measure the merged document. A test TITLE is not
+   * an assertion, so nothing could fail on it -- which is precisely why it drifted
+   * and why it is worth a note rather than a silent edit: the mechanism that
+   * protects every FIGURE in this file protects none of its PROSE.
+   *
+   * Stale since 2026-09-01 (it was already behind before this arc) and widened by
+   * the Library lane's new operation. Re-derived here rather than incremented, two
+   * ways that agree -- `create_app().openapi()` and the transcribed array read with
+   * `test_contract_description_parity.py`'s own extractor: **78**.
+   */
+  it('describes the contract it claims to: 78 operations, MEASURED on the merged tree', () => {
     // FOUR slices have now raised this from 52 for real, different additions — the
     // asset slice, the transcript slice, run removal, and the two CONFLICT
     // RESOLUTION operations. Both sides of this merge conflict carried a number
@@ -1728,7 +1744,25 @@ describe('the Full Description rule over the REAL generated contract', () => {
     // description publishes `checked_reachable: false` rather than leaving a reader to
     // infer that a `configured` link was never fetched. RE-MEASURED from the served
     // document, not incremented.
-    expect(REAL_CONTRACT_DESCRIPTIONS).toHaveLength(77);
+    // 77 -> 78: `PATCH /api/experiments/{experiment_id}/folder`, the Experiment
+    // Library's file/move/unfile write. It is a SEPARATE operation from the rename
+    // rather than a second field on it, deliberately: the rename's own contract says
+    // it writes the title and nothing else, and `test_about_and_openapi.py` quotes
+    // that sentence, so widening its body would have falsified a committed claim to
+    // save a route.
+    //
+    // NO TABLE AND NO MIGRATION CAME WITH IT. A folder is one string at
+    // `state["folder"]` in the experiment's own document, beside `notes` and
+    // `proposals`, so `db_write.OWNED_TABLES` is unchanged and nothing stands between
+    // this operation and working. Its description is the longest single addition in
+    // this arc because it has to say what a folder IS — there is no folder entity, so
+    // there is no create, no delete, no rename and no ACL, and a reader who assumes
+    // otherwise would look for four controls that do not exist.
+    //
+    // RE-MEASURED from the served document via `test_contract_description_parity.py`,
+    // which re-transcribed this entry mechanically rather than by hand, and read out
+    // of this test's own failure output (`expected […(78)] to have a length of 77`).
+    expect(REAL_CONTRACT_DESCRIPTIONS).toHaveLength(78);
     // 84,501 -> 84,584 (+83): the assistant seam's own description was corrected, in
     // ONE operation and with the paragraph count unchanged. It read "so every request
     // is answered `501`" while the paragraph two below it documented the `422` — a
@@ -2245,7 +2279,46 @@ describe('the Full Description rule over the REAL generated contract', () => {
     // Internal consistency as a CHECK, not the derivation: raw sum 134,572 minus 2
     // per `\n\n` separator (254 x 2 = 508) = 134,064. The entry was re-transcribed
     // from `create_app().openapi()` by script, never hand-edited.
-    expect(total).toBe(134064);
+    // *** RE-DERIVED AT MERGE TIME, 2026-09-13, BECAUSE NEITHER LANE'S NUMBER WAS
+    // CORRECT FOR THE MERGE. *** Two lanes landed in the same hour and each
+    // honestly re-derived these figures against ITS OWN base:
+    //
+    //   Experiment Library : 78 operations, 138,714 / 265  (+1 operation:
+    //       `PATCH /api/experiments/{experiment_id}/folder`, plus a refreshed
+    //       `GET /api/experiments` description carrying the Library's six columns)
+    //   MCP note pathway   : 77 operations, 137,701 / 259  (NO new operation; two
+    //       descriptions re-transcribed -- `GET /api/health` gained a fourth `mcp`
+    //       block, and `POST .../notes` gained `client_request_key`, the two
+    //       per-record capacity ceilings, and the caller-asserted-`source`
+    //       disclosure)
+    //
+    // Merged, the tree holds the UNION: 78 operations and BOTH sets of description
+    // changes. So 138,714 and 137,701 are each wrong here, and INCREMENTING either
+    // would have been the exact move this block's own rule forbids.
+    //
+    // DERIVED TWO WAYS THAT AGREE, neither an increment:
+    //   1. `splitPurpose`'s paragraph rule transcribed into Python over
+    //      `REAL_CONTRACT_DESCRIPTIONS`, read with `test_contract_description_
+    //      parity.py`'s OWN `_ENTRY_RE` extractor rather than a second regex
+    //      written for the occasion -> 78 operations, 142,351 / 270.
+    //   2. The same rule over `create_app().openapi()` directly, i.e. the served
+    //      document rather than the transcription -> 78 / 142,351 / 270.
+    // Internal consistency as a CHECK, not the derivation: raw sum 142,891 minus
+    // 2 per `\n\n` separator (270 x 2 = 540) = 142,351.
+    //
+    // AND THE DELTAS COMPOSE EXACTLY, which is the evidence that the auto-merge of
+    // the transcribed array lost nothing: 138,714 + 3,637 = 142,351 and 265 + 5 =
+    // 270, where (+3,637, +5) is the MCP lane's own measured delta from the shared
+    // 134,064 / 254 base. `test_contract_description_parity.py` passes in BOTH
+    // directions on the merged tree (4 passed), so the array is byte-faithful to
+    // what the server serves.
+    //
+    // NAMED COST, carried forward from both lanes rather than dropped: the
+    // Endpoint Explorer renders each post-lead paragraph as its own
+    // `<p class="api-docs-description">`, so the `settings-explorer` accessibility
+    // cells move on BOTH platforms and need a Linux CI round-trip. Unavoidable --
+    // one of the changes is a whole new operation.
+    expect(total).toBe(142351);
     // 104,045 -> 114,959 (+10,914): the four new operations, and NO existing
     // description changed — `test_contract_description_parity.py` proves that rather
     // than leaving it asserted here. RE-DERIVED from the served document and never
@@ -2460,7 +2533,13 @@ describe('the Full Description rule over the REAL generated contract', () => {
     // normalised `url`, the refusal-names-its-category rule, deep-link-only,
     // `checked_reachable`, the connector prerequisite), and a reader who stops early
     // must not have skipped one. RE-DERIVED from the served document, not incremented.
-    expect(REAL_CONTRACT_DESCRIPTIONS.reduce((n, d) => n + rest(d).length, 0)).toBe(254);
+    // 254 -> 270 (+16). RE-DERIVED at merge time two ways that agree, not
+    // incremented -- see the block above `expect(total)` for both derivations, the
+    // internal check, and why neither lane's figure (265, 259) was correct for the
+    // merge. BOTH numbers moved together, which is the signature of prose appended
+    // as new paragraphs; here that is unavoidable, because one of the changes is a
+    // whole new operation.
+    expect(REAL_CONTRACT_DESCRIPTIONS.reduce((n, d) => n + rest(d).length, 0)).toBe(270);
     // 211 -> 235 (+24): the four new operations carry a lead plus 24 post-lead
     // paragraphs between them. It is asserted separately from the character total
     // for the reason every entry above gives: a change that moved one and not the

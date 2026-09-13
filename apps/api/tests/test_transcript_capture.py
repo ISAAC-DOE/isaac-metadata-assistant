@@ -536,6 +536,24 @@ def test_every_ambiguity_kind_is_covered_by_the_published_policy():
         "conflicting_values_for_one_field",
         "temperature_not_in_kelvin",
         "implicit_only_subject",
+        "unhedged_further_values",
+        # The THIRD restatement condition's own kind, added 2026-09-12 (second
+        # pass). It is a SIBLING and not a reuse of `unhedged_further_values`
+        # because that reason says the value was unhedged, and a terminal refusal's
+        # value IS hedged — serving it would publish a reason contradicted by the
+        # quote beside it.
+        "trailing_text_after_further_values",
+        # THE PASS-ONE ASSERTION GATE's three, added 2026-09-13, and three for the
+        # same reason the two above are two: each names a different fact about the
+        # sentence, so a shared name would publish a reason its own quote
+        # contradicts. The first says the label did not assert this value ("the
+        # temperature DRIFT was 3 K"); the second says it did and the following
+        # words changed what the number measures ("3 K ABOVE TARGET"); the third
+        # says the field was asserted more than once and no value could be
+        # selected ("300 K, then 350 K, then 400 K").
+        "label_does_not_assert_this_value",
+        "value_qualified_by_what_follows",
+        "several_values_and_none_selected",
         "unmatched_text",
     } == published
 
