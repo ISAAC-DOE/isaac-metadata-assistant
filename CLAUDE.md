@@ -1972,8 +1972,20 @@ Current state:
   are — but the mitigations were not sufficient, and a browser assertion now pins the geometry in
   `e2e/specs/visual-sweep.spec.ts`. The jsdom half of the sentence is still exactly true.
 
-  **Named rather than implied, and still not done:** `UX-021b` (Help 7 → 4 sections) is the owner's
-  call and needs its own PR; the remaining seven §5 disclosure rows need an allowlist judgement §8
+  **Named rather than implied, and still not done:** ~~`UX-021b` (Help 7 → 4 sections) is the owner's
+  call and needs its own PR~~ — **DONE 2026-09-14 in its own PR, and struck rather than deleted
+  because "is the owner's call" is exactly the kind of line a future session defers on.** The owner
+  then said to finish autonomously, so it was built the way the ledger row specified: **by
+  disclosure, not deletion**. The body is four top-level items (*How it works*, *No guessing*,
+  *Synthetic workspace*, and one native `<details>` holding the other four); all **seven**
+  `.help-section`s still exist with their own `<h3>`, so `upload-claim-parity.test.tsx` §6 and
+  `help-claim-parity.test.tsx` keep matching unchanged — they query `.help-section h3` by text and
+  `querySelectorAll` reaches inside a closed `<details>`. Browser-measured: collapsed
+  `scrollHeight` **1695 → 962** at 1280/768 and **1983 → 1115** at 320, against a 558px scrollport.
+  **The Help popover is scanned by NO axe surface** (`dialogs.spec.ts` opens it for dialog
+  semantics only and runs no scan), which is why this moved no accessibility baseline cell — a fact
+  worth carrying, because the sweep does NOT scan inside a closed `<details>` and a future
+  disclosure on a *scanned* surface WOULD move counts; the remaining seven §5 disclosure rows need an allowlist judgement §8
   reserves for a scientist; `QA-021` (a shared focus-trap hook) is deliberately declined while one
   of the three dialogs is the destructive reset path; the 200%-zoom and narrow-width human sign-off
   (**no CDP method can drive it**); personal-deploy retirement; and every hosted QA — `/krish` sits

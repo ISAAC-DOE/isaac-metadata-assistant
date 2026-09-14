@@ -68,7 +68,15 @@
   gap: 14px;
 }
 
-.help-section h3 {
+/* ONE SELECTOR LIST, NOT TWO MATCHING RULES. The `<summary>` of `.help-more`
+ * (UX-021b) is the same level of the same list as these headings, so it takes
+ * the same declaration rather than a copy of it. My first version DID copy it,
+ * and `type-scale-and-spacing.test.ts` refused the change: `font-size` 1065 ->
+ * 1066 and `font-weight` 414 -> 415. The guard was right twice over -- the
+ * literals were new, AND two rules with identical values are exactly how the
+ * record sidebar's gutter drifted apart earlier in this branch. */
+.help-section h3,
+.help-more > summary {
   font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.02em;
@@ -84,6 +92,41 @@
 .help-section p strong {
   color: var(--text-strong);
   font-weight: 600;
+}
+
+/* UX-021b — the disclosure that takes this popover from seven top-level
+ * sections to four. Styling only: every section inside it is unchanged, and the
+ * accessibility sweep opens it, so nothing behind it goes unscanned.
+ *
+ * The summary borrows `.help-section h3`'s own type treatment rather than
+ * inventing a third one, so the four visible headings and this one control read
+ * as the same level of the same list. It reuses the `--text-slate` /
+ * `--border-faint` pair, and its spacing is the `--space-md` TOKEN (12px) --
+ * NO NEW LITERALS, because `type-scale-and-spacing.test.ts` ratchets
+ * hand-authored values and this file is inside its scan. Deliberately 12 and
+ * not the 14px this popover's own body gap uses: 14 is off-scale here (see
+ * `base.css`, which says so at its own 14px site), so matching it would have
+ * meant authoring a fourth literal to copy a value the scale does not have. */
+.help-more > summary {
+  cursor: pointer;
+}
+.help-more > summary:focus-visible {
+  outline: 2px solid var(--action);
+  outline-offset: 2px;
+  border-radius: var(--radius-inner);
+}
+/* Separated from the three open sections above it, so the fold reads as a fold
+ * rather than as a fourth heading that happens to be clickable. */
+.help-more {
+  border-top: 1px solid var(--border-faint, var(--border));
+  padding-top: var(--space-md);
+}
+/* When open, the four sections inside space themselves exactly as the visible
+ * ones do — the popover's own `gap` cannot reach them through the `<details>`. */
+.help-more[open] {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
 }
 
 .help-steps {
