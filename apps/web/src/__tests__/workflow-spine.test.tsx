@@ -43,7 +43,7 @@ const REOPENED_REASON =
 
 const MIXED_WORKFLOW: ApiWorkflow = {
   ordered_steps: [
-    step({ id: 'load_record', label: 'Load Record', state: 'completed' }),
+    step({ id: 'load_record', label: 'Record Created', state: 'completed' }),
     step({ id: 'complete_metadata', label: 'Complete Metadata', state: 'current' }),
     step({ id: 'review_evidence', label: 'Review Evidence', state: 'reopened', reopened: true, reason: REOPENED_REASON }),
     step({ id: 'review_export_readiness', label: 'Review Export Readiness', state: 'reopened', reopened: true, reason: REOPENED_REASON }),
@@ -56,7 +56,7 @@ const MIXED_WORKFLOW: ApiWorkflow = {
 // A never-started record: complete_metadata current, later steps blocked.
 const BLOCKED_WORKFLOW: ApiWorkflow = {
   ordered_steps: [
-    step({ id: 'load_record', label: 'Load Record', state: 'completed' }),
+    step({ id: 'load_record', label: 'Record Created', state: 'completed' }),
     step({ id: 'complete_metadata', label: 'Complete Metadata', state: 'current' }),
     step({ id: 'review_evidence', label: 'Review Evidence', state: 'blocked', blocked: true, reason: "Complete 'Complete Metadata' first." }),
     step({ id: 'review_export_readiness', label: 'Review Export Readiness', state: 'blocked', blocked: true, reason: "Complete 'Complete Metadata' first." }),
@@ -73,7 +73,7 @@ describe('P28.1 · WorkflowSpine renders the backend workflow verbatim', () => {
       (el) => el.textContent,
     );
     expect(labels).toEqual([
-      'Load Record',
+      'Record Created',
       'Complete Metadata',
       'Review Evidence',
       'Review Export Readiness',
@@ -87,7 +87,7 @@ describe('P28.1 · WorkflowSpine renders the backend workflow verbatim', () => {
     const custom: ApiWorkflow = {
       ordered_steps: [
         step({ id: 'export', label: 'Export', state: 'current' }),
-        step({ id: 'load_record', label: 'Load Record', state: 'completed' }),
+        step({ id: 'load_record', label: 'Record Created', state: 'completed' }),
       ],
       current_step: 'export',
       record_rev: 1,
@@ -96,12 +96,12 @@ describe('P28.1 · WorkflowSpine renders the backend workflow verbatim', () => {
     const labels = Array.from(container.querySelectorAll('li.spine-step .spine-label')).map(
       (el) => el.textContent,
     );
-    expect(labels).toEqual(['Export', 'Load Record']);
+    expect(labels).toEqual(['Export', 'Record Created']);
   });
 
   it('a completed step renders as a navigable link to its route', () => {
     const { container } = renderSpine(MIXED_WORKFLOW, 'demo');
-    const load = stepLi(container, 'Load Record');
+    const load = stepLi(container, 'Record Created');
     const link = load.querySelector('a.spine-step-link');
     expect(link).not.toBeNull();
     expect(link!.getAttribute('href')).toBe('/record/demo');

@@ -167,7 +167,7 @@ describe('WorkflowProgressBanner · suppression rules', () => {
       ordered_steps: [
         {
           id: 'load_record',
-          label: 'Load Record',
+          label: 'Record Created',
           state: 'current',
           current: true,
           reopened: false,

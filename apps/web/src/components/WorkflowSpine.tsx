@@ -47,7 +47,7 @@ function Disc({ state }: { state: ApiWorkflowStep['state'] }) {
 }
 
 /**
- * The permanent canonical workflow spine (Load Record → Complete Metadata →
+ * The permanent canonical workflow spine (Record Created → Complete Metadata →
  * Review Evidence → Review Export Readiness → Export). Order and per-step state
  * are DERIVED by the backend and rendered here verbatim — the client never
  * re-derives completion. `current` is visually distinct and carries

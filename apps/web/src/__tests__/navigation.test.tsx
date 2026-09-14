@@ -85,7 +85,7 @@ describe('P22B · navigation / no dead ends', () => {
     const { container } = renderSpine(<WorkflowSpine workflow={wf} recordId="demo" />);
 
     expect(
-      stepLi(container, 'Load Record').querySelector('a.spine-step-link')?.getAttribute('href'),
+      stepLi(container, 'Record Created').querySelector('a.spine-step-link')?.getAttribute('href'),
     ).toBe('/record/demo');
     expect(
       stepLi(container, 'Complete Metadata').querySelector('a.spine-step-link')?.getAttribute('href'),
@@ -124,12 +124,12 @@ describe('P22B · navigation / no dead ends', () => {
     expect(container.querySelector('a.spine-step-link')).toBeNull();
   });
 
-  it('Review Record spine (record home): the completed Load Record step links back to /record/:id', async () => {
+  it('Review Record spine (record home): the completed Record Created step links back to /record/:id', async () => {
     stubFetchRoutes(bundleRoutes('demo'));
     const { container, findByText } = renderAt('/record/demo');
     await findByText('5 Fields Need Your Confirmation');
     // load_record is always completed and links to /record/demo (self / hub).
-    const load = stepLi(container, 'Load Record');
+    const load = stepLi(container, 'Record Created');
     expect(load.querySelector('a.spine-step-link')?.getAttribute('href')).toBe('/record/demo');
   });
 });

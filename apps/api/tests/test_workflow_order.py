@@ -51,7 +51,7 @@ CANONICAL_ORDER = [
 ]
 
 CANONICAL_LABELS = {
-    "load_record": "Load Record",
+    "load_record": "Record Created",
     "complete_metadata": "Complete Metadata",
     "review_evidence": "Review Evidence",
     "review_export_readiness": "Review Export Readiness",
@@ -247,3 +247,25 @@ def test_reopened_exported_record_is_route_reachable(client):
     # the record is still exported — the regression is derived, not a de-export.
     assert body["exported"] is True
     assert body["record_id"] is not None
+
+
+def test_assistant_workflow_path_tracks_labels() -> None:
+    """The assistant's spoken workflow sentence is DERIVED, not retyped.
+
+    `assistant_query._WORKFLOW_PATH` is what a scientist hears when they ask where a
+    record sits. Until 2026-09-14 it was a hand-typed string reading
+    "Load Record → Complete Metadata → …", and when `load_record` was relabelled
+    "Record Created" — because "Load Record" collided with the `Record Fields`
+    workspace it navigates to — that sentence kept naming a step the rail no longer
+    showed. Two copies of one vocabulary, and only one of them moved.
+
+    This asserts the DERIVATION rather than the current string, so the next relabel
+    cannot reintroduce the drift: whatever `CANONICAL_LABELS` says, in
+    `CANONICAL_ORDER`, is what the assistant says.
+    """
+    from isaac_api import assistant_query
+
+    expected = " → ".join(CANONICAL_LABELS[step] for step in CANONICAL_ORDER)
+    assert assistant_query._WORKFLOW_PATH == expected
+    # And the retired label is gone from the sentence entirely.
+    assert "Load Record" not in assistant_query._WORKFLOW_PATH

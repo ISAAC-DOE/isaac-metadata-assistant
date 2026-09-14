@@ -23,8 +23,38 @@
   position: relative;
   border-radius: var(--radius-inner);
 }
+/*
+ * ── THE CURRENT STEP CARRIES NO ROW FILL, AND THAT IS THE OWNER'S OWN BUG ────
+ *
+ * This rule was `background: var(--action-tint)`. So was
+ * `.workspace-nav-item.active` (`record-workspaces.css`) -- measured in Chromium,
+ * BYTE-IDENTICAL: both `rgb(232, 240, 248)`. Two different questions were being
+ * answered with one visual answer, 331px apart inside a 213px rail:
+ *
+ *   `.spine-step.current`        = where THIS RECORD is in the pipeline
+ *   `.workspace-nav-item.active` = where YOU are
+ *
+ * The owner reported the consequence without seeing the CSS: "when i click on
+ * load record the ui doesnt show me that im back on that, the blue highlight is
+ * still on the 'complete metadata' part." Both pills were lit at once, and the
+ * one with more weight was the one that was NOT the current page.
+ *
+ * THE FILL IS REDUNDANT HERE, WHICH IS WHY REMOVING IT IS THE WHOLE FIX. The
+ * current step already carries the design system's approved treatment one rule
+ * below: a filled disc plus `--ring-active`, which
+ * `design-handoff/05-design-system/spacing-layout.md` specifies for exactly this
+ * ("active spine step icon (ring, not a rail)"). So the pipeline says "here" with
+ * an icon, the nav says "here" with a row fill, and one fill now means one thing.
+ *
+ * AND A LEFT BAR WOULD HAVE BEEN WRONG. The obvious alternative -- give the
+ * current page a 2px inset bar -- is forbidden outright by
+ * `design-handoff/05-design-system/no-vertical-rail-rule.md`: no colored left
+ * border for "selected rows · workflow states · active states · nav items",
+ * "There is no exception." Its approved replacements are the two already in use
+ * here: "selected background" and "status dot / icon + label".
+ */
 .spine-step.current {
-  background: var(--action-tint);
+  /* deliberately no `background` -- see above */
 }
 /* A reopened step (was complete, upstream data regressed) reads as
  * "needs attention" — a soft advisory tint, clearly not the never-started

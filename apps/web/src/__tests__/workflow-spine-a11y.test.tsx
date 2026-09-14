@@ -61,7 +61,7 @@ const REOPENED_REASON =
 
 const MIXED_WORKFLOW: ApiWorkflow = {
   ordered_steps: [
-    step({ id: 'load_record', label: 'Load Record', state: 'completed' }),
+    step({ id: 'load_record', label: 'Record Created', state: 'completed' }),
     step({ id: 'complete_metadata', label: 'Complete Metadata', state: 'current' }),
     step({
       id: 'review_evidence',
@@ -85,7 +85,7 @@ const MIXED_WORKFLOW: ApiWorkflow = {
 
 const BLOCKED_WORKFLOW: ApiWorkflow = {
   ordered_steps: [
-    step({ id: 'load_record', label: 'Load Record', state: 'completed' }),
+    step({ id: 'load_record', label: 'Record Created', state: 'completed' }),
     step({ id: 'complete_metadata', label: 'Complete Metadata', state: 'current' }),
     step({
       id: 'review_evidence',

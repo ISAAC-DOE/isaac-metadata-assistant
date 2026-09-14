@@ -23,8 +23,40 @@ CANONICAL_ORDER: tuple[str, ...] = (
 )
 
 #: Title Case, canonical labels keyed by step id.
+#:
+#: ── `load_record` IS LABELLED "Record Created", NOT "Load Record" ─────────────
+#:
+#: The project owner reported two symptoms on 2026-09-14: *"'record fields' is the
+#: same as 'load record'"* and *"when i click on load record the ui doesnt show me
+#: that im back on that."*
+#:
+#: THE SECOND SYMPTOM WAS A DIFFERENT DEFECT AND IS FIXED ELSEWHERE. Both
+#: `.spine-step.current` and `.workspace-nav-item.active` painted the same
+#: `rgb(232, 240, 248)` (measured), so two questions — where the RECORD is, and
+#: where YOU are — had one visual answer. The row fill is now the nav's alone; see
+#: `apps/web/src/components/workflow.css`.
+#:
+#: THE FIRST SYMPTOM IS THIS LABEL, and only the label. `load_record` links to
+#: `/record/:id`, which resolves to the `fields` workspace — a destination the rail
+#: also lists as "Record Fields". So a STEP and a PLACE had near-identical names for
+#: one page, and the step read like an action a reader should take.
+#:
+#: WHY THE STEP IS NOT DELETED, though it is a tautology. Its criterion is
+#: unconditionally `True` ("a loaded record always exists"), so it can never be
+#: current or blocked — it is an anchor, not a gate. Deleting it was considered and
+#: REJECTED: `test_workflow_order.py` is a TEST-FIRST acceptance contract (P28.1)
+#: whose docstring commits to "ONE permanent ordered sequence … never reordered",
+#: and its navigability is itself an asserted behaviour
+#: (`navigation.test.tsx:127`, "the completed Load Record step links back to
+#: /record/:id"). Removing a step from a committed contract to fix a naming
+#: collision would be a much larger change than the collision warrants.
+#:
+#: "Record Created" states the fact the step actually reports, reads as status
+#: rather than as an instruction, and collides with no workspace name. Title Case
+#: per `design-handoff/05-design-system/casing-and-copy.md` Register 1, as every
+#: label in this map already is.
 CANONICAL_LABELS: dict[str, str] = {
-    "load_record": "Load Record",
+    "load_record": "Record Created",
     "complete_metadata": "Complete Metadata",
     "review_evidence": "Review Evidence",
     "review_export_readiness": "Review Export Readiness",

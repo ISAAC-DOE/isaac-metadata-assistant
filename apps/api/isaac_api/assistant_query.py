@@ -723,8 +723,28 @@ _STATUS_LABELS = {
     "done": "done",
 }
 
+#: THE SPINE'S LABELS, AND THEY MUST TRACK IT — BUT AS A LITERAL, NOT AN IMPORT.
+#:
+#: This sentence is what the assistant reads aloud when a scientist asks where a
+#: record sits. It said "Load Record" until 2026-09-14, when that step was
+#: relabelled "Record Created" (the old name collided with the `Record Fields`
+#: workspace it navigates to), leaving the assistant naming a step the rail no
+#: longer showed.
+#:
+#: I FIRST FIXED THIS BY DERIVING IT FROM `workflow.CANONICAL_LABELS`, AND A GUARD
+#: CORRECTLY REFUSED IT. `test_assistant_query_imports_only_stdlib_plus_the_formatter`
+#: pins this module to "stdlib + exactly one sibling formatter"
+#: (`allowed = _STDLIB_ROOTS | {".assistant_paths"}`), which is what keeps the
+#: resolver a leaf: no truth core, no `fastapi`, no `graphify`, and no sibling
+#: coupling acquired for convenience. Importing `workflow` to save retyping five
+#: words would have traded an architectural boundary for a copy-paste.
+#:
+#: So the words stay a literal here and the AGREEMENT is enforced from OUTSIDE, by
+#: `test_workflow_order.py::test_assistant_workflow_path_tracks_labels` — a test may
+#: import both modules where this module may not. Drift still fails a test; the
+#: boundary still holds.
 _WORKFLOW_PATH = (
-    "Load Record → Complete Metadata → Review Evidence → Review Export Readiness "
+    "Record Created → Complete Metadata → Review Evidence → Review Export Readiness "
     "→ Export"
 )
 

@@ -59,7 +59,7 @@ import type { ApiCaptureSummary } from '../lib/types';
  * workspace can be middle-clicked, copied, bookmarked and — the reason the
  * switch is a PUSH rather than the `replace` the old tab bar used — reached
  * again with the browser Back button. A reader who goes Fields -> Runs ->
- * Capture & Proposals and presses Back twice is on Fields, which is what the
+ * Experiment Data and presses Back twice is on Fields, which is what the
  * control looks like it promises. (~~Fields -> Runs -> Graph~~ — the Graph left
  * this list on 2026-09-13, `EVG-002`; the example is re-pointed rather than the
  * paragraph rewritten, because the PUSH-not-replace property it describes is
@@ -318,7 +318,7 @@ export function RecordCaptureNav({
         aria-current={captureActive ? 'page' : undefined}
         /*
          * THE ACCESSIBLE NAME IS THE DESTINATION; THE COUNTS ARE A DESCRIPTION.
-         * Left to the content, the name would grow to "Capture & Proposals 3
+         * Left to the content, the name would grow to "Experiment Data 3
          * notes · 2 to review" — a link whose name changes whenever a colleague
          * captures a note, which is a poor thing to navigate by and a poor thing
          * to write a test against. The counts are still announced, as the link's
