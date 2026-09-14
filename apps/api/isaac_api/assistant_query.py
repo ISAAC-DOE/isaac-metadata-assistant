@@ -490,7 +490,13 @@ def _pending_labels(pending_items: list) -> list:
         for key in ("about", "question", "id", "unavailable_reason"):
             v = p.get(key)
             if isinstance(v, str) and v.strip():
-                labels.append(v.strip() + _run_clause(p))
+                # `about` ALONE is display-mapped, and only when it is a bare
+                # internal identifier — see `_blocker_display`. The other three
+                # rungs are the server's own prose, the entry's kind, and an
+                # operator-facing reason; rewriting any of those would be this
+                # module editing text it did not author.
+                shown = _blocker_display(v.strip()) if key == "about" else v.strip()
+                labels.append(shown + _run_clause(p))
                 break
         else:
             labels.append("unnamed pending field" + _run_clause(p))
@@ -498,9 +504,78 @@ def _pending_labels(pending_items: list) -> list:
 
 
 def _humanize(path: str) -> str:
-    """Humanize the last path segment (``sample.material.formula`` -> ``Formula``)."""
+    """Humanize the last path segment (``sample.material.formula`` -> ``Formula``).
+
+    UNCHANGED BY THE 2026-09-14 blocker-wording slice, deliberately. The acronym
+    recasing that slice needed is applied in :func:`_blocker_display` and NOWHERE
+    else. Putting it here instead was the slice's first version and it was wrong
+    twice over: this function has **six other callers** (lines 585, 612, 677,
+    1061, 1116 and the one in :func:`_blocker_display`), all of them humanizing an
+    official SCHEMA PATH, so recasing here would have silently restyled field
+    names across every assistant answer — and the TypeScript mirror
+    (``adapt.blockerDisplayName``) applies it only to a blocker key, so the two
+    languages would have had different blast radii while a parity test asserted
+    they agreed. They agree on the three keys because the mapping is in one place
+    on each side, not because the humanizers match.
+    """
     last = re.split(r"[.:]", path)[-1]
     return last.replace("_", " ").strip().title() or path
+
+
+# A BARE INTERNAL IDENTIFIER, as distinct from a locator. Lower-case, digits and
+# single underscores only: `reduced_spectrum`, `qc_status`,
+# `required_for_evidence_record`. It deliberately does NOT match anything with a
+# dot, colon, slash or space, because those are the shapes a real locator takes
+# (`sample.material.formula`, `assets:sha256`,
+# `ssrl-archive://BL15-2/2099_run_000/x.xdi`) and `_humanize` would DESTROY them
+# — measured: that last one humanizes to "Xdi", which names nothing.
+_BARE_IDENTIFIER = re.compile(r"^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$")
+
+# Casing only, and only for acronyms this product already writes in capitals in
+# its own prose to a scientist: `experiment_repository.py:780` asks "What is the
+# QC verdict for this measurement", `inferability.py:798` says "A QC verdict is a
+# scientific judgement". `.title()` renders `qc_status` as "Qc Status", which is
+# neither the machine key nor the word the product uses. This is NOT a vocabulary
+# of field names — it introduces no new name for anything, and a token absent
+# here is left exactly as `.title()` produced it.
+_ACRONYMS = ("QC",)
+
+
+def _recase_acronyms(text: str) -> str:
+    for acronym in _ACRONYMS:
+        text = re.sub(rf"\b{acronym}\b", acronym, text, flags=re.IGNORECASE)
+    return text
+
+
+def _blocker_display(about: str) -> str:
+    """The reader's name for a pending entry's ``about``, and NOTHING invented.
+
+    **THE DEFECT THIS CLOSES.** ``about`` carries either a genuine locator (an
+    asset ``uri``) or the entry's ``blocker`` key (``serialize._blocker_about``
+    returns the first of the two that is a string), and ``_pending_labels`` took
+    it verbatim as its first rung. So the assistant answered a scientist with
+
+        "3 fields still need you: reduced_spectrum, qc_status,
+         required_for_evidence_record."
+
+    — three internal identifiers minted at
+    ``experiment_repository.py:769,778,786``. ``CLAUDE.md`` §11 records this as
+    open jargon and records why the usual exemption does not apply: those keys
+    are **not schema paths**. Re-measured on this branch, ``grep -rao`` over
+    ``schema/`` and ``vocabulary/`` returns **0 hits for all three**, and
+    ``UX-014``'s rule protects a path on the stated ground that "it is how a
+    curator maps a field" — a key that appears nowhere in the schema maps
+    nothing.
+
+    **WHAT IS AND IS NOT TRANSLATED.** A bare identifier is humanized through
+    the same ``_humanize`` this module already uses for field paths; anything
+    else — every real locator — is returned **verbatim**, because humanizing a
+    URI would replace information with a guess. No new name is introduced for
+    any field: the output is the identifier's own words, spaced and cased.
+    """
+    if _BARE_IDENTIFIER.fullmatch(about):
+        return _recase_acronyms(_humanize(about))
+    return about
 
 
 def _source_types(evidence) -> list:

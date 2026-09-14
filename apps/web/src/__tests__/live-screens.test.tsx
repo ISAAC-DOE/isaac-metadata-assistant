@@ -267,12 +267,45 @@ describe('S3 · Review Record (live bundle)', () => {
     expect(getByText('Scientific Descriptor')).toBeInTheDocument();
     expect(queryByText('What is the sha256 of the processing notebook?')).toBeNull();
 
-    // the descriptor's raw identifier is demoted to the locator, shown exactly once
-    const raw = [...container.querySelectorAll('.needsyou-about')].filter(
-      (el) => el.textContent === 'required_for_evidence_record',
+    /*
+     * INVERTED ON 2026-09-14, NOT DELETED, and the old text is quoted because it
+     * named the defect while asserting it. It read:
+     *
+     *   "the descriptor's raw identifier is demoted to the locator, shown exactly
+     *    once" — expecting exactly one `.needsyou-about` whose text is
+     *    `required_for_evidence_record`.
+     *
+     * "Raw identifier" is the accurate description, and demoting one is not the
+     * same as not showing it: `required_for_evidence_record` is an internal
+     * `blocker` key minted at `experiment_repository.py:786`, it appears NOWHERE in
+     * `schema/` or `vocabulary/` (0 hits, re-measured), and `CLAUDE.md` §11 records
+     * it as jargon rendered to a scientist beside an already-correct human label —
+     * "Scientific Descriptor", asserted four lines above. So the row was the same
+     * field named twice, once in machine casing.
+     *
+     * The requirement is now the opposite one, and `blocker-wording-parity.test.ts`
+     * holds the unit-level version of it.
+     */
+    const rawKeyAnywhere = [...container.querySelectorAll('.needsyou-item')].filter((el) =>
+      (el.textContent ?? '').includes('required_for_evidence_record'),
     );
-    expect(raw).toHaveLength(1);
-    // and it is never rendered as a primary label
+    expect(rawKeyAnywhere, 'an internal blocker key reached the reader').toHaveLength(0);
+
+    /*
+     * AND THE REAL LOCATORS ARE UNTOUCHED — the positive half, which is what stops
+     * this from being a change that simply deletes information. An asset question's
+     * `about` is its URI: a genuine locator, and the thing `RecordWorkbench`'s own
+     * note says the token is for ("how a reader can tell WHICH asset's hash is
+     * being asked for"). The three asset rows still carry theirs, exactly once each.
+     */
+    const locators = [...container.querySelectorAll('.needsyou-about')].map(
+      (el) => el.textContent ?? '',
+    );
+    expect(locators).toHaveLength(3);
+    for (const locator of locators) expect(locator).toMatch(/:\/\/|\./);
+    expect(new Set(locators).size, 'a locator was rendered twice').toBe(3);
+
+    // and no internal key is ever a primary label either
     const primaries = [...container.querySelectorAll('.needsyou-q')].map((el) => el.textContent);
     expect(primaries).not.toContain('required_for_evidence_record');
   });

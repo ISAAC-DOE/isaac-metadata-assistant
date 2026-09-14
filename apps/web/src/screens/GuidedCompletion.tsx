@@ -26,6 +26,7 @@ import { RecordActivityNote } from '../components/RecordActivityNote';
 import { useWorkspaceScopeChanged } from '../lib/workspaceScope';
 import {
   answerValuePreview,
+  blockerDisplayName,
   isAnswerablePendingItem,
   pendingItemToBlocker,
   pendingSummary,
@@ -900,7 +901,11 @@ function LoadedCompletion({
         // question rather than the first run owing one of the same kind.
         key: currentBlocker.key,
         runId: currentBlocker.runId,
-        label: currentBlocker.about ?? currentBlocker.question ?? currentBlocker.id,
+        // Humanized when `about` is the entry's internal `blocker` key rather than
+        // a locator — the same mapping the assistant's own sentence uses, so one
+        // field is never called two things. A real locator passes through.
+        label:
+          blockerDisplayName(currentBlocker.about) ?? currentBlocker.question ?? currentBlocker.id,
         suggestedValue: currentBlocker.demo_answer?.value,
         suggestedValueLabel: currentBlocker.demo_answer?.label,
       }
@@ -1406,7 +1411,7 @@ function LoadedCompletion({
             {answered.length + skippedItems.length + 2 + i}
           </span>
           <span className="upcoming-label">{item.question}</span>
-          <span className="upcoming-path">{item.about ?? item.kind}</span>
+          <span className="upcoming-path">{blockerDisplayName(item.about) ?? item.kind}</span>
         </div>
       ))}
 
