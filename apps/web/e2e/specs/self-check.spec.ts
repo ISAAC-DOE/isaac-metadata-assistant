@@ -390,6 +390,23 @@ test('@interaction the a11y baseline reports ONE extra node of a rule it does al
   const project = testInfo.project.name;
   const contrastBaselined = pickContrastBaselined(project);
   await app.open(contrastBaselined);
+  /*
+   * `openUnreachableDisclosures` IS PART OF THE PROCEDURE, NOT A CONVENIENCE —
+   * and omitting it is what broke CI on the first version of this fix.
+   *
+   * The baseline is DEFINED by what `a11y-axe.spec.ts` does: open the surface,
+   * open its unreachable disclosures, scan. A test that compares against that
+   * baseline has to reproduce it. `record-detail` is in `FIELD_GROUP_SURFACES`,
+   * so 25 of its contrast nodes live inside collapsed field groups; without
+   * this line the scan saw ZERO and the audit reported
+   * `FIXED? record-detail … baselined at 25 … but did not fire at all`.
+   *
+   * The old hardcoded fixture hid this: `experiments-example` has no collapsed
+   * disclosures, so the omission was invisible for as long as the surface was
+   * pinned to that one. Making the choice dynamic exposed a second assumption
+   * the test had been carrying all along.
+   */
+  await openUnreachableDisclosures(page, contrastBaselined.id);
 
   expect(auditScan(await scan(page), contrastBaselined.id, project), 'the unmodified surface must audit clean').toEqual([]);
 
@@ -648,6 +665,9 @@ test('@interaction tampering with THIS platform\'s count fails the audit; tamper
   const project = testInfo.project.name;
   const contrastBaselined = pickContrastBaselined(project);
   await app.open(contrastBaselined);
+  // Same reason as the test above: the baseline describes the surface with its
+  // disclosures OPEN, so a comparison against it has to open them too.
+  await openUnreachableDisclosures(page, contrastBaselined.id);
   const platform = currentPlatform();
   const other = BASELINE_PLATFORMS.find((p) => p !== platform)!;
 
