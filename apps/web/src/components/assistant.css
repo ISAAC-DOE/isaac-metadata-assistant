@@ -873,9 +873,21 @@ button.assistant-source-chip-nav:focus-visible {
  *      rows nearest the trigger — the edge least exposed to the clip, and out of
  *      the scroll region so they are visible without scrolling.
  * The panel keeps its own `overflow-y: auto` as a last resort, so in an extreme
- * viewport the fixed rows scroll rather than being clipped away. Whether the
- * empty-state popover fits at all remains a HUMAN browser check: jsdom computes
- * no layout, so nothing in the test suite can prove it. */
+ * viewport the fixed rows scroll rather than being clipped away.
+ *
+ * SUPERSEDED IN PART, 2026-09-13 — "remains a HUMAN browser check: jsdom
+ * computes no layout, so nothing in the test suite can prove it" was the end of
+ * this comment, and it was true of the CAP alone. It is kept as the reason the
+ * mitigations above are shaped the way they are, and corrected here because the
+ * mitigations were NOT SUFFICIENT: measured in Chromium at height 900 the panel
+ * opened with its top edge at -12.5 (desktop) and -17.8 (width 1024), i.e. off
+ * the top of the viewport, with the first pill behind an opaque 77-109px
+ * topbar. No `vh` constant can fix that — the room above the trigger depends on
+ * the dock's content height and on the topbar's own wrapping — so the height is
+ * now CLAMPED AT RUNTIME in `AssistantPanel.tsx` (search "OPENED PAST THE TOP
+ * OF THE SCREEN"), which only ever LOWERS the cap below. The browser assertion
+ * that pins it is in `e2e/specs/visual-sweep.spec.ts`, so this is no longer a
+ * human-only check; the jsdom half of the sentence is still exactly true. */
 .assistant-capabilities {
   position: relative;
   flex: none;
@@ -963,7 +975,25 @@ button.assistant-source-chip-nav:focus-visible {
  * inside the flex column instead of pushing the sentences below it out. */
 .assistant-capabilities-list {
   flex: 1 1 auto;
-  min-height: 0;
+  /* 96px, NOT 0, and the 0 is what this replaces -- measured, because `0` let the
+   * catalog disappear entirely. At width 320 (height 900) the topbar wraps to
+   * three lines (bottom 141px), leaving 156px above the trigger, so the runtime
+   * clamp sized the panel 155px. The fixed rows below this list -- the two
+   * honesty sentences and Close -- are together taller than that, and this was
+   * the ONLY `flex: 1 1 auto` child with `min-height: 0`, so it absorbed the
+   * whole deficit: `clientHeight` measured EXACTLY 0 against a `scrollHeight` of
+   * 1006. The reader was offered a popover with nothing in it, and
+   * `document.elementFromPoint` at the first pill's own centre returned
+   * `P.assistant-capabilities-boundary` -- which is also how it surfaced, as
+   * `visual-sweep` reporting the panel intercepting its own pill at 320px.
+   *
+   * 96px is one group eyebrow plus two 35px rows and the 8px gap between them,
+   * so something is always on offer. The cost is stated rather than hidden: on a
+   * viewport this cramped the fixed rows can now be pushed below the panel's own
+   * scrollport instead of always being visible, which is the "last resort"
+   * behaviour the block comment above already describes. An empty catalog is
+   * worse than a scrolled one. */
+  min-height: 96px;
   min-width: 0;
   overflow-y: auto;
   overflow-x: hidden;

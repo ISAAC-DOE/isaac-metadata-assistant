@@ -1898,6 +1898,88 @@ Current state:
   and on its own PR's CI and lost on the next run. **The release gate refused to publish the red
   commit**, which is the second time this session it did its job.
 
+- **Session of 2026-09-13 (second) — the owner reported two UI defects from screenshots, and fixing
+  the second one introduced THREE more that only a real browser could see.** Branch
+  `fix/assistant-collapsed-and-help`, PR #249. What a future session must not re-derive:
+
+  **THE OWNER'S TWO FINDINGS WERE BOTH REAL.** (1) The record sidebar's select control touched its
+  container border — caused by `.workspace-nav` and `.capture-nav` carrying *separately authored*
+  padding that had drifted apart; they are now ONE selector list, which is also what removed three
+  hand-authored literals that had pushed `type-scale-and-spacing` from 2400 to 2402. The guard
+  `src/__tests__/record-rail-gutter.test.ts` asserts the SHARED RULE structurally, not two matching
+  values, because two matching values are exactly what drifted. (2) The assistant rail clipped its
+  own conversation: measured in Chromium, ELEVEN stacked blocks with **two independently-scrolling
+  regions BOTH clipped** (85px and 65px hidden). The Suggested Questions and Agent Actions groups
+  moved into the "What Can I Ask?" popover — rail 11 → 7 blocks, 2 → 0 clipped regions — and the
+  trigger became an icon-only question mark, per the owner's words.
+
+  **THEN THE POPOVER OPENED OFF THE TOP OF THE SCREEN, AT EVERY WIDTH, AND NO UNIT TEST COULD SEE
+  IT.** Measured at height 900 with the popover open on a record: topbar bottom **109.3** at width
+  1024 and **77.0** at 1280/1440/1920, against a panel top of **-17.8** and **-12.5** — a negative
+  top edge is content off the viewport, and everything above the topbar's bottom sits behind an
+  opaque header. The first pill was at y=**47.6** (desktop) / **42.3** (1024): invisible AND
+  unclickable. It surfaced as Playwright's `<header class="topbar"> intercepts pointer events`,
+  which names the symptom, not the cause. **No `vh` constant can fix it** — the room above the
+  trigger is `triggerTop - gap - headerBottom` and every term moves at runtime (the trigger follows
+  the dock's content height; the header's own height changes with wrapping). The existing 34vh
+  overflowed the 1024 case by **127px** while the desktop 42vh overflowed by **89.5px**. So the
+  height is **clamped at runtime** in `AssistantPanel.tsx` (search "OPENED PAST THE TOP OF THE
+  SCREEN"); the clamp only ever LOWERS the CSS cap, never raises it, and its 120px floor is stated
+  in the code. After: clearance ≥ 8px at 375/1024/1280/1440 and at a short 1280×560, pill clickable
+  in all five. CSS anchor positioning would say this declaratively and is Chromium-only, so the
+  non-Chromium fallback would be the defect itself.
+
+  **AND THEN RUNNING A PILL LEFT THE CATALOG ON TOP OF THE ANSWER IT HAD JUST PRODUCED** —
+  `visual-sweep` at width 1024: *"primary element is covered at its centre by
+  div#assistant-capabilities-panel"*. Whether it covered anything depended on the viewport, which
+  is why the fix is BEHAVIOUR and not a height: a suggested question or agent action now dismisses
+  the popover and returns focus to the trigger. **Consequence a future session will meet: a pill's
+  `aria-pressed` state is no longer readable straight after the click**, because the pill unmounts
+  with the popover. Eight test sites re-open the catalog before reading it (the assertion is
+  preserved, not deleted) — `openAssistantCatalog` is idempotent on `aria-expanded` for exactly
+  this reason.
+
+  ***AND AT WIDTH 320 THE CLAMP THEN MADE THE CATALOG DISAPPEAR ENTIRELY — the third defect in
+  the same surface, found only because the sweep kept failing at one width after the other six went
+  green.*** At 320×900 the topbar wraps to **three lines** (bottom **141px**), leaving **156px**
+  above the trigger, so the clamp sized the panel **155px** — correctly, by its own rule. But the
+  fixed rows below the catalog (the two honesty sentences and Close) are together taller than that,
+  and `.assistant-capabilities-list` was the ONLY `flex: 1 1 auto` child with `min-height: 0`, so it
+  absorbed the whole deficit: `clientHeight` measured **exactly 0** against a `scrollHeight` of
+  **1006**. A reader at 320px was handed a popover with **nothing in it**, and
+  `document.elementFromPoint` at the first pill's own centre returned
+  `P.assistant-capabilities-boundary`. **The panel-geometry assertion could not see this** — the
+  panel fitted; its contents did not. `min-height: 96px` (one eyebrow plus two 35px rows and their
+  8px gap) is the floor, the panel's own scrollport carries the overflow, and the sweep now asks the
+  browser the question a reader asks: **does the first pill's own centre belong to the pill?**
+  Measured after the fix at 320/375/1024/1280×900 and 1280×560: clearance ≥ 8px, list height ≥ 96,
+  centre hit-tests to the pill, click succeeds at all five. **The durable lesson: a clamp that
+  satisfies its own invariant can still starve the thing it was protecting, and an assertion about
+  a CONTAINER is not an assertion about what is inside it.**
+
+  ***A MEASUREMENT TRAP I WALKED INTO MYSELF, AND IT COST A WRONG CLASSIFICATION OF 15 TEST
+  FAILURES.*** I ran the full `vitest` suite and a full Playwright sweep **concurrently** on this
+  host. The result was `26 failed / 5,864 passed` — of which **11 were caused by my change and 15
+  were contention**, including four `Test timed out in 5000ms` and a `page.goto: Timeout 30000ms`
+  in the sweep. Re-run **serially**, the six suspect files gave **90 passed / 90**. A frontend
+  failure count measured while a browser suite is running is not a measurement — this is the same
+  shape as §11's existing skip-count-needs-its-checkout rule, and the same shape as the machine
+  starvation (`syspolicyd` at ~50% CPU) recorded earlier the same day.
+
+  **A stale CSS comment was corrected rather than deleted:** `assistant.css` said the popover's fit
+  "remains a HUMAN browser check: jsdom computes no layout, so nothing in the test suite can prove
+  it." That was true of the CAP alone and is kept as the reason the mitigations are shaped as they
+  are — but the mitigations were not sufficient, and a browser assertion now pins the geometry in
+  `e2e/specs/visual-sweep.spec.ts`. The jsdom half of the sentence is still exactly true.
+
+  **Named rather than implied, and still not done:** `UX-021b` (Help 7 → 4 sections) is the owner's
+  call and needs its own PR; the remaining seven §5 disclosure rows need an allowlist judgement §8
+  reserves for a scientist; `QA-021` (a shared focus-trap hook) is deliberately declined while one
+  of the three dialogs is the destructive reset path; the 200%-zoom and narrow-width human sign-off
+  (**no CDP method can drive it**); personal-deploy retirement; and every hosted QA — `/krish` sits
+  behind an Authentik edge this environment cannot authenticate to, so the honest status is
+  `HOSTED QA PENDING (Krish)`.
+
 - Current repository status is summarized in README.md and docs/mentor-brief.md; see git history for the exact commit state.
 - Start any further phase (beyond the completed Phase 36 / Phase 36R slices) only after explicit user approval.
 

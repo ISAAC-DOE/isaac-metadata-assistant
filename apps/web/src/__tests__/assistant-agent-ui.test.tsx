@@ -120,6 +120,22 @@ function panel(extra: Record<string, unknown> = {}) {
   return view;
 }
 
+/**
+ * Re-open the popover, because a control that RUNS now dismisses it.
+ *
+ * That dismissal is a fix, not an inconvenience: the catalog was left sitting on
+ * top of the answer it had just produced (`visual-sweep` at width 1024 reported
+ * "primary element is covered at its centre by
+ * div#assistant-capabilities-panel"). A test activating a SECOND control has to
+ * do what a reader does and open it again. It is idempotent by construction —
+ * `aria-expanded` decides — so calling it when the popover is already open is
+ * safe.
+ */
+function reopenCatalog(container: HTMLElement): void {
+  const trigger = within(container).getByRole('button', { name: /What Can I Ask/i });
+  if (trigger.getAttribute('aria-expanded') !== 'true') fireEvent.click(trigger);
+}
+
 beforeEach(() => {
   clearAllSessions();
   sessionStorage.clear();
@@ -606,6 +622,7 @@ describe('agent output is announced to a screen reader', () => {
     const { getByText, container } = panel();
     fireEvent.click(getByText('Explain the Current Step'));
     const first = announcer(container).textContent ?? '';
+    reopenCatalog(container);
     fireEvent.click(getByText('Explain the Current Step'));
     const second = announcer(container).textContent ?? '';
     // React must see a genuinely different string or it will not touch the DOM

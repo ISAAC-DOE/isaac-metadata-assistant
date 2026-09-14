@@ -277,6 +277,9 @@ describe('P36V S-A · header + status row', () => {
       fireEvent.click(getByRole('button', { name: /What Can I Ask/i }));
       // ask, then ask again so the FIRST turn archives with its classification
       fireEvent.click(getByText('What is related?'));
+      // A control that RUNS dismisses the popover (it used to cover the answer
+      // it had just produced), so the second ask re-opens it, as a reader would.
+      fireEvent.click(getByRole('button', { name: /What Can I Ask/i }));
       fireEvent.click(getByText('Anything else?'));
       const archived = container.querySelector('.assistant-msg-assistant') as HTMLElement;
       const kind = archived.getAttribute('data-kind');

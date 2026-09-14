@@ -1106,6 +1106,56 @@ const STATES: readonly VisualState[] = [
       // The pills live in "What Can I Ask?" since 2026-09-13 (owner request) —
       // the rail is the chat and nothing else. Same pill, one click further in.
       await aside.getByRole('button', { name: /What Can I Ask/i }).click();
+      /*
+       * THE POPOVER MUST NOT OPEN BEHIND THE TOPBAR, and this assertion exists
+       * because it did. Before the runtime clamp in `AssistantPanel.tsx`, the
+       * panel's top edge measured -12.5 at desktop widths and -17.8 at 1024 (at
+       * height 900) — off the top of the viewport, with the first example pill
+       * at y=47.6 inside an opaque 77px header. The failure surfaced here as
+       * `<header class="topbar"> intercepts pointer events` on the click below,
+       * which names the symptom rather than the cause; this names the cause.
+       * jsdom computes no layout, so a browser is the only place it can be
+       * checked.
+       */
+      const capPanel = aside.locator('.assistant-capabilities-panel');
+      await expect(capPanel).toBeVisible();
+      const capBox = await capPanel.boundingBox();
+      const barBox = await page.locator('header.topbar').boundingBox();
+      expect(capBox, 'the capabilities popover has no box').not.toBeNull();
+      expect(barBox, 'the topbar has no box').not.toBeNull();
+      expect(
+        capBox!.y,
+        `the capabilities popover opened behind the topbar (top ${capBox!.y}, topbar bottom ${
+          barBox!.y + barBox!.height
+        })`,
+      ).toBeGreaterThanOrEqual(barBox!.y + barBox!.height);
+      /*
+       * AND THE CATALOG MUST ACTUALLY OFFER SOMETHING. At width 320 the panel
+       * fitted (top edge clear of the topbar) while its scroll region measured
+       * `clientHeight` EXACTLY 0 against a `scrollHeight` of 1006: the fixed
+       * rows below the list were taller than the clamped panel and the list,
+       * the only `flex: 1 1 auto` child, absorbed the whole deficit. A geometry
+       * check on the PANEL cannot see that, so this asks the browser the
+       * question a reader asks -- does the first pill's own centre belong to the
+       * pill? -- which is also what the click below needs and what failed
+       * (`P.assistant-capabilities-boundary` answered instead).
+       */
+      const reachable = await page.evaluate(() => {
+        const panel = document.querySelector('.assistant-capabilities-panel');
+        const list = panel?.querySelector('.assistant-capabilities-list');
+        const pill = document.querySelector('.assistant-prompt');
+        if (!(panel instanceof HTMLElement) || !(list instanceof HTMLElement)) return null;
+        if (!(pill instanceof HTMLElement)) return null;
+        const box = pill.getBoundingClientRect();
+        const hit = document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2);
+        return {
+          listHeight: list.clientHeight,
+          centreIsPill: hit === pill || (hit instanceof Node && pill.contains(hit)),
+        };
+      });
+      expect(reachable, 'the popover, its list or its first pill is missing').not.toBeNull();
+      expect(reachable!.listHeight, 'the catalog scroll region collapsed to zero height').toBeGreaterThan(0);
+      expect(reachable!.centreIsPill, "the first pill's own centre belongs to something else").toBe(true);
       await aside.getByRole('button', { name: /What still needs me\?/i }).click();
       await expect(log.locator('.assistant-msg')).not.toHaveCount(0, { timeout: 25_000 });
       return log.locator('.assistant-msg').first();

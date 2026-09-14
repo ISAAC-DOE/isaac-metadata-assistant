@@ -141,6 +141,9 @@ describe('P34.2 free-form submit', () => {
     await waitFor(() => expect(getByText(ASSISTANT_UNAVAILABLE)).toBeInTheDocument());
     // the surrounding controls are unaffected — the guided pills still work
     fireEvent.click(getByText('What still needs me?'));
+    // The pill is still pressed — it is behind the popover its own run
+    // dismissed, so this re-opens before reading `aria-pressed`.
+    await openAssistantCatalogWhenReady(container);
     expect(container.querySelector('.assistant-prompt.active')).toBeTruthy();
   });
 });
@@ -182,6 +185,9 @@ describe('P34.2 preserved surfaces', () => {
     // The pills live in "What Can I Ask?" since 2026-09-13 — open it first.
     await openAssistantCatalogWhenReady(container);
     fireEvent.click(getByText('What still needs me?'));
+    // The pill is still pressed — it is behind the popover its own run
+    // dismissed, so this re-opens before reading `aria-pressed`.
+    await openAssistantCatalogWhenReady(container);
     expect(container.querySelector('.assistant-prompt.active')).toBeTruthy();
     expect(getByText(/Beamline, Edge/)).toBeInTheDocument();
     expect(spy).not.toHaveBeenCalled();

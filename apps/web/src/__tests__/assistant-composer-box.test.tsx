@@ -126,7 +126,10 @@ describe('AssistantPanel — wired composer (P34.2)', () => {
     await openAssistantCatalogWhenReady(container);
     const pill = getByText('What still needs me?');
     fireEvent.click(pill.closest('button') as HTMLButtonElement);
-    // clicking a pill activates it (aria-pressed) — the guided answer path is intact
+    // clicking a pill activates it (aria-pressed) — the guided answer path is intact.
+    // Re-opened first: a control that RUNS dismisses the popover (it used to cover
+    // the answer it had just produced), so the pressed pill is behind it.
+    await openAssistantCatalogWhenReady(container);
     expect(container.querySelector('.assistant-prompt.active')).toBeTruthy();
     // a pill does NOT route through the endpoint in this slice (that is P34.3)
     expect(spy).not.toHaveBeenCalled();

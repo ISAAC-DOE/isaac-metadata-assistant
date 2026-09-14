@@ -1,5 +1,8 @@
 import { describe, it, expect, afterEach, vi, type Mock } from 'vitest';
-import { openAssistantCatalogWhenReady } from '../test/openAssistantCatalog';
+import {
+  openAssistantCatalog,
+  openAssistantCatalogWhenReady,
+} from '../test/openAssistantCatalog';
 import { render, fireEvent, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { AppRoutes } from '../App';
@@ -771,6 +774,9 @@ describe('S6 · Ready to Export — grounded assistant (P25.4)', () => {
     // dead prose sentence "Open Validate to run the deterministic schema check."
     // P36V.1 Unit B — "paths" became "validation issues" so the same sentence
     // covers the record-level case too (a root-level violation has no field path).
+    // RE-OPEN: a control that RUNS now dismisses the popover (it used to sit on
+    // top of the answer it had just produced), and this is a SECOND activation.
+    openAssistantCatalog(assistant);
     fireEvent.click(panel.getByText("What's left before export?").closest('button')!);
     expect(
       await panel.findByText(
@@ -1090,6 +1096,8 @@ describe('S4 · Complete Missing Fields — grounded assistant (P25.6)', () => {
       'What does this question want?',
       'What if I leave one missing?',
     ]) {
+      // Dismissed by the previous iteration's run, so re-open before activating.
+      openAssistantCatalog(assistant);
       fireEvent.click(panel.getByText(label).closest('button')!);
       expect(assistant.textContent).not.toMatch(VERDICT);
       expect(assistant.textContent).not.toMatch(INVALID_AGAINST);
@@ -1114,6 +1122,9 @@ describe('S4 · Complete Missing Fields — grounded assistant (P25.6)', () => {
     expect(
       await panel.findByText('This draft currently has no pending fields listed.'),
     ).toBeInTheDocument();
+    // The three pills are still THERE, and still three — they are simply behind
+    // the popover the run dismissed, which is why this re-opens before counting.
+    openAssistantCatalog(assistant);
     expect(assistant.querySelectorAll('.assistant-prompt').length).toBe(3);
   });
 
