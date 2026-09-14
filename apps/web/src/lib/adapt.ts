@@ -803,6 +803,60 @@ export function pendingItemToBlocker(item: ApiAnswerablePendingItem): PendingBlo
  *  - `locator` is the technical locator (`about`) surfaced exactly once, or null.
  * Pure: it does not mutate the item, and the underlying question is unchanged.
  */
+/**
+ * A BARE INTERNAL IDENTIFIER, as distinct from a locator.
+ *
+ * Lower-case, digits and single underscores only — `reduced_spectrum`,
+ * `qc_status`, `required_for_evidence_record`, the three keys
+ * `experiment_repository.py:769,778,786` mints for a created record. It
+ * deliberately matches nothing carrying a dot, colon, slash or space, because
+ * those are the shapes a REAL locator takes (`sample.material.formula`,
+ * `assets:sha256`, `ssrl-archive://BL15-2/2099_run_000/x.xdi`) and they must
+ * survive untouched.
+ *
+ * `serialize._blocker_about` returns the first of `uri`/`blocker` that is a
+ * string, so `about` is a locator on an asset question and an internal key on
+ * these three. Only the second kind is display-mapped.
+ */
+export function isBareBlockerKey(about: string | null | undefined): boolean {
+  return typeof about === 'string' && /^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$/.test(about);
+}
+
+/**
+ * The reader's name for a pending entry's `about`, with NOTHING invented.
+ *
+ * `CLAUDE.md` §11 records three internal blocker identifiers being rendered to a
+ * scientist and records why the usual exemption does not apply: they are **not
+ * schema paths** (`grep -rao` over `schema/` and `vocabulary/` → 0 hits for all
+ * three), and `UX-014`'s protection is for a path, on the stated ground that "it
+ * is how a curator maps a field". A key that appears nowhere in the schema maps
+ * nothing.
+ *
+ * MIRRORS THE SERVER, deliberately and by test. `assistant_query._blocker_display`
+ * applies the same predicate and the same words, because the assistant names
+ * these fields in a sentence while this module names them on a screen — and the
+ * two surfaces must not call one field two things. The parity is pinned in both
+ * languages: `__tests__/blocker-wording-parity.test.ts` here and
+ * `test_blocker_wording.py` there, each naming the other.
+ *
+ * A real locator is returned VERBATIM. Humanizing a URI would replace
+ * information with a guess — measured, the server's own last-segment humanizer
+ * turns `ssrl-archive://BL15-2/2099_run_000/x.xdi` into "Xdi", which names
+ * nothing.
+ */
+export function blockerDisplayName(about: string | null | undefined): string | null {
+  if (typeof about !== 'string' || about.trim() === '') return null;
+  const value = about.trim();
+  if (!isBareBlockerKey(value)) return value;
+  const spaced = value.replace(/_/g, ' ');
+  const titled = spaced.replace(/\b[a-z]/g, (c) => c.toUpperCase());
+  // Casing only, for an acronym this product already writes in capitals in its
+  // own prose ("What is the QC verdict for this measurement",
+  // `experiment_repository.py:780`). Not a vocabulary of field names: it
+  // introduces no new name, and a token absent here keeps its title case.
+  return titled.replace(/\bQc\b/g, 'QC');
+}
+
 export function pendingSummary(item: ApiPendingItem): { label: string; locator: string | null } {
   // AN UNREADABLE ENTRY IS NAMED, NOT BLANKED. `KIND_LABEL[null] ?? item.question` is
   // `null` for one, which rendered an EMPTY row in the "Needs You" list — a blocker
@@ -835,7 +889,17 @@ export function pendingSummary(item: ApiPendingItem): { label: string; locator: 
     // which is the same about → question → id ladder `useRecordSession.toPendingItems`
     // uses, so the two surfaces cannot disagree about what a field is called.
     label: KIND_LABEL[item.kind] ?? item.question ?? item.id,
-    locator: item.about ?? null,
+    // THE LOCATOR IS DROPPED WHEN IT IS NOT ONE. `about` carries an asset `uri`
+    // — a genuine locator, and the thing `RecordWorkbench`'s own note says this
+    // token is for ("how a reader can tell WHICH asset's hash is being asked
+    // for") — or the entry's internal `blocker` key, which is neither a locator
+    // nor news: on this surface the primary label already names the field, so
+    // `reduced_spectrum` rendered as a mono token under "Reduced Spectrum" was
+    // the same words twice, once in machine casing. Suppressed rather than
+    // humanized HERE, and humanized in the assistant's sentence, because there
+    // the token IS the name and here it is a duplicate. Every real locator is
+    // untouched, which is why the predicate is shape-based and not a list.
+    locator: isBareBlockerKey(item.about) ? null : (item.about ?? null),
   };
 }
 

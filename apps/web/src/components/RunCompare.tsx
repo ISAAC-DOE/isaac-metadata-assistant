@@ -84,6 +84,7 @@ import {
   type CompareSide,
   type RunComparison,
 } from '../lib/runCompare';
+import { blockerDisplayName } from '../lib/adapt';
 import { formatCreatedDate } from '../lib/labels';
 import { runFindingText } from '../lib/runFields';
 import {
@@ -877,7 +878,10 @@ function ContextSide({ run, side }: { run: ApiRunView; side: SideContext }) {
                 <li key={item.blocker_key ?? `${item.id ?? 'entry'}#${index}`}>
                   {item.unavailable === true
                     ? `An entry this build could not read${item.unavailable_reason ? ` — ${item.unavailable_reason}` : ''}`
-                    : (item.question ?? item.about ?? item.kind ?? 'An entry carrying no question text')}
+                    : (item.question ??
+                      blockerDisplayName(item.about) ??
+                      item.kind ??
+                      'An entry carrying no question text')}
                 </li>
               ))}
               {page !== null && page.withheld > 0 && (

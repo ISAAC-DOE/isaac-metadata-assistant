@@ -623,13 +623,37 @@ Current state:
       **not schema paths** — and `UX-014`'s rule protects a *schema path*, on the stated ground
       that "it is how a curator maps a field". A key that appears nowhere in the schema maps
       nothing; the rule I cited does not reach them, and the exemption rested on that citation.
-      **The item is therefore STILL OPEN as jargon, not exempt**, and the honest framing is that
+      ~~**The item is therefore STILL OPEN as jargon, not exempt**, and the honest framing is that
       three internal blocker identifiers are rendered to a scientist beside an already-correct
       human label. The fix is a human wording for each blocker key — which is a copy decision
       with a real constraint (the keys also appear in the Assistant's own sentences, e.g.
       `routes.py:22778`'s *"3 fields still need you: reduced_spectrum, qc_status,
       required_for_evidence_record"*), so it needs its own slice rather than a rename in one
-      place; `isaac_propose_field_value`
+      place~~ — **CLOSED 2026-09-14, in its own slice, exactly as that sentence specified.** The
+      diagnosis above is kept because it is what made the fix buildable, and because the withdrawn
+      exemption is the more useful half to remember. What shipped: **one predicate and one
+      mapping, mirrored in both languages and pinned by a parity test in each.** A bare internal
+      identifier (`^[a-z][a-z0-9]*(_[a-z0-9]+)*$` — no dot, colon, slash or space) is humanized
+      through the humanizer `assistant_query` **already had**; anything else is returned
+      **verbatim**, because the same function turns
+      `ssrl-archive://BL15-2/2099_run_000/x.xdi` into *"Xdi"* (measured), so applying it to a
+      locator would replace information with a guess. The assistant now answers *"3 fields still
+      need you: **Reduced Spectrum, QC Status, Required For Evidence Record**."* The `QC` casing
+      is **casing only** — the product already writes it capitalised in its own prose to a
+      scientist (`experiment_repository.py:780`, `inferability.py:798`) — and a test asserts every
+      output word is an input word, so no name is invented. **On the record screen the token is
+      SUPPRESSED rather than humanized**, and the asymmetry is deliberate: there the primary label
+      already reads "Reduced Spectrum", so the key was the same words twice, once in machine
+      casing; in a sentence the token IS the name. **Every real locator is untouched at both
+      sites** — an asset question keeps its URI, which is what `RecordWorkbench`'s own note says
+      that mono token is for. **Two existing tests were PINNING the defect and were inverted, not
+      deleted**: `live-screens.test.tsx`'s *"the descriptor's raw identifier is demoted to the
+      locator, shown exactly once"* (demoting a raw identifier is not the same as not showing
+      one) and five assertions in `test_assistant_is_not_run_blind.py`, whose subject — that a
+      per-run question carries its run — is unchanged and still asserted. The premise the whole
+      change rests on is **a test, not a claim**: `test_blocker_wording.py` re-greps `schema/` and
+      `vocabulary/` for all three keys and fails if a future schema refresh ever introduces one,
+      because then `UX-014`'s exemption *would* reach it; `isaac_propose_field_value`
       names a real MCP tool inside an honest explanation of how a proposal arrives, and editing it
       touches §15's decision about what a product screen may say about the agent seam; and the
       `NO_LINKS` / `NO_MEASUREMENT_SERIES` advisory codes each already carry their plain-English

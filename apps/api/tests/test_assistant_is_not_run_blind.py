@@ -185,9 +185,18 @@ def test_a_run_owned_question_is_named_with_the_run_that_owns_it(client):
 
     answer = _ask(client, exp_id, "what still needs me?")
     assert answer.startswith("6 fields still need you:"), answer
-    assert "reduced_spectrum (on run 300 K)" in answer, answer
+    # THE DISPLAY NAME IS HUMANIZED, THE RUN QUALIFICATION IS WHAT THIS ASSERTS.
+    # This line read "reduced_spectrum (on run 300 K)" until 2026-09-14, when
+    # `assistant_query._blocker_display` stopped rendering the entry's internal
+    # `blocker` key to a scientist (see `test_blocker_wording.py` for why the
+    # `UX-014` schema-path exemption does not reach these three keys). Nothing this
+    # test is FOR has changed: the subject is that a per-run question carries its
+    # run, and the parenthetical is still exactly that.
+    assert "Reduced Spectrum (on run 300 K)" in answer, answer
     # No bare, unqualified repetition of the same label.
-    assert "you: reduced_spectrum," not in answer, answer
+    assert "you: Reduced Spectrum," not in answer, answer
+    # ...and the machine key reaches the reader nowhere in the sentence.
+    assert "reduced_spectrum" not in answer, answer
 
 
 def test_a_run_created_without_a_label_still_gets_a_name_not_a_null(client):
@@ -214,7 +223,10 @@ def test_a_missing_run_label_reads_as_unlabelled_rather_than_interpolated():
     """
     for absent in ({}, {"run_label": None}, {"run_label": "   "}):
         labels = aq._pending_labels([{"about": "reduced_spectrum", "run_id": "01RUN", **absent}])
-        assert labels == ["reduced_spectrum (on an unlabelled run)"], (absent, labels)
+        # Humanized since 2026-09-14 — see the note above and
+        # `test_blocker_wording.py`. The unlabelled-run fallback, which is what this
+        # case exists for, is unchanged.
+        assert labels == ["Reduced Spectrum (on an unlabelled run)"], (absent, labels)
 
 
 @pytest.mark.parametrize("label", ["/Users/me/secret", "valid against v1.05"])
@@ -233,7 +245,9 @@ def test_an_unsafe_or_verdict_bearing_run_label_is_withheld_not_propagated(label
     labels = aq._pending_labels(
         [{"about": "reduced_spectrum", "run_id": "01RUN", "run_label": label}]
     )
-    assert labels == ["reduced_spectrum (on a run whose label is withheld)"], labels
+    # Humanized since 2026-09-14 (`test_blocker_wording.py`); the WITHHELD-label
+    # clause is what this parametrized case is for, and it is unchanged.
+    assert labels == ["Reduced Spectrum (on a run whose label is withheld)"], labels
     assert label not in labels[0]
 
 
@@ -242,7 +256,10 @@ def test_a_record_level_question_is_not_attributed_to_any_run(client):
     exp_id = client.post("/api/experiments", json={"title": "Cu K-edge"}).json()["id"]
     answer = _ask(client, exp_id, "what still needs me?")
     assert "(on " not in answer, answer
-    assert "3 fields still need you: reduced_spectrum," in answer, answer
+    # Humanized since 2026-09-14 (see `test_blocker_wording.py`); what this line
+    # asserts -- that a RECORD-level question carries no run parenthetical -- is
+    # the assertion above it and is unchanged.
+    assert "3 fields still need you: Reduced Spectrum," in answer, answer
 
 
 def test_a_zero_run_record_is_unmoved_by_the_fix(client):

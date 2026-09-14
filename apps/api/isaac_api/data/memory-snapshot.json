@@ -10240,7 +10240,7 @@
       },
       {
         "path": "CLAUDE.md",
-        "sha256": "35bcb48563e84ace55fc5387ad34d1a48116a0d7320478b0e1ec1ccda1faa91f"
+        "sha256": "5c0164d92a8c97841619bf1fee06cc20481342f6d4b0ba9a071907fae4f44a82"
       },
       {
         "path": "CONTRIBUTING.md",
@@ -10360,7 +10360,7 @@
       },
       {
         "path": "apps/web/src/__tests__/live-screens.test.tsx",
-        "sha256": "20a1104305effb54c81a54c64d6512e2dbe2198039ec8c586ab424e840906069"
+        "sha256": "a83d0271167a5c892984f6d3620ba4a88e21e36f8c95bfff3c98c2b02f1469f8"
       },
       {
         "path": "apps/web/src/__tests__/memory-concepts.test.tsx",
@@ -10500,7 +10500,7 @@
       },
       {
         "path": "apps/web/src/lib/adapt.ts",
-        "sha256": "ff391276ad0c11210d9008f69b187cbb8e7f9b4cf9d44b9327f59b5a47e950a1"
+        "sha256": "a209d055d2606bec064b98b82fb464f0635537f464e8a32cf3a0d9b5094f5565"
       },
       {
         "path": "apps/web/src/lib/api.ts",
@@ -10552,7 +10552,7 @@
       },
       {
         "path": "apps/web/src/screens/GuidedCompletion.tsx",
-        "sha256": "762847b8742d0df532d227cf9760cd36412f67f011158837a3ce1cc80959de8a"
+        "sha256": "840e8b129e8fc057d04d402d36a8d4cd9e69e84296be1717c13a9e2cc51262fe"
       },
       {
         "path": "apps/web/src/screens/LoadMaterials.tsx",
@@ -11012,7 +11012,7 @@
       }
     ],
     "served_file_count": 200,
-    "served_manifest_fingerprint": "ee774b5b36b1aa8497d11098a4f4734721e582340bc8eb280af8062de153d1cf"
+    "served_manifest_fingerprint": "948991055230f1a3c099ec0a35164f335b7b3304197e11407069481ade1acf86"
   },
   "overview": {
     "built_at_commit": "caab1d0a69c1733524bda5dde495623bc4b7bad1",
