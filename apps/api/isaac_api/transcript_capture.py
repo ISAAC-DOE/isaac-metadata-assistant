@@ -2161,13 +2161,17 @@ AMBIGUITY_POLICY: tuple[dict[str, str], ...] = (
             "ALLOWLIST: one determiner, and a closed set of words that LOCATE the "
             "quantity ('sample', 'cryostat', 'scan') or say how it was obtained "
             "('measured', 'recorded') rather than re-subject it. TWO KNOWN GAPS, "
-            "stated here rather than left for a reader to discover: a clause-level "
-            "adjunct such as an opening prepositional phrase is NOT closed (its "
-            "object may absorb an arbitrary word), and a bracketing character "
-            "between the modifier and the label — a parenthesis, a quotation mark, "
-            "a colon or a semicolon — ends the clause this gate inspects, so the "
-            "modifier falls outside it. In both, the sentence reads as though the "
-            "modifier were absent. The direction is the decision, for the third "
+            "stated here rather than left for a reader to discover, and the second "
+            "is now NARROWER than it was: a clause-level adjunct such as an opening "
+            "prepositional phrase is NOT closed (its object may absorb an arbitrary "
+            "word); and a COLON or SEMICOLON between the modifier and the label "
+            "still ends the clause this gate inspects, so the modifier falls "
+            "outside it. A PARENTHESIS or a QUOTATION MARK no longer does — a "
+            "closing delimiter that has a matching opener is read as an aside "
+            "inside the clause, and the words it wrapped still reach the gate, so "
+            "'the (setpoint) temperature' is refused exactly as 'the setpoint "
+            "temperature' is. In the gaps that remain, the sentence reads as though "
+            "the modifier were absent. The direction is the decision, for the third "
             "time in this reader: "
             "a list of forbidden modifiers fails OPEN on the next one, while an "
             "allowlist costs a reading and DISCLOSES it. This outcome does NOT "
@@ -3656,10 +3660,76 @@ def _pre_label_text(rule: "_Rule", text: str, match: re.Match[str]) -> str | Non
     if head is None:  # pragma: no cover - pinned by a test over every rule
         return None
     before = text[: match.start() + head.start()]
+    before = _unwrap_parentheticals(before)
     last = None
     for boundary in _PRE_LABEL_CLAUSE_OPEN.finditer(before):
         last = boundary
     return before if last is None else before[last.end() :]
+
+
+#: Closing delimiters that only bound a clause when they OPEN one — i.e. when no
+#: matching opener precedes them in the same stretch of text.
+_PAIRED_CLOSERS = {")": "(", "]": "[", "}": "{", '"': '"', "'": "'"}
+
+
+def _unwrap_parentheticals(before: str) -> str:
+    """Strip paired delimiters that enclose an ASIDE, keeping the words inside.
+
+    *** THIS CLOSES HALF OF A MEASURED §5 BYPASS. *** ``_pre_label_text`` keeps only
+    the text AFTER the last :data:`_PRE_LABEL_CLAUSE_OPEN` boundary, and that set
+    contains ``)``, ``]``, ``"`` and ``'``. So a bracketed pre-modifier CUT ITSELF
+    out of the text gate (4) inspects:
+
+        The (setpoint) temperature was 425 K.   ->  gate saw " "  ->  PROPOSED
+        The "setpoint" temperature was 425 K.   ->  gate saw " "  ->  PROPOSED
+
+    Both are the same claim as ``The setpoint temperature was 425 K.``, which the
+    gate refuses and DISCLOSES. Proposing them silently is a fabrication with no
+    disclosure — the worst outcome this reader has — and it was pinned wrong-way-
+    round by ``test_the_pre_label_gate_IS_BYPASSED_by_a_preamble_or_a_bracket``.
+
+    THE DISTINCTION THIS FUNCTION DRAWS, and it is the whole idea: a closer with a
+    matching OPENER before it is a parenthetical INSIDE the clause, so the clause
+    did not restart and the words inside it still modify the label. A closer with
+    no opener — a quotation continuing from an earlier sentence, a stray bracket —
+    genuinely may open new text, and is left alone.
+
+    The delimiters are REMOVED and their contents KEPT, which is the point: the
+    forbidden word has to reach the gate. Deleting the aside instead would turn
+    ``The (setpoint) temperature`` into ``The temperature``, i.e. into a sentence
+    the gate legitimately ACCEPTS — closing the hole by making the fabrication
+    invisible rather than by refusing it.
+
+    *** WHAT THIS DOES NOT CLOSE, stated rather than implied. *** The other half of
+    that bypass is untouched and deliberately so:
+
+    * the ``:`` and ``;`` forms (``The setpoint: temperature was 425 K.``) — those
+      are genuine clause punctuation, not paired, and treating them otherwise is a
+      judgement about English rather than a parsing fix;
+    * every PREAMBLE form (``In our lab the setpoint temperature was 425 K.``),
+      which runs through ``_PRE_LABEL_PREP_PHRASE``'s open three-word tail. Closing
+      that needs an ALLOWLISTED tail, and choosing its members is a scientific
+      judgement about which position words re-subject a measurement — §5 governs
+      it, and it is not an agent's to make.
+
+    Symmetric quotes are matched by COUNT, not by position: ``"`` is its own opener,
+    so a closer is one only if an odd number precede it.
+    """
+    out: list[str] = []
+    for i, ch in enumerate(before):
+        opener = _PAIRED_CLOSERS.get(ch)
+        if opener is None:
+            out.append(ch)
+            continue
+        head_text = before[:i]
+        if opener == ch:
+            paired = head_text.count(ch) % 2 == 1
+        else:
+            paired = head_text.count(opener) > head_text.count(ch)
+        if paired:
+            continue  # drop the delimiter, keep what it wrapped
+        out.append(ch)
+    return "".join(out)
 
 
 def _label_is_the_subject(rule: "_Rule", text: str, match: re.Match[str]) -> bool:

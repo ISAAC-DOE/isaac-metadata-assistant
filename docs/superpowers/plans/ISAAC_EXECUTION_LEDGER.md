@@ -3399,6 +3399,90 @@ Each applied under an `assert count == 1` and reverted `cmp`-clean.
 
 ---
 
+## *** `A-1b` — HALF THE §5 BYPASS IS CLOSED, and the half left open is the half an agent must not decide ***
+
+### What the pinned defect said, and what it asked for
+
+`test_the_pre_label_gate_IS_BYPASSED_by_a_preamble_or_a_bracket_RESIDUE` asserted a defect
+**wrong-way-round** so it stayed visible in CI: ten sentences that each proposed a scientific value
+with **no abstention at all** — a §5 fabrication with no disclosure, the worst outcome this reader
+has. It named **two independent mechanisms**, said they needed separate fixes, and instructed:
+*"WHEN IT IS FIXED, THIS TEST MUST FAIL, and its failure is the signal to delete it … narrow the
+residue note — do not weaken it."*
+
+### Mechanism 2 is a PARSING defect, and it is now closed
+
+`_pre_label_text` kept only the text after the last `_PRE_LABEL_CLAUSE_OPEN` boundary, and that set
+contains `)`, `]`, `"` and `'`. So a bracketed pre-modifier **cut itself out** of the text gate (4)
+inspects:
+
+```
+The (setpoint) temperature was 425 K.   ->  the gate saw " "   ->  PROPOSED, silently
+The "setpoint" temperature was 425 K.   ->  the gate saw " "   ->  PROPOSED, silently
+```
+
+`_unwrap_parentheticals` strips a closing delimiter **that has a matching opener before it** —
+a parenthetical *inside* the clause, so the clause never restarted — and **keeps the words it
+wrapped**. A closer with no opener (a quotation continuing from an earlier sentence, a stray
+bracket) is left alone. Symmetric quotes are matched by parity, not position.
+
+**Keeping the contents is the whole design.** Deleting the aside would turn `The (setpoint)
+temperature` into `The temperature`, which the gate legitimately **accepts** — that would close the
+hole by making the fabrication *invisible* rather than by refusing it.
+
+Measured, per row:
+
+| row | before | after |
+|---|---|---|
+| parenthesis | proposed, silent | **refused + disclosed** |
+| double quotes | proposed, silent | **refused + disclosed** |
+| instant family, bracket | proposed, silent | **refused + disclosed** |
+| the other **seven** | proposed, silent | unchanged |
+
+### Mechanism 1 is NOT a parsing defect, and is deliberately untouched
+
+`_PRE_LABEL_PREP_PHRASE` ends in three arbitrary words, which absorb the determiner and the
+forbidden modifier. The prior session measured the naive repair at **83 failed / 1807 passed** —
+the tail is load-bearing for legitimate forms like *"At the second scan the temperature hit 500 K."*
+So the repair is an **allowlisted** tail, and choosing its members is a judgement about which
+position words re-subject a measurement. **§8: an agent does not decide scientific truth.** It stays
+open, with its own corpus and its own review.
+
+`:` and `;` stay open for the same kind of reason: they are genuine clause punctuation, not paired,
+and treating them otherwise is a judgement about English rather than a parsing fix.
+
+### The test was NARROWED, not deleted, and gained a ratchet
+
+- `test_the_paired_delimiter_bypass_is_CLOSED_and_stays_closed` — the three fixed rows, asserted in
+  **both** directions: no candidate **and** an abstention. Requiring only "no candidate" would also
+  pass if the reader had stopped producing anything at all; requiring the abstention says the
+  scientist is **told**.
+- `test_the_pre_label_gate_IS_BYPASSED_by_a_PREAMBLE_RESIDUE` — the remaining **seven**, still
+  pinned wrong-way-round.
+
+**Mutation-proven:** deleting the one `_unwrap_parentheticals(before)` call fails the new ratchet —
+so the fix is not an equivalent mutant.
+
+### The SERVED policy text said something that is now false, and is corrected
+
+`AMBIGUITY_POLICY` is sent to clients. It described *"a bracketing character between the modifier
+and the label — a parenthesis, a quotation mark, a colon or a semicolon"* as ending the clause. Two
+of those four are no longer true. The text now names the colon and semicolon as the surviving half
+and states plainly that a parenthesis or quotation mark no longer hides a modifier. **A disclosure
+that overstates a gap is as wrong as one that understates it** — this one would have told a
+scientist their bracketed sentence was unread when it is now refused and disclosed.
+
+### Verification
+
+| Check | Result |
+|---|---|
+| transcript suites | **2,073 passed**, exit 0 |
+| `test_transcript_capture_prelabel_gate.py` | **1,617 passed** |
+| mutation: remove the unwrap | ratchet **FAILS**, reverted `cmp`-clean |
+| full backend suite | see the commit |
+
+---
+
 ## CONTINUATION PROTOCOL
 
 Every future session starts here, in this order:

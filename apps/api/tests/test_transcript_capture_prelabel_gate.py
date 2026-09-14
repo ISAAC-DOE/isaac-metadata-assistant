@@ -686,8 +686,44 @@ def test_the_POSSESSIVE_admits_no_new_NOUN_which_is_what_keeps_it_safe():
             assert reading.abstentions != (), _explain(sentence)
 
 
-def test_the_pre_label_gate_IS_BYPASSED_by_a_preamble_or_a_bracket_RESIDUE():
-    """**PINNED WRONG-WAY-ROUND: this asserts the DEFECT, so it is visible in CI.**
+def test_the_paired_delimiter_bypass_is_CLOSED_and_stays_closed():
+    """THE RATCHET FOR THE HALF THAT IS FIXED (2026-09-13).
+
+    Three rows moved out of the residue below when ``_unwrap_parentheticals``
+    landed: a paired delimiter between the determiner and the label no longer
+    hides the forbidden modifier from gate (4).
+
+    Each was a §5 fabrication proposed with NO abstention — the worst outcome this
+    reader has. Each is now refused AND disclosed, which is the same treatment its
+    direct form already got.
+
+    Asserted in BOTH directions on purpose. Requiring only "no candidate" would
+    also pass if the reader had stopped producing anything at all; requiring the
+    abstention says the scientist is TOLD.
+    """
+    for label, sentence in (
+        ("parenthesis", "The (setpoint) temperature was 425 K."),
+        ("double quotes", 'The "setpoint" temperature was 425 K.'),
+        ("instant family, bracket", f"The previous (scan) ended at {INSTANT}."),
+    ):
+        reading = _read(sentence)
+        assert reading.candidates == (), (
+            f"{label}: the paired-delimiter bypass has REOPENED — this sentence proposes "
+            f"a value again. {_explain(sentence)}"
+        )
+        assert reading.abstentions != (), (
+            f"{label}: refused, but SILENTLY. A §5 refusal that discloses nothing is the "
+            f"defect this fix existed to remove. {_explain(sentence)}"
+        )
+
+
+def test_the_pre_label_gate_IS_BYPASSED_by_a_PREAMBLE_RESIDUE():
+    r"""**PINNED WRONG-WAY-ROUND: this asserts the DEFECT, so it is visible in CI.**
+
+    *** NARROWED 2026-09-13: WAS TEN ROWS, IS NOW SEVEN. *** The three
+    paired-delimiter rows are fixed and moved to the ratchet above — narrowed, not
+    weakened, which is what this test's own instruction asked for. What remains is
+    the half that is NOT a parsing defect.
 
     Found by an independent review of this lane, then re-measured here from scratch.
     Gate (4) closes the 23 named fabrications in their DIRECT form and does not close
@@ -701,11 +737,17 @@ def test_the_pre_label_gate_IS_BYPASSED_by_a_preamble_or_a_bracket_RESIDUE():
        three ARBITRARY words. They absorb the label's determiner and its forbidden
        pre-modifier, so `_PRE_LABEL.fullmatch` succeeds over text the gate was built
        to reject. Nothing allowlisted about that tail.
-    2. `_PRE_LABEL_CLAUSE_OPEN` inherits `_CLAUSE_BOUNDARY`, which contains `)`, `"`,
-       `'`, `:`, `;` and `]`. `_pre_label_text` returns only the text AFTER the last
-       boundary, so a bracketing character between the modifier and the label cuts
-       the modifier out of the string the gate inspects. `The (setpoint) temperature`
-       leaves the gate a single space.
+    2. ~~`_PRE_LABEL_CLAUSE_OPEN` inherits `_CLAUSE_BOUNDARY`, which contains `)`,
+       `"`, `'`, `:`, `;` and `]` …~~ — **HALF CLOSED 2026-09-13.**
+       `_unwrap_parentheticals` now strips a closing delimiter that has a matching
+       OPENER before it, keeping the words it wrapped, so `The (setpoint)
+       temperature` reaches the gate as `The (setpoint ` and is refused. The
+       delimiters are removed and their CONTENTS KEPT deliberately: deleting the
+       aside would turn the sentence into `The temperature`, which the gate
+       legitimately accepts — closing the hole by making the fabrication invisible.
+       **What survives of mechanism 2 is `:` and `;`**, which are genuine clause
+       punctuation rather than paired, so treating them otherwise is a judgement
+       about English and not a parsing fix.
 
     **IT IS PRE-EXISTING, NOT A REGRESSION, and that is measured rather than
     asserted.** At this lane's base commit `d3473414`, before gate (4) existed, the
@@ -731,12 +773,9 @@ def test_the_pre_label_gate_IS_BYPASSED_by_a_preamble_or_a_bracket_RESIDUE():
         ("prepositional preamble", "In our lab the setpoint temperature was 425 K."),
         ("preamble, other words", "During the run the maximum temperature was 425 K."),
         ("numeric-object preamble", "At 300 K the ambient temperature was 425 K."),
-        ("parenthesis", "The (setpoint) temperature was 425 K."),
-        ("double quotes", 'The "setpoint" temperature was 425 K.'),
         ("colon", "The setpoint: temperature was 425 K."),
         ("semicolon", "The setpoint; temperature was 425 K."),
         ("instant family, preamble", f"In the lab their scan ended at {INSTANT}."),
-        ("instant family, bracket", f"The previous (scan) ended at {INSTANT}."),
         # the fail-closed property, falsified: a word in NO list in the module
         ("invented word + preamble", "In our lab the zorblatt temperature was 425 K."),
     )
