@@ -348,28 +348,56 @@ function WorkflowStrip({
   steps: ApiImportWorkflowStep[];
   furthest: string | null;
 }) {
+  /*
+   * THE DISCLOSURE SITS BELOW THE ROW, NOT INSIDE IT, and that is the whole
+   * shape of this strip.
+   *
+   * It used to be a `<span>` inside the unbuilt `<li>`. Measured in Chrome at
+   * 1280: five siblings were 27px tall and 56-91px wide, and that one was
+   * 73.6px x 352px -- 2.7x the height and 4x the width of its neighbours, in a
+   * `flex-wrap` row with a 4px gap. It read exactly as the owner described the
+   * screen: "everything is just put in here with no thought behind it".
+   *
+   * The previous slice found the same thing, tried `flex-basis: 100%` to push
+   * it onto its own line, measured that INERT (flex line-breaking uses the
+   * hypothetical main size, which the 22rem cap kept small enough to fit beside
+   * `Review`), and recorded it as out of its own scope. The mechanism it named
+   * but did not take is this one: a step is a LABEL and belongs in the row; a
+   * sentence about a step is PROSE and belongs under it. So all six are uniform
+   * pills again, the unbuilt one says so by being dashed and muted, and the
+   * sentence is associated with it by `aria-describedby` rather than by
+   * adjacency -- which is a stronger association than the inline span had, not
+   * a weaker one, because it survives the row wrapping.
+   */
+  const unbuilt = steps.filter((step) => !step.built && step.disclosure !== null);
   return (
-    <ol className="hi-steps" aria-label="Historical import workflow">
-      {steps.map((step) => {
-        const reached = furthest !== null && step.id === furthest;
-        return (
-          <li
-            key={step.id}
-            className={`hi-step${reached ? ' reached' : ''}${step.built ? '' : ' unbuilt'}`}
-            aria-current={reached ? 'step' : undefined}
-          >
-            <span className="hi-step-label">{step.label}</span>
-            {/* THE UNBUILT STEP SAYS SO, in the server's own words, and offers no
-                control — not a disabled one. A disabled button implies the act
-                exists and is temporarily unavailable, which would be the claim
-                §15 forbids. */}
-            {!step.built && step.disclosure !== null && (
-              <span className="hi-step-note">{step.disclosure}</span>
-            )}
-          </li>
-        );
-      })}
-    </ol>
+    <>
+      <ol className="hi-steps" aria-label="Historical import workflow">
+        {steps.map((step) => {
+          const reached = furthest !== null && step.id === furthest;
+          return (
+            <li
+              key={step.id}
+              className={`hi-step${reached ? ' reached' : ''}${step.built ? '' : ' unbuilt'}`}
+              aria-current={reached ? 'step' : undefined}
+              aria-describedby={
+                !step.built && step.disclosure !== null ? `hi-step-note-${step.id}` : undefined
+              }
+            >
+              {/* THE UNBUILT STEP OFFERS NO CONTROL -- not a disabled one. A
+                  disabled button implies the act exists and is temporarily
+                  unavailable, which is the claim section 15 forbids. */}
+              <span className="hi-step-label">{step.label}</span>
+            </li>
+          );
+        })}
+      </ol>
+      {unbuilt.map((step) => (
+        <p className="hi-steps-disclosure" id={`hi-step-note-${step.id}`} key={step.id}>
+          <span className="hi-steps-disclosure-subject">{step.label}:</span> {step.disclosure}
+        </p>
+      ))}
+    </>
   );
 }
 

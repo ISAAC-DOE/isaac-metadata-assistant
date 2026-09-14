@@ -282,10 +282,12 @@
   background: var(--surface-subtle);
   font-size: var(--font-size-meta);
   color: var(--text-secondary);
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2xs);
-  max-width: 22rem;
+  /* One line, centred. This was `flex-direction: column` with a gap and a
+   * `max-width: 22rem` when a chip could also hold the unbuilt step's sentence;
+   * the sentence is now prose below the row, so a chip holds a label and only a
+   * label, and the column axis and the cap have no remaining reader. */
+  display: inline-flex;
+  align-items: center;
 }
 
 .hi-step.reached {
@@ -306,44 +308,43 @@
   background: var(--surface);
   color: var(--text-muted);
   /*
-   * AND THIS ONE IS NOT A PILL, because it is not a one-word chip. It holds the
-   * sentence above, so `--radius-pill`'s 999px curved in from both ends across
-   * three lines of text and pinched the sentence it exists to make readable.
-   * `--radius-inner` is the radius this app already uses for a box with prose in
-   * it, so the shape now says what the thing is: the five stages you pass through
-   * are pills, and the note about a stage that does not exist is a small card.
+   * IT IS A PILL AGAIN, and the reasoning that made it a card is kept because
+   * it was right about its own premise. That note read: "this one is NOT a
+   * pill, because it is not a one-word chip. It holds the sentence above, so
+   * `--radius-pill`'s 999px curved in from both ends across three lines of text
+   * and pinched the sentence it exists to make readable."
+   *
+   * True -- while the sentence lived inside the chip. It no longer does (see
+   * `WorkflowStrip`): the sentence is prose below the row, so this element is
+   * once more a one-word chip and takes the row's shape. The row is six uniform
+   * pills; "not built" is carried by the dashed border and the muted text, not
+   * by being four times wider than its neighbours.
    */
-  border-radius: var(--radius-inner);
 }
 
 /*
- * ── ONE THING THIS REDESIGN DID NOT CHANGE, AND THE MEASUREMENT THAT SAYS WHY ─
- *
- * The strip is 74px tall at 1280px because the `.unbuilt` note is 74px and the
- * five stage pills are 27px, so there is ~47px of empty white beneath the pills.
- * I tried the obvious repair — `flex-basis: 100%` on `.hi-step.unbuilt`, to push
- * the note onto its own line in this `flex-wrap: wrap` row — and it is **inert**:
- * flex line-breaking uses the hypothetical main size, which `max-width: 22rem`
- * clamps to 352px, so the item still fits beside `Review` and nothing moves.
- * Measured at 1280: the note stayed at `x: 681, y: 390`, on the pills' own line,
- * with and without the declaration.
- *
- * It is left as it is rather than forced, because the mechanisms that WOULD work
- * (dropping the 22rem cap so the note spans the card, or re-ordering the list)
- * change the shape the previous slice deliberately chose for this element, and
- * that shape is out of this slice's scope. Recorded as an observation, not as a
- * fix, so the next reader does not re-try the inert one.
+ * The disclosure for a step this build does not have. Prose, in the server's
+ * own words, capped to a readable measure and tied to its chip by
+ * `aria-describedby`.
  */
+.hi-steps-disclosure {
+  max-width: var(--hi-prose);
+  margin: 0 0 var(--space-sm);
+  font-size: var(--font-size-meta);
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+.hi-steps-disclosure-subject {
+  font-weight: var(--font-weight-medium);
+  color: var(--text-secondary);
+}
 
 .hi-step-label {
   font-weight: var(--font-weight-medium);
 }
 
-.hi-step-note {
-  font-size: var(--font-size-meta);
-  color: var(--text-muted);
-  line-height: var(--line-height-snug);
-}
+/* `.hi-step-note` was removed with the inline sentence it styled. Its successor
+ * is `.hi-steps-disclosure` above. */
 
 /* --- the list -------------------------------------------------------------- */
 
