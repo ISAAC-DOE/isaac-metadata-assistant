@@ -3645,6 +3645,35 @@ further reading until a new rule appears in it, and a future session can check t
 
 ---
 
+## *** NODES vs SITES — my own QA-023 figures conflated them, corrected here ***
+
+Re-derived at the end of the session, because two of the numbers I published are the kind this
+ledger exists to keep honest.
+
+| figure | what it actually counts | value |
+|---|---|---|
+| axe-measured nodes | `aria-prohibited-attr` nodes on the 28 scanned surfaces, before the fix | **86** |
+| fixed SITES | `role="group"` attributes added to production `.tsx` | **10, in 7 files** |
+
+**Where "88" came from and why it was loose.** 86 was measured by axe. The source scan then found
+`ConflictResolutionPanel`'s two, which the probe could not reach, and I wrote **88** — adding two
+SITES to a count of NODES. They are not the same unit: one `.prov-pair` site accounted for 34 of
+the 86 nodes, because the component renders many times. `FetchStates`' `<pre>` was then described
+as "a ninth", which counted sites again, in a sentence whose other figures were nodes.
+
+**The honest statement of the outcome:** axe reported **86 → 0** across the scanned surfaces; the
+source scan and the tag-widening found **3 further sites** the probe structurally could not reach
+(2 in a conflict panel that renders only on a competing decision, 1 in a backend-down diagnostics
+branch); **10 attributes** were added in total.
+
+**And the method failed the same way twice while checking this.** Counting `role="group"` over
+`git diff` returned **16** — because my own explanatory comments *mention* the attribute in prose,
+and a text search counts what it matches rather than what is meant. Stripping block, JSX and line
+comments first gives **10**. That is the `tr`-on-binary and `ugrep`-complexity shape a third time
+in one session: *the tool answered confidently and wrong, and only a second method disagreed.*
+
+---
+
 ## CONTINUATION PROTOCOL
 
 Every future session starts here, in this order:
