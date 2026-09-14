@@ -27,9 +27,25 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, waitFor } from '@testing-library/react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { AssistantDrawer } from '../components/AssistantDrawer';
+import { AssistantPanel } from '../components/AssistantPanel';
+import { clearAllSessions } from '../lib/assistantSession';
+import type { AssistantMessage } from '../lib/types';
+
+/**
+ * `reply` is a REQUIRED prop of `AssistantPanel`, so the UX-022 cases below
+ * that render the real panel have to supply one. A properly typed constant
+ * rather than an inline literal or a cast: the empty-text resting message is
+ * exactly what `assistant-workspace-context.test.tsx` uses for the same
+ * purpose, so the two harnesses cannot drift, and `AssistantMessage` is
+ * checked by `tsc` rather than asserted away.
+ *
+ * `vitest` type-checks nothing, which is how the first version of this
+ * harness ran green here while failing CI's separate Build step.
+ */
+const RESTING_REPLY: AssistantMessage = { text: '', answeredFrom: 'workflow' };
 
 const STORAGE_KEY = 'isaac.assistant-rail-collapsed';
 
@@ -437,5 +453,138 @@ describe('PR-E · AssistantDrawer desktop rail collapse', () => {
     // and cannot assert the CSS itself (no layout engine here), only that the
     // DOM was never removed.
     expect(container.querySelector('.assistant-drawer-content .assistant')).not.toBeNull();
+  });
+});
+
+/* ══════════════════════════════════════════════════════════════════════════
+ * UX-022 — THE TOGGLE RENDERS INSIDE THE PANEL'S OWN HEADER WHEN EXPANDED
+ *
+ * Every case above renders a child that publishes no header slot, so every
+ * case above exercises the INLINE arm — which is the arm the collapsed rail
+ * needs and which must never change. This block exercises the other arm, with
+ * the REAL `AssistantPanel` rather than a stand-in, because the whole point is
+ * that two files agree about one contract: `AssistantPanel` publishes a slot
+ * through `AssistantRailToggleSlotContext` and `AssistantDrawer` portals its
+ * one button into it.
+ *
+ * WHAT THIS EXISTS TO CATCH. The owner reported the assistant's header as
+ * cluttered; measured in real Chromium at 1280x800 on the 308px record rail,
+ * `button.assistant-rail-toggle` was a 24.3px strip at y=93 sitting OUTSIDE
+ * `section.assistant` (y=123.3), so the panel's own title was not the panel's
+ * first element. The naive repair — render the button inside the header —
+ * breaks the feature outright, because the header lives inside
+ * `.assistant-drawer-content`, which `assistant-drawer.css` hides with
+ * `display: none` in the desktop-collapsed band. That is the DEFAULT state, so
+ * a rail collapsed on first load would have no visible control in it and could
+ * never be re-opened. Hence: ONE button, two positions, asserted here in both.
+ *
+ * FOCUS IS ASSERTED HERE AND NOT IN A BROWSER, DELIBERATELY. The collapse
+ * moves the button between the portal and the inline position, which React
+ * commits as an unmount + mount, so focus needs re-asserting. It could not be
+ * measured in the Chromium this change was otherwise measured in: a
+ * browser-automation tab reports `document.hasFocus() === false` and
+ * `visibilityState: "hidden"`, and `document.activeElement` reads `<body>`
+ * there even on the pre-existing EXPAND path, which is unchanged code. A
+ * non-answer is not a measurement; jsdom can answer it, so jsdom does.
+ * ══════════════════════════════════════════════════════════════════════════ */
+describe('UX-022 · the collapse toggle is a header item when the rail is open', () => {
+  afterEach(() => {
+    cleanup();
+    clearAllSessions();
+  });
+
+  const drawerWithRealPanel = () =>
+    render(
+      <AssistantDrawer railClassName="record-right narrow">
+        <AssistantPanel
+          reply={RESTING_REPLY}
+          prompts={[]}
+          experimentId="ux022"
+          workspaceContext="Record Fields"
+        />
+      </AssistantDrawer>,
+    );
+
+  it('COLLAPSED (the default): exactly one toggle, and it is NOT inside the panel', () => {
+    const { container } = drawerWithRealPanel();
+    expect(container.querySelectorAll('button.assistant-rail-toggle').length).toBe(1);
+    const toggle = getToggle(container);
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    expect(toggle.closest('.assistant-head')).toBeNull();
+    // it is a child of the <aside>, i.e. OUTSIDE the content the collapsed band
+    // hides — which is the only reason a collapsed rail can be re-opened at all
+    expect(toggle.closest('.assistant-drawer-content')).toBeNull();
+    expect(toggle.parentElement).toBe(container.querySelector('aside.assistant-drawer-panel'));
+  });
+
+  it('EXPANDED: still exactly one toggle, now the header\'s own item, with its contract intact', () => {
+    const { container } = drawerWithRealPanel();
+    fireEvent.click(getToggle(container));
+
+    // ONE. A second copy would break `e2e/helpers/assistant.ts`, which selects
+    // `button.assistant-rail-toggle` and reads its `aria-expanded`.
+    expect(container.querySelectorAll('button.assistant-rail-toggle').length).toBe(1);
+    const toggle = getToggle(container);
+    const head = container.querySelector('.assistant-head') as HTMLElement;
+    const slot = head.querySelector('.assistant-head-toggle') as HTMLElement;
+
+    expect(toggle.closest('.assistant-head')).toBe(head);
+    expect(toggle.parentElement).toBe(slot);
+    // …and the panel's own name is now the panel's first element
+    const section = container.querySelector('section.assistant') as HTMLElement;
+    expect(section.firstElementChild).toBe(head);
+    expect(head.querySelector('.assistant-label')!.textContent).toBe('Assistant');
+
+    // THE CONTRACT SEVERAL SPECS DEPEND ON, unchanged by the move.
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');
+    expect(toggle.getAttribute('aria-controls')).toBe(
+      container.querySelector('.assistant-drawer-content')!.id,
+    );
+    expect(toggleLabel(container)).toBe('Collapse Assistant');
+    expect(toggle.getAttribute('aria-label')).toBeNull(); // visible text IS the name
+    expect(toggle).not.toBeDisabled();
+  });
+
+  it('a full round trip keeps ONE toggle and returns focus to it — the portal remount does not drop focus', async () => {
+    const { container } = drawerWithRealPanel();
+
+    getToggle(container).focus();
+    fireEvent.click(getToggle(container)); // expand
+    await waitFor(() => {
+      expect(document.activeElement?.className).toContain('assistant-label');
+    });
+    expect(container.querySelectorAll('button.assistant-rail-toggle').length).toBe(1);
+    expect(getToggle(container).closest('.assistant-head')).not.toBeNull();
+
+    getToggle(container).focus();
+    fireEvent.click(getToggle(container)); // collapse — the button MOVES here
+    expect(container.querySelectorAll('button.assistant-rail-toggle').length).toBe(1);
+    expect(getToggle(container).closest('.assistant-head')).toBeNull();
+    expect(toggleLabel(container)).toBe('Expand Assistant');
+    /*
+     * MUTATION-GUARDED. Without the `else` arm added to `handleRailToggle` this
+     * assertion fails with `document.activeElement` on <body>: the node that
+     * had focus was unmounted by the position change. Verified by removing that
+     * arm and re-running.
+     */
+    await waitFor(() => {
+      expect(document.activeElement).toBe(getToggle(container));
+    });
+  });
+
+  it('collapsing/expanding still never unmounts the panel: a typed composer value survives the round trip', () => {
+    const { container, getByLabelText } = drawerWithRealPanel();
+    fireEvent.click(getToggle(container)); // expand
+
+    const box = getByLabelText('Ask the assistant a question') as HTMLInputElement;
+    fireEvent.change(box, { target: { value: 'half-typed question' } });
+
+    fireEvent.click(getToggle(container)); // collapse
+    fireEvent.click(getToggle(container)); // expand again
+    expect(
+      (getByLabelText('Ask the assistant a question') as HTMLInputElement).value,
+    ).toBe('half-typed question');
+    // and the SAME panel node survived — an unmount+remount would be a new node
+    expect(container.querySelector('section.assistant')).not.toBeNull();
   });
 });

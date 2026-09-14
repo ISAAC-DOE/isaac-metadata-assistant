@@ -168,18 +168,39 @@ describe('P36R S2 empty state', () => {
     expect(dialog.querySelector('.assistant-agent-prompts')).not.toBeNull();
   });
 
-  it('at rest the order is guidance → log → composer, with no divider and no control block', () => {
+  it('at rest the guidance is INSIDE the log, and the log precedes the composer', () => {
     /*
      * ~~the prompt controls precede the (chrome-less) log at rest~~ — there are
      * no prompt controls in the rail to precede anything, and the divider that
      * separated them from the composer went with them: it existed to mark a
      * break that no longer exists.
+     *
+     * ~~`expect(guidance.compareDocumentPosition(log) & FOLLOWING)`~~ —
+     * REWRITTEN by UX-022, and it is a containment claim now rather than an
+     * ordering one, because the guidance MOVED INSIDE the log.
+     *
+     * The old assertion described the defect it was protecting. With the
+     * guidance a SIBLING above `.assistant-log`, the conversation region did not
+     * begin until 145.5px of chrome had been spent (measured in real Chromium at
+     * 1280x800 on the 308px record rail: panel top y=77, log y=222.5) — and the
+     * region a reader opens the rail to read started BELOW the only sentence
+     * that was in it, at 35.3px against the dock's 224.6px. "Nothing asked yet."
+     * is this region's empty state, so it is this region's content.
+     *
+     * What still matters, and is asserted: the guidance is reachable and reads
+     * before the composer, and nothing sits between the transcript and the
+     * composer.
      */
     const { container } = panel();
     const guidance = container.querySelector('.assistant-empty-note')!;
     const log = container.querySelector('.assistant-log')!;
     const composer = container.querySelector('.assistant-composer')!;
-    expect(guidance.compareDocumentPosition(log) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(log.contains(guidance)).toBe(true);
+    // …and it is the log's own content, not nested in some other region inside it
+    expect(guidance.closest('.assistant-log')).toBe(log);
+    expect(
+      guidance.compareDocumentPosition(composer) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
     expect(log.compareDocumentPosition(composer) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(container.querySelector('.assistant-empty-divider')).toBeNull();
     expect(container.querySelector('.assistant-prompts')).toBeNull();
@@ -514,7 +535,34 @@ describe('P36R S2 assistant.css structural contract', () => {
     expect(rail).not.toMatch(/flex:\s*1\b/);
     // capped to the viewport so the composer + caption stay inside the fold
     expect(rail).toMatch(/max-height:\s*calc\(100vh\s*-\s*\d+px\)/);
-    expect(rail).toMatch(/min-height:\s*0/);
+    /*
+     * ~~`expect(rail).toMatch(/min-height:\s*0/)`~~ — UX-022 replaced the floor
+     * of 0 with a CLAMPED floor, and the clamp is the whole reason this
+     * assertion could be changed without weakening the contract it guards.
+     *
+     * `min-height: 0` was what made the conversation the SMALLEST thing in the
+     * conversation panel: `flex: 0 0 auto` + a zero floor means content-sized,
+     * and the content is three standing honesty claims §5 forbids shortening.
+     * Measured at 1280x800 on the 308px record rail: 341.9px of panel, of which
+     * the dock took 224.6px (65.7%) and the body 35.3px (10.3%).
+     *
+     * The property THIS test exists for is "never stretches to the 1407px rail
+     * height", and a `min()` floor cannot: `min-height` beats `max-height` in the
+     * cascade, so the floor is asserted to be clamped BY the viewport cap rather
+     * than trusted to be small. That is a stronger statement than `0` — it is
+     * checked against the same expression the cap uses, so the two can never
+     * drift apart.
+     */
+    const floor = /min-height:\s*min\(\s*(\d+)px\s*,\s*calc\(100vh\s*-\s*(\d+)px\)\s*\)/.exec(
+      rail,
+    );
+    expect(floor, 'the floor must be clamped by the viewport, not absolute').not.toBeNull();
+    const cap = /max-height:\s*calc\(100vh\s*-\s*(\d+)px\)/.exec(rail)!;
+    // the clamp's second arm IS the cap, so the floor can never exceed it
+    expect(floor![2]).toBe(cap[1]);
+    // and the absolute arm is a rail height, not a page height
+    expect(Number(floor![1])).toBeGreaterThan(0);
+    expect(Number(floor![1])).toBeLessThanOrEqual(700);
   });
 
   /*

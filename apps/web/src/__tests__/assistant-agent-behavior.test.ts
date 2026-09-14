@@ -24,7 +24,7 @@ const CTX: AgentContext = {
   workflow: {
     current_step: 'complete_metadata',
     ordered_steps: [
-      { id: 'load_record', label: 'Load Record', state: 'completed', current: false, reopened: false, blocked: false, reason: null },
+      { id: 'load_record', label: 'Record Created', state: 'completed', current: false, reopened: false, blocked: false, reason: null },
       { id: 'complete_metadata', label: 'Complete Metadata', state: 'current', current: true, reopened: false, blocked: false, reason: null },
       { id: 'review_evidence', label: 'Review Evidence', state: 'reopened', current: false, reopened: true, blocked: false, reason: 'An upstream change reopened this step.' },
       { id: 'export', label: 'Export', state: 'completed', current: false, reopened: false, blocked: false, reason: null },
@@ -66,13 +66,13 @@ describe('P29.3 agent — added behavior', () => {
 
   it('a completed step label is never named as the next missing field', () => {
     const r = runIntent('identify_next_missing_field', CTX);
-    for (const completed of ['Load Record', 'Export']) {
+    for (const completed of ['Record Created', 'Export']) {
       expect(r.text).not.toContain(completed);
     }
     // When nothing is pending, it says none — never invents a completed step.
     const empty = runIntent('identify_next_missing_field', { ...CTX, pending: [] });
     expect(empty.text.toLowerCase()).toContain('no pending');
-    expect(empty.text).not.toContain('Load Record');
+    expect(empty.text).not.toContain('Record Created');
   });
 
   it('review_field_evidence reads ONLY ctx.evidence, never Project Memory', () => {

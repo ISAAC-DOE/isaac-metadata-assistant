@@ -57,43 +57,117 @@
    * bottom breathing room; it is viewport-relative, so it scales with zoom. */
   flex: 0 0 auto;
   max-height: calc(100vh - 110px);
-  min-height: 0;
+  /* UX-022 — A FLOOR, BECAUSE `flex: 0 0 auto` MADE THE CHAT THE SMALLEST THING
+   * IN THE CHAT PANEL. Measured before this (real Chromium, 1280x800, the 308px
+   * record rail, no conversation): the panel was content-sized at 341.9px, of
+   * which `.assistant-foot` took 224.6px (65.7%) and `.assistant-body` — the
+   * conversation — 35.3px (10.3%). The dock is that tall because it carries
+   * three standing honesty claims that §5 forbids shortening, so the ONLY way
+   * the transcript can be the largest region is to give the panel a floor and
+   * let the body absorb it.
+   *
+   * `min()` and not a bare 600px: `min-height` beats `max-height` in the CSS
+   * cascade, so a bare floor would break the viewport cap the paragraph above
+   * exists to keep — on a short viewport the panel would grow past the fold and
+   * take the composer with it. Clamped to the cap, the floor is inert at every
+   * viewport shorter than ~710px, which is why no Playwright project's geometry
+   * moves: 320x568, 160x284 (zoom-200) and 1280x560 all resolve to
+   * `calc(100vh - 110px)`, exactly as before. */
+  min-height: min(600px, calc(100vh - 110px));
 }
-/* P36V.1 S2 — the header is ONE BALANCED ROW plus an optional action row.
+/* UX-022 — THE HEADER IS THE HEADER. All of it, and only it.
  *
- * Row 1 (`.assistant-head-titles`, stretched across the header):
- *   LEFT  — the chat icon + the "Assistant" title
- *   RIGHT — the availability status (dot + "Memory Available")
- * Row 2 (`.assistant-head-right`, only when there IS a conversation):
- *   a compact right-aligned action row holding Clear Conversation.
+ * Row 1  — the chat icon, the "Assistant" title, and (portaled in by
+ *          `AssistantDrawer` through `.assistant-head-toggle`) the
+ *          Collapse/Expand control as the right-hand item.
+ * Row 2  — `.assistant-head-meta`: the scope sentence ("You are on Record
+ *          Fields.") and the memory-availability status. `:empty` collapses it.
+ * Row 3  — `.assistant-head-right`: Clear Conversation, only when there IS a
+ *          conversation. `:empty` collapses it.
  *
- * It used to be a stacked block: the status sat on a SECOND line directly under
- * the title while Clear Conversation took the whole right side of the header.
- * That read as three competing levels in a 308px rail. `align-items: center`
- * now aligns the icon, the title and the status on one optical baseline.
+ * WHAT THIS REPLACED, measured in real Chromium at 1280x800 on the 308px record
+ * rail: between the panel's top edge (y=77) and `.assistant-log` (y=222.5) sat
+ * THIRTEEN elements across 145.5px — a 24.3px "Collapse Assistant" strip
+ * OUTSIDE `section.assistant` (so the panel's own title was not its first
+ * element), then this header, then a full-width scope paragraph with its own
+ * 12px margin, then the empty-state note. Nine stacked strips with seven
+ * different gaps: 14, 70, 12, 8, 6, 8, 10px.
  *
- * The row gap is deliberately smaller than the column gap: the action row is a
- * subordinate second line, not a peer of the title. */
+ * TWO GAP VALUES NOW, and only two, everywhere in this panel: 8px WITHIN a
+ * group (header rows, the items on a row, message spacing, composer↔send) and
+ * 12px BETWEEN groups (header↔body, body↔dock, dock↔note). Both are rungs of
+ * `design-handoff/05-design-system/spacing-layout.md`'s scale
+ * (4·6·8·10·12·14·16·18·20·22·24·26·30) and of `styles/tokens.css`'s
+ * `--space-sm`/`--space-md`. The three gaps below stay px literals rather than
+ * `var()` because `assistant-shell-layout.test.tsx` asserts that the header's
+ * column gap, the title row's gap and the status group's internal gap are the
+ * SAME number, and it reads them out of this file.
+ *
+ * `align-items: center` aligns the icon, the title and the toggle on one
+ * optical baseline. */
 .assistant-head {
   flex: none;
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 6px 9px;
-  margin-bottom: 14px;
+  gap: 8px;
+  margin-bottom: 12px;
   min-width: 0;
 }
-/* The header ROW's content: the title on the left, the status pushed to the
- * right edge by its own `margin-left: auto`. `flex-wrap: nowrap` by default so
- * the two groups never wrap accidentally at ordinary desktop width — the ONLY
- * way they stack is the intentional narrow-viewport rule at the end of this
- * block. */
+/* UX-022 — the portal target for `.assistant-rail-toggle`. `display: contents`
+ * so this span contributes NO box: the button itself becomes the flex item of
+ * the header row, which means it takes the header's own 8px gap, and when the
+ * button is CSS-hidden (every viewport ≤1024px) or absent (a mount with no
+ * drawer) the row has no extra item and no extra gap — an empty wrapper would
+ * have left a stray 8px in both cases. */
+.assistant-head-toggle {
+  display: contents;
+}
+/* UX-022 — the toggle as a header item rather than a strip above the panel.
+ * `assistant-drawer.css`'s desktop rule gives the expanded toggle
+ * `align-self: flex-end; margin-bottom: 6px`, which was right when it was the
+ * last thing before the panel and is wrong inside a centred row: it bottom-
+ * aligned the control and added 6px to the row's height. Overridden here, at
+ * 0-4-0 against that rule's 0-3-0, so the outcome does not depend on stylesheet
+ * import order — and here rather than there because that file is a slice of
+ * work this change is not authorized to touch. */
+.assistant-drawer-panel[data-collapsed='false'] .assistant-head .assistant-rail-toggle {
+  align-self: center;
+  margin-bottom: 0;
+}
+/* UX-022 — the header's META row: the scope sentence and the availability
+ * status, sharing ONE subordinate line under the title.
+ *
+ * MEASURED, and this is why the status moved down a line while the toggle moved
+ * up one: at the 275px of content the 308px rail offers, "You are on Record
+ * Fields." is 135px and "Memory Available" is 109px, so that pair fits a single
+ * line with 31px spare — while the title (26px icon + 8 + ~62px) plus the
+ * status (109px) plus "Collapse Assistant" (138.5px) needs ~354px and cannot.
+ * The row that fits is the row that keeps the two widest items apart.
+ *
+ * `flex-basis: 100%` puts it on its own header line (the header wraps);
+ * `:empty` collapses it, so a mount passing neither `workspaceContext` nor
+ * `availability` reserves no space and contributes no row gap. */
+.assistant-head-meta {
+  flex: 0 0 100%;
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+}
+.assistant-head-meta:empty { display: none; }
+/* The TITLE group of row 1: the "Assistant" label. `flex: 1 1 auto` is what
+ * pushes the portaled Collapse control to the row's right edge without an auto
+ * margin on the control itself. `flex-wrap: nowrap` so the title never wraps
+ * mid-row at ordinary desktop width — the ONLY way this row stacks is the
+ * intentional narrow-viewport rule at the end of this block. */
 .assistant-head-titles {
   display: flex;
   flex-direction: row;
   align-items: center;
   flex-wrap: nowrap;
-  gap: 9px;
+  gap: 8px;
   min-width: 0;
   flex: 1 1 auto;
 }
@@ -110,7 +184,7 @@
   align-items: center;
   justify-content: flex-end;
   flex-wrap: wrap;
-  gap: 4px 10px;
+  gap: 8px;
   min-width: 0;
 }
 .assistant-head-right:empty { display: none; }
@@ -130,19 +204,19 @@
   font-weight: 600;
   color: var(--assist-text);
 }
-/* The availability STATUS group (P36V.1 S2) — the RIGHT group of the header
- * row: the state dot + its Title-Case label. `margin-left: auto` pushes it to
- * the header's right edge; `flex: none` keeps it compact so the title keeps the
- * remaining width. Its internal `gap` deliberately MATCHES the header's column
- * gap (9px), i.e. the gap between the chat icon and "Assistant", so the two
- * groups read as one balanced row rather than two unrelated clusters. */
+/* The availability STATUS group — the RIGHT item of the header's META row: the
+ * state dot + its Title-Case label. `margin-left: auto` pushes it to that row's
+ * right edge, opposite the scope sentence; `flex: none` keeps it compact so the
+ * sentence keeps the remaining width. Its internal `gap` deliberately MATCHES
+ * the header's column gap (8px), i.e. the gap between the chat icon and
+ * "Assistant", so every cluster in the header reads at one rhythm. */
 .assistant-memory {
   display: inline-flex;
   align-items: center;
   align-self: center;
   margin-left: auto;
   flex: none;
-  gap: 9px;
+  gap: 8px;
   max-width: 100%;
   font-size: 11px;
   color: var(--text-slate);
@@ -151,14 +225,14 @@
 }
 .assistant-status-row .dot { flex: none; }
 /* The ONE intentional responsive fallback: at a narrow viewport (and at 200%
- * zoom, where the CSS viewport halves) the status drops to its own line under
- * the title instead of squeezing it. Nothing else may wrap this row. */
+ * zoom, where the CSS viewport halves) the header's rows are allowed to wrap
+ * internally, and the status drops under the scope sentence rather than being
+ * squeezed against it. Nothing else may wrap these rows. */
 @media (max-width: 720px) {
   .assistant-head-titles {
     flex-wrap: wrap;
-    row-gap: 3px;
   }
-  .assistant-head-titles .assistant-memory { margin-left: 0; }
+  .assistant-head-meta .assistant-memory { margin-left: 0; }
 }
 
 /* ---- Body (P36R S2 · scroll contract fixed P36V.1 S1) ---------------- */
@@ -194,9 +268,9 @@
    * scrolls (the ≤1024px slide-over drawer, and the memory rail) the dock can
    * slide over the tail of this box, so reserve a hair of space for it and keep
    * a matching scroll padding so a programmatic scroll never parks the last row
-   * flush under it. */
-  padding-bottom: 6px;
-  scroll-padding-bottom: 6px;
+   * flush under it. UX-022 put it on the 8px within-a-group rung. */
+  padding-bottom: 8px;
+  scroll-padding-bottom: 8px;
 }
 
 /* ---- Empty state (P36R S2 · shrink contract fixed P36V.1 S1) --------- */
@@ -245,14 +319,23 @@
 .assistant-log {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
   min-width: 0;
   overscroll-behavior: contain;
 }
-/* At rest the region is invisible chrome-wise: no border, no surface, no height
- * of its own — the empty live region above it already renders as nothing. */
+/* At rest the region is invisible chrome-wise: no border, no surface, no tint —
+ * but it is no longer HEIGHTLESS.
+ *
+ * UX-022: `flex: 0 0 auto` is what made the chat the smallest thing in the chat
+ * panel. With the empty-state guidance now INSIDE this element (it used to be a
+ * sibling above it), a hugging box would render a 17px line and hand every
+ * remaining pixel to the dock — measured at 35.3px of body against 224.6px of
+ * dock. `1 1 auto` lets it absorb the body exactly as `.assistant-conversation`
+ * does once there is a transcript, so the region a reader came to read is the
+ * largest region in both states. It still paints nothing: no border, no
+ * background, no padding. */
 .assistant-log--resting {
-  flex: 0 0 auto;
+  flex: 1 1 auto;
   min-height: 0;
 }
 /* The conversation region proper: ONE full four-sided border (never a colored
@@ -679,10 +762,16 @@ button.assistant-source-chip-nav:focus-visible {
  * (`<strong>`), matching the needs-you banner's own convention of bolding the
  * one thing a row is ABOUT. */
 .assistant-workspace-context {
-  margin: 0 0 12px;
+  /* UX-022 — it is a header ITEM now, not a full-width strip below the header,
+   * so it owns no margin of its own: `.assistant-head-meta`'s 8px gap and the
+   * header's 12px bottom margin place it. */
+  margin: 0;
+  flex: 1 1 auto;
+  min-width: 0;
   font-size: 12px;
   line-height: 1.5;
   color: var(--text-tertiary);
+  overflow-wrap: anywhere;
 }
 .assistant-workspace-context strong {
   color: var(--assist-text);
@@ -894,18 +983,25 @@ button.assistant-source-chip-nav:focus-visible {
   min-width: 0;
   margin-top: 8px;
 }
-/* Icon-only since 2026-09-13 (owner request: "a question mark for what can i
+/* ~~Icon-only since 2026-09-13 (owner request: "a question mark for what can i
    ask"). The accessible name is on the button, so the box only has to hold the
-   glyph.
+   glyph.~~ — RE-LABELLED by UX-022, and the original diagnosis is kept because
+   it was right about the disease: the rail "was already carrying eleven" blocks
+   of text. It was the three stacked strips of fine print and the two clipped
+   control lists that were the eleven; removing the words from the one control
+   that needed them left a 33x23 unlabelled glyph between two paragraphs, with
+   the label it wanted printed as prose directly above it. The accessible name is
+   unchanged (`aria-label`, same constant), so the visible text is now a
+   subset-match of it rather than absent — WCAG 2.5.3 read the right way round.
    NO NEW RAW LITERALS: `type-scale-and-spacing.test.ts` caps hand-authored
-   spacing values and my first version added three, pushing the axis 2400 ->
-   2402. The padding below reuses `.assistant-clear`'s `3px 8px` rung one
-   region up in this same file, and the square comes from the glyph plus that
-   padding rather than from a min-width nobody else declares. */
+   spacing values. The padding below reuses `.assistant-clear`'s `3px 8px` rung
+   one region up in this same file, and the label's gap is the panel's own
+   within-a-group 8px. */
 .assistant-capabilities-trigger {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  gap: 8px;
   padding: 3px 8px;
   border-radius: var(--radius-control);
   border: 1px solid var(--assist-border);
@@ -915,8 +1011,22 @@ button.assistant-source-chip-nav:focus-visible {
   font-weight: 600;
   cursor: pointer;
   transition: background 0.12s ease;
+  /* Never wider than the rail that holds it: without this, the shrink-to-fit
+   * inline-flex box takes its max-content width and leaves the viewport. */
+  max-width: 100%;
 }
 .assistant-capabilities-trigger > span { min-width: 0; overflow-wrap: anywhere; }
+/* The visible label. It USED to be `white-space: nowrap`, on the reasoning
+ * that a four-word control name "may shrink the row, never wrap inside it".
+ * That reasoning assumed the row can always shrink, and at a 160px layout
+ * viewport (a 320px phone at 200% zoom, which is WCAG 1.4.10 reflow's own
+ * target) it cannot. Measured there: the rail offered the control 107.8px
+ * while nowrap fixed its min-content width at 133.3px, so the button right
+ * edge landed at 169.5 in a 160px viewport and ~9.5px of a real control sat
+ * off-screen, unclickable. Wrapping is the lesser cost -- the words never
+ * leave the button, and reflow is what a zoomed reader is entitled to.
+ * Caught and pinned by e2e/specs/assistant-dock-short-viewport.spec.ts. */
+.assistant-capabilities-trigger-label { white-space: normal; text-align: center; }
 .assistant-capabilities-trigger:hover { background: var(--assist-tint); }
 .assistant-capabilities-trigger:focus-visible { outline: 2px solid var(--assist); outline-offset: 2px; }
 .assistant-capabilities-panel {
@@ -1229,7 +1339,7 @@ button.assistant-source-chip-nav:focus-visible {
   z-index: 1;
   min-width: 0;
   margin-top: 12px;
-  padding-top: 10px;
+  padding-top: 12px;
   background: var(--assist-tint);
 }
 
@@ -1543,39 +1653,76 @@ button.assistant-source-chip-nav:focus-visible {
   flex: none;
   padding: 8px 11px;
 }
-.assistant-composer-helper {
-  margin: 0;
-  font-size: 11px;
-  /* AA on the --assist-tint rail (P33 S2 review): --text-secondary = 6.86:1. */
+/* ---- The dock's ONE note (UX-022) ----------------------------------- */
+/*
+ * THREE STRIPS BECAME ONE PARAGRAPH. Measured before (real Chromium, 1280x800,
+ * the 308px record rail): `.assistant-composer-helper` 33px, then
+ * `.assistant-no-model` 33px behind a 6px gap, then `.assistant-caption` 59.5px
+ * behind a 10px margin, a 9px pad and a hair divider — 125.5px of fine print in
+ * two type registers, with an unlabelled 33x23 icon button parked between the
+ * second and the third.
+ *
+ * NOTHING WAS DELETED AND NOTHING WAS SHORTENED. All three sentences are still
+ * the exported constants, in order, in full — §5 disclosures, not decoration.
+ * They are now three `<span>`s in one `<p>`, so each keeps its own class, its
+ * own id (the first two are the composer's `aria-describedby` targets) and its
+ * own exact `textContent`, which is what the parity guard reads.
+ *
+ * 11.5px, not 11px: this is the last paragraph of the panel rather than three
+ * competing ones, and `design-handoff/05-design-system/typography.md` puts
+ * Helper/tertiary at 11.5–12px. `--text-secondary` is 6.86:1 on the
+ * `--assist-tint` rail (P33 S2 review). */
+.assistant-dock-note {
+  margin: 12px 0 0;
+  font-size: 11.5px;
   color: var(--text-secondary);
   line-height: 1.5;
   min-width: 0;
   overflow-wrap: anywhere;
 }
-/* The no-model disclosure, directly beneath the grounded-scope helper.
+/* The three claim carriers inside that note. Each stays a real element with a
+ * stable class and (for the first two) a stable id — the composer names them in
+ * `aria-describedby`, and the parity guard reads each one's own `textContent` —
+ * but none of them paints chrome of its own any more. They inherit the note's
+ * size, colour and line-height, which is what makes the three sentences read as
+ * one note instead of three strips.
  *
- * It reads as a SECOND note in the same block rather than as a new region: a
- * 6px gap, no divider, and the same 11px/1.5 as the helper above it. The two
- * belong together — one says what the assistant can answer, the other says
- * where the question goes — and separating them with a rule would have made
- * three visually independent pieces of fine print stacked above the caption,
- * which is how a standing claim stops being read.
+ * Declared SEPARATELY rather than as one grouped selector: several CSS-source
+ * tests read `ruleBody(assistantCss, '.assistant-caption')` and a grouped rule
+ * makes which body they get depend on selector order. */
+.assistant-composer-helper {
+  margin: 0;
+  /* AA on the --assist-tint rail (P33 S2 review): --text-secondary = 6.86:1. */
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+/* The no-model disclosure, immediately after the grounded-scope helper in the
+ * same note.
  *
- * NOT `font-style: italic`. `.assistant-caption` below owns the italic advisory
- * register; this is a checkable fact about the build, and the two registers must
- * stay distinguishable.
+ * ~~It reads as a SECOND note in the same block rather than as a new region: a
+ * 6px gap, no divider…~~ — UX-022 took the argument one step further than the
+ * sentence it replaces did: the two "belong together" because one says what the
+ * assistant can answer and the other says where the question goes, and a 6px
+ * gap between two `<p>`s is still two blocks. They are now two sentences of one
+ * paragraph, which is what the reasoning was reaching for.
+ *
+ * ~~NOT `font-style: italic`. `.assistant-caption` below owns the italic
+ * advisory register; this is a checkable fact about the build, and the two
+ * registers must stay distinguishable.~~ — WITHDRAWN, because the italic went:
+ * see `.assistant-caption` below for the full reasoning. The distinction this
+ * sentence protected is now carried by sentence order rather than by a second
+ * font style in a 275px column.
  *
  * COLOUR IS `--text-secondary`, the same token `.assistant-composer-helper`
  * carries and for the same measured reason: 6.86:1 on the --assist-tint rail
  * (P33 S2 review). The tertiary token would have been the closer match to this
- * text's visual weight and does not clear AA at 11px here, so weight is carried
- * by size and position instead of by contrast. */
+ * text's visual weight and does not clear AA here, so weight is carried by
+ * position instead of by contrast. The size now comes from
+ * `.assistant-dock-note` (11.5px), which is the paragraph this sentence is part
+ * of — not from a per-sentence declaration. */
 .assistant-no-model {
-  margin: 6px 0 0;
-  font-size: 11px;
+  margin: 0;
   color: var(--text-secondary);
-  line-height: 1.5;
-  min-width: 0;
   overflow-wrap: anywhere;
 }
 .assistant-composer-notice {
@@ -1588,18 +1735,26 @@ button.assistant-source-chip-nav:focus-visible {
   border: 1px solid var(--assist-border);
   border-radius: var(--radius-inner);
 }
-/* The single advisory footer. Subordinate treatment: a subtle hair divider
- * above, 11px, secondary colour — plus (P36V S-A) ITALIC, so it is legibly a
- * standing disclaimer rather than another line of panel copy. */
+/* The advisory caption — still the last words in the panel, now the last
+ * sentence of the note above rather than a fourth strip below it.
+ *
+ * ~~a subtle hair divider above, 11px, secondary colour — plus (P36V S-A)
+ * ITALIC, so it is legibly a standing disclaimer rather than another line of
+ * panel copy.~~ WITHDRAWN by UX-022, and the reasoning is kept because it was
+ * sound for the layout it described. The italic register existed to mark this
+ * sentence as a disclaimer DISTINCT from the two factual claims stacked above
+ * it; merged into one note there is nothing left to distinguish it from, the
+ * distinction is carried by sentence order, and a second font style in a 275px
+ * column is the `overused-font` finding the in-browser detector reported on
+ * this dock. The divider went with it: a hairline between two halves of one
+ * paragraph is a rule drawn through a sentence.
+ *
+ * THE COPY IS UNTOUCHED. `SUBORDINATE_CAPTION` still asserts, verbatim, that
+ * the Assistant is advisory, that it NEVER VALIDATES, and that deterministic
+ * validation remains authoritative. Style changed; the claim did not. */
 .assistant-caption {
-  margin-top: 10px;
-  padding-top: 9px;
-  border-top: 1px solid var(--border-hair);
-  font-size: 11px;
-  font-style: italic;
-  /* AA on the --assist-tint rail (P33 S2 review): --text-secondary = 6.86:1. */
+  margin: 0;
   color: var(--text-secondary);
-  line-height: 1.5;
   overflow-wrap: anywhere;
 }
 

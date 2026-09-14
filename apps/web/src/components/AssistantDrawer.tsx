@@ -1,7 +1,43 @@
 import './assistant-drawer.css';
-import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
+import { createContext, useEffect, useId, useRef, useState, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import { ChevronLeft, ChevronRight, MessageSquare, X } from './icons';
 import { LABELS } from '../lib/labels';
+
+/*
+ * UX-022 — WHERE THE COLLAPSE TOGGLE RENDERS, AND WHY IT IS A PORTAL RATHER
+ * THAN A MOVED `<button>`.
+ *
+ * MEASURED BEFORE (real Chromium, 1280x800, /record/<id>?view=fields, rail
+ * expanded): the toggle was a 24.3px strip at y=93 sitting ABOVE
+ * `section.assistant` (y=123.3), so the panel's own title was not the panel's
+ * first element and the header read as three stacked layers. The owner's words
+ * were "the top part of the assitant UI looks cluttered and things were just
+ * put there".
+ *
+ * THE OBVIOUS FIX DOES NOT WORK. Simply rendering this button inside
+ * `AssistantPanel`'s `.assistant-head` puts it inside
+ * `.assistant-drawer-content`, and that wrapper is `display: none` in the
+ * desktop-collapsed band (assistant-drawer.css, the one rule that hides the
+ * panel). The collapsed rail would then be a 44px strip with no visible
+ * control in it — the state this component is `collapsed` in BY DEFAULT, so
+ * the rail would become unrecoverable on first load.
+ *
+ * So the button is rendered by THIS component in both states and only its
+ * POSITION moves: expanded, it is portaled into the slot `AssistantPanel`
+ * publishes through this context (inside `.assistant-head`, beside the
+ * "Assistant" title); collapsed, it renders inline as the slim strip exactly
+ * as before. One element, one class, one `aria-expanded`, one accessible name
+ * — `e2e/helpers/assistant.ts` and `assistant-drawer-collapse.test.tsx` key on
+ * `button.assistant-rail-toggle` and find exactly one of it in every state.
+ *
+ * A consumer that renders no slot (every `AssistantDrawer` test harness, and
+ * any future non-panel child) gets the inline button unchanged, because the
+ * portal arm requires a registered slot rather than merely an expanded rail.
+ */
+export const AssistantRailToggleSlotContext = createContext<
+  ((el: HTMLElement | null) => void) | null
+>(null);
 
 interface AssistantDrawerProps {
   /**
@@ -137,6 +173,10 @@ export function AssistantDrawer({ railClassName, label = LABELS.assistant, child
   // shows LESS than the reader asked for rather than briefly covering the
   // column they are working in.
   const [collapsed, setCollapsed] = useState(true);
+  // UX-022 — the header slot `AssistantPanel` publishes, or `null` when the
+  // child renders none. See the context's own docstring for why the button is
+  // portaled rather than simply rendered over there.
+  const [headSlot, setHeadSlot] = useState<HTMLElement | null>(null);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const panelRef = useRef<HTMLElement | null>(null);
   const railToggleRef = useRef<HTMLButtonElement | null>(null);
@@ -169,10 +209,20 @@ export function AssistantDrawer({ railClassName, label = LABELS.assistant, child
       requestAnimationFrame(() => {
         panelRef.current?.querySelector<HTMLElement>('.assistant-label')?.focus();
       });
+    } else {
+      // Collapsing returns focus to THIS control — it is the one button that
+      // performs both directions and it stays visible (as the slim affordance)
+      // in both states, so focus never has anywhere else to go.
+      //
+      // UX-022 — it is now RE-ASSERTED rather than merely left alone. Collapsing
+      // moves the button out of the portal and back inline, which React commits
+      // as an unmount + mount, and focus on an unmounted node falls to <body>.
+      // Re-focusing `railToggleRef` (which the newly-mounted inline button has
+      // already populated by the time the frame runs) restores the invariant the
+      // comment above states. It is inert when no slot is registered: the same
+      // node simply receives focus it already had.
+      requestAnimationFrame(() => railToggleRef.current?.focus());
     }
-    // Collapsing returns focus to THIS control — it is the one button that
-    // performs both directions and it stays visible (as the slim affordance)
-    // in both states, so focus never has anywhere else to go.
   }
 
   // Escape closes; Tab / Shift+Tab are contained within the panel while open.
@@ -305,6 +355,39 @@ export function AssistantDrawer({ railClassName, label = LABELS.assistant, child
     wasOpen.current = open;
   }, [open]);
 
+  /* PR-E — desktop-only collapse/expand. CSS-hidden at ≤1024px (the slide-over
+     has its own close button above); CSS-repositioned between "inline in the
+     rail header" (expanded) and "the whole slim rail" (collapsed) at desktop —
+     see assistant-drawer.css. The accessible name states the RESULT of pressing
+     it, per this rail's own convention for `.assistant-clear` etc.: visible text
+     IS the accessible name, so there is no separate aria-label to drift from it.
+
+     UX-022 — built once here and placed in ONE of two positions below, never
+     both. See `AssistantRailToggleSlotContext`. */
+  const railToggle = (
+    <button
+      ref={railToggleRef}
+      type="button"
+      className="assistant-rail-toggle"
+      aria-expanded={!collapsed}
+      aria-controls={contentId}
+      onClick={handleRailToggle}
+    >
+      {collapsed ? (
+        <ChevronLeft size={14} strokeWidth={2} aria-hidden="true" />
+      ) : (
+        <ChevronRight size={14} strokeWidth={2} aria-hidden="true" />
+      )}
+      <span className="assistant-rail-toggle-label">
+        {collapsed ? `Expand ${label}` : `Collapse ${label}`}
+      </span>
+    </button>
+  );
+  // Expanded AND the child published a header slot ⇒ the toggle belongs in the
+  // panel's own header row. Collapsed ⇒ inline, because the slot is inside the
+  // content `display: none` hides in that state.
+  const toggleInHead = !collapsed && headSlot !== null;
+
   return (
     <>
       <button
@@ -347,33 +430,13 @@ export function AssistantDrawer({ railClassName, label = LABELS.assistant, child
           <X size={16} strokeWidth={2} aria-hidden="true" />
         </button>
 
-        {/* PR-E — desktop-only collapse/expand. CSS-hidden at ≤1024px (the
-            slide-over has its own close button above); CSS-repositioned
-            between "inline in the rail header" (expanded) and "the whole
-            slim rail" (collapsed) at desktop — see assistant-drawer.css. The
-            accessible name states the RESULT of pressing it, per this rail's
-            own convention for `.assistant-clear` etc.: visible text IS the
-            accessible name, so there is no separate aria-label to drift from
-            it. */}
-        <button
-          ref={railToggleRef}
-          type="button"
-          className="assistant-rail-toggle"
-          aria-expanded={!collapsed}
-          aria-controls={contentId}
-          onClick={handleRailToggle}
-        >
-          {collapsed ? (
-            <ChevronLeft size={14} strokeWidth={2} aria-hidden="true" />
-          ) : (
-            <ChevronRight size={14} strokeWidth={2} aria-hidden="true" />
-          )}
-          <span className="assistant-rail-toggle-label">
-            {collapsed ? `Expand ${label}` : `Collapse ${label}`}
-          </span>
-        </button>
+        {toggleInHead ? null : railToggle}
 
-        <div id={contentId} className="assistant-drawer-content">{children}</div>
+        <AssistantRailToggleSlotContext.Provider value={setHeadSlot}>
+          <div id={contentId} className="assistant-drawer-content">{children}</div>
+        </AssistantRailToggleSlotContext.Provider>
+
+        {toggleInHead && headSlot ? createPortal(railToggle, headSlot) : null}
       </aside>
     </>
   );

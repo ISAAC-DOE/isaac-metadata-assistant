@@ -22,7 +22,7 @@ const CTX: AgentContext = {
   workflow: {
     current_step: 'complete_metadata',
     ordered_steps: [
-      { id: 'load_record', label: 'Load Record', state: 'completed', current: false, reopened: false, blocked: false, reason: null },
+      { id: 'load_record', label: 'Record Created', state: 'completed', current: false, reopened: false, blocked: false, reason: null },
       { id: 'complete_metadata', label: 'Complete Metadata', state: 'current', current: true, reopened: false, blocked: false, reason: null },
       { id: 'review_evidence', label: 'Review Evidence', state: 'reopened', current: false, reopened: true, blocked: false, reason: 'An upstream change reopened this step.' },
       { id: 'review_export_readiness', label: 'Review Export Readiness', state: 'blocked', current: false, reopened: false, blocked: true, reason: "Complete 'Complete Metadata' first." },
@@ -45,7 +45,7 @@ describe('P29.3 deterministic agent — authority (read intents)', () => {
   it('identify_next_missing_field returns the ACTUAL first pending field, not a completed one', () => {
     const r = runIntent('identify_next_missing_field', CTX);
     expect(r.text).toContain('Reduced Series');
-    expect(r.text).not.toContain('Load Record');
+    expect(r.text).not.toContain('Record Created');
   });
 
   it('explain_current_state uses the authoritative current step', () => {

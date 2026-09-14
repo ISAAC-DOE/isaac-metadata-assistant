@@ -352,22 +352,69 @@ describe('P36V.1 S2 · header is ONE balanced row', () => {
     expect(precedes(icon, label)).toBe(true);
   });
 
-  it('RENDERED: "Memory Available" is the RIGHT group of the SAME row, after the title', () => {
+  it('RENDERED: "Memory Available" is the RIGHT item of the header\'s META row, after the title', () => {
+    /*
+     * ~~the RIGHT group of the SAME row~~ — RE-TARGETED by UX-022 from
+     * `.assistant-head-titles` to `.assistant-head-meta`, which is the header's
+     * own second row. Every property below is the same one this case has always
+     * asserted: the status is a compact Title-Case label with a non-colour dot,
+     * it reads after the title, and it is NOT in the trailing action row that
+     * holds Clear Conversation.
+     *
+     * WHY IT MOVED, and it is arithmetic rather than taste. The Collapse control
+     * used to render as a 24.3px strip ABOVE `section.assistant` (measured, real
+     * Chromium, 1280x800, the 308px record rail: toggle y=93, section y=123.3),
+     * so the panel's own title was not the panel's first element and the owner
+     * read the header as "things just put there". Moving it into the title row
+     * needs 26px icon + 8 + ~62px title + 8 + 138.5px toggle = 242.5px of the
+     * 275px available, which fits — with the 109.2px status on that row it needs
+     * ~354px, which does not. The status pairs with the 135px scope sentence on
+     * the meta row at 244px, which does. The row that fits is the row that keeps
+     * the two widest items apart.
+     */
     const { container } = panel({ availability: 'available' });
+    const head = container.querySelector('.assistant-head') as HTMLElement;
     const row = container.querySelector('.assistant-head-titles') as HTMLElement;
+    const meta = container.querySelector('.assistant-head-meta') as HTMLElement;
     const label = row.querySelector('.assistant-label') as HTMLElement;
-    const status = row.querySelector('.assistant-memory') as HTMLElement;
+    const status = meta.querySelector('.assistant-memory') as HTMLElement;
 
-    // both groups are children of the ONE header row element
+    // both groups are rows of the ONE header element
     expect(status).not.toBeNull();
     expect(label.parentElement).toBe(row);
-    expect(status.parentElement).toBe(row);
+    expect(status.parentElement).toBe(meta);
+    expect(row.parentElement).toBe(head);
+    expect(meta.parentElement).toBe(head);
     expect(precedes(label, status)).toBe(true);
     // it is a compact status, not a sentence, and never colour-only
     expect(status.textContent).toMatch(/^\s*Memory Available\s*$/);
     expect(status.querySelector('.dot-memory')).not.toBeNull();
     // it is NOT in the action row that holds Clear Conversation
     expect(status.closest('.assistant-head-right')).toBeNull();
+  });
+
+  it('RENDERED: the header is the panel\'s FIRST element, and the collapse control is inside it', () => {
+    /*
+     * UX-022 — the defect the owner reported, pinned so it cannot come back.
+     * `button.assistant-rail-toggle` rendered OUTSIDE `section.assistant`,
+     * above the header, so the panel's own name was not its first element.
+     *
+     * This panel is rendered here WITHOUT an `AssistantDrawer`, so the drawer
+     * publishes no toggle — the slot is what is asserted, because the slot is
+     * this file's half of the contract: `AssistantDrawer` portals its one
+     * button into it (see `AssistantRailToggleSlotContext`), and
+     * `assistant-drawer-collapse.test.tsx` owns the portal's own behaviour.
+     */
+    const { container } = panel({ availability: 'available' });
+    const assistant = container.querySelector('section.assistant') as HTMLElement;
+    const head = container.querySelector('.assistant-head') as HTMLElement;
+    expect(assistant.firstElementChild).toBe(head);
+    const slot = head.querySelector('.assistant-head-toggle') as HTMLElement;
+    expect(slot, 'the header must publish the collapse control\'s slot').not.toBeNull();
+    // it is the header's own child, on the title row — never a wrapper elsewhere
+    expect(slot.parentElement).toBe(head);
+    // and it contributes no box of its own, so an absent toggle costs no gap
+    expect(ruleBody(assistantCss, '.assistant-head-toggle')).toMatch(/display:\s*contents/);
   });
 
   it('CSS SOURCE: the row is horizontal, the status is pushed right, and its inner gap matches the icon↔title gap', () => {
@@ -467,8 +514,9 @@ describe('P36V.1 S2 · Clear Conversation', () => {
     await waitFor(() => expect(container.querySelector('.assistant-clear')).not.toBeNull());
 
     const clear = getByRole('button', { name: 'Clear Conversation' });
-    const row = container.querySelector('.assistant-head-titles') as HTMLElement;
-    const status = row.querySelector('.assistant-memory') as HTMLElement;
+    // UX-022 — the status lives on the header's meta row now; see
+    // '"Memory Available" is the RIGHT item of the header\'s META row' above.
+    const status = container.querySelector('.assistant-head-meta .assistant-memory') as HTMLElement;
 
     // the FULL label survives — never abbreviated to "Clear"
     expect(clear.textContent?.trim()).toBe('Clear Conversation');
