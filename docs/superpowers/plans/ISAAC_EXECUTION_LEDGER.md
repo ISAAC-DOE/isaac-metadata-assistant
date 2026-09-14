@@ -2747,8 +2747,16 @@ reproduction changed the remedy.
 
 ### `A-1` · CRITICAL — the gate's headline claim is FALSE, and the code is still a strict improvement
 
-Gate (4) closes the 23 named fabrications **in their DIRECT form only**. A prepositional preamble
-or a bracketing character puts every one of them back, **silently**. Re-measured here with an
+Gate (4) closes the 23 named fabrications **in their DIRECT form only**. ~~A prepositional preamble
+or a bracketing character puts every one of them back, **silently**.~~ — **HALF CORRECTED
+2026-09-13, and struck rather than edited because "puts every one of them back" is exactly the
+claim a future session acts on.** The PREAMBLE half still holds. The BRACKETING half does not:
+`_unwrap_parentheticals` closed the paired-delimiter forms, so the `parenthesis / double quotes`
+row of the table below now reads **0/14 and 0/8, all refused AND disclosed**. The `colon /
+semicolon` row is unchanged — those are not paired. See the `A-1b` entry near the end of this file
+for the measurement and the ratchet.
+
+Re-measured here with an
 independent corpus, two families × eight templates:
 
 | template | temperature (14 modifiers) | instant (8 modifiers) |
@@ -2756,7 +2764,7 @@ independent corpus, two families × eight templates:
 | **direct — the CONTROL** | **0/14 proposed** | **0/8 proposed** |
 | prepositional preamble | 14/14, **all silent** | 8/8, all silent |
 | numeric-object preamble | 14/14, all silent | — |
-| parenthesis / double quotes | 14/14, all silent | 8/8, all silent |
+| ~~parenthesis / double quotes~~ **CLOSED 2026-09-13** | ~~14/14, all silent~~ → **0/14, disclosed** | ~~8/8, all silent~~ → **0/8, disclosed** |
 | colon / semicolon | 14/14, all silent | — |
 
 **"Silent" means a candidate with ZERO abstentions** — a §5 fabrication with no disclosure, the
