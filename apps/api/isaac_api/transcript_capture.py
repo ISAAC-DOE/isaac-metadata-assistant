@@ -3714,6 +3714,25 @@ def _unwrap_parentheticals(before: str) -> str:
 
     Symmetric quotes are matched by COUNT, not by position: ``"`` is its own opener,
     so a closer is one only if an odd number precede it.
+
+    *** IT COSTS EXACTLY ONE READING, AND THAT IS MEASURED RATHER THAN HOPED. ***
+    Run over the corpus with this call removed and restored, it moves TWO
+    sentences and no others:
+
+        The (setpoint) temperature was 425 K.      READ silently -> refused + disclosed
+        The sample (SYN-1) temperature was 425 K.  READ          -> refused + disclosed
+
+    The second is a cost. ``sample`` is an allowlisted apparatus noun and its
+    unbracketed form still reads; with the identifier bracketed the gate now sees
+    ``SYN-1``, a token in no list, and refuses. **The old acceptance was not a
+    reading** — the bracket had cut every word out of the inspected text, so the
+    gate passed on a single space, having approved nothing. It accepted that
+    sentence for the same reason it accepted ``The (setpoint) temperature``.
+
+    So the allowlist is now consulted where it previously was not, and answers
+    honestly: it costs the reading and DISCLOSES it, which is the trade
+    :data:`AMBIGUITY_POLICY` states outright. Pinned by
+    ``test_the_paired_delimiter_fix_COSTS_one_reading_and_discloses_it``.
     """
     out: list[str] = []
     for i, ch in enumerate(before):

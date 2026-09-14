@@ -717,6 +717,57 @@ def test_the_paired_delimiter_bypass_is_CLOSED_and_stays_closed():
         )
 
 
+def test_the_paired_delimiter_fix_COSTS_one_reading_and_discloses_it():
+    """THE COLLATERAL COST OF ``_unwrap_parentheticals``, MEASURED AND PINNED.
+
+    Attribution measured by running the same corpus with the unwrap call removed
+    and restored. It moves exactly TWO readings, and only one of them is the
+    defect it was written for:
+
+        The (setpoint) temperature was 425 K.        READ silently -> refused + disclosed
+        The sample (SYN-1) temperature was 425 K.    READ          -> refused + disclosed
+
+    The second is a COST, and it is recorded here rather than left to be
+    discovered. ``sample`` IS an allowlisted apparatus noun, so the unbracketed
+    form reads normally (asserted below). With the identifier bracketed, the gate
+    now sees ``SYN-1`` — a token in no list — and refuses.
+
+    *** WHY THAT IS THE RIGHT TRADE, AND WHY THE OLD READING WAS NOT A READING.
+    *** Before the fix this sentence was accepted because the gate saw a single
+    SPACE: the bracket had cut every word out of the text it inspects, so it
+    passed VACUOUSLY, never having approved ``sample`` at all. It read for the
+    same reason ``The (setpoint) temperature`` read. One of those two outcomes
+    was right by accident; neither was earned.
+
+    Now the allowlist is actually consulted and answers honestly: it does not
+    know ``SYN-1``, so it costs the reading and DISCLOSES it. That is the trade
+    ``AMBIGUITY_POLICY`` states in as many words — *"an allowlist costs a reading
+    and DISCLOSES it"* — applied to a case that previously escaped it.
+
+    **WHAT A FUTURE SLICE WOULD CHANGE TO RECOVER IT:** admit bracketed
+    IDENTIFIERS (a sample id, a serial) to the pre-label allowlist, on the ground
+    that they locate the quantity rather than re-subject it. That is the same
+    class of scientific judgement as the preamble tail below, and is NOT an
+    agent's to make alone — see §8 and this module's own rule that a token may be
+    admitted only if it opens a clause or LOCATES the measurement.
+    """
+    unbracketed = _read("The sample temperature was 425 K.")
+    assert unbracketed.candidates != (), (
+        "the allowlisted apparatus noun no longer reads in its plain form, which would be a "
+        f"real regression rather than the disclosed cost below. {_explain('The sample temperature was 425 K.')}"
+    )
+
+    sentence = "The sample (SYN-1) temperature was 425 K."
+    reading = _read(sentence)
+    assert reading.candidates == (), (
+        "the bracketed-identifier form reads again. If a slice deliberately admitted "
+        f"identifiers to the pre-label allowlist, delete this test and say so. {_explain(sentence)}"
+    )
+    assert reading.abstentions != (), (
+        f"the cost is being paid SILENTLY, which is the one outcome §5 forbids. {_explain(sentence)}"
+    )
+
+
 def test_the_pre_label_gate_IS_BYPASSED_by_a_PREAMBLE_RESIDUE():
     r"""**PINNED WRONG-WAY-ROUND: this asserts the DEFECT, so it is visible in CI.**
 
