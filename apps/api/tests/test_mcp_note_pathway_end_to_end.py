@@ -647,7 +647,15 @@ def test_STRUCTURAL_no_finalising_authority_exists_at_any_scope():
     proposals_write = {
         op_id for op_id, op in OPERATIONS.items() if op.scope is Scope.PROPOSALS_WRITE
     }
-    assert proposals_write == {"create_note", "create_proposal"}, proposals_write
+    # THREE since MCP-005: `create_transcript` joins them, and for the same
+    # structural reason — its only outputs are notes at `state["notes"]` and open
+    # proposals at `state["proposals"]`, both OUTSIDE `draft`. Enumerated rather than
+    # loosened to a subset check, so a fourth member still fails here.
+    assert proposals_write == {
+        "create_note",
+        "create_proposal",
+        "create_transcript",
+    }, proposals_write
 
 
 def test_the_agent_is_refused_the_review_route_even_holding_every_scope(armed_http):

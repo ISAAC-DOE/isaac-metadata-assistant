@@ -475,7 +475,10 @@ def test_a_full_json_rpc_session_runs_over_http_and_exposes_exactly_the_registry
     listed = {tool["name"] for tool in result_of(client, "tools/list")["tools"]}
     assert listed == set(PERMITTED_TOOL_NAMES)
     # 14 -> 15: MCP-001's `isaac_capture_note`, reaching a client over the wire.
-    assert len(listed) == 15
+    # 15 -> 16: MCP-005's `isaac_capture_transcript`, likewise. THE COUNT IS A
+    # TRIPWIRE FOR AN ACCIDENTAL REGISTRATION, not a claim about which tools are
+    # right; the names are asserted in both directions one line up.
+    assert len(listed) == 16
 
     body = structured(client, "isaac_list_experiments")
     assert body["status"] == 200

@@ -83,6 +83,9 @@ from .policy import (
     proposal_target_field_paths,
     proposal_value_byte_ceiling,
     run_list_query_parameters,
+    transcript_capture_limits,
+    transcript_readable_field_paths,
+    transcript_text_byte_ceiling,
 )
 
 __all__ = [
@@ -1035,6 +1038,70 @@ async def _capture_note(ctx: ToolContext, args: Mapping[str, Any]) -> ToolOutcom
     # application does not make.
     return _settle(
         "create_note",
+        result,
+        _with_links(result, {"capture": links.capture_link(args["experiment_id"])}),
+    )
+
+
+async def _capture_transcript(ctx: ToolContext, args: Mapping[str, Any]) -> ToolOutcome:
+    """Hand ONE finalized transcript to ISAAC's own reader. **MCP-005.**
+
+    THE GAP THIS CLOSES, stated once in the code that closes it. ``_capture_note``
+    stores words and mints no proposal; ``_propose_field_value`` mints one proposal for
+    one value the AGENT chose. So an agent holding a whole dictation could either leave
+    a record with a single note nobody could act on, or become the thing that decides
+    which numbers in it are scientific values — and the second is the boundary
+    ``ai-integration-decision-packet.md`` §6 draws. This operation is the third answer:
+    the agent hands over the prose and ISAAC's OWN deterministic reader decides what,
+    if anything, it recognises.
+
+    ``finalized`` IS AN ARGUMENT AND IS NOT STAMPED HERE, WHICH IS THE OPPOSITE OF THE
+    DECISION ``_AGENT_NOTE_SOURCE`` RECORDS. ``source`` is stamped because "this arrived
+    through the agent interface" is a fact the SERVER observes about itself.
+    ``finalized`` is the reverse: it asserts that a PERSON said the dictation was
+    finished, which is a fact only the caller can be in a position to relay, and the
+    route's own first and unconditional check exists so that text still being written
+    can never move a value. Defaulting it to ``true`` here would forge exactly that
+    assertion, on the one gate the route checks before it reads anything. The schema
+    therefore requires it and pins it to ``true`` — so an agent must state it, and
+    cannot state anything else.
+
+    ``retention`` IS DELIBERATELY NOT OFFERED. The route accepts it, enforces exactly
+    one state, and answers ``422`` naming that state for any other — so exposing it
+    would publish a control whose only reachable use is to fail. The enforced state is
+    named in the description instead, read off the reader rather than transcribed.
+    """
+    body: dict[str, Any] = {
+        "text": args["text"],
+        # Forwarded from `args`, never defaulted — see the docstring.
+        "finalized": args["finalized"],
+    }
+    # ABSENT RATHER THAN NULL, and never defaulted, exactly as `_capture_note` does it.
+    # Omitting `run_id` is what makes the route ASK which run the transcript describes;
+    # filling it in from the only run that happens to exist would be an inference about
+    # the science, and the route's own description says the run is "never inferred".
+    if "run_id" in args:
+        body["run_id"] = args["run_id"]
+
+    result = await ctx.client.call(
+        "create_transcript",
+        path_params={"experiment_id": args["experiment_id"]},
+        json_body=body,
+        if_match=args["if_match"],
+    )
+    # `_settle` and NO PROJECTION, for `_capture_note`'s reason and one of this
+    # operation's own: the route's body is the only place an agent learns what was
+    # NOT resolved — `clarifications`, `abstentions`, `conflicts` and `unproposable`
+    # — and withholding any of them would turn "nothing was dropped in silence" into
+    # exactly that.
+    #
+    # ONE KEY IS ADDED (MCP-006): the record's `capture` workspace, which is the one
+    # screen every artifact this call produced is reviewed on — the notes and the
+    # proposals alike. A per-proposal link is deliberately not minted: this call can
+    # store many, and naming one of them would publish a first-among-equals the
+    # application does not have.
+    return _settle(
+        "create_transcript",
         result,
         _with_links(result, {"capture": links.capture_link(args["experiment_id"])}),
     )
@@ -2027,6 +2094,215 @@ def _tools() -> tuple[Tool, ...]:
             # stores one. `isaac_create_run` declares `False` for the opposite reason
             # — it has no such key, so the same call twice adds two runs.
             idempotent=True,
+        ),
+        Tool(
+            name="isaac_capture_transcript",
+            title="Hand over a finalized transcript",
+            description=(
+                "Give ISAAC ONE transcript a scientist has FINISHED dictating, and "
+                "let ISAAC's own reader find the candidate values in it. A single "
+                "call stores the whole dictation against the record and opens one "
+                "proposal for each value the reader recognises, in one revision. "
+                "This is the tool for words you are RELAYING; it is not the tool "
+                "for a value you worked out yourself.\n\n"
+                "**WHICH TOOL TO USE, AND THE DISTINCTION IS WHO DID THE READING.** "
+                "Use THIS one when the scientist has finished dictating and ISAAC "
+                "should be the thing that decides what, if anything, the words "
+                "contain: you supply the prose and nothing else. Use "
+                "`isaac_capture_note` together with `isaac_propose_field_value` when "
+                "YOU are the reader — when you have content in front of you, you "
+                "have concluded that it states a particular value for a particular "
+                "field, and you can state the rule that produced it. There the "
+                "`rule` sentence is the whole point: it is what lets a person check "
+                "your reasoning. Do not route a value YOU derived through this tool: "
+                "it would be stored with ISAAC's rule cited instead of yours, which "
+                "misattributes the reasoning a reviewer is judging.\n\n"
+                "**NO LANGUAGE MODEL READS THE TEXT.** ISAAC's transcript reader is "
+                "DETERMINISTIC — fixed pattern rules plus a run resolver — so the "
+                "same text yields the same candidates every time and the rule cited "
+                "on each candidate is ISAAC's own, not an inference.\n\n"
+                "**IT CAN PROPOSE AT EXACTLY THESE PATHS AND NO OTHERS:** "
+                + ", ".join(f"`{path}`" for path in transcript_readable_field_paths())
+                + ". Anything else in the transcript — however clearly it states a "
+                "value, and INCLUDING a QC verdict, a sample name, a facility or a "
+                "technique — produces NO candidate and is stored as a note. Do not "
+                "promise a scientist a proposal at a path outside this list, and do "
+                "not read its absence as the reader having failed. Do not tell "
+                "anyone an AI read their notes.\n\n"
+                # THE ROUTE'S OWN CLAIM, in the route's own words, so the two
+                # published contracts cannot drift by wording.
+                # `test_mcp_and_route_descriptions_agree.py` pins this and the four
+                # other sentences marked below, in BOTH surfaces.
+                "`finalized` must be `true`. There is no partial pass and no "
+                "reading while text is still being typed: a request without it is "
+                "`422` and nothing is stored, so text that is still being written "
+                "can never move a value. This tool's schema PINS it to `true`, so "
+                "you have to state it and the server never assumes it for you — "
+                "that assertion is about what a PERSON said, and only you are in a "
+                "position to relay it. Send nothing until the scientist says the "
+                "dictation is finished.\n\n"
+                # The route's own words again.
+                "NOTHING HERE IS A VALUE. Every candidate carries the words it came "
+                "from, the rule that read them, `verified: false`, "
+                "`is_evidence: false` and a `status` of `needs_confirmation`, which "
+                "are constants of the shape rather than fields a request can set. "
+                "And again in the route's own words: STORING A PROPOSAL WRITES NO "
+                "FIELD: this operation leaves every value of this record and of "
+                "every run byte-for-byte unchanged, and a proposal is inert to "
+                "export. It cannot make a record exportable, cannot make one "
+                "un-exportable, and appears in no exported document.\n\n"
+                "**ONLY A PERSON CAN ACCEPT ONE, AND THIS SERVER HAS NO TOOL THAT "
+                "DOES.** A candidate becomes a value only when a person accepts its "
+                "proposal, with their own confirmation and a trusted human identity "
+                "that no default-configured deployment establishes. There is no "
+                "accept, review, supersede or withdraw tool here at any permission "
+                "level, and none will be added. After the call, stop: tell the "
+                "scientist what was stored AND what was not resolved, then use "
+                "`isaac_list_proposals`, `isaac_get_proposal` or `isaac_get_changes` "
+                "to find out whether they have answered.\n\n"
+                # The route's own words again.
+                "EVERY SEGMENT OF THE TRANSCRIPT BECOMES AN UNMAPPED NOTE, "
+                "including the segments that produced a candidate. That redundancy "
+                "is the losslessness guarantee: nothing the scientist said depends "
+                "on a proposal surviving review, so a rejected or never-answered "
+                "proposal still leaves every word stored verbatim. The words are "
+                "stored as sent — do not trim, summarise, translate or tidy the "
+                "transcript before sending it, and do not shorten it to fit: text "
+                "over the ceiling is REFUSED rather than truncated, because a "
+                "shortened transcript misrepresents what was said.\n\n"
+                # The route's own words again.
+                "AMBIGUITY IS NEVER RESOLVED BY PREFERENCE. Read all four of the "
+                "lists the result carries and report them, by these exact key names "
+                "(MEASURED over the route's own response, not inferred from the "
+                "prose): `clarifications` (a run named by position, a run this "
+                "record does not have, or one matching more than one), "
+                "`review_required` (two statements giving different values for one "
+                "field — kind `conflicting_values_for_one_field`; BOTH candidates "
+                "are kept and neither is preferred), `abstentions` (a temperature in "
+                "another unit, the absorbing element or the absorption edge), and "
+                "`unproposable` (a candidate that got no proposal, with the reason). "
+                "`ambiguity_policy` states each rule. Nothing read is dropped in "
+                "silence, and none of these is a defect to work around — do not "
+                "re-send the text with the ambiguity edited out of it in order to "
+                "get a candidate.\n\n"
+                "**`run_id` DECIDES WHETHER YOU GET PROPOSALS AT ALL, AND IT IS "
+                "NEVER INFERRED.** In the route's own words: CANDIDATES ARE WITHHELD "
+                "WHENEVER THE RUN IS UNSETTLED — when no run was selected, and "
+                "whenever any run clarification was raised. Omit `run_id` and the "
+                "transcript is stored in full as notes with NO proposals, which is "
+                "the correct outcome when you do not know which run was described, "
+                "EVEN IF the record has exactly one run: 'the only run' is a guess "
+                "about the science. Ask the scientist which run it was and call "
+                "again with it. A run id this record does not have is refused.\n\n"
+                "`if_match` is the RECORD's current `etag` from "
+                "`isaac_get_experiment`. Storing a transcript rewrites the record, "
+                "so a stale validator is refused `412` with nothing written, and the "
+                "remedy is to read the record again and retry.\n\n"
+                "**THIS TOOL IS NOT IDEMPOTENT, AND THERE IS NO "
+                "`client_request_key` FOR IT.** The server composes an idempotency "
+                "key per candidate from the note that candidate came from, and a "
+                "second call mints NEW notes — so calling twice with the same text "
+                "stores the dictation twice and opens a second set of proposals for "
+                "a scientist to sort out. If a call times out or its outcome is "
+                "unclear, READ the record and look before retrying; do not retry "
+                "blind.\n\n"
+                "Ceilings, which REFUSE rather than dropping anything: a transcript "
+                "over the text ceiling, or one that would exceed "
+                f"{transcript_capture_limits()['max_segments']} segments or "
+                f"{transcript_capture_limits()['max_candidates']} candidates, is "
+                "refused whole and nothing is stored. A record's own note and "
+                "proposal ceilings apply too. A refusal names what it hit; tell the "
+                "scientist, or split the dictation at a boundary they choose, rather "
+                "than retrying.\n\n"
+                "Retention: this build enforces exactly one storage state, "
+                f"`{transcript_capture_limits()['retention_enforced_state']}`, and "
+                "there is no argument here to choose another. The result reports it "
+                "at `capture.retention` — NOT at the top level, measured over the "
+                "route's own response — together with the states this build does "
+                "not offer.\n\n"
+                "Provenance: the record stores these notes and proposals as having "
+                "come from the TRANSCRIPT READER, and — unlike "
+                "`isaac_capture_note` — there is no marker saying they arrived "
+                "through the agent interface rather than through the product's own "
+                "capture screen. So do not tell anyone the record shows you "
+                "captured this, and do not attribute it to a person: it attributes "
+                "to nobody, and an acceptance later carries a different, "
+                "separately-established identity."
+            ),
+            scope=Scope.PROPOSALS_WRITE,
+            operation_ids=("create_transcript",),
+            input_schema=_object_schema(
+                {
+                    "experiment_id": dict(_EXPERIMENT_ID),
+                    "if_match": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 256,
+                        "description": (
+                            "The RECORD's current ETag, exactly as isaac_get_experiment "
+                            "returned it. It must be a validator a read returned: `*` "
+                            "is refused, because it would apply this write whatever the "
+                            "record now says and overwrite a change made since your "
+                            "last read without reporting a conflict."
+                        ),
+                    },
+                    "text": {
+                        "type": "string",
+                        "minLength": 1,
+                        # DERIVED FROM THE ROUTE'S OWN BYTE CEILING, as an upper bound
+                        # only — see `policy.transcript_text_byte_ceiling`, which says
+                        # why the transcript ceiling is read as its own constant even
+                        # though it equals the per-note one today.
+                        "maxLength": transcript_text_byte_ceiling(),
+                        "description": (
+                            "Required. The finalized transcript, verbatim. Stored "
+                            "exactly as sent — do not trim, normalise, summarise, "
+                            "translate or paraphrase it, and do not shorten it to fit: "
+                            "over-long text is refused rather than truncated."
+                        ),
+                    },
+                    "finalized": {
+                        "type": "boolean",
+                        # PINNED TO `true`, AND THE ENUM IS THE HONEST SPELLING OF WHY.
+                        # This argument is not a flag the caller may set either way: it
+                        # asserts that a PERSON said the dictation was finished, and the
+                        # route checks it first and unconditionally so that text still
+                        # being written can never move a value. A schema admitting
+                        # `false` would advertise a call whose only outcome is a `422`;
+                        # omitting the argument and stamping `true` here would forge the
+                        # assertion. Requiring it and pinning it means the agent has to
+                        # state it and cannot state anything else. The route re-checks
+                        # regardless — this boundary check replaces nothing there.
+                        "enum": [True],
+                        "description": (
+                            "Required, and must be `true`. It asserts that the "
+                            "scientist has said this dictation is FINISHED. Do not send "
+                            "text that is still being typed or dictated: the route "
+                            "refuses a request without this and stores nothing."
+                        ),
+                    },
+                    "run_id": {
+                        **_RUN_ID,
+                        "description": (
+                            "Optional, and NEVER inferred. The run this transcript "
+                            "describes. Omit it when you do not know, and the "
+                            "transcript is stored as notes with NO candidate proposals "
+                            "— which is the right answer even when the record has "
+                            "exactly one run. Ask the scientist which run it was."
+                        ),
+                    },
+                },
+                ["experiment_id", "if_match", "text", "finalized"],
+            ),
+            handler=_capture_transcript,
+            read_only=False,
+            # FALSE, AND FOR `isaac_create_run`'S REASON RATHER THAN BY OVERSIGHT:
+            # this operation accepts no `client_request_key`, and the per-candidate
+            # key the server composes is derived from the NOTE a candidate came from
+            # — so a second call mints new notes, new keys and a second set of
+            # proposals. Declaring `True` here would be the aspirational annotation
+            # `_capture_note`'s comment contrasts itself against.
+            idempotent=False,
         ),
         Tool(
             name="isaac_propose_field_value",

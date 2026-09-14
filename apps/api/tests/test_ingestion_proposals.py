@@ -1938,11 +1938,18 @@ def test_DEC7_no_mcp_operation_or_tool_reaches_the_proposal_REVIEW_route():
     # IT: that the model-derived channel never acquires `DRAFT_WRITE`, which would
     # let it change draft content directly (§5 I1/I2). That is asserted below,
     # positively, over both members — so the property survives the count changing.
+    #
+    # TWO -> THREE for MCP-005's `create_transcript`, which hands a FINALIZED
+    # transcript to ISAAC's own deterministic reader. It belongs to this scope rather
+    # than to `DRAFT_WRITE` for the same structural reason the other two do: its only
+    # outputs are notes at `state["notes"]` and open proposals at
+    # `state["proposals"]`, both OUTSIDE `draft`. The enumeration is kept rather than
+    # relaxed to a subset check, so a fourth member still fails here.
     assert {
         op_id
         for op_id, op in policy.OPERATIONS.items()
         if op.scope is policy.Scope.PROPOSALS_WRITE
-    } == {"create_proposal", "create_note"}
+    } == {"create_proposal", "create_note", "create_transcript"}
     # NEITHER MEMBER COSTS THE DRAFT-WRITE SCOPE. This is the property, stated over
     # the members rather than inferred from there being only one.
     for op_id in ("create_proposal", "create_note"):
@@ -1955,7 +1962,9 @@ def test_DEC7_no_mcp_operation_or_tool_reaches_the_proposal_REVIEW_route():
     # two — and all three were swept in one change, because "every tripwire is
     # updated" is itself a checkable claim and a partially-swept correction is the
     # failure mode §15 records.
-    assert len(policy.PERMITTED_TOOL_NAMES) == 15
+    # 15 -> 16: MCP-005's `isaac_capture_transcript`. Still THE THIRD OF THREE SITES,
+    # and all three were swept in this change too.
+    assert len(policy.PERMITTED_TOOL_NAMES) == 16
 
 
 # --- DEC-8: still_current is derived, never stored ----------------------------

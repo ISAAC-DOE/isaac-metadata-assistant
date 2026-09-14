@@ -86,6 +86,9 @@ __all__ = [
     "proposal_target_field_paths",
     "proposal_value_byte_ceiling",
     "run_list_query_parameters",
+    "transcript_capture_limits",
+    "transcript_readable_field_paths",
+    "transcript_text_byte_ceiling",
 ]
 
 
@@ -687,6 +690,67 @@ def note_capture_ceilings() -> dict:
     return {"max_per_record": _MAX_NOTES_PER_RECORD, "max_bytes": _MAX_NOTE_STATE_BYTES}
 
 
+def transcript_text_byte_ceiling() -> int:
+    """The bytes ONE finalized transcript may occupy, read off the route. **MCP-005.**
+
+    Read rather than transcribed, for :func:`note_text_byte_ceiling`'s reason, and
+    read as a SEPARATE constant even though ``routes._MAX_TRANSCRIPT_BYTES`` is today
+    defined as ``_MAX_NOTE_BYTES``: the route's own comment says they match *"because
+    every segment of it becomes a note"*, which is a reason the two happen to be
+    equal and not a promise that they always will be. Naming the transcript ceiling
+    here means a future route that raises one and not the other moves this schema
+    with it.
+
+    USED AS AN UPPER BOUND ONLY, exactly as the note and proposal ceilings are: the
+    route's check is in BYTES and ``maxLength`` is a CHARACTER count, and every UTF-8
+    string of *n* characters occupies at least *n* bytes. The exact check stays at the
+    route, over the encoded bytes, together with the lone-surrogate test a character
+    count cannot perform — and the route additionally refuses a transcript that would
+    exceed its own SEGMENT ceiling, which no length bound can express.
+    """
+    from ..routes import _MAX_TRANSCRIPT_BYTES  # local: keeps import order flexible
+
+    return _MAX_TRANSCRIPT_BYTES
+
+
+def transcript_capture_limits() -> dict:
+    """The transcript reader's own bounds, read off the reader. **MCP-005.**
+
+    Published in the capture tool's description so an agent learns the ceilings from
+    the server rather than from a literal in its prompt. Segments and candidates are
+    the two the reader REFUSES on rather than reporting — see
+    ``transcript_capture.TranscriptTooDense`` — so an agent that has been told them
+    can split a long dictation itself instead of meeting a refusal it cannot explain.
+    """
+    from .. import transcript_capture as tc  # local: keeps import order flexible
+
+    return {
+        "max_segments": tc.MAX_SEGMENTS,
+        "max_candidates": tc.MAX_CANDIDATES,
+        "retention_enforced_state": tc.RETENTION_ENFORCED_STATE,
+    }
+
+
+def transcript_readable_field_paths() -> tuple[str, ...]:
+    """The official paths ISAAC's transcript reader can propose at all. **MCP-005.**
+
+    DERIVED FROM THE READER, AND THE DERIVATION IS THE POINT. A hand-written list in
+    the tool description was written first and was **WRONG ON ITS SECOND EXAMPLE**: it
+    offered "a QC verdict" as something the reader recognises, and
+    ``transcript_capture.READABLE_FIELD_PATHS`` holds no ``qc`` path — measured, by
+    reading a transcript saying *"The QC verdict is valid"* and getting zero
+    candidates. An agent told the reader finds QC verdicts would have promised a
+    scientist a proposal that can never arrive, and then had to explain its absence.
+
+    So the set is read off the reader and sorted for a stable published string. A path
+    the reader gains appears here without an edit; a path it loses stops being
+    advertised.
+    """
+    from .. import transcript_capture as tc  # local: keeps import order flexible
+
+    return tuple(sorted(tc.READABLE_FIELD_PATHS))
+
+
 def _bounds(query: object) -> tuple[int | None, int | None]:
     """``(ge, le)`` for a FastAPI ``Query``, wherever this version keeps them.
 
@@ -1017,6 +1081,69 @@ def _operations() -> tuple[Operation, ...]:
             summary="Capture one piece of verbatim content against a record.",
             requires_if_match=True,
         ),
+        # TRANSCRIPT CAPTURE — **MCP-005**, and the gap it closes is the one the
+        # project owner named: *"if i transcribe the data on my claude app from an
+        # experiment, it should populate"*.
+        #
+        # WHY THE TWO EXISTING WRITE OPERATIONS DID NOT ALREADY COVER IT, measured
+        # rather than argued. `create_note` stores words and DELIBERATELY mints no
+        # proposal — that is its whole safety property, and it is why an agent that
+        # captured a whole dictation left a record with one note and nothing for a
+        # reviewer to accept. `create_proposal` mints exactly ONE proposal for ONE
+        # value the CALLER chose, with a `rule` sentence the CALLER wrote: it is the
+        # channel for the agent's own reading, and it is safe because the agent has
+        # to say what rule produced the value. Neither is the operation a finalized
+        # transcript wants, which is: hand the whole text to ISAAC's OWN
+        # deterministic reader (`transcript_capture.py` — regexes and a run
+        # resolver, no model anywhere in it) and let it mint one note per segment
+        # and one OPEN proposal per candidate it recognises, in one critical
+        # section and one revision.
+        #
+        # SO THIS OPERATION ADDS NO NEW POWER, IT ADDS A DIFFERENT PRODUCER. What
+        # the agent supplies is prose; what targets a field is ISAAC's own rule set.
+        # That is strictly WEAKER than `create_proposal`, where the agent supplies
+        # the target and the value.
+        #
+        # `PROPOSALS_WRITE`, NOT A FOURTH SCOPE, AND FOR `create_note`'s REASON
+        # RATHER THAN FOR CONVENIENCE. The scope is defined by a PROPERTY —
+        # `Scope.PROPOSALS_WRITE` "changes nothing a draft, an export or a
+        # submission reads", and that inertness "is precisely what makes this the
+        # safe channel for model-derived output". This operation has that property:
+        # every note lands at `state["notes"]` and every proposal at
+        # `state["proposals"]`, both OUTSIDE `draft`, and the route's own
+        # description says it "leaves every value of this record and of every run
+        # byte-for-byte unchanged". Its two outputs are exactly the two artifacts
+        # `create_note` and `create_proposal` already produce under this scope, so a
+        # deployment that granted those has already accepted both artifact kinds;
+        # this adds no artifact kind a grantee did not already consent to.
+        #
+        # THE OVER-GRANT IS THE SAME ONE `create_note` NAMES, AND IT IS NOT MADE
+        # WORSE HERE. One scope still unlocks all three, so a deployment wanting
+        # transcript capture and nothing else must also grant note capture and
+        # proposal creation. The least-privilege fix is still the fourth
+        # `isaac:notes.write`/`isaac:transcript.write` scope that `Scope`'s docstring
+        # keeps the set closed against — a new OAuth scope string is a contract an
+        # eventual token issuer has to know, and splitting it later is purely
+        # additive. It is RESIDUE, recorded as such, and this entry is the second
+        # member to inherit it rather than a new reason to defer it.
+        Operation(
+            id="create_transcript",
+            method="POST",
+            path_template="/api/experiments/{experiment_id}/transcript",
+            scope=Scope.PROPOSALS_WRITE,
+            # It mutates: the notes and the proposals are stored inside the
+            # experiment's own state document, so the record's `rev` and ETag move.
+            # `mutates` is about whether stored state changes, not about whether a
+            # scientific value does — `create_proposal` and `create_note` make the
+            # same distinction, and conflating them is how a write ends up without a
+            # precondition.
+            mutates=True,
+            summary=(
+                "Read one finalized transcript into notes and open proposals, "
+                "deterministically."
+            ),
+            requires_if_match=True,
+        ),
         Operation(
             id="get_changes",
             method="GET",
@@ -1135,6 +1262,12 @@ PERMITTED_TOOL_NAMES = frozenset(
         # the contract's own heading is recorded above this frozenset, deliberately
         # OUTSIDE it — see the note there.
         "isaac_capture_note",
+        # MCP-005, a reviewed widening of this set for the same reason
+        # `isaac_capture_note` was one: a finalized transcript had no channel into
+        # ISAAC at all. It contains none of `FORBIDDEN_TOOL_TOKENS` — checked by
+        # `forbidden_tool_reason` at import and asserted again over the registry by
+        # `test_mcp_boundaries`.
+        "isaac_capture_transcript",
         "isaac_propose_field_value",
         "isaac_list_proposals",
         "isaac_get_proposal",

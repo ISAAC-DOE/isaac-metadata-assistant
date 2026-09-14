@@ -110,7 +110,11 @@ def test_the_registry_is_exactly_the_permitted_set_in_both_directions():
     # nothing here could create one. The number is a tripwire for an ACCIDENTAL
     # registration, not a claim about which tools are right; the names are asserted
     # one line up, in both directions.
-    assert len(PERMITTED_TOOL_NAMES) == 15
+    # 15 -> 16 for MCP-005's `isaac_capture_transcript`, which hands a FINALIZED
+    # transcript to ISAAC's own deterministic reader. It adds no artifact kind: its
+    # two outputs are the note `isaac_capture_note` already produces and the open
+    # proposal `isaac_propose_field_value` already produces, under the same scope.
+    assert len(PERMITTED_TOOL_NAMES) == 16
 
 
 def test_no_forbidden_capability_is_registered_under_any_name():
