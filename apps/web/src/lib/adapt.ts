@@ -525,6 +525,42 @@ const KIND_LABEL: Record<string, string> = {
   series: 'Reduced Spectrum',
   descriptor: 'Scientific Descriptor',
   edge: 'Absorption Edge',
+  /*
+   * `qc` WAS MISSING, AND ITS ABSENCE WAS AN OVERSIGHT RATHER THAN A DECISION.
+   *
+   * This map's own contract, two functions down, is that a label is "read straight
+   * from the structured `kind`" — and `qc` is as structured as the other four: it
+   * has a dedicated verdict control (`GuidedPrompt`'s `inputType: 'verdict'`), a
+   * closed enum, and its own answer shape in `complete.py`. It simply never got a
+   * row here, and nothing caught it because no frontend fixture carries a `qc`
+   * pending item.
+   *
+   * MEASURED on a record created through `POST /api/experiments`, which is where a
+   * scientist meets it:
+   *
+   *   pendingItemToBlocker(qc).label   "Qc"    <- titleCase('qc'), the fallback
+   *   pendingSummary(qc).label         105 chars, the whole question verbatim
+   *
+   * So the needs-you banner listed "Reduced Spectrum" (16), the entire question
+   * (105) and "Scientific Descriptor" (21) as three items of one list, and the
+   * answered list called the field "Qc" — which is neither a word nor the term this
+   * product uses anywhere else in its own prose.
+   *
+   * FOUR CONSUMERS, ONE ROW: the needs-you summary (`RecordWorkbench`), the
+   * answered-list label and its `Edit {label}` accessible name
+   * (`GuidedCompletion`), and `GuidedPrompt`'s own `aria-label`.
+   *
+   * NOTHING IS LOST BY SHORTENING IT. The full question — including the allowed
+   * values — is rendered where the reader answers, by
+   * `GuidedPrompt`'s `<h2 className="guided-question">{blocker.question}</h2>`.
+   * This map feeds SUMMARIES; the question feeds the act.
+   *
+   * "QC Verdict" is the product's own phrasing, not a new name:
+   * `experiment_repository.py:780` asks "What is the QC verdict for this
+   * measurement", `inferability.py:798` says "A QC verdict is a scientific
+   * judgement about this measurement". No scientific value is implied by a label.
+   */
+  qc: 'QC Verdict',
 };
 
 // Sentence-case helper copy (never a scientific value) explaining each blocker
