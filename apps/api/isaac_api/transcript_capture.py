@@ -569,10 +569,13 @@ RETENTION_STATES_NOT_IMPLEMENTED: tuple[dict[str, str], ...] = (
         "state": "retain_during_draft",
         "reason": (
             "This would require the transcript to be removed when the record is "
-            "exported or submitted. Captured content is stored as notes, and this "
-            "build has no operation that removes a note — dismissing one records a "
-            "review decision and leaves the text readable. Offering this state "
-            "would promise a deletion that nothing performs."
+            "exported or submitted. Captured content is stored as notes, and no "
+            "operation in this build removes a note from a record that survives "
+            "— dismissing one records a review decision and leaves the text "
+            "readable. (Discarding the whole experiment does destroy its notes, "
+            "because they live in the record; that is the record going, not the "
+            "transcript being retired from it.) Offering this state would promise "
+            "a deletion that nothing performs."
         ),
     },
     {
