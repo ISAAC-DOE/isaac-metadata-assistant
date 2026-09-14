@@ -33,19 +33,35 @@ BRANCH:                **`main`** at `654e43dd`, plus FOUR live working branches
                        `654e43dd` — so every lane merges cleanly into `main`).
                        ~~docs/product-scope-v2-planning — UNPUSHED. `main` is UNTOUCHED.~~ — both
                        halves superseded: it was pushed, PR'd as #248, and merged.
-HEAD:                  **`1017680f` — SECOND CONTINUATION. 46 commits on `main..HEAD`. FOUR LANES
+HEAD:                  **`7e70ab99` — THIRD CONTINUATION. 55 commits on `main..HEAD`.**
+                       Since `1017680f`, five more commits, each independently verified:
+                         40c1ed7d  IA-001  data capture leads the record screen (owner request)
+                                           — CI GREEN on all four jobs, incl. the LINUX a11y sweep
+                         22a93726  A11Y-01b + QA-023 + M-4  28 violating nodes, 88 lost names,
+                                           two tautological controls
+                         cdd69c25  M-11    the import session is axe-scanned (4 states)
+                         1d9aa571  A-1b    a bracketed modifier can no longer hide a fabrication
+                         7e70ab99  QA-023b widening the guard found a ninth lost name
+                       *** THE §5 PREAMBLE BYPASS IS NOW HALF CLOSED. *** The three
+                       PAIRED-DELIMITER rows are fixed and ratcheted; the seven PREAMBLE and
+                       `:`/`;` rows remain pinned in
+                       `test_the_pre_label_gate_IS_BYPASSED_by_a_PREAMBLE_RESIDUE`. Closing THOSE
+                       needs an allowlisted tail, which is a scientific judgement about which
+                       position words re-subject a measurement — §8 says an agent does not make
+                       it. It is the next session's first task ONLY with that constraint attached.
+                       ~~**`1017680f` — SECOND CONTINUATION. 46 commits on `main..HEAD`. FOUR LANES
                        (§5 scientific · Experiment Library · Historical Import · the orchestrator's
                        own) INTEGRATED AND BOTH INDEPENDENTLY REVIEWED, every finding remediated.**
                        `main` = `origin/main` = `654e43dd` = **v0.0.233** and has NOT moved since
                        this branch started, so the merge-base IS `origin/main` and exact-head CI
                        describes the merge result — stated because §10's merge-result re-run is
                        normally mandatory here.
-                       *** THE ONE THING A FUTURE SESSION MUST READ FIRST: the §5 preamble/bracket
-                       bypass is PINNED, NOT CLOSED. It is the next session's first task, the
-                       reproduction is in
-                       `test_the_pre_label_gate_IS_BYPASSED_by_a_preamble_or_a_bracket_RESIDUE`,
-                       and that test FAILS when the class is closed — which is the signal to
-                       delete it. ***
+                       ~~*** THE ONE THING A FUTURE SESSION MUST READ FIRST: the §5
+                       preamble/bracket bypass is PINNED, NOT CLOSED … ***~~ — HALF CLOSED, see
+                       the block above. The test was RENAMED when it was narrowed, so a search
+                       for the old name finds nothing: it is now
+                       `test_the_pre_label_gate_IS_BYPASSED_by_a_PREAMBLE_RESIDUE`, beside
+                       `test_the_paired_delimiter_bypass_is_CLOSED_and_stays_closed`.**
                        ~~cb0494a2 — **ALL FOUR LANES INTEGRATED.** 62 commits on the branch
                        (`git rev-list --count main..HEAD`). Lanes, in merge order:
                        `4d6c74d9` §5 label-overreach + ramp semantics (committed, not merged —
