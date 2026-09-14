@@ -19,6 +19,37 @@
   padding: 4px 12px 0;
 }
 
+/*
+ * THE CAPTURE LANDMARK'S OWN INSET — and its absence was a REGRESSION I shipped
+ * the same day, caught by the project owner looking at the screen.
+ *
+ * When the capture row lived inside `.workspace-nav` it inherited that rule's
+ * `12px`. Splitting it into its own `<nav>` (so it could render ABOVE the
+ * workflow spine) took the padding with it, and nothing replaced it: the card
+ * rendered at 17–229 while EVERY other element in this column — the spine's
+ * rows, the Workspaces eyebrow, the workspace items and the Evidence Trail
+ * card — sits at 29–217. It was 24px wider than its neighbours and flush
+ * against both inner edges of the sidebar.
+ *
+ * Measured in a browser rather than inferred, before and after. `12px` is not
+ * chosen here; it is the value `.workspace-nav` above and `.spine`
+ * (`16px 12px`) already use, so the column has ONE gutter rather than two.
+ */
+.capture-nav {
+  padding: 4px 12px 0;
+}
+
+/*
+ * A SEPARATOR NEEDS SOMETHING TO SEPARATE. `.workspace-nav-eyebrow` carries a
+ * `border-top` because it divides two lists — but the capture eyebrow is now
+ * the FIRST element in the sidebar, so that hairline drew across the top of the
+ * column with nothing above it. Removed here only, leaving the Workspaces
+ * eyebrow's divider exactly as it was.
+ */
+.capture-nav .workspace-nav-eyebrow {
+  border-top: 0;
+}
+
 /* The separation between the two lists is a hairline, not a card: the sidebar
    is one bordered region and nesting a card inside it would be the nested-card
    anti-pattern. `border-top` here rather than `border-bottom` on `.spine` so a
