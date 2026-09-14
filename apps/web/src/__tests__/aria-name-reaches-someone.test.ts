@@ -63,20 +63,40 @@ function sourceFiles(dir: string): string[] {
 }
 
 /**
- * Every `<span …>` or `<div …>` opening tag, with its attribute text.
+ * Every opening tag whose IMPLICIT ARIA ROLE PROHIBITS AN ACCESSIBLE NAME.
  *
- * Deliberately NOT a parser. The question is narrow — does this tag carry a
- * name without a role? — and a regex over the opening tag answers it for the
- * shapes this codebase writes. A tag spanning lines is matched because `[^>]*`
- * crosses newlines here; the negative controls below prove that.
+ * *** WIDENED PAST `<span>`/`<div>`, AND THE WIDENING IMMEDIATELY FOUND ONE. ***
+ * The first version of this guard listed only those two, because those were the
+ * eight nodes QA-023's axe probe reported. Re-run over the fuller set it found a
+ * ninth the narrow version could not see: a `<pre aria-label="Diagnostics report
+ * — selectable text" tabIndex={0}>` in `FetchStates.tsx` — on a FOCUSABLE
+ * element, where the name is the only thing telling a keyboard user what they
+ * have just landed on.
+ *
+ * The list is the elements that map to `generic` (`span`, `div` with no role,
+ * `b`, `i`, `u`, `s`, `small`, `pre`, `q`, `samp`, `kbd`, `var`) plus the ones
+ * whose own implicit role forbids naming for the same reason (`p` ->
+ * `paragraph`, `code`, `caption`, `del`/`ins`, `em`/`strong`). `label` and
+ * `legend` are included because they NAME something else and must not carry a
+ * name of their own.
+ *
+ * Deliberately NOT a parser. The question is narrow — does this tag carry a name
+ * without a role? — and a regex over the opening tag answers it for the shapes
+ * this codebase writes. A tag spanning lines is matched because `[^>]*?` crosses
+ * newlines here; the negative controls below prove that.
  */
-const OPENING_TAG = /<(span|div)(\s[^>]*?)?>/g;
+const NAME_PROHIBITED_TAGS = [
+  'span', 'div', 'p', 'pre', 'code', 'caption', 'label', 'legend',
+  'b', 'i', 'u', 's', 'small', 'q', 'samp', 'kbd', 'var', 'em', 'strong',
+  'del', 'ins',
+] as const;
+const OPENING_TAG = new RegExp(`<(${NAME_PROHIBITED_TAGS.join('|')})(\\s[^>]*?)?>`, 'g');
 
 const NAMING_ATTR = /\b(aria-label|aria-labelledby)\s*=/;
 const HAS_ROLE = /\brole\s*=/;
 
 describe('QA-023 · a name on a `generic` is announced to nobody', () => {
-  it('no `<span>` or `<div>` under src/ carries a name without a role', () => {
+  it('no element whose implicit role forbids a name carries one without a role', () => {
     const offenders: string[] = [];
     for (const file of sourceFiles(SRC)) {
       const src = readFileSync(file, 'utf8');
@@ -110,6 +130,9 @@ describe('QA-023 · a name on a `generic` is announced to nobody', () => {
       '<span aria-labelledby="some-heading">',
       // multi-line, which is how four of the five real offenders were written
       '<span\n  className="statusbar-seg"\n  key="validation"\n  aria-label="Validation signal"\n>',
+      // the ninth, found only once the tag set was widened past span/div
+      '<pre tabIndex={0} aria-label="Diagnostics report">',
+      '<p aria-label="Something">',
     ];
     for (const shape of forbidden) {
       const hit = [...shape.matchAll(OPENING_TAG)].some(
@@ -126,9 +149,15 @@ describe('QA-023 · a name on a `generic` is announced to nobody', () => {
       '<div className="memory-graph-chips" role="group" aria-label="Active filters">',
       // no name at all — not this rule's business
       '<span className="exp-title">',
-      // a name on an element that is NOT a span/div, e.g. a button, which can
-      // always carry one. The scan must not widen to those and start shouting.
+      // a name on an element that CAN always carry one. The scan must not widen
+      // to these and start shouting: every one is correct as written.
       '<button aria-label="Close">',
+      '<nav aria-label="Record workspaces">',
+      '<section aria-labelledby="h">',
+      '<table aria-label="Sources">',
+      '<input aria-label="Search" />',
+      // and the fix for the ninth
+      '<pre tabIndex={0} role="group" aria-label="Diagnostics report">',
     ];
     for (const shape of allowed) {
       const hit = [...shape.matchAll(OPENING_TAG)].some(

@@ -934,10 +934,17 @@ export function CopyDiagnostics({ build }: { build: () => string }) {
       {outcome === 'manual' && report !== null && (
         <>
           <p className="fetch-state-diagnostics-fallback">{message}</p>
+          {/* `role="group"`: `<pre>` has the implicit role `generic`, and ARIA
+              PROHIBITS naming a `generic` — so this label was computed and
+              discarded, on a FOCUSABLE element, where the name is the only thing
+              telling a keyboard user what they have just landed on. Found while
+              widening the QA-023 sweep past `<span>`/`<div>`; the first version
+              of that guard would not have caught it. */}
           <pre
             ref={manualRef}
             className="fetch-state-diagnostics-block mono"
             tabIndex={0}
+            role="group"
             aria-label="Diagnostics report — selectable text"
           >
             {report}

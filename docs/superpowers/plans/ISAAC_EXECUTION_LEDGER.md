@@ -3483,6 +3483,41 @@ scientist their bracketed sentence was unread when it is now refused and disclos
 
 ---
 
+## *** `QA-023b` — WIDENING THE GUARD FOUND A NINTH, AND THE NARROW GUARD COULD NOT HAVE SEEN IT ***
+
+The QA-023 guard listed `<span>` and `<div>`, because those were the eight nodes the axe probe
+reported. **That is measuring the guard against the same evidence that produced it.** Re-run over
+the fuller set of elements whose implicit role prohibits a name, it found a ninth:
+
+```
+FetchStates.tsx:937   <pre tabIndex={0} aria-label="Diagnostics report — selectable text">
+```
+
+`<pre>` maps to `generic`, so that label was computed and discarded — **on a FOCUSABLE element**,
+where the name is the only thing telling a keyboard user what they have just landed on. Fixed with
+`role="group"`, the same remedy as the other eight.
+
+**Why the axe probe missed it too:** the diagnostics block renders only in the manual-report branch
+of a backend-down state, which no scanned surface reaches. So both instruments had the same blind
+spot for different reasons — the probe could not reach the state, and the guard was not looking for
+the tag.
+
+The tag list is now **21**: everything mapping to `generic` (`span`, `div`, `b`, `i`, `u`, `s`,
+`small`, `pre`, `q`, `samp`, `kbd`, `var`), plus elements whose own implicit role forbids naming
+(`p`, `code`, `caption`, `del`, `ins`, `em`, `strong`), plus `label` and `legend`, which NAME
+something else and must not carry a name of their own. The polarity control gained the `<pre>` and
+`<p>` shapes on the forbidden side and `<nav>`, `<section>`, `<table>`, `<input>` and the fixed
+`<pre>` on the allowed side — so a future widening cannot start shouting at elements that may
+legitimately carry a name.
+
+**Mutation-proven:** removing `role="group"` from that `<pre>` fails the widened guard by
+`file:line`; the narrow version passed it.
+
+**The durable lesson: a guard written from a probe's findings inherits the probe's blind spots. Widen
+it past its own evidence at least once, and see what falls out.**
+
+---
+
 ## CONTINUATION PROTOCOL
 
 Every future session starts here, in this order:
