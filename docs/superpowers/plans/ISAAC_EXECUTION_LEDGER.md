@@ -3340,6 +3340,65 @@ that 86 is what this head measures, with the command recorded.
 
 ---
 
+## *** `M-11` CLOSED — the import session is accessibility-scanned, and the first wait I wrote for it was vacuous ***
+
+### The gap, in the file's own words
+
+`e2e/surfaces.ts`'s `imports` entry swept "the first-run state — the empty list, the workflow strip,
+the durability sentence and the Start control", and said plainly: *"WHAT THIS SURFACE DELIBERATELY
+DOES NOT COVER: an OPEN session. Reaching one needs a POST … and this suite is read-only by
+construction."* An honest boundary — and it left the larger half of the screen unmeasured by axe.
+The component tests cover **behaviour**; jsdom computes no colours, resolves no stacking and runs no
+accessibility engine. **"Covered by the component tests" is not accessibility coverage**, and that
+sentence is now corrected in `surfaces.ts` itself.
+
+### What was built
+
+`e2e/mutation/imports-session-a11y.spec.ts` — in the suite that IS allowed to POST, following the
+precedent `run-overrides.spec.ts` set. It drives a real session on a real backend through **four
+states** and requires each axe-**CLEAN** rather than recording a baseline:
+
+| # | State | Distinct? (measured) |
+|---|---|---|
+| 1 | session open, Sources empty | `main` 6,690 chars, no table |
+| 2 | one entry in the Sources table | 7,034 chars, table present |
+| 3 | after Read the Sources | 8,056 chars, Reconstruct now enabled |
+| 4 | after Reconstruct Candidates | three new headings appear |
+
+**Result: clean at all four.** Adding `imports-session` to `SURFACES` instead was rejected for a
+stated reason — it would enrol the state in THIRTEEN sweeps across seven viewport projects, each
+needing the POST the read-only config forbids.
+
+### *** THE WAIT I WROTE FOR STEP 4 WAS TRUE BEFORE THE CLICK, AND THE SUITE WAS GREEN ***
+
+The first version waited on `heading /Candidates/i`. That matched **"Reconstruct Candidates"** — the
+step's own heading, present *before* pressing it. So the wait was satisfied instantly and step 4
+re-scanned step 3 while reporting itself as the reconstruction. **Two tests passed. Nothing failed.**
+
+It was caught by a throwaway probe that printed, at every step, the `main` length, the table count,
+whether Reconstruct was enabled, and every heading — not by any test. The probe also showed step 4's
+`main` collapsing to **843 characters**, which is what first made me look: that is not a
+reconstruction result, it is a state sampled before the fetch landed.
+
+**The fix is not just a better selector.** The three real post-reconstruction headings are
+`Ready for your review`, `Read, with nowhere to write` and `Read, but not recognised`, and the spec
+now asserts the first is **absent before the click** — a negative control, so that if a future
+change renders it early the spec goes RED instead of quietly measuring the wrong state again.
+
+**Durable rule: a wait is an assertion about a STATE CHANGE, and it is only evidence if it was false
+beforehand. A green suite says nothing about whether its waits ever waited.**
+
+### Both directions mutation-tested
+
+- An unlabelled `<button>` injected into the session view → **`[critical] button-name`**, caught.
+- An `<img>` with no `alt` injected into the **post-reconstruction branch only** → **`[critical]
+  image-alt`**, caught, and the failure names *"after candidates are reconstructed"* — which proves
+  step 4 now genuinely reaches the reconstruction output rather than re-scanning step 3.
+
+Each applied under an `assert count == 1` and reverted `cmp`-clean.
+
+---
+
 ## CONTINUATION PROTOCOL
 
 Every future session starts here, in this order:

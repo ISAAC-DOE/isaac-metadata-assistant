@@ -114,13 +114,24 @@ export const SURFACES: readonly Surface[] = [
      * all measure a skeleton and report it as this surface. `Imports` is inside
      * the `status === 'data'` branch and cannot render before the fetch settles.
      *
-     * WHAT THIS SURFACE DELIBERATELY DOES NOT COVER: an OPEN session. Reaching
-     * one needs a POST (`Start an Import` creates a working area), and this suite
-     * is read-only by construction — `playwright.mutation.config.ts` exists for
-     * exactly that reason and has its own backend and its own workspace. So the
-     * sweep covers the list state, and the session state is covered by the
-     * component tests (`src/__tests__/historical-import.test.tsx`, 37 cases).
-     * Stated rather than left as an unexplained gap.
+     * WHAT THIS SURFACE DOES NOT COVER, AND WHERE THAT NOW LIVES: an OPEN
+     * session. Reaching one needs a POST (`Start an Import` creates a working
+     * area), and this suite is read-only by construction.
+     *
+     * *** THAT GAP IS CLOSED AS OF 2026-09-13 (finding M-11), in the suite that
+     * IS allowed to POST: `e2e/mutation/imports-session-a11y.spec.ts`. *** It
+     * drives a real session through all four states — empty Sources, Sources
+     * with an entry in its table, after the sources are read, and after
+     * candidates are reconstructed — and requires each axe-CLEAN. So the
+     * sentence this paragraph used to end on is no longer the whole story: the
+     * component tests (`src/__tests__/historical-import.test.tsx`) still cover
+     * behaviour, but they run in jsdom, which computes no colours and runs no
+     * accessibility engine. Do not read "covered by the component tests" as
+     * accessibility coverage anywhere in this file.
+     *
+     * The split is deliberate rather than incidental: adding `imports-session`
+     * to `SURFACES` would enrol it in THIRTEEN sweeps across seven viewport
+     * projects, every one of which needs the POST this config forbids.
      */
     id: 'imports',
     name: 'Historical Import (ordinary, no sessions)',
