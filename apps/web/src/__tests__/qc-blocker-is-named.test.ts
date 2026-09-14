@@ -27,12 +27,24 @@
 import { describe, expect, it } from 'vitest';
 import { pendingItemToBlocker, pendingSummary } from '../lib/adapt';
 
+/**
+ * The server's own question, held as its own typed constant.
+ *
+ * NOT read back out of `QC_ITEM`, and that is a fix rather than a preference:
+ * `QC_ITEM` is `as never` so it satisfies the API item type without restating it,
+ * which means indexing it yields `never` — and `never.toLowerCase()` is
+ * `error TS2339`. CI's Build step caught exactly that while all 224 test files
+ * passed, because `vitest` type-checks nothing. A separate constant is both
+ * type-safe and clearer about what the assertion below is comparing.
+ */
+const QC_QUESTION =
+  'What is the QC verdict for this measurement (valid/compromised/failed/pending) and how was it determined?';
+
 /** The shape `serialize.pending_to_list` serves for a created record's qc question. */
 const QC_ITEM = {
   id: 'qc',
   kind: 'qc',
-  question:
-    'What is the QC verdict for this measurement (valid/compromised/failed/pending) and how was it determined?',
+  question: QC_QUESTION,
   about: 'qc_status',
 } as never;
 
@@ -100,7 +112,7 @@ describe('a qc blocker is named, not title-cased or quoted whole', () => {
     // `inferability.py:798` already say to a scientist. A label may not invent a
     // term, and this one does not.
     for (const word of EXPECTED.toLowerCase().split(' ')) {
-      expect(QC_ITEM['question' as keyof typeof QC_ITEM].toLowerCase()).toContain(word);
+      expect(QC_QUESTION.toLowerCase()).toContain(word);
     }
   });
 });
