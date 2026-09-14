@@ -55,6 +55,32 @@ import { join, relative, resolve } from 'node:path';
 
 const SRC = resolve(__dirname, '..');
 
+/*
+ * `e2e/` IS SWEPT TOO, since 2026-09-14, and the reason it is a separate root
+ * rather than a wider `resolve(__dirname, '../..')` is that the two trees are
+ * different environments with different consequences.
+ *
+ * WHAT THIS CLOSES. The ledger row for `QA-022` said "a tree-wide sweep for the
+ * broken form is NOT done". That was half true and the wrong half was load
+ * bearing: the sweep existed but was rooted HERE, at `apps/web/src`, so a
+ * Playwright spec could have carried either broken form indefinitely and this
+ * file would have gone on reporting a clean tree.
+ *
+ * IT IS A RATCHET, NOT A FIX, and that is stated rather than implied: measured
+ * on the day it was added, `e2e/` contains ZERO occurrences of either form. So
+ * nothing is repaired here — what changes is that the NEXT one fails a test
+ * instead of passing silently.
+ *
+ * WHY IT MATTERS IN A BROWSER TREE AT ALL, since `Storage.prototype` patching is
+ * a jsdom concern: a Playwright spec runs its assertions in Node while the page
+ * runs in Chromium, so `vi.spyOn(window.localStorage, …)` there is worse than
+ * ineffective — `window` is not even the page's window. A spec written that way
+ * would assert over the TEST process's storage and pass while measuring nothing
+ * about the app. The ban is the same; the failure mode is one level more
+ * confusing.
+ */
+const E2E = resolve(__dirname, '../../e2e');
+
 function sourceFiles(dir: string): string[] {
   const out: string[] = [];
   for (const entry of readdirSync(dir)) {
@@ -150,6 +176,43 @@ describe('storage mocks must actually intercept', () => {
     // The exemption must have been USED, or its path has drifted and this sweep is
     // quietly exempting nothing while claiming to exempt one file.
     expect(exempted, `the self-exemption path no longer matches any file: ${SELF}`).toBe(1);
+  });
+
+  it('no file under e2e/ does either, and the walk is not vacuous', () => {
+    /*
+     * A SECOND ROOT WITH ITS OWN VACUITY GUARD, because a sweep that silently
+     * walks nothing is the exact defect this file exists to prevent — and the
+     * `src/` guard below cannot speak for this tree. The threshold is
+     * deliberately low (`> 40`): it must catch a broken walk, not encode today's
+     * file count, and `e2e/` held 60+ TypeScript files when this was written.
+     *
+     * NO SELF-EXEMPTION HERE, and that is meaningful rather than an omission:
+     * this file lives under `src/`, so nothing in `e2e/` is allowed to carry the
+     * banned form for any reason.
+     */
+    const files = sourceFiles(E2E);
+    expect(files.length, 'the e2e walk found almost nothing — it is broken').toBeGreaterThan(40);
+
+    const offenders: string[] = [];
+    for (const file of files) {
+      const body = withoutComments(text(file));
+      for (const [label, re] of [
+        ['instance spy', INSTANCE_SPY],
+        ['assignment over a method', INSTANCE_ASSIGN],
+      ] as const) {
+        const hits = body.match(re);
+        if (hits) {
+          offenders.push(`${relative(E2E, file)}: ${label} (${hits.length}) — ${hits[0]!.trim()}`);
+        }
+      }
+    }
+    expect(
+      offenders,
+      'in a Playwright spec this is worse than ineffective: the assertions run in ' +
+        'Node, so `window.localStorage` there is the TEST process\'s storage and not ' +
+        "the page's. Drive the page's storage through `page.evaluate` or " +
+        '`addInitScript`, never through a spy in the runner.',
+    ).toEqual([]);
   });
 
   it('POLARITY CONTROL — the two ban patterns actually MATCH the forms they forbid', () => {
