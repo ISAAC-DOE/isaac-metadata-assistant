@@ -799,8 +799,23 @@ describe('the a11y baseline file is well-formed', () => {
     // `A11Y_BASELINE` were emptied, or an early `return` crept in. The floor is
     // deliberately far below the real figure rather than pinned to it, so
     // ordinary baseline edits do not churn this number.
+    //
+    // 50 -> 20, 2026-09-13, AND THE DIRECTION IS WHY IT IS SAFE. Closing
+    // A11Y-01 cause (b) took 21 cells to zero, and a cell at zero is DELETED
+    // rather than recorded — so the key count fell 63 -> 42 and crossed a floor
+    // that had been chosen as "far below". Lowering it is not weakening the
+    // guard: this test protects against the AUDIT going silent, not against the
+    // baseline being small, and a smaller baseline is the whole point of the
+    // work. 20 restores the intended margin under 42.
+    //
+    // NAMED SO THE NEXT READER DOES NOT RE-DERIVE IT: this floor is on a
+    // collision course with success. If every recorded failure is eventually
+    // fixed the real figure reaches 0, and no positive floor can survive that.
+    // At that point the right guard is "the audit examined every surface x
+    // project pair", not "the baseline is big" — a change worth making when the
+    // number next gets close, not pre-emptively now.
     expect(A11Y_BASELINE.length).toBeGreaterThan(0);
-    expect(a11yBaselineKeys().length).toBeGreaterThan(50);
+    expect(a11yBaselineKeys().length).toBeGreaterThan(20);
   });
 });
 

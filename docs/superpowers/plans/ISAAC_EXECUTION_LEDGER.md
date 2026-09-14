@@ -3141,6 +3141,205 @@ earlier run that had written the same path. Same family as the launcher-exit tra
 
 ---
 
+## *** `A11Y-01b` CLOSED + `M-4` CLOSED — the last two opacity composites, and two controls that could not fail ***
+
+### `A11Y-01b` — cause (b) of `A11Y-01` is closed, all three sites
+
+| | Shipped | Now |
+|---|---|---|
+| `queue.css .exp-row.done` | `opacity: 0.82` | removed; de-emphasis by the token ramp |
+| `signals.css .advisory-nongating` | `opacity: 0.85` | removed; the ink already cleared AA alone |
+
+**MEASURED OUTCOME, by the full a11y sweep and not by arithmetic: 21 baseline cells reached ZERO** —
+seven viewports each of `experiments-example` (2 → 0), `export-readiness` (1 → 0) and
+`export-readiness-done` (1 → 0) = **28 violating nodes**. `A11Y_BASELINE_TOTAL_NODES` **857 → 829**,
+and the number written is the sum the invariant recomputes from the entry map, not `857 − 28`. Four
+colours left the `foregrounds` allowlist, which makes that guard **stricter**: a colour no longer
+reachable must not stay on an allowlist.
+
+**THE GUARD NAMED AN ELEMENT THAT NEVER RENDERS.** `palette-contrast.test.ts` recorded
+`.exp-row.done`'s ink as `--text-tertiary` compositing to `#7e868f` (3.69:1), reached through
+`.exp-id`'s `--text-quaternary`. **`.exp-id` is dead CSS — zero `.tsx` mentions.** That is why
+`#7e868f` appeared nowhere in `a11y-baseline.ts` while the site's real failing nodes did (`#777f89`
+on `.chip-exported > span` 3.91:1, `#778493` on `.exp-sub > time` 3.42:1 — the second computed here
+independently as 3.44:1 before the file was read). **The formula was right and the attribution was
+wrong; a computed composite for an unrendered selector reads as evidence and is not one.**
+
+**A DEFERRAL WAS HONOURED RATHER THAN OVERRIDDEN.** `queue.css` recorded *"Not removing the
+opacity … that is a palette-wide decision across three sites with its own visual argument … Taking
+it inside a feature PR would decide it by accident."* That was right, and this is the slice it asked
+for: all three sites together, every replacement colour computed, the whole sweep re-run. The
+deferral's prediction that the last two were "NOT the same shape" as `.upcoming-row` was **right
+about the reasoning and wrong about the difficulty** — `.advisory-nongating` needed nothing but the
+deletion.
+
+**The replacements hold the APPEARANCE, not merely the threshold:** the six `.exp-row.done`
+descendants were `--text-secondary` faded to `#67707c` (5.02:1) and are now `--text-tertiary`
+`#626c77` (5.34:1) unfaded — within a hair, so the row looks the same. `.exp-title` steps *down* one
+rung rather than springing back to full heading ink, because the opacity was the only thing keeping
+a completed row quieter than a live one.
+
+**The guard is retired into a two-way ratchet**, exactly as its own failure message instructed
+(*"retired deliberately rather than left asserting a defect that no longer exists"*): three closed
+sites that must not reacquire an opacity, plus a **counterfactual** — each removed alpha, re-applied
+to the ink the rule paints *today*, must still fail — so the record that these were defects is
+mechanical rather than prose, and survives a palette change.
+
+### A TEST-COUNT RECONCILIATION CAUGHT TWO TESTS I DELETED BY ACCIDENT
+
+The suite went **5,883 → 5,880** when the arithmetic said −1. A block replacement had taken two
+tests it did not mean to, and **the suite stayed green, because deleting a passing test never turns
+anything red.** Both were restored. They were not incidental: `styles/tokens.css` says
+*"`palette-contrast.test.ts` re-derives all three thresholds by search and asserts both orderings"*,
+so deleting them would have left a committed citation pointing at nothing — and they carry the
+correction to a claim ("darkening a token cannot reach them") that was published in four places and
+is arithmetically false, which now has no other home. Final: 35 − 3 retired + 2 added = **34**, and
+the suite reconciles exactly at **5,882**.
+
+**The durable rule: a shrinking test count is a finding, not a rounding error. Reconcile it.**
+
+### `M-4` — two "MUTATION CONTROL" tests were tautologies, and both now drive the real code
+
+| Test | Was | Now |
+|---|---|---|
+| `test_the_outbound_control_can_actually_fail` | `assert "httpx" in " ".join(["import httpx", …])` | drives `_outbound_imports`, the function the guard itself calls |
+| `test_the_no_experiment_DELETE_predicate_can_actually_fail` | `assert "/experiments" in forbidden` | drives `_published_deletes` + `_deletes_addressed_to_an_experiment` over a synthetic OpenAPI document |
+
+Each old version asserted that a string literal contains its own substring. **Neither called the
+function it claimed to control**, so an extraction that returned `[]` for every input would have
+left both green — the exact vacuity a control exists to rule out. The extraction and the predicate
+were inline in the guards and re-implemented as literals in the controls, which is *how* they became
+tautologies; both are now shared functions.
+
+**PROVEN, not asserted:** with each real function stubbed to `return []`, both controls now **FAIL**
+(measured, then reverted with `cmp`). Each also carries a negative control so it cannot be passing
+because the function returns its input.
+
+**Writing one of them found a real property I had wrong:** `_outbound_imports("import httpx")`
+returns `["http", "httpx"]`, not `["httpx"]`, because the names are banned as **substrings**. The
+over-match is correct for a ban list. The first draft of the control expected one element and
+failed — the first useful thing that test has ever done.
+
+### Two ledger rows were stale and are corrected
+
+- **`QA-022` — the tree-wide sweep IS done.** The residue table says *"A tree-wide sweep for the
+  broken form is NOT done"*. `src/__tests__/storage-mock-is-effective.test.ts` exists with a
+  polarity control and a vacuity guard; the only surviving matches in the tree are its own
+  self-exemption and a comment in `current-user-contract.test.ts` documenting the fixed defect.
+- **`QA-023`'s `aria-prohibited-attr` count is 86, not 113**, re-measured at this head over all 28
+  surfaces at `desktop-1280x800` — see the next section.
+
+### Verification
+
+| Check | Result |
+|---|---|
+| `npx vitest run` (apps/web) | **218 files / 5,882 tests, exit 0** |
+| `npx tsc -b` | exit 0 |
+| a11y axe + narrow, full sweep | 21 `FIXED?` movements, all transcribed; re-run clean |
+| `pytest` (main checkout) | see the commit — run after the tree settled |
+| snapshot, both artifacts | no drift (none of this slice's files are manifest-listed) |
+
+**Linux CI is the authority and has not yet spoken.** The linux column is written equal to darwin
+and that is marked in the file as a **prediction**: all 21 cells were already scalars, and what was
+removed is a CSS declaration rather than a platform-dependent rendering, so there is no mechanism
+for the columns to diverge — but that is reasoning, not a reading.
+
+### A floor guard moved, and the direction is why it is safe
+
+`a11yBaselineKeys().length > 50` → `> 20`. Closing cause (b) took the key count **63 → 42**, because
+a cell at zero is deleted rather than recorded. The guard protects against the **audit** going
+silent, not against the baseline being small, and a smaller baseline is the point of the work. Named
+in the file: **this floor is on a collision course with success** — if every recorded failure is
+eventually fixed no positive floor survives, and the right guard then is "the audit examined every
+surface × project pair".
+
+---
+
+## *** `QA-023` CLOSED — 88 accessible names that were announced to NOBODY, and the sweep was green throughout ***
+
+### THE DEFECT
+
+A bare `<span>` or `<div>` has the implicit ARIA role **`generic`**, and the ARIA spec **prohibits
+naming a `generic`**. The browser computes the `aria-label`, then discards it. Every one of these is
+a place where an author wrote a sentence for a screen-reader user and **the sentence reached nobody.**
+
+Measured with an instrumented axe run over all 28 surfaces at `desktop-1280x800` (temporary probe,
+run and removed, not committed):
+
+```
+before   QA023_TOTAL=86
+         {evidence:66, record-detail:3, record-runs:3, record-capture:3, record-graph:3,
+          export-readiness:3, export-readiness-done:3, guided-completion:1, memory:1}
+after    QA023_AFTER_TOTAL=0   {}
+```
+
+| Count | Element | What was lost |
+|---:|---|---|
+| 34 | `.prov-pair` | "Where this came from, and what establishes it" |
+| 31 | `.evclass-sources` | "Safe source references" |
+| 18 | `.statusbar-seg` ×3 | "Validation / Coverage / Advisory signal" |
+| 2 | `.graph-chip` | "memory plane, advisory only, never a validator" |
+| 1 | `.guided-suggestion` | "Example answer suggestion" |
+| **+2** | `.conflict-sources`, `.conflict-decision` | **found by the SOURCE SCAN, not the probe** |
+
+**Two of these are claims this repository cares about specifically.** `ProvenanceChips`' own
+docstring says a screen-reader user *"hears which chip answers which question rather than two
+adjacent adjectives"* — which is exactly what did not happen. And `GraphStatusChip`'s lost label is
+the **§7 memory-plane disclaimer**: *advisory only, never a validator.*
+
+**The fix is `role="group"` on all eight** — ARIA's role for a set of UI objects not included in the
+page summary. It permits a name and adds **no** behaviour, no required children, no keyboard
+semantics. Measured: **86 → 0**, and the full seven-viewport sweep reports **zero movements**,
+because `role="group"` introduces no violations either.
+
+### WHY NO EXISTING GUARD SAW 86 NODES — AND WHY THE SWEEP STAYING GREEN IS THE POINT
+
+`e2e/specs/a11y-axe.spec.ts` reads **`results.violations` only**. axe reports this rule as
+**`incomplete`** — a third bucket, neither pass nor fail, that nothing in this repository reads. So
+the sweep was green before the fix and is green after it, and **its greenness was never evidence
+about this class at all.** A guard that reads one bucket is evidence about that bucket and nothing
+else.
+
+### THE SOURCE SCAN FOUND TWO THE RUNTIME PROBE COULD NOT
+
+`src/__tests__/aria-name-reaches-someone.test.ts` scans every `.tsx` under `src/` for a
+`<span>`/`<div>` carrying `aria-label`/`aria-labelledby` without a `role`. It found
+`ConflictResolutionPanel`'s two — which the axe probe **never saw**, because a conflict panel only
+renders when a record actually has a competing decision, and no scanned surface does. **A runtime
+probe measures the paths it can reach.**
+
+The guard carries a **polarity control** (four real forbidden shapes including a multi-line one, five
+real allowed shapes including `role="region"` and a `<button>`) and a **vacuity guard** (>100 files,
+>1,000 tags). **Both directions were mutation-tested**: deleting one `role="group"` from
+`ProvenanceChips` fails it by name, and neutering `NAMING_ATTR` fails the polarity control — each
+applied under an `assert count == 1` and reverted with `cmp`.
+
+### WHY A SOURCE SCAN RATHER THAN WIDENING THE SWEEP TO READ `incomplete`
+
+Declined for a stated reason, not for convenience. `incomplete` also holds **60 `color-contrast`
+nodes that are genuinely undecidable** — axe cannot resolve a background over an SVG chart or a
+canvas — so adopting the whole bucket would import 60 entries that can never reach zero and would
+teach a reader to ignore it. This scan takes the one rule whose `incomplete` verdict is
+deterministic from source; the other 60 stay measured and named.
+
+### The recorded count was 113 and is 86
+
+Re-measured at this head over 28 surfaces. The ledger's 113 is not re-derivable here; the difference
+is not investigated and is **not claimed to be a regression fixed in between** — the honest entry is
+that 86 is what this head measures, with the command recorded.
+
+### Verification
+
+| Check | Result |
+|---|---|
+| axe probe, before / after | **86 → 0** across 28 surfaces |
+| a11y axe + narrow, full sweep | **206 passed**, zero movements |
+| guard, both mutation directions | fails as designed; reverted `cmp`-clean |
+| `npx tsc -b` | exit 0 |
+| frontend + backend suites, snapshot | see the commit |
+
+---
+
 ## CONTINUATION PROTOCOL
 
 Every future session starts here, in this order:

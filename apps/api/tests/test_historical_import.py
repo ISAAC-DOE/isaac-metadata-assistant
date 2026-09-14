@@ -746,34 +746,72 @@ def test_the_module_can_make_no_outbound_request_of_any_kind():
     implementation wired by configuration that does not exist and is not
     authorized (Dean deferred D1-D9).
     """
-    src = Path(hi.__file__).read_text(encoding="utf-8")
+    offenders = _outbound_imports(Path(hi.__file__).read_text(encoding="utf-8"))
+    assert offenders == [], f"outbound-capable imports: {offenders}"
+
+
+# The extraction and the ban, as ONE function, so the control below can drive the
+# REAL thing. It used to be inline here and the control re-implemented it as a
+# literal, which is how that control became a tautology (see M-4).
+_OUTBOUND_NAMES = (
+    "http",
+    "urllib",
+    "requests",
+    "socket",
+    "httpx",
+    "aiohttp",
+    "ssl",
+    "asyncio",
+    "subprocess",
+    "anthropic",
+    "openai",
+    "providers",
+)
+
+
+def _outbound_imports(src: str) -> list[str]:
+    """Every import line in ``src`` that names an outbound-capable module."""
     imports = [
         line.strip()
         for line in src.splitlines()
         if line.startswith(("import ", "from ")) and "import" in line
     ]
     joined = " ".join(imports)
-    for banned in (
-        "http",
-        "urllib",
-        "requests",
-        "socket",
-        "httpx",
-        "aiohttp",
-        "ssl",
-        "asyncio",
-        "subprocess",
-        "anthropic",
-        "openai",
-        "providers",
-    ):
-        assert banned not in joined, f"{banned!r} is imported: {imports}"
+    return [name for name in _OUTBOUND_NAMES if name in joined]
 
 
 def test_the_outbound_control_can_actually_fail():
-    """MUTATION CONTROL. A predicate over a list that never held the names passes
-    trivially; prove it fires on the line a future slice would add."""
-    assert "httpx" in " ".join(["import httpx", "from . import workspace as ws"])
+    """MUTATION CONTROL, AND IT WAS A TAUTOLOGY UNTIL 2026-09-13 (finding M-4).
+
+    ~~``assert "httpx" in " ".join(["import httpx", ...])``~~ asserted that a
+    string literal contains its own substring. It exercised no part of the guard
+    above: an extraction that returned ``[]`` for every input would have left it
+    green, which is exactly the vacuity the control exists to rule out.
+
+    It now drives ``_outbound_imports`` — the SAME function the guard calls — over
+    a synthetic module, and additionally proves the extraction is not simply
+    matching anywhere in the text.
+    """
+    # `["http", "httpx"]`, not `["httpx"]`, and the over-match is CORRECT: the
+    # names are banned as SUBSTRINGS, so `import httpx` trips `http` too. Writing
+    # this control found that out — the first draft expected `["httpx"]` and
+    # failed, which is the first useful thing this test has ever done.
+    assert _outbound_imports("import httpx\nfrom . import workspace as ws\n") == [
+        "http",
+        "httpx",
+    ]
+    # Two unrelated names at once, in DECLARED order, so the return is a real
+    # projection over the ban list and not a first-hit short circuit.
+    assert _outbound_imports("import socket\nimport subprocess\n") == [
+        "socket",
+        "subprocess",
+    ]
+    # A NEGATIVE CONTROL for the control: a clean module yields nothing, so the
+    # test above cannot be passing because the function returns the ban list.
+    assert _outbound_imports("from . import workspace as ws\n") == []
+    # And the extraction reads IMPORT LINES, not the whole file — a banned name in
+    # a comment or a string is not an import and must not be reported.
+    assert _outbound_imports("# we deliberately do not import httpx here\n") == []
 
 
 def test_an_import_session_is_stored_where_no_experiment_read_can_reach_it(workspace):

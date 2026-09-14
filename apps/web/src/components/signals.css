@@ -249,10 +249,20 @@
   font-weight: 600;
   color: var(--advisory-text);
 }
+/*
+ * A11Y-01b, CLOSED 2026-09-13. ~~`opacity: 0.85`~~ composited
+ * `--advisory-text` #8a6420 onto `--advisory-bg` #f9f1df as #9b793d —
+ * **3.59:1 at 10.5px**, a [serious] AA failure carried in
+ * `e2e/a11y-baseline.ts`'s `foregrounds` allowlist. The ink clears AA on that
+ * tint on its own at **4.76:1**, and `--advisory-text` was darkened in P23C
+ * expressly to do so: the opacity was undoing the fix that token exists for.
+ *
+ * The de-emphasis this rule wants is already carried by the 10.5px size and by
+ * the wording. It does not need a second, uncontrolled dimming on top.
+ */
 .advisory-nongating {
   font-size: 10.5px;
   color: var(--advisory-text);
-  opacity: 0.85;
 }
 .advisory-code {
   margin-top: 10px;

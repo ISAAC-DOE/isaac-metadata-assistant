@@ -52,8 +52,28 @@ export function ProvenanceChipPair({
   origin: ProvenanceOrigin;
   reviewState: ProvenanceReviewState;
 }) {
+  /*
+   * `role="group"` IS LOAD-BEARING, not decoration. A bare `<span>` has the
+   * implicit role `generic`, and ARIA PROHIBITS naming a `generic` — so the
+   * `aria-label` below was computed, then discarded, and announced to nobody.
+   * The docstring above says a screen-reader user "hears which chip answers
+   * which question rather than two adjacent adjectives"; without a role that
+   * permits a name, that is exactly what did NOT happen.
+   *
+   * Measured, not assumed: axe reported this element under
+   * `aria-prohibited-attr` as INCOMPLETE — a bucket the a11y sweep does not
+   * read, which is why 34 instances of this one node shipped unnoticed
+   * (QA-023). `group` is the right role rather than the convenient one: it is
+   * ARIA's role for a set of UI objects not included in the page summary, it
+   * permits a name, and it adds no behaviour, no required children and no
+   * keyboard semantics.
+   */
   return (
-    <span className="prov-pair" aria-label="Where this came from, and what establishes it">
+    <span
+      className="prov-pair"
+      role="group"
+      aria-label="Where this came from, and what establishes it"
+    >
       <OriginChip origin={origin} />
       <ReviewStateChip state={reviewState} />
     </span>

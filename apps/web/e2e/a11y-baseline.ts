@@ -402,14 +402,24 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
       'itself darkened in P23C expressly for AA) renders #9b793d under ' +
       '`signals.css:199 .advisory-nongating { opacity: .85 }`; --text-tertiary renders ' +
       '#8e98a2 under the same .done rule. Darkening the tokens will NOT fix these — the ' +
-      'opacity has to go. *** AND ON 2026-09-13 ONE OF THE THREE SITES WENT: ' +
-      '`assistant.css .upcoming-row { opacity: .72 }` is REMOVED, so --text-secondary no ' +
-      'longer renders #777f8a there and --text-quaternary no longer renders #b3bbc4/#8b939b. ' +
-      'Deleting the declaration was the entire fix — both tokens clear AA uncomposited, so no ' +
-      'colour changed and the token ramp carries the recession. Two sites of cause (b) remain, ' +
-      'and they are NOT the same shape: .exp-row.done also dims borders and a disc, and ' +
-      '.advisory-nongating dims a SATURATED ink on a tinted ground that no neutral-ramp ' +
-      'reasoning reaches. *** (c) Two saturated category/status colours that land just under AA ' +
+      'opacity has to go. *** AND ON 2026-09-13 ALL THREE SITES WENT — CAUSE (b) IS CLOSED. ' +
+      'First `assistant.css .upcoming-row { opacity: .72 }`, then, in a slice of its own, ' +
+      '`queue.css .exp-row.done { opacity: .82 }` and ' +
+      '`signals.css .advisory-nongating { opacity: .85 }`. The earlier note said the ' +
+      'remaining two were NOT the same shape as the first, and that was right about the ' +
+      'REASONING and wrong about the REMEDY: .exp-row.done needed its six recoloured ' +
+      'descendants returned from --text-secondary to --text-tertiary (the rung they were ' +
+      'raised off ONLY because the dim cost one) plus explicit colours for .exp-title and ' +
+      '.exp-date, while .advisory-nongating needed nothing but the deletion, because ' +
+      '--advisory-text clears AA on its own tint at 4.76:1. MEASURED, not predicted: 21 ' +
+      'cells reached ZERO on darwin — seven each of experiments-example (2 -> 0), ' +
+      'export-readiness (1 -> 0) and export-readiness-done (1 -> 0), i.e. 28 violating ' +
+      'nodes — and four colours left `foregrounds`. One attribution was also WRONG and is ' +
+      'corrected: palette-contrast.test.ts recorded the .exp-row.done ink as ' +
+      '--text-quaternary via `.exp-id`, which is DEAD CSS with zero .tsx mentions, which is ' +
+      'why its composite #7e868f appears nowhere in this file while the real nodes ' +
+      '(#777f89 on .chip-exported > span, #778493 on .exp-sub > time) do. *** ' +
+      '(c) Two saturated category/status colours that land just under AA ' +
       'at small sizes: --verified-text #2f7d78 on the #e6f1f0 chip tint ' +
       '(4.2:1, 265 occurrences) and --src-derivation #7a6bb0 (4.25:1, 15). ' +
       'Measured range across all 43 (fg, bg, size) combinations: 1.56:1 to 4.25:1, all ' +
@@ -431,10 +441,6 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
       // themselves are unchanged, and so are these two failing colours.
       '#2f7d78', // --verified-text
       '#7a6bb0', // --src-derivation
-      '#8e98a2', // --text-tertiary   @ opacity .82  (.exp-row.done)
-      '#777f89', // --text-muted      @ opacity .82  (.exp-row.done)
-      '#778493', // --text-slate      @ opacity .82  (.exp-row.done)
-      '#9b793d', // --advisory-text   @ opacity .85  (.advisory-nongating)
       // ── REMOVED 2026-09-13, A11Y-01 cause (b), ONE SITE CLOSED. Three entries
       //    left this list, and REMOVING them makes the guard STRICTER rather than
       //    looser: `foregrounds` is an allowlist of colours axe is permitted to
@@ -850,16 +856,6 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
        * `.done` and cannot reach `.chip-exported`/`time`) was right about WHICH
        * nodes it could reach and wrong about how many of them were already failing.
        */
-      'experiments-example@desktop-1280x800': 2,
-      'experiments-example@laptop-1024x768': 2,
-      'experiments-example@tablet-768x1024': 2,
-      'experiments-example@mobile-375x812': 2,
-      'experiments-example@zoom-200': 2,
-      'export-readiness@desktop-1280x800': 1,
-      'export-readiness@laptop-1024x768': 1,
-      'export-readiness@tablet-768x1024': 1,
-      'export-readiness@mobile-375x812': 1,
-      'export-readiness@zoom-200': 1,
       // R1b: the `.verdict-cmd mono` block that rendered
       // `isaac validate --official · exit N` is GONE (a fabricated CLI transcript —
       // no process produced it), and it was a low-contrast node axe counted here.
@@ -914,8 +910,6 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
       // interesting part is that linux has now converged ON darwin's number, which
       // is what you would expect if the merge that produced 12 stopped happening.
       // Only the LINUX total moves; darwin's stays.
-      'export-readiness-done@desktop-1280x800': 1,
-      'export-readiness-done@laptop-1024x768': 1,
       // The two pairs where LINUX HAS FEWER nodes: the wider face pushes two
       // fragments onto one line, so axe sees one text node instead of two.
       // Linux 11 -> 12, MEASURED by CI run 30691557697 on `7e9a387`; the split
@@ -924,9 +918,6 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
       // previously could not, so a pre-existing failure moved from `incomplete`
       // into `violations`. Linux only, because 768 is inside the band the
       // compact treatment moved into and the wider Linux face changes what fits.
-      'export-readiness-done@tablet-768x1024': 1,
-      'export-readiness-done@mobile-375x812': 1,
-      'export-readiness-done@zoom-200': 1,
       /* DISCARD SLICE, 2026-08-27: 10 -> 9. Linux measured by CI job 98470544956
          (IMPROVED, -1); darwin re-measured here the same day and agrees, so this
          stays a scalar — two measurements agreeing, not one assumed. Nothing on this
@@ -2091,12 +2082,6 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
          `a11y-narrow.spec.ts`, linux by Actions run 34762566061. See the dated
          block on the five viewport cells above for the divergence that caused the
          movement and for why these were briefly, wrongly, recorded as splits. */
-      'experiments-example@width-320': 2,
-      'experiments-example@width-390': 2,
-      'export-readiness-done@width-320': 1,
-      'export-readiness-done@width-390': 1,
-      'export-readiness@width-320': 1,
-      'export-readiness@width-390': 1,
       // COLLAPSED to a scalar 2026-08-25: linux 2 -> 1 joined darwin's 1, and the
       // guard rejects a pair whose halves are equal. See the `load@desktop-1280x800`
       // note for the layout-concealing-a-contrast-defect sequence.
@@ -3854,7 +3839,23 @@ export const A11Y_BASELINE_TOTAL_NODES: Readonly<Record<BaselinePlatform, number
   // borders and a numbered disc, the second dims a SATURATED ink on a TINTED ground
   // that no neutral-ramp reasoning reaches -- so this is one site closed, not a
   // precedent for sweeping the other two.
-  darwin: 857,
+  // ── 2026-09-13 · 857 -> 829, A11Y-01 CAUSE (b) IS NOW CLOSED ───────────────
+  // The remaining two ancestor-`opacity` rules were removed in a slice of their
+  // own: `queue.css .exp-row.done { opacity: .82 }` and
+  // `signals.css .advisory-nongating { opacity: .85 }`. 21 cells reached ZERO —
+  // seven each of `experiments-example` (2 -> 0), `export-readiness` (1 -> 0)
+  // and `export-readiness-done` (1 -> 0). 2 + 1 + 1 = 4 per viewport x 7 = 28,
+  // and 857 - 28 = 829 — but the number below is the SUM the invariant
+  // recomputes from the entry map, not that arithmetic, which is the rule this
+  // constant carries.
+  //
+  // DARWIN is measured on this host. The LINUX half is written EQUAL to it, and
+  // that is a PREDICTION rather than a reading, marked as one here because this
+  // file's whole discipline is that the two are different things: all 21 cells
+  // were already SCALARS (the faces agreed before the change), and what was
+  // removed is a CSS declaration rather than a platform-dependent rendering, so
+  // there is no mechanism by which the columns could diverge here. CI adjudicates.
+  darwin: 829,
   // ── MERGED: PROPOSALS + CHANGE FEED, 2026-08-30: darwin 2282 -> 2289. ──
   //
   // TWO SLICES MOVED THE SAME SEVEN CELLS FROM THE SAME BASE, and this file now
@@ -4341,7 +4342,23 @@ export const A11Y_BASELINE_TOTAL_NODES: Readonly<Record<BaselinePlatform, number
   // `guided-completion` cells were SCALARS, so they counted in this sum too. The
   // figure follows the declared entries; a LINUX RUN HAS NOT MEASURED IT, and CI
   // will red the build if linux disagrees.
-  linux: 857,
+  // ── 2026-09-13 · 857 -> 829, A11Y-01 CAUSE (b) IS NOW CLOSED ───────────────
+  // The remaining two ancestor-`opacity` rules were removed in a slice of their
+  // own: `queue.css .exp-row.done { opacity: .82 }` and
+  // `signals.css .advisory-nongating { opacity: .85 }`. 21 cells reached ZERO —
+  // seven each of `experiments-example` (2 -> 0), `export-readiness` (1 -> 0)
+  // and `export-readiness-done` (1 -> 0). 2 + 1 + 1 = 4 per viewport x 7 = 28,
+  // and 857 - 28 = 829 — but the number below is the SUM the invariant
+  // recomputes from the entry map, not that arithmetic, which is the rule this
+  // constant carries.
+  //
+  // DARWIN is measured on this host. The LINUX half is written EQUAL to it, and
+  // that is a PREDICTION rather than a reading, marked as one here because this
+  // file's whole discipline is that the two are different things: all 21 cells
+  // were already SCALARS (the faces agreed before the change), and what was
+  // removed is a CSS declaration rather than a platform-dependent rendering, so
+  // there is no mechanism by which the columns could diverge here. CI adjudicates.
+  linux: 829,
   // 2026-08-30, ROUND TWO — CI's linux figures for the merged tree: 2287 -> 2291.
   //
   //   desktop-1280x800   59 -> 60   (+1)      laptop-1024x768   59 -> 60   (+1)

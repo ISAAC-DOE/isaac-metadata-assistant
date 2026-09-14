@@ -10452,11 +10452,11 @@
       },
       {
         "path": "apps/web/src/components/GraphStatusChip.tsx",
-        "sha256": "028ca7f50d7d0a751841aed0a8cc606ef6ecac6722df7af20a245677e404dccb"
+        "sha256": "85541855c01a7ad65dfc4025f5ca595a2ce8c39973ade39e82f05f10dc3d1bb7"
       },
       {
         "path": "apps/web/src/components/GuidedPrompt.tsx",
-        "sha256": "d221519190fefcd7bc75618cf414282d1ce98874dcb38fa149ec119d80685ba9"
+        "sha256": "88800eab4b4344efa822d34c7fc1936f4fd028f7a9d8323c4750b2a92871fbff"
       },
       {
         "path": "apps/web/src/components/HelpPanel.tsx",
@@ -10476,7 +10476,7 @@
       },
       {
         "path": "apps/web/src/components/StatusBar.tsx",
-        "sha256": "4252540f149f2dba1a9c5dcea2af85a12e48f3cefd75fd330a45737bb621b5d0"
+        "sha256": "3ceaab6a3805c74be58d1b300c53c234370a8af7a6c3a626fc4aef1141812c68"
       },
       {
         "path": "apps/web/src/components/StatusChip.tsx",
@@ -11012,7 +11012,7 @@
       }
     ],
     "served_file_count": 200,
-    "served_manifest_fingerprint": "cfd4c840c99ec9acf379542a1038ff7c8dd8f3da909f3eb9032fdcbccdcae113"
+    "served_manifest_fingerprint": "39bbca7ef22fd60c0f5b6b3137275070c063f5317aefdf768b45e1148c88ce9d"
   },
   "overview": {
     "built_at_commit": "caab1d0a69c1733524bda5dde495623bc4b7bad1",
