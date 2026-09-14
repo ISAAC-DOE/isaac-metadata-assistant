@@ -3534,6 +3534,61 @@ it past its own evidence at least once, and see what falls out.**
 
 ---
 
+## *** CI CAUGHT A11Y-01b, AND THE REASON IS THAT I RAN THE SPECS I PREDICTED, NOT THE SUITE ***
+
+`22a93726` went **red** on the Linux a11y job. Three of four CI jobs were green, including the
+**full backend suite** — which is the run that finally produced that figure, after three local
+attempts were defeated by machine conditions.
+
+### It was NOT a baseline movement, and the distinction matters
+
+The failing test is `self-check.spec.ts:354`, *"the a11y baseline reports ONE extra node of a rule
+it does allow here"*:
+
+```
+Error: this proof needs colour-contrast to be baselined here
+expect(expectedContrast).toBeGreaterThan(0);   Received: 0
+```
+
+That spec injects one extra low-contrast node into a surface where `color-contrast` **is** baselined
+and proves the audit reports it. Its fixture was **hardcoded** to `experiments-example` — the very
+surface A11Y-01b took to **zero**. Nothing was wrong with the fix, the baseline, or the 829 total.
+**The proof was pinned to a defect that got repaired.**
+
+### This is the hazard I wrote down that morning, arriving the same day in a different test
+
+`baseline-aggregate.invariant.test.ts` gained this note when its floor moved 50 → 20:
+
+> *this floor is on a collision course with success. If every recorded failure is eventually fixed
+> the real figure reaches 0, and no positive floor can survive that.*
+
+I named the hazard on the guard I was editing and did not look for **other** tests resting on the
+same assumption. There was one, and it was in the same directory.
+
+### The fix removes the hazard instead of deferring it by one surface
+
+`pickContrastBaselined(project)` chooses, at run time, the first surface whose `color-contrast`
+count is non-zero **for that project** — counts differ by viewport. If none remains it throws with
+instructions that say, explicitly, *do NOT re-introduce a defect to keep these proofs running*.
+Four surfaces still qualify (`evidence`, `memory`, `record-detail`, `settings-api`, five projects
+each), so the next contrast fix moves the fixture along rather than turning CI red.
+
+**Mutation-proven:** restoring the hardcoded `experiments-example` reproduces CI's exact error
+locally, on the exact line. Reverted `cmp`-clean.
+
+### THE PROCESS FAILURE, which is the part worth carrying forward
+
+After changing the palette I ran `a11y-axe.spec.ts` and `a11y-narrow.spec.ts` — **the two specs I
+predicted were affected.** `self-check.spec.ts` is in the same directory, in the same suite, and
+consumes the same baseline module, and I did not run it. The full read-only config takes about the
+same wall-clock as the two specs I chose.
+
+**Rule: after changing a baseline or a token, run the whole read-only config, not the specs you
+expect to move. The one that broke was the one testing that the baseline machinery still works —
+which is exactly the spec a baseline change is most likely to disturb.**
+
+---
+
 ## CONTINUATION PROTOCOL
 
 Every future session starts here, in this order:
