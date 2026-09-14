@@ -10336,15 +10336,15 @@
       },
       {
         "path": "apps/web/src/__tests__/assistant.test.tsx",
-        "sha256": "8f4a0b9dd4315cc3a83de9fabc5a433e0c1bb3281734a96e526f5ce6fba193ab"
+        "sha256": "f28cabe425be5a08d0ca54eb0c91b30b2d2af63bb155e6486d9c0fc3a2b0f9da"
       },
       {
         "path": "apps/web/src/__tests__/completion-export.test.tsx",
-        "sha256": "fedaadef976d051f5d20227ea914d0a0f68c062c8dc7748b95374f0538500d16"
+        "sha256": "ffa35ab24ace049b11cf954fe91e8afa27b938d9e31ff3377e6491fc704aa2e7"
       },
       {
         "path": "apps/web/src/__tests__/evidence.test.tsx",
-        "sha256": "2bbfc6a03b6629eca32cacbc8751cd9ec064f9d619ea485361dce724d3a1db65"
+        "sha256": "72a968838f65e06d245e805c028a3fff641fec16894110be9d3376120b77480d"
       },
       {
         "path": "apps/web/src/__tests__/help-and-honesty.test.tsx",
@@ -10376,7 +10376,7 @@
       },
       {
         "path": "apps/web/src/__tests__/memory-status.test.tsx",
-        "sha256": "081f40b3466c58a9002f7e0d797e1a4bfc02b08fef60012e7f8633a0ba51a383"
+        "sha256": "a5d9b0e33460be554a08c01eff85bc897b149d1bab26cffdc5f2a57f8ee91c77"
       },
       {
         "path": "apps/web/src/__tests__/modal-a11y.test.tsx",
@@ -10412,7 +10412,7 @@
       },
       {
         "path": "apps/web/src/components/AssistantPanel.tsx",
-        "sha256": "2659d0ad9e8678a8f614b94850c6488c8447430986676cfe1bcb11c649e72f24"
+        "sha256": "a54376a4829f37c73e9feb51c3309bbc63eaac08393cf4ae84ee21a6c5ffc92f"
       },
       {
         "path": "apps/web/src/components/CoverageBadge.tsx",
@@ -11012,7 +11012,7 @@
       }
     ],
     "served_file_count": 200,
-    "served_manifest_fingerprint": "4103bbd9375fb90564aec01c4eafe3ed78ebd8c3f4279ba69fb1e3895d90b098"
+    "served_manifest_fingerprint": "ef8609df075a66978125a5ef7b10821158e27ee9b1138fe765eca62e0a83c27b"
   },
   "overview": {
     "built_at_commit": "caab1d0a69c1733524bda5dde495623bc4b7bad1",

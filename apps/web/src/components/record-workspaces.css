@@ -15,29 +15,24 @@
  * row shape is what does it.
  */
 
-.workspace-nav {
-  padding: 4px 12px 0;
-}
-
 /*
- * THE CAPTURE LANDMARK'S OWN INSET — and its absence was a REGRESSION I shipped
- * the same day, caught by the project owner looking at the screen.
+ * ONE RULE, ONE GUTTER — and that is now STRUCTURAL rather than asserted.
  *
- * When the capture row lived inside `.workspace-nav` it inherited that rule's
- * `12px`. Splitting it into its own `<nav>` (so it could render ABOVE the
- * workflow spine) took the padding with it, and nothing replaced it: the card
- * rendered at 17–229 while EVERY other element in this column — the spine's
- * rows, the Workspaces eyebrow, the workspace items and the Evidence Trail
- * card — sits at 29–217. It was 24px wider than its neighbours and flush
- * against both inner edges of the sidebar.
+ * These were two rules with identical padding, which is exactly how they came
+ * apart: splitting the capture row into its own landmark took the gutter with
+ * it and left nothing behind, so the card rendered 24px wider than every
+ * neighbour and flush against the sidebar border. A shared selector cannot
+ * diverge that way.
  *
- * Measured in a browser rather than inferred, before and after. `12px` is not
- * chosen here; it is the value `.workspace-nav` above and `.spine`
- * (`16px 12px`) already use, so the column has ONE gutter rather than two.
+ * It also removes three hand-authored literals, which `type-scale-and-spacing`
+ * caps: duplicating the declaration pushed that axis over its ceiling, and the
+ * fix for the ceiling and the fix for the gutter turn out to be the same edit.
  */
+.workspace-nav,
 .capture-nav {
   padding: 4px 12px 0;
 }
+
 
 /*
  * A SEPARATOR NEEDS SOMETHING TO SEPARATE. `.workspace-nav-eyebrow` carries a

@@ -336,12 +336,35 @@ const AGENT_MESSAGE_WITHHELD_TEXT =
 // no conversation yet). It is deliberately distinct copy from the composer's
 // persistent helper (ASSISTANT_COMPOSER_HELPER) so the same sentence is never
 // rendered twice, and it claims nothing the panel cannot do.
-const EMPTY_STATE_GUIDANCE = 'Pick a suggestion below, or ask your own question in the box at the bottom.';
+/*
+ * A STATE LABEL, NOT AN INSTRUCTION — and it took two goes to get there.
+ *
+ * It used to read "Pick a suggestion below, or ask your own question in the box
+ * at the bottom." That pointed at a list which is no longer on screen (the
+ * suggestions moved into "What Can I Ask?"), so it had to change.
+ *
+ * My first replacement — "Ask a question below, or open What Can I Ask for
+ * examples and actions." — was accurate and still wrong: measured on screen, it
+ * sat directly above `assistant-composer-helper`, which already says "Ask about
+ * this record, its evidence, workflow, export readiness, or project-memory
+ * leads." Two instruction sentences, one above the input and one below it,
+ * saying overlapping things. That is the clutter this whole change set out to
+ * remove, reintroduced by the change itself.
+ *
+ * So the empty state says only what is TRUE OF THE STATE. What to ask is the
+ * helper's job, and examples are the catalog's; neither needs repeating here.
+ */
+const EMPTY_STATE_GUIDANCE = 'Nothing asked yet.';
 
-// P36R S2 — the disclosure label for the Suggested Questions + Agent Actions
-// controls once a conversation exists. They collapse (never disappear); the
-// composer stays visible at all times, so asking again is never hidden.
-const MORE_DISCLOSURE_LABEL = 'Suggested Questions & Agent Actions';
+/*
+ * ~~`MORE_DISCLOSURE_LABEL` — the label for the `<details>` that held Suggested
+ * Questions + Agent Actions once a conversation existed.~~ RETIRED with that
+ * disclosure: both groups moved into the "What Can I Ask?" popover, so the rail
+ * no longer grows a second collapsible below the composer. Recorded rather than
+ * deleted silently, because the `<details>` was itself a deliberate fix (it
+ * stopped the groups sitting between the transcript and the composer) and a
+ * future reader should see that it was superseded, not lost.
+ */
 
 // P36V S-A — the visible Title-Case label for an ANSWER's own follow-ups. It is
 // deliberately different from the global "Suggested Questions" control group:
@@ -1141,8 +1164,37 @@ export function AssistantPanel({
   // `classifyGraphQuestion` only when it was supplied). Both are props this panel
   // already receives, so no mounting screen had to change — and the list can never
   // offer a family the current surface would refuse.
+  /*
+   * DE-DUPLICATED AGAINST THE SUGGESTED QUESTIONS, because moving both lists
+   * into one popover made an existing collision visible for the first time.
+   *
+   * Measured over the two sources rather than guessed: `assistantComposer`
+   * offers 15 prompt labels and `assistantCapabilities` 15 example texts, and
+   * exactly ONE is in both — "What still needs me?". So the lists are genuinely
+   * different things (surface-specific quick-asks vs. a catalog of what this
+   * assistant can answer) and both belong; what does not belong is the same
+   * sentence rendered twice, a few hundred pixels apart, in one scroll region.
+   *
+   * The SUGGESTED QUESTION wins because it is the actionable one: clicking it
+   * asks immediately, where a capability example only fills the composer. The
+   * example is the redundant copy, so it is the one dropped.
+   *
+   * Filtered here rather than edited out of `assistantCapabilities.ts`: that
+   * module is the catalog of what the assistant can answer and is correct on
+   * its own terms. The collision is a property of rendering the two lists
+   * TOGETHER, so it is resolved where they are brought together.
+   */
+  const promptTexts = useMemo(() => new Set(prompts.map((p) => p.text)), [prompts]);
   const capabilityGroups = useMemo(
-    () => capabilityGroupsFor(queryScope, { graph: !!graphCapability }),
+    () =>
+      capabilityGroupsFor(queryScope, { graph: !!graphCapability })
+        .map((group) => ({
+          ...group,
+          examples: group.examples.filter((e) => !promptTexts.has(e.text)),
+        }))
+        // A group whose every example was a duplicate would render as a bare
+        // heading with nothing under it.
+        .filter((group) => group.examples.length > 0),
     [queryScope, graphCapability],
   );
 
@@ -1545,8 +1597,6 @@ export function AssistantPanel({
         {!hasConversation && (
           <div className="assistant-empty">
             <p className="assistant-empty-note">{EMPTY_STATE_GUIDANCE}</p>
-            {suggestedQuestionControls}
-            <div className="assistant-empty-divider" aria-hidden="true" />
           </div>
         )}
 
@@ -1920,9 +1970,22 @@ export function AssistantPanel({
             aria-controls={CAPABILITIES_PANEL_ID}
             aria-haspopup="dialog"
             onClick={() => (capabilitiesOpen ? closeCapabilities() : setCapabilitiesOpen(true))}
+            /*
+             * ICON-ONLY, WITH THE SAME ACCESSIBLE NAME. The owner asked for
+             * "a question mark for what can i ask" — the labelled pill was one
+             * more block of text in a rail that was already carrying eleven.
+             *
+             * `aria-label` repeats the string the visible label used to show,
+             * so the accessible name is UNCHANGED: every test that finds this
+             * control by name still finds it, the popover it opens is still
+             * labelled by the same words, and a screen-reader user hears
+             * exactly what they heard before. The only thing removed is the
+             * visible duplicate of a name the icon already implies.
+             */
+            aria-label={CAPABILITIES_TRIGGER_LABEL}
+            title={CAPABILITIES_TRIGGER_LABEL}
           >
-            <CircleHelp size={13} strokeWidth={2} aria-hidden="true" />
-            <span>{CAPABILITIES_TRIGGER_LABEL}</span>
+            <CircleHelp size={15} strokeWidth={2} aria-hidden="true" />
           </button>
           {capabilitiesOpen && (
             <div
@@ -1942,6 +2005,15 @@ export function AssistantPanel({
               {/* The one scroll region: a long catalog scrolls HERE, so the
                   sentences below it can never be pushed out of view. */}
               <div className="assistant-capabilities-list">
+                {/* THE TWO GROUPS THAT USED TO CLIP THE RAIL, NOW INSIDE THE ONE
+                    SCROLL REGION THIS POPOVER ALREADY HAD. They go FIRST because
+                    they are the runnable things — a suggested question and an
+                    agent action both DO something on click, where a capability
+                    example only fills the composer. Ordering the actionable
+                    above the illustrative is the same reason the catalog itself
+                    sits above the two honesty sentences below. */}
+                {suggestedQuestionControls}
+                {agentActionControls}
                 {capabilityGroups.map((group) => (
                   <div className="assistant-capabilities-group" key={group.heading}>
                     <div className="assistant-capabilities-eyebrow eyebrow">{group.heading}</div>
@@ -1988,26 +2060,29 @@ export function AssistantPanel({
           )}
         </div>
 
-        {/* EMPTY STATE — Agent Actions sit below the composer (Suggested Questions
-            are above it, in the body). Rendered only where the screen actually
-            supplies live agent intents. */}
-        {!hasConversation && agentActionControls}
-
-        {/* CONVERSATION — both control groups collapse into ONE compact native
-            disclosure, still below the composer. They are never REMOVED (and the
-            composer above is always visible), so asking again is never hidden. */}
-        {hasConversation && (
-          <details className="assistant-more">
-            <summary className="assistant-more-summary">
-              <ChevronRight className="chev" size={14} strokeWidth={2} aria-hidden="true" />
-              <span>{MORE_DISCLOSURE_LABEL}</span>
-            </summary>
-            <div className="assistant-more-body">
-              {suggestedQuestionControls}
-              {agentActionControls}
-            </div>
-          </details>
-        )}
+        {/* ── BOTH CONTROL GROUPS MOVED INTO "What Can I Ask?" (owner request) ──
+            *
+            * ~~Empty state: Agent Actions below the composer, Suggested
+            * Questions above it. Conversation: both in a `<details>`.~~
+            *
+            * MEASURED BEFORE THE CHANGE, in a real browser at the shipped
+            * width: the panel stacked ELEVEN blocks, and TWO of them were
+            * independently-scrolling regions that were BOTH clipped —
+            * `.assistant-empty` hiding 85px and `.assistant-agent-actions`
+            * hiding 65px. A reader met two half-lists, each with its own
+            * scrollbar, neither finishable without scrolling inside it.
+            *
+            * The owner's instruction was to make the rail "literally just the
+            * chat interface" — a question mark for what can be asked, the
+            * collapse, and the conversation. Both groups now live in the
+            * capabilities popover, which is what that affordance already was:
+            * a per-surface catalog of what this assistant can answer.
+            *
+            * NOTHING IS REMOVED — every suggested question and every agent
+            * action is still reachable, one click away, in a region that
+            * scrolls ONCE instead of two regions that each scroll separately.
+            * The composer stays visible at all times, so asking is never
+            * hidden behind the disclosure. */}
 
         <p className="assistant-caption">{SUBORDINATE_CAPTION}</p>
       </div>

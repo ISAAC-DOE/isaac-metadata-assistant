@@ -750,16 +750,22 @@ button.assistant-source-chip-nav:focus-visible {
   flex: none;
   min-width: 0;
   margin-top: 2px;
-  /* P36V.1 S1 — the dock is `flex: none`, so an Agent Actions list of up to 7
-   * pills (Record Workbench) would otherwise grow the dock without limit and
-   * starve the body above it — the second half of the squeeze that hid the
-   * third Suggested Question. Bound it to a fraction of the VIEWPORT (so it
-   * scales with zoom) and scroll it internally: the composer, the advisory
-   * caption and every pill all stay reachable. */
-  max-height: 32vh;
-  overflow-y: auto;
-  overflow-x: hidden;
-  overscroll-behavior: contain;
+  /*
+   * ~~P36V.1 S1 — bound it to 32vh and scroll it internally, so an Agent
+   * Actions list of up to 7 pills cannot grow the dock without limit.~~
+   *
+   * *** THAT CONSTRAINT MOVED WITH THE BLOCK AND BECAME THE DEFECT AGAIN,
+   * ONE LEVEL DOWN. *** It was right while this list lived in the dock. On
+   * 2026-09-13 the list moved inside the "What Can I Ask?" popover, which
+   * already has exactly one scrollport (`.assistant-capabilities-list`) — and
+   * a scroll region nested inside a scroll region is the thing this whole
+   * change set out to remove. Measured in a real browser after the move: the
+   * catalog itself scrolled, AND this block still hid 65px inside it.
+   *
+   * So the cap is gone and the list flows: the popover's own scrollport is the
+   * one place this content scrolls. The runaway-dock hazard the cap existed
+   * for cannot recur, because the block is no longer in the dock's flow.
+   */
 }
 .assistant-agent-actions .assistant-suggested-eyebrow { margin-top: 12px; }
 
@@ -876,13 +882,19 @@ button.assistant-source-chip-nav:focus-visible {
   min-width: 0;
   margin-top: 8px;
 }
+/* Icon-only since 2026-09-13 (owner request: "a question mark for what can i
+   ask"). The accessible name is on the button, so the box only has to hold the
+   glyph.
+   NO NEW RAW LITERALS: `type-scale-and-spacing.test.ts` caps hand-authored
+   spacing values and my first version added three, pushing the axis 2400 ->
+   2402. The padding below reuses `.assistant-clear`'s `3px 8px` rung one
+   region up in this same file, and the square comes from the glyph plus that
+   padding rather than from a min-width nobody else declares. */
 .assistant-capabilities-trigger {
   display: inline-flex;
   align-items: center;
-  gap: 7px;
-  min-width: 0;
-  max-width: 100%;
-  padding: 5px 10px;
+  justify-content: center;
+  padding: 3px 8px;
   border-radius: var(--radius-control);
   border: 1px solid var(--assist-border);
   background: var(--assist-panel-bg);

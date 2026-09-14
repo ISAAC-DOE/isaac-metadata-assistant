@@ -198,6 +198,14 @@ test.describe('@interaction assistant panel', () => {
     const log = aside.getByRole('log');
     await expect(log.locator('.assistant-msg')).toHaveCount(0);
 
+    /*
+     * THE SUGGESTED QUESTIONS MOVED INTO "What Can I Ask?" (owner request,
+     * 2026-09-13): the rail is now the chat and nothing else, after it was
+     * measured stacking two clipped, independently-scrolling control regions.
+     * Opening the popover is the route to a pill; the pill itself is unchanged
+     * and still asks on click.
+     */
+    await aside.getByRole('button', { name: /What Can I Ask/i }).click();
     await aside.getByRole('button', { name: /What still needs me\?/i }).click();
 
     // A question turn and an answer turn appear.

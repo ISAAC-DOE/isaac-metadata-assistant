@@ -1,4 +1,5 @@
 import { describe, it, expect, afterEach, vi, type Mock } from 'vitest';
+import { openAssistantCatalogWhenReady } from '../test/openAssistantCatalog';
 import { render, fireEvent, within, act, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { ProjectMemory } from '../screens/ProjectMemory';
@@ -290,6 +291,8 @@ describe('P25.7 · Project Memory grounded assistant — available', () => {
   it('renders exactly the three approved chips in order, subordinate to the status card', async () => {
     stubFetchRoutes(availableRoutes);
     const { findByText, container } = renderScreen();
+    // The pills live in "What Can I Ask?" since 2026-09-13 — open it first.
+    await openAssistantCatalogWhenReady(container);
     await findByText('Memory Available');
 
     const assistant = container.querySelector('.assistant') as HTMLElement;
@@ -410,6 +413,8 @@ describe('P25.7 · Project Memory grounded assistant — available', () => {
   it('clicking a chip swaps in its live answer and issues NO further network request', async () => {
     stubFetchRoutes(availableRoutes);
     const { findByText, container } = renderScreen();
+    // The pills live in "What Can I Ask?" since 2026-09-13 — open it first.
+    await openAssistantCatalogWhenReady(container);
     await findByText('Memory Available');
     const assistant = container.querySelector('.assistant') as HTMLElement;
     const panel = within(assistant);
@@ -427,6 +432,8 @@ describe('P25.7 · Project Memory grounded assistant — available', () => {
   it('chips are keyboard-activatable native buttons', async () => {
     stubFetchRoutes(availableRoutes);
     const { findByText, container } = renderScreen();
+    // The pills live in "What Can I Ask?" since 2026-09-13 — open it first.
+    await openAssistantCatalogWhenReady(container);
     await findByText('Memory Available');
     const assistant = container.querySelector('.assistant') as HTMLElement;
     const chips = Array.from(assistant.querySelectorAll('.assistant-prompt'));
@@ -466,6 +473,8 @@ describe('P25.7 · Project Memory grounded assistant — unavailable & fetch sta
       'GET /api/memory/files': { body: memoryFilesUnavailable },
     });
     const { findByText, container } = renderScreen();
+    // The pills live in "What Can I Ask?" since 2026-09-13 — open it first.
+    await openAssistantCatalogWhenReady(container);
     await findByText('Memory Unavailable');
 
     const assistant = container.querySelector('.assistant') as HTMLElement;

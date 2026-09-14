@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { openAssistantCatalogWhenReady } from '../test/openAssistantCatalog';
 import { render, fireEvent } from '@testing-library/react';
 import { AssistantPanel } from '../components/AssistantPanel';
 import {
@@ -65,11 +66,13 @@ const reviewOut = () => compose(reviewState());
 const evidenceOut = () => compose(evidenceState());
 
 describe('AssistantPanel is subordinate and never renders a verdict', () => {
-  it('rests with an empty live region (no placeholder text/chrome), then a guided prompt surfaces a Title-Case source label + memory dot', () => {
+  it('rests with an empty live region (no placeholder text/chrome), then a guided prompt surfaces a Title-Case source label + memory dot', async () => {
     const out = evidenceOut();
     const { container, getByText, queryByText } = render(
       <AssistantPanel reply={out.reply} prompts={out.prompts} availability="available" />,
     );
+    // The pills live in "What Can I Ask?" since 2026-09-13 — open it first.
+    await openAssistantCatalogWhenReady(container);
     // P36.1: the resting rail's live region is mounted, aria-live, and EMPTY —
     // no placeholder text, no visible card chrome — never a fully absent element.
     expect(queryByText(/Ask a question or choose a suggested prompt\./)).toBeNull();
@@ -114,7 +117,7 @@ describe('AssistantPanel is subordinate and never renders a verdict', () => {
     expect(available.queryByText(MEMORY_UNAVAILABLE_CAVEAT)).toBeNull();
   });
 
-  it('omitting `availability` renders NO memory head line and NO caveat (P25.7)', () => {
+  it('omitting `availability` renders NO memory head line and NO caveat (P25.7)', async () => {
     // A memory-less screen (e.g. Guided Completion) passes no availability, so
     // the panel must make no memory claim at all — neither the `memory:` head
     // line nor any caveat.
@@ -122,6 +125,8 @@ describe('AssistantPanel is subordinate and never renders a verdict', () => {
     const { container, getByText, queryByText } = render(
       <AssistantPanel reply={out.reply} prompts={out.prompts} />,
     );
+    // The pills live in "What Can I Ask?" since 2026-09-13 — open it first.
+    await openAssistantCatalogWhenReady(container);
     expect(queryByText(/^memory:/i)).toBeNull();
     expect(container.querySelector('.assistant-memory')).toBeNull();
     expect(container.querySelector('.assistant-caveat')).toBeNull();
@@ -145,7 +150,7 @@ describe('AssistantPanel is subordinate and never renders a verdict', () => {
     expect(container.textContent).not.toMatch(/\bFAIL\b/);
   });
 
-  it('the verdict-language guard replaces any live answer that would state a verdict', () => {
+  it('the verdict-language guard replaces any live answer that would state a verdict', async () => {
     // A guided prompt whose (would-be) answer states a verdict must be replaced by
     // the routing text when it becomes the live turn — the panel never renders PASS.
     const { container, getByText } = render(
@@ -161,6 +166,8 @@ describe('AssistantPanel is subordinate and never renders a verdict', () => {
         availability="available"
       />,
     );
+    // The pills live in "What Can I Ask?" since 2026-09-13 — open it first.
+    await openAssistantCatalogWhenReady(container);
     fireEvent.click(getByText('Is it valid?'));
     expect(container.textContent).not.toMatch(/\bPASS\b/);
     expect(container.textContent).toMatch(/truth question/i);
@@ -192,12 +199,14 @@ describe('hasVerdictLanguage — the structural guard the panel runs over every 
 });
 
 describe('assistant final placeholder form: guided prompts + source-labeled answers', () => {
-  it('clicking a guided prompt shows its composed answer', () => {
+  it('clicking a guided prompt shows its composed answer', async () => {
     const out = evidenceOut();
     const sidecarPrompt = out.prompts.find((p) => p.text === 'What is the evidence sidecar?')!;
-    const { getByText } = render(
+    const { getByText, container } = render(
       <AssistantPanel reply={out.reply} prompts={out.prompts} availability="available" />,
     );
+    // The pills live in "What Can I Ask?" since 2026-09-13 — open it first.
+    await openAssistantCatalogWhenReady(container);
     // guided prompts are primary; clicking one swaps in its composed answer
     fireEvent.click(getByText(sidecarPrompt.text));
     expect(
@@ -205,11 +214,13 @@ describe('assistant final placeholder form: guided prompts + source-labeled answ
     ).toBeInTheDocument();
   });
 
-  it('shows a WIRED composer (SECONDARY send) with the grounded-scope helper; the legacy guided-note stays de-duped and the subordinate caption is the single advisory footer', () => {
+  it('shows a WIRED composer (SECONDARY send) with the grounded-scope helper; the legacy guided-note stays de-duped and the subordinate caption is the single advisory footer', async () => {
     const out = evidenceOut();
     const { getByRole, getByText, queryByText, getByLabelText, container } = render(
       <AssistantPanel reply={out.reply} prompts={out.prompts} availability="available" />,
     );
+    // The pills live in "What Can I Ask?" since 2026-09-13 — open it first.
+    await openAssistantCatalogWhenReady(container);
     // P34.2: a real labelled text input plus a SECONDARY-styled send control (never
     // the primary action), with the persistent grounded-scope helper visible.
     const box = getByRole('textbox');

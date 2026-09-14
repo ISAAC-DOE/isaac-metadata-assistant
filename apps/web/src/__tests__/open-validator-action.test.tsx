@@ -31,6 +31,7 @@
  */
 
 import { describe, it, expect, afterEach, vi, type Mock } from 'vitest';
+import { openAssistantCatalog } from '../test/openAssistantCatalog';
 import { render, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, useHref, useLocation, useNavigate } from 'react-router-dom';
 
@@ -259,6 +260,8 @@ describe('P36V S-B · the Open Validator control surfaces from every relevant As
         expect(el).not.toBeNull();
         return el as HTMLElement;
       })) as HTMLElement;
+      // The pills live in "What Can I Ask?" since 2026-09-13 — open it first.
+      openAssistantCatalog(assistant);
       const panel = within(assistant);
 
       // no action is offered before the chip is activated
@@ -311,6 +314,7 @@ describe('P36V S-B · the Open Validator control surfaces from every relevant As
       expect(el).not.toBeNull();
       return el as HTMLElement;
     })) as HTMLElement;
+    openAssistantCatalog(assistant);
     const panel = within(assistant);
 
     for (const chip of EVIDENCE_CATALOG) {
@@ -335,6 +339,8 @@ async function completionWithAction(opts: { basename?: string } = {}) {
     expect(el).not.toBeNull();
     return el as HTMLElement;
   })) as HTMLElement;
+  // The pills live in "What Can I Ask?" since 2026-09-13 — open it first.
+  openAssistantCatalog(assistant);
   const panel = within(assistant);
   fireEvent.click((await panel.findByText('What if I leave one missing?')).closest('button')!);
   await panel.findByRole('button', { name: /Open Validator/ });

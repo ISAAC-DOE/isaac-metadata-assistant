@@ -27,15 +27,6 @@ import { describe, expect, it } from 'vitest';
 
 const SRC = resolve(__dirname, '..');
 
-function ruleBody(file: string, selector: string): string {
-  const css = readFileSync(join(SRC, file), 'utf8');
-  // The rule as authored: `selector {` … `}` at the start of a line.
-  const re = new RegExp(`^\\${selector.startsWith('.') ? '' : ''}${selector.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&')}\\s*\\{([^}]*)\\}`, 'm');
-  const m = re.exec(css);
-  if (m === null) throw new Error(`no rule for ${selector} in ${file}`);
-  return m[1];
-}
-
 function horizontalPadding(body: string): string {
   const m = /(?:^|;)\s*padding:\s*([^;]+)/.exec(body);
   if (m === null) throw new Error(`no padding declaration in: ${body.trim().slice(0, 80)}`);
@@ -47,19 +38,42 @@ function horizontalPadding(body: string): string {
 }
 
 describe('the record sidebar has ONE gutter', () => {
-  it('every container in the column declares the same horizontal padding', () => {
-    const gutters = {
-      '.capture-nav': horizontalPadding(ruleBody('components/record-workspaces.css', '.capture-nav')),
-      '.workspace-nav': horizontalPadding(ruleBody('components/record-workspaces.css', '.workspace-nav')),
-    };
+  it('the two nav landmarks share ONE padding rule, so they cannot diverge', () => {
+    /*
+     * STRONGER THAN THE FIRST VERSION OF THIS TEST, which compared two separate
+     * rules and asserted the values matched. They can only match if someone
+     * keeps them matching — and the defect this file exists for is precisely
+     * that they stopped: splitting the capture row into its own landmark took
+     * `.workspace-nav`'s 12px with it and left nothing behind, rendering the
+     * card 24px wider than every neighbour and flush to the sidebar border.
+     *
+     * One selector list cannot come apart that way, so the invariant is now
+     * structural and this test guards the STRUCTURE rather than a coincidence.
+     * (It also removed three hand-authored literals — `type-scale-and-spacing`
+     * caps those, and duplicating the declaration had pushed it over.)
+     */
+    const css = readFileSync(join(SRC, 'components/record-workspaces.css'), 'utf8');
+    const shared = /^\.workspace-nav,\s*\n\.capture-nav\s*\{([^}]*)\}/m.exec(css);
     expect(
-      new Set(Object.values(gutters)).size,
-      'the capture landmark and the workspace list declare DIFFERENT horizontal padding, so ' +
-        'one of them will not line up with the spine and the Evidence Trail card. Measured ' +
-        `gutters: ${JSON.stringify(gutters)}`,
-    ).toBe(1);
-    // …and it is the value the rest of the column uses, not merely a shared one.
-    expect(Object.values(gutters)[0]).toBe('12px');
+      shared,
+      'the capture landmark and the workspace list no longer share one padding rule. ' +
+        'They had identical padding and were split once before, which is how the capture ' +
+        'card ended up 24px wider than every neighbour. Keep them in one selector list.',
+    ).not.toBeNull();
+    expect(horizontalPadding(shared![1])).toBe('12px');
+
+    /*
+     * …and neither declares its OWN competing padding elsewhere. The shared
+     * rule is removed from the text first: its second line IS `.capture-nav {`,
+     * so a naive search finds the very rule it is meant to protect — which is
+     * what the first version of this assertion did.
+     */
+    const withoutShared = css.replace(shared![0], '');
+    expect(
+      /^\.capture-nav\s*\{[^}]*padding:/m.test(withoutShared),
+      '`.capture-nav` declares its own padding again, which re-opens the divergence the ' +
+        'shared rule closes.',
+    ).toBe(false);
   });
 
   it('the FIRST eyebrow draws no divider, because it separates nothing', () => {

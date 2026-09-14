@@ -16,6 +16,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { openAssistantCatalogWhenReady } from '../test/openAssistantCatalog';
 import { fireEvent, render, waitFor } from '@testing-library/react';
 import { AssistantPanel } from '../components/AssistantPanel';
 import { ApiError, api } from '../lib/api';
@@ -91,8 +92,10 @@ afterEach(() => {
 });
 
 describe('P36.1 empty live region (no placeholder, no auto-reply)', () => {
-  it('rests with an empty, chrome-suppressed live region and shows NO auto pending-summary card on mount', () => {
+  it('rests with an empty, chrome-suppressed live region and shows NO auto pending-summary card on mount', async () => {
     const { container, queryByText } = panel();
+    // The pills live in "What Can I Ask?" since 2026-09-13 — open it first.
+    await openAssistantCatalogWhenReady(container);
     // P36.1: no resting placeholder text at all.
     expect(queryByText(/Ask a question or choose a suggested prompt\./)).toBeNull();
     // the old auto-reply ("still need you") is NOT announced on mount
@@ -129,6 +132,8 @@ describe('P34.2 free-form submit', () => {
   it('a provider/network error renders the honest unavailable message; controls stay usable', async () => {
     vi.spyOn(api, 'askAssistant').mockRejectedValue(new ApiError('down', { unreachable: true }));
     const { getByRole, getByText, container } = panel();
+    // The pills live in "What Can I Ask?" since 2026-09-13 — open it first.
+    await openAssistantCatalogWhenReady(container);
     const box = getByRole('textbox');
     fireEvent.change(box, { target: { value: 'anything' } });
     fireEvent.submit(box.closest('form')!);
@@ -171,18 +176,22 @@ describe('P34.2 Clear Conversation', () => {
 });
 
 describe('P34.2 preserved surfaces', () => {
-  it('Suggested Questions still work via the precomposed path (no endpoint call)', () => {
+  it('Suggested Questions still work via the precomposed path (no endpoint call)', async () => {
     const spy = vi.spyOn(api, 'askAssistant');
     const { getByText, container } = panel();
+    // The pills live in "What Can I Ask?" since 2026-09-13 — open it first.
+    await openAssistantCatalogWhenReady(container);
     fireEvent.click(getByText('What still needs me?'));
     expect(container.querySelector('.assistant-prompt.active')).toBeTruthy();
     expect(getByText(/Beamline, Edge/)).toBeInTheDocument();
     expect(spy).not.toHaveBeenCalled();
   });
 
-  it('Agent Actions are unchanged — a pill still runs a real intent', () => {
+  it('Agent Actions are unchanged — a pill still runs a real intent', async () => {
     const spy = vi.spyOn(api, 'askAssistant');
     const { getByText, container } = panel({ agentContext: ctx(), agentPrompts: AGENT_PROMPTS });
+    // The pills live in "What Can I Ask?" since 2026-09-13 — open it first.
+    await openAssistantCatalogWhenReady(container);
     const before = container.querySelectorAll('.assistant-msg').length;
     fireEvent.click(getByText('Identify the Next Missing Field'));
     const msgs = Array.from(container.querySelectorAll('.assistant-msg'));

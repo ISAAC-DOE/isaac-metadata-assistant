@@ -129,16 +129,25 @@ afterEach(() => {
 // ---------------------------------------------------------------------------
 
 describe('P36R S2 empty state', () => {
-  it('renders Suggested Questions + Agent Actions at full prominence and NO conversation region', () => {
-    const { container, getByText } = panel({ agentContext: ctx(), agentPrompts: AGENT_PROMPTS });
+  it('the rail holds the LOG and nothing else — both control groups are in the catalog', () => {
+    /*
+     * ~~renders Suggested Questions + Agent Actions at full prominence~~ —
+     * REWRITTEN 2026-09-13 (owner request). "Full prominence" was the defect:
+     * measured in a real browser at the shipped width, those two groups were
+     * independently-scrolling regions and BOTH were clipped, `.assistant-empty`
+     * hiding 85px and `.assistant-agent-actions` hiding 65px. Prominent and
+     * unreadable at the same time.
+     *
+     * They now live in "What Can I Ask?". This test pins BOTH halves — absent
+     * from the rail, present in the catalog — because asserting only the first
+     * would pass just as well if they had been deleted.
+     */
+    const { container, getByRole } = panel({ agentContext: ctx(), agentPrompts: AGENT_PROMPTS });
 
-    // the prompt controls are present and NOT inside a collapsed disclosure
     expect(container.querySelector('.assistant-empty')).not.toBeNull();
-    expect(getByText('Suggested Questions')).toBeInTheDocument();
-    expect(getByText('Agent Actions')).toBeInTheDocument();
-    expect(container.querySelector('.assistant-prompts')).not.toBeNull();
-    expect(container.querySelector('.assistant-agent-prompts')).not.toBeNull();
-    expect(container.querySelector('details.assistant-more')).toBeNull();
+    for (const sel of ['.assistant-prompts', '.assistant-agent-prompts', 'details.assistant-more']) {
+      expect(container.querySelector(sel), `${sel} is back in the rail`).toBeNull();
+    }
 
     // no conversation region is drawn when there is nothing to hold
     expect(container.querySelector('.assistant-conversation')).toBeNull();
@@ -149,21 +158,31 @@ describe('P36R S2 empty state', () => {
     expect(reply).not.toBeNull();
     expect(reply?.getAttribute('aria-live')).toBe('polite');
     expect(reply?.textContent).toBe('');
+
+    // …and BOTH groups are one click away, with their headings.
+    fireEvent.click(getByRole('button', { name: /What Can I Ask/i }));
+    const dialog = container.querySelector('.assistant-capabilities-panel')!;
+    expect(within(dialog as HTMLElement).getByText('Suggested Questions')).toBeInTheDocument();
+    expect(within(dialog as HTMLElement).getByText('Agent Actions')).toBeInTheDocument();
+    expect(dialog.querySelector('.assistant-prompts')).not.toBeNull();
+    expect(dialog.querySelector('.assistant-agent-prompts')).not.toBeNull();
   });
 
-  it('the prompt controls precede the (chrome-less) log at rest, and the composer is below them', () => {
+  it('at rest the order is guidance → log → composer, with no divider and no control block', () => {
+    /*
+     * ~~the prompt controls precede the (chrome-less) log at rest~~ — there are
+     * no prompt controls in the rail to precede anything, and the divider that
+     * separated them from the composer went with them: it existed to mark a
+     * break that no longer exists.
+     */
     const { container } = panel();
-    const prompts = container.querySelector('.assistant-prompts')!;
+    const guidance = container.querySelector('.assistant-empty-note')!;
     const log = container.querySelector('.assistant-log')!;
     const composer = container.querySelector('.assistant-composer')!;
-    expect(prompts.compareDocumentPosition(log) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(guidance.compareDocumentPosition(log) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(log.compareDocumentPosition(composer) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    // P36V S-A — Suggested Questions are separated from the composer by a subtle
-    // divider, and Agent Actions moved BELOW the composer.
-    const divider = container.querySelector('.assistant-empty-divider')!;
-    expect(divider).not.toBeNull();
-    expect(prompts.compareDocumentPosition(divider) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(divider.compareDocumentPosition(composer) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(container.querySelector('.assistant-empty-divider')).toBeNull();
+    expect(container.querySelector('.assistant-prompts')).toBeNull();
   });
 });
 
@@ -172,7 +191,7 @@ describe('P36R S2 empty state', () => {
 // ---------------------------------------------------------------------------
 
 describe('P36R S2 conversation state', () => {
-  it('after ONE turn a conversation region exists, the prompt controls collapse, and the composer stays', async () => {
+  it('after ONE turn a conversation region exists, the rail stays a chat, and the composer stays', async () => {
     vi.spyOn(api, 'askAssistant').mockResolvedValue(answerResponse());
     const { container, getByRole } = panel({ agentContext: ctx(), agentPrompts: AGENT_PROMPTS });
 
@@ -186,21 +205,22 @@ describe('P36R S2 conversation state', () => {
     expect(region.getAttribute('role')).toBe('log');
     expect(region.querySelector('.assistant-reply')).not.toBeNull();
 
-    // the prompt controls are COLLAPSED, not removed
-    const disclosure = container.querySelector('details.assistant-more') as HTMLDetailsElement;
-    expect(disclosure).not.toBeNull();
-    expect(disclosure.open).toBe(false);
-    expect(disclosure.querySelector('.assistant-prompts')).not.toBeNull();
+    /*
+     * ~~the prompt controls are COLLAPSED, not removed~~ — there is no
+     * `<details>` any more. Both groups moved into "What Can I Ask?"
+     * (2026-09-13, owner request), so the rail does not grow a second
+     * collapsible below the composer once a conversation starts.
+     *
+     * The property the old assertions protected — that nothing sits between
+     * the transcript and the composer — is now true of the WHOLE rail, and is
+     * asserted that way.
+     */
+    for (const sel of ['details.assistant-more', '.assistant-prompts', '.assistant-agent-prompts']) {
+      expect(container.querySelector(sel), `${sel} is back in the rail`).toBeNull();
+    }
     expect(container.querySelector('.assistant-empty')).toBeNull();
-    // P36V S-A — and the disclosure is no longer BETWEEN the transcript and the
-    // composer: the composer sits directly beneath the transcript, the collapsed
-    // controls come after it.
     const composerEl = container.querySelector('.assistant-composer')!;
     expect(region.compareDocumentPosition(composerEl) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(
-      composerEl.compareDocumentPosition(disclosure) & Node.DOCUMENT_POSITION_FOLLOWING,
-    ).toBeTruthy();
-    expect(disclosure.closest('.assistant-body')).toBeNull();
 
     // asking again is NEVER hidden: the composer is still present and enabled
     const box = getByRole('textbox') as HTMLInputElement;
@@ -224,19 +244,26 @@ describe('P36R S2 conversation state', () => {
     expect(live.compareDocumentPosition(reply) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
-  it('opening the disclosure exposes the same working Suggested Question pills', async () => {
+  it('the catalog still exposes the same working pills once a conversation exists', async () => {
+    /*
+     * ~~opening the disclosure~~ — the `<details>` is gone; the same pills are
+     * in "What Can I Ask?". What this test is FOR is unchanged and is the part
+     * worth keeping: after a turn has happened, the controls are still real,
+     * enabled buttons rather than a list that quietly emptied.
+     */
     vi.spyOn(api, 'askAssistant').mockResolvedValue(answerResponse());
-    const { container, getByRole, getByText } = panel();
+    const { container, getByRole } = panel();
     await ask(getByRole, 'first question');
-    await waitFor(() => expect(container.querySelector('details.assistant-more')).not.toBeNull());
+    await waitFor(() => expect(container.querySelector('.assistant-conversation')).not.toBeNull());
 
-    const disclosure = container.querySelector('details.assistant-more') as HTMLDetailsElement;
-    const summary = disclosure.querySelector('summary')!;
-    // a native <details> summary is keyboard-operable and carries a text label
-    expect(summary.textContent).toMatch(/suggested questions/i);
-    fireEvent.click(summary);
+    const trigger = getByRole('button', { name: /What Can I Ask/i });
+    // a real disclosure trigger, keyboard-operable and honestly labelled
+    expect(trigger.getAttribute('aria-expanded')).toBe('false');
+    fireEvent.click(trigger);
+    expect(trigger.getAttribute('aria-expanded')).toBe('true');
 
-    const pill = getByText('What still needs me?').closest('button')!;
+    const dialog = container.querySelector('.assistant-capabilities-panel') as HTMLElement;
+    const pill = within(dialog).getByText('What still needs me?').closest('button')!;
     expect(pill.tagName).toBe('BUTTON');
     expect(pill).not.toBeDisabled();
   });
@@ -574,11 +601,23 @@ describe('P36R S2 assistant.css structural contract', () => {
     const body = ruleBody(assistantCss, '.assistant-body');
     expect(body).toMatch(/overflow-y:\s*auto/);
     expect(body).not.toMatch(/overflow(-y)?:\s*visible/);
-    // and the dock's own control groups are bounded, so a 7-pill Agent Actions
-    // list cannot grow the dock until it starves the body above it
+    /*
+     * ~~and the dock's own control groups are bounded, so a 7-pill Agent
+     * Actions list cannot grow the dock until it starves the body above it~~
+     *
+     * THE HAZARD IS GONE WITH THE BLOCK. Agent Actions moved into the "What Can
+     * I Ask?" popover on 2026-09-13, so it is no longer in the dock's flow and
+     * cannot grow it. Keeping the cap there was actively harmful: it made the
+     * list scroll INSIDE the popover's own scrollport, hiding 65px — the same
+     * defect one level down. Asserted as ABSENT so it cannot come back.
+     */
     const agent = ruleBody(assistantCss, '.assistant-agent-actions');
-    expect(agent).toMatch(/max-height:\s*\d+vh/);
-    expect(agent).toMatch(/overflow-y:\s*auto/);
+    expect(agent, 'Agent Actions must not scroll inside the catalog').not.toMatch(
+      /overflow-y:\s*auto/,
+    );
+    expect(agent, 'Agent Actions must not be height-capped inside the catalog').not.toMatch(
+      /max-height:/,
+    );
     const moreBody = ruleBody(assistantCss, '.assistant-more-body');
     expect(moreBody).toMatch(/max-height:\s*\d+vh/);
     expect(moreBody).toMatch(/overflow-y:\s*auto/);

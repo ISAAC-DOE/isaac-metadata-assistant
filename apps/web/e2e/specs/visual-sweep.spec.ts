@@ -1103,6 +1103,9 @@ const STATES: readonly VisualState[] = [
       const log = aside.getByRole('log');
       await expect(log.locator('.assistant-msg')).toHaveCount(0);
       // Read-only: the assistant query endpoint is advisory and non-mutating.
+      // The pills live in "What Can I Ask?" since 2026-09-13 (owner request) —
+      // the rail is the chat and nothing else. Same pill, one click further in.
+      await aside.getByRole('button', { name: /What Can I Ask/i }).click();
       await aside.getByRole('button', { name: /What still needs me\?/i }).click();
       await expect(log.locator('.assistant-msg')).not.toHaveCount(0, { timeout: 25_000 });
       return log.locator('.assistant-msg').first();

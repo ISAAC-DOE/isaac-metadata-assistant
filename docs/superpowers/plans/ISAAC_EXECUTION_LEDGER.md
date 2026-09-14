@@ -3674,6 +3674,99 @@ in one session: *the tool answered confidently and wrong, and only a second meth
 
 ---
 
+## *** `UI-001` — TWO SCREENSHOTS FROM THE OWNER, AND BOTH DEFECTS WERE MINE FROM THE SAME DAY ***
+
+The project owner looked at the running app and sent two screenshots. Neither defect was caught by
+any test, and both were introduced by `IA-001` hours earlier.
+
+### Screenshot 1 — the promoted capture card touched the sidebar border
+
+Measured in Chromium before and after:
+
+| element | before | after |
+|---|---|---|
+| `.capture-nav-link` | **17–229** | **29–217** |
+| `.workspace-nav-list a` | 29–217 | 29–217 |
+| `.spine-steps` | 29–217 | 29–217 |
+| `.evidence-trail-link` | 29–217 | 29–217 |
+
+Splitting capture into its own `<nav>` took `.workspace-nav`'s 12px gutter with it and replaced it
+with nothing: the card was **24px wider than every neighbour** and flush to both inner edges. A
+SECOND defect sat in the same place — the "Data Capture" eyebrow still drew a `border-top` while
+being the column's first element, so that hairline separated nothing.
+
+**The fix is ONE selector list**, not two matching rules: `.workspace-nav, .capture-nav`. Two rules
+with identical padding is exactly how they came apart, and a shared rule cannot. That also removed
+three hand-authored literals — `type-scale-and-spacing` caps those, and duplicating the declaration
+had pushed the axis 2400 → 2402. **The fix for the ceiling and the fix for the gutter turned out to
+be the same edit.**
+
+### Screenshot 2 — the assistant rail, measured worse than it looked
+
+The owner said the chat "cuts out" and asked for "a question mark for what can i ask, the collapse,
+and then … literally just the chat interface". Measured at the shipped width: the rail stacked
+**eleven blocks**, two of which were **independently-scrolling regions that were BOTH clipped** —
+`.assistant-empty` hiding **85px** and `.assistant-agent-actions` hiding **65px**. Two half-lists,
+each with its own scrollbar.
+
+| | before | after |
+|---|---|---|
+| text blocks in the rail | 11 | **7** |
+| clipped regions in the rail | **2** | **0** |
+| scroll regions in the catalog | — | **1** |
+
+Suggested Questions and Agent Actions moved into the "What Can I Ask?" popover — which is what that
+affordance already was. The trigger became the **icon** the owner asked for, with `aria-label`
+carrying the identical accessible name, so every test that found it by name still does.
+
+### THE SAME DEFECT RECURRED ONE LEVEL DOWN, AND ONLY A BROWSER FOUND IT
+
+After the move, the catalog scrolled **and** `.assistant-agent-actions` still hid 65px inside it —
+its `max-height: 32vh; overflow-y: auto` had travelled with the block. That constraint was correct
+in the dock (it stopped a 7-pill list starving the body) and became the identical defect in a
+container that already scrolls.
+
+**Rule, now guarded: when a block moves, its scroll constraint moves with it, and a constraint that
+was right in one container is not automatically right in the next.**
+`assistant-one-scrollport.test.ts` allowlists every scrolling selector with the reason it is the ONE
+scrollport of its region, names the two blocks that caused the defect, and carries a vacuity guard.
+Mutation-proven: restoring the `overflow` fails both assertions.
+
+### A REDUNDANCY THE FIX ITSELF INTRODUCED
+
+My replacement empty-state line read *"Ask a question below, or open What Can I Ask for examples and
+actions."* — accurate, and sitting directly above a composer helper that already said *"Ask about
+this record, its evidence, workflow, export readiness, or project-memory leads."* Two instruction
+sentences around one input: the clutter this change existed to remove, reintroduced by the change.
+It is now a state label, **"Nothing asked yet."** — what to ask is the helper's job and examples are
+the catalog's.
+
+### 42 UNIT FAILURES AND 10 E2E FAILURES, REPAIRED WITHOUT WEAKENING ONE ASSERTION
+
+Every test that asserted the OLD order was **rewritten to assert the new one PLUS that the controls
+are still reachable** — because asserting only their absence would pass just as well if they had
+been deleted. Three of my own errors along the way, each recorded at the site:
+
+* `tsc -b` from `apps/web` **does not** typecheck `e2e/` — that is `npm run typecheck:e2e`. A
+  missing import survived local typecheck and surfaced as a runtime `ReferenceError` in the suite.
+* Opening the popover inside `panel()` broke the tests that legitimately assert the RESTING layout.
+  `panel()` is pure; `panelWithCatalog()` is explicit.
+* A blanket regex inserted the catalog-open into ~20 call sites including a test asserting the panel
+  must NOT exist. Reverted the file, patched the 11 named tests.
+* And one assertion I wrote was simply false: *"the pills must not be in the dock"*. They are — the
+  popover is anchored there and opens upward, which is what puts it in FRONT rather than behind.
+
+### A measured duplicate, and why only one list lost a row
+
+Merging the two lists put the same question on screen twice. Measured at source: **15** prompt
+labels, **15** capability examples, exactly **ONE** collision ("What still needs me?"). Both lists
+genuinely belong; the duplicate does not. The capability copy is dropped because the suggested
+question is the actionable one — it ASKS, where an example only fills the composer. The test count
+is derived from the two sources rather than hardcoded, with a guard that fails if the
+de-duplication ever becomes a no-op.
+
+---
+
 ## CONTINUATION PROTOCOL
 
 Every future session starts here, in this order:

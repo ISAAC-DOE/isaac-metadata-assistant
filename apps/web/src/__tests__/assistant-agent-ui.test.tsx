@@ -23,7 +23,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, waitFor } from '@testing-library/react';
+import { fireEvent, render, waitFor, within } from '@testing-library/react';
 import { AssistantPanel } from '../components/AssistantPanel';
 import { api } from '../lib/api';
 import * as agentModule from '../lib/assistantAgent';
@@ -90,7 +90,7 @@ function pendingProposal(overrides: Partial<Proposal> = {}): Proposal {
 }
 
 function panel(extra: Record<string, unknown> = {}) {
-  return render(
+  const view = render(
     <AssistantPanel
       reply={REPLY}
       prompts={PROMPTS}
@@ -101,6 +101,23 @@ function panel(extra: Record<string, unknown> = {}) {
       {...extra}
     />,
   );
+  /*
+   * THE AGENT PILLS MOVED INTO "What Can I Ask?" (owner request, 2026-09-13),
+   * so reaching them now starts with opening that popover. Measured cause: the
+   * rail stacked two independently-scrolling control regions and BOTH were
+   * clipped (85px and 65px hidden); the owner asked for the rail to be the
+   * chat and nothing else.
+   *
+   * Opened HERE rather than in each test because every test in this file is
+   * about what a pill DOES once activated, not about where it sits. Not one
+   * assertion below is weakened: the pills are the same buttons, running the
+   * same intents, and the layout question they used to imply is now asserted
+   * explicitly in `assistant-layout.test.tsx`.
+   */
+  // Scoped to THIS render's container: a test that mounts two panels would
+  // otherwise match both triggers and throw on the ambiguity.
+  fireEvent.click(within(view.container).getByRole('button', { name: /What Can I Ask/i }));
+  return view;
 }
 
 beforeEach(() => {

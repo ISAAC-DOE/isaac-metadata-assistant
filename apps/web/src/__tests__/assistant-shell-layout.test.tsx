@@ -32,6 +32,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { openAssistantCatalog } from '../test/openAssistantCatalog';
 import { fireEvent, render, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { AssistantPanel } from '../components/AssistantPanel';
@@ -201,31 +202,57 @@ function ruleBody(css: string, sel: string): string {
 // ---------------------------------------------------------------------------
 
 describe('P36V.1 S1 · Suggested Questions are not hidden under the composer dock', () => {
-  it('RENDERED: all THREE Suggested Questions render as enabled buttons inside the body, none inside the dock', () => {
-    const { container } = panel({ agentContext: ctx(), agentPrompts: SEVEN_AGENT_PROMPTS });
+  it('RENDERED: all THREE Suggested Questions are enabled buttons in the catalog, and none is in the rail', () => {
+    /*
+     * ~~…inside the body, none inside the dock~~ — REWRITTEN 2026-09-13
+     * (owner request). This test was written to stop the sticky dock painting
+     * over the pills. That hazard is gone with the pills: they are no longer
+     * in the rail at all, so nothing in the rail can cover them.
+     *
+     * Why they moved: measured in a real browser at the shipped width, the
+     * rail stacked two independently-scrolling control regions and BOTH were
+     * clipped — 85px and 65px hidden. "Not under the dock" was true and the
+     * pills were still unreadable.
+     *
+     * What is kept, because it is what the test was really for: all three are
+     * REAL, ENABLED buttons, each with its own text, and none of them is
+     * obscured by the dock. The last clause is now satisfied by absence.
+     */
+    const { container, getByRole } = panel({ agentContext: ctx(), agentPrompts: SEVEN_AGENT_PROMPTS });
 
     const body = container.querySelector('.assistant-body') as HTMLElement;
     const foot = container.querySelector('.assistant-foot') as HTMLElement;
-    const empty = container.querySelector('.assistant-empty') as HTMLElement;
     expect(body).not.toBeNull();
     expect(foot).not.toBeNull();
 
-    const pills = Array.from(container.querySelectorAll('button.assistant-prompt'));
+    // NOT in the rail, in either region
+    expect(container.querySelectorAll('button.assistant-prompt').length).toBe(0);
+
+    fireEvent.click(getByRole('button', { name: /What Can I Ask/i }));
+    const dialog = container.querySelector('.assistant-capabilities-panel') as HTMLElement;
+    const pills = Array.from(dialog.querySelectorAll('button.assistant-prompt'));
     expect(pills.length).toBe(3);
     for (const [i, pill] of pills.entries()) {
       expect(pill.tagName, `prompt ${i} must be a real button`).toBe('BUTTON');
       expect(pill, `prompt ${i} must be activatable`).not.toBeDisabled();
-      // it lives in the scrolling body, NOT in the opaque sticky dock that used
-      // to paint over it
-      expect(pill.closest('.assistant-empty'), `prompt ${i} must be in the empty state`).toBe(
-        empty,
+      /*
+       * ~~must NOT be in the dock~~ — it IS in the dock, and that is correct.
+       * My first rewrite asserted otherwise and was wrong: the capabilities
+       * popover is ANCHORED in the foot and opens upward from it.
+       *
+       * The original hazard was pills FLOWING in the body and being painted
+       * over by an opaque sticky dock. A popover is the opposite case — it is
+       * a positioned overlay that renders ON TOP of everything, so being
+       * anchored in the dock is what puts it in front rather than behind. What
+       * matters is that it is inside the DIALOG, which is asserted here.
+       */
+      expect(pill.closest('.assistant-capabilities-panel'), `prompt ${i} must be in the catalog`).toBe(
+        dialog,
       );
-      expect(pill.closest('.assistant-body'), `prompt ${i} must be in the body`).toBe(body);
-      expect(pill.closest('.assistant-foot'), `prompt ${i} must NOT be in the dock`).toBeNull();
     }
     // each question's own text is rendered (the third one included)
     for (const p of THREE_PROMPTS) {
-      expect(within(empty).getByText(p.text)).toBeInTheDocument();
+      expect(within(dialog).getByText(p.text)).toBeInTheDocument();
     }
     // and the body is a SIBLING that precedes the dock — never nested in it
     expect(body.parentElement).toBe(foot.parentElement);
@@ -273,11 +300,19 @@ describe('P36V.1 S1 · Suggested Questions are not hidden under the composer doc
   });
 
   it('CSS SOURCE: scrollbars are opt-in (`auto`), never always-on (`scroll`)', () => {
+    /*
+     * ~~'.assistant-agent-actions'~~ left this list on 2026-09-13: it no longer
+     * scrolls at all. The block moved into the "What Can I Ask?" popover, which
+     * already has one scrollport, and its `overflow-y: auto` travelled with it —
+     * producing a scroll region nested inside a scroll region that still hid
+     * 65px. The cap was right in the dock and wrong here; it is gone, and
+     * `assistant-one-scrollport.test.ts` now guards the whole panel against a
+     * new one appearing.
+     */
     for (const sel of [
       '.assistant-body',
       '.assistant-empty',
       '.assistant-conversation',
-      '.assistant-agent-actions',
       '.assistant-more-body',
     ]) {
       const b = ruleBody(assistantCss, sel);
@@ -481,10 +516,29 @@ describe('P36V.1 S2 · Clear Conversation', () => {
     expect(queryByText('Related Questions')).toBeNull();
     expect(container.querySelector('.assistant-proposed')).toBeNull();
     expect(container.querySelector('.assistant-reply')!.textContent).toBe('');
-    // the empty state is restored with all three questions back in the body
-    expect(container.querySelectorAll('.assistant-empty button.assistant-prompt').length).toBe(3);
-    // focus returns to the composer input (the Clear button just unmounted)
+    /*
+     * ~~the empty state is restored with all three questions back in the
+     * body~~ — the questions are not in the body any more (2026-09-13, owner
+     * request). The empty STATE is still restored, and that is what Clear is
+     * for; the questions are checked where they now live.
+     */
+    expect(container.querySelector('.assistant-empty')).not.toBeNull();
+    expect(container.querySelectorAll('.assistant-empty button.assistant-prompt').length).toBe(0);
+
+    /*
+     * FOCUS IS ASSERTED BEFORE THE POPOVER IS TOUCHED, and the order is
+     * deliberate: opening the catalog moves focus into it and closing it
+     * returns focus to the trigger, both by design. Checking Clear's own focus
+     * behaviour after that would be measuring the popover, not Clear — which
+     * is exactly what my first version of this edit did, and it failed.
+     */
     expect(document.activeElement).toBe(getByRole('textbox'));
+
+    // …and the three questions are still there, in the catalog.
+    fireEvent.click(getByRole('button', { name: /What Can I Ask/i }));
+    expect(
+      container.querySelectorAll('.assistant-capabilities-panel button.assistant-prompt').length,
+    ).toBe(3);
     // session-only: nothing was written
     expect(submitSpy).not.toHaveBeenCalled();
     expect(editSpy).not.toHaveBeenCalled();
@@ -496,7 +550,7 @@ describe('P36V.1 S2 · Clear Conversation', () => {
 // ---------------------------------------------------------------------------
 
 describe('P36V.1 S5 · active conversation order and legibility', () => {
-  it('RENDERED: header → Clear → transcript → composer → disclosure → advisory footer', async () => {
+  it('RENDERED: header → Clear → transcript → composer → advisory footer, nothing else', async () => {
     vi.spyOn(api, 'askAssistant').mockResolvedValue(answerResponse());
     const { container, getByRole } = panel({
       availability: 'available',
@@ -510,17 +564,22 @@ describe('P36V.1 S5 · active conversation order and legibility', () => {
     const clear = container.querySelector('.assistant-clear')!;
     const log = container.querySelector('.assistant-log')!;
     const composer = container.querySelector('.assistant-composer')!;
-    const more = container.querySelector('details.assistant-more')!;
     const caption = container.querySelector('.assistant-caption')!;
 
     expect(precedes(row, clear)).toBe(true);
     expect(precedes(clear, log)).toBe(true);
     expect(precedes(log, composer)).toBe(true);
-    expect(precedes(composer, more)).toBe(true);
-    expect(precedes(more, caption)).toBe(true);
-    // nothing sits between the transcript and the composer
-    expect(container.querySelector('.assistant-body details.assistant-more')).toBeNull();
-    expect(container.querySelector('.assistant-body .assistant-prompts')).toBeNull();
+    expect(precedes(composer, caption)).toBe(true);
+    /*
+     * ~~→ disclosure →~~ there is no `<details>` in the rail any more: both
+     * control groups moved into "What Can I Ask?" (2026-09-13, owner request).
+     * The clause this test existed for — nothing sits between the transcript
+     * and the composer — now holds over the WHOLE rail rather than over one
+     * gap, and is asserted that way.
+     */
+    for (const sel of ['details.assistant-more', '.assistant-prompts', '.assistant-agent-prompts']) {
+      expect(container.querySelector(sel), `${sel} is back in the rail`).toBeNull();
+    }
   });
 
   it('RENDERED: user and assistant turns are distinct bubbles; Source + Related Questions stay with the answer', async () => {
@@ -565,6 +624,8 @@ describe('P36V.1 S5 · active conversation order and legibility', () => {
         <AssistantPanel reply={REPLY} prompts={withAction} experimentId={EXP} recordRev={5} />
       </MemoryRouter>,
     );
+    // The pills live in "What Can I Ask?" since 2026-09-13 — open it first.
+    openAssistantCatalog(container.querySelector('.assistant') as HTMLElement);
     fireEvent.click(getByText('Is this record valid?'));
 
     const action = container.querySelector('[data-action="open-validator"]') as HTMLElement;
@@ -666,10 +727,23 @@ describe('P36V.1 · all five Assistant mounts still render the panel shell', () 
           .textContent,
       ).toBe('Assistant');
       expect(assistant.querySelector('.assistant-composer')!.closest('.assistant-body')).toBeNull();
-      // every Suggested Question the screen supplies is in the body, not the dock
-      const pills = assistant.querySelectorAll('button.assistant-prompt');
-      expect(pills.length).toBeGreaterThan(0);
-      for (const pill of pills) expect(pill.closest('.assistant-foot')).toBeNull();
+      /*
+       * ~~every Suggested Question the screen supplies is in the body, not the
+       * dock~~ — the pills moved into "What Can I Ask?" on 2026-09-13 (owner
+       * request), so the rail carries none and this mount check asserts the
+       * shell, not the controls.
+       *
+       * The controls are still checked, one step further in: the trigger is
+       * present on every mount (so no surface lost access to them), and the
+       * catalog opens with real pills in it. Asserting only "none in the rail"
+       * would pass on a surface that had lost the assistant entirely.
+       */
+      expect(assistant.querySelectorAll('button.assistant-prompt').length).toBe(0);
+      const trigger = within(assistant).getByRole('button', { name: /What Can I Ask/i });
+      fireEvent.click(trigger);
+      const dialog = assistant.querySelector('.assistant-capabilities-panel') as HTMLElement;
+      expect(dialog, `${name}: the catalog did not open`).not.toBeNull();
+      expect(dialog.querySelectorAll('button.assistant-prompt').length).toBeGreaterThan(0);
     });
   }
 

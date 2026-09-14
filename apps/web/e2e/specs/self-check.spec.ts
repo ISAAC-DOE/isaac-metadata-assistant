@@ -47,6 +47,7 @@ import {
 import { expect, test } from '../fixtures';
 import { activeElementFocusInfo } from '../helpers/focus';
 import { auditScan, scan } from '../helpers/axe';
+import { openUnreachableDisclosures } from '../helpers/disclosures';
 import { findClippedText, findObscuredControls, horizontalPageScroll } from '../helpers/layout';
 import { SURFACES, type Surface } from '../surfaces';
 
