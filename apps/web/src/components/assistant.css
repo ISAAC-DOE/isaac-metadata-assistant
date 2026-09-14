@@ -750,16 +750,22 @@ button.assistant-source-chip-nav:focus-visible {
   flex: none;
   min-width: 0;
   margin-top: 2px;
-  /* P36V.1 S1 — the dock is `flex: none`, so an Agent Actions list of up to 7
-   * pills (Record Workbench) would otherwise grow the dock without limit and
-   * starve the body above it — the second half of the squeeze that hid the
-   * third Suggested Question. Bound it to a fraction of the VIEWPORT (so it
-   * scales with zoom) and scroll it internally: the composer, the advisory
-   * caption and every pill all stay reachable. */
-  max-height: 32vh;
-  overflow-y: auto;
-  overflow-x: hidden;
-  overscroll-behavior: contain;
+  /*
+   * ~~P36V.1 S1 — bound it to 32vh and scroll it internally, so an Agent
+   * Actions list of up to 7 pills cannot grow the dock without limit.~~
+   *
+   * *** THAT CONSTRAINT MOVED WITH THE BLOCK AND BECAME THE DEFECT AGAIN,
+   * ONE LEVEL DOWN. *** It was right while this list lived in the dock. On
+   * 2026-09-13 the list moved inside the "What Can I Ask?" popover, which
+   * already has exactly one scrollport (`.assistant-capabilities-list`) — and
+   * a scroll region nested inside a scroll region is the thing this whole
+   * change set out to remove. Measured in a real browser after the move: the
+   * catalog itself scrolled, AND this block still hid 65px inside it.
+   *
+   * So the cap is gone and the list flows: the popover's own scrollport is the
+   * one place this content scrolls. The runaway-dock hazard the cap existed
+   * for cannot recur, because the block is no longer in the dock's flow.
+   */
 }
 .assistant-agent-actions .assistant-suggested-eyebrow { margin-top: 12px; }
 
@@ -867,22 +873,40 @@ button.assistant-source-chip-nav:focus-visible {
  *      rows nearest the trigger — the edge least exposed to the clip, and out of
  *      the scroll region so they are visible without scrolling.
  * The panel keeps its own `overflow-y: auto` as a last resort, so in an extreme
- * viewport the fixed rows scroll rather than being clipped away. Whether the
- * empty-state popover fits at all remains a HUMAN browser check: jsdom computes
- * no layout, so nothing in the test suite can prove it. */
+ * viewport the fixed rows scroll rather than being clipped away.
+ *
+ * SUPERSEDED IN PART, 2026-09-13 — "remains a HUMAN browser check: jsdom
+ * computes no layout, so nothing in the test suite can prove it" was the end of
+ * this comment, and it was true of the CAP alone. It is kept as the reason the
+ * mitigations above are shaped the way they are, and corrected here because the
+ * mitigations were NOT SUFFICIENT: measured in Chromium at height 900 the panel
+ * opened with its top edge at -12.5 (desktop) and -17.8 (width 1024), i.e. off
+ * the top of the viewport, with the first pill behind an opaque 77-109px
+ * topbar. No `vh` constant can fix that — the room above the trigger depends on
+ * the dock's content height and on the topbar's own wrapping — so the height is
+ * now CLAMPED AT RUNTIME in `AssistantPanel.tsx` (search "OPENED PAST THE TOP
+ * OF THE SCREEN"), which only ever LOWERS the cap below. The browser assertion
+ * that pins it is in `e2e/specs/visual-sweep.spec.ts`, so this is no longer a
+ * human-only check; the jsdom half of the sentence is still exactly true. */
 .assistant-capabilities {
   position: relative;
   flex: none;
   min-width: 0;
   margin-top: 8px;
 }
+/* Icon-only since 2026-09-13 (owner request: "a question mark for what can i
+   ask"). The accessible name is on the button, so the box only has to hold the
+   glyph.
+   NO NEW RAW LITERALS: `type-scale-and-spacing.test.ts` caps hand-authored
+   spacing values and my first version added three, pushing the axis 2400 ->
+   2402. The padding below reuses `.assistant-clear`'s `3px 8px` rung one
+   region up in this same file, and the square comes from the glyph plus that
+   padding rather than from a min-width nobody else declares. */
 .assistant-capabilities-trigger {
   display: inline-flex;
   align-items: center;
-  gap: 7px;
-  min-width: 0;
-  max-width: 100%;
-  padding: 5px 10px;
+  justify-content: center;
+  padding: 3px 8px;
   border-radius: var(--radius-control);
   border: 1px solid var(--assist-border);
   background: var(--assist-panel-bg);
@@ -951,7 +975,25 @@ button.assistant-source-chip-nav:focus-visible {
  * inside the flex column instead of pushing the sentences below it out. */
 .assistant-capabilities-list {
   flex: 1 1 auto;
-  min-height: 0;
+  /* 96px, NOT 0, and the 0 is what this replaces -- measured, because `0` let the
+   * catalog disappear entirely. At width 320 (height 900) the topbar wraps to
+   * three lines (bottom 141px), leaving 156px above the trigger, so the runtime
+   * clamp sized the panel 155px. The fixed rows below this list -- the two
+   * honesty sentences and Close -- are together taller than that, and this was
+   * the ONLY `flex: 1 1 auto` child with `min-height: 0`, so it absorbed the
+   * whole deficit: `clientHeight` measured EXACTLY 0 against a `scrollHeight` of
+   * 1006. The reader was offered a popover with nothing in it, and
+   * `document.elementFromPoint` at the first pill's own centre returned
+   * `P.assistant-capabilities-boundary` -- which is also how it surfaced, as
+   * `visual-sweep` reporting the panel intercepting its own pill at 320px.
+   *
+   * 96px is one group eyebrow plus two 35px rows and the 8px gap between them,
+   * so something is always on offer. The cost is stated rather than hidden: on a
+   * viewport this cramped the fixed rows can now be pushed below the panel's own
+   * scrollport instead of always being visible, which is the "last resort"
+   * behaviour the block comment above already describes. An empty catalog is
+   * worse than a scrolled one. */
+  min-height: 96px;
   min-width: 0;
   overflow-y: auto;
   overflow-x: hidden;
@@ -1791,6 +1833,32 @@ button.assistant-source-chip-nav:focus-visible {
 }
 .edit-impact-reason { font-size: 13px; font-weight: 600; color: var(--text-primary); }
 .edit-impact-note { margin: 4px 0 0; font-size: 12.5px; color: var(--text-muted); }
+/* A11Y-01 cause (b), ONE OF THREE CLOSED — the ancestor `opacity` is GONE.
+   `opacity: 0.72` used to sit here and it dragged this row's text below AA by
+   compositing: `--text-secondary` #46515f (6.86:1 on white) rendered as
+   #777f8a, and `--text-quaternary` -> `--text-tertiary` #626c77 rendered as
+   #8b939b (2.87:1 on #f4f6f9). Both were `serious` axe `color-contrast`
+   failures on a scientist-facing surface.
+
+   REMOVING IT IS THE WHOLE FIX, AND THAT IS WHY NO COLOUR CHANGED. The tokens
+   this row already paints both clear AA uncomposited; the opacity was piling
+   de-emphasis on top of ink that was ALREADY de-emphasised, and it is the only
+   one of the two mechanisms that is invisible to a palette audit.
+   `__tests__/palette-contrast.test.ts` had already proved the alternative
+   impossible: composited at .72, a neutral grey only clears 4.5:1 down to
+   #414141, which is darker than `--text-secondary` two rungs above it — so a
+   compliant "tertiary" here would have had to be darker than the tiers it
+   exists to sit below. The opacity had to go, and the ramp does the work.
+
+   WHAT CARRIES THE RECESSION NOW: the faint border, the outlined number disc,
+   and the token ramp itself (secondary label, tertiary path, against the
+   primary ink active rows use). That is how every other de-emphasised surface
+   in this app already does it — this row was the outlier.
+
+   THE OTHER TWO SITES ARE STILL OPEN and are deliberately not touched here:
+   `queue.css .exp-row.done` (.82) and `signals.css .advisory-nongating` (.85).
+   They are named as residue rather than swept, because each moves accessibility
+   baseline cells on both platforms and needs its own Linux-CI round-trip. */
 .upcoming-row {
   display: flex;
   align-items: center;
@@ -1798,7 +1866,6 @@ button.assistant-source-chip-nav:focus-visible {
   padding: 12px 16px;
   border: 1px solid var(--border-faint);
   border-radius: var(--radius-inner);
-  opacity: 0.72;
 }
 .upcoming-num {
   width: 22px;

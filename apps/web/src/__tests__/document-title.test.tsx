@@ -51,6 +51,7 @@ import {
   recordWorkspaceTitleSegment,
 } from '../lib/documentTitle';
 import { RECORD_VIEW_IDS, ROUTE_PATTERNS, resolveRecordView } from '../lib/routes';
+import { LABELS } from '../lib/labels';
 
 const ID = 'demo';
 const BASE = `/api/experiments/${ID}`;
@@ -126,9 +127,36 @@ describe('every route is titled, and no two routes share a title', () => {
     expect(new Set(titles).size).toBe(paths.length);
   });
 
-  it('answers null for the routes that redirect elsewhere', () => {
+  /*
+   * QA-020 — THIS TEST IS INVERTED IN HALF, NOT DELETED. It used to read
+   * "answers null for the routes that redirect elsewhere" and assert null for BOTH
+   * `/` and `/not-a-route`. That was correct when `path="*"` was
+   * `<Navigate to={ROUTES.experiments} replace />`, and it was pinning the defect:
+   * an unrecognised address silently became My Experiments.
+   *
+   * `/` STILL redirects and still owes no title — the reader is never on it.
+   * `/not-a-route` now RENDERS `screens/NotFound`, which is a real destination a
+   * reader sits on and reads a browser tab for, so WCAG 2.4.2 applies to it like
+   * any other screen. Returning null there would leave the PREVIOUS screen's title
+   * in the tab while a not-found page is on screen — a false claim in the one place
+   * the reader cannot see the page to check it.
+   */
+  it('answers null for `/`, which redirects — but TITLES the not-found screen, which does not', () => {
     expect(routeDocumentTitle('/', '')).toBeNull();
-    expect(routeDocumentTitle('/not-a-route', '')).toBeNull();
+
+    const notFound = routeDocumentTitle('/not-a-route', '');
+    expect(notFound).not.toBeNull();
+    expect(notFound).toContain(LABELS.screenNotFound);
+    expect(notFound).toContain(APP_TITLE);
+
+    // MUTATION GUARD: the not-found title must not be reachable by any RECOGNISED
+    // address. If a real route ever falls through to the `default` branch it would
+    // be titled "Page not found" while rendering correctly, and the §1 sweep over
+    // every declared route below is what catches that — this asserts the converse,
+    // that several unrelated unrecognised shapes all land on the same honest title.
+    for (const p of ['/validator', '/record', '/settings/extra', '/a/b/c', '/Experiments']) {
+      expect(routeDocumentTitle(p, ''), p).toBe(notFound);
+    }
   });
 
   it('names each of the four record workspaces', () => {

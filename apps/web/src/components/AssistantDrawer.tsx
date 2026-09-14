@@ -30,9 +30,31 @@ const RAIL_COLLAPSE_STORAGE_KEY = 'isaac.assistant-rail-collapsed';
 
 function readStoredRailCollapsed(): boolean {
   try {
-    return window.localStorage.getItem(RAIL_COLLAPSE_STORAGE_KEY) === '1';
+    // UX-013 — THE COMPARISON IS AGAINST `'0'`, NOT `'1'`, AND THE INVERSION IS
+    // THE WHOLE POINT. The product default is now COLLAPSED (see the `useState`
+    // below for why), so three cases have to stay distinguishable and only one
+    // of them means "expanded":
+    //
+    //   absent  -> collapsed   a reader who has never touched the toggle gets
+    //                          the default, and the default is now collapsed
+    //   `'1'`   -> collapsed   an explicit collapse, unchanged in meaning
+    //   `'0'`   -> EXPANDED    an explicit expand — "a scientist who expands it
+    //                          once keeps it", which is the property this
+    //                          function exists to preserve and the reason the
+    //                          default flip is not simply `useState(true)` with
+    //                          the effect deleted
+    //
+    // Written as `!== '0'` rather than `=== '1'` because the absent case must
+    // fall on the collapsed side WITH `'1'`, and any future value nobody
+    // anticipated should also fall there: the default is the safe side, so an
+    // unrecognised string does not silently consume the scientist's column.
+    return window.localStorage.getItem(RAIL_COLLAPSE_STORAGE_KEY) !== '0';
   } catch {
-    return false;
+    // Storage refused, so no preference is knowable — use the product default,
+    // which is the same answer the absent case gets above. Returning `false`
+    // here (as this did before UX-013) would have made a storage-refusing
+    // browser the ONE environment where the rail still opened by default.
+    return true;
   }
 }
 
@@ -90,12 +112,31 @@ function writeStoredRailCollapsed(next: boolean): void {
  */
 export function AssistantDrawer({ railClassName, label = LABELS.assistant, children }: AssistantDrawerProps) {
   const [open, setOpen] = useState(false);
-  // PR-E — desktop rail collapse. Starts `false` (open) on every render,
-  // including the FIRST one, so server-rendered/pre-hydration markup and the
-  // first client paint agree; the stored preference (if any) is applied in
-  // the effect below, after mount, exactly like the tutorial-completion and
-  // other per-browser preferences already read localStorage in this app.
-  const [collapsed, setCollapsed] = useState(false);
+  // PR-E, default flipped by UX-013 — desktop rail collapse. Starts `true`
+  // (COLLAPSED) on every render, including the FIRST one, so
+  // server-rendered/pre-hydration markup and the first client paint agree; the
+  // stored preference (if any) is applied in the effect below, after mount,
+  // exactly like the tutorial-completion and other per-browser preferences
+  // already read localStorage in this app.
+  //
+  // WHY THE DEFAULT MOVED, and it is a requirement rather than a taste call.
+  // The Assistant is meant to be CONTEXTUAL: the scope directive's rule is that
+  // it must not permanently consume the scientist's working width, and with
+  // `false` here it consumed a 342px rail on every record screen before anyone
+  // had asked it anything — on a surface that, in this build, has no language
+  // model behind it at all (`ASSISTANT_NO_MODEL_CLAIM` says so in the dock).
+  //
+  // THE UNCONDITIONAL FIRST RENDER IS PRESERVED, NOT TRADED AWAY. Flipping the
+  // literal keeps the property the original comment was protecting — the first
+  // paint still does not depend on storage — it only changes which value that
+  // unconditional paint uses. The cost is the mirror image of the one this code
+  // already carried: a returning reader who had expanded the rail now sees one
+  // collapsed frame before the effect expands it, where previously a reader who
+  // had collapsed it saw one expanded frame. That trade is deliberate, because
+  // the flash now runs in the direction of the smaller surprise: it briefly
+  // shows LESS than the reader asked for rather than briefly covering the
+  // column they are working in.
+  const [collapsed, setCollapsed] = useState(true);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const panelRef = useRef<HTMLElement | null>(null);
   const railToggleRef = useRef<HTMLButtonElement | null>(null);

@@ -280,7 +280,40 @@ function WorkspaceChip() {
   // while the chip describes the workspace the reader is currently looking at.
   const inExampleSession = useTutorialState().sessionId !== null;
   return (
-    <span className="mode-chip" aria-label={chipAriaLabel(health, inExampleSession)}>
+    /*
+     * `role="note"` — QA-023. THE `aria-label` BELOW WAS ON A BARE `<span>`, WHICH
+     * MAPS TO `role=generic`, AND ARIA **PROHIBITS** NAMING A GENERIC.
+     *
+     * Measured with axe 4.12.1 against this element's exact shipped markup:
+     *
+     *   bare span   violations=0  incomplete=[aria-prohibited-attr, color-contrast]
+     *   role=note   violations=0  incomplete=[color-contrast]
+     *
+     * WHAT THIS DOES AND DOES NOT CLAIM. It moves a ~90-word GOVERNANCE disclosure
+     * from an attribute ARIA says must not be there — where whether it is announced
+     * depends on user-agent leniency — onto a role that permits naming, so the name
+     * is conformant rather than tolerated. **It is NOT a claim that the disclosure
+     * was previously inaudible to every screen reader; that was not tested, and a
+     * real-AT check is a human gate this environment cannot perform.** The honest
+     * statement is that it was prohibited and is now permitted.
+     *
+     * WHY `note` AND NOT THE ALTERNATIVES, all four measured and all four clearing
+     * the prohibition equally — so the choice is made on SEMANTICS, not on axe:
+     *   · `status` makes it a LIVE REGION. The chip is driven by polled
+     *     `/api/health`, so every poll that changed a value would re-announce ninety
+     *     words of governance prose. Actively worse than the defect.
+     *   · `img` would treat the chip as a graphic and SUPPRESS its inner text.
+     *   · `group` asserts a set of related widgets; there are none.
+     *   · `note` is ARIA's "parenthetic or ancillary content", permits naming, is
+     *     not a live region, and leaves the visible word readable. That is what this
+     *     chip is.
+     *
+     * IT MOVES NO ACCESSIBILITY BASELINE CELL, which is why it can ship beside a
+     * Linux round-trip already in flight: `e2e/helpers/axe.ts` reads only
+     * `results.violations`, and violations go 0 -> 0. The `incomplete` bucket it
+     * clears is the one nothing reads — see `QA-023`.
+     */
+    <span className="mode-chip" role="note" aria-label={chipAriaLabel(health, inExampleSession)}>
       <Shield size={13} strokeWidth={2} aria-hidden="true" />
       {chipText(health, inExampleSession)}
     </span>
@@ -351,6 +384,43 @@ export function TopBar({ variant, breadcrumb, title, filename, stateChip, record
       {variant === 'record' && (
         <>
           <div className="record-context">
+            {/*
+              QA-017 — the record breadcrumb had exactly one segment (the page's own
+              name), with the ancestor reachable only by clicking `Brand`, which reads
+              as a logo rather than a crumb. This adds `My Experiments` as its own
+              LINKED crumb, ahead of the title, on every `variant="record"` render —
+              whether or not the caller passes `recordId` — because the not-loaded and
+              loaded Review Record screens are exactly the two callers that omit it
+              (`RecordWorkbench.tsx`), and both are the "one segment" case.
+
+              HIDDEN BELOW 1024px, DELIBERATELY, not as an oversight. The narrow-width
+              layout of `.record-context` above is the product of measured, exact-pixel
+              fixes (C1/I4/LAYOUT-01/LAYOUT-02) that this file documents in detail; adding
+              width here would re-open exactly the overflow class those fixes closed,
+              and re-measuring the whole band was out of this slice's scope. `.record-
+              ancestor-link` is hidden in the same `@media (max-width: 1024px)` block
+              that already hides this crumb's decorative `<svg>` separators, so the
+              narrow-width layout is BYTE-IDENTICAL to before this change. The `Brand`
+              logo link remains the way back at every width. */}
+            {/*
+              `aria-label` OPENS WITH THE VISIBLE TEXT (WCAG 2.5.3) AND THEN
+              DISAMBIGUATES — found necessary, not stylistic: `FetchStates.tsx`'s
+              error panel renders its own "the one affordance offered" link with
+              the identical visible text and NO `aria-label`, so its accessible
+              name is the bare `LABELS.navExperiments` string. On the record
+              screen's own not-found/no-session error state that link and this
+              crumb are both mounted, and `getByRole('link', { name:
+              LABELS.navExperiments })` — an existing, unmodified test —
+              correctly failed on "found multiple elements" until this crumb's
+              name became distinct.
+            */}
+            <Link
+              to={ROUTES.experiments}
+              className="record-ancestor-link"
+              aria-label={`${LABELS.navExperiments} breadcrumb`}
+            >
+              {LABELS.navExperiments}
+            </Link>
             <ChevronRight size={14} strokeWidth={2} aria-hidden="true" style={{ color: 'var(--text-disabled)' }} />
             {recordId ? (
               // Sub-surface: the record title is an ancestor crumb linking back to

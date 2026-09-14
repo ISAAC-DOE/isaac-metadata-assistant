@@ -324,6 +324,66 @@ export function isAmbiguousTitle(displayTitle: string, duplicates: Set<string>):
 }
 
 /**
+ * UX-017's LIBRARY HALF — the scientist-facing statistics that used to require
+ * a trip to the demoted Statistics destination, computed over the SAME
+ * `summaries` array `ExperimentsHome` already holds (`GET /api/experiments`
+ * is unpaginated — see `routes.py::list_experiments`'s own docstring — so this
+ * is the server's true total, never `array.length` read from a filtered or
+ * paged subset).
+ *
+ * WORKSPACE-SCOPED, NEVER PERSONAL — the correction that matters most here.
+ * `MyStats.tsx` and the `8ce85a87` fix to `SettingsPage.tsx` both establish why:
+ * this build has no trusted authentication boundary
+ * (`docs/identity-trust-contract.md` §6A) and no per-record author, so "your
+ * activity" is a claim nothing here can back. Every figure below is a fact
+ * about the WORKSPACE — how many experiments, how many runs, how many
+ * proposals are waiting — never attributed to "you". Do not add a per-person
+ * figure beside these; add it beside `MyStats.tsx`'s existing gate instead, so
+ * the one place that already states the absent-identity reason keeps doing so.
+ *
+ * TWO OF THE FOUR ARE NOT DUPLICATES OF THE FACET CHIPS, and that is why this
+ * function exists rather than reusing `facetCounts` alone. `LIBRARY_FACETS`
+ * counts RECORDS matching a predicate (e.g. "records with at least one open
+ * proposal"); `totalRuns` and `openProposals` below are SUMS across every
+ * record — "how much has been captured", not "how many records need
+ * attention". The other two (`total`, `needsAttention`) — ~~`exported`~~, which is
+ * NOT a field on this interface; corrected 2026-09-13 after an independent review
+ * (B-3) caught the docstring naming a field the type does not have — are read
+ * straight off
+ * `facetCounts` rather than recomputed, so the two surfaces can never disagree
+ * about what they both claim to count.
+ */
+export interface LibraryOverviewStats {
+  /** Every experiment in the workspace — `facetCounts(...).all`. */
+  total: number;
+  /** `facetCounts(...).needsAttention`. */
+  needsAttention: number;
+  /** The SUM of `run_count` over every experiment — not a record count. */
+  totalRuns: number;
+  /** The SUM of `open_proposal_count` over every experiment — not the count of
+   *  records carrying at least one (that is the `proposals` facet chip). */
+  openProposals: number;
+}
+
+export function libraryOverviewStats(
+  summaries: ApiExperimentSummary[],
+): LibraryOverviewStats {
+  const counts = facetCounts(summaries);
+  let totalRuns = 0;
+  let openProposals = 0;
+  for (const s of summaries) {
+    totalRuns += count(s.run_count);
+    openProposals += count(s.open_proposal_count);
+  }
+  return {
+    total: counts.all,
+    needsAttention: counts.needsAttention,
+    totalRuns,
+    openProposals,
+  };
+}
+
+/**
  * The folders to OFFER as move destinations: every path that already exists,
  * plus nothing else.
  *

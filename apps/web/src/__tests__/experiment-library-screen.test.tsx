@@ -43,13 +43,19 @@ function row(overrides: Partial<ApiExperimentSummary> = {}): ApiExperimentSummar
  * routes this screen reads are answered; anything else rejects loudly, so a screen
  * that started making a third request would fail rather than silently degrade.
  */
-function stub(experiments: ApiExperimentSummary[]) {
+function stub(
+  experiments: ApiExperimentSummary[],
+  /* B-2 — the server's own "this read was short" signal. Defaulted to `null` so
+     every existing caller is unchanged, and threaded rather than faked, because the
+     claim under test is that the STRIP consults it. */
+  incomplete: { reason: string; message: string } | null = null,
+) {
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: RequestInfo | URL) => {
       const url = String(typeof input === 'string' ? input : (input as Request).url ?? input);
       if (url.includes('/api/experiments')) {
-        return new Response(JSON.stringify({ experiments }), {
+        return new Response(JSON.stringify({ experiments, incomplete }), {
           status: 200,
           headers: { 'Content-Type': 'application/json' },
         });
@@ -328,5 +334,193 @@ describe('the two empty states are DIFFERENT, and this is the one that matters',
     fireEvent.click(screen.getByRole('button', { name: LABELS.libraryClearFilters }));
     expect(screen.getByText('I exist')).toBeInTheDocument();
     expect(screen.getByText('So do I')).toBeInTheDocument();
+  });
+});
+
+/*
+ * UX-017's LIBRARY HALF — the "Workspace Statistics" strip. Not the folder
+ * chips (`search, facets and sort` above already owns those); this owns the
+ * two genuinely new aggregates (`totalRuns`, `openProposals` — SUMS, not
+ * `facetCounts`) and the folder-scope gate.
+ */
+describe('UX-017 — Workspace Statistics is merged into the Library', () => {
+  it('shows workspace-wide totals at the root, including the two SUMS the facet chips do not state', async () => {
+    stub([
+      row({ id: '01A00000000000000000000001', status: 'needs_attention', run_count: 3, open_proposal_count: 2 }),
+      row({ id: '01A00000000000000000000002', status: 'ready_to_export', run_count: 5, open_proposal_count: 1 }),
+      row({ id: '01A00000000000000000000003', status: 'done', run_count: 0, open_proposal_count: 0 }),
+    ]);
+    const { container } = renderLibrary();
+    await screen.findByRole('heading', { name: LABELS.libraryOverviewHeading });
+    // In DOM order: Experiments, Needs Attention, Runs Recorded, Proposals Waiting.
+    // Experiments: 3. Needs Attention: 1 (facetCounts parity). Runs Recorded:
+    // 3 + 5 + 0 = 8 (a SUM). Proposals Waiting: 2 + 1 + 0 = 3 (a SUM, not the
+    // "2 records have at least one" the `proposals` facet chip would show).
+    const values = Array.from(container.querySelectorAll('.library-overview-value')).map(
+      (el) => el.textContent,
+    );
+    expect(values).toEqual(['3', '1', '8', '3']);
+  });
+
+  /*
+   * THE SIX PHRASINGS `8ce85a87` BANNED, over the WHOLE strip — not two of them over
+   * one paragraph.
+   *
+   * *** THIS TEST'S FIRST VERSION WAS VACUOUS AND AN INDEPENDENT REVIEW PROVED IT. ***
+   * It was `expect(note.textContent).not.toMatch(/your (own )?activity|you have/i)`,
+   * which is TWO of the six patterns `8ce85a87` established for exactly this claim
+   * class, scoped to a single `<p>` — so the heading and all four labels were outside
+   * its reach. Measured by mutation: renaming the heading to `'Your Workspace
+   * Statistics'` and a label to `'Runs You Recorded'` left this file and
+   * `statistics-nav` GREEN (36 passed, exit 0) and the full suite green too. A
+   * heading promising per-person figures, on a build with no trusted identity
+   * boundary, shipped through the test titled "never claims the counts are personal".
+   *
+   * `CLAUDE.md` §11 records this same shape in the voice-capture slice: "the guard
+   * that should have caught it did not cover it… the first widened guard caught 1 of
+   * 8 plausible rephrasings". A new surface making an established claim class must be
+   * enrolled in the EXISTING ban, not given a weaker one of its own.
+   *
+   * The list is duplicated from `statistics-nav.test.tsx` deliberately rather than
+   * exported: these are two independent surfaces, and a shared constant would let one
+   * slice weaken the ban for both at once. The parity that matters is the PATTERN
+   * SET, and the comment above is what keeps them findable together.
+   */
+  const PERSONAL_CLAIM_PHRASINGS = [
+    /your own activity/i,
+    /your activity/i,
+    /\byour\b[^.]{0,40}\b(figures|statistics|stats|records|contributions)\b/i,
+    /per-person/i,
+    /who did what/i,
+    /activity (?:by|per) (?:user|person|scientist|you)/i,
+  ];
+
+  it('never claims the counts are personal, in any of the six phrasings, ANYWHERE in the strip', async () => {
+    stub([row({ title: 'Any' })]);
+    const { container } = renderLibrary();
+    await screen.findByText(LABELS.libraryOverviewNote);
+
+    const section = container.querySelector('.library-overview');
+    expect(section, 'the strip did not render; this guard would pass over nothing').not.toBeNull();
+    // The WHOLE section: heading, the four labels, the four values, and the note.
+    const text = section!.textContent ?? '';
+    expect(text.length, 'the strip rendered empty').toBeGreaterThan(20);
+
+    for (const pattern of PERSONAL_CLAIM_PHRASINGS) {
+      expect(
+        text,
+        `the Library statistics strip promises per-person figures (${pattern}). This ` +
+          `build has no trusted authentication boundary, so no figure here can be ` +
+          `attributed to anyone — see 8ce85a87, which retired the same claim from Settings`,
+      ).not.toMatch(pattern);
+    }
+  });
+
+  it('POSITIVE CONTROL — the six patterns actually match the claims they forbid', () => {
+    // Without this, six `not.toMatch` assertions passing is indistinguishable from
+    // six regexes that match nothing. Each pattern gets a phrasing it MUST catch.
+    const MUST_CATCH: ReadonlyArray<readonly [RegExp, string]> = [
+      [PERSONAL_CLAIM_PHRASINGS[0]!, 'Counts over your own activity in it'],
+      [PERSONAL_CLAIM_PHRASINGS[1]!, 'a summary of your activity'],
+      [PERSONAL_CLAIM_PHRASINGS[2]!, 'Your Workspace Statistics'],
+      [PERSONAL_CLAIM_PHRASINGS[3]!, 'per-person totals'],
+      [PERSONAL_CLAIM_PHRASINGS[4]!, 'shows who did what'],
+      [PERSONAL_CLAIM_PHRASINGS[5]!, 'activity by user'],
+    ];
+    for (const [pattern, phrasing] of MUST_CATCH) {
+      expect(pattern.test(phrasing), `${pattern} failed to catch ${JSON.stringify(phrasing)}`).toBe(
+        true,
+      );
+    }
+    // ...and the shipped copy is NOT caught, so the ban is not simply "match all".
+    for (const pattern of PERSONAL_CLAIM_PHRASINGS) {
+      expect(pattern.test(LABELS.libraryOverviewNote), `${pattern}`).toBe(false);
+      expect(pattern.test(LABELS.libraryOverviewHeading), `${pattern}`).toBe(false);
+    }
+  });
+
+  /*
+   * B-2 — THE FOUR FIGURES MUST NOT BE PUBLISHED AS A WORKSPACE INVENTORY WHEN THE
+   * SERVER SAYS THE READ WAS SHORT.
+   *
+   * Found by independent review, and the reviewer's sharpest point was not the copy
+   * but the COVERAGE: the strip never consulted `incomplete` at all, and no test
+   * covered the interaction, so the heading "Workspace Statistics" and the note
+   * "the records in this workspace" were unconditional over a list
+   * `GET /api/experiments` may itself describe as evidence about one read.
+   *
+   * `IncompleteListNote` (role="alert") does render above the strip, which is why
+   * this is Important and not Critical — a caveat IS on screen. But it speaks about
+   * "the list", not about these totals, and a reader scanning four large numbers
+   * under a heading that says "Workspace" has no reason to connect them.
+   */
+  const SHORT_READ = {
+    reason: 'store_unavailable',
+    message: 'the experiment database did not answer',
+  };
+
+  it('B-2 — scopes BOTH the heading and the note when the server declares the read incomplete', async () => {
+    stub([row({ title: 'Any' })], SHORT_READ);
+    const { container } = renderLibrary();
+    await screen.findByText(LABELS.libraryOverviewNotePartial);
+
+    const section = container.querySelector('.library-overview')!;
+    const text = section.textContent ?? '';
+    expect(text).toContain(LABELS.libraryOverviewHeadingPartial);
+    expect(text).toContain(LABELS.libraryOverviewNotePartial);
+    // ...and the unconditional workspace claims are GONE, not merely joined.
+    expect(text).not.toContain(LABELS.libraryOverviewHeading);
+    expect(text).not.toContain(LABELS.libraryOverviewNote);
+  });
+
+  it('B-2 CONTROL — a COMPLETE read still says "Workspace", so the scoping is conditional and not a blanket hedge', async () => {
+    // Without this arm the fix could be "always hedge", which would understate a
+    // read that IS complete — the opposite defect, and just as false.
+    stub([row({ title: 'Any' })]);
+    const { container } = renderLibrary();
+    await screen.findByText(LABELS.libraryOverviewNote);
+
+    const text = container.querySelector('.library-overview')!.textContent ?? '';
+    expect(text).toContain(LABELS.libraryOverviewHeading);
+    expect(text).not.toContain(LABELS.libraryOverviewHeadingPartial);
+    expect(text).not.toContain(LABELS.libraryOverviewNotePartial);
+  });
+
+  it('B-2 — the scoped copy makes no workspace-total claim, and the six personal phrasings still do not match it', async () => {
+    // The scoped strings are new user-facing copy, so they are held to both
+    // standards: they must not reintroduce the inventory claim, and they must not
+    // reintroduce the per-person claim through the back door.
+    expect(LABELS.libraryOverviewHeadingPartial).not.toMatch(/workspace/i);
+    expect(LABELS.libraryOverviewNotePartial).toMatch(/not a workspace total/i);
+    for (const pattern of PERSONAL_CLAIM_PHRASINGS) {
+      expect(LABELS.libraryOverviewHeadingPartial, `${pattern}`).not.toMatch(pattern);
+      expect(LABELS.libraryOverviewNotePartial, `${pattern}`).not.toMatch(pattern);
+    }
+  });
+
+  it('is hidden while browsing INSIDE a folder — these are workspace totals, not the folder’s', async () => {
+    stub([
+      row({ id: '01A00000000000000000000001', title: 'Inside', folder: 'Campaign' }),
+      row({ id: '01A00000000000000000000002', title: 'Outside', folder: '' }),
+    ]);
+    renderLibrary();
+    await screen.findByText('Inside');
+    expect(screen.getByRole('heading', { name: LABELS.libraryOverviewHeading })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /Campaign/ }));
+    expect(screen.getByText('Inside')).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: LABELS.libraryOverviewHeading })).toBeNull();
+
+    // And it reappears on the way back out.
+    const trail = screen.getByRole('navigation', { name: 'Folder path' });
+    fireEvent.click(within(trail).getByRole('button', { name: LABELS.libraryRootFolder }));
+    expect(screen.getByRole('heading', { name: LABELS.libraryOverviewHeading })).toBeInTheDocument();
+  });
+
+  it('is absent from the first-run empty state — there is nothing to summarise yet', async () => {
+    stub([]);
+    renderLibrary();
+    await screen.findByText(LABELS.emptyExperimentsTitle);
+    expect(screen.queryByRole('heading', { name: LABELS.libraryOverviewHeading })).toBeNull();
   });
 });

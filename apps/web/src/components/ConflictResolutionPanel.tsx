@@ -925,7 +925,7 @@ function CandidateChoice({
               assert this answer{uncitedClause(candidate)}
             </p>
             {candidate.sources.length > 0 && (
-              <div className="conflict-sources" aria-label="Safe source references">
+              <div className="conflict-sources" role="group" aria-label="Safe source references">
                 {candidate.sources.map((source, i) => (
                   <span className="conflict-source" key={`${source.source_type}-${i}`}>
                     <SourceTypeToken sourceType={sourceTypeOf(source)} />
@@ -1011,8 +1011,19 @@ function CandidateChoice({
  */
 function RecordedDecision({ resolution }: { resolution: ApiConflictResolution }) {
   const headingId = useId();
+  /*
+   * `role="group"`: a bare `<div>` is `generic`, and ARIA prohibits naming a
+   * `generic`, so this `aria-labelledby` was discarded.
+   *
+   * FOUND BY A SOURCE SCAN, NOT BY THE AXE PROBE — and that difference is the
+   * reason the scan exists. QA-023's instrumented axe run over all 28 surfaces
+   * saw 86 of these and NOT this one, because a conflict panel only renders
+   * when a record actually HAS a competing decision, which no scanned surface
+   * does. A runtime probe measures the paths it can reach; this one could not
+   * reach here.
+   */
   return (
-    <div className="conflict-decision" aria-labelledby={headingId}>
+    <div className="conflict-decision" role="group" aria-labelledby={headingId}>
       <h3 className="conflict-decision-title" id={headingId}>
         {resolution.stale ? 'The decision that was superseded' : 'The decision on record'}
       </h3>

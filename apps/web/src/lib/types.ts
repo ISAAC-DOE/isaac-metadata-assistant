@@ -3849,3 +3849,247 @@ export interface ApiChangeFeedPage {
   /** The kinds this deployment serves, derived server-side from its collectors. */
   kinds: string[];
 }
+
+/* ==========================================================================
+ * HISTORICAL IMPORT — the shell. `HIST-001` / `HIST-003a` / `HIST-004`.
+ *
+ * An IMPORT SESSION is a working area: a bundle of sources, whatever this build
+ * could read out of them, and the candidates a deterministic reconstruction made
+ * of that reading. Nothing in it is a value, evidence or a confirmation, and
+ * nothing in it reaches an exported record.
+ *
+ * THE ONE WAY ANYTHING LEAVES IT is `api.proposeImportCandidate`, which mints one
+ * OPEN `ApiProposal` on an experiment a person chose. Accepting that proposal is a
+ * separate act that needs a trusted human identity — which no default-configured
+ * deployment establishes — so semantic output cannot become record truth
+ * automatically, structurally rather than by convention.
+ * ========================================================================== */
+
+/**
+ * Which kind of source a manifest entry is, and the distinction is the whole
+ * honesty boundary of the feature.
+ *
+ * `reference` — a pointer. This build stores where the file is and what the
+ *   scientist says identifies it. It does not open the file.
+ * `synthetic_fixture` — one of the committed synthetic fixtures inside this
+ *   application. These ARE read, because they are files this repository ships for
+ *   exactly this purpose, and each says so in its own first lines.
+ */
+export type ApiImportSourceKind = 'reference' | 'synthetic_fixture';
+
+/**
+ * What happened when the parse ran, PER ENTRY — never a banner, because the
+ * answer differs per entry and a banner would be wrong for half of them.
+ *
+ * `no_content_path` is the honest state of every `reference` in this build: there
+ * is no path to that file's contents, so it is not "waiting to be parsed" and a
+ * reader waiting for `parsed` would wait forever.
+ */
+export type ApiImportParseState = 'unparsed' | 'parsed' | 'failed' | 'no_content_path';
+
+/** One manifest entry: metadata ABOUT a file, and never its bytes. */
+export interface ApiImportSource {
+  source_id: string;
+  kind: ApiImportSourceKind;
+  filename: string;
+  reference: string;
+  parse_state: ApiImportParseState;
+  /** Why, for every state but `parsed`. Present on all three of the others. */
+  parse_detail: string | null;
+  provenance: Record<string, unknown>;
+  media_type: string | null;
+  /** WHAT THE SCIENTIST SAID. Nothing measures it. */
+  size_bytes: number | null;
+  /**
+   * WHAT THE SCIENTIST SAID, shape-checked and NEVER COMPUTED — not even for a
+   * fixture this build does read. So no surface may describe it as verified,
+   * checked or matched; "recorded" is the only true word.
+   */
+  sha256: string | null;
+  fixture_name: string | null;
+}
+
+/** One thing a source literally says, with where in the source it says it. */
+export interface ApiImportStatement {
+  key: string;
+  /** VERBATIM. A parser reads; it does not normalise, round or reinterpret. */
+  value: string;
+  locator: string;
+}
+
+/** What one parser read out of one source, INCLUDING what it passed over. */
+export interface ApiImportParsedSource {
+  source_id: string;
+  parser_id: string;
+  filename: string;
+  statements: ApiImportStatement[];
+  /** Reported, never dropped — the anti-`Mysterious JSON` half of the report. */
+  skipped: { locator?: string; reason?: string; message?: string; [k: string]: unknown }[];
+}
+
+/**
+ * `deterministic` — read out of a source; `rule` names the key and the line.
+ * `inferred` — produced by a STORED RULE over the bundle, which `rule` names. No
+ *   source states it, and `rule` says so in those words.
+ */
+export type ApiImportDeterminism = 'deterministic' | 'inferred';
+
+/**
+ * `field` is a value at an official field path. `experiment` and `run` are
+ * STRUCTURAL — "this build thinks an experiment/run exists here" — which the
+ * review surface has to be able to show and which nothing in this build can
+ * create from an import.
+ */
+export type ApiImportCandidateKind = 'field' | 'experiment' | 'run';
+
+/** One competing value at one path, with the sources asserting it. */
+export interface ApiImportDisagreement {
+  value: string;
+  source_ids: string[];
+  locators: string[];
+}
+
+export interface ApiImportCandidate {
+  candidate_id: string;
+  kind: ApiImportCandidateKind;
+  determinism: ApiImportDeterminism;
+  /** The warrant. Always a sentence, never an identifier. */
+  rule: string;
+  supporting_source_ids: string[];
+  supporting_statements: (ApiImportStatement & { source_id: string })[];
+  target_field_path: string | null;
+  /**
+   * `null` EXACTLY WHEN `unresolved_reason` is set. The two are not independent: a
+   * candidate either carries a value or says why it does not, and one carrying a
+   * chosen value beside a recorded disagreement would be the server deciding a
+   * scientific question.
+   */
+  proposed_value: unknown;
+  disagreement: ApiImportDisagreement[];
+  unresolved_reason: string | null;
+  not_proposable_reason: string | null;
+  /** DERIVED by the server and served anyway, so no client recomputes the rule. */
+  proposable: boolean;
+}
+
+export interface ApiImportReconstruction {
+  provider_id: string;
+  reconstructed_utc: string;
+  /**
+   * ALWAYS `false`, typed as the literal so no code can branch on it being true.
+   * A reconstruction writes no field, mints no evidence and changes no record —
+   * and the server RECOMPUTES this rather than reading it out of the stored
+   * document, so a hand-edited `true` cannot reach here.
+   */
+  applied: false;
+  candidates: ApiImportCandidate[];
+}
+
+/** One step of the workflow, as the SERVER names it. Never a second vocabulary. */
+export interface ApiImportWorkflowStep {
+  id: string;
+  label: string;
+  /** `false` for the one step this build does not have. */
+  built: boolean;
+  /** What the unbuilt step says INSTEAD of offering an action. */
+  disclosure: string | null;
+}
+
+/** A parsed key the reconstruction could not map. Reported, never guessed at. */
+export interface ApiImportUnmappedKey {
+  source_id: string;
+  key: string;
+  value: string;
+  locator: string;
+  reason: string;
+}
+
+/** Where one candidate was sent, and the proposal it became. */
+export interface ApiImportProposedRow {
+  experiment_id: string;
+  proposal_id: string;
+  note_id: string;
+  proposed_utc: string;
+}
+
+export interface ApiImportSession {
+  import_id: string;
+  label: string;
+  created_utc: string;
+  updated_utc: string;
+  /** DERIVED, never stored, and it never names the unbuilt step. */
+  furthest_step: string;
+  workflow: ApiImportWorkflowStep[];
+  /** The server's own sentence about what a session is and is not. */
+  durability: string;
+  sources: ApiImportSource[];
+  unreadable_source_count: number;
+  source_counts: {
+    total: number;
+    parsed: number;
+    failed: number;
+    no_content_path: number;
+    unparsed: number;
+    parsable_by_this_build: number;
+  };
+  parsed: ApiImportParsedSource[];
+  unmapped_keys: ApiImportUnmappedKey[];
+  reconstruction: ApiImportReconstruction | null;
+  unreadable_candidate_count: number;
+  proposed: Record<string, ApiImportProposedRow>;
+  parsers: { parser_id: string; display_name: string }[];
+  provider: { provider_id: string; display_name: string; applied: false };
+  beamline_profile: {
+    profile_id: string;
+    display_name: string;
+    is_empty: boolean;
+    conventions_encoded: number;
+  };
+  available_fixtures: string[];
+}
+
+/** A session IN A LIST: counts, never the bundle. */
+export interface ApiImportSummary {
+  import_id: string;
+  label: string;
+  created_utc: string;
+  updated_utc: string;
+  furthest_step: string;
+  source_count: number;
+  parsed_source_count: number;
+  candidate_count: number;
+  proposed_count: number;
+}
+
+export interface ApiImportListResponse {
+  imports: ApiImportSummary[];
+  total: number;
+  workflow: ApiImportWorkflowStep[];
+  durability: string;
+  available_fixtures: string[];
+}
+
+export interface ApiImportSessionResponse {
+  import: ApiImportSession;
+}
+
+export interface ApiImportSourceCreated {
+  source: ApiImportSource;
+  import: ApiImportSession;
+}
+
+export interface ApiImportCandidateProposed {
+  proposal: ApiProposal;
+  /**
+   * The note this request minted, or `null` when the record ALREADY held the
+   * proposal (`deduplicated: true`) — in which case the note it cites is from the
+   * earlier request and is not in this response.
+   */
+  note: ApiNote | null;
+  /**
+   * READ THIS BEFORE REPORTING WHAT HAPPENED. `true` means nothing was minted and
+   * the EXISTING proposal is returned; do not describe it as something just sent.
+   */
+  deduplicated: boolean;
+  experiment_version: string;
+}

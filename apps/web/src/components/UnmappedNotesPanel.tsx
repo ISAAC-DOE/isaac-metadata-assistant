@@ -108,6 +108,7 @@ const SOURCE_LABELS: Readonly<Record<string, string>> = {
   csv_column: 'An unrecognised CSV column',
   file_listing_line: 'A line of a file listing',
   extraction_residue: 'A label the extractor would not guess at',
+  historical_source_line: 'Read from a historical source file',
 };
 
 function sourceLabel(source: string): string {

@@ -150,6 +150,7 @@ import { ConnectYourAgentPanel } from '../screens/settings/ConnectYourAgent';
 import { settingsConcepts } from '../lib/settingsContent';
 import { MCP_CAPABILITIES_REFUSED } from '../lib/mcpConnectContent';
 import { CAPTURE_COPY } from '../lib/transcriptCaptureContent';
+import { IMPORT_COPY } from '../lib/historicalImportContent';
 
 afterEach(cleanup);
 
@@ -219,6 +220,12 @@ function syntheticModeCard(): string {
  * is on the surface the reader is looking at rather than merely present in the
  * module.
  */
+/* UX-021 — `MemoryRouter` IS REQUIRED here. `HelpPanel` renders a real `<Link>` to
+ * Settings -> Help & Tutorial, and `Link` reads router context, so a bare render throws
+ * `Cannot destructure property 'basename' of useContext(...) as it is null` and takes every
+ * test in the file down with it. Wrapping is the right fix rather than downgrading the
+ * `<Link>`: in production this panel is mounted inside `TopBar`, inside the router, so the
+ * HARNESS was what did not match reality. */
 function policyTabText(): string {
   render(
     <MemoryRouter
@@ -333,11 +340,41 @@ const SITES: [string, () => string][] = [
  * §5 shipped as `ALL_FIVE` while §3 and §3b still looped over `SITES`, so the
  * capture disclosure was outside two bans that would have held it.
  */
+/**
+ * EVERY authored string the Historical Import surface renders, joined as ONE
+ * ban surface. **The EIGHTH site, added 2026-09-13 with the destination itself.**
+ *
+ * WHY IT IS HERE AT ALL. That surface exists to say what this build does and does
+ * not do with files a scientist points at — which is exactly the claim class this
+ * file was written for, and exactly the class that has shipped false four times.
+ * Adding the site with the feature, rather than after a review catches it, is the
+ * lesson §26's fourth site taught: it "arrived late, and it arrived false",
+ * passing this guard untouched because nobody had widened the list.
+ *
+ * WHY IT IS NOT A MEMBER OF `SITES`, for the reason the fifth, sixth and seventh
+ * are not. §2's `SHARED_CLAIM` requires READER VOCABULARY — the validator, the
+ * campaign-sheet preview, the in-memory bound — and this surface has no business
+ * carrying any of it: it is not about those two controls, it is about an import
+ * source. Forcing it into `SITES` would fail on correct copy, which is the
+ * failure direction a ratchet may not have.
+ *
+ * WHAT IT DOES JOIN is every VOCABULARY-FREE ban: §3 (no absolute "no file is
+ * read"), §3b (no reader-noun denial), §5 (no "the route does not exist") and §7.
+ * The strings are read from the module rather than rendered, which is why the
+ * module exists.
+ */
+function historicalImportCopy(): string {
+  return Object.values(IMPORT_COPY)
+    .filter((value): value is string => typeof value === 'string')
+    .join(' ');
+}
+
 const ALL_BAN_SURFACES: [string, () => string][] = [
   ...SITES,
   ['transcript capture: voiceAudioHandling', captureVoiceAudioHandling],
   ['Settings → Data & Privacy → synthetic-data-only', syntheticModeCard],
   ['Settings → API Access → Connect an Agent (the guide)', connectAnAgentGuide],
+  ['Historical Import: every authored string', historicalImportCopy],
 ];
 
 // --- §1 the readers this ban is justified by ---------------------------------
@@ -675,7 +712,16 @@ describe('R1b §4 · the guard rejects the exact strings that shipped', () => {
  * skips. Pinned because that skip makes the sweep shrinkable without any test
  * failing — convert one key to a function and it silently leaves the ban.
  */
-const CAPTURE_COPY_KEY_COUNTS = { total: 79, strings: 75, functions: 4 };
+/*
+ * 79 -> 92 (strings 75 -> 88), 2026-09-13: the intake chooser's thirteen keys.
+ *
+ * THE RATCHET DID ITS JOB AND THAT IS WHY THE NUMBER MOVED RATHER THAN THE LOOP.
+ * The new keys are CLAIM-BEARING copy about what this build can and cannot do
+ * with files and audio, which is precisely the class this sweep exists for — so
+ * they belong INSIDE the ban, and the correct response to the failure was to
+ * admit them and let the bans judge them, not to exempt them.
+ */
+const CAPTURE_COPY_KEY_COUNTS = { total: 92, strings: 88, functions: 4 };
 
 function captureVoiceAudioHandling(): string {
   return CAPTURE_COPY.voiceAudioHandling;
@@ -903,7 +949,11 @@ describe('R1b §5b · the capture site states the affirmative claim, tolerant of
  *  section cannot supply half of the claim and count as compliance. Same
  *  technique `db-recon-truthfulness.test.tsx`'s `helpSyntheticSection` uses. */
 function helpValuesSectionEl(): Element {
-  const view = render(<HelpPanel />);
+  const view = render(
+    <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+      <HelpPanel />
+    </MemoryRouter>,
+  );
   fireEvent.click(view.getByRole('button', { name: 'Help' }));
   const section = [...view.container.querySelectorAll('.help-section')].find(
     (el) => el.querySelector('h3')?.textContent === 'Where values come from',

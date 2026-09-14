@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { openAssistantCatalogWhenReady } from '../test/openAssistantCatalog';
 import { render, fireEvent, waitFor } from '@testing-library/react';
 import { AssistantPanel } from '../components/AssistantPanel';
 import { api } from '../lib/api';
@@ -118,12 +119,17 @@ describe('AssistantPanel — wired composer (P34.2)', () => {
     expect(edit).not.toHaveBeenCalled();
   });
 
-  it('suggested questions still work (precomposed guided path unchanged)', () => {
+  it('suggested questions still work (precomposed guided path unchanged)', async () => {
     const spy = vi.spyOn(api, 'askAssistant');
     const { getByText, container } = renderPanel('composer-key-6');
+    // The pills live in "What Can I Ask?" since 2026-09-13 — open it first.
+    await openAssistantCatalogWhenReady(container);
     const pill = getByText('What still needs me?');
     fireEvent.click(pill.closest('button') as HTMLButtonElement);
-    // clicking a pill activates it (aria-pressed) — the guided answer path is intact
+    // clicking a pill activates it (aria-pressed) — the guided answer path is intact.
+    // Re-opened first: a control that RUNS dismisses the popover (it used to cover
+    // the answer it had just produced), so the pressed pill is behind it.
+    await openAssistantCatalogWhenReady(container);
     expect(container.querySelector('.assistant-prompt.active')).toBeTruthy();
     // a pill does NOT route through the endpoint in this slice (that is P34.3)
     expect(spy).not.toHaveBeenCalled();

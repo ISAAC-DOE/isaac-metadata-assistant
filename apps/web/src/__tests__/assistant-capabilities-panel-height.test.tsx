@@ -165,11 +165,36 @@ describe('I5 · the capability catalog gets the height the viewport actually has
     expect(Number(px![1])).toBeLessThanOrEqual(440);
   });
 
-  it('CSS source: the list is still the ONE scroll region, and can still shrink', () => {
+  /*
+   * INVERTED, NOT DELETED, on 2026-09-13. This test used to require
+   * `min-height: 0` on the list and was titled "…and can still shrink". It was
+   * PINNING A DEFECT: `0` is what let the list shrink to NOTHING. Measured in
+   * Chromium at 320x900 — where the topbar wraps to three lines (bottom 141px),
+   * leaving 156px above the trigger, so the runtime clamp sized the panel 155px
+   * — the fixed rows below the list were together taller than the panel, and
+   * this was the only `flex: 1 1 auto` child with `min-height: 0`, so it
+   * absorbed the whole deficit: `clientHeight` EXACTLY 0 against a
+   * `scrollHeight` of 1006. The popover offered nothing at all, and
+   * `document.elementFromPoint` at the first pill's own centre answered
+   * `P.assistant-capabilities-boundary`.
+   *
+   * So the requirement is now the opposite one, and it is the requirement that
+   * was actually meant: the list must remain the ONE scroll region and must
+   * remain the flexible child, but it must never be allowed to reach zero.
+   * `flex: 1 1 auto` is still asserted, so it still shrinks — down to a floor.
+   */
+  it('CSS source: the list is the ONE scroll region, and can never shrink to nothing', () => {
     const list = ruleFor('.assistant-capabilities-list')!;
     expect(list).toMatch(/overflow-y:\s*auto/);
     expect(list).toMatch(/overflow-x:\s*hidden/);
-    expect(list).toMatch(/min-height:\s*0/);
+    const floor = /min-height:\s*(\d+(?:\.\d+)?)px/.exec(list);
+    expect(floor, 'the list needs a positive min-height, not `0`').not.toBeNull();
+    expect(Number(floor![1])).toBeGreaterThan(0);
+    // One group eyebrow plus two 35px rows and the 8px gap between them, so
+    // something is always on offer. Bounded above so a future edit cannot turn
+    // the floor into a second cap fighting the runtime clamp.
+    expect(Number(floor![1])).toBeGreaterThanOrEqual(96);
+    expect(Number(floor![1])).toBeLessThanOrEqual(160);
     expect(list).toMatch(/flex:\s*1 1 auto/);
     // the popover itself stays bounded and never scrolls sideways
     expect(ruleFor('.assistant-capabilities-panel')!).toMatch(/overflow-x:\s*hidden/);

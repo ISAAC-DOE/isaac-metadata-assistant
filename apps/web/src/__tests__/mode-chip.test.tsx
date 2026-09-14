@@ -218,3 +218,56 @@ describe('mode chip — scope parity (visible text and accessible name)', () => 
     }
   });
 });
+
+/* ── QA-023 · the chip's accessible name must be PERMITTED, not merely present ─ */
+
+describe('QA-023 · the governance disclosure sits on a role that may carry a name', () => {
+  /*
+   * THE DEFECT THIS PINS. The chip carried its ~90-word governance disclosure in
+   * `aria-label` on a BARE `<span>` — `role=generic`, where ARIA prohibits naming.
+   * Measured with axe 4.12.1 on the exact shipped markup: `violations=0`,
+   * `incomplete=[aria-prohibited-attr, ...]`. It was invisible to this repo's own
+   * a11y suite because `e2e/helpers/axe.ts` reads only `results.violations` and
+   * never `results.incomplete` — see `QA-023` in the ledger.
+   *
+   * WHAT IS ASSERTED is the property, not the literal role: an element carrying an
+   * `aria-label` must have an explicit `role`, because that is what makes the name
+   * permitted. A future slice may pick a different naming-capable role; it may not
+   * go back to none.
+   */
+  it('MUTATION-GUARDED — the chip has an explicit role, so its aria-label is not prohibited', async () => {
+    stubFetchRoutes({ 'GET /api/health': { body: healthSynthetic } });
+    const { container } = renderTopBar();
+    await waitFor(() => expect(container.querySelector('.mode-chip')).not.toBeNull());
+    const chip = container.querySelector<HTMLElement>('.mode-chip')!;
+
+    expect(chip.getAttribute('aria-label'), 'the disclosure is gone entirely').toBeTruthy();
+    const role = chip.getAttribute('role');
+    expect(
+      role,
+      'the chip carries an aria-label with NO role. A bare span is role=generic and ARIA ' +
+        'prohibits naming it, so the governance disclosure is on an attribute that may be ' +
+        'ignored. Give it a naming-capable role (`note` is what shipped).',
+    ).toBeTruthy();
+
+    // ...and NOT a live region, which is the tempting wrong answer: the chip is
+    // driven by polled /api/health, so `status`/`alert` would re-announce ninety
+    // words of governance prose on every poll that changed a value.
+    expect(
+      ['status', 'alert', 'log', 'marquee', 'timer'],
+      `role="${role}" is a live region; the chip updates from a health poll`,
+    ).not.toContain(role);
+  });
+
+  it('the visible text stays readable — the role does not suppress it', async () => {
+    // `role="img"` would have cleared the prohibition too, and would have hidden
+    // the one word a sighted reader actually sees. Asserted so that fix is not
+    // "simplified" into this one.
+    stubFetchRoutes({ 'GET /api/health': { body: healthSynthetic } });
+    const { container } = renderTopBar();
+    await waitFor(() => expect(container.querySelector('.mode-chip')).not.toBeNull());
+    const chip = container.querySelector<HTMLElement>('.mode-chip')!;
+    expect(chip.getAttribute('role')).not.toBe('img');
+    expect((chip.textContent ?? '').trim().length).toBeGreaterThan(0);
+  });
+});

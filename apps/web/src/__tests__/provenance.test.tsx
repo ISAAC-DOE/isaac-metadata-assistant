@@ -115,7 +115,13 @@ describe('the Python source can actually be read', () => {
     // MEASURED by reading the table out of the Python source, as everything in this
     // file is; the number is a tripwire against the parser silently matching nothing,
     // not a hand-maintained inventory.
-    expect(Object.keys(backendTable('NOTE_SOURCE_ORIGIN'))).toHaveLength(6);
+    // 6 -> 7: the backend gained `historical_source_line`, a line a deterministic
+    // parser read out of a historical source file during a Historical Import. It
+    // maps to `file`, NOT to `assistant` — that path holds no model, no provider
+    // and no network call, so the honest claim is that a parser READ the words
+    // rather than that a machine interpreted them. MEASURED by reading the table
+    // out of the Python source, as everything in this file is.
+    expect(Object.keys(backendTable('NOTE_SOURCE_ORIGIN'))).toHaveLength(7);
   });
 });
 

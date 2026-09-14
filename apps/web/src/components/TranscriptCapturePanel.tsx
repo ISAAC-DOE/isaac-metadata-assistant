@@ -278,7 +278,32 @@ const STATE_BADGE: Record<Extract<VoiceState, 'recording' | 'paused' | 'held'>, 
   held: CAPTURE_COPY.voiceHeldBadge,
 };
 
-export function TranscriptCapturePanel({ experimentId }: { experimentId: string }) {
+export interface TranscriptCapturePanelProps {
+  experimentId: string;
+  /*
+   * OPTIONAL CONTROLLED OPEN, for the intake chooser above this panel
+   * (`CaptureIntake`). When omitted the panel is exactly as it was: closed until
+   * a reader presses its own entry button, fetching nothing while closed.
+   *
+   * WHY CONTROLLED RATHER THAN A `defaultOpen` OR AN IMPERATIVE REF. The chooser
+   * has to be able to open the panel MORE THAN ONCE — a reader who closes the
+   * panel and then presses "Start Writing" again expects it to open again — and
+   * a `defaultOpen` only acts on mount. A ref + `.click()` would work and was
+   * rejected: it drives the DOM to change React state, so the two can disagree,
+   * and it makes the chooser depend on this panel's internal markup.
+   *
+   * The pair is all-or-nothing on purpose: passing `open` without `onOpenChange`
+   * would give a panel whose own Close button cannot work.
+   */
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+}
+
+export function TranscriptCapturePanel({
+  experimentId,
+  open: controlledOpen,
+  onOpenChange,
+}: TranscriptCapturePanelProps) {
   const ids = useId();
   const transcriptId = `${ids}-transcript`;
   const runId = `${ids}-run`;
@@ -292,7 +317,25 @@ export function TranscriptCapturePanel({ experimentId }: { experimentId: string 
    * two more (a run listing, a capability report) would change every screen it
    * appears on, for readers who never dictate anything.
    */
-  const [open, setOpen] = useState(false);
+  const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
+  /* Controlled when the caller supplies BOTH halves; uncontrolled otherwise, so
+     every existing caller and every existing test is unchanged. */
+  const controlled = controlledOpen !== undefined && onOpenChange !== undefined;
+  /* A caller that CONTROLS this panel is, by construction, the thing that opens
+     it — so it owns the entry affordance and this panel must not render a second
+     one. Derived from the controlled pair rather than taking its own prop: a
+     separate `hideEntry` could be set without `open`, giving a panel with no way
+     to open at all. */
+  const entryOwnedElsewhere = controlled;
+  const open = controlled ? controlledOpen! : uncontrolledOpen;
+  const setOpen = useCallback(
+    (next: boolean | ((current: boolean) => boolean)) => {
+      const resolved = typeof next === "function" ? next(open) : next;
+      if (controlled) onOpenChange!(resolved);
+      else setUncontrolledOpen(resolved);
+    },
+    [controlled, onOpenChange, open],
+  );
   const [guidanceOpen, setGuidanceOpen] = useState<boolean>(() => !isCaptureGuidanceSeen());
   const [capabilities, setCapabilities] = useState<ApiProviderCapabilities | null>(null);
   const [runs, setRuns] = useState<ApiRunView[]>([]);
@@ -1592,6 +1635,27 @@ export function TranscriptCapturePanel({ experimentId }: { experimentId: string 
     (formLocked || (!showReadingPrimary && !showVoicePrimary && text.trim() !== ''));
   const primaryClass = (isPrimary: boolean) => (isPrimary ? 'btn btn-primary' : 'btn btn-secondary');
 
+  /*
+   * FOUND BY AXE, NOT BY A UNIT TEST — and the unit tests were green.
+   *
+   * An earlier version of this change withheld only the heading and the entry
+   * button, which left this `<section>` rendering as an EMPTY shell that still
+   * carried `aria-labelledby` pointing at a heading that was no longer there. A
+   * `<section>` with no accessible name is not a `region` — it degrades to
+   * `generic`, and `generic` PROHIBITS `aria-labelledby`. So it minted a
+   * [serious] `aria-prohibited-attr` node on all seven viewports, and an empty
+   * landmark-shaped element for a reader to walk into and find nothing in.
+   *
+   * Returning `null` is the honest render: when the chooser owns the entry and
+   * the panel is closed, this component contributes NOTHING to the page, which
+   * is exactly what it looks like on screen. The component stays MOUNTED — that
+   * is the whole reason `open` is a prop rather than internal state — so typed
+   * text, the loaded run list and the capability report all survive a close and
+   * a reopen. Rendering nothing and being unmounted are different things, and
+   * only the first is happening here.
+   */
+  if (entryOwnedElsewhere && !open) return null;
+
   /* ---- render ------------------------------------------------------------ */
 
   return (
@@ -1604,7 +1668,22 @@ export function TranscriptCapturePanel({ experimentId }: { experimentId: string 
       </header>
 
       {/* Primary ONLY while collapsed — it is the one control on screen then.
-          Once open, "Close Capture" is a secondary act (I2). */}
+          Once open, "Close Capture" is a secondary act (I2).
+
+          *** AND IT IS NOT REACHED AT ALL WHILE A CHOOSER OWNS THE ENTRY AND
+          THE PANEL IS CLOSED — see the early `return null` above. *** When
+          `CaptureIntake` sits above this panel it supplies the entry ("Start
+          Writing", "Open Recorder"), and rendering this button too put TWO blue
+          primary controls ten pixels apart, both doing the same thing. Seen in
+          a browser before it was fixed, not reasoned about. That is the
+          double-CTA `ExperimentsHome` already argued against in its own
+          comment: "Two controls for one action is not a styling nit — it makes
+          a reader stop and work out which one is the real one."
+
+          The condition is stated ONCE, as that early return. A first attempt
+          put a copy of it here and another on the heading; both became dead the
+          moment the early return landed, and an unreachable false branch is an
+          equivalent mutant. */}
       <button
         type="button"
         className={primaryClass(!open)}

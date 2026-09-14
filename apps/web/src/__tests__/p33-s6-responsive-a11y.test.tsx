@@ -295,8 +295,18 @@ describe('M1 · Guided Completion backend-down branch has exactly one h1', () =>
 });
 
 describe('M2 · Help trigger icon is aria-hidden, button keeps its name', () => {
+/* UX-021 — `MemoryRouter` IS REQUIRED here. `HelpPanel` renders a real `<Link>` to
+ * Settings -> Help & Tutorial, and `Link` reads router context, so a bare render throws
+ * `Cannot destructure property 'basename' of useContext(...) as it is null` and takes every
+ * test in the file down with it. Wrapping is the right fix rather than downgrading the
+ * `<Link>`: in production this panel is mounted inside `TopBar`, inside the router, so the
+ * HARNESS was what did not match reality. */
   it('names the button "Help" and hides its decorative icon from AT', () => {
-    const view = render(<HelpPanel />);
+    const view = render(
+    <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+      <HelpPanel />
+    </MemoryRouter>,
+  );
     const trigger = view.getByRole('button', { name: 'Help' });
     const svg = trigger.querySelector('svg');
     expect(svg).not.toBeNull();

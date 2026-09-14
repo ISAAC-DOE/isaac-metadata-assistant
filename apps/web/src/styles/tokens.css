@@ -111,8 +111,19 @@
  *
  *   WHAT THIS DOES **NOT** FIX, because it cannot. A11Y-01 has three causes
  *   (`e2e/a11y-baseline.ts`); this change addresses cause (a) for these two
- *   tokens only. Cause (b) — text composited under an ancestor `opacity` — still
- *   fails AFTER this change, at all THREE of its sites:
+ *   tokens only. Cause (b) — text composited under an ancestor `opacity` —
+ *   ~~still fails AFTER this change, at all THREE of its sites~~:
+ *
+ *   *** CAUSE (b) IS CLOSED AS OF 2026-09-13. All three declarations are gone.
+ *   The table below is kept because its NUMBERS are what made the removals
+ *   checkable, and because the paragraph after it was the argument for doing
+ *   it — read them as the state this change ends, not as a live defect. One
+ *   correction travels with them: the `.exp-row.done` row's #7e868f is reached
+ *   through `.exp-id`, which is DEAD CSS (zero .tsx mentions), so that figure
+ *   described an element the product never renders. The site's real failing
+ *   nodes were #777f89 on `.chip-exported > span` and #778493 on
+ *   `.exp-sub > time`. Measured outcome: 21 baseline cells to zero, 28 nodes,
+ *   four colours out of the `foregrounds` allowlist. ***
  *
  *     queue.css       .exp-row.done       .82  --text-tertiary #626c77
  *                                              -> #7e868f, 3.69:1 on --surface
@@ -129,8 +140,9 @@
  *   are NOT browser-measured; `src/test/contrast.ts` says why they must not be
  *   transcribed into `e2e/a11y-baseline.ts`.
  *
- *   THE OPACITY HAS TO GO — but not because "darkening a token cannot reach
- *   them", which is what this paragraph used to say and is arithmetically
+ *   THE OPACITY HAS TO GO — and on 2026-09-13 it went. Not because "darkening
+ *   a token cannot reach them", which is what this paragraph used to say and is
+ *   arithmetically
  *   FALSE. On white a neutral grey still clears 4.5:1 composited at .72 up to
  *   #414141, at .82 up to #585858 and at .85 up to #5e5e5e. Darkening CAN reach
  *   them; what it cannot do is reach them AND stay a tertiary. All three of

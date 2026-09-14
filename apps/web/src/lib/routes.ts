@@ -340,6 +340,23 @@ export const RECORD_ADDRESS_PARAM = 'at';
 
 export const ROUTES = {
   experiments: '/experiments',
+  /**
+   * HISTORICAL IMPORT — one of the three primary destinations, and a route with
+   * NO parameters of its own.
+   *
+   * A session is addressed in component state rather than in the URL, and that
+   * is a deliberate DEPARTURE from the `?tab=`/`?view=`/`?run=` convention above
+   * — which is why it needs a sentence rather than a silent omission. Everything
+   * that convention exists for is a view a scientist would LINK A COLLEAGUE TO:
+   * a record's graph, one run, a comparison, one proposal. An import session is
+   * none of those. It is not durable (the server says so in every response's
+   * `durability`), it holds no scientific state, and its useful output is the
+   * PROPOSAL it mints on a record — which already has its own deep link,
+   * `ROUTES.recordProposal`. A `?import=` parameter would therefore be a link to
+   * a working area that may not exist by the time it is followed, which is a
+   * worse defect than not being linkable.
+   */
+  imports: '/imports',
   load: '/load',
   memory: '/memory',
   governance: '/governance',
@@ -433,6 +450,7 @@ export const ROUTES = {
 // Path patterns for the router definitions.
 export const ROUTE_PATTERNS = {
   experiments: '/experiments',
+  imports: '/imports',
   load: '/load',
   memory: '/memory',
   governance: '/governance',

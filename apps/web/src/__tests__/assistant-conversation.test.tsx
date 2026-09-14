@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render } from '@testing-library/react';
+import { fireEvent, render, within } from '@testing-library/react';
 import { AssistantPanel } from '../components/AssistantPanel';
 import { appendMessage, clearAllSessions } from '../lib/assistantSession';
 import { classifyAnswer } from '../lib/assistantConversation';
@@ -47,6 +47,21 @@ function panel(extra: Record<string, unknown> = {}) {
   );
 }
 
+/**
+ * Open "What Can I Ask?" and return the view.
+ *
+ * The pills moved into that popover on 2026-09-13 (owner request) after the
+ * rail was measured stacking two clipped, independently-scrolling control
+ * regions. `panel()` stays PURE — a test that asserts the resting rail must see
+ * the resting rail — so reaching a pill is an explicit act, as it is for a
+ * reader.
+ */
+function panelWithCatalog(extra: Record<string, unknown> = {}) {
+  const view = panel(extra);
+  fireEvent.click(within(view.container).getByRole('button', { name: /What Can I Ask/i }));
+  return view;
+}
+
 // Simulate a scroll viewport in jsdom (which does no layout): fake the metrics
 // and dispatch a scroll event so the panel recomputes near-bottom.
 function setScroll(el: Element, top: number, height: number, client: number) {
@@ -90,35 +105,46 @@ describe('P29.2 conversation layout — chronological, not inverted', () => {
     expect(last.compareDocumentPosition(reply) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
-  it('EMPTY state places the prompt pills above the (chrome-less) log; once a conversation exists they collapse BELOW the region', () => {
-    // P36R S2 re-laid out the panel. At REST the empty state leads with its
-    // guidance + Suggested Questions + Agent Actions, and the log — which holds
-    // only the empty live region — trails below them, exactly as the P33 S2 · D4
-    // ordering did. Once a conversation EXISTS the log becomes the bounded
-    // conversation region that takes the available height, and the prompt
-    // controls collapse into a disclosure BELOW it (never removed; the composer
-    // stays visible at all times). The live reply block remains the newest
-    // element at the bottom of the region (asserted in the test above).
-    const { container, getByText } = panel();
+  it('the log is the ONLY block in the rail at rest, and it survives the first turn', () => {
+    /*
+     * ~~EMPTY state places the prompt pills above the (chrome-less) log; once a
+     * conversation exists they collapse BELOW the region~~ — REWRITTEN
+     * 2026-09-13 (owner request). There are no pills in the rail in either
+     * state, so there is no "above" or "below" left to assert.
+     *
+     * WHAT THE OLD TEST WAS REALLY PROTECTING, and what is kept: the log is the
+     * SAME element before and after the first turn, so the live region is never
+     * re-mounted (a live region remounted with its content is announced to
+     * nobody). That property is unchanged and is asserted below — it is the
+     * reason this test exists, and it outlives the layout it was written for.
+     */
+    const { container, getByRole } = panel();
     const log = container.querySelector('.assistant-log')!;
-    const prompts = container.querySelector('.assistant-prompts')!;
-    expect(prompts.compareDocumentPosition(log) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(container.querySelector('.assistant-conversation')).toBeNull();
 
-    // start a turn → the region appears and the controls move into the disclosure
-    fireEvent.click(getByText('What still needs me?'));
+    // No control block sits between the header and the composer, in either state.
+    for (const sel of ['.assistant-prompts', '.assistant-agent-prompts', 'details.assistant-more']) {
+      expect(container.querySelector(sel), `${sel} is back in the rail`).toBeNull();
+    }
+
+    // Start a turn THROUGH THE COMPOSER — which is now the rail's only way in,
+    // and is the route a reader takes.
+    const box = getByRole('textbox');
+    fireEvent.change(box, { target: { value: 'what still needs me?' } });
+    fireEvent.submit(box.closest('form')!);
+
     const region = container.querySelector('.assistant-conversation')!;
     expect(region).toBe(log); // the SAME element — the live region is never re-mounted
-    const collapsed = container.querySelector('details.assistant-more')!;
-    expect(collapsed).not.toBeNull();
-    expect(collapsed.querySelector('.assistant-prompts')).not.toBeNull();
-    expect(region.compareDocumentPosition(collapsed) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // …and still nothing else joined the rail.
+    for (const sel of ['.assistant-prompts', '.assistant-agent-prompts', 'details.assistant-more']) {
+      expect(container.querySelector(sel), `${sel} appeared after the first turn`).toBeNull();
+    }
   });
 });
 
 describe('P29.2 prompt pills — interactive, keyboard-activatable, honest disabled', () => {
   it('an answered pill is an enabled native button; a no-answer pill is disabled and non-activatable', () => {
-    const { getByText, container } = panel();
+    const { getByText, container } = panelWithCatalog();
     const active = getByText('What still needs me?').closest('button')!;
     const dead = getByText('A prompt with no answer').closest('button')!;
 
@@ -202,7 +228,7 @@ describe('P29.2 message distinction — role + kind + staleness (never color-onl
 
 describe('P29.2 respectful auto-scroll + Jump to Latest', () => {
   it('shows Jump to Latest when new content arrives while scrolled up, and hides it near the bottom', () => {
-    const { container, queryByRole, getByText } = panel();
+    const { container, queryByRole, getByText } = panelWithCatalog();
     const log = container.querySelector('.assistant-log')!;
 
     // no jump affordance while near the bottom
@@ -219,7 +245,7 @@ describe('P29.2 respectful auto-scroll + Jump to Latest', () => {
   });
 
   it('moves focus intentionally after a prompt is submitted', () => {
-    const { getByText, container } = panel();
+    const { getByText, container } = panelWithCatalog();
     fireEvent.click(getByText('What still needs me?'));
     const reply = container.querySelector('.assistant-reply')!;
     expect(reply).toHaveFocus();
@@ -236,7 +262,7 @@ describe('P29.2 respectful auto-scroll + Jump to Latest', () => {
     const scrollSpy = vi.fn();
     HTMLElement.prototype.scrollTo = scrollSpy as unknown as typeof HTMLElement.prototype.scrollTo;
 
-    const { getByText } = panel();
+    const { getByText } = panelWithCatalog();
     fireEvent.click(getByText('What still needs me?')); // near bottom → auto-scroll fires
     expect(scrollSpy).toHaveBeenCalled();
     for (const call of scrollSpy.mock.calls) {

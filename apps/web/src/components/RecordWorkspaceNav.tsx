@@ -221,51 +221,15 @@ export function RecordWorkspaceNav({
   onNavigate,
 }: RecordWorkspaceNavProps) {
   const location = useLocation();
-  /* `useId`, not a module constant. Only one record sidebar is mounted today,
-     so a fixed id would work today — and a duplicate `id` is a silent defect
-     the moment a second one is (a split view, a test rendering two). This costs
-     nothing and removes the hazard rather than relying on the invariant. */
-  const captureSummaryId = useId();
-
-  const capture = RECORD_WORKSPACES.find((w) => w.id === PROMOTED);
-  const captureSearch = new URLSearchParams(location.search);
-  captureSearch.set(RECORD_VIEW_PARAM, PROMOTED);
-  const captureActive = active === PROMOTED;
-  const summaryLine = captureSummaryLine(captureSummary);
+  /* `captureSummary` is still accepted here and is deliberately UNUSED: the
+     promoted capture row moved to `RecordCaptureNav` below, and keeping the prop
+     means the record sidebar passes ONE summary to both navs, which cannot then
+     disagree about the counts. Renaming it away would let a future caller feed
+     them from two reads. */
+  void captureSummary;
 
   return (
     <nav className="workspace-nav" aria-label="Record workspaces">
-      {capture && (
-        <>
-          <div className="workspace-nav-eyebrow eyebrow">{LABELS.recordCaptureEyebrow}</div>
-          <Link
-            to={{ search: `?${captureSearch.toString()}` }}
-            className={`capture-nav-link${captureActive ? ' active' : ''}`}
-            /* `page`, exactly as the three rows below carry — see their note.
-               This row is visually heavier than they are and must not be
-               semantically different from them. */
-            aria-current={captureActive ? 'page' : undefined}
-            /*
-             * THE ACCESSIBLE NAME IS THE DESTINATION; THE COUNTS ARE A
-             * DESCRIPTION. Left to the content, the name would grow to
-             * "Capture & Proposals 3 notes · 2 to review" — a link whose name
-             * changes whenever a colleague captures a note, which is a poor
-             * thing to navigate by and a poor thing to write a test against.
-             * The counts are still announced, as the link's description.
-             */
-            aria-label={capture.label}
-            aria-describedby={summaryLine === null ? undefined : captureSummaryId}
-            onClick={onNavigate}
-          >
-            <span className="capture-nav-label">{capture.label}</span>
-            {summaryLine !== null && (
-              <span className="capture-nav-summary" id={captureSummaryId}>
-                {summaryLine}
-              </span>
-            )}
-          </Link>
-        </>
-      )}
       <div className="workspace-nav-eyebrow eyebrow">{LABELS.recordWorkspacesEyebrow}</div>
       <ul className="workspace-nav-list">
         {RECORD_WORKSPACES.filter(
@@ -291,6 +255,86 @@ export function RecordWorkspaceNav({
           );
         })}
       </ul>
+    </nav>
+  );
+}
+
+/**
+ * DATA CAPTURE, AS ITS OWN LEADING BLOCK — separated from
+ * {@link RecordWorkspaceNav} so the record sidebar can render it ABOVE the
+ * workflow spine.
+ *
+ * WHY IT MOVED TO THE TOP (project owner, 2026-09-13). Capture is where a
+ * scientist's own work starts: they come off the instrument with something to
+ * write down, or with files, or with something to say. Sitting third — under the
+ * spine and above the workspace list — it read as a secondary destination, and
+ * the hosted screen showed it exactly that way.
+ *
+ * *** IT IS STILL NOT A STEP, AND MOVING IT DOES NOT MAKE IT ONE. *** Being
+ * FIRST and being a STEP are different claims, and only the first was asked for.
+ * It has no completion state, no tick, no lock, no reason text and no
+ * `aria-current="step"` — because a step state needs a criterion the record's own
+ * signals can decide, and "the scientist has finished capturing" is not one.
+ * `workflow.py:128-149` keeps submission out of `CANONICAL_ORDER` for the same
+ * reason, and a criterion invented here (`notes >= 1`) would nag every record
+ * that legitimately needs none. So it leads the rail and carries live COUNTS,
+ * which are facts, and never a verdict.
+ *
+ * The spine is UNTOUCHED: still server-derived, still gated, still the only list
+ * in this rail whose entries can be blocked. What changed is which question the
+ * reader meets first — "what do I want to put in?" before "where am I in the
+ * pipeline?" — which is the right order for someone who has just finished
+ * measuring and has nothing in the record yet.
+ */
+export function RecordCaptureNav({
+  active,
+  captureSummary = null,
+  onNavigate,
+}: RecordWorkspaceNavProps) {
+  const location = useLocation();
+  /* `useId`, not a module constant. Only one record sidebar is mounted today,
+     so a fixed id would work today — and a duplicate `id` is a silent defect
+     the moment a second one is (a split view, a test rendering two). This costs
+     nothing and removes the hazard rather than relying on the invariant. */
+  const captureSummaryId = useId();
+
+  const capture = RECORD_WORKSPACES.find((w) => w.id === PROMOTED);
+  const captureSearch = new URLSearchParams(location.search);
+  captureSearch.set(RECORD_VIEW_PARAM, PROMOTED);
+  const captureActive = active === PROMOTED;
+  const summaryLine = captureSummaryLine(captureSummary);
+  if (!capture) return null;
+
+  return (
+    <nav className="capture-nav" aria-label={LABELS.recordCaptureEyebrow}>
+      <div className="workspace-nav-eyebrow eyebrow">{LABELS.recordCaptureEyebrow}</div>
+      <Link
+        to={{ search: `?${captureSearch.toString()}` }}
+        className={`capture-nav-link${captureActive ? ' active' : ''}`}
+        /* `page`, exactly as the three workspace rows in `RecordWorkspaceNav`
+           carry — see their note. This row is visually heavier than they are,
+           and now sits in a different landmark, but it must not be semantically
+           different from them. */
+        aria-current={captureActive ? 'page' : undefined}
+        /*
+         * THE ACCESSIBLE NAME IS THE DESTINATION; THE COUNTS ARE A DESCRIPTION.
+         * Left to the content, the name would grow to "Capture & Proposals 3
+         * notes · 2 to review" — a link whose name changes whenever a colleague
+         * captures a note, which is a poor thing to navigate by and a poor thing
+         * to write a test against. The counts are still announced, as the link's
+         * description.
+         */
+        aria-label={capture.label}
+        aria-describedby={summaryLine === null ? undefined : captureSummaryId}
+        onClick={onNavigate}
+      >
+        <span className="capture-nav-label">{capture.label}</span>
+        {summaryLine !== null && (
+          <span className="capture-nav-summary" id={captureSummaryId}>
+            {summaryLine}
+          </span>
+        )}
+      </Link>
     </nav>
   );
 }

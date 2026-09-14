@@ -47,8 +47,9 @@ import {
 import { expect, test } from '../fixtures';
 import { activeElementFocusInfo } from '../helpers/focus';
 import { auditScan, scan } from '../helpers/axe';
+import { openUnreachableDisclosures } from '../helpers/disclosures';
 import { findClippedText, findObscuredControls, horizontalPageScroll } from '../helpers/layout';
-import { SURFACES } from '../surfaces';
+import { SURFACES, type Surface } from '../surfaces';
 
 const experiments = SURFACES.find((s) => s.id === 'experiments')!;
 
@@ -121,7 +122,39 @@ const experiments = SURFACES.find((s) => s.id === 'experiments')!;
  * `{ darwin: 20, linux: 21 }` since well before this change, so that sentence was
  * stale independently of it.
  */
-const contrastBaselined = SURFACES.find((s) => s.id === 'experiments-example')!;
+/*
+ * *** NO LONGER HARDCODED, AND THE REASON IS THAT HARDCODING IT BROKE CI. ***
+ *
+ * This was `experiments-example`. Closing A11Y-01 cause (b) took that surface's
+ * `color-contrast` count to ZERO, and the two proofs below need a surface where
+ * the rule IS baselined with a non-zero count — so they failed with
+ * *"this proof needs colour-contrast to be baselined here"*. Nothing was wrong
+ * with the fix or with the baseline; the FIXTURE had been pinned to a defect
+ * that got repaired.
+ *
+ * That is the same hazard `baseline-aggregate.invariant.test.ts` names on its
+ * own floor: **a proof that depends on a recorded defect is on a collision
+ * course with fixing it.** Choosing the surface at RUN TIME removes the hazard
+ * instead of deferring it by one surface — the next contrast fix moves the
+ * fixture along rather than turning CI red.
+ *
+ * Chosen per PROJECT, because a count can be non-zero at one viewport and zero
+ * at another. Declaration order, so the choice is deterministic and a failure
+ * names the same surface on a re-run.
+ */
+function pickContrastBaselined(project: string): Surface {
+  const surface = SURFACES.find((s) => expectedNodeCount('color-contrast', s.id, project) > 0);
+  if (surface === undefined) {
+    throw new Error(
+      `no surface carries a non-zero color-contrast baseline at ${project}, so the two ` +
+        'self-check proofs that inject an extra contrast node have nothing to inject into. ' +
+        'That is a GOOD problem — it means the contrast debt is gone. Rewrite those two ' +
+        'proofs against a rule that is still baselined somewhere, or against a surface ' +
+        'this spec creates itself; do NOT re-introduce a defect to keep them running.'
+    );
+  }
+  return surface;
+}
 
 /**
  * THE SURFACE THE **NEW-FOREGROUND** PROOF USES, and why it needs its own.
@@ -355,8 +388,26 @@ test('@interaction the a11y baseline reports ONE extra node of a rule it does al
   page,
   app,
 }, testInfo) => {
-  await app.open(contrastBaselined);
   const project = testInfo.project.name;
+  const contrastBaselined = pickContrastBaselined(project);
+  await app.open(contrastBaselined);
+  /*
+   * `openUnreachableDisclosures` IS PART OF THE PROCEDURE, NOT A CONVENIENCE —
+   * and omitting it is what broke CI on the first version of this fix.
+   *
+   * The baseline is DEFINED by what `a11y-axe.spec.ts` does: open the surface,
+   * open its unreachable disclosures, scan. A test that compares against that
+   * baseline has to reproduce it. `record-detail` is in `FIELD_GROUP_SURFACES`,
+   * so 25 of its contrast nodes live inside collapsed field groups; without
+   * this line the scan saw ZERO and the audit reported
+   * `FIXED? record-detail … baselined at 25 … but did not fire at all`.
+   *
+   * The old hardcoded fixture hid this: `experiments-example` has no collapsed
+   * disclosures, so the omission was invisible for as long as the surface was
+   * pinned to that one. Making the choice dynamic exposed a second assumption
+   * the test had been carrying all along.
+   */
+  await openUnreachableDisclosures(page, contrastBaselined.id);
 
   expect(auditScan(await scan(page), contrastBaselined.id, project), 'the unmodified surface must audit clean').toEqual([]);
 
@@ -612,8 +663,12 @@ test('@interaction tampering with THIS platform\'s count fails the audit; tamper
   page,
   app,
 }, testInfo) => {
-  await app.open(contrastBaselined);
   const project = testInfo.project.name;
+  const contrastBaselined = pickContrastBaselined(project);
+  await app.open(contrastBaselined);
+  // Same reason as the test above: the baseline describes the surface with its
+  // disclosures OPEN, so a comparison against it has to open them too.
+  await openUnreachableDisclosures(page, contrastBaselined.id);
   const platform = currentPlatform();
   const other = BASELINE_PLATFORMS.find((p) => p !== platform)!;
 

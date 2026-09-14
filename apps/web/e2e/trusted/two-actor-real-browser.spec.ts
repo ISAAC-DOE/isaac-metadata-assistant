@@ -378,8 +378,14 @@ async function bFinalizesATranscript(
   runId: string,
   text: string,
 ): Promise<number> {
+  /*
+   * The entry now lives on the `CaptureIntake` chooser ABOVE the panel, not on the
+   * panel itself — the capture workspace asks "how do you want to get this
+   * experiment in?" first, and the panel renders nothing until a route is chosen.
+   * So the click is on the page, and the region only exists afterwards.
+   */
+  await bPage.getByRole('button', { name: 'Start Writing' }).click();
   const capture = bPage.getByRole('region', { name: 'Transcript Capture' });
-  await capture.getByRole('button', { name: 'Capture Experiment Notes' }).click();
   await capture.getByLabel('Run These Notes Describe').selectOption(runId);
   await capture.getByLabel('Transcript', { exact: true }).fill(text);
   await capture.getByRole('button', { name: 'Finalize and Read' }).click();
@@ -662,36 +668,90 @@ test.describe('two scientists, two real browsers, one record', () => {
         await switchWorkspace(page, 'capture');
         await assertSameDocument(page, 'step 2: switching workspace did not reload the page');
 
-        const capture = page.getByRole('region', { name: 'Transcript Capture' });
+        /*
+         * *** THIS PROPERTY MOVED; IT WAS NOT DROPPED. ***
+         *
+         * It used to read: collapsed, the panel offers exactly ONE entry action and
+         * no second control beside it. The panel no longer renders AT ALL while the
+         * chooser owns the entry, so asserting over the panel here would pass
+         * vacuously on an empty region — the exact shape of vacuous guard this
+         * repository keeps catching. The property is therefore asserted where the
+         * entry now lives, and in the form that actually failed in a browser: the
+         * first build rendered "Start Writing" AND the panel's own "Capture
+         * Experiment Notes" ten pixels apart, both blue, both doing the same thing.
+         *
+         * So: exactly one PRIMARY control on the whole workspace, and the panel's own
+         * entry absent rather than merely hidden.
+         */
         await expect(
-          capture.getByRole('button', { name: 'Capture Experiment Notes' }),
-          'step 2: collapsed, the panel offers exactly ONE entry action',
+          page.getByRole('button', { name: 'Start Writing' }),
+          'step 2: the chooser offers the write route',
         ).toBeVisible();
         /*
-         * AND NOTHING ELSE. `CAPTURE_COPY.entryOpen` is the only control the collapsed
-         * panel renders; a second one here would be the "one clear primary action per
-         * state" property the panel's own header table claims, quietly broken.
+         * SCOPED TO THE TWO ELEMENTS THE PROPERTY IS ABOUT, and the first version of
+         * this assertion was not — it counted `.btn-primary` page-wide and read 4,
+         * because the workflow spine, the notes queue and the proposals list each
+         * own a primary of their own and always did. A page-wide count would have
+         * had to be loosened to 4, which would then pass with the double CTA back
+         * (4 → 5 is invisible to `toBe(4)` only if you also update it, and nobody
+         * would know which of the five was the duplicate). Counting the chooser and
+         * the panel SEPARATELY names the defect exactly: it was one primary in each.
          */
         expect(
-          await capture.locator('button:visible').count(),
-          'step 2: and no second control beside it while collapsed',
+          await page.locator('.capture-intake .btn-primary:visible').count(),
+          'step 2: the chooser offers exactly ONE primary route',
         ).toBe(1);
+        await expect(
+          page.locator('.capture-section'),
+          'step 2: the panel renders NOTHING while the chooser owns the entry — ' +
+            'not an empty shell, which is what minted an aria-prohibited-attr node',
+        ).toHaveCount(0);
+        await expect(
+          page.getByRole('button', { name: 'Capture Experiment Notes' }),
+          'step 2: and so its own entry is absent, not merely hidden',
+        ).toHaveCount(0);
+
+        await page.getByRole('button', { name: 'Start Writing' }).click();
+        const capture = page.getByRole('region', { name: 'Transcript Capture' });
         /*
-         * NO RECORDING CLAIM WHILE COLLAPSED. The collapsed header deliberately names
-         * only the path that always works — typing or pasting — because finalize
-         * posts TEXT and turning a recording into text needs a transcription provider
-         * this build never ships configured. A collapsed panel mentioning recording
-         * would present it as an equally finished path, which is the C1 correction
+         * NO RECORDING CLAIM IN THE PANEL'S OWN INTRO. Unchanged in substance, and
+         * reworded because "while collapsed" stopped being true of this line the
+         * moment the chooser took the entry: the panel reached here is OPEN. The
+         * text being checked is the same text — `.capture-sub`, the panel's intro —
+         * and the reason is the same. Finalize posts TEXT, and turning a recording
+         * into text needs a transcription provider this build never ships
+         * configured, so an intro mentioning recording would present it as an
+         * equally finished path. That is the C1 correction
          * `transcriptCaptureContent.ts` records making.
          */
-        const collapsedText = (await capture.locator('.capture-sub').textContent()) ?? '';
-        expect(collapsedText.length, 'step 2: the collapsed panel says something').toBeGreaterThan(0);
+        const introText = (await capture.locator('.capture-sub').textContent()) ?? '';
+        expect(introText.length, 'step 2: the panel intro says something').toBeGreaterThan(0);
         for (const word of ['record', 'Record', 'audio', 'Audio', 'microphone', 'voice', 'Voice']) {
           expect(
-            collapsedText,
-            `step 2: the collapsed panel makes no recording claim — found ${JSON.stringify(word)}`,
+            introText,
+            `step 2: the panel intro makes no recording claim — found ${JSON.stringify(word)}`,
           ).not.toContain(word);
         }
+
+        /*
+         * *** AND THE OTHER HALF OF THAT PROPERTY, WHICH THE CHOOSER NOW OWNS. ***
+         *
+         * The chooser DOES name recording — that is the point of offering the route
+         * the project owner asked for. What keeps it honest is that the voice card
+         * carries its limit ON the card, not behind a click: speech-to-text needs an
+         * approved transcription provider, and this build ships none, so
+         * `POST /api/transcription` answers 501 in every deployment. Naming the route
+         * without naming the limit would be exactly the "equally finished path"
+         * claim the check above exists to prevent — so the two assertions are two
+         * halves of one property and must travel together.
+         */
+        const voiceCard = page.locator('[data-route="voice"]');
+        await expect(voiceCard, 'step 2: the chooser offers the voice route').toBeVisible();
+        const voiceText = (await voiceCard.textContent()) ?? '';
+        expect(
+          /transcription provider|not configured|no provider/i.test(voiceText),
+          `step 2: the voice route names its limit on the card — read ${JSON.stringify(voiceText)}`,
+        ).toBe(true);
       });
 
       // ══ STEP 3 — B, a SECOND BROWSER, mints proposals through the UI ═════════

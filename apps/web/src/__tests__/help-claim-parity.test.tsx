@@ -150,15 +150,32 @@ function repoSource(rel: string): string {
  *  rather than source-scanned, because a source scan of `HelpPanel.tsx` matches
  *  every banned phrase in the correction comments that explain why they are
  *  banned — it would fail on the fix. */
+/** UX-021 — THE `MemoryRouter` IS REQUIRED, not defensive. The panel now renders a
+ *  real `<Link>` to Settings -> Help & Tutorial (the one permanent home of the guided
+ *  walkthrough), and `Link` reads router context, so a bare render throws
+ *  `Cannot destructure property 'basename' of useContext(...) as it is null` and takes
+ *  every test in this file down with it. Wrapping is the right fix rather than
+ *  downgrading the `<Link>` to an `<a href>`: in production this panel is mounted
+ *  inside `TopBar`, which is inside the router, so the harness was the thing that did
+ *  not match reality. This file already used `MemoryRouter` for other components; only
+ *  the two `HelpPanel` helpers were bare. */
+function renderHelpPanel() {
+  return render(
+    <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+      <HelpPanel />
+    </MemoryRouter>,
+  );
+}
+
 function helpPanelText(): string {
-  render(<HelpPanel />);
+  renderHelpPanel();
   fireEvent.click(screen.getByRole('button', { name: 'Help' }));
   return screen.getByRole('dialog').textContent ?? '';
 }
 
 /** The `<strong>` label of each item in the "How it works" list, in order. */
 function helpStepLabels(): string[] {
-  render(<HelpPanel />);
+  renderHelpPanel();
   fireEvent.click(screen.getByRole('button', { name: 'Help' }));
   const list = screen.getByRole('dialog').querySelector('ol.help-steps');
   if (list === null) throw new Error('the Help panel renders no "How it works" step list');

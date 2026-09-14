@@ -142,6 +142,12 @@ afterEach(() => {
 
 async function renderChip(health: ApiHealth | 'down'): Promise<HTMLElement> {
   if (health === 'down') stubFetchDown();
+/* UX-021 — `MemoryRouter` IS REQUIRED here. `HelpPanel` renders a real `<Link>` to
+ * Settings -> Help & Tutorial, and `Link` reads router context, so a bare render throws
+ * `Cannot destructure property 'basename' of useContext(...) as it is null` and takes every
+ * test in the file down with it. Wrapping is the right fix rather than downgrading the
+ * `<Link>`: in production this panel is mounted inside `TopBar`, inside the router, so the
+ * HARNESS was what did not match reality. */
   else stubFetchRoutes({ 'GET /api/health': { body: health } });
   const { container } = render(
     <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
@@ -572,7 +578,11 @@ describe('Governance & Safety → Policy copy — same distinction, full paragra
 /** The whole rendered popover body — deliberately broader than the one section,
  *  so a forbidden claim cannot be smuggled into a neighbouring section. */
 function helpBodyText(): string {
-  const view = render(<HelpPanel />);
+  const view = render(
+    <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+      <HelpPanel />
+    </MemoryRouter>,
+  );
   fireEvent.click(view.getByRole('button', { name: 'Help' }));
   return view.container.querySelector('.help-panel-body')!.textContent ?? '';
 }
@@ -580,7 +590,11 @@ function helpBodyText(): string {
 /** Just the synthetic section, located by its own heading, so the REQUIRED
  *  claims are proven to sit together under it rather than scattered. */
 function helpSyntheticSection(): string {
-  const view = render(<HelpPanel />);
+  const view = render(
+    <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+      <HelpPanel />
+    </MemoryRouter>,
+  );
   fireEvent.click(view.getByRole('button', { name: 'Help' }));
   const section = [...view.container.querySelectorAll('.help-section')].find(
     (el) => el.querySelector('h3')?.textContent === 'Synthetic workspace',
@@ -599,7 +613,11 @@ describe('Help popover copy — distinguishes the synthetic workspace from the d
   });
 
   it('retitles the section from the unqualified "Synthetic mode"', () => {
-    const view = render(<HelpPanel />);
+    const view = render(
+    <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+      <HelpPanel />
+    </MemoryRouter>,
+  );
     fireEvent.click(view.getByRole('button', { name: 'Help' }));
     const headings = [...view.container.querySelectorAll('.help-section h3')].map(
       (h) => h.textContent,

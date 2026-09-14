@@ -19,6 +19,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { openAssistantCatalogWhenReady } from '../test/openAssistantCatalog';
 import { fireEvent, render, waitFor, within } from '@testing-library/react';
 
 // Mock the app router so a cited memory lead's navigation is observable without
@@ -219,6 +220,8 @@ describe('P34.4 Suggested Questions use the SAME turn pipeline (no endpoint call
     const mem = vi.spyOn(api, 'askMemory');
     const rec = vi.spyOn(api, 'askAssistant');
     const { getByText, container } = memoryPanel();
+    // The pills live in "What Can I Ask?" since 2026-09-13 — open it first.
+    await openAssistantCatalogWhenReady(container);
 
     // click the precomposed Suggested Question
     fireEvent.click(getByText('How fresh is project memory?'));

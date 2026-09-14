@@ -223,5 +223,18 @@ export {
   Columns2,
   FolderIcon,
   SlidersHorizontal,
+  /*
+   * NEWLY EXPORTED for the Historical Import destination. The glyph itself is
+   * unchanged and has been imported above since the provenance work — its own
+   * comment there calls it "content that is waiting to be placed", which is both
+   * an unmapped note (`revUnmapped`, the existing use) and a source bundle
+   * nothing has read yet.
+   *
+   * SHARING ONE MARK ACROSS THOSE TWO IS CONSISTENT RATHER THAN A COLLISION:
+   * they are the same fact in two places. Both sites pair it with a text label,
+   * which is this file's standing rule, so nothing is signalled by the glyph
+   * alone.
+   */
+  Inbox,
 };
 export type { LucideIcon };

@@ -1379,17 +1379,110 @@ def test_there_is_no_HTTP_DELETE_verb_on_any_experiment_route(workspace):
     """A domain operation, not a generic delete — asserted on the route table.
 
     A `DELETE` on `/experiments/{id}` would tell every client the resource is
-    generically deletable, which is exactly what was not authorized. The only
-    `DELETE` this API publishes is the worked-example session's own lifecycle.
+    generically deletable, which is exactly what was not authorized.
+
+    ── THE LIST GREW FROM ONE TO THREE ON 2026-09-13, AND THE PROPERTY THIS TEST
+    ── NAMES IS UNCHANGED. The assertion is rewritten to pin the PROPERTY rather
+    than the single literal, because the literal was never the point:
+    ~~`assert deletes == ["/api/tutorial/sessions/{session_id}"]`~~.
+
+    Historical Import publishes two: `DELETE /api/imports/{import_id}` discards
+    an import SESSION — a working area the server itself describes as not part of
+    the durable record store — and `DELETE .../sources/{source_id}` removes one
+    entry from that session's manifest, which is metadata about a file this build
+    never opened. Neither names an experiment, and every proposal a session sent
+    stays on the record it was sent to.
+
+    SO THE PROPERTY IS ASSERTED AS A PREDICATE: no published `DELETE` may be
+    addressed to an experiment. A fourth `DELETE` on a working area passes; a
+    first one on `/experiments/{id}` fails. The enumeration is kept BESIDE it,
+    because a reviewer seeing a new entry is how the reason gets stated at all.
     """
     from isaac_api.app import create_app
 
     schema = create_app().openapi()
-    deletes = [
-        path for path, ops in schema["paths"].items() if "delete" in ops
-    ]
-    assert deletes == ["/api/tutorial/sessions/{session_id}"], deletes
+    deletes = _published_deletes(schema)
+    assert deletes == [
+        "/api/imports/{import_id}",
+        "/api/imports/{import_id}/sources/{source_id}",
+        "/api/tutorial/sessions/{session_id}",
+    ], deletes
+    # THE PROPERTY. `/experiments` in the path is the test: a `DELETE` addressed
+    # to an experiment, its runs, its notes, its proposals or its assets would all
+    # carry it.
+    assert _deletes_addressed_to_an_experiment(deletes) == []
     assert "post" in schema["paths"]["/api/experiments/{experiment_id}/discard"]
+
+
+# The extraction and the predicate, as functions, so the control below can drive
+# the REAL ones. They were inline above and the control re-implemented the
+# predicate as a bare `in` over literals, which is how it became a tautology
+# (finding M-4).
+def _published_deletes(schema: dict) -> list[str]:
+    """Every path in an OpenAPI document that publishes a `DELETE`."""
+    return sorted(path for path, ops in schema["paths"].items() if "delete" in ops)
+
+
+def _deletes_addressed_to_an_experiment(paths: list[str]) -> list[str]:
+    """The subset that would delete an experiment or anything belonging to one."""
+    return [p for p in paths if "/experiments" in p]
+
+
+def test_the_no_experiment_DELETE_predicate_can_actually_fail():
+    """MUTATION CONTROL, AND IT WAS A TAUTOLOGY UNTIL 2026-09-13 (finding M-4).
+
+    ~~``assert "/experiments" in forbidden``~~ over four hand-written literals
+    asserted that a string contains its own substring. It exercised neither the
+    extraction nor the predicate: both could have returned nothing for every
+    input and this would still have been green — the exact vacuity a control
+    exists to rule out, and exactly how widening the enumeration could have
+    quietly widened the property.
+
+    It now drives the SAME two functions the guard calls, over a synthetic
+    OpenAPI document.
+    """
+    schema = {
+        "paths": {
+            # The four shapes the property must refuse...
+            "/api/experiments/{experiment_id}": {"delete": {}},
+            "/api/experiments/{experiment_id}/runs/{run_id}": {"delete": {}},
+            "/api/experiments/{experiment_id}/notes/{note_id}": {"delete": {}},
+            "/api/experiments/{experiment_id}/proposals/{proposal_id}": {"delete": {}},
+            # ...the three working-area deletes it must allow...
+            "/api/imports/{import_id}": {"delete": {}},
+            "/api/imports/{import_id}/sources/{source_id}": {"delete": {}},
+            "/api/tutorial/sessions/{session_id}": {"delete": {}},
+            # ...and a path on an experiment with NO `delete`, which the
+            # extraction must not pick up at all. Without this the two functions
+            # are indistinguishable from one that just greps the path list.
+            "/api/experiments/{experiment_id}/discard": {"post": {}},
+        }
+    }
+    deletes = _published_deletes(schema)
+    assert "/api/experiments/{experiment_id}/discard" not in deletes
+    assert len(deletes) == 7
+
+    offenders = _deletes_addressed_to_an_experiment(deletes)
+    assert offenders == [
+        "/api/experiments/{experiment_id}",
+        "/api/experiments/{experiment_id}/notes/{note_id}",
+        "/api/experiments/{experiment_id}/proposals/{proposal_id}",
+        "/api/experiments/{experiment_id}/runs/{run_id}",
+    ]
+
+    # NEGATIVE CONTROL for the control: the three allowed paths on their own
+    # yield nothing, so the assertion above cannot be passing because the
+    # predicate returns its input.
+    assert (
+        _deletes_addressed_to_an_experiment(
+            [
+                "/api/imports/{import_id}",
+                "/api/imports/{import_id}/sources/{source_id}",
+                "/api/tutorial/sessions/{session_id}",
+            ]
+        )
+        == []
+    )
 
 
 # =============================================================================

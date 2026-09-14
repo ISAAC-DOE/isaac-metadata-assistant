@@ -1103,7 +1103,38 @@ describe('the Full Description rule over the REAL generated contract', () => {
    * ways that agree -- `create_app().openapi()` and the transcribed array read with
    * `test_contract_description_parity.py`'s own extractor: **78**.
    */
-  it('describes the contract it claims to: 78 operations, MEASURED on the merged tree', () => {
+  /*
+   * ── 78 -> 87 OPERATIONS, 2026-09-13: HISTORICAL IMPORT'S NINE ───────────────
+   *
+   * `POST/GET /api/imports`, `GET/DELETE /api/imports/{import_id}`,
+   * `POST/DELETE .../sources[/{source_id}]`, `POST .../parse`,
+   * `POST .../reconstruct` and `POST .../candidates/{candidate_id}/propose`.
+   *
+   * THE TITLE IS EDITED IN THE SAME CHANGE AS THE ASSERTION, which is this
+   * block's own standing instruction and the thing its 2026-09-13 note records
+   * being forgotten once already: a test TITLE is not an assertion, so nothing
+   * can fail on it.
+   *
+   * ALL THREE FIGURES RE-MEASURED, never incremented, by running
+   * `splitPurpose` over the transcribed array — which
+   * `test_contract_description_parity.py` has already proved byte-identical to
+   * `create_app().openapi()` in both directions:
+   *
+   *     operations         78  ->  87   (+9)
+   *     total characters  142,351 -> 154,565
+   *     post-lead paragraphs  ?  ->  303
+   *
+   * AND TWO OF THE NINE DESCRIPTIONS WERE REWORDED BEFORE THESE NUMBERS WERE
+   * TAKEN, because `hides ZERO characters of the real contract` caught them:
+   * `POST /api/imports` (621 characters, three paragraphs) and
+   * `DELETE .../sources/{source_id}` (568 characters, two) carried NOT ONE
+   * `BOUNDARY_CAVEAT_MARKERS` token, so length alone collapsed this feature's
+   * central honesty claim behind the disclosure. Fixed the way that list's own
+   * comment says to — by saying what the paragraphs mean in the vocabulary the
+   * rule recognises, NOT by widening the list. This is the THIRD recorded
+   * instance of that miss, and the second the test caught rather than a human.
+   */
+  it('describes the contract it claims to: 87 operations, MEASURED on the merged tree', () => {
     // FOUR slices have now raised this from 52 for real, different additions — the
     // asset slice, the transcript slice, run removal, and the two CONFLICT
     // RESOLUTION operations. Both sides of this merge conflict carried a number
@@ -1762,7 +1793,7 @@ describe('the Full Description rule over the REAL generated contract', () => {
     // RE-MEASURED from the served document via `test_contract_description_parity.py`,
     // which re-transcribed this entry mechanically rather than by hand, and read out
     // of this test's own failure output (`expected […(78)] to have a length of 77`).
-    expect(REAL_CONTRACT_DESCRIPTIONS).toHaveLength(78);
+    expect(REAL_CONTRACT_DESCRIPTIONS).toHaveLength(87);
     // 84,501 -> 84,584 (+83): the assistant seam's own description was corrected, in
     // ONE operation and with the paragraph count unchanged. It read "so every request
     // is answered `501`" while the paragraph two below it documented the `422` — a
@@ -2318,7 +2349,13 @@ describe('the Full Description rule over the REAL generated contract', () => {
     // `<p class="api-docs-description">`, so the `settings-explorer` accessibility
     // cells move on BOTH platforms and need a Linux CI round-trip. Unavoidable --
     // one of the changes is a whole new operation.
-    expect(total).toBe(142351);
+    // 142,351 -> 154,565 (+12,214): Historical Import's nine operations, and NO
+    // existing description changed — `test_contract_description_parity.py` proves
+    // that rather than leaving it asserted here. RE-MEASURED by running
+    // `splitPurpose` over the transcribed array rather than by adding the length
+    // of the new text, which is this block's standing rule and the one its own
+    // 2026-08-16 note records being got wrong by nine.
+    expect(total).toBe(154565);
     // 104,045 -> 114,959 (+10,914): the four new operations, and NO existing
     // description changed — `test_contract_description_parity.py` proves that rather
     // than leaving it asserted here. RE-DERIVED from the served document and never
@@ -2539,7 +2576,16 @@ describe('the Full Description rule over the REAL generated contract', () => {
     // merge. BOTH numbers moved together, which is the signature of prose appended
     // as new paragraphs; here that is unavoidable, because one of the changes is a
     // whole new operation.
-    expect(REAL_CONTRACT_DESCRIPTIONS.reduce((n, d) => n + rest(d).length, 0)).toBe(270);
+    expect(REAL_CONTRACT_DESCRIPTIONS.reduce((n, d) => n + rest(d).length, 0)).toBe(
+      // 270 -> 303 (+33): Historical Import's nine operations. RE-MEASURED by
+      // running the same `splitPurpose` rule over the transcribed array, never
+      // apportioned — the two reworded descriptions changed paragraph COUNT as
+      // well as length (`DELETE .../sources/{source_id}` gained a sentence to an
+      // existing paragraph, not a new one; `POST /api/imports` gained none), so
+      // an arithmetic delta would have been wrong in the way this block's own
+      // 2026-08-16 note records being wrong by nine.
+      303,
+    );
     // 211 -> 235 (+24): the four new operations carry a lead plus 24 post-lead
     // paragraphs between them. It is asserted separately from the character total
     // for the reason every entry above gives: a change that moved one and not the

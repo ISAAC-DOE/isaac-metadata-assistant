@@ -111,6 +111,47 @@ test.describe('layout width sweep', () => {
       page,
       app,
     }, testInfo) => {
+      /*
+       * THE BUDGET IS DERIVED FROM THE SURFACE COUNT, NOT A FIXED NUMBER, and
+       * that is the fix for a failure this file had already diagnosed in the
+       * abstract.
+       *
+       * MEASURED, with a control. Adding ONE surface to `SURFACES` (the
+       * `not-found` screen, `QA-020`) turned all seven of these tests red as
+       * `Test timeout of 60000ms exceeded`, and the death point MOVED between
+       * runs — `settings-about` once, `Statistics` the next. The S2 block lower
+       * down in this same file names that signature exactly: "a death point
+       * that moves between runs is the signature of budget exhaustion rather
+       * than of a product regression."
+       *
+       * The control says why one surface was enough. Run at `main` (31
+       * surfaces) these tests take **36.7s to 46.8s against the config's fixed
+       * `timeout: 60_000`** — roughly 13s of headroom at the worst width, about
+       * 1.5s per surface. A 32nd surface spends most of what is left, and the
+       * next one after that would have done this whether or not anybody
+       * connected it to a change. **The 60s was not sized for this loop; it is
+       * `playwright.config.ts`'s global default, and this test grows every time
+       * the product gains a screen.**
+       *
+       * WHY RAISING IT IS THE RIGHT MOVE HERE, when the S2 block below
+       * explicitly REJECTED raising it for itself. That rejection's reason was
+       * readability — "a test that fails as a timeout tells the next reader
+       * nothing about which surface broke" — and its remedy was one test per
+       * (width, surface). That remedy is NOT available to this test: it
+       * accumulates `staleness` ACROSS surfaces and asserts at the end that
+       * every recorded baseline instance fired SOMEWHERE in the sweep. Split
+       * per surface, each test would see only its own surface's findings and
+       * would report every other surface's recorded instances as stale. The
+       * aggregate assertion is the reason this one test exists.
+       *
+       * So the readability objection is answered DIRECTLY instead: the
+       * `app.open` below now names the surface it was opening when it failed,
+       * which is the information the S2 note said a raised timeout would cost.
+       * 4s per surface against a measured ~1.5s leaves real headroom on a
+       * slower machine without restoring a fixed number that rots.
+       */
+      test.setTimeout(20_000 + SURFACES.length * 4_000);
+
       await page.setViewportSize({ width, height: 812 });
 
       // Which column of `layout-baseline.ts` is in force. Throws with an
@@ -130,7 +171,18 @@ test.describe('layout width sweep', () => {
       let font = '(not measured)';
 
       for (const surface of SURFACES) {
-        await app.open(surface);
+        // NAMES THE SURFACE ON FAILURE. Without this the loop's failures —
+        // including a genuine product hang — surface as a bare Playwright
+        // timeout with no indication of which of the 30-odd screens was being
+        // opened, which is precisely the cost the S2 note below objected to.
+        try {
+          await app.open(surface);
+        } catch (err) {
+          throw new Error(
+            `while opening surface '${surface.id}' (${surface.path}) at width ${width}: ` +
+              `${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
         // The viewport is set before navigation, but a surface that mounts a
         // second pane can settle after it; re-assert the size so every
         // measurement below is taken at the width in the test title.

@@ -32,6 +32,12 @@ export function GraphStatusChip({ availability, note }: GraphStatusChipProps) {
     <span
       className={`graph-chip graph-${availability}`}
       title={note}
+      /* `group`: a bare `<span>` is `generic`, and ARIA prohibits naming a
+         `generic`, so this label — the one that says the graph is advisory and
+         never a validator — reached nobody. That is the claim §7 most wants a
+         reader to hear, which is why it is worth a role rather than a shrug.
+         See `ProvenanceChips.tsx` for the measurement (QA-023). */
+      role="group"
       aria-label={`Project memory ${availability} — memory plane, advisory only, never a validator`}
     >
       <Network size={13} strokeWidth={2} aria-hidden="true" />

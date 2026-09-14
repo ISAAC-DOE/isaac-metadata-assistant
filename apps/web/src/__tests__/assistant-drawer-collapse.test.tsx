@@ -26,8 +26,9 @@
  * tests already do.
  */
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, waitFor } from '@testing-library/react';
+import { renderToStaticMarkup } from 'react-dom/server';
 import { AssistantDrawer } from '../components/AssistantDrawer';
 
 const STORAGE_KEY = 'isaac.assistant-rail-collapsed';
@@ -67,14 +68,24 @@ afterEach(() => {
 });
 
 describe('PR-E · AssistantDrawer desktop rail collapse', () => {
-  it('renders one toggle button, open by default, with aria-expanded/aria-controls', () => {
+  /*
+   * UX-013 — THIS TEST IS INVERTED, NOT NEW, AND NOT DELETED. Its previous
+   * title was "renders one toggle button, OPEN by default" and it asserted
+   * `aria-expanded="true"` / `data-collapsed="false"` / "Collapse Assistant".
+   * It passed, and it was pinning the defect: the scope directive requires the
+   * Assistant to stay contextual and collapsed rather than permanently consume
+   * the scientist's working width. Inverting a test that pins a defect — rather
+   * than deleting it — is this repository's established remedy, because the
+   * inverted assertion still fails if the default silently flips back.
+   */
+  it('renders one toggle button, COLLAPSED by default, with aria-expanded/aria-controls', () => {
     const { container } = render(
       <AssistantDrawer railClassName="record-right narrow">
         <FakeAssistantPanelContent />
       </AssistantDrawer>,
     );
     const toggle = getToggle(container);
-    expect(toggle.getAttribute('aria-expanded')).toBe('true');
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
     const aside = container.querySelector('aside.assistant-drawer-panel')!;
     // M-1 (independent review, 2026-09-03) — `aria-controls` names the
     // element this button actually shows/hides, `.assistant-drawer-content`,
@@ -84,8 +95,8 @@ describe('PR-E · AssistantDrawer desktop rail collapse', () => {
     const content = container.querySelector('.assistant-drawer-content')!;
     expect(toggle.getAttribute('aria-controls')).toBe(content.id);
     expect(content.id).not.toBe(aside.id);
-    expect(aside.getAttribute('data-collapsed')).toBe('false');
-    expect(toggleLabel(container)).toBe('Collapse Assistant');
+    expect(aside.getAttribute('data-collapsed')).toBe('true');
+    expect(toggleLabel(container)).toBe('Expand Assistant');
   });
 
   it('clicking the toggle flips aria-expanded, data-collapsed, and the visible/accessible label — which states the RESULTING action', () => {
@@ -97,15 +108,18 @@ describe('PR-E · AssistantDrawer desktop rail collapse', () => {
     const toggle = getToggle(container);
     const aside = container.querySelector('aside.assistant-drawer-panel')!;
 
-    fireEvent.click(toggle);
-    expect(toggle.getAttribute('aria-expanded')).toBe('false');
-    expect(aside.getAttribute('data-collapsed')).toBe('true');
-    expect(toggleLabel(container)).toBe('Expand Assistant');
-
-    fireEvent.click(toggle);
+    // UX-013 — the two arms are SWAPPED relative to the pre-UX-013 version of
+    // this test, because the starting state is now collapsed. The round trip
+    // itself is what is under test and it is unchanged.
+    fireEvent.click(toggle); // expand
     expect(toggle.getAttribute('aria-expanded')).toBe('true');
     expect(aside.getAttribute('data-collapsed')).toBe('false');
     expect(toggleLabel(container)).toBe('Collapse Assistant');
+
+    fireEvent.click(toggle); // collapse
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    expect(aside.getAttribute('data-collapsed')).toBe('true');
+    expect(toggleLabel(container)).toBe('Expand Assistant');
   });
 
   it("MUTATION CONTROL 1 — collapsing/expanding never unmounts the panel: a typed composer value survives the round trip", () => {
@@ -119,8 +133,8 @@ describe('PR-E · AssistantDrawer desktop rail collapse', () => {
     expect(textarea.value).toBe('What is blocking export?');
 
     const toggle = getToggle(container);
+    fireEvent.click(toggle); // expand   (UX-013: the default is now collapsed)
     fireEvent.click(toggle); // collapse
-    fireEvent.click(toggle); // expand
 
     const sameTextarea = getByLabelText('Ask the assistant a question') as HTMLTextAreaElement;
     expect(sameTextarea).toBe(textarea); // same DOM node — never remounted
@@ -137,8 +151,8 @@ describe('PR-E · AssistantDrawer desktop rail collapse', () => {
     expect(panelBefore).not.toBeNull();
 
     const toggle = getToggle(container);
+    fireEvent.click(toggle); // expand   (UX-013: the default is now collapsed)
     fireEvent.click(toggle); // collapse
-    fireEvent.click(toggle); // expand
 
     const panelAfter = container.querySelector('.assistant-drawer-content .assistant');
     // Same object reference — proves the element was never torn down and
@@ -175,10 +189,15 @@ describe('PR-E · AssistantDrawer desktop rail collapse', () => {
         <FakeAssistantPanelContent />
       </AssistantDrawer>,
     );
-    // Default: open, nothing stored yet.
+    // UX-013 — default: COLLAPSED, nothing stored yet. The click therefore
+    // EXPANDS and persists `'0'`, which is the case that matters most: the
+    // stored-preference effect is what makes "a scientist who expands it once
+    // keeps it expanded" true, so this test is the one that would catch a
+    // default flip implemented by deleting the effect instead of inverting the
+    // reader.
     expect(window.localStorage.getItem(STORAGE_KEY)).toBeNull();
     fireEvent.click(getToggle(first.container));
-    expect(window.localStorage.getItem(STORAGE_KEY)).toBe('1');
+    expect(window.localStorage.getItem(STORAGE_KEY)).toBe('0');
     first.unmount();
 
     const second = render(
@@ -187,28 +206,62 @@ describe('PR-E · AssistantDrawer desktop rail collapse', () => {
       </AssistantDrawer>,
     );
     // Hydrated from storage after mount (an effect, not the first render) —
-    // the eventual state is collapsed.
+    // the eventual state is EXPANDED, which is the opposite of the default this
+    // mount rendered first.
     await waitFor(() => {
-      expect(toggleLabel(second.container)).toBe('Expand Assistant');
+      expect(toggleLabel(second.container)).toBe('Collapse Assistant');
     });
   });
 
-  it('a browser that refuses storage still works: the rail defaults open and the toggle still functions', () => {
-    const original = window.localStorage.getItem;
-    window.localStorage.getItem = () => {
+  /*
+   * UX-013 — INVERTED for the same reason as the default-state test above, and
+   * the inversion here closed a second, smaller hole. Before UX-013 this
+   * function's `catch` returned `false` while the default was also `false`, so
+   * the two agreed by accident. Had the default been flipped without touching
+   * the `catch`, a storage-refusing browser would have become the ONE
+   * environment where the rail still opened by default — a divergence no test
+   * asserted in either direction. It is asserted now.
+   *
+   * *** AND THE INVERSION EXPOSED THAT THIS TEST HAD NEVER INJECTED ANYTHING.
+   * Measured while mutation-testing the flip: assigning
+   * `window.localStorage.getItem = fn` is SILENTLY IGNORED by this jsdom — the
+   * own-property assignment does not shadow `Storage.prototype.getItem`, so the
+   * replacement function was never called and the `catch` branch was never
+   * entered. A probe confirmed it directly (`MOCK_CALLED=false THREW=false`),
+   * and `vi.spyOn(Storage.prototype, 'getItem')` confirmed the working form
+   * (`PROTO_THREW=true`).
+   *
+   * The mutation that proved it: changing the `catch` to `return false`
+   * survived the whole file — 16 passed — with the mutation ASSERTED to have
+   * applied. So this test read as fault-injection coverage while injecting no
+   * fault, in BOTH polarities, since it was written. The same was true of the
+   * write-side test below, whose `not.toThrow()` passed against a `setItem`
+   * that never threw. Both now spy on the PROTOTYPE and both ASSERT the spy was
+   * called — because a fault that was never injected is not a fault that was
+   * tolerated. ***
+   */
+  it('a browser that refuses storage still works: the rail defaults COLLAPSED and the toggle still functions', () => {
+    // THE INJECTION IS ON `Storage.prototype`, NOT ON THE INSTANCE, and that
+    // correction is the reason this test now means anything — see the block
+    // comment above.
+    const spy = vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
       throw new Error('storage disabled');
-    };
+    });
     try {
       const { container } = render(
         <AssistantDrawer railClassName="record-right narrow">
           <FakeAssistantPanelContent />
         </AssistantDrawer>,
       );
-      expect(toggleLabel(container)).toBe('Collapse Assistant');
-      fireEvent.click(getToggle(container));
+      // Proof the fault was actually injected, asserted rather than assumed: a
+      // read that never happens cannot be a read that was refused.
+      expect(spy).toHaveBeenCalled();
       expect(toggleLabel(container)).toBe('Expand Assistant');
+      spy.mockRestore();
+      fireEvent.click(getToggle(container));
+      expect(toggleLabel(container)).toBe('Collapse Assistant');
     } finally {
-      window.localStorage.getItem = original;
+      spy.mockRestore();
     }
   });
 
@@ -225,10 +278,9 @@ describe('PR-E · AssistantDrawer desktop rail collapse', () => {
    * removed.
    */
   it('a browser that refuses to WRITE storage still works: toggling neither crashes nor throws', () => {
-    const original = window.localStorage.setItem;
-    window.localStorage.setItem = () => {
+    const spy = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
       throw new Error('storage disabled (write)');
-    };
+    });
     try {
       const { container } = render(
         <AssistantDrawer railClassName="record-right narrow">
@@ -237,12 +289,17 @@ describe('PR-E · AssistantDrawer desktop rail collapse', () => {
       );
       expect(() => fireEvent.click(getToggle(container))).not.toThrow();
       // The in-memory state still updates even though persistence failed —
-      // the failure is contained to storage, not to the feature.
-      expect(toggleLabel(container)).toBe('Expand Assistant');
-      expect(() => fireEvent.click(getToggle(container))).not.toThrow();
+      // the failure is contained to storage, not to the feature. (UX-013: the
+      // arms are swapped, because the first click now expands.)
       expect(toggleLabel(container)).toBe('Collapse Assistant');
+      expect(() => fireEvent.click(getToggle(container))).not.toThrow();
+      expect(toggleLabel(container)).toBe('Expand Assistant');
+      // Proof the fault was injected. Before this correction the assertion
+      // above was `not.toThrow()` against a `setItem` that never threw, so it
+      // could not distinguish a contained failure from no failure at all.
+      expect(spy).toHaveBeenCalled();
     } finally {
-      window.localStorage.setItem = original;
+      spy.mockRestore();
     }
   });
 
@@ -254,13 +311,102 @@ describe('PR-E · AssistantDrawer desktop rail collapse', () => {
     );
     const toggle = getToggle(container);
     toggle.focus();
-    fireEvent.click(toggle); // collapse — focus stays on this control (no code path moves it)
-    expect(document.activeElement).toBe(toggle);
 
+    // UX-013 — the arms are swapped because the default is now collapsed, and
+    // the ORDER matters for what this proves. Expanding first means the focus
+    // move is asserted from the state a reader actually starts in, rather than
+    // from a state only reachable by clicking twice.
     fireEvent.click(toggle); // expand — focus moves to the panel heading
     await waitFor(() => {
       expect(document.activeElement?.className).toContain('assistant-label');
     });
+
+    getToggle(container).focus();
+    fireEvent.click(getToggle(container)); // collapse — focus stays on this control
+    expect(document.activeElement).toBe(getToggle(container));
+  });
+
+  /*
+   * UX-013 — THE THREE-WAY STORAGE DISTINCTION, which is the new load-bearing
+   * logic and had no test in either polarity before this slice.
+   *
+   * `readStoredRailCollapsed` now has to keep three cases apart, and only ONE
+   * of them means expanded. The obvious wrong implementation of a "default
+   * collapsed" flip is `useState(true)` with the reader left at `=== '1'`: that
+   * renders collapsed, passes every test above, and QUIETLY DESTROYS the stored
+   * preference — a scientist who expands the rail gets `'0'` written, the next
+   * mount reads `'0' === '1'` as `false`, and... happens to work. The mutant
+   * that actually survives the tests above is the one that leaves the reader at
+   * `=== '1'` while the WRITE side changes, or that returns `false` from the
+   * `catch`. So each case is asserted on its own, by seeding storage directly
+   * rather than by clicking, because clicking can only ever produce the two
+   * values the writer already agrees about.
+   */
+  it.each([
+    ['absent (a reader who has never touched the toggle)', null, 'Expand Assistant'],
+    ["explicitly collapsed ('1')", '1', 'Expand Assistant'],
+    ["explicitly EXPANDED ('0') — the preference that must survive", '0', 'Collapse Assistant'],
+    ['an unrecognised value falls on the DEFAULT side', 'yes', 'Expand Assistant'],
+  ])('hydrates from stored state: %s', async (_label, stored, expectedLabel) => {
+    if (stored !== null) window.localStorage.setItem(STORAGE_KEY, stored);
+    const { container } = render(
+      <AssistantDrawer railClassName="record-right narrow">
+        <FakeAssistantPanelContent />
+      </AssistantDrawer>,
+    );
+    await waitFor(() => {
+      expect(toggleLabel(container)).toBe(expectedLabel);
+    });
+  });
+
+  it('MUTATION-GUARDED — reading the preference NEVER writes it, so merely mounting cannot convert an absent preference into a stored one', () => {
+    // Without this, a reader implemented as "normalise the stored value on
+    // mount" would write `'1'` for every first-time reader, making the default
+    // indistinguishable from an explicit choice forever after — and no
+    // assertion above would notice, because the rendered result is identical.
+    const { unmount } = render(
+      <AssistantDrawer railClassName="record-right narrow">
+        <FakeAssistantPanelContent />
+      </AssistantDrawer>,
+    );
+    expect(window.localStorage.getItem(STORAGE_KEY)).toBeNull();
+    unmount();
+    expect(window.localStorage.getItem(STORAGE_KEY)).toBeNull();
+  });
+
+  /*
+   * UX-013 — THE FIRST PAINT, and the reason this test uses a SERVER render.
+   *
+   * `useState(true)` vs `useState(false)` is an EQUIVALENT MUTANT under every
+   * other test in this file, and that is a property of the harness rather than
+   * of the code: `render()` from testing-library wraps in `act()`, which
+   * flushes the passive effect that reads storage, so by the time any assertion
+   * runs the state is whatever the EFFECT decided. Measured — flipping the
+   * initial literal to `false` left all 16 tests green.
+   *
+   * The difference the initial literal actually makes is the one frame before
+   * that effect runs, which is exactly what the component's own comment claims
+   * ("the first paint still does not depend on storage"). `renderToStaticMarkup`
+   * runs NO effects, so it observes that frame directly and nothing else can.
+   *
+   * Storage is seeded with the OPPOSITE preference on purpose. If the first
+   * paint consulted storage — the change this test exists to forbid — the
+   * markup would come back expanded, and a reader on a slow hydration would
+   * briefly see the rail cover the column they are working in.
+   */
+  it('MUTATION-GUARDED — the FIRST paint is collapsed and does not consult storage', () => {
+    window.localStorage.setItem(STORAGE_KEY, '0'); // stored preference: EXPANDED
+    const markup = renderToStaticMarkup(
+      <AssistantDrawer railClassName="record-right narrow">
+        <FakeAssistantPanelContent />
+      </AssistantDrawer>,
+    );
+    expect(markup).toContain('data-collapsed="true"');
+    expect(markup).not.toContain('data-collapsed="false"');
+    // Positive control: this assertion is only meaningful because the attribute
+    // is present at all in server markup. Without it, a renderer that emitted
+    // no `data-collapsed` would satisfy both assertions above.
+    expect(markup).toMatch(/data-collapsed="(true|false)"/);
   });
 
   it('the toggle is a real, enabled button (in the tab order)', () => {

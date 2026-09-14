@@ -177,8 +177,12 @@ function ClassificationRow({ result }: { result: ApiFieldClassification }) {
 
       <p className="evclass-explanation">{result.explanation}</p>
 
+      {/* `role="group"` below: a bare `<div>` is `generic`, and ARIA prohibits
+          naming a `generic`, so that `aria-label` reached nobody. 31 instances —
+          the largest single node in QA-023's `aria-prohibited-attr` bucket. See
+          `ProvenanceChips.tsx` for the full note. */}
       {result.sources.length > 0 && (
-        <div className="evclass-sources" aria-label="Safe source references">
+        <div className="evclass-sources" role="group" aria-label="Safe source references">
           {result.sources.map((src, i) => (
             <span className="evclass-source" key={`${src.source_type}-${i}`}>
               <SourceTypeToken sourceType={src.source_type} />

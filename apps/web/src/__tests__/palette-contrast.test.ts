@@ -1600,118 +1600,130 @@ describe('A3 · the guards above can actually fail', () => {
 
 /* ── 5 · the residue this change cannot close ──────────────────────────────── */
 
-describe('A3 · the opacity residue is still open, and says so with numbers', () => {
+describe('A3 · the opacity residue is CLOSED — all three sites, and the guard is now a ratchet', () => {
   /*
    * Cause (b) of FINDING A11Y-01. Three rules put an ancestor `opacity` over
-   * text, and compositing drags a PASSING colour below AA.
+   * text, and compositing dragged a PASSING colour below AA. *** ALL THREE ARE
+   * NOW GONE (2026-09-13), so this block no longer asserts that a defect
+   * EXISTS — it asserts that none of them comes back. ***
    *
-   * EACH SITE NOW CARRIES ITS OWN INK AND ITS OWN BACKDROP, and that is a
-   * correction rather than a refinement. The list used to be three selectors
-   * measured against ONE token on ONE ground, and `.advisory-nongating` is
-   * neither: it sets `color: var(--advisory-text)` itself, and it sits inside
-   * `.advisory`, whose fill is `--advisory-bg`. So the third site was named as
-   * one of the three while its number was published nowhere, and the loop below
-   * iterated `[0.82, 0.72]` — the other two — as though it had covered it.
+   * The previous version said, of the last two: "this site of cause (b) is
+   * closed and the guard should be retired deliberately rather than left
+   * asserting a defect that no longer exists." This is that deliberate
+   * retirement. The three `it`s that measured the live composites are gone with
+   * the composites; what remains is the two-way half, widened from one site to
+   * three.
    *
-   * The composites are FORMULA-COMPUTED, not browser-measured; `compositeOver`
-   * documents why they must not be transcribed into `a11y-baseline.ts`. If an
-   * opacity is ever removed, these tests fail and the record gets updated, which
-   * is the intended behaviour of a ratchet.
+   * ── ONE RECORDED NUMBER WAS FOR AN ELEMENT THAT NEVER RENDERED ─────────────
+   *
+   * `.exp-row.done` was recorded here with `ink: --text-tertiary` compositing to
+   * `#7e868f` (3.69:1), reached through `.exp-id`'s `--text-quaternary`, which
+   * aliases to `--text-tertiary`. **`.exp-id` is dead CSS** — zero mentions in
+   * any `.tsx`. So that composite described an element the product does not
+   * render, which is precisely why `#7e868f` appeared NOWHERE in
+   * `e2e/a11y-baseline.ts` while the site's REAL failing nodes did:
+   * `#777f89` on `.chip-exported > span` (3.91:1) and `#778493` on
+   * `.exp-sub > time` (3.42:1). The formula was right; the attribution was not.
+   * A computed composite for an unrendered selector reads as evidence and is
+   * not one — which is the same lesson this repository has recorded for a
+   * table-driven test whose fixture made every row reachable.
+   *
+   * WHAT CLOSING THE LAST TWO ACTUALLY TOOK, since the note that deferred them
+   * predicted they were "NOT the same shape" as `.upcoming-row`:
+   *
+   *   .advisory-nongating  the deletion alone. `--advisory-text` #8a6420 clears
+   *                        AA on `--advisory-bg` #f9f1df at 4.76:1 by itself —
+   *                        P23C darkened it expressly for that — so the opacity
+   *                        was undoing the fix the token exists for.
+   *   .exp-row.done        the deletion PLUS returning six descendants from
+   *                        `--text-secondary` to `--text-tertiary` (the rung
+   *                        they had been raised off only because the dim cost
+   *                        one), plus explicit colours for `.exp-title` and
+   *                        `.exp-date`. So the prediction was right about the
+   *                        shape and wrong about the difficulty.
+   *
+   * MEASURED, not predicted: 21 baseline cells reached zero (7 viewports x
+   * `experiments-example` 2->0, `export-readiness` 1->0,
+   * `export-readiness-done` 1->0 = 28 nodes), and four colours left the
+   * `foregrounds` allowlist.
    */
-  const OPACITY_SITES = [
-    {
-      file: 'components/queue.css',
-      selector: '.exp-row.done',
-      alpha: 0.82,
-      ink: '--text-tertiary',
-      backdrop: '--surface',
-      composite: '#7e868f',
-      why: '`.exp-row` declares `background: var(--surface)`, so the row composites onto white.',
-    },
-    {
-      file: 'components/assistant.css',
-      selector: '.upcoming-row',
-      alpha: 0.72,
-      ink: '--text-tertiary',
-      backdrop: '--surface',
-      composite: '#8e959d',
-      why:
-        '`.upcoming-row` declares no fill of its own. `--surface` is the lightest ground it can ' +
-        'sit on and therefore the most FAVOURABLE assumption available — the site fails even ' +
-        'there, which is what makes the residue claim safe rather than lucky.',
-    },
-    {
-      file: 'components/signals.css',
-      selector: '.advisory-nongating',
-      alpha: 0.85,
-      ink: '--advisory-text',
-      backdrop: '--advisory-bg',
-      composite: '#9b793d',
-      why:
-        'NOT a neutral-ink site at all: the rule sets `color: var(--advisory-text)` #8a6420, and ' +
-        'its container `.advisory` declares `background: var(--advisory-bg)`. Uncomposited it ' +
-        'clears AA on that tint at 4.76:1; at `opacity: .85` it composites to 3.59:1. A palette ' +
-        'change to the neutral ramp cannot touch it in either direction.',
-    },
+  const CLOSED_OPACITY_SITES = [
+    { file: 'components/assistant.css', selector: '.upcoming-row', wasAlpha: 0.72 },
+    { file: 'components/queue.css', selector: '.exp-row.done', wasAlpha: 0.82 },
+    { file: 'components/signals.css', selector: '.advisory-nongating', wasAlpha: 0.85 },
   ] as const;
 
-  it('all three ancestor-opacity rules are still present at the recorded strength', () => {
-    expect(OPACITY_SITES.length).toBe(3);
-    for (const site of OPACITY_SITES) {
+  it('no closed site has quietly reacquired its opacity', () => {
+    // A TWO-WAY RATCHET, now over all three. Re-adding any of these opacities
+    // would restore a `serious` AA failure while every other test in this file
+    // went on passing.
+    expect(CLOSED_OPACITY_SITES.length).toBe(3);
+    for (const site of CLOSED_OPACITY_SITES) {
       const rule = RULES.find((r) => r.file === site.file && r.selector === site.selector);
       expect(rule, `${site.file} ${site.selector} not found`).toBeDefined();
-      const m = /(?:^|[\s;])opacity:\s*([\d.]+)/.exec(rule!.decls);
-      expect(m, `${site.selector} no longer sets an opacity`).not.toBeNull();
       expect(
-        Number(m![1]),
-        `${site.selector}'s opacity changed. Re-measure the composited foregrounds in a ` +
-          'browser and update e2e/a11y-baseline.ts `foregrounds`.',
-      ).toBe(site.alpha);
+        /(?:^|[\s;])opacity:\s*([\d.]+)/.exec(rule!.decls),
+        `${site.selector} has an ancestor opacity again (it was ${site.wasAlpha} and was ` +
+          'removed to close A11Y-01 cause (b)). Compositing drags its text below AA; ' +
+          'de-emphasise with the token ramp, not with opacity.',
+      ).toBeNull();
     }
   });
 
-  it('every site still paints the ink this file measured for it', () => {
-    // Without this, a rule could be re-pointed at another token and the ratios
-    // below would go on describing a colour the site no longer uses.
-    for (const site of OPACITY_SITES) {
-      const rule = RULES.find((r) => r.file === site.file && r.selector === site.selector);
-      if (site.selector === '.advisory-nongating') {
-        expect(
-          new RegExp(`color\\s*:\\s*var\\(${site.ink}\\)`).test(rule!.decls),
-          `${site.selector} no longer sets ${site.ink} itself`,
-        ).toBe(true);
-        continue;
-      }
-      // The two neutral sites colour their CHILDREN, not themselves; assert the
-      // ink is still used somewhere in the same stylesheet rather than inventing
-      // a containment check this parser cannot do.
-      expect(
-        rulesUsing(site.ink).some((r) => r.file === site.file),
-        `${site.file} no longer paints anything with ${site.ink}`,
-      ).toBe(true);
-    }
-  });
-
-  it('every site still fails AA once composited, on its own backdrop', () => {
-    for (const site of OPACITY_SITES) {
-      const bg = declaredHex(site.backdrop);
-      const composited = compositeOver(declaredHex(site.ink), site.alpha, bg);
-      expect(
-        composited,
-        `${site.selector}: the composite of ${site.ink} at ${site.alpha} over ${site.backdrop} ` +
-          'moved. Re-derive the ratio below before trusting it.',
-      ).toBe(site.composite);
-      const ratio = contrastRatio(composited, bg);
+  it('each removed opacity WOULD still fail today — the removals were necessary, not cosmetic', () => {
+    /*
+     * The other half of the ratchet, and the reason `compositeOver` is still
+     * imported here: without this, the only surviving record that these three
+     * rules were defects would be prose. This re-derives it.
+     *
+     * It asks a counterfactual — "if this alpha were re-applied to the ink the
+     * rule paints TODAY, would it still fall below AA?" — so it keeps working
+     * after a palette change instead of pinning the historical hex values. A
+     * future ramp that made one of these safe at its old alpha would fail here,
+     * which is the right moment to reconsider the note above rather than to
+     * discover it by accident.
+     */
+    const REMOVED = [
+      { selector: '.exp-row.done', alpha: 0.82, ink: '--text-tertiary', ground: '--surface' },
+      { selector: '.upcoming-row', alpha: 0.72, ink: '--text-tertiary', ground: '--surface' },
+      {
+        selector: '.advisory-nongating',
+        alpha: 0.85,
+        ink: '--advisory-text',
+        ground: '--advisory-bg',
+      },
+    ] as const;
+    for (const r of REMOVED) {
+      const bg = declaredHex(r.ground);
+      const ratio = contrastRatio(compositeOver(declaredHex(r.ink), r.alpha, bg), bg);
       expect(
         ratio,
-        `${site.selector}: ${site.ink} at opacity ${site.alpha} composites to ${composited}, ` +
-          `which is ${ratio.toFixed(2)}:1 on ${site.backdrop} — a PASS. If that is real, this ` +
-          'site of cause (b) is closed and the guard should be retired deliberately rather than ' +
-          'left asserting a defect that no longer exists.',
+        `${r.selector}: ${r.ink} at the removed opacity ${r.alpha} over ${r.ground} is now ` +
+          `${ratio.toFixed(2)}:1 — a PASS. The palette has moved far enough that this ` +
+          'opacity would no longer be a defect, so the note above is stale and should be ' +
+          're-argued rather than trusted.',
       ).toBeLessThan(4.5);
     }
   });
 
+  /*
+   * ── RESTORED, 2026-09-13, AND THE NEAR-MISS IS THE POINT ──────────────────
+   *
+   * The two tests below were deleted by accident when the three live-defect
+   * assertions above them were retired — a block replacement took more than it
+   * meant to, and the suite stayed GREEN because deleting a passing test never
+   * turns anything red. What caught it was a test-count reconciliation: 5,883
+   * -> 5,880 when the arithmetic said -1.
+   *
+   * They matter independently of the opacities. `styles/tokens.css` says
+   * "`palette-contrast.test.ts` re-derives all three thresholds by search and
+   * asserts both orderings", so deleting them would have left a committed
+   * citation pointing at nothing — the same defect class this session has
+   * spent the day closing elsewhere. They also carry the CORRECTION to a claim
+   * that was published in four places and is arithmetically false ("darkening
+   * a token cannot reach them"), which no longer has any other home now that
+   * the sites are gone.
+   */
   it('darkening the ink WOULD reach two of them, and that is why the wording matters', () => {
     /*
      * THE CLAIM THIS FILE USED TO MAKE — "darkening the token cannot reach
@@ -1731,6 +1743,9 @@ describe('A3 · the opacity residue is still open, and says so with numbers', ()
      */
     const white = declaredHex('--surface');
     const THRESHOLDS = [
+      // .72 is KEPT after `.upcoming-row` was fixed, because this block's whole
+      // argument is that darkening the ink could not have fixed it — retiring the
+      // row would delete the evidence for the decision that was actually taken.
       [0.72, '#414141'],
       [0.82, '#585858'],
       [0.85, '#5e5e5e'],
@@ -1780,6 +1795,28 @@ describe('A3 · the opacity residue is still open, and says so with numbers', ()
         contrastRatio(composited, white),
         `${ink} at opacity ${alpha} composites to ${composited}, which would PASS`,
       ).toBeLessThan(4.5);
+    }
+  });
+
+  it('the replacement inks clear AA unfaded, which is what made the removals safe', () => {
+    // The removals are only correct because the ramp carries the recession on
+    // its own. Asserted rather than asserted-in-prose: if a future palette
+    // change pushes any of these under 4.5:1, the de-emphasis those rules now
+    // rely on becomes a defect and this says so.
+    const cases = [
+      { ink: '--text-tertiary', ground: '--surface', min: 4.5 },
+      { ink: '--text-secondary', ground: '--surface', min: 4.5 },
+      { ink: '--text-tertiary', ground: '--cover-bg', min: 4.5 },
+      { ink: '--advisory-text', ground: '--advisory-bg', min: 4.5 },
+    ] as const;
+    for (const c of cases) {
+      const ratio = contrastRatio(declaredHex(c.ink), declaredHex(c.ground));
+      expect(
+        ratio,
+        `${c.ink} on ${c.ground} is ${ratio.toFixed(2)}:1. A11Y-01 cause (b) was closed by ` +
+          'removing the opacities and letting these inks stand unfaded; below 4.5:1 that ' +
+          'reasoning no longer holds.',
+      ).toBeGreaterThanOrEqual(c.min);
     }
   });
 });

@@ -703,7 +703,27 @@ def test_every_operation_has_a_summary_that_is_not_the_function_name(client):
     # (that needs the trusted authentication boundary this deployment lacks).
     #
     # MEASURED from `create_app().openapi()`, not derived from the line above it.
-    assert checked == 78, f"expected 78 documented operations, found {checked}"
+        #
+    # ── 78 -> 87, 2026-09-13: the HISTORICAL IMPORT shell, NINE operations ──────
+    # `POST/GET /api/imports`, `GET/DELETE /api/imports/{import_id}`,
+    # `POST/DELETE .../sources[/{source_id}]`, `POST .../parse`,
+    # `POST .../reconstruct`, and `POST .../candidates/{candidate_id}/propose`.
+    #
+    # NO UPLOAD OPERATION IS AMONG THEM and `POST /api/uploads` is untouched: a
+    # source is either a POINTER this build records and does not open, or one of
+    # the committed synthetic fixtures it reads because they are files inside this
+    # application. There is no multipart body anywhere in the nine.
+    #
+    # EIGHT WRITE ONLY A SESSION — a working area outside every experiment
+    # document, which no experiment read can reach. Exactly ONE writes an
+    # experiment, and it writes one note plus one OPEN proposal and no field.
+    #
+    # NO TABLE AND NO MIGRATION WAS ADDED, the third such extension in this file's
+    # history. A session is one JSON file under the workspace directory, and the
+    # response says so rather than implying durability it does not have.
+    #
+    # MEASURED from `create_app().openapi()`, not derived from the line above it.
+    assert checked == 87, f"expected 87 documented operations, found {checked}"
 
 
 def test_the_auto_summary_check_can_actually_fail(client):
@@ -1145,6 +1165,35 @@ EXPECTED_RESPONSE_CODES: dict[tuple[str, str], list[str]] = {
     # `status: "refused"`, because refusing is a result the reader must see
     # rather than a malformed request.
     ("/api/runtime/verification", "get"): ["200", "401", "422"],
+    # ── HISTORICAL IMPORT, NINE OPERATIONS ──────────────────────────────────
+    # The import SHELL. `404` on every one of them is the fail-closed arm of the
+    # scope resolver plus "no import session in this workspace has that id", and
+    # `422` is FastAPI's own parameter/body validation response.
+    #
+    # EIGHT OF THE NINE CARRY NO `If-Match` CODES, and that is the contract rather
+    # than an omission: an import session is a working area with no revision
+    # contract and serves no validator of its own. The ONE operation that rewrites
+    # an EXPERIMENT carries the full 400/412/428 set plus `503`, because it is held
+    # to the RECORD's precondition exactly as `POST .../proposals` is.
+    #
+    # `POST .../parse` carries a `503` of its own — a source this application ships
+    # could not be read. It is deliberately NOT the database 503: reusing that
+    # description would tell a reader the database is unreachable.
+    ("/api/imports", "get"): ["200", "401", "404", "422"],
+    ("/api/imports", "post"): ["200", "401", "404", "422"],
+    ("/api/imports/{import_id}", "delete"): ["200", "401", "404", "422"],
+    ("/api/imports/{import_id}", "get"): ["200", "401", "404", "422"],
+    (
+        "/api/imports/{import_id}/candidates/{candidate_id}/propose",
+        "post",
+    ): ["200", "400", "401", "404", "412", "422", "428", "503"],
+    ("/api/imports/{import_id}/parse", "post"): ["200", "401", "404", "422", "503"],
+    ("/api/imports/{import_id}/reconstruct", "post"): ["200", "401", "404", "422"],
+    ("/api/imports/{import_id}/sources", "post"): ["200", "401", "404", "422"],
+    (
+        "/api/imports/{import_id}/sources/{source_id}",
+        "delete",
+    ): ["200", "401", "404", "422"],
     ("/api/search", "get"): ["200", "401", "404", "422"],
     ("/api/tutorial/sessions", "post"): ["201", "401"],
     ("/api/tutorial/sessions/{session_id}", "delete"): ["204", "401", "422"],

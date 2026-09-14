@@ -135,6 +135,21 @@ function panel(extra: Record<string, unknown> = {}) {
   );
 }
 
+/**
+ * Open "What Can I Ask?" and return the view.
+ *
+ * The suggested-question and agent-action pills moved into that popover on
+ * 2026-09-13 (owner request), after the rail was measured stacking two clipped,
+ * independently-scrolling control regions. `panel()` stays PURE — a test that
+ * asserts the resting layout must see the resting layout — so reaching a pill
+ * is an explicit act here, exactly as it is for a reader.
+ */
+function panelWithCatalog(extra: Record<string, unknown> = {}) {
+  const view = panel(extra);
+  fireEvent.click(within(view.container).getByRole('button', { name: /What Can I Ask/i }));
+  return view;
+}
+
 async function ask(getByRole: (r: string) => HTMLElement, text: string) {
   const box = getByRole('textbox');
   fireEvent.change(box, { target: { value: text } });
@@ -247,7 +262,7 @@ describe('P36V S-A · header + status row', () => {
       },
     ];
     const kindOf = (extra: Record<string, unknown>) => {
-      const { container, getByText, unmount } = render(
+      const { container, getByText, getByRole, unmount } = render(
         <AssistantPanel
           reply={REPLY}
           prompts={graphPrompts}
@@ -256,8 +271,15 @@ describe('P36V S-A · header + status row', () => {
           {...extra}
         />,
       );
+      /* The pills live in "What Can I Ask?" since 2026-09-13 — open it, then ask.
+         By ROLE, not by text: the popover it opens is labelled with the same
+         string, so `getByText` matches two nodes once it is open. */
+      fireEvent.click(getByRole('button', { name: /What Can I Ask/i }));
       // ask, then ask again so the FIRST turn archives with its classification
       fireEvent.click(getByText('What is related?'));
+      // A control that RUNS dismisses the popover (it used to cover the answer
+      // it had just produced), so the second ask re-opens it, as a reader would.
+      fireEvent.click(getByRole('button', { name: /What Can I Ask/i }));
       fireEvent.click(getByText('Anything else?'));
       const archived = container.querySelector('.assistant-msg-assistant') as HTMLElement;
       const kind = archived.getAttribute('data-kind');
@@ -320,7 +342,7 @@ describe('P36V S-A · Clear Conversation', () => {
     );
     const submitSpy = vi.spyOn(api, 'submitAnswer');
     const editSpy = vi.spyOn(api, 'editField');
-    const { container, getByRole, getByText, queryByText } = panel({
+    const { container, getByRole, getByText, queryByText } = panelWithCatalog({
       availability: 'available',
       agentContext: ctx(),
       agentPrompts: AGENT_PROMPTS,
@@ -354,7 +376,14 @@ describe('P36V S-A · Clear Conversation', () => {
     ).toBe(true);
     // the correct EMPTY state is restored (guidance + Suggested Questions + divider)
     expect(container.querySelector('.assistant-empty')).not.toBeNull();
-    expect(container.querySelector('.assistant-empty-divider')).not.toBeNull();
+    /*
+     * ~~the divider is back~~ — the empty state no longer HAS one. It existed
+     * to mark the break between the Suggested Questions list and the composer;
+     * with that list moved into the popover there is no break to mark. Asserted
+     * as ABSENT rather than deleted, so restoring a rule that renders it again
+     * fails here instead of quietly re-cluttering the rail.
+     */
+    expect(container.querySelector('.assistant-empty-divider')).toBeNull();
     expect(container.querySelector('details.assistant-more')).toBeNull();
     // focus lands on the always-present composer, not <body>
     expect(document.activeElement).toBe(getByRole('textbox'));
@@ -491,7 +520,14 @@ describe('P36V S-A · the assistant answer bubble', () => {
     vi.spyOn(api, 'askAssistant').mockResolvedValue(
       answerResponse({ followups: ['What is the edge?', 'What is the beamline?'] }),
     );
-    const { container, getByRole, getByText } = panel({ availability: 'available' });
+    /*
+     * `panelWithCatalog`, not `panel`: this test's whole point is that
+     * "Related Questions" is DISTINCT from "Suggested Questions". Since the
+     * suggested group moved into the popover, the contrast is only observable
+     * with the popover open — otherwise the test would pass trivially, because
+     * the label it distinguishes itself from would not be rendered at all.
+     */
+    const { container, getByRole, getByText } = panelWithCatalog({ availability: 'available' });
     await ask(getByRole, 'what is this record?');
     await waitFor(() => expect(container.querySelector('.assistant-followups')).not.toBeNull());
 
@@ -533,7 +569,19 @@ function precedes(a: Element, b: Element): boolean {
 }
 
 describe('P36V S-A · panel order', () => {
-  it('ACTIVE: header → transcript → composer → collapsed controls → advisory footer', async () => {
+  it('ACTIVE: header → transcript → composer → footer, with no control block anywhere in the rail', async () => {
+    /*
+     * ~~header → transcript → composer → collapsed controls → advisory
+     * footer~~ — REWRITTEN 2026-09-13 (owner request). The `<details>` that
+     * held the collapsed controls is gone: both groups moved into the "What
+     * Can I Ask?" popover, so the rail no longer grows a second collapsible
+     * below the composer.
+     *
+     * THE PROPERTY THE OLD TEST PROTECTED IS KEPT AND STRENGTHENED. It asserted
+     * that nothing sits BETWEEN the transcript and the composer. That is now
+     * true by construction — there is nothing to sit anywhere — and the
+     * assertion below says so over the whole rail rather than over one gap.
+     */
     vi.spyOn(api, 'askAssistant').mockResolvedValue(answerResponse());
     const { container, getByRole } = panel({
       availability: 'available',
@@ -546,25 +594,47 @@ describe('P36V S-A · panel order', () => {
     const head = container.querySelector('.assistant-head')!;
     const log = container.querySelector('.assistant-log')!;
     const composer = container.querySelector('.assistant-composer')!;
-    const more = container.querySelector('details.assistant-more')!;
     const caption = container.querySelector('.assistant-caption')!;
 
     expect(precedes(head, log)).toBe(true);
     expect(precedes(log, composer)).toBe(true);
-    expect(precedes(composer, more)).toBe(true);
-    expect(precedes(more, caption)).toBe(true);
+    expect(precedes(composer, caption)).toBe(true);
 
-    // the composer is DIRECTLY beneath the transcript: no prompt controls, no
-    // Suggested Questions / Agent Actions pills sit between them.
+    // NO control block anywhere in the rail, in either state — not between the
+    // transcript and the composer, and not below it either.
     for (const sel of ['details.assistant-more', '.assistant-prompts', '.assistant-agent-prompts']) {
-      const el = container.querySelector(sel);
-      if (el) expect(precedes(composer, el)).toBe(true);
+      expect(container.querySelector(sel), `${sel} is back in the rail`).toBeNull();
     }
-    expect(container.querySelector('.assistant-body details.assistant-more')).toBeNull();
+
+    // …and they are still one click away, WITH a conversation on screen. The
+    // empty-state test proves the same thing at rest; this proves the popover
+    // does not disappear once the reader has started talking.
+    fireEvent.click(within(container).getByRole('button', { name: /What Can I Ask/i }));
+    const dialog = container.querySelector('.assistant-capabilities-panel')!;
+    expect(dialog.querySelectorAll('.assistant-prompt').length).toBeGreaterThan(0);
+    expect(dialog.querySelectorAll('.assistant-agent-prompt').length).toBeGreaterThan(0);
   });
 
-  it('EMPTY: header → guidance → Suggested Questions → divider → composer → Agent Actions → footer, with no filler card', () => {
-    const { container } = panel({
+  it('EMPTY: header → guidance → composer → footer, and NOTHING between them', () => {
+    /*
+     * ~~header → guidance → Suggested Questions → divider → composer → Agent
+     * Actions → footer~~ — REWRITTEN 2026-09-13 (owner request), not patched.
+     *
+     * The old order was the defect. Measured in a real browser at the shipped
+     * width, the rail stacked ELEVEN blocks and TWO of them were
+     * independently-scrolling regions that were BOTH clipped:
+     * `.assistant-empty` hiding 85px and `.assistant-agent-actions` hiding
+     * 65px. A reader met two half-lists, each with its own scrollbar.
+     *
+     * Both control groups moved into the "What Can I Ask?" popover. What this
+     * test now pins is the ABSENCE that makes the rail a chat: between the
+     * guidance line and the composer there is nothing, and below the composer
+     * there is nothing but the honesty lines and the caption.
+     *
+     * NOTHING IS LOST — the controls are asserted present, and working, one
+     * click away. That is the half a deletion would have quietly dropped.
+     */
+    const { container, getByRole } = panel({
       availability: 'available',
       agentContext: ctx(),
       agentPrompts: AGENT_PROMPTS,
@@ -572,26 +642,41 @@ describe('P36V S-A · panel order', () => {
 
     const head = container.querySelector('.assistant-head')!;
     const guidance = container.querySelector('.assistant-empty-note')!;
-    const prompts = container.querySelector('.assistant-prompts')!;
-    const divider = container.querySelector('.assistant-empty-divider')!;
     const composer = container.querySelector('.assistant-composer')!;
-    const agent = container.querySelector('.assistant-agent-actions')!;
     const caption = container.querySelector('.assistant-caption')!;
 
     expect(precedes(head, guidance)).toBe(true);
-    expect(precedes(guidance, prompts)).toBe(true);
-    expect(precedes(prompts, divider)).toBe(true);
-    expect(precedes(divider, composer)).toBe(true);
-    expect(precedes(composer, agent)).toBe(true);
-    expect(precedes(agent, caption)).toBe(true);
+    expect(precedes(guidance, composer)).toBe(true);
+    expect(precedes(composer, caption)).toBe(true);
 
-    // ONE guidance sentence, and the divider is a hairline break, not a card
+    // *** THE POINT OF THE CHANGE: neither control group is in the rail. ***
+    expect(container.querySelector('.assistant-prompts')).toBeNull();
+    expect(container.querySelector('.assistant-agent-actions')).toBeNull();
+    // and the divider that separated them from the composer went with them
+    expect(container.querySelector('.assistant-empty-divider')).toBeNull();
+    // no collapsed disclosure either — that was the conversation-state variant
+    expect(container.querySelector('details.assistant-more')).toBeNull();
+
+    // ONE guidance sentence, and it no longer points at a list that is not there
     expect(container.querySelectorAll('.assistant-empty-note').length).toBe(1);
     expect(guidance.textContent!.split('. ').length).toBeLessThanOrEqual(2);
-    expect(divider.textContent).toBe('');
-    expect(divider.getAttribute('aria-hidden')).toBe('true');
-    // no collapsed disclosure while there is no conversation
-    expect(container.querySelector('details.assistant-more')).toBeNull();
+    /*
+     * It must not point at a LIST that is not there. "below" on its own is
+     * fine and is now accurate — the composer IS below. My first version of
+     * this assertion banned the word outright and failed on the corrected
+     * copy, which is the assertion being wrong rather than the copy.
+     */
+    expect(guidance.textContent).not.toMatch(/suggestions? below|pick .* below/i);
+
+    /*
+     * AND THEY ARE STILL REACHABLE. Without this the test above would pass just
+     * as well if the controls had been DELETED, which is the failure mode a
+     * simplification is most likely to hide.
+     */
+    fireEvent.click(getByRole('button', { name: /What Can I Ask/i }));
+    const dialog = container.querySelector('.assistant-capabilities-panel')!;
+    expect(dialog.querySelectorAll('.assistant-prompt').length).toBeGreaterThan(0);
+    expect(dialog.querySelectorAll('.assistant-agent-prompt').length).toBeGreaterThan(0);
   });
 
   it('the advisory footer is the single, last, italicised caption with the approved copy', () => {

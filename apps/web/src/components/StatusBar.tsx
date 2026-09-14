@@ -81,6 +81,8 @@ export function StatusBar({
       <span
         className="statusbar-seg"
         key="validation"
+        /* `group`, not a bare span: see the note on the coverage segment below. */
+        role="group"
         aria-label="Validation signal"
         /* The walkthrough's "how validation works" anchor. The SEGMENT, not the
            whole readout: the readout is a different step, about the three signals
@@ -99,7 +101,22 @@ export function StatusBar({
           </>
         )}
       </span>,
-      <span className="statusbar-seg" key="coverage" aria-label="Coverage signal">
+      /*
+       * `role="group"` ON ALL THREE SEGMENTS, AND IT IS A FIX RATHER THAN
+       * TIDYING. A bare `<span>` has the implicit role `generic`, and ARIA
+       * PROHIBITS naming a `generic` — so "Validation signal", "Coverage
+       * signal" and "Advisory signal" were each computed and then DISCARDED.
+       * The whole point of this readout is that the three signals are kept
+       * apart and never collapsed into one verdict; unnamed, a screen-reader
+       * user met three adjacent runs of text with nothing saying which was
+       * which.
+       *
+       * Measured under `aria-prohibited-attr` as INCOMPLETE — a bucket the a11y
+       * sweep does not read, which is how 18 instances shipped (QA-023).
+       * `group` permits a name and adds no behaviour, no required children and
+       * no keyboard semantics.
+       */
+      <span className="statusbar-seg" key="coverage" role="group" aria-label="Coverage signal">
         {coverageResolved ? (
           <>
             <span className="statusbar-cover">
@@ -183,7 +200,7 @@ export function StatusBar({
           </>
         )}
       </span>,
-      <span className="statusbar-seg" key="advisory" aria-label="Advisory signal">
+      <span className="statusbar-seg" key="advisory" role="group" aria-label="Advisory signal">
         {advisoryResolved ? (
           <>
             <span className="statusbar-advisory">

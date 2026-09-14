@@ -420,10 +420,36 @@ describe('P36X · the catalog lists only what the CURRENT surface supports', () 
   it('a record surface lists the record families', () => {
     const { dialog } = open();
     expect(headings(dialog)).toEqual(RECORD_HEADINGS);
-    // the record families are genuinely there, not just their headings
-    expect(exampleButtons(dialog).length).toBe(
-      RECORD_CAPABILITY_GROUPS.reduce((n, g) => n + g.examples.length, 0),
+
+    /*
+     * THE COUNT IS THE CATALOG MINUS WHAT THE SUGGESTED QUESTIONS ALREADY SHOW.
+     *
+     * Both lists now render inside this one popover, and measured over the two
+     * sources exactly ONE text is in both — `assistantComposer` offers 15
+     * prompt labels, `assistantCapabilities` 15 example texts, and "What still
+     * needs me?" is in each. The panel drops the capability copy, because the
+     * suggested question is the actionable one (it ASKS; an example only fills
+     * the composer).
+     *
+     * Derived here rather than hardcoded, so this stays true if either list
+     * changes: if a future prompt collides with another example the number
+     * moves on its own, and if the de-duplication is ever removed this fails.
+     */
+    const promptTexts = new Set(PROMPTS.map((p) => p.text));
+    const expected = RECORD_CAPABILITY_GROUPS.reduce(
+      (n, g) => n + g.examples.filter((e) => !promptTexts.has(e.text)).length,
+      0,
     );
+    expect(exampleButtons(dialog).length).toBe(expected);
+    // …and the de-duplication is REAL, not a no-op: at least one example is
+    // actually being suppressed. Without this the assertion above would pass
+    // unchanged if the filter were deleted.
+    expect(
+      RECORD_CAPABILITY_GROUPS.reduce((n, g) => n + g.examples.length, 0),
+      'no capability example collides with a suggested question any more, so this ' +
+        'test no longer proves the de-duplication does anything. Point it at a real ' +
+        'collision or retire it deliberately.',
+    ).toBeGreaterThan(expected);
     // no graph group without a graph capability
     expect(headings(dialog)).not.toContain(GRAPH_CAPABILITY_GROUP.heading);
   });

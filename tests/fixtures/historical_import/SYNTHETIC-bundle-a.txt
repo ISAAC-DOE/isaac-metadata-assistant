@@ -1,0 +1,27 @@
+# SYNTHETIC FIXTURE - NOT REAL EXPERIMENTAL DATA, NOT FROM ANY BEAMLINE.
+#
+# Hand-written for apps/api/tests/test_historical_import.py so the Historical
+# Import shell has something to parse. Every value below is fictional: the
+# material, the detector and the operator do not exist, and this file was never
+# produced by an instrument.
+#
+# THE FORMAT IS THIS FIXTURE'S OWN and is not a beamline convention. It is
+# `key = value`, one per line, where the key is written as an OFFICIAL ISAAC
+# FIELD PATH. That is deliberate: the shell's reconstruction provider maps a key
+# to a field path only when the key IS that path verbatim, so this file encodes
+# no beamline vocabulary and no alias table. BL15-002 (the real Beamline
+# Profile) stays blocked, and nothing here may be read as evidence about it.
+#
+# Between them, bundle A and bundle B exercise the four outcomes the import
+# review surface has to be able to show:
+#   agreed and writable    -> system.technique
+#   sources disagree       -> sample.material.name
+#   recognised, unwritable -> system.configuration.detector_model
+#   not a field path       -> operator_initials
+
+system.technique = XAS
+sample.material.name = SYNTHETIC-CuO-FAKE-001
+system.configuration.detector_model = SYNTHETIC-DETECTOR-MODEL-ZERO
+operator_initials = ZZ
+
+this line carries no separator and is reported as skipped

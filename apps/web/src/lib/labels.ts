@@ -115,6 +115,18 @@ export const LABELS = {
   // access — rather than promising preferences this build does not have. This is
   // the SINGLE authored string: the nav label and the page <h1> both read it.
   navSettings: 'Settings & API',
+  /*
+   * HISTORICAL IMPORT — the second of the three primary destinations the
+   * narrowed product names (`Experiments`, `Historical Import`, `Settings`).
+   *
+   * ONE authored string: the nav label, the page `<h1>` and the `document.title`
+   * segment all read it, so the destination cannot end up with three names. It
+   * says what the workflow is FOR rather than how it works, and it deliberately
+   * promises no format: which formats this build can read is a per-source fact
+   * the manifest states entry by entry, and a nav label that named one would be
+   * making a claim the surface then has to walk back.
+   */
+  navImports: 'Historical Import',
 
   // Screen titles
   screenExperiments: 'My Experiments',
@@ -268,6 +280,56 @@ export const LABELS = {
   createExperimentFolderHint:
     'File it straight into a folder, e.g. “2026 campaign/October”. Use “/” to nest. Leave it ' +
     'empty to decide later.',
+
+  /*
+   * UX-017's LIBRARY HALF — merging scientist-facing statistics into the
+   * Experiment Library, rather than requiring a trip to the demoted Statistics
+   * destination (`89d9f07c`'s own commit message names this half as not yet
+   * done: "the scientist-relevant half is per-record summary that belongs
+   * beside the records").
+   *
+   * WORKSPACE-SCOPED, NEVER PERSONAL, and the note below says so explicitly.
+   * `8ce85a87` deleted "and over your own activity in it" from Settings' own
+   * statistics description because this build cannot back a personal-activity
+   * claim (no trusted authentication boundary, no per-record author — see
+   * `MyStats.tsx`). The note here is adapted from that same fix's replacement
+   * sentence rather than freshly authored, so the two surfaces state the same
+   * boundary in matching words rather than two independent claims that could
+   * drift apart.
+   */
+  libraryOverviewHeading: 'Workspace Statistics',
+  libraryOverviewTotal: 'Experiments',
+  libraryOverviewNeedsAttention: 'Needs Attention',
+  libraryOverviewRuns: 'Runs Recorded',
+  libraryOverviewProposals: 'Proposals Waiting',
+  libraryOverviewNote:
+    'Counts over the records in this workspace. Summary figures only; nothing here gates ' +
+    'export or changes a record.',
+
+  /*
+   * THE SAME FOUR FIGURES WHEN THE SERVER SAYS THE READ WAS SHORT.
+   *
+   * `GET /api/experiments` can return an `incomplete` object, and its own response
+   * description says: "Treat a short list as evidence about this read, never as an
+   * inventory." The four figures are computed from that list, so when `incomplete`
+   * is non-null BOTH the heading above ("Workspace Statistics") and the note above
+   * ("the records in this workspace") describe something this read cannot see.
+   *
+   * The screen already renders `IncompleteListNote` (role="alert") above the strip,
+   * so a caveat IS on screen — but it is a general statement about "the list", not
+   * about these totals, and a reader scanning four large numbers under a heading
+   * that says "Workspace" has no reason to connect them. So the strip says it
+   * itself, which is the difference between a caveat being PRESENT and a figure
+   * being SCOPED.
+   *
+   * Found by independent review (B-2). The reviewer also measured that NO test
+   * covered the interaction — the strip never consulted `incomplete` at all.
+   */
+  libraryOverviewHeadingPartial: 'Statistics From This Read',
+  libraryOverviewNotePartial:
+    'Counts over the records this read returned, which is fewer than the workspace holds — ' +
+    'the notice above says why. Not a workspace total. Summary figures only; nothing here ' +
+    'gates export or changes a record.',
 
   /*
    * RETIRED — a SECOND five-step workflow vocabulary, deleted rather than
@@ -610,6 +672,35 @@ export const LABELS = {
     'It lives in Settings & API → Help & Tutorial.',
   actionGoToHelpAndTutorial: 'Go to Help & Tutorial',
   actionGoToExperiments: 'Go to My Experiments',
+
+  /*
+   * QA-020 — THE NOT-FOUND STATE. Every word here is scoped on purpose, because
+   * the surface that had none used to silently redirect to My Experiments and
+   * erase the attempted URL.
+   *
+   * `screenNotFound` says "page", not "record". An unrecognised PATH and a
+   * missing RECORD are different failures with different remedies, and the
+   * second is already handled: `/record/<unknown-ULID>` matches the record
+   * route and reaches `RecordWorkbench`'s own not-found handling. Saying
+   * "record" here would tell a scientist their work is gone when all that
+   * happened is that no screen answers to this address.
+   *
+   * `notFoundRecordScope` exists to CLOSE that door explicitly rather than
+   * leaving it to inference, because a reader who lands here from a stale
+   * record bookmark will assume the worst unless told otherwise.
+   *
+   * Nothing here guesses a destination. "Did you mean ...?" would need a
+   * similarity rule nobody specified, and a wrong guess on this screen is the
+   * very defect being fixed, one step further along.
+   */
+  screenNotFound: 'Page not found',
+  notFoundExplanation:
+    'No screen in this application answers to this address. The link may be out of date, or ' +
+    'the address may have a typo.',
+  notFoundAttemptedLabel: 'You asked for:',
+  notFoundRecordScope:
+    'This is about the address, not about your data. Nothing has been deleted, and no record ' +
+    'was looked up — an address ISAAC does not recognise never reaches a record at all.',
   actionReviewAnswer: 'Review & Answer',
   actionConfirm: 'Confirm',
   actionEdit: 'Edit',
@@ -814,9 +905,43 @@ export const LABELS = {
    * just arrived can see that it is empty.
    */
   emptyExperimentsTitle: 'Start your first experiment',
+  /*
+   * ~~'Create your first experiment, validate an existing record, or explore
+   * ISAAC with the guided demo.'~~ — **CORRECTED 2026-09-13, and the previous
+   * wording is kept struck because it was TRUE when written and became stale by
+   * omission rather than by error.**
+   *
+   * `ExperimentsHome`'s own comment above this label's use said the sentence
+   * "does not promise import" because "there is still no import path". That was
+   * an accurate reading of the build. `HIST-001`/`HIST-004`/`HIST-003a` shipped
+   * an import path, so the omission stopped being honesty and became a scientist
+   * with nothing to create being offered no way to recover what they already
+   * have — which is exactly the gap `UX-016` names.
+   *
+   * IT STILL PROMISES NO UPLOAD, and the word choice is deliberate: "bring in
+   * work you already have" is what the destination does (records where files
+   * are, reads what it can, proposes what it finds), and "import your files"
+   * would imply the one thing it does not do.
+   */
   emptyExperimentsBody:
-    'Create your first experiment, validate an existing record, or explore ISAAC with the ' +
-    'guided demo.',
+    'Create your first experiment, bring in work you already have, validate an existing ' +
+    'record, or explore ISAAC with the guided demo.',
+
+  /*
+   * `UX-016`'s IMPORT HALF — the first-run discovery of Pillar 2.
+   *
+   * A scientist with zero experiments who wants to RECOVER rather than CREATE
+   * had nowhere to go from this screen. This is the card that closes that, and
+   * its description is checkable rather than promotional: the destination really
+   * does record where a file is without opening it, really does read the
+   * committed synthetic fixtures, and really does put every candidate through the
+   * proposal review a person decides.
+   */
+  historicalImportHint:
+    'Reconstruct a past experiment from the files it is scattered across. Record where ' +
+    'each file lives, see what ISAAC can read out of it, and review every candidate ' +
+    'before any of it becomes a value.',
+  actionOpenHistoricalImport: 'Open Historical Import',
 
   actionOpenValidator: 'Open Validator',
   openValidatorHint:

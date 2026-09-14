@@ -1,4 +1,8 @@
 import { describe, it, expect, afterEach, vi, type Mock } from 'vitest';
+import {
+  openAssistantCatalog,
+  openAssistantCatalogWhenReady,
+} from '../test/openAssistantCatalog';
 import { render, fireEvent, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { AppRoutes } from '../App';
@@ -743,6 +747,8 @@ describe('S6 · Ready to Export — grounded assistant (P25.4)', () => {
   it('pre-export: assistant is grounded live — empty-coverage fallback, blocking routing, ROUTE_TO_CLI_NOTE', async () => {
     stubFetchRoutes(exportReadyRoutes('demo')); // audit records:[], dry-run would pass, 1 advisory
     const { container, findByText } = renderAt('/record/demo/export');
+    // The pills live in "What Can I Ask?" since 2026-09-13 — open it first.
+    await openAssistantCatalogWhenReady(container);
 
     // the three approved export chips are the guided prompts
     await findByText('Is coverage the same as valid?');
@@ -768,6 +774,9 @@ describe('S6 · Ready to Export — grounded assistant (P25.4)', () => {
     // dead prose sentence "Open Validate to run the deterministic schema check."
     // P36V.1 Unit B — "paths" became "validation issues" so the same sentence
     // covers the record-level case too (a root-level violation has no field path).
+    // RE-OPEN: a control that RUNS now dismisses the popover (it used to sit on
+    // top of the answer it had just produced), and this is a SECOND activation.
+    openAssistantCatalog(assistant);
     fireEvent.click(panel.getByText("What's left before export?").closest('button')!);
     expect(
       await panel.findByText(
@@ -808,6 +817,8 @@ describe('S6 · Ready to Export — grounded assistant (P25.4)', () => {
       },
     });
     const { container, findByText } = renderAt('/record/demo/export');
+    // The pills live in "What Can I Ask?" since 2026-09-13 — open it first.
+    await openAssistantCatalogWhenReady(container);
     await findByText("What's left before export?");
     const assistant = container.querySelector('.assistant') as HTMLElement;
     const panel = within(assistant);
@@ -854,6 +865,8 @@ describe('S6 · Ready to Export — grounded assistant (P25.4)', () => {
       },
     });
     const { container, findByText } = renderAt('/record/demo/export');
+    // The pills live in "What Can I Ask?" since 2026-09-13 — open it first.
+    await openAssistantCatalogWhenReady(container);
     await findByText("What's left before export?");
     const assistant = container.querySelector('.assistant') as HTMLElement;
     const panel = within(assistant);
@@ -878,6 +891,8 @@ describe('S6 · Ready to Export — grounded assistant (P25.4)', () => {
   it('pre-export: the advisory chip echoes the LIVE warning, flagged advisory / non-gating', async () => {
     stubFetchRoutes(exportReadyRoutes('demo'));
     const { container, findByText } = renderAt('/record/demo/export');
+    // The pills live in "What Can I Ask?" since 2026-09-13 — open it first.
+    await openAssistantCatalogWhenReady(container);
     await findByText('Explain the advisory warning');
     const panel = within(container.querySelector('.assistant') as HTMLElement);
 
@@ -893,6 +908,8 @@ describe('S6 · Ready to Export — grounded assistant (P25.4)', () => {
   it('post-export: coverage chip echoes evidence_present/expected live (33/33), never a verdict', async () => {
     stubFetchRoutes(exportedReadyRoutes('demo')); // audit 33/33, real (post-export) validation
     const { container, findByText } = renderAt('/record/demo/export');
+    // The pills live in "What Can I Ask?" since 2026-09-13 — open it first.
+    await openAssistantCatalogWhenReady(container);
 
     // wait for the loaded (post-export) screen
     await findByText('Valid against official ISAAC schema v1.05.');
@@ -940,6 +957,8 @@ describe('S4 · Complete Missing Fields — grounded assistant (P25.6)', () => {
   it('mounts the three approved complete chips; the default reply is the LIVE pending summary', async () => {
     stubFetchRoutes(bundleRoutes('demo')); // 5 pending, live from /pending
     const { container, findByText } = renderAt('/record/demo/complete');
+    // The pills live in "What Can I Ask?" since 2026-09-13 — open it first.
+    await openAssistantCatalogWhenReady(container);
 
     await findByText('Answer 5 Questions to Finish This Record');
     const assistant = container.querySelector('.assistant') as HTMLElement;
@@ -976,6 +995,8 @@ describe('S4 · Complete Missing Fields — grounded assistant (P25.6)', () => {
   it('the explain chip echoes the ACTIVE question live, sourced from Workflow & Artifacts', async () => {
     stubFetchRoutes(bundleRoutes('demo'));
     const { container, findByText } = renderAt('/record/demo/complete');
+    // The pills live in "What Can I Ask?" since 2026-09-13 — open it first.
+    await openAssistantCatalogWhenReady(container);
 
     await findByText('Answer 5 Questions to Finish This Record');
     const assistant = container.querySelector('.assistant') as HTMLElement;
@@ -995,6 +1016,8 @@ describe('S4 · Complete Missing Fields — grounded assistant (P25.6)', () => {
   it('the missing-field chip offers the real Open Validator control, sourced from Schema Rules', async () => {
     stubFetchRoutes(bundleRoutes('demo'));
     const { container, findByText } = renderAt('/record/demo/complete');
+    // The pills live in "What Can I Ask?" since 2026-09-13 — open it first.
+    await openAssistantCatalogWhenReady(container);
 
     await findByText('Answer 5 Questions to Finish This Record');
     const assistant = container.querySelector('.assistant') as HTMLElement;
@@ -1046,6 +1069,8 @@ describe('S4 · Complete Missing Fields — grounded assistant (P25.6)', () => {
   it('clicking a chip issues NO new network request (pure, LLM-free)', async () => {
     const calls = stubFetchRoutes(bundleRoutes('demo'));
     const { container, findByText } = renderAt('/record/demo/complete');
+    // The pills live in "What Can I Ask?" since 2026-09-13 — open it first.
+    await openAssistantCatalogWhenReady(container);
 
     await findByText('Answer 5 Questions to Finish This Record');
     const panel = within(container.querySelector('.assistant') as HTMLElement);
@@ -1059,6 +1084,8 @@ describe('S4 · Complete Missing Fields — grounded assistant (P25.6)', () => {
   it('no verdict language anywhere in the assistant panel across every chip', async () => {
     stubFetchRoutes(bundleRoutes('demo'));
     const { container, findByText } = renderAt('/record/demo/complete');
+    // The pills live in "What Can I Ask?" since 2026-09-13 — open it first.
+    await openAssistantCatalogWhenReady(container);
 
     await findByText('Answer 5 Questions to Finish This Record');
     const assistant = container.querySelector('.assistant') as HTMLElement;
@@ -1069,6 +1096,8 @@ describe('S4 · Complete Missing Fields — grounded assistant (P25.6)', () => {
       'What does this question want?',
       'What if I leave one missing?',
     ]) {
+      // Dismissed by the previous iteration's run, so re-open before activating.
+      openAssistantCatalog(assistant);
       fireEvent.click(panel.getByText(label).closest('button')!);
       expect(assistant.textContent).not.toMatch(VERDICT);
       expect(assistant.textContent).not.toMatch(INVALID_AGAINST);
@@ -1079,6 +1108,8 @@ describe('S4 · Complete Missing Fields — grounded assistant (P25.6)', () => {
   it('the assistant also mounts on the all-resolved branch (0 pending), honestly', async () => {
     stubFetchRoutes(exportReadyRoutes('demo')); // pending: [] from the first load
     const { container, findByText } = renderAt('/record/demo/complete');
+    // The pills live in "What Can I Ask?" since 2026-09-13 — open it first.
+    await openAssistantCatalogWhenReady(container);
 
     await findByText('All Fields Resolved');
     const assistant = container.querySelector('.assistant') as HTMLElement;
@@ -1091,6 +1122,9 @@ describe('S4 · Complete Missing Fields — grounded assistant (P25.6)', () => {
     expect(
       await panel.findByText('This draft currently has no pending fields listed.'),
     ).toBeInTheDocument();
+    // The three pills are still THERE, and still three — they are simply behind
+    // the popover the run dismissed, which is why this re-opens before counting.
+    openAssistantCatalog(assistant);
     expect(assistant.querySelectorAll('.assistant-prompt').length).toBe(3);
   });
 

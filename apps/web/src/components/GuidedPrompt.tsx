@@ -343,8 +343,11 @@ export function GuidedPrompt({
         </p>
       )}
 
+      {/* `role="group"` below: `generic` cannot carry a name, so "Example answer
+          suggestion" was discarded — on the one block whose whole job is to say
+          this is an EXAMPLE and not a value. See `ProvenanceChips.tsx`. */}
       {demo && (
-        <div className="guided-suggestion" aria-label="Example answer suggestion">
+        <div className="guided-suggestion" role="group" aria-label="Example answer suggestion">
           <div className="guided-suggestion-head">
             <MessageSquare size={14} strokeWidth={2} aria-hidden="true" />
             {demo.label}

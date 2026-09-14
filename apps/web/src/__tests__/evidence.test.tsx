@@ -1,4 +1,5 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
+import { openAssistantCatalogWhenReady } from '../test/openAssistantCatalog';
 import { render, fireEvent, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { AppRoutes } from '../App';
@@ -151,6 +152,8 @@ describe('S5 · grounded assistant (P25.5) — subordinate, guided-only, LLM-fre
   it('mounts the assistant with exactly the three approved evidence chips', async () => {
     stubFetchRoutes(evidenceBundleRoutes('demo'));
     const { container, findByText, getByText } = renderAt('/record/demo/evidence');
+    // The pills live in "What Can I Ask?" since 2026-09-13 — open it first.
+    await openAssistantCatalogWhenReady(container);
 
     await findByText('Direct Fields');
     const panel = container.querySelector('.assistant');
@@ -191,6 +194,8 @@ describe('S5 · grounded assistant (P25.5) — subordinate, guided-only, LLM-fre
   it('a guided multiplicity chip reflects the selected trail entry (provenance never leaks)', async () => {
     stubFetchRoutes(evidenceBundleRoutes('demo'));
     const { container, findByText, getByText } = renderAt('/record/demo/evidence');
+    // The pills live in "What Can I Ask?" since 2026-09-13 — open it first.
+    await openAssistantCatalogWhenReady(container);
 
     await findByText('Direct Fields');
     // P34.2: the on-mount auto-reply was removed; the multiplicity answer is
@@ -209,6 +214,8 @@ describe('S5 · grounded assistant (P25.5) — subordinate, guided-only, LLM-fre
   it('clicking a chip issues NO new network request (pure, LLM-free)', async () => {
     const calls = stubFetchRoutes(evidenceBundleRoutes('demo'));
     const { container, findByText, getByText } = renderAt('/record/demo/evidence');
+    // The pills live in "What Can I Ask?" since 2026-09-13 — open it first.
+    await openAssistantCatalogWhenReady(container);
 
     await findByText('Direct Fields');
     const before = calls.length;

@@ -569,10 +569,13 @@ RETENTION_STATES_NOT_IMPLEMENTED: tuple[dict[str, str], ...] = (
         "state": "retain_during_draft",
         "reason": (
             "This would require the transcript to be removed when the record is "
-            "exported or submitted. Captured content is stored as notes, and this "
-            "build has no operation that removes a note — dismissing one records a "
-            "review decision and leaves the text readable. Offering this state "
-            "would promise a deletion that nothing performs."
+            "exported or submitted. Captured content is stored as notes, and no "
+            "operation in this build removes a note from a record that survives "
+            "— dismissing one records a review decision and leaves the text "
+            "readable. (Discarding the whole experiment does destroy its notes, "
+            "because they live in the record; that is the record going, not the "
+            "transcript being retired from it.) Offering this state would promise "
+            "a deletion that nothing performs."
         ),
     },
     {
@@ -1206,6 +1209,455 @@ _SIBLING_GAP = re.compile(
     re.IGNORECASE,
 )
 
+# --- GATE (4) — THE PRE-LABEL GATE --------------------------------------------
+#
+# **WHY IT EXISTS, AND WHY IT IS A FOURTH GATE RATHER THAN A WIDENING OF THE
+# FIRST.** Gates (1) and (2) both look FORWARD from the label: ``_ASSERTION_BRIDGE``
+# reads label → value, ``_VALUE_CONTINUATION`` reads value → end. Neither can see a
+# word that sits BEFORE the label, and a word there can rename the quantity just as
+# completely as one after it. Measured at ``d3473414`` — each SILENT, each shipping
+# a ``rule`` sentence asserting the transcript stated the field:
+#
+# ==================================================  ====================  ========
+# sentence                                             proposed              really is
+# ==================================================  ====================  ========
+# ``The setpoint temperature was 425 K.``              ``temperature_K=425`` a SETPOINT
+# ``The maximum temperature was 500 K.``               ``500``               an EXTREMUM
+# ``The average temperature was 400 K.``               ``400``               a STATISTIC
+# ``The ambient temperature was 295 K.``               ``295``               the ROOM's
+# ``The target temperature was 425 K.``                ``425``               a TARGET
+# ``We lowered the temperature 15 K.``                 ``15``                a DELTA
+# ``The previous scan ended at <instant>.``            ``acquired_end_utc``  ANOTHER scan
+# ``The calibration scan ended at <instant>.``         ``acquired_end_utc``  ANOTHER scan
+# ==================================================  ====================  ========
+#
+# The last two are the worse failure of the two families, and they are kept in one
+# table because ONE gate closes both: the value is a real acquisition time, of a
+# different measurement, attributed to this one.
+#
+# **THE SHARPEST EXHIBIT IS THIS MODULE'S OWN COMMENT.** :data:`_SIBLING_GAP` cites
+# *"cryostat setpoint 80 K"* as a case where the gap *positively identifies 80 as
+# something other than the temperature* — and until this gate existed *"The
+# setpoint temperature was 425 K"* proposed 425 AS the temperature. The same word,
+# read as disqualifying in one position and invisible in the other. The module
+# contained the reasoning that condemned its own behaviour, which is why the
+# published claim that the pre-label family had *"ONE MEMBER"* was the part of it
+# that was most wrong.
+#
+# **AN ALLOWLIST, FOR THE THIRD TIME IN THIS FILE, AND THE REJECTED-PROXY
+# REASONING IS WHY.** :data:`_PRE_LABEL_OVERREACH_CLOSED` refused this class three
+# times over and named three proxies, each correctly rejected:
+#
+#   * a DENYLIST of nouns (``setpoint``/``maximum``/``previous``) FAILS OPEN on the
+#     next noun — the failure mode this module has shipped twice;
+#   * "no determiner immediately before the label" refuses *"The temperature 425
+#     K"*, which is legitimate;
+#   * "at most N words before the label" is a word count with no grammatical story,
+#     and *"The sample temperature"* and *"The setpoint temperature"* differ by no
+#     words at all.
+#
+# **WHAT THE THIRD REFERRAL DID NOT CONSIDER IS THAT AN ALLOWLIST OF THE SAME
+# NOUNS FAILS CLOSED.** Its stated ground was *"a denylist of nouns fails OPEN,
+# which is the failure mode that has already shipped twice"* — true, and it settles
+# only the denylist. Inverting the polarity inverts the failure direction: an
+# unanticipated noun costs a READING, and a lost reading is DISCLOSED, which §5
+# ranks above a silent assertion. That is the identical move that closed gate (1),
+# where *"a shorter bridge"* was rejected and the bridge's SHAPE was constrained
+# instead. Four constructs in this file are already closed lexical allowlists in a
+# pre-value slot (:data:`_LABEL_ADVERB`, :data:`_ASSERTION_AT_VERB`,
+# :data:`_CONTINUATION_WORD`, :data:`_SIBLING_COORDINATOR`); this is the fifth, and
+# :data:`_LABEL_ADVERB`'s own comment states the reason it must be closed — *"an
+# open ``[A-Za-z]+`` here would admit ``drift`` and undo the whole gate"*.
+#
+# **THE DISTINCTION IS NOT DECIDABLE BY GRAMMAR, AND THAT IS ESTABLISHED RATHER
+# THAN ASSUMED.** In English a compound noun's head is its LAST noun, so *"setpoint
+# temperature"* and *"sample temperature"* are BOTH grammatically temperatures —
+# unlike *"temperature setpoint"*, which gate (1) refuses precisely because the head
+# moved. No shape test separates them; only the lexicon does. So the lexicon is
+# where the decision is taken, explicitly, with the cost measured.
+#
+# **AND THE SCHEMA — NOT A SCIENTIFIC JUDGEMENT — IS WHY THE SETPOINT FAMILY IS
+# REFUSED.** §5 forbids this reader from judging whether a stated setpoint is
+# "really" the temperature. It does not have to: the official schema distinguishes
+# as-commanded from measured wherever it speaks about the distinction at all, and it
+# gives the as-commanded value its OWN path —
+# ``context.electrochemistry.potential_setpoint_V`` (*"PRIMARY, immutable: the
+# as-commanded potential"*) and ``current_setpoint_mA_cm2``. ``context.temperature_K``
+# has **no setpoint sibling**, so a stated setpoint temperature has no path in this
+# schema, and writing it to ``context.temperature_K`` would put an as-commanded
+# number at a path the schema keeps separate for every quantity where it provides
+# both. Refusing it is reading the schema. The same holds for the extremum and
+# statistic families: ``maximum``/``minimum``/``average``/``mean`` name a reduction
+# over temperatures and the schema carries no path for one — and ``CAP-008`` records
+# that the only uncertainty-like structure in the schema is
+# ``$.descriptors.outputs[].descriptors[].uncertainty``, which is descriptor-only.
+#
+# **WHAT IT DOES NOT CLAIM.** Refusing *"The ambient temperature was 295 K"* is NOT
+# this reader asserting that an ambient temperature is not the field's value. It is
+# declining to decide, and saying so in the disclosure. The scientist can restate it
+# prepositionally — *"The temperature of the sample was 295 K"* — which gate (1)
+# already reads, and the disclosure says that too.
+
+#: Nouns that may sit BARE between a determiner and the label without renaming what
+#: the label denotes: they LOCATE the quantity (*"the SAMPLE temperature"*) or
+#: SUBJECT the verb (*"the SCAN ended"*). A CLOSED list, and small on purpose — a
+#: noun that is missing costs one disclosed reading, and a noun that should not be
+#: here reopens the class.
+#:
+#: **EVERY ENTRY IS JUSTIFIED BY THIS REPOSITORY, NOT BY TASTE.** ``sample`` is
+#: pinned as a must-read by ``_BENIGN_BRIDGE_FORMS`` (*"The sample temperature was
+#: 425 K."*) and is the schema's own word for the measured thing (top-level
+#: ``sample``); ``scan``/``run`` are pinned by the instant corpus (*"The scan ended
+#: …"*, *"The run started …"*); the remainder are the same referents under the words
+#: a person actually dictates. ``base`` is DELIBERATELY ABSENT even though *"base
+#: temperature"* is ordinary dictation: it names the LOWEST temperature, so it
+#: re-subjects exactly as ``minimum`` does.
+#:
+#: **ONE SHARED LIST RATHER THAN ONE PER RULE, AND THAT WAS MEASURED SAFE.** Sharing
+#: lets *"The scan temperature was 425 K"* and *"The sample ended at <instant>"*
+#: read. Neither re-subjects anything: both locate. A per-rule list would be more
+#: precise and buys nothing measurable, and a fourth ``_Rule`` field for it would be
+#: carried by every future rule for no reason.
+#:
+#: **WIDENED FROM 11 ENTRIES TO THREE GROUPS, AFTER MEASURING THAT THE FIRST VERSION
+#: REFUSED 43% OF BENIGN PRE-LABEL FORMS.** ~~41%~~ ~~20 of 51~~ — **BOTH FIGURES
+#: WERE WRONG AND ARE CORRECTED 2026-09-13 AFTER AN INDEPENDENT REVIEW RE-DERIVED
+#: THEM. 22 of 51 (43%).** The error is worth keeping because it is the exact one the
+#: parenthetical below declares it is avoiding: `20` was measured over the **49**-row
+#: corpus (20/49 = 41%, which is where the other figure in this same sentence came
+#: from) and was then silently **rebased onto the 51-row denominator**. The two rows
+#: added later were BOTH lost pre-widening, so 20 + 2 = 22. Re-derived by running the
+#: shipped 51-row corpus against the pre-widening commit `66082dce` itself, not by
+#: arithmetic on a published number. 22 independently-written natural
+#: sentences were lost, and the module's own standard for that number is explicit:
+#: *"a reader that refuses most of the ways a person says a thing is not usable, and
+#: 'disclosed' is not a defence against that."* The three groups below take it to
+#: **2 of 51 (4%)**, and every remaining loss is named in
+#: :data:`_PRE_LABEL_RESIDUE`. Re-measured over all four corpora after widening.
+#:
+#: **GROUP 2 — THE APPARATUS — EXISTS BECAUSE MY OWN §5 ARGUMENT FOR EXCLUDING IT WAS
+#: WRONG, AND THE REFUTATION IS THE MOST USEFUL THING MEASURED HERE.** I first
+#: excluded ``cryostat``/``stage``/``chamber``/``sensor`` on the ground that admitting
+#: them would assert that the cryostat's temperature IS ``context.temperature_K`` — a
+#: scientific judgement §5 forbids. **That ground is unavailable, because the module
+#: has already made that exact call in the PREPOSITIONAL direction.**
+#: :data:`_LABEL_MODIFIER` admits ``of``/``on``/``in``/``at`` + a determiner, so all
+#: six of these read TODAY and did before this slice:
+#:
+#:     "The temperature of the cryostat was 80 K."   -> 80
+#:     "The temperature on the sensor was 425 K."    -> 425   <- a pinned MUST-READ
+#:     "The temperature in the chamber was 300 K."   -> 300
+#:     "The temperature of the furnace was 900 K."   -> 900
+#:     "The temperature at the stage was 300 K."     -> 300
+#:     "The temperature of the substrate was 700 K." -> 700
+#:
+#: Refusing *"The sensor temperature was 425 K"* while reading *"The temperature on
+#: the sensor was 425 K"* is an INCONSISTENCY between two phrasings of one claim, not
+#: a §5 position — and the second is in ``_BENIGN_BRIDGE_FORMS``, so the repository
+#: has committed to it. **The durable lesson: "admitting this would require a
+#: scientific judgement" has to be checked against what the code ALREADY admits.
+#: Mine was a judgement the module had made two screens away.** The compound list is
+#: also strictly NARROWER than the prepositional form it matches, which is closed on
+#: an arbitrary noun (:data:`_MODIFIER_OBJECT_OVERREACH_RESIDUE` records that *"The
+#: temperature of the DRIFT was 3 K"* still reads, and this list admits no such word).
+#:
+#: **GROUP 3 — REPORT PARTICIPLES — is safe for one structural reason, stated once:
+#: a past participle of a verb of REPORT says how the value was OBTAINED, never what
+#: quantity it is.** *"The measured temperature"* is the temperature; *"the measured
+#: drift"* is a drift, and ``drift`` is not in this list at any position. The verbs
+#: are the same closed set :data:`_PRE_LABEL_REPORT` already holds, so this widening
+#: introduces no new vocabulary and cannot outgrow the list it borrows.
+#:
+#: **GROUP 4 — AFFIRMING ADJECTIVES — are the exact ANTONYMS of the estimate family
+#: gate (4) refuses.** ``actual``/``real``/``true`` assert that the value is the one
+#: obtained, which is the opposite move from ``nominal``/``expected``/``estimated``.
+#: They affirm the label rather than re-subject it.
+#:
+#: **AND THE STACKING BOUND IS WHAT KEEPS ALL OF THIS CLOSED.** With three groups the
+#: slot became genuinely multi-word (*"the measured sample temperature"*), so
+#: :data:`_PRE_LABEL` allows at most **two** — enough for every measured form, and
+#: bounded rather than a ``*`` loop, so the grammar's reach is stated. Stacking is
+#: safe only because every member is vetted: two admitted words cannot compose into a
+#: re-subjecting phrase when neither re-subjects alone.
+_PRE_LABEL_NOUN = (
+    # (1) the measured thing, and the unit of work the instant rules subject.
+    r"(?:samples?|specimens?|scans?|runs?|measurements?|acquisitions?"
+    r"|collections?|datasets?|exposures?|spectra|spectrum"
+    # (2) the apparatus. See the note above: the prepositional form of each of
+    #     these already reads, so this matches a decision rather than taking one.
+    r"|cryostats?|cryos|stages?|holders?|cells?|chambers?|furnaces?|ovens?"
+    r"|baths?|substrates?|sensors?|thermocouples?|probes?|pucks?|mounts?"
+    r"|windows?|beamlines?|monochromators?"
+    # (3) participles of the closed report-verb set: HOW the value was obtained.
+    r"|measured|recorded|logged|observed|reported|noted|read|found"
+    # (4) affirming adjectives: the antonyms of the estimate family.
+    r"|actual|real|true"
+    # (5) THE POSSESSIVE OF ANY OF THE ABOVE, closing a regression this gate
+    #     introduced. `_PRE_LABEL_NOUN` matched `samples?` but not `sample's`, so
+    #     gate (4) REFUSED 16 of 16 apparatus possessives that the base commit
+    #     `d3473414` READ — measured both ways, at both SHAs.
+    #
+    #     IT IS THE INCONSISTENCY THIS GATE'S OWN GROUP-2 ARGUMENT CONDEMNS, which
+    #     is why it is a defect and not a policy. Three phrasings of one claim, and
+    #     the gate read two of them and refused the third:
+    #
+    #         The sample temperature was 425 K.            -> read  (16/16)
+    #         The temperature of the sample was 425 K.     -> read  (16/16)
+    #         The sample's temperature was 425 K.          -> REFUSED (0/16)
+    #
+    #     That group's note says in terms: "Refusing 'The sensor temperature was
+    #     425 K' while reading 'The temperature on the sensor was 425 K' is an
+    #     INCONSISTENCY between two phrasings of one claim, not a §5 position."
+    #
+    #     Both apostrophes, because a transcript typed in a word processor or
+    #     dictated through an OS keyboard carries U+2019 and not U+0027, and a rule
+    #     that reads one and refuses the other is the same inconsistency one
+    #     character smaller. It attaches to the ALTERNATION rather than to each
+    #     member, so a noun added later cannot be admitted without its possessive.
+    #
+    #     It admits no new NOUN: `The setpoint's temperature` stays refused, because
+    #     `setpoint` is not in this allowlist in any form. Found by independent
+    #     review (A-2); the lane's "0 legitimate temperatures lost" did not cover it
+    #     because no possessive exists in its 51-row benign corpus.
+    r")(?:['’]s)?"
+)
+
+#: **THE PRE-LABEL FORMS STILL LOST, named rather than folded into the percentage** —
+#: the discipline :data:`_PARENTHETICAL_BRIDGE_RESIDUE` set for gate (1)'s one loss.
+#: Measured at **2 of 51** independently-written benign forms (4%) after the widening
+#: above, down from ~~20 of 51 (39%)~~ **22 of 51 (43%)** — corrected 2026-09-13; see
+#: the note on the widening above for why the old numerator was a rebased 49-row
+#: figure. Both DISCLOSED with an instruction that works.
+#:
+#: (*The denominator moved 49 → 51 in the same session, when a mutation exposed that
+#: the stacking bound was an equivalent mutant and two two-modifier rows were added to
+#: the corpus that justified it. "5 of 49" below is quoted as it was written, not
+#: rebased onto the new denominator — a quoted wrong claim that silently acquires
+#: today's numbers stops being a record of anything.*)
+#:
+#: **THIS TUPLE READ "5 of 49" AND LISTED FIVE ROWS FOR ONE COMMIT AND THAT WAS
+#: WRONG — caught by re-running the measurement instead of trusting the sentence I
+#: had just written.** Three of the five (*"The FINAL temperature"*, *"The STARTING
+#: temperature"*, *"The INITIAL temperature"*) are **deliberate refusals, not
+#: benign losses**, and they are not in the benign corpus at all — they are in the
+#: adversarial corpus's must-refuse family. Counting a deliberate refusal as a
+#: false negative inflates the cost of the gate and, worse, implies someone intends
+#: to admit it. **The two classes are now kept apart**, because it is exactly the
+#: conflation §15 records this repository publishing before.
+#:
+#: **(a) THE GENUINE LOSSES — an OPEN class, which is why an allowlist cannot chase
+#: them.** ``anyway``, ``OK``, ``well``, ``anyhow``, ``like``, ``so anyway`` — spoken
+#: fillers, where the next one is unguessable by construction. Each is trivially
+#: recoverable and the fix is punctuation the speaker would probably use anyway: ``,``
+#: is a clause bound, so *"Anyway, the temperature was 425 K"* parses and reads. That
+#: recoverability is why the class is left open rather than chased with a list that
+#: would grow forever and still fail on the next filler.
+#:
+#: **(b) REFUSED DELIBERATELY, AND WOULD NOT BE ADMITTED EVEN IF IT WERE EASY —
+#: recorded here so a future slice does not "fix" it.** *"The FINAL temperature was
+#: 425 K"*, *"The STARTING temperature was 300 K"*, *"The INITIAL temperature was
+#: 300 K"*. Each states a temperature at ONE POINT of a progression, and which point
+#: ``context.temperature_K`` should hold is precisely the question
+#: :data:`_KIND_NONE_SELECTED` refuses to answer for *"300 K, then 350 K, then 400
+#: K"*. Admitting these would decide by PHRASING what the sequence gate declines to
+#: decide by MEASUREMENT — the same value, the same record, two opposite answers
+#: depending on whether the scientist said "initial" or "then". They are asserted as
+#: refused by the adversarial corpus, not listed below.
+_PRE_LABEL_RESIDUE: tuple[str, ...] = (
+    "Anyway the temperature was 425 K",
+    "OK the temperature was 425 K",
+)
+
+#: A bare adverbial that may OPEN the clause the label sits in: *"LATER the
+#: temperature was 425 K"*, *"INITIALLY the temperature was 300 K"*.
+#:
+#: **``earlier``, ``previously``, ``next`` AND ``then`` ARE IN THIS LIST AND ARE
+#: REFUSED BY :data:`_PRE_LABEL_NOUN`, AND THAT ASYMMETRY IS THE GATE'S WHOLE
+#: STRUCTURAL RESULT RATHER THAN AN INCONSISTENCY.** *"EARLIER the temperature was
+#: 425 K"* is an adverbial locating the statement in time and is benign; *"the
+#: EARLIER scan ended at <instant>"* is a pre-modifier naming a DIFFERENT scan and
+#: is a misattribution. The determiner is the left bracket of the noun phrase the
+#: label heads, so a word before it modifies the CLAUSE and a word after it modifies
+#: the LABEL — the same word, safe on one side and not the other. That is exactly
+#: the asymmetry :data:`_LABEL_ADVERB` and :data:`_CONTINUATION_WORD` already
+#: record for the two sides of the value, and it is what lets this gate close the
+#: run-misattribution family without a denylist of scan adjectives.
+_PRE_LABEL_ADVERB = (
+    r"(?:later|then|next|afterwards|afterward|subsequently|meanwhile|finally"
+    r"|initially|briefly|today|yesterday|tonight|overnight|earlier|previously"
+    r"|now|also|again|overall|throughout|here|there)"
+)
+
+#: A pronoun subject, and the closed set of verbs it may take while leaving the
+#: label the thing being described: *"WE RECORDED the temperature at 425 K"*, *"IT
+#: started at <instant>"*.
+#:
+#: **THE VERBS OF CHANGE ARE ABSENT RATHER THAN FORBIDDEN, WHICH IS THE POINT.**
+#: ``lowered``, ``raised``, ``dropped``, ``ramped``, ``brought``, ``corrected`` and
+#: every verb nobody has thought of simply do not appear, so *"We lowered the
+#: temperature 15 K"* — the one row
+#: :data:`_PRE_LABEL_OVERREACH_CLOSED` was reduced to before this gate, and the
+#: row its own generator could not produce — is refused without being named.
+#: ``set`` is absent too, and that is not an oversight: *"The temperature was SET TO
+#: 425 K"* is pinned as a must-read and is unaffected, because there ``set`` sits in
+#: the BRIDGE where :data:`_ASSERTION_TO_VERB` admits it. This gate governs the
+#: other side of the label only.
+_PRE_LABEL_SUBJECT = r"(?:it|we|i|they|he|she)"
+_PRE_LABEL_REPORT = (
+    r"(?:recorded|measured|logged|read|saw|observed|noted|found|took|report"
+    r"|reported|see|had)"
+)
+
+#: A prepositional phrase opening the clause: *"AT 300 K the temperature was 425
+#: K"*, *"AT THE end 2026-01-01T00:00:00Z"*. The object may be a determiner-led
+#: phrase or a quantity, because both occur in this repository's own corpus. It
+#: cannot reach the label's own pre-modifier slot, which sits after the determiner.
+_PRE_LABEL_PREP = (
+    r"(?:at|in|on|by|during|for|throughout|across|inside|near|from|after"
+    r"|before|around|with|over|per|until)"
+)
+_PRE_LABEL_PREP_PHRASE = (
+    rf"{_PRE_LABEL_PREP}\s+(?:{_DETERMINER}|-?\d[\d.]*\s*[A-Za-z%/]*)"
+    r"(?:\s+[A-Za-z][A-Za-z0-9-]*){0,3}"
+)
+
+#: Anything that may precede the label's own noun phrase. Adjuncts only: nothing
+#: here can rename the label, because everything here is outside the phrase the
+#: label heads.
+#:
+#: ~~``|{_PRE_LABEL_PREP}``~~ — **A BARE PREPOSITION WITH NO OBJECT WAS AN ALTERNATIVE
+#: HERE AND WAS REMOVED AS A MEASURED EQUIVALENT MUTANT.** Dropping it left all 1,902
+#: tests GREEN, i.e. nothing in any corpus reaches it: every measured form that opens
+#: with a preposition supplies an object, so ``_PRE_LABEL_PREP_PHRASE`` already covers
+#: it (*"At the end <instant>"* parses as ``at`` + ``the``). It admitted ``"At "``
+#: alone. Removed rather than recorded-and-kept, because an unreachable alternative in
+#: an allowlist is reach nobody has measured, and removing it narrows the gate — the
+#: fail-closed direction.
+_PRE_LABEL_ADJUNCT = (
+    rf"(?:{_PRE_LABEL_PREP_PHRASE}|{_PRE_LABEL_ADVERB}"
+    rf"|{_PRE_LABEL_SUBJECT}\s+{_PRE_LABEL_REPORT}|{_PRE_LABEL_SUBJECT})"
+)
+
+#: The determiner gate (4) accepts in front of the label — **NARROWER than the shared
+#: :data:`_DETERMINER`, and the narrowing closed a silent fabrication an independent
+#: hunt found AFTER the gate had shipped.**
+#:
+#: Measured: *"THEIR scan ended at 2026-01-01T00:00:00Z"* proposed this run's
+#: ``acquired_end_utc``. That is the run-misattribution family exactly — a real
+#: acquisition time, of somebody else's measurement, attributed to this one — and the
+#: pre-modifier allowlist could not have caught it, because the offending word is the
+#: DETERMINER and not a modifier.
+#:
+#: **WHY A SECOND CONSTANT RATHER THAN EDITING THE SHARED ONE, which is the part to
+#: preserve.** ``_DETERMINER`` is used by five other constructs
+#: (:data:`_LABEL_MODIFIER`, :data:`_LABEL_CLAUSE`, :data:`_CONTINUATION_PHRASE`,
+#: :data:`_CONTINUATION_PREP`, :data:`_PRE_LABEL_PREP_PHRASE`), and in every one of
+#: them the determiner introduces the object of a LOCATING phrase — *"the temperature
+#: of THEIR sample"*, *"425 K at THEIR stage"* — where a third-person possessive says
+#: whose APPARATUS, not whose MEASUREMENT, and is perfectly readable. **The pre-label
+#: slot is the only one where the determiner answers "whose measurement is this?"**,
+#: so it is the only one narrowed. Editing the shared constant would have refused
+#: four unrelated legitimate constructions to close one defect; a test asserts all
+#: five still read.
+#:
+#: Dropped, each for a stated reason: ``their``/``his``/``her`` name a THIRD PARTY;
+#: ``that``/``those`` are deictic-DISTAL and ambiguous rather than wrong, which
+#: fail-closed resolves toward a disclosed refusal; ``each``/``every``/``both``/
+#: ``all`` QUANTIFY over several measurements, so *"every scan ended at <instant>"*
+#: says something about all of them and nothing about this one.
+#:
+#: **``that`` ALSO HAD TO LEAVE :data:`_PRE_LABEL_CLAUSE_OPEN`, or narrowing this set
+#: would have achieved nothing for it.** As a subordinator it was treated as a clause
+#: boundary, so *"That scan "* was cut to *" scan "* and admitted whatever the
+#: determiner set said. Measured cost of removing it: **zero** — *"The temperature
+#: THAT we recorded was 425 K"* is handled by :data:`_LABEL_CLAUSE` on the far side of
+#: the label and still reads.
+_PRE_LABEL_DETERMINER = r"(?:the|this|these|a|an|its|our|my)"
+
+#: **GATE (4).** The WHOLE text from the start of the label's clause to the label
+#: must be: clause-level adjuncts, then at most one determiner, then at most one
+#: admitted locating noun — in that order. ``fullmatch``, for the reason gate (1)
+#: gives.
+#:
+#: **TWO MORE EQUIVALENT MUTANTS WERE FOUND HERE AND BOTH BECAME SIMPLIFICATIONS
+#: RATHER THAN FOOTNOTES.**
+#:
+#: ~~``(?:{_PRE_LABEL_ADJUNCT}\s*[,)]?\s+)*``~~ — the optional ``[,)]`` is
+#: **STRUCTURALLY UNREACHABLE**, not merely unexercised, and that is worth more than
+#: the deletion. It was copied from :data:`_ASSERTION_BRIDGE`, where it earns its
+#: place. Here it cannot: ``,`` and ``)`` are both in :data:`_CLAUSE_BOUNDARY`, so
+#: :data:`_PRE_LABEL_CLAUSE_OPEN` cuts the pre-label text AFTER them before this
+#: pattern ever sees one. Measured — *"Later, the temperature was 425 K"* and
+#: *"(Later) the temperature was 425 K"* both present this gate with ``" the "``.
+#: **The lesson is about copying a sub-pattern between gates: the bridge has no
+#: clause bound and this gate is defined by one, so syntax that is load-bearing there
+#: is dead here.**
+#:
+#: ~~``(?:{_PRE_LABEL_NOUN}\s+)*``~~ → ~~``?``~~ → ``{0,2}``, **and the middle step
+#: is kept because it was RIGHT ON THE EVIDENCE IT HAD AND WRONG WITHIN THE HOUR.**
+#: The unbounded loop was an equivalent mutant when :data:`_PRE_LABEL_NOUN` held 11
+#: locator nouns and no measured sentence stacked two, so narrowing it to ``?``
+#: followed the rule stated above — reach exactly as far as something measures. The
+#: benign-form measurement then widened that constant to three groups, which made
+#: the slot genuinely multi-word (*"the MEASURED SAMPLE temperature"* is ordinary
+#: dictation), so ``?`` began costing readings. ``{0,2}`` is the measured need, and
+#: it stays BOUNDED rather than returning to ``*`` so the grammar's reach is stated
+#: rather than open. **The lesson is about equivalent mutants specifically: an
+#: equivalence is a property of the CORPUS AND THE LEXICON at one moment, not of the
+#: pattern — so widening a vocabulary can un-equivalence a mutation that was
+#: correctly removed.**
+#:
+#: **AND ``{0,2}`` → ``*`` REMAINS A GENUINE EQUIVALENT MUTANT, recorded rather than
+#: chased.** Measured: all 1,740 tests stay GREEN with the bound removed, because the
+#: two differ only on THREE OR MORE stacked pre-modifiers and no corpus anywhere
+#: contains one. The bound is kept regardless, and the reason is not behavioural: an
+#: allowlist's reach should be STATED. ``*`` would admit *"the measured recorded
+#: observed logged sample cryostat temperature"*, and while every word in it is
+#: vetted and the sentence is harmless, a pattern whose reach nobody has bounded is
+#: how an allowlist stops being one. ``{0,2}`` is the measured need plus nothing.
+#: This repository records equivalent mutants as a real and instructive outcome;
+#: this is one, and it is the only one left in this gate.
+_PRE_LABEL = re.compile(
+    rf"\s*(?:{_PRE_LABEL_ADJUNCT}\s+)*"
+    rf"(?:{_PRE_LABEL_DETERMINER}\s+)?(?:{_PRE_LABEL_NOUN}\s+){{0,2}}\s*",
+    re.IGNORECASE,
+)
+
+#: Where the label's clause STARTS: the nearest punctuation or conjunction behind
+#: it. Without this the gate would be a whole-segment rule, and *"The temperature
+#: drift was 3 K AND the temperature was 425 K"* would lose its second, legitimate
+#: reading to the first clause's noun. It is :data:`_CLAUSE_BOUNDARY`'s character
+#: class plus the conjunctions, which is the same boundary
+#: :data:`_CONTINUATION_WORD` treats as opening a new clause on the far side of the
+#: value — deliberately the same notion of "clause", read from the other direction.
+#: THE APOSTROPHE IS REMOVED FROM :data:`_CLAUSE_BOUNDARY` FOR THIS GATE ONLY, and
+#: it is a correction rather than a loosening. An apostrophe is never a clause
+#: boundary in English; it is a possessive or a contraction, and both sit INSIDE the
+#: noun phrase the label heads.
+#:
+#: Measured: with `'` treated as a boundary, ``_pre_label_text`` cut
+#: *"The sample's temperature was 425 K"* down to ``"s "`` and gate (4) refused it —
+#: 16 of 16 apparatus possessives, every one of which the base commit `d3473414`
+#: READ. The curly form *"The sample’s"* read correctly throughout, because U+2019
+#: was never in the class, so ONE CHARACTER decided whether an identical sentence
+#: was read or refused depending on which keyboard typed it.
+#:
+#: NOTHING ELSE LEAVES THE CLASS. `)`, `"`, `:`, `;` and `]` remain boundaries here,
+#: and they are the second mechanism of the bypass pinned by
+#: ``test_the_pre_label_gate_IS_BYPASSED_by_a_preamble_or_a_bracket_RESIDUE``.
+#: Removing them would close part of that bypass and is deliberately NOT done in the
+#: same change: they are genuine punctuation between clauses in other sentences, and
+#: deciding that costs its own corpus. This removal is safe precisely because the
+#: apostrophe is the one member that is never a clause boundary at all.
+_PRE_LABEL_BOUNDARY_CHARS = r"[,;.!?:)\]}\"—–]"
+
+_PRE_LABEL_CLAUSE_OPEN = re.compile(
+    _PRE_LABEL_BOUNDARY_CHARS
+    + r"|\b(?:and|but|or|so|while|whilst|because|although|though|when|once"
+    r"|until|which|as)\b",
+    re.IGNORECASE,
+)
+
 #: THE LABEL EACH RULE IS ANCHORED ON, as it appears at the START of that rule's
 #: own whole match. Every label-anchored pattern above begins with ``\b`` and its
 #: label alternation, so ``match.group(0)`` starts exactly at the label and these
@@ -1661,6 +2113,81 @@ AMBIGUITY_POLICY: tuple[dict[str, str], ...] = (
         ),
     },
     {
+        # GATE (4). **THIS ROW WAS MISSING FOR THREE COMMITS. `AMBIGUITY_POLICY` IS
+        # SERVED (`routes.py:16309`), so this application published a policy document
+        # enumerating three pass-one outcomes while its reader produced four.** A
+        # scientist receiving a `words_before_the_label_name_something_else`
+        # abstention would have found no rule for it in the very document that exists
+        # to explain the reader's refusals — a surface promising completeness it did
+        # not have, which is the defect class this module keeps finding in itself.
+        #
+        # **AND IT WENT MISSING A SECOND TIME, BY A PROCESS FAILURE WORTH RECORDING:**
+        # the row was written, then a mutation-testing harness that restores with
+        # `git checkout -- <file>` ran against it. That restores from HEAD, so it
+        # **discarded the uncommitted row**, and the commit whose message announced
+        # this fix (`32fd4189`) therefore contained only the TEST. The test is what
+        # caught it. **A mutation harness that restores from git destroys
+        # uncommitted work in the file it mutates — commit first, or snapshot the
+        # bytes.** (An in-process `try/finally` restore was tried before that and is
+        # worse: a timeout killed it mid-run and left this module silently corrupt
+        # but syntactically valid, because implicit string concatenation swallowed a
+        # deleted alternation.)
+        #
+        # The guard is `test_every_abstention_kind_the_reader_can_PRODUCE_has_a_
+        # served_policy_row`: it walks a corpus, collects the kinds actually emitted,
+        # and requires a row for each. A guard over `_REFUSAL_REASONS` alone would
+        # have been weaker — it would pass for a kind that has a reason and no row,
+        # which is exactly the state this row fixes.
+        #
+        # **AND `32fd4189`'s CLAIM THAT "NO GUARD COULD HAVE CAUGHT IT" WAS TOO
+        # STRONG — withdrawn here.** `test_transcript_capture.py::test_every_
+        # ambiguity_kind_is_covered_by_the_published_policy` has long asserted SET
+        # EQUALITY between `AMBIGUITY_POLICY`'s kinds and a hand-written list, and it
+        # DID fire on this row — in the other direction, when the row was added
+        # without extending the list. What it cannot do is catch a kind the READER
+        # emits with no row, because it never consults the reader. So the accurate
+        # claim is about the guard's SHAPE, not its absence — and that shape was
+        # already named as one of the three weak forms in the new guard's own
+        # docstring, so the slice named the weakness and then asserted the guard's
+        # absence anyway. Both tests are kept: one ratchets the served set, the other
+        # measures what the reader emits, and neither subsumes the other.
+        "kind": "words_before_the_label_name_something_else",
+        "outcome": OUTCOME_ABSTENTION,
+        "rule": (
+            "A sentence stated a value the way a field is stated, but the words in "
+            "FRONT of the label re-named what the label denotes: 'the SETPOINT "
+            "temperature was 425 K' states a setpoint, 'the MAXIMUM temperature' an "
+            "extremum, 'the AMBIENT temperature' the room's, and 'the PREVIOUS scan "
+            "ended at ...' a different measurement's time. The two forward gates "
+            "cannot see any of it — one reads label-to-value and the other "
+            "value-to-end — so what may sit in front of the label is a THIRD "
+            "ALLOWLIST: one determiner, and a closed set of words that LOCATE the "
+            "quantity ('sample', 'cryostat', 'scan') or say how it was obtained "
+            "('measured', 'recorded') rather than re-subject it. TWO KNOWN GAPS, "
+            "stated here rather than left for a reader to discover, and the second "
+            "is now NARROWER than it was: a clause-level adjunct such as an opening "
+            "prepositional phrase is NOT closed (its object may absorb an arbitrary "
+            "word); and a COLON or SEMICOLON between the modifier and the label "
+            "still ends the clause this gate inspects, so the modifier falls "
+            "outside it. A PARENTHESIS or a QUOTATION MARK no longer does — a "
+            "closing delimiter that has a matching opener is read as an aside "
+            "inside the clause, and the words it wrapped still reach the gate, so "
+            "'the (setpoint) temperature' is refused exactly as 'the setpoint "
+            "temperature' is. In the gaps that remain, the sentence reads as though "
+            "the modifier were absent. The direction is the decision, for the third "
+            "time in this reader: "
+            "a list of forbidden modifiers fails OPEN on the next one, while an "
+            "allowlist costs a reading and DISCLOSES it. This outcome does NOT "
+            "claim the value is not the field's — an ambient or a cryostat "
+            "temperature may be exactly what was meant, and deciding that it is "
+            "not would be as much a scientific judgement as deciding that it is. "
+            "It reports that the sentence does not settle it. The value is not "
+            "read, the statement is reported, the text is kept verbatim, and the "
+            "same claim stated with the qualifier BEHIND the label — 'the "
+            "temperature of the sample was ...' — is read normally."
+        ),
+    },
+    {
         "kind": "several_values_and_none_selected",
         "outcome": OUTCOME_ABSTENTION,
         "rule": (
@@ -2012,16 +2539,31 @@ def _statement_ends_after(text: str, position: int) -> bool:
 _KIND_UNHEDGED = "unhedged_further_values"
 _KIND_TRAILING = "trailing_text_after_further_values"
 
-#: The three kinds the PASS-ONE assertion gate discloses. They are three and not
+#: The four kinds the PASS-ONE assertion gate discloses. They are four and not
 #: one for the reason the two above are two and not one: each names a DIFFERENT
 #: fact about the sentence, and a shared name would publish a reason the quote
 #: beside it contradicts. ``_KIND_NOT_ASSERTED`` says the label did not assert
 #: this value; ``_KIND_QUALIFIED`` says it did and the following words changed what
 #: the number measures; ``_KIND_NONE_SELECTED`` says the sentence asserted the
-#: field more than once and this reader cannot say which value is the field's.
+#: field more than once and this reader cannot say which value is the field's;
+#: ``_KIND_NOT_THIS_SUBJECT`` says the words BEFORE the label name something other
+#: than the field.
+#:
+#: **THE FOURTH IS ONE KIND AND NOT TWO, WHICH IS THE OPPOSITE CALL FROM THE ONE
+#: ABOVE AND IS MADE ON THE SAME GROUND.** Gate (4) closes two families that look
+#: different — a renamed quantity (*"the SETPOINT temperature"*) and a different
+#: measurement (*"the PREVIOUS scan ended"*) — and the temptation is to give each
+#: its own reason. They are one kind because the FACT is one fact: the words before
+#: the label are ones this reader does not recognise as leaving the label the thing
+#: being described. Splitting them would require this reader to say WHICH of the two
+#: happened, and it cannot — *"The previous scan temperature was 425 K"* is both —
+#: so a two-way split would publish a classification the reader does not hold,
+#: which is the defect the rule above exists to prevent rather than an application
+#: of it.
 _KIND_NOT_ASSERTED = "label_does_not_assert_this_value"
 _KIND_QUALIFIED = "value_qualified_by_what_follows"
 _KIND_NONE_SELECTED = "several_values_and_none_selected"
+_KIND_NOT_THIS_SUBJECT = "words_before_the_label_name_something_else"
 
 #: The reason served for each, keyed by kind so the gate cannot record one and
 #: serve the other's sentence. ``{field_path}`` is the only substitution.
@@ -2106,6 +2648,37 @@ _REFUSAL_REASONS: dict[str, str] = {
         "punctuation, by a new clause, or by where and when it was measured — so "
         "if the value does stand on its own, state it on its own and it will be "
         "read."
+    ),
+    # GATE (4)'s REASON, written to the same two rules as the two above it and to
+    # one more of its own.
+    #
+    # (a) NO NUMERIC EXAMPLE, for the reason stated twice already: every digit that
+    #     reads naturally here ("425 K", "295 K") is a value this gate withholds, so
+    #     an example would sit in the same response as the withheld value.
+    # (b) IT REPORTS THE READER'S LIMIT, NOT AN INTERPRETATION. It does NOT say the
+    #     words before the label DO name something else — on "The cryostat
+    #     temperature was 80 K" nothing was renamed and this reader simply has no
+    #     grounds to decide whose temperature it is.
+    # (c) AND IT DOES NOT CLAIM THAT WHAT IT REFUSED IS NOT THE FIELD'S VALUE, which
+    #     is the claim §5 actually forbids here. An ambient or a cryostat temperature
+    #     MAY be exactly what the scientist means by the field; deciding that it is
+    #     not would be the scientific judgement §5 rules out just as surely as
+    #     deciding that it is. So the reason offers the one thing that IS decidable —
+    #     the prepositional restatement gate (1) already reads — and stops.
+    _KIND_NOT_THIS_SUBJECT: (
+        "This sentence states a value the way {field_path} is stated, but the words "
+        "in FRONT of the label are ones this reader does not recognise as leaving "
+        "the label the thing being described. Very often they name something else: "
+        "a setpoint, a target, a requested or planned value, a maximum, a minimum, "
+        "an average, an ambient or room figure — or, for a time, a previous, "
+        "earlier, calibration, dark or reference scan rather than this run. This "
+        "reader cannot tell which, and it is not deciding that the value is NOT the "
+        "field's — only that this sentence does not settle it. So nothing is "
+        "guessed and nothing is proposed. What it DOES read is the label with "
+        "nothing in front of it but 'the', or with the qualifier moved behind the "
+        "label — 'the temperature of the sample was …', 'the temperature at the "
+        "second scan was …' — so if this is the field's value, state it that way "
+        "and it will be read."
     ),
     _KIND_NONE_SELECTED: (
         # NO NUMERIC EXAMPLE, and the reason is not style: this reason shipped for
@@ -2403,7 +2976,7 @@ _RESTATEMENT_RESIDUE_CLOSED: tuple[str, ...] = (
 #: and produced **twenty** members, not one of which appears in the thirteen rows
 #: below, in the bridge grammar, or in the generator the fix was developed against.
 #: **Nineteen are refused and disclosed** with no change to the gate.
-#: `_PRE_LABEL_OVERREACH_RESIDUE` is the twentieth and is a different sub-class,
+#: `_PRE_LABEL_OVERREACH_CLOSED` is the twentieth and is a different sub-class,
 #: named and left open. A table of thirteen entrances cannot produce that result;
 #: a grammar can, and that is the whole argument for the shape of this fix.
 #:
@@ -2413,8 +2986,20 @@ _RESTATEMENT_RESIDUE_CLOSED: tuple[str, ...] = (
 #: class. Named so a reader does not count the two and conclude one is stale — it
 #: is closed too, and asserted separately by
 #: ``test_the_LABEL_ANCHORED_instant_overreach_is_CLOSED_TOO``.
-#: **THE ONE MEMBER OF THE CLASS THE PASS-ONE ASSERTION GATE DOES NOT CLOSE, and it
-#: is a structurally DIFFERENT sub-class rather than a leftover row.**
+#: ~~**THE ONE MEMBER OF THE CLASS THE PASS-ONE ASSERTION GATE DOES NOT CLOSE, and
+#: it is a structurally DIFFERENT sub-class rather than a leftover row.**~~
+#:
+#: **STRUCK IN PLACE. IT WAS WITHDRAWN AS AN OVERCLAIM ~55 LINES BELOW, IN
+#: ``d3473414``, AND THE HEADING WAS LEFT STANDING — which is the reason for
+#: striking it rather than leaving the withdrawal to do the work.** A reader
+#: arriving at this line reads a completeness claim and has no way to know, until
+#: they reach the note, that the file itself contradicts it. That is the same
+#: failure this file records elsewhere as *"the unstruck opening paragraph of the
+#: same block, four lines above, was a second instance"*: a correction placed
+#: BELOW the claim it corrects leaves the claim readable. **The claim is now
+#: doubly false and doubly resolved** — the class had more members than one
+#: (withdrawn ``d3473414``), and gate (4) closes every one of them, so the
+#: sentence's subject no longer exists.
 #:
 #: An independent review hunted this class on 2026-09-13 and produced twenty rows
 #: none of which was in the thirteen above. **Nineteen are closed** by
@@ -2508,15 +3093,47 @@ _RESTATEMENT_RESIDUE_CLOSED: tuple[str, ...] = (
 #: gate neither introduced nor worsened them; what was wrong and in range was the
 #: published claim of completeness.
 #:
-#: **NOT FIXED HERE, and the reason is the same one that referred the original
+#: ~~**NOT FIXED HERE, and the reason is the same one that referred the original
 #: residue:** a fix has to reject a modifier before the label without rejecting
 #: `"Sample temperature at the second scan was 425 K"` — where the words before the
 #: label are a legitimate qualifier of the SAME quantity. That is a distinction
 #: between an adjective that re-subjects and one that locates, it is not decidable by
 #: the allowlist shape this gate uses, and a denylist of nouns fails OPEN, which is
 #: the failure mode that has already shipped twice in this module. It needs its own
-#: slice and its own argument.
-_PRE_LABEL_OVERREACH_RESIDUE: tuple[str, ...] = (
+#: slice and its own argument.~~
+#:
+#: **CLOSED BY :data:`_PRE_LABEL` — GATE (4) — AND THE CONSTANT IS RENAMED
+#: ``_PRE_LABEL_OVERREACH_CLOSED`` RATHER THAN EMPTIED, the precedent
+#: :data:`_RESTATEMENT_RESIDUE_CLOSED` and :data:`_LABEL_OVERREACH_CLOSED` both
+#: set.** Every row below now proposes NOTHING and raises exactly one
+#: ``words_before_the_label_name_something_else`` abstention naming the field. It
+#: DID get its own slice and its own argument, and both referrals were the right
+#: call.
+#:
+#: **AND THE PARAGRAPH ABOVE IS WRONG IN EXACTLY ONE PLACE, WHICH IS THE WHOLE
+#: LESSON AND IS THE SAME LESSON GATE (1) LEARNED.** It says the distinction *"is
+#: not decidable by the allowlist shape this gate uses"* — TRUE, and it is why gate
+#: (4) is a fourth gate rather than a widening of gate (1). It then says *"a
+#: denylist of nouns fails OPEN, which is the failure mode that has already shipped
+#: twice"* — also TRUE, and it settles the DENYLIST only. **The polarity was never
+#: examined.** An ALLOWLIST of the same nouns fails CLOSED: an unanticipated noun
+#: costs one DISCLOSED reading instead of minting a silent scientific value. That is
+#: the identical move gate (1) made when it rejected *"a shorter bridge"* and
+#: constrained the bridge's SHAPE instead — and this comment, having recorded that
+#: move one screen above, did not apply it to itself. **A rejected proxy is only
+#: rejected in the polarity it was considered in**, and three successive referrals
+#: reasoned about the same one.
+#:
+#: **WHAT THE CLOSURE COST, MEASURED RATHER THAN ASSERTED.** Over the **232**
+#: sentences this repository's own tests already contained that produce a
+#: label-anchored match, gate (4) removes **2** readings and both are rows of this
+#: tuple; **0** legitimate readings are lost and **0** are gained (a gate can only
+#: refuse, and that direction is asserted by test). `"Sample temperature at the
+#: second scan was 425 K"` — the reading every referral protected — still reads, as
+#: does `"The sample temperature was 425 K."`, because ``sample`` is an admitted
+#: locator. The benign-refusal cost of the new gate on an independently-written
+#: corpus is recorded in :data:`_GATE_FALSE_NEGATIVES`.
+_PRE_LABEL_OVERREACH_CLOSED: tuple[str, ...] = (
     # The DELTA case: the re-subjecting word is a verb and there is no `by`.
     "We lowered the temperature 15 K",
     # The MODIFIER family, added 2026-09-13. A noun or adjective before the label
@@ -2549,16 +3166,88 @@ _PRE_LABEL_OVERREACH_RESIDUE: tuple[str, ...] = (
 #: SELECTED. That is a worse failure than reading the wrong quantity: the value is a
 #: real acquisition time, of a different measurement, attributed to this one.
 #:
-#: **PRE-EXISTING**, by the same `git show` above. **NOT FIXED HERE** for the
+#: **PRE-EXISTING**, by the same `git show` above. ~~**NOT FIXED HERE** for the
 #: analogous reason: distinguishing "the scan" from "the previous scan" requires
 #: knowing which scan the sentence is about, which is a referent-resolution problem
 #: rather than a pattern-shape one, and guessing it would substitute one
-#: misattribution for another.
-_RUN_MISATTRIBUTION_RESIDUE: tuple[str, ...] = (
+#: misattribution for another.~~
+#:
+#: **CLOSED BY THE SAME GATE (4), AND THE REFERRAL'S PREMISE WAS FALSE — WHICH IS
+#: WORTH MORE THAN THE FIX.** It said closing this needs REFERENT RESOLUTION:
+#: knowing *which* scan the sentence is about. **It does not.** This reader never
+#: had to decide which scan `"the previous scan"` names; it only had to notice that
+#: the sentence does not say it is THIS one, and refuse. Deciding the referent and
+#: declining to decide it are different acts, and only the first is the hard
+#: problem — §5 asks for the second. **The general form of that error: "fixing this
+#: requires knowing X" is a claim about a fix that ASSERTS, and a refusal asserts
+#: nothing, so the requirement usually does not transfer.**
+#:
+#: And no guess replaced a misattribution, which is the thing the referral was
+#: right to fear: each row raises one
+#: ``words_before_the_label_name_something_else`` abstention, proposes nothing, and
+#: the transcript is retained in full. Renamed rather than emptied, per the
+#: precedent above.
+_RUN_MISATTRIBUTION_CLOSED: tuple[str, ...] = (
     "The previous scan ended at 2026-01-01T00:00:00Z",
     "The last scan ended at 2026-01-01T00:00:00Z",
     "The calibration scan ended at 2026-01-01T00:00:00Z",
     "The reference scan started at 2026-01-01T00:00:00Z",
+)
+
+#: *** A THIRD, PRE-EXISTING CLASS, FOUND 2026-09-13 BY AN INDEPENDENT ADVERSARIAL
+#: HUNT AFTER GATE (4) SHIPPED — AND IT IS A SILENT **LOSS**, WHICH §5 RANKS WORSE
+#: THAN A SILENT REFUSAL. Named here because nothing in this module or the ledger
+#: names it, NOT fixed because it is the DETECTOR and not a gate. ***
+#:
+#: **THE VALUE MAY PRECEDE THE LABEL, AND THEN NOTHING HAPPENS AT ALL.** Every
+#: label-anchored pattern is written label-then-value —
+#: ``\btemperatures?\b[^.;:]{0,40}?<number>\s*K`` — so a sentence that puts the
+#: quantity in FRONT of the label produces **no match**, and therefore no candidate
+#: AND no abstention. Measured at this head, and the detector pattern is
+#: byte-identical to ``d3473414`` (``git diff d3473414 HEAD -- <this file>`` shows
+#: zero changes to ``_TEMPERATURE_K``), so this is pre-existing in full:
+#:
+#:     "A 425 K temperature was used."          -> nothing, SILENT   <- a LOSS
+#:     "We ran at a 425 K temperature."         -> nothing, SILENT   <- a LOSS
+#:     "The 425 K temperature was held."        -> nothing, SILENT   <- a LOSS
+#:     "We saw a 3 K temperature drift."        -> nothing, SILENT   <- correct outcome
+#:     "A 3 K temperature error was seen."      -> nothing, SILENT   <- correct outcome
+#:     "There was a 3 K temperature offset."    -> nothing, SILENT   <- correct outcome
+#:
+#: **THE TWO HALVES ARE OPPOSITE AND THAT IS THE WHOLE REASON TO RECORD IT.** The
+#: last three are *drift*, *error* and *offset* — refusing them is RIGHT, and only
+#: the silence is suboptimal. The first three are ordinary dictation of a real
+#: temperature, refused just as silently. So the class contains both a correct
+#: refusal and a genuine reading loss, produced by the same cause, and neither is
+#: disclosed: the reader never knows it saw anything. That is worse than gate
+#: (4)'s abstentions, which at least tell the scientist to restate.
+#:
+#: **WHY IT IS NOT FIXED HERE, with the shape of the fix named so it is not
+#: re-derived.** It is not a gate, it is the DETECTOR. Every gate in this module is
+#: built on the premise that the permissive pattern matches MORE than it may read —
+#: *"the permissive pattern is kept as the DETECTOR — that is what makes a refusal
+#: disclosable instead of silent"*. Widening ``_TEMPERATURE_K`` to match
+#: value-then-label would change what all four gates see, what the restatement pass
+#: is allowed to scan, and what every span-overlap guard computes, because
+#: ``match.start(1)`` would no longer sit after the label and :func:`_label_bridge`
+#: and :func:`_pre_label_text` both slice on that assumption. It is also the one
+#: change in this module that can only ADD candidates, so it must arrive with its own
+#: adversarial corpus rather than beside a gate. A slice of its own.
+#:
+#: Asserted the wrong way round by
+#: ``test_the_VALUE_BEFORE_LABEL_class_is_STILL_SILENT`` so closing it is a reviewed
+#: deletion rather than a documented item quietly going away.
+_VALUE_BEFORE_LABEL_RESIDUE: tuple[str, ...] = (
+    # The LOSSES: legitimate temperatures, read by nothing, disclosed by nothing.
+    "A 425 K temperature was used.",
+    "We ran at a 425 K temperature.",
+    "The 425 K temperature was held.",
+    # The CORRECT refusals, silent for the identical reason. Kept in the same tuple
+    # deliberately: a fix that discloses one must disclose the other, and a fix that
+    # reads the first three must NOT read these.
+    "We saw a 3 K temperature drift.",
+    "A 3 K temperature error was seen.",
+    "There was a 3 K temperature offset.",
 )
 
 #: **THE OTHER SIDE OF THE SAME LEDGER: the false NEGATIVES this gate costs,
@@ -2697,12 +3386,49 @@ _PARENTHETICAL_BRIDGE_RESIDUE: tuple[str, ...] = (
     "The temperature, measured carefully, was 425 K.",
 )
 
+#: **AND THE BRIDGE FIGURE IN IT WAS MEASURED ~3x TOO LOW, WHICH IS THE PART OF THIS
+#: LEDGER A FUTURE SLICE SHOULD LEARN FROM RATHER THAN THE NUMBERS.** An independent
+#: review put the overall benign-refusal rate at **28% (14 of 50)**, 10 of the 14
+#: being bridge refusals, against the published *"bridge: 1 of 15 (7%)"*. The cause
+#: is stated in :data:`_ASSERTION_AT_VERB` and is the same defect one level up: the
+#: 86%→7% widening was re-measured against *"an independently-written list of fifteen
+#: forms"* — **written by the same author as the grammar.** Fifteen forms from one
+#: head is not an independent sample of how people talk; it is a second draw from the
+#: distribution that produced the grammar. The module's *tail* figure (28%) matched
+#: the reviewer's rate almost exactly and is honest, which is the tell: the figure
+#: that came from a large corpus held up and the figure that came from a short
+#: hand-written list did not.
+#:
+#: **THE 7% IS LEFT UNCHANGED HERE AND IS NOT RE-MEASURED BY THIS SLICE, deliberately
+#: and with the limit stated.** It is gate (1)'s number, this slice changed no part of
+#: gate (1), and replacing a stale figure with one measured by a DIFFERENT author on a
+#: DIFFERENT corpus would silently change what the number means. The correction is
+#: recorded beside it instead, with the reviewer's figure, so a reader gets both and
+#: neither is presented as settled.
+#:
+#: **THE PRE-LABEL ROW BELOW CARRIES THE SAME DISCLOSURE ABOUT ITSELF, because the
+#: honest thing is to say so rather than to repeat the mistake one gate over.** Its 49
+#: forms were written by the author of gate (4) — before the grammar's vocabulary was
+#: widened, and without consulting it while writing, which reduces the coupling but
+#: does not remove it. **It is quoted beside two figures that ARE independent of this
+#: slice and are the stronger evidence:** 0 of 20 lost from ``_BENIGN_BRIDGE_FORMS``
+#: (written for gate (1), by a different slice, before gate (4) existed) and 0
+#: legitimate readings lost from the 232 sentences this repository's tests already
+#: contained. A single-author benign list should be read as a floor on the true loss
+#: rate, never as an estimate of it.
 _GATE_FALSE_NEGATIVES = (
     "bridge: 1 of 15 independently-written benign forms, a PARENTHETICAL (was 13 "
-    "of 15 before the 2026-09-13 widening); "
+    "of 15 before the 2026-09-13 widening) -- and an independent review measured "
+    "the overall benign-refusal rate at 28% (14 of 50), 10 of them bridge "
+    "refusals, so this 7% is a single-author figure and is understated; "
     "tail: 16 of 57 benign continuations, every one a bare adverb or a benignly-"
     "used relational preposition, none of which can be admitted without shielding "
-    "a qualifier behind it; 0 of 1,365 generated legitimate sentences and 0 of the "
+    "a qualifier behind it; "
+    "pre-label: 2 of 51 benign forms (4%), both spoken discourse markers, was 22 "
+    "of 51 (43%) before the apparatus/participle/affirming widening (corrected "
+    "2026-09-13 from a published 20 of 51, which was a 49-row numerator rebased "
+    "onto this denominator), and 0 of 20 "
+    "_BENIGN_BRIDGE_FORMS; 0 of 1,365 generated legitimate sentences and 0 of the "
     "156 in this repository's own tests. Every loss is DISCLOSED."
 )
 
@@ -2920,6 +3646,145 @@ def _continuation_is_clean(rule: "_Rule", text: str, match: re.Match[str]) -> bo
     if rule.label_head is None:
         return True
     return _VALUE_CONTINUATION.match(text, match.end()) is not None
+
+
+def _pre_label_text(rule: "_Rule", text: str, match: re.Match[str]) -> str | None:
+    """The text from the start of the label's clause to the label, or ``None``.
+
+    Sliced out of the SEGMENT rather than out of ``match.group(0)``, which is the
+    opposite of :func:`_label_bridge` and is forced: the bridge lives inside the
+    match and this lives entirely outside it, so there is nothing in the match to
+    slice. The clause bound is what keeps it from becoming a whole-segment rule —
+    see :data:`_PRE_LABEL_CLAUSE_OPEN`.
+    """
+    if rule.label_head is None:
+        return None
+    head = rule.label_head.match(match.group(0))
+    if head is None:  # pragma: no cover - pinned by a test over every rule
+        return None
+    before = text[: match.start() + head.start()]
+    before = _unwrap_parentheticals(before)
+    last = None
+    for boundary in _PRE_LABEL_CLAUSE_OPEN.finditer(before):
+        last = boundary
+    return before if last is None else before[last.end() :]
+
+
+#: Closing delimiters that only bound a clause when they OPEN one — i.e. when no
+#: matching opener precedes them in the same stretch of text.
+_PAIRED_CLOSERS = {")": "(", "]": "[", "}": "{", '"': '"', "'": "'"}
+
+
+def _unwrap_parentheticals(before: str) -> str:
+    """Strip paired delimiters that enclose an ASIDE, keeping the words inside.
+
+    *** THIS CLOSES HALF OF A MEASURED §5 BYPASS. *** ``_pre_label_text`` keeps only
+    the text AFTER the last :data:`_PRE_LABEL_CLAUSE_OPEN` boundary, and that set
+    contains ``)``, ``]``, ``"`` and ``'``. So a bracketed pre-modifier CUT ITSELF
+    out of the text gate (4) inspects:
+
+        The (setpoint) temperature was 425 K.   ->  gate saw " "  ->  PROPOSED
+        The "setpoint" temperature was 425 K.   ->  gate saw " "  ->  PROPOSED
+
+    Both are the same claim as ``The setpoint temperature was 425 K.``, which the
+    gate refuses and DISCLOSES. Proposing them silently is a fabrication with no
+    disclosure — the worst outcome this reader has — and it was pinned wrong-way-
+    round by ``test_the_pre_label_gate_IS_BYPASSED_by_a_preamble_or_a_bracket``.
+
+    THE DISTINCTION THIS FUNCTION DRAWS, and it is the whole idea: a closer with a
+    matching OPENER before it is a parenthetical INSIDE the clause, so the clause
+    did not restart and the words inside it still modify the label. A closer with
+    no opener — a quotation continuing from an earlier sentence, a stray bracket —
+    genuinely may open new text, and is left alone.
+
+    The delimiters are REMOVED and their contents KEPT, which is the point: the
+    forbidden word has to reach the gate. Deleting the aside instead would turn
+    ``The (setpoint) temperature`` into ``The temperature``, i.e. into a sentence
+    the gate legitimately ACCEPTS — closing the hole by making the fabrication
+    invisible rather than by refusing it.
+
+    *** WHAT THIS DOES NOT CLOSE, stated rather than implied. *** The other half of
+    that bypass is untouched and deliberately so:
+
+    * the ``:`` and ``;`` forms (``The setpoint: temperature was 425 K.``) — those
+      are genuine clause punctuation, not paired, and treating them otherwise is a
+      judgement about English rather than a parsing fix;
+    * every PREAMBLE form (``In our lab the setpoint temperature was 425 K.``),
+      which runs through ``_PRE_LABEL_PREP_PHRASE``'s open three-word tail. Closing
+      that needs an ALLOWLISTED tail, and choosing its members is a scientific
+      judgement about which position words re-subject a measurement — §5 governs
+      it, and it is not an agent's to make.
+
+    Symmetric quotes are matched by COUNT, not by position: ``"`` is its own opener,
+    so a closer is one only if an odd number precede it.
+
+    *** IT COSTS EXACTLY ONE READING, AND THAT IS MEASURED RATHER THAN HOPED. ***
+    Run over the corpus with this call removed and restored, it moves TWO
+    sentences and no others:
+
+        The (setpoint) temperature was 425 K.      READ silently -> refused + disclosed
+        The sample (SYN-1) temperature was 425 K.  READ          -> refused + disclosed
+
+    The second is a cost. ``sample`` is an allowlisted apparatus noun and its
+    unbracketed form still reads; with the identifier bracketed the gate now sees
+    ``SYN-1``, a token in no list, and refuses. **The old acceptance was not a
+    reading** — the bracket had cut every word out of the inspected text, so the
+    gate passed on a single space, having approved nothing. It accepted that
+    sentence for the same reason it accepted ``The (setpoint) temperature``.
+
+    So the allowlist is now consulted where it previously was not, and answers
+    honestly: it costs the reading and DISCLOSES it, which is the trade
+    :data:`AMBIGUITY_POLICY` states outright. Pinned by
+    ``test_the_paired_delimiter_fix_COSTS_one_reading_and_discloses_it``.
+    """
+    out: list[str] = []
+    for i, ch in enumerate(before):
+        opener = _PAIRED_CLOSERS.get(ch)
+        if opener is None:
+            out.append(ch)
+            continue
+        head_text = before[:i]
+        if opener == ch:
+            paired = head_text.count(ch) % 2 == 1
+        else:
+            paired = head_text.count(opener) > head_text.count(ch)
+        if paired:
+            continue  # drop the delimiter, keep what it wrapped
+        out.append(ch)
+    return "".join(out)
+
+
+def _label_is_the_subject(rule: "_Rule", text: str, match: re.Match[str]) -> bool:
+    """GATE (4): do the words BEFORE the label leave it naming ``rule``'s field?
+
+    True for an ungated rule, for the reason :func:`_asserts_the_value` gives.
+
+    **CHECKED LAST OF THE THREE PASS-ONE GATES, AND THE ORDER IS DELIBERATE RATHER
+    THAN INCIDENTAL.** A sentence can fail more than one gate — *"We corrected the
+    temperature by 7 K"* fails this one and gate (1) — and only the FIRST failure is
+    disclosed, so the order decides which sentence the scientist is shown. Running
+    this gate last leaves every reading refused by the bridge or the continuation
+    disclosing exactly what it disclosed before, so the thirteen rows of
+    :data:`_LABEL_OVERREACH_CLOSED` keep the reason they are pinned to, and only a
+    match that survives both forward gates reaches this one.
+
+    **RUNNING IT FIRST WAS TRIED AND RE-LABELLED EXACTLY TWO ALREADY-CLOSED ROWS —
+    and this sentence said "six" until it was counted, which is the reason the
+    derivation is written out rather than the number quoted.** The rows are
+    *"We held the temperature to within 2 K"* and *"We corrected the temperature by
+    7 K"*, both from :data:`_LABEL_OVERREACH_CLOSED`; they fail this gate on
+    ``We held the``/``We corrected the`` AND gate (1) on their bridge. Re-derive over
+    the 18 rows of :data:`_LABEL_OVERREACH_CLOSED` plus
+    :data:`_MODIFIER_OBJECT_OVERREACH_RESIDUE`, counting those where
+    ``_asserts_the_value and _continuation_is_clean`` is False and
+    ``_label_is_the_subject`` is also False. Two is a smaller reason than six, and
+    it is still the reason: the bridge is the NEARER fact about those sentences, so
+    naming a pre-label word when the words between the label and the value are
+    themselves disqualifying tells the scientist about the wrong half of their
+    sentence — and it would break the pins those rows carry, for no gain.
+    """
+    pre_label = _pre_label_text(rule, text, match)
+    return pre_label is None or _PRE_LABEL.fullmatch(pre_label) is not None
 
 
 _RULES: tuple[_Rule, ...] = (
@@ -3216,6 +4081,50 @@ def _segment_readings(
             if not _continuation_is_clean(rule, segment.text, match):
                 gate_refusals.append(
                     (rule.name, _KIND_QUALIFIED, match.group(0), match.span(1))
+                )
+                continue
+            # GATE (4), last of the three — see `_label_is_the_subject` for why the
+            # order is load-bearing. The QUOTE is the whole match, exactly as the
+            # two gates above quote it, and so deliberately does NOT include the
+            # pre-label words that caused the refusal: `match.group(0)` starts at
+            # the label. Extending the quote backwards was considered and declined
+            # — every other disclosure in this module quotes a match, ~~a scientist
+            # reading "the setpoint temperature was 425 K" sees the whole sentence
+            # beside the reason anyway~~, and a quote whose span does not correspond
+            # to a match would break the offset round-trip the quotes' honesty
+            # rests on.
+            #
+            # *** THE STRUCK CLAUSE IS FALSE AT THE RENDERING LAYER, and it was the
+            # only one of the three reasons that was about the SCIENTIST rather than
+            # about this module's internals. Measured 2026-09-13 after an independent
+            # review raised the quote (A-4). ***
+            #
+            # `TranscriptCapturePanel.tsx` renders `“{entry.quote}” — {entry.reason}`
+            # and NOTHING ELSE. The reading's wire shape carries `segments` as a
+            # COUNT, not as texts, so the panel cannot show the sentence even if it
+            # wanted to. What a scientist actually sees is:
+            #
+            #     "temperature was 425 K" — ... the words in FRONT of the label are
+            #     ones this reader does not recognise ...
+            #
+            # a quote containing no words in front of the label, beside a reason
+            # blaming the words in front of the label. They are pointed at something
+            # they cannot see.
+            #
+            # THE REMAINING REASON STILL HOLDS AND IS WHY THIS IS NOT FIXED HERE: a
+            # quote whose span does not correspond to a match breaks the offset
+            # round-trip, which is a structural invariant and not a preference. So
+            # the two viable repairs both live elsewhere — serve the segment TEXT
+            # alongside the abstention (a wire-shape change), or give the abstention
+            # a second, separately-named span for the pre-label words so the
+            # round-trip is preserved for `quote` itself.
+            #
+            # Left open and named rather than guessed at. What is fixed here is the
+            # JUSTIFICATION: a decision resting on three reasons, one of which is
+            # false, is not the decision it appears to be.
+            if not _label_is_the_subject(rule, segment.text, match):
+                gate_refusals.append(
+                    (rule.name, _KIND_NOT_THIS_SUBJECT, match.group(0), match.span(1))
                 )
                 continue
             kept.append(match)
@@ -3605,6 +4514,7 @@ def _segment_readings(
         for kind in (
             _KIND_NOT_ASSERTED,
             _KIND_QUALIFIED,
+            _KIND_NOT_THIS_SUBJECT,
             _KIND_NONE_SELECTED,
             _KIND_UNHEDGED,
             _KIND_TRAILING,

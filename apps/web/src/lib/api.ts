@@ -38,6 +38,10 @@ import type {
   ApiCsvPreview,
   ApiDraftResponse,
   ApiEvidenceClassification,
+  ApiImportCandidateProposed,
+  ApiImportListResponse,
+  ApiImportSessionResponse,
+  ApiImportSourceCreated,
   ApiEvidenceEntry,
   ApiEvidenceResponse,
   ApiExperimentDetail,
@@ -2747,6 +2751,146 @@ export const api = {
         : {}),
     });
     if (res.ok) return readJson<ApiTranscriptCapture>(res, path);
+    throw await mutationError(res, path);
+  },
+
+  /* ======================================================================
+   * HISTORICAL IMPORT — nine operations over a working area.
+   *
+   * NONE OF THEM SENDS A FILE. A source is either a POINTER this build records
+   * and does not open, or one of the committed synthetic fixtures it reads
+   * because they are files this repository ships for that purpose. There is no
+   * multipart body anywhere here and no `<input type="file">` on the surface —
+   * `upload-claim-parity.test.tsx` asserts exactly two non-test files declare one
+   * and names both, so a third would fail CI.
+   *
+   * EIGHT OF THE NINE SEND NO `If-Match`, AND THAT IS THE CONTRACT. An import
+   * session serves no `ETag`: it is a working area with no revision contract, and
+   * sending a validator it does not have would be inventing one. The ONE
+   * operation that rewrites an EXPERIMENT sends the RECORD's, exactly as
+   * `createProposal` does — the same trap `updateRun`'s comment names, in the
+   * other direction.
+   * ====================================================================== */
+
+  listImports(): Promise<ApiImportListResponse> {
+    return getJson<ApiImportListResponse>('/imports');
+  },
+
+  getImport(importId: string): Promise<ApiImportSessionResponse> {
+    return getJson<ApiImportSessionResponse>(`/imports/${enc(importId)}`);
+  },
+
+  /**
+   * Start a session. `label` is omitted from the body when blank, for the reason
+   * `createExperiment` omits `description`: unfiled and `''` are the same thing
+   * and only one of them is a value.
+   */
+  createImport(label?: string): Promise<ApiImportSessionResponse> {
+    const trimmed = (label ?? '').trim();
+    return postJson<ApiImportSessionResponse>('/imports', trimmed ? { label: trimmed } : {});
+  },
+
+  async deleteImport(importId: string): Promise<void> {
+    const path = `/imports/${enc(importId)}`;
+    const res = await request(path, { method: 'DELETE' });
+    if (!res.ok) throw await mutationError(res, path);
+  },
+
+  /**
+   * Record ONE manifest entry. `kind` decides which fields are required, and
+   * this signature deliberately does not collapse the two: a `reference` needs a
+   * filename and a reference, a `synthetic_fixture` needs a fixture name, and a
+   * single loose shape would let a caller send half of each and be refused by the
+   * server for a reason the type could have prevented.
+   *
+   * `sha256` IS WHAT THE CALLER SAYS, and nothing computes one. The server checks
+   * the SHAPE and refuses a malformed digest with `malformed_sha256`; a caller
+   * must surface that rather than assuming the entry landed without it.
+   */
+  addImportSource(
+    importId: string,
+    input:
+      | {
+          kind: 'reference';
+          filename: string;
+          reference: string;
+          mediaType?: string;
+          sizeBytes?: number;
+          sha256?: string;
+        }
+      | {
+          kind: 'synthetic_fixture';
+          fixtureName: string;
+          mediaType?: string;
+          sizeBytes?: number;
+          sha256?: string;
+        },
+  ): Promise<ApiImportSourceCreated> {
+    const body: Record<string, unknown> = { kind: input.kind };
+    if (input.kind === 'reference') {
+      body.filename = input.filename.trim();
+      body.reference = input.reference.trim();
+    } else {
+      body.fixture_name = input.fixtureName;
+    }
+    const mediaType = (input.mediaType ?? '').trim();
+    const sha256 = (input.sha256 ?? '').trim();
+    if (mediaType) body.media_type = mediaType;
+    if (input.sizeBytes !== undefined) body.size_bytes = input.sizeBytes;
+    if (sha256) body.sha256 = sha256;
+    return postJson<ApiImportSourceCreated>(`/imports/${enc(importId)}/sources`, body);
+  },
+
+  async removeImportSource(
+    importId: string,
+    sourceId: string,
+  ): Promise<ApiImportSessionResponse> {
+    const path = `/imports/${enc(importId)}/sources/${enc(sourceId)}`;
+    const res = await request(path, { method: 'DELETE' });
+    if (res.ok) return readJson<ApiImportSessionResponse>(res, path);
+    throw await mutationError(res, path);
+  },
+
+  parseImport(importId: string): Promise<ApiImportSessionResponse> {
+    return postJson<ApiImportSessionResponse>(`/imports/${enc(importId)}/parse`);
+  },
+
+  reconstructImport(importId: string): Promise<ApiImportSessionResponse> {
+    return postJson<ApiImportSessionResponse>(`/imports/${enc(importId)}/reconstruct`);
+  },
+
+  /**
+   * Send ONE candidate into review on ONE record, as an OPEN proposal.
+   *
+   * THE ONLY WAY ANYTHING FROM AN IMPORT REACHES A RECORD, and it writes no
+   * value: the record's fields are byte-identical afterwards. Accepting the
+   * proposal is `reviewProposal`, which needs a trusted human identity that no
+   * default-configured deployment establishes.
+   *
+   * `experimentVersion` IS THE RECORD'S, not the session's. Truthiness-guarded
+   * exactly as every other mutation here is: a blank must send NO header (→ a 428
+   * naming the missing precondition) rather than `If-Match: ""`, which is
+   * malformed (→ 400) and would report a client bug as a server disagreement.
+   *
+   * READ `deduplicated` BEFORE REPORTING WHAT HAPPENED. `true` means the record
+   * already held this proposal and nothing was minted.
+   */
+  async proposeImportCandidate(
+    importId: string,
+    candidateId: string,
+    opts: { experimentId: string; experimentVersion: string; runId?: string },
+  ): Promise<ApiImportCandidateProposed> {
+    const path = `/imports/${enc(importId)}/candidates/${enc(candidateId)}/propose`;
+    const body: Record<string, unknown> = { experiment_id: opts.experimentId };
+    if (opts.runId !== undefined) body.run_id = opts.runId;
+    const res = await request(path, {
+      method: 'POST',
+      body: JSON.stringify(body),
+      ...(opts.experimentVersion
+        ? { headers: { 'If-Match': `"${opts.experimentVersion}"` } }
+        : {}),
+    });
+    if (res.ok) return readJson<ApiImportCandidateProposed>(res, path);
     throw await mutationError(res, path);
   },
 } as const;

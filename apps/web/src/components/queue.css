@@ -139,7 +139,6 @@
 }
 .exp-row.done {
   border-color: var(--border-faint);
-  opacity: 0.82;
 }
 
 /*
@@ -176,10 +175,19 @@
  * failing node, and recording three would ship three sub-AA nodes on the
  * product's new home screen as "expected".
  *
- * **Not removing the opacity.** `tokens.css` is right that it has to go, but that
- * is a palette-wide decision across three sites (`.exp-row.done`,
- * `.upcoming-row`, `.advisory-nongating`) with its own visual argument, and it is
- * recorded as open. Taking it inside a feature PR would decide it by accident.
+ * ~~**Not removing the opacity.** `tokens.css` is right that it has to go, but
+ * that is a palette-wide decision across three sites (`.exp-row.done`,
+ * `.upcoming-row`, `.advisory-nongating`) with its own visual argument, and it
+ * is recorded as open. Taking it inside a feature PR would decide it by
+ * accident.~~
+ *
+ * *** THE OPACITY IS GONE, 2026-09-13 — the deferral above was right and has
+ * been honoured rather than overridden. *** It said the decision belonged to a
+ * slice of its own instead of to a feature PR, and this is that slice: all
+ * three sites were taken together (`.upcoming-row` first, then these two), with
+ * every replacement colour computed and the whole a11y sweep re-run. Nothing
+ * below is deleted, because the reasoning is what makes the new numbers
+ * checkable — read it as the state this change ends.
  *
  * **Not darkening the tokens themselves.** `tokens.css` already worked this out:
  * a value that clears the composite is darker than the rung above it, so the
@@ -195,13 +203,47 @@
  * outcome is therefore a return to the recorded baseline of 3, not an
  * improvement to 0.
  */
+/*
+ * ── AND THE RUNG WENT BACK DOWN WHEN THE DIM WENT AWAY, 2026-09-13 ─────────
+ *
+ * The comment above raised these six to `--text-secondary` because it was "the
+ * first rung that survives the composite" — a statement about the OPACITY, not
+ * about the design. With the opacity gone the composite is gone with it, and
+ * `--text-tertiary` #626c77 clears AA on `--surface` at **5.34:1** on its own.
+ * It is also the rung this row wanted before the dim forced it up: the shipped
+ * pixels were `--text-secondary` faded to #67707c (5.02:1), and #626c77 unfaded
+ * is within a hair of that — so the row LOOKS the same and no longer
+ * composites.
+ *
+ * `.exp-title` and `.exp-date` join the list, and they are the reason this is a
+ * fix rather than a wash:
+ *
+ *   .exp-title   was #3c434b 10.02:1 (faded --text-heading) -> --text-secondary
+ *                #46515f 8.07:1. It steps DOWN one rung rather than springing
+ *                back to full heading ink, because the opacity was the only
+ *                thing keeping a completed row quieter than a live one.
+ *   .exp-date    was #758393 **3.44:1** — a real AA failure at 11px, and one of
+ *                the TWO nodes `experiments-example` still carries in
+ *                `e2e/a11y-baseline.ts`. `--text-tertiary` on `--cover-bg`
+ *                #eef2f6 is **4.75:1**.
+ *
+ * The other recorded node, `.chip-exported > span`, is `--text-muted` on
+ * `--surface-subtle` and was failing for the same single reason; it needs no
+ * rule of its own, because removing the dim is the whole fix. Expected
+ * outcome: `experiments-example` color-contrast **2 -> 0**, measured, not
+ * predicted — see the sweep in the commit.
+ */
+.exp-row.done .exp-title {
+  color: var(--text-secondary);
+}
 .exp-row.done .exp-scenario,
 .exp-row.done .exp-scenario-text,
 .exp-row.done .exp-scenario-icon,
 .exp-row.done .exp-meta,
 .exp-row.done .exp-meta-item,
-.exp-row.done .exp-meta-mono {
-  color: var(--text-secondary);
+.exp-row.done .exp-meta-mono,
+.exp-row.done .exp-date {
+  color: var(--text-tertiary);
 }
 .exp-main {
   flex: 1;

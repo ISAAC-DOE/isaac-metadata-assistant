@@ -196,25 +196,75 @@ describe('the shipped source is inactive by construction', () => {
       get: cookieGetter,
       set: () => {},
     });
-    const localGet = vi.spyOn(window.localStorage, 'getItem');
-    const sessionGet = vi.spyOn(window.sessionStorage, 'getItem');
+    /* *** THE TWO STORAGE SPIES USED TO BE VACUOUS, AND THIS FILE'S OWN COMMENT
+       BELOW IS WHY THAT IS WORTH RECORDING RATHER THAN QUIETLY FIXING. ***
+
+       They read:
+
+           const localGet   = vi.spyOn(window.localStorage, 'getItem');
+           const sessionGet = vi.spyOn(window.sessionStorage, 'getItem');
+
+       An INSTANCE spy on a jsdom `Storage` does not intercept and does not even
+       RECORD. Measured directly, in this project's own vitest environment:
+
+           INSTANCE_CALLS=0  PROTOTYPE_CALLS=1  SESSION_INSTANCE_CALLS=0
+
+       after calling `getItem` once through each. So both
+       `.not.toHaveBeenCalled()` assertions were TRUE BY CONSTRUCTION: this test
+       would have passed unchanged if `disabledCurrentUserSource.get()` read
+       browser storage on every call — which is two thirds of what its own title
+       claims to guard, in an IDENTITY contract.
+
+       The irony is the lesson. The block below already articulates the exact
+       principle ("THE SPY IS PROVED TO WORK, so 'not called' means something")
+       and applies it to `document.cookie` — and the same author left the two
+       storage spies unproven in the same `try`. Proving one spy is not proving
+       the spies.
+
+       ONE PROTOTYPE SPY COVERS BOTH STORES, because `localStorage` and
+       `sessionStorage` share `Storage.prototype` — so they cannot be told apart
+       by installing two spies. They are told apart by the RECEIVER instead,
+       which is strictly more informative than the two labels that never fired:
+       a failure now names which store was read. */
+    const storageReads: string[] = [];
+    const storageGet = vi
+      .spyOn(Storage.prototype, 'getItem')
+      .mockImplementation(function (this: Storage, key: string) {
+        storageReads.push(
+          `${this === window.localStorage ? 'localStorage' : this === window.sessionStorage ? 'sessionStorage' : 'unknown Storage'}.getItem(${JSON.stringify(key)})`,
+        );
+        return null;
+      });
 
     try {
       disabledCurrentUserSource.get();
       expect(fetchSpy, 'fetch').not.toHaveBeenCalled();
       expect(cookieGetter, 'document.cookie').not.toHaveBeenCalled();
-      expect(localGet, 'localStorage.getItem').not.toHaveBeenCalled();
-      expect(sessionGet, 'sessionStorage.getItem').not.toHaveBeenCalled();
+      expect(
+        storageReads,
+        'the disabled source read browser storage; it is supposed to answer from nothing',
+      ).toEqual([]);
 
       /* THE SPY IS PROVED TO WORK, so "not called" means something. Without this,
          a getter that jsdom had made non-configurable — leaving the real accessor
          in place — would report "never read" for every possible implementation. */
       expect(document.cookie).toBe('');
       expect(cookieGetter).toHaveBeenCalledTimes(1);
+
+      /* AND THE SAME PROOF FOR THE STORAGE SPY, which is the half that was
+         missing. Both stores are read deliberately and both must be recorded —
+         one store appearing would leave the other unproven, which is how this
+         defect survived in the first place. Done AFTER the assertions above so
+         these two reads cannot be mistaken for reads by `get()`. */
+      window.localStorage.getItem('probe');
+      window.sessionStorage.getItem('probe');
+      expect(storageReads).toEqual([
+        'localStorage.getItem("probe")',
+        'sessionStorage.getItem("probe")',
+      ]);
     } finally {
       Reflect.deleteProperty(document, 'cookie');
-      localGet.mockRestore();
-      sessionGet.mockRestore();
+      storageGet.mockRestore();
       vi.unstubAllGlobals();
     }
   });

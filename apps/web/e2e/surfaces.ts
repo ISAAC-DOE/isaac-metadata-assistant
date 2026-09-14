@@ -95,6 +95,52 @@ export const SURFACES: readonly Surface[] = [
   },
   {
     /*
+     * HISTORICAL IMPORT — the second of the three primary destinations, added
+     * 2026-09-13 with the destination itself.
+     *
+     * ORDINARY SCOPE, and this is the one that matters for this surface. An
+     * import session has NOTHING to do with the worked-example records, and the
+     * ordinary workspace is where a reader actually meets it: on a fresh
+     * deployment it holds no sessions, so this surface measures the REAL
+     * first-run state — the empty list, the workflow strip, the durability
+     * sentence and the Start control. That is what a reader of this deployment
+     * sees, so it is what is swept.
+     *
+     * THE READY GATE IS THE LIST's OWN `<h2>`, NOT THE PAGE `<h1>`, and the
+     * distinction is the race `record-detail`'s comment documents at length. The
+     * `<h1>` renders unconditionally — it is outside the fetch branch — so a gate
+     * on it would resolve while `role="status"`/`Loading imports…` was still on
+     * screen, and axe, the width sweep, the layout probes and the 200% pass would
+     * all measure a skeleton and report it as this surface. `Imports` is inside
+     * the `status === 'data'` branch and cannot render before the fetch settles.
+     *
+     * WHAT THIS SURFACE DOES NOT COVER, AND WHERE THAT NOW LIVES: an OPEN
+     * session. Reaching one needs a POST (`Start an Import` creates a working
+     * area), and this suite is read-only by construction.
+     *
+     * *** THAT GAP IS CLOSED AS OF 2026-09-13 (finding M-11), in the suite that
+     * IS allowed to POST: `e2e/mutation/imports-session-a11y.spec.ts`. *** It
+     * drives a real session through all four states — empty Sources, Sources
+     * with an entry in its table, after the sources are read, and after
+     * candidates are reconstructed — and requires each axe-CLEAN. So the
+     * sentence this paragraph used to end on is no longer the whole story: the
+     * component tests (`src/__tests__/historical-import.test.tsx`) still cover
+     * behaviour, but they run in jsdom, which computes no colours and runs no
+     * accessibility engine. Do not read "covered by the component tests" as
+     * accessibility coverage anywhere in this file.
+     *
+     * The split is deliberate rather than incidental: adding `imports-session`
+     * to `SURFACES` would enrol it in THIRTEEN sweeps across seven viewport
+     * projects, every one of which needs the POST this config forbids.
+     */
+    id: 'imports',
+    name: 'Historical Import (ordinary, no sessions)',
+    path: '/imports',
+    scope: 'ordinary',
+    ready: { role: 'heading', name: 'Imports' },
+  },
+  {
+    /*
      * THE READY GATE IS THE PAGE `h1`'s WORKSPACE LINE, AND IT USED TO BE A RACE.
      *
      * It read `{ role: 'heading', name: 'Review Record' }`. That heading is
@@ -154,14 +200,30 @@ export const SURFACES: readonly Surface[] = [
      * controls, its seam-status disclosure and its textarea), the unmapped-notes
      * queue, and the ingestion-proposals list.
      *
-     * `ready` waits on the transcript panel's own heading, which is the first of the
-     * three and the one whose capability report resolves last.
+     * `ready` USED TO WAIT on the transcript panel's own heading. It no longer can,
+     * and the reason is a deliberate product change rather than a broken selector:
+     * the capture workspace now lands on the three-route CHOOSER (`CaptureIntake`),
+     * and the panel — which the chooser opens — renders nothing at all until it
+     * does, because two entry points for one action was the defect that change
+     * fixed. So the probe is the chooser's own heading, which is what a reader
+     * actually meets on arrival.
+     *
+     * *** WHAT THIS DOES AND DOES NOT DO TO COVERAGE, stated because `ready`
+     * silently decides what gets scanned. *** The panel's closed-state entry (its
+     * heading and its one button) leaves this scan; the chooser's three cards,
+     * three action controls and advisory limit note enter it — so the surface gains
+     * controls rather than losing them. What is UNCHANGED is the gap
+     * `a11y-baseline.ts` already records in full: the panel's textarea, run select,
+     * candidate list, decision controls and every voice control are STILL UNSCANNED,
+     * because this scan does not press the entry. That gap was not created here and
+     * is not closed here; driving the disclosure remains its own slice, exactly as
+     * that note says.
      */
     id: 'record-capture',
     name: 'Record Detail — Capture & Proposals',
     path: `/record/${SEED.partial}?view=capture`,
     scope: 'example',
-    ready: { role: 'heading', name: /Transcript/i },
+    ready: { role: 'heading', name: /How do you want to get this experiment in\?/i },
   },
   {
     /*
@@ -260,6 +322,26 @@ export const SURFACES: readonly Surface[] = [
     path: '/memory?tab=graph',
     scope: 'ordinary',
     ready: { role: 'heading', name: 'Graph' },
+  },
+  {
+    /*
+     * QA-020 — the not-found state, enrolled deliberately and with its cost known.
+     *
+     * `QA-018`'s closure recorded the lesson in its own commit subject: adding an
+     * entry here enrols a surface in THIRTEEN sweeps, not one, and mints fresh
+     * baseline cells on BOTH platforms. It is enrolled anyway, because the
+     * alternative is a scientist-facing screen that no axe or narrow-width run has
+     * ever measured — which is exactly the gap `QA-018` existed to close, and
+     * shipping a NEW one while closing the old would be the worse trade.
+     *
+     * `scope: 'ordinary'` because this screen reads no record and needs no worked
+     * example: it is reachable at any unrecognised address, in any scope.
+     */
+    id: 'not-found',
+    name: 'Page not found',
+    path: '/an-address-no-route-declares',
+    scope: 'ordinary',
+    ready: { role: 'heading', name: 'Page not found' },
   },
   {
     id: 'governance',

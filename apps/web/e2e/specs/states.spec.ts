@@ -11,6 +11,7 @@
 import { API_BASE, API_ROUTE_GLOB, MISSING_RECORD_ID, SEED } from '../env';
 import { ASSISTANT_MOUNTS } from '../surfaces';
 import { expect, LOADING_PANEL, test } from '../fixtures';
+import { openAssistant } from '../helpers/assistant';
 
 // Was computed locally here; the same expression is now needed by
 // `worked-example.ts` (it is the glob the scope header is attached on), so it
@@ -30,20 +31,13 @@ const API_GLOB = API_ROUTE_GLOB;
  * `aria-modal`. Both shapes are legitimate; the specs must handle both rather
  * than assume the desktop one.
  */
-async function openAssistant(page: import('@playwright/test').Page) {
-  const trigger = page.locator('button.assistant-drawer-trigger');
-  const panel = page.locator('aside.assistant-drawer-panel');
-  await expect(panel).toHaveCount(1, { timeout: 20_000 });
-  if (await trigger.isVisible()) {
-    await expect(trigger).toHaveAttribute('aria-haspopup', 'dialog');
-    await trigger.click();
-    await expect(trigger).toHaveAttribute('aria-expanded', 'true');
-    await expect(panel).toHaveAttribute('role', 'dialog');
-    await expect(panel).toHaveAttribute('aria-modal', 'true');
-  }
-  await expect(panel).toBeVisible({ timeout: 10_000 });
-  return panel;
-}
+/* UX-013 — this file's own `openAssistant` is GONE, replaced by the shared
+   `helpers/assistant.ts`. It clicked only the <=1024px slide-over trigger and,
+   at desktop, merely asserted the panel was visible — correct only while the
+   desktop rail defaulted to EXPANDED. Flipping that default broke all six
+   assistant-state tests in this file at once, and the same hand-rolled copy
+   existed in `visual-sweep.spec.ts`, so the fix is ONE definition rather than
+   two parallel edits. */
 
 test('@interaction LOADING: a pending fetch shows a polite status, not an empty screen', async ({ page }) => {
   let release!: () => void;
@@ -204,6 +198,14 @@ test.describe('@interaction assistant panel', () => {
     const log = aside.getByRole('log');
     await expect(log.locator('.assistant-msg')).toHaveCount(0);
 
+    /*
+     * THE SUGGESTED QUESTIONS MOVED INTO "What Can I Ask?" (owner request,
+     * 2026-09-13): the rail is now the chat and nothing else, after it was
+     * measured stacking two clipped, independently-scrolling control regions.
+     * Opening the popover is the route to a pill; the pill itself is unchanged
+     * and still asks on click.
+     */
+    await aside.getByRole('button', { name: /What Can I Ask/i }).click();
     await aside.getByRole('button', { name: /What still needs me\?/i }).click();
 
     // A question turn and an answer turn appear.
