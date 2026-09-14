@@ -93,7 +93,7 @@ const RECORD_COUNT = 5;
 
 /** The workflow axis, in canonical order, with the zero bucket included. */
 const WORKFLOW_BARS: [string, string][] = [
-  ['Load Record', '0'],
+  ['Record Created', '0'],
   ['Complete Metadata', '1'],
   ['Review Evidence', '1'],
   ['Review Export Readiness', '1'],
@@ -762,7 +762,7 @@ describe('Workflow Distribution', () => {
     const { container } = renderStatistics(statisticsRoutes());
     await settled();
 
-    // ONE ordered read of the visible spans. `Load Record` is at zero in this
+    // ONE ordered read of the visible spans. `Record Created` is at zero in this
     // fixture and must still draw its row: a distribution that silently omits
     // an empty bucket reshapes its own axis as records move.
     const caption = `Records by current workflow step, out of ${RECORD_COUNT} counted`;

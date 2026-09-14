@@ -53,7 +53,7 @@ import {
  */
 
 const WORKFLOW = [
-  { key: 'load_record', label: 'Load Record', value: 0 },
+  { key: 'load_record', label: 'Record Created', value: 0 },
   { key: 'complete_metadata', label: 'Complete Metadata', value: 1 },
   { key: 'export', label: 'Export', value: 3 },
 ];

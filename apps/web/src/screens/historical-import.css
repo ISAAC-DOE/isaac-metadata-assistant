@@ -16,33 +16,170 @@
  * text, never by a colour a reader would decode as approval.
  */
 
-.hi-lead {
-  font-size: var(--font-size-body);
-  line-height: var(--line-height-relaxed);
-  color: var(--text-secondary);
-  max-width: var(--content-max);
-  margin: var(--space-sm) 0 0;
+/* ══ THE SECTION SYSTEM ═══════════════════════════════════════════════════════
+ *
+ * WHAT WAS WRONG, MEASURED IN CHROMIUM BEFORE THIS CHANGE. The four sibling
+ * blocks on this screen were each `div.placeholder`, which declares a measure
+ * and nothing else: computed `background: rgba(0,0,0,0)`, `border-top-width: 0`,
+ * `padding: 0`, `margin-bottom: 0`. The three gaps BETWEEN them measured
+ * **8px, 4px and 0px** — not a rhythm, but whatever margin each block's last
+ * child happened to leave behind. There was no vertical-rhythm token at all, so
+ * "how far apart are two sections" had a different answer three times on one
+ * page and no answer a future edit could preserve.
+ *
+ * THE AUTHORITY IS THE COMMITTED SPEC, NOT TASTE. Three lines of it decide
+ * everything below:
+ *
+ *   `05-design-system/spacing-layout.md:19`
+ *     "Card interiors 14–24px; gaps between cards 10–16px"
+ *   `05-design-system/spacing-layout.md:47`
+ *     "**Card** — `background:#fff; border:1px solid #e4e9ef; border-radius:12px;`
+ *      interior padding 14–20px."
+ *   `05-design-system/spacing-layout.md:71-72`
+ *     "separate unrelated blocks ... with clear structural breaks (a card each)"
+ *
+ * So each section IS a card — `--surface`, a quiet 1px `--border` on ALL sides,
+ * `--radius-card` (12px) — and `.hi-screen` owns the ONE gap between them:
+ * `--space-lg`, 16px, the top of the spec's 10–16px band. Interior padding is
+ * the same `--space-lg`, inside the spec's 14–24px band and identical to
+ * `.queue-empty-action`'s 16px on `/experiments`, so the two screens read as one
+ * card language rather than two.
+ *
+ * `> :last-child { margin-bottom: 0 }` IS THE FIX FOR THE 8/4/0 RESIDUE, and it
+ * is the reason the gap is now a property of the CONTAINER rather than of
+ * whichever element a section happens to end with.
+ *
+ * NO RAIL, and this is not incidental: `no-vertical-rail-rule.md:26` lists
+ * "**quiet whole-card border** — a full 1px border, same on all sides" as the
+ * approved pattern, and that is what these are. Nothing on this screen carries a
+ * coloured left edge.
+ */
+.hi-screen {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-lg);
+
+  /*
+   * ONE PROSE MEASURE FOR THE WHOLE SCREEN.
+   *
+   * MEASURED BEFORE: three different body measures on one page — the lead at
+   * 556.8px, the empty-state prose at 895.9px, the name input at 1192px — and
+   * lines running to **138 characters**. `spacing-layout.md:14` ("Content column
+   * caps: S2 ~1040px, S4 ~720px") is the cap this screen was ignoring.
+   *
+   * WHY `em` AND NOT `ch`, WHICH IS WHAT THE REST OF THE APP USES.
+   *
+   * `screens.css` caps page prose at `68ch` and `queue.css:429` caps
+   * `/experiments`' lede at `64ch`, so `ch` was the obvious choice and I measured
+   * it first. It lands almost exactly on a threshold:
+   *
+   *   Impeccable's `line-length` rule (`detector/rules/checks.mjs:3108-3113`)
+   *   computes `chars = rect.width / (fontSize * 0.5)` and fires above
+   *   `lineMax + 5` = **85**.
+   *
+   *   `68ch` measured 556.8px at 13px -> 556.8 / 6.5 = **85.66. It fires.**
+   *   It fires at EVERY prose size, because `68ch` is ~42.8em whatever the
+   *   font-size, so the ratio is a constant 85.66.
+   *
+   * `38em` is 19 of those notional characters clear of the threshold (**76**),
+   * inside the skill's own stated "aim for <80", and well inside the spec's
+   * pixel cap at every size this screen paints (494px at 13px, 418px at 11px).
+   *
+   * AND `em` REMOVES A PLATFORM SPLIT RATHER THAN JUST A NUMBER. `ch` is the
+   * advance width of the `0` glyph, which differs between the macOS face and the
+   * DejaVu/Liberation face `ubuntu-latest` resolves `--font-ui` to — so the same
+   * `68ch` is a different pixel width, and therefore a different wrap boundary,
+   * in CI than on a laptop. `layout-widths.spec.ts`'s header says exactly this
+   * ("a wrap boundary — and therefore a clip — can exist on one and not the
+   * other. **CI (Linux) is the authority**"). `em` resolves off `font-size`
+   * alone, so the measure is identical on both.
+   */
+  --hi-prose: 38em;
 }
 
-.hi-h2 {
+/* The page header. Eyebrow, `<h1>`, lead — and no card, because it is the
+   screen's title block rather than one of its sections. */
+.hi-page-head {
+  max-width: var(--content-max);
+}
+
+.hi-page-head .eyebrow {
+  display: block;
+  margin-bottom: var(--space-sm);
+}
+
+.hi-section {
+  max-width: var(--content-max);
+  padding: var(--space-lg);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+}
+
+/* THE RESIDUE STOPS HERE. See the block comment above. */
+.hi-section > :last-child {
+  margin-bottom: 0;
+}
+
+/*
+ * THE TYPE LADDER — three levels, each one straight off `typography.md:46-49`:
+ *
+ *   Page title (H2)   22px / 600   -> `.page-title` from `screens.css`
+ *   Section title     17px / 600   -> `.hi-section-title`
+ *   Card / row title  14–15px/600  -> `.hi-group-title`  (`--font-size-heading-sm`, 15px)
+ *
+ * It replaced FOUR levels (22 / 17 / 15 / 13) in which the fourth — a 13px
+ * semibold `.hi-h4` — was the same size as the body text beside it and so read
+ * as emphasis rather than as an outline level. A section title and a group title
+ * inside it are now two steps apart on the recorded scale, which is the
+ * "perceptibility bar" `type-scale-and-spacing.test.ts` enforces for the scale
+ * itself.
+ */
+.hi-section-title {
   font-size: var(--font-size-heading-md);
   font-weight: var(--font-weight-semibold);
   color: var(--text-heading);
   margin: 0 0 var(--space-sm);
 }
 
-.hi-h3 {
+/* A section title with a control beside it (the session header's Back button).
+   Baseline-aligned so the button sits on the title's own line rather than
+   floating against the top of a wrapped heading. */
+.hi-section-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-sm);
+  margin: 0 0 var(--space-sm);
+}
+
+.hi-section-head > .hi-section-title {
+  margin: 0;
+}
+
+/* The session header's eyebrow. `.eyebrow` (base.css) supplies the family, size,
+   weight, tracking and colour — `typography.md:55` — and this adds only the two
+   things a span in flow needs: its own line, and the 8px it sits above the
+   title. Same pattern as `.hi-page-head .eyebrow`. */
+.hi-session-eyebrow {
+  display: block;
+  margin-bottom: var(--space-sm);
+}
+
+.hi-group-title {
   font-size: var(--font-size-heading-sm);
   font-weight: var(--font-weight-semibold);
   color: var(--text-heading);
   margin: 0 0 var(--space-xs);
 }
 
-.hi-h4 {
+.hi-lead {
   font-size: var(--font-size-body);
-  font-weight: var(--font-weight-semibold);
-  color: var(--text-strong);
-  margin: var(--space-md) 0 var(--space-2xs);
+  line-height: var(--line-height-relaxed);
+  color: var(--text-secondary);
+  max-width: var(--hi-prose);
+  margin: var(--space-sm) 0 0;
 }
 
 .hi-body,
@@ -50,8 +187,10 @@
 .hi-counts,
 .hi-sub {
   line-height: var(--line-height-relaxed);
-  max-width: var(--content-max);
-  margin: 0 0 var(--space-xs);
+  max-width: var(--hi-prose);
+  /* 8px, not the 4px this was: three `.hi-body` paragraphs stack on the Sources
+     section and at 13px/1.7 a 4px gap makes them read as one block. */
+  margin: 0 0 var(--space-sm);
 }
 
 .hi-body {
@@ -118,10 +257,28 @@
   padding: 0;
 }
 
+/*
+ * PADDING. The Impeccable in-browser detector reported `cramped-padding` five
+ * times on this one selector, and it was right: `2px 8px`.
+ *
+ * `spacing-layout.md:56-57` gives the chip primitive as `padding: 5px 11px;
+ * border-radius: 999px`. 5 and 11 are not rungs on THIS repository's recorded
+ * scale (`tokens.css`: 2 / 4 / 8 / 12 / 16 / 24) and
+ * `type-scale-and-spacing.test.ts` sits at its ceiling, so a new raw literal is
+ * refused. `--space-xs var(--space-md)` — 4px 12px — is the nearest pair of
+ * rungs either side of the spec's pair, so the chip is the spec's chip built
+ * from this repo's tokens.
+ *
+ * WHY NOT 8px VERTICAL. `e2e/specs/pill-shape.spec.ts:179` requires a
+ * single-line stage chip to measure under 32px tall ("one line of
+ * `--font-size-meta` plus this chip's padding, with room to spare"). 11px at the
+ * inherited 1.55 line-height is ~17px, so 8px padding plus 2px border lands at
+ * ~35px and would fail that guard. 4px lands at ~27px.
+ */
 .hi-step {
   border: 1px solid var(--border);
   border-radius: var(--radius-pill);
-  padding: var(--space-2xs) var(--space-sm);
+  padding: var(--space-xs) var(--space-md);
   background: var(--surface-subtle);
   font-size: var(--font-size-meta);
   color: var(--text-secondary);
@@ -158,6 +315,25 @@
    */
   border-radius: var(--radius-inner);
 }
+
+/*
+ * ── ONE THING THIS REDESIGN DID NOT CHANGE, AND THE MEASUREMENT THAT SAYS WHY ─
+ *
+ * The strip is 74px tall at 1280px because the `.unbuilt` note is 74px and the
+ * five stage pills are 27px, so there is ~47px of empty white beneath the pills.
+ * I tried the obvious repair — `flex-basis: 100%` on `.hi-step.unbuilt`, to push
+ * the note onto its own line in this `flex-wrap: wrap` row — and it is **inert**:
+ * flex line-breaking uses the hypothetical main size, which `max-width: 22rem`
+ * clamps to 352px, so the item still fits beside `Review` and nothing moves.
+ * Measured at 1280: the note stayed at `x: 681, y: 390`, on the pills' own line,
+ * with and without the declaration.
+ *
+ * It is left as it is rather than forced, because the mechanisms that WOULD work
+ * (dropping the 22rem cap so the note spans the card, or re-ordering the list)
+ * change the shape the previous slice deliberately chose for this element, and
+ * that shape is out of this slice's scope. Recorded as an observation, not as a
+ * fix, so the next reader does not re-try the inert one.
+ */
 
 .hi-step-label {
   font-weight: var(--font-weight-medium);
@@ -205,25 +381,77 @@
   font-variant-numeric: tabular-nums;
 }
 
+/*
+ * THE EMPTY STATE — the card idiom `/experiments` already ships, reused rather
+ * than a third one invented.
+ *
+ * MEASURED BEFORE: a 20×20 icon flush-left at x=275 with NO container, then a
+ * `<strong>`, then a paragraph at a third body measure (895.9px). The icon had
+ * nothing to sit in and the whole block had nothing to sit on, so it read as
+ * three unrelated fragments dropped on the canvas.
+ *
+ * WHAT IT COPIES, and from where — `components/queue.css`:
+ *   `.queue-empty-action`       (:475) flex row, gap 14px, 16px padding,
+ *                                      `--surface`, quiet 1px border, radius
+ *   `.queue-empty-action-mark`  (:505) 30×30 square, `--radius-token`, tinted
+ *   `.queue-empty-action-title` (:531) 600 weight, `--text-heading`
+ *   `.queue-empty-hint`         (:566) secondary body beneath the title
+ *
+ * The gap and the two type sizes are this repo's tokens rather than
+ * `queue.css`'s literals (14px / 13.5px / 12.5px), because the spacing and
+ * font-size ratchets in `type-scale-and-spacing.test.ts` are at their ceilings —
+ * `--space-md` (12px) for the gutter, `--font-size-heading-sm` (15px) for the
+ * title, which is `typography.md:49`'s "Card / row title 14–15px / 600".
+ *
+ * NO ACTION IN THIS CARD, deliberately, and it is the one place this diverges
+ * from the `/experiments` pattern the redesign brief points at. The only act
+ * available here is `Start an Import`, and its control is the primary button in
+ * the section directly above — `ExperimentsHome.tsx:585-601` records the
+ * double-CTA argument at length ("a SECOND call to action ... the empty state
+ * wins the CTA"). A second button with the same label 200px lower would be that
+ * defect, so the card states the situation and points at nothing.
+ */
 .hi-empty {
   display: flex;
-  flex-direction: column;
   align-items: flex-start;
-  gap: var(--space-xs);
-  padding: var(--space-lg) 0;
-  color: var(--text-muted);
+  gap: var(--space-md);
+  padding: var(--space-lg);
+  background: var(--surface-subtle);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-inner);
 }
 
-.hi-empty strong {
+.hi-empty-mark {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: var(--radius-token);
+  background: var(--action-tint);
+  color: var(--action);
+}
+
+/* min-width:0 so the paragraph wraps inside the flex row instead of forcing the
+   row wider than the card at 320px — the same reason `.queue-empty-lede-text`
+   carries it (`queue.css:424-430`). */
+.hi-empty-main {
+  min-width: 0;
+  max-width: var(--hi-prose);
+}
+
+.hi-empty-title {
+  margin: 0 0 var(--space-xs);
   font-size: var(--font-size-heading-sm);
-  color: var(--text-strong);
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-heading);
 }
 
-.hi-empty p {
+.hi-empty-body {
   margin: 0;
   font-size: var(--font-size-body);
   color: var(--text-secondary);
-  max-width: var(--content-max);
   line-height: var(--line-height-relaxed);
 }
 
@@ -293,20 +521,34 @@
 .hi-sent {
   display: flex;
   align-items: flex-start;
-  gap: var(--space-2xs);
+  gap: var(--space-sm);
   font-size: var(--font-size-meta);
   line-height: var(--line-height-relaxed);
-  max-width: var(--content-max);
+  max-width: var(--hi-prose);
   margin: var(--space-xs) 0 0;
 }
 
+/*
+ * PADDING, MEASURED RATHER THAN CHOSEN. All three were `var(--space-xs)` — 4px on
+ * every side of a bordered, tinted box holding a sentence — and Impeccable's
+ * `cramped-padding` rule (`detector/rules/checks.mjs:3123-3151`) reported
+ * `p.hi-blocked`: "4px horizontal padding (need >=8px for 11px text)". Its
+ * thresholds are `max(4, fontSize x 0.3)` vertical and `max(8, fontSize x 0.5)`
+ * horizontal, so at 11px the floor is 4 / 8.
+ *
+ * `--space-sm var(--space-md)` (8px / 12px) clears both with margin rather than
+ * landing exactly on the floor, and both are rungs on the recorded scale. The
+ * two `.hi-warn`/`.hi-refusal` boxes did not fire only because neither was
+ * rendered at the moment of measurement — they share the defect and share the
+ * fix, which is the point of keeping them in one rule.
+ */
 .hi-warn,
 .hi-refusal {
   color: var(--advisory-text);
   background: var(--advisory-bg);
   border: 1px solid var(--advisory-border);
   border-radius: var(--radius-inner);
-  padding: var(--space-xs);
+  padding: var(--space-sm) var(--space-md);
 }
 
 .hi-blocked {
@@ -314,11 +556,32 @@
   background: var(--missing-bg);
   border: 1px solid var(--missing-border);
   border-radius: var(--radius-inner);
-  padding: var(--space-xs);
+  padding: var(--space-sm) var(--space-md);
 }
 
 .hi-sent {
   color: var(--text-secondary);
+}
+
+/*
+ * A 14px ICON WAS RENDERING 3.1px WIDE.
+ *
+ * Measured in Chromium on a blocked candidate: the `CircleAlert` in
+ * `p.hi-blocked` reported `3.1 x 14` against its own `width="14"`. These four
+ * rules are flex rows and the SVG is a flex item with `flex-shrink: 1` by
+ * default, so a long text sibling shrank it to 22% of its width — a vertical
+ * sliver where a warning glyph should be. It is `aria-hidden`, so no
+ * accessibility check could see it and no test could measure it (jsdom computes
+ * no layout).
+ *
+ * `flex: none` is the fix; the gap also moves 2px -> 8px, because at 2px the
+ * glyph and the first word were touching. Both are rungs on the recorded scale.
+ */
+.hi-warn > svg,
+.hi-refusal > svg,
+.hi-blocked > svg,
+.hi-sent > svg {
+  flex: none;
 }
 
 /* --- forms ----------------------------------------------------------------- */
@@ -335,9 +598,28 @@
   min-width: 16rem;
 }
 
+/*
+ * THE NAME INPUT WAS 1192px WIDE.
+ *
+ * MEASURED BEFORE: `.hi-input` is `width: 100%` and its only bounding box was
+ * `.placeholder`'s `var(--content-max)` — 1200px in the `wide` mode — so the
+ * one-line field for "name this import" ran the full width of the screen. The
+ * equivalent control on `/experiments` measures **344px**: a 3.5x difference for
+ * the same act.
+ *
+ * `42ch` is not a new number either. It is the cap `queue.css:626` puts on
+ * `.create-experiment`, which is where that 344px comes from — so the two
+ * screens now size a short text field the same way, from the same value, and a
+ * `ch` unit keeps it tied to the rendered font rather than to a guessed pixel
+ * count. `.hi-input` keeps `width: 100%` and fills this box, so the cap applies
+ * to every field on the screen (name, file name, reference, checksum, the
+ * example-source select, the two ids on a candidate) instead of only the one
+ * that was measured.
+ */
 .hi-field {
   display: block;
-  margin: 0 0 var(--space-xs);
+  max-width: 42ch;
+  margin: 0 0 var(--space-sm);
 }
 
 .hi-field-label {
@@ -360,8 +642,24 @@
   padding: var(--space-2xs) var(--space-xs);
 }
 
+/*
+ * `--ring-active` IS A BOX-SHADOW VALUE, NOT A COLOUR, so this rule drew nothing.
+ *
+ * It read `outline: 2px solid var(--ring-active)`, and that token is
+ * `0 0 0 4px rgba(44, 106, 176, 0.15)` (`tokens.css`). `var()` resolves at
+ * computed-value time rather than parse time, so the declaration SURVIVES the
+ * parser -- which is why nothing ever flagged it -- and then becomes
+ * invalid-at-computed-value-time, leaving `outline-style: none`.
+ *
+ * Measured in Chromium rather than reasoned, on a probe element:
+ *   `2px solid var(--ring-active)` -> outline-style: none
+ *   `2px solid var(--action)`      -> outline-style: solid, 2px, rgb(44,106,176)
+ *
+ * So the name input on this screen had NO keyboard focus ring at all.
+ * `var(--action)` is what every other focusable control in this app uses.
+ */
 .hi-input:focus-visible {
-  outline: 2px solid var(--ring-active);
+  outline: 2px solid var(--action);
   outline-offset: 1px;
 }
 
@@ -394,12 +692,24 @@
   padding: var(--space-2xs) 0;
 }
 
+/*
+ * THE LAST UNCAPPED PROSE ON THE SCREEN, and it took the session view to find it.
+ *
+ * These two lists hold a sentence per entry — the reason a line was passed over,
+ * and who asserts a competing value — inside a `flex-direction: column` item that
+ * inherited the section card's full width. Measured in the session view after
+ * reading a source: one skipped-line message ("This line has no `=`, so ...")
+ * rendered at **168 characters per line** by the `line-length` formula, on a bare
+ * `<span>` that no selector on this screen reached. Capping the ITEM caps the
+ * span inside it, because a column item's children are as wide as the item.
+ */
 .hi-skipped li,
 .hi-disagreement li {
   display: flex;
   flex-direction: column;
   gap: var(--space-2xs);
   padding: var(--space-2xs) 0;
+  max-width: var(--hi-prose);
   color: var(--text-muted);
 }
 
@@ -496,6 +806,9 @@
   font-size: var(--font-size-meta);
   color: var(--text-secondary);
   line-height: var(--line-height-relaxed);
+  /* The warrant is prose, so it takes the screen's ONE prose measure like every
+     other paragraph here — it was previously uncapped inside a 1200px card. */
+  max-width: var(--hi-prose);
   margin: 0;
 }
 

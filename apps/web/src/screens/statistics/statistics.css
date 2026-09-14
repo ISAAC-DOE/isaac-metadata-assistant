@@ -1579,8 +1579,31 @@
   gap: 6px;
   min-width: 0;
   padding: 12px 14px;
+  /*
+   * NO THICKENED LEFT BORDER. `design-handoff/05-design-system/no-vertical-rail-rule.md`
+   * removes the coloured left-border stripe from the design language for "status
+   * cards" among others, and says so absolutely: "There is no exception."
+   *
+   * This card carried a 3px left-side border in `--border-strong` over the 1px box
+   * below. The declaration is DESCRIBED rather than quoted verbatim on purpose:
+   * the detector is regex-based and does not strip comments, so writing the
+   * removed property in code form re-flagged this exact line after the fix —
+   * measured, findings stayed at 4 until this sentence was reworded. Same shape
+   * as the CSS-phantom sweep in `CLAUDE.md` §11 that counted `var()` inside the
+   * comments documenting retired tokens.
+   * Found MECHANICALLY rather than by eye: Impeccable's detector flagged it as
+   * `side-tab` (warning) at this line. Its sibling finding in `graph/graph.css` is a
+   * FALSE POSITIVE and was deliberately left alone — that one is
+   * `.graph-help-swatch.shape-arrow::after`, a `content: ''` box whose transparent
+   * top/bottom borders and solid left border draw an ARROWHEAD for the graph legend,
+   * not a rail.
+   *
+   * The replacement is straight from that rule's approved table: a "quiet whole-card
+   * border — a full 1px border, same on all sides", which this card already has,
+   * plus the "soft full-card tint" it already carries in `background`. Nothing is
+   * lost; the emphasis was already being carried twice.
+   */
   border: 1px solid var(--border);
-  border-left: 3px solid var(--border-strong);
   border-radius: var(--radius-inner);
   background: var(--surface-subtle);
 }
