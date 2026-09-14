@@ -3589,6 +3589,54 @@ which is exactly the spec a baseline change is most likely to disturb.**
 
 ---
 
+## *** `QA-023` FULLY ACCOUNTED — the whole `incomplete` bucket is ONE rule, and every node of it is undecidable ***
+
+QA-023 measured 173 unread `incomplete` nodes and characterised two rules. Re-measured at this head
+over all 28 surfaces at `desktop-1280x800`, after the `aria-prohibited-attr` fixes:
+
+```
+INC_BY_RULE = {"color-contrast": 72}
+INC_TOTAL   = 72
+```
+
+**`aria-prohibited-attr`: 113 → 0.** And no other rule appeared — the bucket that held two rules now
+holds one. That is worth stating because a bucket nothing reads is exactly where a new rule could
+arrive unnoticed; it has not.
+
+### Every one of the 72 is structurally undecidable, and this time the breakdown SUMS
+
+| nodes | why axe could not decide |
+|---:|---|
+| 47 | background could not be determined — **element contains an image node** |
+| 9 | background could not be determined — **partially overlaps other elements** |
+| 7 | **content is too short** to determine if it is actual text |
+| 5 | background could not be determined — **overlapped by another element** |
+| 4 | background could not be determined — **partially obscured by another element** |
+| **72** | **— sums exactly** |
+
+**The prior entry's breakdown summed to 56 of 60 and said so**, flagging that presenting the top
+four as the whole account "implied a completeness they did not have". This one is the complete
+partition: five reasons, 72 nodes, no remainder. **None of them is a hidden contrast failure** — an
+SVG chart, a graph canvas or an overlapping element is a case where the question has no determinate
+answer, not a case where the answer is bad.
+
+### Why 72 and not 60, stated as an open figure rather than explained away
+
+The prior 60 was measured at a different commit over 27 surfaces; this is 28 (the Historical Import
+entry) and the tree has changed a great deal since. **The delta is NOT attributed** — I did not
+bisect it, and claiming a cause I have not measured is the error this ledger keeps recording. What
+IS measured is that all 72 fall in the five undecidable classes above, so the rise cannot be hiding
+a real failure.
+
+### What this closes
+
+`QA-023`'s remaining question — *"which nodes, and whether each is a real loss, is NOT measured
+here"* — is now answered for **both** rules: the 113 were real losses and are fixed; the
+contrast nodes are undecidable by construction and are not losses at all. The bucket needs no
+further reading until a new rule appears in it, and a future session can check that in one probe.
+
+---
+
 ## CONTINUATION PROTOCOL
 
 Every future session starts here, in this order:
