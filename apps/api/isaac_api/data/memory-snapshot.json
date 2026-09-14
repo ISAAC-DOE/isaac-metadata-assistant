@@ -10384,7 +10384,7 @@
       },
       {
         "path": "apps/web/src/__tests__/navigation.test.tsx",
-        "sha256": "016f28b21b4154994899be133174aae475d34a98d8256a5c3963bf3592dfdd75"
+        "sha256": "53dc1bcc042f0e6bc2fa8f4b72de6017b1b34ea46ec56472fed58a736dd4e792"
       },
       {
         "path": "apps/web/src/__tests__/no-vertical-rail.test.ts",
@@ -10412,7 +10412,7 @@
       },
       {
         "path": "apps/web/src/components/AssistantPanel.tsx",
-        "sha256": "c57293a5d1b87b5c007157f3e2bb6f557ef0cfc8a8db63ac4f5b3669e29c8761"
+        "sha256": "92bbdc29d5c6544e1c4e97d8dec5aaf889a040a8df636bfe6896e9b3c6ab00d8"
       },
       {
         "path": "apps/web/src/components/CoverageBadge.tsx",
@@ -10444,7 +10444,7 @@
       },
       {
         "path": "apps/web/src/components/FieldRow.tsx",
-        "sha256": "b1758c6d449ec4c18ed182406d62396eeb13012ef8b49d48e3ba2430e58ecf51"
+        "sha256": "572e24375b56e89a5fb8fd88ba9115179cfb5fbb2e49c5f806470ac516277aca"
       },
       {
         "path": "apps/web/src/components/GovernanceBanner.tsx",
@@ -10460,7 +10460,7 @@
       },
       {
         "path": "apps/web/src/components/HelpPanel.tsx",
-        "sha256": "12adfcf7d3a628fa1f8796003d160d040cd614f45fd931cb73f69ecbb276a71b"
+        "sha256": "4c2d90ce1c1489cf94eef5aca355f30ec72bce6364ec9a940c7f42e03b74a283"
       },
       {
         "path": "apps/web/src/components/LeftNav.tsx",
@@ -10492,7 +10492,7 @@
       },
       {
         "path": "apps/web/src/components/WorkflowSpine.tsx",
-        "sha256": "b2d12f4adea568c9a3b09739f883bb90a64d9369104368055c85c8e774117208"
+        "sha256": "12a85999ab98412700639d38e658ce97e8ac4ea7cf440cd3548a2b14c49e1510"
       },
       {
         "path": "apps/web/src/components/icons.tsx",
@@ -10512,11 +10512,11 @@
       },
       {
         "path": "apps/web/src/lib/labels.ts",
-        "sha256": "dad731f0552fc41b7c567f60e877a24a3eb71cb7428f1a61347c2c5904410987"
+        "sha256": "7c617760ed6cd2b0218dce0295e8a4215e3c5543ac02b9be154dcacf3772c05f"
       },
       {
         "path": "apps/web/src/lib/routes.ts",
-        "sha256": "f3d47366ebfb423e16e74568ea76b65c3c3fa8c233a2fcdc583c5109f0de3509"
+        "sha256": "50b6db927b2c1536fffd20473b779ef021f842dbdc011311f8435d99efdea50a"
       },
       {
         "path": "apps/web/src/lib/status.ts",
@@ -10564,7 +10564,7 @@
       },
       {
         "path": "apps/web/src/screens/RecordWorkbench.tsx",
-        "sha256": "cafb376298220c482b075a885bf659258af44e0e4d4e4b74ef894cd95509fbfc"
+        "sha256": "f72bdf30f58ead8c4003da46cdca5df68cc7fc23c6fbdbd707a0efc789222a0b"
       },
       {
         "path": "apps/web/src/screens/SettingsPage.tsx",
@@ -10572,7 +10572,7 @@
       },
       {
         "path": "apps/web/src/test/apiFixtures.ts",
-        "sha256": "6a737c6a03cc85b29e86b99fef8e4e0f742d96c4d35fa1212294ff513bb1c705"
+        "sha256": "47a6f420a9cab5d0fecf4c40b117ed6ca35f0e45395c4104f3fa8e621b48cf96"
       },
       {
         "path": "apps/web/src/test/setup.ts",
@@ -11012,7 +11012,7 @@
       }
     ],
     "served_file_count": 200,
-    "served_manifest_fingerprint": "8f92f20d3b41e0126bdd1661096d020ccafb67fcc6f1a3cb5c2852dca48cf837"
+    "served_manifest_fingerprint": "55d3be4d6c311ff4f1e7d30e9c8457117916569fe58ec7b972926356f7b845a7"
   },
   "overview": {
     "built_at_commit": "caab1d0a69c1733524bda5dde495623bc4b7bad1",

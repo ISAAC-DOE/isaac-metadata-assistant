@@ -64,8 +64,54 @@ export function FieldRow({ field, capture }: FieldRowProps) {
       <div className="field-value-col">
         <div className="field-value-row">
           {needsYou || missing ? (
-            <span className="field-value awaiting">
-              {needsYou ? 'awaiting your confirmation' : 'honestly missing'}
+            /*
+             * ONE ANNOUNCEMENT, IN ONE REGISTER — UX casing conformance,
+             * 2026-09-14.
+             *
+             * ~~`{needsYou ? 'awaiting your confirmation' : 'honestly missing'}`~~ —
+             * two hardcoded lowercase literals (never in `LABELS`), rendered at
+             * 12px italic in the VALUE slot, 10px to the left of a `<StatusChip>`
+             * reading `Needs You` / `Missing` in Title Case. So one state was
+             * announced TWICE in one 22px row, in two different registers, and
+             * `casing-and-copy.md:12` puts "status chips, badge labels" in
+             * Register 1 — which is the chip, not this span.
+             *
+             * THE CHIP WINS, and the value slot stops speaking. Three reasons,
+             * in order of weight:
+             *   1. The chip is the registry-driven status system (`CHIP_META` in
+             *      `lib/status.ts`, icon + label, never colour alone). Its words
+             *      are the spec's own approved ones — `casing-and-copy.md:53`
+             *      maps the `pending` status to **`Needs You`**, which is
+             *      `LABELS.chipNeedsYou` and is exactly what renders here now.
+             *      Keeping the TEXT instead would have meant dropping the chip,
+             *      deleting the icon and the amber attention affordance for
+             *      precisely the two states that need them, and desynchronising
+             *      this row from every other chip surface in the app.
+             *   2. This column's job is the VALUE. When there is none, a dash is
+             *      the honest placeholder; a second sentence about the status is
+             *      not a value.
+             *   3. `aria-hidden` on the dash means the row announces its status
+             *      exactly once to a screen reader, where before it announced it
+             *      twice in two vocabularies.
+             *
+             * NOTHING IS LOST IN WORDS. `mapFieldStatus` maps
+             * `needs_confirmation` -> `needsYou` and `missing`/`rejected` ->
+             * `missing`, so the chip's condition is byte-for-byte this branch's
+             * condition — the two states stay distinguishable. The row's own
+             * prose (`.field-helper`, `.field-capture-hint`) still says in
+             * Register 2 where the value is entered, and the styling that made
+             * this slot read as "not a value" (`.field-value.awaiting`: sans,
+             * italic, muted) is untouched and still does that work.
+             *
+             * THE APPROVED PROSE IS ELSEWHERE AND IS NOT THIS.
+             * `casing-and-copy.md:67` approves "Leave honestly missing — a blank
+             * stays blank until you confirm it" as Register 2 copy, and
+             * `LABELS.actionDontKnow` ("I don't know — leave honestly missing")
+             * renders it on /complete. That sentence is DELIBERATELY unchanged;
+             * it is prose a reader acts on, not a label in a status slot.
+             */
+            <span className="field-value awaiting" aria-hidden="true">
+              —
             </span>
           ) : (
             <span className="field-value">

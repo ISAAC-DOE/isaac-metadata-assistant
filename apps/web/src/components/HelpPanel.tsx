@@ -11,7 +11,7 @@ import { CANONICAL_STEPS } from '../lib/workflowSteps';
  *
  * This list used to be authored here from five now-deleted `LABELS` entries —
  * Draft · Complete · Export · Validate · Audit — while every per-record surface
- * in the same product showed the server-derived spine: Load Record · Complete
+ * in the same product showed the server-derived spine: Record Created · Complete
  * Metadata · Review Evidence · Review Export Readiness · Export. A first-timer
  * opening Help was taught the five words that appear nowhere else in the app.
  *
@@ -729,8 +729,16 @@ export function HelpPanel() {
                     2. NOT EVERY FIELD, AND THAT IS BY DESIGN. `FieldRow.tsx:81` gates the
                        evidence block on `field.evidence && field.evidence.length > 0`, and
                        `CLAUDE.md` §5 guarantees fields with no evidence exist on purpose —
-                       `FieldRow.tsx:68` renders the literal `'honestly missing'` for
-                       exactly that case. So the product deliberately ships fields with no
+                       ~~`FieldRow.tsx:68` renders the literal `'honestly missing'` for
+                       exactly that case~~ — **corrected 2026-09-14, casing conformance.**
+                       That literal is GONE: it was one of two hardcoded lowercase strings
+                       rendered in the value slot beside a Title Case `<StatusChip>`, so the
+                       row announced one state twice in two registers. The row now renders an
+                       `aria-hidden` dash there and lets the chip carry the words, which for
+                       the evidence-free case reads `Missing` (`LABELS.chipMissing`). The
+                       claim this footnote supports is UNCHANGED and is still true — the
+                       state is still rendered, and still carries no citation — only the
+                       mechanism that renders it moved. So the product deliberately ships fields with no
                        citation while Help told the scientist every field had one. This is
                        the worst of the three: it contradicts the policy the product is
                        FOR.

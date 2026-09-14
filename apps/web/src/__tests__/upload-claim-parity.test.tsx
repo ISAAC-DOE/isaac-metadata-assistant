@@ -721,7 +721,20 @@ describe('R1b §4 · the guard rejects the exact strings that shipped', () => {
  * they belong INSIDE the ban, and the correct response to the failure was to
  * admit them and let the bans judge them, not to exempt them.
  */
-const CAPTURE_COPY_KEY_COUNTS = { total: 92, strings: 88, functions: 4 };
+/*
+ * 92 -> 95 (strings 88 -> 91), 2026-09-14: the FOURTH intake route's three keys
+ * (`intakeRunTitle`, `intakeRunBody`, `intakeRunAction`).
+ *
+ * THE RATCHET DID ITS JOB A SECOND TIME, in exactly the way the 2026-09-13 note
+ * above describes, and the response is the same one: admit the keys and let the
+ * bans judge them. `intakeRunBody` is claim-bearing — it says this route is the
+ * one where the scientist enters a value directly rather than ISAAC proposing
+ * one, and that nothing there needs confirmation afterwards. That is a statement
+ * about what the build does, so it belongs INSIDE the ban, not exempted from it.
+ * All three pass the bans as written; none asserts that any route or endpoint
+ * does not exist.
+ */
+const CAPTURE_COPY_KEY_COUNTS = { total: 95, strings: 91, functions: 4 };
 
 function captureVoiceAudioHandling(): string {
   return CAPTURE_COPY.voiceAudioHandling;

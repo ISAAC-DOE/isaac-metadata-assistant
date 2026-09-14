@@ -212,7 +212,7 @@ export function MoveExperimentPanel({
           <Chevron className="fg-chevron" size={16} strokeWidth={2} aria-hidden="true" />
           <span className="fg-block">{LABELS.libraryMoveLabel}</span>
           <span className="record-section-key">folder</span>
-          <span className="record-section-summary">where this experiment is filed</span>
+          <span className="record-section-summary">Where this experiment is filed</span>
         </button>
       </h2>
       {expanded && (

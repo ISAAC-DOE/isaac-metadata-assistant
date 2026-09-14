@@ -25,10 +25,20 @@
   margin-bottom: 10px;
 }
 
+/*
+ * 15px / 600, NOT 650 — casing-and-copy/typography conformance, 2026-09-14.
+ * `typography.md:49` declares the card/row title tier as "Sans | 14-15px / 600";
+ * ~~`font-weight: 650`~~ was off-scale, and it was the heavier half of a tier
+ * carrying two different treatments (`.capture-intake-title`, the same 15px card
+ * title one workspace away, is 600). Same declared token as that rule now, so the
+ * tier has one weight. The CASE half of the same reconciliation went the other
+ * way: this title is already Register 1 ("Unmapped Notes"), and the capture cards moved up to
+ * match it rather than this moving down.
+ */
 .notes-title {
   margin: 0;
   font-size: 15px;
-  font-weight: 650;
+  font-weight: var(--font-weight-semibold);
   color: var(--text-heading);
 }
 
