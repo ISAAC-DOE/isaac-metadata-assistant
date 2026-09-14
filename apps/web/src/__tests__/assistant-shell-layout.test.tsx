@@ -427,8 +427,27 @@ describe('P36V.1 S2 · header is ONE balanced row', () => {
     expect(row).toMatch(/align-items:\s*center/);
     expect(row).toMatch(/flex-wrap:\s*nowrap/);
     expect(head).toMatch(/align-items:\s*center/);
-    // the status sits at the right edge and stays compact
-    expect(status).toMatch(/margin-left:\s*auto/);
+    /*
+     * THE STATUS SITS AT THE RIGHT EDGE, AND THIS NOW ASSERTS THE MECHANISM
+     * THAT PUTS IT THERE.
+     *
+     * It used to require `margin-left: auto` on the chip. Measured in Chromium
+     * at 1920 on the 275px record rail, that declaration's USED value was
+     * `0px`: `.assistant-workspace-context` is `flex: 1 1 auto` and had already
+     * absorbed all the free space, so the sentence was doing the pushing and
+     * the auto margin was inert. Where it was NOT inert was the wrapped row --
+     * there it drove the chip alone to the right edge under a left-aligned
+     * sentence, which is the ragged two-alignment header the owner reported.
+     *
+     * So the assertion moves to the thing that is load-bearing at every width,
+     * and adds the negative: the chip must NOT re-acquire an auto margin, or
+     * the wrapped case comes back.
+     */
+    const scope = ruleBody(assistantCss, '.assistant-workspace-context');
+    expect(scope, 'the scope sentence must grow to push the status right').toMatch(
+      /flex:\s*1\s+1\s+auto/,
+    );
+    expect(status).not.toMatch(/margin-left:\s*auto/);
     expect(status).toMatch(/flex:\s*none/);
 
     // the gap INSIDE the right group must visually match the gap between the
@@ -452,7 +471,15 @@ describe('P36V.1 S2 · header is ONE balanced row', () => {
     );
     expect(m, 'an intentional responsive header rule must exist').not.toBeNull();
     expect(m![1]).toMatch(/\.assistant-head-titles\s*\{[^}]*flex-wrap:\s*wrap/);
-    expect(m![1]).toMatch(/\.assistant-memory\s*\{[^}]*margin-left:\s*0/);
+    /*
+     * The `.assistant-memory { margin-left: 0 }` override this used to require
+     * is GONE, with the auto margin it existed to undo. It is not replaced by a
+     * narrower assertion because there is nothing left to assert: the chip
+     * carries no auto margin at any width (pinned above), so no width needs an
+     * exception. Worth recording rather than silently dropping -- that override
+     * was also keyed on the VIEWPORT while the wrap it addressed is driven by
+     * the 275px rail, so it never fired in the case it was written for.
+     */
   });
 });
 
