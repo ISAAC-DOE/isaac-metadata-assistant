@@ -95,3 +95,84 @@ describe('the record sidebar has ONE gutter', () => {
     ).toBe(true);
   });
 });
+
+/*
+ * AND THE GUARD ABOVE HAD A HOLE, WHICH A BROWSER FOUND ON 2026-09-14.
+ *
+ * It read the BASE rule and then forbade `.capture-nav` from declaring its own
+ * padding again. Both were true while the two landmarks still diverged: the
+ * `<=1024px` media query named `.workspace-nav` ALONE and moved it to a 10px
+ * gutter, leaving `.capture-nav` on the base rule's 12px. Nothing here looked
+ * inside a media query, and the divergence it re-opened was on the OTHER
+ * selector from the one the check watched.
+ *
+ * Measured with Playwright at 1024 and 390 before the fix: the `Runs` chip at
+ * `left: 23`, `Record Fields` at `left: 21`.
+ *
+ * So the invariant is restated over the WHOLE FILE: any rule that sets a
+ * horizontal padding for one of these two landmarks must name both. That is
+ * width-agnostic by construction -- a future media query, container query or
+ * `:has()` rule is covered without this file learning about it.
+ */
+describe('the gutter agrees in EVERY rule, not only the base one', () => {
+  const css = readFileSync(join(SRC, 'components/record-workspaces.css'), 'utf8');
+
+  /** Every rule in the file, with comments stripped so prose cannot match. */
+  const rules = (() => {
+    const bare = css.replace(/\/\*[\s\S]*?\*\//g, '');
+    const out: { selector: string; body: string }[] = [];
+    const re = /([^{}]+)\{([^{}]*)\}/g;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(bare)) !== null) {
+      const selector = m[1].replace(/\s+/g, ' ').trim();
+      // Skip the `@media (...)` preamble itself; its inner rules match on the
+      // next iterations because this pattern only ever captures innermost
+      // braces.
+      if (selector.startsWith('@')) continue;
+      out.push({ selector, body: m[2] });
+    }
+    return out;
+  })();
+
+  const SETS_HORIZONTAL =
+    /(?:^|;)\s*(?:padding(?:-left|-right)?|padding-inline(?:-start|-end)?)\s*:/;
+
+  it('is not vacuous — it finds the rules it means to check', () => {
+    const touching = rules.filter(
+      (r) => /\.workspace-nav\b/.test(r.selector) || /\.capture-nav\b/.test(r.selector),
+    );
+    expect(touching.length, 'no rule names either landmark — has the file moved?').toBeGreaterThan(
+      1,
+    );
+    const withPadding = touching.filter((r) => SETS_HORIZONTAL.test(r.body));
+    expect(
+      withPadding.length,
+      'no rule sets horizontal padding on either landmark — the check would pass trivially',
+    ).toBeGreaterThan(1);
+  });
+
+  it('MUTATION-GUARDED: every horizontal-padding rule names BOTH landmarks', () => {
+    /*
+     * MUTATION: narrowing the `<=1024px` rule back to `.workspace-nav` alone
+     * makes this RED and names the width band. That is the exact edit that
+     * shipped the 2px misalignment.
+     */
+    const offenders = rules
+      .filter((r) => SETS_HORIZONTAL.test(r.body))
+      .filter((r) => {
+        // A rule targeting the landmark ITSELF, not a descendant of it.
+        const parts = r.selector.split(',').map((p) => p.trim());
+        const namesWorkspace = parts.some((p) => p === '.workspace-nav');
+        const namesCapture = parts.some((p) => p === '.capture-nav');
+        return (namesWorkspace || namesCapture) && !(namesWorkspace && namesCapture);
+      })
+      .map((r) => r.selector);
+
+    expect(
+      offenders,
+      'a rule sets the horizontal gutter for one record-rail landmark but not the other. ' +
+        'They must move together or they drift apart at some width, which is how a 2px ' +
+        'misalignment between `Runs` and `Record Fields` reached the owner at 1024px and 390px.',
+    ).toEqual([]);
+  });
+});

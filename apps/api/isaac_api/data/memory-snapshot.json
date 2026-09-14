@@ -10492,7 +10492,7 @@
       },
       {
         "path": "apps/web/src/components/WorkflowSpine.tsx",
-        "sha256": "12a85999ab98412700639d38e658ce97e8ac4ea7cf440cd3548a2b14c49e1510"
+        "sha256": "6fe35d0ed1f74c3136cad029f6196131b8bbfd993af1d890237b7b6a929c8a08"
       },
       {
         "path": "apps/web/src/components/icons.tsx",
@@ -11012,7 +11012,7 @@
       }
     ],
     "served_file_count": 200,
-    "served_manifest_fingerprint": "55d3be4d6c311ff4f1e7d30e9c8457117916569fe58ec7b972926356f7b845a7"
+    "served_manifest_fingerprint": "06636f3178f3438f9307803baa49562fb18b2f3a56dad13cdae8a14990cae9b4"
   },
   "overview": {
     "built_at_commit": "caab1d0a69c1733524bda5dde495623bc4b7bad1",

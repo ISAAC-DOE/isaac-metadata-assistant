@@ -144,18 +144,30 @@ describe('I-2 · a non-current step reason stays in the DOM/a11y tree at narrow 
     expect(rule).toMatch(/clip-path\s*:\s*inset/);
     expect(rule).toMatch(/position\s*:\s*absolute/);
 
-    // And the `spine-meta` span itself never carries aria-hidden — icons
-    // elsewhere in this component legitimately do (they are decorative), so
-    // this checks the specific JSX line that renders the reason text, not
-    // the whole file.
-    const tsxSources = import.meta.glob('../components/WorkflowSpine.tsx', {
-      query: '?raw',
-      import: 'default',
-      eager: true,
-    }) as Record<string, string>;
-    const tsx = Object.values(tsxSources)[0];
-    const spineMetaLine = tsx.match(/<span className=\{`spine-meta[^>]*>/);
-    expect(spineMetaLine, 'the spine-meta span JSX must exist').not.toBeNull();
-    expect(spineMetaLine![0]).not.toMatch(/aria-hidden/);
+    /*
+     * And no `spine-meta` span carries `aria-hidden` — icons elsewhere in this
+     * component legitimately do (they are decorative), so this must name the
+     * reason-text element specifically rather than scanning the whole file.
+     *
+     * MEASURED OVER THE RENDERED DOM, NOT OVER THE SOURCE TEXT. It used to
+     * match `/<span className=\{`spine-meta[^>]*>/` against `WorkflowSpine.tsx`
+     * and assert the captured tag held no `aria-hidden`. That broke on
+     * 2026-09-14 when the span's className grew a second conditional and
+     * Prettier moved `className` onto its own line: the regex requires `<span`
+     * and `className` to be adjacent, so it returned `null` and the test failed
+     * with "the spine-meta span JSX must exist" — a reformat that changed
+     * nothing about the property being guarded.
+     *
+     * The DOM is what the guard is actually about, and it cannot be broken by
+     * formatting: every element carrying the class is checked, so a SECOND
+     * span acquiring `aria-hidden` is caught too, which the single-match regex
+     * could never have seen.
+     */
+    const { container } = renderSpine(BLOCKED_WORKFLOW, 'demo');
+    const metas = container.querySelectorAll('.spine-meta');
+    expect(metas.length, 'no spine-meta element rendered').toBeGreaterThan(0);
+    for (const meta of metas) {
+      expect(meta.hasAttribute('aria-hidden'), 'a reason element is hidden from AT').toBe(false);
+    }
   });
 });

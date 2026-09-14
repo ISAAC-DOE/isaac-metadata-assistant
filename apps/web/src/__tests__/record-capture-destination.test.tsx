@@ -182,7 +182,22 @@ describe('the promoted capture destination', () => {
       ...within(nav())
         .getAllByRole('link')
         .map((l) => l.getAttribute('aria-label') ?? l.textContent),
-    ]).toEqual(['Experiment Data', 'Record Fields', 'Runs']);
+    ]).toEqual([
+      /*
+       * ORDER CHANGED 2026-09-14: `Runs` JOINED THE CAPTURE GROUP, so it is now
+       * the second link in the capture landmark rather than the last in the
+       * workspace list. ~~['Experiment Data', 'Record Fields', 'Runs']~~
+       *
+       * The owner's words: "the runs should be a part of the initial capture and
+       * proposals". The assertion's PURPOSE is unchanged and is why it is
+       * updated rather than loosened -- it is the union over BOTH landmarks
+       * precisely so a destination that MOVES between them stays covered, which
+       * is the case it was written for and is now the case that happened.
+       */
+      'Experiment Data',
+      'Runs',
+      'Record Fields',
+    ]);
   });
 
   it('routes to ?view=capture, the destination that already exists', async () => {

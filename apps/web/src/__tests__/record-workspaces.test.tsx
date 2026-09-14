@@ -150,9 +150,19 @@ describe('the record workspace list', () => {
      * is REFUSED by its own dependency condition.
      */
     expect(links.map((l) => l.getAttribute('aria-label') ?? l.textContent)).toEqual([
+      /*
+       * ORDER CHANGED 2026-09-14 -- `Runs` joined the `Data Capture` group and
+       * is rendered as a child row under the `Experiment Data` card, so it
+       * precedes `Record Fields` in DOM order. ~~['Experiment Data', 'Record
+       * Fields', 'Runs']~~
+       *
+       * Still THREE, and still derived from the route contract below: the guard
+       * is that no `?view=` id becomes unreachable, and `Runs` is as reachable
+       * as it was -- one group higher.
+       */
       'Experiment Data',
-      'Record Fields',
       'Runs',
+      'Record Fields',
     ]);
     /*
      * STILL DERIVED FROM THE ROUTE CONTRACT, and the guard's PURPOSE is
@@ -682,7 +692,13 @@ describe('LIB-005 — reopen-and-continue: visiting a workspace remembers it', (
     await screen.findByRole('link', { name: 'Record Fields' });
     expect(lastRecordView(ID)).toBe('fields');
 
-    fireEvent.click(within(nav()).getByRole('link', { name: 'Runs' }));
+    /* `screen`, not `within(nav())`: `Runs` joined the `Data Capture` group on
+       2026-09-14, so it is no longer inside the `Record workspaces` landmark.
+       Which landmark holds it is incidental to this test -- its subject is that
+       clicking a sidebar destination updates the REMEMBERED view -- and the
+       name is unique across the screen, which `record-capture-destination`
+       asserts directly. */
+    fireEvent.click(screen.getByRole('link', { name: 'Runs' }));
     await waitFor(() => expect(address()).toContain('view=runs'));
     expect(lastRecordView(ID)).toBe('runs');
   });

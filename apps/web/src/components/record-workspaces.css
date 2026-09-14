@@ -147,6 +147,24 @@
   padding: 0;
 }
 
+/*
+ * THE CAPTURE GROUP'S CHILD ROWS -- `Runs`, beneath the `Experiment Data` card
+ * (project owner, 2026-09-14: "the runs should be a part of the initial capture
+ * and proposals").
+ *
+ * The indent is the ONLY new declaration. A child row is the same kind of thing
+ * as a row in the workspace list -- an ungated destination -- so it keeps
+ * `.workspace-nav-item` wholesale rather than growing a parallel look, and the
+ * nesting is carried by position alone: no new hue, radius, shadow, border,
+ * connector or custom property. A connector line in particular is deliberately
+ * absent, because that is the workflow spine's vocabulary and this group
+ * asserts no sequence between its members.
+ */
+.capture-nav-children {
+  margin-top: 2px;
+  padding-left: 10px;
+}
+
 .workspace-nav-row + .workspace-nav-row {
   margin-top: 2px;
 }
@@ -204,8 +222,31 @@
  * `LeftNav` shows there. That is accepted, not worked around.
  */
 @media (max-width: 1024px) {
+  /*
+   * VERTICAL ONLY -- THE HORIZONTAL GUTTER IS LEFT TO THE SHARED BASE RULE, and
+   * getting that wrong twice is why it is spelled out here.
+   *
+   * This rule used to read `padding: 0 10px 8px`, which set the gutter as a
+   * side effect of setting the vertical space, and named `.workspace-nav`
+   * alone. So below 1024px the workspace list moved to a 10px gutter while
+   * `.capture-nav` stayed on the base rule's 12px. Measured with Playwright at
+   * 1024 and 390: `Runs` at `left: 23`, `Record Fields` at `left: 21` -- two
+   * sibling rows in one rail, off by 2px.
+   *
+   * THE FIRST REPAIR WENT THE WRONG WAY: sharing `padding-left/right: 10px`
+   * between the two landmarks made them agree with each other and disagree with
+   * everything else in the same column -- re-measured, both navs went to 21
+   * while `.spine-steps` and `.evidence-trail-link` stayed at 23. The rail's
+   * gutter is the base rule's 12px; 10px was the drift, not the target. So this
+   * rule now touches only the axis it is actually about, and every container in
+   * the column lands on one gutter at every width.
+   *
+   * Vertical is legitimately NOT shared: the capture landmark is first in the
+   * column and the workspace list follows a divider.
+   */
   .workspace-nav {
-    padding: 0 10px 8px;
+    padding-top: 0;
+    padding-bottom: 8px;
   }
   .workspace-nav-eyebrow {
     padding: 8px 2px 6px;
@@ -221,5 +262,16 @@
   }
   .workspace-nav-item {
     width: auto;
+  }
+  /*
+   * THE CAPTURE GROUP'S INDENT IS DROPPED HERE, because the thing it expresses
+   * is gone. At this width the lists become WRAPPING ROWS (above), so a 10px
+   * left pad no longer reads as "nested under the card" -- it reads as one row
+   * mis-aligned against its neighbours. The grouping survives without it: the
+   * child row is still inside the `Data Capture` landmark, under its eyebrow,
+   * directly beneath the card.
+   */
+  .capture-nav-children {
+    padding-left: 0;
   }
 }
