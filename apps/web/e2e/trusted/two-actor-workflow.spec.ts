@@ -362,7 +362,7 @@ test.describe('two scientists, one record, end to end', () => {
     // ── STEP 5 — A opens the proposal-review surface, and it is EMPTY ─────────
     /*
      * AND THIS IS NOW A REAL "OPENS", which the step name always claimed. The
-     * proposal-review surface is the Capture & Proposals workspace; it used to be
+     * proposal-review surface is the Experiment Data workspace; it used to be
      * further down the same column, so the step asserted a heading it had not
      * navigated to. A opens it here and STAYS here for steps 6-17 — the live-arrival
      * assertion in step 7 depends on no navigation happening after this point.

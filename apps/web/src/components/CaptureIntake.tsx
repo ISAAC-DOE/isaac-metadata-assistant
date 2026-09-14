@@ -1,6 +1,6 @@
 import { useId } from 'react';
 import { Link } from 'react-router-dom';
-import { FileText, AudioWaveform, ExternalLink } from './icons';
+import { FileText, AudioWaveform, ExternalLink, SlidersHorizontal } from './icons';
 import { CAPTURE_COPY } from '../lib/transcriptCaptureContent';
 import { ROUTES } from '../lib/routes';
 
@@ -28,7 +28,7 @@ import { ROUTES } from '../lib/routes';
  *     POST /api/uploads         -> 403   unconditional
  *
  * A chooser offering only the two named would put a scientist in front of two
- * doors that do not open. So `Write it down` is listed FIRST and is the only
+ * doors that do not open. So `Write It Down` is listed FIRST and is the only
  * primary-styled action, because it is the one route that reaches a proposal
  * today; the other two are offered with what they actually do.
  *
@@ -69,11 +69,21 @@ export interface CaptureIntakeProps {
    * change this component's signature to do it.
    */
   onOpenRecorder: () => void;
+  /**
+   * The record's own id, so the fourth route can link to ITS runs workspace.
+   *
+   * Required rather than optional: a card that silently renders a dead link on a
+   * caller that forgot the prop is worse than a type error. The other three routes
+   * need no id — two open a panel on this same screen and one leaves for the
+   * globally-routed `/imports`.
+   */
+  experimentId: string;
 }
 
 export function CaptureIntake({
   onOpenCapture,
   onOpenRecorder,
+  experimentId,
 }: CaptureIntakeProps) {
   /* `useId`, not a literal — the same hazard `RecordWorkspaceNav` records: a
      fixed `id` works while exactly one of these is mounted and becomes a silent
@@ -153,6 +163,33 @@ export function CaptureIntake({
               rather than a button that only works on left-click. */}
           <Link className="btn btn-secondary" to={ROUTES.imports}>
             {CAPTURE_COPY.intakeFilesAction}
+          </Link>
+        </li>
+        {/*
+          THE FOURTH ROUTE IN — the scan itself (2026-09-14).
+          The owner's words: "the runs should be a part of the initial capture and
+          proposals". This screen asked how you want to get the experiment in and
+          then omitted the route that records what was measured; Runs sat as a
+          sibling workspace pill instead, so answering the question honestly could
+          still leave a record with no scan in it.
+
+          A real <Link> to this record's own `?view=runs`, for the same reason the
+          files card is one: it is a routed destination, so it must be
+          middle-clickable and bookmarkable. `?view=runs` is unchanged as an
+          address — `run-compare` deep links and every existing bookmark keep
+          working; this adds a way IN, it does not move the workspace.
+        */}
+        <li className="capture-intake-card" data-route="runs">
+          <span className="capture-intake-icon" aria-hidden="true">
+            <SlidersHorizontal size={18} strokeWidth={2} />
+          </span>
+          <h3 className="capture-intake-title">{CAPTURE_COPY.intakeRunTitle}</h3>
+          <p className="capture-intake-body">{CAPTURE_COPY.intakeRunBody}</p>
+          <Link
+            className="btn btn-secondary"
+            to={ROUTES.recordView(experimentId, 'runs')}
+          >
+            {CAPTURE_COPY.intakeRunAction}
           </Link>
         </li>
       </ul>

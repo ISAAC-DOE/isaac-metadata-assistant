@@ -717,7 +717,7 @@ describe('the record screen resolves a bare ?proposal= to the workspace that can
     );
   }
 
-  it('opens Capture & Proposals, and the panel honours the id it was sent', async () => {
+  it('opens Experiment Data, and the panel honours the id it was sent', async () => {
     renderAt(`/record/${EXP}?${RECORD_PROPOSAL_PARAM}=${LINKED}`);
 
     /* The panel is MOUNTED — which is the thing a bare `?proposal=` used not to

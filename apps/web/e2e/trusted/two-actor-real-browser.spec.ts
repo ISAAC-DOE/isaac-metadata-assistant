@@ -640,7 +640,7 @@ test.describe('two scientists, two real browsers, one record', () => {
 
       // ══ STEP 2 — A opens the review surface; it makes no recording claim ═════
       let seeded: ServerProposal | null = null;
-      await test.step('2 · A opens Capture & Proposals: one entry action, no recording claim', async () => {
+      await test.step('2 · A opens Experiment Data: one entry action, no recording claim', async () => {
         /*
          * SEEDED FIRST, OVER HTTP, AND ONLY THIS ONE. It exists to prove the negative
          * control in step 4: a proposal that was ALREADY on the record when A's panel
@@ -761,7 +761,7 @@ test.describe('two scientists, two real browsers, one record', () => {
         await bPage.goto(`/record/${id}?view=capture`);
         await expect(
           bPage.getByRole('heading', { name: 'Ingestion Proposals' }),
-          'step 3: B is on the same record’s Capture & Proposals workspace',
+          'step 3: B is on the same record’s Experiment Data workspace',
         ).toBeVisible();
 
         mintedByTranscript = await bFinalizesATranscript(bPage, runTwo.id, TRANSCRIPT_TEXT);
@@ -1401,7 +1401,7 @@ test.describe('two scientists, two real browsers, one record', () => {
          * READ OUT OF THE HIDDEN, STILL-MOUNTED RUNS PANEL. `RecordWorkbench` keeps a
          * workspace mounted once visited and hides it with the `hidden` attribute, so
          * `RunsSection` has been live since step 1 and its own pollers are running
-         * while A sits on Capture & Proposals. Asserting the value in its DOM — before
+         * while A sits on Experiment Data. Asserting the value in its DOM — before
          * switching to it — is therefore a claim about the LIVE REFRESH rather than
          * about a fresh mount, which is what a switch-then-look assertion would
          * actually have measured.
@@ -1661,7 +1661,7 @@ test.describe('two scientists, two real browsers, one record', () => {
          * the loop, so a Graph link silently returning to the sidebar would fail
          * here rather than pass unnoticed.
          */
-        for (const workspace of ['Record Fields', 'Runs', 'Capture & Proposals'] as const) {
+        for (const workspace of ['Record Fields', 'Runs', 'Experiment Data'] as const) {
           await page.locator('body').click({ position: { x: 2, y: 2 } });
           await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
           await tabUntil(
@@ -1673,7 +1673,7 @@ test.describe('two scientists, two real browsers, one record', () => {
              * This read `active.text === workspace` and broke the moment Capture &
              * Proposals was promoted out of this row into its own `DATA CAPTURE`
              * card: the card's anchor wraps a label AND a live count line, so its
-             * `textContent` became `Capture & Proposals3 notes · 2 to review` and an
+             * `textContent` became `Experiment Data3 notes · 2 to review` and an
              * exact-text match could never succeed again. The walk then exhausted its
              * 150-press bound and threw — correctly, and this spec is what caught the
              * change.
@@ -1725,7 +1725,7 @@ test.describe('two scientists, two real browsers, one record', () => {
             {
               'Record Fields': 'record-workspace-fields',
               Runs: 'record-workspace-runs',
-              'Capture & Proposals': 'record-workspace-capture',
+              'Experiment Data': 'record-workspace-capture',
             }[workspace],
           );
         }

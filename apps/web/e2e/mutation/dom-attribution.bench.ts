@@ -73,7 +73,7 @@ test('attribute the DOM by class at a high run count', async ({ page, request, s
    *   · Record Fields — the four draft blocks, the Record Identity sections
    *     (Rename, Record Description, Record Info, Relationships) and Asset
    *     References;
-   *   · Capture & Proposals — transcript capture, unmapped notes, ingestion
+   *   · Experiment Data — transcript capture, unmapped notes, ingestion
    *     proposals;
    *   · Graph.
    *

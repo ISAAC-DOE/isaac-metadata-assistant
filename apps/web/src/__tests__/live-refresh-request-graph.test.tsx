@@ -371,7 +371,7 @@ describe('the record screen live-refresh request graph', () => {
   });
 
   it('TEN proposal entries cost NO bundle at all — the record read is not stale for them', async () => {
-    /* `?view=capture` — the proposals list lives on the Capture & Proposals
+    /* `?view=capture` — the proposals list lives on the Experiment Data
        workspace, and the negative-control assertion at the end of this test needs
        the panel that owns that content to be MOUNTED. On Record Fields it is not,
        and the control would pass vacuously: zero proposal reads before, zero

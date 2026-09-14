@@ -102,7 +102,7 @@ function renderAt(path: string, extra: Record<string, unknown> = {}) {
 }
 
 const nav = () => screen.getByRole('navigation', { name: 'Record workspaces' });
-const captureLink = () => screen.getByRole('link', { name: 'Capture & Proposals' });
+const captureLink = () => screen.getByRole('link', { name: 'Experiment Data' });
 
 /** The summary line as a screen reader would reach it — through the link's own
  *  description, never by hunting for text that happens to sit nearby. */
@@ -166,7 +166,7 @@ describe('the promoted capture destination', () => {
     /* AND IT APPEARS EXACTLY ONCE. Promoting it is a rendering split, not a
        second list: a build that forgot to filter `capture` out of the list
        below would show the destination twice with two different shapes. */
-    expect(screen.getAllByRole('link', { name: 'Capture & Proposals' })).toHaveLength(1);
+    expect(screen.getAllByRole('link', { name: 'Experiment Data' })).toHaveLength(1);
     /* THE RAIL'S FULL SET, now spanning BOTH landmarks — capture first, in its
        own, then the workspace list. Reading only `nav()` would silently stop
        covering capture the moment it moved out, which is exactly what happened
@@ -182,7 +182,7 @@ describe('the promoted capture destination', () => {
       ...within(nav())
         .getAllByRole('link')
         .map((l) => l.getAttribute('aria-label') ?? l.textContent),
-    ]).toEqual(['Capture & Proposals', 'Record Fields', 'Runs']);
+    ]).toEqual(['Experiment Data', 'Record Fields', 'Runs']);
   });
 
   it('routes to ?view=capture, the destination that already exists', async () => {
@@ -299,7 +299,7 @@ describe('the promoted capture destination', () => {
       expect(calls.filter((c) => c.replace(/\?.*$/, '') === `GET ${BASE}/notes`)).toHaveLength(1),
     );
     expect(captureLink().getAttribute('aria-describedby')).toBeNull();
-    expect(captureLink().textContent).toBe('Capture & Proposals');
+    expect(captureLink().textContent).toBe('Experiment Data');
 
     /*
      * AND THE NUMBER WAS AVAILABLE THE WHOLE TIME. The bundle carried
@@ -332,7 +332,7 @@ describe('the promoted capture destination', () => {
     // Give the failed read time to land and any summary to appear.
     await waitFor(() => expect(screen.queryByText('No notes or proposals')).toBeNull());
     expect(captureLink().getAttribute('aria-describedby')).toBeNull();
-    expect(captureLink().textContent).toBe('Capture & Proposals');
+    expect(captureLink().textContent).toBe('Experiment Data');
   });
 
   it('discloses stored entries neither list could read, rather than understating the record', async () => {
@@ -417,12 +417,12 @@ describe('the promoted capture destination', () => {
 
     /*
      * WHY THIS IS PINNED. Left to its content the link's name would be
-     * "Capture & Proposals 4 notes" — a name that changes whenever a colleague
+     * "Experiment Data 4 notes" — a name that changes whenever a colleague
      * captures a note. A reader navigating by link name would find the
      * destination renamed under them, and every `getByRole('link', { name })`
      * in this suite would be querying a moving target.
      */
-    expect(captureLink().getAttribute('aria-label')).toBe('Capture & Proposals');
+    expect(captureLink().getAttribute('aria-label')).toBe('Experiment Data');
     expect(screen.queryByRole('link', { name: /4 notes/ })).toBeNull();
   });
 });
