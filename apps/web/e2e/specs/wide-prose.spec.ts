@@ -94,6 +94,32 @@ const PROSE_SURFACES: readonly { id: string; path: string; example: boolean }[] 
  */
 const KNOWN: Record<string, readonly string[]> = {
   /*
+   * THE IMPORT SESSION'S TWO NOTES ARE RECORDED AS *RIGHT AS THEY STAND* —
+   * which is what this allowlist is for, not a place to park a defect.
+   *
+   * Measured at 1280: `.hi-steps-disclosure` is 471px in a 926px container (455
+   * dead, 8 lines) and the durability `.hi-note` 471px in 928 (457 dead, 3
+   * lines). Both are capped by `--hi-prose: 68ch`, which computes to **471px**
+   * at this screen's font size — the `ch` unit is smaller here than it reads, so
+   * "68ch" is about 66 characters and not the generous measure it sounds like.
+   *
+   * WHY NOT FIXED: unlike the landing page, these two are NOTES UNDER A
+   * FULL-WIDTH DIAGRAM. The stepper above them spans the card; prose at a
+   * readable measure beneath a wide element, with space to its right, is
+   * ordinary editorial layout — not the defect the owner reported, which was a
+   * six-line paragraph standing as a page's main content in an empty card.
+   *
+   * AND THE THREE ALTERNATIVES WERE EACH MEASURED AND EACH WORSE. Capping
+   * `.hi-steps-wrap` narrows the stepper the notes belong to. Widening
+   * `--hi-prose` enough to satisfy this threshold at 1728 (container 1166) needs
+   * ~746px — about 107 characters, trading a whitespace problem for a legibility
+   * one, which is the trade that token's own comment already declined. Tuning
+   * MAX_DEAD_PX would stop it describing anything.
+   *
+   * If the stepper ever becomes narrow, delete these two lines and re-measure.
+   */
+  'imports-session': ['.hi-steps-disclosure', '.hi-note'],
+  /*
    * EMPTY, AND IT STARTED WITH FOUR ENTRIES. All four were measured on `main`
    * at 1728 px and all four are fixed in this same integration:
    *
