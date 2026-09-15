@@ -117,6 +117,56 @@ given.**
 | **DEC-34** | **Proposal creation must be discoverable.** | **CONFIRMED 2026-09-15 — and the owner's premise was measured and found FALSE, in the product's favour** | owner: *"there's no way to actually add an ingestion proposal. I understand maybe it's not hooked up to the backend, maybe it's blocked"* | **It is NOT blocked.** Measured at `dbf9d121`: `POST /api/experiments/{id}/proposals` is registered and documented (`routes.py`, `post_proposal`), requiring `note_id`, `target_field_path`, `proposed_value`, `rule`, conditional `run_id` and the record's `If-Match`. **So this was a UI gap, not a capability gap**, and the correct outcome is a real form — not a disabled placeholder. **Creation and ACCEPTANCE must never be conflated:** acceptance answers `409 human_actor_required` in every default deployment because no trusted authentication boundary exists (`EXT-01`), which is a configuration fact no application change can close. |
 | **DEC-35** | **Visible prose is reduced product-wide; long explanation moves behind accessible disclosure.** And **Impeccable is required for every significant UI redesign.** | **CONFIRMED 2026-09-15** | owner: *"the text is still stopping midway through half the block"* — the earlier `38em -> 68ch` change did NOT close it | Defaults: one sentence of page introduction, one line of card description. **Never disclose-away a blocking error, a scientific uncertainty, a destructive consequence, a security/privacy state, or a required action** — those stay visible. Disclosures must be keyboard- and screen-reader-accessible, **never hover-only**. The dead-whitespace defect is **per-composition**, not one global CSS constant — a prior instance in this repository was a `max-width` media query fixing the wrong box entirely. **Impeccable's mechanical detector is non-functional here** (missing parsers AND `.tsx` routed to a regex engine with no accessibility ruleset), so a `0 findings` from it is a non-answer unless a negative control says otherwise; its in-browser overlay is a different code path and does work. |
 
+### `DEC-33` in detail — what it actually reverses, found 2026-09-15
+
+**`DEC-33` is not a green field. It REVERSES A RECORDED, REASONED DECLINE, and a future session
+must be able to see that rather than discover it the way I did.**
+
+`screens/HistoricalImport.tsx` (~line 640) carries a comment stating that a previous session
+**built a multi-file picker and reverted it**. Its argument, quoted because it is a good one:
+
+> *"A `Choose Files…` button is an upload affordance whatever it does underneath — a scientist who
+> picked twelve files would reasonably believe twelve files had been uploaded. Recording their
+> names while they believe that is worse than asking them to type, because it is a false
+> impression the product created on purpose."*
+
+Two committed guards enforce it:
+
+* `historical-import.test.tsx` §1 — the screen renders **no** `input[type="file"]`, declares no
+  `type="file"` in its source, and has no `onDrop`, `FormData` or `multipart`. Its stated subject:
+  *"the destination cannot accept bytes and does not say it can"*.
+* `upload-claim-parity.test.tsx` — **exactly two** non-test files under `apps/web/src` declare a
+  file input, both named, so a third anywhere fails whatever it does.
+
+**THE DECLINE WAS RIGHT ON ITS OWN TERMS AND THE OWNER HAS ANSWERED ITS OBJECTION DIRECTLY.** The
+objection was a false impression; the instruction supplies the mitigation — staged files must read
+`Local only — not sent to ISAAC` — and says explicitly: *"Do not merely delete the guards.
+Reconcile them."* So the decline is superseded, not refuted, and is left standing in the source
+beside its reversal.
+
+**THE MECHANISM IS MEASURED AND NEEDS NO BACKEND CHANGE, NO NEW CAPABILITY AND NO GOVERNANCE
+CHANGE** — which is what makes the reconciliation honest rather than a loosening. `POST
+/api/imports/{id}/sources` already accepts `kind: "reference"` with `filename`, `reference`,
+`media_type`, `size_bytes` and `sha256`, stores them verbatim, **fetches nothing**, and records the
+entry as `parse_state: "no_content_path"`. A browser file picker supplies exactly those from the
+chosen `File` — `name`, `type`, `size` — **without reading or transmitting a byte**. Proved over
+HTTP against a local backend on 2026-09-15: the entry lands with the real filename, real size, a
+genuine SHA-256, and `parse_state: "no_content_path"`.
+
+**ONE PRECISION THAT MUST NOT DRIFT.** The route's own description says `sha256` *"is checked for
+SHAPE only … and is **never computed**"*, and that **no surface may describe it as verified,
+checked or matched**. A browser-computed digest does not change that: it is computed by the
+CLIENT, over bytes the server never sees, and remains the caller's claim. It may be labelled as
+computed in the reader's browser; it may **never** be labelled verified by ISAAC.
+
+**THE GUARD RECONCILIATION, stated before it is written so it cannot be quietly weakened:** §1
+inverts from *"the affordance cannot exist"* to *"the affordance exists **and** no bytes are ever
+transmitted **and** every staged row carries the not-sent disclosure"*. That is a **stronger**
+claim than the one it replaces — the old guard banned the affordance, the new one bans the actual
+harm. `upload-claim-parity`'s file-input census goes two → three, with the third named and its
+disclosure pinned. **Neither guard may be deleted, and neither may be weakened without the
+replacement truth assertion landing in the same change.**
+
 ### `DEC-17` — the orchestrator fallback, disclosed for this session
 
 `DEC-17` requires that an Opus orchestrator be **recorded in the ledger session header** rather
