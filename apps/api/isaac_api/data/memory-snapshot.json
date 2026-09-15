@@ -10356,7 +10356,7 @@
       },
       {
         "path": "apps/web/src/__tests__/labels.test.ts",
-        "sha256": "7753509aab8d5ea1bd2c4b6c8d2bd10dc87e468ac216aca6865c801b46a3e98f"
+        "sha256": "02404eb5170b84d3a66fe8ee6d9728ad6586e6cacaeb3e4fa8ff0e07a77f1902"
       },
       {
         "path": "apps/web/src/__tests__/live-screens.test.tsx",
@@ -10512,7 +10512,7 @@
       },
       {
         "path": "apps/web/src/lib/labels.ts",
-        "sha256": "7368d78df17f724765f0699210d0b482aa2157656d90c27ecd213b3059892192"
+        "sha256": "76aa958542e147b170bb33a21788274774c045690afc0841bcade27c97c03426"
       },
       {
         "path": "apps/web/src/lib/routes.ts",
@@ -11012,7 +11012,7 @@
       }
     ],
     "served_file_count": 200,
-    "served_manifest_fingerprint": "c574408b40add8190071b17a7d063fa44496691676af34a982e7799d9629477a"
+    "served_manifest_fingerprint": "b4786cef4601a1cacaeb6d1b29cc3797a01bba4a2ada8a93a4025b42d0061ae8"
   },
   "overview": {
     "built_at_commit": "caab1d0a69c1733524bda5dde495623bc4b7bad1",
