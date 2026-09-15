@@ -152,8 +152,35 @@ export function ConnectYourAgentPanel({
         <p className="api-keys-note">{MCP_CONNECT_COPY.neverSubmitEnforcement}</p>
       </section>
 
-      <section className="api-access-full">
-        <h3 className="api-keys-heading">What an Agent Will Be Able to Do</h3>
+      {/*
+        THE FOUR HEAVY SECTIONS ARE COLLAPSED, and the reason is placement rather
+        than length.
+
+        The project owner reviewed this tab as a full-page wall of text: *"the
+        settings page is very verry cluttered with text and that needs to be
+        addressed, remember the design philosophy we are going for, streamlined,
+        user friendly, not visually cluttered … put collapse the text or something
+        or find another better way to show it"*.
+
+        Every sentence here is load-bearing — `ai-integration-decision-packet.md`
+        §6 and §9 require the boundary, the refusals and the permissions to be
+        stated, and `CLAUDE.md` §15 forbids implying a capability exists. So
+        nothing is deleted. What changes is that a reader meets the STATUS and the
+        one headline boundary first, and opens the rest when it is the thing they
+        need: a capability audit, a permission list and a setup procedure are all
+        reference material, read once.
+
+        `<details className="api-connect">` is the drawer this screen's sibling
+        tab already uses (`ConnectAnAgent.tsx`), so no new disclosure vocabulary
+        enters the app. Native `<details>` keeps the content in the DOM and in the
+        accessibility tree, and `upload-claim-parity` / `connect-your-agent`
+        query it with `querySelectorAll`, which reaches inside a closed drawer —
+        so the honesty guards keep passing without being weakened.
+      */}
+      <details className="api-connect">
+        <summary className="api-connect-summary">
+          <h3 className="api-connect-title">What an Agent Will Be Able to Do</h3>
+        </summary>
         {/* The provenance qualifier sits HERE, immediately above the material
             it qualifies, because a reader who skims to the capability list is
             exactly the reader who needs to know it describes a defined
@@ -181,10 +208,12 @@ export function ConnectYourAgentPanel({
           The boundary above is settled in <code className="mono">{MCP_AUDIT_DOC}</code>, committed
           to this repository.
         </p>
-      </section>
+      </details>
 
-      <section className="api-access-full">
-        <h3 className="api-keys-heading">{MCP_CONNECT_COPY.permissionsHeading}</h3>
+      <details className="api-connect">
+        <summary className="api-connect-summary">
+          <h3 className="api-connect-title">{MCP_CONNECT_COPY.permissionsHeading}</h3>
+        </summary>
         <p className="api-keys-note">{MCP_CONNECT_COPY.permissionsDetail}</p>
         <dl className="api-keys-rows">
           {MCP_PERMISSIONS.map((permission) => (
@@ -198,10 +227,15 @@ export function ConnectYourAgentPanel({
             </div>
           ))}
         </dl>
-      </section>
+      </details>
 
-      <section className="api-access-full">
-        <h3 className="api-keys-heading">{MCP_CONNECT_COPY.setupHeading}</h3>
+      {/* THE SETUP PROCEDURE, collapsed. The owner asked for exactly this
+          shape for MCP instructions: "for that put it behind a collapsible
+          thing so it isnt just more word clutter again". */}
+      <details className="api-connect">
+        <summary className="api-connect-summary">
+          <h3 className="api-connect-title">{MCP_CONNECT_COPY.setupHeading}</h3>
+        </summary>
         {/* THE PRECONDITION, above the steps rather than inside one of them.
             A procedure a reader cannot start has to say so before the reader
             starts it. */}
@@ -223,7 +257,7 @@ export function ConnectYourAgentPanel({
           ))}
         </ol>
         <p className="api-keys-note">{MCP_CONNECT_COPY.setupBilling}</p>
-      </section>
+      </details>
 
     </div>
   );

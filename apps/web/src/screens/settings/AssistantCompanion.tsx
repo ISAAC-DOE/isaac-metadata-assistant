@@ -176,8 +176,20 @@ export function AssistantCompanionSection({
           : COPY.unknownDetail;
 
   return (
-    <section className="api-access-full">
-      <h3 className="api-keys-heading">{COPY.heading}</h3>
+    /*
+      COLLAPSED (2026-09-14). Measured at 830px — the tallest single block on the
+      Connect Your Agent tab, which the project owner reviewed as a page-long wall
+      of text. Every claim in it is required (`ai-integration-decision-packet.md`
+      §6/§9: no fake connected state, no implied capability), so nothing is cut;
+      it becomes a drawer, using the same `.api-connect` treatment as this tab's
+      other three and as `ConnectAnAgent`. Native `<details>` keeps the content in
+      the DOM and the accessibility tree, so `assistant-companion.test.tsx`'s 25
+      guards — which query by selector, not by visibility — still hold.
+    */
+    <details className="api-connect">
+      <summary className="api-connect-summary">
+        <h3 className="api-connect-title">{COPY.heading}</h3>
+      </summary>
       <p className="api-keys-lead">{COPY.lead}</p>
 
       {/* THE STATE, said once, as a sentence.
@@ -304,6 +316,6 @@ export function AssistantCompanionSection({
         {COPY.verifyAction}
         <ChevronRight size={13} strokeWidth={2.2} aria-hidden="true" />
       </button>
-    </section>
+    </details>
   );
 }
