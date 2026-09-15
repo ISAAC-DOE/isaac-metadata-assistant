@@ -111,11 +111,130 @@
   --hi-prose: 68ch;
 }
 
-/* The page header. Eyebrow, `<h1>`, lead — and no card, because it is the
-   screen's title block rather than one of its sections. */
+/*
+ * THE PAGE HEADER. Eyebrow, `<h1>`, lead — and no card, because it is the
+ * screen's title block rather than one of its sections.
+ *
+ * ── THE DEAD-WHITESPACE DEFECT, AND WHY THE FIX IS HERE AND NOT IN
+ *    `.hi-lead`'S OWN MEASURE ──────────────────────────────────────────────
+ *
+ * This wrapper used to cap at `--content-max` (1200px, `width="wide"`) while
+ * its only prose child, `.hi-lead`, capped itself at `--hi-prose` (68ch,
+ * measured 556.8px at this screen's 13px). That is TWO different widths on
+ * one block with no visible border between them, so the lead's own box
+ * looked "correct" in isolation while the HEADER around it read as broken:
+ * measured in Chromium at a 1152px content column, the eyebrow and `<h1>`
+ * sat inside an implied ~1152px box while the lead wrapped to three lines
+ * and stopped at 556.8px, leaving roughly 600px of dead column beside it —
+ * exactly the owner's report, "the text is still stopping midway through
+ * half the block".
+ *
+ * SHORTENING THE LEAD DID NOT FIX THIS ON ITS OWN. Re-measured after M-9's
+ * two-sentence rewrite (`historicalImportContent.ts`): the paragraph is
+ * shorter, but the CONTAINER is what was wide, not the text, so the same
+ * ~600px gap remained beside three even-shorter lines — a smaller amount of
+ * content inside the same oversized box reads, if anything, MORE stranded,
+ * not less.
+ *
+ * THE FIX IS THE CONTAINER, PER-COMPOSITION, EXACTLY AS ASKED: this header
+ * has no reason to claim `--content-max` at all — nothing in it (a one-line
+ * eyebrow, a short `<h1>`, prose already capped at 68ch) ever needs more
+ * width than the prose measure itself. Capping the WRAPPER at `--hi-prose`
+ * rather than leaving it at `--content-max` means the box a reader sees
+ * ends where its own content ends, by construction — there is no invisible
+ * wider box left for the eye to notice as empty. The sections below
+ * (`.hi-section`) keep `--content-max` unchanged: they hold a form and a
+ * list, which DO benefit from the wider column, so widening the fix beyond
+ * this one header block would trade a solved defect for an invented one.
+ */
 .hi-page-head {
-  max-width: var(--content-max);
+  max-width: var(--hi-prose);
 }
+
+/*
+ * THE LANDING'S OWN NARROWER COLUMN — the part of the fix `.hi-page-head`'s
+ * comment above could not finish on its own, because that wrapper paints no
+ * border: capping an invisible box does not change what a reader SEES next
+ * to a visible one.
+ *
+ * WHAT ACTUALLY READS AS "STOPPING MIDWAY". The three landing cards below
+ * the header (`New Import`, `Imports`, the collapsed "How Historical Import
+ * works") are `.hi-section`, capped at `--content-max` — 1200px for this
+ * screen's `width="wide"` AppShell. Their own content (a name field and a
+ * button; a list of rows; a stepper) never approaches that width, so each
+ * card's visible border sits far right of where its content ends — and,
+ * unlike the header, THESE do paint a border, which is what turns "the text
+ * is short" into "the block looks broken": a bordered box a third full reads
+ * as unfinished in a way an unbordered one does not.
+ *
+ * NOT FIXED BY WIDENING `AppShell`'S OWN width PROP, deliberately. The
+ * SESSION view (`ImportSessionView`, opened once an import exists) shares
+ * these same `.hi-section` cards for `.hi-table` (Sources) and the
+ * candidate/disagreement cards, both of which DO use the wide column's
+ * room — measured, `.hi-table` runs several columns wide. Narrowing the
+ * screen's own AppShell `width` would fix the landing and immediately
+ * re-break the session view it shares a component tree with.
+ *
+ * So the narrower measure is scoped to `.hi-landing-col`, applied ONLY to
+ * the landing's three cards (`ImportList`, not `ImportSessionView`) —
+ * exactly the "narrower card" option this had to choose between, applied to
+ * the composition that needed it and not the one that didn't. 760px is not
+ * a new number: it is `--content-max` for `width="readable"`
+ * (`chrome.css`), reused here as a literal because that variable is scoped
+ * to the AppShell region and this selector sits one level below it — the
+ * SAME measure `GuidedCompletion.tsx` already uses for its own
+ * comparably-narrow, sequential-form screen.
+ */
+.hi-landing-col {
+  max-width: 760px;
+}
+
+/*
+ * THE COLLAPSED "HOW HISTORICAL IMPORT WORKS" DISCLOSURE — the same idiom
+ * `RecordValidator.tsx`'s `.rec-val-purpose` and `HelpPanel.tsx`'s
+ * `.help-more` already use: a small, action-coloured `<summary>` rather than
+ * a full `.hi-section-title`, because this is progressive disclosure for a
+ * reader who wants the mechanism, not a section every reader is expected to
+ * open. `list-style: none` + the custom `::before` marker (rather than the
+ * UA triangle) keeps the same visual language `.section-tab`'s own chevrons
+ * use elsewhere, so a reader learns one "there's more here" affordance
+ * rather than two.
+ */
+.hi-how-it-works > summary {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  font-size: 13px;
+  font-weight: var(--font-weight-medium);
+  color: var(--action);
+  cursor: pointer;
+  list-style: none;
+  width: fit-content;
+}
+.hi-how-it-works > summary::-webkit-details-marker {
+  display: none;
+}
+.hi-how-it-works > summary::before {
+  content: '▸';
+  display: inline-block;
+  font-size: 10px;
+  color: var(--text-tertiary);
+  transition: transform 0.12s ease;
+}
+.hi-how-it-works[open] > summary::before {
+  transform: rotate(90deg);
+}
+.hi-how-it-works > summary:focus-visible {
+  outline: 2px solid var(--action);
+  outline-offset: 2px;
+  border-radius: var(--radius-token);
+}
+.hi-how-it-works[open] > summary {
+  margin-bottom: var(--space-md);
+}
+/* The stepper and the durability note sit inside the disclosure at their
+   own existing measures — nothing about `.hi-steps-wrap` or `.hi-note`
+   changes when their parent is a `<details>` rather than a plain `<div>`. */
 
 .hi-page-head .eyebrow {
   display: block;
@@ -236,127 +355,157 @@
   display: block;
 }
 
-/* --- the workflow strip ---------------------------------------------------- */
-
-/*
- * ── EVERY STAGE CHIP WAS AS TALL AS THE TALLEST, AND THAT MADE FIVE OF THEM
- *    ELLIPSES ──────────────────────────────────────────────────────────────────
+/* --- the workflow strip: a circle-node stepper -----------------------------
  *
- * `align-items` was unset, so it defaulted to `normal` -> `stretch`, and a flex
- * row stretches every item to the tallest. One chip — the `.unbuilt` step —
- * carries a three-line sentence explaining why that stage does not exist, so it
- * is ~70px tall. The other five hold a single word.
+ * ── WHAT THIS REPLACES, AND WHY A THIRD SHAPE RATHER THAN A SECOND FIX ──────
  *
- * MEASURED IN CHROMIUM, live on `/imports`, by toggling this one property:
+ * The row has already been through one correction (bordered/filled pills ->
+ * a chevron-joined chain of plain words, see the retired comments this
+ * replaces in git history), made because the owner asked "are they supposed
+ * to be clickable or something?" of the pill shape — a control-looking
+ * non-control. The chevron chain answered THAT complaint but not the next
+ * one: of this exact row, the owner said "it should be a little bit cleaner,
+ * and I think it should be like a circle-dotted thing instead." A `›`
+ * breadcrumb reads as navigation history; a dotted/dashed circle reads as
+ * "not yet built", which is the one thing this row has to say about that
+ * step and nothing else in the row says.
  *
- *   align-items: normal (before)   70 70 70 70 70 70
- *   align-items: flex-start        23 23 23 23 23 70
+ * ── ONE VOCABULARY, REUSED RATHER THAN INVENTED ─────────────────────────────
  *
- * `.hi-step` carries `border-radius: var(--radius-pill)` — 999px. On a 23px-tall
- * chip that is a correct pill. On a 70px-tall chip only 48px wide (`Parse`) it is
- * an ELLIPSE, and with the label pinned to the top of the stretched box the word
- * appeared to float above its own outline. The strip read as six lozenges of
- * random shape rather than as a workflow.
+ * `components/workflow.css`'s record-screen spine already draws exactly this
+ * shape for a real, gated pipeline — `.spine-disc` (a circle) plus
+ * `.spine-step::before` (a 2px background connector positioned into the gap
+ * between rows, `top` + `bottom` fixed offsets, no dependency on either row's
+ * measured height). `.hi-step-node` and its connector below are the same
+ * technique, deliberately smaller and unfilled-by-default (this row has no
+ * "completed" state to paint — see `WorkflowStrip`'s own comment on why it is
+ * not a spine), closer in scale to `evidence.css`'s `.trail-dot`.
  *
- * So the chips size themselves, which is also what the markup means: these are
- * list items of differing content, not a row of equal cells.
+ * ── DEFAULT IS VERTICAL, THE SAFE DIRECTION TO FAIL IN ──────────────────────
+ *
+ * Six nodes cannot read cleanly across a narrow card, so the unconditional
+ * (below) rules lay the six steps out as a vertical list — dot beside label,
+ * rows stacked, a vertical connector — and the `@container` block widens
+ * that into the horizontal row only once `.hi-steps-wrap`'s own measured
+ * width says six columns will fit. Exactly the pattern
+ * `screens/graph/experiment-graph.css`'s `@container expgraph` comment
+ * states for the same reason: where container queries are unsupported the
+ * block never applies and the surface stays in the always-legible stacked
+ * layout.
+ *
+ * `container-type: inline-size` responds to THIS ELEMENT's rendered width,
+ * not the viewport's — which matters here because a left sidebar and a
+ * bounded card sit between the two (`.hi-section`'s own `--content-max`).
+ * A `min-width` viewport media query would be answering the wrong question,
+ * the exact trap this repo's own history records for a different screen's
+ * rail.
  */
+.hi-steps-wrap {
+  container-type: inline-size;
+  container-name: histeps;
+}
+
 .hi-steps {
   display: flex;
-  flex-wrap: wrap;
-  align-items: flex-start;
-  gap: var(--space-xs);
+  flex-direction: column;
+  gap: var(--space-md);
   list-style: none;
   margin: var(--space-sm) 0;
   padding: 0;
 }
 
-/*
- * PADDING. The Impeccable in-browser detector reported `cramped-padding` five
- * times on this one selector, and it was right: `2px 8px`.
- *
- * `spacing-layout.md:56-57` gives the chip primitive as `padding: 5px 11px;
- * border-radius: 999px`. 5 and 11 are not rungs on THIS repository's recorded
- * scale (`tokens.css`: 2 / 4 / 8 / 12 / 16 / 24) and
- * `type-scale-and-spacing.test.ts` sits at its ceiling, so a new raw literal is
- * refused. `--space-xs var(--space-md)` — 4px 12px — is the nearest pair of
- * rungs either side of the spec's pair, so the chip is the spec's chip built
- * from this repo's tokens.
- *
- * WHY NOT 8px VERTICAL. `e2e/specs/pill-shape.spec.ts:179` requires a
- * single-line stage chip to measure under 32px tall ("one line of
- * `--font-size-meta` plus this chip's padding, with room to spare"). 11px at the
- * inherited 1.55 line-height is ~17px, so 8px padding plus 2px border lands at
- * ~35px and would fail that guard. 4px lands at ~27px.
- */
-/*
- * THE STEPS READ AS A SEQUENCE, NOT AS CONTROLS.
- *
- * The project owner asked of this row: "are they supposed to be clickable or
- * something? its a little confusing having them there otherwise". They were
- * bordered, filled pills — the exact shape this app uses for `.section-tab` and
- * for filter chips, both of which ARE clickable — and they do nothing. A
- * control-shaped thing that is not a control is worse than absent.
- *
- * So the border and the fill are gone and the separator does the work: the row
- * is now a chain of words with a chevron between them, which is what a described
- * sequence looks like. The one step this build does not have keeps its dashed
- * outline, because there it carries meaning (see `.hi-step.unbuilt`) rather than
- * implying an affordance.
- *
- * NOT MADE CLICKABLE INSTEAD, deliberately: an import has no notion of jumping
- * to "Reconstruct" before its sources are read, and the screen already renders
- * each stage's own controls in order below. Linking them would promise
- * navigation the workflow does not support.
- */
 .hi-step {
-  padding: 0;
-  background: none;
+  position: relative;
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+  gap: var(--space-sm);
   font-size: var(--font-size-meta);
   color: var(--text-secondary);
-  /* One line, centred. This was `flex-direction: column` with a gap and a
-   * `max-width: 22rem` when a chip could also hold the unbuilt step's sentence;
-   * the sentence is now prose below the row, so a chip holds a label and only a
-   * label, and the column axis and the cap have no remaining reader. */
-  display: inline-flex;
-  align-items: center;
 }
 
-.hi-step.reached {
-  border-color: var(--action-selected-border);
-  background: var(--action-tint);
+/*
+ * THE NODE. An outlined circle by default, filled in `--action` only for the
+ * single step `aria-current` also marks, dashed only for the step this build
+ * does not have. `box-sizing: border-box` keeps the box exactly 10x10 with
+ * the border included, which is what both the vertical and the horizontal
+ * connector math below assume.
+ */
+.hi-step-node {
+  position: relative;
+  z-index: 1; /* paints over the connector's `.hi-step::before`, z-index 0 */
+  flex: none;
+  box-sizing: border-box;
+  width: 10px;
+  height: 10px;
+  margin-top: 3px; /* optical alignment with the label's cap height */
+  border-radius: 50%;
+  border: 2px solid var(--border-strong);
+  background: var(--surface);
+}
+
+.hi-step.reached .hi-step-node {
+  border-color: var(--action);
+  background: var(--action);
+}
+
+.hi-step.reached .hi-step-label {
   color: var(--text-strong);
   font-weight: var(--font-weight-medium);
 }
 
 /*
- * THE UNBUILT STEP IS DIMMED AND STILL READABLE. `--text-muted` clears AA on
- * every ground this app paints, so the sentence explaining why the step is not
- * built is informational ink and not decoration — a reader must be able to read
- * the reason, which is the whole point of showing the step at all.
+ * THE UNBUILT NODE IS DOTTED, NOT A DASHED RECTANGLE. This is the owner's own
+ * requested shape for exactly this step — a circle whose outline is broken,
+ * beside the muted label `--text-muted` already used here (it clears AA on
+ * every ground this app paints, so the sentence explaining why the step is
+ * not built stays informational ink and not decoration).
  */
-.hi-step.unbuilt {
-  border-style: dashed;
-  background: var(--surface);
+.hi-step.unbuilt .hi-step-node {
+  border-style: dotted;
+  border-color: var(--text-muted);
+  background: none;
+}
+
+.hi-step.unbuilt .hi-step-label {
   color: var(--text-muted);
-  /*
-   * IT IS A PILL AGAIN, and the reasoning that made it a card is kept because
-   * it was right about its own premise. That note read: "this one is NOT a
-   * pill, because it is not a one-word chip. It holds the sentence above, so
-   * `--radius-pill`'s 999px curved in from both ends across three lines of text
-   * and pinched the sentence it exists to make readable."
-   *
-   * True -- while the sentence lived inside the chip. It no longer does (see
-   * `WorkflowStrip`): the sentence is prose below the row, so this element is
-   * once more a one-word chip and takes the row's shape. The row is six uniform
-   * pills; "not built" is carried by the dashed border and the muted text, not
-   * by being four times wider than its neighbours.
-   */
+}
+
+.hi-step-label {
+  padding-top: 1px;
+  font-weight: var(--font-weight-medium);
+}
+
+/*
+ * THE CONNECTOR — vertical by default (this block), horizontal once
+ * `.hi-steps-wrap` is wide enough (the `@container` block below).
+ *
+ * Positioned from THIS node's own bottom edge (`top: 10px`, the node's own
+ * height) down by exactly the list's `gap` (`height: var(--space-md)`) —
+ * which lands precisely on the TOP edge of the next node, because that gap
+ * is the one and only distance between this row's bottom and the next row's
+ * top. No row's rendered height (which depends on whether its label wraps)
+ * enters the calculation, which is what makes this exact technique safe
+ * regardless of label length — the same property `.spine-step::before`
+ * (`workflow.css`) relies on for the record screen's own connector.
+ */
+.hi-step::before {
+  content: '';
+  position: absolute;
+  left: 4px; /* node's horizontal centre: (10px width - 2px line) / 2 */
+  top: 10px;
+  height: var(--space-md);
+  width: 2px;
+  background: var(--border-strong);
+  z-index: 0;
+}
+.hi-step:last-child::before {
+  content: none;
 }
 
 /*
  * The disclosure for a step this build does not have. Prose, in the server's
- * own words, capped to a readable measure and tied to its chip by
+ * own words, capped to a readable measure and tied to its node by
  * `aria-describedby`.
  */
 .hi-steps-disclosure {
@@ -371,20 +520,81 @@
   color: var(--text-secondary);
 }
 
-/* The chain separator. `::after` on every step but the last, so the markup stays
- * a plain list and the sequence is presentational. */
-.hi-step:not(:last-child)::after {
-  content: '›';
-  margin-left: var(--space-xs);
-  color: var(--text-tertiary);
-}
+/*
+ * ── THE HORIZONTAL ENHANCEMENT ───────────────────────────────────────────────
+ *
+ * 560px is the measured threshold at which six equal columns still leave
+ * each one wide enough for its own longest label ("Add to Experiments", 19
+ * characters) to wrap to no more than two lines without the row feeling
+ * cramped. `flex: 1 1 0` gives every `<li>` an EQUAL share of the row
+ * regardless of label length or step count, which is what lets each node's
+ * connector be drawn as two independent half-segments (this rule's own
+ * `::before`/`::after`) that always meet exactly at the shared boundary
+ * between two adjacent equal-width columns — a property that would not hold
+ * if the columns were sized to their own content.
+ *
+ * EVERY GEOMETRY PROPERTY THE VERTICAL RULES ABOVE SET IS RESTATED HERE,
+ * EXPLICITLY, EVEN WHERE THE VALUE LOOKS REDUNDANT. `.hi-step::before` above
+ * and `.hi-step::before` here are the same selector at the same specificity;
+ * the cascade resolves EACH PROPERTY independently, so a property this block
+ * does not mention would keep the vertical rule's value even while every
+ * property this block DOES mention takes the later (horizontal) one. `width`
+ * is the property that bites: the vertical rule sets a literal `2px`, which
+ * would keep clamping this segment to 2px wide even after `left`/`right` are
+ * redefined here, unless `width: auto` is restated to let `left` + `right`
+ * define the box instead.
+ */
+@container histeps (min-width: 560px) {
+  .hi-steps {
+    flex-direction: row;
+    align-items: flex-start;
+    gap: 0;
+  }
 
-.hi-step-label {
-  font-weight: var(--font-weight-medium);
-}
+  .hi-step {
+    flex: 1 1 0;
+    min-width: 0;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--space-xs);
+    text-align: center;
+  }
 
-/* `.hi-step-note` was removed with the inline sentence it styled. Its successor
- * is `.hi-steps-disclosure` above. */
+  .hi-step-node {
+    margin-top: 0;
+  }
+
+  .hi-step::before,
+  .hi-step::after {
+    content: '';
+    position: absolute;
+    top: 4px; /* node's vertical centre: (10px height - 2px line) / 2 */
+    height: 2px;
+    width: auto;
+    background: var(--border-strong);
+    z-index: 0;
+  }
+  .hi-step::before {
+    left: 0;
+    right: 50%;
+  }
+  .hi-step::after {
+    left: 50%;
+    right: 0;
+  }
+  .hi-step:first-child::before {
+    content: none;
+  }
+  /* Cancels the vertical rule's `content: none` for the SAME selector at the
+     SAME specificity — the later declaration (this one) wins the tie, which
+     is what re-enables the last node's own left-half segment. */
+  .hi-step:last-child::before {
+    content: '';
+  }
+  .hi-step:last-child::after {
+    content: none;
+  }
+}
 
 /* --- the list -------------------------------------------------------------- */
 

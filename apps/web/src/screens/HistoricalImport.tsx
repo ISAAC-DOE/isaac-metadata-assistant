@@ -199,34 +199,22 @@ function ImportList({
   return (
     <>
       {/*
-        SECTION ONE — the sequence, titled by its SUBJECT.
+        SECTION ONE — `New Import`, FIRST. The action a reader came here for.
 
-        `How An Import Works` is a new heading and it is the reason this block
-        stops being an unlabelled strip floating above the page: it had no title
-        at all, so the six stage chips and the durability sentence were two
-        unrelated fragments a reader had to interpret unaided.
-
-        Register 1 Title Case, per `casing-and-copy.md:8-12` ("section titles").
-      */}
-      <div className="hi-section">
-        <h2 className="hi-section-title">How An Import Works</h2>
-        <WorkflowStrip steps={data.workflow} furthest={null} />
-        {/* THE SERVER'S OWN SENTENCE about what a session is and is not. Rendered
-            before anything is created, because a reader deciding whether to start
-            one is exactly who needs it.
-
-            MOVED, NOT CHANGED: it used to be the last child of an untitled block
-            and is now the last child of `How An Import Works`. Same string, same
-            `role="note"`, same server source — the claim that an import session is
-            not part of the durable record store is unaltered, and it now sits
-            under a heading that says what it is a note ABOUT. */}
-        <p className="hi-note" role="note">
-          {data.durability}
-        </p>
-      </div>
-
-      {/*
-        SECTION TWO — and the heading no longer repeats its own button.
+        WHY THIS IS NOW FIRST, AND WHY "HOW IT WORKS" IS NOW LAST (below). The
+        owner, of this exact page: "the text is still stopping midway through
+        half the block, and it's not really something that looks good" — the
+        landing used to open with a six-line paragraph and THEN a full
+        stepper-plus-note block before a reader ever reached a control. This
+        screen's own job is simple (one sentence in `.hi-lead` now says it):
+        reconstruct candidate metadata from files already on hand. State,
+        action, and value belong before explanation — the design direction
+        this repo has recorded elsewhere as "state -> action -> blocker ->
+        value -> source before explanation" — so `New Import` and `Imports`
+        (the record of past sessions) now render immediately after the intro,
+        and the longer "how the six stages work" explanation moves to a
+        collapsed disclosure at the end of this list (see the closing
+        `<details>` below).
 
         MEASURED BEFORE: `IMPORT_COPY.actionStart` ("Start an Import") rendered
         TWICE, 78px apart — once as this section's `<h2>` and once as the label of
@@ -235,11 +223,11 @@ function ImportList({
         it makes the same string an ambiguous target for anything (a test, a
         screen reader user cycling headings, a person) looking for "the control".
 
-        THE RULE APPLIED HERE AND THREE MORE TIMES BELOW: a section is titled by
+        THE RULE APPLIED HERE AND ONE MORE TIME BELOW: a section is titled by
         its SUBJECT and the button keeps the verb. So `New Import` names the thing;
         `Start an Import` remains the only place that verb appears.
       */}
-      <div className="hi-section">
+      <div className="hi-section hi-landing-col">
         <h2 className="hi-section-title">New Import</h2>
         <label className="hi-field">
           <span className="hi-field-label">Name this import (optional)</span>
@@ -260,7 +248,7 @@ function ImportList({
       </div>
 
       {/*
-        SECTION THREE — `Imports`.
+        SECTION TWO — `Imports`.
 
         THE HEADING STRING IS LOAD-BEARING AND MUST NOT BE "IMPROVED".
         `e2e/surfaces.ts:141` declares this surface's ready gate as
@@ -268,9 +256,11 @@ function ImportList({
         `e2e/mutation/imports-session-a11y.spec.ts:64` asserts it at `level: 2` —
         both because it is inside the `status === 'data'` branch and so cannot
         render over a skeleton. Renaming it, or changing its level, silently turns
-        thirteen sweeps into measurements of a loading state.
+        thirteen sweeps into measurements of a loading state. (This is also why
+        moving it above `New Import` keeps it exactly as it was rather than
+        touching its text or level — only its ORDER on the page changed.)
       */}
-      <div className="hi-section">
+      <div className="hi-section hi-landing-col">
         <h2 className="hi-section-title">Imports</h2>
         {data.total === 0 ? (
           /*
@@ -323,6 +313,41 @@ function ImportList({
           </ul>
         )}
       </div>
+
+      {/*
+        SECTION THREE — the explanation, collapsed, LAST.
+
+        A NATIVE `<details>`, the repo's own idiom for exactly this move (see
+        `RecordValidator.tsx`'s `.rec-val-purpose`, `HelpPanel.tsx`'s
+        `.help-more`, `FetchStates.tsx`'s `.fetch-state-technical`): keyboard-
+        operable (Tab to the `<summary>`, Enter/Space to toggle), and exposed
+        to a screen reader as a native disclosure widget with its own
+        expanded/collapsed state — no ARIA authored by hand, and none needed.
+
+        NOTHING IS DELETED. The six-stage stepper and the server's own
+        durability sentence are exactly what rendered here before this slice;
+        only their POSITION (last, not first) and their default VISIBILITY
+        (collapsed, not always-open) changed. `CLAUDE.md`'s own rule for this
+        exact situation — never delete a scientific caveat or honesty claim,
+        only relocate it behind progressive disclosure — is what this is: the
+        durability sentence stays reachable by keyboard and to a screen
+        reader, and "Nothing here becomes a value on its own" (the OTHER
+        claim this slice had to preserve) never left the always-visible
+        `.hi-lead` above, so it did not need this disclosure at all.
+      */}
+      <div className="hi-section hi-landing-col">
+        <details className="hi-how-it-works">
+          <summary>How Historical Import works</summary>
+          <WorkflowStrip steps={data.workflow} furthest={null} />
+          {/* THE SERVER'S OWN SENTENCE about what a session is and is not. Same
+              string, same `role="note"`, same server source as before — only
+              now the last child of a collapsed disclosure rather than of an
+              always-visible heading. */}
+          <p className="hi-note" role="note">
+            {data.durability}
+          </p>
+        </details>
+      </div>
     </>
   );
 }
@@ -350,29 +375,46 @@ function WorkflowStrip({
   furthest: string | null;
 }) {
   /*
-   * THE DISCLOSURE SITS BELOW THE ROW, NOT INSIDE IT, and that is the whole
-   * shape of this strip.
+   * THE DISCLOSURE SITS BELOW THE ROW, NOT INSIDE IT, and that is unchanged
+   * from the pill-row version this replaces — only the NODE's own shape and
+   * the connector between nodes changed.
    *
-   * It used to be a `<span>` inside the unbuilt `<li>`. Measured in Chrome at
-   * 1280: five siblings were 27px tall and 56-91px wide, and that one was
-   * 73.6px x 352px -- 2.7x the height and 4x the width of its neighbours, in a
-   * `flex-wrap` row with a 4px gap. It read exactly as the owner described the
-   * screen: "everything is just put in here with no thought behind it".
+   * WHAT CHANGED, AND WHY. The owner, of this exact row: "it should be a
+   * little bit cleaner, and I think it should be like a circle-dotted thing
+   * instead." The pill row (bordered/filled chips joined by a `›` chevron)
+   * had already been through one correction — the SAME owner had previously
+   * said of it "are they supposed to be clickable or something?", because a
+   * bordered, filled chip is this app's shape for `.section-tab` and for
+   * filter chips, both of which ARE controls. Removing the border and fill
+   * (the prior fix, still in `.hi-step`'s base rule) answered "is it a
+   * button" but not "is it clean" — six one-word labels chained by `›` still
+   * read as a breadcrumb, not as a sequence with a position in it. A dot per
+   * step, joined by a line, is the vocabulary this app already uses for
+   * exactly that job: `components/workflow.css`'s record-screen spine
+   * (`.spine-disc` + `.spine-step::before`) is a disc-and-connector stepper,
+   * and `.trail-dot` (`evidence.css`) is the same disc vocabulary at its
+   * smallest size. `.hi-step-node` below reuses that vocabulary rather than
+   * inventing a third.
    *
-   * The previous slice found the same thing, tried `flex-basis: 100%` to push
-   * it onto its own line, measured that INERT (flex line-breaking uses the
-   * hypothetical main size, which the 22rem cap kept small enough to fit beside
-   * `Review`), and recorded it as out of its own scope. The mechanism it named
-   * but did not take is this one: a step is a LABEL and belongs in the row; a
-   * sentence about a step is PROSE and belongs under it. So all six are uniform
-   * pills again, the unbuilt one says so by being dashed and muted, and the
-   * sentence is associated with it by `aria-describedby` rather than by
-   * adjacency -- which is a stronger association than the inline span had, not
-   * a weaker one, because it survives the row wrapping.
+   * THE UNBUILT NODE IS DASHED, NOT THE UNBUILT STEP'S CONNECTOR. Only the
+   * CIRCLE for "Add to Experiments" is dashed; the line reaching it is the
+   * same solid `--border-strong` every other segment uses, because the
+   * dashing is a claim about that ONE step ("not built"), not about how far
+   * the sequence has got.
+   *
+   * NARROW WIDTH: see `.hi-steps-wrap`'s `container-type` in
+   * historical-import.css. Below the container's own measured 560px this
+   * renders as a VERTICAL stepper (dot beside label, rows stacked, a
+   * vertical connector) rather than the six-across horizontal row, which is
+   * this file's own established pattern for "the safe direction to fail in"
+   * (see `experiment-graph.css`'s `@container` comment) — a container query
+   * responds to the CARD's rendered width, not the window's, which matters
+   * here because a sidebar sits between them (see
+   * `viewport-media-query-wrong-box` in this repo's own session memory).
    */
   const unbuilt = steps.filter((step) => !step.built && step.disclosure !== null);
   return (
-    <>
+    <div className="hi-steps-wrap">
       <ol className="hi-steps" aria-label="Historical import workflow">
         {steps.map((step) => {
           const reached = furthest !== null && step.id === furthest;
@@ -387,7 +429,12 @@ function WorkflowStrip({
             >
               {/* THE UNBUILT STEP OFFERS NO CONTROL -- not a disabled one. A
                   disabled button implies the act exists and is temporarily
-                  unavailable, which is the claim section 15 forbids. */}
+                  unavailable, which is the claim section 15 forbids. The dot
+                  itself carries no text and is `aria-hidden`: the state it
+                  shows (reached / unbuilt / plain) is decorative reinforcement
+                  of what the LABEL and `aria-current`/`aria-describedby`
+                  already say, never the only way to know it. */}
+              <span className="hi-step-node" aria-hidden="true" />
               <span className="hi-step-label">{step.label}</span>
             </li>
           );
@@ -398,7 +445,7 @@ function WorkflowStrip({
           <span className="hi-steps-disclosure-subject">{step.label}:</span> {step.disclosure}
         </p>
       ))}
-    </>
+    </div>
   );
 }
 
