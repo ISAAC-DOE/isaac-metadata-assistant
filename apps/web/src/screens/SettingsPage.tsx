@@ -302,7 +302,7 @@ function SettingsSectionTabs({
     <div
       className="section-tabs"
       role="tablist"
-      aria-label="Settings & API sections"
+      aria-label="Settings sections"
       /* The walkthrough's "where Settings and API access live" anchor: the
          tablist, because that is what the step is actually describing. */
       data-tutorial-anchor={TUTORIAL_ANCHORS.settingsSections}
@@ -534,10 +534,6 @@ function AdvancedSurfaces() {
           {LABELS.navMemory}
           <ChevronRight size={13} strokeWidth={2.2} aria-hidden="true" />
         </Link>
-        <Link to={ROUTES.statistics} className="settings-jump-btn">
-          {LABELS.navStatistics}
-          <ChevronRight size={13} strokeWidth={2.2} aria-hidden="true" />
-        </Link>
       </nav>
       <dl className="settings-summary-list">
         <div className="settings-summary-row">
@@ -546,30 +542,6 @@ function AdvancedSurfaces() {
             A read-only view of a committed, point-in-time snapshot of this project's own source
             and documentation. It surfaces related files and concepts as leads to verify — it never
             validates a record, completes a field, or supplies a value.
-          </dd>
-        </div>
-        <div className="settings-summary-row">
-          <dt className="settings-summary-label">{LABELS.navStatistics}</dt>
-          <dd className="settings-summary-text">
-            {/*
-              ~~"and over your own activity in it"~~ — REMOVED 2026-09-13, found by
-              independent review. It was FALSE: `MyStats.tsx` renders
-              `ChartAccessPending` on EVERY branch and its own header says "there is
-              no personal figure in this build to appear", because the three reasons
-              in `lib/myStatsContract.ts` — `no_signed_in_account`,
-              `no_record_ownership`, `not_recorded` — are all downstream of the
-              absent trusted authentication boundary. A scientist following that
-              sentence would have gone looking for their own figures and found a
-              gated panel.
-
-              §15's "build nothing that implies any of it exists" applies to a
-              DESCRIPTION of a destination as much as to the destination, and this
-              same commit cited that rule as its reason for restraint elsewhere.
-              The `My Stats` TAB is deliberately not mentioned either: naming it
-              here would reintroduce the same implication one level down.
-            */}
-            Counts over the records in this workspace. Summary figures only; nothing here
-            gates export or changes a record.
           </dd>
         </div>
       </dl>

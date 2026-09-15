@@ -114,7 +114,23 @@ export const LABELS = {
   // Names what the destination actually holds — runtime status plus programmatic
   // access — rather than promising preferences this build does not have. This is
   // the SINGLE authored string: the nav label and the page <h1> both read it.
-  navSettings: 'Settings & API',
+  /*
+   * `Settings & API` -> `Settings`, 2026-09-15, by the project owner's direction.
+   *
+   * THE `& API` WAS NAMING THE CONTENTS OF THE PAGE IN THE LABEL OF THE
+   * DESTINATION, and the contents are exactly what is being reorganised: API
+   * Access and the Endpoint Explorer are developer surfaces, and a primary nav
+   * slot that advertises them tells a scientist the page is not for them. The
+   * capability is not withdrawn and neither surface moves route — only the
+   * destination's name stops enumerating one of its tabs.
+   *
+   * THE ROUTE IS DELIBERATELY UNCHANGED. `/settings` and every `?tab=` deep
+   * link resolve exactly as before, and `statistics-nav.test.tsx` asserts the
+   * rename and the route SEPARATELY, precisely so a later "tidy-up" that
+   * renames the route to match the label fails a test instead of breaking a
+   * bookmark.
+   */
+  navSettings: 'Settings',
   /*
    * HISTORICAL IMPORT — the second of the three primary destinations the
    * narrowed product names (`Experiments`, `Historical Import`, `Settings`).

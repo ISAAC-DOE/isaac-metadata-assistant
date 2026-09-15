@@ -12,6 +12,7 @@ import {
 } from '../components/FetchStates';
 import { ApiError, RUN_COMMAND } from '../lib/api';
 import { EXAMPLE_RECORD_IDS } from '../lib/exampleRecords';
+import { LABELS } from '../lib/labels';
 
 /*
  * P36V.2 — the hosted down state.
@@ -1373,7 +1374,12 @@ describe('an example-record 404 with no worked-example session open', () => {
     const view = render(<BackendDown error={missing(`/experiments/${EXAMPLE}`)} />);
     expect(view.getByText('Worked Example Not Open')).toBeInTheDocument();
     expect(view.queryByRole('link', { name: 'My Experiments' })).toBeNull();
-    // The walkthrough's home is still named in words, so nothing is lost.
-    expect(view.container.textContent).toContain('Settings & API → Help & Tutorial');
+    /* The walkthrough's home is still named in words, so nothing is lost.
+       READ FROM `LABELS`, NOT FROM A LITERAL: this sentence names the Settings
+       destination, and pinning its TEXT here is what made the 2026-09-15
+       rename break a test that is not about the rename. The claim under test —
+       that the walkthrough's home is still named in words — survives a rename,
+       and now the assertion does too. */
+    expect(view.container.textContent).toContain(`${LABELS.navSettings} \u2192 Help & Tutorial`);
   });
 });

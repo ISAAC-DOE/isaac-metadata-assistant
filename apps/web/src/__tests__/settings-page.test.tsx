@@ -68,7 +68,7 @@ import {
  */
 
 /** The page-level tablist's `aria-label` (`SettingsPage`'s `SettingsSectionTabs`). */
-const SETTINGS_TABLIST_NAME = 'Settings & API sections';
+const SETTINGS_TABLIST_NAME = 'Settings sections';
 
 const ABOUT_URL = 'GET /api/about';
 const OPENAPI_URL = 'GET /api/openapi';
