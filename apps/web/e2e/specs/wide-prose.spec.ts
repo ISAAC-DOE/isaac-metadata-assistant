@@ -124,6 +124,29 @@ interface Finding {
 }
 
 test.describe('wide viewports: prose does not strand a wide empty gutter @responsive', () => {
+  /*
+   * RUNS ONCE, IN THE REFERENCE DESKTOP PROJECT ONLY — and the skip is here
+   * rather than in the tag because of how this config routes specs.
+   *
+   * Every viewport project's `grep` requires one of `@responsive`,
+   * `@interaction` or `@zoom`, so an UNTAGGED spec matches no project and runs
+   * NOWHERE — silently, which is the worse failure. `@responsive` is therefore
+   * the only tag that guarantees it is collected at all.
+   *
+   * But `@responsive` means all five projects, and this spec calls
+   * `setViewportSize` itself: it would measure the same two widths five times,
+   * once of them under `zoom-200`'s `deviceScaleFactor: 2`, where "1728 CSS px"
+   * is a different physical thing and the numbers would not be comparable to
+   * the rest. So the tag gets it collected and this line picks the one project
+   * whose own viewport it is legitimately overriding.
+   */
+  test.beforeEach(({}, testInfo) => {
+    test.skip(
+      testInfo.project.name !== 'desktop-1280x800',
+      'sets its own viewport; running it per-project would measure the same thing five times',
+    );
+  });
+
   for (const width of WIDE_WIDTHS) {
     for (const surface of PROSE_SURFACES) {
       test(`${surface.id} at ${width} has no unrecorded dead gutter`, async ({ app, page }) => {
