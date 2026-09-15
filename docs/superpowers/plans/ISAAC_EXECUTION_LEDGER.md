@@ -346,6 +346,65 @@ NAMED RESIDUE THAT IS OURS, NOT EXTERNAL — the honest short list:
     Import were critiqued; the file-staging panel, the stepper and the favicon
     had browser measurement plus independent review instead.
 
+*** A MEASUREMENT TRAP THAT LOOKS EXACTLY LIKE A PRODUCT DEFECT, and it cost a
+diagnosis before it was found: RUNNING THE READ-ONLY E2E SUITE WITH A
+NON-DEFAULT `VITE_API_BASE` CHANGES USER-FACING COPY. ***
+
+  `runtimeContext.isHostedBuild` is a COMPILE-TIME comparison of `VITE_API_BASE`
+  against the default. Point vite at any other base — which is exactly what you
+  do to avoid colliding with another lane's backend — and the app classifies
+  itself as HOSTED. `FetchStates` then renders the hosted unreachable-API copy
+  ("ISAAC Is Not Responding", a session-or-service explanation) instead of the
+  local one ("Backend Not Running", with the `uvicorn` remedy), and
+  `states.spec.ts`'s `@interaction ERROR` test fails on the assertion it makes
+  about that copy.
+
+  MEASURED BOTH WAYS: with `VITE_API_BASE=http://127.0.0.1:8019/api` the test
+  fails and the alert reports `Build Mode: hosted`; with the default base,
+  `states.spec.ts` is **14 passed / 0 failed**. Nothing about the product is
+  wrong. Same family as the stale-port and CORS-by-port traps already recorded —
+  a configuration difference wearing a defect's clothes.
+
+  THE RULE: a read-only e2e result is only comparable to CI's when vite is on the
+  DEFAULT base. Quote the base with any local e2e claim about copy or states.
+
+`charts.spec.ts` NEEDED REAL WORK, AND AN INFERENCE OF MINE WAS WRONG. I told
+the owner CI's 105 failures were "consistent with" the two structural breaks.
+They were not: five `charts.spec.ts` failures had an independent cause, and only
+running the spec locally found it.
+
+  THE STATISTICS CHARTS SPLIT BY KIND when the redesign moved the engineering
+  content to its own tab. Measured in Chrome on a populated workspace:
+
+               figure.stats-chart   details.stats-technical   Record Verification
+    Overview            1                     0                      no
+    ?tab=build          4                     1                     yes
+
+  So the spec was opening a tab that no longer held what it asserts about, and
+  `openTechnicalDetails` was waiting on a `details.stats-technical` that is not
+  there.
+
+  MY FIRST FIX WAS WRONG AND THE FAILURE SAID WHY. I sent those tests at the
+  WORKED-EXAMPLE build tab; three still failed, each reporting ZERO charts. The
+  four build-tab charts are VERIFICATION-derived, and `global-setup` settles a
+  verification report for the ORDINARY scope (its own log: "verification report
+  settled to ok"). A worked-example session has no such report. Retargeted at
+  the catalogued ordinary `statistics-build` surface: 9/10, then 10/10 once the
+  caption set matched the four measured captions.
+
+  AND NARROWING THAT CAPTION SET WOULD ITSELF HAVE BEEN A COVERAGE LOSS — the
+  same trap `openUnreachableDisclosures` caught one commit earlier: an assertion
+  made green by narrowing what it looks at. The two RECORD-derived charts
+  (`workflow step`, `evidence-support class`) render only where records exist, so
+  they got their own sibling test on the worked-example Overview asserting the
+  property the six-caption set used to guarantee for all of them — a caption and
+  a non-empty `p.sr-only` summary, outside the collapsed data-table. `charts.spec.ts`
+  is **11 passed / 0 failed**.
+
+  The per-figure axis-band and measured-width battery is deliberately NOT
+  duplicated into the sibling: those are properties of the chart component, not
+  of these two instances, and two copies would be harder to trust than one.
+
 OWNER FEEDBACK DRIVING THIS SESSION (verbatim, 2026-09-15, from screenshots):
   * the Runs split-screen architecture is APPROVED — "I like that split-screen
     architecture" — but the right pane "is not really readable … I can't clearly

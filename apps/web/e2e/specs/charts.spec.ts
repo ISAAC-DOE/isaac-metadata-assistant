@@ -30,7 +30,15 @@
 import { expect, test } from '../fixtures';
 import { SURFACES } from '../surfaces';
 
-const STATISTICS_EXAMPLE = SURFACES.find((s) => s.id === 'statistics-example')!;
+/* `STATISTICS_EXAMPLE` REMOVED, 2026-09-15, not silenced: the five tests that
+   referenced it now open the BUILD tab, where the charts live. The
+   `statistics-example` surface itself still exists and is still scanned by axe —
+   it is only this spec that no longer addresses it. */
+const STATISTICS_BUILD = SURFACES.find((s) => s.id === 'statistics-build')!;
+/* The worked-example OVERVIEW tab — named for the tab, because this spec now
+   addresses two different Statistics tabs and `STATISTICS_EXAMPLE` alone no
+   longer says which. */
+const STATISTICS_EXAMPLE_OVERVIEW = SURFACES.find((s) => s.id === 'statistics-example')!;
 const STATISTICS_ORDINARY = SURFACES.find((s) => s.id === 'statistics')!;
 const STATISTICS_MINE = SURFACES.find((s) => s.id === 'statistics-mine')!;
 
@@ -691,9 +699,37 @@ async function settledVerificationSection(page: import('@playwright/test').Page)
   ).toBeVisible({ timeout: 20_000 });
 }
 
+/**
+ * The `Build & Verification` tab — where the charts now live.
+ *
+ * *** FOUR OF THE FIVE CHARTS MOVED, 2026-09-15. *** The Statistics redesign put
+ * the engineering content on its own tab so a scientist does not land on it.
+ * Measured in Chrome on a populated workspace:
+ *
+ *              figure.stats-chart   details.stats-technical   Record Verification
+ *   Overview            1                     0                      no
+ *   ?tab=build          4                     1                     yes
+ *
+ * So these tests were opening a tab that no longer holds what they assert about,
+ * and `openTechnicalDetails` was waiting on a `details.stats-technical` that is
+ * not there — which is how they failed in CI.
+ *
+ * THE ORDINARY SCOPE, NOT THE WORKED EXAMPLE, and that is a correction to my own
+ * first attempt. I sent these at the worked-example build tab and three still
+ * failed, every one reporting ZERO charts. The reason is what these four charts
+ * ARE: they are VERIFICATION-derived, not record-derived, and `global-setup`
+ * settles a verification report for the ORDINARY scope (its own log line:
+ * "verification report settled to ok"). A worked-example session has no such
+ * report, so the tab renders no plot there. Record-derived charts are the
+ * separate concern `STATISTICS_ORDINARY`'s "draws no RECORD-derived chart" test
+ * already pins.
+ *
+ * Using the catalogued surface also means no new baseline cells: `statistics-build`
+ * was added to `e2e/surfaces.ts` in this same change for axe, in this same scope.
+ */
 test.describe('@responsive Statistics charts (worked example)', () => {
   test('every chart carries BOTH text equivalents, at this viewport', async ({ page, app }) => {
-    await app.open(STATISTICS_EXAMPLE);
+    await app.open(STATISTICS_BUILD);
     await settledVerificationSection(page);
     await openTechnicalDetails(page);
 
@@ -724,10 +760,26 @@ test.describe('@responsive Statistics charts (worked example)', () => {
      * figure and not three.
      */
     const captions = await figures.locator('figcaption').allInnerTexts();
+    /*
+     * *** FOUR, NOT SIX — the set SPLIT BY KIND when the charts moved tabs, and
+     * the two that left are covered by their own test below rather than dropped. ***
+     *
+     * ~~'Records by current workflow step, out of <n> counted'~~
+     * ~~'Share of classified fields by evidence-support class'~~
+     *
+     * Those two are RECORD-derived, so they render only where records exist —
+     * the worked-example Overview. The four that remain are derived from the
+     * schema, the API contract and the validators, which this tab reads
+     * regardless of how many records a workspace holds. Measured from this
+     * test's own failure output rather than guessed.
+     *
+     * Deleting the two from this list WITHOUT the sibling test would have been
+     * the same coverage loss `openUnreachableDisclosures` caught on the prose
+     * disclosures one commit earlier: an assertion made green by narrowing what
+     * it looks at.
+     */
     expect(captions.map((c) => c.trim().replace(/\d+/g, '<n>')).sort()).toEqual(
       [
-        'Records by current workflow step, out of <n> counted',
-        'Share of classified fields by evidence-support class',
         "Fields by top-level section, in the schema's own declaration order",
         'Documented operations by HTTP method',
         "Documented operations by group, in the contract's own tag order",
@@ -778,7 +830,7 @@ test.describe('@responsive Statistics charts (worked example)', () => {
   });
 
   test('the drawn SVG claims nothing — the text is authoritative', async ({ page, app }) => {
-    await app.open(STATISTICS_EXAMPLE);
+    await app.open(STATISTICS_BUILD);
     await openTechnicalDetails(page);
 
     const svgs = page.locator('figure.stats-chart svg');
@@ -794,7 +846,7 @@ test.describe('@responsive Statistics charts (worked example)', () => {
     page,
     app,
   }) => {
-    await app.open(STATISTICS_EXAMPLE);
+    await app.open(STATISTICS_BUILD);
     await openTechnicalDetails(page);
 
     const measurements = await page.evaluate(() => {
@@ -837,7 +889,7 @@ test.describe('@responsive Statistics charts (worked example)', () => {
   });
 
   test('no chart forces two-dimensional scrolling', async ({ page, app }) => {
-    await app.open(STATISTICS_EXAMPLE);
+    await app.open(STATISTICS_BUILD);
     await openTechnicalDetails(page);
     // Open every data table too: a wide table is the most likely thing to widen
     // the page, so the check is made in the state where it could.
@@ -870,7 +922,7 @@ test.describe('@responsive Statistics charts (worked example)', () => {
   });
 
   test('the wide block scrolls inside its own container, not the page', async ({ page, app }) => {
-    await app.open(STATISTICS_EXAMPLE);
+    await app.open(STATISTICS_BUILD);
     await openTechnicalDetails(page);
     await page.locator('summary.stats-chart-table-toggle').first().click();
 
@@ -883,6 +935,56 @@ test.describe('@responsive Statistics charts (worked example)', () => {
         ).length,
     );
     expect(unwrapped, 'every chart table must sit in a .stats-scroll container').toBe(0);
+  });
+});
+
+test.describe('@responsive Statistics charts · the record-derived pair', () => {
+  /*
+   * *** THE TWO CHARTS THE BUILD-TAB SET NO LONGER NAMES, covered here so that
+   * narrowing that set did not narrow the suite. ***
+   *
+   * `Records by current workflow step` and `Share of classified fields by
+   * evidence-support class` are RECORD-derived: they render where records exist,
+   * which is the worked-example Overview, not the ordinary build tab where the
+   * schema/contract/validator charts live.
+   *
+   * This asserts the property that matters and that the moved set used to
+   * guarantee for all six — every figure carries a caption and a non-empty
+   * `p.sr-only` summary, outside its own data-table disclosure, so the text
+   * equivalent survives with the `<details>` shut. It deliberately does NOT
+   * re-run the whole per-figure battery above: that block's remaining
+   * assertions are about axis bands and measured plot widths, which are
+   * properties of the chart component rather than of these two instances, and
+   * duplicating 100 lines to re-prove them would make both copies harder to
+   * trust than one.
+   */
+  test('each carries a caption and a non-empty summary, at this viewport', async ({ page, app }) => {
+    await app.open(STATISTICS_EXAMPLE_OVERVIEW);
+
+    const figures = page.locator('figure.stats-chart');
+    const count = await figures.count();
+    expect(count, 'the worked-example Overview must draw its record-derived charts').toBeGreaterThan(
+      0,
+    );
+
+    const captions = await figures.locator('figcaption').allInnerTexts();
+    expect(count, 'every figure must have exactly one caption').toBe(captions.length);
+
+    for (let i = 0; i < count; i++) {
+      const figure = figures.nth(i);
+      const caption = (await figure.locator('figcaption').first().innerText()).trim();
+      const summary = figure.locator('p.sr-only').first();
+      await expect(summary, `${caption}: summary sentence`).toHaveCount(1);
+      const text = (await summary.textContent())?.trim() ?? '';
+      expect(text.length, `${caption}: summary must not be empty`).toBeGreaterThan(10);
+      /* Outside the chart's own data-table disclosure — a closed `<details>` is
+         hidden from assistive technology, so a summary inside it would vanish
+         with it. Same reasoning as the build-tab block above. */
+      await expect(
+        figure.locator('details.stats-chart-table-wrap p.sr-only'),
+        `${caption}: summary must not be inside the data-table disclosure`,
+      ).toHaveCount(0);
+    }
   });
 });
 
