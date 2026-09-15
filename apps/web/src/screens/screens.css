@@ -214,11 +214,34 @@
  * engine returns `[]` exit 0 on a `.tsx` holding four deliberate defects, with
  * no warning at all; negative-controlled again this session).
  *
- * Measured at 1280: 699px wide with `max-width: none` at 12.5px — about 112
- * characters per line, against the 70-85ch the product direction cites as
- * readable. This is the OPPOSITE failure from the dead-whitespace one
- * `e2e/specs/wide-prose.spec.ts` guards: there, prose stops far short of its
- * box; here it had no measure at all and ran the full width of the banner.
+ * *** THE FIRST VERSION OF THIS COMMENT CARRIED A FALSE NUMBER FROM A FLAWED
+ * INSTRUMENT, and the correction is kept in full because the instrument is the
+ * transferable part. ***
+ *
+ * ~~Measured at 1280: 699px wide at 12.5px — about 112 characters per line.~~
+ * That 112 came from taking `getClientRects()`' widest rect and its COUNT as
+ * "line width" and "line count". Those are one rect per inline TEXT-NODE
+ * FRAGMENT, not per line: JSX interpolation splits a sentence into many nodes,
+ * so a single 19px-tall line reads back as 14 short "lines". Caught on
+ * `.hi-counts`, which reported 17 chars over 14 lines while being one line of
+ * 89 characters.
+ *
+ * MEASURED AGAIN, by laying the element's own text into a probe at its own font
+ * and content width and counting LINE BOXES:
+ *
+ *              before                        after
+ *   @1280      699px, 2 lines, 58 ch/line    567px, 2 lines, 58 ch/line
+ *   @1728     1147px, 1 line, 115 ch/line    567px, 2 lines, 58 ch/line
+ *
+ * SO THE CAP IS INERT AT 1280 AND LOAD-BEARING AT 1728 — and that is the same
+ * structural fact `e2e/specs/wide-prose.spec.ts` was written for: the widest
+ * viewport this suite tests is 1280, and both failure modes of a missing prose
+ * measure live above it. 115 characters on ONE line is past any readable
+ * measure; the 70-85ch the product direction cites is the target, and 58 is
+ * inside it.
+ *
+ * It is the OPPOSITE failure from the dead-whitespace one that spec guards:
+ * there, prose stops far short of its box; here it had no measure at all.
  *
  * `72ch` rather than a pixel value, so it tracks this rule's own font-size.
  */
