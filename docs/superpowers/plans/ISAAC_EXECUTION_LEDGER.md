@@ -237,6 +237,46 @@ including the contention conclusion about `record-capture-destination`.
     backend -> 9447 passed / 45 skipped, exit 0 (MAIN CHECKOUT — a worktree
               would read +2, because `graphify-out/graph.json` is gitignored)
 
+IMPECCABLE — HONEST COVERAGE, STATED RATHER THAN CLAIMED. The skill was invoked
+for the **Statistics/Settings** redesign (lane commit `137b13f0`: playbooks
+`critique`/`distill`/`layout`/`operate`, negative control run, in-browser
+overlay 21 anti-patterns, one against its own new code and fixed) and, at the
+end of the session, for the **Runs** redesign by the orchestrator. It was NOT
+invoked for the file-staging panel, the stepper or the favicon — those had live
+browser measurement plus independent review instead. A future session should
+read that as partial coverage, because that is what it is.
+
+  *** BOTH RUNS ARE ⚠️ DEGRADED: single-context. *** The `critique` playbook
+  requires Assessment A and B as two ISOLATED sub-agents and calls an inline run
+  a degraded run that must be bannered. The session's five-agent budget was
+  spent, so both ran sequentially in one context and both say so.
+
+  THE CLI DETECTOR IS NON-FUNCTIONAL HERE AND WAS NEGATIVE-CONTROLLED AGAIN. A
+  `.tsx` holding an unlabelled `<img>`, a clickable `<div>` with no role, 8px
+  text and a nested interactive element returns `[]`, **exit 0, with no stderr
+  warning at all**; the same defects as `.html` also return `[]` but do warn
+  `HTML parser modules unavailable`. So a `.tsx` scan is a SILENT non-answer —
+  never quote a `0` from it. §11's standing instruction is confirmed, not
+  weakened. The **in-browser overlay is a different code path and works** (33
+  findings on the Runs workspace).
+
+  TWO OVERLAY FINDINGS WERE REAL AND ARE FIXED, and they are the OPPOSITE
+  failure from the one `wide-prose.spec.ts` guards — prose with NO measure at
+  all rather than prose stranded inside its box:
+    `.needsyou-text`  699px, `max-width: none`  -> ~112 chars/line
+    `.vr-status`      895px, `max-width: none`  -> ~143 chars/line
+  Both now `72ch`; measured after at 567px and **79 chars/line**, inside the
+  70-85ch the direction cites, and still two lines so no gutter is created.
+
+  AND THE RULE THAT FOUND THEM IS CRUDE, which is the part worth carrying: it
+  still fires on all three after the fix, including `.vr-sub`, which was already
+  capped at ~79 chars. Its threshold is **pixel**-based, not character-based. So
+  the count went 33 -> 33, and that is not a failure to improve — it pointed at
+  two genuine defects while being wrong about its own criterion. The other 30
+  are triaged and unfixed: 24 `tiny-text` at 11px/11.5px, which is this repo's
+  deliberate `--font-size-meta` rung and its documented ~11px floor; 3
+  `nested-cards`, 1 `overused-font`, 1 `em-dash-overuse`, 1 `layout-transition`.
+
 OWNER FEEDBACK DRIVING THIS SESSION (verbatim, 2026-09-15, from screenshots):
   * the Runs split-screen architecture is APPROVED — "I like that split-screen
     architecture" — but the right pane "is not really readable … I can't clearly
