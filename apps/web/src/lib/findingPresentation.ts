@@ -53,6 +53,27 @@ import type { ApiRunCheckFinding } from './types';
  */
 export type FindingState = 'Missing' | 'Needs Review' | 'Invalid' | 'Advisory';
 
+/**
+ * THE SERVER'S SENTINEL FOR "THE WHOLE DOCUMENT, NO FIELD" — and the reason
+ * this constant exists at all is that a browser caught it being rendered as a
+ * subject.
+ *
+ * `official.py:98` builds a finding's path as
+ * `".".join(str(p) for p in err.absolute_path) or "$"` — so `$` is what an
+ * error with an EMPTY path becomes, which is every whole-document error
+ * (`'descriptors' is a required property` is the commonest one in this
+ * product). `routes.py` additionally writes `{"path": "$"}` at seven sites for
+ * its fail-closed "Validation could not be completed" branch.
+ *
+ * MEASURED ON THE RUNNING APP, 2026-09-15: a Check Run on a real record
+ * rendered a subject line reading exactly `$` above
+ * `'descriptors' is a required property`. That is worse than no subject — it
+ * looks like a variable name, it names no field, and it is the shape of defect
+ * this whole slice exists to remove. A whole-document finding HAS no subject,
+ * and saying nothing is the honest rendering of that.
+ */
+const ROOT_PATH = '$';
+
 /** What a finding is ABOUT, when it says. */
 export interface FindingSubject {
   text: string;
@@ -76,7 +97,7 @@ export function findingSubject(finding: ApiRunCheckFinding): FindingSubject | nu
   const label = blockerKindLabel(finding.kind);
   if (label !== null) return { text: label, mono: false };
   const path = finding.path;
-  if (typeof path === 'string' && path.trim() !== '') {
+  if (typeof path === 'string' && path.trim() !== '' && path.trim() !== ROOT_PATH) {
     return { text: path.trim(), mono: true };
   }
   return null;
@@ -105,6 +126,10 @@ export function findingRunFieldPath(finding: ApiRunCheckFinding): string | null 
   const path = finding.path;
   if (typeof path !== 'string') return null;
   const trimmed = path.trim();
+  /* `$` could never match a member of the five, so excluding it changes no
+     outcome here — it is excluded anyway, so both readers of a finding's path
+     agree on what a path IS rather than agreeing by coincidence. */
+  if (trimmed === ROOT_PATH) return null;
   return RUN_FIELD_PATHS.has(trimmed) ? trimmed : null;
 }
 

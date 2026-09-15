@@ -110,6 +110,14 @@ import { inheritedTally, type InheritedTally } from '../lib/runOverrides';
 import { Check, ChevronRight, CircleAlert, RotateCcw, TriangleAlert } from './icons';
 import { api } from '../lib/api';
 import {
+  RUN_DATETIME_TEXT_SUMMARY,
+  RUN_DATETIME_UNPICKABLE,
+  RUN_DATETIME_ZONE_HINT,
+  formatStoredDatetime,
+  isoToPickerValue,
+  pickerValueToIso,
+} from '../lib/runDatetime';
+import {
   RUN_FIELDS,
   envelopeText,
   parseRunField,
@@ -278,6 +286,15 @@ export function RunCard({
    * that can honestly claim the input exists.
    */
   const fieldControls = useRef<Record<string, HTMLElement | null>>({});
+  /*
+   * WHETHER THE READER HAS OPENED (OR CLOSED) THE ISO TEXT PATH FOR A GIVEN
+   * DATETIME FIELD. Absent means "no choice made", and the disclosure then
+   * follows its own default — open exactly when the stored value is one the
+   * picker cannot represent. A recorded choice wins over that default, so a
+   * reader who closes the box on an unpickable value does not have it spring
+   * back open on the next keystroke.
+   */
+  const [isoOverrides, setIsoOverrides] = useState<Record<string, boolean>>({});
   const headerId = `${baseId}-header`;
   const panelId = `${baseId}-panel`;
   const removeId = `${baseId}-remove`;
@@ -906,11 +923,48 @@ export function RunCard({
                 const fieldId = `${baseId}-${spec.path}`;
                 const errorId = `${fieldId}-error`;
                 const hintId = `${fieldId}-hint`;
+                const isoId = `${fieldId}-iso`;
                 const error = fieldErrors[spec.path];
                 const value = draft[spec.path] ?? envelopeText(run.fields?.[spec.path]);
+                /*
+                  ── THE ACQUISITION TIMESTAMPS GET A REAL PICKER ────────────
+                  The project owner, 2026-09-15: *"that acquisition start,
+                  acquisition end, no idea, like why."* He should not be
+                  hand-typing `2026-01-31T09:00:00Z`.
+
+                  IT IS THE SAME STORED STRING. The picker's value is routed
+                  through `pickerValueToIso` and then through the SAME
+                  `onFieldChange` / `parseRunField` / autosave path a typed
+                  entry has always used, so the PATCH body is byte-identical to
+                  the one the text box produced. Nothing about the contract
+                  moves; only the way a person enters it.
+
+                  AND THE TEXT PATH DOES NOT GO AWAY. `datetime-local` cannot
+                  hold three things the record legitimately can — an explicit
+                  `+02:00` offset, fractional seconds, and a half-typed string
+                  the reader is still holding — and a browser BLANKS a value it
+                  cannot parse rather than keeping it. So the ISO box stays,
+                  beside the picker, and it OPENS BY ITSELF whenever the stored
+                  value is one the picker cannot represent (`pickerValue ===
+                  null`), with the reason stated. See `lib/runDatetime.ts` for
+                  which values those are and why each one is `null` rather than
+                  a silent reinterpretation.
+
+                  NO `start <= end` CHECK IS ADDED HERE. `runFields.ts` records
+                  that as a deliberate open decision with the measurement behind
+                  it (an inverted window PATCHes 200, Check Run reports nothing,
+                  official validation passes). A picker makes an inverted window
+                  EASIER to produce — two clicks rather than two typed strings —
+                  and that is a disclosure, not a licence to close it in the one
+                  writer that happens to be a browser.
+                */
+                const isDatetime = spec.kind === 'datetime';
+                const pickerValue = isDatetime ? isoToPickerValue(value) : null;
+                const isoOpen = isoOverrides[spec.path] ?? (isDatetime && pickerValue === null);
                 const describedBy =
-                  [error ? errorId : null, spec.hint ? hintId : null].filter(Boolean).join(' ') ||
-                  undefined;
+                  [error ? errorId : null, spec.hint || isDatetime ? hintId : null]
+                    .filter(Boolean)
+                    .join(' ') || undefined;
                 return (
                   <div className="run-field" key={spec.path}>
                     <label className="run-field-label" htmlFor={fieldId}>
@@ -940,6 +994,43 @@ export function RunCard({
                             </option>
                           ))}
                         </select>
+                      ) : isDatetime ? (
+                        /*
+                          THE LABEL IS UNCHANGED — no `(UTC)` suffix on it. The
+                          zone is stated visibly beside the control and in the
+                          hint the control is `aria-describedby`'d to, so both
+                          readers get it; putting it in the LABEL would rename
+                          the field ("Acquisition start (UTC)") and every
+                          surface, test and script that addresses this control
+                          by its name would be addressing a name that no longer
+                          exists.
+                        */
+                        <span className="run-field-datetime">
+                          <input
+                            id={fieldId}
+                            ref={(el) => {
+                              fieldControls.current[spec.path] = el;
+                            }}
+                            data-run-field-path={spec.path}
+                            className="run-input"
+                            type="datetime-local"
+                            /* Seconds granularity. Without it the control
+                               offers minutes only and would silently truncate a
+                               stored `:37` the moment the reader touched it. */
+                            step="1"
+                            value={pickerValue ?? ''}
+                            /* A value the picker cannot represent is not shown
+                               as an empty box pretending the field is empty —
+                               the control is disabled, the ISO box below is
+                               open with the real value in it, and the note says
+                               which of the two the record holds. */
+                            disabled={pickerValue === null}
+                            aria-invalid={error !== undefined || undefined}
+                            aria-describedby={describedBy}
+                            onChange={(e) => onFieldChange(spec, pickerValueToIso(e.target.value))}
+                          />
+                          <span className="run-field-zone">UTC</span>
+                        </span>
                       ) : (
                         <input
                           id={fieldId}
@@ -957,10 +1048,73 @@ export function RunCard({
                         />
                       )}
                       <span className="run-field-path">{spec.path}</span>
-                      {spec.hint && (
-                        <span className="run-field-hint" id={hintId}>
-                          {spec.hint}
+                      {/*
+                        WHAT IS ACTUALLY STORED, in both spellings, so a reader
+                        never has to trust that the picker and the record agree
+                        — they can see the string. It renders only when there IS
+                        a value, and `formatStoredDatetime` hands back an
+                        unreadable one verbatim rather than re-spelling a guess.
+                      */}
+                      {isDatetime && value !== '' && (
+                        <span className="run-field-readback">
+                          {formatStoredDatetime(value)}
+                          {' · stored as '}
+                          <code className="mono">{value}</code>
                         </span>
+                      )}
+                      {isDatetime ? (
+                        <span className="run-field-hint" id={hintId}>
+                          {RUN_DATETIME_ZONE_HINT}
+                        </span>
+                      ) : (
+                        spec.hint && (
+                          <span className="run-field-hint" id={hintId}>
+                            {spec.hint}
+                          </span>
+                        )
+                      )}
+                      {/*
+                        THE TEXT PATH, NEXT TO THE PICKER AND NOT INSTEAD OF IT.
+                        A `<details>` with `open` DRIVEN rather than native, so
+                        it can open ITSELF when the stored value is one the
+                        picker cannot hold; `onToggle` records the reader's own
+                        choice, which then wins over that default for as long as
+                        this card is mounted.
+                      */}
+                      {isDatetime && (
+                        <details
+                          className="run-field-iso"
+                          open={isoOpen}
+                          onToggle={(e) =>
+                            setIsoOverrides((prev) => ({
+                              ...prev,
+                              [spec.path]: (e.target as HTMLDetailsElement).open,
+                            }))
+                          }
+                        >
+                          <summary className="run-field-iso-summary">
+                            {RUN_DATETIME_TEXT_SUMMARY}
+                          </summary>
+                          {pickerValue === null && value !== '' && (
+                            <span className="run-field-hint">
+                              {RUN_DATETIME_UNPICKABLE}
+                            </span>
+                          )}
+                          <label className="run-field-iso-label" htmlFor={isoId}>
+                            {spec.label} — ISO 8601 text
+                          </label>
+                          <input
+                            id={isoId}
+                            data-run-field-iso-path={spec.path}
+                            className="run-input"
+                            type="text"
+                            value={value}
+                            aria-invalid={error !== undefined || undefined}
+                            aria-describedby={describedBy}
+                            onChange={(e) => onFieldChange(spec, e.target.value)}
+                          />
+                          {spec.hint && <span className="run-field-hint">{spec.hint}</span>}
+                        </details>
                       )}
                       {error && (
                         <span className="run-field-error" id={errorId}>

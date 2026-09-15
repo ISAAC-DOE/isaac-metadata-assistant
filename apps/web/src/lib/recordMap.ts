@@ -34,6 +34,7 @@
  * decides whether that value is right, and it runs at export.
  */
 
+import { formatStoredDatetime } from './runDatetime';
 import { RUN_FIELDS, envelopeValue, type RunFieldSpec } from './runFields';
 import type { ApiRunCheckFinding, ApiRunView } from './types';
 
@@ -79,44 +80,6 @@ export interface RecordMapRow {
   reviewNote: string | null;
 }
 
-const MONTHS = [
-  'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-  'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
-] as const;
-
-/**
- * A stored ISO-8601 date-time as something a person reads — or, unchanged, the
- * string that was stored.
- *
- * IT DOES NOT PARSE A DATE. There is no `Date` object anywhere in here, and
- * that is deliberate rather than frugal: `new Date(...)` would resolve an
- * offset against the reader's own zone, so `2026-01-31T09:00:00+02:00` would
- * render as a DIFFERENT CLOCK TIME than the one the scientist entered, and the
- * rendering would change with the machine it ran on. This reads the literal
- * components the string already carries and re-spells them.
- *
- *   `2026-01-31T09:00:00Z`       -> `Jan 31, 2026 · 09:00 UTC`
- *   `2026-01-31T09:00:00+02:00`  -> `Jan 31, 2026 · 09:00 +02:00`
- *   `2026-01-31T09:00:00`        -> `Jan 31, 2026 · 09:00`   (no zone claimed)
- *   anything else                -> returned VERBATIM
- *
- * The last line is the rule: a string this shape does not describe is handed
- * back untouched, because re-spelling something you could not read is how a
- * surface ends up showing a value nobody entered. A month number outside 1–12
- * also falls through to verbatim rather than indexing off the end of the list.
- */
-export function formatStoredDatetime(raw: string): string {
-  const m = /^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})(?::\d{2}(?:\.\d+)?)?(Z|[+-]\d{2}:\d{2})?$/.exec(
-    raw.trim(),
-  );
-  if (m === null) return raw;
-  const [, year, month, day, hh, mm, zone] = m;
-  const monthName = MONTHS[Number(month) - 1];
-  if (monthName === undefined) return raw;
-  const suffix = zone === undefined ? '' : zone === 'Z' ? ' UTC' : ` ${zone}`;
-  return `${monthName} ${Number(day)}, ${year} · ${hh}:${mm}${suffix}`;
-}
-
 /**
  * One stored run-field value as display text.
  *
@@ -148,11 +111,23 @@ function bagTouchesBlock(bag: Record<string, unknown>, block: string): boolean {
   );
 }
 
-/** The `path` a finding names, or `null` when it names none. Never inferred. */
+/**
+ * The `path` a finding names, or `null` when it names none. Never inferred.
+ *
+ * `$` IS NOT A PATH. It is `official.py:98`'s sentinel for an error with an
+ * EMPTY `absolute_path` — a whole-document finding — and `routes.py` writes it
+ * at seven sites for a fail-closed no-verdict. Indexing it would change no
+ * outcome here (no row is addressed `$`), and it is excluded anyway so that
+ * this reader and `findingPresentation`'s agree on what a path IS rather than
+ * agreeing by coincidence. See that module's `ROOT_PATH` for the measurement
+ * that prompted it.
+ */
 export function findingPath(finding: ApiRunCheckFinding): string | null {
   if (typeof finding !== 'object' || finding === null) return null;
   const path = finding.path;
-  return typeof path === 'string' && path.trim() !== '' ? path.trim() : null;
+  if (typeof path !== 'string') return null;
+  const trimmed = path.trim();
+  return trimmed !== '' && trimmed !== '$' ? trimmed : null;
 }
 
 /** The message a finding carries, verbatim, or `null`. Never composed. */

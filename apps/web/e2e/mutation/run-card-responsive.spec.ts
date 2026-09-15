@@ -598,11 +598,17 @@ test.describe('run card — narrow widths', () => {
     await page.setViewportSize({ width: 320, height: 812 });
     const first = await oneOpenRun(page);
 
+    /*
+     * ~~`.run-field:has(.run-field-path:text-is(path)) input, … select`~~ —
+     * NARROWED to `data-run-field-path`, the attribute the PRIMARY control
+     * publishes, because the two acquisition timestamps now render a
+     * `datetime-local` picker AND an ISO text box in the same `.run-field`:
+     * the old selector matched two elements and Playwright's strict mode would
+     * refuse the locator. The ISO box carries `data-run-field-iso-path`
+     * instead, so this resolves to exactly one element for all five paths.
+     */
     const type = async (path: string, value: string) => {
-      const box = first.locator(
-        `.run-field:has(.run-field-path:text-is("${path}")) input, ` +
-          `.run-field:has(.run-field-path:text-is("${path}")) select`,
-      );
+      const box = first.locator(`[data-run-field-path="${path}"]`);
       await pwExpect(box).toBeVisible();
       const tag = await box.evaluate((el) => el.tagName);
       if (tag === 'SELECT') await box.selectOption(value);
@@ -613,8 +619,16 @@ test.describe('run card — narrow widths', () => {
     await type('context.environment', 'operando');
     await type('context.temperature_K', '1273.15');
     await type('context.thermodynamics.atmosphere', '5% H2 in Ar, 1.2 bar');
-    await type('timestamps.acquired_start_utc', '2026-01-31T09:00:00Z');
-    await type('timestamps.acquired_end_utc', '2026-01-31T17:45:00Z');
+    /*
+     * ~~`'2026-01-31T09:00:00Z'`~~ — a `datetime-local` control cannot hold a
+     * `Z` suffix (HTML's own value sanitization for that input type), so
+     * `fill` with one throws. The picker's own format stores the IDENTICAL
+     * official string — `pickerValueToIso` appends the seconds and the `Z` —
+     * so the stored values this test's own assertions read back are unchanged,
+     * and this remains the widest plausible entry at 320px.
+     */
+    await type('timestamps.acquired_start_utc', '2026-01-31T09:00');
+    await type('timestamps.acquired_end_utc', '2026-01-31T17:45');
 
     // Let the debounced saves settle, then leave focus so the row renders.
     await pwExpect(first.locator('.run-save-status')).toContainText(/Saved/, { timeout: 20_000 });

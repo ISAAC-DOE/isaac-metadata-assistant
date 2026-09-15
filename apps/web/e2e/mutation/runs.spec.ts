@@ -114,8 +114,28 @@ const conditions = (card: Locator) => card.locator('.run-card-conditions');
  * that is itself a regression worth failing on.
  */
 function fieldControl(card: Locator, path: string): Locator {
-  return card.locator(`.run-field:has(.run-field-path:text-is("${path}")) input, ` +
-    `.run-field:has(.run-field-path:text-is("${path}")) select`);
+  /*
+   * ~~`.run-field:has(.run-field-path:text-is(path)) input, … select`~~ —
+   * NARROWED to the attribute the control itself publishes, and it had to be:
+   * the two acquisition timestamps now render a `datetime-local` PICKER and an
+   * ISO TEXT box in the same `.run-field`, so the old selector matched two
+   * elements and Playwright's strict mode would refuse the locator outright.
+   *
+   * `data-run-field-path` is on the PRIMARY control only (the ISO text box
+   * carries `data-run-field-iso-path`), so this resolves to exactly one element
+   * for all five paths — and it is the same attribute the Record Map beside the
+   * editor uses to focus a field, which is one handle rather than two.
+   *
+   * The comment this replaces was right about the reason NOT to use
+   * `getByLabel('Temperature')` — the visible label carries a unit span and two
+   * runs on screen match it twice — and that reason still holds.
+   */
+  return card.locator(`[data-run-field-path="${path}"]`);
+}
+
+/** The ISO 8601 text box beside a datetime picker. `datetime` paths only. */
+function fieldIsoControl(card: Locator, path: string): Locator {
+  return card.locator(`[data-run-field-iso-path="${path}"]`);
 }
 
 const fieldError = (card: Locator, path: string) =>
@@ -639,7 +659,15 @@ test.describe('R5 · the Run workspace', () => {
       (r) => r.method() === 'PATCH' && r.url().includes(`/experiments/${SEED.fresh}/runs/`),
     );
 
-    await fieldControl(card, 'timestamps.acquired_start_utc').fill('2026-01-31T09:00:00Z');
+    /*
+     * ~~`fieldControl(...).fill('2026-01-31T09:00:00Z')`~~ — the picker cannot
+     * hold a `Z` suffix (the HTML specification's own value sanitization for
+     * `datetime-local`), so `fill` with one would throw. The ISO TEXT box beside
+     * it accepts exactly the string this spec always sent, and the assertion
+     * below — that the stored value is `2026-01-31T09:00:00Z` — is unchanged,
+     * which is the point: the two controls write the same field.
+     */
+    await fieldIsoControl(card, 'timestamps.acquired_start_utc').fill('2026-01-31T09:00:00Z');
 
     /*
      * Leave the runs workspace while that first PATCH is still open. This is ONE

@@ -99,6 +99,32 @@ describe('a finding row says what it is about, and nothing more', () => {
     expect(subject.className).toContain('mono');
   });
 
+  it('MUTATION-GUARDED: the whole-document sentinel `$` is not rendered as a subject', () => {
+    /*
+     * FOUND IN A REAL BROWSER, NOT BY A TEST. A Check Run on a real record
+     * rendered a subject line reading exactly `$` above
+     * `'descriptors' is a required property` — which is `official.py:98`'s
+     * sentinel for an error with an EMPTY path, i.e. a WHOLE-DOCUMENT finding
+     * with no field to name.
+     *
+     * MUTATION: dropping the `ROOT_PATH` check makes this RED, and ships a
+     * subject that looks like a variable name and names nothing. A finding with
+     * no field says nothing about its subject — the same rule as an absent
+     * `kind`, for the same reason.
+     */
+    render(
+      <FindingList
+        title="Official schema"
+        state="Invalid"
+        findings={[{ path: '$', message: "'descriptors' is a required property" }]}
+      />,
+    );
+    expect(rows()[0].querySelector('.run-check-item-subject')).toBeNull();
+    // The finding itself is untouched, and still counted.
+    expect(screen.getByText('Official schema · 1')).toBeTruthy();
+    expect(rows()[0].textContent).toContain("'descriptors' is a required property");
+  });
+
   it('does not print the path twice when the path IS the whole finding', () => {
     /* `runFindingText` falls back to `path` when there is no prose, so a subject
        line here would be the same six words stacked on themselves. */

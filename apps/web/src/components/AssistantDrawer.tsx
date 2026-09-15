@@ -226,18 +226,50 @@ export function AssistantDrawer({
     setCollapsed(readStoredRailCollapsed());
   }, []);
 
-  /* REVEAL ON REQUEST — see `revealSignal`'s own note for why it only ever
-     opens, why the stored preference is not written, and why `open` is set at
-     narrow widths only. `0` is the resting value, so mounting reveals nothing. */
-  useEffect(() => {
-    if (revealSignal === 0) return;
-    setCollapsed(false);
-    const narrow =
-      typeof window !== 'undefined' &&
-      typeof window.matchMedia === 'function' &&
-      !window.matchMedia('(min-width: 1024px)').matches;
-    if (narrow) setOpen(true);
-  }, [revealSignal]);
+  /*
+   * REVEAL ON REQUEST — DURING RENDER, NOT IN AN EFFECT, and the difference was
+   * measured rather than preferred.
+   *
+   * It WAS a `useEffect`, and that put the unhide in a SECOND React commit:
+   * `AssistantPanel` is this component's child, so its own prefill effect runs
+   * FIRST, at a moment when `.assistant-drawer-content` is still
+   * `display: none`. Measured on the running app, 2026-09-15, sampling
+   * `getComputedStyle(...).display` after an `Ask ISAAC` click with the rail
+   * collapsed:
+   *
+   *     sync  none      t0  none      t50  contents
+   *
+   * — so the panel's `.focus()` on the composer was a no-op in a real browser
+   * (focus on an element inside a `display: none` container does nothing), and
+   * the reader was handed a pre-filled box they then had to click into.
+   *
+   * This is React's documented "adjust state when a prop changes" pattern: the
+   * assignment re-renders THIS component immediately, before the browser sees
+   * anything, so `data-collapsed="false"` lands in the SAME commit as the
+   * prefill and the child's effect runs against a visible panel. No `rAF`, no
+   * timeout, and nothing to race.
+   *
+   * A `requestAnimationFrame` fix was tried first and is NOT what this is. It
+   * would also have been dead in every automated browser check: a tab driven by
+   * this repository's Chrome tooling reports `visibilityState: "hidden"`, and
+   * the two rAF callbacks in that same measurement NEVER FIRED.
+   *
+   * IT ONLY EVER REVEALS — see `revealSignal`'s own note for why the stored
+   * preference is not written and why `open` is set at narrow widths only. `0`
+   * is the resting value on both sides, so mounting reveals nothing.
+   */
+  const [seenReveal, setSeenReveal] = useState(0);
+  if (revealSignal !== seenReveal) {
+    setSeenReveal(revealSignal);
+    if (revealSignal !== 0) {
+      setCollapsed(false);
+      const narrow =
+        typeof window !== 'undefined' &&
+        typeof window.matchMedia === 'function' &&
+        !window.matchMedia('(min-width: 1024px)').matches;
+      if (narrow) setOpen(true);
+    }
+  }
 
   function handleRailToggle() {
     const next = !collapsed;

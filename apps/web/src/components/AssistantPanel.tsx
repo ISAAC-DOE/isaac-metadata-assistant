@@ -1426,6 +1426,30 @@ export function AssistantPanel({
       setComposerText(prefill.text);
       setPrefillDeclined(false);
     }
+    /*
+     * FOCUS IS PLAIN AND SYNCHRONOUS, AND THAT IS ONLY SAFE BECAUSE OF WHAT
+     * `AssistantDrawer` DOES — see its `revealSignal` note for the measurement.
+     *
+     * A rail that is collapsed (the product default) has this whole panel
+     * inside a `display: none` container, and `.focus()` on such an element is
+     * a NO-OP in a real browser. Measured on the running app, 2026-09-15: the
+     * composer filled and `document.activeElement` stayed where it was. The
+     * drawer now flips `collapsed` DURING RENDER rather than in an effect, so
+     * by the time this effect runs the panel is visible in the SAME commit and
+     * there is nothing to wait for.
+     *
+     * NOT `requestAnimationFrame`, which was the first attempt: a tab driven by
+     * this repository's Chrome tooling reports `visibilityState: "hidden"` and
+     * the rAF callbacks in that same measurement NEVER FIRED at all — so a
+     * rAF-based fix would be untestable in a browser here and starved in a
+     * backgrounded real one.
+     *
+     * JSDOM CANNOT SEE ANY OF THIS. Its `.focus()` does not respect
+     * `display: none` — the same limitation `AssistantDrawer`'s C-1 note
+     * records, where the real-browser proof had to live in a Playwright spec —
+     * so no test in this file distinguishes the working version from the broken
+     * one. The guard is the comment, the measurement, and the drawer's ordering.
+     */
     composerInputRef.current?.focus();
   }, [prefill, composerText]);
 
