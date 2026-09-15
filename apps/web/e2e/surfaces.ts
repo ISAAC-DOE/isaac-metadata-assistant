@@ -423,11 +423,43 @@ export const SURFACES: readonly Surface[] = [
     ready: { role: 'heading', name: 'Personal Statistics' },
   },
   {
+    /*
+     * *** ADDED 2026-09-15 TO STOP A COVERAGE LOSS, not to add coverage that
+     * never existed. ***
+     *
+     * The Statistics redesign moved four `details.stats-disclosure` blocks off
+     * the Overview tab onto this new `Build & Verification` tab. Measured in
+     * Chrome: Overview mounts **0**, My Stats **0**, `?tab=build` mounts **4**
+     * (plus one `details.stats-technical`). This tab was absent from the
+     * catalog, so those four blocks — and Record Verification, Mutation
+     * Verification and the platform-metrics region with them — were scanned by
+     * axe at NO viewport.
+     *
+     * `openUnreachableDisclosures` caught it rather than letting the baselines
+     * quietly drop, which is the failure its own header records having happened
+     * before: "exactly such a drop was once recorded as an accessibility win;
+     * it is a coverage loss."
+     *
+     * `ready` waits on the panel's own first heading, not the page `h1`, so the
+     * scan cannot race a tab that has not painted yet — the same reasoning the
+     * `statistics-mine` entry above states.
+     */
+    id: 'statistics-build',
+    name: 'Statistics — Build & Verification',
+    path: '/statistics?tab=build',
+    scope: 'ordinary',
+    ready: { role: 'heading', name: 'Record Verification' },
+  },
+  {
     id: 'settings',
     name: 'Settings — Overview',
     path: '/settings',
     scope: 'ordinary',
-    ready: { role: 'heading', name: 'Runtime Status' },
+    /* `Runtime Status` -> `System Status`, 2026-09-15: the Settings density work
+       renamed this heading and this gate did not move with it, so the surface
+       never became ready at four viewports. The gate follows the heading a
+       reader actually sees. */
+    ready: { role: 'heading', name: 'System Status' },
   },
   {
     id: 'settings-privacy',

@@ -1301,11 +1301,26 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
       // workspace is empty, and at 375 the shorter string stops wrapping — so one
       // rendered text node fewer exists to fail. The other four projects are
       // unchanged, which is what a wrap-boundary effect looks like.
-      'settings-api@desktop-1280x800': 1,
-      'settings-api@laptop-1024x768': 1,
-      'settings-api@tablet-768x1024': 1,
-      'settings-api@mobile-375x812': 1,
-      'settings-api@zoom-200': 1,
+      /*
+       * *** ALL SEVEN `settings-api` PAIRS DELETED, 2026-09-15 — a real fix, on
+       * BOTH PLATFORMS, measured twice. ***
+       *
+       * ~~'settings-api@desktop-1280x800': 1, @laptop-1024x768: 1,
+       *   @tablet-768x1024: 1, @mobile-375x812: 1, @zoom-200: 1~~
+       * (and `@width-320`, `@width-390` in the narrow block below)
+       *
+       * The Settings density work moved API Access's curl examples, bearer-token
+       * discussion and endpoint list behind progressive disclosure, and the
+       * `color-contrast` node this entry recorded stopped firing entirely.
+       *
+       * BOTH COLUMNS ARE MEASURED, NEITHER IS CARRIED FORWARD, which is the
+       * condition this file sets before a pair may be deleted rather than split:
+       *   darwin — local run, 7 of 7 `FIXED?` at every project
+       *   linux  — CI job 104526682061 on `1bd4e0fe`, 7 of 7 `FIXED?`
+       * The guard's own message prescribes deletion when it is fixed and a
+       * per-platform count when it is fixed on only one face. Both faces agree,
+       * so these are deleted and `DARWIN_CARRIED_FORWARD` stays `[]`.
+       */
       /*
        * ── RUN VERTICAL SLICE, 2026-08-10: THE SAME CLIPPED-LIST DISPLACEMENT, AND
        *    A DARWIN COLUMN THAT TURNED OUT TO HAVE BEEN STALE ─────────────────
@@ -2120,8 +2135,9 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
          differences with a mechanism the file header already explains: a long
          paragraph rewrapping at 320px is exactly the wrap-boundary case, and the two
          faces disagree by whole text nodes rather than by one. */
-      'settings-api@width-320': 1,
-      'settings-api@width-390': 1,
+      /* ~~'settings-api@width-320': 1, 'settings-api@width-390': 1~~ — the other
+         two of the seven deleted above; same rule, same two measured columns.
+         See the block over the wide projects for the evidence. */
       // linux 56 -> 54 on BOTH, 2026-08-10, CI run 31446324340. The two narrow widths
       // move by 2 where the five wide ones move by 1 — see the RUN OVERRIDE ROUTES
       // note above `settings-explorer@desktop-1280x800` for the cause (two new API
@@ -3868,7 +3884,21 @@ export const A11Y_BASELINE_TOTAL_NODES: Readonly<Record<BaselinePlatform, number
   // were already SCALARS (the faces agreed before the change), and what was
   // removed is a CSS declaration rather than a platform-dependent rendering, so
   // there is no mechanism by which the columns could diverge here. CI adjudicates.
-  darwin: 829,
+  /*
+   * *** 829 -> 822 ON BOTH FACES, 2026-09-15: the seven `settings-api`
+   * `color-contrast` pairs deleted above, at one node each. ***
+   *
+   * `baseline-aggregate.invariant.test.ts` refused the deletion until this moved
+   * — "A11Y_BASELINE_TOTAL_NODES.darwin = 829, entries sum to 822" — which is
+   * the ratchet working: a total that no longer equals the entries it totals is
+   * how a stale baseline hides a real change.
+   *
+   * BOTH COLUMNS ARE MEASURED and both moved by the same 7, because the fix
+   * landed on both faces: darwin from a local run, linux from CI job
+   * 104526682061 on `1bd4e0fe`, each reporting 7 of 7 `FIXED?`.
+   * `DARWIN_CARRIED_FORWARD` stays `[]`.
+   */
+  darwin: 822,
   // ── MERGED: PROPOSALS + CHANGE FEED, 2026-08-30: darwin 2282 -> 2289. ──
   //
   // TWO SLICES MOVED THE SAME SEVEN CELLS FROM THE SAME BASE, and this file now
@@ -4371,7 +4401,8 @@ export const A11Y_BASELINE_TOTAL_NODES: Readonly<Record<BaselinePlatform, number
   // were already SCALARS (the faces agreed before the change), and what was
   // removed is a CSS declaration rather than a platform-dependent rendering, so
   // there is no mechanism by which the columns could diverge here. CI adjudicates.
-  linux: 829,
+  // 829 -> 822, the same seven pairs; see the note over `darwin` above.
+  linux: 822,
   // 2026-08-30, ROUND TWO — CI's linux figures for the merged tree: 2287 -> 2291.
   //
   //   desktop-1280x800   59 -> 60   (+1)      laptop-1024x768   59 -> 60   (+1)

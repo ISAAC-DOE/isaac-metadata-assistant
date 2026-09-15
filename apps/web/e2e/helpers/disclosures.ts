@@ -111,8 +111,38 @@ import { expect, type Page } from '@playwright/test';
  * and no `details.stats-technical` either.
  */
 export const PROSE_DISCLOSURES: Readonly<Record<string, number>> = Object.freeze({
-  statistics: 4,
-  'statistics-example': 4,
+  /*
+   * *** THE FOUR MOVED, 2026-09-15, AND THIS MAP IS WHAT CAUGHT IT. ***
+   *
+   * ~~statistics: 4, 'statistics-example': 4~~ — the Statistics redesign moved
+   * every prose disclosure off the Overview tab and onto the new
+   * `Build & Verification` tab. Measured in Chrome: Overview mounts **0**, My
+   * Stats **0**, `?tab=build` **4**.
+   *
+   * SETTING THE OLD ENTRIES TO 0 WOULD HAVE MADE THIS GREEN AND DELETED THE
+   * COVERAGE — the four blocks would then be opened, and scanned, at no
+   * viewport at all. So the declaration MOVES with the disclosures, and
+   * `statistics-build` is added to `e2e/surfaces.ts` in the same change so
+   * there is a surface for this entry to apply to. An absent surface reads `?? 0`
+   * here, which is exactly how a silent loss would have looked.
+   */
+  /*
+   * `statistics-example` IS **2**, NOT 0, AND REMOVING IT WAS MY OWN
+   * REGRESSION — corrected here rather than quietly.
+   *
+   * I set both Statistics entries to absent (`?? 0`) on the strength of
+   * measuring the ORDINARY scope, where Overview genuinely mounts 0. The
+   * WORKED-EXAMPLE scope holds five seeded records, so Overview renders
+   * sections the empty workspace has nothing to render — and two of them carry
+   * a prose disclosure. Measured twice, on both platforms: CI reported
+   * `surface "statistics-example" mounts 2` on linux and a local run reproduced
+   * it on darwin.
+   *
+   * The lesson is the map's own: a per-surface count is a property of the
+   * SURFACE AND ITS SCOPE, and measuring one scope does not measure the other.
+   */
+  'statistics-example': 2,
+  'statistics-build': 4,
 });
 
 /**
