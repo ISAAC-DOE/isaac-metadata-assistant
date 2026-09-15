@@ -1,0 +1,198 @@
+/*
+ * Historical Import — choosing files without sending one.
+ *
+ * Tokens only. Every colour here is an existing custom property: this file
+ * declares none of its own, because `palette-contrast.test.ts` sweeps all 42
+ * stylesheets under `apps/web/src` for a `var()` naming a property nothing
+ * declares, and a phantom is dropped silently at computed-value time — which is
+ * how the capture textarea shipped for an unknown number of releases with no
+ * border at all.
+ *
+ * THE FIRST DRAFT OF THIS FILE HAD FOUR PHANTOMS — `--focus-ring`, `--danger-text`,
+ * `--radius-md`, `--surface-sunken` — every one of them a plausible name this
+ * design system does not use. `historical-import.css:689` records the SAME
+ * mistake being made here before, with `--ring-active`. They are named rather
+ * than quietly fixed because the lesson is that plausibility is exactly the
+ * failure mode: the real names are `--action` (this repo draws focus rings in
+ * the action colour), `--fail-text`, `--radius-card` and `--surface-subtle`.
+ */
+
+.ifs {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+
+/* --- the drop target ------------------------------------------------------ */
+
+.ifs-drop {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2xs);
+  padding: var(--space-md) var(--space-sm);
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-card);
+  background: var(--surface-subtle);
+  text-align: center;
+}
+
+/* Dragging is signalled by BORDER AND BACKGROUND TOGETHER, not by hue alone —
+   a reader who cannot distinguish the tint still sees the border solidify. */
+.ifs-drop.dragging {
+  border-style: solid;
+  border-color: var(--action);
+  background: var(--action-tint);
+}
+
+.ifs-drop-icon { color: var(--text-muted); }
+
+.ifs-drop-lead {
+  margin: 0;
+  font-size: var(--font-size-body);
+  color: var(--text-primary);
+}
+
+/* The real control. A `<label htmlFor>` is focusable through its input, so the
+   input is visually hidden rather than `display: none` — which would take it
+   out of the tab order and make this keyboard-unreachable. */
+.ifs-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.ifs-choose { cursor: pointer; }
+
+/* The input is visually hidden, so the focus ring has to be drawn on the label
+   the reader can actually see. Without this the control is reachable by keyboard
+   and invisible while focused, which is worse than unreachable. */
+.ifs-input:focus-visible + .ifs-choose,
+.ifs-choose:focus-within {
+  outline: 2px solid var(--action);
+  outline-offset: 2px;
+}
+
+.ifs-claim {
+  margin: var(--space-2xs) 0 0;
+  max-width: 62ch;
+  font-size: var(--font-size-meta);
+  color: var(--text-secondary);
+}
+
+/* --- the staged list ------------------------------------------------------ */
+
+.ifs-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border-hair);
+  border-radius: var(--radius-card);
+}
+
+.ifs-row {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-xs);
+  padding: var(--space-xs) var(--space-sm);
+  border-bottom: 1px solid var(--border-hair);
+}
+
+.ifs-row:last-child { border-bottom: none; }
+
+.ifs-row-icon {
+  flex: none;
+  margin-top: 2px;
+  color: var(--text-muted);
+}
+
+.ifs-row-main {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.ifs-row-name {
+  font-size: var(--font-size-body);
+  color: var(--text-strong);
+  overflow-wrap: anywhere;
+}
+
+.ifs-row-meta,
+.ifs-row-digest {
+  font-size: var(--font-size-meta);
+  color: var(--text-muted);
+}
+
+.ifs-row-error {
+  font-size: var(--font-size-meta);
+  color: var(--fail-text);
+}
+
+.ifs-row-state {
+  flex: none;
+  align-self: center;
+  font-size: var(--font-size-meta);
+  color: var(--text-secondary);
+  text-align: right;
+}
+
+.ifs-recorded .ifs-row-state { color: var(--text-strong); }
+.ifs-failed .ifs-row-state { color: var(--fail-text); }
+
+.ifs-row-actions {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2xs);
+}
+
+.ifs-row-btn { white-space: nowrap; }
+
+.ifs-row-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  /* 28px is below the 44px comfortable target, so the row's own padding is what
+     makes this pressable; it is deliberately not shrunk further. */
+  min-width: 28px;
+  min-height: 28px;
+  color: var(--text-muted);
+}
+
+.ifs-explain {
+  font-size: var(--font-size-meta);
+  color: var(--text-secondary);
+}
+
+.ifs-explain > summary { cursor: pointer; }
+
+.ifs-explain > p {
+  margin: var(--space-2xs) 0 0;
+  max-width: 74ch;
+}
+
+/*
+ * NARROW WIDTHS. The row is four flex children across; below the tablet
+ * breakpoint it stacks, because at 390px the actions were being squeezed to a
+ * width no finger can hit and the state word was wrapping one character per
+ * line.
+ */
+@media (max-width: 760px) {
+  .ifs-row {
+    flex-wrap: wrap;
+  }
+  .ifs-row-main { flex-basis: 100%; }
+  .ifs-row-state { text-align: left; }
+  .ifs-row-actions { margin-left: auto; }
+}
