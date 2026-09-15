@@ -495,9 +495,30 @@ const REQUIRED_CLAIMS: [string, RegExp][] = [
     'the historical-import file staging is named as the third file reader',
     /\b(historical import|file staging)\b/i,
   ],
+  /*
+   * *** THE ALTERNATION IS WIDENED BECAUSE THE NARROW FORM PINNED AN UNSCOPED
+   * CLAIM, and a correctly scoped repair would have FAILED this guard. ***
+   *
+   * The copy first read "…and sends nothing anywhere" — an app-wide existential
+   * negative. It is true of the COMPONENT (it takes `onRecord` as a prop and
+   * imports no API client, pinned structurally and behaviourally) and false of
+   * the FEATURE: pressing `Record as source` sends the filename, size, media
+   * type and digest to `POST /api/imports/{id}/sources`. The panel itself was
+   * already exact — "**The file itself** is not sent to ISAAC" — and this copy
+   * dropped that scoping.
+   *
+   * §11 records this same repair twice, including in this file's own family:
+   * the unscoped refusal claim, "repaired by SCOPING it rather than deleting
+   * it", and the 2026-09-10 entry's "a subtler false claim … an app-wide
+   * existential negative inferred from one route".
+   *
+   * So `sends no part of the file` joins the accepted forms. The claim still
+   * has to be MADE — that is what this row is for — it just no longer has to be
+   * made in the one wording that overreaches. Found by independent review.
+   */
   [
-    'and the third is stated to send nothing',
-    /\b(historical import|file staging)\b[\s\S]{0,160}\b(sends? nothing|not sent|never sent|nothing is sent)\b/i,
+    'and the third is stated to send no part of the file',
+    /\b(historical import|file staging)\b[\s\S]{0,170}\b(sends? no part of the file|sends? no bytes|sends? nothing|not sent|never sent|nothing is sent)\b/i,
   ],
   [
     'dictated words survive whether or not a proposal is accepted',

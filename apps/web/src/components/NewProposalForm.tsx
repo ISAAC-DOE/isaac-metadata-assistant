@@ -477,6 +477,34 @@ export function NewProposalForm({
           </label>
         </div>
 
+        {/*
+          *** THE DISABLED RADIO'S REASON RENDERS AT GROUP LEVEL, NOT INSIDE THE
+          BRANCH THAT RADIO SELECTS. ***
+
+          It used to sit inside `sourceMode === 'existing'`, and `sourceMode`
+          defaults to `'new'` — so on a record with NO NOTES, which is the default
+          state of every freshly created record and exactly the case the owner was
+          in when he said there was no way to add a proposal, the reader saw a
+          greyed-out `Cite a note…` with no explanation anywhere. The reason could
+          never be revealed, because the only control that would reveal it was the
+          disabled one.
+
+          This is the class this integration has a commit of its own about — "the
+          one disabled primary control with no reason beside it" — surviving in a
+          different lane, and it contradicts `RunFindingList`'s stated standard
+          ("not a disabled one, which would still read as an offer"). Found by
+          independent review; the 703 lines of this form's own tests never touched
+          it, which is this repository's signature pattern.
+        */}
+        {notes.status === 'data' && notes.notes.length === 0 && (
+          <p className="proposal-form-hint">
+            This record holds no notes yet, so there is nothing to cite. Write a
+            source note instead — a proposal always names the note its content came
+            from, and that note is what keeps the words safe whatever the review
+            decides.
+          </p>
+        )}
+
         {sourceMode === 'existing' && (
           <>
             {notes.status === 'loading' && (
@@ -487,14 +515,6 @@ export function NewProposalForm({
                 This record&rsquo;s notes could not be read, so no note can be cited
                 right now. Nothing was written. Write a source note instead, or close
                 this and try again.
-              </p>
-            )}
-            {notes.status === 'data' && notes.notes.length === 0 && (
-              <p className="proposal-form-hint">
-                This record holds no notes yet, so there is nothing to cite. Write a
-                source note instead — a proposal always names the note its content
-                came from, and that note is what keeps the words safe whatever the
-                review decides.
               </p>
             )}
             {notes.status === 'data' && notes.notes.length > 0 && (

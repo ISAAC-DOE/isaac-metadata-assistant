@@ -701,3 +701,59 @@ describe('New Proposal · the field label invents no vocabulary', () => {
     expect(Array.from(mono).some((el) => el.textContent === RECORD_PATH)).toBe(true);
   });
 });
+
+/* ── a disabled control must say why, in the state where it is disabled ────── */
+
+/**
+ * *** THIS EXISTS BECAUSE ITS ABSENCE LET A DISABLED CONTROL SHIP WITH NO
+ * REASON, on this feature's own primary path. ***
+ *
+ * `Cite a note this record already holds` is disabled when the record holds no
+ * notes. Its explanation used to render inside `sourceMode === 'existing'` — and
+ * `sourceMode` defaults to `'new'`, so the reason was unreachable precisely when
+ * it applied: the only control that would have revealed it was the disabled one.
+ *
+ * That is the state of every freshly created record, and it is the exact case
+ * the owner was in when he reported that a proposal could not be added. Found by
+ * independent review; 703 lines of tests in this file passed it.
+ */
+describe('the no-notes state explains its own disabled control', () => {
+  it('states why citing is unavailable WITHOUT the reader selecting that mode', async () => {
+    stubFetchRoutes({
+      [LIST]: { body: page() },
+      [NOTES]: { body: notesPage([]) },
+      [RUNS]: { body: { runs: [], total: 0, returned: 0 } },
+    });
+    renderPanel();
+    await openForm();
+
+    // The default mode is "write a note now" — the reason must be visible anyway.
+    const cite = screen.getByLabelText(/Cite a note this record already holds/i);
+    expect(cite).toBeDisabled();
+    expect(
+      screen.getByText(/This record holds no notes yet, so there is nothing to cite/i),
+      'a disabled control with no reason beside it leaves a reader guessing whether the ' +
+        'feature is broken — and the reason must not live inside the branch that control selects',
+    ).toBeInTheDocument();
+  });
+
+  /*
+   * THE NEGATIVE CONTROL. With notes present the hint must be ABSENT, or the
+   * assertion above would pass on a form that shows it unconditionally — which
+   * would be a different false claim, not a fix.
+   */
+  it('does NOT claim the record has no notes when it has some', async () => {
+    stubFetchRoutes({
+      [LIST]: { body: page() },
+      [NOTES]: { body: notesPage([noteFixture()]) },
+      [RUNS]: { body: { runs: [], total: 0, returned: 0 } },
+    });
+    renderPanel();
+    await openForm();
+
+    expect(screen.getByLabelText(/Cite a note this record already holds/i)).toBeEnabled();
+    expect(
+      screen.queryByText(/This record holds no notes yet/i),
+    ).toBeNull();
+  });
+});

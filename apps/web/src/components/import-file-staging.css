@@ -25,11 +25,27 @@
 
 /* --- the drop target ------------------------------------------------------ */
 
+/*
+ * CAPPED — and this was found by the guard I wrote three commits earlier,
+ * pointing at my own component, which is the outcome a guard is for.
+ *
+ * Measured at 1728 in the import session: `.ifs-claim` rendered SEVEN LINES at
+ * 430px inside a 1088-1168px `.ifs-drop`, stranding 658-738px. That is the
+ * worst instance of the defect on the surface — worse than anything the owner
+ * screenshotted — and it was in the panel I added while fixing the defect
+ * elsewhere.
+ *
+ * The fix is the container, not the prose: a drop target is a TARGET, and a
+ * bounded one reads as something to aim at while a full-width band does not.
+ * 760px is the app's own `readable` measure (AppShell), so the claim inside it
+ * keeps its comfortable 62ch and the gutter beside it stops being dead space.
+ */
 .ifs-drop {
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: var(--space-2xs);
+  max-width: 760px;
   padding: var(--space-md) var(--space-sm);
   border: 1px dashed var(--border-strong);
   border-radius: var(--radius-card);

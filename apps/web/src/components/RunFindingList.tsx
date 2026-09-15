@@ -165,7 +165,12 @@ export function FindingList({
                       }
                       onClick={() =>
                         askIsaac(
-                          composeFindingQuestion(state, subject, text, ask ?? {}),
+                          /* `fieldPath` is the SAME value that gates `Go to
+                             field` above, so the button and the question cannot
+                             disagree about whether this finding names a field.
+                             It is what makes the composed question answerable —
+                             see `composeFindingQuestion`. */
+                          composeFindingQuestion(state, subject, text, ask ?? {}, fieldPath),
                         )
                       }
                     >

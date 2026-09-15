@@ -532,7 +532,7 @@ export function HelpPanel() {
                   the Validator and the campaign-sheet CSV comparison, which report what
                   they found and apply nothing to a record, and Historical Import&rsquo;s
                   file staging, which opens one only to work out a checksum you asked for
-                  and sends nothing anywhere.
+                  and sends no part of the file anywhere.
                 </p>
                 <p style={{ marginTop: 8 }}>
                   Dictating into Capture does not write a field either. It stores every

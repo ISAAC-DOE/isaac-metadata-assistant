@@ -99,6 +99,25 @@ export function titleCase(input: string): string {
 }
 
 // Approved Title Case UI labels (verbatim from casing-and-copy.md).
+/**
+ * THE SETTINGS DESTINATION'S NAME, HOISTED OUT OF THE OBJECT — because six other
+ * strings inside `LABELS` quote it, and an object literal cannot reference its
+ * own members while it is being built.
+ *
+ * *** THIS EXISTS BECAUSE THE 2026-09-15 RENAME STRANDED SEVEN RENDERED
+ * STRINGS. *** `navSettings` went `Settings & API` -> `Settings` and the copy
+ * that names the destination did not move with it — five of the seven were
+ * ERROR-RECOVERY REMEDIES, the sentence a reader is shown after something
+ * failed, telling them where to go. That is the worst possible place for a
+ * stale name, and the suite was green: `tutorial-anchors.test.tsx` carries the
+ * old literal only as an `it.each` TITLE, never asserted against the DOM.
+ *
+ * Found by independent review. Every one of those sentences now interpolates
+ * this constant, so the next rename cannot strand copy — there is one authored
+ * name and `navSettings` reads it too.
+ */
+const SETTINGS_DESTINATION = 'Settings';
+
 export const LABELS = {
   // App / brand
   brand: 'ISAAC',
@@ -130,7 +149,7 @@ export const LABELS = {
    * renames the route to match the label fails a test instead of breaking a
    * bookmark.
    */
-  navSettings: 'Settings',
+  navSettings: SETTINGS_DESTINATION,
   /*
    * HISTORICAL IMPORT — the second of the three primary destinations the
    * narrowed product names (`Experiments`, `Historical Import`, `Settings`).
@@ -701,7 +720,7 @@ export const LABELS = {
     'and nothing changed.',
   demoScopeRequiredRemedy:
     'Opening the guided walkthrough opens a worked example, and this control works inside one. ' +
-    'It lives in Settings & API → Help & Tutorial.',
+    `It lives in ${SETTINGS_DESTINATION} → Help & Tutorial.`,
   actionGoToHelpAndTutorial: 'Go to Help & Tutorial',
   actionGoToExperiments: 'Go to My Experiments',
 
@@ -1237,18 +1256,18 @@ export const LABELS = {
   tutorialSessionCreateFailedTitle: 'The worked example could not be opened',
   tutorialSessionCreateFailedBody:
     'The walkthrough did not start, and nothing in My Experiments was changed. You can try ' +
-    'again from Settings & API → Help & Tutorial.',
+    `again from ${SETTINGS_DESTINATION} → Help & Tutorial.`,
   tutorialSessionExpiredTitle: 'The Worked Example Has Expired',
   tutorialSessionExpiredBody:
     'The temporary workspace this walkthrough was using no longer exists, so its five example ' +
     'records are gone and the walkthrough has closed. Nothing in My Experiments was changed. ' +
-    'You can start the walkthrough again from Settings & API → Help & Tutorial.',
+    `You can start the walkthrough again from ${SETTINGS_DESTINATION} → Help & Tutorial.`,
   tutorialSessionResumeFailedTitle: 'The worked example could not be resumed',
   tutorialSessionResumeFailedBody:
     'Checking the walkthrough you had open did not succeed, so it has not been resumed. Whether ' +
     'it is still there is not something this screen can tell you. Nothing was written and ' +
     'nothing in My Experiments was changed. Reloading the page tries again, and you can start a ' +
-    'new walkthrough from Settings & API → Help & Tutorial.',
+    `new walkthrough from ${SETTINGS_DESTINATION} → Help & Tutorial.`,
   actionDismissTutorialNotice: 'Dismiss',
 
   /*
@@ -1308,7 +1327,7 @@ export const LABELS = {
     'That is the whole workflow. The worked example you were walking through is gone now, and so ' +
     'is anything you answered inside it — it was a temporary copy of the five examples, kept apart ' +
     'from your own work, and no record of yours was changed. You can start it again from ' +
-    'Settings & API → Help & Tutorial at any time.',
+    `${SETTINGS_DESTINATION} → Help & Tutorial at any time.`,
 
   settingsTabHelp: 'Help & Tutorial',
 

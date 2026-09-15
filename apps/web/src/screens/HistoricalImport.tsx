@@ -36,11 +36,28 @@ import type {
  * `HIST-004` bans `Upload Files -> Spinner -> Mysterious JSON`. All three halves
  * are refused here deliberately:
  *
- * * **No upload.** There is no `<input type="file">` on this screen and no drop
- *   handler. That is not a promise — `__tests__/upload-claim-parity.test.tsx`
- *   asserts that EXACTLY two non-test files in `apps/web/src` declare a file
- *   input and names both, so adding a third fails CI. A source is either a
- *   POINTER (recorded, not opened) or one of the committed example sources.
+ * * **No upload** — and the shape of that claim CHANGED on 2026-09-15, so the
+ *   old form is struck rather than edited away. ~~There is no
+ *   `<input type="file">` on this screen and no drop handler. That is not a
+ *   promise — `upload-claim-parity.test.tsx` asserts that EXACTLY two non-test
+ *   files in `apps/web/src` declare a file input and names both, so adding a
+ *   third fails CI.~~
+ *
+ *   ALL THREE OF THOSE CLAUSES ARE NOW FALSE, and this docstring was
+ *   contradicting the very test this screen's own §1 was inverted to assert.
+ *   The screen mounts `ImportFileStaging`, which has both a file input and an
+ *   `onDrop`; the census is THREE named files. Found by independent review — it
+ *   survived because §1's source scan runs over `stripComments(src)`.
+ *
+ *   WHAT IS STILL TRUE, AND IS THE CLAIM THAT MATTERS: **no file's content ever
+ *   reaches ISAAC.** Choosing one stages it in the browser; `Record as source`
+ *   sends its name, size, type and — if you asked for one — a checksum computed
+ *   in your tab. Proved by instrumenting `fetch` and `XMLHttpRequest` before
+ *   the picker was touched: choosing issued zero requests, the checksum zero,
+ *   and recording one POST whose body carries no file bytes. `POST /api/uploads`
+ *   remains an unconditional 403 and nothing here calls it. A source is still
+ *   either a POINTER (recorded, not opened) or one of the committed example
+ *   sources.
  * * **No spinner over work that does not happen.** Reading and reconstructing are
  *   real server operations and their in-flight state says which one is running;
  *   nothing else animates, and no control implies a step this build does not

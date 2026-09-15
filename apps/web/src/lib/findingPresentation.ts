@@ -160,13 +160,60 @@ export function composeFindingQuestion(
   subject: FindingSubject | null,
   message: string | null,
   context: AskContext,
+  /**
+   * The finding's run-field path, when it has one — the SAME value that gates
+   * `Go to field`, passed in rather than re-derived so the button and the
+   * question cannot disagree about whether a field is known.
+   */
+  fieldPath: string | null = null,
 ): string {
   const parts: string[] = [];
+  /*
+   * *** THE OPENING SENTENCE DECIDES WHETHER THIS QUESTION IS ANSWERABLE AT
+   * ALL, AND THE FIRST VERSION OF IT WAS REFUSED 100% OF THE TIME. ***
+   *
+   * It read `What does this <state> finding [about <subject>] mean?`. Measured
+   * against the real resolver — `assistant_query.classify`, not a guess — every
+   * variant of that sentence returns `intent='unsupported', confidence='none'`:
+   * all four states, with and without a subject, with and without the context
+   * clause. The catalog has eight intents and "explain this finding" is not one
+   * of them.
+   *
+   * So the control the owner asked for — *"a button right next to it that points
+   * to the agent, and then the agent will have the context"* — handed the agent
+   * context it could not use, and a reader who pressed Send got a refusal every
+   * time. Found by independent review, not by a test: nothing here asserted that
+   * the composed string is one the resolver accepts.
+   *
+   * IT ALSO BROKE THIS REPOSITORY'S OWN RULE, cited one file away. `assistantAsk`
+   * withholds the button when there is no context because "a control never
+   * appears where pressing it would do nothing — the same rule the run editor
+   * follows for a field whose only possible outcome is a refusal". That rule was
+   * being applied to the wrong axis: whether an Assistant is mounted, rather
+   * than whether the question can be answered.
+   *
+   * THE TWO OPENINGS BELOW BOTH CLASSIFY `high`, verified the same way:
+   *   `Where did <path> come from?`  -> field_provenance  (high)
+   *   `What is blocking export?`     -> export_blockers   (high)
+   * The `On …` clause and the validator's verbatim sentence survive
+   * classification untouched, so no context is given up to gain an answer.
+   *
+   * WHICH ONE IS CHOSEN IS A QUESTION OF WHAT IS TRUE, not of what classifies.
+   * Provenance is only a sensible question about a value that EXISTS, so a
+   * `Missing` finding asks what is blocking export even when its path is known —
+   * asking where an absent value came from would be a question with no answer,
+   * which is the defect this comment exists to record.
+   */
+  const askProvenance = fieldPath !== null && state !== 'Missing';
   parts.push(
-    subject === null
-      ? `What does this ${state.toLowerCase()} finding mean?`
-      : `What does this ${state.toLowerCase()} finding about ${subject.text} mean?`,
+    askProvenance ? `Where did ${fieldPath} come from?` : 'What is blocking export?',
   );
+  /* The subject is still named, after the answerable opening rather than inside
+     it — a reader sees which finding they asked about, and the resolver still
+     matches on the opening. */
+  if (!askProvenance && subject !== null) {
+    parts.push(`I am looking at the ${state.toLowerCase()} finding about ${subject.text}.`);
+  }
   const where: string[] = [];
   if (context.runLabel !== undefined && context.runLabel !== '') {
     where.push(

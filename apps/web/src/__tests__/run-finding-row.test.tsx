@@ -26,6 +26,7 @@ import { render, screen, cleanup, fireEvent, within } from '@testing-library/rea
 
 import { FindingList } from '../components/RunFindingList';
 import { AssistantAskContext } from '../lib/assistantAsk';
+import { composeFindingQuestion } from '../lib/findingPresentation';
 
 afterEach(cleanup);
 
@@ -265,5 +266,99 @@ describe('Ask ISAAC composes the context and sends nothing', () => {
     expect(
       screen.getByRole('button', { name: 'Ask ISAAC about Scientific Descriptor' }),
     ).toBeTruthy();
+  });
+});
+
+/* ── the composed question must be one the resolver can actually answer ────── */
+
+/**
+ * *** THIS BLOCK EXISTS BECAUSE ITS ABSENCE LET A NON-FUNCTIONAL CONTROL SHIP. ***
+ *
+ * `composeFindingQuestion`'s first version opened with
+ * `What does this <state> finding [about <subject>] mean?`, and the deterministic
+ * resolver classifies every variant of that as `intent='unsupported'`. So the
+ * `Ask ISAAC` button — the owner's own request — handed the assistant context it
+ * could not use and produced a refusal every time. An independent review caught
+ * it by running `assistant_query.classify`; nothing in this file asserted that
+ * the string is one the catalog accepts.
+ *
+ * THE OPENING IS WHAT CLASSIFICATION TURNS ON, so that is what these assert. The
+ * intents are the resolver's own (`assistant_query.py`) and the two phrasings
+ * were verified against it at `high` confidence:
+ *
+ *   `Where did <path> come from?`  -> field_provenance
+ *   `What is blocking export?`     -> export_blockers
+ *
+ * A change that reworded the opening would have to re-verify it there; that
+ * cannot be done from jsdom, which is precisely why the OPENING is pinned here
+ * as a literal rather than paraphrased.
+ */
+describe('the Ask ISAAC question is answerable, not merely well-formed', () => {
+  const ctx = { runLabel: 'Run 1', runId: 'r_1', experimentId: 'e_1' };
+
+  it('asks for provenance when the finding names a field that HOLDS a value', () => {
+    const q = composeFindingQuestion(
+      'Invalid',
+      { text: 'Temperature', mono: false },
+      '301 is out of range',
+      ctx,
+      'context.temperature_K',
+    );
+    // The opening, exactly — this is the substring the resolver matches on.
+    expect(q.startsWith('Where did context.temperature_K come from?')).toBe(true);
+    // ...and nothing was given up to get it.
+    expect(q).toContain('On Run 1 (r_1), record e_1.');
+    expect(q).toContain('301 is out of range');
+  });
+
+  /*
+   * THE CASE THAT IS ABOUT TRUTH RATHER THAN ABOUT CLASSIFICATION. A `Missing`
+   * finding has a path but no value, and "where did it come from" is a question
+   * with no answer. `What is blocking export?` also classifies `high`, so the
+   * choice costs nothing and says something true.
+   */
+  it('asks what blocks export for a MISSING finding, even when the path is known', () => {
+    const q = composeFindingQuestion('Missing', null, 'Provide a value', ctx, 'context.environment');
+    expect(q.startsWith('What is blocking export?')).toBe(true);
+    expect(q).not.toContain('come from');
+  });
+
+  it('asks what blocks export when there is no field path at all', () => {
+    const q = composeFindingQuestion(
+      'Missing',
+      { text: 'Reduced Spectrum', mono: false },
+      'Provide/point to the reduced spectrum',
+      ctx,
+    );
+    expect(q.startsWith('What is blocking export?')).toBe(true);
+    // the subject is still named, so the reader can see which finding they asked about
+    expect(q).toContain('Reduced Spectrum');
+    expect(q).toContain('Provide/point to the reduced spectrum');
+  });
+
+  /*
+   * THE BAN, and it is the assertion that would have failed on the shipped
+   * defect. No composed question may open with the phrasing the resolver
+   * refuses — across every state, with and without a subject and a path.
+   */
+  it('never emits the opening the resolver classifies as unsupported', () => {
+    const states = ['Missing', 'Needs Review', 'Invalid', 'Advisory'] as const;
+    for (const state of states) {
+      for (const subject of [null, { text: 'Environment', mono: false }]) {
+        for (const path of [null, 'context.environment']) {
+          const q = composeFindingQuestion(state, subject, 'a message', ctx, path);
+          expect(
+            q,
+            `state=${state} subject=${subject === null ? 'none' : 'named'} path=${String(path)} ` +
+              `opens with a phrasing assistant_query.classify returns 'unsupported' for`,
+          ).not.toMatch(/^What does this .* finding/);
+          // and it opens with one of exactly the two verified forms
+          expect(
+            q.startsWith('Where did ') || q.startsWith('What is blocking export?'),
+            `unrecognised opening: ${q.slice(0, 60)}`,
+          ).toBe(true);
+        }
+      }
+    }
   });
 });

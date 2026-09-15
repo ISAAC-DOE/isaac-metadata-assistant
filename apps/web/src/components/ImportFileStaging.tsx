@@ -274,8 +274,17 @@ export function ImportFileStaging({ onRecord, busy = false }: ImportFileStagingP
           shipped once and pinned a test against.
         */}
         <p className="ifs-claim" id={noteId}>
-          Choosing a file records its name, size and type in this import. <strong>The file itself
-          is not sent to ISAAC</strong>, and no upload route is called.
+          {/*
+            "lets you record", NOT "records". Choosing a file records NOTHING — it
+            stages it in this browser, and recording is the separate per-row
+            button. The first wording said otherwise two lines above a row
+            reading "Local only — not sent to ISAAC", so the panel contradicted
+            itself about the same act, and a reader could reasonably skip
+            `Record as source` believing it had already happened. Found by
+            independent review.
+          */}
+          Choosing a file lets you record its name, size and type in this import.{' '}
+          <strong>The file itself is not sent to ISAAC</strong>, and no upload route is called.
         </p>
       </div>
 
