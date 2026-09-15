@@ -355,9 +355,10 @@ export function ImportFileStaging({ onRecord, busy = false }: ImportFileStagingP
           <summary>What recording a file does</summary>
           <p>
             It adds the file&rsquo;s name, size, type and — if you computed one — its checksum to
-            this import&rsquo;s source list. ISAAC has not opened the file, so that entry cannot
-            contribute a parsed statement and is listed as having no readable content. A checksum
-            is computed in your browser from the file you chose; ISAAC does not recompute it and
+            this import&rsquo;s source list. <strong>The ISAAC server never receives the
+            file</strong>, so that entry cannot contribute a parsed statement and is listed as
+            having no readable content. A checksum, if you asked for one, was computed here in
+            your browser by reading the file you chose — the server does not recompute it and
             does not confirm it.
           </p>
         </details>
