@@ -175,6 +175,68 @@ mandatory here and this repository has two counterexamples nine minutes apart.
   Here`, and the -61%/-71% figures, which are the implementer's and not
   re-measured by me.
 
+INDEPENDENT REVIEW DONE (fifth and last agent). Verdict **MERGE AFTER FIXES** —
+one Critical, four Important, six Minor. **ALL FIVE FIXED; M1 taken as well.**
+The reviewer re-measured every number the PR states and all six matched,
+including the contention conclusion about `record-capture-destination`.
+
+  *** C1 — THE OWNER'S OWN REQUESTED FEATURE DID NOT WORK, and no test could
+  have caught it because none asserted answerability. `Ask ISAAC` composed
+  `What does this <state> finding [about <subject>] mean?`, and
+  `assistant_query.classify` returns `intent=unsupported, confidence=none` for
+  EVERY variant — all four states, with and without a subject, with and without
+  context. So a reader who pressed Send got a refusal every time. It also broke
+  this repository's own rule, cited one file away: *a control never appears
+  where pressing it would do nothing.* That rule had been applied to whether an
+  Assistant is MOUNTED rather than to whether the question is ANSWERABLE.
+  Fixed in the opening sentence only — `Where did <path> come from?` ->
+  `field_provenance`, `What is blocking export?` -> `export_blockers`, both
+  verified `high` — with the On-clause and the verbatim validator sentence
+  surviving classification untouched. WHICH opening is chosen is a question of
+  TRUTH, not of classification: a `Missing` finding asks what blocks export even
+  when its path is known, because asking where an absent value came from is a
+  question with no answer. ***
+
+  I1  seven RENDERED strings still said `Settings & API`, five of them
+      error-recovery remedies. Green suite: `tutorial-anchors` carries the old
+      literal only as an `it.each` TITLE. One `SETTINGS_DESTINATION` now backs
+      `navSettings` and every sentence quoting it.
+  I2  a disabled radio whose reason rendered INSIDE the branch that radio
+      selects, while `sourceMode` defaults to the other one — so on a record
+      with no notes (every new record, and exactly the owner's case) the reason
+      was unreachable. Hoisted; mutation-proven both ways.
+  I3  `sends nothing anywhere` — an unscoped existential negative, true of the
+      component and false of the feature. AND THE NEW GUARD PINNED THE UNSCOPED
+      WORDING, so a correct repair would have failed it; the alternation is
+      widened and the claim must still be made.
+  I4  `Choosing a file records…` contradicted the row two lines below it.
+  I5  two stale census comments falsified by this PR — one of them
+      `HistoricalImport`'s own module docstring, contradicting the §1 guard this
+      PR inverted.
+  M1  the wide-prose allowlist was unbounded AND its `imports-session` key was
+      **DEAD** — an earlier edit was lost to a failed `cd`, so it exempted
+      nothing while reading as coverage. Now live, with measured `maxDead`
+      ceilings, all mutation-proven at `maxDead: 0`.
+
+  *** AND THE NEWLY-LIVE TEST FOUND THE WORST INSTANCE ON THE SURFACE IN MY OWN
+  COMPONENT: `.ifs-claim`, seven lines at 430px inside a 1168px drop zone, 738px
+  stranded — worse than anything the owner screenshotted, and added by the same
+  work that was fixing the defect elsewhere. THEN THE PROBE ITSELF PROVED WRONG:
+  it walked only to `block` ancestors, so a paragraph inside a CAPPED FLEX
+  container was measured against a far wider grandparent, and it went on
+  reporting 738px after the cap had landed. I nearly allowlisted a paragraph
+  that was already fixed. `flex`/`grid` now count, and the direction is what
+  makes that safe — a nearer container is smaller, so it can only ever REDUCE a
+  measurement, never manufacture one. ***
+
+  RE-VERIFIED AFTER THE FIXES, main checkout, nothing competing:
+    npx tsc -b -> 0 · e2e tsconfig -> 0
+    npx vitest run -> 235 files / **6082** tests, exit 0 (6076 before; +6 guards)
+    wide-prose -> 11/11 incl. the positive control and both session cases
+    snapshot pair -> regenerated, no drift
+    backend -> 9447 passed / 45 skipped, exit 0 (MAIN CHECKOUT — a worktree
+              would read +2, because `graphify-out/graph.json` is gitignored)
+
 OWNER FEEDBACK DRIVING THIS SESSION (verbatim, 2026-09-15, from screenshots):
   * the Runs split-screen architecture is APPROVED — "I like that split-screen
     architecture" — but the right pane "is not really readable … I can't clearly
