@@ -136,3 +136,49 @@ describe('the series form and the official schema require the same keys', () => 
     expect(seriesShapeError([{ series_id: 'averaged_spectrum' }])).toBeNull();
   });
 });
+
+describe('the conditions slot the series form points scientists at', () => {
+  /*
+   * The form tells a scientist that conditions the five questions do not ask
+   * about belong in each series' `conditions` object, with their own keys. That
+   * is a claim about the OFFICIAL SCHEMA, so it is checked against the schema
+   * rather than trusted.
+   *
+   * If a future refresh closes the object — declares `properties` and
+   * `additionalProperties: false` — the claim becomes false and this fails,
+   * which is the point: the hint would then be telling scientists to write
+   * something export would refuse.
+   */
+  const schema = JSON.parse(
+    readFileSync(join(REPO_ROOT, 'schema', 'isaac_record_v1.json'), 'utf8'),
+  ) as JsonSchemaNode;
+  const items = seriesItemNodes(schema)[0];
+
+  it('MUTATION-GUARDED: `conditions` exists and accepts arbitrary keys', () => {
+    const conditions = items.properties?.conditions as JsonSchemaNode | undefined;
+    expect(conditions, '`series[].conditions` is gone from the schema').toBeDefined();
+    expect(conditions!.type).toBe('object');
+    /*
+     * BOTH HALVES MATTER. A declared `properties` list would mean only those
+     * keys are meant; `additionalProperties: false` would mean a scientist's own
+     * key is refused outright. Today neither is present, which is what makes
+     * "your own keys" true.
+     */
+    expect(
+      conditions!.properties,
+      'the schema now declares specific condition properties — the form\'s "your own keys" hint needs revisiting',
+    ).toBeUndefined();
+    expect(
+      (conditions as Record<string, unknown>).additionalProperties,
+      'the schema now closes `conditions` — a scientist\'s own key would be refused at export',
+    ).not.toBe(false);
+  });
+
+  it('is not vacuous — the schema describes the slot as operating conditions', () => {
+    const conditions = items.properties?.conditions as JsonSchemaNode | undefined;
+    expect(String((conditions as Record<string, unknown>).description ?? '')).toMatch(
+      /conditions/i,
+    );
+  });
+});
+

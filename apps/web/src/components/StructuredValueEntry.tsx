@@ -524,6 +524,35 @@ export function SeriesEntry({ text, onChange, idPrefix }: SeriesEntryProps) {
         {error ??
           'The shape is checked here and again on the server; the values themselves are never inspected or altered.'}
       </p>
+      {/*
+        ── THE SLOT FOR CONDITIONS THE FIVE QUESTIONS DO NOT ASK ABOUT ───────
+        *"there should be an option to add more conditions to the run, not just
+        those 5 things … make sure there is an option for the scientist to add
+        custom conditions"* — project owner, 2026-09-14.
+
+        THE OFFICIAL SCHEMA ALREADY HAS THE SLOT, which is why this is a hint
+        rather than a new field. `schema/isaac_record_v1.json` declares
+        `measurement.series[].conditions` as `type: object` with NO declared
+        properties and NO `additionalProperties: false`, described as "Operating
+        conditions specific to this series when they differ from context". So
+        arbitrary keys are legal there and they EXPORT — verified by reading the
+        vendored schema, and pinned by
+        `structured-value-schema-parity.test.ts`, which fails if a future
+        refresh closes the object.
+
+        It is stated here, on the control that writes the series, because that is
+        the only place a scientist can put them today. It is NOT a promise that
+        ISAAC interprets them: a condition is carried through to the record
+        verbatim, and nothing reads it. Anything with no schema home at all still
+        belongs in Unmapped Notes, which is the surface built for exactly that.
+      */}
+      <p className="structured-entry-note">
+        Conditions the questions above do not cover go in each series&apos;{' '}
+        <code className="mono">conditions</code> object — your own keys, for example{' '}
+        <code className="mono">{'{"control_mode": "potentiostatic", "flow_sccm": 20}'}</code>.
+        The official schema accepts them there and they are exported verbatim;
+        ISAAC does not interpret them.
+      </p>
     </div>
   );
 }

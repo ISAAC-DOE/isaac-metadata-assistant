@@ -563,9 +563,28 @@ function SourcesSection({
           change — and `e2e/mutation/imports-session-a11y.spec.ts:147` gates on
           `heading /Sources/i`, so it must keep matching. */}
       <h3 className="hi-section-title">Sources</h3>
+      {/*
+        ONE LEAD VISIBLE, THE REST COLLAPSED. *"once again there is too much word
+        clutter, put the question mark tooltip icons that users can click instead
+        if they are curious"* — project owner, 2026-09-14.
+
+        `sourcesLead` stays on the page because it is the one sentence that
+        changes what a reader DOES here: a source is a pointer, and this workflow
+        does not open the file it names. The other two explain the example
+        sources and which layout is read — true, load-bearing for anyone
+        auditing the claim, and read once.
+
+        A native `<details>` rather than a tooltip icon: the content is two
+        paragraphs, not a phrase, and a hover tooltip is unreachable by keyboard
+        and by touch. It keeps the text in the DOM and the accessibility tree, so
+        `historical-import.test.tsx`'s copy assertions still reach it.
+      */}
       <p className="hi-body">{IMPORT_COPY.sourcesLead}</p>
-      <p className="hi-body">{IMPORT_COPY.fixturesLead}</p>
-      <p className="hi-note">{IMPORT_COPY.formatsNote}</p>
+      <details className="hi-more">
+        <summary className="hi-more-summary">What counts as a source here</summary>
+        <p className="hi-body">{IMPORT_COPY.fixturesLead}</p>
+        <p className="hi-note">{IMPORT_COPY.formatsNote}</p>
+      </details>
 
       {data.sources.length === 0 ? (
         <p className="hi-body hi-empty-inline">{IMPORT_COPY.emptySourcesBody}</p>
@@ -612,6 +631,36 @@ function SourcesSection({
         </p>
       )}
 
+      {/*
+        ── WHY THERE IS NO FILE PICKER HERE, AND WHY I TRIED TO ADD ONE ──────
+        *"for the historical import, there is no area or button to actually upload
+        the files"* — project owner, 2026-09-14. Correct observation, and the
+        answer is a refusal rather than a gap.
+
+        I BUILT A MULTI-FILE PICKER AND REVERTED IT. It read no bytes — only
+        `File.name`, which a browser hands over with the selection — and it would
+        have turned "type twelve filenames" into one act. Two committed guards
+        refused it, and both are right:
+
+          * `historical-import.test.tsx` §1 asserts this screen renders NO
+            `input[type="file"]`, declares no `type="file"` in its source, and
+            has no `onDrop`, `FormData` or `multipart`. Its stated subject is
+            "the destination cannot accept bytes and does not say it can".
+          * `upload-claim-parity.test.tsx` asserts that EXACTLY TWO non-test
+            files in `apps/web/src` declare a file input, and names both — so a
+            third anywhere fails, whatever it does.
+
+        THE REASONING THAT BEATS THE FEATURE REQUEST: `POST /api/uploads` answers
+        an unconditional 403 and real-data ingestion is out of scope (`CLAUDE.md`
+        §15). A "Choose Files…" button is an upload affordance whatever it does
+        underneath — a scientist who picked twelve files would reasonably believe
+        twelve files had been uploaded. Recording their names while they believe
+        that is worse than asking them to type, because it is a false impression
+        the product created on purpose.
+
+        So this section keeps the reference form, and the honest mechanism is
+        made obvious instead: a reference is a POINTER a later build can follow.
+      */}
       <div className="hi-forms">
         <form
           className="hi-form"

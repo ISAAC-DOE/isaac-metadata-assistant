@@ -180,8 +180,25 @@ export function RunsSection({
   experimentId,
   activity,
   recordVersion,
+  onFirstRun,
 }: {
   experimentId: string;
+  /**
+   * Called with the first run of the loaded page, or `null` when there is none.
+   *
+   * WHY THIS EXISTS RATHER THAN A SECOND FETCH. `RunSchemaMirror` renders beside
+   * this section and needs a run to say what is recorded on it. Its first
+   * version read `GET /runs?limit=1` itself, and
+   * `runs-live-refresh-integration.test.tsx` caught the consequence
+   * immediately: the workspace then read the runs list TWICE on first paint,
+   * against a guard that pins it at once.
+   *
+   * ONE READ, TWO CONSUMERS — the same arrangement the record sidebar uses for
+   * `captureSummary`, and for the same second reason: two reads could disagree,
+   * so the mirror and the run card can never show different states of the same
+   * run.
+   */
+  onFirstRun?: (run: ApiRunView | null) => void;
   /**
    * THE FAST PATH — a RUN-scoped change-feed summary, or `null`. See the note
    * above this file's imports for which field of it this path reads (`runRev`,
@@ -254,6 +271,7 @@ export function RunsSection({
         experimentId={experimentId}
         activity={activity ?? null}
         recordVersion={recordVersion ?? null}
+        onFirstRun={onFirstRun}
       />
     </section>
   );
@@ -263,10 +281,13 @@ function RunsBrowser({
   experimentId,
   activity,
   recordVersion,
+  onFirstRun,
 }: {
   experimentId: string;
   activity: RecordChangeSummary | null;
   recordVersion: string | null;
+  /** Forwarded from `RunsSection` — see the prop's note there. */
+  onFirstRun?: (run: ApiRunView | null) => void;
 }) {
   const baseId = useId();
   const searchId = `${baseId}-search`;
@@ -407,6 +428,20 @@ function RunsBrowser({
    */
   const runsRef = useRef<ApiRunView[]>([]);
   runsRef.current = list.status === 'data' ? list.loaded.runs : [];
+
+  /* Report the first run upward whenever the loaded page changes. An effect, not
+     a render-time call: calling a parent's setter during render is the loop this
+     codebase has been bitten by, and the value is derived from state that has
+     already settled. */
+  const firstRun = list.status === 'data' ? (list.loaded.runs[0] ?? null) : null;
+  const firstRunId = firstRun?.id ?? null;
+  const firstRunVersion = firstRun?.version ?? null;
+  useEffect(() => {
+    onFirstRun?.(firstRun);
+    /* Keyed on the run's IDENTITY and VERSION rather than the object, so a
+       re-render with an equal run does not re-notify. */
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [firstRunId, firstRunVersion]);
 
   /*
    * THE LOADED SNAPSHOT, read the same way — see `runsRef` immediately above for

@@ -15,6 +15,7 @@ import { RenameExperimentPanel } from '../components/RenameExperimentPanel';
 import { MoveExperimentPanel } from '../components/MoveExperimentPanel';
 import { RecordDescriptionPanel } from '../components/RecordDescriptionPanel';
 import { RunsSection } from '../components/RunsSection';
+import { RunSchemaMirror } from '../components/RunSchemaMirror';
 import { TranscriptCapturePanel } from '../components/TranscriptCapturePanel';
 import { UnmappedNotesPanel } from '../components/UnmappedNotesPanel';
 import { IngestionProposalsPanel } from '../components/IngestionProposalsPanel';
@@ -49,7 +50,13 @@ import {
   toValidationResult,
 } from '../lib/adapt';
 import { compose } from '../lib/assistantComposer';
-import type { ApiEvidenceEntry, ApiPendingItem, ApiWorkflow, RecordBundle } from '../lib/types';
+import type {
+  ApiEvidenceEntry,
+  ApiPendingItem,
+  ApiRunView,
+  ApiWorkflow,
+  RecordBundle,
+} from '../lib/types';
 
 /**
  * How many pending questions the record screen's banner lists before it says how
@@ -760,6 +767,10 @@ function LoadedWorkbench({
   });
   if (activeView !== 'graph') mounted.current[activeView] = true;
 
+  /* The run the schema mirror describes, reported by `RunsSection` from the page
+     it already loaded. Held here because the two are siblings. */
+  const [mirrorRun, setMirrorRun] = useState<ApiRunView | null>(null);
+
   const evidenceByPath = useMemo(
     () => new Map<string, ApiEvidenceEntry>(evidence.map((e) => [e.path, e])),
     [evidence],
@@ -1139,6 +1150,25 @@ function LoadedWorkbench({
             why `RunsSection` opens this workspace rather than sitting under the
             review below it.
           */}
+          {/*
+            ── THE SPLIT: RUN EDITOR LEFT, OFFICIAL STRUCTURE RIGHT ──────────
+            *"there should be an intuitive way users can both add runs and then
+            see the schema being filled at the same time, maybe like a split
+            screen type of thing"*, and then *"build a provisional one and revise
+            later, i want the view there so i can show angel and hao the
+            vision"* — project owner, 2026-09-14/15.
+
+            The mirror reads `GET /api/schema` — the vendored v1.05 document
+            `isaac validate --official` checks against — so the structure is
+            exact rather than transcribed. What is a DRAFT, and what the pane
+            says on itself, is which blocks belong to a run versus the whole
+            experiment: that is Angel's call, and the grouping is a starting
+            point for that conversation rather than a rule the product enforces.
+
+            It gates nothing. No export decision, no completeness claim, no
+            validation reads it.
+          */}
+          <div className="runs-split">
           <RunsSection
             experimentId={id}
             /* THE FAST PATH: a run-scoped feed summary. Ids and a rev, never content. */
@@ -1150,7 +1180,11 @@ function LoadedWorkbench({
              * `RunsSection`'s comments on both props carry the full argument.
              */
             recordVersion={detail.version}
+            /* ONE READ, TWO CONSUMERS — see the prop's note in `RunsSection`. */
+            onFirstRun={setMirrorRun}
           />
+          <RunSchemaMirror run={mirrorRun} />
+          </div>
 
           {/*
             VALIDATE & REVIEW SITS DIRECTLY BELOW THE RUNS, and the placement is the

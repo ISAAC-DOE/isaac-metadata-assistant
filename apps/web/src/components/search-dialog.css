@@ -35,11 +35,15 @@
   outline-offset: 2px;
 }
 .topbar-search-label {
+  /* `--font-size-body`: this is a control label, and it inherited a 12.5px
+     one-off from the trigger. See `.record-title` for the top bar's scale. */
+  font-size: var(--font-size-body);
   color: var(--text-secondary);
 }
 .topbar-search-kbd {
   font-family: var(--font-mono);
-  font-size: 10.5px;
+  /* 11px, the rung — it was 10.5px, the bar's smallest one-off. */
+  font-size: var(--font-size-meta);
   line-height: 1;
   padding: 2px 5px;
   border-radius: 5px;

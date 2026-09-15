@@ -858,3 +858,23 @@
   padding-top: var(--space-sm);
   border-top: 1px solid var(--border-hair);
 }
+
+/*
+ * THE "WHAT COUNTS AS A SOURCE" DRAWER. Reference prose, collapsed — the one
+ * sentence that changes what a reader does stays on the page above it.
+ */
+.hi-more {
+  margin-top: var(--space-sm);
+  max-width: var(--hi-prose);
+}
+.hi-more-summary {
+  cursor: pointer;
+  width: fit-content;
+  font-size: var(--font-size-meta);
+  color: var(--action);
+}
+.hi-more-summary:focus-visible {
+  outline: 2px solid var(--action);
+  outline-offset: 2px;
+  border-radius: var(--radius-inner);
+}
