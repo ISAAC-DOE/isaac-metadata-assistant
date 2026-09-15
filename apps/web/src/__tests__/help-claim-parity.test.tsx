@@ -443,8 +443,11 @@ const REQUIRED_CLAIMS: [string, RegExp][] = [
    * is the half-disclosure `__tests__/upload-claim-parity` §2 exists to stop, and
    * it is worse than naming neither: a reader is told the exhaustive-sounding
    * truth about the reader that changes nothing, and nothing about the one with
-   * "Upload" on its face. Measured: exactly two components under `apps/web/src`
-   * declare an `<input type="file">`, so "both" is a closed set.
+   * "Upload" on its face. ~~Measured: exactly two components under
+   * `apps/web/src` declare an `<input type="file">`, so "both" is a closed
+   * set.~~ — THREE as of 2026-09-15 (`DEC-33`); the census in
+   * `__tests__/upload-claim-parity.test.tsx` names all three, so the set is
+   * still closed and still measured rather than counted by hand.
    */
   [
     'the record validator is named as one of the two file readers',
@@ -458,9 +461,43 @@ const REQUIRED_CLAIMS: [string, RegExp][] = [
     'what those two do read is applied to no record',
     /\b(csv|campaign[- ]sheet)\b[^.]{0,110}\b(read-only|no route that applies|nothing is applied|apply nothing|applies nothing|change no record|write nothing)\b/i,
   ],
+  /*
+   * *** THE COUNT IS THREE AS OF 2026-09-15 (`DEC-33`), and this pattern is
+   * updated rather than relaxed. The retired form is kept struck because a
+   * pattern that still accepted "two" would go on certifying a stale count as
+   * correct — which is precisely the failure this family records two entries
+   * below ("a pattern that a false claim satisfies is not a guard for that
+   * claim"). ***
+   *
+   * ~~/\b(only two|two)\s+controls?\b[^.]{0,40}\b(read|reads)\b|…/~~
+   *
+   * `apps/web/src` now has THREE components declaring an `<input type="file">`,
+   * and `__tests__/upload-claim-parity.test.tsx` asserts that census exactly and
+   * names all three — so "three" is still a closed set, measured rather than
+   * counted by hand.
+   *
+   * `[\s\S]`, not `[^.]`, for the window. The new sentence is a list with a
+   * clause boundary in it, and this family's own rule two entries below records
+   * that `[^.]` is only a sentence proxy and breaks on anything dot-shaped.
+   */
   [
-    'no control other than those two accepts a file',
-    /\b(only two|two)\s+controls?\b[^.]{0,40}\b(read|reads)\b|\bno other control\b[^.]{0,30}\bfile\b/i,
+    'no control other than those three accepts a file',
+    /\bthree\s+controls?\b[\s\S]{0,40}\b(read|reads)\b|\bno other control\b[\s\S]{0,30}\bfile\b/i,
+  ],
+  /*
+   * THE THIRD READER IS NAMED, AND SO IS THE THING THAT MAKES IT DIFFERENT.
+   * Naming it without saying it sends nothing would be the half-disclosure this
+   * family exists to stop, one level along: a reader told "three controls read
+   * your files" and left to assume all three behave like the two with "Upload"
+   * on their face.
+   */
+  [
+    'the historical-import file staging is named as the third file reader',
+    /\b(historical import|file staging)\b/i,
+  ],
+  [
+    'and the third is stated to send nothing',
+    /\b(historical import|file staging)\b[\s\S]{0,160}\b(sends? nothing|not sent|never sent|nothing is sent)\b/i,
   ],
   [
     'dictated words survive whether or not a proposal is accepted',

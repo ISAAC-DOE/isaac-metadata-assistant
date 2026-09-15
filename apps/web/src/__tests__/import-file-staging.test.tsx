@@ -3,6 +3,8 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
+import type { ComponentProps } from 'react';
+
 import { ImportFileStaging, formatBytes } from '../components/ImportFileStaging';
 
 /**
@@ -130,14 +132,17 @@ describe('the staged list', () => {
 
 describe('recording a staged file as a source', () => {
   it('sends the browser metadata, a null digest when none was computed, and no path', async () => {
-    const onRecord = vi.fn(async () => {});
+    // Typed from the component's own prop, so the assertions below read real
+    // field names rather than casting an `unknown` and hoping.
+    type RecordInput = Parameters<ComponentProps<typeof ImportFileStaging>['onRecord']>[0];
+    const onRecord = vi.fn((_input: RecordInput): Promise<void> => Promise.resolve());
     render(<ImportFileStaging onRecord={onRecord} />);
     choose([file('run_log.txt', 'abc', 'text/plain')]);
 
     fireEvent.click(screen.getByRole('button', { name: 'Record as source' }));
 
     await waitFor(() => expect(onRecord).toHaveBeenCalledTimes(1));
-    const sent = onRecord.mock.calls[0][0] as Record<string, unknown>;
+    const sent = onRecord.mock.calls[0][0];
     expect(sent.filename).toBe('run_log.txt');
     expect(sent.mediaType).toBe('text/plain');
     expect(sent.sizeBytes).toBe(3);

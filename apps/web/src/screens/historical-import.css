@@ -1120,3 +1120,49 @@
   outline-offset: 2px;
   border-radius: var(--radius-inner);
 }
+
+/*
+ * `Add an external reference instead` — the demoted source path (`DEC-33`).
+ *
+ * It is a `<details>` and not a hidden panel: the owner's direction moves the
+ * reference form BEHIND the file picker, not away. A reference is still the only
+ * way to describe a file that has to stay where it is — on an instrument
+ * machine, in group storage — which a browser picker cannot express at all,
+ * because a browser does not disclose a local path.
+ *
+ * Capped at the app's own `readable` measure for the reason the disclosure above
+ * it is: the forms inside are narrow, and an uncapped 1166px host would strand
+ * the same gutter `e2e/specs/wide-prose.spec.ts` now measures.
+ */
+.hi-reference-fallback {
+  max-width: 760px;
+  margin-top: var(--space-sm);
+}
+
+.hi-reference-fallback > summary {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  font-size: 13px;
+  font-weight: var(--font-weight-medium);
+  color: var(--action);
+  cursor: pointer;
+  list-style: none;
+  width: fit-content;
+}
+
+.hi-reference-fallback > summary::-webkit-details-marker {
+  display: none;
+}
+
+.hi-reference-fallback > summary::before {
+  content: '▸';
+  display: inline-block;
+  font-size: 10px;
+  color: var(--text-tertiary);
+  transition: transform 0.12s ease;
+}
+
+.hi-reference-fallback[open] > summary::before {
+  transform: rotate(90deg);
+}

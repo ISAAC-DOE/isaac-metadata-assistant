@@ -7,6 +7,7 @@ import { TopBar } from '../components/TopBar';
 import { LeftNav } from '../components/LeftNav';
 import { BackendDown, LoadingPanel } from '../components/FetchStates';
 import { CircleAlert, Inbox, Plus, TriangleAlert } from '../components/icons';
+import { ImportFileStaging } from '../components/ImportFileStaging';
 import { LABELS } from '../lib/labels';
 import { stripLifecycleSuffix } from '../lib/adapt';
 import { ROUTES } from '../lib/routes';
@@ -679,12 +680,36 @@ function SourcesSection({
       )}
 
       {/*
-        ── WHY THERE IS NO FILE PICKER HERE, AND WHY I TRIED TO ADD ONE ──────
+        ── THE FILE PICKER, AND THE RECORDED DECLINE IT REVERSES ─────────────
         *"for the historical import, there is no area or button to actually upload
-        the files"* — project owner, 2026-09-14. Correct observation, and the
-        answer is a refusal rather than a gap.
+        the files"* — project owner, 2026-09-14. ~~Correct observation, and the
+        answer is a refusal rather than a gap.~~
 
-        I BUILT A MULTI-FILE PICKER AND REVERTED IT. It read no bytes — only
+        *** REVERSED 2026-09-15 BY THE PROJECT OWNER (`DEC-33`), AND THE DECLINE
+        BELOW IS KEPT IN FULL BECAUSE IT WAS RIGHT ABOUT THE RISK. He did not
+        overrule its argument; he ANSWERED it, and supplied the mitigation it
+        asked for: a staged file must read `Local only — not sent to ISAAC`. His
+        instruction was explicit — *"Do not merely delete the guards. Reconcile
+        them."* ***
+
+        WHAT MAKES THE REVERSAL HONEST RATHER THAN A LOOSENING — and it is a
+        measurement, not an argument. `POST /api/imports/{id}/sources` ALREADY
+        accepts `kind: "reference"` with `filename`, `reference`, `media_type`,
+        `size_bytes` and `sha256`; it stores them verbatim, FETCHES NOTHING, and
+        records the entry as `parse_state: "no_content_path"`. A browser hands
+        over `File.name`, `File.size` and `File.type` as part of the SELECTION —
+        no read is involved. Proved over HTTP on 2026-09-15: an entry sent that
+        way lands with the real filename, the real size, a genuine digest and
+        `no_content_path`. So this adds no route, no capability and no
+        governance change. `POST /api/uploads` is still an unconditional 403 and
+        nothing here calls it.
+
+        THE PANEL CANNOT SEND A BYTE BY CONSTRUCTION, which is stronger than a
+        promise in a comment: `ImportFileStaging` takes `onRecord` as a prop and
+        therefore cannot import the API client. Asserted structurally AND
+        behaviourally in `import-file-staging.test.tsx`.
+
+        ~~I BUILT A MULTI-FILE PICKER AND REVERTED IT. It read no bytes — only
         `File.name`, which a browser hands over with the selection — and it would
         have turned "type twelve filenames" into one act. Two committed guards
         refused it, and both are right:
@@ -706,8 +731,53 @@ function SourcesSection({
         the product created on purpose.
 
         So this section keeps the reference form, and the honest mechanism is
-        made obvious instead: a reference is a POINTER a later build can follow.
+        made obvious instead: a reference is a POINTER a later build can follow.~~
+
+        THE ONE SENTENCE OF THE DECLINE THAT STILL GOVERNS: *"a scientist who
+        picked twelve files would reasonably believe twelve files had been
+        uploaded."* That is why the disclosure is on every ROW and in the drop
+        zone itself, visible rather than in a tooltip — a privacy state is one of
+        the things the copy rule keeps out in the open — and why the checksum,
+        the only thing here that reads a file, is opt-in per file and says so
+        before it runs.
       */}
+      <ImportFileStaging
+        busy={busy !== null}
+        onRecord={async (input) => {
+          /*
+           * THE API CALL IS DELIBERATELY NOT ROUTED THROUGH `onAct`, and the
+           * reason is where the failure lands. `onAct` catches and puts the
+           * refusal in this SECTION's banner — correct for a single form, wrong
+           * for a list, because a reader with four staged files would see one
+           * banner and no indication of WHICH row the server refused. So the
+           * call is made directly, its rejection propagates to the row that
+           * caused it, and `onAct` is used afterwards only for its reload.
+           */
+          await api.addImportSource(importId, {
+            kind: 'reference',
+            filename: input.filename,
+            reference: input.reference,
+            ...(input.mediaType === '' ? {} : { mediaType: input.mediaType }),
+            sizeBytes: input.sizeBytes,
+            ...(input.sha256 === null ? {} : { sha256: input.sha256 }),
+          });
+          await onAct('record-staged-file', async () => {});
+        }}
+      />
+
+      {/* `Record a reference` IS NOW SECONDARY, per `DEC-33`, and is deliberately
+          NOT removed. It is the only way to describe a file that must stay where
+          it is — external storage, a large raw dataset, a path on an instrument
+          machine — which a browser file picker cannot express at all, because a
+          browser does not disclose a local path. So it moves behind a disclosure
+          and keeps every field it had. */}
+      <details className="hi-reference-fallback">
+        <summary>Add an external reference instead</summary>
+        <p className="hi-note">
+          For a file that has to stay where it is — on an instrument machine, in
+          group storage, or anywhere ISAAC cannot be pointed at. You describe
+          where it is; nothing is fetched.
+        </p>
       <div className="hi-forms">
         <form
           className="hi-form"
@@ -790,6 +860,15 @@ function SourcesSection({
             {IMPORT_COPY.actionAddReference}
           </button>
         </form>
+      </div>
+      </details>
+
+      {/* THE EXAMPLE SOURCE STAYS OUT IN THE OPEN and is deliberately NOT inside
+          the external-reference disclosure: it is the one source kind this build
+          actually READS, so it is the only way to exercise parse and
+          reconstruction end to end. Burying it under "add an external reference
+          instead" would hide the only entry that can produce a candidate. */}
+      <div className="hi-forms">
 
         {data.available_fixtures.length > 0 && (
           <form

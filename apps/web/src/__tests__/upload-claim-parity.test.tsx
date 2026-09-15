@@ -384,9 +384,33 @@ const ALL_BAN_SURFACES: [string, () => string][] = [
  * call itself, not by a comment about it — `Blob.text()` with a `FileReader`
  * fallback, reached from an `<input type="file">` change handler.
  */
+/*
+ * TWO BECAME THREE ON 2026-09-15 (`DEC-33`), and the third is DIFFERENT IN KIND
+ * from the first two — which is why it is listed separately below rather than
+ * appended here.
+ *
+ * These two READ A FILE AND POST ITS CONTENT to the server. The Historical
+ * Import staging panel reads a file only when the reader explicitly asks for a
+ * checksum, and **transmits nothing, ever** — it cannot, because it takes
+ * `onRecord` as a prop and so cannot import the API client
+ * (`import-file-staging.test.tsx` asserts that structurally AND behaviourally).
+ *
+ * The distinction is load-bearing for the Help copy: a reader asking "does this
+ * app send my files anywhere?" gets a different answer for the third than for
+ * these two, and collapsing them into one list would flatten that.
+ */
 const FILE_READING_CONTROLS: [string, string][] = [
   ['the standalone record validator', 'components/RecordValidator.tsx'],
   ['the campaign-sheet reconciliation preview', 'components/CsvReconcilePanel.tsx'],
+];
+
+/**
+ * Reads a chosen file but SENDS NOTHING. Kept apart from the two above so the
+ * app-wide census can be exact without the Help copy having to claim that all
+ * three behave alike.
+ */
+const LOCAL_ONLY_FILE_CONTROLS: [string, string][] = [
+  ['the historical-import file staging panel', 'components/ImportFileStaging.tsx'],
 ];
 
 describe('R1b §1 · the file-reading controls exist, so the absolute claim is false', () => {
@@ -397,6 +421,27 @@ describe('R1b §1 · the file-reading controls exist, so the absolute claim is f
     expect(src).toMatch(/new FileReader\(\)/);
     // ...reached from a real file picker, so a user can actually get there.
     expect(src).toMatch(/type="file"/);
+  });
+
+  /*
+   * THE THIRD CONTROL, ASSERTED ON ITS OWN TERMS. It is not folded into the
+   * `it.each` above because that block requires `file.text()` or `new
+   * FileReader()` — loosening it to also accept `arrayBuffer()` would weaken a
+   * guard covering two components in order to describe a third. This case
+   * instead asserts the property that makes the third one safe.
+   */
+  it('the staging panel reads a file only on request, and can send nothing', () => {
+    const src = rawSource('components/ImportFileStaging.tsx');
+    // It reaches bytes, so it belongs in the census...
+    expect(src).toMatch(/arrayBuffer\(\)/);
+    expect(src).toMatch(/type="file"/);
+    // ...and it cannot transmit them: no client, no transport, by construction.
+    expect(src).not.toMatch(/from '\.\.\/lib\/api'/);
+    expect(src).not.toMatch(/\bfetch\s*\(/);
+    expect(src).not.toMatch(/XMLHttpRequest/);
+    expect(src).not.toMatch(/FormData/);
+    // ...and the reader is told so, in words, in the component itself.
+    expect(src).toMatch(/not sent to ISAAC/);
   });
 
   it('the Governance page mounts one of them one tab away from its own policy copy', () => {
@@ -421,7 +466,18 @@ describe('R1b §1 · the file-reading controls exist, so the absolute claim is f
    * make this test FAIL rather than pass, which is the failure direction a
    * guard is allowed to have.
    */
-  it('EXACTLY these two non-test files declare a file input — no third control', () => {
+  /*
+   * *** THE CENSUS IS NOW THREE, AND IT IS STILL EXACT. *** The previous
+   * expectation is struck rather than edited away, because "there is no third
+   * control" is precisely the kind of claim a future session acts on:
+   *
+   *   ~~['components/CsvReconcilePanel.tsx', 'components/RecordValidator.tsx']~~
+   *
+   * `components/ImportFileStaging.tsx` joins it under `DEC-33`. The count is
+   * what this test is FOR — a count in prose goes stale silently and this does
+   * not — so the number moves with the code and the reason moves with it.
+   */
+  it('EXACTLY these three non-test files declare a file input — no fourth control', () => {
     const ATTRIBUTE = 'type="file"';
     function walk(dir: string): string[] {
       const out: string[] = [];
@@ -450,11 +506,22 @@ describe('R1b §1 · the file-reading controls exist, so the absolute claim is f
         'them, and __tests__/help-claim-parity.test.tsx requires that section to name ' +
         'BOTH readers — so a third control means that copy is now a half-disclosure, ' +
         'and a removed one means the §3 ban rests on nothing (see §1 above).',
-    ).toEqual(['components/CsvReconcilePanel.tsx', 'components/RecordValidator.tsx']);
+    ).toEqual([
+      'components/CsvReconcilePanel.tsx',
+      'components/ImportFileStaging.tsx',
+      'components/RecordValidator.tsx',
+    ]);
 
-    // The two names the copy uses are exactly the two paths asserted above, so
-    // the prose and the count cannot drift apart.
-    expect(FILE_READING_CONTROLS.map(([, path]) => path).sort()).toEqual(declaring);
+    // The names the copy uses are exactly the paths asserted above, so the prose
+    // and the count cannot drift apart. BOTH lists together, because the third
+    // control is real and is deliberately described differently from the first
+    // two — summing them here is what stops a future slice adding a fourth to
+    // whichever list happens to be less guarded.
+    expect(
+      [...FILE_READING_CONTROLS, ...LOCAL_ONLY_FILE_CONTROLS]
+        .map(([, path]) => path)
+        .sort(),
+    ).toEqual(declaring);
   });
 });
 
@@ -987,10 +1054,26 @@ function helpValuesSection(): string {
   return helpValuesSectionEl().textContent ?? '';
 }
 
-/** Both file-reading controls, as the claim must name them. */
+/**
+ * Every control that reads a chosen file, as the claim must name them.
+ *
+ * *** TWO BECAME THREE ON 2026-09-15 (`DEC-33`). The name of this constant is
+ * unchanged on purpose — `BOTH_READERS_NAMED` is referenced by §2's and §6a's
+ * prose and by `help-claim-parity.test.tsx`'s own commentary, and renaming it
+ * would make every one of those references look like it had been dropped rather
+ * than extended. The count lives in the ARRAY, which is the thing that cannot
+ * go stale silently; a name is prose. ***
+ *
+ * The third is different in kind from the first two and the Help copy says so:
+ * it opens a file only to compute a checksum the reader asked for, and sends
+ * nothing. It is still listed here, because the question §6a asks — "is every
+ * control that touches my files named on this screen?" — has to be answered
+ * about all three or it is not answered at all.
+ */
 const BOTH_READERS_NAMED: [string, RegExp][] = [
   ['the record validator', /validator/i],
   ['the campaign-sheet CSV comparison', /(csv|campaign[- ]sheet)/i],
+  ['the historical-import file staging', /historical import|file staging/i],
 ];
 
 /**
