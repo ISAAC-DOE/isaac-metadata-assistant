@@ -216,8 +216,17 @@ export function captureSummaryLine(summary: ApiCaptureSummary | null): string | 
 }
 
 interface RecordWorkspaceNavProps {
-  /** The workspace currently rendered — already resolved, never re-derived here. */
-  active: RecordViewId;
+  /**
+   * The workspace currently rendered — already resolved, never re-derived here.
+   *
+   * `null` means NO workspace is active, which is the honest state on the
+   * record's SUB-SCREENS (`/complete`, `/export`). Those are workflow steps, not
+   * workspaces: the spine marks where you are and nothing here should claim a
+   * second "you are here". Before `RecordRail` existed those screens rendered no
+   * workspace list at all, so a scientist lost every way back to Experiment
+   * Data, Runs and Record Fields the moment they clicked a step.
+   */
+  active: RecordViewId | null;
   /**
    * The server's own capture totals, straight off the record's detail payload, or
    * `null` when they are not known — an API build that does not serve the block, or

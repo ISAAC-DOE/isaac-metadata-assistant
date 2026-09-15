@@ -372,7 +372,7 @@ export function ExperimentsHome() {
      * It gates the first-run empty state ("create your first experiment") and the
      * header's Create control, so it MUST mean "this workspace holds nothing" —
      * derived from the unfiltered server list. Deriving it from the filtered rows
-     * instead would put "Start your first experiment" in front of somebody with
+     * instead would put "Start Your First Experiment" in front of somebody with
      * forty records who had simply typed a word that matched none of them. That is
      * the single worst false claim this screen could make, and it is one line of
      * carelessness away, which is why this is spelled out rather than inlined.

@@ -385,6 +385,36 @@ function installMicProbe(permissionDelayMs: number) {
   }
 }
 
+/**
+ * Read the probe once the recorder's FINAL `dataavailable` has landed.
+ *
+ * WHY THIS EXISTS. `MediaRecorder.stop()` guarantees one last `dataavailable`,
+ * but it fires ASYNCHRONOUSLY after `stop()` returns. Both post-stop assertions
+ * sampled `readProbe` the moment the Discard button appeared, which is not
+ * ordered after that event -- so `chunkEvents` could still be 0 on a machine
+ * where the flush had not been dispatched yet.
+ *
+ * MEASURED, NOT SUSPECTED: Linux CI failed both sites with
+ * `expect(received).toBeGreaterThan(expected)` on `chunkEvents` (run
+ * 34924695484) while the SAME suite passed locally, 123 of 123. The assertions
+ * immediately above each failure -- `trackStates` `['ended']` and
+ * `recorderStates` `['inactive']` -- both PASSED, which is what identifies this
+ * as the flush lagging rather than a recorder that never produced audio: the
+ * recorder had already reached `inactive`.
+ *
+ * This waits for a GUARANTEED event rather than granting slack to a flaky one,
+ * which is the distinction that makes a poll legitimate here. If no chunk ever
+ * arrives the poll times out and says so, which is a better failure than
+ * `expected 0 to be greater than 0` -- that message names the counter but not
+ * the cause.
+ */
+async function readProbeAfterFlush(page: Page): Promise<MicProbeReading> {
+  await expect
+    .poll(async () => (await readProbe(page)).chunkEvents, { timeout: 10_000 })
+    .toBeGreaterThan(0);
+  return readProbe(page);
+}
+
 /** Read the probe out of the page, flattening the live objects to plain data. */
 async function readProbe(page: Page): Promise<MicProbeReading> {
   return page.evaluate(() => {
@@ -783,7 +813,7 @@ test('Stop releases the microphone, and Discard drops the audio it captured', as
   await stopButton(page).click();
   await expect(discardButton(page)).toBeVisible();
 
-  const stopped = await readProbe(page);
+  const stopped = await readProbeAfterFlush(page);
   // Stop is where the microphone is released — before any discard.
   expect(stopped.trackStates).toEqual(['ended']);
   expect(stopped.recorderStates).toEqual(['inactive']);
@@ -972,7 +1002,7 @@ test('pause suspends the recorder WITHOUT releasing the microphone, and Stop fro
   await stopButton(page).click();
   await expect(discardButton(page)).toBeVisible();
 
-  const stopped = await readProbe(page);
+  const stopped = await readProbeAfterFlush(page);
   expect(stopped.trackStates).toEqual(['ended']);
   expect(stopped.recorderStates).toEqual(['inactive']);
   // The take survived the pause: real bytes, from one recorder, across two

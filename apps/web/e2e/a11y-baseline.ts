@@ -2454,6 +2454,19 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
    *
    * −7 nodes on both columns: darwin 2426 -> 2419, linux 2430 -> 2423. See
    * `A11Y_BASELINE_TOTAL_NODES`.
+      *
+   * SINCE THEN (2026-09-14): that `<h3>` has been RENAMED to "Browse Endpoints".
+   * The account above stays as written because it is accurate about what the
+   * A11Y-06 fix did -- that fix left the heading's words alone, and this entry
+   * records that fix. The rename is a separate change, for a separate reason:
+   * the words duplicated the tab label and the card's own `<h2>` 103px above.
+   * The landmark count cannot be affected -- a nameless `<section>` is still
+   * nameless, and the heading is still an `<h3>` in the same place. Whether this
+   * entry's CELLS hold is REASONED, NOT MEASURED: the rename ran no a11y suite,
+   * and the argument is only that the element, its class and its role are
+   * unchanged and the text is 17 characters rather than 16. Linux CI's a11y job
+   * is the thing that settles it; if it reports a movement on
+   * `settings-explorer`, this is the first place to look.
    */
 ];
 

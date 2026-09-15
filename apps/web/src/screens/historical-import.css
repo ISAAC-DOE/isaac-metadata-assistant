@@ -94,7 +94,21 @@
    * other. **CI (Linux) is the authority**"). `em` resolves off `font-size`
    * alone, so the measure is identical on both.
    */
-  --hi-prose: 38em;
+  /*
+   * 68ch, up from 38em (494px measured at this screen's 13px).
+   *
+   * The project owner asked, of this screen: "i dont know why you aren't letting
+   * the text go all the way to the end?" Measured at 1478px: prose sat at 418px
+   * and 494px inside a ~1160px card, so roughly 60% of every row was empty and
+   * the page read as broken rather than as a considered measure.
+   *
+   * 68ch is the generous end of a readable line rather than a removal of the
+   * cap: letting prose fill the card entirely would put ~145 characters on a
+   * line at this size, which trades one legibility problem for another. The
+   * other half of the fix is VOLUME — long explanations move behind disclosure
+   * (see `IMPORT_COPY`), so what is left is short enough not to look stranded.
+   */
+  --hi-prose: 68ch;
 }
 
 /* The page header. Eyebrow, `<h1>`, lead — and no card, because it is the
@@ -275,11 +289,29 @@
  * inherited 1.55 line-height is ~17px, so 8px padding plus 2px border lands at
  * ~35px and would fail that guard. 4px lands at ~27px.
  */
+/*
+ * THE STEPS READ AS A SEQUENCE, NOT AS CONTROLS.
+ *
+ * The project owner asked of this row: "are they supposed to be clickable or
+ * something? its a little confusing having them there otherwise". They were
+ * bordered, filled pills — the exact shape this app uses for `.section-tab` and
+ * for filter chips, both of which ARE clickable — and they do nothing. A
+ * control-shaped thing that is not a control is worse than absent.
+ *
+ * So the border and the fill are gone and the separator does the work: the row
+ * is now a chain of words with a chevron between them, which is what a described
+ * sequence looks like. The one step this build does not have keeps its dashed
+ * outline, because there it carries meaning (see `.hi-step.unbuilt`) rather than
+ * implying an affordance.
+ *
+ * NOT MADE CLICKABLE INSTEAD, deliberately: an import has no notion of jumping
+ * to "Reconstruct" before its sources are read, and the screen already renders
+ * each stage's own controls in order below. Linking them would promise
+ * navigation the workflow does not support.
+ */
 .hi-step {
-  border: 1px solid var(--border);
-  border-radius: var(--radius-pill);
-  padding: var(--space-xs) var(--space-md);
-  background: var(--surface-subtle);
+  padding: 0;
+  background: none;
   font-size: var(--font-size-meta);
   color: var(--text-secondary);
   /* One line, centred. This was `flex-direction: column` with a gap and a
@@ -337,6 +369,14 @@
 .hi-steps-disclosure-subject {
   font-weight: var(--font-weight-medium);
   color: var(--text-secondary);
+}
+
+/* The chain separator. `::after` on every step but the last, so the markup stays
+ * a plain list and the sequence is presentational. */
+.hi-step:not(:last-child)::after {
+  content: '›';
+  margin-left: var(--space-xs);
+  color: var(--text-tertiary);
 }
 
 .hi-step-label {
@@ -817,4 +857,24 @@
   margin-top: var(--space-sm);
   padding-top: var(--space-sm);
   border-top: 1px solid var(--border-hair);
+}
+
+/*
+ * THE "WHAT COUNTS AS A SOURCE" DRAWER. Reference prose, collapsed — the one
+ * sentence that changes what a reader does stays on the page above it.
+ */
+.hi-more {
+  margin-top: var(--space-sm);
+  max-width: var(--hi-prose);
+}
+.hi-more-summary {
+  cursor: pointer;
+  width: fit-content;
+  font-size: var(--font-size-meta);
+  color: var(--action);
+}
+.hi-more-summary:focus-visible {
+  outline: 2px solid var(--action);
+  outline-offset: 2px;
+  border-radius: var(--radius-inner);
 }

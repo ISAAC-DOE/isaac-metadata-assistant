@@ -354,6 +354,24 @@ export function ValidateReview({ experimentId }: { experimentId: string }) {
         nothing on this screen knows which shape the record is, and the honest
         third form says so rather than picking one.
       */}
+      {/*
+        COLLAPSED BY DEFAULT (project owner, 2026-09-14): *"for the runs, the text
+        on the bottom should be default collapsed, and the user can click to
+        uncolapse them"*.
+
+        What stays visible is the title, the button and the status line. The
+        STATUS line is deliberately NOT collapsed: "No check has been run here
+        yet … That is not the same as 'no findings'" is the sentence that stops a
+        reader concluding this record is clean, and a claim that prevents a
+        misreading has to be where the misreading happens.
+
+        What moves is the DESCRIPTION of what the check does — reference material,
+        read once. Native `<details>`, so it stays in the DOM and the
+        accessibility tree; the read-only promise inside it is therefore still
+        present for a screen reader and still greppable.
+      */}
+      <details className="vr-about">
+        <summary className="vr-about-summary">What this checks</summary>
       <p className="vr-sub">
         {review.status !== 'data'
           ? 'Checks this record against the same deterministic validators the export gate uses — each run separately if it has runs — and lists what was found, so you can decide what to fix. '
@@ -362,6 +380,7 @@ export function ValidateReview({ experimentId }: { experimentId: string }) {
             : 'Checks this record against the same deterministic validators the export gate uses, and lists what they found, so you can decide what to fix. '}
         Read-only: nothing here is written, exported, submitted, or repaired for you.
       </p>
+      </details>
 
       <div className="vr-actions">
         <button

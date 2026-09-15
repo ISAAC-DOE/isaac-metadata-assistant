@@ -344,7 +344,7 @@ export const test = base.extend<{
 export async function createExperimentThroughTheUi(page: Page, title: string): Promise<string> {
   await page.goto('/experiments');
   await page.getByRole('button', { name: 'Create Experiment' }).first().click();
-  await page.getByLabel('Experiment title').fill(title);
+  await page.getByLabel('Experiment Title').fill(title);
   await page.getByRole('button', { name: 'Create Experiment', exact: true }).last().click();
   await page.waitForURL(/\/record\/[0-9A-Z]{26}/);
   const id = new URL(page.url()).pathname.split('/')[2];

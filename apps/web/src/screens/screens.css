@@ -1827,6 +1827,31 @@
   padding: 6px 0;
   border-bottom: 1px solid var(--border-faint);
 }
+
+/*
+ * NO DANGLING HALF-RULE UNDER THE LAST ROW.
+ *
+ * `.settings-figures` is a two-column grid and the Runtime Status list has
+ * SEVEN items, so the final row holds one cell. Measured in Chromium at 1512:
+ * that cell spans x 296-859 and carries the same 1px `border-bottom` as every
+ * other, so the table ended in a 563px rule with 587px of nothing beside it --
+ * a line that stops halfway across, which is the "uneven" the owner reported.
+ *
+ * Both cells of the final row lose the rule, whatever the parity, so a table
+ * with an even count does not instead end in a full-width closing rule below
+ * its last content. `:last-child` catches the final cell; the second selector
+ * catches its left-hand neighbour ONLY when that neighbour shares the row --
+ * `:nth-child(odd)` is what makes it row-aware, since an odd-indexed cell is
+ * always the left column of a two-column grid.
+ *
+ * Stated as a separator rather than a border on each row would be the other
+ * repair; it is not taken because `border-bottom` is what every other list in
+ * this file uses, and one list diverging is the drift these rules keep having.
+ */
+.settings-figure:last-child,
+.settings-figure:nth-last-child(2):nth-child(odd) {
+  border-bottom: none;
+}
 .settings-figure dt {
   font-size: 12px;
   color: var(--text-tertiary);
@@ -3161,6 +3186,32 @@ a.settings-jump-btn {
     grid-template-columns: 1fr;
   }
 
+  /*
+   * AND THE FINAL-ROW BORDER RULE IS UNDONE FOR THE NEIGHBOUR, because the
+   * thing it compensates for does not exist in one column.
+   *
+   * Found by independent review, 2026-09-14. The base rule drops the
+   * `border-bottom` from BOTH cells of the last row -- `:last-child` plus
+   * `:nth-last-child(2):nth-child(odd)` for its left-hand neighbour -- and its
+   * comment justifies the second selector with "an odd-indexed cell is always
+   * the left column of a two-column grid". True at two columns. Here the grid
+   * is ONE column (the rule directly above), so an odd-indexed
+   * second-to-last cell is simply the second-to-last ROW, and dropping its
+   * border deletes a separator from the middle of the list.
+   *
+   * Measured by reasoning over the two grids that exist (`SettingsPage.tsx:446`
+   * Runtime Status, 7 items; `:705` Identity, 4 items): at <=640px the 4-item
+   * grid lost the rule between rows 3 and 4 while rows 1|2 and 2|3 kept theirs.
+   * The 7-item grid was unaffected, because its second-to-last cell is even.
+   *
+   * `:last-child` is deliberately NOT restored: a list should not close with a
+   * rule under its last row at any width, which is the half of the base rule
+   * that was always about the last ROW rather than the last COLUMN.
+   */
+  .settings-figure:nth-last-child(2):nth-child(odd) {
+    border-bottom: 1px solid var(--border-faint);
+  }
+
   /* Settings (P36.4 · P36R S9 · P36V PR3): the identity figures, the boundary
      summary rows and the API search box go full-width on narrow screens instead
      of pinning to a fixed max, and the API master list keeps its own scroll box
@@ -3300,4 +3351,41 @@ a.settings-jump-btn {
   font-size: var(--font-size-meta);
   line-height: var(--line-height-relaxed);
   color: var(--text-muted);
+}
+
+/*
+ * THE CAPTURE WORKSPACE'S THREE PANELS ARE CARDS, IN ONE RULE.
+ *
+ * The project owner, 2026-09-14, on the Experiment Data screen: *"i like the ui
+ * you have in this screenshot with the four different ways they can get the
+ * experiment in, but below that when the transcript or whatever happens then it
+ * becomes cluttered again, there is no visual separation between sections, it
+ * needs to look cleaner and polished"*.
+ *
+ * Measured: the four intake tiles are cards, and `.capture-section`,
+ * `.notes-section` and `.proposals-section` each carried `margin-bottom: 20px`
+ * and nothing else — so everything below the tiles was one undifferentiated
+ * column of headings and prose.
+ *
+ * ONE SELECTOR LIST, NOT THREE COPIES, and that is the lesson from this
+ * repository's own `.workspace-nav` / `.capture-nav` gutter defect: two rules
+ * with identical values are how values come apart, and those two diverged at a
+ * width nobody checked. These three panels live in three component
+ * stylesheets; styling them together is the only way the card cannot drift
+ * between them.
+ *
+ * Every value is the existing `.card` token set (`base.css`), so no new visual
+ * vocabulary enters the app — the panels become the same kind of surface the
+ * intake tiles already are.
+ */
+.capture-section,
+.notes-section,
+.proposals-section {
+  /* `--space-lg` on both axes: a rung of the scale, and the same interior the
+     intake tiles above already use. The 18px I first wrote has no rung. */
+  padding: var(--space-lg);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-card);
 }

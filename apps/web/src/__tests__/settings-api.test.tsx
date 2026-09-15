@@ -154,7 +154,9 @@ async function openApiAccess(extraRoutes: Record<string, unknown> = {}) {
 async function openExplorer(extraRoutes: Record<string, unknown> = {}) {
   stubFetchRoutes({ ...routes(), ...extraRoutes } as Parameters<typeof stubFetchRoutes>[0]);
   const view = renderSettings(ROUTES.settingsTab('explorer'));
-  await screen.findByRole('heading', { name: 'Endpoint Explorer', level: 3 });
+  /* The panel heading; renamed from 'Endpoint Explorer' on 2026-09-14 because it
+     repeated the tab label and the card's own <h2>. See `ApiDocs.tsx`. */
+  await screen.findByRole('heading', { name: 'Browse Endpoints', level: 3 });
   return view;
 }
 
@@ -481,7 +483,7 @@ describe('Settings → API Access — an honest unavailable state', () => {
       'true',
     );
     expect(
-      await screen.findByRole('heading', { name: 'Endpoint Explorer', level: 3 }),
+      await screen.findByRole('heading', { name: 'Browse Endpoints', level: 3 }),
     ).toBeInTheDocument();
   });
 });
@@ -728,7 +730,7 @@ describe('Settings → API Access — Quick Start', () => {
       'true',
     );
     expect(
-      await screen.findByRole('heading', { name: 'Endpoint Explorer', level: 3 }),
+      await screen.findByRole('heading', { name: 'Browse Endpoints', level: 3 }),
     ).toBeInTheDocument();
   });
 });
@@ -2923,7 +2925,7 @@ describe('Settings → API Access — Connect an Agent', () => {
       'true',
     );
     expect(
-      await screen.findByRole('heading', { name: 'Endpoint Explorer', level: 3 }),
+      await screen.findByRole('heading', { name: 'Browse Endpoints', level: 3 }),
     ).toBeInTheDocument();
   });
 

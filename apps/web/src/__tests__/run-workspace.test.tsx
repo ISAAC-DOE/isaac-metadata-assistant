@@ -258,7 +258,12 @@ describe('Add Run', () => {
     });
 
     await screen.findByRole('button', { name: /Add Run/ });
-    expect(screen.getByText('No runs yet. Add one for the first set of conditions you measured.')).toBeInTheDocument();
+    /* The empty state is now the REMEDY only -- `.runs-count` above it carries
+       "No runs in this record yet", which it used to repeat. See
+       `RunsSection`'s `NO_RUNS_COUNT` note. */
+    expect(
+      screen.getByText('Add one for the first set of conditions you measured.'),
+    ).toBeInTheDocument();
 
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: /Add Run/ }));

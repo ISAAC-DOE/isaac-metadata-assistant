@@ -328,9 +328,38 @@ describe('A11Y-06 residue · the Endpoint Explorer tab names one region, once', 
     expect(panel.getAttribute('role')).toBeNull();
     expect(landmarkName(panel)).toBe('');
     // The heading is kept: this fix must not cost the outline a level.
-    const h3 = panel.querySelector('h3#settings-api-explorer-heading');
+    /* Queried by ID ALONE, deliberately. It used to read
+       `querySelector('h3#settings-api-explorer-heading')`, which made the
+       `tagName` assertion below TRUE BY CONSTRUCTION -- the selector had already
+       required an `h3`, so a change to `h2` or `h4` would have made the element
+       null and failed a different assertion with a misleading message. Found by
+       independent review, 2026-09-14, in a comment that claimed this test
+       "checks the LEVEL". Now it does. */
+    const h3 = panel.querySelector('#settings-api-explorer-heading');
     expect(h3, 'the <h3> must survive — only the landmark name was removed').not.toBeNull();
-    expect(h3!.textContent).toBe('Endpoint Explorer');
+    /*
+     * ITS WORDS CHANGED ON 2026-09-14; THE PROPERTY THIS ASSERTS DID NOT. The
+     * heading read "Endpoint Explorer", which is also the tab label and the
+     * card's own `<h2>` 103px above it — the same three words twice, in the
+     * viewport and in the heading outline. It now names the panel ("Browse
+     * Endpoints"), following `QuickStart`'s shape in the same file.
+     *
+     * What this test exists to protect is that the fix "must not cost the
+     * outline a level", so it checks the LEVEL and the CONTAINMENT, and asserts
+     * the words are no longer the card's — which is a stronger statement than
+     * the literal it replaced, and would have failed before the rename.
+     *
+     * The level check is only real because the element is now fetched by ID
+     * alone; see the note at the query. As first written it selected `h3#…` and
+     * then asserted the tag was `H3`, which could not fail.
+     */
+    expect(h3!.tagName).toBe('H3');
+    expect(h3!.textContent).toBe('Browse Endpoints');
+    const cardHeading = container.querySelector('h2#settings-apidocs-heading');
+    expect(
+      h3!.textContent,
+      'the panel heading repeats its card heading — the duplication this rename removed',
+    ).not.toBe(cardHeading?.textContent ?? null);
   });
 });
 

@@ -63,6 +63,36 @@ import {
  * rule here would create the second definition `complete.py:342-345` warns about —
  * "copying IS restating" — for a case the server already handles end to end.
  */
+/**
+ * The one key this form REQUIRES, and a deliberately narrower gate than the
+ * schema's full `required` list.
+ *
+ * `schema/isaac_record_v1.json` marks THREE keys required on a series item --
+ * `series_id`, `independent_variables`, `channels`. This form checks only the
+ * first, and the reason is where each is best enforced:
+ *
+ *  * `series_id` is what the DRAFT validator keys evidence by, and its absence
+ *    is the accept-then-refuse defect actually measured
+ *    (`docs/evidence/end-to-end-demo-walk-2026-09-15.md`): the answer was taken,
+ *    pending fell 3 to 1, and only export said `series has no series_id`.
+ *  * The other two are enforced by OFFICIAL validation at export, which already
+ *    names each missing key and its allowed values precisely -- measured in the
+ *    same walk, on `channels[0].unit` and on three enum values.
+ *
+ * REQUIRING ALL THREE HERE WAS BUILT AND NARROWED, because the cost told me the
+ * gate was at the wrong layer: it turned 13 tests in three files red, none of
+ * them about series validation -- prefill, Confirm arming, DOM ids, bounded
+ * pending, refused corrections -- each of which would have had to carry full
+ * schema detail it does not care about. Every REAL fixture and canonical seed
+ * already carries all three (checked across `tests/fixtures/**`), so the strict
+ * version blocked no shipped data; it only made incidental scaffolding verbose.
+ *
+ * Pinned by `src/__tests__/structured-value-schema-parity.test.ts`, which asserts
+ * this key really is one the schema requires -- so the gate stays grounded in the
+ * authority (`CLAUDE.md` section 1) rather than being this file's opinion.
+ */
+export const SERIES_REQUIRED_KEYS = ['series_id'] as const;
+
 export function seriesShapeError(parsed: unknown): string | null {
   if (!Array.isArray(parsed)) return 'The value must be a list of series objects.';
   if (parsed.length === 0) {
@@ -72,6 +102,50 @@ export function seriesShapeError(parsed: unknown): string | null {
   }
   if (!parsed.every((item) => item !== null && typeof item === 'object' && !Array.isArray(item))) {
     return 'Every entry must be a series object.';
+  }
+
+  /*
+   * THE OFFICIAL SCHEMA'S OWN REQUIRED KEYS, CHECKED HERE BECAUSE THE RECORD
+   * OTHERWISE BECOMES QUIETLY UN-EXPORTABLE.
+   *
+   * Measured over HTTP on a record created through the product: answering this
+   * question with `[{"energy_eV": 8979, "mu": 0.412}]` -- a list of objects,
+   * which is all this function used to require -- was ACCEPTED. The pending
+   * count fell from 3 to 1 and the question read as answered. Export then
+   * refused with `series has no series_id — cannot key its evidence`, twice,
+   * once per entry. So a scientist could complete every question and hold a
+   * record that cannot leave the building, with the reason surfacing only at
+   * the end.
+   *
+   * `schema/isaac_record_v1.json` declares `required: ["series_id",
+   * "independent_variables", "channels"]` on each series item. This form gates
+   * on `series_id` alone; see `SERIES_REQUIRED_KEYS` for why the other two are
+   * left to official validation at export, and for the measurement that
+   * narrowed this from all three.
+   *
+   * The ASYMMETRY BEHIND IT IS NOT CLOSED and is named rather than implied:
+   * `src/isaac_records/complete.py:239-240` skips evidence for a series with no
+   * `series_id` (`if series_id is None: continue`) and accepts the answer, while
+   * `draft_validator.py:592` makes the same absence an export error. An API
+   * caller can still reach that. Closing it belongs in the truth path, which
+   * `CLAUDE.md` section 13 puts behind its own slice and its own review; this
+   * closes the path a scientist can actually type into.
+   */
+  const missing = new Map<string, string[]>();
+  for (const item of parsed as Record<string, unknown>[]) {
+    for (const key of SERIES_REQUIRED_KEYS) {
+      if (item[key] === undefined || item[key] === null) {
+        missing.set(key, [...(missing.get(key) ?? []), '']);
+      }
+    }
+  }
+  if (missing.size > 0) {
+    const names = SERIES_REQUIRED_KEYS.filter((k) => missing.has(k));
+    return (
+      `Every series needs ${names.map((n) => `\`${n}\``).join(', ')} — the official ISAAC ` +
+      `schema requires ${names.length === 1 ? 'it' : 'them'}, and a series without ` +
+      `${names.length === 1 ? 'it' : 'them'} cannot be exported.`
+    );
   }
   return null;
 }
@@ -449,6 +523,35 @@ export function SeriesEntry({ text, onChange, idPrefix }: SeriesEntryProps) {
       >
         {error ??
           'The shape is checked here and again on the server; the values themselves are never inspected or altered.'}
+      </p>
+      {/*
+        ── THE SLOT FOR CONDITIONS THE FIVE QUESTIONS DO NOT ASK ABOUT ───────
+        *"there should be an option to add more conditions to the run, not just
+        those 5 things … make sure there is an option for the scientist to add
+        custom conditions"* — project owner, 2026-09-14.
+
+        THE OFFICIAL SCHEMA ALREADY HAS THE SLOT, which is why this is a hint
+        rather than a new field. `schema/isaac_record_v1.json` declares
+        `measurement.series[].conditions` as `type: object` with NO declared
+        properties and NO `additionalProperties: false`, described as "Operating
+        conditions specific to this series when they differ from context". So
+        arbitrary keys are legal there and they EXPORT — verified by reading the
+        vendored schema, and pinned by
+        `structured-value-schema-parity.test.ts`, which fails if a future
+        refresh closes the object.
+
+        It is stated here, on the control that writes the series, because that is
+        the only place a scientist can put them today. It is NOT a promise that
+        ISAAC interprets them: a condition is carried through to the record
+        verbatim, and nothing reads it. Anything with no schema home at all still
+        belongs in Unmapped Notes, which is the surface built for exactly that.
+      */}
+      <p className="structured-entry-note">
+        Conditions the questions above do not cover go in each series&apos;{' '}
+        <code className="mono">conditions</code> object — your own keys, for example{' '}
+        <code className="mono">{'{"control_mode": "potentiostatic", "flow_sccm": 20}'}</code>.
+        The official schema accepts them there and they are exported verbatim;
+        ISAAC does not interpret them.
       </p>
     </div>
   );

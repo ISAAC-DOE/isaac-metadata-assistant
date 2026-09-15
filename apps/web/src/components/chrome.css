@@ -222,8 +222,21 @@
   overflow: hidden;
 }
 .record-title {
-  font-size: 14px;
-  font-weight: 600;
+  /*
+   * ── ONE SCALE IN THE TOP BAR (project owner, 2026-09-14) ─────────────────
+   * *"in the top the typography is inconsistent"*. Measured in Chromium on a
+   * record screen, the bar held FOUR sizes — 10.5, 11, 12.5 and 14px — and only
+   * 11px was a rung of `styles/tokens.css`. Three of the four were
+   * hand-authored one-offs.
+   *
+   * It is now three rungs with one role each: `--font-size-meta` (11px) for
+   * breadcrumb, id and shortcut, `--font-size-body` (13px) for the interactive
+   * Search label, and `--font-size-heading-sm` (15px) here for the record's own
+   * name. 15px is also what `design-handoff/05-design-system/typography.md`
+   * gives a card/row title, and this is the page's title.
+   */
+  font-size: var(--font-size-heading-sm);
+  font-weight: var(--font-weight-semibold);
   color: var(--text-heading);
   white-space: nowrap;
   overflow: hidden;
@@ -290,7 +303,8 @@
 }
 .record-file {
   font-family: var(--font-mono);
-  font-size: 11px;
+  /* The rung, not the literal it happened to equal. */
+  font-size: var(--font-size-meta);
   color: var(--text-quaternary);
 }
 .icon-btn {

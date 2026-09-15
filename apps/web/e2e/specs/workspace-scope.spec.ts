@@ -38,7 +38,7 @@ test.describe('@interaction the ordinary workspace', () => {
     // NOT a placeholder and not a loading state: the permanent condition of this
     // deployment. Asserted as the reader's own words rather than by a CSS class
     // alone, so replacing the copy with something that over-promises fails here.
-    await expect(page.getByRole('heading', { name: 'Start your first experiment' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Start Your First Experiment' })).toBeVisible();
     /*
      * THE PROMISE-IT-CANNOT-KEEP ASSERTION, REDERIVED TWICE — and the second
      * rederivation is 2026-09-13's.

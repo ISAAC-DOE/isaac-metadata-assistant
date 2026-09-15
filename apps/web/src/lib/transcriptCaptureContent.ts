@@ -547,6 +547,63 @@ export const CAPTURE_COPY = {
     'Below is what this deployment itself said, unedited. This page adds nothing ' +
     'to it and takes nothing away.',
 
+  /*
+   * ── THE ROUTE THAT CAN ACTUALLY PRODUCE TEXT ──────────────────────────────
+   *
+   * The project owner's reasoning, 2026-09-14: *"the recording is held but it
+   * becomes kind of useless, i think how it should be is that yeah sure they can
+   * record on the site but at the end of the day if they cant transcribe its
+   * useless right so instead we give them instructions of how to setup the mcp
+   * instead on their claude and then tell em how to use it and specific verbage
+   * on what to say instead and for that put it behind a collapsible thing"*.
+   *
+   * That is correct about this build and will stay correct until a provider is
+   * approved: `POST /api/transcription` answers `501 no_provider_configured` in
+   * every deployment, and `requestTranscript` sends
+   * `audio_ref: "held-in-tab:<n>"` — an integer no provider could dereference
+   * even if one existed. So in-browser audio can be played back and typed from,
+   * and nothing else.
+   *
+   * A CLAUDE APP CAN DO IT, because the transcription happens THERE and only
+   * text crosses the boundary: `isaac_capture_transcript` takes a finalized
+   * transcript, stores every segment as a note and mints one proposal per
+   * extracted candidate. Measured over real JSON-RPC: 5 notes, 3 candidates, 3
+   * proposals.
+   *
+   * ── WHAT THIS COPY MAY NOT DO ────────────────────────────────────────────
+   *
+   * `CLAUDE.md` §15 and `ai-integration-decision-packet.md` §9 forbid building
+   * anything that implies the agent path exists here. The MCP transport is
+   * UNMOUNTED in every deployment (`ISAAC_MCP_DEPLOYMENT` unset), so every
+   * sentence below is CONDITIONAL and the precondition is stated first, not
+   * buried: there is no endpoint yet, and whether there is one is the
+   * deployment's decision. It points at Settings → Connect Your Agent rather
+   * than restating the procedure, so the two surfaces cannot drift.
+   */
+  mcpRouteHeading: 'Transcribe With Your Claude App Instead',
+  mcpRouteLead:
+    'Speech becomes text in your Claude app, not here — so the words never ' +
+    'reach this deployment as audio, only as text you have seen.',
+  mcpRoutePrecondition:
+    'This needs an agent endpoint, and this deployment publishes none yet. ' +
+    'Whether it does is an organization decision — Settings → Connect Your ' +
+    'Agent reports the current state and the full setup steps.',
+  mcpRouteSayLabel: 'What to say, once it is connected',
+  /*
+   * A WORKED SENTENCE rather than a description of one. The owner asked for
+   * "specific verbage on what to say". It names the record and dictates values
+   * in the phrasing the extractor actually recognises — measured: a sentence
+   * pairing a start word with a full UTC instant yields a candidate, and
+   * "held at 301 K in vacuum" yields the temperature and environment.
+   */
+  mcpRouteSayExample:
+    '"Add these notes to my ISAAC experiment <name>, run 1: sample held at ' +
+    '301 K in vacuum, acquisition started 2026-09-15T02:00:00Z."',
+  mcpRouteOutcome:
+    'Your words are stored word for word as notes on the record. Any value ' +
+    'ISAAC can read from them becomes a proposal you review here — nothing is ' +
+    'written to a field until you accept it.',
+
   transcriptLabel: 'Transcript',
   transcriptHint:
     'Finalizing stores this text with the record and reads it. Editing it ' +

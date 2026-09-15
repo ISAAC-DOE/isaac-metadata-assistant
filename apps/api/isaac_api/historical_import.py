@@ -1131,10 +1131,18 @@ UNBUILT_STEP = "add_to_experiments"
 
 #: What the unbuilt step says instead of offering an action.
 UNBUILT_STEP_DISCLOSURE = (
-    "Not built in this build. A field candidate you propose becomes an ingestion "
-    "proposal on an experiment you choose, and you review it there; nothing here "
-    "creates an experiment for you."
+    "Not built in this build as a single step. Each candidate you send becomes an "
+    "ingestion proposal on the record you choose \u2014 or on a new record created "
+    "from this import \u2014 and you review it there. Nothing is applied for you."
 )
+#: WHY THE WORDING CHANGED (2026-09-14). The clause "nothing here creates an
+#: experiment for you" became FALSE when the surface gained "New record from this
+#: import": a scientist can now make the destination without leaving the screen.
+#: The step is still not built AS A STEP — there is no one-click "apply this
+#: whole import" — and that is what the sentence now says. The rest of the
+#: original wording is kept because it is the part that is still exactly true:
+#: a candidate becomes a proposal, reviewed on the record, and never applied
+#: automatically.
 
 #: The session's durability, stated on the surface rather than assumed. Measured:
 #: an import session is one JSON file under the workspace directory, and the

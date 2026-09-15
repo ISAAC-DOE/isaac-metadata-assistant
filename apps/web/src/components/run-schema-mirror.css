@@ -1,0 +1,83 @@
+/*
+ * THE SCHEMA MIRROR beside the run editor. Card language and tokens only — no
+ * new hue, radius or size enters the app. See `RunSchemaMirror.tsx` for what on
+ * this pane is exact and what is a draft grouping.
+ */
+.rsm {
+  padding: var(--space-lg);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-card);
+  min-width: 0;
+}
+.rsm-heading {
+  margin: 0 0 var(--space-sm);
+  font-size: var(--font-size-heading-sm);
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-heading);
+}
+.rsm-note {
+  margin: 0 0 var(--space-sm);
+  font-size: var(--font-size-meta);
+  line-height: var(--line-height-normal);
+  color: var(--text-secondary);
+}
+.rsm-group {
+  margin-top: var(--space-md);
+}
+.rsm-group-title {
+  margin: 0 0 var(--space-xs);
+}
+.rsm-blocks {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+.rsm-block {
+  padding: var(--space-sm);
+  border: 1px solid var(--border-faint);
+  border-radius: var(--radius-inner);
+  background: var(--surface-subtle);
+  min-width: 0;
+}
+/* Recorded state carries a border weight, never a reserved hue: `P22C` bans a
+   green/red pass-fail colour in an interaction rule, and "recorded" is not a
+   verdict anyway — official validation decides validity. */
+.rsm-own {
+  border-color: var(--action-selected-border);
+  background: var(--action-tint);
+}
+.rsm-block-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-sm);
+}
+.rsm-path {
+  font-size: var(--font-size-meta);
+  color: var(--text-strong);
+}
+.rsm-state {
+  font-size: var(--font-size-meta);
+  color: var(--text-secondary);
+}
+.rsm-fields {
+  margin: var(--space-xs) 0 0;
+  font-size: var(--font-size-meta);
+  line-height: var(--line-height-normal);
+  color: var(--text-tertiary);
+  overflow-wrap: anywhere;
+}
+.rsm-draft {
+  margin: var(--space-md) 0 0;
+  padding-left: var(--space-sm);
+  border-left: var(--space-2xs) solid var(--border-strong);
+  font-size: var(--font-size-meta);
+  line-height: var(--line-height-normal);
+  color: var(--text-secondary);
+}

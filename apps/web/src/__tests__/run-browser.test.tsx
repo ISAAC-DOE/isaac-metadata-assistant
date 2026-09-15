@@ -872,8 +872,13 @@ describe('search', () => {
     expect(screen.getByText(/No run matches this search or these filters/)).toBeInTheDocument();
     expect(screen.getByText(/This record has 120 runs/)).toBeInTheDocument();
     expect(countText()).toBe('Showing 0 of 0 matching · 120 runs in this record');
-    // The record is NOT empty, so the empty-record copy must not appear.
-    expect(screen.queryByText(/No runs yet\./)).toBeNull();
+    /* The record is NOT empty, so the empty-RECORD copy must not appear -- the
+       distinction this assertion exists for. It used to match `/No runs yet\./`;
+       that sentence was removed on 2026-09-14 when the empty state stopped
+       repeating the count line, so the pattern matched nothing at all and the
+       assertion had become VACUOUSLY TRUE. Re-pointed at the copy that actually
+       ships now, which is what keeps it able to fail. */
+    expect(screen.queryByText(/Add one for the first set of conditions/)).toBeNull();
   });
 
   it('counts a partial match as matched-of-total, with the record total beside it', async () => {
@@ -1848,5 +1853,78 @@ describe('an edit in flight', () => {
     expect(renderedIds()).toEqual(['RUN110']);
     // Nor by searching one off the list.
     expect(patched).toHaveLength(1);
+  });
+});
+
+/* --------------------------------------------------------------------------
+ * The zero-state count does not repeat the empty state
+ * -------------------------------------------------------------------------- */
+
+describe('at zero runs, one fact is stated once', () => {
+  /*
+   * FOUND IN A BROWSER, NOT BY A TEST. On a record with no runs, `.runs-count`
+   * read "No runs in this record yet" at y=377 and `.runs-empty` read "No runs
+   * yet. Add one for the first set of conditions you measured." at y=416 --
+   * 39px apart: the same sentence, then an instruction.
+   *
+   * THE FIX SPLITS THE TWO RATHER THAN HIDING ONE. The count keeps the fact
+   * (and its `aria-live` announcement, which a reader deleting their last run
+   * depends on); the empty state keeps only the remedy. An earlier attempt
+   * hid the count with the visually-hidden recipe, passed every unit test, and
+   * was failed 19 times by the read-only browser sweep -- `1px visible of 143px
+   * (1%)` and `scrollWidth 143 vs clientWidth 1` -- which would have cost two
+   * permanent exemptions in `e2e/layout-allowlist.ts`. That is recorded in
+   * `RunsSection`'s own note.
+   */
+  it('MUTATION-GUARDED: the count states the fact, the empty state states only the remedy', async () => {
+    /*
+     * MUTATION: restoring "No runs yet." to the front of `.runs-empty` makes
+     * this RED, and so does returning `''` from `countLine` for the zero case --
+     * the first restores the duplication, the second silences the live region.
+     */
+    stubBackend(() => ({ runs: [], total: 0, matched: 0, limit: 20, offset: 0 }));
+    renderRecord();
+    await waitForList();
+
+    const count = document.querySelector('.runs-count')!;
+    // the fact, still announced
+    expect(count.getAttribute('aria-live')).toBe('polite');
+    expect(count.textContent).toContain('No runs in this record yet');
+
+    const empty = document.querySelector('.runs-empty');
+    expect(empty, 'the empty state must still be rendered').not.toBeNull();
+    // the remedy…
+    expect(empty!.textContent).toContain('Add one for the first set of conditions');
+    // …and NOT the fact a second time. Asserted over the whole screen rather
+    // than over the two nodes, so moving the sentence to a third element does
+    // not quietly pass.
+    const saidTwice = Array.from(document.querySelectorAll('*')).filter(
+      (el) => el.children.length === 0 && /no runs/i.test(el.textContent ?? ''),
+    );
+    expect(
+      saidTwice.map((el) => el.textContent?.trim()),
+      '"no runs" is stated by more than one leaf element',
+    ).toHaveLength(1);
+  });
+
+  it('with runs, the count is the count and no empty state is rendered', async () => {
+    /*
+     * The negative control: a fix that BLANKED the count would pass the test
+     * above while deleting the count from every record that has runs.
+     *
+     * SCOPED HONESTLY AFTER REVIEW (2026-09-14). This said "blanked or hid",
+     * and it cannot see HIDING: jsdom computes no layout, and the class
+     * assertion that would have caught a visually-hidden count was removed with
+     * the `.runs-count-quiet` approach itself. Hiding is caught by the read-only
+     * browser sweep, which is not a hypothetical -- it failed that approach 19
+     * times with `1px visible of 143px (1%)` and `scrollWidth 143 vs
+     * clientWidth 1`. Two different guards, and only one of them lives here.
+     */
+    stubBackend((q) => serveRuns([mkRun(1), mkRun(2)], q));
+    renderRecord();
+    await waitForList();
+
+    expect(countText()).toContain('Showing 2 of 2 runs');
+    expect(document.querySelector('.runs-empty')).toBeNull();
   });
 });

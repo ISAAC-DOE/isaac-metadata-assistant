@@ -180,8 +180,25 @@ export function RunsSection({
   experimentId,
   activity,
   recordVersion,
+  onFirstRun,
 }: {
   experimentId: string;
+  /**
+   * Called with the first run of the loaded page, or `null` when there is none.
+   *
+   * WHY THIS EXISTS RATHER THAN A SECOND FETCH. `RunSchemaMirror` renders beside
+   * this section and needs a run to say what is recorded on it. Its first
+   * version read `GET /runs?limit=1` itself, and
+   * `runs-live-refresh-integration.test.tsx` caught the consequence
+   * immediately: the workspace then read the runs list TWICE on first paint,
+   * against a guard that pins it at once.
+   *
+   * ONE READ, TWO CONSUMERS — the same arrangement the record sidebar uses for
+   * `captureSummary`, and for the same second reason: two reads could disagree,
+   * so the mirror and the run card can never show different states of the same
+   * run.
+   */
+  onFirstRun?: (run: ApiRunView | null) => void;
   /**
    * THE FAST PATH — a RUN-scoped change-feed summary, or `null`. See the note
    * above this file's imports for which field of it this path reads (`runRev`,
@@ -254,6 +271,7 @@ export function RunsSection({
         experimentId={experimentId}
         activity={activity ?? null}
         recordVersion={recordVersion ?? null}
+        onFirstRun={onFirstRun}
       />
     </section>
   );
@@ -263,10 +281,13 @@ function RunsBrowser({
   experimentId,
   activity,
   recordVersion,
+  onFirstRun,
 }: {
   experimentId: string;
   activity: RecordChangeSummary | null;
   recordVersion: string | null;
+  /** Forwarded from `RunsSection` — see the prop's note there. */
+  onFirstRun?: (run: ApiRunView | null) => void;
 }) {
   const baseId = useId();
   const searchId = `${baseId}-search`;
@@ -407,6 +428,20 @@ function RunsBrowser({
    */
   const runsRef = useRef<ApiRunView[]>([]);
   runsRef.current = list.status === 'data' ? list.loaded.runs : [];
+
+  /* Report the first run upward whenever the loaded page changes. An effect, not
+     a render-time call: calling a parent's setter during render is the loop this
+     codebase has been bitten by, and the value is derived from state that has
+     already settled. */
+  const firstRun = list.status === 'data' ? (list.loaded.runs[0] ?? null) : null;
+  const firstRunId = firstRun?.id ?? null;
+  const firstRunVersion = firstRun?.version ?? null;
+  useEffect(() => {
+    onFirstRun?.(firstRun);
+    /* Keyed on the run's IDENTITY and VERSION rather than the object, so a
+       re-render with an equal run does not re-notify. */
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [firstRunId, firstRunVersion]);
 
   /*
    * THE LOADED SNAPSHOT, read the same way — see `runsRef` immediately above for
@@ -2450,6 +2485,36 @@ type CountFocus = 'none' | 'loading' | 'viewing' | 'missing';
  * screen. A run that is still being read is not being viewed either, and saying so
  * early would be the same defect a moment sooner.
  */
+/**
+ * The zero-state count.
+ *
+ * THIS LINE STATES THE FACT AND `EmptyRuns` STATES THE REMEDY, and they used to
+ * state both twice. Measured in Chromium on a record with no runs: this line at
+ * y=377 reading "No runs in this record yet" and `.runs-empty` at y=416 reading
+ * "No runs yet. Add one for the first set of conditions you measured." -- 39px
+ * apart, the same sentence, then an instruction.
+ *
+ * TWO OTHER FIXES WERE BUILT AND DISCARDED, and both are recorded because each
+ * looked right on its own terms:
+ *
+ *  * Returning `''` here. Shortest, and it silences a real announcement -- this
+ *    is an `aria-live` region, so a reader who deletes their LAST run is told,
+ *    and this file's own note (see the render site) is that emptying a live
+ *    region says nothing.
+ *  * Keeping the text and hiding it with the visually-hidden recipe. That
+ *    preserves the announcement and was measured PASSING every unit test -- and
+ *    the read-only browser sweep failed it 19 times, correctly: `1px visible of
+ *    143px (1%) -- below the 24px readable floor`, plus `scrollWidth 143 vs
+ *    clientWidth 1`. Silencing that needs two exemptions in
+ *    `e2e/layout-allowlist.ts`, which weaken those probes for this selector
+ *    permanently, to hide a sentence that did not need to exist twice.
+ *
+ * So the duplication is removed at its source instead: the empty state no
+ * longer repeats the fact this line already carries. Nothing is hidden, no
+ * probe is weakened, and the announcement is untouched.
+ */
+const NO_RUNS_COUNT = 'No runs in this record yet';
+
 function countLine(loaded: Loaded | null, filtering: boolean, focus: CountFocus): string {
   if (loaded === null) return '';
   const runWord = loaded.total === 1 ? 'run' : 'runs';
@@ -2462,7 +2527,7 @@ function countLine(loaded: Loaded | null, filtering: boolean, focus: CountFocus)
   if (focus === 'missing') {
     return `No run with that id · ${loaded.total} ${runWord} in this record`;
   }
-  if (loaded.total === 0) return 'No runs in this record yet';
+  if (loaded.total === 0) return NO_RUNS_COUNT;
   if (!filtering) {
     return `Showing ${loaded.runs.length} of ${loaded.total} ${runWord}`;
   }
@@ -2489,7 +2554,10 @@ function EmptyRuns({
   if (!filtering || total === 0) {
     return (
       <p className="runs-empty">
-        No runs yet. Add one for the first set of conditions you measured.
+        {/* THE REMEDY ONLY. `.runs-count` 39px above already says "No runs in
+            this record yet" -- see `NO_RUNS_COUNT`. This paragraph used to open
+            with "No runs yet." and repeat it. */}
+        Add one for the first set of conditions you measured.
       </p>
     );
   }

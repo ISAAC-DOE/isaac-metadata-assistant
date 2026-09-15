@@ -4,7 +4,7 @@
  *
  * THE ONE DEFECT THIS FILE MOST EXISTS TO PREVENT is the last test in it: an empty
  * RESULT is not an empty WORKSPACE. `queueIsEmpty` gates the first-run empty state
- * ("Start your first experiment") and it is derived from the UNFILTERED server
+ * ("Start Your First Experiment") and it is derived from the UNFILTERED server
  * list; deriving it from the filtered rows instead would put that invitation in
  * front of somebody with forty records who had typed a word matching none of them.
  * That is the worst false claim this screen could make and it is one line of

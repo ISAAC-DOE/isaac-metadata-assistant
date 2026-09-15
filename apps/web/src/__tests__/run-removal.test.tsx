@@ -638,7 +638,12 @@ describe('list and search recovery', () => {
       expect(renderedIds()).toEqual([]);
       expect(screen.getByText(/No run matches this search or these filters/)).toBeTruthy();
       expect(screen.getByText(/This record has 1 run\./)).toBeTruthy();
-      expect(screen.queryByText(/No runs yet\./)).toBeNull();
+      /* Re-pointed 2026-09-14. This matched `/No runs yet\./`, a sentence retired
+         when the runs empty state stopped repeating the count line -- so it
+         matched NOTHING and could never fail. The THIRD instance of that stale
+         literal: the commit that split the copy re-pointed two and did not sweep
+         for the rest, which is why an independent review found this one. */
+      expect(screen.queryByText(/Add one for the first set of conditions/)).toBeNull();
       // And the way out is offered rather than left to be guessed. There are
       // TWO — the controls row keeps its own while filtering, and the empty
       // state adds one where the reader is looking — so this asserts the

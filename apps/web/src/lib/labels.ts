@@ -218,7 +218,7 @@ export const LABELS = {
   librarySortRuns: 'Most Runs',
   librarySortLabel: 'Sort by',
 
-  librarySearchLabel: 'Search experiments',
+  librarySearchLabel: 'Search Experiments',
   /*
    * IT NAMES WHAT IS SEARCHED, because a search box that silently searches more
    * than its placeholder admits is a box a reader cannot predict. These five are
@@ -229,7 +229,7 @@ export const LABELS = {
   librarySearchHint:
     'Searches every folder, not just the one you are looking at.',
 
-  libraryNoResultsTitle: 'No experiments match this view',
+  libraryNoResultsTitle: 'No Experiments Match This View',
   libraryNoResultsBody:
     'Nothing here is hidden or lost — the filters above are narrowing the list. Clear them to ' +
     'see everything again.',
@@ -259,9 +259,9 @@ export const LABELS = {
   libraryMoveHint:
     'Type a new path to file this experiment somewhere new, or pick a folder that already ' +
     'exists. Use “/” to nest. Leave it empty to take it out of every folder.',
-  libraryMoveSubmit: 'Save folder',
+  libraryMoveSubmit: 'Save Folder',
   libraryMoveCancel: 'Cancel',
-  libraryMoveAction: 'Change folder',
+  libraryMoveAction: 'Change Folder',
   /*
    * The create form's optional destination. Same field, same rules, said shorter.
    *
@@ -276,7 +276,7 @@ export const LABELS = {
    * edge, which is precisely the confusion the guard exists to prevent. The guard
    * was left untouched and the copy changed.
    */
-  createExperimentFolderLabel: 'Folder (optional)',
+  createExperimentFolderLabel: 'Folder (Optional)',
   createExperimentFolderHint:
     'File it straight into a folder, e.g. “2026 campaign/October”. Use “/” to nest. Leave it ' +
     'empty to decide later.',
@@ -589,7 +589,7 @@ export const LABELS = {
   // heading is deliberately second person and blunt: the previous dialog stated a
   // record COUNT and left the operator to infer what a count of five meant for the
   // afternoon's work.
-  resetAtRiskLabel: 'What you would lose',
+  resetAtRiskLabel: 'What You Would Lose',
   resetAtRiskNothing:
     'Nothing. None of the built-in examples has been changed since it was set up.',
 
@@ -821,12 +821,12 @@ export const LABELS = {
 
   /** The form's own heading, distinct from the button that opens it, so a screen
    *  reader announcing the expanded region is not told "Create Experiment" twice. */
-  createExperimentFormTitle: 'Name your experiment',
-  createExperimentTitleLabel: 'Experiment title',
-  createExperimentDescriptionLabel: 'What is it? (optional)',
+  createExperimentFormTitle: 'Name Your Experiment',
+  createExperimentTitleLabel: 'Experiment Title',
+  createExperimentDescriptionLabel: 'What Is It? (Optional)',
   /*
    * The one place a create form is allowed to be opinionated: it tells the reader
-   * what this box is NOT for. Without it, "What is it?" invites exactly the
+   * what this box is NOT for. Without it, "What Is It?" invites exactly the
    * unsourced scientific assertion the no-guessing contract exists to keep out of
    * a record — someone types "Cu K-edge, 8979 eV" and reasonably expects those to
    * become fields. They do not; this text is stored as the record's source
@@ -858,10 +858,10 @@ export const LABELS = {
    * other failure falls to `renameFailed`, which claims nothing about why.
    */
   actionRenameExperiment: 'Rename',
-  renameFormTitle: 'Rename this experiment',
-  renameTitleLabel: 'Experiment title',
+  renameFormTitle: 'Rename This Experiment',
+  renameTitleLabel: 'Experiment Title',
   renameHint: 'Only the name changes. Nothing about the record’s scientific content is touched.',
-  renameSubmit: 'Save name',
+  renameSubmit: 'Save Name',
   renameCancel: 'Cancel',
   /** Shown when the box is empty. States the fix, not the failure. */
   renameTitleRequired: 'An experiment needs a title. Type one, or cancel.',
@@ -893,10 +893,10 @@ export const LABELS = {
    * every other write in the app.
    */
   actionRenameRun: 'Rename',
-  runRenameLabel: 'Run name',
+  runRenameLabel: 'Run Name',
   runRenameHint:
     'Only the name changes. Nothing this run measured, and nothing it inherits from the record, is touched.',
-  runRenameSubmit: 'Save name',
+  runRenameSubmit: 'Save Name',
   runRenameSaving: 'Saving…',
   /** Shown when the box is empty. States the fix, not the failure. */
   runRenameRequired: 'A run needs a name. Type one, or cancel.',
@@ -920,7 +920,7 @@ export const LABELS = {
    * experiments yet" describes the reader's screen back to them; a person who has
    * just arrived can see that it is empty.
    */
-  emptyExperimentsTitle: 'Start your first experiment',
+  emptyExperimentsTitle: 'Start Your First Experiment',
   /*
    * ~~'Create your first experiment, validate an existing record, or explore
    * ISAAC with the guided demo.'~~ — **CORRECTED 2026-09-13, and the previous
@@ -1207,7 +1207,7 @@ export const LABELS = {
   tutorialSessionCreateFailedBody:
     'The walkthrough did not start, and nothing in My Experiments was changed. You can try ' +
     'again from Settings & API → Help & Tutorial.',
-  tutorialSessionExpiredTitle: 'The worked example has expired',
+  tutorialSessionExpiredTitle: 'The Worked Example Has Expired',
   tutorialSessionExpiredBody:
     'The temporary workspace this walkthrough was using no longer exists, so its five example ' +
     'records are gone and the walkthrough has closed. Nothing in My Experiments was changed. ' +
@@ -1272,7 +1272,7 @@ export const LABELS = {
    * And "start it again" replaces "reopen this walkthrough", because a replay mints a
    * NEW session at step one; the one just finished cannot be reopened.
    */
-  tutorialCompleteTitle: 'Tutorial complete',
+  tutorialCompleteTitle: 'Tutorial Complete',
   tutorialCompleteBody:
     'That is the whole workflow. The worked example you were walking through is gone now, and so ' +
     'is anything you answered inside it — it was a temporary copy of the five examples, kept apart ' +
@@ -1339,6 +1339,46 @@ export function formatUpdatedDate(isoDate: string): FormattedDate | undefined {
     ...created,
     accessible: created.accessible.replace(/^Created /, 'Last updated '),
   };
+}
+
+/**
+ * A captured CLIENT-SIDE instant, in this app's own date style plus a wall clock.
+ *
+ * WHY IT IS NOT `toLocaleString()`. `StatisticsPage` defined its own
+ * `formatInstant` that returned `when.toLocaleString()`, which rendered the page
+ * clock as "9/14/2026, 8:07:08 PM" while the experiment card two screens away
+ * rendered "Sep 15, 2026". Same app, two date vocabularies -- and the comment on
+ * `SHORT_MONTHS` above already forbids exactly this: "never `Date`/`Intl` locale
+ * formatting … so the … date badge is deterministic across environments". The
+ * page clock is a client value like the badge is, so it belongs under the same
+ * rule; `toLocaleString()` also varies with the host's locale, which makes a
+ * screenshot or a transcribed baseline environment-dependent.
+ *
+ * THE OTHER TWO CLOCKS ARE DELIBERATELY UNTOUCHED, and they are different kinds
+ * of thing rather than inconsistencies:
+ *
+ *  * `Report Generated` renders `report.metadata.generated_at` VERBATIM in mono.
+ *    That is a SERVER value, and `casing-and-copy.md`'s Register 3 keeps a
+ *    server string exactly as written. Re-formatting it here would make the page
+ *    speak for the report.
+ *  * `formatCreatedDate` stays date-only, because a record's creation date is a
+ *    DATE. This function exists because a "last read at" needs the time too.
+ *
+ * Local wall clock via `Date` getters -- so the instant is the reader's, while
+ * the FORMAT is fixed. 12-hour with AM/PM, matching what shipped: moving to a
+ * 24-hour clock would read better in a scientific tool and is a copy decision,
+ * not a determinism one.
+ */
+export function formatInstant(when: Date): string {
+  const hours24 = when.getHours();
+  const hour12 = hours24 % 12 === 0 ? 12 : hours24 % 12;
+  const minutes = String(when.getMinutes()).padStart(2, '0');
+  const seconds = String(when.getSeconds()).padStart(2, '0');
+  const meridiem = hours24 < 12 ? 'AM' : 'PM';
+  return (
+    `${SHORT_MONTHS[when.getMonth()]} ${when.getDate()}, ${when.getFullYear()}, ` +
+    `${hour12}:${minutes}:${seconds} ${meridiem}`
+  );
 }
 
 export function formatCreatedDate(isoDate: string): FormattedDate | undefined {

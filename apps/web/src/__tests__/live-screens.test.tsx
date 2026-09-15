@@ -478,7 +478,10 @@ describe('S3 · Review Record (live bundle)', () => {
     expect(
       [...container.querySelectorAll('.field-value')].map((node) => node.textContent),
     ).toContain('HERFD-XAS');
-    const pickers = getAllByLabelText('Change this value') as HTMLSelectElement[];
+    /* Re-cased 2026-09-14: this control label rendered VISIBLY in sentence case
+       (`.field-capture-label` declares no `text-transform`), and a control label is
+       Register 1. See `FieldCaptureControl`. */
+    const pickers = getAllByLabelText('Change This Value') as HTMLSelectElement[];
     expect(pickers.map((select) => select.value)).toContain('HERFD-XAS');
 
     // three signals: separate labeled segments, never merged; dry-run carries the

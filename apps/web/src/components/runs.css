@@ -58,6 +58,9 @@
   color: var(--text-slate);
 }
 
+
+
+
 /*
  * THE FOCUSED TOOLBAR'S OWN BUTTON GROUP — "Back to all runs" plus Next/
  * Previous run (review finding I-5). A flex row nested inside `.runs-toolbar`
@@ -1369,4 +1372,22 @@
   font-size: 12px;
   line-height: 1.55;
   color: var(--fail-text);
+}
+
+/*
+ * THE RUNS SPLIT — editor left, official structure right. Collapses to one
+ * column below 1280px: two columns of this density under that width would give
+ * the editor less room than a run card needs, and the mirror is reference
+ * material rather than a control.
+ */
+.runs-split {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-lg);
+  align-items: start;
+}
+@media (min-width: 1280px) {
+  .runs-split {
+    grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr);
+  }
 }
