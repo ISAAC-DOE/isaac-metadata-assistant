@@ -8,6 +8,71 @@ the repository — never from remembered chat context.
 ## SESSION HEADER
 
 ```
+*** 2026-09-15 SESSION OPEN — THE BLOCK BELOW WAS STALE BY 26 COMMITS AND IS
+    CORRECTED HERE FIRST, per this file's own rule that a stale header is worse
+    than none. Everything under "LAST UPDATED: 2026-09-13" describes a state
+    `main` left behind on 2026-09-14/15; it is kept unedited below because a
+    superseded header read as a correction is safe, and one silently rewritten
+    is not. ***
+
+RE-DERIVED 2026-09-15 AT SESSION OPEN, every line from a command, not a handoff:
+  main            = origin/main = dbf9d121  (`git rev-parse HEAD`, 0 ahead / 0 behind)
+  release         = v0.0.240; `git rev-list -n1 v0.0.240` -> dbf9d121fdb4679f…
+  also this arc   = v0.0.239 (merge 26c7b68d, PR #254); PR #255 merged as dbf9d121
+  open PRs        = NONE (`gh pr list --state open` -> empty)
+  main CI         = green (`gh run list --branch main`: CI success at dbf9d121,
+                    then "Build and Push to GHCR" success 2026-09-15T09:40Z)
+  working tree    = CLEAN at session open
+  stashes         = NONE (`git stash list` -> empty)
+  worktrees       = the main checkout, FOUR orphans from earlier sessions
+                    (wt-control, wt-hist, wt-lib, wt-sci, mergetest) which are
+                    DELIBERATELY LEFT ALONE — they may hold unknown work — and
+                    THREE created this session (see LANES below).
+  .venv           = present and working (`/Users/krishverma/Documents/ISAAC/.venv`).
+                    NOTE: a bare `.venv` resolves only from the MAIN CHECKOUT; a
+                    worktree has none, so quote an absolute path from a lane.
+
+LANES OPEN THIS SESSION (each its OWN worktree under the session scratchpad, each
+based at dbf9d121, `apps/web/node_modules` symlinked in — the symlink is safe
+because node_modules is gitignored, and §11's tracked-mode-120000 guard still holds):
+  feat/v2-recordmap  Runs right pane -> a readable Record Map (states + values +
+                     click-to-focus); `Check Failed` -> field-specific, actionable
+                     findings; contextual `Ask ISAAC` per blocker.
+  feat/v2-chrome     the favicon (reusing the EXISTING AudioWaveform brand mark,
+                     base-path-correct for /krish/); the Historical Import stepper
+                     redrawn as circle nodes; landing copy density.
+  feat/v2-propose    a discoverable, REAL `New Proposal` creation path.
+
+  *** THE FINDING THAT SIZED THAT THIRD LANE: the owner reported "there's no way
+  to actually add an ingestion proposal … maybe it's blocked". Measured at
+  dbf9d121, it is NOT blocked — `POST /api/experiments/{id}/proposals`
+  (`routes.py`, handler `post_proposal`) is registered and documented, requiring
+  `note_id`, `target_field_path`, `proposed_value`, `rule`, conditional `run_id`
+  and the record's `If-Match`. So this was a UI GAP, NOT A CAPABILITY GAP, and the
+  correct outcome is a real form and not a disabled placeholder. ACCEPTANCE
+  remains genuinely blocked (`409 human_actor_required`, no trusted auth
+  boundary) — creation and acceptance must not be conflated. ***
+
+SNAPSHOT DISCIPLINE THIS SESSION: the three lanes were told NOT to regenerate the
+committed snapshot pair. Of their targets only `apps/web/index.html`,
+`apps/web/src/lib/api.ts` and `apps/web/src/lib/labels.ts` are in the 200-entry
+served-content manifest (measured, not assumed). Regeneration happens ONCE, after
+integration, in the main checkout, with BOTH `--out` and `--detail-out` — which is
+what keeps §11's "every merge conflicts every open PR" failure from recurring.
+
+OWNER FEEDBACK DRIVING THIS SESSION (verbatim, 2026-09-15, from screenshots):
+  * the Runs split-screen architecture is APPROVED — "I like that split-screen
+    architecture" — but the right pane "is not really readable … I can't clearly
+    distinguish what fields are done, what fields aren't done, what my values were".
+  * "the check failed — I don't even know what it's asking … you should point to
+    the specific field … and there could be a button right next to it that points
+    to the agent, and then the agent will have the context".
+  * "there's no way to actually add an ingestion proposal".
+  * "the text is still stopping midway through half the block" — the 38em -> 68ch
+    change did NOT close it.
+  * "for the add experiments thing … it should be like a circle-dotted thing".
+  * the browser tab shows a generic document icon; use the EXISTING ISAAC logo.
+
 LAST UPDATED:          2026-09-13 (**SECOND CONTINUATION run, a NEW top-level session with a
                        FRESH budget of five subordinate agents.** PR #248 is MERGED; the programme
                        has moved on to the remaining ledger tasks. Every fact in the block below
