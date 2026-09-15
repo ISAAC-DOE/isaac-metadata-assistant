@@ -1297,6 +1297,52 @@ export const LABELS = {
 
   settingsTabHelp: 'Help & Tutorial',
 
+  /*
+   * New Proposal — the creation form on the Ingestion Proposals panel.
+   *
+   * THEY LIVE HERE BECAUSE `casing-registers.test.tsx` SAID SO, and it was right.
+   * Its §3 ratchet refused `NewProposalForm.tsx` as a NEW file carrying hardcoded
+   * label-slot literals, with the remedy stated in the failure message: "Move the
+   * string into `lib/labels.ts`". Doing that rather than raising the ceiling is what
+   * keeps the register decision in one file — every one of these is Register 1
+   * (Title Case for a control, sentence case for a form field's own question), and
+   * that is now checkable in one place instead of at eight call sites.
+   *
+   * THE SIBLING SURFACE'S EQUIVALENTS ARE NOT MOVED HERE, deliberately.
+   * `UnmappedNotesPanel.tsx` carries its own per-note propose form with several of
+   * the same questions, and it is grandfathered at a ceiling of 9. Rewriting its
+   * JSX is a separate change with its own risk to that panel's 74 tests; unifying
+   * the two is worth doing and is named as deferred rather than done quietly.
+   */
+  newProposalAction: 'New Proposal',
+  newProposalSubmit: 'Store This Proposal',
+  newProposalSubmitBusy: 'Storing…',
+  newProposalUnavailable: 'New Proposal · Unavailable on this deployment',
+  /*
+   * THE TWO GROUP HEADINGS ARE REGISTER 1 (Title Case) AND THE FIELD LABELS ARE NOT,
+   * and the split is a rule rather than an accident. These two label a GROUP — a set
+   * of choices, and a read-only block of stored text — which is the Register 1 slot
+   * `casing-and-copy.md` describes. The rest (`newProposalField`,
+   * `newProposalPickNote`, `newProposalRun`, …) label an INPUT and are phrased as the
+   * question that input answers, in sentence case, matching the equivalent labels on
+   * `UnmappedNotesPanel`'s propose form word for word.
+   *
+   * `casing-registers.test.tsx` §1b caught `newProposalRuleHeading` shipping as
+   * "How this proposal will be explained" — a `*Heading`-suffixed key in Register 1's
+   * checked set, violating it. It was re-cased rather than renamed to dodge the
+   * check, and `newProposalSourceGroup` was re-cased WITH it, because two group
+   * headings in one form must not sit in two registers.
+   */
+  newProposalSourceGroup: 'Source Note',
+  newProposalSourceExisting: 'Cite a note this record already holds',
+  newProposalSourceNew: 'Write a source note now',
+  newProposalPickNote: 'The note this value was read from',
+  newProposalWriteNote: 'What the source says, in your words',
+  newProposalField: 'Field this value is for',
+  newProposalRun: 'Run this value is about',
+  newProposalValueJson: 'The value, as JSON',
+  newProposalRuleHeading: 'How This Proposal Will Be Explained',
+
   // Export artifacts
   officialRecord: 'Official Record',
   sidecarConvention: 'sidecar · assistant convention, not an official ISAAC standard',
