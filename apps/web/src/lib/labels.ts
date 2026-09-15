@@ -826,7 +826,7 @@ export const LABELS = {
   createExperimentDescriptionLabel: 'What Is It? (Optional)',
   /*
    * The one place a create form is allowed to be opinionated: it tells the reader
-   * what this box is NOT for. Without it, "What is it?" invites exactly the
+   * what this box is NOT for. Without it, "What Is It?" invites exactly the
    * unsourced scientific assertion the no-guessing contract exists to keep out of
    * a record — someone types "Cu K-edge, 8979 eV" and reasonably expects those to
    * become fields. They do not; this text is stored as the record's source

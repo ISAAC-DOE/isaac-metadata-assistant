@@ -1909,8 +1909,16 @@ describe('at zero runs, one fact is stated once', () => {
 
   it('with runs, the count is the count and no empty state is rendered', async () => {
     /*
-     * The negative control: a fix that blanked or hid the count would pass the
-     * test above while deleting the count from every record that HAS runs.
+     * The negative control: a fix that BLANKED the count would pass the test
+     * above while deleting the count from every record that has runs.
+     *
+     * SCOPED HONESTLY AFTER REVIEW (2026-09-14). This said "blanked or hid",
+     * and it cannot see HIDING: jsdom computes no layout, and the class
+     * assertion that would have caught a visually-hidden count was removed with
+     * the `.runs-count-quiet` approach itself. Hiding is caught by the read-only
+     * browser sweep, which is not a hypothetical -- it failed that approach 19
+     * times with `1px visible of 143px (1%)` and `scrollWidth 143 vs
+     * clientWidth 1`. Two different guards, and only one of them lives here.
      */
     stubBackend((q) => serveRuns([mkRun(1), mkRun(2)], q));
     renderRecord();

@@ -3186,6 +3186,32 @@ a.settings-jump-btn {
     grid-template-columns: 1fr;
   }
 
+  /*
+   * AND THE FINAL-ROW BORDER RULE IS UNDONE FOR THE NEIGHBOUR, because the
+   * thing it compensates for does not exist in one column.
+   *
+   * Found by independent review, 2026-09-14. The base rule drops the
+   * `border-bottom` from BOTH cells of the last row -- `:last-child` plus
+   * `:nth-last-child(2):nth-child(odd)` for its left-hand neighbour -- and its
+   * comment justifies the second selector with "an odd-indexed cell is always
+   * the left column of a two-column grid". True at two columns. Here the grid
+   * is ONE column (the rule directly above), so an odd-indexed
+   * second-to-last cell is simply the second-to-last ROW, and dropping its
+   * border deletes a separator from the middle of the list.
+   *
+   * Measured by reasoning over the two grids that exist (`SettingsPage.tsx:446`
+   * Runtime Status, 7 items; `:705` Identity, 4 items): at <=640px the 4-item
+   * grid lost the rule between rows 3 and 4 while rows 1|2 and 2|3 kept theirs.
+   * The 7-item grid was unaffected, because its second-to-last cell is even.
+   *
+   * `:last-child` is deliberately NOT restored: a list should not close with a
+   * rule under its last row at any width, which is the half of the base rule
+   * that was always about the last ROW rather than the last COLUMN.
+   */
+  .settings-figure:nth-last-child(2):nth-child(odd) {
+    border-bottom: 1px solid var(--border-faint);
+  }
+
   /* Settings (P36.4 · P36R S9 · P36V PR3): the identity figures, the boundary
      summary rows and the API search box go full-width on narrow screens instead
      of pinning to a fixed max, and the API master list keeps its own scroll box

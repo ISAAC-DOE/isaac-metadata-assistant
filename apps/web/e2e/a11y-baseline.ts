@@ -2460,9 +2460,13 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
    * A11Y-06 fix did -- that fix left the heading's words alone, and this entry
    * records that fix. The rename is a separate change, for a separate reason:
    * the words duplicated the tab label and the card's own `<h2>` 103px above.
-   * Neither the landmark count nor this entry's cells are affected -- a
-   * nameless `<section>` is still nameless, and the heading is still an `<h3>`
-   * in the same place.
+   * The landmark count cannot be affected -- a nameless `<section>` is still
+   * nameless, and the heading is still an `<h3>` in the same place. Whether this
+   * entry's CELLS hold is REASONED, NOT MEASURED: the rename ran no a11y suite,
+   * and the argument is only that the element, its class and its role are
+   * unchanged and the text is 17 characters rather than 16. Linux CI's a11y job
+   * is the thing that settles it; if it reports a movement on
+   * `settings-explorer`, this is the first place to look.
    */
 ];
 

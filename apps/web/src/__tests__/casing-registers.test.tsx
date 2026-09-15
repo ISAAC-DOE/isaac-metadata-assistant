@@ -299,11 +299,23 @@ describe('UX-CASE §1 · the LABELS registry conforms to Register 1', () => {
  * better and is a different decision from the one this slice is authorised to
  * take.
  *
- * Two of the seventeen would have passed `register1Violations` untouched -- it
+ * ~~Two of the seventeen would have passed `register1Violations` untouched -- it
  * only flags words of four or more characters, so "what is it?" clears it on
- * word length alone. They were re-cased anyway: the checker defines the floor,
- * `casing-and-copy.md` defines the intent, and a label that passes the checker
- * while reading as a sentence is the defect the owner reported.
+ * word length alone.~~ *** FALSE, AND CORRECTED BY INDEPENDENT REVIEW ON THE
+ * SAME DAY: the measured number is ZERO of seventeen. *** Every one of the old
+ * values produced at least one violation, because `register1Violations` strips
+ * only LEADING and TRAILING punctuation from a word -- so `(optional)` becomes
+ * `optional`, eight characters and lowercase, and is flagged. The four-character
+ * floor is real; the inference that it let any of these seventeen through was
+ * not, and the claim is contradicted by this file's own preserved inventory two
+ * paragraphs up, which says all "17 of them violate Register 1".
+ *
+ * It is struck rather than deleted because the reasoning it rests on is a live
+ * trap: the checker's word-length floor DOES mean a short sentence-shaped label
+ * can pass it, so "the checker is the floor, `casing-and-copy.md` is the intent"
+ * remains the right rule. What was wrong was asserting an instance of it here
+ * without running the checker over the old values -- a claim about a measurement
+ * that was reasoned instead of measured.
  *
  * THE CEILING IS NOW A FLOOR OF ZERO. It stays as an assertion rather than
  * being deleted, so a new suffix-named violation fails here instead of
@@ -558,7 +570,16 @@ const RENDER_ALLOWLIST: Readonly<Record<string, string>> = {
      became `Change Folder` in the §1b sweep -- and the ROW ITSELF is what caught
      it: the allowlist asserts every exemption still renders, so a fixed string
      fails as a stale exemption rather than lingering as a silent one. */
-  'Record created': 'lib/recordIdentity.ts row label',
+  /* 'Record created' was here, and LEAVING IT WAS A DEFECT rather than a
+     deferral -- found by independent review, 2026-09-14. `RECORD_INFO_SPECS` has
+     SIX row labels; the sweep re-cased five and left this one, so the Record Info
+     panel rendered five Title Case rows beside one sentence-case row. Before the
+     sweep the six were at least CONSISTENTLY sentence case, which is what makes a
+     partial sweep worse than no sweep. Aggravated by the workflow step retitled
+     `Record Created` the same day: the product spelled the same two words two
+     ways. The argument the sweep gave for the other five -- a table row label is
+     Register 1 by `casing-and-copy.md:10-11` -- applies to this one verbatim, so
+     the exemption had no remaining ground. */
 };
 
 /** Allowlist entries actually observed during this run — see the staleness test. */

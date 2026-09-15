@@ -296,7 +296,7 @@ export const RECORD_INFO_SPECS: readonly RecordInfoSpec[] = [
   },
   {
     path: 'timestamps.created_utc',
-    label: 'Record created',
+    label: 'Record Created',
     description: '',
     beforeExport: 'written_at_export',
     beforeExportNote:
