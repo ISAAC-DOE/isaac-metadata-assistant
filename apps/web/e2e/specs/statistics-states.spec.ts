@@ -428,6 +428,32 @@ async function stampProvenance(target: Locator, stateId: string): Promise<() => 
 }
 
 /** A bare navigation — no injected stylesheet. See the header. */
+/**
+ * WHERE RECORD VERIFICATION LIVES — `?tab=build`, not the Statistics landing.
+ *
+ * *** IT MOVED, 2026-09-15. *** The Statistics redesign put the engineering
+ * content on its own `Build & Verification` tab so a scientist does not land on
+ * it, and Record Verification went with it. Measured in Chrome on a populated
+ * workspace: the Overview tab renders no Record Verification section at all,
+ * while `?tab=build` renders it plus the four verification charts and the
+ * technical-details disclosure.
+ *
+ * Every state in `STATES` below reaches this section, so every one of them
+ * addresses this path. So do probe self-checks **P3 and P4**, which anchor their
+ * injected DOM INSIDE this section.
+ *
+ * ~~the injected-DOM probe self-checks are deliberately NOT changed … the four
+ * supply their own DOM and only need a page to put it on~~ — I wrote that and it
+ * was WRONG for two of the four, and the failure said so: P3 and P4 assert
+ * `section(page).locator('.stats-cards')` and got 0. P1 and P2 genuinely do only
+ * need a page, and they are left on the landing route. The `?tab=mine` state is
+ * likewise unchanged — it tests My Stats.
+ *
+ * The same move broke `charts.spec.ts` in the same way and was fixed there
+ * first; this is the second spec in that family.
+ */
+const VERIFICATION_PATH = '/statistics?tab=build';
+
 async function open(page: Page, path: string): Promise<void> {
   await page.goto(path, { waitUntil: 'domcontentloaded' });
   await expect(page.locator('main#main')).toBeVisible({ timeout: 20_000 });
@@ -572,7 +598,7 @@ const STATES: readonly VerificationState[] = [
         await g.wait;
         await route.continue();
       });
-      await open(page, '/statistics');
+      await open(page, VERIFICATION_PATH);
       const s = section(page);
       await expect(s).toBeVisible({ timeout: 20_000 });
       const loading = s.locator('div.fetch-state[role="status"]');
@@ -611,7 +637,7 @@ const STATES: readonly VerificationState[] = [
         );
         await serve(page, verificationRunningEnvelope);
       }
-      await open(page, '/statistics');
+      await open(page, VERIFICATION_PATH);
       const s = section(page);
       await expect(s.getByText('Verification Run in Progress')).toBeVisible({ timeout: 20_000 });
       await expect(s).toContainText(/no results to state yet/i);
@@ -637,7 +663,7 @@ const STATES: readonly VerificationState[] = [
         'the real backend must be able to produce a real public-reference report for this ' +
           'state; anything else would mean captioning some other body as the real one'
       ).toBe('ok');
-      await open(page, '/statistics');
+      await open(page, VERIFICATION_PATH);
       const s = section(page);
       await expect(s.getByRole('heading', { name: 'Record Verification' })).toBeVisible({
         timeout: 30_000,
@@ -658,7 +684,7 @@ const STATES: readonly VerificationState[] = [
     longPaths: true,
     async reach({ page }) {
       await serve(page, PRIVATE_SAMPLE_SHAPE);
-      await open(page, '/statistics');
+      await open(page, VERIFICATION_PATH);
       const s = section(page);
       await expect(s.locator('.stats-verify-corpus-label')).toHaveText(PRIVATE_LABEL, {
         timeout: 20_000,
@@ -684,7 +710,7 @@ const STATES: readonly VerificationState[] = [
     longPaths: true,
     async reach({ page }) {
       await serve(page, STALE_PUBLIC_SHAPE);
-      await open(page, '/statistics');
+      await open(page, VERIFICATION_PATH);
       const s = section(page);
       await expect(s.locator('.stats-cards')).toHaveCount(1, { timeout: 20_000 });
       const stale = s.locator('div.stats-unavailable').filter({ hasText: /past the/i }).first();
@@ -726,7 +752,7 @@ const STATES: readonly VerificationState[] = [
           });
         }
       );
-      await open(page, '/statistics');
+      await open(page, VERIFICATION_PATH);
       const s = section(page);
       await expect(s.locator('.stats-cards')).toHaveCount(1, { timeout: 20_000 });
 
@@ -774,7 +800,7 @@ const STATES: readonly VerificationState[] = [
         (route) => route.continue(),
         (route) => route.abort('connectionrefused')
       );
-      await open(page, '/statistics');
+      await open(page, VERIFICATION_PATH);
       const s = section(page);
       await expect(s.locator('.stats-cards')).toHaveCount(1, { timeout: 30_000 });
       const before = await s.locator('.stats-cards').innerText();
@@ -818,7 +844,7 @@ const STATES: readonly VerificationState[] = [
     allowedConsole: [],
     async reach({ page }) {
       await serve(page, verificationFailureEnvelope);
-      await open(page, '/statistics');
+      await open(page, VERIFICATION_PATH);
       const s = section(page);
       const panel = s.locator('div.stats-chart-state').first();
       await expect(panel).toBeVisible({ timeout: 20_000 });
@@ -858,7 +884,7 @@ const STATES: readonly VerificationState[] = [
     allowedConsole: [/Failed to load resource/i, /net::ERR_/i],
     async reach({ page }) {
       await page.route(VERIFICATION_ROUTE, (route) => route.abort('timedout'));
-      await open(page, '/statistics');
+      await open(page, VERIFICATION_PATH);
       const s = section(page);
       const panel = s.locator('div.stats-unavailable').first();
       await expect(panel).toBeVisible({ timeout: 20_000 });
@@ -889,7 +915,7 @@ const STATES: readonly VerificationState[] = [
     allowedConsole: [],
     async reach({ page }) {
       await serve(page, verificationErrorEnvelope);
-      await open(page, '/statistics');
+      await open(page, VERIFICATION_PATH);
       const s = section(page);
       const panel = s.locator('div.stats-chart-state').first();
       await expect(panel).toBeVisible({ timeout: 20_000 });
@@ -916,7 +942,7 @@ const STATES: readonly VerificationState[] = [
     async reach({ page, request }) {
       const status = await waitForRealReport(request);
       expect(status).toBe('ok');
-      await open(page, '/statistics');
+      await open(page, VERIFICATION_PATH);
       const details = page.locator('details.stats-technical');
       await expect(details).toHaveCount(1, { timeout: 20_000 });
       await expect(details.getByRole('heading', { name: 'Technical Details' })).toBeVisible();
@@ -944,7 +970,7 @@ const STATES: readonly VerificationState[] = [
     async reach({ page, request }) {
       const status = await waitForRealReport(request);
       expect(status).toBe('ok');
-      await open(page, '/statistics');
+      await open(page, VERIFICATION_PATH);
       const details = page.locator('details.stats-technical');
       await expect(details).toHaveCount(1, { timeout: 20_000 });
       // `> summary`, not `summary`: every chart's data table is a nested
@@ -1141,7 +1167,17 @@ async function commonAssertions(
       tabIndex: number;
     }[];
     if (tabs.label === null || tabs.label.length === 0) push('the tablist has no accessible name');
-    if (items.length !== 2) push(`expected 2 tabs, found ${items.length}`);
+    /*
+     * THREE, NOT TWO — `Build & Verification` was added, 2026-09-15.
+     *
+     * ~~if (items.length !== 2)~~ The Statistics redesign moved the engineering
+     * content onto a third tab so a scientist does not land on it. The count is
+     * asserted EXACTLY, not as a minimum, and that is deliberate: this block's
+     * whole job is to notice the tablist changing shape, and `>= 2` would stop
+     * noticing. It is the same reason `charts.spec.ts` asserts its caption set
+     * by equality rather than by containment.
+     */
+    if (items.length !== 3) push(`expected 3 tabs, found ${items.length}`);
     const selected = items.filter((t) => t.selected === 'true');
     if (selected.length !== 1) push(`exactly one tab must be selected; ${selected.length} are`);
     for (const t of selected) {
@@ -1842,7 +1878,7 @@ test.describe('probe self-check (injected DOM)', () => {
     page,
   }) => {
     await serve(page, PRIVATE_SAMPLE_SHAPE);
-    await open(page, '/statistics');
+    await open(page, VERIFICATION_PATH);
     const s = section(page);
     await expect(s.locator('.stats-cards')).toHaveCount(1, { timeout: 20_000 });
 
@@ -1881,7 +1917,7 @@ test.describe('probe self-check (injected DOM)', () => {
   }) => {
     await page.setViewportSize({ width: 320, height: VIEWPORT_HEIGHT });
     await serve(page, PRIVATE_SAMPLE_SHAPE);
-    await open(page, '/statistics');
+    await open(page, VERIFICATION_PATH);
     const s = section(page);
     await expect(s.locator('.stats-cards')).toHaveCount(1, { timeout: 20_000 });
 
