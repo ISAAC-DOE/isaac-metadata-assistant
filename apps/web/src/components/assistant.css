@@ -201,7 +201,7 @@
 }
 .assistant-label {
   font-size: 13.5px;
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
   color: var(--assist-text);
 }
 /* The availability STATUS group — the RIGHT item of the header's META row: the
@@ -466,7 +466,7 @@
   align-items: center;
   gap: 5px;
   font-size: 10.5px;
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
   letter-spacing: 0.02em;
   color: var(--text-tertiary);
 }
@@ -481,7 +481,7 @@
   padding: 2px 7px;
   border-radius: var(--radius-token);
   font-size: 10px;
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
   border: 1px solid var(--border);
   color: var(--text-tertiary);
   background: var(--surface);
@@ -508,7 +508,7 @@
   gap: 5px;
   max-width: 100%;
   font-size: 10px;
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
   color: var(--advisory-text);
   overflow-wrap: anywhere;
 }
@@ -536,7 +536,7 @@
   background: var(--assist-panel-bg);
   color: var(--assist-text);
   font-size: 11.5px;
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
   transition: background 0.12s ease, border-color 0.12s ease;
 }
 .assistant-jump:hover { background: var(--assist-tint); }
@@ -561,7 +561,7 @@
   background: transparent;
   color: var(--text-secondary);
   font-size: 11px;
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
   white-space: nowrap;
   transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
 }
@@ -686,7 +686,7 @@
   background: var(--surface);
   color: var(--text-tertiary);
   font-size: 10.5px;
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
   line-height: 1.3;
   overflow-wrap: anywhere;
 }
@@ -731,7 +731,7 @@ button.assistant-source-chip-nav:focus-visible {
   background: var(--assist-panel-bg);
   color: var(--assist-text);
   font-size: 11px;
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
   cursor: pointer;
   transition: background 0.12s ease, border-color 0.12s ease;
 }
@@ -769,7 +769,7 @@ button.assistant-source-chip-nav:focus-visible {
   background: transparent;
   color: var(--assist-text);
   font-size: 11.5px;
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
   text-align: left;
   cursor: pointer;
   transition: background 0.12s ease, border-color 0.12s ease;
@@ -803,7 +803,7 @@ button.assistant-source-chip-nav:focus-visible {
 }
 .assistant-workspace-context strong {
   color: var(--assist-text);
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
 }
 
 /* P29.4 — honest, manual-first degraded state. Subordinate tint (never a verdict
@@ -853,7 +853,7 @@ button.assistant-source-chip-nav:focus-visible {
   border-color: var(--assist-border);
   background: var(--assist-panel-bg);
   color: var(--assist-text);
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
 }
 .assistant-prompt:disabled { opacity: 0.6; cursor: default; }
 .assistant-prompt > span { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
@@ -908,7 +908,7 @@ button.assistant-source-chip-nav:focus-visible {
   background: var(--assist-panel-bg);
   color: var(--assist-text);
   font-size: 12.5px;
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
   text-align: left;
   transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
 }
@@ -944,7 +944,7 @@ button.assistant-source-chip-nav:focus-visible {
   background: var(--assist-panel-bg);
   color: var(--assist-text);
   font-size: 11.5px;
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
   cursor: pointer;
   transition: background 0.12s ease;
 }
@@ -1036,7 +1036,7 @@ button.assistant-source-chip-nav:focus-visible {
   background: var(--assist-panel-bg);
   color: var(--assist-text);
   font-size: 11.5px;
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
   cursor: pointer;
   transition: background 0.12s ease;
   /* Never wider than the rail that holds it: without this, the shrink-to-fit
@@ -1204,7 +1204,7 @@ button.assistant-source-chip-nav:focus-visible {
   background: var(--surface);
   color: var(--text-secondary);
   font-size: 11.5px;
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
   text-align: left;
   cursor: pointer;
   transition: background 0.12s ease, border-color 0.12s ease;
@@ -1226,7 +1226,7 @@ button.assistant-source-chip-nav:focus-visible {
   background: transparent;
   color: var(--text-tertiary);
   font-size: 11px;
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
   cursor: pointer;
   transition: background 0.12s ease, color 0.12s ease;
 }
@@ -1272,7 +1272,7 @@ button.assistant-source-chip-nav:focus-visible {
 .assistant-graph-title {
   margin-top: 6px;
   font-size: 12.5px;
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
   line-height: 1.5;
   color: var(--text-heading);
   overflow-wrap: anywhere;
@@ -1537,8 +1537,8 @@ button.assistant-source-chip-nav:focus-visible {
 .agent-proposal-fields dt { color: var(--text-tertiary); font-size: 11px; min-width: 0; overflow-wrap: anywhere; }
 .agent-proposal-fields dd { margin: 0; min-width: 0; color: var(--text-primary); overflow-wrap: anywhere; }
 .agent-proposal-fields dd.mono { font-family: var(--font-mono); font-size: 11.5px; }
-.agent-proposal-value { font-weight: 600; }
-.agent-proposal-class { display: inline-flex; align-items: center; gap: 4px; font-weight: 600; }
+.agent-proposal-value { font-weight: var(--font-weight-semibold); }
+.agent-proposal-class { display: inline-flex; align-items: center; gap: 4px; font-weight: var(--font-weight-semibold); }
 .agent-proposal-honesty {
   margin: 0 0 8px;
   font-size: 11.5px;
@@ -1571,7 +1571,7 @@ button.assistant-source-chip-nav:focus-visible {
   border-radius: var(--radius-control);
   padding: 3px 8px;
   font-size: 11px;
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
   color: var(--text-secondary);
   cursor: pointer;
 }
@@ -1610,7 +1610,7 @@ button.assistant-source-chip-nav:focus-visible {
 .agent-stage-head .mono {
   font-family: var(--font-mono);
   font-size: 11.5px;
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
   min-width: 0;
   overflow-wrap: anywhere;
 }
@@ -1627,7 +1627,7 @@ button.assistant-source-chip-nav:focus-visible {
   padding: 6px 8px;
   font-family: var(--font-mono);
   font-size: 11.5px;
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
   color: var(--text-primary);
   /* `--surface` directly. This read `var(--surface-sunken, var(--surface))` and
      `--surface-sunken` is declared nowhere, so the fallback always won — the
@@ -1823,7 +1823,7 @@ button.assistant-source-chip-nav:focus-visible {
   align-items: center;
   justify-content: center;
   font-size: 12px;
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
   flex: none;
 }
 .guided-index {
@@ -1843,7 +1843,7 @@ button.assistant-source-chip-nav:focus-visible {
 }
 .guided-question {
   font-size: 17px;
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
   color: var(--text-heading);
 }
 .guided-context {
@@ -1874,7 +1874,7 @@ button.assistant-source-chip-nav:focus-visible {
   align-items: center;
   gap: 8px;
   font-size: 12.5px;
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
   color: var(--assist-text);
   margin-bottom: 6px;
 }
@@ -1939,7 +1939,7 @@ button.assistant-source-chip-nav:focus-visible {
   border-radius: var(--radius-token);
   color: var(--text-muted);
   font-size: 12px;
-  font-weight: 500;
+  font-weight: var(--font-weight-medium);
   transition: background 0.14s ease, color 0.14s ease, box-shadow 0.14s ease;
 }
 .guided-dontknow svg { color: var(--text-tertiary); transition: color 0.14s ease; }
@@ -1994,7 +1994,7 @@ button.assistant-source-chip-nav:focus-visible {
   justify-content: center;
   flex: none;
 }
-.answered-label { font-size: 13.5px; font-weight: 600; color: var(--text-primary); }
+.answered-label { font-size: 13.5px; font-weight: var(--font-weight-semibold); color: var(--text-primary); }
 .answered-stored { font-family: var(--font-mono); font-size: 12px; color: var(--text-muted); }
 .answered-trailing { margin-left: auto; display: inline-flex; align-items: center; gap: 12px; }
 .answered-edit {
@@ -2007,7 +2007,7 @@ button.assistant-source-chip-nav:focus-visible {
   padding: 4px 10px;
   color: var(--action);
   font-size: 12px;
-  font-weight: 500;
+  font-weight: var(--font-weight-medium);
   cursor: pointer;
 }
 .answered-edit:hover:not(:disabled) { border-color: var(--border-strong); background: var(--surface); }
@@ -2027,7 +2027,7 @@ button.assistant-source-chip-nav:focus-visible {
   border-radius: var(--radius-inner);
   color: var(--pass-solid);
 }
-.edit-impact-reason { font-size: 13px; font-weight: 600; color: var(--text-primary); }
+.edit-impact-reason { font-size: var(--font-size-body); font-weight: var(--font-weight-semibold); color: var(--text-primary); }
 .edit-impact-note { margin: 4px 0 0; font-size: 12.5px; color: var(--text-muted); }
 /* A11Y-01 cause (b), ONE OF THREE CLOSED — the ancestor `opacity` is GONE.
    `opacity: 0.72` used to sit here and it dragged this row's text below AA by
@@ -2075,7 +2075,7 @@ button.assistant-source-chip-nav:focus-visible {
   font-size: 11px;
   flex: none;
 }
-.upcoming-label { font-size: 13px; color: var(--text-secondary); }
+.upcoming-label { font-size: var(--font-size-body); color: var(--text-secondary); }
 .upcoming-path { margin-left: auto; font-family: var(--font-mono); font-size: 11px; color: var(--text-quaternary); }
 
 /* The withheld-questions disclosure. This screen holds a PAGE of the record's open
@@ -2092,7 +2092,7 @@ button.assistant-source-chip-nav:focus-visible {
   border: 1px dashed var(--border-input);
   border-radius: var(--radius-inner);
 }
-.upcoming-more-text { font-size: 13px; color: var(--text-secondary); }
+.upcoming-more-text { font-size: var(--font-size-body); color: var(--text-secondary); }
 .upcoming-more .btn { margin-left: auto; }
 
 /* THE ENTRIES THAT CANNOT BE ANSWERED HERE. `.upcoming-unreadable` shipped with NO
@@ -2229,7 +2229,7 @@ button.assistant-source-chip-nav:focus-visible {
   width: 100%;
   max-width: 100%;
   min-width: 0;
-  font-size: 13px;
+  font-size: var(--font-size-body);
 }
 .structured-entry-json {
   font-family: var(--font-mono);
@@ -2255,7 +2255,7 @@ button.assistant-source-chip-nav:focus-visible {
   color: var(--fail-text);
   line-height: 1.55;
   margin: 10px 0 0;
-  font-weight: 500;
+  font-weight: var(--font-weight-medium);
 }
 
 /* The QC verdict blocker: a closed choice plus the reasoning behind it.
@@ -2298,7 +2298,7 @@ button.assistant-source-chip-nav:focus-visible {
   /* 32px keeps the whole row a touch target at 390/320px rather than the radio
      dot alone, which is ~13px and below every guideline. */
   min-height: 32px;
-  font-size: 13px;
+  font-size: var(--font-size-body);
   color: var(--text-secondary);
   cursor: pointer;
 }
@@ -2315,7 +2315,7 @@ button.assistant-source-chip-nav:focus-visible {
      than its container and overflow the page at narrow widths. */
   resize: vertical;
   font-family: inherit;
-  font-size: 13px;
+  font-size: var(--font-size-body);
   line-height: 1.55;
 }
 .guided-verdict-hint {

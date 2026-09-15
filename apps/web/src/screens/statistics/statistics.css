@@ -160,14 +160,14 @@
  */
 .statistics .stats-card-head h2 {
   font-size: 14px;
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
   color: var(--text-heading);
   letter-spacing: -0.005em;
   line-height: 1.35;
 }
 .statistics .stats-card-head h3 {
-  font-size: 13px;
-  font-weight: 600;
+  font-size: var(--font-size-body);
+  font-weight: var(--font-weight-semibold);
   color: var(--text-heading);
   letter-spacing: -0.005em;
   line-height: 1.35;
@@ -370,7 +370,7 @@
   align-items: center;
   gap: 7px;
   font-size: 11.5px;
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
   color: var(--text-slate);
   line-height: 1.4;
 }
@@ -460,7 +460,7 @@
 /* `quiet` values are usually a sentence ("Not Available"), not a number. */
 .statistics .stat-card[data-tone='quiet'] .stat-card-value {
   font-size: 14px;
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
 }
 
 /* ---- FigureList ------------------------------------------------------ */
@@ -479,7 +479,7 @@
 }
 .statistics .stats-figure dt {
   font-size: 11.5px;
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
   color: var(--text-slate);
   line-height: 1.4;
 }
@@ -501,7 +501,7 @@
 .statistics .stats-figure dd {
   margin: 3px 0 0;
   font-size: 15px;
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
   color: var(--text-heading);
   line-height: 1.35;
   overflow-wrap: anywhere;
@@ -516,7 +516,7 @@
 }
 .statistics .stats-mini-label {
   font-size: 11.5px;
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
   color: var(--text-slate);
   line-height: 1.4;
 }
@@ -548,8 +548,8 @@
   /* A count, so it is sized as a figure rather than as a label: it was 12px
      against its own 11.5px label. `line-height` was undeclared, so the badge
      inherited the body's 1.55 and was the only chip on the surface not on 1.4. */
-  font-size: 13px;
-  font-weight: 600;
+  font-size: var(--font-size-body);
+  font-weight: var(--font-weight-semibold);
   line-height: 1.4;
   color: var(--text-heading);
 }
@@ -614,7 +614,7 @@
 }
 .statistics .stats-meta-label {
   font-size: 11.5px;
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
   color: var(--text-slate);
 }
 .statistics .stats-meta-read time {
@@ -678,8 +678,8 @@
   min-width: 0;
 }
 .statistics .stats-group > h3 {
-  font-size: 13px;
-  font-weight: 600;
+  font-size: var(--font-size-body);
+  font-weight: var(--font-weight-semibold);
   color: var(--text-heading);
   letter-spacing: -0.005em;
   line-height: 1.35;
@@ -720,8 +720,8 @@
   gap: 8px;
 }
 .statistics .stats-empty-title {
-  font-size: 13px;
-  font-weight: 600;
+  font-size: var(--font-size-body);
+  font-weight: var(--font-weight-semibold);
   color: var(--text-heading);
   line-height: 1.4;
 }
@@ -733,7 +733,7 @@
 /* The Project Memory freshness lead-in. A weight/colour emphasis only — the
    sentence beside it carries the meaning, so nothing is signalled by colour. */
 .statistics .stats-freshness-label {
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
   color: var(--text-heading);
 }
 
@@ -795,7 +795,7 @@
 }
 .statistics .stats-chart-caption {
   font-size: 12.5px;
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
   color: var(--text-strong);
   line-height: 1.5;
   max-width: 68ch;
@@ -844,7 +844,7 @@
 }
 .statistics .stats-chart-row-value {
   font-size: 12.5px;
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
   color: var(--text-heading);
   font-variant-numeric: tabular-nums;
 }
@@ -983,7 +983,7 @@
   transform: translateX(-50%);
   color: var(--text-heading);
   font-size: 11px;
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
   line-height: 1.3;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
@@ -1093,7 +1093,7 @@
   top: 50%;
   transform: translate(-50%, -50%);
   font-size: 11px;
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
   line-height: 1.2;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
@@ -1181,7 +1181,7 @@
 /* Values lead, labels follow: the number is the strong element, because the
    reader already knows which mark they are pointing at. */
 .statistics .stats-chart-tooltip-value {
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
   color: var(--text-heading);
   font-variant-numeric: tabular-nums;
 }
@@ -1213,7 +1213,7 @@
 .statistics .stats-chart-table-toggle {
   display: inline-block;
   font-size: 11.5px;
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
   color: var(--action);
   line-height: 1.5;
 }
@@ -1237,12 +1237,12 @@
 }
 .statistics .stats-chart-table thead th {
   font-size: 11px;
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
   color: var(--text-slate);
   white-space: nowrap;
 }
 .statistics .stats-chart-table tbody th {
-  font-weight: 500;
+  font-weight: var(--font-weight-medium);
   color: var(--text-strong);
   overflow-wrap: anywhere;
 }
@@ -1281,8 +1281,8 @@
   background: var(--cover-bg);
 }
 .statistics .stats-chart-state-title {
-  font-size: 13px;
-  font-weight: 600;
+  font-size: var(--font-size-body);
+  font-weight: var(--font-weight-semibold);
   color: var(--text-heading);
   line-height: 1.4;
 }
@@ -1366,7 +1366,7 @@
 .statistics .stats-technical-title {
   display: inline;
   font-size: 14px;
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
   color: var(--text-heading);
   letter-spacing: -0.005em;
   line-height: 1.35;
@@ -1425,8 +1425,8 @@
    tracking while every other `h3` was 13px/1.35 at -0.005em — a fourth-of-a-step
    difference that read as a rendering accident rather than a level. */
 .statistics .stats-plan-title {
-  font-size: 13px;
-  font-weight: 600;
+  font-size: var(--font-size-body);
+  font-weight: var(--font-weight-semibold);
   color: var(--text-heading);
   letter-spacing: -0.005em;
   line-height: 1.35;
@@ -1448,7 +1448,7 @@
    dot, no colour-only signal — the sentence says it. */
 .statistics .stats-plan-gate {
   color: var(--cover-text);
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
 }
 
 @media (max-width: 900px) {
@@ -1549,7 +1549,7 @@
 }
 .statistics .stats-verify-safeguard-label {
   font-size: 12px;
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
   color: var(--text-heading);
   line-height: 1.4;
   overflow-wrap: anywhere;
@@ -1682,7 +1682,7 @@
   overflow-wrap: anywhere;
 }
 .statistics .stats-verify-corpus-mode-label {
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
   color: var(--text-strong);
 }
 
@@ -1775,8 +1775,8 @@
   background: var(--surface-subtle);
 }
 .statistics .stats-verify-running-title {
-  font-size: 13px;
-  font-weight: 600;
+  font-size: var(--font-size-body);
+  font-weight: var(--font-weight-semibold);
   color: var(--text-heading);
   line-height: 1.4;
 }
@@ -1817,7 +1817,7 @@
 }
 .statistics .stats-verify-chartgroup-total {
   font-size: 11.5px;
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
   color: var(--text-secondary);
   font-variant-numeric: tabular-nums;
 }
@@ -1849,7 +1849,7 @@
    hide the right-hand side of an equation whose whole point is both sides. */
 .statistics .stats-verify-identity-statement {
   font-size: 12.5px;
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
   line-height: 1.5;
   color: var(--text-strong);
   overflow-wrap: anywhere;
@@ -1908,7 +1908,7 @@
   border-radius: 8px;
   background: var(--cover-bg);
   color: var(--text-secondary);
-  font-size: 13px;
+  font-size: var(--font-size-body);
   line-height: 1.55;
 }
 
@@ -1949,8 +1949,8 @@
 }
 .statistics .stats-recent-title {
   min-width: 0;
-  font-size: 13px;
-  font-weight: 500;
+  font-size: var(--font-size-body);
+  font-weight: var(--font-weight-medium);
   color: var(--text-primary);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1993,7 +1993,7 @@
   border-radius: 999px;
   background: var(--surface-subtle);
   font-size: 11.5px;
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
   color: var(--text-slate);
   white-space: nowrap;
 }

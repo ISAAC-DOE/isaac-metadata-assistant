@@ -76,7 +76,7 @@
 
 .proposals-control-label {
   font-size: 12px;
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
   color: var(--text-secondary);
 }
 
@@ -372,7 +372,7 @@
 
 .proposal-form-label,
 .proposals-deep-link-label {
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
 }
 
 .proposal-form-input {
@@ -416,7 +416,7 @@
 .proposal-history-toggle {
   font: inherit;
   font-size: 12px;
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
   color: var(--action);
   background: none;
   border: none;
@@ -724,8 +724,8 @@
  * a deployment serving no proposable paths is a configuration, not a fault.
  */
 .new-proposal-unavailable-label {
-  font-size: 13px;
-  font-weight: 600;
+  font-size: var(--font-size-body);
+  font-weight: var(--font-weight-semibold);
   color: var(--text-secondary);
 }
 
@@ -743,7 +743,7 @@
 
 .new-proposal-why > summary {
   cursor: pointer;
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
 }
 
 .new-proposal-why > p {
@@ -790,7 +790,7 @@
 
 /* The human label for the chosen target, beside — never instead of — its path. */
 .new-proposal-target-label {
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
   color: var(--text-secondary);
 }
 

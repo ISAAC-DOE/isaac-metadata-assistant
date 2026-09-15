@@ -236,7 +236,7 @@
   display: flex;
   align-items: center;
   gap: var(--space-xs);
-  font-size: 13px;
+  font-size: var(--font-size-body);
   font-weight: var(--font-weight-medium);
   color: var(--action);
   cursor: pointer;
@@ -1143,7 +1143,12 @@
   display: flex;
   align-items: center;
   gap: var(--space-xs);
-  font-size: 13px;
+  /* `var(--font-size-body)` — which IS 13px, the same value the sibling rule
+     above writes as a literal. My first attempt reached for
+     `--font-size-meta` and that is **11px**: it would have silently shrunk
+     this control by 2px to satisfy a ratchet. Tokenizing must preserve the
+     rendered value or it is not tokenizing, it is redesigning by accident. */
+  font-size: var(--font-size-body);
   font-weight: var(--font-weight-medium);
   color: var(--action);
   cursor: pointer;

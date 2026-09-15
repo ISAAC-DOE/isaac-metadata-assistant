@@ -35,7 +35,7 @@
   margin: 4px 0 0;
   max-width: 66ch;
   font-size: 12.5px;
-  line-height: 1.55;
+  line-height: var(--line-height-normal); /* exact rung: 1.55 */
   color: var(--text-slate);
 }
 
@@ -168,7 +168,7 @@
 
 .runs-control-label {
   font-size: 11.5px;
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
   color: var(--text-slate);
 }
 
@@ -234,7 +234,7 @@
   background: var(--surface);
   border: 1px dashed var(--border-strong);
   border-radius: var(--radius-card);
-  font-size: 13px;
+  font-size: var(--font-size-body);
   color: var(--text-slate);
 }
 
@@ -313,7 +313,7 @@
   border-radius: var(--radius-control);
   font-family: var(--font-ui);
   font-size: 11.5px;
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
   color: var(--text-slate);
   cursor: pointer;
 }
@@ -596,7 +596,7 @@
   flex: none;
   padding-top: 7px;
   font-size: 13.5px;
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
   color: var(--text-primary);
 }
 
@@ -796,13 +796,13 @@
 
 .run-inherited-value {
   font-family: var(--font-mono);
-  font-size: 13px;
+  font-size: var(--font-size-body);
   color: var(--text-primary);
   overflow-wrap: anywhere;
 }
 
 .run-inherited-row[data-state='overridden'] .run-inherited-value {
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
 }
 
 /* `--text-slate`, NOT `--text-tertiary`. Both were written as tertiary first and
@@ -829,7 +829,7 @@
 
 .run-inherited-state[data-state='overridden'] {
   color: var(--confirmed-text);
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
 }
 
 /* The record's own value beside a run that has diverged from it. Context, never
@@ -872,7 +872,7 @@
 
 .run-inherited-form-label {
   font-size: 12px;
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
   color: var(--text-strong);
 }
 
@@ -940,7 +940,7 @@
 .run-inherited-failure-title {
   margin: 0;
   font-size: 12px;
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
 }
 
 .run-inherited-failure-text {

@@ -258,8 +258,56 @@ const ANCHORS: readonly string[] = [
  */
 const TOLERANCE = 25;
 const CEILING = {
-  fontSize: 1065,
-  fontWeight: 414,
+  /*
+   * *** LOWERED 2026-09-15, IN THE SAME CHANGE THAT MIGRATED THE DECLARATIONS —
+   * which is what this ratchet's own message demands, and the reason it demands
+   * it is exactly what happened here. ***
+   *
+   * ~~fontSize: 1065, fontWeight: 414~~ -> 1043 / 281
+   *
+   * The numbers are THIS FILE'S OWN counter's, read out of its failure message,
+   * not a second implementation's. My own sweep said 1042 and 280 — off by one
+   * in each axis, because its exclusion list is not identical to
+   * `rawLiteralsByValue`'s. A ratchet recorded from a different counter than
+   * the one that enforces it is a ratchet that fails on the next unrelated
+   * change.
+   *
+   * Four lanes landed new CSS in one integration and pushed three of these
+   * axes over: font-size 1065 -> 1070, font-weight 414 -> 417, line-height
+   * 421 -> 422. Every new literal with an EXACT rung was migrated
+   * (`13px` -> `--font-size-body`, `600` -> `--font-weight-semibold`,
+   * `500` -> `--font-weight-medium`), which took the real counts well BELOW the
+   * old ceilings — and the TOLERANCE floor then refused that too, correctly:
+   * a count that falls without the record falling stops being a ratchet.
+   *
+   * ONE MIGRATION WAS REFUSED ON PURPOSE AND IS WORTH RECORDING. My first pass
+   * sent a `13px` to `--font-size-meta`, which is **11px** — it would have
+   * silently shrunk a control by 2px to satisfy a guard. Tokenizing has to
+   * preserve the rendered value or it is not tokenizing, it is redesigning by
+   * accident. `12px`, `11.5px` and `10px` therefore stay literals: no rung
+   * holds those values, and the new `1.5` line-heights stay literals because
+   * `--line-height-normal` is 1.55, not 1.5. For that axis the remedy this
+   * message prescribes was used instead — one EXACT `1.55` elsewhere was
+   * migrated, so the count returns to its recorded 421 with no value changed.
+   *
+   * `fontWeight` IS 282 AND NOT 281 BECAUSE ONE MIGRATION WAS REVERTED, and the
+   * revert is the more useful half of this record. `.section-tab`'s weight went
+   * to `--font-weight-medium` and `a11y-landmarks-headings-and-tabs.test.tsx`'s
+   * A16 control CRASHED — it reads `font-weight: (\d+)` numerically out of that
+   * block to prove the WCAG large-text exemption does not apply, so a token
+   * matched `null`. The value is restored as `500`, which IS
+   * `--font-weight-medium`: the rendering never moved, only the spelling.
+   *
+   * AND FONT-SIZE MIGRATIONS SKIPPED ANY RULE PAINTING `--text-tertiary` or
+   * `--text-muted` — the exception this file's header already records. What I
+   * missed is that it extends to `font-weight` in those same rules, for the
+   * identical reason, and A16 is the guard that says so. This file's own header explains why: `palette-contrast`
+   * reads a NUMERIC `font-size` out of those rules to decide the WCAG
+   * large-text threshold, so a rule whose size becomes a token drops out of
+   * that sample.
+   */
+  fontSize: 1043,
+  fontWeight: 282,
   lineHeight: 421,
   spacing: 2400,
   /**
