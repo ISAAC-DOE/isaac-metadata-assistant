@@ -56,6 +56,7 @@ export function RecordRail({
   activeView,
   captureSummary = null,
   evidenceCount = null,
+  showEvidenceTrail = true,
   onNavigate,
 }: {
   recordId: string;
@@ -73,6 +74,22 @@ export function RecordRail({
    */
   evidenceCount?: number | null;
   /**
+   * Whether to offer the Evidence Trail link at all. `false` on Export
+   * Readiness, and for a reason worth stating rather than a layout preference:
+   * that screen already uses the words "Evidence Trail" for the exported
+   * SIDECAR ARTIFACT in its record/sidecar toggle
+   * (`ExportReadiness.tsx:1028`). Rendering the rail's navigation link there too
+   * put one label on two different things on one screen — the artifact you
+   * exported, and a surface you can navigate to — which
+   * `completion-export.test.tsx` caught as `Found multiple elements with the
+   * text: Evidence Trail`.
+   *
+   * The rail still offers Experiment Data, Runs and Record Fields there, so the
+   * navigation this component exists for is intact; what is dropped is the one
+   * row whose name collides.
+   */
+  showEvidenceTrail?: boolean;
+  /**
    * Called immediately before navigating away. `RecordWorkbench` uses it to
    * flush held run edits; the sub-screens have nothing to flush and pass
    * nothing, which is why it is optional here and required there.
@@ -87,6 +104,7 @@ export function RecordRail({
       <RecordCaptureNav active={activeView} captureSummary={captureSummary} onNavigate={flush} />
       <WorkflowSpine workflow={workflow} recordId={recordId} />
       <RecordWorkspaceNav active={activeView} captureSummary={captureSummary} onNavigate={flush} />
+      {showEvidenceTrail && (
       <button
         type="button"
         className="evidence-trail-link"
@@ -104,6 +122,7 @@ export function RecordRail({
           </span>
         )}
       </button>
+      )}
     </div>
   );
 }

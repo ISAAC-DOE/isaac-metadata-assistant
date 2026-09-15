@@ -335,3 +335,22 @@
   color: var(--advisory-text);
   overflow-wrap: anywhere;
 }
+
+/*
+ * THE "WHAT THIS CHECKS" DRAWER — the description collapsed, the status left
+ * visible. See `ValidateReview.tsx` for which sentence stays out and why.
+ */
+.vr-about {
+  margin-top: var(--space-sm);
+}
+.vr-about-summary {
+  cursor: pointer;
+  width: fit-content;
+  font-size: var(--font-size-meta);
+  color: var(--action);
+}
+.vr-about-summary:focus-visible {
+  outline: 2px solid var(--action);
+  outline-offset: 2px;
+  border-radius: var(--radius-inner);
+}

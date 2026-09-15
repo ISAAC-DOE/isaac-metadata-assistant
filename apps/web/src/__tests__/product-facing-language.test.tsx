@@ -474,6 +474,27 @@ const CREATION_CAPABILITY_SITES: Readonly<Record<string, readonly string[]>> = {
    * heading over it, and it is the ONE string in this file the patterns catch.
    */
   'screens/ExperimentsHome.tsx': ['New experiment'],
+  /*
+   * HISTORICAL IMPORT CAN NOW CREATE THE DESTINATION, added 2026-09-14.
+   *
+   * Sending an import candidate somewhere always worked, but the form asked for
+   * the destination by typing its ULID. It is now a picker of the workspace's
+   * records plus one control that creates one — so this screen genuinely holds
+   * the capability, which is the only thing this exemption is for. The project
+   * owner asked for it directly: *"there should also be an intuitive way for
+   * users to add it into a current experiment or make a new experiment from
+   * it"*.
+   *
+   * It calls the SAME `POST /api/experiments` as My Experiments; no second
+   * creation path exists. And it creates a TITLE and nothing else — no field is
+   * carried over from the import, because no candidate has been reviewed yet.
+   *
+   * ONE STRING, ONE OCCURRENCE, which is what makes this an act rather than a
+   * widening: the patterns stay live on every other file, including `/load`,
+   * where `POST /api/uploads` is still an unconditional 403 and a "New Record"
+   * button would still be the exact defect P1 removed.
+   */
+  'screens/HistoricalImport.tsx': ['New record from this import'],
 };
 
 function creationScannedCopy(path: string): string {

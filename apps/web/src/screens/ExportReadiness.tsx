@@ -580,6 +580,9 @@ function LoadedExport({
           workflow={detail.workflow}
           activeView={null}
           captureSummary={detail.capture_summary ?? null}
+          /* This screen already says "Evidence Trail" about the exported
+             sidecar artifact; see the prop's note in `RecordRail`. */
+          showEvidenceTrail={false}
         />
       }
       rightPanel={rightPanel}
