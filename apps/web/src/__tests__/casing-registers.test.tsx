@@ -267,48 +267,51 @@ describe('UX-CASE §1 · the LABELS registry conforms to Register 1', () => {
 
 /**
  * `REGISTER_1_KEY` matches a key by its PREFIX. A large family of Register 1
- * labels is named by SUFFIX instead — `libraryMoveAction`, `renameFormTitle`,
- * `emptyExperimentsTitle` — and none of those is checked above.
+ * labels is named by SUFFIX instead -- `libraryMoveAction`, `renameFormTitle`,
+ * `emptyExperimentsTitle` -- and none of those was reached by the narrow scan.
  *
- * Measured at this commit: 37 keys match the widened form below and not the
- * narrow one, and **17 of them violate Register 1**, including six `*Title`
- * keys, which `casing-and-copy.md:10` names explicitly ("page titles, section
- * titles, card titles, **empty-state titles**"):
+ * *** CLOSED 2026-09-14. THE RESIDUE IS ZERO, AND THE REASON IT WAS DEFERRED
+ * TURNED OUT NOT TO HOLD. ***
  *
- *   librarySearchLabel            "Search experiments"
- *   libraryNoResultsTitle         "No experiments match this view"
- *   libraryMoveSubmit             "Save folder"
- *   libraryMoveAction             "Change folder"
- *   createExperimentFolderLabel   "Folder (optional)"
- *   resetAtRiskLabel              "What you would lose"
- *   createExperimentFormTitle     "Name your experiment"
- *   createExperimentTitleLabel    "Experiment title"
- *   createExperimentDescriptionLabel "What is it? (optional)"
- *   renameFormTitle               "Rename this experiment"
- *   renameTitleLabel              "Experiment title"
- *   renameSubmit                  "Save name"
- *   runRenameLabel                "Run name"
- *   runRenameSubmit               "Save name"
- *   emptyExperimentsTitle         "Start your first experiment"
- *   tutorialSessionExpiredTitle   "The worked example has expired"
- *   tutorialCompleteTitle         "Tutorial complete"
+ * All seventeen are re-cased. The previous note is kept below because its
+ * REASONING is the useful part and because it was wrong in a specific,
+ * checkable way that the next deferral should be tested against:
  *
- * WHY THEY ARE COUNTED HERE AND NOT FIXED. Three of them are pinned only by
- * Playwright suites this environment cannot run — "Start your first experiment"
- * alone appears in `e2e/specs/tutorial.spec.ts`,
- * `e2e/mutation/tutorial-lifecycle.spec.ts` and `e2e/specs/workspace-scope.spec.ts`
- * — so a sweep would leave a suite red that no verification available here can
- * observe. `CLAUDE.md` §12 is explicit that a count or a result you did not
- * measure is not reportable, and "I changed copy three browser specs assert, and
- * did not run them" is that failure wearing a fix's clothes.
+ *     "Three of them are pinned only by Playwright suites this environment
+ *      cannot run -- 'Start your first experiment' alone appears in
+ *      `e2e/specs/tutorial.spec.ts`, `e2e/mutation/tutorial-lifecycle.spec.ts`
+ *      and `e2e/specs/workspace-scope.spec.ts` -- so a sweep would leave a
+ *      suite red that no verification available here can observe."
  *
- * SO THIS TEST ENFORCES A CEILING, NOT CONFORMANCE. The residue cannot grow, and
- * it is written down instead of being invisible — which is the difference between
- * deferred work and an unknown. Closing it is one copy slice plus one e2e run.
+ * The INVENTORY was exactly right: those are the three files, and the copy is
+ * asserted at nine call sites across them. The BLOCKER was not. All three
+ * suites run in this environment -- the read-only config with a backend you
+ * start, the mutation config with `E2E_UVICORN` -- and they were run for this
+ * change. `CLAUDE.md` section 12's rule is that a result you did not measure is
+ * not reportable; it does not follow that a suite you did not TRY to run is
+ * unrunnable, and that inference is what parked seventeen labels.
+ *
+ * WHAT WAS RE-CASED, AND WHAT WAS DELIBERATELY NOT. Casing only -- no word was
+ * added, removed or reworded, because the wording is a product decision and the
+ * register is not. So `createExperimentDescriptionLabel` reads "What Is It?
+ * (Optional)": odd-looking, and the honest result of applying the committed rule
+ * to copy somebody chose. Rewriting it to "Description (Optional)" would read
+ * better and is a different decision from the one this slice is authorised to
+ * take.
+ *
+ * Two of the seventeen would have passed `register1Violations` untouched -- it
+ * only flags words of four or more characters, so "what is it?" clears it on
+ * word length alone. They were re-cased anyway: the checker defines the floor,
+ * `casing-and-copy.md` defines the intent, and a label that passes the checker
+ * while reading as a sentence is the defect the owner reported.
+ *
+ * THE CEILING IS NOW A FLOOR OF ZERO. It stays as an assertion rather than
+ * being deleted, so a new suffix-named violation fails here instead of
+ * re-opening the inventory.
  */
 const WIDE_REGISTER_1_KEY =
   /(?:Label|Action|Title|Tab|Chip|Badge|Step|Heading|Eyebrow|Submit|Button|Cta)$/;
-const WIDE_ONLY_RESIDUE_CEILING = 17;
+const WIDE_ONLY_RESIDUE_CEILING = 0;
 
 describe('UX-CASE §1b · the suffix-named residue is inventoried and cannot grow', () => {
   const wideOnly = Object.entries(LABELS).filter(
@@ -332,8 +335,9 @@ describe('UX-CASE §1b · the suffix-named residue is inventoried and cannot gro
       offenders.length,
       `suffix-named Register 1 labels violating the register: ${offenders.length} ` +
         `(ceiling ${WIDE_ONLY_RESIDUE_CEILING}).\n${offenders.join('\n')}\n\n` +
-        'A NEW one was added. Put the label in Title Case rather than raising this ' +
-        'ceiling — the list is residue this slice measured and deferred, not a budget.',
+        'This set was swept to zero on 2026-09-14. Put the label in Title Case rather ' +
+        'than raising the ceiling: it is a floor now, not a budget, and raising it ' +
+        're-opens an inventory that took one copy slice and four suite runs to close.',
     ).toBeLessThanOrEqual(WIDE_ONLY_RESIDUE_CEILING);
   });
 });
@@ -540,12 +544,20 @@ const RENDER_ALLOWLIST: Readonly<Record<string, string>> = {
      session finds them without re-measuring. */
   'Change this value': 'FieldCaptureControl <label>; also asserted in live-screens.test.tsx',
   'Search within this experiment': 'ExperimentGraphPanel <label>',
-  'Change folder': 'LABELS.libraryMoveAction — key does not match REGISTER_1_KEY (see §1b)',
-  'ISAAC record version': 'lib/recordIdentity.ts row label',
-  'Record identifier': 'lib/recordIdentity.ts row label',
-  'Record type': 'lib/recordIdentity.ts row label',
-  'Record domain': 'lib/recordIdentity.ts row label',
-  'Source type': 'lib/recordIdentity.ts row label',
+  /* The five `lib/recordIdentity.ts` row labels were here -- `ISAAC record
+     version`, `Record identifier`, `Record type`, `Record domain`, `Source
+     type`. Closed 2026-09-14 in the same slice as the section 1b residue, which
+     is what this file's own note said they needed ("a copy sweep over
+     record-identity vocabulary and form labels is its own slice"). They are
+     table row labels, which `casing-and-copy.md:10-11` names in Register 1
+     outright, so the exemption was never on firm ground. `Source Type` also
+     moved at its two graph-detail `term:` sites; the two COMMENTS mentioning
+     it, and every `source_type` VALUE, are untouched -- those are Register 3
+     (`casing-and-copy.md:37` names `source_type` values verbatim). */
+  /* 'Change folder' was here. Dropped 2026-09-14 when `LABELS.libraryMoveAction`
+     became `Change Folder` in the §1b sweep -- and the ROW ITSELF is what caught
+     it: the allowlist asserts every exemption still renders, so a fixed string
+     fails as a stale exemption rather than lingering as a silent one. */
   'Record created': 'lib/recordIdentity.ts row label',
 };
 

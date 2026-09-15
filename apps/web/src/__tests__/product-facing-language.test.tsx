@@ -611,7 +611,7 @@ describe("R0 · the guided walkthrough's copy uses no harness vocabulary", () =>
       'Skip Tutorial',
       'Replay Tutorial',
       'Close Tutorial',
-      'Tutorial complete',
+      'Tutorial Complete',
       'Help & Tutorial',
       'What My Experiments Contains',
       'Opening a Worked Example',
@@ -767,7 +767,7 @@ describe('P1 · product-facing language — every pattern still flags its own de
   it('create copy that no pattern was written for stays unflagged', () => {
     for (const shipped of [
       'Starts an empty record with the questions ISAAC needs already listed, and opens it.',
-      'Name your experiment',
+      'Name Your Experiment',
       'Give the experiment a title to create it.',
       // The empty state's lede. It reads "Create your FIRST experiment", and the
       // pattern requires `record|experiment` immediately after the optional

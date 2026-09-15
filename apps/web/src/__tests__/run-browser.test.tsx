@@ -27,9 +27,6 @@
  * an unrouted call still throws, so nothing passes by accident.
  */
 
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
-
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
 import { act, configure, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, useLocation } from 'react-router-dom';
@@ -875,8 +872,13 @@ describe('search', () => {
     expect(screen.getByText(/No run matches this search or these filters/)).toBeInTheDocument();
     expect(screen.getByText(/This record has 120 runs/)).toBeInTheDocument();
     expect(countText()).toBe('Showing 0 of 0 matching · 120 runs in this record');
-    // The record is NOT empty, so the empty-record copy must not appear.
-    expect(screen.queryByText(/No runs yet\./)).toBeNull();
+    /* The record is NOT empty, so the empty-RECORD copy must not appear -- the
+       distinction this assertion exists for. It used to match `/No runs yet\./`;
+       that sentence was removed on 2026-09-14 when the empty state stopped
+       repeating the count line, so the pattern matched nothing at all and the
+       assertion had become VACUOUSLY TRUE. Re-pointed at the copy that actually
+       ships now, which is what keeps it able to fail. */
+    expect(screen.queryByText(/Add one for the first set of conditions/)).toBeNull();
   });
 
   it('counts a partial match as matched-of-total, with the record total beside it', async () => {
@@ -1863,79 +1865,58 @@ describe('at zero runs, one fact is stated once', () => {
    * FOUND IN A BROWSER, NOT BY A TEST. On a record with no runs, `.runs-count`
    * read "No runs in this record yet" at y=377 and `.runs-empty` read "No runs
    * yet. Add one for the first set of conditions you measured." at y=416 --
-   * 39px apart, the same fact twice, and the second one is the better of the
-   * two because it carries the remedy.
+   * 39px apart: the same sentence, then an instruction.
    *
-   * The count is NOT blanked, and that is the whole point of the fix: it is an
-   * `aria-live` region, so a reader who deletes their LAST run hears the
-   * transition, and an emptied live region announces nothing. The text stays in
-   * the accessibility tree and only the paint is withheld.
+   * THE FIX SPLITS THE TWO RATHER THAN HIDING ONE. The count keeps the fact
+   * (and its `aria-live` announcement, which a reader deleting their last run
+   * depends on); the empty state keeps only the remedy. An earlier attempt
+   * hid the count with the visually-hidden recipe, passed every unit test, and
+   * was failed 19 times by the read-only browser sweep -- `1px visible of 143px
+   * (1%)` and `scrollWidth 143 vs clientWidth 1` -- which would have cost two
+   * permanent exemptions in `e2e/layout-allowlist.ts`. That is recorded in
+   * `RunsSection`'s own note.
    */
-  it('MUTATION-GUARDED: the count is visually hidden but still announced', async () => {
+  it('MUTATION-GUARDED: the count states the fact, the empty state states only the remedy', async () => {
     /*
-     * MUTATION: dropping the ` runs-count-quiet` branch in `RunsSection` makes
+     * MUTATION: restoring "No runs yet." to the front of `.runs-empty` makes
      * this RED, and so does returning `''` from `countLine` for the zero case --
-     * the first restores the visible duplicate, the second silences the live
-     * region.
+     * the first restores the duplication, the second silences the live region.
      */
     stubBackend(() => ({ runs: [], total: 0, matched: 0, limit: 20, offset: 0 }));
     renderRecord();
     await waitForList();
 
     const count = document.querySelector('.runs-count')!;
-    // still a live region, still carrying the words
+    // the fact, still announced
     expect(count.getAttribute('aria-live')).toBe('polite');
     expect(count.textContent).toContain('No runs in this record yet');
-    // …and hidden from the eye
-    expect(count.className).toContain('runs-count-quiet');
 
-    // the empty state is the visible copy, and it is the one with the remedy
     const empty = document.querySelector('.runs-empty');
-    expect(empty, 'the empty state must be the visible statement').not.toBeNull();
+    expect(empty, 'the empty state must still be rendered').not.toBeNull();
+    // the remedy…
     expect(empty!.textContent).toContain('Add one for the first set of conditions');
+    // …and NOT the fact a second time. Asserted over the whole screen rather
+    // than over the two nodes, so moving the sentence to a third element does
+    // not quietly pass.
+    const saidTwice = Array.from(document.querySelectorAll('*')).filter(
+      (el) => el.children.length === 0 && /no runs/i.test(el.textContent ?? ''),
+    );
+    expect(
+      saidTwice.map((el) => el.textContent?.trim()),
+      '"no runs" is stated by more than one leaf element',
+    ).toHaveLength(1);
   });
 
-  it('with runs, the count is visible and unchanged', async () => {
+  it('with runs, the count is the count and no empty state is rendered', async () => {
     /*
-     * The negative control. Without it, hiding `.runs-count` unconditionally
-     * would pass the test above while deleting the count from every record that
-     * HAS runs -- which is the over-correction, and it is the more damaging of
-     * the two failures.
+     * The negative control: a fix that blanked or hid the count would pass the
+     * test above while deleting the count from every record that HAS runs.
      */
     stubBackend((q) => serveRuns([mkRun(1), mkRun(2)], q));
     renderRecord();
     await waitForList();
 
-    const count = document.querySelector('.runs-count')!;
-    expect(count.className).not.toContain('runs-count-quiet');
     expect(countText()).toContain('Showing 2 of 2 runs');
     expect(document.querySelector('.runs-empty')).toBeNull();
-  });
-
-  it('CSS SOURCE: hidden by clip-path, never by display:none or visibility:hidden', () => {
-    /*
-     * `display: none` and `visibility: hidden` remove an element from the
-     * ACCESSIBILITY TREE as well as the viewport, which would silence the live
-     * region this fix exists to preserve. jsdom computes no layout, so the
-     * technique is asserted at its source -- the same way
-     * `workflow-spine-a11y.test.tsx` asserts the spine's equivalent rule.
-     */
-    const css = readFileSync(
-      resolve(__dirname, '..', 'components/runs.css'),
-      'utf8',
-    );
-    const rule = /\.runs-count-quiet\s*\{([^}]*)\}/.exec(css);
-    expect(rule, 'the .runs-count-quiet rule must exist').not.toBeNull();
-    expect(rule![1]).toMatch(/clip-path:\s*inset/);
-    expect(rule![1]).toMatch(/position:\s*absolute/);
-    expect(rule![1]).not.toMatch(/display:\s*none/);
-    expect(rule![1]).not.toMatch(/visibility:\s*hidden/);
-    // every declaration terminated -- an unterminated one silently drops the
-    // NEXT property too, which is how an invalid `outline` shorthand once left
-    // a whole screen with no focus ring.
-    const decls = rule![1].split('\n').map((l) => l.trim()).filter((l) => l.length > 0);
-    for (const d of decls) {
-      expect(d.endsWith(';'), `unterminated declaration: ${d}`).toBe(true);
-    }
   });
 });

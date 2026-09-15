@@ -121,7 +121,7 @@ describe('the control that did not exist', () => {
     });
 
     const el = await openRename();
-    const input = within(el).getByLabelText('Run name') as HTMLInputElement;
+    const input = within(el).getByLabelText('Run Name') as HTMLInputElement;
     // Pre-filled with the current name, so a correction is an edit rather than a retype.
     expect(input.value).toBe('Run 1');
 
@@ -129,7 +129,7 @@ describe('the control that did not exist', () => {
       fireEvent.change(input, { target: { value: '300 K, in situ' } });
     });
     await act(async () => {
-      fireEvent.click(within(el).getByRole('button', { name: 'Save name' }));
+      fireEvent.click(within(el).getByRole('button', { name: 'Save Name' }));
     });
 
     const write = calls.find((c) => c.init?.method === 'PATCH');
@@ -152,12 +152,12 @@ describe('the control that did not exist', () => {
     });
     const el = await openRename();
     await act(async () => {
-      fireEvent.change(within(el).getByLabelText('Run name'), {
+      fireEvent.change(within(el).getByLabelText('Run Name'), {
         target: { value: '300 K, in situ' },
       });
     });
     await act(async () => {
-      fireEvent.click(within(el).getByRole('button', { name: 'Save name' }));
+      fireEvent.click(within(el).getByRole('button', { name: 'Save Name' }));
     });
 
     await waitFor(() => {
@@ -177,10 +177,10 @@ describe('the control that did not exist', () => {
 
     const el = await openRename();
     await act(async () => {
-      fireEvent.change(within(el).getByLabelText('Run name'), { target: { value: '   ' } });
+      fireEvent.change(within(el).getByLabelText('Run Name'), { target: { value: '   ' } });
     });
     await act(async () => {
-      fireEvent.click(within(el).getByRole('button', { name: 'Save name' }));
+      fireEvent.click(within(el).getByRole('button', { name: 'Save Name' }));
     });
 
     expect(within(el).getByRole('alert').textContent).toContain('A run needs a name');
@@ -205,10 +205,10 @@ describe('the control that did not exist', () => {
 
     const el = await openRename();
     await act(async () => {
-      fireEvent.change(within(el).getByLabelText('Run name'), { target: { value: '300 K' } });
+      fireEvent.change(within(el).getByLabelText('Run Name'), { target: { value: '300 K' } });
     });
     await act(async () => {
-      fireEvent.click(within(el).getByRole('button', { name: 'Save name' }));
+      fireEvent.click(within(el).getByRole('button', { name: 'Save Name' }));
     });
 
     await waitFor(() => {
@@ -221,10 +221,10 @@ describe('the control that did not exist', () => {
     expect(card().querySelector('.run-card-name')?.textContent).toBe('Run 1');
     expect(card().querySelector('.run-rename-status')?.textContent ?? '').not.toContain('saved');
     // And the reader's text survives, so the retry is a retry and not a re-entry.
-    expect((within(el).getByLabelText('Run name') as HTMLInputElement).value).toBe('300 K');
+    expect((within(el).getByLabelText('Run Name') as HTMLInputElement).value).toBe('300 K');
     // Save is withheld while the held token is still the rejected one — pressing it
     // again could only produce the same refusal.
-    expect((within(el).getByRole('button', { name: 'Save name' }) as HTMLButtonElement).disabled).toBe(
+    expect((within(el).getByRole('button', { name: 'Save Name' }) as HTMLButtonElement).disabled).toBe(
       true,
     );
   });
@@ -234,7 +234,7 @@ describe('the control that did not exist', () => {
     const el = await openRename();
     const section = el.querySelector('.run-rename') as HTMLElement;
     expect(section.textContent).not.toMatch(/\d+\s*characters?/);
-    expect((within(el).getByLabelText('Run name') as HTMLInputElement).maxLength).toBe(-1);
+    expect((within(el).getByLabelText('Run Name') as HTMLInputElement).maxLength).toBe(-1);
   });
 
   it('names the run in the control’s accessible name, and keeps the visible word in it', async () => {

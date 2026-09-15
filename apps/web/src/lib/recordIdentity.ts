@@ -224,7 +224,7 @@ export interface RecordInfoSpec {
 export const RECORD_INFO_SPECS: readonly RecordInfoSpec[] = [
   {
     path: 'isaac_record_version',
-    label: 'ISAAC record version',
+    label: 'ISAAC Record Version',
     description: '',
     beforeExport: 'written_at_export',
     beforeExportNote:
@@ -241,7 +241,7 @@ export const RECORD_INFO_SPECS: readonly RecordInfoSpec[] = [
   },
   {
     path: 'record_id',
-    label: 'Record identifier',
+    label: 'Record Identifier',
     // schema/isaac_record_v1.json → properties.record_id.description
     description: 'ULID identifier for the record.',
     beforeExport: 'written_at_export',
@@ -256,7 +256,7 @@ export const RECORD_INFO_SPECS: readonly RecordInfoSpec[] = [
     path: 'record_type',
     // schema/isaac_record_v1.json → properties.record_type.description
     description: 'Fundamental nature of the record.',
-    label: 'Record type',
+    label: 'Record Type',
     beforeExport: 'not_read_here',
     beforeExportNote:
       'Derived by a stored rule — this build supports one path and stamps the same classification on every draft. This screen reads it from the exported record, so it is shown once the record is written.',
@@ -270,7 +270,7 @@ export const RECORD_INFO_SPECS: readonly RecordInfoSpec[] = [
   },
   {
     path: 'record_domain',
-    label: 'Record domain',
+    label: 'Record Domain',
     // schema/isaac_record_v1.json → properties.record_domain.description
     description: 'Scientific domain of the record content.',
     beforeExport: 'not_read_here',
@@ -283,7 +283,7 @@ export const RECORD_INFO_SPECS: readonly RecordInfoSpec[] = [
   },
   {
     path: 'source_type',
-    label: 'Source type',
+    label: 'Source Type',
     // schema/isaac_record_v1.json → properties.source_type.description
     description: 'Origin of the data acquisition.',
     beforeExport: 'not_read_here',

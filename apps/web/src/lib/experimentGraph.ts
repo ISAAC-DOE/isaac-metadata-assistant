@@ -469,7 +469,7 @@ function supportWhy(ev: FieldEvidence): string {
 
 function evidenceDetailLines(ev: FieldEvidence): ExperimentGraphDetailLine[] {
   const lines: ExperimentGraphDetailLine[] = [
-    { term: 'Source type', value: ev.source_type },
+    { term: 'Source Type', value: ev.source_type },
   ];
   if (ev.source_file) lines.push({ term: 'Source file', value: ev.source_file });
   if (ev.locator) lines.push({ term: 'Locator', value: ev.locator });

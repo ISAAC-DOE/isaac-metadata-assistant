@@ -148,9 +148,9 @@ describe('Record Info — the six top-level values, and where each comes from', 
     renderInfo();
     const header = screen.getByRole('button', { name: /Record Info/ });
     expect(header).toHaveAttribute('aria-expanded', 'false');
-    expect(screen.queryByText('ISAAC record version')).toBeNull();
+    expect(screen.queryByText('ISAAC Record Version')).toBeNull();
     fireEvent.click(header);
-    expect(screen.getByText('ISAAC record version')).toBeInTheDocument();
+    expect(screen.getByText('ISAAC Record Version')).toBeInTheDocument();
   });
 
   it('shows every value from the exported record, each labelled and addressed', () => {

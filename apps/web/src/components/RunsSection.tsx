@@ -2049,29 +2049,7 @@ function RunsBrowser({
           already carries several `status` regions (one per run card) that an
           unnamed extra one would sit among.
         */}
-        {/*
-          AND WHEN IT WOULD REPEAT THE EMPTY STATE, IT IS HIDDEN RATHER THAN
-          BLANKED.
-
-          At zero runs this line and `EmptyRuns` said the same thing 39px apart
-          (measured in Chromium: y=377 and y=416). Returning `''` would have been
-          the shorter fix and would have cost a real announcement: this is a live
-          region, so a reader who DELETES their last run currently hears "No runs
-          in this record yet", and an empty region says nothing. So the text
-          stays and only the paint is withheld -- the same remedy, for the same
-          reason, as the workflow spine's repeated blocking reason.
-
-          Compared against `NO_RUNS_COUNT` rather than re-testing `total === 0`
-          here: the condition for showing it belongs to `countLine`, and reading
-          its own answer cannot drift out of step with it.
-        */}
-        <p
-          className={`runs-count${
-            countLine(loaded, filtering, countFocus) === NO_RUNS_COUNT ? ' runs-count-quiet' : ''
-          }`}
-          aria-live="polite"
-          aria-atomic="true"
-        >
+        <p className="runs-count" aria-live="polite" aria-atomic="true">
           {countLine(loaded, filtering, countFocus)}
         </p>
       </div>
@@ -2473,14 +2451,32 @@ type CountFocus = 'none' | 'loading' | 'viewing' | 'missing';
  * early would be the same defect a moment sooner.
  */
 /**
- * The zero-state count, named because the render site has to RECOGNISE it.
+ * The zero-state count.
  *
- * `EmptyRuns` below says the same thing and says it better -- it carries the
- * remedy ("Add one for the first set of conditions you measured"). Measured in
- * Chromium on a record with no runs: this line at y=377 and that paragraph at
- * y=416, 39px apart, stating one fact twice. The render site hides this copy
- * VISUALLY while keeping it in the live region; see the note there for why it is
- * not simply blanked.
+ * THIS LINE STATES THE FACT AND `EmptyRuns` STATES THE REMEDY, and they used to
+ * state both twice. Measured in Chromium on a record with no runs: this line at
+ * y=377 reading "No runs in this record yet" and `.runs-empty` at y=416 reading
+ * "No runs yet. Add one for the first set of conditions you measured." -- 39px
+ * apart, the same sentence, then an instruction.
+ *
+ * TWO OTHER FIXES WERE BUILT AND DISCARDED, and both are recorded because each
+ * looked right on its own terms:
+ *
+ *  * Returning `''` here. Shortest, and it silences a real announcement -- this
+ *    is an `aria-live` region, so a reader who deletes their LAST run is told,
+ *    and this file's own note (see the render site) is that emptying a live
+ *    region says nothing.
+ *  * Keeping the text and hiding it with the visually-hidden recipe. That
+ *    preserves the announcement and was measured PASSING every unit test -- and
+ *    the read-only browser sweep failed it 19 times, correctly: `1px visible of
+ *    143px (1%) -- below the 24px readable floor`, plus `scrollWidth 143 vs
+ *    clientWidth 1`. Silencing that needs two exemptions in
+ *    `e2e/layout-allowlist.ts`, which weaken those probes for this selector
+ *    permanently, to hide a sentence that did not need to exist twice.
+ *
+ * So the duplication is removed at its source instead: the empty state no
+ * longer repeats the fact this line already carries. Nothing is hidden, no
+ * probe is weakened, and the announcement is untouched.
  */
 const NO_RUNS_COUNT = 'No runs in this record yet';
 
@@ -2523,7 +2519,10 @@ function EmptyRuns({
   if (!filtering || total === 0) {
     return (
       <p className="runs-empty">
-        No runs yet. Add one for the first set of conditions you measured.
+        {/* THE REMEDY ONLY. `.runs-count` 39px above already says "No runs in
+            this record yet" -- see `NO_RUNS_COUNT`. This paragraph used to open
+            with "No runs yet." and repeat it. */}
+        Add one for the first set of conditions you measured.
       </p>
     );
   }

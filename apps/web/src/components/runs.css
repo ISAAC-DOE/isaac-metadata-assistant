@@ -58,27 +58,7 @@
   color: var(--text-slate);
 }
 
-/*
- * THE ZERO-STATE COUNT, KEPT FOR THE LIVE REGION AND WITHHELD FROM THE EYE.
- *
- * `.runs-count` and `.runs-empty` both state "this record has no runs" -- measured
- * in Chromium 39px apart (y=377 and y=416), and `.runs-empty` is the better of the
- * two because it carries the remedy. Blanking the count instead would also have
- * worked visually and would have cost an announcement: this is an `aria-live`
- * region, so a reader who deletes their LAST run hears the count change, and an
- * emptied region says nothing at all.
- *
- * The standard visually-hidden technique, the same one `.spine-meta-duplicate`
- * uses for the workflow spine's repeated blocking reason, for the same reason.
- */
-.runs-count-quiet {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  overflow: hidden;
-  clip-path: inset(50%);
-  white-space: nowrap;
-}
+
 
 
 /*

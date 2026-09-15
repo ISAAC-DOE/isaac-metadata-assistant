@@ -1067,7 +1067,7 @@ function supportWhy(ev: FieldEvidence, address: string): string {
 function evidenceDetailLines(ev: FieldEvidence, address: string): EvidenceGraphDetailLine[] {
   const lines: EvidenceGraphDetailLine[] = [
     { term: 'Address', value: address },
-    { term: 'Source type', value: ev.source_type },
+    { term: 'Source Type', value: ev.source_type },
   ];
   if (ev.source_file) lines.push({ term: 'Source file', value: ev.source_file });
   if (ev.locator) lines.push({ term: 'Locator', value: ev.locator });
