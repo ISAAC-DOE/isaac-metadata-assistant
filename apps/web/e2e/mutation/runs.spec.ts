@@ -138,6 +138,32 @@ function fieldIsoControl(card: Locator, path: string): Locator {
   return card.locator(`[data-run-field-iso-path="${path}"]`);
 }
 
+/**
+ * Open the ISO text path for a datetime field, then hand back its input.
+ *
+ * *** THIS HELPER EXISTS BECAUSE THE SPEC WITHOUT IT TIMED OUT, and the reason
+ * is a real property of the control rather than a flake. *** The ISO box lives
+ * inside a `<details open={isoOpen}>` that opens ITSELF only when the stored
+ * value is one the picker cannot hold (an offset, fractional seconds, no zone).
+ * On a FRESH run the field is empty, the picker can hold empty, so the
+ * disclosure is shut — and Playwright's `fill` requires a visible element, so it
+ * waited the full 60s.
+ *
+ * Clicking the summary is what a reader does, so the spec does that. It is
+ * idempotent: `<details>` toggling is driven off the element's own `open`, so
+ * this is safe to call twice.
+ */
+async function openFieldIso(card: Locator, path: string): Promise<Locator> {
+  const input = fieldIsoControl(card, path);
+  if (!(await input.isVisible())) {
+    await card
+      .locator(`.run-field:has([data-run-field-iso-path="${path}"]) .run-field-iso-summary`)
+      .click();
+  }
+  await expect(input).toBeVisible();
+  return input;
+}
+
 const fieldError = (card: Locator, path: string) =>
   card.locator(`.run-field:has(.run-field-path:text-is("${path}")) .run-field-error`);
 
@@ -667,7 +693,9 @@ test.describe('R5 · the Run workspace', () => {
      * below — that the stored value is `2026-01-31T09:00:00Z` — is unchanged,
      * which is the point: the two controls write the same field.
      */
-    await fieldIsoControl(card, 'timestamps.acquired_start_utc').fill('2026-01-31T09:00:00Z');
+    await (await openFieldIso(card, 'timestamps.acquired_start_utc')).fill(
+      '2026-01-31T09:00:00Z',
+    );
 
     /*
      * Leave the runs workspace while that first PATCH is still open. This is ONE
