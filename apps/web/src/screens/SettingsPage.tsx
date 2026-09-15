@@ -228,7 +228,11 @@ export function SettingsPage() {
           aria-labelledby={tabId('api')}
           tabIndex={0}
         >
-          <ApiAccessTab state={openapi} onOpenExplorer={() => setActiveTab('explorer')} />
+          <ApiAccessTab
+            state={openapi}
+            onOpenExplorer={() => setActiveTab('explorer')}
+            onOpenMcp={() => setActiveTab('mcp')}
+          />
         </div>
       )}
 
@@ -423,7 +427,7 @@ function OverviewTab({
       icon={<Settings size={18} strokeWidth={2} aria-hidden="true" className="settings-card-icon" />}
       headingId="settings-overview-heading"
       title="Overview"
-      sub="What this running build is right now. Runtime Mode, Persistence and Build Commit are read live from this deployment; the other rows are fixed properties of this build. This build has no user-adjustable settings."
+      sub="What this running build is right now. Each status row says whether its value is read per request or fixed for this build. This build has no user-adjustable settings."
     >
       {state.status === 'loading' && <LoadingPanel label="Loading app info…" />}
       {state.status === 'error' && <BackendDown error={state.error} onRetry={state.reload} />}
@@ -442,20 +446,50 @@ function OverviewBody({
   const concepts = useMemo(() => settingsConcepts(settingsFactsFrom(data)), [data]);
   return (
     <>
-      <h3 className="settings-subheading">Runtime Status</h3>
+      {/*
+        ── `System Status`, AND THE PROVENANCE MOVED OUT OF THE PROSE ─────────
+        ~~`Runtime Status`~~ — the block carries three rows that are read live
+        and four that are fixed for a given build, and the card's supporting
+        line has to say which are which. That sentence has been wrong TWICE
+        (see this component's header: once claiming every row was live over a
+        block of which three were literals, and once grouping `Build Commit`
+        with the fixed rows when it is read from the environment per request).
+        A sentence that has to enumerate a set it sits above is the wrong
+        instrument, so each row now carries its OWN provenance and the sentence
+        no longer has to be right about the set.
+        The name `System Status` is the owner's, and it is the more accurate
+        one: four of these seven are properties of the build rather than of the
+        runtime.
+      */}
+      <h3 className="settings-subheading">System Status</h3>
       <dl className="settings-figures">
-        <Figure label="App Version" value={<span className="mono">{data.app_version}</span>} />
-        <Figure label="Build Commit" value={<CommitShort commit={data.build_commit} />} />
+        <Figure label="App Version" value={<span className="mono">{data.app_version}</span>} source="build" />
+        <Figure label="Build Commit" value={<CommitShort commit={data.build_commit} />} source="live" />
         <Figure
           label="Record Schema"
           value={<span className="mono">v{data.record_schema_version}</span>}
+          source="build"
         />
-        <Figure label="Runtime Mode" value={<span className="mono">{data.runtime_mode}</span>} />
-        <Figure label="Data Regime" value={<span className="mono">{data.data_regime}</span>} />
-        <Figure label="Persistence" value={<span className="mono">{data.persistence}</span>} />
-        <Figure label="Core" value={<span className="mono">{data.core}</span>} />
+        <Figure label="Runtime Mode" value={<span className="mono">{data.runtime_mode}</span>} source="live" />
+        <Figure label="Data Regime" value={<span className="mono">{data.data_regime}</span>} source="build" />
+        <Figure label="Persistence" value={<span className="mono">{data.persistence}</span>} source="live" />
+        <Figure label="Core" value={<span className="mono">{data.core}</span>} source="build" />
       </dl>
 
+      {/*
+        THE THIRTEEN BOUNDARY SUMMARIES STAY VISIBLE, and that is a decision
+        rather than an omission.
+
+        The density brief for this page proposed turning them into navigation
+        rows with the explanation behind a drawer. They are ALREADY one line
+        each — the drawer they would point at is the Data & Privacy tab, which
+        the jump row below already offers — and every one of them states a
+        privacy, data-handling or authentication POSTURE. Those are exactly the
+        class this project's rule keeps out of a disclosure: a security or
+        privacy state must not be something a reader has to open something to
+        find. So what was compressed here is the LAYOUT (see
+        `.settings-summary-list` in `screens.css`), not the claims.
+      */}
       <h3 className="settings-subheading">Boundaries at a Glance</h3>
       <dl className="settings-summary-list">
         {concepts.map((concept) => (
@@ -549,10 +583,43 @@ function AdvancedSurfaces() {
   );
 }
 
-function Figure({ label, value }: { label: string; value: ReactNode }) {
+/**
+ * One labelled figure, with an OPTIONAL provenance mark.
+ *
+ * `source` is `'live'` for a value this deployment resolves per request and
+ * `'build'` for one that is fixed for a given image. It renders as a short
+ * visible word beside the label, NOT as a colour and not as a tooltip: it
+ * qualifies the value, and this project's rule is that a qualifier of a figure
+ * stays beside the figure.
+ *
+ * Omitted entirely where the caller does not know — `undefined` renders
+ * nothing rather than defaulting to either word, because guessing a
+ * provenance is how the two wrong sentences in this component's header were
+ * written in the first place.
+ */
+function Figure({
+  label,
+  value,
+  source,
+}: {
+  label: string;
+  value: ReactNode;
+  source?: 'live' | 'build';
+}) {
   return (
     <div className="settings-figure">
-      <dt>{label}</dt>
+      <dt>
+        {/* The label is ALWAYS its own element, provenance or not, so a query
+            for the label text matches the label rather than the label with the
+            provenance word concatenated onto it — the same reason
+            `StatsPrimitives`' `FigureList` wraps its own. */}
+        <span className="settings-figure-label">{label}</span>
+        {source ? (
+          <span className="settings-figure-source">
+            {source === 'live' ? 'read per request' : 'fixed for this build'}
+          </span>
+        ) : null}
+      </dt>
       <dd>{value}</dd>
     </div>
   );
@@ -795,9 +862,11 @@ function AboutDetail({
 function ApiAccessTab({
   state,
   onOpenExplorer,
+  onOpenMcp,
 }: {
   state: OpenApiState;
   onOpenExplorer: () => void;
+  onOpenMcp: () => void;
 }) {
   return (
     <SettingsCard
@@ -806,7 +875,7 @@ function ApiAccessTab({
       title="API Access"
       sub="What a program can and cannot do with this build, and what it needs to send."
     >
-      <ApiKeysPanel onOpenExplorer={onOpenExplorer} />
+      <ApiKeysPanel onOpenExplorer={onOpenExplorer} onOpenMcp={onOpenMcp} />
 
       {state.status === 'loading' && <LoadingPanel label="Loading the API contract…" />}
       {state.status === 'error' && <BackendDown error={state.error} onRetry={state.reload} />}

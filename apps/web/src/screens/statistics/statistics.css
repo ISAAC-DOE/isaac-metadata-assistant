@@ -209,6 +209,26 @@
 }
 
 /*
+ * THE HEADLINE GLANCE ROW — six tiles, and a four-column grid is the wrong
+ * shape for six.
+ *
+ * `Workspace at a Glance` is now the FIRST thing on the Overview tab and
+ * carries six figures (seven when an `Unrecognized Status` is measured): total,
+ * needs attention, ready, exported, open questions, import sessions. On the
+ * shared `repeat(4, …)` that is 4 + 2 — a full row and a third-empty one — and
+ * the two orphans read as an afterthought rather than as peers of the four.
+ *
+ * `auto-fit` with a 150px floor puts six across at 1440, three across at the
+ * `wide` measure a sidebar leaves at 1024, and never fewer than two before the
+ * narrow rule below takes over. It is `auto-fit` rather than `auto-fill` so a
+ * seventh tile does not leave a phantom empty column when it is absent.
+ */
+.statistics .stats-cards-glance {
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: var(--space-md);
+}
+
+/*
  * A two-up section row (e.g. an evidence card beside an export-gate card).
  * Provided by this slice as part of the layout system; the wiring slice
  * applies it. Same minmax(0, …) reasoning as above.
@@ -237,6 +257,19 @@
 @media (max-width: 900px) {
   .statistics .stats-cards {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  /*
+   * THE GLANCE ROW TAKES THREE, NOT TWO, AND THE OVERRIDE IS NEEDED RATHER
+   * THAN PREFERRED.
+   *
+   * `.stats-cards-glance`'s `auto-fit` rule sits EARLIER in this file at the
+   * same specificity, so this media query silently won and the six headline
+   * tiles became 2 x 3 at 768px — measured in Chromium at exactly that width,
+   * which is how it was found. Three columns fits all six in two rows with a
+   * ~230px tile, and the narrow rule below still takes over at 560px.
+   */
+  .statistics .stats-cards-glance {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
   .statistics .stats-columns {
     grid-template-columns: minmax(0, 1fr);
@@ -276,6 +309,26 @@
   .statistics .stats-cards-headline {
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 10px;
+  }
+  /*
+   * ...AND THE GLANCE ROW NOW TAKES THE SAME TREATMENT, which reverses the
+   * decision recorded immediately above. That decision was right for the row
+   * it described and is kept rather than deleted: with four or five cards, an
+   * odd count two-up left a half-empty row directly under the caveat that
+   * qualifies it.
+   *
+   * WHAT CHANGED IS THE ROW, NOT THE REASONING. It now carries SIX figures as
+   * the first thing on the tab, so one-up is six full-width cards — roughly
+   * two screens before anything else — which is the precise failure the
+   * exception above exists to prevent, and it is worse here because this row
+   * is the page's lede. Six is even, so the half-empty row the old note warns
+   * about does not arise; the seven-card case (an `Unrecognized Status` was
+   * measured) does leave one, and that is the better trade against three
+   * screens of scrolling.
+   */
+  .statistics .stats-cards-glance {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--space-sm);
   }
 }
 
@@ -1857,4 +1910,115 @@
   color: var(--text-secondary);
   font-size: 13px;
   line-height: 1.55;
+}
+
+/* ---- Recent Work ------------------------------------------------------ */
+
+/*
+ * The five most recently updated records: a list of rows, deliberately NOT a
+ * table and NOT cards.
+ *
+ * A TABLE would need a header row for three columns whose meaning is already
+ * carried by their content (a title, a status word, a time), and would put a
+ * `<th>` above a list five rows long. CARDS would give each row the weight of
+ * a section on a tab whose whole point is that it stopped giving everything
+ * equal weight. A row list is the form that scans.
+ *
+ * The grid is `1fr auto auto`, so the title takes the slack and the status and
+ * the time stay on the trailing edge, right-aligned against each other down
+ * the column. `min-width: 0` on the title cell is what lets a long title
+ * ellipsise instead of pushing the time off the card.
+ */
+.statistics .stats-recent {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+.statistics .stats-recent-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: var(--space-md);
+  padding: var(--space-sm) 0;
+  border-bottom: 1px solid var(--border);
+}
+.statistics .stats-recent-row:last-child {
+  border-bottom: 0;
+}
+.statistics .stats-recent-title {
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.statistics .stats-recent-when {
+  font-size: 12px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+/*
+ * The status word.
+ *
+ * NOT a `StatusChip`, and the component's own header explains why: that
+ * vocabulary's `pass` owns the reserved verdict green, and a workflow position
+ * is not a verdict. This is a neutral pill whose TONE is decoration only — the
+ * word is always rendered, so the row is fully readable with all colour
+ * removed, which is the rule `status-system.md` states for every signal on
+ * this surface.
+ *
+ * The tones reuse the EXACT token families `.stat-card[data-tone]` already
+ * uses on this page — `--advisory-*` for attention, `--pass-*` for ready,
+ * `--cover-text` for an unrecognised status — so an amber means one thing in
+ * both places and this rule declares no colour of its own.
+ *
+ * `--pass-*` IS THE RESERVED VERDICT FAMILY, and using it here needs its own
+ * justification rather than borrowing the card's. `Ready to Export` is exactly
+ * what `.stat-card[data-tone='good']` already paints on the tile three
+ * sections up, from the same derivation (`deriveWorkspaceTotals`), so this
+ * row states the same fact in the same colour. What must NOT happen is a
+ * `pass` treatment on a status this page cannot place, which is why the
+ * unrecognised branch is `quiet` and never `good`.
+ */
+.statistics .stats-recent-state {
+  display: inline-flex;
+  align-items: center;
+  padding: var(--space-2xs) var(--space-sm);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface-subtle);
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--text-slate);
+  white-space: nowrap;
+}
+.statistics .stats-recent-state[data-tone='attention'] {
+  border-color: var(--advisory-border);
+  background: var(--advisory-bg);
+  color: var(--advisory-text);
+}
+.statistics .stats-recent-state[data-tone='good'] {
+  border-color: var(--pass-border);
+  background: var(--pass-bg);
+  color: var(--pass-text);
+}
+.statistics .stats-recent-state[data-tone='quiet'] {
+  color: var(--cover-text);
+}
+
+/* Narrow: the three columns become title over (status · time), so a long
+   title keeps a full line rather than ellipsising to nothing at 320px. */
+@media (max-width: 560px) {
+  .statistics .stats-recent-row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--space-xs);
+  }
+  .statistics .stats-recent-title {
+    white-space: normal;
+  }
 }
