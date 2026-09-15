@@ -49,6 +49,31 @@ interface AssistantDrawerProps {
   railClassName: string;
   /** Accessible name for the region / slide-over dialog. */
   label?: string;
+  /**
+   * A MONOTONIC COUNTER THAT MEANS "SOMETHING OUTSIDE ASKED FOR THIS PANEL".
+   *
+   * `Ask ISAAC` on a check finding puts a question in the composer, and the
+   * rail is COLLAPSED BY DEFAULT on desktop (see `readStoredRailCollapsed`) —
+   * so without this the question would land somewhere the reader cannot see,
+   * which is the failure mode that control exists to avoid.
+   *
+   * IT ONLY EVER REVEALS. Each increment expands the desktop rail and, at
+   * narrow widths, opens the slide-over; nothing here collapses or closes, so
+   * it can never take the panel away from a reader who is using it. The stored
+   * collapse PREFERENCE is deliberately not written: this is one request for
+   * one question, not the reader choosing to keep the rail open.
+   *
+   * The narrow/desktop split matters. `open` carries `role="dialog"` +
+   * `aria-modal` and a focus trap, and this component's own hygiene effect
+   * forces it false at ≥1024px — so setting it on desktop would be setting a
+   * flag that is immediately cleared, and worse, would briefly assert dialog
+   * semantics on a static rail. It is set only when `matchMedia` says the
+   * viewport is narrow, and the desktop path expands instead.
+   *
+   * Omitted (every other mount) ⇒ inert. `0` is the resting value and the
+   * effect's guard, so a first render never reveals anything.
+   */
+  revealSignal?: number;
   children: ReactNode;
 }
 
@@ -146,7 +171,12 @@ function writeStoredRailCollapsed(next: boolean): void {
  * for exactly that reason: there is only ever one mount of the panel, for the
  * lifetime of this component.
  */
-export function AssistantDrawer({ railClassName, label = LABELS.assistant, children }: AssistantDrawerProps) {
+export function AssistantDrawer({
+  railClassName,
+  label = LABELS.assistant,
+  revealSignal = 0,
+  children,
+}: AssistantDrawerProps) {
   const [open, setOpen] = useState(false);
   // PR-E, default flipped by UX-013 — desktop rail collapse. Starts `true`
   // (COLLAPSED) on every render, including the FIRST one, so
@@ -195,6 +225,19 @@ export function AssistantDrawer({ railClassName, label = LABELS.assistant, child
   useEffect(() => {
     setCollapsed(readStoredRailCollapsed());
   }, []);
+
+  /* REVEAL ON REQUEST — see `revealSignal`'s own note for why it only ever
+     opens, why the stored preference is not written, and why `open` is set at
+     narrow widths only. `0` is the resting value, so mounting reveals nothing. */
+  useEffect(() => {
+    if (revealSignal === 0) return;
+    setCollapsed(false);
+    const narrow =
+      typeof window !== 'undefined' &&
+      typeof window.matchMedia === 'function' &&
+      !window.matchMedia('(min-width: 1024px)').matches;
+    if (narrow) setOpen(true);
+  }, [revealSignal]);
 
   function handleRailToggle() {
     const next = !collapsed;

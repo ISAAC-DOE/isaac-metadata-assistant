@@ -1173,19 +1173,101 @@
   color: var(--text-slate);
 }
 
+/* A FINDING IS A STRUCTURED ROW NOW, NOT A BULLET. Subject and state on one
+   line, the server's own sentence under it, the actions under that — so the
+   two questions a scientist asks first ("what is this about" and "how bad is
+   it") are answered before the prose, and a row that is only prose still
+   reads as one row. The list marker is dropped because a bullet beside a
+   two-line structured row reads as a typographic accident. */
 .run-check-list {
+  list-style: none;
   margin: 0;
-  padding-left: 18px;
+  padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: var(--space-sm);
 }
 
 .run-check-item {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2xs);
+  padding: var(--space-sm);
+  background: var(--surface);
+  border: 1px solid var(--border-faint);
+  border-radius: var(--radius-inner);
   font-size: 12.5px;
   line-height: 1.5;
   color: var(--text-secondary);
   overflow-wrap: anywhere;
+}
+
+.run-check-item-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-sm);
+}
+
+/* The subject. `.mono` is added at the call site when the text is a raw
+   official PATH rather than a human name — the same demotion every other path
+   in this app gets, and never a substitute for one. */
+.run-check-item-subject {
+  font-size: var(--font-size-meta);
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-heading);
+}
+
+/* NEVER COLOUR ALONE — and here, never colour AT ALL. The state is a word in a
+   bordered chip; the hue is the same for every state, so nothing about a
+   finding is signalled by a colour a reader has to have learned. Reserved
+   pass/fail hues are deliberately absent: a finding row is not a verdict
+   surface, and official validation is the only thing that issues one. */
+.run-check-item-state {
+  margin-left: auto;
+  flex: none;
+  padding: 0 var(--space-xs);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  font-size: var(--font-size-meta);
+  font-weight: var(--font-weight-medium);
+  color: var(--text-slate);
+  white-space: nowrap;
+}
+
+.run-check-item-text {
+  display: block;
+}
+
+.run-check-item-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-xs);
+  margin-top: var(--space-2xs);
+}
+
+.run-check-item-action {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2xs);
+  padding: var(--space-2xs) var(--space-xs);
+  background: var(--surface-subtle);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  font: inherit;
+  font-size: var(--font-size-meta);
+  color: var(--text-strong);
+  cursor: pointer;
+}
+
+.run-check-item-action:hover {
+  background: var(--action-tint);
+  border-color: var(--action-selected-border);
+}
+
+.run-check-item-action:focus-visible {
+  outline: 2px solid var(--ring-active);
+  outline-offset: 2px;
 }
 
 .run-check-item-opaque {

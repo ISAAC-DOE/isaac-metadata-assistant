@@ -105,6 +105,7 @@ import { RunInheritedPanel } from './RunInheritedPanel';
 import { RunRenameForm } from './RunRenameForm';
 import { RunSection } from './RunSection';
 import { FindingList } from './RunFindingList';
+import type { AskContext } from '../lib/findingPresentation';
 import { inheritedTally, type InheritedTally } from '../lib/runOverrides';
 import { Check, ChevronRight, CircleAlert, RotateCcw, TriangleAlert } from './icons';
 import { api } from '../lib/api';
@@ -157,6 +158,7 @@ export function RunCard({
   removeError = null,
   onReloadSection,
   onHeldInvalidChange,
+  onCheck,
 }: {
   experimentId: string;
   run: ApiRunView;
@@ -249,8 +251,33 @@ export function RunCard({
    * has nothing to report.
    */
   onHeldInvalidChange?: (heldInvalid: boolean) => void;
+  /**
+   * TOLD, NOT ASKED — the same arrangement as `onHeldInvalidChange` above, and
+   * for the same reason: a Check Run's result is local state in this card, and
+   * the Record Map rendered beside the Runs section needs it to mark a row
+   * `Needs Review`.
+   *
+   * Called with the response on success and with `null` the moment a new check
+   * starts (so a stale read is withdrawn rather than left standing). It is NOT
+   * called on failure with anything but that `null`: a check that could not run
+   * says nothing about any field, and the card reports the failure itself.
+   *
+   * Supplied only by the focused view. A compact row has no Check Run control.
+   */
+  onCheck?: (data: ApiRunCheckResponse | null) => void;
 }) {
   const baseId = useId();
+  /*
+   * THE FIVE RUN-FIELD CONTROLS, BY PATH — so a finding row can send the reader
+   * to the input it is about.
+   *
+   * A ref map rather than an id lookup: `fieldId` below is built from `useId`,
+   * which is deliberately opaque and unstable, and minting a STABLE id from the
+   * run id would put a duplicate in the document the moment two cards render
+   * the same run. The map is local to this card, which is also the only place
+   * that can honestly claim the input exists.
+   */
+  const fieldControls = useRef<Record<string, HTMLElement | null>>({});
   const headerId = `${baseId}-header`;
   const panelId = `${baseId}-panel`;
   const removeId = `${baseId}-remove`;
@@ -370,9 +397,20 @@ export function RunCard({
 
   const runCheck = () => {
     setCheck({ status: 'busy' });
+    /*
+      REPORTED UPWARD AS IT IS CLEARED, NOT ONLY AS IT ARRIVES. The Record Map
+      beside this card marks a row `Needs Review` from these findings, so a
+      check that is being re-run must withdraw the previous one first — a map
+      still showing the last read while a new one is in flight would be a claim
+      about a document nobody has read yet.
+    */
+    onCheck?.(null);
     api
       .checkRun(experimentId, run.id)
-      .then((data) => setCheck({ status: 'data', data }))
+      .then((data) => {
+        setCheck({ status: 'data', data });
+        onCheck?.(data);
+      })
       .catch((err: unknown) =>
         setCheck({
           status: 'error',
@@ -883,6 +921,10 @@ export function RunCard({
                       {spec.kind === 'enum' ? (
                         <select
                           id={fieldId}
+                          ref={(el) => {
+                            fieldControls.current[spec.path] = el;
+                          }}
+                          data-run-field-path={spec.path}
                           className="run-input"
                           value={value}
                           aria-invalid={error !== undefined || undefined}
@@ -901,6 +943,10 @@ export function RunCard({
                       ) : (
                         <input
                           id={fieldId}
+                          ref={(el) => {
+                            fieldControls.current[spec.path] = el;
+                          }}
+                          data-run-field-path={spec.path}
                           className="run-input"
                           type="text"
                           inputMode={spec.kind === 'number' ? 'decimal' : undefined}
@@ -1166,7 +1212,31 @@ export function RunCard({
             </div>
           )}
 
-          <CheckResult check={check} />
+          <CheckResult
+            check={check}
+            /*
+              WHAT THE COMPOSED "Ask ISAAC" QUESTION MAY NAME — read from this
+              card's own props, never looked up. It is put in the Assistant
+              composer and not sent; see `RunFindingList`'s header.
+            */
+            ask={{ experimentId, runId: run.id, runLabel: run.label }}
+            /*
+              THE ONLY SURFACE THAT MAY OFFER "Go to field", because it is the
+              only one rendering the inputs. A compact row renders none of them
+              and this whole body with it, so there is no state in which the
+              control points at something absent.
+            */
+            onGoToField={(path) => {
+              const el = fieldControls.current[path];
+              if (el === null || el === undefined) return;
+              el.focus();
+              // jsdom implements no layout and no `scrollIntoView`; the focus
+              // above is the part that matters and happens either way.
+              if (typeof el.scrollIntoView === 'function') {
+                el.scrollIntoView({ block: 'center' });
+              }
+            }}
+          />
         </div>
       )}
     </article>
@@ -1343,7 +1413,15 @@ function CheckSummaryChip({ check }: { check: CheckState }) {
  * validators found nothing blocking at the version named below it — not that
  * anything was produced, filed or accepted.
  */
-function CheckResult({ check }: { check: CheckState }) {
+function CheckResult({
+  check,
+  ask,
+  onGoToField,
+}: {
+  check: CheckState;
+  ask: AskContext;
+  onGoToField: (path: string) => void;
+}) {
   if (check.status === 'idle' || check.status === 'busy') return null;
   if (check.status === 'error') {
     return (
@@ -1408,8 +1486,31 @@ function CheckResult({ check }: { check: CheckState }) {
         </span>
       </div>
 
-      <FindingList title="Blocking" findings={data.blockers ?? []} />
-      <FindingList title="Draft checks" findings={draftErrors} />
+      {/*
+        THE STATE WORD IS SUPPLIED HERE, NOT DERIVED IN THE LIST, because only
+        this call knows which of the route's lists it is holding.
+
+        `blockers` are OPEN QUESTIONS — `serialize.pending_to_list` entries
+        nobody has answered — so the record does not carry the thing each one
+        names: `Missing`.
+
+        `draft.errors` are the NO-GUESSING validator's, which is not the
+        official schema and must not read as it: `Needs Review`.
+      */}
+      <FindingList
+        title="Blocking"
+        state="Missing"
+        findings={data.blockers ?? []}
+        ask={ask}
+        onGoToField={onGoToField}
+      />
+      <FindingList
+        title="Draft checks"
+        state="Needs Review"
+        findings={draftErrors}
+        ask={ask}
+        onGoToField={onGoToField}
+      />
       {/*
         THE TITLE NAMES WHO PRODUCED THE FINDINGS, AND IT IS NO LONGER DERIVED HERE.
         Both claims it used to make were wrong at least once.
@@ -1465,7 +1566,15 @@ function CheckResult({ check }: { check: CheckState }) {
       {documentSentence !== null && officialErrors.length > 0 && (
         <p className="run-check-subject">{documentSentence}</p>
       )}
-      <FindingList title={officialFindingsHeading(source)} findings={officialErrors} />
+      {/* `Invalid` is the gate's own word: this list is what `validate_official`
+          (or, where the heading says so, ISAAC's exactness gate) refused. */}
+      <FindingList
+        title={officialFindingsHeading(source)}
+        state="Invalid"
+        findings={officialErrors}
+        ask={ask}
+        onGoToField={onGoToField}
+      />
 
       {/*
         WHY THE PASS PATH MAY NAME THE OFFICIAL SCHEMA AT ALL, and why the sentence

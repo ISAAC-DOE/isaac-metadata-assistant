@@ -112,6 +112,20 @@ export const CAPABILITIES_DRAFT_KEPT_NOTE =
   'Your unsent question stays in the composer. Clear it first to insert an example.';
 
 /**
+ * The same rule, for a question composed OFF-PANEL by `Ask ISAAC` on a check
+ * finding — and said AFTERWARDS rather than before, because there is no open
+ * popover in which to warn the reader first.
+ *
+ * IT SAYS THE QUESTION IS NOT SENT, which the sibling note above does not have
+ * to: `Ask ISAAC` sits beside a validator finding, where a reader could
+ * otherwise take "asking" to mean an answer is on its way. Nothing is
+ * submitted by that control under any circumstances.
+ */
+export const ASSISTANT_PREFILL_DRAFT_KEPT =
+  'Your unsent question stays in the composer, so the one from that finding was not ' +
+  'inserted. Clear the box and press Ask ISAAC again. Nothing has been sent.';
+
+/**
  * The BOUNDARY. It must never imply open-ended understanding — but it must also
  * not overstate the rigidity: the resolver holds several trigger phrases per
  * family, so a family tolerates re-phrasing while the SET of families is closed.
