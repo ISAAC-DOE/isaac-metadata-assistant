@@ -2871,9 +2871,29 @@ a.settings-jump-btn {
   min-width: 0;
   max-width: 90ch;
 }
+/*
+ * *** `flex: none` PINNED THIS AT MAX-CONTENT AND OVERFLOWED EVERY NARROW
+ * WIDTH. *** Found by CI's Linux width sweep, which is the only thing that
+ * could: jsdom computes no layout, and the desktop projects have room to spare.
+ *
+ * Measured at 390px: `div.api-access-banner-action` right edge **389** against a
+ * card content edge of **379**, forcing `main#main` to `scrollWidth 378 vs
+ * clientWidth 368`. Also failing at 375 and 320. The cause is that this holds
+ * TWO jump buttons side by side — `Endpoint Explorer` and `Connect Your Agent` —
+ * and `flex: none` forbade the container from shrinking, so they could never
+ * wrap however little room was left.
+ *
+ * It now shrinks (`0 1 auto` + `min-width: 0`) and wraps its own buttons, and
+ * below the existing 900px breakpoint it takes a full row of its own — which is
+ * what the `flex-wrap: wrap` already on `.api-access-banner` was there to allow.
+ */
 .api-access-banner-action {
-  flex: none;
+  flex: 0 1 auto;
+  min-width: 0;
   margin-left: auto;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 .api-access-grid {
   display: grid;
@@ -2909,6 +2929,9 @@ a.settings-jump-btn {
   }
   .api-access-banner-action {
     margin-left: 0;
+    /* Its own row. The banner already wraps, so giving the action a full basis
+       moves it below the prose instead of competing with it for a line. */
+    flex-basis: 100%;
   }
 }
 .api-keys-heading {

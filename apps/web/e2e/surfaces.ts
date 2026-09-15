@@ -602,7 +602,11 @@ export const TABBED_SURFACES = [
     id: 'statistics',
     path: '/statistics',
     tablistName: 'Statistics sections',
-    tabs: ['General ISAAC', 'My Stats'],
+    /* `General ISAAC` -> `Overview`, and a THIRD tab added, 2026-09-15: the
+       Statistics redesign moved the engineering content onto
+       `Build & Verification` so a scientist does not land on it. Measured in
+       Chrome — the tablist reads exactly these three, in this order. */
+    tabs: ['Overview', 'My Stats', 'Build & Verification'],
     panelIdPrefix: 'statistics-tabpanel-',
   },
 ] as const;
