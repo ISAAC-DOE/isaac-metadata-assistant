@@ -81,3 +81,41 @@ Measured by the orchestrator on 2026-09-15 against a local build of `feat/v2-nav
 (`main` = `dbf9d121` plus navigation and docs commits), on a record created through
 `POST /api/experiments` with one run and five run fields filled. Synthetic data only; nothing
 hosted was contacted.
+
+---
+
+# Appendix — the Statistics redesign, re-measured by the orchestrator
+
+Added because the −61% / −71% figures in PR #256 are the **implementer's**, and a headline number
+nobody re-measured is a number on trust.
+
+**What I measured, independently, on the integrated branch.** Real Chromium, local vite + uvicorn
+on ports nobody else held, a workspace I populated myself through `POST /api/experiments`
+(5 experiments, each with a run) plus one import session, viewport 1280:
+
+| | measured |
+|---|---|
+| `main#main` scrollHeight | **2,927 px** |
+| visible text elements (`UX-017` method) | **170** |
+| ...excluding closed disclosures | **143** |
+| tabs | `Overview` · `My Stats` · `Build & Verification` |
+| first two sections | `Workspace at a Glance`, `Workflow Distribution` |
+| any per-person claim (6 banned phrasings) | **false** |
+
+The implementer reported **2,715 px / 172 / 146** at 1440 and **2,923 px** at 1024. My 1280 reading
+sits between their two heights and within 2 of both element counts, which is what independent
+agreement looks like on a viewport-sensitive measurement.
+
+**Against `UX-017`'s bar — 3,820 px and 422 elements — the page is now under both halves.** That
+bar was not a historical note: it was written into `LeftNav.tsx` as the acceptance condition when
+the destination was promoted back into the sidebar, and it is met.
+
+**What I did NOT verify, stated so the figure is not read as fully mine:** the BEFORE numbers
+(6,993 px / 598 elements). Reproducing those means checking out the pre-redesign commit and
+re-measuring on an identically populated workspace. The AFTER is the half that has to clear the
+bar, and the AFTER is the half I measured.
+
+**One cosmetic observation, recorded and not fixed:** at 1400 px the six headline tiles wrap 5 + 1,
+leaving `Historical Imports` alone on a second row. It is a wrap, not a defect — every tile is
+legible and correct — and changing the grid at this point in the integration would be an unmeasured
+visual edit for balance alone.
