@@ -309,6 +309,20 @@ describe('screens opt into the width system', () => {
   it('Statistics renders wide', async () => {
     stubFetchRoutes(statisticsRoutes());
     const { container, findByText } = routerRender(<StatisticsPage />, '/statistics');
+    /* ~~`Synthetic-Only`~~ — that string comes from `/api/about`, whose runtime
+       cards moved to `?tab=build` in the 2026-09-15 redesign. `Total Records`
+       is this tab's own loaded-state anchor, from the records read. The
+       property under test (the width mode) is unchanged. */
+    await findByText('Total Records'); // the records read resolved
+    expect(mainOf(container).getAttribute('data-width')).toBe('wide');
+  });
+
+  it('Statistics · Build & Verification renders wide too', async () => {
+    // The second data tab shares the page's shell, so it shares the width mode.
+    // Asserted rather than assumed: a tab is a panel inside one `AppShell`, and
+    // a future split into two routes would silently drop this.
+    stubFetchRoutes(statisticsRoutes());
+    const { container, findByText } = routerRender(<StatisticsPage />, '/statistics?tab=build');
     await findByText('Synthetic-Only'); // the /api/about card resolved
     expect(mainOf(container).getAttribute('data-width')).toBe('wide');
   });

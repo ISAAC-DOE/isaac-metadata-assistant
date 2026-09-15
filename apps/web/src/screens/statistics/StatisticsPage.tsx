@@ -7,14 +7,16 @@ import { AppShell } from '../../components/AppShell';
 import { TopBar } from '../../components/TopBar';
 import { LeftNav } from '../../components/LeftNav';
 import { BackendDown, LoadingPanel } from '../../components/FetchStates';
-import { formatInstant } from '../../lib/labels';
+import { LABELS, formatInstant } from '../../lib/labels';
 import { StatusChip } from '../../components/StatusChip';
 import {
   BarChart3,
   CircleDashed,
   CircleHelp,
   FileJson,
+  Inbox,
   LayoutList,
+  List,
   Network,
   Settings,
   Shield,
@@ -51,11 +53,14 @@ import {
   deriveApiSurface,
   deriveEvidenceTotals,
   deriveExportGate,
+  deriveImportTotals,
   deriveMemoryFacts,
   deriveOpenQuestions,
+  deriveRecentWork,
   deriveSchemaFacts,
   deriveWorkflowStages,
   deriveWorkspaceTotals,
+  type RecentWorkItem,
 } from '../../lib/statisticsModel';
 import { RovingTabs } from '../settings/apiShared';
 import {
@@ -80,9 +85,67 @@ import { MyStats } from './MyStats';
 import { RecordVerification, useVerificationReport } from './RecordVerification';
 
 /**
- * Statistics — the read-only insights surface, in two tabs.
+ * Statistics — the read-only insights surface, in THREE tabs.
  *
- * COMPOSITION ONLY. Every number on the General ISAAC tab is produced by
+ * ── THE 2026-09-15 REDESIGN, AND THE OBLIGATION IT DISCHARGES ──────────────
+ *
+ * `UX-017` demoted Statistics out of primary navigation on a MEASUREMENT: the
+ * densest screen in the application. The project owner then returned it to the
+ * sidebar, and `LeftNav.tsx` records the condition attached to that promotion —
+ * *"the density finding is unretracted, and `Statistics` earns this slot only
+ * once the page is scientist-first. `UX-017`'s measurement is the acceptance
+ * bar, not a historical note."* This file is that work.
+ *
+ * MEASURED BEFORE, at 1440x900 in Chromium against a populated workspace (five
+ * experiments, two import sessions, a verification report present): the one
+ * `general` tab was **6,993 px** of main scroll carrying **598** text-bearing
+ * elements, of which **303** were readable without opening a disclosure. One
+ * section — `Record Verification` — was **3,049 px** of it, and it was the
+ * FIRST thing under the page heading, so the opening viewport of a scientist's
+ * statistics screen was an engineering QA program over a corpus of official
+ * records and not one figure about their own workspace.
+ *
+ * WHAT CHANGED, in one sentence: the tab a scientist lands on now answers *how
+ * much have I recorded, how much is ready, how much still needs me, what
+ * changed recently*, and everything that describes the BUILD moved to a tab of
+ * its own.
+ *
+ *   · `general` (**Overview**) — Workspace at a Glance (the headline figures,
+ *     now first), Workflow Distribution, Open Questions, Evidence and
+ *     Validation, Recent Work, Historical Imports, and the no-analytics
+ *     disclosure.
+ *   · `mine` (**My Stats**) — unchanged. See `MyStats.tsx`.
+ *   · `build` (**Build & Verification**) — Record Verification and its
+ *     safeguards, Platform Metrics, the four prose disclosures, and the
+ *     Technical Details region (runtime, record schema, Project Memory, API
+ *     surface).
+ *
+ * NOTHING WAS DELETED AND NOTHING BECAME UNREACHABLE. Every section keeps its
+ * heading, its id, its states, its copy and its tests; `?tab=build` is a real
+ * deep link, and an unrecognised `?tab=` still falls back to `general`, so every
+ * existing `/statistics` link resolves exactly where it did.
+ *
+ * WHY A TAB RATHER THAN A MOVE INTO SETTINGS. The instruction that prompted this
+ * was *"move general ISAAC/engineering statistics to Advanced Settings if they
+ * are retained at all"*, and the goal it names is that a scientist's screen must
+ * not mix "how this build is doing" with "how my science is doing". A tab
+ * unmixes them. Physically relocating `RecordVerification` into `SettingsPage`
+ * would have added an EIGHTH Settings tab while the same direction asks Settings
+ * to shed surface, and would have re-homed roughly forty assertions — including
+ * several honesty guards — across two suites for no reader-visible gain over a
+ * tab. `Settings → Overview → Advanced & Developer Surfaces` links to
+ * `?tab=build`, so the Settings route into it exists.
+ *
+ * ── THE DENSITY RULE THIS FILE NOW FOLLOWS ─────────────────────────────────
+ *
+ * ONE LINE PER SECTION BY DEFAULT; the explanation goes behind an accessible
+ * disclosure. But the older rule at the foot of this file is UNCHANGED and
+ * outranks it: **a sentence that qualifies a specific figure stays beside that
+ * figure.** So the non-addability caveats, the truncation note and the
+ * suppression disclosures are all still visible, in a compacted form that keeps
+ * their meaning; what moved behind a `<summary>` is the longer restatement.
+ *
+ * COMPOSITION ONLY. Every number on the Overview and Build tabs is produced by
  * `lib/statisticsModel.ts` from one of five read-only GETs
  * (`/api/runtime/records`, `/api/graph/status`, `/api/about`, `/api/openapi`,
  * `/api/schema`); this file fetches them, formats the strings the primitives
@@ -363,46 +426,62 @@ function leadSentence(scope: string | null, tab: StatisticsTabId): string {
       'rather than a figure.'
     );
   }
+  if (tab === 'build') {
+    /*
+     * IT NAMES THE SUBJECT, NOT THE CONTENTS. The old `general` lead was a
+     * six-topic table of contents three lines long, which is the form this
+     * redesign is removing — and on THIS tab the honest lead is shorter still,
+     * because the one thing a reader needs told is that nothing here is about
+     * their workspace. `Record verification` is named because it is what opens
+     * the tab; `Verification Safeguards` deliberately is not, for the reason
+     * the struck version of this comment gave and which is unchanged: that
+     * section renders only when a readable report is on screen, so naming it
+     * would promise a heading that is legitimately absent.
+     */
+    return (
+      'This tab describes the build, not your records: record verification over a ' +
+      'corpus of official records, and what this deployment reports about itself.'
+    );
+  }
+  /*
+   * ── THE OVERVIEW LEAD IS ONE CLAUSE, AND WHAT IT DROPPED ─────────────────
+   *
+   * ~~'Record verification first, then a read-only view of {workspace},
+   * workflow readiness, open questions, evidence, the official record schema,
+   * Project Memory, and the API surface — and, for platform-wide figures, why
+   * none is stated.'~~
+   *
+   * That sentence was CORRECT about the page it described and is struck rather
+   * than reworded, because the reasoning behind it is still live and a future
+   * session must not reinstate the form. It listed seven topics, of which four
+   * are no longer on this tab at all, and it opened by naming the engineering
+   * program that used to sit directly beneath it — the defect this function's
+   * own header records, where a lead immediately above a panel reads as a
+   * promise about that panel.
+   *
+   * A table of contents above a tablist is also the wrong instrument: the
+   * section headings ARE the contents, they are `region` landmarks, and a
+   * reader scanning them does not need them re-listed in prose first. So the
+   * lead states the QUESTION this tab answers.
+   *
+   * THE WORKSPACE CLAUSE IS KEPT, and it is the one part of the old sentence
+   * that was load-bearing. It branches for the same reason it always did: only
+   * the worked-example scope holds the five built-in examples, and only the
+   * ordinary scope can be named without them. See the note above for the full
+   * argument, which is unchanged.
+   */
   const workspace = scope === null ? 'this workspace' : 'the open worked-example workspace';
   /*
-   * IT NAMES THE TOPICS THAT STATE FIGURES — NOT EVERY HEADING BELOW IT, and the
-   * narrower claim is the true one. Open Questions, Record Schema and Platform
-   * Metrics are added by this same change, so the previous four-topic sentence was
-   * not stale: it was complete for the page it described, and it is adding a
-   * section that makes a lead go wrong. Two headings stay unnamed on purpose — the
-   * runtime facts inside Technical Details, and the no-analytics disclosure, which
-   * is an absence rather than a topic — so this is not a table of contents.
-   *
-   * Platform Metrics is named DIFFERENTLY from the rest, in its own clause, because
-   * it is the one section that states no figure — listing "platform metrics"
-   * alongside the others would promise a platform-wide number this build cannot
-   * produce, which is the same defect class as the workspace clause this function
-   * already branches on.
-   *
-   * ── RECORD VERIFICATION IS NAMED, AND NAMED FIRST ─────────────────────────
-   *
-   * It was not named at all, while the section itself sat fifth. The
-   * visual-first reorganisation made it the FIRST thing under this sentence —
-   * and a lead that opens by naming six other topics, directly above a section
-   * it does not mention, reproduces the defect this function's own header
-   * records: a lead sitting immediately above a panel reads as a promise about
-   * that panel, whatever it is technically a summary of. So the sentence now
-   * opens where the page opens.
-   *
-   * `Verification Safeguards` is deliberately NOT named beside it. That section
-   * renders only when a readable report is on screen — a `running`, `refused` or
-   * unreadable body carries no safeguards — so naming it would promise a heading
-   * that is legitimately absent, which is exactly the failure mode the workspace
-   * clause branches to avoid. `Record verification` itself is safe to name: that
-   * section renders in every state, stating what it could not read when it could
-   * not read it.
+   * `needs attention`, NOT `needs you`. The product does say "3 fields still
+   * need you" in the assistant's own sentences, and that phrasing was written
+   * here first — but this screen is one tab away from `My Stats`, whose whole
+   * content is that this build cannot tell whose records these are. A
+   * second-person possessive in the page lead would be the softest possible
+   * version of exactly the claim that tab exists to refuse. `Needs Attention`
+   * is also already the product's word for this set (`LABELS`), so the lead and
+   * the figure below it use one vocabulary.
    */
-  return (
-    `Record verification first, then a read-only view of ${workspace}, ` +
-    'workflow readiness, open questions, evidence, the official record schema, ' +
-    'Project Memory, and the API surface — and, for platform-wide figures, why ' +
-    'none is stated.'
-  );
+  return `How much is recorded in ${workspace}, how much is ready, and how much needs attention.`;
 }
 
 /**
@@ -453,9 +532,16 @@ function SectionUnavailable({ message, onRetry }: { message: string; onRetry: ()
 
 /* ---- the two tabs ------------------------------------------------------ */
 
+/**
+ * `General ISAAC` became `Overview`, and the rename is the point rather than a
+ * tidy-up: the old label named the SUBJECT (ISAAC in general) on the tab a
+ * scientist lands on, which is exactly the mixing the redesign undoes. The tab
+ * ID is untouched, so every existing `?tab=general` link is unaffected.
+ */
 const STATISTICS_TABS: { id: StatisticsTabId; label: string }[] = [
-  { id: 'general', label: 'General ISAAC' },
+  { id: 'general', label: 'Overview' },
   { id: 'mine', label: 'My Stats' },
+  { id: 'build', label: 'Build & Verification' },
 ];
 
 const tabId = (id: StatisticsTabId) => `statistics-tab-${id}`;
@@ -581,6 +667,22 @@ export function StatisticsPage() {
   const openapi = useFetch(() => track(api.getOpenApi()), []);
   const schema = useFetch(() => track(api.getSchema()), []);
   /*
+   * THE SIXTH TRACKED READ, added 2026-09-15 with the Historical Imports
+   * figures — and it is TRACKED, unlike the verification read below.
+   *
+   * It is keyed on `scope` for the same reason the record read is: an import
+   * session belongs to a workspace, so leaving or entering a worked-example
+   * session changes the answer. The other four are properties of the BUILD and
+   * stay unkeyed.
+   *
+   * IT JOINS THE ROUND, which is what makes `Refresh` honest. The round's
+   * denominator has always been COUNTED rather than hard-coded (see `Round`),
+   * precisely so a read could be added without the "N of M reads failed"
+   * sentence going wrong — an untracked read would have left the page stamping
+   * `Last Read From the API` onto a figure that Refresh never re-read.
+   */
+  const imports = useFetch(() => track(api.listImports()), [scope]);
+  /*
    * The SIXTH read, and it is deliberately NOT a `useFetch` and NOT tracked.
    *
    * It lives HERE rather than inside `RecordVerification` because the section is
@@ -631,12 +733,13 @@ export function StatisticsPage() {
   function refreshAll() {
     if (refreshing) return;
     // Silent reloads: current data stays on screen, so the page does not blank
-    // and scroll position is kept. Five GETs, no write, nothing else.
+    // and scroll position is kept. SIX GETs, no write, nothing else.
     records.reloadSilent();
     graph.reloadSilent();
     about.reloadSilent();
     openapi.reloadSilent();
     schema.reloadSilent();
+    imports.reloadSilent();
     setRefreshing(true);
     setRefreshMessage('Refreshing — re-reading the API.');
   }
@@ -646,7 +749,8 @@ export function StatisticsPage() {
     graph.status === 'error' &&
     about.status === 'error' &&
     openapi.status === 'error' &&
-    schema.status === 'error';
+    schema.status === 'error' &&
+    imports.status === 'error';
 
   function retryAll() {
     records.reload();
@@ -654,6 +758,7 @@ export function StatisticsPage() {
     about.reload();
     openapi.reload();
     schema.reload();
+    imports.reload();
   }
 
   return (
@@ -696,67 +801,16 @@ export function StatisticsPage() {
           aria-labelledby={tabId('general')}
           tabIndex={0}
         >
-          <div className="stats-meta">
-            {/* Three mutually exclusive states, and the labels are not
-                interchangeable. `Last Read From the API` is rendered from
-                `lastSuccess` ONLY, so it can never date the figures to an attempt
-                that returned nothing. With no successful read at all there is a
-                time but no reading, so the row says `Last Read Attempt`; before
-                the first settle there is neither, and a placeholder there would be
-                a fabricated reading time. */}
-            {lastSuccess !== null ? (
-              <p className="stats-meta-read">
-                <span className="stats-meta-label">Last Read From the API</span>
-                <time className="mono" dateTime={lastSuccess.toISOString()}>
-                  {formatInstant(lastSuccess)}
-                </time>
-              </p>
-            ) : lastAttempt !== null ? (
-              <p className="stats-meta-read">
-                <span className="stats-meta-label">Last Read Attempt</span>
-                <time className="mono" dateTime={lastAttempt.toISOString()}>
-                  {formatInstant(lastAttempt)}
-                </time>
-              </p>
-            ) : (
-              <p className="stats-meta-read">
-                <span className="stats-meta-label">Reading From the API</span>
-              </p>
-            )}
-            <button
-              type="button"
-              className="btn btn-secondary"
-              onClick={refreshAll}
-              aria-busy={refreshing}
-            >
-              {refreshing ? 'Refreshing…' : 'Refresh'}
-            </button>
-          </div>
-          {/* The failure of a round is stated in the page's own words, next to the
-              timestamp it qualifies. Suppressed when EVERY read failed, because
-              the page-level `BackendDown` below already says so and there are then
-              no figures left to caveat. Neutral (`UnavailableNote`), not an alert:
-              each affected section carries its own alert and its own Retry. */}
-          {degraded && !allFailed && lastAttempt !== null && (
-            <div className="stats-block">
-              <UnavailableNote>
-                <p>
-                  {round.failed} of {round.attempted} reads failed on the most recent attempt, at{' '}
-                  {formatInstant(lastAttempt)}.{' '}
-                  {lastSuccess !== null
-                    ? 'Nothing was substituted for what did not arrive, so any figure a failed read feeds is either absent or older than the last-read time above.'
-                    : 'No read has succeeded yet, so nothing on this page has been read from the API.'}
-                </p>
-              </UnavailableNote>
-            </div>
-          )}
-          {/* Present from FIRST render so a change to its text is what gets
-              announced — a live region that appears with its message is
-              unreliable. This page never auto-polls, so it only ever speaks in
-              response to the reader pressing Refresh. */}
-          <p className="sr-only" role="status">
-            {refreshMessage}
-          </p>
+          <ReadMeta
+            lastSuccess={lastSuccess}
+            lastAttempt={lastAttempt}
+            round={round}
+            degraded={degraded}
+            allFailed={allFailed}
+            refreshing={refreshing}
+            refreshMessage={refreshMessage}
+            onRefresh={refreshAll}
+          />
 
           {allFailed ? (
             <BackendDown
@@ -765,16 +819,52 @@ export function StatisticsPage() {
             />
           ) : (
             <>
-              {/* THE LEDE. `RecordVerification` renders TWO sections — itself and,
-                  when a readable report is on screen, `Verification Safeguards` —
-                  so the first two `h2`s of this tab come out of one component. */}
-              <RecordVerification verification={verification} />
-              <WorkspaceGlance records={records} />
+              {/* THE HEADLINE FIGURES ARE THE LEDE. They used to be the fourth
+                  thing on this tab, roughly 3,700 px down, behind an
+                  engineering QA program. */}
+              <WorkspaceGlance records={records} imports={imports} />
               <WorkflowDistribution records={records} />
               <OpenQuestions records={records} />
               <EvidenceAndValidation records={records} />
-              <PlatformMetrics />
+              <RecentWork records={records} />
+              <HistoricalImports imports={imports} />
               <NoAnalytics />
+            </>
+          )}
+        </div>
+      )}
+
+      {activeTab === 'build' && (
+        <div
+          className="statistics"
+          id={panelId('build')}
+          role="tabpanel"
+          aria-labelledby={tabId('build')}
+          tabIndex={0}
+        >
+          <ReadMeta
+            lastSuccess={lastSuccess}
+            lastAttempt={lastAttempt}
+            round={round}
+            degraded={degraded}
+            allFailed={allFailed}
+            refreshing={refreshing}
+            refreshMessage={refreshMessage}
+            onRefresh={refreshAll}
+          />
+
+          {allFailed ? (
+            <BackendDown
+              error={records.status === 'error' ? records.error : undefined}
+              onRetry={retryAll}
+            />
+          ) : (
+            <>
+              {/* `RecordVerification` renders TWO sections — itself and, when a
+                  readable report is on screen, `Verification Safeguards` — so
+                  the first two `h2`s of this tab come out of one component. */}
+              <RecordVerification verification={verification} />
+              <PlatformMetrics />
               {/* ---- the collapsed disclosures, all supporting copy ---------- */}
               <HowVerificationWorks />
               <HowToInterpretResults />
@@ -783,7 +873,7 @@ export function StatisticsPage() {
               <TechnicalDetails
                 id="stats-technical"
                 title="Technical Details"
-                sub="What this build reports about itself: the runtime mode, the served memory snapshot, the official record schema, and the shape of the API. Properties of the deployment, not of your records."
+                sub="What this build reports about itself: the runtime mode, the served memory snapshot, the official record schema, and the shape of the API."
               >
                 <RuntimeFacts about={about} />
                 <RecordSchemaFacts schema={schema} />
@@ -810,6 +900,108 @@ export function StatisticsPage() {
   );
 }
 
+/* ---- the read-state header, shared by the two data tabs ---------------- */
+
+/**
+ * The read clock, the Refresh control, the round's failure note and the live
+ * region — EXTRACTED verbatim from the `general` panel when the Build tab was
+ * split out, because both tabs display figures produced by the same six reads
+ * and a tab that showed figures without their read state would be the weaker
+ * half of the honesty this row exists for.
+ *
+ * EVERY BRANCH AND EVERY LABEL IS UNCHANGED. `Last Read From the API` is still
+ * rendered from `lastSuccess` alone; the `Last Read Attempt` and
+ * `Reading From the API` branches are still the two cases where there is a
+ * time but no reading, and neither a time nor a reading; and the degraded note
+ * is still suppressed when every read failed, because the page-level
+ * `BackendDown` already says so and there are then no figures left to caveat.
+ *
+ * ONE INSTANCE AT A TIME. Only one panel is mounted, so there is exactly one
+ * `role="status"` region in the tree — and it is present from that panel's
+ * FIRST render, which is the property the original comment insisted on: a live
+ * region that appears together with its message is unreliable.
+ */
+function ReadMeta({
+  lastSuccess,
+  lastAttempt,
+  round,
+  degraded,
+  allFailed,
+  refreshing,
+  refreshMessage,
+  onRefresh,
+}: {
+  lastSuccess: Date | null;
+  lastAttempt: Date | null;
+  round: Round;
+  degraded: boolean;
+  allFailed: boolean;
+  refreshing: boolean;
+  refreshMessage: string;
+  onRefresh: () => void;
+}) {
+  return (
+    <>
+      <div className="stats-meta">
+        {/* Three mutually exclusive states, and the labels are not
+            interchangeable. `Last Read From the API` is rendered from
+            `lastSuccess` ONLY, so it can never date the figures to an attempt
+            that returned nothing. With no successful read at all there is a
+            time but no reading, so the row says `Last Read Attempt`; before
+            the first settle there is neither, and a placeholder there would be
+            a fabricated reading time. */}
+        {lastSuccess !== null ? (
+          <p className="stats-meta-read">
+            <span className="stats-meta-label">Last Read From the API</span>
+            <time className="mono" dateTime={lastSuccess.toISOString()}>
+              {formatInstant(lastSuccess)}
+            </time>
+          </p>
+        ) : lastAttempt !== null ? (
+          <p className="stats-meta-read">
+            <span className="stats-meta-label">Last Read Attempt</span>
+            <time className="mono" dateTime={lastAttempt.toISOString()}>
+              {formatInstant(lastAttempt)}
+            </time>
+          </p>
+        ) : (
+          <p className="stats-meta-read">
+            <span className="stats-meta-label">Reading From the API</span>
+          </p>
+        )}
+        <button type="button" className="btn btn-secondary" onClick={onRefresh} aria-busy={refreshing}>
+          {refreshing ? 'Refreshing…' : 'Refresh'}
+        </button>
+      </div>
+      {/* The failure of a round is stated in the page's own words, next to the
+          timestamp it qualifies. Suppressed when EVERY read failed, because
+          the page-level `BackendDown` below already says so and there are then
+          no figures left to caveat. Neutral (`UnavailableNote`), not an alert:
+          each affected section carries its own alert and its own Retry. */}
+      {degraded && !allFailed && lastAttempt !== null && (
+        <div className="stats-block">
+          <UnavailableNote>
+            <p>
+              {round.failed} of {round.attempted} reads failed on the most recent attempt, at{' '}
+              {formatInstant(lastAttempt)}.{' '}
+              {lastSuccess !== null
+                ? 'Nothing was substituted for what did not arrive, so any figure a failed read feeds is either absent or older than the last-read time above.'
+                : 'No read has succeeded yet, so nothing on this page has been read from the API.'}
+            </p>
+          </UnavailableNote>
+        </div>
+      )}
+      {/* Present from FIRST render so a change to its text is what gets
+          announced — a live region that appears with its message is
+          unreliable. This page never auto-polls, so it only ever speaks in
+          response to the reader pressing Refresh. */}
+      <p className="sr-only" role="status">
+        {refreshMessage}
+      </p>
+    </>
+  );
+}
+
 /* ---- 1 · Workspace at a Glance ---------------------------------------- */
 
 /** What `useFetch` hands back: the 3-state union plus its two reload controls. */
@@ -821,23 +1013,51 @@ type AboutFetch = Fetched<ApiAboutResponse>;
 type GraphFetch = Fetched<ApiGraphStatus>;
 type OpenApiFetch = Fetched<ApiOpenApiResponse>;
 type SchemaFetch = Fetched<ApiSchemaResponse>;
+/* The import list is read for its COUNTS only, so the fetch is typed against
+   the envelope this page actually consumes rather than against the full
+   session-summary shape — `deriveImportTotals` validates what it reads and
+   returns `null` for anything it could not read, which is what lets a body
+   this build does not recognise degrade to an unavailable figure instead of
+   throwing during render. */
+type ImportsFetch = Fetched<unknown>;
 
 /**
  * The at-a-glance row — the KPI form, deliberately not a chart.
  *
- * Four headline numbers with no shared scale and no ordering between them are a
- * row of stat tiles; a four-bar chart of "Total / Need Attention / Ready /
- * Exported" would put a total and its own subsets on one axis, which invites
- * reading the parts as a partition of the whole when `Total Records` is the API's
- * workspace denominator and the other three describe only the records received.
+ * Headline numbers with no shared scale and no ordering between them are a row
+ * of stat tiles; a bar chart of "Total / Need Attention / Ready / Exported"
+ * would put a total and its own subsets on one axis, which invites reading the
+ * parts as a partition of the whole when `Total Records` is the API's workspace
+ * denominator and the other three describe only the records received.
+ *
+ * ── IT IS THE FIRST THING ON THE TAB NOW, AND IT GAINED TWO TILES ─────────
+ *
+ * `Open Questions` and `Historical Imports` are here because the four
+ * questions this tab exists to answer are *how much is recorded, how much is
+ * ready, how much still needs attention, and what have I brought in* — and two
+ * of those four were answerable only by scrolling to a section further down.
+ * Neither tile is a new measurement: `Open Questions` is `deriveOpenQuestions`'
+ * own total, restated at the top and still stated in full in its own section,
+ * and `Historical Imports` is the import list's own `total`.
+ *
+ * THE IMPORT TILE COUNTS SESSIONS AND IS NEVER ADDED TO A RECORD COUNT. An
+ * import session is a working area; this build creates no experiment from one
+ * automatically, so a reader must not add the two tiles together. The tile's
+ * own note says `sessions`, and the Historical Imports section below states it
+ * again beside the figure.
+ *
+ * EACH TILE STATES ITS OWN READ STATE. The records read and the imports read
+ * are independent, so one dead source empties its own tiles and leaves the
+ * others standing — the page's partial-failure rule applied at tile
+ * granularity. A tile whose read has not settled says it is reading; a tile
+ * whose read failed says the figure is not available. Neither ever shows `0`,
+ * which would be a figure nobody measured.
  *
  * The two runtime cards this section used to carry (`Runtime Mode`,
- * `Persistence`) moved into `Technical Details`: they are facts about the build,
- * not about the workspace, and they sat here only because they arrived in the
- * same round of reads. This section therefore reads exactly one endpoint now, so
- * its sub-line no longer promises anything about the build.
+ * `Persistence`) moved into `Technical Details` on the Build tab: they are
+ * facts about the build, not about the workspace.
  */
-function WorkspaceGlance({ records }: { records: RecordsFetch }) {
+function WorkspaceGlance({ records, imports }: { records: RecordsFetch; imports: ImportsFetch }) {
   return (
     <StatsSection
       id="stats-glance"
@@ -847,7 +1067,7 @@ function WorkspaceGlance({ records }: { records: RecordsFetch }) {
     >
       {records.status === 'loading' && <LoadingPanel label="Loading the workspace summary…" />}
       {records.status === 'error' && <BackendDown error={records.error} onRetry={records.reload} />}
-      {records.status === 'data' && <GlanceRecordCards body={records.data} />}
+      {records.status === 'data' && <GlanceRecordCards body={records.data} imports={imports} />}
     </StatsSection>
   );
 }
@@ -914,8 +1134,15 @@ function GlanceRuntimeCards({ body }: { body: ApiAboutResponse }) {
   );
 }
 
-function GlanceRecordCards({ body }: { body: { records: RuntimeRecord[]; total: number } }) {
+function GlanceRecordCards({
+  body,
+  imports,
+}: {
+  body: { records: RuntimeRecord[]; total: number };
+  imports: ImportsFetch;
+}) {
   const totals = deriveWorkspaceTotals(body);
+  const questions = deriveOpenQuestions(body.records);
 
   /* NOT defensive any more, and the comment here said it was. It read "the workspace
      always holds its canonical synthetic records ... so this branch is not reachable
@@ -959,20 +1186,20 @@ function GlanceRecordCards({ body }: { body: { records: RuntimeRecord[]; total: 
           </UnavailableNote>
         </div>
       )}
-      <div className="stats-cards">
+      <div className="stats-cards stats-cards-glance">
         <StatCard
           label="Total Records"
           value={count(totals.total)}
           note="the workspace total the API reports."
         />
         <StatCard
-          label="Need Attention"
+          label={LABELS.groupNeedsAttention}
           value={count(totals.needsAttention)}
           note="open questions remain."
           tone={totals.needsAttention > 0 ? 'attention' : 'neutral'}
         />
         <StatCard
-          label="Ready to Export"
+          label={LABELS.groupReady}
           value={count(totals.readyToExport)}
           note="no open questions and the export dry-run passes."
           tone={totals.readyToExport > 0 ? 'good' : 'neutral'}
@@ -982,6 +1209,15 @@ function GlanceRecordCards({ body }: { body: { records: RuntimeRecord[]; total: 
           value={count(totals.exported)}
           note="an official record has been written."
         />
+        {/* QUESTIONS, not records — the note says so, and the section below
+            states the same total with its four record-counted companions. */}
+        <StatCard
+          label="Open Questions"
+          value={count(questions.totalOpenQuestions)}
+          note="questions still awaiting an answer, across the records received."
+          tone={questions.totalOpenQuestions > 0 ? 'attention' : 'neutral'}
+        />
+        <ImportSessionsCard imports={imports} />
         {totals.unknownStatus > 0 && (
           <StatCard
             label="Unrecognized Status"
@@ -992,6 +1228,48 @@ function GlanceRecordCards({ body }: { body: { records: RuntimeRecord[]; total: 
         )}
       </div>
     </>
+  );
+}
+
+/**
+ * The one headline tile fed by a different read, so it states its own state.
+ *
+ * A failed or unsettled import read must not empty the five record tiles
+ * beside it, and it must not render `0` — which would claim the workspace holds
+ * no import session when what is true is that this page did not read one. The
+ * `quiet` tone is this page's existing not-available treatment and is
+ * deliberately not an error treatment: the section below carries the alarm and
+ * the Retry for this source.
+ */
+function ImportSessionsCard({ imports }: { imports: ImportsFetch }) {
+  if (imports.status === 'loading') {
+    return (
+      <StatCard
+        label="Historical Imports"
+        value="Reading…"
+        note="the import sessions have not been read yet."
+        tone="quiet"
+      />
+    );
+  }
+  if (imports.status === 'error') {
+    return (
+      <StatCard
+        label="Historical Imports"
+        value={UNAVAILABLE}
+        note="the import sessions could not be read, so no count is stated."
+        tone="quiet"
+      />
+    );
+  }
+  const totals = deriveImportTotals(imports.data);
+  return (
+    <StatCard
+      label="Historical Imports"
+      value={countOrUnavailable(totals.sessions)}
+      note="import sessions — working areas, never records."
+      tone={totals.sessions === null ? 'quiet' : 'neutral'}
+    />
   );
 }
 
@@ -1148,18 +1426,47 @@ function OpenQuestionFigures({ records }: { records: RuntimeRecord[] }) {
           </UnavailableNote>
         </div>
       )}
+      {/*
+        ── THE CAVEAT STAYS VISIBLE; THE RESTATEMENT IS DISCLOSED ──────────
+        Two paragraphs used to sit here, and between them they said one thing a
+        reader must not miss (these five are on different axes and may not be
+        added) and several things that explain why. The operative sentence is
+        now one line and is still visible, because this file's own rule is that
+        a sentence qualifying a specific figure is part of what the figure
+        MEANS and may not be collapsed. Everything that merely restates it is
+        behind the disclosure, verbatim — nothing was deleted.
+      */}
       <p className="stats-note">
-        Total Open Questions counts QUESTIONS across the {count(questions.recordsCounted)} records
-        received. Records With Open Questions, Records With a Blocked Step and Records With a
-        Reopened Step count RECORDS. Most on One Record is the largest single record&rsquo;s
-        question count, and is neither a total nor a share of one.
+        Total Open Questions counts QUESTIONS; the other four count RECORDS. None of the five may be
+        added together.
       </p>
-      <p className="stats-note">
-        A blocked step and a reopened step are separate axes and overlap each other and the question
-        counts, so none of these five may be added together. Each reports only whether a record has
-        at least one such step — the workspace projection reduces all five steps to one flag apiece,
-        so it does not name the step. No question text, field name or answer is read here.
-      </p>
+      <TechnicalDetails
+        variant="prose"
+        id="stats-questions-reading"
+        title="How These Five Are Counted"
+        sub="Which figure counts questions, which count records, and why they do not sum."
+      >
+        {/* THE RECORD COUNT IS DELIBERATELY NOT REPEATED HERE. The paragraph
+            this replaces read "across the {'{'}count(questions.recordsCounted){'}'} records
+            received" — a MEASUREMENT, and this file's rule is that a closed
+            disclosure may hold prose and never a figure, because a closed
+            disclosure is not scanned by axe and is skipped by a reader
+            scanning the page. The figure it named is still stated, visibly,
+            in the list above. */}
+        <p className="stats-note">
+          Total Open Questions counts QUESTIONS across the records received. Records With Open
+          Questions, Records With a Blocked Step and Records With a Reopened Step count RECORDS.
+          Most on One Record is the largest single record&rsquo;s question count, and is neither a
+          total nor a share of one.
+        </p>
+        <p className="stats-note">
+          A blocked step and a reopened step are separate axes and overlap each other and the
+          question counts, so none of these five may be added together. Each reports only whether a
+          record has at least one such step — the workspace projection reduces all five steps to one
+          flag apiece, so it does not name the step. No question text, field name or answer is read
+          here.
+        </p>
+      </TechnicalDetails>
     </>
   );
 }
@@ -1372,22 +1679,303 @@ function ExportGateGroup({ records }: { records: RuntimeRecord[] }) {
               { label: 'Stale Artifacts', value: count(gate.staleArtifacts), mono: true },
             ]}
           />
+          {/* The SUBSET caveat is the one a reader cannot be allowed to miss —
+              adding Stale Artifacts to the four above double-counts a record —
+              so it stays visible in one line. The glossary of what each
+              position means, and the two supporting facts, are disclosed
+              verbatim below. */}
           <p className="stats-note">
-            Ready Now means no open questions remain and the official export dry-run passes. Blocked
-            by the Export Gate means no open questions remain but the dry-run does not pass. Blocked
-            by Open Questions means the gate has not been reached yet. Stale Artifacts is a subset of
-            Exported, not a fifth bucket — a record whose exported file no longer matches its draft
-            is counted in both — so it must not be added to the four, and for that reason these five
-            are not charted on a shared scale.
+            Stale Artifacts is a subset of Exported, not a fifth bucket, so these five may not be
+            added together.
           </p>
-          <p className="stats-note">
-            These positions are recomputed from the current drafts on every read and are never
-            stored, so there is no saved verdict and no not-yet-run state to report.
-          </p>
-          <p className="stats-note">Evidence support and schema validation are separate signals.</p>
+          <TechnicalDetails
+            variant="prose"
+            id="stats-gate-reading"
+            title="What Each Position Means"
+            sub="The definition behind each export-gate row, and what the positions are recomputed from."
+          >
+            <p className="stats-note">
+              Ready Now means no open questions remain and the official export dry-run passes.
+              Blocked by the Export Gate means no open questions remain but the dry-run does not
+              pass. Blocked by Open Questions means the gate has not been reached yet. Stale
+              Artifacts is a subset of Exported — a record whose exported file no longer matches its
+              draft is counted in both — which is why these five are not charted on a shared scale.
+            </p>
+            <p className="stats-note">
+              These positions are recomputed from the current drafts on every read and are never
+              stored, so there is no saved verdict and no not-yet-run state to report.
+            </p>
+            <p className="stats-note">Evidence support and schema validation are separate signals.</p>
+          </TechnicalDetails>
         </>
       )}
     </div>
+  );
+}
+
+/* ---- Recent Work ------------------------------------------------------- */
+
+/** How many rows the list shows. A short list is the point: this answers "what
+ *  changed lately", and a full inventory is what My Experiments is for. */
+const RECENT_WORK_ROWS = 5;
+
+/**
+ * The most recently updated records in this workspace.
+ *
+ * ── WHY THIS SECTION EXISTS ────────────────────────────────────────────────
+ *
+ * Of the four questions a scientist brings to this screen — how much have I
+ * recorded, how much is ready, how much still needs attention, what changed
+ * lately — the page answered the first three and not the fourth. Every other
+ * section states a COUNT, and a count cannot tell you which record moved.
+ *
+ * ── WHAT IT IS CAREFUL NOT TO CLAIM ────────────────────────────────────────
+ *
+ * IT IS NOT "WHAT YOU TOUCHED", and the heading, the supporting line and the
+ * column label all say `updated` rather than anything second-person. This build
+ * has no trusted user identity and no record carries an author, which is the
+ * whole content of the My Stats tab; a "your recent activity" list would be the
+ * per-person claim that tab exists to refuse, dressed as a convenience.
+ * `statistics-nav.test.tsx` bans six phrasings of exactly that claim across
+ * this screen, and this section is inside the scanned tree.
+ *
+ * IT IS NOT AN ORDERING THE SERVER GAVE. `GET /api/runtime/records` is not
+ * sorted by this page's key, so the sort is `deriveRecentWork`'s and is stated
+ * as such. A record whose `updated_utc` cannot be read is EXCLUDED and counted
+ * rather than placed at either end — putting it last would assert it is the
+ * oldest, putting it first that it is the newest, and the response said
+ * neither.
+ *
+ * IT SHOWS ONLY WHAT THE PROJECTION ALREADY SHOWS ELSEWHERE. Title, status and
+ * the record's own route are the three fields My Experiments and the
+ * cross-record triage chips already render from this same body; no draft value,
+ * no evidence and no field name is read here.
+ *
+ * `updated_utc` IS THE RECORD'S, NOT THIS PAGE'S CLOCK. It is rendered through
+ * `formatInstant`, the same formatter the rest of the app uses, so one instant
+ * reads one way everywhere.
+ */
+function RecentWork({ records }: { records: RecordsFetch }) {
+  return (
+    <StatsSection
+      id="stats-recent"
+      title="Recent Work"
+      sub="The records updated most recently, newest first."
+      icon={<List size={18} strokeWidth={2} aria-hidden="true" />}
+    >
+      {records.status === 'loading' && <LoadingPanel label="Loading the most recent updates…" />}
+      {records.status === 'error' && (
+        <SectionUnavailable
+          message="The workspace records could not be read, so no recent updates are listed."
+          onRetry={records.reload}
+        />
+      )}
+      {records.status === 'data' && <RecentWorkList records={records.data.records} />}
+    </StatsSection>
+  );
+}
+
+function RecentWorkList({ records }: { records: RuntimeRecord[] }) {
+  const recent = deriveRecentWork(records, RECENT_WORK_ROWS);
+
+  if (recent.items.length === 0) {
+    return (
+      <p className="stats-note">
+        {recent.undatedRecords > 0
+          ? `None of the ${count(recent.undatedRecords)} records received carried a readable update time, so no order can be stated for them.`
+          : 'No records were returned, so there is nothing recent to list.'}
+      </p>
+    );
+  }
+
+  return (
+    <>
+      <ul className="stats-recent">
+        {recent.items.map((item) => (
+          <RecentWorkRow item={item} key={item.experimentId} />
+        ))}
+      </ul>
+      {/* ONE line, and it carries the two things the list cannot show: how many
+          records the five were chosen from, and whether any was left out of the
+          ordering. Both qualify the list directly, so neither is disclosed. */}
+      <p className="stats-note">
+        The {count(Math.min(RECENT_WORK_ROWS, recent.items.length))} most recently updated of the{' '}
+        {count(recent.datedRecords)} records with a readable update time.
+        {recent.undatedRecords > 0
+          ? ` ${count(recent.undatedRecords)} more carried none and are not ordered here.`
+          : ''}
+      </p>
+      <p className="stats-actions">
+        <Link to={ROUTES.experiments}>Open My Experiments</Link>
+      </p>
+    </>
+  );
+}
+
+/**
+ * One row: the record's title, its status as the app's own chip, and when it
+ * was last updated.
+ *
+ * The TITLE is the link, not a separate "Open" affordance — it is the row's own
+ * name and is what a reader aims at. A row whose projection carried no route is
+ * still listed, as plain text: the record exists and was updated, and dropping
+ * it would under-report the workspace to hide a missing link.
+ */
+function RecentWorkRow({ item }: { item: RecentWorkItem }) {
+  const when = new Date(item.updatedUtc);
+  const readable = Number.isFinite(when.getTime());
+  return (
+    <li className="stats-recent-row">
+      <span className="stats-recent-title">
+        {item.navigateTo === null ? item.title : <Link to={item.navigateTo}>{item.title}</Link>}
+      </span>
+      {/* The status word comes from the app's own vocabulary (`LABELS`), so a
+          status reads identically here and on My Experiments. A status this
+          page cannot place is rendered as the server's own token rather than
+          mapped onto a neighbouring one. */}
+      <span className="stats-recent-status">
+        <RecordStatusWord status={item.status} />
+      </span>
+      {readable ? (
+        <time className="stats-recent-when mono" dateTime={when.toISOString()}>
+          {formatInstant(when)}
+        </time>
+      ) : (
+        <span className="stats-recent-when">{UNAVAILABLE}</span>
+      )}
+    </li>
+  );
+}
+
+/**
+ * The record status as a word, in a neutral pill — DELIBERATELY NOT a
+ * `StatusChip`, and the restraint is the point.
+ *
+ * `StatusChip`'s kinds are a different vocabulary with reserved meanings:
+ * `pass` owns the reserved verdict green, and `signals.css`' own rule is that
+ * it is used only for a verdict. `Ready to Export` is a workflow POSITION, not
+ * a validation verdict — the export gate section says so in as many words —
+ * and painting it in verdict green here would be this row claiming something
+ * the deterministic core alone may claim. `mentorReview` and `draft` are
+ * likewise about other things. So the status is rendered as its own word.
+ *
+ * THE WORDS ARE `LABELS`', the same four strings My Experiments' facets use, so
+ * there is ONE vocabulary and not a fifth copy authored here. Tone is
+ * decoration only: the word is always present and the pill is fully readable
+ * with all colour removed.
+ *
+ * AN UNRECOGNISED STATUS IS RENDERED VERBATIM. Mapping it onto a neighbouring
+ * one would assert a position the server did not report, and dropping the row
+ * would lose a record the workspace does hold — the same choice
+ * `deriveWorkspaceTotals` already makes with its `Unrecognized Status` count.
+ */
+const RECORD_STATUS_WORD: Readonly<Record<string, string>> = Object.freeze({
+  needs_attention: LABELS.groupNeedsAttention,
+  in_review: LABELS.groupInReview,
+  ready_to_export: LABELS.groupReady,
+  done: LABELS.groupDone,
+});
+
+function RecordStatusWord({ status }: { status: string }) {
+  const known = RECORD_STATUS_WORD[status];
+  const tone =
+    status === 'needs_attention' ? 'attention' : status === 'ready_to_export' ? 'good' : 'neutral';
+  return (
+    <span className="stats-recent-state" data-tone={known === undefined ? 'quiet' : tone}>
+      {known ?? (status.length > 0 ? status : UNAVAILABLE)}
+    </span>
+  );
+}
+
+/* ---- Historical Imports ------------------------------------------------ */
+
+/**
+ * The import sessions this workspace holds.
+ *
+ * AN IMPORT SESSION IS NOT A RECORD, and that is the one thing this section
+ * must not let a reader conclude. A session is a working area holding source
+ * entries and the candidates read out of them; `POST .../propose` puts a
+ * candidate in front of a person as an OPEN PROPOSAL and writes no value, and
+ * nothing in this build creates an experiment from a session automatically. So
+ * the figures here are counted in SESSIONS, are never added to a record count,
+ * and the note says so beside them rather than in a disclosure.
+ *
+ * NO FILENAME, DIGEST OR PATH CAN REACH THIS SECTION. `GET /api/imports`
+ * serves summaries carrying counts and never the bundle — its own contract
+ * description says so — and `deriveImportTotals` reduces what arrives to four
+ * integers before this component sees it.
+ */
+function HistoricalImports({ imports }: { imports: ImportsFetch }) {
+  return (
+    <StatsSection
+      id="stats-imports"
+      title="Historical Imports"
+      sub="Import sessions in this workspace, counted in sessions rather than in records."
+      icon={<Inbox size={18} strokeWidth={2} aria-hidden="true" />}
+    >
+      {imports.status === 'loading' && <LoadingPanel label="Loading the import sessions…" />}
+      {imports.status === 'error' && (
+        <BackendDown error={imports.error} onRetry={imports.reload} />
+      )}
+      {imports.status === 'data' && <ImportFigures body={imports.data} />}
+    </StatsSection>
+  );
+}
+
+function ImportFigures({ body }: { body: unknown }) {
+  const totals = deriveImportTotals(body);
+
+  if (totals.sessions === 0 && totals.summariesReceived === 0) {
+    return (
+      <>
+        <p className="stats-note">
+          This workspace holds no import session, so there is nothing to summarise here.
+        </p>
+        <p className="stats-actions">
+          <Link to={ROUTES.imports}>{LABELS.navImports}</Link>
+        </p>
+      </>
+    );
+  }
+
+  return (
+    <>
+      <FigureList
+        rows={[
+          { label: 'Import Sessions', value: countOrUnavailable(totals.sessions), mono: true },
+          {
+            label: 'Sessions With a Source Recorded',
+            value: count(totals.sessionsWithSources),
+            mono: true,
+          },
+          {
+            label: 'Sessions With a Candidate Sent to Review',
+            value: count(totals.sessionsWithProposals),
+            mono: true,
+          },
+        ]}
+      />
+      {/* A caveat about the figures, so it is visible rather than disclosed:
+          the API's own total and the summaries this page received are separate
+          numbers, exactly as `Total Records` and the records received are. */}
+      {totals.sessions !== null && totals.sessions !== totals.summariesReceived && (
+        <div className="stats-block">
+          <UnavailableNote>
+            This page received {count(totals.summariesReceived)} of the{' '}
+            {count(totals.sessions)} import sessions the API reports. The two counts beneath
+            Import Sessions describe only the summaries received.
+          </UnavailableNote>
+        </div>
+      )}
+      <p className="stats-note">
+        These count SESSIONS, never records: a session is a working area, and nothing here creates
+        an experiment or writes a value. A candidate sent to review is an open proposal awaiting a
+        person&rsquo;s judgement.
+      </p>
+      <p className="stats-actions">
+        <Link to={ROUTES.imports}>{LABELS.navImports}</Link>
+      </p>
+    </>
   );
 }
 
@@ -1843,7 +2431,7 @@ function NoAnalytics() {
     <StatsSection
       id="stats-no-analytics"
       title="This Application Collects No Analytics"
-      sub="Scoped to this application — what it ships, measures and stores. Server-side logs belong to whoever operates the deployment; what this page can and cannot say about them is stated under Known Limitations below."
+      sub="Scoped to this application — what it ships, measures and stores. Server-side logs belong to whoever operates the deployment; what this page can and cannot say about them is stated under Known Limitations, on the Build & Verification tab."
       icon={<Shield size={18} strokeWidth={2} aria-hidden="true" />}
     >
       <p className="stats-note">
@@ -1854,6 +2442,17 @@ function NoAnalytics() {
       </p>
       <p className="stats-actions">
         <Link to={ROUTES.settingsTab('privacy')}>Open Data &amp; Privacy Settings</Link>
+        {/*
+          ── THE POINTER IS NOW A LINK, BECAUSE THE TARGET MOVED TABS ────────
+          The supporting line above used to end "under Known Limitations
+          BELOW", and that word was true of a one-tab page. `Known Limitations`
+          is now on `?tab=build`, so "below" would have been false — and this
+          is the one pointer on the page that must not go wrong: the paragraph
+          it points at is the CORRECTION of a claim this section shipped
+          falsely once (see the header), so a reader who cannot reach it is
+          left with the narrow claim and nothing to scope it.
+        */}
+        <Link to={ROUTES.statisticsTab('build')}>Read Known Limitations</Link>
       </p>
     </StatsSection>
   );

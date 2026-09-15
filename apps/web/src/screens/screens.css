@@ -1916,6 +1916,36 @@
   font-size: 12px;
   color: var(--text-tertiary);
 }
+/*
+ * THE PROVENANCE MARK, beside the label rather than under the value.
+ *
+ * It is a WORD, never a colour and never a tooltip: it qualifies the value it
+ * sits beside, and a qualifier of a figure has to be readable without hovering
+ * or opening anything. Smaller and quieter than the label, because the label is
+ * what a reader scans for and this is what they check once.
+ *
+ * `--text-muted` rather than `--text-tertiary`: the label above is already
+ * tertiary, and a second tertiary string on the same line would compete with
+ * it. `--text-muted` is the darker of the two (5.04:1 against 4.13:1 on
+ * `--surface`), so the quieter-looking element is also the more legible one —
+ * which is the right way round for text this small.
+ */
+.settings-figure-source {
+  display: block;
+  /*
+   * `--font-size-meta` (11px), NOT the 10.5px this first shipped as. The
+   * Impeccable in-browser overlay flagged that value on this very element
+   * (`undersized-ui-text … below 11px floor`) in the same pass that flagged
+   * the pre-existing `span.nav-version` for the same reason. There was a
+   * precedent for 10.5px and the precedent is also flagged, so following it
+   * would have shipped a known-undersized string; the token rung is the right
+   * answer and costs nothing here.
+   */
+  font-size: var(--font-size-meta);
+  font-weight: 500;
+  color: var(--text-muted);
+  letter-spacing: 0.01em;
+}
 .settings-figure dd {
   margin: 0;
   min-width: 0;
@@ -3090,8 +3120,21 @@ a.settings-jump-btn {
   outline-offset: 1px;
 }
 
-/* ---- Connect an Agent -------------------------------------------------- */
-.api-connect {
+/* ---- Connect an Agent, and the Quick Start drawer beside it ------------- */
+/*
+ * ONE SELECTOR LIST, NOT A SECOND SET OF DECLARATIONS.
+ *
+ * The Quick Start drawer added on 2026-09-15 wears the same chrome as this one
+ * — same rule, same border, same summary affordance — but it deliberately does
+ * NOT reuse the class name. `.api-connect` is addressed by
+ * `document.querySelector('details.api-connect')` in `settings-api.test.tsx`,
+ * which takes the FIRST match, so a second element carrying that class made
+ * three of those tests silently assert about the wrong drawer. Sharing the
+ * declarations through a selector list keeps one visual definition while
+ * leaving `details.api-connect` resolving to exactly one element.
+ */
+.api-connect,
+.api-quickstart-drawer {
   margin-top: 22px;
   padding-top: 16px;
   border-top: 1px solid var(--border-faint);

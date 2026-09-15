@@ -89,7 +89,31 @@ import {
 /** The `aria-describedby` target for the disabled Create control. */
 const CREATE_REASON_ID = 'settings-api-create-reason';
 
-export function ApiKeysPanel({ onOpenExplorer }: { onOpenExplorer: () => void }) {
+export function ApiKeysPanel({
+  onOpenExplorer,
+  onOpenMcp,
+}: {
+  onOpenExplorer: () => void;
+  /**
+   * Selects the Connect Your Agent tab.
+   *
+   * ── WHY THIS EXISTS, ADDED 2026-09-15 ────────────────────────────────────
+   *
+   * The brief for this tab's default view is that it answer four questions:
+   * is API access available, is a credential available, HOW DOES THE AGENT
+   * INTERFACE DIFFER FROM THE REST API, and where does a developer go next.
+   * The third had no answer here at all — the reciprocal pointer exists only
+   * on the other tab (`MCP_CONNECT_COPY.restApiPointer`), so a reader who
+   * arrived here first met neither the distinction nor a way to find it.
+   *
+   * IT IS NAVIGATION, NOT A CLAIM, and that is deliberate: the distinction is
+   * authored once, on the tab that owns the agent interface, and a second
+   * paraphrase here is exactly the duplication `settings-page.test.tsx`'s
+   * "appears exactly once" suite exists to refuse. So this adds a link and no
+   * sentence.
+   */
+  onOpenMcp: () => void;
+}) {
   return (
     <div className="api-access">
       {/* THE status, said once. Everything below answers a different question. */}
@@ -104,6 +128,10 @@ export function ApiKeysPanel({ onOpenExplorer }: { onOpenExplorer: () => void })
         <div className="api-access-banner-action">
           <button type="button" className="settings-jump-btn" onClick={onOpenExplorer}>
             Endpoint Explorer
+            <ChevronRight size={13} strokeWidth={2.2} aria-hidden="true" />
+          </button>
+          <button type="button" className="settings-jump-btn" onClick={onOpenMcp}>
+            Connect Your Agent
             <ChevronRight size={13} strokeWidth={2.2} aria-hidden="true" />
           </button>
         </div>

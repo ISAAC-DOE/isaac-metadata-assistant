@@ -705,3 +705,152 @@ export function deriveApiSurface(doc: ApiOpenApiResponse): ApiSurfaceFacts {
     byGroup,
   };
 }
+
+// --- recent work --------------------------------------------------------------
+
+/**
+ * One row of the Recent Work list.
+ *
+ * It carries a TITLE and an id, which is the one place this module deliberately
+ * departs from its own "counts and provenance strings only" rule — so the
+ * departure is argued here rather than left to be noticed.
+ *
+ * `title` and `navigate_to` are already in the SAFE cross-record projection
+ * (`apps/api/isaac_api/runtime_records.py`), and are already rendered to the
+ * same reader, by the same route, on My Experiments and on the cross-record
+ * triage chips (`lib/crossRecordTriage.ts` puts both into a `TriageMatch`). So
+ * this is not a widening of what the projection exposes; it is the same two
+ * fields the app already shows, in one more place. No draft value, no evidence
+ * body, no per-field classification and no filesystem path is read here.
+ *
+ * The rule the module DOES keep unchanged: nothing is invented. A row is built
+ * only from fields the response carried, and a record whose timestamp cannot be
+ * read is reported as unreadable rather than being given a plausible position.
+ */
+export interface RecentWorkItem {
+  experimentId: string;
+  title: string;
+  status: string;
+  /** The wire value, verbatim — the page owns formatting. */
+  updatedUtc: string;
+  /** Milliseconds since epoch, for ordering only. Never displayed. */
+  updatedAtMs: number;
+  navigateTo: string | null;
+}
+
+export interface RecentWork {
+  /** Newest first, at most `limit` rows. */
+  items: RecentWorkItem[];
+  /** How many records carried a usable `updated_utc` at all. */
+  datedRecords: number;
+  /** Records whose `updated_utc` could not be read as a time. Never ordered. */
+  undatedRecords: number;
+}
+
+/**
+ * The most recently updated records, newest first.
+ *
+ * `updated_utc` is the projection's own field and is the only ordering signal
+ * available: there is no per-person activity, no edit log and no "opened by"
+ * anywhere in this build, so this answers "what changed most recently in this
+ * workspace" and deliberately NOT "what did you touch" — the second is a
+ * per-person claim `MyStats` exists to refuse.
+ *
+ * A record whose `updated_utc` is missing or unparseable is EXCLUDED from the
+ * ordering and counted in `undatedRecords`, never placed at either end of the
+ * list. Sorting it to the bottom would assert it is the oldest, and sorting it
+ * to the top would assert it is the newest; both are claims the response did
+ * not make.
+ *
+ * Ties are broken by `experiment_id`, descending, so the list is deterministic
+ * for a given body — two records saved in the same second must not swap places
+ * between two renders of the same data.
+ */
+export function deriveRecentWork(
+  records: readonly RuntimeRecord[],
+  limit: number,
+): RecentWork {
+  const dated: RecentWorkItem[] = [];
+  let undatedRecords = 0;
+  for (const record of records) {
+    const raw = stringOrNull(record.updated_utc);
+    const ms = raw === null ? Number.NaN : Date.parse(raw);
+    const id = stringOrNull(record.experiment_id);
+    const title = stringOrNull(record.title);
+    if (raw === null || !Number.isFinite(ms) || id === null || title === null) {
+      undatedRecords += 1;
+      continue;
+    }
+    dated.push({
+      experimentId: id,
+      title,
+      status: typeof record.status === 'string' ? record.status : '',
+      updatedUtc: raw,
+      updatedAtMs: ms,
+      navigateTo: stringOrNull(record.navigate_to),
+    });
+  }
+  dated.sort((a, b) =>
+    b.updatedAtMs - a.updatedAtMs || (a.experimentId < b.experimentId ? 1 : a.experimentId > b.experimentId ? -1 : 0),
+  );
+  return {
+    items: limit > 0 ? dated.slice(0, limit) : [],
+    datedRecords: dated.length,
+    undatedRecords,
+  };
+}
+
+// --- historical imports --------------------------------------------------------
+
+export interface ImportTotals {
+  /** The API's own workspace total for import sessions. */
+  sessions: number | null;
+  /** How many session summaries this page actually received. */
+  summariesReceived: number;
+  /** Sessions with at least one source recorded. */
+  sessionsWithSources: number;
+  /** Sessions with at least one candidate already sent to review. */
+  sessionsWithProposals: number;
+}
+
+/**
+ * Import-session counts, from `GET /api/imports`.
+ *
+ * SESSIONS, NEVER SOURCES OR FILES. Each entry is a summary that carries counts
+ * and never the bundle (the route's own description says so), so nothing here
+ * can state a filename, a digest or a path — and nothing tries to.
+ *
+ * `sessions` is the API's own `total` and is `null` when the body carried no
+ * usable one; `summariesReceived` is what this page was actually handed. They
+ * are kept apart for the same reason `Total Records` is kept apart from the
+ * records received: a truncated list must not be presented as the whole
+ * workspace.
+ *
+ * An import session is NOT a record and is never added to a record count. It is
+ * a working area, and this build creates no experiment from one automatically.
+ */
+export function deriveImportTotals(body: unknown): ImportTotals {
+  const imports =
+    typeof body === 'object' && body !== null && Array.isArray((body as { imports?: unknown }).imports)
+      ? ((body as { imports: unknown[] }).imports as Record<string, unknown>[])
+      : [];
+  const total =
+    typeof body === 'object' && body !== null
+      ? numberOrNull((body as { total?: unknown }).total)
+      : null;
+  let sessionsWithSources = 0;
+  let sessionsWithProposals = 0;
+  for (const entry of imports) {
+    if (typeof entry !== 'object' || entry === null) continue;
+    const sources = numberOrNull(entry.source_count);
+    const proposed = numberOrNull(entry.proposed_count);
+    if (sources !== null && sources > 0) sessionsWithSources += 1;
+    if (proposed !== null && proposed > 0) sessionsWithProposals += 1;
+  }
+  return {
+    sessions: total,
+    summariesReceived: imports.length,
+    sessionsWithSources,
+    sessionsWithProposals,
+  };
+}

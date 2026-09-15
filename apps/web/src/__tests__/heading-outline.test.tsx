@@ -69,9 +69,18 @@ describe('A11Y-1 — one screen-level h1 per routed surface', () => {
     expect(await h1CountAt('/settings', null, null)).toBe(1);
   });
   it('Statistics', async () => {
-    // Awaiting the Title-Cased runtime mode settles the /api/about read, so the
-    // count is taken on the LOADED dashboard rather than on its loading state.
-    expect(await h1CountAt('/statistics', statisticsRoutes(), 'Synthetic-Only')).toBe(1);
+    /* Awaiting a figure from the records read settles the dashboard, so the
+       count is taken on the LOADED surface rather than on its loading state.
+       ~~`Synthetic-Only`~~ — that string is `/api/about`'s, and the runtime
+       cards it belongs to moved to `?tab=build` in the 2026-09-15 redesign;
+       `Total Records` is the Overview tab's own equivalent anchor. */
+    expect(await h1CountAt('/statistics', statisticsRoutes(), 'Total Records')).toBe(1);
+  });
+
+  it('Statistics · Build & Verification', async () => {
+    // The tab that gained the sections, asserted for the same property. Without
+    // this, a second tab's outline would be checked by nothing.
+    expect(await h1CountAt('/statistics?tab=build', statisticsRoutes(), 'Synthetic-Only')).toBe(1);
   });
 });
 
@@ -161,29 +170,86 @@ describe('A11Y — heading levels never skip a level or go backwards', () => {
    *      paragraph it used to carry about server-side logging is inside Known
    *      Limitations, which is why the disclosure count is four and not three.
    *
-   * So the General ISAAC tab is now h1 → THIRTEEN h2s:
+   * ~~So the General ISAAC tab is now h1 → THIRTEEN h2s: Record Verification
+   * (nesting FOUR h3s) · Verification Safeguards · Workspace at a Glance ·
+   * Workflow Distribution · Open Questions · Evidence and Validation · Platform
+   * Metrics · This Application Collects No Analytics · How Verification Works ·
+   * How to Interpret Results · Mutation Methodology · Known Limitations ·
+   * Technical Details~~
    *
-   *   Record Verification (nesting FOUR h3s) · Verification Safeguards ·
-   *   Workspace at a Glance · Workflow Distribution · Open Questions ·
-   *   Evidence and Validation (nesting `Evidence Support` and `Export Gate`) ·
-   *   Platform Metrics (nesting one h3 per planned view — SIX of them, the same
-   *   plan-card shape My Stats uses) · This Application Collects No Analytics ·
-   *   How Verification Works · How to Interpret Results · Mutation Methodology ·
-   *   Known Limitations · Technical Details (nesting FOUR h3 sections: Runtime ·
-   *   Record Schema · Project Memory · API Surface)
+   * ── THAT ONE OUTLINE BECAME TWO ON 2026-09-15, and the list is struck rather
+   *    than rewritten in place because the reason it was one list is the thing
+   *    that changed. ────────────────────────────────────────────────────────
    *
-   * FIVE of those h2s are the `<summary>` heading of a `<details>` that is CLOSED
-   * by default, and all five are counted here on purpose: `querySelectorAll` sees
+   * The redesign split the tab: the engineering material moved to
+   * `?tab=build`, so there is no single Statistics outline any more.
+   *
+   *   · OVERVIEW — h1 → ELEVEN h2s: Workspace at a Glance · Workflow
+   *     Distribution · Open Questions · `How These Five Are Counted` (a
+   *     disclosure) · Evidence and Validation (nesting `Evidence Support` and
+   *     `Export Gate`) · `What Each Position Means` (a disclosure) · Recent
+   *     Work · Historical Imports · This Application Collects No Analytics.
+   *     The two disclosures are new: the distillation moved the RESTATEMENT of
+   *     two caveats behind a `<summary>` while leaving the operative sentence
+   *     of each visible, so each is prose and holds no figure — the same rule
+   *     as (3) above, enforced by `statistics-page.test.tsx`.
+   *   · BUILD & VERIFICATION — h1 → NINE h2s: Record Verification (nesting
+   *     FOUR h3s) · Verification Safeguards · Platform Metrics (nesting one h3
+   *     per planned view — SIX of them, the same plan-card shape My Stats
+   *     uses) · How Verification Works · How to Interpret Results · Mutation
+   *     Methodology · Known Limitations · Technical Details (nesting FOUR h3
+   *     sections: Runtime · Record Schema · Project Memory · API Surface).
+   *
+   * Points (1) to (4) above are unchanged and still describe why each of those
+   * headings is the level it is; only which TAB renders it moved.
+   *
+   * SEVEN of those h2s across the two tabs are the `<summary>` heading of a
+   * `<details>` that is CLOSED
+   * by default, and all seven are counted here on purpose: `querySelectorAll` sees
    * the whole DOM, so this asserts the outline is well-formed in BOTH states of
    * every disclosure. (`e2e/specs/structure.spec.ts` filters by computed style and
    * therefore checks the collapsed state as a real browser renders it — the two
    * are complementary, and neither alone would catch a heading that is only wrong
    * when open.)
    */
-  it('Statistics · General ISAAC (every section loaded, disclosures closed)', async () => {
+  /*
+   * ── SPLIT IN TWO ON 2026-09-15, AND NEITHER HALF IS WEAKER ───────────────
+   *
+   * The redesign moved Record Verification, its safeguards, Platform Metrics,
+   * the four prose disclosures and the whole Technical Details region to
+   * `?tab=build`. The outline is therefore TWO outlines, and both are asserted
+   * as exact level sequences exactly as the one used to be — a single case
+   * pointed at one tab would have left the other tab's outline, which is the
+   * one carrying every nested `h3`, checked by nothing.
+   */
+  it('Statistics · Overview (every section loaded, disclosures closed)', async () => {
     stubFetchRoutes(statisticsRoutes());
     const view = renderAt('/statistics');
-    // Settles /api/about, which is the last of the five reads to paint.
+    // Settles the records read, whose figures are this tab's own content.
+    await view.findByText('Total Records');
+
+    const found = levels(view.container);
+    expect(found).toEqual([
+      1,
+      2 /* Workspace at a Glance */,
+      2 /* Workflow Distribution */,
+      2 /* Open Questions */,
+      2 /* How These Five Are Counted — a closed prose disclosure's summary */,
+      2 /* Evidence and Validation */,
+      3 /* Evidence Support */,
+      3 /* Export Gate */,
+      2 /* What Each Position Means — a closed prose disclosure's summary */,
+      2 /* Recent Work */,
+      2 /* Historical Imports */,
+      2 /* This Application Collects No Analytics */,
+    ]);
+    assertMonotonic(found, 'Statistics page · Overview');
+  });
+
+  it('Statistics · Build & Verification (every section loaded, disclosures closed)', async () => {
+    stubFetchRoutes(statisticsRoutes());
+    const view = renderAt('/statistics?tab=build');
+    // Settles /api/about, which is the last of this tab's reads to paint.
     await view.findByText('Synthetic-Only');
 
     const found = levels(view.container);
@@ -199,12 +265,6 @@ describe('A11Y — heading levels never skip a level or go backwards', () => {
       3 /* Where the Stricter Checks Disagreed */,
       3 /* About This Run */,
       2 /* Verification Safeguards */,
-      2 /* Workspace at a Glance */,
-      2 /* Workflow Distribution */,
-      2 /* Open Questions */,
-      2 /* Evidence and Validation */,
-      3,
-      3,
       2 /* Platform Metrics */,
       3,
       3,
@@ -212,7 +272,6 @@ describe('A11Y — heading levels never skip a level or go backwards', () => {
       3,
       3,
       3,
-      2 /* This Application Collects No Analytics */,
       2 /* How Verification Works */,
       2 /* How to Interpret Results */,
       2 /* Mutation Methodology */,
@@ -223,7 +282,7 @@ describe('A11Y — heading levels never skip a level or go backwards', () => {
       3,
       3,
     ]);
-    assertMonotonic(found, 'Statistics page · General ISAAC');
+    assertMonotonic(found, 'Statistics page · Build & Verification');
   });
 
   /*

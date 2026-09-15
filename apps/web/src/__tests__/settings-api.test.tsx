@@ -421,9 +421,20 @@ describe('Settings → API Access — an honest unavailable state', () => {
     expect(
       within(keysRegion()).queryByRole('button', { name: /copy|reveal|show|regenerate|rotate|revoke/i }),
     ).not.toBeInTheDocument();
-    // The only controls on this surface are the disabled one and the nav link.
+    /* The only controls on this surface are the disabled one and the TWO nav
+       links. ~~one~~ — `Connect Your Agent` was added on 2026-09-15 because the
+       brief for this tab's default view requires it to answer how the agent
+       interface differs from the REST API, and it answered that nowhere: the
+       distinction is authored on the other tab only. It is a jump link and
+       carries no sentence, so no claim is duplicated.
+
+       THE PROPERTY THIS CASE EXISTS FOR IS UNCHANGED, and it is the reason the
+       list is asserted as an equality rather than as a `toContain`: no control
+       on this surface can reveal, copy, regenerate, rotate or revoke a
+       credential, and a third button that could would fail here. */
     expect(within(keysRegion()).getAllByRole('button').map((b) => b.textContent?.trim())).toEqual([
       'Endpoint Explorer',
+      'Connect Your Agent',
       'Create API Key',
     ]);
 

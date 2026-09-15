@@ -55,10 +55,30 @@ export function isSettingsTab(value: string | null | undefined): value is Settin
  * `general` without throwing, so there is no dead route.
  *
  * `general` is the workspace-wide material; `mine` is the personal tab.
+ *
+ * ── A THIRD TAB, `build`, ADDED 2026-09-15 ─────────────────────────────────
+ *
+ * `general` used to hold BOTH "how is my science doing" and "how is this build
+ * doing" — record verification over a corpus of official records, the platform
+ * adapter boundary, the runtime facts, the served memory snapshot, the official
+ * schema's own shape, and the API surface. Measured at 1440x900 on a populated
+ * workspace, the tab was 3,744 px of main scroll with 425 visible text
+ * elements, and the FIRST viewport was entirely an engineering QA program —
+ * not one workspace figure was above the fold.
+ *
+ * `build` is where that material now lives. Nothing is deleted, nothing becomes
+ * unreachable, and every section keeps its heading, its states and its tests;
+ * what changes is that a scientist's default tab answers a scientist's
+ * question. The id is deliberately NOT `technical` or `advanced`: the tab holds
+ * facts about the BUILD (and the corpus it was verified against), which is what
+ * its label says.
+ *
+ * `general` remains the fallback for anything unrecognised, so every existing
+ * `/statistics` link, bookmark and test entry still lands where it did.
  */
 export const STATISTICS_TAB_PARAM = 'tab';
 
-export const STATISTICS_TAB_IDS = ['general', 'mine'] as const;
+export const STATISTICS_TAB_IDS = ['general', 'mine', 'build'] as const;
 
 export type StatisticsTabId = (typeof STATISTICS_TAB_IDS)[number];
 
