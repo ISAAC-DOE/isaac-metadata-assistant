@@ -605,9 +605,41 @@
   color: var(--text-slate);
 }
 
+/*
+ * `width: 100%` IS THE THIRD DECLARATION THE DATETIME PICKER NEEDED, and it was
+ * found by the mutation suite at 320px — not by a unit test, which computes no
+ * layout, and not by looking at the screen at a comfortable width.
+ *
+ * MEASURED, at 320px, on a run with both timestamps filled: the run card
+ * reported `scrollWidth 283` against `clientWidth 240` — a 43px overflow — and
+ * the checker listed six clipped strings including the word `UTC` and the whole
+ * `timestamps.acquired_start_utc` path. The cause is NOT the one it looks like:
+ *
+ *   * `.run-field-control` was **126px** inside a 240px `.run-field`. It is
+ *     shrink-to-fit, not stretched, so it sized itself from one child (the path
+ *     span, also 126px) while `.run-field-datetime` — a flex ROW — sized itself
+ *     from ITS content at **267px** and overflowed its own parent.
+ *   * `max-width: 100%` on the datetime row alone was tried and measured
+ *     **INERT**: 267px before, 267px after. `100%` of a shrink-to-fit parent is
+ *     the parent's already-too-small width, so it constrains nothing.
+ *   * AND THE `datetime-local` CONTROL HAS NO HARD INTRINSIC FLOOR, which is
+ *     worth recording because it is the obvious suspect and it is innocent.
+ *     Probed directly in Chrome inside a 126px box: `step="1"` with no width is
+ *     213px, and with `width: 100%` it is **126px**. `step`, `min-width: 0` and
+ *     `box-sizing` changed nothing. The control shrinks when it is told a width.
+ *
+ * So the parent is given one. `width: 100%` makes `.run-field-control` fill its
+ * column instead of one child, `max-width: 100%` then genuinely bounds the
+ * datetime row, and the input's existing `flex: 1 1 0` divides what is left.
+ * After: overflow **43px -> 0**, control 126 -> 208, `UTC` back inside the card.
+ * Re-measured at 1280, 768 and 390: overflow 0 at every width and no column
+ * width changed except 390's control, which went 126 -> 278 to match the
+ * datetime row it already contained — a latent mismatch, fixed by the same line.
+ */
 .run-field-control {
   flex: 1;
   min-width: 0;
+  width: 100%;
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -1137,6 +1169,9 @@
   align-items: center;
   gap: var(--space-xs);
   min-width: 0;
+  /* Bounds the row to the column it sits in. Inert on its own — see the
+     measurement above `.run-field-control`, which is what makes it work. */
+  max-width: 100%;
 }
 /*
  * `flex: 1 1 0` AND `min-width: 0`, AND BOTH ARE LOAD-BEARING — measured, not

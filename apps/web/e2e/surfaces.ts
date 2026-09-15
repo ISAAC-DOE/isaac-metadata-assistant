@@ -424,35 +424,35 @@ export const SURFACES: readonly Surface[] = [
   },
   {
     id: 'settings',
-    name: 'Settings & API — Overview',
+    name: 'Settings — Overview',
     path: '/settings',
     scope: 'ordinary',
     ready: { role: 'heading', name: 'Runtime Status' },
   },
   {
     id: 'settings-privacy',
-    name: 'Settings & API — Data & Privacy',
+    name: 'Settings — Data & Privacy',
     path: '/settings?tab=privacy',
     scope: 'ordinary',
-    ready: { role: 'heading', name: 'Settings & API' },
+    ready: { role: 'heading', name: 'Settings' },
   },
   {
     id: 'settings-about',
-    name: 'Settings & API — About',
+    name: 'Settings — About',
     path: '/settings?tab=about',
     scope: 'ordinary',
     ready: { role: 'heading', name: 'Identity' },
   },
   {
     id: 'settings-api',
-    name: 'Settings & API — API Access',
+    name: 'Settings — API Access',
     path: '/settings?tab=api',
     scope: 'ordinary',
     ready: { role: 'heading', name: 'How Access Works Today' },
   },
   {
     id: 'settings-explorer',
-    name: 'Settings & API — Endpoint Explorer',
+    name: 'Settings — Endpoint Explorer',
     path: '/settings?tab=explorer',
     scope: 'ordinary',
     // Wait for the DETAIL pane, not the group list: the list heading renders
@@ -491,7 +491,7 @@ export const SURFACES: readonly Surface[] = [
      * this locator must be revisited rather than loosened.
      */
     id: 'settings-connect',
-    name: 'Settings & API — Connect Your Agent',
+    name: 'Settings — Connect Your Agent',
     path: '/settings?tab=mcp',
     scope: 'ordinary',
     ready: { role: 'heading', name: 'Requires organization configuration' },
@@ -544,7 +544,7 @@ export const TABBED_SURFACES = [
   {
     id: 'settings',
     path: '/settings',
-    tablistName: 'Settings & API sections',
+    tablistName: 'Settings sections',
     // R0 added 'Help & Tutorial' (the tutorial replay surface). The tab COUNT the
     // APG-structure spec asserts is derived from this array, so the list is the
     // single place a new tab has to be declared — no magic number to chase.
