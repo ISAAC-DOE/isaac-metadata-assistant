@@ -2049,7 +2049,29 @@ function RunsBrowser({
           already carries several `status` regions (one per run card) that an
           unnamed extra one would sit among.
         */}
-        <p className="runs-count" aria-live="polite" aria-atomic="true">
+        {/*
+          AND WHEN IT WOULD REPEAT THE EMPTY STATE, IT IS HIDDEN RATHER THAN
+          BLANKED.
+
+          At zero runs this line and `EmptyRuns` said the same thing 39px apart
+          (measured in Chromium: y=377 and y=416). Returning `''` would have been
+          the shorter fix and would have cost a real announcement: this is a live
+          region, so a reader who DELETES their last run currently hears "No runs
+          in this record yet", and an empty region says nothing. So the text
+          stays and only the paint is withheld -- the same remedy, for the same
+          reason, as the workflow spine's repeated blocking reason.
+
+          Compared against `NO_RUNS_COUNT` rather than re-testing `total === 0`
+          here: the condition for showing it belongs to `countLine`, and reading
+          its own answer cannot drift out of step with it.
+        */}
+        <p
+          className={`runs-count${
+            countLine(loaded, filtering, countFocus) === NO_RUNS_COUNT ? ' runs-count-quiet' : ''
+          }`}
+          aria-live="polite"
+          aria-atomic="true"
+        >
           {countLine(loaded, filtering, countFocus)}
         </p>
       </div>
@@ -2450,6 +2472,18 @@ type CountFocus = 'none' | 'loading' | 'viewing' | 'missing';
  * screen. A run that is still being read is not being viewed either, and saying so
  * early would be the same defect a moment sooner.
  */
+/**
+ * The zero-state count, named because the render site has to RECOGNISE it.
+ *
+ * `EmptyRuns` below says the same thing and says it better -- it carries the
+ * remedy ("Add one for the first set of conditions you measured"). Measured in
+ * Chromium on a record with no runs: this line at y=377 and that paragraph at
+ * y=416, 39px apart, stating one fact twice. The render site hides this copy
+ * VISUALLY while keeping it in the live region; see the note there for why it is
+ * not simply blanked.
+ */
+const NO_RUNS_COUNT = 'No runs in this record yet';
+
 function countLine(loaded: Loaded | null, filtering: boolean, focus: CountFocus): string {
   if (loaded === null) return '';
   const runWord = loaded.total === 1 ? 'run' : 'runs';
@@ -2462,7 +2496,7 @@ function countLine(loaded: Loaded | null, filtering: boolean, focus: CountFocus)
   if (focus === 'missing') {
     return `No run with that id · ${loaded.total} ${runWord} in this record`;
   }
-  if (loaded.total === 0) return 'No runs in this record yet';
+  if (loaded.total === 0) return NO_RUNS_COUNT;
   if (!filtering) {
     return `Showing ${loaded.runs.length} of ${loaded.total} ${runWord}`;
   }

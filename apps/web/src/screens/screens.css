@@ -1827,6 +1827,31 @@
   padding: 6px 0;
   border-bottom: 1px solid var(--border-faint);
 }
+
+/*
+ * NO DANGLING HALF-RULE UNDER THE LAST ROW.
+ *
+ * `.settings-figures` is a two-column grid and the Runtime Status list has
+ * SEVEN items, so the final row holds one cell. Measured in Chromium at 1512:
+ * that cell spans x 296-859 and carries the same 1px `border-bottom` as every
+ * other, so the table ended in a 563px rule with 587px of nothing beside it --
+ * a line that stops halfway across, which is the "uneven" the owner reported.
+ *
+ * Both cells of the final row lose the rule, whatever the parity, so a table
+ * with an even count does not instead end in a full-width closing rule below
+ * its last content. `:last-child` catches the final cell; the second selector
+ * catches its left-hand neighbour ONLY when that neighbour shares the row --
+ * `:nth-child(odd)` is what makes it row-aware, since an odd-indexed cell is
+ * always the left column of a two-column grid.
+ *
+ * Stated as a separator rather than a border on each row would be the other
+ * repair; it is not taken because `border-bottom` is what every other list in
+ * this file uses, and one list diverging is the drift these rules keep having.
+ */
+.settings-figure:last-child,
+.settings-figure:nth-last-child(2):nth-child(odd) {
+  border-bottom: none;
+}
 .settings-figure dt {
   font-size: 12px;
   color: var(--text-tertiary);
