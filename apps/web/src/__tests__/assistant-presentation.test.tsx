@@ -184,18 +184,37 @@ afterEach(() => {
 
 describe('P36V S-A · header + status row', () => {
   it('the status row sits BENEATH the title inside the header, not in the trailing control group', () => {
+    /*
+     * ~~`expect(row.closest('.assistant-head-titles')).toBe(titles)`~~ —
+     * RE-TARGETED by UX-022 to `.assistant-head-meta`. Both the title of this
+     * test and every property it protects are UNCHANGED: the status is inside
+     * the header, it reads after the title, it is not in the trailing
+     * Clear-Conversation group, it is Title Case, and it carries a dot so colour
+     * is never the only signal. What changed is which of the header's OWN rows
+     * holds it, and that was forced by a measurement rather than chosen: the
+     * Collapse control moved into the title row (it had been a 24.3px strip
+     * ABOVE `section.assistant`, so the panel's title was not the panel's first
+     * element), and at the 275px of content the 308px record rail offers, title
+     * + status + "Collapse Assistant" needs ~354px. The status and the scope
+     * sentence together need 244px and fit. The row that fits is the row that
+     * keeps the two widest items apart.
+     */
     const { container } = panel({ availability: 'available' });
 
     const head = container.querySelector('.assistant-head') as HTMLElement;
     const titles = head.querySelector('.assistant-head-titles') as HTMLElement;
+    const meta = head.querySelector('.assistant-head-meta') as HTMLElement;
     const label = head.querySelector('.assistant-label') as HTMLElement;
     const row = head.querySelector('.assistant-memory') as HTMLElement;
 
     expect(titles).not.toBeNull();
     expect(label.closest('.assistant-head-titles')).toBe(titles);
-    // the status row is in the SAME stacked block as the title …
+    // the status row is in the SAME stacked block as the title — the header —
+    // on the header's own subordinate meta row …
     expect(row).not.toBeNull();
-    expect(row.closest('.assistant-head-titles')).toBe(titles);
+    expect(meta).not.toBeNull();
+    expect(row.closest('.assistant-head-meta')).toBe(meta);
+    expect(row.closest('.assistant-head')).toBe(head);
     // … it comes AFTER the title (i.e. it reads beneath it) …
     expect(label.compareDocumentPosition(row) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     // … and it is NOT in the header's trailing (far-right) group any more.
@@ -693,10 +712,24 @@ describe('P36V S-A · panel order', () => {
     // I2 — it was dropped in the same slice that added an Open Validator button
     // and a Deterministic Schema Check card to this very panel)
     expect(caption.textContent).toMatch(/never validates/i);
-    // it is the LAST thing in the panel
+    /*
+     * It is the LAST THING IN THE PANEL — asserted in three links now rather
+     * than two, because UX-022 merged the dock's three strips of fine print into
+     * ONE `.assistant-dock-note` paragraph and the caption is that paragraph's
+     * last element instead of the foot's last child.
+     *
+     * ~~`expect(foot.lastElementChild).toBe(caption)`~~ is kept struck rather
+     * than deleted because "the caption is last" is exactly the property a
+     * merge could have quietly dropped. The chain below is strictly stronger
+     * than the single link it replaces: the old assertion would have passed with
+     * the caption FIRST inside a last-positioned wrapper.
+     */
     const panelEl = container.querySelector('.assistant') as HTMLElement;
     const foot = container.querySelector('.assistant-foot') as HTMLElement;
-    expect(foot.lastElementChild).toBe(caption);
+    const note = container.querySelector('.assistant-dock-note') as HTMLElement;
+    expect(note).not.toBeNull();
+    expect(note.lastElementChild).toBe(caption);
+    expect(foot.lastElementChild).toBe(note);
     expect(panelEl.lastElementChild).toBe(foot);
     // it never states a verdict
     expect(caption.textContent).not.toMatch(/\b(PASS|FAIL)\b/);
@@ -734,7 +767,10 @@ describe('P36V S-A · the contract holds on every mount surface', () => {
       const row = assistant.querySelector('.assistant-memory');
       if (knowsAvailability) {
         expect(row).not.toBeNull();
-        expect(row!.closest('.assistant-head-titles')).toBe(titles);
+        // UX-022 — the header's subordinate meta row, not the title row. See the
+        // measurement in "the status row sits BENEATH the title…" above.
+        expect(row!.closest('.assistant-head-meta')).not.toBeNull();
+        expect(row!.closest('.assistant-head')).toBe(titles.closest('.assistant-head'));
         expect(row!.textContent).toMatch(/^\s*Memory (Available|Unavailable)\s*$/);
       } else {
         // Guided Completion consults no graph — it claims NOTHING here
@@ -885,12 +921,41 @@ describe('P36V S-A · long values wrap; nothing forces horizontal overflow', () 
     expect(assistantCss).toMatch(re);
   });
 
-  it('CSS SOURCE: the advisory footer keeps its hair divider + secondary colour and is italicised', () => {
+  it('CSS SOURCE: the advisory footer is one register with the notes it now sits with, and keeps its secondary colour', () => {
+    /*
+     * ~~keeps its hair divider + secondary colour and is italicised~~ —
+     * REWRITTEN by UX-022, and the old assertions are quoted here rather than
+     * deleted because each was protecting something real about the layout it
+     * was written for.
+     *
+     * The divider and the italic both existed to separate this sentence from the
+     * two factual claims stacked above it — `border-top: 1px solid
+     * var(--border-hair)`, `font-style: italic`, `font-size: 11px`. Those three
+     * strips are now ONE paragraph (`.assistant-dock-note`), so there is nothing
+     * left to separate this sentence FROM: a hairline drawn between two halves
+     * of one paragraph is a rule through a sentence, and a second font style in
+     * a 275px column is the `overused-font` finding the in-browser detector
+     * reported on this dock.
+     *
+     * WHAT IS ASSERTED INSTEAD, and it is the half that was load-bearing: the
+     * caption still paints at the measured-AA `--text-secondary` on the
+     * `--assist-tint` rail (6.86:1, P33 S2 review), it is NOT italic (so the two
+     * registers cannot silently come back one at a time), and the note it lives
+     * in carries the Helper size the design system specifies (11.5–12px per
+     * `design-handoff/05-design-system/typography.md`). The COPY is pinned
+     * verbatim by the three `.assistant-caption` text assertions elsewhere in
+     * this file — style is all this case has ever been about.
+     */
     const caption = ruleBody(assistantCss, '.assistant-caption');
-    expect(caption).toMatch(/border-top:\s*1px solid var\(--border-hair\)/);
-    expect(caption).toMatch(/font-style:\s*italic/);
     expect(caption).toMatch(/color:\s*var\(--text-secondary\)/);
-    expect(caption).toMatch(/font-size:\s*11px/);
+    expect(caption).not.toMatch(/font-style:\s*italic/);
+    expect(caption).not.toMatch(/border-top:/);
+    const note = ruleBody(assistantCss, '.assistant-dock-note');
+    expect(note).toMatch(/color:\s*var\(--text-secondary\)/);
+    const size = /font-size:\s*(\d+(?:\.\d+)?)px/.exec(note);
+    expect(size, 'the dock note must declare its own size — it is the panel\'s last paragraph').not.toBeNull();
+    expect(Number(size![1])).toBeGreaterThanOrEqual(11.5);
+    expect(Number(size![1])).toBeLessThanOrEqual(12);
   });
 
   it('CSS SOURCE: the head, the empty divider and the Agent Actions group never absorb the bounded column', () => {

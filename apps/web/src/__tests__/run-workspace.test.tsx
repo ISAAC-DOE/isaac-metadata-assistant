@@ -729,7 +729,7 @@ describe('autosave', () => {
     // this sentence and the Runs leave-confirmation dialog can no longer be read as
     // opposite conclusions) is pinned end to end.
     expect(note.textContent).toMatch(
-      /Switching to this record’s other workspaces — Record Fields, Capture & Proposals, Graph — and back keeps it/,
+      /Switching to this record’s other workspaces — Record Fields, Experiment Data, Graph — and back keeps it/,
     );
     // ...and it must still name what DOES lose it, rather than implying nothing does.
     expect(note.textContent).toMatch(/paging, searching or filtering the runs list, or reloading/);
@@ -1982,7 +1982,7 @@ describe('PHASE 2 — save state that outlives the card', () => {
     expect(cardFor('RUNAAA').textContent ?? '').not.toMatch(/saving live here only/);
     expect(cardFor('RUNAAA').textContent ?? '').not.toMatch(/this record.s views/);
     expect(cardFor('RUNAAA').textContent ?? '').toMatch(
-      /Switching to this record.s other workspaces — Record Fields, Capture & Proposals, Graph — and back keeps them/,
+      /Switching to this record.s other workspaces — Record Fields, Experiment Data, Graph — and back keeps them/,
     );
 
     // AND IT STAYS UP WHILE THE REQUEST IS IN FLIGHT. Gating on `pendingCount` hid it

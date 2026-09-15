@@ -1015,9 +1015,13 @@ describe('Connect Your Agent — parity with the backend it describes', () => {
     // to `DRAFT_WRITE`, and the partition assertion below is what keeps that honest.
     expect(byScope('PROPOSALS_WRITE')).toEqual([
       'isaac_capture_note',
+      'isaac_capture_transcript',
       'isaac_propose_field_value',
     ]);
-    expect(byScope('READ')).toHaveLength(declared.length - 5);
+    // `- 6`, not `- 5`: `isaac_capture_transcript` (2026-09-14) is the third
+    // PROPOSALS_WRITE tool. Kept as an arithmetic relation to `declared.length`
+    // rather than a literal, so the partition stays self-checking.
+    expect(byScope('READ')).toHaveLength(declared.length - 6);
     expect(new Set(declared.map((t) => t.scope))).toEqual(
       new Set(['READ', 'DRAFT_WRITE', 'PROPOSALS_WRITE']),
     );
@@ -1047,6 +1051,7 @@ describe('Connect Your Agent — parity with the backend it describes', () => {
     expect(callableWithOnly('DRAFT_WRITE')).toEqual([]);
     expect(byScopeName('PROPOSALS_WRITE')).toEqual([
       'isaac_capture_note',
+      'isaac_capture_transcript',
       'isaac_propose_field_value',
     ]);
     expect(byScopeName('DRAFT_WRITE')).not.toContain('isaac_propose_field_value');

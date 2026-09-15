@@ -1290,7 +1290,7 @@ describe('the leave confirmation, and Next / Previous run', () => {
    * The rewrite names both destinations explicitly, with the identical verb
    * ("switching to…"), in the SAME dialog: leaving this run (a different run, paging,
    * searching, filtering, reloading) loses it; switching to this record's other
-   * workspaces (Record Fields, Capture & Proposals, Graph) keeps it. Both claims are
+   * workspaces (Record Fields, Experiment Data, Graph) keeps it. Both claims are
    * true and neither is deleted — this test pins the "keeps it" sentence being
    * PRESENT here, not the "loses it" sentence being removed.
    */
@@ -1322,7 +1322,7 @@ describe('the leave confirmation, and Next / Previous run', () => {
     // SAFE, leaving a reader to infer it (wrongly, per the finding above) from a
     // different paragraph on a different component.
     expect(text).toMatch(
-      /Switching to this record’s other workspaces — Record Fields, Capture & Proposals, Graph — keeps it\./,
+      /Switching to this record’s other workspaces — Record Fields, Experiment Data, Graph — keeps it\./,
     );
   });
 

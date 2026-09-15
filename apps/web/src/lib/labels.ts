@@ -343,7 +343,7 @@ export const LABELS = {
    * apps/web/src` returned that file and this declaration, nothing else). So a
    * first-time scientist opening Help was taught these five words, while every
    * per-record surface in the same product showed the server-derived spine —
-   * Load Record · Complete Metadata · Review Evidence · Review Export Readiness
+   * Record Created · Complete Metadata · Review Evidence · Review Export Readiness
    * · Export (`apps/api/isaac_api/workflow.py:17,26`). Two five-step sequences,
    * both presented as "the workflow", neither naming the other.
    *
@@ -377,7 +377,23 @@ export const LABELS = {
   recordWorkspacesEyebrow: 'Workspaces',
   workspaceFields: 'Record Fields',
   workspaceRuns: 'Runs',
-  workspaceCapture: 'Capture & Proposals',
+  /*
+   * `Experiment Data`, NOT the old `Capture & Proposals`, and the owner said why.
+   *
+   * *"there should be a better name than capture and proposals that actually tells
+   * the user what that place is"* (2026-09-14). The old name described the SYSTEM's
+   * internal seam -- raw capture on one side, machine suggestions on the other --
+   * which is a fact about how ISAAC is built, not about what the scientist is doing.
+   * The screen's own heading already asks the scientist's question: "How do you want
+   * to get this experiment in?"
+   *
+   * `Experiment Data` names the thing rather than the mechanism, and it is the
+   * category that legitimately contains all of it: the notes, the recordings, the
+   * proposals waiting on a decision, and the runs. Title Case per
+   * `design-handoff/05-design-system/casing-and-copy.md` Register 1, as every other
+   * workspace label here is.
+   */
+  workspaceCapture: 'Experiment Data',
   workspaceGraph: 'Graph',
 
   /*

@@ -200,7 +200,7 @@ export function RecordDescriptionPanel({ experimentId }: { experimentId: string 
           <span className="fg-block">Record Description</span>
           <span className="record-section-key">record-level</span>
           <span className="record-section-summary">
-            technique, facility, sample, contributors and tags — every run inherits these
+            Technique, facility, sample, contributors and tags — every run inherits these
           </span>
         </button>
       </h2>

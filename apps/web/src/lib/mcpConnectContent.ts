@@ -467,6 +467,32 @@ export const MCP_CAPABILITIES_ALLOWED: readonly McpCapability[] = [
     tools: ['isaac_capture_note'],
   },
   {
+    /*
+     * HAND OVER A WHOLE DICTATION, AND LET ISAAC DO THE READING.
+     *
+     * The companion to `capture-a-note`, and the difference is WHO finds the
+     * values. There, your agent stores your words and — if it believes a value is
+     * stated in them — makes a separate, rule-stating suggestion. Here you hand
+     * over one finished dictation and ISAAC's OWN reader looks for the handful of
+     * things it knows how to read. No model reads the text on this path: the rules
+     * are fixed, they are quoted back with every suggestion, and what they cannot
+     * read they say they cannot read instead of guessing.
+     *
+     * WHY THIS IS THE HONEST ROUTE FOR A TRANSCRIPT. `docs/ai-integration-decision-packet.md`
+     * §6 keeps model output out of the truth path; a suggestion this reader makes is
+     * not model output at all. And every segment is kept as a note either way, so
+     * refusing every suggestion still loses none of what you said.
+     *
+     * DELIBERATELY NOT MENTIONED, as everywhere on this tab: any suggestion that a
+     * connector exists. Future tense throughout.
+     */
+    id: 'capture-a-transcript',
+    action: 'Hand over a finished dictation and let ISAAC read it',
+    detail:
+      'Give a record one dictation you have finished — not text you are still typing — and ISAAC reads it with its own fixed rules rather than with a language model. Every segment of it is kept as a note, including the segments a rule recognised, so nothing you said is lost whatever you decide afterwards. Anything a rule does read becomes a suggestion that quotes the words it came from and the rule that read them, and it is still only a suggestion: no value moves, the record is unchanged, and an exported record will not contain it until you accept it. The reader deliberately knows only a few things; a sentence it cannot read is kept as a note and reported as unread rather than interpreted, and where one field is claimed two different ways it hands you both instead of preferring one. Saying which run the dictation describes is required for a record that has runs — "the only run" is a guess about the science, so it is never assumed.',
+    tools: ['isaac_capture_transcript'],
+  },
+  {
     id: 'read-proposals',
     action: 'Read the suggestions and what you decided',
     detail:

@@ -1,5 +1,14 @@
 import './assistant.css';
-import { useCallback, useEffect, useId, useMemo, useRef, useState, type FormEvent } from 'react';
+import {
+  useCallback,
+  useContext,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+  type FormEvent,
+} from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   MessageSquare,
@@ -18,6 +27,7 @@ import {
   type LucideIcon,
 } from './icons';
 import { LABELS } from '../lib/labels';
+import { AssistantRailToggleSlotContext } from './AssistantDrawer';
 import {
   ASSISTANT_COMPOSER_HELPER,
   ASSISTANT_NO_MODEL_CLAIM,
@@ -137,7 +147,7 @@ interface AssistantPanelProps {
   /** Optional subordinate note, e.g. "truth questions route to the CLI…". */
   note?: string;
   /**
-   * PR-E — the current workspace's own label ("Runs", "Capture & Proposals"),
+   * PR-E — the current workspace's own label ("Runs", "Experiment Data"),
    * reusing the SAME copy `RecordWorkspaceNav`'s pill row already shows
    * (`RECORD_WORKSPACES` in `components/RecordWorkspaceNav.tsx`, itself
    * sourced from `lib/labels.ts`) — no new copy, no new backend intent.
@@ -490,18 +500,17 @@ const NEAR_BOTTOM_PX = 64;
  *                 never a chat message, directly above the composer
  *   FOOT          the sticky dock, in order:
  *                   COMPOSER    directly beneath the transcript, always reachable
- *                   NOTES       the grounded-scope helper, then the no-model
- *                               disclosure — both named as the input's
+ *                   CATALOG     the labelled "What Can I Ask?" trigger,
+ *                               directly under the composer it fills
+ *                   NOTE        ONE paragraph (UX-022) carrying, in order and
+ *                               in full, the grounded-scope helper, the
+ *                               no-model disclosure and the advisory caption.
+ *                               The first two are named as the input's
  *                               `aria-describedby`, so the reader who tabs into
  *                               the field hears what the reader who looks at it
- *                               sees. The disclosure is here rather than in the
- *                               caption because it answers "where do my words
- *                               go?" at the moment of typing.
- *                   CONTROLS    empty state → Agent Actions; conversation →
- *                               Suggested Questions + Agent Actions collapsed
- *                               into ONE compact disclosure (never between the
- *                               transcript and the composer)
- *                   FOOTER      the single italicised advisory caption
+ *                               sees. The disclosure is here rather than in a
+ *                               separate footer because it answers "where do my
+ *                               words go?" at the moment of typing.
  *
  * The panel presents the P29.1 ephemeral session as a conversation and preserves
  * every honesty guard: `Source:` beneath the response it supports, the
@@ -561,6 +570,21 @@ export function AssistantPanel({
   const ids = useId();
   const composerHelperId = `${ids}-composer-helper`;
   const noModelClaimId = `${ids}-no-model`;
+
+  /*
+   * UX-022 — THE HEADER'S TOGGLE SLOT. `AssistantDrawer` owns the collapse
+   * control's state and behaviour (it has to: the control must survive the
+   * `display: none` that hides this whole panel when the rail is collapsed),
+   * but the control BELONGS in this panel's header row, beside the panel's own
+   * name. Publishing an empty slot and letting the drawer portal into it is
+   * what makes both true at once — see `AssistantRailToggleSlotContext`.
+   *
+   * `null` when this panel is mounted WITHOUT a drawer (Guided Completion's
+   * inline mount, and every jsdom test that renders the panel directly). The
+   * slot is then simply an empty `display: contents` span that renders nothing,
+   * which is the same thing the header showed before.
+   */
+  const registerRailToggleSlot = useContext(AssistantRailToggleSlotContext);
 
   const [activeIndex, setActiveIndex] = useState<number | null>(null);
   const [messages, setMessages] = useState<Msg[]>(() => loadSession(experimentId).messages);
@@ -1601,6 +1625,48 @@ export function AssistantPanel({
           <span className="assistant-label" tabIndex={-1}>
             {LABELS.assistant}
           </span>
+        </div>
+        {/* UX-022 — THE COLLAPSE CONTROL'S PLACE IN THE HEADER. An empty
+            `display: contents` span; `AssistantDrawer` portals its ONE
+            `.assistant-rail-toggle` button in here when the rail is expanded,
+            so the button becomes the right-hand flex item of this row and the
+            section's first element is the section's own name. Empty (and
+            invisible) on a mount with no drawer, and on every viewport
+            ≤1024px where that button is CSS-hidden. */}
+        <span className="assistant-head-toggle" ref={registerRailToggleSlot ?? undefined} />
+
+        {/* UX-022 — THE HEADER'S META ROW: the scope sentence and the
+            memory-availability status, on ONE subordinate line under the title
+            rather than as two more full-width strips below the header.
+
+            MEASURED (real Chromium, 1280x800, the 308px record rail, 275px of
+            content): "You are on Record Fields." is 135px and "Memory
+            Available" 109px, so the pair fits one 275px line with room to
+            spare, while title + status + "Collapse Assistant" together need
+            ~354px and do not. That measurement is the whole reason the status
+            moved down a line and the toggle moved up one: the row that fits is
+            the row that gets the two widest items apart.
+
+            `:empty` collapses it, so a mount that passes neither
+            `workspaceContext` nor `availability` reserves no space and adds no
+            row gap. */}
+        <div className="assistant-head-meta">
+          {/* PR-E — the workspace-context lead sentence. It orients rather than
+              instructs: a reader who switches from Runs to Capture sees this
+              line update on the next render (the parent passes a new
+              `workspaceContext` string into the SAME mounted panel), while
+              everything below — conversation, composer text, a staged proposal
+              — is untouched by the switch.
+              UX-022 — it moved INTO the header (it was a separate full-width
+              `<p>` with its own 12px margin directly beneath it) because it is
+              header chrome: it names where the reader is, which is what a
+              header does. Its text, its `<strong>`, and its class are
+              unchanged. */}
+          {workspaceContext && (
+            <p className="assistant-workspace-context">
+              You are on <strong>{workspaceContext}</strong>.
+            </p>
+          )}
           {/* The status row renders only where BOTH are true: the mounting screen
               actually fetched GET /api/graph/status and passed `availability`
               (a mount that cannot truthfully know it — Guided Completion loads
@@ -1624,15 +1690,16 @@ export function AssistantPanel({
             </span>
           )}
         </div>
+
         <div className="assistant-head-right">
           {/* P36R S2 — Clear Conversation lives in the HEADER (never between the
               controls and the transcript). It wipes THIS experiment's ephemeral
               session and returns the rail to its resting empty state; it touches
               no record/truth state, so it needs no confirmation.
-              P36V.1 S2 — it now sits on its OWN compact right-aligned row BENEATH
-              the title + status row, so it can never be read as sitting between
-              the title and the status. When there is nothing to clear this
-              wrapper is empty and CSS `:empty` collapses it — no reserved space.
+              P36V.1 S2 — it sits on its OWN compact right-aligned row, so it can
+              never be read as sitting between the title and the status. When
+              there is nothing to clear this wrapper is empty and CSS `:empty`
+              collapses it — no reserved space.
               P36V S-A — the VISIBLE label is the full "Clear Conversation"; the
               accessible name now comes from that same visible text (the previous
               aria-label="Clear conversation" both contradicted the visible
@@ -1646,20 +1713,6 @@ export function AssistantPanel({
         </div>
       </div>
 
-      {/* PR-E — the workspace-context lead sentence. Renders BELOW the header
-          and ABOVE everything else (degraded state, empty state, the
-          conversation) so it is the first thing read after "Assistant"
-          itself, on every one of the four record workspaces this single
-          panel mount serves. It orients rather than instructs: a reader who
-          switches from Runs to Capture sees this line update on the next
-          render (the parent passes a new `workspaceContext` string into the
-          SAME mounted panel), while everything below — conversation,
-          composer text, a staged proposal — is untouched by the switch. */}
-      {workspaceContext && (
-        <p className="assistant-workspace-context">
-          You are on <strong>{workspaceContext}</strong>.
-        </p>
-      )}
 
       {/* P29.4 — honest, manual-first degraded state: when the live AgentContext
           cannot be verified the assistant says so plainly and answers no
@@ -1688,16 +1741,6 @@ export function AssistantPanel({
       {/* P36R S2 — the BODY absorbs the rail height (flex:1 / min-height:0) so the
           conversation region can flex instead of being clipped by a fixed height. */}
       <div className="assistant-body">
-        {/* EMPTY STATE (P36V S-A order) — one concise guidance sentence, then
-            Suggested Questions at full prominence, then a subtle divider marking
-            the break before the composer below. Agent Actions move BELOW the
-            composer (rendered in the foot). No filler card is added. */}
-        {!hasConversation && (
-          <div className="assistant-empty">
-            <p className="assistant-empty-note">{EMPTY_STATE_GUIDANCE}</p>
-          </div>
-        )}
-
         {/* The conversation region (older → newest, newest at the BOTTOM, the live
             turn last). role="log" carries an IMPLICIT aria-live="polite"; we set
             aria-live="off" here to suppress it so archiving prior turns into the
@@ -1715,6 +1758,31 @@ export function AssistantPanel({
           aria-label="Assistant conversation"
           onScroll={onScroll}
         >
+          {/* EMPTY STATE — one concise guidance sentence, and it lives INSIDE the
+              conversation region rather than as a strip above it.
+
+              UX-022, and it is a measurement rather than a preference. It used
+              to be a sibling of this element, which meant `.assistant-log` did
+              not begin until 145.5px of chrome had already been spent (measured
+              in real Chromium at 1280x800 on the 308px record rail: panel top
+              y=77, log y=222.5) — and the region a reader comes here to read
+              began BELOW the only thing that was in it. "Nothing asked yet." is
+              this region's empty state, so it is now this region's content: one
+              element, `flex: 1`, largest thing in the panel, in both states.
+
+              `role="log"` with an empty-state line inside it is the ordinary
+              shape of a transcript that has no entries yet, and the live region
+              is unaffected — `aria-live="off"` here (the reply inside owns the
+              one polite announcement), so rendering this sentence announces
+              nothing. Agent Actions and Suggested Questions are NOT here; they
+              are one click away in "What Can I Ask?" (owner request,
+              2026-09-13). No filler card is added. */}
+          {!hasConversation && (
+            <div className="assistant-empty">
+              <p className="assistant-empty-note">{EMPTY_STATE_GUIDANCE}</p>
+            </div>
+          )}
+
           {messages.map((m, i) => (
             <ConversationMessage key={m.id ?? i} message={m} currentRev={recordRev} />
           ))}
@@ -1988,7 +2056,13 @@ export function AssistantPanel({
           P36V S-A — the composer is the FIRST thing in the dock, so it sits
           DIRECTLY beneath the transcript. The prompt controls (which used to sit
           between the transcript and the composer as a `<details>` accordion) now
-          come AFTER it, and the advisory caption is last in both states. */}
+          come AFTER it.
+
+          UX-022 — the dock is THREE children, not five: composer, the labelled
+          catalog trigger, and ONE note carrying all three standing claims in
+          order (grounded scope, no-model disclosure, advisory caption). The
+          caption is still the last words in the panel; it is the last element of
+          that note rather than a fourth sibling behind a hair divider. */}
       <div className="assistant-foot">
         <form className="assistant-composer" onSubmit={onComposerSubmit}>
           <input
@@ -2010,37 +2084,13 @@ export function AssistantPanel({
             <CornerDownRight size={15} strokeWidth={2} aria-hidden="true" />
           </button>
         </form>
-        <p className="assistant-composer-helper" id={composerHelperId}>
-          {ASSISTANT_COMPOSER_HELPER}
-        </p>
-
-        {/* WHERE A TYPED QUESTION GOES, STATED WHERE IT IS TYPED.
-            `docs/ai-integration-decision-packet.md` §3 asserts this panel already
-            says "There is no language model"; it never did — the claim lived only
-            in Settings → AI & Automation, behind a tab (`lib/assistant.ts`'s
-            `ASSISTANT_NO_MODEL_CLAIM` records the measurement). §3 uses that
-            supposed disclosure as its reason for surfacing no seam status, so the
-            mitigation the decision rests on did not exist.
-
-            IT REPORTS NO SEAM, and that is the authorization boundary rather than
-            a style choice. It names no provider, no missing item and no decision;
-            it never reads `GET /api/providers/capabilities`; and it is true with
-            no provider in existence. §9's 2026-08-12 amendment is the test — "if a
-            screen would have to say a provider exists in order for the work to be
-            visible, that screen is out of scope" — and nothing here needs one to.
-
-            NOT ITALIC, unlike `assistant-caption` directly below it. That caption
-            is advisory ("the Assistant is advisory ... it never validates"); this
-            is a fact about the build. Rendering a fact in the advisory register
-            invites it to be read as a disposition, and this one is checkable. */}
-        <p className="assistant-no-model" id={noModelClaimId}>
-          {ASSISTANT_NO_MODEL_CLAIM}
-        </p>
 
         {/* P36X — "What Can I Ask?": the real, per-surface capability catalog.
-            The composer's helper line above names the grounded scopes in one
-            sentence; this control shows the actual question families and a
-            traced example of each, for THIS surface only.
+            The dock note BELOW names the grounded scopes in one sentence; this
+            control shows the actual question families and a traced example of
+            each, for THIS surface only. (UX-022 moved it above that note, so it
+            sits directly under the composer it fills — an input affordance
+            beside its input, rather than parked between two paragraphs.)
 
             It is a compact non-modal popover, not a document: a disclosure-style
             trigger (`aria-expanded` + `aria-controls`) over a `role="dialog"`
@@ -2081,9 +2131,29 @@ export function AssistantPanel({
              * visible duplicate of a name the icon already implies.
              */
             aria-label={CAPABILITIES_TRIGGER_LABEL}
-            title={CAPABILITIES_TRIGGER_LABEL}
           >
             <CircleHelp size={15} strokeWidth={2} aria-hidden="true" />
+            {/* UX-022 — THE LABEL IS BACK, VISIBLY, and the reason the icon-only
+                version was wrong is the reason it was introduced. It was made
+                icon-only on 2026-09-13 because the rail "was already carrying
+                eleven" blocks of text — a correct diagnosis with the wrong
+                patient. The eleven blocks were the two clipped control lists and
+                three stacked strips of fine print, all of which are now gone or
+                merged; what was left was a 33x23 unlabelled glyph sitting
+                between two paragraphs, with the words it needed printed as prose
+                right beside it. An icon-only control whose meaning is "ask me
+                what you may ask" cannot be guessed from a question mark.
+
+                The accessible name is UNCHANGED and still comes from
+                `aria-label`, which carries exactly this same string — so every
+                test that finds this control by name still finds it, and the
+                visible text is now a subset-match of the accessible name (WCAG
+                2.5.3 Label in Name), where before there was no visible text to
+                match at all. `title` is dropped: a tooltip duplicating a now-
+                visible label is a second, slower copy of the same words. */}
+            <span className="assistant-capabilities-trigger-label">
+              {CAPABILITIES_TRIGGER_LABEL}
+            </span>
           </button>
           {capabilitiesOpen && (
             <div
@@ -2182,7 +2252,55 @@ export function AssistantPanel({
             * The composer stays visible at all times, so asking is never
             * hidden behind the disclosure. */}
 
-        <p className="assistant-caption">{SUBORDINATE_CAPTION}</p>
+        {/* ── ONE NOTE, NOT THREE STRIPS ──────────────────────────────────
+            *
+            * ~~`.assistant-composer-helper`, then `.assistant-no-model` 6px
+            * below it, then `.assistant-caption` behind a hair divider and in
+            * italics.~~ MEASURED (real Chromium, 1280x800, the 308px record
+            * rail): three separate 11px paragraphs of 33 + 33 + 59.5 = 125.5px,
+            * with an unlabelled 33x23 icon button parked between the second and
+            * the third. Two type registers, one divider and four gap values
+            * across three sentences that a reader meets as one thing: fine
+            * print under a text box.
+            *
+            * EVERY CLAIM SURVIVES VERBATIM, and that is a §5 requirement rather
+            * than a courtesy. All three strings are still the exported
+            * constants, rendered in full, in document order, visible with no
+            * disclosure and no viewport condition:
+            *
+            *   · `ASSISTANT_COMPOSER_HELPER` — what the assistant answers over.
+            *   · `ASSISTANT_NO_MODEL_CLAIM`  — there is no language model in
+            *     this build, and nothing typed here is sent to a model
+            *     provider. `docs/ai-integration-decision-packet.md` §3 names
+            *     this panel as the site of that claim and its absence was a
+            *     measured defect; `__tests__/assistant-model-claim-parity.test.tsx`
+            *     pins it here on all five mounts, including its POLARITY.
+            *   · `SUBORDINATE_CAPTION`      — the assistant is advisory, it
+            *     never validates, and deterministic validation remains
+            *     authoritative.
+            *
+            * THE SPANS ARE NOT COSMETIC. `.assistant-composer-helper` and
+            * `.assistant-no-model` carry the ids the composer input names in
+            * `aria-describedby`, so a reader who tabs into the field still
+            * hears both facts — and each span's own `textContent` is still
+            * exactly its own constant, which is what the parity guard reads.
+            * `.assistant-caption` stays a distinct element for the same reason.
+            *
+            * NOT ITALIC ANY MORE. The italic register existed to mark the
+            * caption as a standing disclaimer distinct from the two facts above
+            * it; in one merged note the distinction is carried by sentence
+            * order and there is nothing left to distinguish it FROM. A single
+            * register also removes the `overused-font` finding the in-browser
+            * detector reported on this dock. */}
+        <p className="assistant-dock-note">
+          <span id={composerHelperId} className="assistant-composer-helper">
+            {ASSISTANT_COMPOSER_HELPER}
+          </span>{' '}
+          <span id={noModelClaimId} className="assistant-no-model">
+            {ASSISTANT_NO_MODEL_CLAIM}
+          </span>{' '}
+          <span className="assistant-caption">{SUBORDINATE_CAPTION}</span>
+        </p>
       </div>
     </section>
   );

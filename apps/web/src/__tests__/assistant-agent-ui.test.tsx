@@ -41,7 +41,7 @@ function ctx(overrides: Partial<AgentContext> = {}): AgentContext {
     workflow: {
       current_step: 'complete_metadata',
       ordered_steps: [
-        { id: 'load_record', label: 'Load Record', state: 'completed', current: false, reopened: false, blocked: false, reason: null },
+        { id: 'load_record', label: 'Record Created', state: 'completed', current: false, reopened: false, blocked: false, reason: null },
         { id: 'complete_metadata', label: 'Complete Metadata', state: 'current', current: true, reopened: false, blocked: false, reason: null },
         { id: 'review_export_readiness', label: 'Review Export Readiness', state: 'blocked', current: false, reopened: false, blocked: true, reason: "Complete 'Complete Metadata' first." },
       ],

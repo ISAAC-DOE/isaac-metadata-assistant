@@ -428,9 +428,59 @@
   background: var(--border-input);
   flex: none;
 }
+/*
+ * TWO NAMES, ONE OF THEM WRONG — reconciled 2026-09-14, and the reconciliation
+ * goes the OPPOSITE WAY from the obvious one. Read the measurement before
+ * "finishing" this.
+ *
+ * THE COLLISION. This app ships two things called an eyebrow:
+ *   `.eyebrow`           (styles/base.css:69) — mono, 11px, weight 500,
+ *                        letter-spacing .09em, `text-transform: uppercase`.
+ *                        That IS `typography.md:55`'s "Eyebrow (section) | Mono
+ *                        | 11px / uppercase | letter-spacing .09em", verbatim.
+ *   `.statusbar-eyebrow` (here)               — mono, 10.5px, no weight,
+ *                        letter-spacing .04em, NO transform.
+ * One name describing two treatments is the defect. `typography.md` has no tier
+ * matching the second, so something had to move.
+ *
+ * WHAT MOVED: the SIZE ONLY. ~~`font-size: 10.5px`~~ is below the scale's own
+ * floor — `typography.md:57`, "Minimum on-screen text size is ~11px (mono meta);
+ * never smaller" — and it is what trips the mechanical `undersized-ui-text`
+ * rule. It is now `var(--font-size-meta)` (11px), the same declared rung
+ * `.eyebrow` reads, so this rule is on the scale and sits squarely in
+ * `typography.md:54`'s "Mono meta | Mono | 10.5–11.5px" tier.
+ *
+ * WHAT DELIBERATELY DID NOT MOVE, AND WHY IT IS A MEASUREMENT AND NOT A
+ * PREFERENCE: `text-transform: uppercase` and `letter-spacing: .09em` are NOT
+ * adopted here. Both make the text WIDER, and this footer is already recorded as
+ * overflowing. `e2e/layout-baseline.ts`'s **LAYOUT-01** measures the record
+ * StatusBar at 375px as "575px in a 353px box with `overflow-x: visible`", with
+ * `span.statusbar-eyebrow < span.statusbar-seg < footer.statusbar` named among
+ * the clipped selectors, and further single-segment clipping at 640 (200% zoom)
+ * and at 768 — two segments at 768 on Linux. Uppercasing three labels and adding
+ * .09em tracking to them grows the content box of a bar that is 222px over its
+ * container, on a known-unfixed finding, and the Linux half of that baseline
+ * cannot be re-measured from this environment. So the full eyebrow treatment is
+ * REFUSED here on evidence, not deferred on taste.
+ *
+ * WHY THE CLASS KEEPS ITS MISLEADING NAME. Renaming it to `.statusbar-meta`
+ * would be the tidy answer and is the wrong one: `e2e/layout-baseline.ts` and
+ * `e2e/helpers/layout.ts` key entries on this exact selector string, and several
+ * of those entries were transcribed from Linux CI runs. Renaming would
+ * invalidate baseline rows that cannot be re-derived here — trading a naming
+ * defect for a measurement defect. The name is therefore documented rather than
+ * changed, and THIS COMMENT is the reconciliation: a reader who reaches for
+ * `.eyebrow`'s treatment because of the name finds out here why it does not
+ * apply. Closing the naming half needs a CI round-trip and is named residue.
+ *
+ * COLOUR UNCHANGED. `--text-slate` is the declared token for mono labels
+ * (`tokens.css:29`, "coverage + mono eyebrows/labels") and `evidence.css` cites
+ * this rule as the precedent; 11px does not change the 5.32:1 it measures on
+ * `--surface-subtle`, so no contrast cell moves.
+ */
 .statusbar-eyebrow {
   font-family: var(--font-mono);
-  font-size: 10.5px;
+  font-size: var(--font-size-meta);
   letter-spacing: 0.04em;
   color: var(--text-slate);
 }

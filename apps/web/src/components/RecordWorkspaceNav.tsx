@@ -59,7 +59,7 @@ import type { ApiCaptureSummary } from '../lib/types';
  * workspace can be middle-clicked, copied, bookmarked and — the reason the
  * switch is a PUSH rather than the `replace` the old tab bar used — reached
  * again with the browser Back button. A reader who goes Fields -> Runs ->
- * Capture & Proposals and presses Back twice is on Fields, which is what the
+ * Experiment Data and presses Back twice is on Fields, which is what the
  * control looks like it promises. (~~Fields -> Runs -> Graph~~ — the Graph left
  * this list on 2026-09-13, `EVG-002`; the example is re-pointed rather than the
  * paragraph rewritten, because the PUSH-not-replace property it describes is
@@ -92,6 +92,31 @@ export const RECORD_WORKSPACES: readonly { id: RecordViewId; label: string }[] =
  * own group, with the summary the others have no equivalent of.
  */
 const PROMOTED: RecordViewId = 'capture';
+
+/**
+ * *** RUNS JOINS DATA CAPTURE (project owner, 2026-09-14). ***
+ *
+ * The owner's words: *"the runs should be a part of the initial capture and
+ * proposals"*. Entering the conditions you set at the instrument IS getting
+ * data in -- it sat under `Workspaces`, two groups away from the intake that
+ * offers the other three routes, so the most direct way in was the one a reader
+ * had to already know about.
+ *
+ * `capture` is still the group's HEAD -- the card with the counts -- and `runs`
+ * is a child row beneath it. It is a RENDERING group and nothing more:
+ * `RECORD_WORKSPACES` remains the complete registry of all four ids (the
+ * assistant reads labels from it, and so does the screen's region naming), each
+ * id is still rendered exactly once, and `?view=runs` is unchanged.
+ *
+ * *** NEITHER MEMBER IS A STEP, AND GROUPING THEM DOES NOT MAKE ONE. *** No
+ * tick, no lock, no disc, no connector, no `aria-current="step"`, no ordering
+ * claim between them: a reader may add a run before writing a note or after,
+ * and the group asserts no sequence. `workflow.py:128-149` is the standing
+ * argument for why -- a step state needs a criterion the record's own signals
+ * can DECIDE, and neither "capture is finished" nor "the runs are all entered"
+ * is derivable from anything this build holds.
+ */
+const CAPTURE_GROUP: readonly RecordViewId[] = [PROMOTED, 'runs'] as const;
 
 /**
  * *** EVG-002 / DEC-04 — THE GRAPH LEAVES THE RECORD'S SIDEBAR (2026-09-13). ***
@@ -233,7 +258,8 @@ export function RecordWorkspaceNav({
       <div className="workspace-nav-eyebrow eyebrow">{LABELS.recordWorkspacesEyebrow}</div>
       <ul className="workspace-nav-list">
         {RECORD_WORKSPACES.filter(
-          (workspace) => workspace.id !== PROMOTED && !URL_ONLY.includes(workspace.id),
+          (workspace) =>
+            !CAPTURE_GROUP.includes(workspace.id) && !URL_ONLY.includes(workspace.id),
         ).map((workspace) => {
           const next = new URLSearchParams(location.search);
           next.set(RECORD_VIEW_PARAM, workspace.id);
@@ -318,7 +344,7 @@ export function RecordCaptureNav({
         aria-current={captureActive ? 'page' : undefined}
         /*
          * THE ACCESSIBLE NAME IS THE DESTINATION; THE COUNTS ARE A DESCRIPTION.
-         * Left to the content, the name would grow to "Capture & Proposals 3
+         * Left to the content, the name would grow to "Experiment Data 3
          * notes · 2 to review" — a link whose name changes whenever a colleague
          * captures a note, which is a poor thing to navigate by and a poor thing
          * to write a test against. The counts are still announced, as the link's
@@ -335,6 +361,36 @@ export function RecordCaptureNav({
           </span>
         )}
       </Link>
+      {/*
+        THE GROUP'S OTHER MEMBERS, as child rows beneath the head.
+
+        They reuse `.workspace-nav-*` deliberately: a row here must be the same
+        KIND of thing as a row in the workspace list -- an ungated destination --
+        and reusing the class carries that sameness rather than asserting it. The
+        only new declaration is the indent that expresses the nesting, and
+        `aria-current` is `page` for exactly the reason the other rows say so.
+      */}
+      <ul className="workspace-nav-list capture-nav-children">
+        {CAPTURE_GROUP.filter((id) => id !== PROMOTED).map((id) => {
+          const member = RECORD_WORKSPACES.find((w) => w.id === id);
+          if (!member) return null;
+          const next = new URLSearchParams(location.search);
+          next.set(RECORD_VIEW_PARAM, id);
+          const isActive = id === active;
+          return (
+            <li key={id} className="workspace-nav-row">
+              <Link
+                to={{ search: `?${next.toString()}` }}
+                className={`workspace-nav-item${isActive ? ' active' : ''}`}
+                aria-current={isActive ? 'page' : undefined}
+                onClick={onNavigate}
+              >
+                {member.label}
+              </Link>
+            </li>
+          );
+        })}
+      </ul>
     </nav>
   );
 }

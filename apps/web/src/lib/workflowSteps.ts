@@ -29,7 +29,25 @@ export interface WorkflowStep {
 
 /** The five canonical steps, in canonical order. Never reordered. */
 export const CANONICAL_STEPS: readonly WorkflowStep[] = [
-  { id: 'load_record', label: 'Load Record' },
+  /*
+   * `Record Created`, renamed server-side on 2026-09-14 and mirrored here.
+   *
+   * The owner reported *"'record fields' is the same as 'load record'"* — and it
+   * was: `load_record` links to `/record/:id`, which resolves to the `fields`
+   * workspace the rail separately calls "Record Fields". So a STEP and a PLACE had
+   * near-identical names for one page, and the step read like an instruction.
+   *
+   * THIS FILE IS THE SECOND COPY OF ONE VOCABULARY, and that is the hazard worth
+   * naming rather than the rename. `workflow.py::CANONICAL_LABELS` is the source;
+   * this mirror exists so a SCREEN NAME can be the step's name (see the note below).
+   * When the server label moved, four `statistics-page` assertions went red because
+   * this copy had not — which is exactly how the assistant's own workflow sentence
+   * was found stranded in the same change, and why that one is now DERIVED from
+   * `CANONICAL_LABELS` instead of retyped. This copy cannot be derived (it is
+   * client-side, with no server import), so it is pinned by
+   * `workflow-steps-mirror.test.ts` against the label the API actually serves.
+   */
+  { id: 'load_record', label: 'Record Created' },
   { id: 'complete_metadata', label: 'Complete Metadata' },
   { id: 'review_evidence', label: 'Review Evidence' },
   { id: 'review_export_readiness', label: 'Review Export Readiness' },

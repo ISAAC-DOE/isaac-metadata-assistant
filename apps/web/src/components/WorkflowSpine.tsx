@@ -47,7 +47,7 @@ function Disc({ state }: { state: ApiWorkflowStep['state'] }) {
 }
 
 /**
- * The permanent canonical workflow spine (Load Record → Complete Metadata →
+ * The permanent canonical workflow spine (Record Created → Complete Metadata →
  * Review Evidence → Review Export Readiness → Export). Order and per-step state
  * are DERIVED by the backend and rendered here verbatim — the client never
  * re-derives completion. `current` is visually distinct and carries
@@ -98,6 +98,32 @@ export function WorkflowSpine({ workflow, recordId }: WorkflowSpineProps) {
       <div className="spine-eyebrow eyebrow">{LABELS.workflowEyebrow}</div>
       <ol className="spine-steps">
         {workflow.ordered_steps.map((step) => {
+          /*
+           * THE SAME SENTENCE IS NOT PRINTED THREE TIMES.
+           *
+           * `workflow.py:139` gives EVERY blocked step the same reason --
+           * `Complete '<current>' first.` -- which is right for the API: a
+           * client may render one step alone, so each step carries its own
+           * reason rather than depending on a sibling. On the desktop vertical
+           * spine that rendered the identical sentence once per blocked step:
+           * measured on a freshly created record, three copies of "Complete
+           * 'Complete Metadata' first." stacked down the rail. That is the
+           * "everything is just put in here with no thought behind it" the
+           * owner reported, and it is a PRESENTATION problem, so it is fixed
+           * here and not by weakening the server's contract.
+           *
+           * The first step carrying a reason prints it; later steps carrying
+           * the IDENTICAL string keep it in the DOM and hide it visually, so
+           * the accessibility tree is UNCHANGED -- a screen reader still hears
+           * why each individual step is locked. Compared by string equality
+           * rather than by assuming all blocked reasons match, because
+           * `reopened` carries a different sentence and a future state may
+           * carry a third.
+           */
+          const duplicateReason =
+            step.reason !== null &&
+            workflow.ordered_steps.findIndex((other) => other.reason === step.reason) !==
+              workflow.ordered_steps.indexOf(step);
           const route = STEP_ROUTE[step.id];
           const href =
             recordId && route && isNavigable(step.state) ? route(recordId) : undefined;
@@ -120,7 +146,11 @@ export function WorkflowSpine({ workflow, recordId }: WorkflowSpineProps) {
                * query, so at desktop widths it is present but inert and the
                * text renders exactly as it always has. */}
               {step.reason && (
-                <span className={`spine-meta${step.current ? '' : ' spine-meta-compact-narrow'}`}>
+                <span
+                  className={`spine-meta${step.current ? '' : ' spine-meta-compact-narrow'}${
+                    duplicateReason ? ' spine-meta-duplicate' : ''
+                  }`}
+                >
                   {step.reason}
                 </span>
               )}

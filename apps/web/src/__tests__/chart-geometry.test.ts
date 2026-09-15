@@ -354,13 +354,13 @@ describe('linePoints / polylinePoints — an index axis, never an inferred calen
 
 describe('chartSummary — the sentence a screen reader gets', () => {
   const rows = [
-    { label: 'Load Record', value: 0 },
+    { label: 'Record Created', value: 0 },
     { label: 'Export', value: 2 },
   ];
 
   it('names every category, its value, and the unit-qualified total', () => {
     expect(chartSummary('Records by step', rows, 'records', 5)).toBe(
-      'Records by step. Load Record: 0, Export: 2. Total 5 records.',
+      'Records by step. Record Created: 0, Export: 2. Total 5 records.',
     );
   });
 
@@ -371,7 +371,7 @@ describe('chartSummary — the sentence a screen reader gets', () => {
   it('omits the total clause rather than naming a denominator it was not given', () => {
     const summary = chartSummary('Operations by group', rows, 'operations', null);
     expect(summary).not.toMatch(/Total/);
-    expect(summary).toContain('Load Record: 0');
+    expect(summary).toContain('Record Created: 0');
   });
 
   it('says there is nothing to describe rather than describing nothing', () => {

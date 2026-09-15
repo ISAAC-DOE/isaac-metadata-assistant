@@ -100,6 +100,13 @@
       "purpose": "Store what a scientist said against a record, word for word, as a note. Not a field value and not evidence, carries no value at all, and never appears in an exported record; only a person decides what it means, and no tool here maps, edits or discards one."
     },
     {
+      "tool": "isaac_capture_transcript",
+      "title": "Hand over a finalized transcript",
+      "scope": "isaac:proposals.write",
+      "mutates": true,
+      "purpose": "Hand one transcript the scientist has FINISHED dictating to ISAAC's own deterministic reader, which stores every segment as a verbatim note and opens one proposal per value it recognises. No language model reads the text and no field is written: every candidate is a suggestion awaiting a person, ambiguities are reported rather than resolved, and only a person can accept one."
+    },
+    {
       "tool": "isaac_propose_field_value",
       "title": "Propose a value for a record field",
       "scope": "isaac:proposals.write",

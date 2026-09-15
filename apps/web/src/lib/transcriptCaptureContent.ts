@@ -296,19 +296,70 @@ export const CAPTURE_COPY = {
    * WITHOUT reading bytes. That is a real capability, described as what it is.
    */
   intakeHeading: 'How do you want to get this experiment in?',
+  /*
+   * "Four ways in", not three — the fourth card was added 2026-09-14.
+   *
+   * The project owner: *"the runs should be a part of the initial capture and
+   * proposals."* He was describing a real gap rather than a preference: this
+   * screen asks "How do you want to get this experiment in?" and then offered
+   * three routes, none of which was the one that records WHAT WAS MEASURED. A
+   * scientist could answer the question honestly, use every route on offer, and
+   * still have entered no scan. Runs were a sibling workspace pill instead.
+   */
   intakeIntro:
-    'Three ways in, and you can use more than one on the same record. Everything ' +
+    'Four ways in, and you can use more than one on the same record. Everything ' +
     'you put in stays exactly as you wrote it — ISAAC proposes values from it and ' +
     'you accept, correct or refuse each one.',
 
-  intakeWriteTitle: 'Write it down',
+  /*
+   * THE THREE CARD TITLES ARE REGISTER 1 — casing conformance, 2026-09-14.
+   *
+   * ~~'Write it down'~~ / ~~'Record at the instrument'~~ / ~~'Bring files you
+   * already have'~~ were Sentence case. They are CARD TITLES, which
+   * `casing-and-copy.md:10` lists in Register 1 ("page titles, section titles,
+   * card titles, empty-state titles"), and they render at the same 15px/600
+   * card-title tier (`typography.md:49`) as `.notes-title` ("Unmapped Notes")
+   * and `.proposals-title` ("Ingestion Proposals") — two Title Case siblings
+   * that sit on the same screen. One tier cannot carry two conventions, so the
+   * three moved to the convention the spec names for the tier rather than the
+   * other two moving to the one it does not.
+   *
+   * `at` and `the` stay lowercase: both are in `labels.ts`'s `MINOR_WORDS`, and
+   * the spec's own approved examples do the same ("Confirmed by You").
+   *
+   * `intakeHeading` above is DELIBERATELY NOT TOUCHED. It is a nine-word
+   * question ending in `?` — prose by `casing-and-copy.md:22` ("anything longer
+   * than a label"), not a label — and Title-Casing a question would be the
+   * error in the other direction.
+   */
+  /*
+   * THE DIRECT ROUTE, AND THE ONLY ONE THAT WRITES A VALUE ITSELF.
+   *
+   * The other three all end in a PROPOSAL a person decides on. This one is the
+   * scientist typing the conditions they set, so the honest body says so rather
+   * than implying a proposal step that does not exist here. Title Case per
+   * Register 1, same 15px/600 card tier as its three siblings.
+   *
+   * "one run per set of measurement conditions" is the Runs workspace's own
+   * subtitle, reused verbatim so the card and its destination agree about what a
+   * run IS -- the vocabulary drift this repo keeps finding comes from paraphrasing
+   * a definition that already exists somewhere else.
+   */
+  intakeRunTitle: 'Enter the Scan Directly',
+  intakeRunBody:
+    'Type the conditions you set — one run per set of measurement conditions. ' +
+    'Unlike the other three routes this is you entering the value, not ISAAC ' +
+    'proposing one, so nothing here needs your confirmation afterwards.',
+  intakeRunAction: 'Add Run',
+
+  intakeWriteTitle: 'Write It Down',
   intakeWriteBody:
     'Type or paste what happened at the instrument. ISAAC reads it for values, ' +
     'asks about anything it will not guess, and keeps your exact words either way.',
   intakeWriteAction: 'Start Writing',
   intakeWriteAvailable: 'Ready to use',
 
-  intakeVoiceTitle: 'Record at the instrument',
+  intakeVoiceTitle: 'Record at the Instrument',
   intakeVoiceBody:
     'Record while your hands are busy. The audio stays in this tab and is never ' +
     'uploaded — you can play it back here and type from it.',
@@ -324,7 +375,7 @@ export const CAPTURE_COPY = {
     'institutional decision rather than a setting here. Recording and playback ' +
     'work now; the words have to be typed.',
 
-  intakeFilesTitle: 'Bring files you already have',
+  intakeFilesTitle: 'Bring Files You Already Have',
   intakeFilesBody:
     'Record where each file lives, with its checksum and your notes, so the record ' +
     'points at the real material. One layout is read today; everything else is kept ' +

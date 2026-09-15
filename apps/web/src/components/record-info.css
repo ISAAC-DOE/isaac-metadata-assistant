@@ -33,6 +33,21 @@
   font-size: 11px;
   color: var(--text-muted);
 }
+/*
+ * REGISTER 2, AND IT STILL STARTS WITH A CAPITAL — casing conformance,
+ * 2026-09-14. At 12px / muted this is the "Helper / tertiary" tier
+ * (`typography.md:53`), so `casing-and-copy.md:20-25` puts it in sentence case,
+ * NOT Title Case. What the four authored summaries got wrong was the other half
+ * of "sentence case": all four began lowercase —
+ *   ~~"what this experiment is called"~~      (RenameExperimentPanel)
+ *   ~~"where this experiment is filed"~~      (MoveExperimentPanel)
+ *   ~~"technique, facility, sample, …"~~      (RecordDescriptionPanel)
+ *   ~~"read from the exported record"~~ / ~~"written when this record is exported"~~
+ *                                            (RecordInfoPanel)
+ * — which reads as a fragment rather than a sentence, directly under a Title
+ * Case `.fg-block` on the same row. Each now leads with a capital and is
+ * otherwise unchanged; none was Title-Cased, because none is a label.
+ */
 .record-section-summary {
   margin-left: auto;
   font-size: 12px;

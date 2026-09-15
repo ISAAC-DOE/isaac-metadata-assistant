@@ -137,7 +137,7 @@ describe('the record workspace list', () => {
     /*
      * *** THREE, NOT FOUR, SINCE 2026-09-13 — `EVG-002`/`DEC-04`. ***
      *
-     * ~~['Capture & Proposals', 'Record Fields', 'Runs', 'Graph']~~ and
+     * ~~['Experiment Data', 'Record Fields', 'Runs', 'Graph']~~ and
      * ~~expect(links).toHaveLength(RECORD_VIEW_IDS.length)~~ — inverted in
      * place, because this file's own expectation is what a future session would
      * read as the intended design.
@@ -150,9 +150,19 @@ describe('the record workspace list', () => {
      * is REFUSED by its own dependency condition.
      */
     expect(links.map((l) => l.getAttribute('aria-label') ?? l.textContent)).toEqual([
-      'Capture & Proposals',
-      'Record Fields',
+      /*
+       * ORDER CHANGED 2026-09-14 -- `Runs` joined the `Data Capture` group and
+       * is rendered as a child row under the `Experiment Data` card, so it
+       * precedes `Record Fields` in DOM order. ~~['Experiment Data', 'Record
+       * Fields', 'Runs']~~
+       *
+       * Still THREE, and still derived from the route contract below: the guard
+       * is that no `?view=` id becomes unreachable, and `Runs` is as reachable
+       * as it was -- one group higher.
+       */
+      'Experiment Data',
       'Runs',
+      'Record Fields',
     ]);
     /*
      * STILL DERIVED FROM THE ROUTE CONTRACT, and the guard's PURPOSE is
@@ -174,7 +184,7 @@ describe('the record workspace list', () => {
      * the array above — `railLinks()` builds that array in the order it wants, so
      * asserting its first element would be asserting the helper.
      */
-    const captureLink = within(captureNav()).getByRole('link', { name: 'Capture & Proposals' });
+    const captureLink = within(captureNav()).getByRole('link', { name: 'Experiment Data' });
     const firstWorkspaceLink = within(nav()).getAllByRole('link')[0]!;
     expect(
       captureLink.compareDocumentPosition(firstWorkspaceLink) &
@@ -261,11 +271,11 @@ describe('the record workspace list', () => {
 
     /*
      * ~~the second hop used to be `Graph`~~ — it left the sidebar
-     * (`EVG-002`/`DEC-04`, 2026-09-13), so the hop is `Capture & Proposals`.
+     * (`EVG-002`/`DEC-04`, 2026-09-13), so the hop is `Experiment Data`.
      * The property under test is the PUSH, not the destination: any two
      * switches exercise it identically.
      */
-    fireEvent.click(screen.getByRole('link', { name: 'Capture & Proposals' }));
+    fireEvent.click(screen.getByRole('link', { name: 'Experiment Data' }));
     await waitFor(() => expect(address()).toBe(`/record/${ID}?view=capture`));
 
     /* THE ASSERTION THAT WOULD HAVE FAILED BEFORE. The retired tab bar wrote the
@@ -323,7 +333,7 @@ describe('the record workspace list', () => {
     /* ~~clicked `Graph`~~ — demoted out of the sidebar (`EVG-002`/`DEC-04`).
        The property is that the OTHER parameters are copied, which any
        destination exercises. */
-    fireEvent.click(screen.getByRole('link', { name: 'Capture & Proposals' }));
+    fireEvent.click(screen.getByRole('link', { name: 'Experiment Data' }));
     await waitFor(() => {
       const url = new URLSearchParams(address().split('?')[1] ?? '');
       expect(url.get('view')).toBe('capture');
@@ -682,7 +692,13 @@ describe('LIB-005 — reopen-and-continue: visiting a workspace remembers it', (
     await screen.findByRole('link', { name: 'Record Fields' });
     expect(lastRecordView(ID)).toBe('fields');
 
-    fireEvent.click(within(nav()).getByRole('link', { name: 'Runs' }));
+    /* `screen`, not `within(nav())`: `Runs` joined the `Data Capture` group on
+       2026-09-14, so it is no longer inside the `Record workspaces` landmark.
+       Which landmark holds it is incidental to this test -- its subject is that
+       clicking a sidebar destination updates the REMEMBERED view -- and the
+       name is unique across the screen, which `record-capture-destination`
+       asserts directly. */
+    fireEvent.click(screen.getByRole('link', { name: 'Runs' }));
     await waitFor(() => expect(address()).toContain('view=runs'));
     expect(lastRecordView(ID)).toBe('runs');
   });

@@ -208,8 +208,8 @@ export function RecordInfoPanel({
   // part of it — see CLAUDE.md §5.
   const summary =
     artifacts.record !== null
-      ? 'read from the exported record'
-      : 'written when this record is exported';
+      ? 'Read from the exported record'
+      : 'Written when this record is exported';
 
   return (
     <Section

@@ -30,7 +30,7 @@ const WF_ORDER = [
   'export',
 ] as const;
 const WF_LABELS: Record<string, string> = {
-  load_record: 'Load Record',
+  load_record: 'Record Created',
   complete_metadata: 'Complete Metadata',
   review_evidence: 'Review Evidence',
   review_export_readiness: 'Review Export Readiness',

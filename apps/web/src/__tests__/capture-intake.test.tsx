@@ -19,6 +19,9 @@ import { fireEvent, render, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { useState } from 'react';
 import { CaptureIntake } from '../components/CaptureIntake';
+
+/** Any well-formed record id: the fourth intake card builds a link from it. */
+const FIXTURE_EXPERIMENT_ID = '01SYNTHTESTEXP000000000000';
 import { TranscriptCapturePanel } from '../components/TranscriptCapturePanel';
 import { CAPTURE_COPY } from '../lib/transcriptCaptureContent';
 import { ROUTES } from '../lib/routes';
@@ -32,9 +35,13 @@ function renderIntake(
     <MemoryRouter
       future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
     >
+      {/* `experimentId` before the spread, so an override can still replace it —
+          the fourth intake route (2026-09-14) links to this record's own
+          `?view=runs`, so the component now requires the id. */}
       <CaptureIntake
         onOpenCapture={onOpenCapture}
         onOpenRecorder={onOpenRecorder}
+        experimentId={FIXTURE_EXPERIMENT_ID}
         {...overrides}
       />
     </MemoryRouter>,
@@ -212,6 +219,7 @@ function Wired() {
       <CaptureIntake
         onOpenCapture={() => setOpen(true)}
         onOpenRecorder={() => setOpen(true)}
+        experimentId={FIXTURE_EXPERIMENT_ID}
       />
       <TranscriptCapturePanel
         experimentId="01TESTTESTTESTTESTTESTTEST"

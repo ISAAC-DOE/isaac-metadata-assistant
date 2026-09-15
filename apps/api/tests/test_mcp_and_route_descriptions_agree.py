@@ -76,6 +76,61 @@ SHARED_CLAIMS: tuple[tuple[str, str, str], ...] = (
         "create_proposal",
         "IT WRITES NO SCIENTIFIC VALUE AND MINTS NO EVIDENCE.",
     ),
+    # THE FIVE CLAIMS THE TRANSCRIPT SURFACE MUST MAKE ON BOTH SIDES — MCP-005.
+    #
+    # One row per claim rather than one per tool, for this table's stated reason: a
+    # failure then says WHICH claim drifted. They are the five a paraphrase would
+    # quietly weaken, and each is load-bearing for a different reason.
+    #
+    # Note the asymmetry this tool has and the other two do not: its candidates are
+    # produced by ISAAC's OWN deterministic reader rather than by the caller, so an
+    # agent that read a softened description would be relaying ISAAC's findings to a
+    # scientist in the wrong register — "ISAAC recorded the temperature" instead of
+    # "ISAAC suggests this, and it is yours to accept". The agent is the only reader
+    # of this text, and it is the one speaking to the person afterwards.
+    (
+        # The gate is checked FIRST and unconditionally at the route, so that text
+        # still being written can never move a value. An agent told the gate is
+        # optional, or told nothing about it, would send a half-finished dictation.
+        "isaac_capture_transcript",
+        "create_transcript",
+        "`finalized` must be `true`.",
+    ),
+    (
+        # The shape constants. An agent that reported a candidate as a stored value
+        # would be describing a different feature to the one reader who acts alone.
+        "isaac_capture_transcript",
+        "create_transcript",
+        "NOTHING HERE IS A VALUE. Every candidate carries the words it came from, "
+        "the rule that read them, `verified: false`, `is_evidence: false` and a "
+        "`status` of `needs_confirmation`, which are constants of the shape rather "
+        "than fields a request can set.",
+    ),
+    (
+        # The inertness, which is what makes minting proposals from a whole
+        # transcript safe at all.
+        "isaac_capture_transcript",
+        "create_transcript",
+        "STORING A PROPOSAL WRITES NO FIELD: this operation leaves every value of "
+        "this record and of every run byte-for-byte unchanged, and a proposal is "
+        "inert to export.",
+    ),
+    (
+        # The losslessness guarantee. Its practical consequence for an agent is that
+        # a rejected proposal destroys nothing, which is what makes it honest to tell
+        # a scientist they may refuse every suggestion.
+        "isaac_capture_transcript",
+        "create_transcript",
+        "EVERY SEGMENT OF THE TRANSCRIPT BECOMES AN UNMAPPED NOTE, including the "
+        "segments that produced a candidate.",
+    ),
+    (
+        # The refusal to disambiguate. An agent that read this as a defect would
+        # re-send edited text to force a candidate out of the reader.
+        "isaac_capture_transcript",
+        "create_transcript",
+        "AMBIGUITY IS NEVER RESOLVED BY PREFERENCE.",
+    ),
 )
 
 #: Sentences that must appear in NO tool description, with the reason they were

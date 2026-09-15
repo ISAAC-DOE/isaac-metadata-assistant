@@ -234,7 +234,7 @@ export function RenameExperimentPanel({
               `.fg-sublabel` / `.fg-summary` paint a colour already below the contrast
               threshold on this screen. */}
           <span className="record-section-key">name</span>
-          <span className="record-section-summary">what this experiment is called</span>
+          <span className="record-section-summary">What this experiment is called</span>
         </button>
       </h2>
       {expanded && (

@@ -262,7 +262,21 @@ const CEILING = {
   fontWeight: 414,
   lineHeight: 421,
   spacing: 2400,
-  /** font-size declarations BELOW the 11px floor: 9.5px ×1, 10px ×14, 10.5px ×85. */
+  /**
+   * font-size declarations BELOW the 11px floor: 9.5px ×1, 10px ×14, 10.5px ×84.
+   *
+   * ~~10.5px ×85~~ — re-measured 2026-09-14 and corrected in place, because the
+   * breakdown is what a reader checks the ceiling against and a stale one makes
+   * the next change look like a regression. `.statusbar-eyebrow` moved 10.5px ->
+   * `var(--font-size-meta)` (11px) in the casing/typography reconciliation
+   * (`chrome.css`); `typography.md:57` sets that floor ("Minimum on-screen text
+   * size is ~11px (mono meta); never smaller") and 10.5px was also the size the
+   * mechanical `undersized-ui-text` rule flags. THE CEILING IS DELIBERATELY NOT
+   * LOWERED to 99: the TOLERANCE floor below it (ceiling − 25) is what refuses a
+   * migration that lowers the real count without lowering the recorded one, and
+   * a one-declaration fix does not warrant moving both ends of a ratchet sized
+   * for the palette-wide work that remains.
+   */
   belowFloor: 100,
   /** the three grandfathered non-standard weights: 650 ×54, 550 ×8, 620 ×5. */
   nonStandardWeight: 67,

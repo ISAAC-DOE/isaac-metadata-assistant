@@ -413,7 +413,7 @@ export async function switchWorkspace(
 const WORKSPACE_LABEL = {
   fields: 'Record Fields',
   runs: 'Runs',
-  capture: 'Capture & Proposals',
+  capture: 'Experiment Data',
   graph: 'Graph',
 } as const;
 
@@ -470,7 +470,7 @@ export async function backToAllRuns(page: Page): Promise<void> {
  * is about may not exist on the page at all. The default is unchanged from what a
  * reader gets by typing the bare URL.
  */
-/** Navigate to the Review Record screen's Capture & Proposals workspace and wait
+/** Navigate to the Review Record screen's Experiment Data workspace and wait
  *  for the proposals panel. */
 export async function openRecord(page: Page, id: string, view = 'capture'): Promise<void> {
   await page.goto(`/record/${id}?view=${view}`);

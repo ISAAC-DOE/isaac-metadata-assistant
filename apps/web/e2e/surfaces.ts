@@ -220,7 +220,7 @@ export const SURFACES: readonly Surface[] = [
      * that note says.
      */
     id: 'record-capture',
-    name: 'Record Detail — Capture & Proposals',
+    name: 'Record Detail — Experiment Data',
     path: `/record/${SEED.partial}?view=capture`,
     scope: 'example',
     ready: { role: 'heading', name: /How do you want to get this experiment in\?/i },

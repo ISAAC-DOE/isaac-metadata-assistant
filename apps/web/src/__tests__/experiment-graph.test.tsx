@@ -153,7 +153,7 @@ describe('the graph lives inside the record, and is linkable', () => {
      * remaining workspaces must also not falsely claim to be the current page.
      */
     expect(view.queryByRole('link', { name: 'Graph' })).toBeNull();
-    for (const name of ['Record Fields', 'Runs', 'Capture & Proposals']) {
+    for (const name of ['Record Fields', 'Runs', 'Experiment Data']) {
       expect(view.getByRole('link', { name })).not.toHaveAttribute('aria-current');
     }
   });

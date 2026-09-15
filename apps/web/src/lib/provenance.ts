@@ -119,17 +119,52 @@ export const ORIGIN_PRECEDENCE: readonly ProvenanceOrigin[] = [
   'unknown',
 ];
 
-/** Product words. None of them says "verified" — that word belongs to the core. */
+/**
+ * Product words. None of them says "verified" — that word belongs to the core.
+ *
+ * REGISTER 1 — casing conformance, 2026-09-14. All eight of these, and three of
+ * the five `REVIEW_STATE_LABEL` values below, were Sentence case:
+ *   ~~'Entered by a person'~~ ~~'From a file'~~ ~~'From a transcript'~~
+ *   ~~'Inherited from the record'~~ ~~'From an assistant'~~
+ *   ~~'Derived by a rule'~~ ~~'From recorded evidence'~~
+ *   ~~'Origin not recorded'~~ ~~'Needs review'~~ ~~'Not yet placed'~~
+ *   ~~'Conflict decided'~~
+ * These are CHIP LABELS, and `casing-and-copy.md:12` puts "status chips, badge
+ * labels" in Register 1 — the spec's single most explicit Register 1 category.
+ * Its own approved list (`:17`) even contains `In Review` and `Needs Attention`
+ * as Title Case siblings of `Needs Review`. They rendered beside chips that were
+ * already Title Case (`Verified`, `Confirmed by You`, `Needs You`, `Missing`), so
+ * the chip vocabulary carried two conventions at once.
+ *
+ * `by` and `the` stay lowercase (minor words, not leading — the same shape as the
+ * spec's own `Confirmed by You`). `From` in "Inherited From the Record" is
+ * capitalised because it is four characters, which is the rule
+ * `casing-and-copy.md` implies and `labels.ts::MINOR_WORDS` does not list it
+ * against.
+ *
+ * A CLAIM I MADE AND THEN MEASURED FALSE, recorded so nobody rebuilds the
+ * reasoning: I first left these alone on the ground that they were
+ * "parity-locked with the backend", after `grep -rln 'Entered by a person'
+ * apps/api/` matched `apps/api/isaac_api/proposals.py`. **That hit is a PROSE
+ * COMMENT** (`proposals.py:242`, about superseding), not a label definition, and
+ * `grep -n LABEL apps/api/isaac_api/provenance.py` returns **nothing at all**.
+ * What `__tests__/provenance.test.tsx` actually pins across the language boundary
+ * is the ENUM VOCABULARY and its ORDER (`backendTuple('ORIGINS')`,
+ * `backendTable('SOURCE_TYPE_ORIGIN')`), plus that every member HAS a non-empty
+ * label — never the label's text. So no parity pair exists here and nothing was
+ * desynchronised. A `grep` that matches a comment is not a measurement of a
+ * contract.
+ */
 export const ORIGIN_LABEL: Record<ProvenanceOrigin, string> = {
   // Not "Entered by you": this build stamps no actor, so it cannot say WHO.
-  manual: 'Entered by a person',
-  file: 'From a file',
-  voice: 'From a transcript',
-  inherited: 'Inherited from the record',
-  assistant: 'From an assistant',
-  derived: 'Derived by a rule',
-  evidence: 'From recorded evidence',
-  unknown: 'Origin not recorded',
+  manual: 'Entered by a Person',
+  file: 'From a File',
+  voice: 'From a Transcript',
+  inherited: 'Inherited From the Record',
+  assistant: 'From an Assistant',
+  derived: 'Derived by a Rule',
+  evidence: 'From Recorded Evidence',
+  unknown: 'Origin Not Recorded',
 };
 
 export const ORIGIN_MEANING: Record<ProvenanceOrigin, string> = {
@@ -164,10 +199,10 @@ export type ProvenanceReviewState = (typeof PROVENANCE_REVIEW_STATES)[number];
 
 export const REVIEW_STATE_LABEL: Record<ProvenanceReviewState, string> = {
   supported: 'Supported',
-  needs_review: 'Needs review',
+  needs_review: 'Needs Review',
   conflict: 'Conflicting',
-  unmapped: 'Not yet placed',
-  resolved: 'Conflict decided',
+  unmapped: 'Not Yet Placed',
+  resolved: 'Conflict Decided',
 };
 
 export const REVIEW_STATE_MEANING: Record<ProvenanceReviewState, string> = {

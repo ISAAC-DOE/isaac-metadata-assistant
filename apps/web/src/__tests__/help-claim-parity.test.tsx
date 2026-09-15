@@ -356,9 +356,39 @@ describe('QA-013 §1 · nothing in a field row links anywhere, and not every fie
   });
 
   it('a field with no evidence is a DESIGNED state, not an edge case', () => {
-    // `CLAUDE.md` §5: a value with no support stays missing. The row says so in
-    // words, which is why "every field" could never have been true.
-    expect(frontendSource('components/FieldRow.tsx')).toMatch(/'honestly missing'/);
+    /*
+     * `CLAUDE.md` §5: a value with no support stays missing. The row says so,
+     * which is why "every field" could never have been true.
+     *
+     * INVERTED 2026-09-14 — this assertion was PINNING A CASING DEFECT.
+     * ~~`expect(frontendSource('components/FieldRow.tsx')).toMatch(/'honestly missing'/)`~~
+     * required the row to keep a hardcoded lowercase literal — quoted here so
+     * the old text is not lost: `'honestly missing'`, and its sibling
+     * `'awaiting your confirmation'`. Both rendered in the VALUE slot 10px from
+     * a Title Case `<StatusChip>` announcing the same state, which
+     * `casing-and-copy.md:12` assigns to the chip (Register 1), and neither was
+     * ever in `LABELS`. A test requiring the literal's presence is a test that
+     * fails when the defect is fixed, so it is inverted rather than deleted.
+     *
+     * WHAT IS PINNED NOW IS THE CLAIM, NOT THE SENTENCE: the row must still
+     * RENDER the no-evidence state distinctly (it branches on `missing`, and
+     * `StatusChip` carries the words), and it must NOT have gone back to a
+     * hardcoded literal in that slot.
+     */
+    const src = frontendSource('components/FieldRow.tsx');
+    // The state is still a first-class branch of the row, not an edge case.
+    expect(src).toMatch(/const missing = field\.status === 'missing'/);
+    expect(src).toMatch(/{needsYou \|\| missing \? \(/);
+    // …and it is announced by the chip, from the registry, exactly once.
+    expect(src).toMatch(/<StatusChip kind={kind} \/>/);
+    /* THE RETIRED LITERALS ARE POLICED SOMEWHERE ELSE, DELIBERATELY. Asserting
+       their absence over this file's raw text would fail on the correction
+       comment that quotes them — the same trap `CLAUDE.md` §11 records for the
+       CSS phantom sweep that counted `var()` written inside comments. The
+       comment-stripped, tree-wide version of that check lives in
+       `src/__tests__/casing-registers.test.tsx` §4 (the anti-hardcode ratchet),
+       which is where a reintroduction anywhere under `components/` or
+       `screens/` is caught rather than only here. */
   });
 
   it('the sidecar sentence is true: build_sidecar exists and the CLI writes it beside the record', () => {

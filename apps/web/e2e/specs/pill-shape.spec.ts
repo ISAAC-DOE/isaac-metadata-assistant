@@ -138,52 +138,81 @@ for (const width of WIDTHS) {
   });
 }
 
-test('@responsive the /imports strip is five pills and one card, not six lozenges', async ({
+test('@responsive the /imports strip is SIX uniform pills, and the sentence is not a chip', async ({
   page,
   app,
 }) => {
   /*
-   * The specific shape the general assertion above was written for, pinned
-   * separately so a future reader can see what it is protecting.
+   * THIS TEST PREVIOUSLY PINNED "five pills and one card", AND IS INVERTED
+   * RATHER THAN DELETED -- the established remedy here for a test that pins a
+   * defect.
+   *
+   * What it protected is real and is still asserted below: a pill radius must
+   * never curve in across a sentence. It protected it by ACCEPTING a chip that
+   * held a sentence, and measured at 1280 that chip was 73.6px x 352px beside
+   * five siblings of 27px x 56-91px -- 2.7x the height and 4x the width, in a
+   * wrapping row with a 4px gap. That is the "everything is just put in here
+   * with no thought behind it" the owner reported, and no assertion here could
+   * see it, because the file's own subject was the RADIUS and not the RHYTHM.
+   *
+   * The sentence now lives below the row as `.hi-steps-disclosure`, tied to its
+   * step by `aria-describedby`. So the invariant gets stronger rather than
+   * looser: no chip may hold a sentence AT ALL, which makes the old
+   * radius-versus-height check unreachable by construction instead of merely
+   * satisfied.
    */
   await page.setViewportSize({ width: 1280, height: 812 });
   await app.goto('/imports');
-  // The strip itself, before measuring it — see the note in the test above. One
-  // run of an earlier version of this file reported `1 failed / 3 passed` on an
-  // unmutated tree and could not be reproduced in ten further runs; rather than
-  // trust the ten, the premise each assertion rests on is now waited for.
   await expect(page.locator('.hi-steps > .hi-step').first()).toBeVisible();
 
   const chips = await page.evaluate(() =>
     Array.from(document.querySelectorAll<HTMLElement>('.hi-steps > .hi-step')).map((el) => {
       const box = el.getBoundingClientRect();
+      const cs = window.getComputedStyle(el);
       return {
         unbuilt: el.classList.contains('unbuilt'),
+        text: (el.textContent ?? '').trim(),
         width: Math.round(box.width),
         height: Math.round(box.height),
-        radius: Math.round(Number.parseFloat(window.getComputedStyle(el).borderTopLeftRadius)),
+        radius: Math.round(Number.parseFloat(cs.borderTopLeftRadius)),
+        lineHeight: Math.round(Number.parseFloat(cs.lineHeight)),
+        describedBy: el.getAttribute('aria-describedby'),
       };
     }),
   );
 
   expect(chips.length, 'the workflow strip is missing').toBeGreaterThan(1);
 
-  const stages = chips.filter((c) => !c.unbuilt);
-  const notes = chips.filter((c) => c.unbuilt);
-  expect(stages.length, 'no single-line stage chips found').toBeGreaterThan(1);
-
-  for (const stage of stages) {
-    // Each sizes itself rather than being stretched to the note's height. 32px
-    // is one line of `--font-size-meta` plus this chip's padding, with room to
-    // spare; the note chip measures 70.
-    expect(stage.height, 'a stage chip was stretched to a taller sibling').toBeLessThan(32);
-    expect(stage.width).toBeGreaterThanOrEqual(stage.height);
-  }
-
-  for (const note of notes) {
-    // A chip holding a sentence must not curve in across its own text.
-    expect(note.radius, 'the multi-line note chip still has a pill radius').toBeLessThan(
-      note.height / 2,
+  // (1) EVERY chip is a single-line pill now -- including the unbuilt one.
+  for (const chip of chips) {
+    expect(chip.height, `chip "${chip.text}" is taller than one line`).toBeLessThan(32);
+    expect(chip.width, `chip "${chip.text}" is taller than it is wide`).toBeGreaterThanOrEqual(
+      chip.height,
     );
   }
+
+  // (2) THE RHYTHM the old contract could not see: no chip towers over its
+  //     neighbours. Generous at 1.6x so a longer label or a wrapped row is not
+  //     a failure -- the defect this replaces was 2.7x.
+  const tallest = Math.max(...chips.map((c) => c.height));
+  const shortest = Math.min(...chips.map((c) => c.height));
+  expect(tallest / shortest, 'one chip is much taller than its neighbours').toBeLessThan(1.6);
+
+  // (3) No chip holds a sentence. A label, not prose -- which is what makes the
+  //     999px radius correct on all six.
+  for (const chip of chips) {
+    expect(chip.text.length, `chip "${chip.text}" reads as prose, not a label`).toBeLessThan(40);
+    expect(chip.text, `chip "${chip.text}" contains sentence punctuation`).not.toMatch(/[.!?]\s/);
+  }
+
+  // (4) The unbuilt step still SAYS it is unbuilt -- the disclosure moved, it
+  //     did not disappear, and it is associated rather than merely adjacent.
+  const unbuilt = chips.filter((c) => c.unbuilt);
+  expect(unbuilt.length, 'no unbuilt step found -- has the fixture changed?').toBe(1);
+  expect(unbuilt[0]!.describedBy, 'the unbuilt chip names no disclosure').toBeTruthy();
+  const note = page.locator(`#${unbuilt[0]!.describedBy}`);
+  await expect(note).toBeVisible();
+  await expect(note).toContainText(/Not built in this build/);
+  // …and it is prose in the document, not another chip in the row.
+  expect(await note.evaluate((el) => el.classList.contains('hi-step'))).toBe(false);
 });

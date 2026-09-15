@@ -299,7 +299,7 @@ export function resolveRecordView(search: string | URLSearchParams): RecordViewI
    *
    * WHY IT IS HERE AND NOT IN `RecordWorkbench`, where it was written: the WCAG
    * 2.4.2 `document.title` floor calls this function too. Left inline, a
-   * `?proposal=` deep link would have RENDERED `Capture & Proposals` while the
+   * `?proposal=` deep link would have RENDERED `Experiment Data` while the
    * page TITLE said `Record Fields`. Neither side of that merge conflict was
    * correct alone.
    */

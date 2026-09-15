@@ -28,6 +28,15 @@ import {
 } from '../lib/evidenceGraph';
 import type { ApiProvenanceResponse } from '../lib/api';
 import { experimentDetail } from '../test/apiFixtures';
+/* READ FROM THE REGISTRY, NOT RETYPED — casing conformance, 2026-09-14. The three
+   origin labels were asserted as literals: ~~'From a file'~~, ~~'From an assistant'~~,
+   ~~'From a transcript'~~. All three were Sentence case and moved to Register 1
+   (`casing-and-copy.md:12`, status chips). The two NEGATIVE assertions are why this
+   is a reference and not a re-typed string: a stale literal makes `.not.toContain`
+   pass vacuously, and the property it protects — that an origin this build never
+   produces can never reach a screen — would have stopped being checked while
+   reading green. */
+import { ORIGIN_LABEL } from '../lib/provenance';
 import type {
   ApiAsset,
   ApiAssetsResponse,
@@ -1230,7 +1239,9 @@ describe('evidence graph · where a value came from, and what establishes it', (
 
     const sample = withProv.nodes.find((n) => n.kind === 'sample' && n.runId === null);
     const text = (sample?.detail ?? []).map((l) => `${l.term}: ${l.value}`).join('\n');
-    expect(text).toContain('Where this came from · sample.material.formula: From a file');
+    expect(text).toContain(
+      `Where this came from · sample.material.formula: ${ORIGIN_LABEL.file}`,
+    );
     expect(text).toContain('Review state · sample.material.formula: Supported');
   });
 
@@ -1240,17 +1251,17 @@ describe('evidence graph · where a value came from, and what establishes it', (
      * IN THIS BUILD PRODUCES, and no surface may list it as an available
      * capability. This module therefore has no origin legend, no origin filter and
      * no origin inventory — an origin reaches the screen only attached to an
-     * address that reported it. The positive half is the test above: "From a file"
-     * DOES appear when the data says `file`.
+     * address that reported it. The positive half is the test above:
+     * `ORIGIN_LABEL.file` DOES appear when the data says `file`.
      */
     const graph = buildOk({ provenance: data(provenanceFixture()) });
     const everyValue = graph.nodes
       .flatMap((n) => n.detail)
       .map((l) => l.value)
       .join('\n');
-    expect(everyValue).toContain('From a file');
-    expect(everyValue).not.toContain('From an assistant');
-    expect(everyValue).not.toContain('From a transcript');
+    expect(everyValue).toContain(ORIGIN_LABEL.file);
+    expect(everyValue).not.toContain(ORIGIN_LABEL.assistant);
+    expect(everyValue).not.toContain(ORIGIN_LABEL.voice);
   });
 
   it('states what the route itself did not describe', () => {

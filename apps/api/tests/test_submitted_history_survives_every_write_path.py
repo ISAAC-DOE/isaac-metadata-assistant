@@ -889,6 +889,14 @@ def test_no_mcp_write_reaches_a_submitted_records_history(client, app, db):
         # exercise. It is also the operation an UNTRUSTED caller can now reach, so
         # "it cannot disturb a submitted record" is the claim that matters about it.
         "create_note",
+        # THE NINTH, added with MCP-005. `create_transcript` writes into BOTH
+        # `state["notes"]` and `state["proposals"]` — both OUTSIDE `draft` — in one
+        # critical section, so it moves the record's `rev` and must still leave every
+        # submitted artifact and every history row precisely where they are. It is the
+        # widest of the three by volume (one note per segment plus one proposal per
+        # candidate, from a single call), which is exactly why it is driven below
+        # rather than exempted.
+        "create_transcript",
     }, f"the MCP mutating surface changed: {sorted(mutating)}"
     for forbidden in (
         "submit",
@@ -1019,6 +1027,40 @@ def test_no_mcp_write_reaches_a_submitted_records_history(client, app, db):
                 },
             ),
         ),
+        (
+            # A REAL TRANSCRIPT CAPTURE THROUGH MCP, NOT A REFUSAL, for the reason the
+            # proposal and note cases give. `run_id` IS supplied deliberately: without
+            # it the reader withholds every candidate, so the call would store notes
+            # and nothing else and this case would cover the narrower half of the
+            # operation. With it the run is settled, the reader recognises the
+            # temperature, and the call writes notes AND an open proposal in one
+            # critical section — which is the shape whose safety argument this sweep
+            # exists to check.
+            #
+            # `finalized: true` is not decoration: the route's first and unconditional
+            # check refuses the request without it and stores nothing, which would
+            # make this case a refusal wearing a pass.
+            #
+            # NOW LAST IN THE TUPLE, taking over from `create_note` — every case reads
+            # its validator lazily inside `build()`, so the ordering trap the
+            # `create_proposal` comment records is about evaluation time rather than
+            # position; appending here keeps that property rather than relying on it.
+            "create_transcript",
+            lambda: (
+                {"experiment_id": eid},
+                _etag(client, eid),
+                {
+                    # THE PHRASING IS MEASURED, NOT INVENTED. "The cell sat at 301 K"
+                    # produces ZERO candidates — the reader wants a temperature LABEL,
+                    # so this case would have stored notes and nothing else while
+                    # reading as full coverage. The `source == "transcript"` proposal
+                    # assertion below is what caught it.
+                    "text": "The temperature was 301 K.",
+                    "finalized": True,
+                    "run_id": run_a,
+                },
+            ),
+        ),
     )
     reached = 0
     landed: set[str] = set()
@@ -1062,6 +1104,28 @@ def test_no_mcp_write_reaches_a_submitted_records_history(client, app, db):
     ), (
         "the note was reported stored, and no note on the record carries the agent "
         "channel — so either nothing was stored or the channel was not stamped"
+    )
+    # THE SAME NAMED CHECK FOR THE NINTH OPERATION, and not left to `reached`, for
+    # the reason the two above give — with one addition specific to it: this operation
+    # produces TWO artifact kinds, so "it landed" is asserted over both. A transcript
+    # that stored its notes and minted no proposal would satisfy a `landed` check
+    # alone while covering only half of what the operation does.
+    assert "create_transcript" in landed, (
+        "the MCP transcript capture did not land, so the invariant is being asserted "
+        "over a refusal"
+    )
+    _after_transcript = ws.load_experiment(eid)
+    assert any(note.source == "transcript" for note in _after_transcript.notes), (
+        "the transcript was reported stored, and no note on the record carries the "
+        "transcript channel — so either nothing was stored or it was not stamped"
+    )
+    # BY SOURCE, NOT BY COUNT. A total is satisfied by the `create_proposal` case
+    # above; `source == "transcript"` can only be satisfied by a proposal this
+    # operation minted, which is the half of the operation that would otherwise go
+    # unexercised.
+    assert any(p.source == "transcript" for p in _after_transcript.proposals), (
+        "the transcript reader recognised no candidate, so this case is covering only "
+        "the notes half of the operation it exists to drive"
     )
     assert len(db.submissions) == len(history["submissions"]), (
         "no MCP operation may record a submission"

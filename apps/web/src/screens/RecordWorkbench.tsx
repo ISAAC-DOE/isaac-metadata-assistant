@@ -597,7 +597,7 @@ function LoadedWorkbench({
    * It arrived inline here, from the lane that built the agent-facing proposal
    * deep link, in the same hour this extraction landed. Keeping it inline would
    * have restored the second expression; dropping it would have made a
-   * `?proposal=` link RENDER `Capture & Proposals` while the page TITLE said
+   * `?proposal=` link RENDER `Experiment Data` while the page TITLE said
    * `Record Fields` - a false claim about the page in the one place a reader
    * cannot see the page to check it. `resolveRecordView`'s own comment carries
    * the reasoning and the branch ORDER, which is load-bearing: a run address
@@ -1253,7 +1253,7 @@ function LoadedWorkbench({
             ~~A section, not a tab, because behind a tab a reader would never learn
             that this record can hold captured content at all, and an empty tab is
             exactly the surface a person stops opening.~~ — WITHDRAWN for the reason the
-            Runs workspace records: the sidebar names `Capture & Proposals` permanently,
+            Runs workspace records: the sidebar names `Experiment Data` permanently,
             on every workspace, so the existence of the pipeline is visible without
             opening it. What the argument was PROTECTING is unchanged and still holds —
             this build has no automatic producer for proposals, so the ordinary state of
@@ -1288,6 +1288,7 @@ function LoadedWorkbench({
       <CaptureIntake
         onOpenCapture={() => setCaptureOpen(true)}
         onOpenRecorder={() => setCaptureOpen(true)}
+        experimentId={id}
       />
       <TranscriptCapturePanel
         experimentId={id}
@@ -1478,7 +1479,7 @@ function NeedsYouBanner({
    * the "content pushed far down the page" cost this whole reorganisation exists
    * to remove, reintroduced by the fix for a different problem.
    *
-   * SO THE QUESTIONS FOLD, NOT THE BANNER. On Runs, Capture & Proposals and Graph
+   * SO THE QUESTIONS FOLD, NOT THE BANNER. On Runs, Experiment Data and Graph
    * it renders the icon, the count, the one sentence that says a refusal is
    * expected, and the action — which is everything a reader needs in order to
    * decide whether to go and answer them. The itemised list is on Record Fields,

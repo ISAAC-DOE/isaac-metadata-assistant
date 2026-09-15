@@ -13,7 +13,7 @@
  * ── AND THE RISK GREW WHEN THE SCREEN GAINED FOUR WORKSPACES ────────────────
  *
  * The three boxes below no longer share one panel: the transcript and the note box
- * are on `Capture & Proposals`, the asset form is on `Record Fields`, and the run
+ * are on `Experiment Data`, the asset form is on `Record Fields`, and the run
  * field is on `Runs`. So there are now THREE panels that must survive being left,
  * and the ways to leave one went from one (the graph) to three. Each case below
  * therefore makes TWO round trips — out to the Graph, which is the conditional
@@ -206,7 +206,7 @@ describe('the record workspaces keep unsaved text', () => {
     expect(screen.queryByRole('textbox', { name: 'Capture a note' })).toBeNull();
     expect(panel('capture')?.hidden).toBe(true);
 
-    await go('Capture & Proposals');
+    await go('Experiment Data');
     expect((screen.getByLabelText('Transcript') as HTMLTextAreaElement).value).toBe(
       'the scan was repeated at 8979 eV',
     );
@@ -224,7 +224,7 @@ describe('the record workspaces keep unsaved text', () => {
     expect(panel('capture')?.hidden).toBe(true);
     expect(panel('runs')?.hidden).toBe(false);
 
-    await go('Capture & Proposals');
+    await go('Experiment Data');
     expect((screen.getByLabelText('Transcript') as HTMLTextAreaElement).value).toBe(
       'the scan was repeated at 8979 eV',
     );
@@ -262,7 +262,7 @@ describe('the record workspaces keep unsaved text', () => {
     );
 
     // ...and across a sibling workspace too, for the reason the first case records.
-    await go('Capture & Proposals');
+    await go('Experiment Data');
     expect(screen.queryByRole('textbox', { name: /^Notes/ })).toBeNull();
     await go('Record Fields');
     expect((screen.getByLabelText(/^Notes/) as HTMLTextAreaElement).value).toBe(

@@ -44,6 +44,14 @@ import axe from 'axe-core';
 import { RunsSection, RUNS_PAGE_SIZE } from '../components/RunsSection';
 import { __resetRunAutosaveStore } from '../lib/runAutosaveStore';
 import { RECORD_COMPARE_PARAM, RECORD_RUN_PARAM, RUN_COMPARE_MAX } from '../lib/routes';
+/* READ FROM THE REGISTRY, NOT RETYPED — casing conformance, 2026-09-14. These two
+   assertions carried the label TEXT as literals: ~~'Inherited from the record'~~ and
+   ~~'Needs review'~~. Both were Sentence-case chip labels and moved to Register 1
+   (`casing-and-copy.md:12`); the negative assertion below was the dangerous one,
+   because a stale literal makes a `.not.toContain` pass VACUOUSLY — it would have
+   gone green while the two facts it forbids running together did exactly that.
+   Referencing the constants means the next re-casing cannot silently defuse it. */
+import { ORIGIN_LABEL, REVIEW_STATE_LABEL } from '../lib/provenance';
 import { runFixture, runsPage, stubFetchRoutes, type RouteEntry } from '../test/apiFixtures';
 
 configure({ asyncUtilTimeout: 5_000 });
@@ -1458,13 +1466,13 @@ describe('the expanded detail describes support without weighing it', () => {
     expect(detail.textContent).toContain('How this run holds it');
     expect(detail.textContent).toContain('What establishes it');
     expect(detail.textContent).not.toContain(
-      'Inherited from the record · inherited from record',
+      `${ORIGIN_LABEL.inherited} · inherited from record`,
     );
     // NAMED AS THIS BUILD'S OWN READING OF THE CITATIONS, not as a decision.
     expect(detail.textContent).toContain(
       'read from the citations stored on this run, not a decision anybody recorded',
     );
-    expect(detail.textContent).toContain('Needs review');
+    expect(detail.textContent).toContain(REVIEW_STATE_LABEL.needs_review);
     expect(detail.textContent).toContain('Supported');
     // Run 2's one entry records no source kind, and is described as exactly that
     // rather than being dropped or given a plausible one.
