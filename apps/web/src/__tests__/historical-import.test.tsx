@@ -374,7 +374,20 @@ function renderScreen() {
 }
 
 async function openSession() {
-  stub({ list: listResponse(), detail: session() });
+  /*
+   * `experiments` IS SERVED HERE because sending a candidate now CHOOSES a
+   * destination from the workspace's own records rather than asking a scientist
+   * to type a ULID (see `useProposalDestinations`). An empty list is a legitimate
+   * state — the screen then offers "New record from this import" instead — but a
+   * test about the SEND path needs something to send to.
+   */
+  stub({
+    list: listResponse(),
+    detail: session(),
+    experiments: {
+      experiments: [{ id: '01RECORD00000000000000001', title: 'Cu K-edge campaign, 2019' }],
+    },
+  });
   renderScreen();
   fireEvent.click(await screen.findByRole('button', { name: IMPORT_COPY.actionStart }));
   await screen.findByRole('heading', { name: 'Sources' });
@@ -750,9 +763,26 @@ describe('§5 · a candidate that cannot be sent says why, and offers no control
     const card = screen
       .getByText('system.technique', { selector: '.hi-candidate-target' })
       .closest('article') as HTMLElement;
-    fireEvent.change(within(card).getByPlaceholderText("the record's id"), {
-      target: { value: '01RECORD00000000000000001' },
+    /*
+     * A PICKER SINCE 2026-09-14, not a typed ULID. This used to
+     * `getByPlaceholderText("the record's id")` and type the id in — which is
+     * exactly the interaction the project owner reported as unusable ("nobody
+     * knows a ULID"), so the field is now a `<select>` of the workspace's own
+     * records. The destination is incidental to THIS test, whose subject is that
+     * sending reads the RECORD's version and sends it as `If-Match`; only the
+     * way the destination is chosen changed. See `useProposalDestinations`.
+     *
+     * The option must exist to be selectable, so this waits for the list read
+     * rather than assuming it has landed.
+     */
+    const destination = await waitFor(() => {
+      const el =
+        within(card).queryByRole('combobox', { name: /which record/i }) ??
+        within(card).queryByPlaceholderText("the record's id");
+      if (el === null) throw new Error('no destination control yet');
+      return el;
     });
+    fireEvent.change(destination, { target: { value: '01RECORD00000000000000001' } });
     fireEvent.click(within(card).getByRole('button', { name: IMPORT_COPY.actionPropose }));
 
     await waitFor(() => {

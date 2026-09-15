@@ -5,7 +5,7 @@ import type { ReactNode } from 'react';
 import { Navigate, useNavigate, useParams } from 'react-router-dom';
 import { AppShell } from '../components/AppShell';
 import { TopBar } from '../components/TopBar';
-import { WorkflowSpine } from '../components/WorkflowSpine';
+import { RecordRail } from '../components/RecordRail';
 import { StatusBar } from '../components/StatusBar';
 import { GuidedPrompt } from '../components/GuidedPrompt';
 import { StatusChip } from '../components/StatusChip';
@@ -207,7 +207,7 @@ export function GuidedCompletion() {
       <AppShell
         variant="record"
         topBar={<TopBar variant="record" title={LABELS.screenComplete} recordId={id} />}
-        sidebar={<WorkflowSpine workflow={null} recordId={id} />}
+        sidebar={<RecordRail recordId={id} workflow={null} activeView={null} />}
         mainPad="centered"
         width="readable"
       >
@@ -957,7 +957,23 @@ function LoadedCompletion({
           surface={LABELS.screenComplete}
         />
       }
-      sidebar={<WorkflowSpine workflow={detail.workflow} recordId={id} />}
+      /*
+        THE FULL RECORD RAIL, not the spine alone. This screen rendered
+        `<WorkflowSpine …/>` by itself, so arriving here from a workflow step
+        removed Experiment Data, Runs, Record Fields and the Evidence Trail —
+        reported by the project owner, 2026-09-14. `activeView={null}` because
+        this is a workflow STEP: the spine marks where you are, and the workspace
+        rows stay navigable and unhighlighted rather than adding a second
+        "you are here". See `RecordRail`.
+      */
+      sidebar={
+        <RecordRail
+          recordId={id}
+          workflow={detail.workflow}
+          activeView={null}
+          captureSummary={detail.capture_summary ?? null}
+        />
+      }
       rightPanel={rightPanel}
       statusBar={statusBar}
       mainPad="centered"

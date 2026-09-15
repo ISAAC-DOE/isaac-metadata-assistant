@@ -1,6 +1,6 @@
 import './screens.css';
 import './historical-import.css';
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { AppShell } from '../components/AppShell';
 import { TopBar } from '../components/TopBar';
@@ -8,6 +8,7 @@ import { LeftNav } from '../components/LeftNav';
 import { BackendDown, LoadingPanel } from '../components/FetchStates';
 import { CircleAlert, Inbox, Plus, TriangleAlert } from '../components/icons';
 import { LABELS } from '../lib/labels';
+import { stripLifecycleSuffix } from '../lib/adapt';
 import { ROUTES } from '../lib/routes';
 import { api, ApiError } from '../lib/api';
 import { useFetch } from '../lib/useFetch';
@@ -1021,6 +1022,60 @@ function CandidatesSection({
   );
 }
 
+/**
+ * THE RECORDS THIS IMPORT CAN BE SENT TO, and a way to make a new one.
+ *
+ * ── WHAT WAS WRONG ─────────────────────────────────────────────────────────
+ *
+ * Sending a candidate to an experiment has always worked — `POST
+ * /api/imports/{id}/candidates/{cid}/propose` — but the form asked for it by
+ * typing the record's **ULID** into a free-text box ("the record's id"). Nobody
+ * knows a ULID, so a path that existed was effectively invisible. The project
+ * owner read the screen as having no way to land an import at all: *"there
+ * should also be an intuitive way for users to add it into a current experiment
+ * or make a new experiment from it because at the end of the day the import is
+ * so that users can upload files and stuff from their previous experiment and
+ * it can be mapped to the isaac schema"*.
+ *
+ * ── WHAT THIS DOES, AND WHAT IT REFUSES TO DO ──────────────────────────────
+ *
+ * It lists the workspace's experiments so one can be CHOSEN, and it can create a
+ * new one named after the import. It does NOT map anything by itself: a chosen
+ * candidate still becomes an ingestion PROPOSAL on that record, reviewed there,
+ * exactly as before. Creating a record here writes a title and nothing else —
+ * no field is inferred from the import, which is the same no-guessing rule the
+ * rest of this screen follows.
+ *
+ * A failed list is reported, not swallowed: an empty picker with no explanation
+ * would read as "you have no experiments", which is a different claim.
+ */
+function useProposalDestinations() {
+  const [rows, setRows] = useState<{ id: string; title: string }[] | null>(null);
+  const [failed, setFailed] = useState(false);
+
+  const reload = useCallback(async () => {
+    try {
+      const list = await api.listExperiments();
+      setRows(
+        (list.experiments ?? []).map((e) => ({
+          id: e.id,
+          title: stripLifecycleSuffix(e.title) || e.id,
+        })),
+      );
+      setFailed(false);
+    } catch {
+      setRows(null);
+      setFailed(true);
+    }
+  }, []);
+
+  useEffect(() => {
+    void reload();
+  }, [reload]);
+
+  return { rows, failed, reload };
+}
+
 function CandidateCard({
   candidate,
   session,
@@ -1036,6 +1091,7 @@ function CandidateCard({
 }) {
   const [experimentId, setExperimentId] = useState('');
   const [runId, setRunId] = useState('');
+  const destinations = useProposalDestinations();
   const already = session.proposed[candidate.candidate_id];
   const filenameOf = (sourceId: string) =>
     session.sources.find((s) => s.source_id === sourceId)?.filename ?? sourceId;
@@ -1122,17 +1178,80 @@ function CandidateCard({
             });
           }}
         >
+          {/*
+            A PICKER, NOT A TYPED ULID. See `useProposalDestinations` for why:
+            this field used to ask a scientist to type "the record's id".
+          */}
           <label className="hi-field">
             <span className="hi-field-label">Send it to which record?</span>
-            <input
-              className="hi-input"
-              type="text"
-              required
-              value={experimentId}
-              onChange={(event) => setExperimentId(event.target.value)}
-              placeholder="the record's id"
-            />
+            {destinations.failed ? (
+              /*
+                A LIST THAT COULD NOT BE READ FALLS BACK TO THE FIELD, rather
+                than removing the only way to send. A scientist who has the id —
+                from a URL, from a colleague — can still act, and the note says
+                why they are being asked for one. Removing the control here would
+                turn a failed READ into a blocked WRITE, which is a bigger claim
+                than the failure supports.
+              */
+              <>
+                <input
+                  className="hi-input"
+                  type="text"
+                  required
+                  value={experimentId}
+                  onChange={(event) => setExperimentId(event.target.value)}
+                  placeholder="the record's id"
+                />
+                <span className="hi-note">
+                  The list of records could not be read, so this asks for the id instead.
+                </span>
+              </>
+            ) : destinations.rows === null ? (
+              <span className="hi-note">Reading your records…</span>
+            ) : destinations.rows.length === 0 ? (
+              <span className="hi-note">
+                This workspace holds no records yet. Create one below and it becomes the
+                destination.
+              </span>
+            ) : (
+              <select
+                className="hi-input"
+                required
+                value={experimentId}
+                onChange={(event) => setExperimentId(event.target.value)}
+              >
+                <option value="">Choose a record…</option>
+                {destinations.rows.map((row) => (
+                  <option key={row.id} value={row.id}>
+                    {row.title}
+                  </option>
+                ))}
+              </select>
+            )}
           </label>
+          {/*
+            …or make the destination. The title is the import's own label, so the
+            new record is recognisable; NOTHING else is carried over, because
+            nothing in the import has been reviewed yet.
+          */}
+          <button
+            type="button"
+            className="btn btn-ghost hi-new-destination"
+            disabled={busy !== null}
+            onClick={() => {
+              void onAct(`create:${candidate.candidate_id}`, async () => {
+                const created = await api.createExperiment({
+                  title: session.label || 'Imported experiment',
+                });
+                await destinations.reload();
+                setExperimentId(created.id);
+              });
+            }}
+          >
+            {busy === `create:${candidate.candidate_id}`
+              ? 'Creating…'
+              : 'New record from this import'}
+          </button>
           <label className="hi-field">
             <span className="hi-field-label">
               Which run? (required for a value a run owns)

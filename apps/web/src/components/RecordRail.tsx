@@ -1,0 +1,109 @@
+import { ExternalLink } from './icons';
+import { useNavigate } from 'react-router-dom';
+
+import { LABELS } from '../lib/labels';
+import { ROUTES, type RecordViewId } from '../lib/routes';
+import type { ApiCaptureSummary, ApiWorkflow } from '../lib/types';
+import { TUTORIAL_ANCHORS } from '../lib/tutorialSteps';
+import { WorkflowSpine } from './WorkflowSpine';
+import { RecordCaptureNav, RecordWorkspaceNav } from './RecordWorkspaceNav';
+
+/**
+ * ONE RECORD RAIL, ON EVERY RECORD SCREEN.
+ *
+ * ── THE DEFECT THIS CLOSES ──────────────────────────────────────────────────
+ *
+ * Reported by the project owner, 2026-09-14: *"when i click 'complete metadata'
+ * it removes the other things we have in the sidebar, i think we should still
+ * have that there to make it easier for scientists to go back and forth if they
+ * want to add more data and such as well"*.
+ *
+ * Measured: `RecordWorkbench` built the full rail inline — `RecordCaptureNav`,
+ * the spine, `RecordWorkspaceNav`, the Evidence Trail link — while
+ * `GuidedCompletion` and `ExportReadiness` each rendered
+ * `sidebar={<WorkflowSpine …/>}` and nothing else. So clicking a workflow step
+ * navigated to a route that DROPPED Experiment Data, Runs, Record Fields and the
+ * Evidence Trail, leaving a scientist mid-completion with no way back except the
+ * browser's own Back button.
+ *
+ * ── WHY A COMPONENT RATHER THAN A COPY ─────────────────────────────────────
+ *
+ * The rail is four pieces with a deliberate order and a documented reason for
+ * each position (capture first, then the gated spine, then the ungated
+ * workspaces, then the one link that leaves the screen). Pasting that into three
+ * screens is how the pieces drift apart — this repository has already been
+ * caught shipping two nav landmarks whose padding diverged because they were
+ * "two rules with identical values".
+ *
+ * ── `activeView` IS NULL ON A SUB-SCREEN, AND THAT IS THE POINT ────────────
+ *
+ * `/complete` and `/export` are workflow STEPS. The spine marks where you are
+ * there; the workspace rows stay navigable and unhighlighted. Passing an active
+ * workspace would put two "you are here" marks on one rail, which is the exact
+ * collision fixed on 2026-09-14 when `.spine-step.current` and
+ * `.workspace-nav-item.active` were both painting `rgb(232, 240, 248)`.
+ *
+ * ── WHAT IT DELIBERATELY DOES NOT DO ──────────────────────────────────────
+ *
+ * `EvidenceExplorer` keeps its own sidebar. That one is not navigation — it is
+ * the Evidence Trail master list, a working panel with a selection. Replacing it
+ * with this rail would delete a feature to gain a nav, so that screen is left
+ * alone and its navigation gap is named rather than papered over.
+ */
+export function RecordRail({
+  recordId,
+  workflow,
+  activeView,
+  captureSummary = null,
+  evidenceCount = null,
+  onNavigate,
+}: {
+  recordId: string;
+  /** The server's derived workflow, or `null` while it is still loading. */
+  workflow: ApiWorkflow | null;
+  /** The active workspace, or `null` on a sub-screen — see the header. */
+  activeView: RecordViewId | null;
+  /** The record's own capture totals, straight off its detail payload. */
+  captureSummary?: ApiCaptureSummary | null;
+  /**
+   * How many evidence entries the record has, when the screen happens to know.
+   * `null` renders the link WITHOUT a count rather than guessing one — a screen
+   * that has not read the evidence must not imply a number, which is the same
+   * rule `captureSummaryLine` follows for `null` totals.
+   */
+  evidenceCount?: number | null;
+  /**
+   * Called immediately before navigating away. `RecordWorkbench` uses it to
+   * flush held run edits; the sub-screens have nothing to flush and pass
+   * nothing, which is why it is optional here and required there.
+   */
+  onNavigate?: () => void;
+}) {
+  const navigate = useNavigate();
+  const flush = onNavigate ?? (() => {});
+
+  return (
+    <div className="record-aside">
+      <RecordCaptureNav active={activeView} captureSummary={captureSummary} onNavigate={flush} />
+      <WorkflowSpine workflow={workflow} recordId={recordId} />
+      <RecordWorkspaceNav active={activeView} captureSummary={captureSummary} onNavigate={flush} />
+      <button
+        type="button"
+        className="evidence-trail-link"
+        data-tutorial-anchor={TUTORIAL_ANCHORS.recordEvidenceTrail}
+        onClick={() => {
+          flush();
+          navigate(ROUTES.evidence(recordId));
+        }}
+      >
+        <ExternalLink size={14} strokeWidth={2} aria-hidden="true" />
+        <span className="evidence-trail-link-label">{LABELS.evidenceTrail}</span>
+        {evidenceCount !== null && (
+          <span className="evidence-trail-link-count">
+            {evidenceCount} {evidenceCount === 1 ? 'entry' : 'entries'}
+          </span>
+        )}
+      </button>
+    </div>
+  );
+}

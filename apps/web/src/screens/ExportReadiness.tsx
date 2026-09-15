@@ -4,7 +4,7 @@ import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { Navigate, useNavigate, useParams } from 'react-router-dom';
 import { AppShell } from '../components/AppShell';
 import { TopBar } from '../components/TopBar';
-import { WorkflowSpine } from '../components/WorkflowSpine';
+import { RecordRail } from '../components/RecordRail';
 import { StatusBar } from '../components/StatusBar';
 import { VerdictCard } from '../components/VerdictCard';
 import { RunFindings } from '../components/RunFindings';
@@ -213,7 +213,7 @@ export function ExportReadiness() {
       <AppShell
         variant="record"
         topBar={<TopBar variant="record" title={LABELS.screenExport} recordId={id} />}
-        sidebar={<WorkflowSpine workflow={null} recordId={id} />}
+        sidebar={<RecordRail recordId={id} workflow={null} activeView={null} />}
         mainPad="pad"
       >
         <h1 className="sr-only">{LABELS.screenExport}</h1>
@@ -565,7 +565,23 @@ function LoadedExport({
           surface={LABELS.screenExport}
         />
       }
-      sidebar={<WorkflowSpine workflow={detail.workflow} recordId={id} />}
+      /*
+        THE FULL RECORD RAIL, not the spine alone. This screen rendered
+        `<WorkflowSpine …/>` by itself, so arriving here from a workflow step
+        removed Experiment Data, Runs, Record Fields and the Evidence Trail —
+        reported by the project owner, 2026-09-14. `activeView={null}` because
+        this is a workflow STEP: the spine marks where you are, and the workspace
+        rows stay navigable and unhighlighted rather than adding a second
+        "you are here". See `RecordRail`.
+      */
+      sidebar={
+        <RecordRail
+          recordId={id}
+          workflow={detail.workflow}
+          activeView={null}
+          captureSummary={detail.capture_summary ?? null}
+        />
+      }
       rightPanel={rightPanel}
       statusBar={
         <StatusBar

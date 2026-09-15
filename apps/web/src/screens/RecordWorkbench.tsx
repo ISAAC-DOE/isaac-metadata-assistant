@@ -5,11 +5,8 @@ import { Navigate, useNavigate, useParams, useSearchParams } from 'react-router-
 import { AppShell } from '../components/AppShell';
 import { TopBar } from '../components/TopBar';
 import { WorkflowSpine } from '../components/WorkflowSpine';
-import {
-  RECORD_WORKSPACES,
-  RecordCaptureNav,
-  RecordWorkspaceNav,
-} from '../components/RecordWorkspaceNav';
+import { RECORD_WORKSPACES } from '../components/RecordWorkspaceNav';
+import { RecordRail } from '../components/RecordRail';
 import { StatusBar } from '../components/StatusBar';
 import { FieldGroup } from '../components/FieldGroup';
 import { RecordInfoPanel, RecordLinksPanel } from '../components/RecordInfoPanel';
@@ -31,7 +28,7 @@ import { RecordActivityNote } from '../components/RecordActivityNote';
 import { needsCanonicalRefetch, type RecordChangeSummary } from '../lib/recordChanges';
 import { WorkflowProgressBanner } from '../components/WorkflowProgressBanner';
 import { LoadingPanel, BackendDown } from '../components/FetchStates';
-import { CircleAlert, ExternalLink } from '../components/icons';
+import { CircleAlert } from '../components/icons';
 import { ExperimentGraphPanel } from './graph/ExperimentGraphPanel';
 import { LABELS } from '../lib/labels';
 import { ROUTES, resolveRecordView, type RecordViewId } from '../lib/routes';
@@ -841,69 +838,25 @@ function LoadedWorkbench({
   // D8 — the whole-record Evidence Trail affordance, moved out of the (removed)
   // right-rail evidence panel to sit directly beneath the workflow. It reuses the
   // EXISTING /evidence route (ROUTES.evidence) — no new route or evidence system.
+  /*
+    THE RAIL IS ONE COMPONENT NOW, shared with `/complete` and `/export`.
+
+    It was built inline here — capture nav, spine, workspace nav, Evidence Trail
+    — while `GuidedCompletion` and `ExportReadiness` rendered the spine ALONE.
+    So clicking a workflow step dropped every other way back. The project owner
+    reported it on 2026-09-14; `RecordRail`'s header carries the full account,
+    including why the four pieces are in this order and why `EvidenceExplorer`
+    keeps its own sidebar instead.
+  */
   const sidebar = (
-    <div className="record-aside">
-      {/*
-        DATA CAPTURE LEADS THE RAIL (project owner, 2026-09-13).
-
-        Previously it sat third — below the spine, above the workspace list —
-        and the hosted screen showed it that way: a secondary row reading 'No
-        notes or proposals' in the middle of the sidebar. A scientist arriving
-        from the instrument with something to write down met the pipeline first
-        and their own first act third.
-
-        FIRST IS NOT A STEP. Only the ordering changed. The spine below is
-        untouched — still server-derived, still gated, still the only list here
-        whose entries can be blocked — and capture still carries no tick, no
-        lock and no `aria-current='step'`, because 'the scientist has finished
-        capturing' is not derivable from any signal the record has. See
-        `RecordCaptureNav`'s own header.
-      */}
-      <RecordCaptureNav
-        active={activeView}
-        captureSummary={captureSummary}
-        onNavigate={flushHeldRunEdits}
-      />
-      <WorkflowSpine workflow={detail.workflow} recordId={id} />
-      {/*
-        THE FOUR WORKSPACES SIT BETWEEN THE SPINE AND THE EVIDENCE TRAIL, and both
-        neighbours are deliberate.
-
-        BELOW THE SPINE, because the spine answers "where am I in the pipeline?"
-        and this answers "where can I go on this record?" — the second question
-        only arises once the first is oriented. The spine is untouched by this:
-        still server-derived, still gated, still the only list here whose entries
-        can be blocked.
-
-        ABOVE THE EVIDENCE TRAIL, and NOT merged into it as a fifth peer. That link
-        leaves this screen for a separately-routed, spine-gated surface; these four
-        stay on it. Presenting a route change as a fifth workspace would make one of
-        the five behave unlike the other four with nothing on screen saying so.
-
-        AND ONE OF THE FOUR — `capture` — IS RENDERED FIRST, UNDER ITS OWN
-        `Data Capture` EYEBROW, carrying the record's live note and open-proposal
-        counts. Still inside this one navigation landmark, still ungated, still
-        `aria-current="page"`; the component's header explains why it is promoted
-        and why it must never acquire a step's semantics.
-      */}
-      <RecordWorkspaceNav
-        active={activeView}
-        captureSummary={captureSummary}
-        onNavigate={flushHeldRunEdits}
-      />
-      <button
-        type="button"
-        className="evidence-trail-link"
-        data-tutorial-anchor={TUTORIAL_ANCHORS.recordEvidenceTrail}
-        onClick={() => navigate(ROUTES.evidence(id))}
-      >
-        <ExternalLink size={14} strokeWidth={2} aria-hidden="true" />
-        <span className="evidence-trail-link-label">{LABELS.evidenceTrail}</span>
-        <span className="evidence-trail-link-count">
-          {evidence.length} {evidence.length === 1 ? 'entry' : 'entries'}
-        </span>
-      </button>
-    </div>
+    <RecordRail
+      recordId={id}
+      workflow={detail.workflow}
+      activeView={activeView}
+      captureSummary={captureSummary}
+      evidenceCount={evidence.length}
+      onNavigate={flushHeldRunEdits}
+    />
   );
 
   return (
