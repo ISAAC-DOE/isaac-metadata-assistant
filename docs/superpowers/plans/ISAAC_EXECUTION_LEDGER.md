@@ -60,6 +60,63 @@ served-content manifest (measured, not assumed). Regeneration happens ONCE, afte
 integration, in the main checkout, with BOTH `--out` and `--detail-out` — which is
 what keeps §11's "every merge conflicts every open PR" failure from recurring.
 
+PROGRESS AT LAST LEDGER WRITE (integration branch `feat/v2-integration`), every
+line verified by a command rather than by an agent's report:
+
+  MERGED INTO INTEGRATION AND INDEPENDENTLY CHECKED
+    feat/v2-chrome    favicon (existing AudioWaveform mark, base-path correct
+                      for /krish/ — verified by building with and without
+                      VITE_BASE_PATH); the stepper redrawn as circle nodes with
+                      a dotted node for the unbuilt step and a vertical fallback
+                      below a 560px CONTAINER (not viewport); landing copy cut
+                      and the architecture prose moved behind a disclosure.
+    feat/v2-propose   a discoverable New Proposal path. VERIFIED BY ME IN A REAL
+                      BROWSER end to end on a record with ZERO notes — the state
+                      in which the pre-existing control was unreachable: guided
+                      note-first flow, 19 server-supplied targets with the dotted
+                      path demoted, Store disabled until a run is chosen for a
+                      run-scoped target, and the server afterwards holding one
+                      proposal with verified/is_evidence/is_field_value all false
+                      and the field itself unchanged. Evidence:
+                      docs/evidence/proposal-creation-browser-proof-2026-09-15.md
+    (orchestrator)    Statistics promoted / Governance demoted / `Settings & API`
+                      -> `Settings`, six tests inverted rather than deleted, two
+                      of them inverted BACK to a pre-2026-09-13 form.
+    (orchestrator)    the Historical Import FILE PICKER (DEC-33). Proven by
+                      OBSERVATION: every transport instrumented before the picker
+                      was touched, choosing two real files issued ZERO requests,
+                      the checksum ZERO, and Record as source one POST whose body
+                      a content probe returned false on. Both guards reconciled
+                      two -> three named files, §1 moved from banning the
+                      affordance to banning the harm. Evidence:
+                      docs/evidence/file-staging-browser-proof-2026-09-15.md
+
+  STILL RUNNING AT THIS WRITE — do not assume either landed
+    feat/v2-recordmap  the Runs Record Map + field-specific blockers + Ask ISAAC
+                       + human-friendly acquisition timestamps.
+    feat/v2-stats      Statistics redesigned scientist-first (the OBLIGATION the
+                       promotion created — UX-017's 3,820px/422-element figure is
+                       the acceptance bar, not a historical note) + Settings
+                       density.
+
+  *** THE MEASUREMENT FINDING OF THIS SESSION, and it explains two failed
+  attempts at the owner's most-repeated complaint. `LAYOUT_SWEEP_WIDTHS` tops
+  out at 1280, so 1280 IS THE WIDEST VIEWPORT THIS PRODUCT IS EVER TESTED AT.
+  A prose cap strands no whitespace until the CONTAINER outgrows it, so at 1280
+  the defect does not exist and above ~1300 it does. The root cause is
+  `.screen-main[data-width="wide"] .placeholder > p { max-width: 68ch }` — the
+  very `38em -> 68ch` change made in answer to this same report, which narrows
+  the TEXT and leaves the BOX as wide as it was. Measured worst cases at 1728:
+  .notes-sub and .proposals-sub 833px, .vr-sub 821px, .hi-lead and
+  .gov-canonical 643px; My Experiments, Settings and the record's Fields
+  workspace CLEAN. Two of my own three detectors were wrong and returned zero
+  findings on a demonstrably broken page. `e2e/specs/wide-prose.spec.ts` now
+  guards it at 1440/1728 with a positive control and an EMPTY allowlist;
+  the 68ch rule is deliberately NOT touched (it reaches every `wide`/`full`
+  screen and two lanes were editing such surfaces) and is named as its own
+  slice. Evidence:
+  docs/evidence/dead-whitespace-measurement-2026-09-15.md ***
+
 OWNER FEEDBACK DRIVING THIS SESSION (verbatim, 2026-09-15, from screenshots):
   * the Runs split-screen architecture is APPROVED — "I like that split-screen
     architecture" — but the right pane "is not really readable … I can't clearly
