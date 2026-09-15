@@ -1090,6 +1090,30 @@ function CandidatesSection({
         {busy === 'reconstruct' ? 'Reconstructing…' : IMPORT_COPY.actionReconstruct}
       </button>
 
+      {/* THE SAME RULE THE PARSE CONTROL ALREADY OBEYS, APPLIED HERE — it was
+          the one disabled primary button on this screen with no reason beside
+          it, so a reader met a dead control and had to guess whether the
+          feature was broken, unavailable or simply not ready yet.
+
+          IT NAMES THE PRECONDITION AND THE NEXT ACT, not the internal state:
+          the button is gated on `data.parsed.length === 0`, and what a reader
+          can DO about that is read a source. Saying "no parsed sources" would
+          restate the predicate back at them.
+
+          AND IT SAYS WHAT RECONSTRUCTION IS, because this is the one place the
+          distinction bites: it is deterministic, in this build. No model is
+          called, so a reader waiting for "the AI" to become available is
+          waiting for something that is not the blocker. `§15` forbids implying
+          a capability exists; it equally forbids implying one is missing when
+          the real precondition is one click away. */}
+      {data.parsed.length === 0 && (
+        <p className="hi-note">
+          Nothing has been read yet, so there is nothing to reconstruct from. Read a source
+          above first. Reconstruction is deterministic in this build — it reads the
+          statements already parsed and calls no model.
+        </p>
+      )}
+
       {reconstruction === null ? (
         <p className="hi-body hi-empty-inline">{IMPORT_COPY.emptyCandidatesBody}</p>
       ) : (
