@@ -138,81 +138,103 @@ for (const width of WIDTHS) {
   });
 }
 
-test('@responsive the /imports strip is SIX uniform pills, and the sentence is not a chip', async ({
+test('@responsive the /imports strip is SIX circle nodes on a connecting line, not pills, and the sentence is not a node', async ({
   page,
   app,
 }) => {
   /*
-   * THIS TEST PREVIOUSLY PINNED "five pills and one card", AND IS INVERTED
-   * RATHER THAN DELETED -- the established remedy here for a test that pins a
-   * defect.
+   * THIS TEST PREVIOUSLY PINNED "six uniform pills joined by a chevron", AND
+   * IS INVERTED RATHER THAN DELETED -- the established remedy here for a
+   * test that pins a superseded design, not only a defect.
    *
-   * What it protected is real and is still asserted below: a pill radius must
-   * never curve in across a sentence. It protected it by ACCEPTING a chip that
-   * held a sentence, and measured at 1280 that chip was 73.6px x 352px beside
-   * five siblings of 27px x 56-91px -- 2.7x the height and 4x the width, in a
-   * wrapping row with a 4px gap. That is the "everything is just put in here
-   * with no thought behind it" the owner reported, and no assertion here could
-   * see it, because the file's own subject was the RADIUS and not the RHYTHM.
+   * WHY A SECOND INVERSION OF THE SAME TEST. The pill row itself was already
+   * one correction (bordered/filled chips -> a `›`-joined chain of plain
+   * words), made because the owner asked "are they supposed to be clickable
+   * or something?" of the pill shape. Of THAT chevron-chain shape, the owner
+   * said "it should be a little bit cleaner, and I think it should be like a
+   * circle-dotted thing instead" -- so the invariant this file protects moves
+   * again, from "six uniform pills" to "six circle nodes on one connecting
+   * line, the unbuilt one dotted". What survives BOTH corrections, unchanged:
+   * no node may hold a sentence, and the unbuilt step's disclosure lives
+   * below the row as prose, tied to its step by `aria-describedby` rather
+   * than by adjacency.
    *
-   * The sentence now lives below the row as `.hi-steps-disclosure`, tied to its
-   * step by `aria-describedby`. So the invariant gets stronger rather than
-   * looser: no chip may hold a sentence AT ALL, which makes the old
-   * radius-versus-height check unreachable by construction instead of merely
-   * satisfied.
+   * THE STRIP IS NOW BEHIND A COLLAPSED `<details>` ("How Historical Import
+   * works", `HistoricalImport.tsx`'s `ImportList`, P3 of the 2026-09-15
+   * landing-density slice), so this test opens it before measuring -- a
+   * closed `<details>` hides everything but its own `<summary>`, and a probe
+   * that skipped this step would silently measure zero nodes rather than
+   * six.
    */
   await page.setViewportSize({ width: 1280, height: 812 });
   await app.goto('/imports');
+  await page.locator('details.hi-how-it-works > summary').click();
   await expect(page.locator('.hi-steps > .hi-step').first()).toBeVisible();
 
-  const chips = await page.evaluate(() =>
-    Array.from(document.querySelectorAll<HTMLElement>('.hi-steps > .hi-step')).map((el) => {
-      const box = el.getBoundingClientRect();
-      const cs = window.getComputedStyle(el);
+  const steps = await page.evaluate(() =>
+    Array.from(document.querySelectorAll<HTMLElement>('.hi-steps > .hi-step')).map((li) => {
+      const node = li.querySelector<HTMLElement>('.hi-step-node')!;
+      const nodeBox = node.getBoundingClientRect();
+      const nodeStyle = window.getComputedStyle(node);
+      const liStyle = window.getComputedStyle(li);
       return {
-        unbuilt: el.classList.contains('unbuilt'),
-        text: (el.textContent ?? '').trim(),
-        width: Math.round(box.width),
-        height: Math.round(box.height),
-        radius: Math.round(Number.parseFloat(cs.borderTopLeftRadius)),
-        lineHeight: Math.round(Number.parseFloat(cs.lineHeight)),
-        describedBy: el.getAttribute('aria-describedby'),
+        unbuilt: li.classList.contains('unbuilt'),
+        reached: li.classList.contains('reached'),
+        text: (li.querySelector('.hi-step-label')?.textContent ?? '').trim(),
+        liBorderStyle: liStyle.borderStyle,
+        liBackground: liStyle.backgroundColor,
+        nodeWidth: Math.round(nodeBox.width),
+        nodeHeight: Math.round(nodeBox.height),
+        nodeBorderRadius: Math.round(Number.parseFloat(nodeStyle.borderTopLeftRadius)),
+        nodeBorderStyle: nodeStyle.borderTopStyle,
+        describedBy: li.getAttribute('aria-describedby'),
       };
     }),
   );
 
-  expect(chips.length, 'the workflow strip is missing').toBeGreaterThan(1);
+  expect(steps.length, 'the workflow strip is missing').toBe(6);
 
-  // (1) EVERY chip is a single-line pill now -- including the unbuilt one.
-  for (const chip of chips) {
-    expect(chip.height, `chip "${chip.text}" is taller than one line`).toBeLessThan(32);
-    expect(chip.width, `chip "${chip.text}" is taller than it is wide`).toBeGreaterThanOrEqual(
-      chip.height,
-    );
+  // (1) EVERY node is a true CIRCLE -- width == height and fully rounded --
+  //     which is the shape the owner asked for and the one the app-wide
+  //     ellipse guard above explicitly exempts ("a dot").
+  for (const step of steps) {
+    expect(
+      Math.abs(step.nodeWidth - step.nodeHeight),
+      `"${step.text}" node is ${step.nodeWidth}x${step.nodeHeight}, not a circle`,
+    ).toBeLessThanOrEqual(1);
+    expect(
+      step.nodeBorderRadius,
+      `"${step.text}" node's radius does not reach half its own height`,
+    ).toBeGreaterThanOrEqual(step.nodeHeight / 2 - 1);
   }
 
-  // (2) THE RHYTHM the old contract could not see: no chip towers over its
-  //     neighbours. Generous at 1.6x so a longer label or a wrapped row is not
-  //     a failure -- the defect this replaces was 2.7x.
-  const tallest = Math.max(...chips.map((c) => c.height));
-  const shortest = Math.min(...chips.map((c) => c.height));
-  expect(tallest / shortest, 'one chip is much taller than its neighbours').toBeLessThan(1.6);
-
-  // (3) No chip holds a sentence. A label, not prose -- which is what makes the
-  //     999px radius correct on all six.
-  for (const chip of chips) {
-    expect(chip.text.length, `chip "${chip.text}" reads as prose, not a label`).toBeLessThan(40);
-    expect(chip.text, `chip "${chip.text}" contains sentence punctuation`).not.toMatch(/[.!?]\s/);
+  // (2) THE ROW ITSELF IS NOT A CONTROL. `<li class="hi-step">` carries no
+  //     border and no fill of its own -- only its `.hi-step-node` child does
+  //     -- which is the property that keeps this from reading as a button
+  //     the way the retired bordered/filled pill did.
+  for (const step of steps) {
+    expect(step.liBorderStyle, `"${step.text}" row itself has a border`).toBe('none');
   }
 
-  // (4) The unbuilt step still SAYS it is unbuilt -- the disclosure moved, it
-  //     did not disappear, and it is associated rather than merely adjacent.
-  const unbuilt = chips.filter((c) => c.unbuilt);
+  // (3) THE UNBUILT NODE IS DOTTED OR DASHED, NOT A SOLID OUTLINE AND NOT A
+  //     FILLED DISC -- the owner's own requested shape for exactly this step,
+  //     and no rectangle anywhere.
+  const unbuilt = steps.filter((s) => s.unbuilt);
   expect(unbuilt.length, 'no unbuilt step found -- has the fixture changed?').toBe(1);
-  expect(unbuilt[0]!.describedBy, 'the unbuilt chip names no disclosure').toBeTruthy();
+  expect(['dotted', 'dashed']).toContain(unbuilt[0]!.nodeBorderStyle);
+
+  // (4) No node holds a sentence -- a label, not prose.
+  for (const step of steps) {
+    expect(step.text.length, `"${step.text}" reads as prose, not a label`).toBeLessThan(40);
+    expect(step.text, `"${step.text}" contains sentence punctuation`).not.toMatch(/[.!?]\s/);
+  }
+
+  // (5) The unbuilt step still SAYS it is unbuilt -- associated rather than
+  //     merely adjacent, and the disclosure is prose in the document, not
+  //     another node in the row.
+  expect(unbuilt[0]!.describedBy, 'the unbuilt node names no disclosure').toBeTruthy();
   const note = page.locator(`#${unbuilt[0]!.describedBy}`);
   await expect(note).toBeVisible();
   await expect(note).toContainText(/Not built in this build/);
-  // …and it is prose in the document, not another chip in the row.
   expect(await note.evaluate((el) => el.classList.contains('hi-step'))).toBe(false);
 });

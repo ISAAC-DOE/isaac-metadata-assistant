@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 30 30" width="30" height="30" role="img" aria-label="ISAAC">
+  <!--
+    Reproduction of the existing app-header mark (TopBar.tsx `Brand()` /
+    chrome.css `.brand-tile`) — NOT a new logo. Same tile size (30x30, rx 8),
+    same fill (--action #2c6ab0), same lucide-react `AudioWaveform` glyph
+    (size 17, strokeWidth 2.2), centered exactly as the flex tile centers it
+    ((30-17)/2 = 6.5 inset). The path `d` below is copied verbatim from
+    node_modules/lucide-react/dist/esm/icons/audio-waveform.js so the mark is
+    the same glyph, not a redrawing. Scale 17/24 maps the icon's native 24x24
+    viewBox onto the 17x17 box the app renders it at.
+  -->
+  <rect width="30" height="30" rx="8" ry="8" fill="#2c6ab0" />
+  <g transform="translate(6.5,6.5) scale(0.7083333333)">
+    <path
+      d="M2 13a2 2 0 0 0 2-2V7a2 2 0 0 1 4 0v13a2 2 0 0 0 4 0V4a2 2 0 0 1 4 0v13a2 2 0 0 0 4 0v-4a2 2 0 0 1 2-2"
+      fill="none"
+      stroke="#ffffff"
+      stroke-width="2.2"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+    />
+  </g>
+</svg>

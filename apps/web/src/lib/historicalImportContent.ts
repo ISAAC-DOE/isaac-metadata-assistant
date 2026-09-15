@@ -88,29 +88,37 @@ export const IMPORT_COPY = {
    * suggestion, and a person decides each one.
    */
   /*
-   * M-9 — THE PROMISE AND THE CAPABILITY ARE NOW IN THE SAME SENTENCE.
+   * M-9 — THE PROMISE AND THE CAPABILITY ARE STILL IN THE SAME SENTENCE.
    *
    * This used to read "...from the files your work is already scattered across —
    * filenames, notes, sheets, run logs — ...", naming FOUR source classes on the
-   * INDEX while the honest correction (`formatsNote`) renders one step downstream
+   * INDEX while the honest correction (`formatsNote`) rendered one step downstream
    * on the Sources step. Of those four, one layout is read. An independent review
    * raised it (M-9) and it is a §15 matter, not a style one: "build nothing that
-   * implies any of it exists".
+   * implies any of it exists". The fix — stating the honest limit ("one layout",
+   * "reference") on the SAME screen as the decision to start — is unchanged here;
+   * only the SENTENCE COUNT dropped.
    *
-   * The purpose is kept, because that IS what this destination is for and stating
-   * an intention is not a capability claim. What changed is that the sentence now
-   * says which part works TODAY, on the screen where a reader decides whether to
-   * start. `formatsNote` still carries the detail, and now corroborates the lead
-   * instead of correcting it.
+   * CUT FROM THREE SENTENCES TO TWO, 2026-09-15. The owner: "the text is still
+   * stopping midway through half the block, and it's not really something that
+   * looks good" — measured, this paragraph wrapped at roughly half the card's
+   * width, leaving a dead column beside it. What moved out is the ARCHITECTURE
+   * detail ("put every candidate through the same review and validation as
+   * anything else in ISAAC", "keeping its pointer, checksum and your notes for a
+   * later build") — restated in the collapsed "How Historical Import works"
+   * disclosure (`HistoricalImport.tsx`'s `ImportList`), not deleted. What STAYS
+   * here, because M-9 and this file's own header both require it to sit beside
+   * the decision rather than only downstream: the honest capability limit ("one
+   * layout" / "reference") and the one claim that governs how to read every
+   * candidate this screen ever produces ("Nothing here becomes a value on its
+   * own"). `__tests__/historical-import.test.tsx`'s M-9 test still asserts both
+   * substrings are in `.hi-lead` itself, unchanged.
    */
   lead:
-    'Reconstruct candidate experiment metadata from the files your work is already ' +
-    'scattered across, and put every candidate through the same review and validation ' +
-    'as anything else in ISAAC. Today it reads one layout — the one ISAAC’s own ' +
-    'example sources are written in — and records every other file as a reference, ' +
-    'keeping its pointer, checksum and your notes for a later build that can read it. ' +
-    'Nothing here becomes a value on its own: each candidate is a suggestion you ' +
-    'accept, correct or refuse.',
+    'Reconstruct candidate experiment metadata from files your work is already ' +
+    'scattered across — today it reads one layout and records anything else as a ' +
+    'reference. Nothing here becomes a value on its own: each candidate is a ' +
+    'suggestion you accept, correct or refuse.',
 
   /**
    * THE SCOPED FILE CLAIM. Both halves are true and neither is an absolute.

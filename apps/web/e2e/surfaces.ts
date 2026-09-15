@@ -102,9 +102,22 @@ export const SURFACES: readonly Surface[] = [
      * import session has NOTHING to do with the worked-example records, and the
      * ordinary workspace is where a reader actually meets it: on a fresh
      * deployment it holds no sessions, so this surface measures the REAL
-     * first-run state — the empty list, the workflow strip, the durability
-     * sentence and the Start control. That is what a reader of this deployment
-     * sees, so it is what is swept.
+     * first-run state — the empty list and the Start control. That is what a
+     * reader of this deployment sees, so it is what is swept.
+     *
+     * CORRECTED 2026-09-15: this used to also name "the workflow strip, the
+     * durability sentence" as part of that first-run state. As of the
+     * landing-density slice (`HistoricalImport.tsx`'s `ImportList`), both now
+     * live inside a COLLAPSED `<details className="hi-how-it-works">` at the
+     * end of the page — reachable, not deleted (`CLAUDE.md`'s own rule for a
+     * relocated honesty claim), but no longer part of the DEFAULT-collapsed
+     * state this generic per-surface ready-gate measures. Opening a native
+     * `<details>` mutates no backend state, so it is not itself out of scope
+     * here — `e2e/specs/pill-shape.spec.ts`'s stepper-shape test does exactly
+     * that, in the SAME ordinary/read-only scope, to measure the node shapes
+     * inside it. This entry's own sweep simply has no reason to: it exists to
+     * gate readiness for axe/width/200%-zoom checks over the page a reader
+     * actually lands on, and a reader lands on it collapsed.
      *
      * THE READY GATE IS THE LIST's OWN `<h2>`, NOT THE PAGE `<h1>`, and the
      * distinction is the race `record-detail`'s comment documents at length. The
