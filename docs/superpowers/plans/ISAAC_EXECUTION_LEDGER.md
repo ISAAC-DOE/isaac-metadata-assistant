@@ -405,6 +405,48 @@ running the spec locally found it.
   duplicated into the sibling: those are properties of the chart component, not
   of these two instances, and two copies would be harder to trust than one.
 
+CI ON `042b2538`: **12 failed / 1183 passed**, down from 105. Three families,
+fixed in `7d21911b` — and ONE WAS A GENUINE PRODUCT DEFECT, not test drift.
+
+  *** THE API ACCESS BANNER OVERFLOWED EVERY NARROW WIDTH, and only CI's Linux
+  width sweep could have found it: jsdom computes no layout, and the desktop
+  projects have room to spare. *** Measured at 390px:
+  `div.api-access-banner-action` right edge **389** against a card content edge
+  of **379**, forcing `main#main` to `scrollWidth 378 vs clientWidth 368`. Also
+  failing at 375 and 320.
+
+  The cause: the banner's action holds TWO jump buttons side by side —
+  `Endpoint Explorer` and `Connect Your Agent` — and **`flex: none`** forbade
+  the container from shrinking, so they could never wrap however little room was
+  left. The existing 900px media query only reset `margin-left`, which changes
+  nothing about shrinkability. Now `flex: 0 1 auto` + `min-width: 0`, wrapping
+  its own buttons, and `flex-basis: 100%` below 900px — which is what the
+  `flex-wrap: wrap` already on `.api-access-banner` was there to allow.
+  Re-measured: `layout-widths` + `tabs` = **85 passed / 0 failed**, with no
+  `api-access-banner-action` finding in the output.
+
+  THE STATISTICS TAB LIST WAS STALE IN BOTH NAME AND COUNT:
+  `['General ISAAC', 'My Stats']` -> `['Overview', 'My Stats', 'Build &
+  Verification']`, measured in Chrome. That is the THIRD place this session has
+  had to correct a Statistics tab count — `statistics-states`' tablist
+  assertion, this catalog entry, and `tabs.spec`'s read of it.
+
+  AND `visual-sweep` KEEPS ITS OWN READINESS GATE, which still waited on
+  **`Runtime Status`**. So there are THREE independent copies of that one gate —
+  `e2e/surfaces.ts`, `statistics-nav.test.tsx`'s assertions, and
+  `visual-sweep.spec.ts` — and the next rename must sweep all three. Recorded at
+  the site as well as here.
+
+*** A TOOLING TRAP THAT ATE PART OF A COMMIT MESSAGE, recorded because the fix
+is mechanical and the failure is silent. *** `git commit -q -m "...backticks..."`
+under zsh runs the backticked text as COMMAND SUBSTITUTION. `7d21911b`'s message
+therefore lost exactly three fragments — `flex: none`, the tab-list before/after
+pair, and `Runtime Status` — leaving sentences like "and  forbade the container".
+The commit is CORRECT; only its prose is holed, and the three fragments are
+restored above rather than force-pushed, because this repository forbids a
+force-push without explicit approval. **Use `git commit -F <file>` for any
+message containing a backtick.**
+
 OWNER FEEDBACK DRIVING THIS SESSION (verbatim, 2026-09-15, from screenshots):
   * the Runs split-screen architecture is APPROVED — "I like that split-screen
     architecture" — but the right pane "is not really readable … I can't clearly
