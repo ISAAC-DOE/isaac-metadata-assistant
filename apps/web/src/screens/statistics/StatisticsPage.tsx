@@ -7,6 +7,7 @@ import { AppShell } from '../../components/AppShell';
 import { TopBar } from '../../components/TopBar';
 import { LeftNav } from '../../components/LeftNav';
 import { BackendDown, LoadingPanel } from '../../components/FetchStates';
+import { formatInstant } from '../../lib/labels';
 import { StatusChip } from '../../components/StatusChip';
 import {
   BarChart3,
@@ -239,10 +240,12 @@ function titleCaseTokenOrNull(value: unknown): string | null {
   return value.replace(/[A-Za-z0-9]+/g, (word) => word.charAt(0).toUpperCase() + word.slice(1));
 }
 
-/** The reader's locale rendering of a captured client-side instant. */
-function formatInstant(when: Date): string {
-  return when.toLocaleString();
-}
+/* `formatInstant` now comes from `lib/labels` -- it used to be defined here as
+   `when.toLocaleString()`, which rendered this page's clock in a different date
+   vocabulary from the rest of the app (measured: "9/14/2026, 8:07:08 PM" here
+   against "Sep 15, 2026" on an experiment card) and varied with the host locale.
+   See its note there, including why `Report Generated` is deliberately left
+   verbatim. */
 
 /**
  * One round of reads: how many were STARTED while the page was busy, and how

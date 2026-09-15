@@ -1341,6 +1341,46 @@ export function formatUpdatedDate(isoDate: string): FormattedDate | undefined {
   };
 }
 
+/**
+ * A captured CLIENT-SIDE instant, in this app's own date style plus a wall clock.
+ *
+ * WHY IT IS NOT `toLocaleString()`. `StatisticsPage` defined its own
+ * `formatInstant` that returned `when.toLocaleString()`, which rendered the page
+ * clock as "9/14/2026, 8:07:08 PM" while the experiment card two screens away
+ * rendered "Sep 15, 2026". Same app, two date vocabularies -- and the comment on
+ * `SHORT_MONTHS` above already forbids exactly this: "never `Date`/`Intl` locale
+ * formatting … so the … date badge is deterministic across environments". The
+ * page clock is a client value like the badge is, so it belongs under the same
+ * rule; `toLocaleString()` also varies with the host's locale, which makes a
+ * screenshot or a transcribed baseline environment-dependent.
+ *
+ * THE OTHER TWO CLOCKS ARE DELIBERATELY UNTOUCHED, and they are different kinds
+ * of thing rather than inconsistencies:
+ *
+ *  * `Report Generated` renders `report.metadata.generated_at` VERBATIM in mono.
+ *    That is a SERVER value, and `casing-and-copy.md`'s Register 3 keeps a
+ *    server string exactly as written. Re-formatting it here would make the page
+ *    speak for the report.
+ *  * `formatCreatedDate` stays date-only, because a record's creation date is a
+ *    DATE. This function exists because a "last read at" needs the time too.
+ *
+ * Local wall clock via `Date` getters -- so the instant is the reader's, while
+ * the FORMAT is fixed. 12-hour with AM/PM, matching what shipped: moving to a
+ * 24-hour clock would read better in a scientific tool and is a copy decision,
+ * not a determinism one.
+ */
+export function formatInstant(when: Date): string {
+  const hours24 = when.getHours();
+  const hour12 = hours24 % 12 === 0 ? 12 : hours24 % 12;
+  const minutes = String(when.getMinutes()).padStart(2, '0');
+  const seconds = String(when.getSeconds()).padStart(2, '0');
+  const meridiem = hours24 < 12 ? 'AM' : 'PM';
+  return (
+    `${SHORT_MONTHS[when.getMonth()]} ${when.getDate()}, ${when.getFullYear()}, ` +
+    `${hour12}:${minutes}:${seconds} ${meridiem}`
+  );
+}
+
 export function formatCreatedDate(isoDate: string): FormattedDate | undefined {
   const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(isoDate);
   if (!m) return undefined;

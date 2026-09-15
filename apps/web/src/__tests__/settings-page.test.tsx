@@ -372,7 +372,7 @@ describe('Settings — deep-linkable tabs (?tab=)', () => {
     renderSettings('/settings?tab=explorer');
     expect(tab('Endpoint Explorer')).toHaveAttribute('aria-selected', 'true');
     expect(
-      await screen.findByRole('heading', { name: 'Endpoint Explorer', level: 3 }),
+      await screen.findByRole('heading', { name: 'Browse Endpoints', level: 3 }),
     ).toBeInTheDocument();
     expect(screen.getByText(`${ENDPOINT_COUNT} of ${ENDPOINT_COUNT} endpoints`)).toBeInTheDocument();
   });
@@ -453,7 +453,7 @@ describe('Settings — deep-linkable tabs (?tab=)', () => {
   it('a deep-linked tab survives a refresh (a fresh mount at the same URL)', async () => {
     stubFetchRoutes(fullRoutes());
     const first = renderSettings('/settings?tab=explorer');
-    await screen.findByRole('heading', { name: 'Endpoint Explorer', level: 3 });
+    await screen.findByRole('heading', { name: 'Browse Endpoints', level: 3 });
     first.unmount();
 
     // Re-mounting at the same entry is what a reload does: no client state
@@ -462,7 +462,7 @@ describe('Settings — deep-linkable tabs (?tab=)', () => {
     renderSettings('/settings?tab=explorer');
     expect(tab('Endpoint Explorer')).toHaveAttribute('aria-selected', 'true');
     expect(
-      await screen.findByRole('heading', { name: 'Endpoint Explorer', level: 3 }),
+      await screen.findByRole('heading', { name: 'Browse Endpoints', level: 3 }),
     ).toBeInTheDocument();
   });
 
@@ -1321,7 +1321,7 @@ const ENDPOINT_COUNT = 7;
 /** Open the Endpoint Explorer tab. It is one click now, not two. */
 async function openApiDocs() {
   openTab('Endpoint Explorer');
-  return screen.findByRole('heading', { name: 'Endpoint Explorer', level: 3 });
+  return screen.findByRole('heading', { name: 'Browse Endpoints', level: 3 });
 }
 
 /** The endpoint list, scoped: several paths also appear in Quick Start. */
@@ -1734,7 +1734,7 @@ const SURFACES: { name: string; open: () => void; settle: () => Promise<unknown>
   {
     name: 'Endpoint Explorer',
     open: () => openTab('Endpoint Explorer'),
-    settle: () => screen.findByRole('heading', { name: 'Endpoint Explorer', level: 3 }),
+    settle: () => screen.findByRole('heading', { name: 'Browse Endpoints', level: 3 }),
   },
   /*
    * Connect Your Agent joined the list rather than being left out of it. The
@@ -1773,7 +1773,7 @@ describe('Settings — no sensitive infrastructure detail is rendered', () => {
     const { container } = renderSettings();
     await screen.findByText('0.1.0');
     openTab('Endpoint Explorer');
-    await screen.findByRole('heading', { name: 'Endpoint Explorer', level: 3 });
+    await screen.findByRole('heading', { name: 'Browse Endpoints', level: 3 });
 
     expect(container.querySelectorAll('script')).toHaveLength(0);
     expect(container.querySelectorAll('iframe')).toHaveLength(0);

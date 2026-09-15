@@ -389,8 +389,27 @@ function ApiBrowser({
    */
   return (
     <section className="api-explorer">
+      {/*
+        THE PANEL IS NAMED FOR ITSELF, NOT FOR ITS TAB.
+
+        This read "Endpoint Explorer", which is also the tab label AND the card's
+        own `<h2>`. Measured in Chromium at 1512: the `<h2>` at y=276 and this
+        `<h3>` at y=379 -- the same three words twice, 103px apart, with the card
+        description in between. A reader navigating by heading heard it twice
+        too: "Endpoint Explorer, heading level 2", then level 3.
+
+        `QuickStart` in this same file already shows the right shape -- its panel
+        `<h3>` reads "Quick Start", naming the panel rather than repeating the
+        "API Access" card above it. This follows that precedent, and "Endpoints"
+        is the surrounding vocabulary ("Search endpoints", "83 of 83 endpoints",
+        the `ENDPOINTS` list eyebrow) rather than a new word.
+
+        THE OUTLINE IS UNCHANGED, which is the property the A11Y-06 fix kept this
+        heading for: still an `<h3>`, still inside `.api-explorer`, still
+        carrying the same id. Only the words changed.
+      */}
       <h3 id="settings-api-explorer-heading" className="api-section-title">
-        Endpoint Explorer
+        Browse Endpoints
       </h3>
 
       {/*
