@@ -734,7 +734,12 @@ describe('R1b §4 · the guard rejects the exact strings that shipped', () => {
  * All three pass the bans as written; none asserts that any route or endpoint
  * does not exist.
  */
-const CAPTURE_COPY_KEY_COUNTS = { total: 95, strings: 91, functions: 4 };
+/*
+ * 101/97/4, up from 95/91/4 on 2026-09-14: six keys for the MCP route drawer in
+ * the voice section (`mcpRoute*`). The ratchet caught the change, which is what
+ * it is for — a copy addition to this panel must be a decision, not a drift.
+ */
+const CAPTURE_COPY_KEY_COUNTS = { total: 101, strings: 97, functions: 4 };
 
 function captureVoiceAudioHandling(): string {
   return CAPTURE_COPY.voiceAudioHandling;

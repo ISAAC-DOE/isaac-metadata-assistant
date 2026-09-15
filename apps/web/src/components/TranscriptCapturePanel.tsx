@@ -1789,6 +1789,33 @@ export function TranscriptCapturePanel({
           <>
             <p className="capture-note">{CAPTURE_COPY.voiceAudioHandling}</p>
             {/*
+              THE ROUTE THAT CAN PRODUCE TEXT, offered where the reader has just
+              been told this one cannot.
+
+              The project owner's point, 2026-09-14: recording that can never be
+              transcribed "becomes kind of useless", so the screen should say how
+              to get text — via a Claude app over MCP — rather than leave a
+              control whose only outcomes are playback and Discard.
+
+              COLLAPSED, because the owner asked for exactly that ("put it behind
+              a collapsible thing so it isnt just more word clutter again") and
+              because it is a procedure, not a status. And CONDITIONAL: the
+              precondition is the first line inside, since the MCP transport is
+              unmounted in every deployment and `CLAUDE.md` §15 forbids implying
+              the agent path exists. It points at Settings → Connect Your Agent
+              for the steps rather than restating them, so the two cannot drift.
+            */}
+            <details className="capture-mcp-route">
+              <summary className="capture-mcp-summary">
+                {CAPTURE_COPY.mcpRouteHeading}
+              </summary>
+              <p className="capture-note">{CAPTURE_COPY.mcpRouteLead}</p>
+              <p className="capture-mcp-precondition">{CAPTURE_COPY.mcpRoutePrecondition}</p>
+              <p className="capture-guidance-label">{CAPTURE_COPY.mcpRouteSayLabel}</p>
+              <p className="capture-mcp-say">{CAPTURE_COPY.mcpRouteSayExample}</p>
+              <p className="capture-note">{CAPTURE_COPY.mcpRouteOutcome}</p>
+            </details>
+            {/*
               THE STATE BAR — ABOVE THE CONTROLS, NOT INSIDE THEM.
               ====================================================
 

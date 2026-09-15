@@ -1039,3 +1039,47 @@
 .capture-intake-card .btn {
   margin-top: auto;
 }
+
+/*
+ * THE MCP ROUTE DRAWER — the path that can actually turn speech into text,
+ * offered beside the one that cannot. Collapsed by default; see the panel.
+ *
+ * Every value here is an existing token or a rung of
+ * `design-handoff/05-design-system/spacing-layout.md`'s scale. The precondition
+ * reuses the left-rule treatment `.api-connect-prerequisite` already uses for a
+ * sentence a reader must not miss, and the example line reuses the mono
+ * treatment the rest of this panel gives quoted technical text.
+ */
+.capture-mcp-route {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border-faint);
+}
+.capture-mcp-summary {
+  cursor: pointer;
+  width: fit-content;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-heading);
+}
+.capture-mcp-summary:focus-visible {
+  outline: 2px solid var(--action);
+  outline-offset: 2px;
+  border-radius: var(--radius-inner);
+}
+.capture-mcp-precondition {
+  margin: 8px 0 0;
+  padding-left: 10px;
+  border-left: 2px solid var(--border-strong);
+  font-size: 11.5px;
+  line-height: 1.55;
+  color: var(--text-secondary);
+}
+.capture-mcp-say {
+  margin: 4px 0 8px;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  line-height: 1.55;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
