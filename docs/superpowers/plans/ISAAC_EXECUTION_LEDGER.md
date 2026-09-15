@@ -117,6 +117,64 @@ line verified by a command rather than by an agent's report:
   slice. Evidence:
   docs/evidence/dead-whitespace-measurement-2026-09-15.md ***
 
+ALL FOUR LANES LANDED. INTEGRATION BRANCH `feat/v2-integration`, HEAD `7612c0ce`,
+PR **#256**, 28 commits / 82 files / +11,057 -1,225. `origin/main` is STILL
+`dbf9d121`, so the merge-base IS `origin/main` and exact-head CI describes the
+merge result — stated because §10's merge-result round-trip is normally
+mandatory here and this repository has two counterexamples nine minutes apart.
+
+  VERIFIED IN THE MAIN CHECKOUT WITH NO COMPETING PROCESS:
+    npx tsc -b                    -> 0
+    npx tsc -p e2e/tsconfig.json  -> 0
+    npx vitest run                -> 235 files / 6076 tests, exit 0
+    snapshot pair --check (BOTH)  -> no drift; 201 served / 200 manifest, unchanged
+    snapshot gate tests           -> 155 passed
+    e2e structure/tabs/pill/dialogs -> 107 passed
+    e2e wide-prose                -> 9 passed, 36 skipped (one project, by design)
+    e2e mutation runs             -> 10 passed
+    e2e mutation run-card-responsive -> 14 passed
+
+  *** FIVE E2E FAILURES WERE FOUND AND FIXED THAT NO UNIT TEST COULD SEE, which
+  is the argument for running them rather than shipping edited specs: my
+  `Settings & API` -> `Settings` rename broke SEVEN specs through
+  `e2e/surfaces.ts`'s ready-gates and its `tablistName`; the datetime picker
+  OVERFLOWED A 320px CARD BY 43px (cause was not the obvious one — the control
+  has no intrinsic floor, `width: 100%` shrinks it to 126px; the shrink-to-fit
+  PARENT was sizing itself from one child); and the ISO text box could not be
+  filled because its `<details>` is shut on a fresh run. ***
+
+  *** FIVE DESIGN GUARDS FAILED ON THE MERGE AND NONE WAS WEAKENED. A coloured
+  `border-left` (banned system-wide) became a tinted card. The type ratchet
+  fired in BOTH directions — new literals over the ceiling, then the migration
+  under the tolerance floor — and its ceilings were lowered from ITS OWN
+  counter (1043/282), not from my sweep, which was off by one in each axis.
+  Three favicon binaries were exempted from the NUL guard BY EXACT PATH, never
+  by extension, per that file's own stated rule.
+  TWO OF MY OWN MIGRATIONS WERE WRONG AND ARE RECORDED AT THE SITE: one sent a
+  `13px` to `--font-size-meta`, which is 11px — it would have silently shrunk a
+  control to satisfy a guard; and tokenizing `.section-tab`'s font-weight
+  CRASHED `A16`, which reads that value numerically to prove the WCAG
+  large-text exemption does not apply. `type-scale`'s header already recorded
+  that exception for font-size in rules painting `--text-tertiary`/
+  `--text-muted`; what it did not say is that it extends to font-weight. ***
+
+  A SIXTH "FAILURE" WAS CONTENTION, NOT A DEFECT, and is recorded because I
+  nearly reported it: a full run showed `record-capture-destination` failing;
+  alone it passes 15/15. A count taken under load is not a measurement.
+
+  STATISTICS EARNED THE SLOT RATHER THAN JUST RECEIVING IT. Measured on a
+  populated workspace at 1440: **6,993px -> 2,715px (-61%)** and **598 -> 172
+  visible text elements (-71%)**, under both halves of `UX-017`'s bar. That
+  figure was the acceptance condition written into `LeftNav` when the item was
+  promoted, not a historical note.
+
+  NEXT, AND THE ONLY THINGS BETWEEN THIS AND A MERGE: PR #256's CI on the exact
+  head, and the independent review (the fifth and last agent of this session).
+  The review brief is deliberately adversarial about the CLAIMS — the file
+  panel's "not sent", the census going 2 -> 3, the Record Map's `Not Shown
+  Here`, and the -61%/-71% figures, which are the implementer's and not
+  re-measured by me.
+
 OWNER FEEDBACK DRIVING THIS SESSION (verbatim, 2026-09-15, from screenshots):
   * the Runs split-screen architecture is APPROVED — "I like that split-screen
     architecture" — but the right pane "is not really readable … I can't clearly
