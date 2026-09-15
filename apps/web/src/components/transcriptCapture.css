@@ -1051,15 +1051,17 @@
  * treatment the rest of this panel gives quoted technical text.
  */
 .capture-mcp-route {
-  margin-top: 12px;
-  padding-top: 10px;
+  margin-top: var(--space-md);
+  padding-top: var(--space-sm);
   border-top: 1px solid var(--border-faint);
 }
 .capture-mcp-summary {
   cursor: pointer;
   width: fit-content;
-  font-size: 12px;
-  font-weight: 600;
+  /* `--font-size-body`, not the 12px I first wrote: 12px has no rung and this
+     guard exists to refuse a new hand-authored size. */
+  font-size: var(--font-size-body);
+  font-weight: var(--font-weight-semibold);
   color: var(--text-heading);
 }
 .capture-mcp-summary:focus-visible {
@@ -1068,18 +1070,18 @@
   border-radius: var(--radius-inner);
 }
 .capture-mcp-precondition {
-  margin: 8px 0 0;
-  padding-left: 10px;
-  border-left: 2px solid var(--border-strong);
-  font-size: 11.5px;
-  line-height: 1.55;
+  margin: var(--space-sm) 0 0;
+  padding-left: var(--space-sm);
+  border-left: var(--space-2xs) solid var(--border-strong);
+  font-size: var(--font-size-meta);
+  line-height: var(--line-height-normal);
   color: var(--text-secondary);
 }
 .capture-mcp-say {
-  margin: 4px 0 8px;
+  margin: var(--space-xs) 0 var(--space-sm);
   font-family: var(--font-mono);
-  font-size: 11.5px;
-  line-height: 1.55;
+  font-size: var(--font-size-meta);
+  line-height: var(--line-height-normal);
   color: var(--text-secondary);
   overflow-wrap: anywhere;
 }

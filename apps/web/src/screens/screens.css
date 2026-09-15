@@ -3352,3 +3352,40 @@ a.settings-jump-btn {
   line-height: var(--line-height-relaxed);
   color: var(--text-muted);
 }
+
+/*
+ * THE CAPTURE WORKSPACE'S THREE PANELS ARE CARDS, IN ONE RULE.
+ *
+ * The project owner, 2026-09-14, on the Experiment Data screen: *"i like the ui
+ * you have in this screenshot with the four different ways they can get the
+ * experiment in, but below that when the transcript or whatever happens then it
+ * becomes cluttered again, there is no visual separation between sections, it
+ * needs to look cleaner and polished"*.
+ *
+ * Measured: the four intake tiles are cards, and `.capture-section`,
+ * `.notes-section` and `.proposals-section` each carried `margin-bottom: 20px`
+ * and nothing else — so everything below the tiles was one undifferentiated
+ * column of headings and prose.
+ *
+ * ONE SELECTOR LIST, NOT THREE COPIES, and that is the lesson from this
+ * repository's own `.workspace-nav` / `.capture-nav` gutter defect: two rules
+ * with identical values are how values come apart, and those two diverged at a
+ * width nobody checked. These three panels live in three component
+ * stylesheets; styling them together is the only way the card cannot drift
+ * between them.
+ *
+ * Every value is the existing `.card` token set (`base.css`), so no new visual
+ * vocabulary enters the app — the panels become the same kind of surface the
+ * intake tiles already are.
+ */
+.capture-section,
+.notes-section,
+.proposals-section {
+  /* `--space-lg` on both axes: a rung of the scale, and the same interior the
+     intake tiles above already use. The 18px I first wrote has no rung. */
+  padding: var(--space-lg);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-card);
+}
