@@ -93,8 +93,25 @@ const PROSE_SURFACES: readonly { id: string; path: string; example: boolean }[] 
  * line requires stating why the composition is right as it stands.
  */
 const KNOWN: Record<string, readonly string[]> = {
-  imports: ['.hi-steps-disclosure', '.hi-note', '.hi-lead'],
-  governance: ['.gov-canonical'],
+  /*
+   * EMPTY, AND IT STARTED WITH FOUR ENTRIES. All four were measured on `main`
+   * at 1728 px and all four are fixed in this same integration:
+   *
+   *   .hi-steps-disclosure  697 px  ]  the Historical Import landing column is
+   *   .hi-note              697 px  ]  now capped at the app's `readable`
+   *   .hi-lead              643 px  ]  measure, so the container no longer
+   *                                    outgrows the prose inside it
+   *   .gov-canonical        643 px     restyled as a bounded callout, which is
+   *                                    what a pointer paragraph actually is
+   *
+   * Verified by emptying this list and running the spec: it exited 1 naming
+   * exactly those four before the fixes, and exits 0 after. An allowlist that
+   * was never demonstrated to be load-bearing is indistinguishable from a
+   * vacuous one.
+   *
+   * IT MUST ONLY EVER SHRINK. Adding an entry requires stating why the
+   * composition is right as it stands — it is not a place to park a defect.
+   */
 };
 
 interface Finding {
@@ -120,6 +137,25 @@ test.describe('wide viewports: prose does not strand a wide empty gutter @respon
           for (const p of Array.from(document.querySelectorAll('p,li,dd,summary'))) {
             const cs = getComputedStyle(p);
             if (cs.display === 'none' || cs.visibility === 'hidden') continue;
+
+            /*
+             * INSIDE A CLOSED `<details>` IS NOT ON SCREEN, and this exclusion
+             * is a correction to a real false positive rather than a
+             * convenience. Chrome keeps laid-out boxes for a collapsed
+             * disclosure's children, so the first version of this probe
+             * reported `.hi-steps-disclosure` at 695px on a surface where a
+             * reader can see none of it — while `display`/`visibility` both
+             * said it was fine. Reporting a defect nobody can see would train
+             * the next reader to distrust the whole file.
+             *
+             * The OPEN state is still covered: the container cap that fixes it
+             * is unconditional, not `[open]`, so the geometry is already
+             * correct when the disclosure expands. This repo's axe sweep makes
+             * the same choice for the same reason.
+             */
+            const collapsed = p.closest('details:not([open])');
+            if (collapsed !== null && p.closest('summary') === null) continue;
+
             const text = (p.textContent ?? '').trim();
             if (text.length < 90) continue;
 

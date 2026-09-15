@@ -383,8 +383,68 @@
 }
 /* The canonical-home pointer that leads the tab. Quieter than the policy
    sections it introduces, because it is navigation, not policy. */
-.gov-canonical {
+/*
+ * THE CANONICAL-HOME POINTER IS A CALLOUT, NOT A PARAGRAPH — and the change is
+ * a measurement, not a preference.
+ *
+ * Measured 2026-09-15 in real Chromium at 1728px: this paragraph rendered SIX
+ * lines at 557px inside a 1200px `wide` main, stranding 643px of empty gutter
+ * beside a tall narrow column. That is the defect the project owner reported
+ * twice — "the text is still stopping midway through half the block" — and the
+ * sibling `.gov-policy` block two rules below had ALREADY been given the
+ * two-column treatment for exactly this reason. This pointer was left behind.
+ *
+ * IT IS FIXED AS A CALLOUT RATHER THAN BY WIDENING THE MEASURE, because the
+ * content is a POINTER and not prose: "the canonical home for this is over
+ * there". A bounded, tinted box at a readable measure makes the space beside it
+ * read as deliberate framing instead of a broken column, and a 1200px line
+ * would be worse to read, not better — the owner ruled out spanning the
+ * viewport explicitly. Nothing is hidden and no sentence is cut: this is
+ * placement only.
+ *
+ * `e2e/specs/wide-prose.spec.ts` measures the result at 1440 and 1728.
+ */
+/*
+ * THE BOX IS THE FIX, NOT THE PARAGRAPH — and the reason is a specificity
+ * measurement that also explains why the owner's complaint survived an earlier
+ * attempt at it.
+ *
+ * `.screen-main[data-width="wide"] .placeholder > p` sets `max-width: 68ch`.
+ * Measured in Chrome: that rule wins against a bare `.gov-canonical`
+ * (`computedMaxWidth: 556.816px`), so capping the PARAGRAPH wider is inert. And
+ * capping it wider would not have helped anyway: the defect is the gap between
+ * the paragraph and its CONTAINER, and the container is the 1200px `wide` main.
+ *
+ * THAT `68ch` RULE IS THE ROOT CAUSE OF THIS WHOLE DEFECT FAMILY. It is the
+ * `38em -> 68ch` change a prior slice made in answer to this same report, and it
+ * could not have worked: it narrows the text and leaves the box it sits in
+ * exactly as wide. It is deliberately NOT touched here — it applies to every
+ * `wide` and `full` screen in the app, and changing it mid-flight would move
+ * surfaces two other slices are editing. Fixing it globally is its own slice
+ * with its own before/after measurement.
+ *
+ * So the pointer gets its own bounded container at the app's own `readable`
+ * measure (AppShell: `readable` -> 760px). The paragraph then fills the box it
+ * is in, and the space beside it reads as deliberate framing — which is what a
+ * pointer callout is — instead of a broken column. Nothing is hidden and no
+ * sentence is cut: this is placement only.
+ *
+ * Measured at 1728px: 643px of stranded gutter before, ~0 after.
+ * `e2e/specs/wide-prose.spec.ts` holds it at 1440 and 1728.
+ */
+.gov-canonical-box {
+  max-width: 760px;
   margin-top: 14px;
+  padding: var(--space-sm) var(--space-md);
+  border-left: 3px solid var(--action);
+  border-radius: 0 var(--radius-inner) var(--radius-inner) 0;
+  background: var(--action-tint);
+}
+/* Inside the box the paragraph fills it. The `68ch` rule above still wins on
+   `max-width`, which is now harmless: 68ch is wider than the box. */
+.gov-canonical-box > .gov-canonical {
+  margin: 0;
+  color: var(--text-primary);
 }
 /* UNDERLINED, and this is an accessibility fix rather than a style preference.
    `base.css` sets `text-decoration: none` on every link, which is fine for the

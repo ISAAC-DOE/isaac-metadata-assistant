@@ -200,6 +200,38 @@
  * use elsewhere, so a reader learns one "there's more here" affordance
  * rather than two.
  */
+/*
+ * THE DISCLOSURE'S CONTENT COLUMN IS CAPPED, for the same reason the landing
+ * cards are — and it was missed because a collapsed disclosure hides the defect
+ * rather than removing it.
+ *
+ * Measured at 1728px on the integrated build: `.hi-steps-disclosure` rendered
+ * EIGHT lines at 471px inside a 1166px host, and `.hi-note` three lines at the
+ * same width — 695px of stranded gutter each. The landing-column cap that fixed
+ * `.hi-lead` deliberately scoped ITSELF away from `.hi-section` (the session
+ * view has a real table that needs the wide column), and this content sits
+ * inside the new `<details>` rather than in a landing card, so it fell between
+ * the two.
+ *
+ * A READER ONLY SEES IT AFTER OPENING THE DISCLOSURE, which is exactly why it
+ * is worth fixing rather than tolerating: the moment somebody follows "How
+ * Historical Import works" they meet the defect the disclosure was introduced
+ * to reduce.
+ *
+ * 760px is the app's own `readable` measure (AppShell), not a new number, and
+ * it stays above the 560px container threshold at which the stepper upgrades to
+ * its horizontal row — so the circle-node layout is unaffected.
+ */
+.hi-how-it-works {
+  /* UNCONDITIONAL, not `[open]`. A closed `<details>` still has laid-out boxes
+     for its children in Chrome, and more to the point the cap has to be in
+     force at the instant the reader opens it — a cap that arrives with the
+     `[open]` attribute is a cap that reflows the content the reader is looking
+     at. The summary is `width: fit-content`, so bounding the element does not
+     change the collapsed row. */
+  max-width: 760px;
+}
+
 .hi-how-it-works > summary {
   display: flex;
   align-items: center;
