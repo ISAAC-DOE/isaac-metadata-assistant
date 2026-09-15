@@ -62,7 +62,21 @@ import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import { api, ApiError } from '../lib/api';
 import { mutationFailureCopy, staleWriteCurrentVersion } from '../lib/mutationErrors';
 import { markSelfMintedProposals } from '../lib/selfMintedProposals';
-import { RUN_FIELDS, parseRunField, type RunFieldSpec } from '../lib/runFields';
+import { RUN_FIELDS, type RunFieldSpec } from '../lib/runFields';
+/*
+ * MOVED OUT, NOT REWRITTEN (2026-09-15). `HUMAN_PROPOSED_RULE`, `stableValueDigest`
+ * and this form's value parsing used to be declared in this file. A SECOND surface
+ * now performs the same act — `NewProposalForm`, reached from the Ingestion
+ * Proposals panel's own header — and the two must store one provenance sentence,
+ * compute one dedupe key and refuse with one set of words. The symbols are verbatim,
+ * with their reasoning, in `lib/proposalAuthoring.ts`; nothing about this panel's
+ * behaviour changed with the move, and `unmapped-notes.test.tsx` pins the strings.
+ */
+import {
+  HUMAN_PROPOSED_RULE,
+  parseProposedValue,
+  stableValueDigest,
+} from '../lib/proposalAuthoring';
 import { RUNS_PAGE_SIZE } from '../lib/runPaging';
 import type { RecordChangeSummary } from '../lib/recordChanges';
 import type { ApiNote, ApiNoteState, ApiNotesResponse, ApiRunView } from '../lib/types';
@@ -226,59 +240,6 @@ type ProposalCapabilities = {
   targetFieldPaths: string[];
   recordScopedTargetFieldPaths: string[];
 } | null;
-
-/**
- * THE RULE SENTENCE FOR A HUMAN-MAPPED PROPOSAL. `rule` is required and must be
- * "the sentence that produced this value and this target, not an identifier" —
- * for an extracted candidate that sentence describes the extraction rule; for
- * this act there is no extraction rule, and the honest sentence says exactly
- * that: a person read the note and chose the value directly. It is a FIXED
- * constant rather than something a scientist types, because composing a
- * provenance sentence is a burden this act does not need to impose — the act
- * itself IS the provenance.
- */
-const HUMAN_PROPOSED_RULE =
-  'A person read this note directly and entered this value for the field by hand; ' +
-  'no automated rule matched it.';
-
-/**
- * A short, deterministic, NON-cryptographic digest of a proposed value — used only
- * to build `client_request_key` so an accidental double click on "Propose This
- * Value" dedupes to one proposal rather than two. It carries no security property;
- * exactly-once enforcement is the server's, inside `record_lock` (contract §2,
- * DEC-13) — this only has to be STABLE for the same (note, path, value) triple
- * within one click, which a plain hash over the value's JSON serialisation is.
- *
- * m8, INDEPENDENT REVIEW OF PR-D — THE COLLISION BEHAVIOUR, NAMED RATHER THAN
- * LEFT IMPLICIT. This is a 32-bit hash (`hash >>> 0`), not a cryptographic one,
- * so two DIFFERENT values for the SAME (note, path) CAN — with vanishing but
- * non-zero probability — produce the SAME `client_request_key`. If that ever
- * happens: proposing value A stores it under key K; proposing DIFFERENT value B
- * for the same note+path later computes the SAME key K, and the server's
- * dedup (contract §2 DEC-13 — "a key already present … returns the EXISTING
- * proposal") returns A's proposal with `deduplicated: true` — the reader is
- * told "already proposed" while the record still holds A, not B. Nothing is
- * corrupted (A is a real, previously-confirmed proposal; B is simply not
- * stored), but the CONFIRMATION is misleading for that one request. Two things
- * bound the risk to theoretical: the key space this collision would need to
- * land in is scoped to ONE (note_id, field_path) pair — not the record, not
- * the experiment — and a real note is proposed against a handful of paths at
- * most, nowhere near the ~2^16 distinct values against one pair before a
- * birthday-bound collision becomes plausible. Upgrading to a wider,
- * collision-resistant digest (e.g. a truncated `SubtleCrypto` SHA-256) would
- * close this to a cryptographic margin; not done here because the risk this
- * function actually has to cover — an accidental double click on the SAME
- * value — cannot manifest it at all (identical value ⇒ identical digest by
- * construction), and a wider digest is a separate, reviewable change.
- */
-function stableValueDigest(value: unknown): string {
-  const json = JSON.stringify(value) ?? 'undefined';
-  let hash = 5381;
-  for (let index = 0; index < json.length; index += 1) {
-    hash = (Math.imul(hash, 33) + json.charCodeAt(index)) | 0;
-  }
-  return (hash >>> 0).toString(16);
-}
 
 /**
  * `activity` — F-1, THE MISSING LIVE REFRESH, CLOSED HERE.
@@ -1495,32 +1456,20 @@ function NoteCard({
   const runPropose = async () => {
     if (proposeBusy || proposeFieldPath === '') return;
     if (proposeNeedsRun && proposeRunId === '') return;
-    let parsedValue: unknown;
-    if (proposeFieldSpec !== null) {
-      const parsed = parseRunField(proposeFieldSpec, proposeValueText);
-      if (!parsed.ok) {
-        setProposeError(parsed.error);
-        return;
-      }
-      parsedValue = parsed.value;
-    } else {
-      try {
-        parsedValue = JSON.parse(proposeValueText) as unknown;
-      } catch {
-        setProposeError(
-          'That is not valid JSON, so it was not sent and nothing was written. A text ' +
-            'value needs quotes around it, for example "CuO".',
-        );
-        return;
-      }
-    }
-    if (parsedValue === null) {
-      setProposeError(
-        'A null value cannot be proposed here — clearing a field is a different act ' +
-          'with its own questions. Nothing was sent.',
-      );
+    /*
+     * THE THREE BRANCHES THAT USED TO BE INLINE HERE — typed parse, JSON fallback,
+     * and the `null` refusal — MOVED VERBATIM to `parseProposedValue`, with their
+     * refusal sentences unchanged, so the New Proposal form on the Ingestion
+     * Proposals panel refuses the same input with the same words. It re-derives the
+     * spec from the path, which is the same `RUN_FIELDS` lookup `proposeFieldSpec`
+     * above performs; that constant still drives the CONTROL this form renders.
+     */
+    const parsed = parseProposedValue(proposeFieldPath, proposeValueText);
+    if (!parsed.ok) {
+      setProposeError(parsed.error);
       return;
     }
+    const parsedValue = parsed.value;
     setProposeError(null);
     setProposeBusy(true);
     try {
