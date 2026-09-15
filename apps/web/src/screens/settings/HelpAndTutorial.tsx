@@ -119,7 +119,7 @@ export function HelpAndTutorialPanel() {
         kept, because discarding it would throw away your only route back into a walkthrough that
         may still be open. Nothing else about the walkthrough is stored: neither
         of those two entries holds record content, a field value, or an identity. What the
-        assistant panel keeps is separate and is described under Settings &amp; API &rarr; Data &amp;
+        assistant panel keeps is separate and is described under {LABELS.navSettings} &rarr; Data &amp;
         Privacy.
       </p>
     </>

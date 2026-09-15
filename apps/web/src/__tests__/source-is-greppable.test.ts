@@ -1,5 +1,5 @@
 /*
- * NO FILE GIT TRACKS MAY HOLD A RAW NUL BYTE, WITH ONE NAMED EXEMPTION.
+ * NO FILE GIT TRACKS MAY HOLD A RAW NUL BYTE, WITH FOUR NAMED EXEMPTIONS.
  *
  * ── THE MEASUREMENT THIS EXISTS FOR ─────────────────────────────────────────
  *
@@ -107,6 +107,28 @@ const NUL = '\u0000';
  */
 const EXEMPT_BY_EXACT_PATH: readonly string[] = [
   'qa/validator-upload-package/isaac-validator-qa-files.zip',
+  /*
+   * *** THREE FAVICON RASTERS, ADDED 2026-09-15, BY EXACT PATH AND NOT BY
+   * EXTENSION — which is this file's own stated rule and the reason it is
+   * stated. A `.png`/`.ico` rule would silently exempt every image a future
+   * author adds anywhere; these three exempt the three files measured to need
+   * it, and this list fails loudly if one is moved, renamed, or joined by a
+   * fourth. ***
+   *
+   * They are genuine binaries: the PNG/ICO fallbacks for the browser-tab icon
+   * the project owner asked for, reproducing the app's own header mark. Nothing
+   * greps a PNG, and their NUL bytes are image data rather than a typo in
+   * prose — which is the exact test the zip above already passes.
+   *
+   * NUL counts at the commit that added them, measured with a reader that
+   * cannot fail silently (`open(f,'rb').read().count(b'\x00')`, not `tr`, for
+   * the reason §11 records): apple-touch-icon.png 21, favicon-32.png 22,
+   * favicon.ico 96. `favicon.svg` is deliberately NOT here — it is text, it
+   * holds no NUL, and it is the file a reader would actually grep.
+   */
+  'apps/web/public/apple-touch-icon.png',
+  'apps/web/public/favicon-32.png',
+  'apps/web/public/favicon.ico',
 ];
 
 /** Every path `git ls-files` reports, NUL-delimited so a path with a newline survives. */
@@ -172,8 +194,18 @@ describe('the repository is greppable without -a', () => {
         `${rel} is exempted but holds no NUL — delete the exemption`,
       ).toBeGreaterThan(0);
     }
-    // AND THE EXEMPTION IS ONE FILE. Stated as a number so widening it is a visible edit
-    // to this line rather than an unremarked extra array entry.
-    expect(EXEMPT_BY_EXACT_PATH).toHaveLength(1);
+    /*
+     * AND THE EXEMPTION LIST IS FOUR FILES. ~~one file~~ — widened 2026-09-15
+     * for the three favicon rasters, and the number is updated rather than the
+     * assertion removed, because this line existing is the whole mechanism:
+     * "stated as a number so widening it is a visible edit to this line rather
+     * than an unremarked extra array entry." It worked exactly as designed —
+     * adding the three failed here and forced this edit.
+     *
+     * The loop above is what keeps them honest: every entry must still be
+     * TRACKED and must still HOLD a NUL, so an exemption for a file that was
+     * deleted, moved, or turned into text cannot sit here widening the guard.
+     */
+    expect(EXEMPT_BY_EXACT_PATH).toHaveLength(4);
   });
 });

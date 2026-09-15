@@ -794,6 +794,32 @@ export function sanitizeInferability(
   return { ...inf, value: null, provenance: null };
 }
 
+/**
+ * THE ONE BLOCKER-KIND VOCABULARY, made reachable — not copied.
+ *
+ * `FindingList` names the SUBJECT of a check finding, and the only structured
+ * thing a blocker carries about its subject is `kind`. Writing a second
+ * `series -> 'Reduced Spectrum'` map beside `KIND_LABEL` is the shape this
+ * repository has already been caught in ("one vocabulary, three copies"): a
+ * rename lands in one of them and the other two go on saying the old word.
+ *
+ * IT RETURNS `null` FOR AN UNKNOWN KIND, WHERE `pendingItemToBlocker` FALLS BACK
+ * TO `titleCase`, and the difference is deliberate rather than an omission. That
+ * consumer is rendering a form for a question the reader is about to ANSWER, so
+ * a rough label beats a blank; this one is rendering a SUBJECT LINE above the
+ * server's own sentence, where a made-up subject is a claim about what the
+ * finding is about. `titleCase('qc')` is `'Qc'`, which is the measured shape of
+ * that failure. When there is no recognised kind, the caller says nothing about
+ * the subject — which is the instruction `ApiRunCheckFinding.kind`'s own
+ * docstring gives: "a reader groups by it when it is there and says nothing when
+ * it is not — it is never defaulted, and no kind is inferred from the message
+ * text."
+ */
+export function blockerKindLabel(kind: unknown): string | null {
+  if (typeof kind !== 'string') return null;
+  return KIND_LABEL[kind] ?? null;
+}
+
 /** Map one live /pending item onto the render blocker the GuidedPrompt consumes. */
 export function pendingItemToBlocker(item: ApiAnswerablePendingItem): PendingBlocker {
   const hasExample = !!item.demo_answer;

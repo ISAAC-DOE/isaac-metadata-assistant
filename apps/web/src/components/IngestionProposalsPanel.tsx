@@ -15,10 +15,27 @@
  * That was true when this panel shipped and stopped being true twice over: finalizing
  * a transcript capture mints a proposal per candidate (PR-A), and
  * `UnmappedNotesPanel`'s "Propose a Value from This Note" act mints one from a note
- * this record already holds (this change). This panel still has NO create control of
- * its own — a review surface that manufactured the queue it reviews would be
- * reviewing itself — but the queue is no longer structurally empty in every
+ * this record already holds (this change). ~~This panel still has NO create control
+ * of its own — a review surface that manufactured the queue it reviews would be
+ * reviewing itself —~~ but the queue is no longer structurally empty in every
  * deployment, and the empty state below is worded for that.
+ *
+ * ~~THE "NO CREATE CONTROL" RULE IS WITHDRAWN, 2026-09-15~~ — struck above rather
+ * than deleted, because it was a deliberate decision and a future session must be
+ * able to see that it was REVERSED, not forgotten. The project owner reported the
+ * cost of it directly: "there's no way to actually add an ingestion proposal". The
+ * premise behind that report — that creation might be backend-blocked — was measured
+ * and is FALSE: `POST .../proposals` is a registered, working route, exercised over
+ * HTTP in both scopes on a record created through `POST /api/experiments`. So the gap
+ * was DISCOVERABILITY, not capability; the act existed only inside one note's
+ * collapsed action row on the panel above, and only for a record that already held a
+ * note. `NewProposalForm`, mounted at the top of the browser below, is the door.
+ *
+ * WHAT THE OLD RULE WAS PROTECTING IS UNCHANGED AND STILL HOLDS. Nothing here reviews
+ * what it creates: a proposal minted by that form lands `open` and is decided by the
+ * same review acts as any other, and the form has no path to accept, reject,
+ * supersede or withdraw anything. Creating and judging are still two acts by two
+ * controls, which is the whole of what "reviewing itself" was about.
  *
  * m14 — A NAMED DEVIATION FROM `ia-brief.md` §8, INDEPENDENT REVIEW OF PR-D.
  * §8 specifies the target run is stated verbatim, "'On run `<run_id>`' stated
@@ -129,6 +146,7 @@ import type {
   ApiProposalsResponse,
 } from '../lib/types';
 import { BackendDown, LoadingPanel } from './FetchStates';
+import { NewProposalForm } from './NewProposalForm';
 import './ingestionProposals.css';
 
 /** Same narrowing `UnmappedNotesPanel` uses — a non-`ApiError` throw still renders. */
@@ -1402,6 +1420,49 @@ function ProposalsBrowser({
 
   return (
     <div className="proposals-browser">
+      {/*
+        THE CREATION DOOR, FIRST AND UNCONDITIONAL — see this file's header for why
+        the "no create control" rule was withdrawn.
+
+        IT IS RENDERED ONLY ONCE THE SERVER HAS ANSWERED, and `loaded` is the
+        LAST SUCCESSFUL load rather than the current request, so a reload does not
+        unmount it. That is load-bearing and not incidental: this component holds a
+        half-filled form, and `CLAUDE.md` §11 records three separate occasions on
+        which a background refresh in this application destroyed what a scientist had
+        typed. The silent-refresh gate at `wasSilent && listStatusRef.current ===
+        'data'` protects the LIST's open editors; an unmount would defeat both, so the
+        form must not be conditional on `list.status`.
+
+        IT NEVER ADOPTS A VERSION OR REFRESHES ITSELF. The three callbacks below are
+        the only things it can do to this panel, and each is the same act the review
+        path already performs: adopt the token the server returned, refresh SILENTLY,
+        announce after the server confirmed. Nothing is announced before a write is
+        awaited, exactly as rule 3 in this file's header requires.
+      */}
+      {loaded !== null && (
+        <NewProposalForm
+          experimentId={experimentId}
+          experimentVersion={version}
+          targetFieldPaths={loaded.target_field_paths ?? []}
+          recordScopedTargetFieldPaths={loaded.record_scoped_target_field_paths ?? []}
+          onCreated={(created) => {
+            setVersion(created.experiment_version);
+            reload(true);
+            announce(
+              created.deduplicated
+                ? 'That value was already proposed from this note, so no second ' +
+                    'proposal was created. It is in the list below.'
+                : 'Proposal stored. It is open for review in the list below, and no ' +
+                    'field was written.',
+            );
+          }}
+          onVersionAdvanced={(next) => setVersion(next)}
+          onStaleRecovered={(current) => {
+            setVersion(current);
+            reload(true);
+          }}
+        />
+      )}
       <div className="proposals-toolbar">
         <div className="proposals-control">
           <label className="proposals-control-label" htmlFor={filterId}>

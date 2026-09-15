@@ -43,7 +43,7 @@
  * CORRECTION, 2026-09-12, found by an independent design review of this very
  * comment: an earlier revision of this paragraph said the name appeared "only as
  * a ~12px crumb". THAT WAS FALSE, and wrong in kind as well as in size.
- * `chrome.css` `.record-title` is `font-size: 14px; font-weight: 600; color:
+ * `chrome.css` `.record-title` is `font-size: 14px; font-weight: var(--font-weight-semibold); color:
  * var(--text-heading)` — the SAME weight and the SAME heading colour as the
  * `.record-page-title` added here, at 14px rather than 12px. It was never a
  * quiet crumb; it reads as a title, and `chrome.css` says so on purpose:
@@ -134,7 +134,7 @@
   border-radius: var(--radius-inner);
   color: var(--text-secondary);
   font-size: 12.5px;
-  font-weight: 500;
+  font-weight: var(--font-weight-medium);
   cursor: pointer;
   text-align: left;
   transition: background 0.12s ease, box-shadow 0.12s ease;
@@ -202,13 +202,56 @@
    compete with them for no new meaning. */
 .needsyou-owner {
   font-size: 12.5px;
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
   color: var(--advisory-text);
 }
 
 .needsyou-body { flex: 1; }
-.needsyou-title { font-size: 14px; font-weight: 600; color: var(--advisory-text); }
-.needsyou-text { margin-top: 4px; font-size: 12.5px; color: var(--text-secondary); line-height: 1.5; }
+.needsyou-title { font-size: 14px; font-weight: var(--font-weight-semibold); color: var(--advisory-text); }
+/*
+ * CAPPED TO A READABLE MEASURE — found by Impeccable's in-browser overlay, which
+ * is the detector code path that actually works in this repository (the CLI
+ * engine returns `[]` exit 0 on a `.tsx` holding four deliberate defects, with
+ * no warning at all; negative-controlled again this session).
+ *
+ * *** THE FIRST VERSION OF THIS COMMENT CARRIED A FALSE NUMBER FROM A FLAWED
+ * INSTRUMENT, and the correction is kept in full because the instrument is the
+ * transferable part. ***
+ *
+ * ~~Measured at 1280: 699px wide at 12.5px — about 112 characters per line.~~
+ * That 112 came from taking `getClientRects()`' widest rect and its COUNT as
+ * "line width" and "line count". Those are one rect per inline TEXT-NODE
+ * FRAGMENT, not per line: JSX interpolation splits a sentence into many nodes,
+ * so a single 19px-tall line reads back as 14 short "lines". Caught on
+ * `.hi-counts`, which reported 17 chars over 14 lines while being one line of
+ * 89 characters.
+ *
+ * MEASURED AGAIN, by laying the element's own text into a probe at its own font
+ * and content width and counting LINE BOXES:
+ *
+ *              before                        after
+ *   @1280      699px, 2 lines, 58 ch/line    567px, 2 lines, 58 ch/line
+ *   @1728     1147px, 1 line, 115 ch/line    567px, 2 lines, 58 ch/line
+ *
+ * SO THE CAP IS INERT AT 1280 AND LOAD-BEARING AT 1728 — and that is the same
+ * structural fact `e2e/specs/wide-prose.spec.ts` was written for: the widest
+ * viewport this suite tests is 1280, and both failure modes of a missing prose
+ * measure live above it. 115 characters on ONE line is past any readable
+ * measure; the 70-85ch the product direction cites is the target, and 58 is
+ * inside it.
+ *
+ * It is the OPPOSITE failure from the dead-whitespace one that spec guards:
+ * there, prose stops far short of its box; here it had no measure at all.
+ *
+ * `72ch` rather than a pixel value, so it tracks this rule's own font-size.
+ */
+.needsyou-text {
+  margin-top: 4px;
+  max-width: 72ch;
+  font-size: 12.5px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
 /* THE PRIMARY ACTION SITS BESIDE THE TITLE, not floated to the vertical middle of
    whatever the banner happens to hold. `center` was defensible while the banner was
    always a list — the button landed roughly beside its own subject. It is wrong now
@@ -285,7 +328,7 @@
   gap: 8px;
   margin: 22px 0 12px;
 }
-.ready-heading .ready-label { font-size: 14px; font-weight: 600; color: var(--text-strong); }
+.ready-heading .ready-label { font-size: 14px; font-weight: var(--font-weight-semibold); color: var(--text-strong); }
 .ready-heading .ready-note { font-size: 12px; color: var(--text-tertiary); }
 .artifact-row {
   display: grid;
@@ -313,7 +356,7 @@
 }
 .placeholder p {
   margin-top: 10px;
-  font-size: 13px;
+  font-size: var(--font-size-body);
   color: var(--text-secondary);
   line-height: 1.6;
 }
@@ -376,15 +419,86 @@
   max-width: 68ch;
 }
 .gov-policy-section h2 {
-  font-size: 13px;
-  font-weight: 600;
+  font-size: var(--font-size-body);
+  font-weight: var(--font-weight-semibold);
   color: var(--text-heading);
   letter-spacing: -0.005em;
 }
 /* The canonical-home pointer that leads the tab. Quieter than the policy
    sections it introduces, because it is navigation, not policy. */
-.gov-canonical {
+/*
+ * THE CANONICAL-HOME POINTER IS A CALLOUT, NOT A PARAGRAPH — and the change is
+ * a measurement, not a preference.
+ *
+ * Measured 2026-09-15 in real Chromium at 1728px: this paragraph rendered SIX
+ * lines at 557px inside a 1200px `wide` main, stranding 643px of empty gutter
+ * beside a tall narrow column. That is the defect the project owner reported
+ * twice — "the text is still stopping midway through half the block" — and the
+ * sibling `.gov-policy` block two rules below had ALREADY been given the
+ * two-column treatment for exactly this reason. This pointer was left behind.
+ *
+ * IT IS FIXED AS A CALLOUT RATHER THAN BY WIDENING THE MEASURE, because the
+ * content is a POINTER and not prose: "the canonical home for this is over
+ * there". A bounded, tinted box at a readable measure makes the space beside it
+ * read as deliberate framing instead of a broken column, and a 1200px line
+ * would be worse to read, not better — the owner ruled out spanning the
+ * viewport explicitly. Nothing is hidden and no sentence is cut: this is
+ * placement only.
+ *
+ * `e2e/specs/wide-prose.spec.ts` measures the result at 1440 and 1728.
+ */
+/*
+ * THE BOX IS THE FIX, NOT THE PARAGRAPH — and the reason is a specificity
+ * measurement that also explains why the owner's complaint survived an earlier
+ * attempt at it.
+ *
+ * `.screen-main[data-width="wide"] .placeholder > p` sets `max-width: 68ch`.
+ * Measured in Chrome: that rule wins against a bare `.gov-canonical`
+ * (`computedMaxWidth: 556.816px`), so capping the PARAGRAPH wider is inert. And
+ * capping it wider would not have helped anyway: the defect is the gap between
+ * the paragraph and its CONTAINER, and the container is the 1200px `wide` main.
+ *
+ * THAT `68ch` RULE IS THE ROOT CAUSE OF THIS WHOLE DEFECT FAMILY. It is the
+ * `38em -> 68ch` change a prior slice made in answer to this same report, and it
+ * could not have worked: it narrows the text and leaves the box it sits in
+ * exactly as wide. It is deliberately NOT touched here — it applies to every
+ * `wide` and `full` screen in the app, and changing it mid-flight would move
+ * surfaces two other slices are editing. Fixing it globally is its own slice
+ * with its own before/after measurement.
+ *
+ * So the pointer gets its own bounded container at the app's own `readable`
+ * measure (AppShell: `readable` -> 760px). The paragraph then fills the box it
+ * is in, and the space beside it reads as deliberate framing — which is what a
+ * pointer callout is — instead of a broken column. Nothing is hidden and no
+ * sentence is cut: this is placement only.
+ *
+ * Measured at 1728px: 643px of stranded gutter before, ~0 after.
+ * `e2e/specs/wide-prose.spec.ts` holds it at 1440 and 1728.
+ */
+/*
+ * NO COLOURED LEFT RAIL. My first version used `border-left: 3px solid
+ * var(--action)` and `__tests__/no-vertical-rail.test.ts` refused it — correctly.
+ * That rule is documented as "permanent and system-wide" (`no-vertical-rail-rule.md`)
+ * and the guard's own comment names the only allowed border-left: a neutral
+ * full-width divider, which is not a rail.
+ *
+ * So the callout is a TINTED CARD WITH A NEUTRAL BORDER instead, which reads the
+ * same way (bounded, subordinate, clearly a pointer) without the banned device.
+ * The guard was not widened and no exemption was added.
+ */
+.gov-canonical-box {
+  max-width: 760px;
   margin-top: 14px;
+  padding: var(--space-sm) var(--space-md);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-inner);
+  background: var(--action-tint);
+}
+/* Inside the box the paragraph fills it. The `68ch` rule above still wins on
+   `max-width`, which is now harmless: 68ch is wider than the box. */
+.gov-canonical-box > .gov-canonical {
+  margin: 0;
+  color: var(--text-primary);
 }
 /* UNDERLINED, and this is an accessibility fix rather than a style preference.
    `base.css` sets `text-decoration: none` on every link, which is fine for the
@@ -465,6 +579,24 @@
   padding: 7px 12px;
   border: 0;
   background: none;
+  /*
+   * `font-size` AND `font-weight` ARE LITERALS HERE ON PURPOSE, and this is a
+   * correction to a migration of mine that broke a guard.
+   *
+   * `a11y-landmarks-headings-and-tabs.test.tsx`'s A16 negative control reads
+   * BOTH values numerically out of this block — `font-size: ([\d.]+)px` and
+   * `font-weight: (\d+)` — to prove the WCAG large-text exemption does not
+   * apply to this label, which is the whole reason its 4.5:1 requirement
+   * stands. I tokenized the weight to `var(--font-weight-medium)` in the
+   * type-scale migration and the regex matched `null`, so the guard crashed
+   * rather than failing cleanly.
+   *
+   * `type-scale-and-spacing.test.tsx`'s header already records the same
+   * exception for `font-size` in rules that paint `--text-tertiary` or
+   * `--text-muted` — this rule paints `--text-muted`. The rule extends to
+   * `font-weight` for exactly the same reason, and that was the half I missed.
+   * 500 IS `--font-weight-medium`; the value is unchanged, only its spelling.
+   */
   font-size: 12.5px;
   font-weight: 500;
   color: var(--text-muted);
@@ -475,7 +607,7 @@
 .section-tab.active {
   color: var(--action-hover);
   border-bottom-color: var(--action);
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
 }
 .section-tab:focus-visible {
   outline: 2px solid var(--action);
@@ -520,7 +652,7 @@
   margin: 0;
   font-size: 12.5px;
   color: var(--text-heading);
-  font-weight: 500;
+  font-weight: var(--font-weight-medium);
   text-align: right;
 }
 .memory-indexed-note {
@@ -553,7 +685,7 @@
 }
 .memory-axis-label {
   font-size: 12.5px;
-  font-weight: 500;
+  font-weight: var(--font-weight-medium);
   color: var(--text-heading);
 }
 .memory-axis-state {
@@ -562,7 +694,7 @@
   border-radius: 999px;
   border: 1px solid transparent;
   font-size: 11px;
-  font-weight: 500;
+  font-weight: var(--font-weight-medium);
   letter-spacing: 0.01em;
 }
 .memory-axis-state.axis-ok {
@@ -589,7 +721,7 @@
 /* The honest "unavailable" panel — neutral surface, not an error state. */
 .memory-unavailable-title {
   font-size: 13.5px;
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
   color: var(--text-heading);
   line-height: 1.5;
 }
@@ -637,14 +769,14 @@
   gap: 8px;
   margin: 0 0 4px;
   font-size: 11px;
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
   letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--text-slate);
 }
 .source-index-group-count {
   font-family: var(--font-mono);
-  font-weight: 500;
+  font-weight: var(--font-weight-medium);
   letter-spacing: normal;
   text-transform: none;
   color: var(--text-quaternary);
@@ -723,7 +855,7 @@
 .source-index-panel-figures dd {
   margin: 0;
   font-size: 12px;
-  font-weight: 500;
+  font-weight: var(--font-weight-medium);
   color: var(--text-heading);
 }
 /* `local_reference` is inert text — no link, no download, no viewer. */
@@ -753,7 +885,7 @@
 .source-index-section-heading {
   margin: 0 0 4px;
   font-size: 11px;
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
   letter-spacing: 0.04em;
   text-transform: uppercase;
   color: var(--text-slate);
@@ -981,7 +1113,7 @@
   gap: 8px;
   margin: 0 0 4px;
   font-size: 11px;
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
   letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--text-slate);
@@ -989,7 +1121,7 @@
 .concept-lookup-pane-count {
   font-family: var(--font-mono);
   font-size: 10.5px;
-  font-weight: 500;
+  font-weight: var(--font-weight-medium);
   letter-spacing: normal;
   text-transform: none;
   color: var(--text-quaternary);
@@ -1031,7 +1163,7 @@
   box-shadow: inset 0 0 0 1px var(--action-selected-border);
 }
 .concept-lookup-row-btn.selected .concept-lookup-label {
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
   color: var(--text-heading);
 }
 .concept-lookup-row-btn.selected .concept-lookup-chevron {
@@ -1083,7 +1215,7 @@
 .concept-lookup-detail-empty-title {
   margin: 0;
   font-size: 12.5px;
-  font-weight: 500;
+  font-weight: var(--font-weight-medium);
   color: var(--text-heading);
 }
 .concept-lookup-detail-empty-text {
@@ -1095,7 +1227,7 @@
 .concept-lookup-detail-heading {
   margin: 0;
   font-size: 13.5px;
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
   line-height: 1.4;
   color: var(--text-heading);
   overflow-wrap: anywhere;
@@ -1160,7 +1292,7 @@
 .concept-lookup-metavalue {
   margin: 0;
   font-size: 12px;
-  font-weight: 500;
+  font-weight: var(--font-weight-medium);
   color: var(--text-heading);
   overflow-wrap: anywhere;
 }
@@ -1188,7 +1320,7 @@
 .concept-lookup-section-heading {
   margin: 0 0 5px;
   font-size: 11px;
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
   letter-spacing: 0.04em;
   text-transform: uppercase;
   color: var(--text-slate);
@@ -1199,7 +1331,7 @@
 .concept-lookup-subsection-heading {
   margin: 0 0 4px;
   font-size: 10.5px;
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
   color: var(--text-quaternary);
 }
 .concept-lookup-related-list {
@@ -1373,7 +1505,7 @@
 .needsyou-q {
   font-size: 12.5px;
   line-height: 1.45;
-  font-weight: 500;
+  font-weight: var(--font-weight-medium);
   color: var(--text-primary);
 }
 .needsyou-about {
@@ -1410,7 +1542,7 @@
   border-radius: var(--radius-card);
 }
 .completion-done .dot { margin-top: 4px; }
-.completion-done-title { font-size: 14px; font-weight: 600; color: var(--text-heading); }
+.completion-done-title { font-size: 14px; font-weight: var(--font-weight-semibold); color: var(--text-heading); }
 .completion-done-text {
   margin-top: 4px;
   font-size: 12.5px;
@@ -1439,7 +1571,7 @@
   border: 1px solid var(--border);
   border-radius: var(--radius-card);
 }
-.completion-allskipped-title { font-size: 13px; font-weight: 600; color: var(--text-primary); }
+.completion-allskipped-title { font-size: var(--font-size-body); font-weight: var(--font-weight-semibold); color: var(--text-primary); }
 .completion-allskipped-text {
   margin-top: 4px;
   font-size: 12px;
@@ -1468,7 +1600,7 @@
   border: 0;
   color: var(--action);
   font-size: 12px;
-  font-weight: 500;
+  font-weight: var(--font-weight-medium);
 }
 
 /* ---- S6 pre-export gate / readiness --------------------------------- */
@@ -1482,7 +1614,7 @@
   border-radius: var(--radius-card);
 }
 .preexport-icon { color: var(--text-tertiary); flex: none; margin-top: 2px; }
-.preexport-title { font-size: 14.5px; font-weight: 600; color: var(--text-heading); }
+.preexport-title { font-size: 14.5px; font-weight: var(--font-weight-semibold); color: var(--text-heading); }
 .preexport-text {
   margin-top: 6px;
   font-size: 12.5px;
@@ -1500,7 +1632,7 @@
   align-items: center;
   gap: 8px;
 }
-.preexport-ready-title { font-size: 14.5px; font-weight: 600; color: var(--text-heading); }
+.preexport-ready-title { font-size: 14.5px; font-weight: var(--font-weight-semibold); color: var(--text-heading); }
 .preexport-ready-note {
   font-family: var(--font-mono);
   font-size: 11px;
@@ -1508,7 +1640,7 @@
 }
 .preexport-ready .btn { margin-top: 12px; }
 .preexport-blocked { padding: 16px 18px; }
-.preexport-blocked h2 { font-size: 14px; font-weight: 600; color: var(--text-heading); }
+.preexport-blocked h2 { font-size: 14px; font-weight: var(--font-weight-semibold); color: var(--text-heading); }
 .preexport-errors {
   margin: 10px 0 12px;
   padding: 0;
@@ -1521,7 +1653,7 @@
 }
 .preexport-error-path { color: var(--text-muted); }
 .preexport-coverage { padding: 14px 16px; }
-.preexport-coverage-title { font-size: 13px; font-weight: 600; color: var(--text-slate); }
+.preexport-coverage-title { font-size: var(--font-size-body); font-weight: var(--font-weight-semibold); color: var(--text-slate); }
 .coverage-loading { padding: 14px 16px; font-size: 12.5px; color: var(--text-tertiary); }
 
 /* P27.6 — "live updates paused" indicator (degraded poller). Honest + calm:
@@ -1638,7 +1770,7 @@
   padding: 14px 18px;
   border-bottom: 1px solid var(--border);
 }
-.artifact-modal-title { font-size: 13.5px; font-weight: 600; color: var(--text-heading); }
+.artifact-modal-title { font-size: 13.5px; font-weight: var(--font-weight-semibold); color: var(--text-heading); }
 .artifact-modal-sub { font-weight: 400; font-size: 11.5px; color: var(--text-tertiary); }
 .artifact-modal-body {
   margin: 0;
@@ -1692,7 +1824,7 @@
 .reset-count-row dd {
   margin: 0;
   font-family: var(--font-mono);
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
   color: var(--text-heading);
 }
 .reset-count-final {
@@ -1799,7 +1931,7 @@
 .settings-subheading {
   margin: 18px 0 0;
   font-size: 11px;
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
   letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--text-slate);
@@ -1856,12 +1988,42 @@
   font-size: 12px;
   color: var(--text-tertiary);
 }
+/*
+ * THE PROVENANCE MARK, beside the label rather than under the value.
+ *
+ * It is a WORD, never a colour and never a tooltip: it qualifies the value it
+ * sits beside, and a qualifier of a figure has to be readable without hovering
+ * or opening anything. Smaller and quieter than the label, because the label is
+ * what a reader scans for and this is what they check once.
+ *
+ * `--text-muted` rather than `--text-tertiary`: the label above is already
+ * tertiary, and a second tertiary string on the same line would compete with
+ * it. `--text-muted` is the darker of the two (5.04:1 against 4.13:1 on
+ * `--surface`), so the quieter-looking element is also the more legible one —
+ * which is the right way round for text this small.
+ */
+.settings-figure-source {
+  display: block;
+  /*
+   * `--font-size-meta` (11px), NOT the 10.5px this first shipped as. The
+   * Impeccable in-browser overlay flagged that value on this very element
+   * (`undersized-ui-text … below 11px floor`) in the same pass that flagged
+   * the pre-existing `span.nav-version` for the same reason. There was a
+   * precedent for 10.5px and the precedent is also flagged, so following it
+   * would have shipped a known-undersized string; the token rung is the right
+   * answer and costs nothing here.
+   */
+  font-size: var(--font-size-meta);
+  font-weight: var(--font-weight-medium);
+  color: var(--text-muted);
+  letter-spacing: 0.01em;
+}
 .settings-figure dd {
   margin: 0;
   min-width: 0;
   font-size: 12.5px;
   color: var(--text-heading);
-  font-weight: 500;
+  font-weight: var(--font-weight-medium);
   text-align: right;
   overflow-wrap: anywhere;
 }
@@ -1873,7 +2035,7 @@
   max-width: 74ch;
 }
 .settings-commit-short {
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
 }
 /* P36V PR3: the FULL sha now renders only inside About's Technical Details, so
    this rule no longer stacks under a short sha — it just keeps a 40-character
@@ -1910,7 +2072,7 @@
 }
 .settings-summary-label {
   font-size: 12px;
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
   color: var(--text-heading);
 }
 .settings-summary-text {
@@ -2016,7 +2178,7 @@
   min-width: 0;
   padding: 6px 12px;
   font-size: 12px;
-  font-weight: 500;
+  font-weight: var(--font-weight-medium);
   color: var(--action);
   background: var(--surface);
   border: 1px solid var(--border-input);
@@ -2163,7 +2325,7 @@ a.settings-jump-btn {
 }
 .settings-search-label {
   font-size: 12px;
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
   color: var(--text-strong);
 }
 .settings-search-input-wrap {
@@ -2251,14 +2413,14 @@ a.settings-jump-btn {
   gap: 8px;
   margin: 0;
   font-size: 11px;
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
   letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--text-slate);
 }
 .api-browser-pane-count {
   font-size: 10.5px;
-  font-weight: 500;
+  font-weight: var(--font-weight-medium);
   letter-spacing: normal;
   text-transform: none;
   color: var(--text-quaternary);
@@ -2282,7 +2444,7 @@ a.settings-jump-btn {
   margin: 0;
   padding: 6px 10px;
   font-size: 11px;
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
   text-transform: uppercase;
   letter-spacing: 0.04em;
   color: var(--text-strong);
@@ -2294,7 +2456,7 @@ a.settings-jump-btn {
 }
 .api-browser-group-count {
   font-size: 10.5px;
-  font-weight: 500;
+  font-weight: var(--font-weight-medium);
   text-transform: none;
   letter-spacing: normal;
   color: var(--text-quaternary);
@@ -2386,7 +2548,7 @@ a.settings-jump-btn {
 }
 .api-browser-detail-path {
   min-width: 0;
-  font-size: 13px;
+  font-size: var(--font-size-body);
   font-weight: 700;
   color: var(--text-heading);
   overflow-wrap: anywhere;
@@ -2394,7 +2556,7 @@ a.settings-jump-btn {
 .api-browser-detail-summary {
   margin-top: 8px;
   font-size: 12.5px;
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
   color: var(--text-heading);
   overflow-wrap: anywhere;
 }
@@ -2424,7 +2586,7 @@ a.settings-jump-btn {
   overflow-wrap: anywhere;
 }
 .api-browser-meta-flag.required {
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
   color: var(--text-strong);
 }
 .api-docs-description {
@@ -2441,7 +2603,7 @@ a.settings-jump-btn {
 .api-browser-section-heading {
   margin: 0 0 5px;
   font-size: 11px;
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
   letter-spacing: 0.04em;
   text-transform: uppercase;
   color: var(--text-slate);
@@ -2469,7 +2631,7 @@ a.settings-jump-btn {
 .api-docs-params th {
   text-align: left;
   color: var(--text-tertiary);
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
   padding: 4px 12px 4px 0;
   border-bottom: 1px solid var(--border-faint);
 }
@@ -2500,7 +2662,7 @@ a.settings-jump-btn {
   border: 1px solid var(--border);
   background: var(--surface);
   font-size: 11px;
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
   color: var(--text-secondary);
 }
 .api-browser-response-body {
@@ -2527,7 +2689,7 @@ a.settings-jump-btn {
   width: fit-content;
   max-width: 100%;
   font-size: 11.5px;
-  font-weight: 500;
+  font-weight: var(--font-weight-medium);
   color: var(--action);
   cursor: pointer;
 }
@@ -2590,7 +2752,7 @@ a.settings-jump-btn {
 /* ---- section titles inside the API panels ------------------------------ */
 .api-section-title {
   margin: 0 0 2px;
-  font-size: 13px;
+  font-size: var(--font-size-body);
   font-weight: 700;
   color: var(--text-heading);
 }
@@ -2619,7 +2781,7 @@ a.settings-jump-btn {
 }
 .api-quickstart-row > dt {
   font-size: 11px;
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
   letter-spacing: 0.03em;
   text-transform: uppercase;
   color: var(--text-slate);
@@ -2636,7 +2798,7 @@ a.settings-jump-btn {
   flex: none;
   padding: 2px 7px;
   font-size: 11.5px;
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
   color: var(--text-heading);
   background: var(--surface-subtle);
   border: 1px solid var(--border-faint);
@@ -2709,9 +2871,29 @@ a.settings-jump-btn {
   min-width: 0;
   max-width: 90ch;
 }
+/*
+ * *** `flex: none` PINNED THIS AT MAX-CONTENT AND OVERFLOWED EVERY NARROW
+ * WIDTH. *** Found by CI's Linux width sweep, which is the only thing that
+ * could: jsdom computes no layout, and the desktop projects have room to spare.
+ *
+ * Measured at 390px: `div.api-access-banner-action` right edge **389** against a
+ * card content edge of **379**, forcing `main#main` to `scrollWidth 378 vs
+ * clientWidth 368`. Also failing at 375 and 320. The cause is that this holds
+ * TWO jump buttons side by side — `Endpoint Explorer` and `Connect Your Agent` —
+ * and `flex: none` forbade the container from shrinking, so they could never
+ * wrap however little room was left.
+ *
+ * It now shrinks (`0 1 auto` + `min-width: 0`) and wraps its own buttons, and
+ * below the existing 900px breakpoint it takes a full row of its own — which is
+ * what the `flex-wrap: wrap` already on `.api-access-banner` was there to allow.
+ */
 .api-access-banner-action {
-  flex: none;
+  flex: 0 1 auto;
+  min-width: 0;
   margin-left: auto;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 .api-access-grid {
   display: grid;
@@ -2747,11 +2929,14 @@ a.settings-jump-btn {
   }
   .api-access-banner-action {
     margin-left: 0;
+    /* Its own row. The banner already wraps, so giving the action a full basis
+       moves it below the prose instead of competing with it for a line. */
+    flex-basis: 100%;
   }
 }
 .api-keys-heading {
   margin: 0 0 6px;
-  font-size: 13px;
+  font-size: var(--font-size-body);
   font-weight: 700;
   color: var(--text-heading);
 }
@@ -2780,7 +2965,7 @@ a.settings-jump-btn {
 }
 .api-keys-row > dt {
   font-size: 12px;
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
   color: var(--text-heading);
 }
 /* The cap belongs to the COLUMN here, not to the sentence. The grid track is
@@ -2811,7 +2996,7 @@ a.settings-jump-btn {
   flex: none;
   padding: 7px 13px;
   font-size: 12.5px;
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
   color: var(--text-disabled);
   background: var(--surface-subtle);
   border: 1px dashed var(--border-strong);
@@ -2857,7 +3042,7 @@ a.settings-jump-btn {
 .api-keys-empty-title {
   margin: 0;
   font-size: 12.5px;
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
   color: var(--text-strong);
 }
 .api-keys-empty-body {
@@ -2899,7 +3084,7 @@ a.settings-jump-btn {
   flex: none;
   padding: 1px 8px;
   font-size: 10.5px;
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
   letter-spacing: 0.02em;
   color: var(--text-slate);
   background: var(--cover-bg);
@@ -2932,7 +3117,7 @@ a.settings-jump-btn {
   width: fit-content;
   max-width: 100%;
   font-size: 11.5px;
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
   color: var(--action);
   cursor: pointer;
 }
@@ -2950,7 +3135,7 @@ a.settings-jump-btn {
 .api-samples-tabs-tab {
   padding: 3px 10px;
   font-size: 11px;
-  font-weight: 500;
+  font-weight: var(--font-weight-medium);
   color: var(--text-tertiary);
   background: none;
   border: 1px solid var(--border-faint);
@@ -2961,7 +3146,7 @@ a.settings-jump-btn {
 }
 .api-samples-tabs-tab.active {
   color: var(--action-hover);
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
   background: var(--action-tint);
   border-color: var(--action-selected-border);
 }
@@ -2988,7 +3173,7 @@ a.settings-jump-btn {
   gap: 6px;
   min-width: 0;
   font-size: 11px;
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
   letter-spacing: 0.04em;
   text-transform: uppercase;
   color: var(--text-slate);
@@ -3014,7 +3199,7 @@ a.settings-jump-btn {
   flex: none;
   padding: 3px 9px;
   font-size: 11px;
-  font-weight: 500;
+  font-weight: var(--font-weight-medium);
   color: var(--action);
   background: var(--surface);
   border: 1px solid var(--border-input);
@@ -3030,8 +3215,21 @@ a.settings-jump-btn {
   outline-offset: 1px;
 }
 
-/* ---- Connect an Agent -------------------------------------------------- */
-.api-connect {
+/* ---- Connect an Agent, and the Quick Start drawer beside it ------------- */
+/*
+ * ONE SELECTOR LIST, NOT A SECOND SET OF DECLARATIONS.
+ *
+ * The Quick Start drawer added on 2026-09-15 wears the same chrome as this one
+ * — same rule, same border, same summary affordance — but it deliberately does
+ * NOT reuse the class name. `.api-connect` is addressed by
+ * `document.querySelector('details.api-connect')` in `settings-api.test.tsx`,
+ * which takes the FIRST match, so a second element carrying that class made
+ * three of those tests silently assert about the wrong drawer. Sharing the
+ * declarations through a selector list keeps one visual definition while
+ * leaving `details.api-connect` resolving to exactly one element.
+ */
+.api-connect,
+.api-quickstart-drawer {
   margin-top: 22px;
   padding-top: 16px;
   border-top: 1px solid var(--border-faint);
@@ -3050,7 +3248,7 @@ a.settings-jump-btn {
 .api-connect-title {
   display: inline;
   margin: 0;
-  font-size: 13px;
+  font-size: var(--font-size-body);
   font-weight: 700;
   color: var(--text-heading);
 }
@@ -3089,7 +3287,7 @@ a.settings-jump-btn {
 .api-connect-heading {
   margin: 0;
   font-size: 12px;
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
   color: var(--text-heading);
 }
 .api-connect-section p {

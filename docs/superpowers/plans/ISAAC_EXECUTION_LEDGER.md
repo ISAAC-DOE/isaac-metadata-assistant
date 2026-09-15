@@ -8,6 +8,458 @@ the repository — never from remembered chat context.
 ## SESSION HEADER
 
 ```
+*** 2026-09-15 SESSION OPEN — THE BLOCK BELOW WAS STALE BY 26 COMMITS AND IS
+    CORRECTED HERE FIRST, per this file's own rule that a stale header is worse
+    than none. Everything under "LAST UPDATED: 2026-09-13" describes a state
+    `main` left behind on 2026-09-14/15; it is kept unedited below because a
+    superseded header read as a correction is safe, and one silently rewritten
+    is not. ***
+
+RE-DERIVED 2026-09-15 AT SESSION OPEN, every line from a command, not a handoff:
+  main            = origin/main = dbf9d121  (`git rev-parse HEAD`, 0 ahead / 0 behind)
+  release         = v0.0.240; `git rev-list -n1 v0.0.240` -> dbf9d121fdb4679f…
+  also this arc   = v0.0.239 (merge 26c7b68d, PR #254); PR #255 merged as dbf9d121
+  open PRs        = NONE (`gh pr list --state open` -> empty)
+  main CI         = green (`gh run list --branch main`: CI success at dbf9d121,
+                    then "Build and Push to GHCR" success 2026-09-15T09:40Z)
+  working tree    = CLEAN at session open
+  stashes         = NONE (`git stash list` -> empty)
+  worktrees       = the main checkout, FOUR orphans from earlier sessions
+                    (wt-control, wt-hist, wt-lib, wt-sci, mergetest) which are
+                    DELIBERATELY LEFT ALONE — they may hold unknown work — and
+                    THREE created this session (see LANES below).
+  .venv           = present and working (`/Users/krishverma/Documents/ISAAC/.venv`).
+                    NOTE: a bare `.venv` resolves only from the MAIN CHECKOUT; a
+                    worktree has none, so quote an absolute path from a lane.
+
+LANES OPEN THIS SESSION (each its OWN worktree under the session scratchpad, each
+based at dbf9d121, `apps/web/node_modules` symlinked in — the symlink is safe
+because node_modules is gitignored, and §11's tracked-mode-120000 guard still holds):
+  feat/v2-recordmap  Runs right pane -> a readable Record Map (states + values +
+                     click-to-focus); `Check Failed` -> field-specific, actionable
+                     findings; contextual `Ask ISAAC` per blocker.
+  feat/v2-chrome     the favicon (reusing the EXISTING AudioWaveform brand mark,
+                     base-path-correct for /krish/); the Historical Import stepper
+                     redrawn as circle nodes; landing copy density.
+  feat/v2-propose    a discoverable, REAL `New Proposal` creation path.
+
+  *** THE FINDING THAT SIZED THAT THIRD LANE: the owner reported "there's no way
+  to actually add an ingestion proposal … maybe it's blocked". Measured at
+  dbf9d121, it is NOT blocked — `POST /api/experiments/{id}/proposals`
+  (`routes.py`, handler `post_proposal`) is registered and documented, requiring
+  `note_id`, `target_field_path`, `proposed_value`, `rule`, conditional `run_id`
+  and the record's `If-Match`. So this was a UI GAP, NOT A CAPABILITY GAP, and the
+  correct outcome is a real form and not a disabled placeholder. ACCEPTANCE
+  remains genuinely blocked (`409 human_actor_required`, no trusted auth
+  boundary) — creation and acceptance must not be conflated. ***
+
+SNAPSHOT DISCIPLINE THIS SESSION: the three lanes were told NOT to regenerate the
+committed snapshot pair. Of their targets only `apps/web/index.html`,
+`apps/web/src/lib/api.ts` and `apps/web/src/lib/labels.ts` are in the 200-entry
+served-content manifest (measured, not assumed). Regeneration happens ONCE, after
+integration, in the main checkout, with BOTH `--out` and `--detail-out` — which is
+what keeps §11's "every merge conflicts every open PR" failure from recurring.
+
+PROGRESS AT LAST LEDGER WRITE (integration branch `feat/v2-integration`), every
+line verified by a command rather than by an agent's report:
+
+  MERGED INTO INTEGRATION AND INDEPENDENTLY CHECKED
+    feat/v2-chrome    favicon (existing AudioWaveform mark, base-path correct
+                      for /krish/ — verified by building with and without
+                      VITE_BASE_PATH); the stepper redrawn as circle nodes with
+                      a dotted node for the unbuilt step and a vertical fallback
+                      below a 560px CONTAINER (not viewport); landing copy cut
+                      and the architecture prose moved behind a disclosure.
+    feat/v2-propose   a discoverable New Proposal path. VERIFIED BY ME IN A REAL
+                      BROWSER end to end on a record with ZERO notes — the state
+                      in which the pre-existing control was unreachable: guided
+                      note-first flow, 19 server-supplied targets with the dotted
+                      path demoted, Store disabled until a run is chosen for a
+                      run-scoped target, and the server afterwards holding one
+                      proposal with verified/is_evidence/is_field_value all false
+                      and the field itself unchanged. Evidence:
+                      docs/evidence/proposal-creation-browser-proof-2026-09-15.md
+    (orchestrator)    Statistics promoted / Governance demoted / `Settings & API`
+                      -> `Settings`, six tests inverted rather than deleted, two
+                      of them inverted BACK to a pre-2026-09-13 form.
+    (orchestrator)    the Historical Import FILE PICKER (DEC-33). Proven by
+                      OBSERVATION: every transport instrumented before the picker
+                      was touched, choosing two real files issued ZERO requests,
+                      the checksum ZERO, and Record as source one POST whose body
+                      a content probe returned false on. Both guards reconciled
+                      two -> three named files, §1 moved from banning the
+                      affordance to banning the harm. Evidence:
+                      docs/evidence/file-staging-browser-proof-2026-09-15.md
+
+  STILL RUNNING AT THIS WRITE — do not assume either landed
+    feat/v2-recordmap  the Runs Record Map + field-specific blockers + Ask ISAAC
+                       + human-friendly acquisition timestamps.
+    feat/v2-stats      Statistics redesigned scientist-first (the OBLIGATION the
+                       promotion created — UX-017's 3,820px/422-element figure is
+                       the acceptance bar, not a historical note) + Settings
+                       density.
+
+  *** THE MEASUREMENT FINDING OF THIS SESSION, and it explains two failed
+  attempts at the owner's most-repeated complaint. `LAYOUT_SWEEP_WIDTHS` tops
+  out at 1280, so 1280 IS THE WIDEST VIEWPORT THIS PRODUCT IS EVER TESTED AT.
+  A prose cap strands no whitespace until the CONTAINER outgrows it, so at 1280
+  the defect does not exist and above ~1300 it does. The root cause is
+  `.screen-main[data-width="wide"] .placeholder > p { max-width: 68ch }` — the
+  very `38em -> 68ch` change made in answer to this same report, which narrows
+  the TEXT and leaves the BOX as wide as it was. Measured worst cases at 1728:
+  .notes-sub and .proposals-sub 833px, .vr-sub 821px, .hi-lead and
+  .gov-canonical 643px; My Experiments, Settings and the record's Fields
+  workspace CLEAN. Two of my own three detectors were wrong and returned zero
+  findings on a demonstrably broken page. `e2e/specs/wide-prose.spec.ts` now
+  guards it at 1440/1728 with a positive control and an EMPTY allowlist;
+  the 68ch rule is deliberately NOT touched (it reaches every `wide`/`full`
+  screen and two lanes were editing such surfaces) and is named as its own
+  slice. Evidence:
+  docs/evidence/dead-whitespace-measurement-2026-09-15.md ***
+
+ALL FOUR LANES LANDED. INTEGRATION BRANCH `feat/v2-integration`, HEAD `7612c0ce`,
+PR **#256**, 28 commits / 82 files / +11,057 -1,225. `origin/main` is STILL
+`dbf9d121`, so the merge-base IS `origin/main` and exact-head CI describes the
+merge result — stated because §10's merge-result round-trip is normally
+mandatory here and this repository has two counterexamples nine minutes apart.
+
+  VERIFIED IN THE MAIN CHECKOUT WITH NO COMPETING PROCESS:
+    npx tsc -b                    -> 0
+    npx tsc -p e2e/tsconfig.json  -> 0
+    npx vitest run                -> 235 files / 6076 tests, exit 0
+    snapshot pair --check (BOTH)  -> no drift; 201 served / 200 manifest, unchanged
+    snapshot gate tests           -> 155 passed
+    e2e structure/tabs/pill/dialogs -> 107 passed
+    e2e wide-prose                -> 9 passed, 36 skipped (one project, by design)
+    e2e mutation runs             -> 10 passed
+    e2e mutation run-card-responsive -> 14 passed
+
+  *** FIVE E2E FAILURES WERE FOUND AND FIXED THAT NO UNIT TEST COULD SEE, which
+  is the argument for running them rather than shipping edited specs: my
+  `Settings & API` -> `Settings` rename broke SEVEN specs through
+  `e2e/surfaces.ts`'s ready-gates and its `tablistName`; the datetime picker
+  OVERFLOWED A 320px CARD BY 43px (cause was not the obvious one — the control
+  has no intrinsic floor, `width: 100%` shrinks it to 126px; the shrink-to-fit
+  PARENT was sizing itself from one child); and the ISO text box could not be
+  filled because its `<details>` is shut on a fresh run. ***
+
+  *** FIVE DESIGN GUARDS FAILED ON THE MERGE AND NONE WAS WEAKENED. A coloured
+  `border-left` (banned system-wide) became a tinted card. The type ratchet
+  fired in BOTH directions — new literals over the ceiling, then the migration
+  under the tolerance floor — and its ceilings were lowered from ITS OWN
+  counter (1043/282), not from my sweep, which was off by one in each axis.
+  Three favicon binaries were exempted from the NUL guard BY EXACT PATH, never
+  by extension, per that file's own stated rule.
+  TWO OF MY OWN MIGRATIONS WERE WRONG AND ARE RECORDED AT THE SITE: one sent a
+  `13px` to `--font-size-meta`, which is 11px — it would have silently shrunk a
+  control to satisfy a guard; and tokenizing `.section-tab`'s font-weight
+  CRASHED `A16`, which reads that value numerically to prove the WCAG
+  large-text exemption does not apply. `type-scale`'s header already recorded
+  that exception for font-size in rules painting `--text-tertiary`/
+  `--text-muted`; what it did not say is that it extends to font-weight. ***
+
+  A SIXTH "FAILURE" WAS CONTENTION, NOT A DEFECT, and is recorded because I
+  nearly reported it: a full run showed `record-capture-destination` failing;
+  alone it passes 15/15. A count taken under load is not a measurement.
+
+  STATISTICS EARNED THE SLOT RATHER THAN JUST RECEIVING IT. Measured on a
+  populated workspace at 1440: **6,993px -> 2,715px (-61%)** and **598 -> 172
+  visible text elements (-71%)**, under both halves of `UX-017`'s bar. That
+  figure was the acceptance condition written into `LeftNav` when the item was
+  promoted, not a historical note.
+
+  NEXT, AND THE ONLY THINGS BETWEEN THIS AND A MERGE: PR #256's CI on the exact
+  head, and the independent review (the fifth and last agent of this session).
+  The review brief is deliberately adversarial about the CLAIMS — the file
+  panel's "not sent", the census going 2 -> 3, the Record Map's `Not Shown
+  Here`, and the -61%/-71% figures, which are the implementer's and not
+  re-measured by me.
+
+INDEPENDENT REVIEW DONE (fifth and last agent). Verdict **MERGE AFTER FIXES** —
+one Critical, four Important, six Minor. **ALL FIVE FIXED; M1 taken as well.**
+The reviewer re-measured every number the PR states and all six matched,
+including the contention conclusion about `record-capture-destination`.
+
+  *** C1 — THE OWNER'S OWN REQUESTED FEATURE DID NOT WORK, and no test could
+  have caught it because none asserted answerability. `Ask ISAAC` composed
+  `What does this <state> finding [about <subject>] mean?`, and
+  `assistant_query.classify` returns `intent=unsupported, confidence=none` for
+  EVERY variant — all four states, with and without a subject, with and without
+  context. So a reader who pressed Send got a refusal every time. It also broke
+  this repository's own rule, cited one file away: *a control never appears
+  where pressing it would do nothing.* That rule had been applied to whether an
+  Assistant is MOUNTED rather than to whether the question is ANSWERABLE.
+  Fixed in the opening sentence only — `Where did <path> come from?` ->
+  `field_provenance`, `What is blocking export?` -> `export_blockers`, both
+  verified `high` — with the On-clause and the verbatim validator sentence
+  surviving classification untouched. WHICH opening is chosen is a question of
+  TRUTH, not of classification: a `Missing` finding asks what blocks export even
+  when its path is known, because asking where an absent value came from is a
+  question with no answer. ***
+
+  I1  seven RENDERED strings still said `Settings & API`, five of them
+      error-recovery remedies. Green suite: `tutorial-anchors` carries the old
+      literal only as an `it.each` TITLE. One `SETTINGS_DESTINATION` now backs
+      `navSettings` and every sentence quoting it.
+  I2  a disabled radio whose reason rendered INSIDE the branch that radio
+      selects, while `sourceMode` defaults to the other one — so on a record
+      with no notes (every new record, and exactly the owner's case) the reason
+      was unreachable. Hoisted; mutation-proven both ways.
+  I3  `sends nothing anywhere` — an unscoped existential negative, true of the
+      component and false of the feature. AND THE NEW GUARD PINNED THE UNSCOPED
+      WORDING, so a correct repair would have failed it; the alternation is
+      widened and the claim must still be made.
+  I4  `Choosing a file records…` contradicted the row two lines below it.
+  I5  two stale census comments falsified by this PR — one of them
+      `HistoricalImport`'s own module docstring, contradicting the §1 guard this
+      PR inverted.
+  M1  the wide-prose allowlist was unbounded AND its `imports-session` key was
+      **DEAD** — an earlier edit was lost to a failed `cd`, so it exempted
+      nothing while reading as coverage. Now live, with measured `maxDead`
+      ceilings, all mutation-proven at `maxDead: 0`.
+
+  *** AND THE NEWLY-LIVE TEST FOUND THE WORST INSTANCE ON THE SURFACE IN MY OWN
+  COMPONENT: `.ifs-claim`, seven lines at 430px inside a 1168px drop zone, 738px
+  stranded — worse than anything the owner screenshotted, and added by the same
+  work that was fixing the defect elsewhere. THEN THE PROBE ITSELF PROVED WRONG:
+  it walked only to `block` ancestors, so a paragraph inside a CAPPED FLEX
+  container was measured against a far wider grandparent, and it went on
+  reporting 738px after the cap had landed. I nearly allowlisted a paragraph
+  that was already fixed. `flex`/`grid` now count, and the direction is what
+  makes that safe — a nearer container is smaller, so it can only ever REDUCE a
+  measurement, never manufacture one. ***
+
+  RE-VERIFIED AFTER THE FIXES, main checkout, nothing competing:
+    npx tsc -b -> 0 · e2e tsconfig -> 0
+    npx vitest run -> 235 files / **6082** tests, exit 0 (6076 before; +6 guards)
+    wide-prose -> 11/11 incl. the positive control and both session cases
+    snapshot pair -> regenerated, no drift
+    backend -> 9447 passed / 45 skipped, exit 0 (MAIN CHECKOUT — a worktree
+              would read +2, because `graphify-out/graph.json` is gitignored)
+
+IMPECCABLE — HONEST COVERAGE, STATED RATHER THAN CLAIMED. The skill was invoked
+for the **Statistics/Settings** redesign (lane commit `137b13f0`: playbooks
+`critique`/`distill`/`layout`/`operate`, negative control run, in-browser
+overlay 21 anti-patterns, one against its own new code and fixed) and, at the
+end of the session, for the **Runs** redesign by the orchestrator. It was NOT
+invoked for the file-staging panel, the stepper or the favicon — those had live
+browser measurement plus independent review instead. A future session should
+read that as partial coverage, because that is what it is.
+
+  *** BOTH RUNS ARE ⚠️ DEGRADED: single-context. *** The `critique` playbook
+  requires Assessment A and B as two ISOLATED sub-agents and calls an inline run
+  a degraded run that must be bannered. The session's five-agent budget was
+  spent, so both ran sequentially in one context and both say so.
+
+  THE CLI DETECTOR IS NON-FUNCTIONAL HERE AND WAS NEGATIVE-CONTROLLED AGAIN. A
+  `.tsx` holding an unlabelled `<img>`, a clickable `<div>` with no role, 8px
+  text and a nested interactive element returns `[]`, **exit 0, with no stderr
+  warning at all**; the same defects as `.html` also return `[]` but do warn
+  `HTML parser modules unavailable`. So a `.tsx` scan is a SILENT non-answer —
+  never quote a `0` from it. §11's standing instruction is confirmed, not
+  weakened. The **in-browser overlay is a different code path and works** (33
+  findings on the Runs workspace).
+
+  TWO OVERLAY FINDINGS WERE REAL AND ARE FIXED, and they are the OPPOSITE
+  failure from the one `wide-prose.spec.ts` guards — prose with NO measure at
+  all rather than prose stranded inside its box:
+    `.needsyou-text`  699px, `max-width: none`  -> ~112 chars/line
+    `.vr-status`      895px, `max-width: none`  -> ~143 chars/line
+  Both now `72ch`; measured after at 567px and **79 chars/line**, inside the
+  70-85ch the direction cites, and still two lines so no gutter is created.
+
+  AND THE RULE THAT FOUND THEM IS CRUDE, which is the part worth carrying: it
+  still fires on all three after the fix, including `.vr-sub`, which was already
+  capped at ~79 chars. Its threshold is **pixel**-based, not character-based. So
+  the count went 33 -> 33, and that is not a failure to improve — it pointed at
+  two genuine defects while being wrong about its own criterion. The other 30
+  are triaged and unfixed: 24 `tiny-text` at 11px/11.5px, which is this repo's
+  deliberate `--font-size-meta` rung and its documented ~11px floor; 3
+  `nested-cards`, 1 `overused-font`, 1 `em-dash-overuse`, 1 `layout-transition`.
+
+IMPECCABLE, SECOND RUN — HISTORICAL IMPORT, and it caught a flaw in MY OWN
+INSTRUMENT rather than in the page. Also ⚠️ DEGRADED: single-context.
+
+  The detector flagged `.hi-counts` as "17 characters over 14 lines". It is ONE
+  19px line of 89 characters. `getClientRects()` returns one rect per inline
+  TEXT-NODE FRAGMENT, not per line, and JSX interpolation splits a sentence into
+  many — so my chars-per-line helper (widest rect / glyph width, rect count as
+  line count) was wrong for every interpolated element it had touched.
+
+  *** THREE NUMBERS I HAD ALREADY COMMITTED WERE ARTIFACTS: "~112 chars/line",
+  "~143", and "79 after". *** Re-measured by laying each element's own text into
+  a probe at its own font and content width and counting LINE BOXES:
+
+    .needsyou-text  @1280   699px  2 lines   58 ch  ->  567px  2 lines  58 ch
+                    @1728  1147px  1 line   115 ch  ->  567px  2 lines  58 ch
+    .vr-status      @1280   895px  1 line   129 ch  ->  567px  2 lines  65 ch
+                    @1728  1343px  1 line   129 ch  ->  567px  2 lines  65 ch
+
+  BOTH CAPS SURVIVE AND ONE IS WEAKER THAN I CLAIMED, recorded at the site
+  rather than reverted. `.vr-status` was a real defect at BOTH widths — 129
+  characters on one line. `.needsyou-text` is **INERT AT 1280** and load-bearing
+  only at 1728; it was presented as a 1280 defect and is not one. The
+  wide-viewport case is real, and it is the same structural fact
+  `wide-prose.spec.ts` exists for: the widest viewport this suite tests is 1280,
+  and BOTH failure modes of a missing prose measure live above it.
+
+  AND 14 FINDINGS WERE REFUSED, measured: every `line-length` hit on Historical
+  Import is a false positive — the widest is 81 ch/line, inside the cited 70-85
+  band. That rule is PIXEL-based, so it fires on 13px text at 557px. It found
+  two real defects on Runs while being wrong about its own criterion, and it is
+  wrong about all fourteen of these. `tiny-text` (20-24 per surface) is this
+  repo's deliberate `--font-size-meta` rung and its documented ~11px floor.
+
+THE BLOCKER TABLE AT SESSION END. Every row is app-side COMPLETE; what remains
+is a switch, a decision, or a person — not product code.
+
+  | capability | app-side | owner | exact next action |
+  |---|---|---|---|
+  | proposal ACCEPTANCE | complete, fail-closed | Hao / SLAC | provide a trusted server-authoritative identity boundary; until then `409 human_actor_required` is correct, not a defect |
+  | MCP production transport | complete incl. OAuth resource server, disabled by default | Hao / operator | set `ISAAC_MCP_DEPLOYMENT` and configure trusted auth |
+  | voice -> text | recorder, pause/resume, playback, provider seam all complete | Hao / provider approval | approve a provider (D1-D9 deferred 2026-08-12); every provider answers `501` by design |
+  | real file-byte ingestion | staging UI complete and provably sends nothing | Hao / data governance | enable an approved Historical Import upload capability; the UI already reflects capability truth |
+  | `.mac` / spreadsheet parsers | interfaces + synthetic harness complete | Krish + Angel | supply a representative BL15-2 corpus (`EXT-10`). §5 forbids designing a parser against zero examples |
+  | Run-field template | 5 writable per run, 2 record-level, 7 refused by all routes | Angel | classify the six `system.configuration.*` paths (`EXT-09`); blocks nothing else |
+  | hosted QA of this image | n/a | Krish | `docs/krish-qa-packet-2026-09-15.md` — 6 items, each saying why it needs a human |
+  | 200% zoom / real narrow width | n/a — NOT automatable | Krish | no CDP method drives true zoom; `resize_window` does not move the rendered viewport |
+  | `0005` + `isaac_runs` Stage 2b | migration, backfill, projection all complete | Krish (approve) + operator (apply) | approve `0005`, run the backfill, then the two §8A completeness queries must both return 0 |
+  | personal-deploy retirement | n/a | Krish | disable (not delete) Vercel `isaac-demo-web` + the Railway service; Railway has a persistent volume |
+
+NAMED RESIDUE THAT IS OURS, NOT EXTERNAL — the honest short list:
+  * the global `.screen-main[data-width="wide"] .placeholder > p { max-width: 68ch }`
+    rule is the root cause of the dead-whitespace FAMILY. Deliberately untouched:
+    it reaches every `wide`/`full` screen, two lanes were editing such surfaces,
+    and it needs its own before/after plus an a11y round-trip.
+  * Settings tab regroup (`Overview / Privacy & Governance / Integrations /
+    Advanced`) — skipped with reasons: a nested tablist is banned and the flat
+    seven are each deep-linked.
+  * Data & Privacy status-row restructure — BLOCKED BY THE REPOSITORY, not by
+    taste: `settingsContent.ts` requires the mode-not-content caveat in the
+    always-visible `detail`, and `settings-page.test.tsx` requires each summary
+    to render exactly once. The mandated shape would hide a privacy state.
+  * `.hi-body` / `.hi-note` / `.hi-steps-disclosure` in the import session —
+    bounded in `wide-prose.spec.ts` with measured ceilings and a stated reason,
+    not silently forgiven. §10's remedy is shorter copy, which is a content
+    decision with the owner.
+  * Impeccable coverage is PARTIAL: Statistics/Settings, Runs and Historical
+    Import were critiqued; the file-staging panel, the stepper and the favicon
+    had browser measurement plus independent review instead.
+
+*** A MEASUREMENT TRAP THAT LOOKS EXACTLY LIKE A PRODUCT DEFECT, and it cost a
+diagnosis before it was found: RUNNING THE READ-ONLY E2E SUITE WITH A
+NON-DEFAULT `VITE_API_BASE` CHANGES USER-FACING COPY. ***
+
+  `runtimeContext.isHostedBuild` is a COMPILE-TIME comparison of `VITE_API_BASE`
+  against the default. Point vite at any other base — which is exactly what you
+  do to avoid colliding with another lane's backend — and the app classifies
+  itself as HOSTED. `FetchStates` then renders the hosted unreachable-API copy
+  ("ISAAC Is Not Responding", a session-or-service explanation) instead of the
+  local one ("Backend Not Running", with the `uvicorn` remedy), and
+  `states.spec.ts`'s `@interaction ERROR` test fails on the assertion it makes
+  about that copy.
+
+  MEASURED BOTH WAYS: with `VITE_API_BASE=http://127.0.0.1:8019/api` the test
+  fails and the alert reports `Build Mode: hosted`; with the default base,
+  `states.spec.ts` is **14 passed / 0 failed**. Nothing about the product is
+  wrong. Same family as the stale-port and CORS-by-port traps already recorded —
+  a configuration difference wearing a defect's clothes.
+
+  THE RULE: a read-only e2e result is only comparable to CI's when vite is on the
+  DEFAULT base. Quote the base with any local e2e claim about copy or states.
+
+`charts.spec.ts` NEEDED REAL WORK, AND AN INFERENCE OF MINE WAS WRONG. I told
+the owner CI's 105 failures were "consistent with" the two structural breaks.
+They were not: five `charts.spec.ts` failures had an independent cause, and only
+running the spec locally found it.
+
+  THE STATISTICS CHARTS SPLIT BY KIND when the redesign moved the engineering
+  content to its own tab. Measured in Chrome on a populated workspace:
+
+               figure.stats-chart   details.stats-technical   Record Verification
+    Overview            1                     0                      no
+    ?tab=build          4                     1                     yes
+
+  So the spec was opening a tab that no longer held what it asserts about, and
+  `openTechnicalDetails` was waiting on a `details.stats-technical` that is not
+  there.
+
+  MY FIRST FIX WAS WRONG AND THE FAILURE SAID WHY. I sent those tests at the
+  WORKED-EXAMPLE build tab; three still failed, each reporting ZERO charts. The
+  four build-tab charts are VERIFICATION-derived, and `global-setup` settles a
+  verification report for the ORDINARY scope (its own log: "verification report
+  settled to ok"). A worked-example session has no such report. Retargeted at
+  the catalogued ordinary `statistics-build` surface: 9/10, then 10/10 once the
+  caption set matched the four measured captions.
+
+  AND NARROWING THAT CAPTION SET WOULD ITSELF HAVE BEEN A COVERAGE LOSS — the
+  same trap `openUnreachableDisclosures` caught one commit earlier: an assertion
+  made green by narrowing what it looks at. The two RECORD-derived charts
+  (`workflow step`, `evidence-support class`) render only where records exist, so
+  they got their own sibling test on the worked-example Overview asserting the
+  property the six-caption set used to guarantee for all of them — a caption and
+  a non-empty `p.sr-only` summary, outside the collapsed data-table. `charts.spec.ts`
+  is **11 passed / 0 failed**.
+
+  The per-figure axis-band and measured-width battery is deliberately NOT
+  duplicated into the sibling: those are properties of the chart component, not
+  of these two instances, and two copies would be harder to trust than one.
+
+CI ON `042b2538`: **12 failed / 1183 passed**, down from 105. Three families,
+fixed in `7d21911b` — and ONE WAS A GENUINE PRODUCT DEFECT, not test drift.
+
+  *** THE API ACCESS BANNER OVERFLOWED EVERY NARROW WIDTH, and only CI's Linux
+  width sweep could have found it: jsdom computes no layout, and the desktop
+  projects have room to spare. *** Measured at 390px:
+  `div.api-access-banner-action` right edge **389** against a card content edge
+  of **379**, forcing `main#main` to `scrollWidth 378 vs clientWidth 368`. Also
+  failing at 375 and 320.
+
+  The cause: the banner's action holds TWO jump buttons side by side —
+  `Endpoint Explorer` and `Connect Your Agent` — and **`flex: none`** forbade
+  the container from shrinking, so they could never wrap however little room was
+  left. The existing 900px media query only reset `margin-left`, which changes
+  nothing about shrinkability. Now `flex: 0 1 auto` + `min-width: 0`, wrapping
+  its own buttons, and `flex-basis: 100%` below 900px — which is what the
+  `flex-wrap: wrap` already on `.api-access-banner` was there to allow.
+  Re-measured: `layout-widths` + `tabs` = **85 passed / 0 failed**, with no
+  `api-access-banner-action` finding in the output.
+
+  THE STATISTICS TAB LIST WAS STALE IN BOTH NAME AND COUNT:
+  `['General ISAAC', 'My Stats']` -> `['Overview', 'My Stats', 'Build &
+  Verification']`, measured in Chrome. That is the THIRD place this session has
+  had to correct a Statistics tab count — `statistics-states`' tablist
+  assertion, this catalog entry, and `tabs.spec`'s read of it.
+
+  AND `visual-sweep` KEEPS ITS OWN READINESS GATE, which still waited on
+  **`Runtime Status`**. So there are THREE independent copies of that one gate —
+  `e2e/surfaces.ts`, `statistics-nav.test.tsx`'s assertions, and
+  `visual-sweep.spec.ts` — and the next rename must sweep all three. Recorded at
+  the site as well as here.
+
+*** A TOOLING TRAP THAT ATE PART OF A COMMIT MESSAGE, recorded because the fix
+is mechanical and the failure is silent. *** `git commit -q -m "...backticks..."`
+under zsh runs the backticked text as COMMAND SUBSTITUTION. `7d21911b`'s message
+therefore lost exactly three fragments — `flex: none`, the tab-list before/after
+pair, and `Runtime Status` — leaving sentences like "and  forbade the container".
+The commit is CORRECT; only its prose is holed, and the three fragments are
+restored above rather than force-pushed, because this repository forbids a
+force-push without explicit approval. **Use `git commit -F <file>` for any
+message containing a backtick.**
+
+OWNER FEEDBACK DRIVING THIS SESSION (verbatim, 2026-09-15, from screenshots):
+  * the Runs split-screen architecture is APPROVED — "I like that split-screen
+    architecture" — but the right pane "is not really readable … I can't clearly
+    distinguish what fields are done, what fields aren't done, what my values were".
+  * "the check failed — I don't even know what it's asking … you should point to
+    the specific field … and there could be a button right next to it that points
+    to the agent, and then the agent will have the context".
+  * "there's no way to actually add an ingestion proposal".
+  * "the text is still stopping midway through half the block" — the 38em -> 68ch
+    change did NOT close it.
+  * "for the add experiments thing … it should be like a circle-dotted thing".
+  * the browser tab shows a generic document icon; use the EXISTING ISAAC logo.
+
 LAST UPDATED:          2026-09-13 (**SECOND CONTINUATION run, a NEW top-level session with a
                        FRESH budget of five subordinate agents.** PR #248 is MERGED; the programme
                        has moved on to the remaining ledger tasks. Every fact in the block below

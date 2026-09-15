@@ -68,7 +68,7 @@ import {
  */
 
 /** The page-level tablist's `aria-label` (`SettingsPage`'s `SettingsSectionTabs`). */
-const SETTINGS_TABLIST_NAME = 'Settings & API sections';
+const SETTINGS_TABLIST_NAME = 'Settings sections';
 
 const ABOUT_URL = 'GET /api/about';
 const OPENAPI_URL = 'GET /api/openapi';
@@ -593,8 +593,15 @@ describe('Settings — Overview', () => {
     const { container } = renderSettings();
     await screen.findByText('0.1.0');
 
-    const labels = Array.from(container.querySelectorAll('.settings-figure dt')).map(
-      (dt) => dt.textContent,
+    /* Read from `.settings-figure-label`, not from the whole `<dt>`: each row
+       now carries a visible PROVENANCE word beside its label ("read per
+       request" / "fixed for this build"), so `dt.textContent` is the label and
+       the qualifier concatenated. The assertion is unchanged in what it
+       checks — which status rows exist, and in what order — and the provenance
+       is asserted on its own immediately below, so nothing is lost by scoping
+       this one to the label. */
+    const labels = Array.from(container.querySelectorAll('.settings-figure-label')).map(
+      (el) => el.textContent,
     );
     expect(labels).toEqual([
       'App Version',
@@ -604,6 +611,33 @@ describe('Settings — Overview', () => {
       'Data Regime',
       'Persistence',
       'Core',
+    ]);
+
+    /*
+     * THE PROVENANCE OF EVERY ROW, ASSERTED — which is the point of moving it
+     * out of the card's supporting sentence. That sentence had to enumerate
+     * which rows were live and which were fixed, and it has been WRONG TWICE
+     * (see `OverviewTab`'s header). A per-row mark is checkable, and this is
+     * the check: `Build Commit`, `Runtime Mode` and `Persistence` are resolved
+     * per request; the other four are fixed for a given image.
+     *
+     * `Build Commit` being LIVE is the half most likely to be "corrected" back
+     * to `build` by someone reading its name: `routes._build_commit()` reads
+     * `ISAAC_BUILD_COMMIT` from the environment on every request, so the same
+     * image redeployed with a different value reports the different value.
+     */
+    const provenance = Array.from(container.querySelectorAll('.settings-figure')).map((row) => [
+      row.querySelector('.settings-figure-label')?.textContent,
+      row.querySelector('.settings-figure-source')?.textContent ?? null,
+    ]);
+    expect(provenance).toEqual([
+      ['App Version', 'fixed for this build'],
+      ['Build Commit', 'read per request'],
+      ['Record Schema', 'fixed for this build'],
+      ['Runtime Mode', 'read per request'],
+      ['Data Regime', 'fixed for this build'],
+      ['Persistence', 'read per request'],
+      ['Core', 'fixed for this build'],
     ]);
     const text = norm(container.textContent ?? '').toLowerCase();
     expect(text).not.toContain('authentication: active');

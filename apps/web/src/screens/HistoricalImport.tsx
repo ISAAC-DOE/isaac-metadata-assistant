@@ -7,6 +7,7 @@ import { TopBar } from '../components/TopBar';
 import { LeftNav } from '../components/LeftNav';
 import { BackendDown, LoadingPanel } from '../components/FetchStates';
 import { CircleAlert, Inbox, Plus, TriangleAlert } from '../components/icons';
+import { ImportFileStaging } from '../components/ImportFileStaging';
 import { LABELS } from '../lib/labels';
 import { stripLifecycleSuffix } from '../lib/adapt';
 import { ROUTES } from '../lib/routes';
@@ -35,11 +36,28 @@ import type {
  * `HIST-004` bans `Upload Files -> Spinner -> Mysterious JSON`. All three halves
  * are refused here deliberately:
  *
- * * **No upload.** There is no `<input type="file">` on this screen and no drop
- *   handler. That is not a promise — `__tests__/upload-claim-parity.test.tsx`
- *   asserts that EXACTLY two non-test files in `apps/web/src` declare a file
- *   input and names both, so adding a third fails CI. A source is either a
- *   POINTER (recorded, not opened) or one of the committed example sources.
+ * * **No upload** — and the shape of that claim CHANGED on 2026-09-15, so the
+ *   old form is struck rather than edited away. ~~There is no
+ *   `<input type="file">` on this screen and no drop handler. That is not a
+ *   promise — `upload-claim-parity.test.tsx` asserts that EXACTLY two non-test
+ *   files in `apps/web/src` declare a file input and names both, so adding a
+ *   third fails CI.~~
+ *
+ *   ALL THREE OF THOSE CLAUSES ARE NOW FALSE, and this docstring was
+ *   contradicting the very test this screen's own §1 was inverted to assert.
+ *   The screen mounts `ImportFileStaging`, which has both a file input and an
+ *   `onDrop`; the census is THREE named files. Found by independent review — it
+ *   survived because §1's source scan runs over `stripComments(src)`.
+ *
+ *   WHAT IS STILL TRUE, AND IS THE CLAIM THAT MATTERS: **no file's content ever
+ *   reaches ISAAC.** Choosing one stages it in the browser; `Record as source`
+ *   sends its name, size, type and — if you asked for one — a checksum computed
+ *   in your tab. Proved by instrumenting `fetch` and `XMLHttpRequest` before
+ *   the picker was touched: choosing issued zero requests, the checksum zero,
+ *   and recording one POST whose body carries no file bytes. `POST /api/uploads`
+ *   remains an unconditional 403 and nothing here calls it. A source is still
+ *   either a POINTER (recorded, not opened) or one of the committed example
+ *   sources.
  * * **No spinner over work that does not happen.** Reading and reconstructing are
  *   real server operations and their in-flight state says which one is running;
  *   nothing else animates, and no control implies a step this build does not
@@ -199,34 +217,22 @@ function ImportList({
   return (
     <>
       {/*
-        SECTION ONE — the sequence, titled by its SUBJECT.
+        SECTION ONE — `New Import`, FIRST. The action a reader came here for.
 
-        `How An Import Works` is a new heading and it is the reason this block
-        stops being an unlabelled strip floating above the page: it had no title
-        at all, so the six stage chips and the durability sentence were two
-        unrelated fragments a reader had to interpret unaided.
-
-        Register 1 Title Case, per `casing-and-copy.md:8-12` ("section titles").
-      */}
-      <div className="hi-section">
-        <h2 className="hi-section-title">How An Import Works</h2>
-        <WorkflowStrip steps={data.workflow} furthest={null} />
-        {/* THE SERVER'S OWN SENTENCE about what a session is and is not. Rendered
-            before anything is created, because a reader deciding whether to start
-            one is exactly who needs it.
-
-            MOVED, NOT CHANGED: it used to be the last child of an untitled block
-            and is now the last child of `How An Import Works`. Same string, same
-            `role="note"`, same server source — the claim that an import session is
-            not part of the durable record store is unaltered, and it now sits
-            under a heading that says what it is a note ABOUT. */}
-        <p className="hi-note" role="note">
-          {data.durability}
-        </p>
-      </div>
-
-      {/*
-        SECTION TWO — and the heading no longer repeats its own button.
+        WHY THIS IS NOW FIRST, AND WHY "HOW IT WORKS" IS NOW LAST (below). The
+        owner, of this exact page: "the text is still stopping midway through
+        half the block, and it's not really something that looks good" — the
+        landing used to open with a six-line paragraph and THEN a full
+        stepper-plus-note block before a reader ever reached a control. This
+        screen's own job is simple (one sentence in `.hi-lead` now says it):
+        reconstruct candidate metadata from files already on hand. State,
+        action, and value belong before explanation — the design direction
+        this repo has recorded elsewhere as "state -> action -> blocker ->
+        value -> source before explanation" — so `New Import` and `Imports`
+        (the record of past sessions) now render immediately after the intro,
+        and the longer "how the six stages work" explanation moves to a
+        collapsed disclosure at the end of this list (see the closing
+        `<details>` below).
 
         MEASURED BEFORE: `IMPORT_COPY.actionStart` ("Start an Import") rendered
         TWICE, 78px apart — once as this section's `<h2>` and once as the label of
@@ -235,11 +241,11 @@ function ImportList({
         it makes the same string an ambiguous target for anything (a test, a
         screen reader user cycling headings, a person) looking for "the control".
 
-        THE RULE APPLIED HERE AND THREE MORE TIMES BELOW: a section is titled by
+        THE RULE APPLIED HERE AND ONE MORE TIME BELOW: a section is titled by
         its SUBJECT and the button keeps the verb. So `New Import` names the thing;
         `Start an Import` remains the only place that verb appears.
       */}
-      <div className="hi-section">
+      <div className="hi-section hi-landing-col">
         <h2 className="hi-section-title">New Import</h2>
         <label className="hi-field">
           <span className="hi-field-label">Name this import (optional)</span>
@@ -260,7 +266,7 @@ function ImportList({
       </div>
 
       {/*
-        SECTION THREE — `Imports`.
+        SECTION TWO — `Imports`.
 
         THE HEADING STRING IS LOAD-BEARING AND MUST NOT BE "IMPROVED".
         `e2e/surfaces.ts:141` declares this surface's ready gate as
@@ -268,9 +274,11 @@ function ImportList({
         `e2e/mutation/imports-session-a11y.spec.ts:64` asserts it at `level: 2` —
         both because it is inside the `status === 'data'` branch and so cannot
         render over a skeleton. Renaming it, or changing its level, silently turns
-        thirteen sweeps into measurements of a loading state.
+        thirteen sweeps into measurements of a loading state. (This is also why
+        moving it above `New Import` keeps it exactly as it was rather than
+        touching its text or level — only its ORDER on the page changed.)
       */}
-      <div className="hi-section">
+      <div className="hi-section hi-landing-col">
         <h2 className="hi-section-title">Imports</h2>
         {data.total === 0 ? (
           /*
@@ -323,6 +331,41 @@ function ImportList({
           </ul>
         )}
       </div>
+
+      {/*
+        SECTION THREE — the explanation, collapsed, LAST.
+
+        A NATIVE `<details>`, the repo's own idiom for exactly this move (see
+        `RecordValidator.tsx`'s `.rec-val-purpose`, `HelpPanel.tsx`'s
+        `.help-more`, `FetchStates.tsx`'s `.fetch-state-technical`): keyboard-
+        operable (Tab to the `<summary>`, Enter/Space to toggle), and exposed
+        to a screen reader as a native disclosure widget with its own
+        expanded/collapsed state — no ARIA authored by hand, and none needed.
+
+        NOTHING IS DELETED. The six-stage stepper and the server's own
+        durability sentence are exactly what rendered here before this slice;
+        only their POSITION (last, not first) and their default VISIBILITY
+        (collapsed, not always-open) changed. `CLAUDE.md`'s own rule for this
+        exact situation — never delete a scientific caveat or honesty claim,
+        only relocate it behind progressive disclosure — is what this is: the
+        durability sentence stays reachable by keyboard and to a screen
+        reader, and "Nothing here becomes a value on its own" (the OTHER
+        claim this slice had to preserve) never left the always-visible
+        `.hi-lead` above, so it did not need this disclosure at all.
+      */}
+      <div className="hi-section hi-landing-col">
+        <details className="hi-how-it-works">
+          <summary>How Historical Import works</summary>
+          <WorkflowStrip steps={data.workflow} furthest={null} />
+          {/* THE SERVER'S OWN SENTENCE about what a session is and is not. Same
+              string, same `role="note"`, same server source as before — only
+              now the last child of a collapsed disclosure rather than of an
+              always-visible heading. */}
+          <p className="hi-note" role="note">
+            {data.durability}
+          </p>
+        </details>
+      </div>
     </>
   );
 }
@@ -350,29 +393,46 @@ function WorkflowStrip({
   furthest: string | null;
 }) {
   /*
-   * THE DISCLOSURE SITS BELOW THE ROW, NOT INSIDE IT, and that is the whole
-   * shape of this strip.
+   * THE DISCLOSURE SITS BELOW THE ROW, NOT INSIDE IT, and that is unchanged
+   * from the pill-row version this replaces — only the NODE's own shape and
+   * the connector between nodes changed.
    *
-   * It used to be a `<span>` inside the unbuilt `<li>`. Measured in Chrome at
-   * 1280: five siblings were 27px tall and 56-91px wide, and that one was
-   * 73.6px x 352px -- 2.7x the height and 4x the width of its neighbours, in a
-   * `flex-wrap` row with a 4px gap. It read exactly as the owner described the
-   * screen: "everything is just put in here with no thought behind it".
+   * WHAT CHANGED, AND WHY. The owner, of this exact row: "it should be a
+   * little bit cleaner, and I think it should be like a circle-dotted thing
+   * instead." The pill row (bordered/filled chips joined by a `›` chevron)
+   * had already been through one correction — the SAME owner had previously
+   * said of it "are they supposed to be clickable or something?", because a
+   * bordered, filled chip is this app's shape for `.section-tab` and for
+   * filter chips, both of which ARE controls. Removing the border and fill
+   * (the prior fix, still in `.hi-step`'s base rule) answered "is it a
+   * button" but not "is it clean" — six one-word labels chained by `›` still
+   * read as a breadcrumb, not as a sequence with a position in it. A dot per
+   * step, joined by a line, is the vocabulary this app already uses for
+   * exactly that job: `components/workflow.css`'s record-screen spine
+   * (`.spine-disc` + `.spine-step::before`) is a disc-and-connector stepper,
+   * and `.trail-dot` (`evidence.css`) is the same disc vocabulary at its
+   * smallest size. `.hi-step-node` below reuses that vocabulary rather than
+   * inventing a third.
    *
-   * The previous slice found the same thing, tried `flex-basis: 100%` to push
-   * it onto its own line, measured that INERT (flex line-breaking uses the
-   * hypothetical main size, which the 22rem cap kept small enough to fit beside
-   * `Review`), and recorded it as out of its own scope. The mechanism it named
-   * but did not take is this one: a step is a LABEL and belongs in the row; a
-   * sentence about a step is PROSE and belongs under it. So all six are uniform
-   * pills again, the unbuilt one says so by being dashed and muted, and the
-   * sentence is associated with it by `aria-describedby` rather than by
-   * adjacency -- which is a stronger association than the inline span had, not
-   * a weaker one, because it survives the row wrapping.
+   * THE UNBUILT NODE IS DASHED, NOT THE UNBUILT STEP'S CONNECTOR. Only the
+   * CIRCLE for "Add to Experiments" is dashed; the line reaching it is the
+   * same solid `--border-strong` every other segment uses, because the
+   * dashing is a claim about that ONE step ("not built"), not about how far
+   * the sequence has got.
+   *
+   * NARROW WIDTH: see `.hi-steps-wrap`'s `container-type` in
+   * historical-import.css. Below the container's own measured 560px this
+   * renders as a VERTICAL stepper (dot beside label, rows stacked, a
+   * vertical connector) rather than the six-across horizontal row, which is
+   * this file's own established pattern for "the safe direction to fail in"
+   * (see `experiment-graph.css`'s `@container` comment) — a container query
+   * responds to the CARD's rendered width, not the window's, which matters
+   * here because a sidebar sits between them (see
+   * `viewport-media-query-wrong-box` in this repo's own session memory).
    */
   const unbuilt = steps.filter((step) => !step.built && step.disclosure !== null);
   return (
-    <>
+    <div className="hi-steps-wrap">
       <ol className="hi-steps" aria-label="Historical import workflow">
         {steps.map((step) => {
           const reached = furthest !== null && step.id === furthest;
@@ -387,7 +447,12 @@ function WorkflowStrip({
             >
               {/* THE UNBUILT STEP OFFERS NO CONTROL -- not a disabled one. A
                   disabled button implies the act exists and is temporarily
-                  unavailable, which is the claim section 15 forbids. */}
+                  unavailable, which is the claim section 15 forbids. The dot
+                  itself carries no text and is `aria-hidden`: the state it
+                  shows (reached / unbuilt / plain) is decorative reinforcement
+                  of what the LABEL and `aria-current`/`aria-describedby`
+                  already say, never the only way to know it. */}
+              <span className="hi-step-node" aria-hidden="true" />
               <span className="hi-step-label">{step.label}</span>
             </li>
           );
@@ -398,7 +463,7 @@ function WorkflowStrip({
           <span className="hi-steps-disclosure-subject">{step.label}:</span> {step.disclosure}
         </p>
       ))}
-    </>
+    </div>
   );
 }
 
@@ -632,12 +697,36 @@ function SourcesSection({
       )}
 
       {/*
-        ── WHY THERE IS NO FILE PICKER HERE, AND WHY I TRIED TO ADD ONE ──────
+        ── THE FILE PICKER, AND THE RECORDED DECLINE IT REVERSES ─────────────
         *"for the historical import, there is no area or button to actually upload
-        the files"* — project owner, 2026-09-14. Correct observation, and the
-        answer is a refusal rather than a gap.
+        the files"* — project owner, 2026-09-14. ~~Correct observation, and the
+        answer is a refusal rather than a gap.~~
 
-        I BUILT A MULTI-FILE PICKER AND REVERTED IT. It read no bytes — only
+        *** REVERSED 2026-09-15 BY THE PROJECT OWNER (`DEC-33`), AND THE DECLINE
+        BELOW IS KEPT IN FULL BECAUSE IT WAS RIGHT ABOUT THE RISK. He did not
+        overrule its argument; he ANSWERED it, and supplied the mitigation it
+        asked for: a staged file must read `Local only — not sent to ISAAC`. His
+        instruction was explicit — *"Do not merely delete the guards. Reconcile
+        them."* ***
+
+        WHAT MAKES THE REVERSAL HONEST RATHER THAN A LOOSENING — and it is a
+        measurement, not an argument. `POST /api/imports/{id}/sources` ALREADY
+        accepts `kind: "reference"` with `filename`, `reference`, `media_type`,
+        `size_bytes` and `sha256`; it stores them verbatim, FETCHES NOTHING, and
+        records the entry as `parse_state: "no_content_path"`. A browser hands
+        over `File.name`, `File.size` and `File.type` as part of the SELECTION —
+        no read is involved. Proved over HTTP on 2026-09-15: an entry sent that
+        way lands with the real filename, the real size, a genuine digest and
+        `no_content_path`. So this adds no route, no capability and no
+        governance change. `POST /api/uploads` is still an unconditional 403 and
+        nothing here calls it.
+
+        THE PANEL CANNOT SEND A BYTE BY CONSTRUCTION, which is stronger than a
+        promise in a comment: `ImportFileStaging` takes `onRecord` as a prop and
+        therefore cannot import the API client. Asserted structurally AND
+        behaviourally in `import-file-staging.test.tsx`.
+
+        ~~I BUILT A MULTI-FILE PICKER AND REVERTED IT. It read no bytes — only
         `File.name`, which a browser hands over with the selection — and it would
         have turned "type twelve filenames" into one act. Two committed guards
         refused it, and both are right:
@@ -659,8 +748,53 @@ function SourcesSection({
         the product created on purpose.
 
         So this section keeps the reference form, and the honest mechanism is
-        made obvious instead: a reference is a POINTER a later build can follow.
+        made obvious instead: a reference is a POINTER a later build can follow.~~
+
+        THE ONE SENTENCE OF THE DECLINE THAT STILL GOVERNS: *"a scientist who
+        picked twelve files would reasonably believe twelve files had been
+        uploaded."* That is why the disclosure is on every ROW and in the drop
+        zone itself, visible rather than in a tooltip — a privacy state is one of
+        the things the copy rule keeps out in the open — and why the checksum,
+        the only thing here that reads a file, is opt-in per file and says so
+        before it runs.
       */}
+      <ImportFileStaging
+        busy={busy !== null}
+        onRecord={async (input) => {
+          /*
+           * THE API CALL IS DELIBERATELY NOT ROUTED THROUGH `onAct`, and the
+           * reason is where the failure lands. `onAct` catches and puts the
+           * refusal in this SECTION's banner — correct for a single form, wrong
+           * for a list, because a reader with four staged files would see one
+           * banner and no indication of WHICH row the server refused. So the
+           * call is made directly, its rejection propagates to the row that
+           * caused it, and `onAct` is used afterwards only for its reload.
+           */
+          await api.addImportSource(importId, {
+            kind: 'reference',
+            filename: input.filename,
+            reference: input.reference,
+            ...(input.mediaType === '' ? {} : { mediaType: input.mediaType }),
+            sizeBytes: input.sizeBytes,
+            ...(input.sha256 === null ? {} : { sha256: input.sha256 }),
+          });
+          await onAct('record-staged-file', async () => {});
+        }}
+      />
+
+      {/* `Record a reference` IS NOW SECONDARY, per `DEC-33`, and is deliberately
+          NOT removed. It is the only way to describe a file that must stay where
+          it is — external storage, a large raw dataset, a path on an instrument
+          machine — which a browser file picker cannot express at all, because a
+          browser does not disclose a local path. So it moves behind a disclosure
+          and keeps every field it had. */}
+      <details className="hi-reference-fallback">
+        <summary>Add an external reference instead</summary>
+        <p className="hi-note">
+          For a file that has to stay where it is — on an instrument machine, in
+          group storage, or anywhere ISAAC cannot be pointed at. You describe
+          where it is; nothing is fetched.
+        </p>
       <div className="hi-forms">
         <form
           className="hi-form"
@@ -743,6 +877,15 @@ function SourcesSection({
             {IMPORT_COPY.actionAddReference}
           </button>
         </form>
+      </div>
+      </details>
+
+      {/* THE EXAMPLE SOURCE STAYS OUT IN THE OPEN and is deliberately NOT inside
+          the external-reference disclosure: it is the one source kind this build
+          actually READS, so it is the only way to exercise parse and
+          reconstruction end to end. Burying it under "add an external reference
+          instead" would hide the only entry that can produce a candidate. */}
+      <div className="hi-forms">
 
         {data.available_fixtures.length > 0 && (
           <form
@@ -963,6 +1106,30 @@ function CandidatesSection({
       >
         {busy === 'reconstruct' ? 'Reconstructing…' : IMPORT_COPY.actionReconstruct}
       </button>
+
+      {/* THE SAME RULE THE PARSE CONTROL ALREADY OBEYS, APPLIED HERE — it was
+          the one disabled primary button on this screen with no reason beside
+          it, so a reader met a dead control and had to guess whether the
+          feature was broken, unavailable or simply not ready yet.
+
+          IT NAMES THE PRECONDITION AND THE NEXT ACT, not the internal state:
+          the button is gated on `data.parsed.length === 0`, and what a reader
+          can DO about that is read a source. Saying "no parsed sources" would
+          restate the predicate back at them.
+
+          AND IT SAYS WHAT RECONSTRUCTION IS, because this is the one place the
+          distinction bites: it is deterministic, in this build. No model is
+          called, so a reader waiting for "the AI" to become available is
+          waiting for something that is not the blocker. `§15` forbids implying
+          a capability exists; it equally forbids implying one is missing when
+          the real precondition is one click away. */}
+      {data.parsed.length === 0 && (
+        <p className="hi-note">
+          Nothing has been read yet, so there is nothing to reconstruct from. Read a source
+          above first. Reconstruction is deterministic in this build — it reads the
+          statements already parsed and calls no model.
+        </p>
+      )}
 
       {reconstruction === null ? (
         <p className="hi-body hi-empty-inline">{IMPORT_COPY.emptyCandidatesBody}</p>

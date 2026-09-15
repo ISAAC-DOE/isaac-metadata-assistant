@@ -4,6 +4,25 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="color-scheme" content="light" />
+    <!--
+      The tab icon reuses the app's own header mark verbatim — the
+      `.brand-tile` in TopBar.tsx's `Brand()` (--action #2c6ab0 tile,
+      lucide-react `AudioWaveform` glyph) — not a new logo. See
+      public/favicon.svg for the exact reproduction and its provenance
+      comment, and scripts/render_favicons.py for how the PNG/ICO fallbacks
+      were rasterized from that same SVG.
+
+      %BASE_URL% is a Vite build-time template variable (not a runtime env
+      var) that resolves to the configured `base` — '/' locally, '/krish/'
+      in the production Docker build (see vite.config.ts) — so these hrefs
+      resolve under the deployed subpath instead of 404ing at the domain
+      root. Verified by inspecting `dist/index.html` after a
+      VITE_BASE_PATH=/krish/ build.
+    -->
+    <link rel="icon" type="image/svg+xml" href="%BASE_URL%favicon.svg" />
+    <link rel="icon" type="image/png" sizes="32x32" href="%BASE_URL%favicon-32.png" />
+    <link rel="alternate icon" href="%BASE_URL%favicon.ico" />
+    <link rel="apple-touch-icon" href="%BASE_URL%apple-touch-icon.png" />
     <title>ISAAC Metadata Assistant</title>
   </head>
   <body>

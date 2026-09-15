@@ -99,6 +99,25 @@ export function titleCase(input: string): string {
 }
 
 // Approved Title Case UI labels (verbatim from casing-and-copy.md).
+/**
+ * THE SETTINGS DESTINATION'S NAME, HOISTED OUT OF THE OBJECT — because six other
+ * strings inside `LABELS` quote it, and an object literal cannot reference its
+ * own members while it is being built.
+ *
+ * *** THIS EXISTS BECAUSE THE 2026-09-15 RENAME STRANDED SEVEN RENDERED
+ * STRINGS. *** `navSettings` went `Settings & API` -> `Settings` and the copy
+ * that names the destination did not move with it — five of the seven were
+ * ERROR-RECOVERY REMEDIES, the sentence a reader is shown after something
+ * failed, telling them where to go. That is the worst possible place for a
+ * stale name, and the suite was green: `tutorial-anchors.test.tsx` carries the
+ * old literal only as an `it.each` TITLE, never asserted against the DOM.
+ *
+ * Found by independent review. Every one of those sentences now interpolates
+ * this constant, so the next rename cannot strand copy — there is one authored
+ * name and `navSettings` reads it too.
+ */
+const SETTINGS_DESTINATION = 'Settings';
+
 export const LABELS = {
   // App / brand
   brand: 'ISAAC',
@@ -114,7 +133,23 @@ export const LABELS = {
   // Names what the destination actually holds — runtime status plus programmatic
   // access — rather than promising preferences this build does not have. This is
   // the SINGLE authored string: the nav label and the page <h1> both read it.
-  navSettings: 'Settings & API',
+  /*
+   * `Settings & API` -> `Settings`, 2026-09-15, by the project owner's direction.
+   *
+   * THE `& API` WAS NAMING THE CONTENTS OF THE PAGE IN THE LABEL OF THE
+   * DESTINATION, and the contents are exactly what is being reorganised: API
+   * Access and the Endpoint Explorer are developer surfaces, and a primary nav
+   * slot that advertises them tells a scientist the page is not for them. The
+   * capability is not withdrawn and neither surface moves route — only the
+   * destination's name stops enumerating one of its tabs.
+   *
+   * THE ROUTE IS DELIBERATELY UNCHANGED. `/settings` and every `?tab=` deep
+   * link resolve exactly as before, and `statistics-nav.test.tsx` asserts the
+   * rename and the route SEPARATELY, precisely so a later "tidy-up" that
+   * renames the route to match the label fails a test instead of breaking a
+   * bookmark.
+   */
+  navSettings: SETTINGS_DESTINATION,
   /*
    * HISTORICAL IMPORT — the second of the three primary destinations the
    * narrowed product names (`Experiments`, `Historical Import`, `Settings`).
@@ -685,7 +720,7 @@ export const LABELS = {
     'and nothing changed.',
   demoScopeRequiredRemedy:
     'Opening the guided walkthrough opens a worked example, and this control works inside one. ' +
-    'It lives in Settings & API → Help & Tutorial.',
+    `It lives in ${SETTINGS_DESTINATION} → Help & Tutorial.`,
   actionGoToHelpAndTutorial: 'Go to Help & Tutorial',
   actionGoToExperiments: 'Go to My Experiments',
 
@@ -741,6 +776,21 @@ export const LABELS = {
   tabSidecar: 'Sidecar JSON',
   cited: 'Cited',
   readOnly: 'read-only',
+
+  /*
+   * THE RECORD MAP's three group titles. Register 1 (Title Case), here rather
+   * than inline for the reason `casing-registers.test.tsx` refuses a new
+   * label-slot literal: a `.eyebrow` group heading is a label slot, and three
+   * of them authored in place is three strings nobody has to re-read when the
+   * vocabulary next moves.
+   *
+   * "Needs Attention" is DELIBERATELY the queue's existing words — it is the
+   * same claim in a second place ("something here wants you"), and the one
+   * thing worse than a new vocabulary is two words for one state.
+   */
+  recordMapNeedsAttention: 'Needs Attention',
+  recordMapThisRun: 'This Run',
+  recordMapInherited: 'Shared By The Record',
 
   // Assistant
   assistant: 'Assistant',
@@ -1206,18 +1256,18 @@ export const LABELS = {
   tutorialSessionCreateFailedTitle: 'The worked example could not be opened',
   tutorialSessionCreateFailedBody:
     'The walkthrough did not start, and nothing in My Experiments was changed. You can try ' +
-    'again from Settings & API → Help & Tutorial.',
+    `again from ${SETTINGS_DESTINATION} → Help & Tutorial.`,
   tutorialSessionExpiredTitle: 'The Worked Example Has Expired',
   tutorialSessionExpiredBody:
     'The temporary workspace this walkthrough was using no longer exists, so its five example ' +
     'records are gone and the walkthrough has closed. Nothing in My Experiments was changed. ' +
-    'You can start the walkthrough again from Settings & API → Help & Tutorial.',
+    `You can start the walkthrough again from ${SETTINGS_DESTINATION} → Help & Tutorial.`,
   tutorialSessionResumeFailedTitle: 'The worked example could not be resumed',
   tutorialSessionResumeFailedBody:
     'Checking the walkthrough you had open did not succeed, so it has not been resumed. Whether ' +
     'it is still there is not something this screen can tell you. Nothing was written and ' +
     'nothing in My Experiments was changed. Reloading the page tries again, and you can start a ' +
-    'new walkthrough from Settings & API → Help & Tutorial.',
+    `new walkthrough from ${SETTINGS_DESTINATION} → Help & Tutorial.`,
   actionDismissTutorialNotice: 'Dismiss',
 
   /*
@@ -1277,9 +1327,55 @@ export const LABELS = {
     'That is the whole workflow. The worked example you were walking through is gone now, and so ' +
     'is anything you answered inside it — it was a temporary copy of the five examples, kept apart ' +
     'from your own work, and no record of yours was changed. You can start it again from ' +
-    'Settings & API → Help & Tutorial at any time.',
+    `${SETTINGS_DESTINATION} → Help & Tutorial at any time.`,
 
   settingsTabHelp: 'Help & Tutorial',
+
+  /*
+   * New Proposal — the creation form on the Ingestion Proposals panel.
+   *
+   * THEY LIVE HERE BECAUSE `casing-registers.test.tsx` SAID SO, and it was right.
+   * Its §3 ratchet refused `NewProposalForm.tsx` as a NEW file carrying hardcoded
+   * label-slot literals, with the remedy stated in the failure message: "Move the
+   * string into `lib/labels.ts`". Doing that rather than raising the ceiling is what
+   * keeps the register decision in one file — every one of these is Register 1
+   * (Title Case for a control, sentence case for a form field's own question), and
+   * that is now checkable in one place instead of at eight call sites.
+   *
+   * THE SIBLING SURFACE'S EQUIVALENTS ARE NOT MOVED HERE, deliberately.
+   * `UnmappedNotesPanel.tsx` carries its own per-note propose form with several of
+   * the same questions, and it is grandfathered at a ceiling of 9. Rewriting its
+   * JSX is a separate change with its own risk to that panel's 74 tests; unifying
+   * the two is worth doing and is named as deferred rather than done quietly.
+   */
+  newProposalAction: 'New Proposal',
+  newProposalSubmit: 'Store This Proposal',
+  newProposalSubmitBusy: 'Storing…',
+  newProposalUnavailable: 'New Proposal · Unavailable on this deployment',
+  /*
+   * THE TWO GROUP HEADINGS ARE REGISTER 1 (Title Case) AND THE FIELD LABELS ARE NOT,
+   * and the split is a rule rather than an accident. These two label a GROUP — a set
+   * of choices, and a read-only block of stored text — which is the Register 1 slot
+   * `casing-and-copy.md` describes. The rest (`newProposalField`,
+   * `newProposalPickNote`, `newProposalRun`, …) label an INPUT and are phrased as the
+   * question that input answers, in sentence case, matching the equivalent labels on
+   * `UnmappedNotesPanel`'s propose form word for word.
+   *
+   * `casing-registers.test.tsx` §1b caught `newProposalRuleHeading` shipping as
+   * "How this proposal will be explained" — a `*Heading`-suffixed key in Register 1's
+   * checked set, violating it. It was re-cased rather than renamed to dodge the
+   * check, and `newProposalSourceGroup` was re-cased WITH it, because two group
+   * headings in one form must not sit in two registers.
+   */
+  newProposalSourceGroup: 'Source Note',
+  newProposalSourceExisting: 'Cite a note this record already holds',
+  newProposalSourceNew: 'Write a source note now',
+  newProposalPickNote: 'The note this value was read from',
+  newProposalWriteNote: 'What the source says, in your words',
+  newProposalField: 'Field this value is for',
+  newProposalRun: 'Run this value is about',
+  newProposalValueJson: 'The value, as JSON',
+  newProposalRuleHeading: 'How This Proposal Will Be Explained',
 
   // Export artifacts
   officialRecord: 'Official Record',

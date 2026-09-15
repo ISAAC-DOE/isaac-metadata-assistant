@@ -123,12 +123,14 @@ export function GovernancePage() {
               pointer is deliberately a real Link and not prose: a reader who
               arrives here asking a data-handling question should be able to
               leave for the answer in one activation. */}
+          <div className="gov-canonical-box">
           <p className="gov-canonical">
             Settings › Data &amp; Privacy is the canonical home for what this build collects,
             stores, retains, resets, and exports. This tab states the governance policy and the
             safety behaviour it requires.{' '}
             <Link to={ROUTES.settingsTab('privacy')}>Open Data &amp; Privacy Settings</Link>
           </p>
+          </div>
 
           {/* P2 — LAYOUT. These three paragraphs used to be one 68ch column in a
               1200px `wide` main, so roughly half the page was empty and the tab

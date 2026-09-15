@@ -1089,8 +1089,23 @@ describe('worked-example session — scope handling', () => {
     await waitFor(() => expect(getTutorialState().sessionId).toBeNull());
 
     const boundary = sentRequests().length;
-    // Navigate around the ordinary app after leaving.
-    fireEvent.click(screen.getByRole('link', { name: LABELS.navGovernance }));
+    /*
+     * Navigate around the ordinary app after leaving.
+     *
+     * ~~`LABELS.navGovernance`~~ — Governance & Safety was demoted out of the
+     * primary sidebar on 2026-09-15 and is now reached from Settings → Data &
+     * Privacy, so there is no such link here to click. `LABELS.navStatistics`
+     * is used instead: it was promoted INTO the sidebar in the same change, and
+     * it satisfies this test's only requirement of the destination — that it be
+     * an ordinary-scope route whose render issues at least one request, so the
+     * assertion below has something to inspect.
+     *
+     * THE PROPERTY UNDER TEST IS UNCHANGED and is not about Governance: after
+     * leaving a worked-example session, no later request may carry the tutorial
+     * scope. Read from `LABELS` rather than a literal so the next rename breaks
+     * the test that is about renaming and not this one.
+     */
+    fireEvent.click(screen.getByRole('link', { name: LABELS.navStatistics }));
     await waitFor(() => expect(sentRequests().length).toBeGreaterThanOrEqual(boundary));
 
     expect(sentRequests().slice(boundary).filter((r) => r.scope !== undefined)).toEqual([]);

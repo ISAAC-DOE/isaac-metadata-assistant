@@ -28,6 +28,7 @@ import {
 } from './icons';
 import { LABELS } from '../lib/labels';
 import { AssistantRailToggleSlotContext } from './AssistantDrawer';
+import type { AssistantPrefill } from '../lib/assistantAsk';
 import {
   ASSISTANT_COMPOSER_HELPER,
   ASSISTANT_NO_MODEL_CLAIM,
@@ -44,6 +45,7 @@ import { classifyAnswer, type MessageKind } from '../lib/assistantConversation';
 import {
   CAPABILITIES_BOUNDARY,
   CAPABILITIES_CLOSE_LABEL,
+  ASSISTANT_PREFILL_DRAFT_KEPT,
   CAPABILITIES_DRAFT_KEPT_NOTE,
   CAPABILITIES_INSERT_NOTE,
   CAPABILITIES_MEMORY_SCOPE_NOTE,
@@ -246,6 +248,29 @@ interface AssistantPanelProps {
    * read-only resolver, unchanged.
    */
   graphCapability?: AssistantGraphCapability;
+  /**
+   * A QUESTION SOMETHING ELSE ON THIS SCREEN COMPOSED — put in the composer,
+   * NEVER sent.
+   *
+   * `Ask ISAAC` beside a check finding is the only producer today. It hands
+   * over the sentence a scientist would otherwise retype (what the finding is
+   * about, which run and record, and the validator's own words) and stops
+   * there: the reader edits it if they like and presses Send. Submitting it
+   * here would put an answer beside a blocker, and in a build with no language
+   * model — `ASSISTANT_NO_MODEL_CLAIM`, in this panel's own dock — that answer
+   * would be a deterministic refusal dressed as an explanation, or worse, read
+   * as a model's.
+   *
+   * IT NEVER DESTROYS A DRAFT. The rule is exactly the one
+   * `insertCapabilityExample` already follows: a half-typed question is the
+   * reader's. Where that control announces the rule BEFORE the click (the
+   * popover is open, so it can), this one arrives from somewhere off-panel — so
+   * declining is DISCLOSED AFTERWARDS instead, rather than being a control that
+   * silently does nothing.
+   *
+   * Omitted (every other mount) ⇒ nothing is ever inserted.
+   */
+  prefill?: AssistantPrefill | null;
 }
 
 /**
@@ -536,6 +561,7 @@ export function AssistantPanel({
   confirmApi = api,
   stageField,
   graphCapability,
+  prefill,
 }: AssistantPanelProps) {
   /*
    * THE COMPOSER'S TWO STANDING NOTES ARE NOW REACHABLE BY A SCREEN READER, and
@@ -632,6 +658,11 @@ export function AssistantPanel({
   // P36X — is the "What Can I Ask?" panel showing? Presentation only: opening it
   // fetches nothing, submits nothing and mutates nothing.
   const [capabilitiesOpen, setCapabilitiesOpen] = useState(false);
+
+  // The last off-panel question this mount has already handled, and whether the
+  // most recent one was DECLINED because the box was not empty. See `prefill`.
+  const lastPrefillNonce = useRef(0);
+  const [prefillDeclined, setPrefillDeclined] = useState(false);
 
   // An unapplied proposal belongs to the surface it was resolved against. When
   // the capability is withdrawn — the Graph tab stopped showing, so the mounted
@@ -1370,6 +1401,58 @@ export function AssistantPanel({
   // `CAPABILITIES_DRAFT_KEPT_NOTE` instead of the insert note — so declining to
   // overwrite is predictable rather than a control that silently does nothing.
   const composerHasDraft = composerText.trim() !== '';
+
+  /*
+   * AN OFF-PANEL QUESTION ARRIVES — see the `prefill` prop's own note.
+   *
+   * The nonce ref is what makes a REPEAT observable: pressing the same
+   * `Ask ISAAC` button twice sends an identical string, so an effect keyed on
+   * the text would not re-run and the second press would do nothing.
+   *
+   * `composerText` is in the dependency list because the draft check has to
+   * read the CURRENT box rather than a value captured when the effect was
+   * created; the nonce guard is what stops it acting again on every keystroke.
+   * Reading it here rather than inside a `setComposerText` updater is
+   * deliberate — an updater that also called `setPrefillDeclined` would be a
+   * side effect in a function React may invoke twice.
+   */
+  useEffect(() => {
+    if (prefill === null || prefill === undefined) return;
+    if (prefill.nonce === lastPrefillNonce.current) return;
+    lastPrefillNonce.current = prefill.nonce;
+    if (composerText.trim() !== '') {
+      setPrefillDeclined(true);
+    } else {
+      setComposerText(prefill.text);
+      setPrefillDeclined(false);
+    }
+    /*
+     * FOCUS IS PLAIN AND SYNCHRONOUS, AND THAT IS ONLY SAFE BECAUSE OF WHAT
+     * `AssistantDrawer` DOES — see its `revealSignal` note for the measurement.
+     *
+     * A rail that is collapsed (the product default) has this whole panel
+     * inside a `display: none` container, and `.focus()` on such an element is
+     * a NO-OP in a real browser. Measured on the running app, 2026-09-15: the
+     * composer filled and `document.activeElement` stayed where it was. The
+     * drawer now flips `collapsed` DURING RENDER rather than in an effect, so
+     * by the time this effect runs the panel is visible in the SAME commit and
+     * there is nothing to wait for.
+     *
+     * NOT `requestAnimationFrame`, which was the first attempt: a tab driven by
+     * this repository's Chrome tooling reports `visibilityState: "hidden"` and
+     * the rAF callbacks in that same measurement NEVER FIRED at all — so a
+     * rAF-based fix would be untestable in a browser here and starved in a
+     * backgrounded real one.
+     *
+     * JSDOM CANNOT SEE ANY OF THIS. Its `.focus()` does not respect
+     * `display: none` — the same limitation `AssistantDrawer`'s C-1 note
+     * records, where the real-browser proof had to live in a Playwright spec —
+     * so no test in this file distinguishes the working version from the broken
+     * one. The guard is the comment, the measurement, and the drawer's ordering.
+     */
+    composerInputRef.current?.focus();
+  }, [prefill, composerText]);
+
   function insertCapabilityExample(text: string) {
     if (!composerHasDraft) setComposerText(text);
     setCapabilitiesOpen(false);
@@ -2084,6 +2167,24 @@ export function AssistantPanel({
             <CornerDownRight size={15} strokeWidth={2} aria-hidden="true" />
           </button>
         </form>
+
+        {/*
+          THE ONE CASE WHERE `Ask ISAAC` DELIBERATELY DID NOTHING TO THE BOX,
+          said out loud.
+
+          A composed question never overwrites a draft — that rule is
+          `insertCapabilityExample`'s and is shared — but this request arrives
+          from a control the reader pressed somewhere else on the page, so
+          there was no open popover in which to warn them first. Without this
+          line the button would appear inert, which is the failure this whole
+          channel exists to avoid. `role="status"` rather than `alert`: it is
+          the outcome of something the reader just did, not an error.
+        */}
+        {prefillDeclined && composerHasDraft && (
+          <p className="assistant-foot-note" role="status">
+            {ASSISTANT_PREFILL_DRAFT_KEPT}
+          </p>
+        )}
 
         {/* P36X — "What Can I Ask?": the real, per-surface capability catalog.
             The dock note BELOW names the grounded scopes in one sentence; this

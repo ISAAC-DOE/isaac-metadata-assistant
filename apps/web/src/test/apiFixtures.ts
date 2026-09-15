@@ -3600,9 +3600,57 @@ export const statisticsRecordsBody = {
 };
 
 /**
- * EXACTLY the five route keys the Statistics page requests, in the order the
+ * The import-session list, as `GET /api/imports` serves it — TWO sessions, one
+ * of which has a source recorded and has sent a candidate to review.
+ *
+ * Deliberately minimal: Statistics reduces this body to three counts
+ * (`deriveImportTotals`) and renders no filename, digest, path or candidate, so
+ * a richer fixture here would only be asserting fields the surface cannot show.
+ * `total` matches the array length, which is the ordinary case; a test that
+ * wants the TRUNCATED case overrides `imports` with its own body.
+ */
+export const importListFixture = {
+  imports: [
+    {
+      import_id: '01JIMPORTSESSIONAAAAAAAAAA',
+      label: 'Synthetic BL15-2 bundle',
+      created_utc: '2099-07-01T00:00:00Z',
+      updated_utc: '2099-07-02T00:00:00Z',
+      furthest_step: 'reconstructed',
+      source_count: 2,
+      parsed_source_count: 1,
+      candidate_count: 4,
+      proposed_count: 1,
+    },
+    {
+      import_id: '01JIMPORTSESSIONBBBBBBBBBB',
+      label: 'Empty working area',
+      created_utc: '2099-07-03T00:00:00Z',
+      updated_utc: '2099-07-03T00:00:00Z',
+      furthest_step: 'new_import',
+      source_count: 0,
+      parsed_source_count: 0,
+      candidate_count: 0,
+      proposed_count: 0,
+    },
+  ],
+  total: 2,
+  workflow: [],
+  durability: 'workspace',
+  available_fixtures: [],
+};
+
+/**
+ * EXACTLY the SIX route keys the Statistics page requests, in the order the
  * page issues them. Exported so a test can assert the request set itself instead
- * of restating five literals it might mistype.
+ * of restating six literals it might mistype.
+ *
+ * ~~five~~ — `GET /api/imports` was added on 2026-09-15 with the Historical
+ * Imports figures. It is a TRACKED read (it joins the page's round and is
+ * re-issued by Refresh), which is why it belongs in this constant rather than
+ * beside the verification key below: the whole distinction that constant
+ * records is tracked-versus-not, and getting this one wrong would make the
+ * Refresh assertion silently weaker rather than fail.
  */
 export const STATISTICS_ROUTE_KEYS = [
   'GET /api/runtime/records',
@@ -3610,6 +3658,7 @@ export const STATISTICS_ROUTE_KEYS = [
   'GET /api/about',
   'GET /api/openapi',
   'GET /api/schema',
+  'GET /api/imports',
 ] as const;
 
 /**
@@ -3638,7 +3687,7 @@ export const STATISTICS_VERIFICATION_ROUTE_KEY = 'GET /api/runtime/verification'
 export function statisticsRoutes(
   over: Partial<
     Record<
-      'records' | 'graph' | 'about' | 'openapi' | 'schema' | 'verification',
+      'records' | 'graph' | 'about' | 'openapi' | 'schema' | 'imports' | 'verification',
       RouteEntry
     >
   > = {},
@@ -3649,6 +3698,7 @@ export function statisticsRoutes(
     'GET /api/about': over.about ?? { body: aboutResponse },
     'GET /api/openapi': over.openapi ?? { body: openApiFixture },
     'GET /api/schema': over.schema ?? { body: schemaBrowserFixture },
+    'GET /api/imports': over.imports ?? { body: importListFixture },
     [STATISTICS_VERIFICATION_ROUTE_KEY]: over.verification ?? { body: verificationReportOk },
   };
 }

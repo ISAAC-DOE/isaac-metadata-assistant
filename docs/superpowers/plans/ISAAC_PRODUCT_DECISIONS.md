@@ -88,6 +88,93 @@ and they are marked so a reader can see the owner corrected the plan rather than
 | **DEC-23** | **Authless remote MCP is REJECTED for production ISAAC scientific data**, even though Anthropic documents it as supported. | **CONFIRMED 2026-09-12** | **SUPERSEDES MY PROPOSAL.** I surfaced vendor-permitted authless MCP as *"a stronger, cheaper argument to put to Dean"* (`MCP-009`). The owner rejected that framing: **trusted attribution is load-bearing**, so vendor permission is not a reason to drop it. Authless mode may be used **only for explicitly approved local/synthetic/non-sensitive smoke testing** — never as a governance shortcut. `MCP-009` is therefore **REJECTED as a production route** and survives only as the local-smoke-test caveat. |
 | **DEC-24** | **"Zero migrations" is a migration-free TARGET, not a promise.** | **CONFIRMED + SOFTENED 2026-09-12** | My plan asserted zero migrations across all 31 PRs "by design rather than luck". That stands as an intent, but must not become pressure to force a requirement into an unsuitable existing structure. If fresh implementation evidence proves a safe requirement cannot be represented in existing approved state: **stop that slice**, document the evidence, add the required committed authorization sentence, prepare forward/rollback/test evidence and an operator packet, **do not apply it yourself**, and continue unrelated unblocked work. Never rewrite an applied migration. |
 
+## B3. Decisions taken by the 2026-09-15 owner direction
+
+**Eleven decisions, and TWO OF THEM REVERSE A DECISION IN THE TABLE ABOVE.** They are recorded as
+reversals rather than folded in silently, because `DEC-19` and `DEC-05` are exactly the kind of
+committed row a future session builds against.
+
+**PROVENANCE, stated because a repository cannot witness a conversation.** Every row here reaches
+the repository as an **owner instruction relayed in-session**, the same evidentiary class as
+`DEC-01`…`DEC-24`. No transcript, packet or evidence file backs it, and authorship witnesses
+nothing — every commit here is authored by the project owner with Claude co-authored, so a commit
+author cannot distinguish a granted direction from an assumed one. What a reader CAN check
+mechanically is the boundary: each row is dated, names what it does and does not cover, and
+carries the measurement it rests on where one exists. **Only Krish can confirm the instruction was
+given.**
+
+| ID | Decision | Status | Basis | Consequence |
+|---|---|---|---|---|
+| **DEC-25** | **Statistics RETURNS to the primary scientist sidebar.** | **CONFIRMED 2026-09-15 — REVERSES the Statistics half of `DEC-19`** | owner instruction: *"Return Statistics to the primary sidebar … This is a newer product-owner decision and supersedes the earlier plan to demote it completely."* | **`UX-017`'s measurement is NOT retracted — it becomes the acceptance bar.** It measured the SCREEN (3,820 px, 422 visible text elements) and concluded the slot was unearned; that was an answer about a screen, and the slot is a question about a destination. So the promotion carries an obligation, written into `LeftNav.tsx` beside the item: **Statistics earns the slot only once the page is scientist-first.** Shipped in `d7780b53`; the redesign is a separate slice. |
+| **DEC-26** | **Project Memory STAYS OUT of primary scientist navigation.** | **RE-AFFIRMED 2026-09-15** | owner: *"Do NOT return Project Memory to the primary scientist sidebar"* — it is source-code/Graphify/developer memory tooling, not a scientist's day-to-day job | The other half of `DEC-19` is untouched. Capability and its ~578 test cases are preserved; this remains a navigation decision and not a deletion one. `statistics-nav.test.tsx` now pins the ASYMMETRY — one of the two 2026-09-13 demotions is reversed and the other is not — so a future session cannot "tidy up" by treating them alike. |
+| **DEC-27** | **Governance & Safety is demoted out of primary navigation, to Settings.** | **CONFIRMED 2026-09-15** | owner: *"evaluate moving it under Settings rather than keeping it as another primary scientist destination … The desired top-level navigation should remain extremely small."* | **This is decided by the same reasoning that previously KEPT it.** The prior ground was that the authorizing direction enumerated it in neither list, so removal would be "a product decision nobody took"; the new direction takes it. **No capability moves** — the route is unchanged, `?tab=validator` and `?tab=schema` deep links still resolve, and Data & Privacy already carried a reciprocal link, which is §19's "provide the capability elsewhere FIRST" and now has its own assertion. |
+| **DEC-28** | **`Settings & API` -> `Settings`**, and Settings reorganises toward `Overview / Privacy & Governance / Integrations / Advanced`. | **CONFIRMED 2026-09-15** (rename shipped in `d7780b53`; the regroup is a slice) | owner: the area *"remains too cluttered"*; developer-heavy material goes to Advanced | The `& API` named the page's CONTENTS in the DESTINATION's label — and those contents are what is being reorganised. **The route and every `?tab=` deep link are deliberately NOT moved**; the rename and the route are asserted separately so a later tidy-up that renames the route fails a test instead of breaking a bookmark. That guard has now caught two renames. **A nested tablist is banned** by `settings-page.test.tsx`, so the regroup uses sections, not tabs-in-tabs. |
+| **DEC-29** | **The Runs split-screen is APPROVED and retained; the right pane becomes a READABLE RECORD MAP.** | **CONFIRMED 2026-09-15** | owner: *"I like that split-screen architecture … but it's not really readable. I can't clearly distinguish what fields are done, what fields aren't done, what my values were for those fields"* | The architecture is ratified; only the pane's content is at issue. Required states — Filled / Missing / Needs Review / Invalid / Inherited / Not Applicable — **icon or shape plus text, never colour alone**, with the current value shown where one is honestly held. **`Not Shown Here` is retained and is not a defect**: `run.fields` carries only the five `RUN_FIELDS`, so the QC verdict, series and descriptors answered through Complete Metadata are genuinely not visible to this payload, and claiming "nothing yet" about them would be this product's signature defect. |
+| **DEC-30** | **A validation blocker must name its field and offer the fix; `Check Failed` alone is not acceptable.** | **CONFIRMED 2026-09-15** | owner: *"I don't even know what it's asking … you should point to the specific field … and there could be a button right next to it that points to the agent, and then the agent will have the context"* | Each finding gets a subject, a state word, the server's own sentence **verbatim**, and a `Go to field` **only where a real destination exists** — a non-action must not look clickable. `FindingList` is the ONE shared renderer (Runs and Validate & Review), so both surfaces move together. **`kind` is optional on the wire and must be read as such**: absent, the row says nothing about its subject rather than inferring one from the message text. |
+| **DEC-31** | **Contextual `Ask ISAAC` becomes a general pattern beside blockers and fields.** | **CONFIRMED 2026-09-15** | owner: *"if they want more information, then they can ask the agent … and then he'll tell you, okay, this, this, this needs to be done"* | It carries only safe structured context — experiment id, run id, field path, validation code, current value, message. It is **advisory**: it may not validate, accept, submit, fill a field, or decide scientific truth. **There is no LLM in any deployment** (`/api/assistant/ask` is a bounded deterministic resolver; every provider answers `501`), so an unanswerable question must refuse honestly — a fabricated explanation is forbidden, and `ASSISTANT_NO_MODEL_CLAIM` stays on the panel. |
+| **DEC-32** | **The browser tab must carry the ISAAC mark, reusing the EXISTING logo.** | **CONFIRMED 2026-09-15** | owner: *"Nerve already has a recognizable browser-tab icon. ISAAC should too … Reuse the existing ISAAC logo already displayed in the upper-left application header. Do not design a new brand/logo."* | The mark is measured, not chosen: `TopBar.tsx`'s `Brand()` renders the lucide `AudioWaveform` glyph, white, on a 30×30 `border-radius: 8px` tile filled `var(--action)`. **The deployment base path `/krish/` is the trap** — a root-relative icon href 404s there, so the build must be inspected rather than assumed. |
+| **DEC-33** | **Historical Import gets a familiar file-selection UI**; real file-byte ingestion may be implemented **application-side** but stays **disabled by default** until governance enables it. | **CONFIRMED 2026-09-15 — this is a NEW authorization** | owner: the reference-only Source experience *"is insufficient as the ordinary scientist workflow"* | **The existing guards are RECONCILED, not deleted.** `POST /api/uploads` is an unconditional 403 and `upload-claim-parity.test.tsx` pins that claim **and its polarity**. The honest shape is a capability-driven path: size- and type-bounded, traversal-safe, separate from official record bytes, discoverable through capability state, **disabled in governed production** — and where browser-only local staging is honest, files may be listed as `Local only — not sent to ISAAC` **without transmitting a byte**. A button that merely fails after being clicked is forbidden. `Record a reference` survives as the secondary path. |
+| **DEC-34** | **Proposal creation must be discoverable.** | **CONFIRMED 2026-09-15 — and the owner's premise was measured and found FALSE, in the product's favour** | owner: *"there's no way to actually add an ingestion proposal. I understand maybe it's not hooked up to the backend, maybe it's blocked"* | **It is NOT blocked.** Measured at `dbf9d121`: `POST /api/experiments/{id}/proposals` is registered and documented (`routes.py`, `post_proposal`), requiring `note_id`, `target_field_path`, `proposed_value`, `rule`, conditional `run_id` and the record's `If-Match`. **So this was a UI gap, not a capability gap**, and the correct outcome is a real form — not a disabled placeholder. **Creation and ACCEPTANCE must never be conflated:** acceptance answers `409 human_actor_required` in every default deployment because no trusted authentication boundary exists (`EXT-01`), which is a configuration fact no application change can close. |
+| **DEC-35** | **Visible prose is reduced product-wide; long explanation moves behind accessible disclosure.** And **Impeccable is required for every significant UI redesign.** | **CONFIRMED 2026-09-15** | owner: *"the text is still stopping midway through half the block"* — the earlier `38em -> 68ch` change did NOT close it | Defaults: one sentence of page introduction, one line of card description. **Never disclose-away a blocking error, a scientific uncertainty, a destructive consequence, a security/privacy state, or a required action** — those stay visible. Disclosures must be keyboard- and screen-reader-accessible, **never hover-only**. The dead-whitespace defect is **per-composition**, not one global CSS constant — a prior instance in this repository was a `max-width` media query fixing the wrong box entirely. **Impeccable's mechanical detector is non-functional here** (missing parsers AND `.tsx` routed to a regex engine with no accessibility ruleset), so a `0 findings` from it is a non-answer unless a negative control says otherwise; its in-browser overlay is a different code path and does work. |
+
+### `DEC-33` in detail — what it actually reverses, found 2026-09-15
+
+**`DEC-33` is not a green field. It REVERSES A RECORDED, REASONED DECLINE, and a future session
+must be able to see that rather than discover it the way I did.**
+
+`screens/HistoricalImport.tsx` (~line 640) carries a comment stating that a previous session
+**built a multi-file picker and reverted it**. Its argument, quoted because it is a good one:
+
+> *"A `Choose Files…` button is an upload affordance whatever it does underneath — a scientist who
+> picked twelve files would reasonably believe twelve files had been uploaded. Recording their
+> names while they believe that is worse than asking them to type, because it is a false
+> impression the product created on purpose."*
+
+Two committed guards enforce it:
+
+* `historical-import.test.tsx` §1 — the screen renders **no** `input[type="file"]`, declares no
+  `type="file"` in its source, and has no `onDrop`, `FormData` or `multipart`. Its stated subject:
+  *"the destination cannot accept bytes and does not say it can"*.
+* `upload-claim-parity.test.tsx` — **exactly two** non-test files under `apps/web/src` declare a
+  file input, both named, so a third anywhere fails whatever it does.
+
+**THE DECLINE WAS RIGHT ON ITS OWN TERMS AND THE OWNER HAS ANSWERED ITS OBJECTION DIRECTLY.** The
+objection was a false impression; the instruction supplies the mitigation — staged files must read
+`Local only — not sent to ISAAC` — and says explicitly: *"Do not merely delete the guards.
+Reconcile them."* So the decline is superseded, not refuted, and is left standing in the source
+beside its reversal.
+
+**THE MECHANISM IS MEASURED AND NEEDS NO BACKEND CHANGE, NO NEW CAPABILITY AND NO GOVERNANCE
+CHANGE** — which is what makes the reconciliation honest rather than a loosening. `POST
+/api/imports/{id}/sources` already accepts `kind: "reference"` with `filename`, `reference`,
+`media_type`, `size_bytes` and `sha256`, stores them verbatim, **fetches nothing**, and records the
+entry as `parse_state: "no_content_path"`. A browser file picker supplies exactly those from the
+chosen `File` — `name`, `type`, `size` — **without reading or transmitting a byte**. Proved over
+HTTP against a local backend on 2026-09-15: the entry lands with the real filename, real size, a
+genuine SHA-256, and `parse_state: "no_content_path"`.
+
+**ONE PRECISION THAT MUST NOT DRIFT.** The route's own description says `sha256` *"is checked for
+SHAPE only … and is **never computed**"*, and that **no surface may describe it as verified,
+checked or matched**. A browser-computed digest does not change that: it is computed by the
+CLIENT, over bytes the server never sees, and remains the caller's claim. It may be labelled as
+computed in the reader's browser; it may **never** be labelled verified by ISAAC.
+
+**THE GUARD RECONCILIATION, stated before it is written so it cannot be quietly weakened:** §1
+inverts from *"the affordance cannot exist"* to *"the affordance exists **and** no bytes are ever
+transmitted **and** every staged row carries the not-sent disclosure"*. That is a **stronger**
+claim than the one it replaces — the old guard banned the affordance, the new one bans the actual
+harm. `upload-claim-parity`'s file-input census goes two → three, with the third named and its
+disclosure pinned. **Neither guard may be deleted, and neither may be weakened without the
+replacement truth assertion landing in the same change.**
+
+### `DEC-17` — the orchestrator fallback, disclosed for this session
+
+`DEC-17` requires that an Opus orchestrator be **recorded in the ledger session header** rather
+than silently substituted. Recorded here too: the 2026-09-15 session ran on **Opus 5
+(`claude-opus-5[1m]`)**, not Fable 5.1, under `CLAUDE.md` §10's ratified standing fallback, with
+orchestrator-only discipline preserved. `DEC-18`'s ceiling of **five subordinate agents total**
+was applied: four implementation lanes and one reserved for independent review.
+
 ## C. Open — external owners
 
 These are not ours to decide. Full detail in

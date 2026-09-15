@@ -7,8 +7,10 @@ import {
   deriveApiSurface,
   deriveEvidenceTotals,
   deriveExportGate,
+  deriveImportTotals,
   deriveMemoryFacts,
   deriveOpenQuestions,
+  deriveRecentWork,
   deriveSchemaFacts,
   deriveWorkflowStages,
   deriveWorkspaceTotals,
@@ -824,5 +826,172 @@ describe('deriveSchemaFacts', () => {
     expect(facts.totalFields).toBe(0);
     expect(facts.schemaVersion).toBeNull();
     expect(facts.byVocabulary).toEqual([]);
+  });
+});
+
+// --- recent work ------------------------------------------------------------
+
+/*
+ * `deriveRecentWork` — the ordering, and the one record it refuses to order.
+ *
+ * Its contract is narrow on purpose: it is the only derivation in this module
+ * that emits a record's own title and route, so the tests below pin BOTH the
+ * ordering property and the exclusion, because the exclusion is what stops the
+ * list asserting a position the response did not report.
+ */
+describe('deriveRecentWork', () => {
+  it('orders newest first and takes only the requested number', () => {
+    const recent = deriveRecentWork(
+      [
+        rec({ experiment_id: 'A', updated_utc: '2026-07-01T00:00:00Z' }),
+        rec({ experiment_id: 'B', updated_utc: '2026-07-03T00:00:00Z' }),
+        rec({ experiment_id: 'C', updated_utc: '2026-07-02T00:00:00Z' }),
+      ],
+      2,
+    );
+    expect(recent.items.map((i) => i.experimentId)).toEqual(['B', 'C']);
+    // `datedRecords` counts everything orderable, not just what was returned,
+    // so the page can say "the 2 most recent of 3" rather than implying 2 exist.
+    expect(recent.datedRecords).toBe(3);
+    expect(recent.undatedRecords).toBe(0);
+  });
+
+  it('EXCLUDES a record whose update time cannot be read, and never orders it', () => {
+    /* The whole point. Sorting it last would assert it is the oldest; sorting
+       it first, that it is the newest. The response said neither, so it is
+       counted and left out. */
+    const recent = deriveRecentWork(
+      [
+        rec({ experiment_id: 'A', updated_utc: '2026-07-01T00:00:00Z' }),
+        rec({ experiment_id: 'B', updated_utc: 'not a time' }),
+        rec({ experiment_id: 'C', updated_utc: '' }),
+        rec({ experiment_id: 'D', updated_utc: undefined as unknown as string }),
+      ],
+      10,
+    );
+    expect(recent.items.map((i) => i.experimentId)).toEqual(['A']);
+    expect(recent.datedRecords).toBe(1);
+    expect(recent.undatedRecords).toBe(3);
+  });
+
+  it('breaks a tie deterministically, so one body always renders one order', () => {
+    /* Two records saved in the same second must not swap places between two
+       renders of the same data. Asserted by deriving TWICE from arrays that
+       differ only in input order. */
+    const same = '2026-07-04T12:00:00Z';
+    const forward = deriveRecentWork(
+      [rec({ experiment_id: 'A', updated_utc: same }), rec({ experiment_id: 'B', updated_utc: same })],
+      5,
+    );
+    const reversed = deriveRecentWork(
+      [rec({ experiment_id: 'B', updated_utc: same }), rec({ experiment_id: 'A', updated_utc: same })],
+      5,
+    );
+    expect(forward.items.map((i) => i.experimentId)).toEqual(
+      reversed.items.map((i) => i.experimentId),
+    );
+  });
+
+  it('emits only the six safe projection fields, and never an evidence or draft value', () => {
+    /* AN ALLOWLIST, ASSERTED AS AN EQUALITY. This is the one derivation in the
+       module that emits a record's own title and route, so what it must NOT
+       also emit — a pending count, an evidence class, a revision, an artifact
+       state, a draft value — is pinned by the key set rather than by a list of
+       things to look for. A field added to `RecentWorkItem` fails here.
+
+       (~~four~~ — the first version of this case listed five keys and called
+       them four, omitting `title`, which is the single most consequential field
+       in the set. It failed immediately, which is the argument for asserting an
+       equality over a subset.) */
+    const [item] = deriveRecentWork([rec({ experiment_id: 'A' })], 1).items;
+    expect(Object.keys(item).sort()).toEqual(
+      ['experimentId', 'title', 'status', 'updatedUtc', 'updatedAtMs', 'navigateTo'].sort(),
+    );
+  });
+
+  it('keeps a record whose projection carried no route, as an unlinkable row', () => {
+    /* Dropping it would under-report the workspace in order to hide a missing
+       link; the page renders the title as plain text instead. */
+    const [item] = deriveRecentWork(
+      [rec({ experiment_id: 'A', navigate_to: '' as unknown as string })],
+      1,
+    ).items;
+    expect(item.navigateTo).toBeNull();
+    expect(item.title).not.toBe('');
+  });
+
+  it('returns nothing for a zero limit, and for no records', () => {
+    expect(deriveRecentWork([rec({ experiment_id: 'A' })], 0).items).toEqual([]);
+    expect(deriveRecentWork([], 5)).toEqual({ items: [], datedRecords: 0, undatedRecords: 0 });
+  });
+});
+
+// --- historical imports ------------------------------------------------------
+
+describe('deriveImportTotals', () => {
+  const summary = (over: Record<string, unknown>) => ({
+    import_id: 'x',
+    label: 'l',
+    created_utc: '2026-07-01T00:00:00Z',
+    updated_utc: '2026-07-01T00:00:00Z',
+    furthest_step: 'new_import',
+    source_count: 0,
+    parsed_source_count: 0,
+    candidate_count: 0,
+    proposed_count: 0,
+    ...over,
+  });
+
+  it('counts sessions, sessions with a source, and sessions with a proposal', () => {
+    const totals = deriveImportTotals({
+      imports: [
+        summary({ source_count: 2, proposed_count: 1 }),
+        summary({ source_count: 1, proposed_count: 0 }),
+        summary({}),
+      ],
+      total: 3,
+    });
+    expect(totals).toEqual({
+      sessions: 3,
+      summariesReceived: 3,
+      sessionsWithSources: 2,
+      sessionsWithProposals: 1,
+    });
+  });
+
+  it("keeps the API's own total apart from what this page received", () => {
+    /* The same distinction `Total Records` keeps: a truncated list must not be
+       presented as the whole workspace. */
+    const totals = deriveImportTotals({ imports: [summary({})], total: 9 });
+    expect(totals.sessions).toBe(9);
+    expect(totals.summariesReceived).toBe(1);
+  });
+
+  it('a missing or non-numeric total becomes null, never 0', () => {
+    /* `0` would claim the workspace holds no import session; what is true is
+       that the response carried no usable total. */
+    expect(deriveImportTotals({ imports: [] }).sessions).toBeNull();
+    expect(deriveImportTotals({ imports: [], total: 'three' }).sessions).toBeNull();
+    expect(deriveImportTotals({ imports: [], total: Number.NaN }).sessions).toBeNull();
+  });
+
+  it('a malformed body degrades to nulls and zeros rather than throwing during render', () => {
+    /* There is no ErrorBoundary in this app, so a throw here would blank the
+       whole SPA rather than one section. */
+    for (const body of [null, undefined, 7, 'nope', [], {}, { imports: 'not a list' }]) {
+      const totals = deriveImportTotals(body);
+      expect(totals.sessions).toBeNull();
+      expect(totals.summariesReceived).toBe(0);
+      expect(totals.sessionsWithSources).toBe(0);
+    }
+  });
+
+  it('skips a non-object entry rather than counting it', () => {
+    const totals = deriveImportTotals({
+      imports: [null, 'x', summary({ source_count: 1 })],
+      total: 3,
+    });
+    expect(totals.summariesReceived).toBe(3);
+    expect(totals.sessionsWithSources).toBe(1);
   });
 });

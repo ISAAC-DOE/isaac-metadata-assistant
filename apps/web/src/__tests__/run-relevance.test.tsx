@@ -237,11 +237,36 @@ describe('an unclassified field is never a Run control', () => {
     for (const box of boxes) expect(box.value).not.toContain('SYNTHETIC-');
   });
 
-  it('offers exactly the writable set — no more controls than there are run-level paths', async () => {
+  it('offers exactly the writable set — no control addresses a path outside it', async () => {
+    /*
+     * ~~`expect(boxes).toHaveLength(RUN_FIELDS.length)`~~ — REWRITTEN, not
+     * deleted, and the property it was protecting is now asserted DIRECTLY
+     * rather than through a count that happened to equal it.
+     *
+     * The count was a proxy for "no control exists for a path outside the
+     * writable set", and it stopped being one when the two acquisition
+     * timestamps gained a picker AND an ISO text path: seven controls, still
+     * five paths, and the old line failed while nothing it cared about had
+     * changed. The replacement reads the SET of paths the controls address and
+     * compares it with `RUN_FIELDS` — which is strictly stronger, because a
+     * control for `system.configuration.detector_model` would now fail by NAME
+     * rather than by arithmetic, and a swap of one forbidden control for one
+     * permitted one could never balance the books.
+     *
+     * The second assertion is what stops a control slipping in unaddressed: a
+     * box in this grid carrying neither attribute is a box this test cannot
+     * see, which is the shape the count could not detect either.
+     */
     const card = await showRun(RUN_WITH_UNCLASSIFIED);
-    const boxes = card.querySelectorAll('.run-fields input, .run-fields select');
-    // The run carries eight extra field-map keys; the grid still holds five controls.
-    expect(boxes).toHaveLength(RUN_FIELDS.length);
+    const boxes = Array.from(
+      card.querySelectorAll<HTMLElement>('.run-fields input, .run-fields select'),
+    );
+    const addressed = boxes.map(
+      (el) => el.dataset.runFieldPath ?? el.dataset.runFieldIsoPath ?? null,
+    );
+    expect(addressed.filter((p) => p === null)).toEqual([]);
+    expect([...new Set(addressed)].sort()).toEqual([...RUN_FIELDS.map((s) => s.path)].sort());
+    // The run carries eight extra field-map keys; none of them is addressed.
     for (const spec of RUN_FIELDS) {
       expect(within(card).getByText(spec.path)).toBeInTheDocument();
     }

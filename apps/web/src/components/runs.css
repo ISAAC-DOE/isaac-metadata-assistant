@@ -35,7 +35,7 @@
   margin: 4px 0 0;
   max-width: 66ch;
   font-size: 12.5px;
-  line-height: 1.55;
+  line-height: var(--line-height-normal); /* exact rung: 1.55 */
   color: var(--text-slate);
 }
 
@@ -168,7 +168,7 @@
 
 .runs-control-label {
   font-size: 11.5px;
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
   color: var(--text-slate);
 }
 
@@ -234,7 +234,7 @@
   background: var(--surface);
   border: 1px dashed var(--border-strong);
   border-radius: var(--radius-card);
-  font-size: 13px;
+  font-size: var(--font-size-body);
   color: var(--text-slate);
 }
 
@@ -313,7 +313,7 @@
   border-radius: var(--radius-control);
   font-family: var(--font-ui);
   font-size: 11.5px;
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
   color: var(--text-slate);
   cursor: pointer;
 }
@@ -596,7 +596,7 @@
   flex: none;
   padding-top: 7px;
   font-size: 13.5px;
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
   color: var(--text-primary);
 }
 
@@ -605,9 +605,41 @@
   color: var(--text-slate);
 }
 
+/*
+ * `width: 100%` IS THE THIRD DECLARATION THE DATETIME PICKER NEEDED, and it was
+ * found by the mutation suite at 320px — not by a unit test, which computes no
+ * layout, and not by looking at the screen at a comfortable width.
+ *
+ * MEASURED, at 320px, on a run with both timestamps filled: the run card
+ * reported `scrollWidth 283` against `clientWidth 240` — a 43px overflow — and
+ * the checker listed six clipped strings including the word `UTC` and the whole
+ * `timestamps.acquired_start_utc` path. The cause is NOT the one it looks like:
+ *
+ *   * `.run-field-control` was **126px** inside a 240px `.run-field`. It is
+ *     shrink-to-fit, not stretched, so it sized itself from one child (the path
+ *     span, also 126px) while `.run-field-datetime` — a flex ROW — sized itself
+ *     from ITS content at **267px** and overflowed its own parent.
+ *   * `max-width: 100%` on the datetime row alone was tried and measured
+ *     **INERT**: 267px before, 267px after. `100%` of a shrink-to-fit parent is
+ *     the parent's already-too-small width, so it constrains nothing.
+ *   * AND THE `datetime-local` CONTROL HAS NO HARD INTRINSIC FLOOR, which is
+ *     worth recording because it is the obvious suspect and it is innocent.
+ *     Probed directly in Chrome inside a 126px box: `step="1"` with no width is
+ *     213px, and with `width: 100%` it is **126px**. `step`, `min-width: 0` and
+ *     `box-sizing` changed nothing. The control shrinks when it is told a width.
+ *
+ * So the parent is given one. `width: 100%` makes `.run-field-control` fill its
+ * column instead of one child, `max-width: 100%` then genuinely bounds the
+ * datetime row, and the input's existing `flex: 1 1 0` divides what is left.
+ * After: overflow **43px -> 0**, control 126 -> 208, `UTC` back inside the card.
+ * Re-measured at 1280, 768 and 390: overflow 0 at every width and no column
+ * width changed except 390's control, which went 126 -> 278 to match the
+ * datetime row it already contained — a latent mismatch, fixed by the same line.
+ */
 .run-field-control {
   flex: 1;
   min-width: 0;
+  width: 100%;
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -764,13 +796,13 @@
 
 .run-inherited-value {
   font-family: var(--font-mono);
-  font-size: 13px;
+  font-size: var(--font-size-body);
   color: var(--text-primary);
   overflow-wrap: anywhere;
 }
 
 .run-inherited-row[data-state='overridden'] .run-inherited-value {
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
 }
 
 /* `--text-slate`, NOT `--text-tertiary`. Both were written as tertiary first and
@@ -797,7 +829,7 @@
 
 .run-inherited-state[data-state='overridden'] {
   color: var(--confirmed-text);
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
 }
 
 /* The record's own value beside a run that has diverged from it. Context, never
@@ -840,7 +872,7 @@
 
 .run-inherited-form-label {
   font-size: 12px;
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
   color: var(--text-strong);
 }
 
@@ -908,7 +940,7 @@
 .run-inherited-failure-title {
   margin: 0;
   font-size: 12px;
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
 }
 
 .run-inherited-failure-text {
@@ -1127,6 +1159,86 @@
   flex: none;
 }
 
+/* ---- the acquisition-timestamp controls --------------------------------- */
+
+/* The picker and its zone marker on one line. The marker is a VISIBLE `UTC`
+   beside the control rather than a suffix on the label, because renaming the
+   field would break every surface that addresses it by name — see the JSX. */
+.run-field-datetime {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  min-width: 0;
+  /* Bounds the row to the column it sits in. Inert on its own — see the
+     measurement above `.run-field-control`, which is what makes it work. */
+  max-width: 100%;
+}
+/*
+ * `flex: 1 1 0` AND `min-width: 0`, AND BOTH ARE LOAD-BEARING — measured, not
+ * defensive.
+ *
+ * A `datetime-local` control has a LARGE intrinsic minimum: the browser's own
+ * date/time spinner and calendar glyph set a min-content width of roughly
+ * 200px, and a flex item defaults to `min-width: auto`, which is that
+ * min-content width. Measured on the running app at 1280px with the Assistant
+ * rail expanded (so the runs column is 402px): without these two declarations
+ * the picker pushed `.run-fields`' min-content width past the column, the run
+ * card's own header row was squeezed in response, and `.run-card-conditions`
+ * rendered at **13px wide by 1041px tall** — one character per line. The same
+ * screen before the picker existed: 147px by 74px.
+ *
+ * `min-width: 0` alone is not enough, because `flex-basis: auto` then sizes the
+ * item from its content anyway; `flex: 1 1 0` is what makes the control take
+ * the space it is GIVEN rather than the space it wants.
+ */
+.run-field-datetime .run-input {
+  flex: 1 1 0;
+  min-width: 0;
+}
+.run-field-zone {
+  flex: none;
+  font-size: var(--font-size-meta);
+  font-weight: var(--font-weight-medium);
+  color: var(--text-slate);
+}
+
+/* WHAT IS ACTUALLY STORED, in both spellings. Not a caption on the control: it
+   is the one line that lets a reader confirm the picker and the record agree
+   without opening the text path. */
+.run-field-readback {
+  font-size: var(--font-size-meta);
+  line-height: var(--line-height-normal);
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+
+/* The ISO text path. Native `<details>`, so it is keyboard-operable with no JS
+   and `querySelectorAll` reaches its contents whether it is open or shut. */
+.run-field-iso {
+  margin-top: var(--space-2xs);
+}
+.run-field-iso-summary {
+  cursor: pointer;
+  font-size: var(--font-size-meta);
+  color: var(--text-strong);
+}
+.run-field-iso-summary:focus-visible {
+  outline: 2px solid var(--ring-active);
+  outline-offset: 2px;
+}
+.run-field-iso > *:not(summary) {
+  display: block;
+  margin-top: var(--space-2xs);
+}
+/* A real label, not a placeholder: the box has its own name because it is a
+   second control for the same field and a screen reader must be able to tell
+   the two apart. */
+.run-field-iso-label {
+  font-size: var(--font-size-meta);
+  font-weight: var(--font-weight-medium);
+  color: var(--text-secondary);
+}
+
 /* ---- check result ------------------------------------------------------- */
 
 .run-check {
@@ -1173,19 +1285,101 @@
   color: var(--text-slate);
 }
 
+/* A FINDING IS A STRUCTURED ROW NOW, NOT A BULLET. Subject and state on one
+   line, the server's own sentence under it, the actions under that — so the
+   two questions a scientist asks first ("what is this about" and "how bad is
+   it") are answered before the prose, and a row that is only prose still
+   reads as one row. The list marker is dropped because a bullet beside a
+   two-line structured row reads as a typographic accident. */
 .run-check-list {
+  list-style: none;
   margin: 0;
-  padding-left: 18px;
+  padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: var(--space-sm);
 }
 
 .run-check-item {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2xs);
+  padding: var(--space-sm);
+  background: var(--surface);
+  border: 1px solid var(--border-faint);
+  border-radius: var(--radius-inner);
   font-size: 12.5px;
   line-height: 1.5;
   color: var(--text-secondary);
   overflow-wrap: anywhere;
+}
+
+.run-check-item-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-sm);
+}
+
+/* The subject. `.mono` is added at the call site when the text is a raw
+   official PATH rather than a human name — the same demotion every other path
+   in this app gets, and never a substitute for one. */
+.run-check-item-subject {
+  font-size: var(--font-size-meta);
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-heading);
+}
+
+/* NEVER COLOUR ALONE — and here, never colour AT ALL. The state is a word in a
+   bordered chip; the hue is the same for every state, so nothing about a
+   finding is signalled by a colour a reader has to have learned. Reserved
+   pass/fail hues are deliberately absent: a finding row is not a verdict
+   surface, and official validation is the only thing that issues one. */
+.run-check-item-state {
+  margin-left: auto;
+  flex: none;
+  padding: 0 var(--space-xs);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  font-size: var(--font-size-meta);
+  font-weight: var(--font-weight-medium);
+  color: var(--text-slate);
+  white-space: nowrap;
+}
+
+.run-check-item-text {
+  display: block;
+}
+
+.run-check-item-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-xs);
+  margin-top: var(--space-2xs);
+}
+
+.run-check-item-action {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2xs);
+  padding: var(--space-2xs) var(--space-xs);
+  background: var(--surface-subtle);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  font: inherit;
+  font-size: var(--font-size-meta);
+  color: var(--text-strong);
+  cursor: pointer;
+}
+
+.run-check-item-action:hover {
+  background: var(--action-tint);
+  border-color: var(--action-selected-border);
+}
+
+.run-check-item-action:focus-visible {
+  outline: 2px solid var(--ring-active);
+  outline-offset: 2px;
 }
 
 .run-check-item-opaque {

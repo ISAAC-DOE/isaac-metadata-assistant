@@ -76,7 +76,7 @@
 
 .proposals-control-label {
   font-size: 12px;
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
   color: var(--text-secondary);
 }
 
@@ -372,7 +372,7 @@
 
 .proposal-form-label,
 .proposals-deep-link-label {
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
 }
 
 .proposal-form-input {
@@ -416,7 +416,7 @@
 .proposal-history-toggle {
   font: inherit;
   font-size: 12px;
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
   color: var(--action);
   background: none;
   border: none;
@@ -659,4 +659,148 @@
 .proposal-card[data-linked-proposal='true'] {
   outline: 2px solid var(--action);
   outline-offset: 2px;
+}
+
+/* --- New Proposal (the creation door) -------------------------------------- */
+
+/*
+ * EVERY SPACING VALUE IN THIS BLOCK IS A `--space-*` RUNG, NOT A LITERAL, and the
+ * reason it is worth a note is that it was NOT written that way first.
+ * `type-scale-and-spacing.test.ts` measured six new hand-authored `px` values here
+ * and refused them (2406 against a ceiling of 2400). Two of the six had no rung as
+ * written — a 6px gap, which the rest of THIS FILE uses freely — and the honest
+ * options were to raise the ceiling or to move to the scale. Moving was correct:
+ * nothing in this form needed a spacing the design system does not declare, and the
+ * 6px in the rules above is grandfathered residue rather than a precedent. The block
+ * therefore adds ZERO to that count.
+ */
+
+/*
+ * THE CREATION AFFORDANCE, AT THE TOP OF THE BROWSER AND NOT INSIDE A CARD.
+ *
+ * It is declared entirely with tokens this file already uses — `.proposal-form*`
+ * carries every control, label, hint and error treatment, so the form below adds no
+ * new input rule and cannot drift from the review forms beside it. No token is
+ * declared here and no new hue, radius or shadow is introduced. (`CLAUDE.md` §11
+ * records nine undeclared custom properties shipping in the capture surface and
+ * making its primary input invisible; reusing declared selectors is the cheapest
+ * defence against a tenth.)
+ *
+ * NO RESERVED VERDICT COLOUR, for this file's stated reason: creating a proposal is
+ * not a pass and failing to is not a fail. The trigger is `.btn-primary`, the same
+ * weight every other primary act in this application carries.
+ */
+.new-proposal {
+  margin-bottom: var(--space-md);
+  padding-bottom: var(--space-md);
+  border-bottom: 1px solid var(--border-hair);
+}
+
+.new-proposal-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-sm) var(--space-md);
+}
+
+/*
+ * ONE LINE BY DEFAULT, per the design direction: state the act, not the policy. The
+ * longer, honest explanation of what a proposal is and what acceptance cannot do
+ * lives inside the form and inside a disclosure — never hover-only, and never
+ * hiding a blocking error.
+ */
+.new-proposal-lede {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+  max-width: 68ch;
+}
+
+/*
+ * THE UNAVAILABLE LABEL IS TEXT, NOT A DISABLED BUTTON. A disabled control invites a
+ * click and teaches nothing; this states the fact and puts the reason one keystroke
+ * away in the `<details>` beside it. It is deliberately NOT painted as an error:
+ * a deployment serving no proposable paths is a configuration, not a fault.
+ */
+.new-proposal-unavailable-label {
+  font-size: var(--font-size-body);
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-secondary);
+}
+
+/*
+ * A NATIVE `<details>`, so it is keyboard operable and screen-reader announced with
+ * no JavaScript and no ARIA of our own — the same choice the Help popover's
+ * disclosure made. `summary` keeps the browser's own focus ring rather than
+ * suppressing it.
+ */
+.new-proposal-why {
+  margin-top: var(--space-sm);
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.new-proposal-why > summary {
+  cursor: pointer;
+  font-weight: var(--font-weight-semibold);
+}
+
+.new-proposal-why > p {
+  margin-top: var(--space-xs);
+}
+
+.new-proposal-form {
+  width: 100%;
+  max-width: 68ch;
+}
+
+.new-proposal-source-modes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-xs) var(--space-lg);
+}
+
+/*
+ * THE WHOLE ROW IS THE LABEL, so the hit target is the words and not just the 13px
+ * control. `align-items: baseline` would drop the radio below the text at this size;
+ * `center` keeps them on one line at every zoom level this file is read at.
+ */
+.new-proposal-radio {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  font-size: 12px;
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+/*
+ * THE FOURTH NATIVE CONTROL IN THE APP TO NEED THIS, and it gets the same treatment
+ * as the three before it (`graph.css`, `assistant.css`, `run-compare.css`). Left at
+ * the default, a native radio paints itself in the VIEWER'S OS accent — crimson in a
+ * default Chromium — and `tokens.css` reserves saturated red for the validation
+ * verdict, so an inert source-mode switch would render as a failure marker this
+ * design system never authorised, in a colour that changes from machine to machine.
+ * `native-control-accent.test.ts` caught this control shipping without it.
+ */
+.new-proposal-radio input[type='radio'] {
+  accent-color: var(--action);
+}
+
+/* The human label for the chosen target, beside — never instead of — its path. */
+.new-proposal-target-label {
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-secondary);
+}
+
+/*
+ * THE STORED PROVENANCE SENTENCE, SHOWN IN FULL. Set back from the surrounding hints
+ * by a rule rather than by colour, because it is not an aside: it is the exact text
+ * this act will store, and a reader is entitled to see it before they store it.
+ */
+.new-proposal-rule {
+  padding-left: var(--space-sm);
+  border-left: 2px solid var(--border-faint);
+  color: var(--text-secondary);
 }

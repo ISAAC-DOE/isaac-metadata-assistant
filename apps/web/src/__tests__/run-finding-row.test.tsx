@@ -1,0 +1,364 @@
+/**
+ * A CHECK FINDING IS A STRUCTURED ROW — subject, state, the server's own
+ * sentence, and a destination only when one exists.
+ *
+ * The project owner, 2026-09-15, looking at `Check Failed` on the Runs screen:
+ * *"I don't even know what it's asking. What does it mean? I think you should
+ * point to the specific field that it's talking about … it should be simple.
+ * And if they want more information, then they can ask the agent — there could
+ * be a button right next to it that points to the agent, and then the agent
+ * will have the context."*
+ *
+ * WHAT THESE TESTS PROTECT, and every one of them is a claim this build could
+ * get wrong in the direction of saying more than it knows:
+ *
+ *   1. A subject is READ, never inferred. `kind` is optional on the wire and
+ *      `ApiRunCheckFinding`'s own docstring says so: "a reader groups by it
+ *      when it is there and says nothing when it is not".
+ *   2. The server's sentence is verbatim.
+ *   3. A finding this build cannot describe is still COUNTED and still SHOWN —
+ *      the behaviour that exists because it was got wrong once.
+ *   4. `Go to field` appears only where the field is actually on screen.
+ *   5. `Ask ISAAC` PRE-FILLS and never sends.
+ */
+import { describe, expect, it, vi, afterEach } from 'vitest';
+import { render, screen, cleanup, fireEvent, within } from '@testing-library/react';
+
+import { FindingList } from '../components/RunFindingList';
+import { AssistantAskContext } from '../lib/assistantAsk';
+import { composeFindingQuestion } from '../lib/findingPresentation';
+
+afterEach(cleanup);
+
+const rows = () => Array.from(document.querySelectorAll('.run-check-item')) as HTMLElement[];
+
+describe('a finding row says what it is about, and nothing more', () => {
+  it('names the subject from the server’s own `kind`, through the ONE vocabulary', () => {
+    render(
+      <FindingList
+        title="Blocking"
+        state="Missing"
+        findings={[
+          { kind: 'series', message: 'Provide/point to the reduced spectrum.' },
+          { kind: 'qc', message: 'What is the QC verdict for this measurement?' },
+        ]}
+      />,
+    );
+    // `adapt.KIND_LABEL`'s words, not a second copy of them.
+    expect(within(rows()[0]).getByText('Reduced Spectrum')).toBeTruthy();
+    expect(within(rows()[1]).getByText('QC Verdict')).toBeTruthy();
+    // The state word the CALLER supplied, once per row.
+    expect(rows()[0].querySelector('.run-check-item-state')?.textContent).toBe('Missing');
+    // And the server's sentence, verbatim.
+    expect(rows()[0].textContent).toContain('Provide/point to the reduced spectrum.');
+  });
+
+  it('MUTATION-GUARDED: a finding with NO kind gets no subject line at all', () => {
+    /*
+     * MUTATION: falling back to `titleCase(String(kind))` (which is what
+     * `pendingItemToBlocker` correctly does for a form it is about to render)
+     * makes this RED — and produces "Undefined" or, for `qc`, the measured
+     * "Qc". A subject line is a claim about what a finding is ABOUT, so an
+     * absent kind must produce silence rather than a guess.
+     */
+    render(
+      <FindingList
+        title="Blocking"
+        state="Missing"
+        findings={[{ message: 'A blocking question is open on this run.' }]}
+      />,
+    );
+    expect(rows()).toHaveLength(1);
+    expect(rows()[0].querySelector('.run-check-item-subject')).toBeNull();
+    expect(rows()[0].textContent).toContain('A blocking question is open on this run.');
+  });
+
+  it('MUTATION-GUARDED: an unrecognised kind is not humanised into a subject', () => {
+    /* MUTATION: `KIND_LABEL[kind] ?? titleCase(kind)` in `blockerKindLabel`
+       makes this RED with "Spectrometer Drift" — a name no server ever sent. */
+    render(
+      <FindingList
+        title="Blocking"
+        state="Missing"
+        findings={[{ kind: 'spectrometer_drift', message: 'Something new.' }]}
+      />,
+    );
+    expect(rows()[0].querySelector('.run-check-item-subject')).toBeNull();
+  });
+
+  it('falls back to the official PATH, in mono, when there is no kind', () => {
+    render(
+      <FindingList
+        title="Draft checks"
+        state="Needs Review"
+        findings={[{ path: 'context.temperature_K', message: 'no evidence' }]}
+      />,
+    );
+    const subject = rows()[0].querySelector('.run-check-item-subject') as HTMLElement;
+    expect(subject.textContent).toBe('context.temperature_K');
+    // `UX-014` — a schema path is demoted, never removed, and never re-worded.
+    expect(subject.className).toContain('mono');
+  });
+
+  it('MUTATION-GUARDED: the whole-document sentinel `$` is not rendered as a subject', () => {
+    /*
+     * FOUND IN A REAL BROWSER, NOT BY A TEST. A Check Run on a real record
+     * rendered a subject line reading exactly `$` above
+     * `'descriptors' is a required property` — which is `official.py:98`'s
+     * sentinel for an error with an EMPTY path, i.e. a WHOLE-DOCUMENT finding
+     * with no field to name.
+     *
+     * MUTATION: dropping the `ROOT_PATH` check makes this RED, and ships a
+     * subject that looks like a variable name and names nothing. A finding with
+     * no field says nothing about its subject — the same rule as an absent
+     * `kind`, for the same reason.
+     */
+    render(
+      <FindingList
+        title="Official schema"
+        state="Invalid"
+        findings={[{ path: '$', message: "'descriptors' is a required property" }]}
+      />,
+    );
+    expect(rows()[0].querySelector('.run-check-item-subject')).toBeNull();
+    // The finding itself is untouched, and still counted.
+    expect(screen.getByText('Official schema · 1')).toBeTruthy();
+    expect(rows()[0].textContent).toContain("'descriptors' is a required property");
+  });
+
+  it('does not print the path twice when the path IS the whole finding', () => {
+    /* `runFindingText` falls back to `path` when there is no prose, so a subject
+       line here would be the same six words stacked on themselves. */
+    render(
+      <FindingList title="Draft checks" state="Needs Review" findings={[{ path: 'descriptors' }]} />,
+    );
+    expect(rows()[0].querySelector('.run-check-item-subject')).toBeNull();
+    expect(rows()[0].textContent).toContain('descriptors');
+  });
+
+  it('MUTATION-GUARDED: a finding it cannot describe is still counted and still shown', () => {
+    /* The behaviour that exists because it was got wrong once: dropping it
+       silently shrinks the number of things standing between this run and a
+       valid record. MUTATION: filtering `text === null` makes this RED twice. */
+    render(<FindingList title="Blocking" state="Missing" findings={[{ code: 'SOMETHING_NEW' }] as never} />);
+    expect(screen.getByText('Blocking · 1')).toBeTruthy();
+    expect(
+      screen.getByText('The server reported a finding this build cannot describe.'),
+    ).toBeTruthy();
+  });
+});
+
+describe('a control is offered only where its destination exists', () => {
+  it('MUTATION-GUARDED: no Go to field button when the caller renders no inputs', () => {
+    /*
+     * `ValidateReview` is exactly this case — it shows a run's findings and
+     * renders none of that run's inputs. MUTATION: rendering the button
+     * unconditionally makes this RED, and ships a control that scrolls to
+     * nothing or to another run's box.
+     */
+    render(
+      <FindingList
+        title="Draft checks"
+        state="Needs Review"
+        findings={[{ path: 'context.temperature_K', message: 'no evidence' }]}
+      />,
+    );
+    expect(screen.queryByRole('button', { name: 'Go to field' })).toBeNull();
+  });
+
+  it('offers Go to field for a run-level path, and calls back with that path', () => {
+    const go = vi.fn();
+    render(
+      <FindingList
+        title="Draft checks"
+        state="Needs Review"
+        findings={[{ path: 'context.temperature_K', message: 'no evidence' }]}
+        onGoToField={go}
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Go to field' }));
+    expect(go).toHaveBeenCalledWith('context.temperature_K');
+  });
+
+  it('MUTATION-GUARDED: a path that is NOT one of the five offers nothing', () => {
+    /*
+     * MUTATION: matching by prefix — so `timestamps` resolves to
+     * `timestamps.acquired_start_utc` — makes this RED. "The timestamps block
+     * has a problem" and "this field has a problem" are different claims, and
+     * only the server can tell them apart.
+     */
+    render(
+      <FindingList
+        title="Official schema"
+        state="Invalid"
+        findings={[
+          { path: 'timestamps', message: "'acquired_start_utc' is required" },
+          { path: 'descriptors', message: "'outputs' is a required property" },
+        ]}
+        onGoToField={vi.fn()}
+      />,
+    );
+    expect(screen.queryByRole('button', { name: 'Go to field' })).toBeNull();
+  });
+
+  it('MUTATION-GUARDED: no Ask ISAAC control on a screen with no Assistant', () => {
+    /* The context default is `null`, and a button that cannot reach a composer
+       is a button that does nothing. MUTATION: rendering it regardless makes
+       this RED. */
+    render(
+      <FindingList title="Blocking" state="Missing" findings={[{ kind: 'series', message: 'x' }]} />,
+    );
+    expect(screen.queryByRole('button', { name: /Ask ISAAC/ })).toBeNull();
+  });
+});
+
+describe('Ask ISAAC composes the context and sends nothing', () => {
+  const askWith = (findings: Parameters<typeof FindingList>[0]['findings']) => {
+    const ask = vi.fn();
+    render(
+      <AssistantAskContext.Provider value={ask}>
+        <FindingList
+          title="Blocking"
+          state="Missing"
+          findings={findings}
+          ask={{ experimentId: 'EXP1', runId: 'RUN7', runLabel: 'Run 7' }}
+        />
+      </AssistantAskContext.Provider>,
+    );
+    return ask;
+  };
+
+  it('carries the subject, the run, the record and the validator’s own words', () => {
+    const ask = askWith([
+      { kind: 'series', message: 'Provide/point to the reduced spectrum.' },
+    ]);
+    fireEvent.click(screen.getByRole('button', { name: 'Ask ISAAC about Reduced Spectrum' }));
+    expect(ask).toHaveBeenCalledTimes(1);
+    const question = ask.mock.calls[0][0] as string;
+    expect(question).toContain('Reduced Spectrum');
+    expect(question).toContain('Run 7');
+    expect(question).toContain('RUN7');
+    expect(question).toContain('EXP1');
+    // VERBATIM. The composed question quotes the validator; it never rewords it.
+    expect(question).toContain('Provide/point to the reduced spectrum.');
+  });
+
+  it('MUTATION-GUARDED: it never invents a subject for an unnamed finding', () => {
+    /* MUTATION: interpolating `finding.kind` unguarded puts "undefined" into a
+       sentence a scientist is about to send. */
+    const ask = askWith([{ message: 'A blocking question is open on this run.' }]);
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Ask ISAAC about this missing finding' }),
+    );
+    const question = ask.mock.calls[0][0] as string;
+    expect(question).not.toMatch(/undefined|null|\[object/i);
+    expect(question).toContain('A blocking question is open on this run.');
+  });
+
+  it('each row’s control is distinguishable by name', () => {
+    /* Six identical "Ask ISAAC" buttons in one list are six controls a
+       screen-reader user cannot tell apart. */
+    askWith([
+      { kind: 'series', message: 'a' },
+      { kind: 'descriptor', message: 'b' },
+    ]);
+    expect(screen.getByRole('button', { name: 'Ask ISAAC about Reduced Spectrum' })).toBeTruthy();
+    expect(
+      screen.getByRole('button', { name: 'Ask ISAAC about Scientific Descriptor' }),
+    ).toBeTruthy();
+  });
+});
+
+/* ── the composed question must be one the resolver can actually answer ────── */
+
+/**
+ * *** THIS BLOCK EXISTS BECAUSE ITS ABSENCE LET A NON-FUNCTIONAL CONTROL SHIP. ***
+ *
+ * `composeFindingQuestion`'s first version opened with
+ * `What does this <state> finding [about <subject>] mean?`, and the deterministic
+ * resolver classifies every variant of that as `intent='unsupported'`. So the
+ * `Ask ISAAC` button — the owner's own request — handed the assistant context it
+ * could not use and produced a refusal every time. An independent review caught
+ * it by running `assistant_query.classify`; nothing in this file asserted that
+ * the string is one the catalog accepts.
+ *
+ * THE OPENING IS WHAT CLASSIFICATION TURNS ON, so that is what these assert. The
+ * intents are the resolver's own (`assistant_query.py`) and the two phrasings
+ * were verified against it at `high` confidence:
+ *
+ *   `Where did <path> come from?`  -> field_provenance
+ *   `What is blocking export?`     -> export_blockers
+ *
+ * A change that reworded the opening would have to re-verify it there; that
+ * cannot be done from jsdom, which is precisely why the OPENING is pinned here
+ * as a literal rather than paraphrased.
+ */
+describe('the Ask ISAAC question is answerable, not merely well-formed', () => {
+  const ctx = { runLabel: 'Run 1', runId: 'r_1', experimentId: 'e_1' };
+
+  it('asks for provenance when the finding names a field that HOLDS a value', () => {
+    const q = composeFindingQuestion(
+      'Invalid',
+      { text: 'Temperature', mono: false },
+      '301 is out of range',
+      ctx,
+      'context.temperature_K',
+    );
+    // The opening, exactly — this is the substring the resolver matches on.
+    expect(q.startsWith('Where did context.temperature_K come from?')).toBe(true);
+    // ...and nothing was given up to get it.
+    expect(q).toContain('On Run 1 (r_1), record e_1.');
+    expect(q).toContain('301 is out of range');
+  });
+
+  /*
+   * THE CASE THAT IS ABOUT TRUTH RATHER THAN ABOUT CLASSIFICATION. A `Missing`
+   * finding has a path but no value, and "where did it come from" is a question
+   * with no answer. `What is blocking export?` also classifies `high`, so the
+   * choice costs nothing and says something true.
+   */
+  it('asks what blocks export for a MISSING finding, even when the path is known', () => {
+    const q = composeFindingQuestion('Missing', null, 'Provide a value', ctx, 'context.environment');
+    expect(q.startsWith('What is blocking export?')).toBe(true);
+    expect(q).not.toContain('come from');
+  });
+
+  it('asks what blocks export when there is no field path at all', () => {
+    const q = composeFindingQuestion(
+      'Missing',
+      { text: 'Reduced Spectrum', mono: false },
+      'Provide/point to the reduced spectrum',
+      ctx,
+    );
+    expect(q.startsWith('What is blocking export?')).toBe(true);
+    // the subject is still named, so the reader can see which finding they asked about
+    expect(q).toContain('Reduced Spectrum');
+    expect(q).toContain('Provide/point to the reduced spectrum');
+  });
+
+  /*
+   * THE BAN, and it is the assertion that would have failed on the shipped
+   * defect. No composed question may open with the phrasing the resolver
+   * refuses — across every state, with and without a subject and a path.
+   */
+  it('never emits the opening the resolver classifies as unsupported', () => {
+    const states = ['Missing', 'Needs Review', 'Invalid', 'Advisory'] as const;
+    for (const state of states) {
+      for (const subject of [null, { text: 'Environment', mono: false }]) {
+        for (const path of [null, 'context.environment']) {
+          const q = composeFindingQuestion(state, subject, 'a message', ctx, path);
+          expect(
+            q,
+            `state=${state} subject=${subject === null ? 'none' : 'named'} path=${String(path)} ` +
+              `opens with a phrasing assistant_query.classify returns 'unsupported' for`,
+          ).not.toMatch(/^What does this .* finding/);
+          // and it opens with one of exactly the two verified forms
+          expect(
+            q.startsWith('Where did ') || q.startsWith('What is blocking export?'),
+            `unrecognised opening: ${q.slice(0, 60)}`,
+          ).toBe(true);
+        }
+      }
+    }
+  });
+});

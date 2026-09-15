@@ -156,6 +156,47 @@ function QuickStart({
   const first = facts.firstRequest;
   const firstSample = first ? codeSamples(first)[0] : null;
   return (
+    /*
+     * ── COLLAPSED BY DEFAULT SINCE 2026-09-15, AND WHY IT IS ELIGIBLE ───────
+     *
+     * The owner's standing direction is that this page carries too much visible
+     * prose, and the brief for API Access is narrower than "shorten it": the
+     * default view should answer only whether API access is available, whether
+     * a credential is available, how the agent interface differs from the REST
+     * API, and where a developer goes next. Those four are the banner, the
+     * disabled Create control with its reason, the two jump links, and the
+     * access rows. A `curl` line, a base path, a media-type list and a
+     * bearer-header discussion are none of them: they are what a developer
+     * reads ONCE, after deciding to call the API.
+     *
+     * NOTHING HERE IS A STATE A READER MUST NOT MISS, which is the test this
+     * surface's disclosures are held to. Every figure in this drawer is derived
+     * from the contract the app generates for itself (`quickStartFacts`), it
+     * states no security or privacy posture, no destructive consequence and no
+     * required action — the ONE claim of that kind on this tab, that no
+     * operation can issue a credential, is in the always-visible banner and
+     * stays there. `ConnectAnAgent` below is already a drawer, so this
+     * introduces no new disclosure vocabulary.
+     *
+     * THE SECTION AND ITS `aria-labelledby` ARE UNCHANGED, so this is still a
+     * named region with the same accessible name, and native `<details>` keeps
+     * every sentence in the DOM and in the accessibility tree — which is what
+     * lets the honesty guards go on reaching it with `querySelectorAll` without
+     * being weakened.
+     *
+     * THE ROOT CLASS IS ITS OWN, AND THAT IS NOT A STYLE DECISION. It wears the
+     * same chrome as the `Connect an Agent` drawer below — `screens.css` shares
+     * the declarations through one selector list — but it must NOT carry
+     * `api-connect`, because `settings-api.test.tsx` addresses that drawer with
+     * `document.querySelector('details.api-connect')`, which takes the FIRST
+     * match. Adding the class here made three of those tests assert about this
+     * drawer instead of the one they name, and they failed loudly rather than
+     * silently only because the open/closed state happened to differ.
+     */
+    <details className="api-quickstart-drawer">
+      <summary className="api-connect-summary">
+        <span className="api-connect-title">Quick Start — Your First Request</span>
+      </summary>
     <section className="api-quickstart" aria-labelledby="settings-api-quickstart-heading">
       <h3 id="settings-api-quickstart-heading" className="api-section-title">
         Quick Start
@@ -284,6 +325,7 @@ function QuickStart({
         </button>
       </nav>
     </section>
+    </details>
   );
 }
 

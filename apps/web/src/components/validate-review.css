@@ -49,8 +49,31 @@
   min-width: 0;
 }
 
+/*
+ * CAPPED — and the numbers here are the CORRECTED ones. The first version said
+ * "about 143 characters per line", which came from a flawed reading of
+ * `getClientRects()` (one rect per inline text-node fragment, not per line —
+ * see the fuller account at `.needsyou-text` in `screens/screens.css`).
+ *
+ * Re-measured by laying the text into a probe at this rule's own font and
+ * content width and counting line boxes:
+ *
+ *              before                        after
+ *   @1280      895px, 1 line, 129 ch/line    567px, 2 lines, 65 ch/line
+ *   @1728     1343px, 1 line, 129 ch/line    567px, 2 lines, 65 ch/line
+ *
+ * 129 characters on ONE line, at BOTH widths — so unlike its sibling this one
+ * was a real defect even at the widest viewport the suite tests. Found by
+ * Impeccable's in-browser overlay; the CLI engine cannot see a `.tsx` at all.
+ *
+ * This sentence matters more than most: it is the one that says a check has NOT
+ * been run, and that "that is not the same as no findings". A reader who loses
+ * their place in a 143-character line is losing their place in the distinction
+ * the sentence exists to draw.
+ */
 .vr-status {
   margin-top: 8px;
+  max-width: 72ch;
   font-size: 12.5px;
   line-height: 1.55;
   color: var(--text-secondary);

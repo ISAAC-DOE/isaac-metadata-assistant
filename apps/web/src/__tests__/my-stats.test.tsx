@@ -698,18 +698,35 @@ function assertsEmptiness(sentence: string): boolean {
 
 // --- the tablist ------------------------------------------------------------
 
-describe('the two top-level tabs', () => {
+/*
+ * ~~'the two top-level tabs'~~ — THREE since 2026-09-15. `build` joined
+ * `general` and `mine` when the redesign moved the engineering material off the
+ * tab a scientist lands on; see `lib/routes.ts` and `StatisticsPage.tsx`'s
+ * header for the measurement behind it. Every property below (order, default,
+ * roving tabindex, panel wiring, deep-linkability) is unchanged in kind — the
+ * expectations are widened to three rather than loosened.
+ */
+describe('the top-level tabs', () => {
   const tablist = () => screen.getByRole('tablist', { name: 'Statistics sections' });
 
-  it('exposes exactly two tabs, in order, with General ISAAC selected by default', async () => {
+  it('exposes exactly three tabs, in order, with Overview selected by default', async () => {
     stubFetchRoutes(statisticsRoutes());
     renderAt(ROUTES.statistics);
     await screen.findByRole('heading', { name: 'Workspace at a Glance' });
 
     const tabs = within(tablist()).getAllByRole('tab');
-    expect(tabs.map((t) => t.textContent)).toEqual(['General ISAAC', 'My Stats']);
+    /* ~~['General ISAAC', 'My Stats']~~ — the first label was renamed with the
+       redesign: `General ISAAC` named the SUBJECT (ISAAC in general) on the tab
+       a scientist lands on, which is the mixing the split undoes. The tab ID is
+       untouched, so every `?tab=general` link still resolves. */
+    expect(tabs.map((t) => t.textContent)).toEqual([
+      'Overview',
+      'My Stats',
+      'Build & Verification',
+    ]);
     expect(tabs[0]).toHaveAttribute('aria-selected', 'true');
     expect(tabs[1]).toHaveAttribute('aria-selected', 'false');
+    expect(tabs[2]).toHaveAttribute('aria-selected', 'false');
   });
 
   it('uses a roving tabindex — exactly one tab is in the tab order', async () => {
@@ -718,7 +735,7 @@ describe('the two top-level tabs', () => {
     await screen.findByRole('heading', { name: 'Workspace at a Glance' });
 
     const tabs = within(tablist()).getAllByRole('tab');
-    expect(tabs.map((t) => t.tabIndex)).toEqual([0, -1]);
+    expect(tabs.map((t) => t.tabIndex)).toEqual([0, -1, -1]);
   });
 
   it('wires the selected tab to a rendered tabpanel, and the panel back to it', async () => {
@@ -733,7 +750,9 @@ describe('the two top-level tabs', () => {
     expect(panel).toHaveAttribute('role', 'tabpanel');
     expect(panel).toHaveAttribute('aria-labelledby', selected.id);
     // `aria-controls` only on the SELECTED tab, matching the app's other tablists.
-    expect(within(tablist()).getAllByRole('tab')[1].getAttribute('aria-controls')).toBeNull();
+    for (const unselected of within(tablist()).getAllByRole('tab').slice(1)) {
+      expect(unselected.getAttribute('aria-controls')).toBeNull();
+    }
   });
 
   it('switches on ArrowRight and moves focus with the selection', async () => {
@@ -783,10 +802,11 @@ describe('the two top-level tabs', () => {
   });
 
   it('declares its ids in one place, and the type guard agrees with them', () => {
-    expect([...STATISTICS_TAB_IDS]).toEqual(['general', 'mine']);
+    expect([...STATISTICS_TAB_IDS]).toEqual(['general', 'mine', 'build']);
     expect(isStatisticsTab('general')).toBe(true);
     expect(isStatisticsTab('mine')).toBe(true);
-    for (const bad of ['General', '', null, undefined, 'general ']) {
+    expect(isStatisticsTab('build')).toBe(true);
+    for (const bad of ['General', 'Build', '', null, undefined, 'general ']) {
       expect(isStatisticsTab(bad as string | null)).toBe(false);
     }
   });
@@ -828,8 +848,11 @@ describe('the General ISAAC tab keeps the workspace material', () => {
   });
 
   it('collapses the build internals — runtime, Project Memory and the API surface — by default', async () => {
+    /* They moved to `?tab=build` in the 2026-09-15 redesign, and they are still
+       COLLAPSED inside it: the tab change did not make them a main-flow
+       destination, which is the property this case exists for. */
     stubFetchRoutes(statisticsRoutes());
-    const { container } = renderAt(ROUTES.statistics);
+    const { container } = renderAt(ROUTES.statisticsTab('build'));
     await screen.findByText('Synthetic-Only');
 
     const details = container.querySelector('details.stats-technical');
@@ -889,8 +912,12 @@ describe('My Stats invents no personal figure — the six traps', () => {
   it('2 — issues NO request, so no record in any scope can be shown as personal', async () => {
     const { calls } = await renderMineTab();
     /*
-     * The five General-tab reads still happen on mount (they are not tab-keyed),
-     * and NOTHING else does. `stubFetchRoutes` records each call as
+     * The SIX tracked page-level reads still happen on mount (they are not
+     * tab-keyed), and NOTHING else does. ~~five~~ — `GET /api/imports` joined
+     * them on 2026-09-15 with the Historical Imports figures, and its presence
+     * here is the assertion that it is PAGE-level rather than tab-keyed: were
+     * it keyed on the tab, it would be absent from this list and this tab would
+     * be issuing a different set of requests from the Overview one. `stubFetchRoutes` records each call as
      * `"<METHOD> <path>"`, so this asserts the method too — every request is a GET,
      * and this tab therefore cannot mutate anything either.
      *
@@ -909,7 +936,8 @@ describe('My Stats invents no personal figure — the six traps', () => {
         'GET /api/openapi',
         'GET /api/runtime/records',
         'GET /api/schema',
-        // Record Verification's read. A General-tab section, not tab-keyed, so
+        'GET /api/imports',
+        // Record Verification's read. A Build-tab section, not tab-keyed, so
         // it fires here too — and it is a GET, so this tab still cannot mutate.
         'GET /api/runtime/verification',
       ].sort(),
@@ -2075,16 +2103,21 @@ describe('unconfiguredMyStatsSource', () => {
 // --- switching tabs does not re-read --------------------------------------
 
 describe('switching tabs is free', () => {
+  /* WALKED ACROSS ALL THREE TABS since 2026-09-15, which is what keeps the
+     claim honest: the reads are deliberately NOT keyed on the tab, so a third
+     panel that fetched on mount would be invisible to a two-tab walk. */
   it('issues no additional request when the reader moves between tabs', async () => {
     const calls = stubFetchRoutes(statisticsRoutes());
     renderAt(ROUTES.statistics);
-    await screen.findByText('Synthetic-Only');
+    await screen.findByRole('heading', { name: 'Workspace at a Glance' });
     const afterLoad = calls.length;
 
     const tablist = screen.getByRole('tablist', { name: 'Statistics sections' });
     fireEvent.click(within(tablist).getByRole('tab', { name: 'My Stats' }));
     await screen.findByRole('heading', { name: 'Personal Statistics' });
-    fireEvent.click(within(tablist).getByRole('tab', { name: 'General ISAAC' }));
+    fireEvent.click(within(tablist).getByRole('tab', { name: 'Build & Verification' }));
+    await screen.findByRole('heading', { name: 'Record Verification' });
+    fireEvent.click(within(tablist).getByRole('tab', { name: 'Overview' }));
     await screen.findByRole('heading', { name: 'Workspace at a Glance' });
 
     await waitFor(() => expect(calls.length).toBe(afterLoad));

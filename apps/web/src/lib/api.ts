@@ -2760,9 +2760,19 @@ export const api = {
    * NONE OF THEM SENDS A FILE. A source is either a POINTER this build records
    * and does not open, or one of the committed synthetic fixtures it reads
    * because they are files this repository ships for that purpose. There is no
-   * multipart body anywhere here and no `<input type="file">` on the surface —
-   * `upload-claim-parity.test.tsx` asserts exactly two non-test files declare one
-   * and names both, so a third would fail CI.
+   * multipart body anywhere here.
+   *
+   * ~~and no `<input type="file">` on the surface — `upload-claim-parity.test.tsx`
+   * asserts exactly two non-test files declare one and names both, so a third
+   * would fail CI.~~ — **BOTH HALVES FALSE SINCE 2026-09-15**, and struck rather
+   * than deleted because "there is no file input" is exactly the kind of claim a
+   * future session builds on. The Historical Import surface now HAS a file
+   * picker (`ImportFileStaging`) and the census is THREE named files.
+   *
+   * THE SENTENCE ABOVE IT IS UNAFFECTED AND IS THE ONE THAT MATTERS HERE: none
+   * of these nine operations sends a file. The picker stages in the browser and
+   * `addImportSource` sends a name, size, type and an optional checksum — never
+   * content. Found by independent review.
    *
    * EIGHT OF THE NINE SEND NO `If-Match`, AND THAT IS THE CONTRACT. An import
    * session serves no `ETag`: it is a working area with no revision contract, and

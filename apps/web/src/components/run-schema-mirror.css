@@ -1,7 +1,20 @@
 /*
- * THE SCHEMA MIRROR beside the run editor. Card language and tokens only — no
- * new hue, radius or size enters the app. See `RunSchemaMirror.tsx` for what on
- * this pane is exact and what is a draft grouping.
+ * THE RECORD MAP beside the run editor. Card language and tokens only — no new
+ * hue, radius or size enters the app. See `RunSchemaMirror.tsx` for what on
+ * this pane is exact, what is scoped to a check, and what is a draft grouping.
+ *
+ * TWO LAYOUT DECISIONS ARE LOAD-BEARING RATHER THAN TASTE:
+ *
+ *  1. IT IS STICKY AND INTERNALLY SCROLLED, AT DESKTOP ONLY. A reader edits on
+ *     the left and reads state on the right, so the right must not scroll away
+ *     — and it must not become a second full-height document either. It is
+ *     capped and scrolls inside itself. Below the split's own 1280px
+ *     breakpoint the two columns are stacked, where sticking would pin the map
+ *     over the editor, so neither rule applies there.
+ *  2. THE ROW IS A TWO-LINE GRID, NOT A PARAGRAPH IN A WIDE BOX. The pane is
+ *     a ~1fr column of a 1.6fr/1fr split; a sentence in it stops a third of the
+ *     way across and leaves the rest dead. Label and state sit on one line with
+ *     the state pushed right, the path and value under it.
  */
 .rsm {
   padding: var(--space-lg);
@@ -11,17 +24,56 @@
   box-shadow: var(--shadow-card);
   min-width: 0;
 }
+
+@media (min-width: 1280px) {
+  .rsm {
+    position: sticky;
+    /* Clear of the app chrome above, in the same token grid as the gap the
+       split itself uses. */
+    top: var(--space-lg);
+    /* THE CAP IS A MAXIMUM, NOT A HEIGHT. The pane is as tall as its content
+       until the content passes the viewport, so a short map is a short card
+       rather than a mostly-empty column with a scrollbar. */
+    max-height: calc(100vh - var(--space-xl));
+    overflow-y: auto;
+    /* `auto` on the CONTAINER and nothing inside it is `flex: 1 1 auto` with a
+       zeroed minimum — the shape that once starved a clamped popover's list to
+       `clientHeight: 0`. Every child here is in normal flow, so a cap that is
+       smaller than the content overflows into this one scrollport and is
+       reachable, rather than being absorbed by one child. */
+  }
+}
+
+.rsm-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-sm);
+  margin-bottom: var(--space-sm);
+}
 .rsm-heading {
-  margin: 0 0 var(--space-sm);
+  margin: 0;
   font-size: var(--font-size-heading-sm);
   font-weight: var(--font-weight-semibold);
   color: var(--text-heading);
+}
+/* WHICH RUN THIS PANE DESCRIBES. Demoted, because it names the subject rather
+   than being the heading; never absent, because an unnamed subject beside a
+   list of runs reads as the record's own state. */
+.rsm-subject {
+  margin: 0;
+  font-size: var(--font-size-meta);
+  color: var(--text-secondary);
 }
 .rsm-note {
   margin: 0 0 var(--space-sm);
   font-size: var(--font-size-meta);
   line-height: var(--line-height-normal);
   color: var(--text-secondary);
+  /* The pane is narrow; this stops a line from running the full width of the
+     card in the stacked (below-1280px) layout where it could. */
+  max-width: 62ch;
 }
 .rsm-group {
   margin-top: var(--space-md);
@@ -29,6 +81,135 @@
 .rsm-group-title {
   margin: 0 0 var(--space-xs);
 }
+
+/* ---- the state rows ----------------------------------------------------- */
+
+.rm-rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+}
+
+.rm-row {
+  min-width: 0;
+}
+
+.rm-row-inner {
+  display: grid;
+  gap: var(--space-2xs);
+  width: 100%;
+  padding: var(--space-sm);
+  border: 1px solid var(--border-faint);
+  border-radius: var(--radius-inner);
+  background: var(--surface-subtle);
+  text-align: left;
+  min-width: 0;
+}
+
+/* A ROW IS PRESSABLE ONLY WHERE AN INPUT EXISTS FOR IT. The cursor, the hover
+   and the focus ring are all scoped to `.rm-row-button`, so an inert row is
+   visually inert as well as unfocusable — it is a `<div>`, not a disabled
+   button, so there is nothing for a reader to try. */
+.rm-row-button {
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+.rm-row-button:hover {
+  border-color: var(--action-selected-border);
+  background: var(--action-tint);
+}
+.rm-row-button:focus-visible {
+  outline: 2px solid var(--ring-active);
+  outline-offset: 2px;
+}
+
+.rm-row-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-sm);
+  min-width: 0;
+}
+
+.rm-row-label {
+  font-size: var(--font-size-body);
+  font-weight: var(--font-weight-medium);
+  color: var(--text-heading);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* NEVER COLOUR ALONE, and here never colour at all: every state wears the same
+   ink and is told apart by its glyph and its word. Reserved pass/fail hues are
+   deliberately absent — "Filled" is not a verdict, and official validation is
+   the only thing on this screen that issues one. */
+.rm-state {
+  margin-left: auto;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2xs);
+  padding: 0 var(--space-xs);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  font-size: var(--font-size-meta);
+  font-weight: var(--font-weight-medium);
+  color: var(--text-slate);
+  white-space: nowrap;
+}
+
+.rm-row-path {
+  font-size: var(--font-size-meta);
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+
+/* THE VALUE THE RUN ACTUALLY HOLDS — the half of this pane that did not exist
+   before. Mono, because it carries identity the way the run header's condition
+   line does, and at body size because it is the content rather than a caption. */
+.rm-row-value {
+  font-family: var(--font-mono);
+  font-size: var(--font-size-body);
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+.rm-row-unit {
+  color: var(--text-secondary);
+}
+
+/* The validator's own sentence, verbatim. */
+.rm-row-note {
+  font-size: var(--font-size-meta);
+  line-height: var(--line-height-normal);
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+
+/* ---- the full-schema disclosure ----------------------------------------- */
+
+.rsm-more {
+  margin-top: var(--space-md);
+  border-top: 1px solid var(--border-faint);
+  padding-top: var(--space-sm);
+}
+.rsm-more-summary {
+  cursor: pointer;
+  font-size: var(--font-size-meta);
+  font-weight: var(--font-weight-medium);
+  color: var(--text-strong);
+}
+.rsm-more-summary:focus-visible {
+  outline: 2px solid var(--ring-active);
+  outline-offset: 2px;
+}
+.rsm-more-body {
+  margin-top: var(--space-sm);
+}
+
 .rsm-blocks {
   list-style: none;
   margin: 0;
@@ -44,13 +225,6 @@
   background: var(--surface-subtle);
   min-width: 0;
 }
-/* Recorded state carries a border weight, never a reserved hue: `P22C` bans a
-   green/red pass-fail colour in an interaction rule, and "recorded" is not a
-   verdict anyway — official validation decides validity. */
-.rsm-own {
-  border-color: var(--action-selected-border);
-  background: var(--action-tint);
-}
 .rsm-block-head {
   display: flex;
   flex-wrap: wrap;
@@ -62,15 +236,11 @@
   font-size: var(--font-size-meta);
   color: var(--text-strong);
 }
-.rsm-state {
-  font-size: var(--font-size-meta);
-  color: var(--text-secondary);
-}
 .rsm-fields {
   margin: var(--space-xs) 0 0;
   font-size: var(--font-size-meta);
   line-height: var(--line-height-normal);
-  color: var(--text-tertiary);
+  color: var(--text-muted);
   overflow-wrap: anywhere;
 }
 .rsm-draft {

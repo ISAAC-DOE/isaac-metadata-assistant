@@ -819,11 +819,42 @@ describe('the whole writable set is reachable, not three fifths of it', () => {
     expect(paths).toHaveLength(RUN_FIELDS.length);
   });
 
-  it('sends the acquisition END timestamp, under its own official path', async () => {
-    const bodies = await patchBodyAfterTyping('Acquisition end', '2026-01-31T11:30:00Z');
+  it('sends the acquisition END timestamp from the PICKER, under its own official path', async () => {
+    /*
+     * ~~`patchBodyAfterTyping('Acquisition end', '2026-01-31T11:30:00Z')`~~ —
+     * REWRITTEN AS TWO TESTS, and the reason is the whole point of the change
+     * it is following.
+     *
+     * `Acquisition end` now names an `<input type="datetime-local">`, which
+     * cannot hold a `Z` suffix: the control sanitizes `'2026-01-31T11:30:00Z'`
+     * to `''` (measured in jsdom, and it is the HTML specification's own value
+     * sanitization, not a jsdom quirk). So the old line was no longer entering
+     * a timestamp at all.
+     *
+     * THE ASSERTION THAT MATTERS IS UNCHANGED AND IS THE REASON BOTH HALVES
+     * STAYED: the WHOLE PATCH body, including the confirmation flag the route
+     * requires, and the stored string byte-for-byte. The picker is a different
+     * way to enter the value and must not be a different value — so this test
+     * enters `2026-01-31T11:30` and still expects `2026-01-31T11:30:00Z` on the
+     * wire. If `pickerValueToIso` ever stopped producing the official string,
+     * this fails here rather than in a record nobody re-reads.
+     */
+    const bodies = await patchBodyAfterTyping('Acquisition end', '2026-01-31T11:30');
     expect(bodies).toHaveLength(1);
-    // The WHOLE body, including the confirmation flag the route requires — asserted
-     // rather than projected, so a change to either half fails here.
+    expect(bodies[0]).toEqual({
+      confirmed_by_user: true,
+      fields: { 'timestamps.acquired_end_utc': '2026-01-31T11:30:00Z' },
+    });
+  });
+
+  it('still accepts a PASTED ISO string, and sends the identical body', async () => {
+    /* The other half of the test above: the text path is not a fallback that
+       behaves differently, it is the same field entered another way. */
+    const bodies = await patchBodyAfterTyping(
+      'Acquisition end — ISO 8601 text',
+      '2026-01-31T11:30:00Z',
+    );
+    expect(bodies).toHaveLength(1);
     expect(bodies[0]).toEqual({
       confirmed_by_user: true,
       fields: { 'timestamps.acquired_end_utc': '2026-01-31T11:30:00Z' },
@@ -831,10 +862,16 @@ describe('the whole writable set is reachable, not three fifths of it', () => {
   });
 
   it('applies the SAME format gate to the end timestamp as to the start', async () => {
-    const bodies = await patchBodyAfterTyping('Acquisition end', 'yesterday afternoon');
+    /* Through the ISO text path, because that is now the only way to enter an
+       unparseable timestamp — the picker refuses one before this build sees
+       it. The gate itself (`parseRunField`) is untouched. */
+    const bodies = await patchBodyAfterTyping(
+      'Acquisition end — ISO 8601 text',
+      'yesterday afternoon',
+    );
     expect(bodies).toHaveLength(0);
     const card = cardFor('RUNAAA');
-    expect(within(card).getByLabelText('Acquisition end')).toHaveAttribute(
+    expect(within(card).getByLabelText('Acquisition end — ISO 8601 text')).toHaveAttribute(
       'aria-invalid',
       'true',
     );
@@ -1529,11 +1566,25 @@ describe('a held-invalid edit is ADDITIVE, not a replacement (review finding)', 
       });
       await vi.advanceTimersByTimeAsync(AUTOSAVE_DEBOUNCE_MS + 50);
     });
-    // ...then an unparseable one this build will not send.
+    /*
+     * ...then an unparseable one this build will not send.
+     *
+     * ~~`getByLabelText('Acquisition start')`~~ — RETARGETED, not weakened, and
+     * the reason is a real behaviour change rather than a selector preference.
+     * That name now belongs to an `<input type="datetime-local">`, and a
+     * datetime control SANITIZES ITS OWN VALUE: `'not-a-date'` becomes `''` in
+     * jsdom and in every browser, so this test could no longer produce the
+     * held-invalid state it exists to observe — it would have been asserting
+     * over a cleared field. Unparseable text is now reachable only through the
+     * ISO text path beside the picker, which is exactly where a reader can
+     * still type one, so the state is unchanged and only the box it is typed
+     * into has moved.
+     */
     await act(async () => {
-      fireEvent.change(within(cardFor('RUNAAA')).getByLabelText('Acquisition start'), {
-        target: { value: 'not-a-date' },
-      });
+      fireEvent.change(
+        within(cardFor('RUNAAA')).getByLabelText('Acquisition start — ISO 8601 text'),
+        { target: { value: 'not-a-date' } },
+      );
       await vi.advanceTimersByTimeAsync(AUTOSAVE_DEBOUNCE_MS + 50);
     });
     return within(cardFor('RUNAAA')).getByRole('status').textContent ?? '';

@@ -1,6 +1,6 @@
 import './chrome.css';
 import { Link } from 'react-router-dom';
-import { Inbox, LayoutList, ShieldCheck, Settings } from './icons';
+import { BarChart3, Inbox, LayoutList, Settings } from './icons';
 import { LABELS } from '../lib/labels';
 import { ROUTES } from '../lib/routes';
 import type { LucideIcon } from './icons';
@@ -102,7 +102,29 @@ const ITEMS: { key: NavKey; label: string; icon: LucideIcon; to: string }[] = [
    * sites pair it with a text label, which is this file's standing rule.
    */
   { key: 'imports', label: LABELS.navImports, icon: Inbox, to: ROUTES.imports },
-  { key: 'governance', label: LABELS.navGovernance, icon: ShieldCheck, to: ROUTES.governance },
+  /*
+   * `Statistics` IS BACK IN THE PRIMARY LIST, 2026-09-15, BY THE PROJECT
+   * OWNER'S DECISION — and the reasoning that demoted it on 2026-09-13 is left
+   * standing above rather than deleted, because it was not wrong about what it
+   * measured.
+   *
+   * That decline measured the SCREEN (3,820 px, 422 visible text elements) and
+   * concluded the slot was not earned. The owner's instruction is about the
+   * DESTINATION: a scientist does want to know how much is recorded, how much
+   * is ready and how much still needs them, and there is nowhere else in the
+   * product that answers it. Those are different questions, and only one of
+   * them is an agent's to answer.
+   *
+   * SO THE PROMOTION CARRIES AN OBLIGATION, stated here so a future session
+   * cannot read the slot as settled while the screen behind it is not: the
+   * density finding is unretracted, and `Statistics` earns this slot only once
+   * the page is scientist-first. `UX-017`'s measurement is the acceptance bar,
+   * not a historical note.
+   *
+   * `BarChart3` is already exported by `icons.tsx` and is paired with a text
+   * label, which is this file's standing rule.
+   */
+  { key: 'statistics', label: LABELS.navStatistics, icon: BarChart3, to: ROUTES.statistics },
   { key: 'settings', label: LABELS.navSettings, icon: Settings, to: ROUTES.settings },
 ];
 
@@ -120,7 +142,22 @@ const ITEMS: { key: NavKey; label: string; icon: LucideIcon; to: string }[] = [
  */
 const NAV_PARENT: Partial<Record<NavKey, NavKey>> = {
   memory: 'settings',
-  statistics: 'settings',
+  /*
+   * `governance` JOINS THE DEMOTED SET AND `statistics` LEAVES IT (2026-09-15).
+   *
+   * Governance & Safety is not a place a scientist goes to do their job; it is
+   * where they go to check what this build does with their data. That is a
+   * question asked once and then trusted, which is a Settings question and not
+   * a fifth primary destination — and the top-level list is supposed to stay
+   * very small.
+   *
+   * NOTHING ABOUT THE CAPABILITY MOVES. The route is unchanged, every existing
+   * deep link into it still resolves (`?tab=validator` from My Experiments and
+   * from the assistant's own composer, `?tab=schema` from Statistics), and the
+   * Record Validator is reachable in exactly as many clicks from the surfaces
+   * that actually send a reader there. Only the nav slot is withdrawn.
+   */
+  governance: 'settings',
 };
 
 interface LeftNavProps {

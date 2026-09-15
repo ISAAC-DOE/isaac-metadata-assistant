@@ -102,9 +102,22 @@ export const SURFACES: readonly Surface[] = [
      * import session has NOTHING to do with the worked-example records, and the
      * ordinary workspace is where a reader actually meets it: on a fresh
      * deployment it holds no sessions, so this surface measures the REAL
-     * first-run state — the empty list, the workflow strip, the durability
-     * sentence and the Start control. That is what a reader of this deployment
-     * sees, so it is what is swept.
+     * first-run state — the empty list and the Start control. That is what a
+     * reader of this deployment sees, so it is what is swept.
+     *
+     * CORRECTED 2026-09-15: this used to also name "the workflow strip, the
+     * durability sentence" as part of that first-run state. As of the
+     * landing-density slice (`HistoricalImport.tsx`'s `ImportList`), both now
+     * live inside a COLLAPSED `<details className="hi-how-it-works">` at the
+     * end of the page — reachable, not deleted (`CLAUDE.md`'s own rule for a
+     * relocated honesty claim), but no longer part of the DEFAULT-collapsed
+     * state this generic per-surface ready-gate measures. Opening a native
+     * `<details>` mutates no backend state, so it is not itself out of scope
+     * here — `e2e/specs/pill-shape.spec.ts`'s stepper-shape test does exactly
+     * that, in the SAME ordinary/read-only scope, to measure the node shapes
+     * inside it. This entry's own sweep simply has no reason to: it exists to
+     * gate readiness for axe/width/200%-zoom checks over the page a reader
+     * actually lands on, and a reader lands on it collapsed.
      *
      * THE READY GATE IS THE LIST's OWN `<h2>`, NOT THE PAGE `<h1>`, and the
      * distinction is the race `record-detail`'s comment documents at length. The
@@ -410,36 +423,68 @@ export const SURFACES: readonly Surface[] = [
     ready: { role: 'heading', name: 'Personal Statistics' },
   },
   {
+    /*
+     * *** ADDED 2026-09-15 TO STOP A COVERAGE LOSS, not to add coverage that
+     * never existed. ***
+     *
+     * The Statistics redesign moved four `details.stats-disclosure` blocks off
+     * the Overview tab onto this new `Build & Verification` tab. Measured in
+     * Chrome: Overview mounts **0**, My Stats **0**, `?tab=build` mounts **4**
+     * (plus one `details.stats-technical`). This tab was absent from the
+     * catalog, so those four blocks — and Record Verification, Mutation
+     * Verification and the platform-metrics region with them — were scanned by
+     * axe at NO viewport.
+     *
+     * `openUnreachableDisclosures` caught it rather than letting the baselines
+     * quietly drop, which is the failure its own header records having happened
+     * before: "exactly such a drop was once recorded as an accessibility win;
+     * it is a coverage loss."
+     *
+     * `ready` waits on the panel's own first heading, not the page `h1`, so the
+     * scan cannot race a tab that has not painted yet — the same reasoning the
+     * `statistics-mine` entry above states.
+     */
+    id: 'statistics-build',
+    name: 'Statistics — Build & Verification',
+    path: '/statistics?tab=build',
+    scope: 'ordinary',
+    ready: { role: 'heading', name: 'Record Verification' },
+  },
+  {
     id: 'settings',
-    name: 'Settings & API — Overview',
+    name: 'Settings — Overview',
     path: '/settings',
     scope: 'ordinary',
-    ready: { role: 'heading', name: 'Runtime Status' },
+    /* `Runtime Status` -> `System Status`, 2026-09-15: the Settings density work
+       renamed this heading and this gate did not move with it, so the surface
+       never became ready at four viewports. The gate follows the heading a
+       reader actually sees. */
+    ready: { role: 'heading', name: 'System Status' },
   },
   {
     id: 'settings-privacy',
-    name: 'Settings & API — Data & Privacy',
+    name: 'Settings — Data & Privacy',
     path: '/settings?tab=privacy',
     scope: 'ordinary',
-    ready: { role: 'heading', name: 'Settings & API' },
+    ready: { role: 'heading', name: 'Settings' },
   },
   {
     id: 'settings-about',
-    name: 'Settings & API — About',
+    name: 'Settings — About',
     path: '/settings?tab=about',
     scope: 'ordinary',
     ready: { role: 'heading', name: 'Identity' },
   },
   {
     id: 'settings-api',
-    name: 'Settings & API — API Access',
+    name: 'Settings — API Access',
     path: '/settings?tab=api',
     scope: 'ordinary',
     ready: { role: 'heading', name: 'How Access Works Today' },
   },
   {
     id: 'settings-explorer',
-    name: 'Settings & API — Endpoint Explorer',
+    name: 'Settings — Endpoint Explorer',
     path: '/settings?tab=explorer',
     scope: 'ordinary',
     // Wait for the DETAIL pane, not the group list: the list heading renders
@@ -478,7 +523,7 @@ export const SURFACES: readonly Surface[] = [
      * this locator must be revisited rather than loosened.
      */
     id: 'settings-connect',
-    name: 'Settings & API — Connect Your Agent',
+    name: 'Settings — Connect Your Agent',
     path: '/settings?tab=mcp',
     scope: 'ordinary',
     ready: { role: 'heading', name: 'Requires organization configuration' },
@@ -531,7 +576,7 @@ export const TABBED_SURFACES = [
   {
     id: 'settings',
     path: '/settings',
-    tablistName: 'Settings & API sections',
+    tablistName: 'Settings sections',
     // R0 added 'Help & Tutorial' (the tutorial replay surface). The tab COUNT the
     // APG-structure spec asserts is derived from this array, so the list is the
     // single place a new tab has to be declared — no magic number to chase.
@@ -557,7 +602,11 @@ export const TABBED_SURFACES = [
     id: 'statistics',
     path: '/statistics',
     tablistName: 'Statistics sections',
-    tabs: ['General ISAAC', 'My Stats'],
+    /* `General ISAAC` -> `Overview`, and a THIRD tab added, 2026-09-15: the
+       Statistics redesign moved the engineering content onto
+       `Build & Verification` so a scientist does not land on it. Measured in
+       Chrome — the tablist reads exactly these three, in this order. */
+    tabs: ['Overview', 'My Stats', 'Build & Verification'],
     panelIdPrefix: 'statistics-tabpanel-',
   },
 ] as const;

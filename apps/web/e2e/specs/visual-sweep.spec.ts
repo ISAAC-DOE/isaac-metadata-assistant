@@ -598,7 +598,12 @@ const STATES: readonly VisualState[] = [
     async reach({ page, app }) {
       await app.goto('/settings');
       await settled(page);
-      const heading = page.getByRole('heading', { name: 'Runtime Status' });
+      /* `Runtime Status` -> `System Status`, 2026-09-15. This spec keeps its OWN
+         readiness gate rather than reading `e2e/surfaces.ts`, so the Settings
+         density rename had to be applied here too — and this is the THIRD
+         independent copy of that gate (the surface catalog, `statistics-nav`'s
+         assertions, and this). A future rename must sweep all three. */
+      const heading = page.getByRole('heading', { name: 'System Status' });
       await expect(heading).toBeVisible({ timeout: 20_000 });
       return heading;
     },

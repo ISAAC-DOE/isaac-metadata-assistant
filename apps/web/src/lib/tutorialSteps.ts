@@ -1,3 +1,4 @@
+import { LABELS } from './labels';
 /*
  * The guided walkthrough's step catalog — the ONE place its content lives.
  *
@@ -323,7 +324,7 @@ export const TUTORIAL_STEPS: readonly TutorialStep[] = [
     id: 'settings-and-api',
     title: 'Where Settings and API Access Live',
     body:
-      'Settings & API reports what this build actually is — its version, where its records come ' +
+      `${LABELS.navSettings} reports what this build actually is — its version, where its records come ` +
       'from, what it refuses, and how to reach it as a program. Nothing on it is adjustable; it is ' +
       'a readout, and it says so plainly.',
     anchor: TUTORIAL_ANCHORS.settingsSections,

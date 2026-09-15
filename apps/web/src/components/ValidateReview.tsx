@@ -473,6 +473,7 @@ export function ValidateReview({ experimentId }: { experimentId: string }) {
                 advice={adviceFor(review.warnings, unit, i)}
                 detail={unit.runId === null ? undefined : details[unit.runId]}
                 onCheckDetail={unit.runId === null ? undefined : () => runDetail(unit.runId!)}
+                experimentId={experimentId}
               />
             ))}
           </ul>
@@ -625,12 +626,15 @@ function UnitGroup({
   advice,
   detail,
   onCheckDetail,
+  experimentId,
 }: {
   unit: ReviewUnit;
   advice: NonNullable<ApiWarningsResponse['runs']>[number] | undefined;
   detail: Detail | undefined;
   /** Absent when the unit has no run id, so there is no per-run route to call. */
   onCheckDetail?: () => void;
+  /** Threaded to `UnitDetail` for the composed `Ask ISAAC` question only. */
+  experimentId: string;
 }) {
   const state = runFindingState(unit.verdict);
   /* The two questions, asked once each and never conflated: WHO produced the findings,
@@ -774,7 +778,9 @@ function UnitGroup({
         </p>
       )}
 
-      {detail?.status === 'data' && <UnitDetail unit={unit} data={detail.data} />}
+      {detail?.status === 'data' && (
+        <UnitDetail unit={unit} data={detail.data} experimentId={experimentId} />
+      )}
     </li>
   );
 }
@@ -823,11 +829,37 @@ function blockerKindLine(blockers: ApiRunCheckFinding[]): string | null {
  * having changed at all. Stating the observation is supported; stating the cause
  * is not, and the reader is the one who can find out which it was.
  */
-function UnitDetail({ unit, data }: { unit: ReviewUnit; data: ApiRunCheckResponse }) {
+function UnitDetail({
+  unit,
+  data,
+  experimentId,
+}: {
+  unit: ReviewUnit;
+  data: ApiRunCheckResponse;
+  /** Named in the composed `Ask ISAAC` question. Read, never looked up. */
+  experimentId: string;
+}) {
   const blockers = data.blockers ?? [];
   const draftErrors = data.draft?.errors ?? [];
   const draftWarnings = data.draft?.warnings ?? [];
   const kindLine = blockerKindLine(blockers);
+  /*
+   * NO `onGoToField` HERE, AND THAT IS A DECISION RATHER THAN AN OMISSION.
+   *
+   * This screen renders no run-field input. The inputs live in the Runs section
+   * above, on whichever run is the ONE open editor — which is usually not the
+   * run this detail is about. A `Go to field` control here would either scroll
+   * to an input for a different run or find nothing at all, and a control whose
+   * destination may not exist is worse than no control. Linking to the run
+   * itself (`ROUTES.recordRun`) is a real destination and a separate slice: it
+   * navigates rather than focuses, so it needs its own label and its own
+   * argument about losing the findings the reader is standing in.
+   */
+  const ask = {
+    experimentId,
+    runId: unit.runId ?? undefined,
+    runLabel: unit.label,
+  };
   const disagrees =
     (data.official?.ok ?? unit.verdict.ok) !== unit.verdict.ok ||
     (data.official?.unavailable === true) !== (unit.verdict.unavailable === true);
@@ -848,7 +880,15 @@ function UnitDetail({ unit, data }: { unit: ReviewUnit; data: ApiRunCheckRespons
         </p>
       )}
 
-      <FindingList titleAs="h4" title="Blocks export · open questions" findings={blockers} />
+      {/* The state word per list — see `RunCard`'s own call for the argument.
+          These three are `blockers`, `draft.errors` and `draft.warnings`. */}
+      <FindingList
+        titleAs="h4"
+        title="Blocks export · open questions"
+        state="Missing"
+        findings={blockers}
+        ask={ask}
+      />
       {kindLine && (
         <p className="vr-kinds">
           By the kind the server recorded for each: {kindLine}.
@@ -866,15 +906,21 @@ function UnitDetail({ unit, data }: { unit: ReviewUnit; data: ApiRunCheckRespons
       <FindingList
         titleAs="h4"
         title="Blocks export · no-guessing checks"
+        state="Needs Review"
         findings={draftErrors}
+        ask={ask}
       />
       {/* The no-guessing validator's OWN advisory channel (`report.warn`), which
           `DraftReport.ok` does not read — so it cannot gate anything, and the
           heading says so rather than leaving it beside the two above. */}
+      {/* `Advisory` and not one of the other three: `DraftReport.ok` does not
+          read this list, so nothing in it is missing, invalid or blocking. */}
       <FindingList
         titleAs="h4"
         title="Advisory · non-gating · no-guessing notes"
+        state="Advisory"
         findings={draftWarnings}
+        ask={ask}
       />
 
       {blockers.length === 0 && draftErrors.length === 0 && draftWarnings.length === 0 && (

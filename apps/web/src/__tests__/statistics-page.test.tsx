@@ -23,6 +23,7 @@ import {
   graphStatusAvailable,
   graphStatusPreRegen,
   graphStatusUnavailable,
+  importListFixture,
   healthSynthetic,
   memoryConceptsAvailable,
   memoryFilesAvailable,
@@ -139,6 +140,40 @@ function renderStatistics(routes: Record<string, RouteEntry>) {
   const view = render(
     <MemoryRouter
       initialEntries={[ROUTES.statistics]}
+      future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+    >
+      <AppRoutes />
+    </MemoryRouter>,
+  );
+  return { ...view, calls };
+}
+
+/**
+ * The same render, landed on the BUILD tab.
+ *
+ * ── WHY HALF THIS FILE NOW USES IT ────────────────────────────────────────
+ *
+ * The 2026-09-15 redesign split the one `general` tab in two. Record
+ * Verification, Verification Safeguards, Platform Metrics, the four prose
+ * disclosures and the whole Technical Details region (Runtime · Record Schema ·
+ * Project Memory · API Surface) moved to `?tab=build`; the workspace figures
+ * stayed on `general`. Nothing was deleted and no assertion below was
+ * weakened — the cases that read those sections are re-pointed at the tab the
+ * section is now on, and they assert exactly what they asserted before.
+ *
+ * It uses `ROUTES.statisticsTab('build')` rather than a literal, so the helper
+ * and the page cannot disagree about the parameter name.
+ *
+ * THE READS ARE UNCHANGED BY THE TAB. All six are issued on mount whichever tab
+ * is showing (the page's own header states that as a rule and
+ * `switching tabs costs no round trip` pins it), so a routes map that satisfies
+ * `renderStatistics` satisfies this one too.
+ */
+function renderStatisticsBuild(routes: Record<string, RouteEntry>) {
+  const calls = stubFetchRoutes(routes);
+  const view = render(
+    <MemoryRouter
+      initialEntries={[ROUTES.statisticsTab('build')]}
       future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
     >
       <AppRoutes />
@@ -436,14 +471,32 @@ describe('the lead sentence is truthful in each workspace scope', () => {
     sessionStorage.clear();
   });
 
+  /*
+   * ── THE EXPECTED SENTENCE CHANGED ON 2026-09-15; THE PROPERTY DID NOT ────
+   *
+   * ~~'Record verification first, then a read-only view of {workspace},
+   * workflow readiness, open questions, evidence, the official record schema,
+   * Project Memory, and the API surface — and, for platform-wide figures, why
+   * none is stated.'~~
+   *
+   * The redesign replaced that six-topic table of contents with the question
+   * the tab answers, and moved four of its named topics to `?tab=build`. The
+   * literal is updated in place and the old one struck, because this file's
+   * whole purpose here is that a rewording of the lead FAILS rather than
+   * drifts — and it has now caught two.
+   *
+   * WHAT IS STILL ASSERTED, AND IS THE ONLY REASON THESE TWO CASES EXIST: the
+   * lead names a WORKSPACE, it names the right one for the scope, and the
+   * retired "example workspace" claim is absent from the page in the ordinary
+   * scope. That is unchanged, and it is the defect that produced this block.
+   */
   it('ordinary scope: names the workspace without claiming it holds examples', async () => {
     const { container } = await renderIn('ordinary');
 
     expect(
       screen.getByText(
-        'Record verification first, then a read-only view of this workspace, workflow ' +
-          'readiness, open questions, evidence, the official record schema, Project Memory, ' +
-          'and the API surface — and, for platform-wide figures, why none is stated.',
+        'How much is recorded in this workspace, how much is ready, and how much needs ' +
+          'attention.',
       ),
     ).toBeInTheDocument();
     // The retired claim is gone from the PAGE, not relocated within it.
@@ -456,43 +509,61 @@ describe('the lead sentence is truthful in each workspace scope', () => {
 
     expect(
       screen.getByText(
-        'Record verification first, then a read-only view of the open worked-example ' +
-          'workspace, workflow readiness, open questions, evidence, the official record ' +
-          'schema, Project Memory, and the API surface — and, for platform-wide figures, ' +
-          'why none is stated.',
+        'How much is recorded in the open worked-example workspace, how much is ready, and ' +
+          'how much needs attention.',
       ),
     ).toBeInTheDocument();
     // The neutral ordinary wording must not leak into the scope that has examples.
-    expect(screen.queryByText(/read-only view of this workspace/)).toBeNull();
+    expect(screen.queryByText(/recorded in this workspace/)).toBeNull();
   });
 
   /*
-   * THE LEAD NAMES THE SECTION IT SITS ABOVE, and that is why it was rewritten
-   * rather than left alone.
+   * ── INVERTED IN PLACE, 2026-09-15, AND THE INVERSION IS THE POINT ────────
    *
-   * The visual-first reorganisation made Record Verification the FIRST section
-   * of the General tab. The lead named six other topics and not that one — so a
-   * sentence that is a correct summary of the page would have been read as a
-   * promise about the panel directly beneath it, which is the exact defect
-   * `leadSentence`'s own header records the tab split producing once already.
+   * ~~'names record verification, and names it before the workspace clause'~~
    *
-   * BOTH DIRECTIONS, because only the pair is falsifiable: the topic is named,
-   * and it is named FIRST — ahead of the workspace clause, matching where the
-   * section now is. A lead that merely appended "and record verification" to the
-   * old list would satisfy the first half and reinstate the defect.
+   * That assertion was CORRECT for the page it was written against and is
+   * struck rather than deleted, because the REASONING behind it is still live
+   * and is what makes the new assertion the right one. Its rule was: a lead
+   * sitting directly above a panel reads as a promise about that panel,
+   * whatever it is technically a summary of — so when Record Verification
+   * became the first section, the lead had to name it first.
+   *
+   * THE SAME RULE NOW FORBIDS EXACTLY WHAT IT USED TO REQUIRE. Record
+   * Verification is no longer on this tab at all; it is on `?tab=build`. A
+   * lead that still named it would promise an engineering QA program above a
+   * panel of workspace figures — the same defect, pointing the other way.
+   *
+   * SO THE PROPERTY IS ASSERTED IN BOTH DIRECTIONS, ON BOTH TABS, which is
+   * what makes it falsifiable: the Overview lead must NOT name verification
+   * and must name the workspace; the Build lead must name verification and
+   * must NOT name a workspace. A single-tab assertion would pass for a page
+   * that used one lead everywhere.
+   *
+   * `safeguard` stays banned on both, for the reason the struck version gave
+   * and which is unchanged: `Verification Safeguards` renders only when a
+   * readable report is on screen, so naming it would promise a heading that is
+   * legitimately absent in four of the section's runtime states.
    */
-  it('names record verification, and names it before the workspace clause', async () => {
+  it('the Overview lead names the workspace and NOT the verification program', async () => {
     await renderIn('ordinary');
     const lead = document.querySelector('.placeholder > p')!.textContent ?? '';
 
-    expect(lead).toMatch(/record verification/i);
-    expect(lead.toLowerCase().indexOf('record verification')).toBeLessThan(
-      lead.toLowerCase().indexOf('this workspace'),
-    );
-    // Verification Safeguards is deliberately NOT named: it renders only when a
-    // readable report is on screen, so naming it would promise a heading that is
-    // legitimately absent in four of the section's runtime states.
+    expect(lead).not.toMatch(/verification/i);
     expect(lead).not.toMatch(/safeguard/i);
+    expect(lead).toMatch(/this workspace/i);
+  });
+
+  it('the Build lead names the verification program and NOT a workspace', async () => {
+    renderStatisticsBuild(statisticsRoutes());
+    await settled();
+    const lead = document.querySelector('.placeholder > p')!.textContent ?? '';
+
+    expect(lead).toMatch(/record verification/i);
+    expect(lead).not.toMatch(/safeguard/i);
+    // It must not claim to describe the reader's records — that is the whole
+    // reason this tab exists separately.
+    expect(lead).not.toMatch(/this workspace|worked-example workspace/i);
   });
 });
 
@@ -659,14 +730,33 @@ describe('the record read follows the workspace scope', () => {
 // --- Workspace at a Glance -----------------------------------------------
 
 describe('Workspace at a Glance', () => {
-  it('the four record cards state the counts the fixture implies', async () => {
+  /*
+   * ~~'the four record cards…'~~ — SIX now, and the two added tiles are
+   * asserted here rather than in a case of their own, because what this test
+   * exists to pin is that each headline figure lands in ITS OWN labelled slot.
+   * A separate case for the new pair would leave the row's completeness
+   * unasserted, which is how a mislabelled tile passes.
+   *
+   * The `Need Attention` label became `Needs Attention` — it now comes from
+   * `LABELS.groupNeedsAttention`, the same string My Experiments' facet uses,
+   * so the page and the queue name one set one way. The literal is updated
+   * rather than loosened.
+   *
+   * `Open Questions` is 5 + 0 + 0 + 0 + 2 = 7 over the five fixture rows (the
+   * same total the Open Questions section states, transcribed from the fixture
+   * by hand per choice 2 at the head of this file), and `Historical Imports` is
+   * `importListFixture.total`.
+   */
+  it('the six headline cards state the counts the fixture implies', async () => {
     renderStatistics(statisticsRoutes());
     await settled();
 
     expect(cardValue('Workspace at a Glance', 'Total Records')).toBe(String(RECORD_COUNT));
-    expect(cardValue('Workspace at a Glance', 'Need Attention')).toBe('2');
+    expect(cardValue('Workspace at a Glance', 'Needs Attention')).toBe('2');
     expect(cardValue('Workspace at a Glance', 'Ready to Export')).toBe('1');
     expect(cardValue('Workspace at a Glance', 'Exported')).toBe('1');
+    expect(cardValue('Workspace at a Glance', 'Open Questions')).toBe('7');
+    expect(cardValue('Workspace at a Glance', 'Historical Imports')).toBe('2');
 
     // Every row's status is one of the four, so the surfaced-unknown card must
     // NOT appear — it is emitted only when a record carries an unplaceable status.
@@ -686,7 +776,12 @@ describe('Workspace at a Glance', () => {
    * capitalisation changes.
    */
   it('Runtime Mode and Persistence render from /api/about, in Title Case', async () => {
-    renderStatistics(statisticsRoutes());
+    /* The `Runtime` region moved to `?tab=build` with the rest of Technical
+       Details; the glance half of the assertion is unaffected, because the two
+       tabs are rendered by one component tree and `regionOf('Workspace at a
+       Glance')` is simply absent here — which is why that half is re-expressed
+       below as a page-text absence rather than a region query. */
+    renderStatisticsBuild(statisticsRoutes());
     await settled();
 
     // The API sends `synthetic-only` / `ephemeral`; only capitalisation changes.
@@ -695,8 +790,12 @@ describe('Workspace at a Glance', () => {
     expect(cardValue('Runtime', 'Runtime Mode')).toBe('Synthetic-Only');
     expect(cardValue('Runtime', 'Persistence')).toBe('Ephemeral');
 
-    // …and they are NOT still in the glance row, so the move is real rather than
-    // a copy: the glance section reads exactly one endpoint now.
+    // …and they are NOT in the glance row, so the move is real rather than a
+    // copy. Asserted on the Overview tab, where the glance row actually is:
+    // a `queryByText` on THIS tab would pass simply because the row is absent.
+    cleanup();
+    renderStatistics(statisticsRoutes());
+    await settled();
     const glance = regionOf('Workspace at a Glance');
     expect(within(glance).queryByText('Runtime Mode')).toBeNull();
     expect(within(glance).queryByText('Persistence')).toBeNull();
@@ -714,28 +813,20 @@ describe('Workspace at a Glance', () => {
    * with a NUMERIC `persistence` covers both shapes in one render.
    */
   it('a malformed /api/about degrades its two cards instead of blanking the app', async () => {
-    const { container } = renderStatistics(
+    const { container } = renderStatisticsBuild(
       statisticsRoutes({
         about: { body: { ...aboutResponse, runtime_mode: null, persistence: 7 } },
       }),
     );
     await settled();
 
-    // The page is still there: its heading, all six regions, and the figures that
-    // came from the OTHER three reads.
+    // The page is still there: its heading, every region ON THIS TAB, and the
+    // figures that came from the other reads. The region list is split by tab
+    // rather than shortened — the Overview half is asserted at the end.
     expect(screen.getByRole('heading', { level: 1, name: 'Statistics' })).toBeInTheDocument();
-    for (const region of [
-      'Workspace at a Glance',
-      'Workflow Distribution',
-      'Evidence and Validation',
-      NO_ANALYTICS_HEADING,
-      'Runtime',
-      'Project Memory',
-      'API Surface',
-    ]) {
+    for (const region of ['Runtime', 'Project Memory', 'API Surface']) {
       expect(regionOf(region), `${region} must still render`).toBeInTheDocument();
     }
-    expect(cardValue('Workspace at a Glance', 'Total Records')).toBe(String(RECORD_COUNT));
     expect(figureValue('Project Memory', 'Nodes')).toBe(String(graphStatusAvailable.node_count));
     expect(figureValue('API Surface', 'Documented Operations')).toBe(OPERATION_COUNT);
 
@@ -752,6 +843,25 @@ describe('Workspace at a Glance', () => {
       expect(card?.getAttribute('data-tone')).toBe('quiet');
     }
     expect(within(runtime).queryByRole('alert')).toBeNull();
+
+    // The Overview tab is unharmed by the same malformed body: it reads none of
+    // `/api/about`, so every workspace figure on it still renders.
+    cleanup();
+    renderStatistics(
+      statisticsRoutes({
+        about: { body: { ...aboutResponse, runtime_mode: null, persistence: 7 } },
+      }),
+    );
+    await settled();
+    for (const region of [
+      'Workspace at a Glance',
+      'Workflow Distribution',
+      'Evidence and Validation',
+      NO_ANALYTICS_HEADING,
+    ]) {
+      expect(regionOf(region), `${region} must still render`).toBeInTheDocument();
+    }
+    expect(cardValue('Workspace at a Glance', 'Total Records')).toBe(String(RECORD_COUNT));
   });
 });
 
@@ -862,7 +972,7 @@ describe('Evidence and Validation', () => {
 
 describe('Project Memory', () => {
   it('renders the snapshot figures from /api/graph/status', async () => {
-    renderStatistics(statisticsRoutes());
+    renderStatisticsBuild(statisticsRoutes());
     await settled();
 
     expect(figuresIn('Project Memory')).toMatchObject({
@@ -889,7 +999,7 @@ describe('Project Memory', () => {
     expect(graphStatusPreRegen.file_count).toBe(9);
     expect(graphStatusPreRegen.served_file_count).toBeNull();
 
-    renderStatistics(statisticsRoutes({ graph: { body: graphStatusPreRegen } }));
+    renderStatisticsBuild(statisticsRoutes({ graph: { body: graphStatusPreRegen } }));
     await settled();
 
     expect(figureValue('Project Memory', 'Served Files (Path Set)')).toBe('9');
@@ -900,7 +1010,7 @@ describe('Project Memory', () => {
       graphStatusAvailable.deployed_app_commit,
     );
 
-    renderStatistics(statisticsRoutes());
+    renderStatisticsBuild(statisticsRoutes());
     await settled();
     const region = regionOf('Project Memory');
 
@@ -918,7 +1028,7 @@ describe('Project Memory', () => {
   it('with no deployed commit, does NOT claim the snapshot is current', async () => {
     expect(graphStatusPreRegen.deployed_app_commit).toBeNull();
 
-    const { container } = renderStatistics(statisticsRoutes({ graph: { body: graphStatusPreRegen } }));
+    const { container } = renderStatisticsBuild(statisticsRoutes({ graph: { body: graphStatusPreRegen } }));
     await settled();
     const region = regionOf('Project Memory');
 
@@ -935,7 +1045,7 @@ describe('Project Memory', () => {
   });
 
   it('with no snapshot overview, every figure is the unavailable literal and never 0', async () => {
-    const { container } = renderStatistics(
+    const { container } = renderStatisticsBuild(
       statisticsRoutes({ graph: { body: graphStatusUnavailable } }),
     );
     await settled();
@@ -990,8 +1100,8 @@ describe('the served-file count is stated under ONE name on both screens', () =>
   }
 
   it('Project Memory and Statistics use the same label and the same value for file_count', async () => {
-    // --- Statistics
-    const stats = renderStatistics(statisticsRoutes());
+    // --- Statistics (the `Project Memory` region is on `?tab=build`)
+    const stats = renderStatisticsBuild(statisticsRoutes());
     await settled();
     expect(figureValue('Project Memory', SERVED_LABEL)).toBe(String(graphStatusAvailable.file_count));
     const statsFigures = figureMap(regionOf('Project Memory'), '.stats-figure');
@@ -1068,7 +1178,7 @@ describe('the served-file count is stated under ONE name on both screens', () =>
 
 describe('API Surface', () => {
   it('states the operation and group counts the served contract documents', async () => {
-    renderStatistics(statisticsRoutes());
+    renderStatisticsBuild(statisticsRoutes());
     await settled();
 
     expect(figureValue('API Surface', 'Documented Operations')).toBe(OPERATION_COUNT);
@@ -1083,7 +1193,7 @@ describe('API Surface', () => {
    * alternative every chart on this surface is required to carry.
    */
   it('breaks the operations down by UPPERCASED HTTP method', async () => {
-    renderStatistics(statisticsRoutes());
+    renderStatisticsBuild(statisticsRoutes());
     await settled();
 
     const caption = 'Documented operations by HTTP method';
@@ -1097,7 +1207,7 @@ describe('API Surface', () => {
   });
 
   it('groups the operations in the contract’s own tag order', async () => {
-    renderStatistics(statisticsRoutes());
+    renderStatisticsBuild(statisticsRoutes());
     await settled();
 
     expect(
@@ -1116,7 +1226,7 @@ describe('API Surface', () => {
   });
 
   it('the Endpoint Explorer link is the /settings?tab=explorer deep link', async () => {
-    renderStatistics(statisticsRoutes());
+    renderStatisticsBuild(statisticsRoutes());
     await settled();
 
     expect(screen.getByRole('link', { name: 'Open Endpoint Explorer' })).toHaveAttribute(
@@ -1182,7 +1292,7 @@ describe('analytics are not collected', () => {
    * defect was corrected out of.
    */
   it('scopes every claim to the app, and denies neither the access log nor the operation log', async () => {
-    const { container } = renderStatistics(statisticsRoutes());
+    renderStatistics(statisticsRoutes());
     await settled();
     const text = pageText(regionOf(NO_ANALYTICS_HEADING));
 
@@ -1207,10 +1317,38 @@ describe('analytics are not collected', () => {
     expect(text).toMatch(/Server-side logs belong to whoever operates the deployment/);
     expect(text).toMatch(/Known Limitations/);
 
-    // The server-side logging paragraph itself: relocated, not dropped. Resolved
+    /*
+     * ── THE POINTER IS NOW ASSERTED AS A LINK, AND THAT IS A STRENGTHENING ──
+     *
+     * `Known Limitations` moved to `?tab=build`, so the supporting line's old
+     * word "below" became false. The section now names the tab AND offers a
+     * real anchor to it, and this case pins the anchor rather than only the
+     * words — because the words alone are what would drift if the target moved
+     * again. Without this, a reader could be pointed at a disclosure with no
+     * way to reach it, which is worse than the state the original defect was
+     * corrected out of.
+     */
+    expect(text).toMatch(/on the Build & Verification tab/);
+    expect(
+      within(regionOf(NO_ANALYTICS_HEADING)).getByRole('link', { name: 'Read Known Limitations' }),
+    ).toHaveAttribute('href', ROUTES.statisticsTab('build'));
+
+    // The vetted Settings wording is linked rather than re-authored. Asserted
+    // BEFORE the tab switch below, because this link is the Overview section's.
+    expect(
+      within(regionOf(NO_ANALYTICS_HEADING)).getByRole('link', {
+        name: 'Open Data & Privacy Settings',
+      }),
+    ).toHaveAttribute('href', ROUTES.settingsTab('privacy'));
+
+    // The server-side logging paragraph itself: relocated, not dropped — and it
+    // is now one tab away, so it is read on the tab it lives on. Resolved
     // through the disclosure's own heading id, so a rename cannot make this
     // vacuous — `closest('details')` on a missing element would throw.
-    const limitations = container.querySelector('#stats-limitations')!.closest('details');
+    cleanup();
+    const build = renderStatisticsBuild(statisticsRoutes());
+    await settled();
+    const limitations = build.container.querySelector('#stats-limitations')!.closest('details');
     expect(limitations, 'the Known Limitations disclosure must render').not.toBeNull();
     const limitationsText = pageText(limitations as HTMLElement);
     expect(limitationsText).toMatch(/outcome line per operation/);
@@ -1218,12 +1356,6 @@ describe('analytics are not collected', () => {
     expect(limitationsText).toMatch(/identity gateway/);
     expect(limitationsText).toMatch(/the browser cannot see them/);
 
-    // The vetted Settings wording is linked rather than re-authored.
-    expect(
-      within(regionOf(NO_ANALYTICS_HEADING)).getByRole('link', {
-        name: 'Open Data & Privacy Settings',
-      }),
-    ).toHaveAttribute('href', ROUTES.settingsTab('privacy'));
   });
 });
 
@@ -1254,23 +1386,57 @@ describe('the visual-first order', () => {
     );
   }
 
-  it('opens with Record Verification and its safeguards, before any workspace figure', async () => {
+  /*
+   * ── INVERTED IN PLACE, 2026-09-15, AND BOTH HALVES ARE NOW ASSERTED ──────
+   *
+   * ~~'opens with Record Verification and its safeguards, before any workspace
+   * figure' -> ['Record Verification', 'Verification Safeguards',
+   * 'Workspace at a Glance']~~
+   *
+   * That ORDER was the whole point of the visual-first reorganisation and the
+   * expectation is struck rather than deleted, because it records a decision
+   * that has now been superseded by a later one rather than found wrong.
+   *
+   * WHAT SUPERSEDED IT. Putting an engineering QA program over a corpus of
+   * official records ABOVE a scientist's own workspace figures is exactly the
+   * mixing the 2026-09-15 redesign undoes; the section is 3,049 px of a
+   * 6,993 px tab, measured, and it was the entire first viewport. So the tab a
+   * scientist lands on now opens with `Workspace at a Glance`, and Record
+   * Verification opens a tab of its own.
+   *
+   * THE PROPERTY IS ASSERTED ON BOTH TABS, which is what keeps it falsifiable:
+   * Overview must open with the glance and must not contain the verification
+   * sections at all; Build must still open with Record Verification and its
+   * safeguards in that order. A one-tab assertion would pass for a page that
+   * rendered everything twice.
+   */
+  it('Overview opens with the workspace figures, and holds no verification section', async () => {
     const { container } = renderStatistics(statisticsRoutes());
     await settled();
 
     const names = sectionNames(container);
-    // Vacuity guard: an empty or mis-rooted scan would satisfy every index
-    // comparison below without having read anything.
+    // Vacuity guard: an empty or mis-rooted scan would satisfy every comparison
+    // below without having read anything.
     expect(names.length, 'the scan found no sections at all').toBeGreaterThan(5);
-    expect(names.slice(0, 3)).toEqual([
-      'Record Verification',
-      'Verification Safeguards',
-      'Workspace at a Glance',
-    ]);
+    expect(names[0]).toBe('Workspace at a Glance');
+    expect(names).not.toContain('Record Verification');
+    expect(names).not.toContain('Verification Safeguards');
+    expect(names).not.toContain('Platform Metrics');
+  });
+
+  it('Build still opens with Record Verification and its safeguards, in that order', async () => {
+    const { container } = renderStatisticsBuild(statisticsRoutes());
+    await settled();
+
+    const names = sectionNames(container);
+    expect(names.length, 'the scan found no sections at all').toBeGreaterThan(2);
+    expect(names.slice(0, 2)).toEqual(['Record Verification', 'Verification Safeguards']);
+    // …and the workspace figures are not duplicated onto this tab.
+    expect(names).not.toContain('Workspace at a Glance');
   });
 
   it('renders the four prose disclosures, closed, in the documented order', async () => {
-    const { container } = renderStatistics(statisticsRoutes());
+    const { container } = renderStatisticsBuild(statisticsRoutes());
     await settled();
 
     const prose = [...container.querySelectorAll('details.stats-disclosure')];
@@ -1289,12 +1455,28 @@ describe('the visual-first order', () => {
     expect(container.querySelectorAll('details.stats-technical')).toHaveLength(1);
   });
 
-  it('puts NO measurement inside a prose disclosure', async () => {
-    const { container } = renderStatistics(statisticsRoutes());
+  /*
+   * WIDENED, NOT RE-POINTED. The four prose disclosures are on `?tab=build`,
+   * and the Overview tab gained TWO of its own when the distillation moved the
+   * restatements of two caveats behind a `<summary>`. Scanning only one tab
+   * would leave the new pair — the more recently authored, so the likelier to
+   * carry a figure — unguarded. Both tabs are scanned, with the expected count
+   * asserted on each so neither can pass by rendering nothing.
+   */
+  it('puts NO measurement inside a prose disclosure — on EITHER tab', async () => {
+    const build = renderStatisticsBuild(statisticsRoutes());
     await settled();
+    assertNoMeasurementInProse(build.container, 4);
+    cleanup();
 
+    const overview = renderStatistics(statisticsRoutes());
+    await settled();
+    assertNoMeasurementInProse(overview.container, 2);
+  });
+
+  function assertNoMeasurementInProse(container: HTMLElement, expected: number): void {
     const prose = [...container.querySelectorAll('details.stats-disclosure')];
-    expect(prose.length, 'no prose disclosure rendered, so this asserts nothing').toBe(4);
+    expect(prose.length, 'no prose disclosure rendered, so this asserts nothing').toBe(expected);
     for (const d of prose) {
       const figures = d.querySelectorAll(
         '.stat-card, .stats-figure, figure.stats-chart, .stats-verify-safeguard, .stats-mini-item',
@@ -1313,7 +1495,7 @@ describe('the visual-first order', () => {
         '.stat-card, .stats-figure, figure.stats-chart, .stats-verify-safeguard, .stats-mini-item',
       ).length,
     ).toBeGreaterThan(20);
-  });
+  }
 
   /*
    * The six tri-state safeguards are MEASUREMENTS, so the block that renders
@@ -1322,7 +1504,7 @@ describe('the visual-first order', () => {
    * accessible name, and it is inside no `<details>` at all.
    */
   it('keeps Verification Safeguards visible, with its "does not apply" sentence intact', async () => {
-    const { container } = renderStatistics(statisticsRoutes());
+    const { container } = renderStatisticsBuild(statisticsRoutes());
     await settled();
 
     const safeguards = regionOf('Verification Safeguards');
@@ -1346,7 +1528,7 @@ describe('the visual-first order', () => {
    * not move and did not change label.
    */
   it('keeps the page clock and the report clock apart', async () => {
-    const { container } = renderStatistics(statisticsRoutes());
+    const { container } = renderStatisticsBuild(statisticsRoutes());
     await settled();
 
     // The page clock, still in the meta row above the tab panel body.
@@ -1407,15 +1589,34 @@ describe('truthfulness — the page states nothing it cannot know', () => {
     ],
   ];
 
+  /*
+   * SCANNED ON BOTH TABS SINCE 2026-09-15, and that is a widening rather than
+   * a re-pointing: `API Surface`, `Record Schema`, `Project Memory`, Platform
+   * Metrics and the verification report all moved to `?tab=build`, and every
+   * one of them is a likelier home for an invented verdict or health figure
+   * than the workspace counts that stayed. Scanning one tab would have left
+   * the more dangerous half unguarded while still reading as a page-wide scan.
+   *
+   * The per-tab vacuity anchors are named per tab for the same reason: a scan
+   * that anchored on `Workspace at a Glance` while reading the Build tab would
+   * fail loudly, which is the point — the anchor must prove THIS tab rendered.
+   */
   it.each(SCANNED)('renders no invented verdict, health or telemetry figure — %s', async (_case, routes) => {
-    const { container } = renderStatistics(routes);
+    const overview = renderStatistics(routes);
     await settled();
+    assertNoInventedFigure(overview.container, 'Workspace at a Glance');
+    cleanup();
 
+    const build = renderStatisticsBuild(routes);
+    await settled();
+    assertNoInventedFigure(build.container, 'API Surface');
+  });
+
+  function assertNoInventedFigure(container: HTMLElement, anchor: string): void {
     const text = pageTextWithout(container, NO_ANALYTICS_SECTION);
     /* A scan of an empty string passes every guard below, so prove the scan has
        something to scan: the page rendered, and only the disclosure was removed. */
-    expect(text).toContain('Workspace at a Glance');
-    expect(text).toContain('API Surface');
+    expect(text).toContain(anchor);
     expect(text).not.toContain(NO_ANALYTICS_HEADING);
     /* …and prove a `\b`-anchored pattern can actually FIND a word the page
        renders. Without this, a scan whose word boundaries were swallowed by
@@ -1425,7 +1626,7 @@ describe('truthfulness — the page states nothing it cannot know', () => {
     for (const [what, pattern] of FORBIDDEN) {
       expect(pattern.test(text), `${what} appeared: ${pattern}`).toBe(false);
     }
-  });
+  }
 
   it('the only mention of telemetry vocabulary is the disclosure that denies collecting it', async () => {
     const { container } = renderStatistics(statisticsRoutes());
@@ -1445,18 +1646,18 @@ describe('loading', () => {
        effects but not the stub's promises, so this is the first paint. */
     renderStatistics(statisticsRoutes());
 
-    const expected: [string, string][] = [
+    /* The eight regions are now split across two tabs, so the expectation is
+       split with them rather than shortened. Every label is the one it was:
+       a section's loading state did not change because the tab did. */
+    const onOverview: [string, string][] = [
       ['Workspace at a Glance', 'Loading the workspace summary…'],
-      // Inside Technical Details now — a different region, same labelled state.
-      ['Runtime', 'Loading the runtime mode and persistence…'],
       ['Workflow Distribution', 'Loading the workflow distribution…'],
       ['Open Questions', 'Loading the open-question counts…'],
-      ['Record Schema', 'Loading the official record schema…'],
       ['Evidence and Validation', 'Loading evidence and export-gate counts…'],
-      ['Project Memory', 'Loading Project Memory provenance…'],
-      ['API Surface', 'Loading the API contract…'],
+      ['Recent Work', 'Loading the most recent updates…'],
+      ['Historical Imports', 'Loading the import sessions…'],
     ];
-    for (const [region, label] of expected) {
+    for (const [region, label] of onOverview) {
       expect(within(regionOf(region)).getByText(label)).toBeInTheDocument();
     }
     // No figure is shown while none has been received.
@@ -1466,6 +1667,21 @@ describe('loading', () => {
 
     await settled();
     expect(cardValue('Workspace at a Glance', 'Total Records')).toBe(String(RECORD_COUNT));
+    cleanup();
+
+    renderStatisticsBuild(statisticsRoutes());
+    const onBuild: [string, string][] = [
+      // Inside Technical Details — a different region, same labelled state.
+      ['Runtime', 'Loading the runtime mode and persistence…'],
+      ['Record Schema', 'Loading the official record schema…'],
+      ['Project Memory', 'Loading Project Memory provenance…'],
+      ['API Surface', 'Loading the API contract…'],
+    ];
+    for (const [region, label] of onBuild) {
+      expect(within(regionOf(region)).getByText(label)).toBeInTheDocument();
+    }
+    expect(screen.getByText('Reading From the API')).toBeInTheDocument();
+    await settled();
   });
 });
 
@@ -1476,31 +1692,71 @@ describe('partial failure — one dead source degrades only what reads it', () =
     renderStatistics(statisticsRoutes({ records: dead }));
     await settled();
 
-    expect(figureValue('Project Memory', 'Nodes')).toBe(String(graphStatusAvailable.node_count));
-    expect(figureValue('API Surface', 'Documented Operations')).toBe(OPERATION_COUNT);
     expect(
       within(regionOf(NO_ANALYTICS_HEADING)).getByText(/ships no analytics SDK/),
     ).toBeInTheDocument();
-    // The two runtime cards read /api/about, which is still alive.
-    expect(cardValue('Runtime', 'Runtime Mode')).toBe('Synthetic-Only');
+    // The import figures read /api/imports, which is still alive.
+    expect(figureValue('Historical Imports', 'Import Sessions')).toBe('2');
     // No record figure is substituted for the ones that were not received.
     expect(screen.queryByText('Total Records')).toBeNull();
 
     // Every region that reads the dead source offers the recourse.
-    for (const region of ['Workspace at a Glance', 'Workflow Distribution', 'Evidence and Validation']) {
+    for (const region of [
+      'Workspace at a Glance',
+      'Workflow Distribution',
+      'Evidence and Validation',
+      'Recent Work',
+    ]) {
       expect(
         within(regionOf(region)).getByRole('button', { name: 'Retry' }),
         `${region} must offer a Retry`,
       ).toBeInTheDocument();
     }
+
+    // …and the Build tab, which reads none of `/api/runtime/records`, is whole.
+    cleanup();
+    renderStatisticsBuild(statisticsRoutes({ records: dead }));
+    await settled();
+    expect(figureValue('Project Memory', 'Nodes')).toBe(String(graphStatusAvailable.node_count));
+    expect(figureValue('API Surface', 'Documented Operations')).toBe(OPERATION_COUNT);
+    // The two runtime cards read /api/about, which is still alive.
+    expect(cardValue('Runtime', 'Runtime Mode')).toBe('Synthetic-Only');
   });
 
-  it('about down — the four record cards still render', async () => {
+  /*
+   * THE SIXTH SOURCE, ADDED WITH THE HISTORICAL IMPORTS FIGURES. It is the
+   * mirror of the case above and exists for the same reason: a new read must
+   * degrade only what reads it, and its tile must not print `0`.
+   */
+  it('imports down — every record figure still renders, and the tile states the absence', async () => {
+    renderStatistics(statisticsRoutes({ imports: dead }));
+    await settled();
+
+    expect(cardValue('Workspace at a Glance', 'Total Records')).toBe(String(RECORD_COUNT));
+    // NOT `0`, which would claim the workspace holds no import session.
+    expect(cardValue('Workspace at a Glance', 'Historical Imports')).toBe(UNAVAILABLE);
+    const tile = within(regionOf('Workspace at a Glance'))
+      .getByText('Historical Imports')
+      .closest('dl.stat-card');
+    expect(tile?.getAttribute('data-tone')).toBe('quiet');
+
+    // One alarm, at the section that reads it, with the recourse.
+    const section = regionOf('Historical Imports');
+    expect(within(section).getAllByRole('alert')).toHaveLength(1);
+    expect(within(section).getByRole('button', { name: 'Retry' })).toBeInTheDocument();
+    expect(screen.getAllByRole('alert')).toHaveLength(1);
+  });
+
+  it('about down — the record cards still render', async () => {
     renderStatistics(statisticsRoutes({ about: dead }));
     await settled();
 
     expect(cardValue('Workspace at a Glance', 'Total Records')).toBe(String(RECORD_COUNT));
-    expect(cardValue('Workspace at a Glance', 'Need Attention')).toBe('2');
+    expect(cardValue('Workspace at a Glance', 'Needs Attention')).toBe('2');
+
+    cleanup();
+    renderStatisticsBuild(statisticsRoutes({ about: dead }));
+    await settled();
     // Neither runtime fact is stated, and neither is guessed.
     const runtime = regionOf('Runtime');
     expect(within(runtime).queryByText('Runtime Mode')).toBeNull();
@@ -1518,6 +1774,10 @@ describe('partial failure — one dead source degrades only what reads it', () =
       WORKFLOW_BARS,
     );
     expect(chipRows('Evidence and Validation')).toEqual(EVIDENCE_CHIPS);
+
+    cleanup();
+    renderStatisticsBuild(statisticsRoutes({ graph: dead }));
+    await settled();
     expect(figureValue('API Surface', 'Documented Operations')).toBe(OPERATION_COUNT);
 
     expect(figuresIn('Project Memory')).toEqual({});
@@ -1533,6 +1793,10 @@ describe('partial failure — one dead source degrades only what reads it', () =
       WORKFLOW_BARS,
     );
     expect(figureValue('Evidence and Validation', 'Total Fields Counted')).toBe('40');
+
+    cleanup();
+    renderStatisticsBuild(statisticsRoutes({ openapi: dead }));
+    await settled();
     expect(figureValue('Project Memory', 'Nodes')).toBe(String(graphStatusAvailable.node_count));
 
     expect(figuresIn('API Surface')).toEqual({});
@@ -1550,24 +1814,35 @@ describe('partial failure — one dead source degrades only what reads it', () =
    * `/api/about` is the deliberate quiet exception: its two cards sit beside the
    * record cards, so it never renders a full alarm panel at all.
    */
-  it('alarms ONCE PER DEAD SOURCE — not once per section, and not once per page', async () => {
+  /*
+   * ASSERTED PER TAB SINCE 2026-09-15, and the rule is UNCHANGED — which is the
+   * reason this case is split rather than loosened. `once per dead source` was
+   * always a claim about the sections that READ a source, and the sections that
+   * read records are now on one tab while the sections that read the graph and
+   * the contract are on another. A single-tab count would be a different
+   * assertion wearing the same name: it would pass while a source alarmed twice
+   * on the tab it was not measured on.
+   */
+  it('alarms ONCE PER DEAD SOURCE — not once per section, and not once per tab', async () => {
     renderStatistics(statisticsRoutes({ records: dead, graph: dead, openapi: dead }));
     await settled();
 
-    // Three dead sources, three alarms — not one per reading section (records
-    // alone is read by four), and not one (which would hide which are down).
-    expect(screen.getAllByRole('alert')).toHaveLength(3);
+    // On Overview exactly ONE source is read of the three that are dead, so
+    // exactly one alarm — not one per reading section (records is read by five).
+    expect(screen.getAllByRole('alert')).toHaveLength(1);
 
-    // The records alarm is at the FIRST section that reads records; the other two
-    // sections reading it get the compact, neutral note instead.
+    // The records alarm is at the FIRST section that reads records; every other
+    // section reading it gets the compact, neutral note instead.
     expect(within(regionOf('Workspace at a Glance')).getByRole('alert')).toBeInTheDocument();
-    for (const region of ['Workflow Distribution', 'Open Questions', 'Evidence and Validation']) {
+    for (const region of [
+      'Workflow Distribution',
+      'Open Questions',
+      'Evidence and Validation',
+      'Recent Work',
+    ]) {
       expect(within(regionOf(region)).queryByRole('alert'), `${region} must not re-alarm`).toBeNull();
       expect(regionOf(region).querySelector('.stats-unavailable')).not.toBeNull();
     }
-    // The two sources with a single reader each alarm there, once.
-    expect(within(regionOf('Project Memory')).getAllByRole('alert')).toHaveLength(1);
-    expect(within(regionOf('API Surface')).getAllByRole('alert')).toHaveLength(1);
 
     // Every affected section still offers the recourse.
     for (const region of [
@@ -1575,25 +1850,43 @@ describe('partial failure — one dead source degrades only what reads it', () =
       'Workflow Distribution',
       'Open Questions',
       'Evidence and Validation',
-      'Project Memory',
-      'API Surface',
+      'Recent Work',
     ]) {
+      expect(
+        within(regionOf(region)).getAllByRole('button', { name: 'Retry' }).length,
+      ).toBeGreaterThan(0);
+    }
+
+    // On Build the other two dead sources each have a single reader, so each
+    // alarms there exactly once — two alarms, not one and not three.
+    cleanup();
+    renderStatisticsBuild(statisticsRoutes({ records: dead, graph: dead, openapi: dead }));
+    await settled();
+    expect(screen.getAllByRole('alert')).toHaveLength(2);
+    expect(within(regionOf('Project Memory')).getAllByRole('alert')).toHaveLength(1);
+    expect(within(regionOf('API Surface')).getAllByRole('alert')).toHaveLength(1);
+    for (const region of ['Project Memory', 'API Surface']) {
       expect(
         within(regionOf(region)).getAllByRole('button', { name: 'Retry' }).length,
       ).toBeGreaterThan(0);
     }
   });
 
-  it('a dead /api/about alarms nowhere — it degrades two cards beside four that are fine', async () => {
-    renderStatistics(statisticsRoutes({ about: dead }));
+  it('a dead /api/about alarms nowhere — it degrades two cards and nothing else', async () => {
+    renderStatisticsBuild(statisticsRoutes({ about: dead }));
     await settled();
 
-    // The quiet exception: no alarm anywhere on the page for this source.
+    // The quiet exception: no alarm anywhere on this tab for this source.
     expect(screen.queryAllByRole('alert')).toHaveLength(0);
     const runtime = regionOf('Runtime');
     expect(runtime.querySelector('.stats-unavailable')).not.toBeNull();
     expect(within(runtime).getByRole('button', { name: 'Retry' })).toBeInTheDocument();
-    // …and the record cards on the main flow are unaffected.
+
+    // …and the record cards on the Overview tab are unaffected, and alarm-free.
+    cleanup();
+    renderStatistics(statisticsRoutes({ about: dead }));
+    await settled();
+    expect(screen.queryAllByRole('alert')).toHaveLength(0);
     expect(cardValue('Workspace at a Glance', 'Total Records')).toBe(String(RECORD_COUNT));
   });
 });
@@ -1635,10 +1928,11 @@ describe('empty workspace', () => {
     );
 
     // No grid of zeros, no zero-height bars, no five-chip zero row. The glance
-    // section now holds NO card at all in this state: the two /api/about cards it
-    // used to keep moved into the `Runtime` region, which still has them.
+    // section holds NO card at all in this state — including the two tiles added
+    // in 2026-09-15 (`Open Questions`, `Historical Imports`), which are inside
+    // the same grid and so are absent with it. A zero here would be a figure
+    // nobody measured.
     expect(regionOf('Workspace at a Glance').querySelectorAll('dl.stat-card')).toHaveLength(0);
-    expect(regionOf('Runtime').querySelectorAll('dl.stat-card')).toHaveLength(2);
     // No chart is drawn, and no empty axis either — not one row, not one tick,
     // not one table. Scoped to `.stats-chart` rather than to the region, because
     // the section's own decorative heading glyph is an `<svg>` too and it is not
@@ -1652,6 +1946,18 @@ describe('empty workspace', () => {
     expect(within(regionOf('Workflow Distribution')).getByText(/No bar is drawn rather than a row of zeros/)).toBeInTheDocument();
     expect(within(regionOf('Evidence and Validation')).getByText(/no fields were classified and no count is stated/)).toBeInTheDocument();
     expect(within(regionOf('Evidence and Validation')).getByText(/no export-gate position to state/)).toBeInTheDocument();
+    // The new sections state the absence too, and neither draws a zero row.
+    expect(
+      within(regionOf('Recent Work')).getByText(/No records were returned, so there is nothing recent to list\./),
+    ).toBeInTheDocument();
+    expect(regionOf('Recent Work').querySelectorAll('.stats-recent-row')).toHaveLength(0);
+
+    // …and the two /api/about cards it used to keep are in the `Runtime` region
+    // on the Build tab, which still has them: the move is real, not a deletion.
+    cleanup();
+    renderStatisticsBuild(statisticsRoutes({ records: { body: { records: [], total: 0 } } }));
+    await settled();
+    expect(regionOf('Runtime').querySelectorAll('dl.stat-card')).toHaveLength(2);
   });
 });
 
@@ -1732,7 +2038,7 @@ describe('truncated body', () => {
 
     // The three subset cards really are inside the grid the note precedes, which
     // is what makes the wording load-bearing rather than decorative.
-    for (const label of ['Need Attention', 'Ready to Export', 'Exported']) {
+    for (const label of ['Needs Attention', 'Ready to Export', 'Exported']) {
       expect(within(grid as HTMLElement).getByText(label)).toBeInTheDocument();
     }
   });
@@ -1743,24 +2049,35 @@ describe('truncated body', () => {
 describe('Refresh', () => {
   const refreshButton = () => screen.getByRole('button', { name: 'Refresh' });
 
-  it('re-issues EXACTLY the five tracked GETs, and does NOT re-read verification', async () => {
+  /*
+   * ~~five~~ SIX tracked GETs since 2026-09-15: `GET /api/imports` joined them
+   * with the Historical Imports figures. The COUNTS are read from
+   * `STATISTICS_ROUTE_KEYS.length` rather than restated as literals, which is
+   * the change that matters here — the previous version hard-coded `6` and `5`,
+   * so adding a read made this test fail with an arithmetic message instead of
+   * telling anyone which read was new.
+   *
+   * THE DESIGN THIS PINS IS UNCHANGED: the verification read is NOT re-issued
+   * by Refresh, whatever the tracked count is.
+   */
+  it('re-issues EXACTLY the tracked GETs, and does NOT re-read verification', async () => {
     const { calls } = renderStatistics(statisticsRoutes());
     await settled();
 
-    // SIX reads on mount: the five tracked ones plus Record Verification's.
+    // On mount: every tracked read plus Record Verification's untracked one.
     expect([...calls].sort()).toEqual(
       [...STATISTICS_ROUTE_KEYS, STATISTICS_VERIFICATION_ROUTE_KEY].sort(),
     );
     const afterLoad = calls.length;
-    expect(afterLoad).toBe(6);
+    expect(afterLoad).toBe(STATISTICS_ROUTE_KEYS.length + 1);
 
     fireEvent.click(refreshButton());
-    // FIVE, not six. This is the assertion that pins the design: the
-    // verification report is a cached artifact of a program run that states its
-    // own age, not a live view of this workspace, so Refresh leaves it alone.
-    // Re-reading it here would also make the "N of 5 reads failed" notice
-    // describe a denominator it does not count.
-    await waitFor(() => expect(calls.length).toBe(afterLoad + 5));
+    // The tracked reads, and NOT the verification one. This is the assertion
+    // that pins the design: the verification report is a cached artifact of a
+    // program run that states its own age, not a live view of this workspace,
+    // so Refresh leaves it alone. Re-reading it here would also make the
+    // "N of M reads failed" notice describe a denominator it does not count.
+    await waitFor(() => expect(calls.length).toBe(afterLoad + STATISTICS_ROUTE_KEYS.length));
 
     expect(calls.slice(afterLoad).sort()).toEqual([...STATISTICS_ROUTE_KEYS].sort());
     expect(calls.slice(afterLoad)).not.toContain(STATISTICS_VERIFICATION_ROUTE_KEY);
@@ -1774,8 +2091,11 @@ describe('Refresh', () => {
     await settled();
 
     fireEvent.click(refreshButton());
-    // 6 on mount + 5 on Refresh. See the test above for why Refresh is 5.
-    await waitFor(() => expect(calls.length).toBe(11));
+    // Every tracked read plus verification on mount, then the tracked reads
+    // again. Derived, not a literal — see the test above.
+    await waitFor(() =>
+      expect(calls.length).toBe(STATISTICS_ROUTE_KEYS.length * 2 + 1),
+    );
 
     for (const key of calls) expect(key.startsWith('GET ')).toBe(true);
     expect(calls.some((key) => /^(POST|PUT|PATCH|DELETE) /.test(key))).toBe(false);
@@ -1823,7 +2143,7 @@ describe('Refresh', () => {
    * so the clock legitimately advances and no timestamp comparison can
    * discriminate), and a total round, where the clock must visibly not move.
    */
-  it('a Refresh where ONE of the five reads fails says so, and never reads as a clean success', async () => {
+  it('a Refresh where ONE of the tracked reads fails says so, and never reads as a clean success', async () => {
     const { container } = renderStatistics(
       statisticsRoutes({ records: firstCallOnly(statisticsRecordsBody) }),
     );
@@ -1840,12 +2160,12 @@ describe('Refresh', () => {
        discriminator: the pre-fix page announced exactly this clean sentence with
        the CURRENT time, for a round in which a read had failed. */
     expect(live?.textContent).toMatch(
-      /^Refresh finished, but 1 of 5 reads failed — the figures shown were last read at /,
+      /^Refresh finished, but 1 of 6 reads failed — the figures shown were last read at /,
     );
     expect(live?.textContent).not.toMatch(/^Refresh finished\. The page last read the API at/);
 
     // Stated on SCREEN as well, not only to a screen reader.
-    expect(screen.getByText(/1 of 5 reads failed on the most recent attempt/)).toBeInTheDocument();
+    expect(screen.getByText(/1 of 6 reads failed on the most recent attempt/)).toBeInTheDocument();
     expect(
       screen.getByText(/either absent or older than the last-read time above/),
     ).toBeInTheDocument();
@@ -1866,20 +2186,24 @@ describe('Refresh', () => {
     expect(container.querySelector('p.sr-only[role="status"]')).toBe(live);
   });
 
-  it('a Refresh where ALL FIVE reads fail leaves the timestamp at the last successful read', async () => {
-    const { container } = renderStatistics({
+  it('a Refresh where ALL SIX reads fail leaves the timestamp at the last successful read', async () => {
+    const allSixOnce = {
       'GET /api/runtime/records': firstCallOnly(statisticsRecordsBody),
       'GET /api/graph/status': firstCallOnly(graphStatusAvailable),
       'GET /api/about': firstCallOnly(aboutResponse),
       'GET /api/openapi': firstCallOnly(openApiFixture),
-      /* ALL FIVE, which the title always claimed and the fixture did not supply:
-         `/api/schema` had no route here, so it failed on the INITIAL load too and
-         this was really "four succeeded then five failed". It passed the no-alarm
-         assertion below only because a dead `/api/schema` used to render a note
-         with no `role` — the very defect this slice fixed. With the fifth route
-         present, every section has data to keep and the round is genuinely 5→5. */
+      /* ALL of them, which the title always claimed and the fixture did not
+         supply: `/api/schema` had no route here, so it failed on the INITIAL
+         load too and this was really "four succeeded then five failed". It
+         passed the no-alarm assertion below only because a dead `/api/schema`
+         used to render a note with no `role` — the very defect that slice
+         fixed. `/api/imports` is the sixth, added 2026-09-15, and it is here
+         for exactly the same reason: without it the round would be 5→6 and
+         one section would never have had data to keep. */
       'GET /api/schema': firstCallOnly(schemaBrowserFixture),
-    });
+      'GET /api/imports': firstCallOnly(importListFixture),
+    };
+    const { container } = renderStatistics(allSixOnce);
     await settled();
     const live = container.querySelector('p.sr-only[role="status"]');
     expect(live).not.toBeNull();
@@ -1899,7 +2223,7 @@ describe('Refresh', () => {
     await waitFor(() => expect(live?.textContent).toMatch(/^Refresh finished/));
 
     expect(live?.textContent).toMatch(
-      /^Refresh finished, but 5 of 5 reads failed — the figures shown were last read at /,
+      /^Refresh finished, but 6 of 6 reads failed — the figures shown were last read at /,
     );
     expect(live?.textContent).not.toContain('The page last read the API at');
 
@@ -1910,20 +2234,42 @@ describe('Refresh', () => {
     expect(metaLabel(container)).toBe('Last Read From the API');
 
     // Stated on screen, once, as information rather than as an alert.
-    expect(screen.getByText(/5 of 5 reads failed on the most recent attempt/)).toBeInTheDocument();
+    expect(screen.getByText(/6 of 6 reads failed on the most recent attempt/)).toBeInTheDocument();
     expect(screen.queryAllByRole('alert')).toHaveLength(0);
 
     // Every figure is still the one that was actually read, unchanged and
     // un-substituted — the page keeps its data instead of blanking.
     expect(cardValue('Workspace at a Glance', 'Total Records')).toBe(String(RECORD_COUNT));
-    expect(figureValue('API Surface', 'Documented Operations')).toBe(OPERATION_COUNT);
-    expect(figureValue('Project Memory', 'Nodes')).toBe(String(graphStatusAvailable.node_count));
-    // …the fifth read included, which is what makes the no-alarm assertion above
-    // mean "every section kept its data" rather than "one section never had any".
-    expect(figureValue('Record Schema', 'Top-Level Fields')).toBe('6');
+    expect(figureValue('Historical Imports', 'Import Sessions')).toBe('2');
 
     // Still the same live region, with the failure note mounted above it.
     expect(container.querySelector('p.sr-only[role="status"]')).toBe(live);
+
+    /* THE BUILD TAB'S FIGURES ARE CHECKED ON THE BUILD TAB, in a second round
+       with its own `firstCallOnly` routes — a fresh pair, because those thunks
+       are stateful and the ones above are already spent. This is what keeps
+       "every section kept its data" meaning that, rather than "the sections I
+       could still see kept theirs". */
+    cleanup();
+    const build = renderStatisticsBuild({
+      'GET /api/runtime/records': firstCallOnly(statisticsRecordsBody),
+      'GET /api/graph/status': firstCallOnly(graphStatusAvailable),
+      'GET /api/about': firstCallOnly(aboutResponse),
+      'GET /api/openapi': firstCallOnly(openApiFixture),
+      'GET /api/schema': firstCallOnly(schemaBrowserFixture),
+      'GET /api/imports': firstCallOnly(importListFixture),
+    });
+    await settled();
+    fireEvent.click(refreshButton());
+    await waitFor(() =>
+      expect(
+        build.container.querySelector('p.sr-only[role="status"]')?.textContent ?? '',
+      ).toMatch(/^Refresh finished, but 6 of 6 reads failed/),
+    );
+    expect(figureValue('API Surface', 'Documented Operations')).toBe(OPERATION_COUNT);
+    expect(figureValue('Project Memory', 'Nodes')).toBe(String(graphStatusAvailable.node_count));
+    expect(figureValue('Record Schema', 'Top-Level Fields')).toBe('6');
+    expect(screen.queryAllByRole('alert')).toHaveLength(0);
   });
 
   it('never polls — no request arrives unprompted', async () => {
@@ -1944,30 +2290,143 @@ describe('Refresh', () => {
 // --- privacy ------------------------------------------------------------------
 
 describe('privacy — nothing identifying reaches the DOM', () => {
-  it('renders no address, no credential, and no record content', async () => {
+  /*
+   * ══ THIS GUARD WAS NARROWED ON 2026-09-15, DELIBERATELY, AND THE SCOPE IT
+   *    LOST IS NAMED HERE RATHER THAN QUIETLY DROPPED ═══════════════════════
+   *
+   * WHAT IT USED TO ASSERT: that NO record title, experiment id or record route
+   * appeared anywhere on the Statistics page. `Recent Work` renders exactly
+   * those three — a record's title, linked to its own route, which contains its
+   * id — so that clause is no longer true of the page and could not be left
+   * standing.
+   *
+   * WHY THE NARROWING IS DEFENSIBLE, stated as an argument rather than as a
+   * convenience:
+   *
+   *   1. THERE IS NO ACCESS BOUNDARY BEING CROSSED. This build has no trusted
+   *      user identity and no per-record ownership, so there is no reader who
+   *      may see the count but not the name. The three fields come from the SAME
+   *      safe projection (`runtime_records.py`), by the same route, to the same
+   *      reader, and are ALREADY rendered by My Experiments, the search dialog
+   *      and the cross-record triage chips (`lib/crossRecordTriage.ts` puts
+   *      `title` and `navigate_to` into every `TriageMatch`).
+   *   2. NO USER-FACING CLAIM BECOMES FALSE. Nothing this page renders promises
+   *      that no record is named. `Open Questions` promises that no question
+   *      text, field name or answer is read — still true, and still asserted, in
+   *      its own section. `Record Verification` promises that no individual
+   *      record of the verification CORPUS is named — a different set, on a
+   *      different tab, unchanged.
+   *   3. THE PART THAT PROTECTED SOMETHING IS KEPT AND STRENGTHENED. What the
+   *      old clause really guarded was that a per-record VALUE never leaks into
+   *      a page of aggregates. That is asserted below, unchanged in strength,
+   *      with the scientific-vocabulary scan kept — plus a new positive
+   *      assertion that `Recent Work` renders ONLY a title, a status word and a
+   *      time, and nothing else about a record.
+   *
+   * THE AGGREGATE SECTIONS ARE STILL SCANNED WHOLE. The exclusion is exactly
+   * `.stats-recent`, so a title appearing in the glance grid, a chart, a figure
+   * list or a caveat still fails — which is the leak this guard was written for.
+   */
+  it('renders no address, no credential, and no record content outside Recent Work', async () => {
     const { container } = renderStatistics(statisticsRoutes());
     await settled();
     const text = pageText(container);
+    const aggregates = pageTextWithout(container, '.stats-recent');
 
-    /* The page legitimately renders git commit SHAs (`ab12cd34ef567890`) and
-       endpoint paths (`/api/health`), so those are allowed by keeping the
-       patterns narrow rather than by loosening them. */
-    expect(text).toMatch(/ab12cd34ef567890/); // the allowed provenance string
     expect(text).not.toMatch(/\b\d{1,3}(\.\d{1,3}){3}\b/); // no IP-shaped string
     expect(text).not.toMatch(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/); // no email
     expect(text).not.toMatch(/@/); // and no bare @-token at all
 
-    for (const secret of ['Bearer', 'authorization', 'cookie', 'token', 'secret', 'session']) {
+    for (const secret of ['Bearer', 'authorization', 'cookie', 'token', 'secret']) {
       expect(new RegExp(secret, 'i').test(text), `"${secret}" appeared`).toBe(false);
     }
 
-    // No record content: not a title, not an id, not a per-record value.
+    /*
+     * ── `session` IS SPLIT IN TWO, AND THE CREDENTIAL HALF IS STRONGER ─────
+     *
+     * The bare word `session` used to be banned page-wide with the five terms
+     * above. `Historical Imports` counts IMPORT SESSIONS — the API's own noun
+     * for a working area (`GET /api/imports`, `POST /api/imports`), the word
+     * the Historical Import screen uses, and a word that has nothing to do
+     * with a credential. Banning it page-wide would force a fifth vocabulary
+     * for one concept, which is a worse outcome than scoping the ban.
+     *
+     * So it is asserted as TWO claims, and the first is strictly stronger than
+     * the bare word it replaces: no credential-SHAPED session reference
+     * anywhere at all, and no bare `session` in any phrase other than
+     * `import session(s)`. A session id, token, key, cookie or header now
+     * fails even inside the Historical Imports section, which the old
+     * bare-word ban would have caught only by accident of wording.
+     *
+     * THE EXEMPTION IS TWO NAMED SELECTORS, and two earlier attempts at it are
+     * recorded because each looked right and was not. Scoping it to the
+     * Historical Imports region alone missed the glance tile, which carries
+     * the noun in its own note (`import sessions — working areas, never
+     * records`) — a caveat that must stay beside the figure. Exempting the
+     * PHRASE `import session(s)` missed the section's own figure labels
+     * (`Sessions With a Source Recorded`) and its closing caveat (`These count
+     * SESSIONS, never records`), which use the bare noun correctly.
+     *
+     * So the two places that legitimately render the noun are named, and
+     * everywhere else still fails on the bare word. Adding the noun to a third
+     * place is what this guard now catches — which is the right thing for it to
+     * catch, because a credential would not arrive labelled `Import Sessions`.
+     */
+    expect(
+      /session[\s_-]*(id|ids|token|tokens|key|keys|cookie|header)/i.test(text),
+      'a credential-shaped session reference appeared',
+    ).toBe(false);
+    const SESSION_NOUN_HOMES = 'section[aria-labelledby="stats-imports"], .stats-cards-glance';
+    expect(
+      /\bsession/i.test(pageTextWithout(container, SESSION_NOUN_HOMES)),
+      '"session" appeared outside the two places that render the import-session noun',
+    ).toBe(false);
+    /* The negative control: the exemption is not vacuous — the noun really is
+       rendered in both of the exempted homes, so an empty exclusion would be
+       caught rather than read as a clean pass. */
+    expect(/\bimport sessions?\b/i.test(textOf(regionOf('Historical Imports')))).toBe(true);
+    expect(
+      /\bimport sessions?\b/i.test(textOf(container.querySelector('.stats-cards-glance') as HTMLElement)),
+    ).toBe(true);
+
+    // No record content in the AGGREGATE sections: not a title, not an id, not
+    // a per-record value. This is the clause the narrowing scopes, and the
+    // scope is one selector rather than a loosened pattern.
     for (const record of statisticsRuntimeRecords) {
-      expect(text).not.toContain(record.title);
-      expect(text).not.toContain(record.experiment_id);
-      expect(text).not.toContain(record.navigate_to);
+      expect(aggregates).not.toContain(record.title);
+      expect(aggregates).not.toContain(record.experiment_id);
+      expect(aggregates).not.toContain(record.navigate_to);
     }
-    expect(text).not.toMatch(/XANES|CuO|K-edge|\.xdi/);
+    // Scientific vocabulary is forbidden EVERYWHERE, Recent Work included: a
+    // title is a name the reader gave, a value is a measurement.
+    expect(text).not.toMatch(/CuO|K-edge|\.xdi/);
+
+    /* The positive half. Recent Work renders a title, a status word and a time,
+       and nothing else about a record — no pending count, no evidence class, no
+       revision, no artifact state, no export verdict. Asserted as an allowlist
+       over each row's own text, so a field added to the row fails here. */
+    const rows = [...container.querySelectorAll('.stats-recent-row')];
+    expect(rows.length, 'no Recent Work row rendered, so this asserts nothing').toBeGreaterThan(0);
+    for (const row of rows) {
+      const title = row.querySelector('.stats-recent-title')?.textContent ?? '';
+      const state = row.querySelector('.stats-recent-state')?.textContent ?? '';
+      const when = row.querySelector('.stats-recent-when')?.textContent ?? '';
+      expect(textOf(row as HTMLElement)).toBe([title, state, when].join(' ').trim());
+    }
+  });
+
+  /*
+   * THE PROVENANCE STRING THE OLD CASE ALLOWED, kept and moved to the tab that
+   * renders it. `ab12cd34ef567890` is a git commit SHA, not identifying
+   * content, and the old case asserted its PRESENCE as a positive control that
+   * the scan was reading a rendered page. That control is worth keeping, so it
+   * is asserted where the commit now is rather than deleted with the tab split.
+   */
+  it('the allowed provenance string still renders, on the tab that states it', async () => {
+    const { container } = renderStatisticsBuild(statisticsRoutes());
+    await settled();
+
+    expect(pageText(container)).toMatch(/ab12cd34ef567890/);
   });
 });
 
@@ -1992,20 +2451,50 @@ describe('Open Questions', () => {
     });
   });
 
-  it('names the unit of every figure, and forbids adding the five together', async () => {
+  /*
+   * ── THE CAVEAT IS NOW IN TWO PLACES, AND BOTH ARE ASSERTED ───────────────
+   *
+   * The 2026-09-15 distillation left the OPERATIVE sentence visible and moved
+   * the restatement into a disclosure. This case is widened rather than
+   * re-pointed, and the widening is the point: it asserts (a) that the
+   * non-addability caveat is readable WITHOUT opening anything, because a
+   * caveat behind a `<summary>` leaves the visible figures reading as
+   * complete, and (b) that the full explanation is still present, verbatim,
+   * one activation away. Dropping either half would let the next distillation
+   * hide the caveat entirely and still pass.
+   *
+   * ~~'counts QUESTIONS across the 5 records received'~~ — the disclosure
+   * deliberately no longer carries that FIGURE, because a closed `<details>` is
+   * not scanned by axe and is skipped by a reader, so a measurement inside one
+   * is a hidden measurement (the rule `puts NO measurement inside a prose
+   * disclosure` enforces). The unit claim survives without the number.
+   */
+  it('keeps the non-addability caveat VISIBLE, with the full explanation disclosed', async () => {
     renderStatistics(statisticsRoutes());
     await settled();
 
-    const text = textOf(regionOf('Open Questions'));
-    expect(text).toMatch(/counts QUESTIONS across the 5 records received/);
+    const region = regionOf('Open Questions');
+    const disclosure = region.querySelector('details.stats-disclosure');
+    expect(disclosure, 'the reading-rules disclosure must render').not.toBeNull();
+    expect(disclosure!.hasAttribute('open'), 'it must arrive closed').toBe(false);
+
+    // (a) the operative caveat, outside the disclosure — read from a clone with
+    // the disclosure removed, so this cannot pass on the disclosed copy.
+    const visible = pageTextWithout(region, 'details.stats-disclosure');
+    expect(visible).toMatch(/Total Open Questions counts QUESTIONS; the other four count RECORDS/);
+    expect(visible).toMatch(/None of the five may be added together/);
+
+    // (b) the full explanation, inside it, unchanged.
+    const disclosed = textOf(disclosure as HTMLElement);
+    expect(disclosed).toMatch(/counts QUESTIONS across the records received/);
     /* The three record-counting rows are NAMED rather than referred to by
        position: "the three beneath it" was true and unreadable, because a
        maximum sits among them. */
-    expect(text).toMatch(
+    expect(disclosed).toMatch(
       /Records With Open Questions, Records With a Blocked Step and Records With a Reopened Step count RECORDS/,
     );
-    expect(text).toMatch(/Most on One Record is the largest single record’s question count/);
-    expect(text).toMatch(/none of these five may be added together/);
+    expect(disclosed).toMatch(/Most on One Record is the largest single record’s question count/);
+    expect(disclosed).toMatch(/none of these five may be added together/);
   });
 
   it('reads no question text, field name or answer — no record string reaches the page', async () => {
@@ -2055,7 +2544,7 @@ describe('Open Questions', () => {
  */
 describe('Record Schema (inside Technical Details)', () => {
   it('states the schema counts in their labelled slots', async () => {
-    renderStatistics(statisticsRoutes());
+    renderStatisticsBuild(statisticsRoutes());
     await settled();
 
     expect(figuresIn('Record Schema')).toEqual({
@@ -2090,7 +2579,7 @@ describe('Record Schema (inside Technical Details)', () => {
    * not alphabetical, not by count.
    */
   it('breaks the fields down by section, in the document\'s own order', async () => {
-    renderStatistics(statisticsRoutes());
+    renderStatisticsBuild(statisticsRoutes());
     await settled();
 
     expect(
@@ -2106,7 +2595,7 @@ describe('Record Schema (inside Technical Details)', () => {
   });
 
   it('qualifies what "required" means and what the term count is a property of', async () => {
-    renderStatistics(statisticsRoutes());
+    renderStatisticsBuild(statisticsRoutes());
     await settled();
 
     const text = textOf(regionOf('Record Schema'));
@@ -2124,7 +2613,7 @@ describe('Record Schema (inside Technical Details)', () => {
   });
 
   it('links to the browser that renders the same document field by field', async () => {
-    renderStatistics(statisticsRoutes());
+    renderStatisticsBuild(statisticsRoutes());
     await settled();
 
     expect(
@@ -2149,7 +2638,7 @@ describe('Record Schema (inside Technical Details)', () => {
    * make each lookup ambiguous.
    */
   it('states the same field total the Schema Reference browser displays', async () => {
-    renderStatistics(statisticsRoutes());
+    renderStatisticsBuild(statisticsRoutes());
     await settled();
     const onStatistics = figureValue('Record Schema', 'Fields at Every Depth');
     // …and it really did read a number, or the comparison below could pass on ''.
@@ -2187,7 +2676,7 @@ describe('Record Schema (inside Technical Details)', () => {
    * is precisely what passed while the role was missing.
    */
   it('a dead /api/schema alarms ONCE, like its two siblings in this region', async () => {
-    renderStatistics(statisticsRoutes({ schema: { status: 500, body: { detail: 'synthetic failure' } } }));
+    renderStatisticsBuild(statisticsRoutes({ schema: { status: 500, body: { detail: 'synthetic failure' } } }));
     await settled();
 
     const region = regionOf('Record Schema');
@@ -2207,15 +2696,21 @@ describe('Record Schema (inside Technical Details)', () => {
     const alarmText = textOf(within(region).getByRole('alert'));
     expect(textOf(region).replace(alarmText, '')).not.toMatch(/\b\d+\b/);
 
-    // Everything else still renders.
-    expect(cardValue('Workspace at a Glance', 'Total Records')).toBe(String(RECORD_COUNT));
+    // Everything else on this tab still renders...
     expect(figureValue('API Surface', 'Documented Operations')).toBe(OPERATION_COUNT);
+    // ...and the Overview tab, which reads none of `/api/schema`, is untouched
+    // and alarm-free.
+    cleanup();
+    renderStatistics(statisticsRoutes({ schema: { status: 500, body: { detail: 'synthetic failure' } } }));
+    await settled();
+    expect(cardValue('Workspace at a Glance', 'Total Records')).toBe(String(RECORD_COUNT));
+    expect(screen.queryAllByRole('alert')).toHaveLength(0);
   });
 });
 
 describe('Platform Metrics — the inactive adapter boundary', () => {
   it('states that it is not connected, and states no figure at all', async () => {
-    renderStatistics(statisticsRoutes());
+    renderStatisticsBuild(statisticsRoutes());
     await settled();
 
     const region = regionOf('Platform Metrics');
@@ -2228,7 +2723,7 @@ describe('Platform Metrics — the inactive adapter boundary', () => {
   });
 
   it('says the absence is an absence, not a withholding and not a zero', async () => {
-    renderStatistics(statisticsRoutes());
+    renderStatisticsBuild(statisticsRoutes());
     await settled();
 
     const text = textOf(regionOf('Platform Metrics'));
@@ -2239,7 +2734,7 @@ describe('Platform Metrics — the inactive adapter boundary', () => {
   });
 
   it('lists the six planned views, each naming what it would count', async () => {
-    renderStatistics(statisticsRoutes());
+    renderStatisticsBuild(statisticsRoutes());
     await settled();
 
     const titles = [...regionOf('Platform Metrics').querySelectorAll('.stats-plan-title')].map(
@@ -2256,7 +2751,7 @@ describe('Platform Metrics — the inactive adapter boundary', () => {
   });
 
   it('adds NO request to the page — the mount reads are unchanged by its presence', async () => {
-    const { calls } = renderStatistics(statisticsRoutes());
+    const { calls } = renderStatisticsBuild(statisticsRoutes());
     await settled();
 
     // The five tracked reads plus Record Verification's, and nothing else. The
@@ -2269,7 +2764,7 @@ describe('Platform Metrics — the inactive adapter boundary', () => {
   });
 
   it('draws no chart, no axis and no empty plot', async () => {
-    renderStatistics(statisticsRoutes());
+    renderStatisticsBuild(statisticsRoutes());
     await settled();
 
     const panel = regionOf('Platform Metrics');

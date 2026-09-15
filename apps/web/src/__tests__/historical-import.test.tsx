@@ -397,31 +397,86 @@ async function openSession() {
  * §1 no upload, and no claim of one
  * -------------------------------------------------------------------------- */
 
-describe('§1 · the destination cannot accept bytes and does not say it can', () => {
-  it('renders no file input anywhere on the screen', async () => {
+/*
+ * *** §1 IS INVERTED, 2026-09-15, AND IT NOW BANS THE HARM RATHER THAN THE
+ * AFFORDANCE — which is a STRICTLY STRONGER CLAIM than the one it replaces. ***
+ *
+ * ~~It asserted that this screen renders NO `input[type="file"]` and declares
+ * no `type="file"`, `onDrop`, `FormData` or `multipart` in its source. Its
+ * stated subject was "the destination cannot accept bytes and does not say it
+ * can".~~
+ *
+ * The project owner reversed that decline (`DEC-33`) and — this is the part
+ * that makes the inversion legitimate rather than a loosening — he ANSWERED
+ * the decline's own objection instead of overruling it. The objection was:
+ *
+ *     "a scientist who picked twelve files would reasonably believe twelve
+ *      files had been uploaded."
+ *
+ * His instruction supplies the mitigation (a staged file must read `Local only
+ * — not sent to ISAAC`) and is explicit that the guards are to be RECONCILED,
+ * not deleted.
+ *
+ * SO THE SUBJECT CHANGES FROM "the affordance cannot exist" TO "the affordance
+ * exists and cannot do harm", and the three things asserted below are the harm:
+ * no byte is transmitted, the disclosure is on screen, and no upload route is
+ * called. The old assertion could pass on a build that had no feature; these
+ * cannot pass on a build that lies about one.
+ *
+ * WHAT IS NOT WEAKENED: `POST /api/uploads` is still an unconditional 403, and
+ * `upload-claim-parity.test.tsx` still holds the app-wide census of which
+ * components declare a file input — it goes from two named files to three named
+ * files, with the third's disclosure pinned. Neither guard is deleted.
+ */
+describe('§1 · the file picker exists and cannot send a byte', () => {
+  it('renders a file input — the affordance the owner asked for is present', async () => {
     await openSession();
-    expect(document.querySelectorAll('input[type="file"]')).toHaveLength(0);
+    const inputs = document.querySelectorAll('input[type="file"]');
+    expect(
+      inputs.length,
+      'the staging panel is mounted on Sources; if this is 0 the feature has been ' +
+        'removed rather than the guard updated',
+    ).toBe(1);
+    expect(inputs[0]).toHaveAttribute('multiple');
   });
 
-  it('declares no `type="file"` in its own source, nor a drop handler', () => {
+  it('the disclosure is on screen, in the open, next to it', async () => {
+    await openSession();
     /*
-     * THE SOURCE, NOT THE RENDER, and both are needed. The render test above
-     * cannot see a control behind a branch this fixture does not reach; this one
-     * cannot see one added by a child component. Together they cover both.
+     * THE MITIGATION THE DECLINE ASKED FOR, asserted at the point of use. A
+     * privacy state is one of the things the copy rule keeps VISIBLE, so this
+     * also checks it is not tucked inside a disclosure — `.ifs-claim` sitting
+     * inside a `<details>` would satisfy a presence-only check and still leave
+     * the reader with the false impression the decline warned about.
+     */
+    const claim = document.querySelector('.ifs-claim');
+    expect(claim).not.toBeNull();
+    expect(claim!.textContent).toMatch(/not sent to ISAAC/i);
+    expect(claim!.closest('details')).toBeNull();
+  });
+
+  it('declares no upload machinery in its own source, and calls no upload route', () => {
+    /*
+     * THE SOURCE, NOT THE RENDER, and both are still needed for the original
+     * reason: the render test cannot see a control behind a branch this fixture
+     * does not reach, and the source test cannot see one added by a child.
      *
-     * `upload-claim-parity.test.tsx` separately asserts that EXACTLY two non-test
-     * files in `apps/web/src` declare a file input and NAMES BOTH, so a third
-     * anywhere fails that test — this is the local, specific half.
+     * `type="file"` is no longer banned here — the panel legitimately declares
+     * one, and it is `ImportFileStaging`'s, asserted in
+     * `import-file-staging.test.tsx` both structurally and behaviourally (a spy
+     * on `fetch` and `XMLHttpRequest` that throws if either is touched). What is
+     * banned is the machinery that would carry BYTES, which no part of this
+     * pathway has any use for.
      */
     const src = readFileSync(
       join(__dirname, '..', 'screens', 'HistoricalImport.tsx'),
       'utf8',
     );
     const code = stripComments(src);
-    expect(code).not.toContain('type="file"');
-    expect(code).not.toContain('onDrop');
     expect(code).not.toContain('FormData');
     expect(code).not.toContain('multipart');
+    expect(code).not.toContain('/uploads');
+    expect(code).not.toContain('api.upload');
   });
 
   it('M-9 — the LANDING copy does not promise a format the build cannot read', async () => {
