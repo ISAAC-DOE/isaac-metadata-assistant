@@ -554,8 +554,24 @@ const RENDER_ALLOWLIST: Readonly<Record<string, string>> = {
      fifth, sixth and seventh; a copy sweep over record-identity vocabulary and
      form labels is its own slice with its own review. Named here so the next
      session finds them without re-measuring. */
-  'Change this value': 'FieldCaptureControl <label>; also asserted in live-screens.test.tsx',
-  'Search within this experiment': 'ExperimentGraphPanel <label>',
+  /* 'Change this value' was here (with its sibling 'Record this value') and is
+     CLOSED 2026-09-14: `.field-capture-label` declares no `text-transform`, so
+     those words reached the reader in sentence case at 11.5px/600. Now
+     'Change This Value' / 'Record This Value'.
+
+     THIS ONE STAYS, AND THE REASON IS MEASURED RATHER THAN DEFERRED.
+     `.expgraph-search-label` carries `text-transform: uppercase`
+     (`graph.css`), so the rendered label is "SEARCH WITHIN THIS EXPERIMENT" --
+     already a Register 1 eyebrow treatment. Re-casing the source string would
+     change nothing a sighted reader sees and nothing a screen reader says,
+     because casing does not affect speech. So this is an exemption on the
+     grounds that the VISIBLE rendering conforms, not an item of outstanding
+     work. Verified in Chromium: `getComputedStyle(label).textTransform ===
+     'uppercase'`, `font-size: 11px`.
+
+     The pair is worth keeping together: in the SOURCE these two strings looked
+     like the same defect, and only their computed styles distinguished them. */
+  'Search within this experiment': 'ExperimentGraphPanel <label> — rendered uppercase by CSS, see above',
   /* The five `lib/recordIdentity.ts` row labels were here -- `ISAAC record
      version`, `Record identifier`, `Record type`, `Record domain`, `Source
      type`. Closed 2026-09-14 in the same slice as the section 1b residue, which

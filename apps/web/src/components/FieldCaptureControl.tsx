@@ -307,8 +307,22 @@ export function FieldCaptureControl({
 
   return (
     <form className="field-capture" onSubmit={submit}>
+      {/*
+        TITLE CASE, because this label is VISIBLY sentence case and a control
+        label is Register 1 (`casing-and-copy.md:8-12`). Measured rather than
+        assumed: `.field-capture-label` (`fields.css:195`) sets `font-size`,
+        `font-weight` and `color` and NO `text-transform`, so these words reach
+        the reader exactly as written, at 11.5px/600.
+
+        The contrast with its neighbour in the same allowlist is the reason this
+        one moved and that one did not: `.expgraph-search-label` carries
+        `text-transform: uppercase`, so "Search within this experiment" renders
+        as "SEARCH WITHIN THIS EXPERIMENT" and its source casing is invisible.
+        Reading the two strings side by side in the source, they look like the
+        same defect; reading their computed styles, only one is.
+      */}
       <label className="field-capture-label" htmlFor={selectId}>
-        {field.present ? 'Change this value' : 'Record this value'}
+        {field.present ? 'Change This Value' : 'Record This Value'}
       </label>
       <div className="field-capture-controls">
         <select
