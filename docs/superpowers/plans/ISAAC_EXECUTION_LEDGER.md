@@ -277,6 +277,75 @@ read that as partial coverage, because that is what it is.
   deliberate `--font-size-meta` rung and its documented ~11px floor; 3
   `nested-cards`, 1 `overused-font`, 1 `em-dash-overuse`, 1 `layout-transition`.
 
+IMPECCABLE, SECOND RUN — HISTORICAL IMPORT, and it caught a flaw in MY OWN
+INSTRUMENT rather than in the page. Also ⚠️ DEGRADED: single-context.
+
+  The detector flagged `.hi-counts` as "17 characters over 14 lines". It is ONE
+  19px line of 89 characters. `getClientRects()` returns one rect per inline
+  TEXT-NODE FRAGMENT, not per line, and JSX interpolation splits a sentence into
+  many — so my chars-per-line helper (widest rect / glyph width, rect count as
+  line count) was wrong for every interpolated element it had touched.
+
+  *** THREE NUMBERS I HAD ALREADY COMMITTED WERE ARTIFACTS: "~112 chars/line",
+  "~143", and "79 after". *** Re-measured by laying each element's own text into
+  a probe at its own font and content width and counting LINE BOXES:
+
+    .needsyou-text  @1280   699px  2 lines   58 ch  ->  567px  2 lines  58 ch
+                    @1728  1147px  1 line   115 ch  ->  567px  2 lines  58 ch
+    .vr-status      @1280   895px  1 line   129 ch  ->  567px  2 lines  65 ch
+                    @1728  1343px  1 line   129 ch  ->  567px  2 lines  65 ch
+
+  BOTH CAPS SURVIVE AND ONE IS WEAKER THAN I CLAIMED, recorded at the site
+  rather than reverted. `.vr-status` was a real defect at BOTH widths — 129
+  characters on one line. `.needsyou-text` is **INERT AT 1280** and load-bearing
+  only at 1728; it was presented as a 1280 defect and is not one. The
+  wide-viewport case is real, and it is the same structural fact
+  `wide-prose.spec.ts` exists for: the widest viewport this suite tests is 1280,
+  and BOTH failure modes of a missing prose measure live above it.
+
+  AND 14 FINDINGS WERE REFUSED, measured: every `line-length` hit on Historical
+  Import is a false positive — the widest is 81 ch/line, inside the cited 70-85
+  band. That rule is PIXEL-based, so it fires on 13px text at 557px. It found
+  two real defects on Runs while being wrong about its own criterion, and it is
+  wrong about all fourteen of these. `tiny-text` (20-24 per surface) is this
+  repo's deliberate `--font-size-meta` rung and its documented ~11px floor.
+
+THE BLOCKER TABLE AT SESSION END. Every row is app-side COMPLETE; what remains
+is a switch, a decision, or a person — not product code.
+
+  | capability | app-side | owner | exact next action |
+  |---|---|---|---|
+  | proposal ACCEPTANCE | complete, fail-closed | Hao / SLAC | provide a trusted server-authoritative identity boundary; until then `409 human_actor_required` is correct, not a defect |
+  | MCP production transport | complete incl. OAuth resource server, disabled by default | Hao / operator | set `ISAAC_MCP_DEPLOYMENT` and configure trusted auth |
+  | voice -> text | recorder, pause/resume, playback, provider seam all complete | Hao / provider approval | approve a provider (D1-D9 deferred 2026-08-12); every provider answers `501` by design |
+  | real file-byte ingestion | staging UI complete and provably sends nothing | Hao / data governance | enable an approved Historical Import upload capability; the UI already reflects capability truth |
+  | `.mac` / spreadsheet parsers | interfaces + synthetic harness complete | Krish + Angel | supply a representative BL15-2 corpus (`EXT-10`). §5 forbids designing a parser against zero examples |
+  | Run-field template | 5 writable per run, 2 record-level, 7 refused by all routes | Angel | classify the six `system.configuration.*` paths (`EXT-09`); blocks nothing else |
+  | hosted QA of this image | n/a | Krish | `docs/krish-qa-packet-2026-09-15.md` — 6 items, each saying why it needs a human |
+  | 200% zoom / real narrow width | n/a — NOT automatable | Krish | no CDP method drives true zoom; `resize_window` does not move the rendered viewport |
+  | `0005` + `isaac_runs` Stage 2b | migration, backfill, projection all complete | Krish (approve) + operator (apply) | approve `0005`, run the backfill, then the two §8A completeness queries must both return 0 |
+  | personal-deploy retirement | n/a | Krish | disable (not delete) Vercel `isaac-demo-web` + the Railway service; Railway has a persistent volume |
+
+NAMED RESIDUE THAT IS OURS, NOT EXTERNAL — the honest short list:
+  * the global `.screen-main[data-width="wide"] .placeholder > p { max-width: 68ch }`
+    rule is the root cause of the dead-whitespace FAMILY. Deliberately untouched:
+    it reaches every `wide`/`full` screen, two lanes were editing such surfaces,
+    and it needs its own before/after plus an a11y round-trip.
+  * Settings tab regroup (`Overview / Privacy & Governance / Integrations /
+    Advanced`) — skipped with reasons: a nested tablist is banned and the flat
+    seven are each deep-linked.
+  * Data & Privacy status-row restructure — BLOCKED BY THE REPOSITORY, not by
+    taste: `settingsContent.ts` requires the mode-not-content caveat in the
+    always-visible `detail`, and `settings-page.test.tsx` requires each summary
+    to render exactly once. The mandated shape would hide a privacy state.
+  * `.hi-body` / `.hi-note` / `.hi-steps-disclosure` in the import session —
+    bounded in `wide-prose.spec.ts` with measured ceilings and a stated reason,
+    not silently forgiven. §10's remedy is shorter copy, which is a content
+    decision with the owner.
+  * Impeccable coverage is PARTIAL: Statistics/Settings, Runs and Historical
+    Import were critiqued; the file-staging panel, the stepper and the favicon
+    had browser measurement plus independent review instead.
+
 OWNER FEEDBACK DRIVING THIS SESSION (verbatim, 2026-09-15, from screenshots):
   * the Runs split-screen architecture is APPROVED — "I like that split-screen
     architecture" — but the right pane "is not really readable … I can't clearly
