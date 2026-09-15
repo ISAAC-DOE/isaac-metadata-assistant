@@ -49,8 +49,19 @@
   min-width: 0;
 }
 
+/*
+ * CAPPED — 895px wide with `max-width: none` at 12.5px, about 143 characters
+ * per line, which is the worst measure on the record screen. Found by
+ * Impeccable's in-browser overlay; the CLI engine cannot see a `.tsx` at all.
+ *
+ * This sentence matters more than most: it is the one that says a check has NOT
+ * been run, and that "that is not the same as no findings". A reader who loses
+ * their place in a 143-character line is losing their place in the distinction
+ * the sentence exists to draw.
+ */
 .vr-status {
   margin-top: 8px;
+  max-width: 72ch;
   font-size: 12.5px;
   line-height: 1.55;
   color: var(--text-secondary);

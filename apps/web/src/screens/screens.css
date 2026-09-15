@@ -208,7 +208,27 @@
 
 .needsyou-body { flex: 1; }
 .needsyou-title { font-size: 14px; font-weight: var(--font-weight-semibold); color: var(--advisory-text); }
-.needsyou-text { margin-top: 4px; font-size: 12.5px; color: var(--text-secondary); line-height: 1.5; }
+/*
+ * CAPPED TO A READABLE MEASURE — found by Impeccable's in-browser overlay, which
+ * is the detector code path that actually works in this repository (the CLI
+ * engine returns `[]` exit 0 on a `.tsx` holding four deliberate defects, with
+ * no warning at all; negative-controlled again this session).
+ *
+ * Measured at 1280: 699px wide with `max-width: none` at 12.5px — about 112
+ * characters per line, against the 70-85ch the product direction cites as
+ * readable. This is the OPPOSITE failure from the dead-whitespace one
+ * `e2e/specs/wide-prose.spec.ts` guards: there, prose stops far short of its
+ * box; here it had no measure at all and ran the full width of the banner.
+ *
+ * `72ch` rather than a pixel value, so it tracks this rule's own font-size.
+ */
+.needsyou-text {
+  margin-top: 4px;
+  max-width: 72ch;
+  font-size: 12.5px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
 /* THE PRIMARY ACTION SITS BESIDE THE TITLE, not floated to the vertical middle of
    whatever the banner happens to hold. `center` was defensible while the banner was
    always a list — the button landed roughly beside its own subject. It is wrong now
