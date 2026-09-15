@@ -615,6 +615,51 @@
   border-radius: var(--radius-token);
 }
 
+/*
+ * A GROUP MARKER INSIDE A FLAT TABLIST — the Settings row only, 2026-09-15.
+ *
+ * The divider is a NEUTRAL 1px `--border-faint`, which is what the
+ * no-vertical-rail rule allows and explicitly names as "not a rail": no status
+ * or accent colour touches a left border here. It separates the scientist-facing
+ * tabs from the developer group without adding a child to the tablist, because
+ * `role="tablist"` may only own `role="tab"` children and a stray wrapper is how
+ * `aria-required-children` gets broken.
+ *
+ * The eyebrow is `--font-size-meta` (11px) painting `--text-muted` (#5b6570,
+ * 5.93:1 on white) rather than `--text-tertiary`: nothing in this app qualifies
+ * for the WCAG large-text exemption, so 4.5:1 is the bar for an 11px label and
+ * the lighter grey would miss it.
+ */
+.section-tab-group-start {
+  margin-left: var(--space-sm);
+  padding-left: var(--space-md);
+  border-left: 1px solid var(--border-faint);
+}
+
+.section-tab-group {
+  /* Inline, not a block above the label: a block would make this one tab taller
+     than its six siblings and pull the whole shared `.section-tabs` row out of
+     alignment on all four pages that use it. MEASURED in Chrome: all seven tabs
+     report the same `top` and the same 30.5px height with the marker in place.
+     
+     The marker sits EQUIDISTANT between the divider and the label it precedes
+     (12px each side). It was 16px/8px first, which put it nearer the label than
+     the boundary and invited reading "ADVANCED API Access" as one tab name. */
+  margin-right: var(--space-md);
+  font-size: var(--font-size-meta);
+  font-weight: var(--font-weight-semibold);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+/* The marker does not brighten with its tab: it names the group, not the
+   selection, and a reader should not have to re-read it as part of the label. */
+.section-tab.active .section-tab-group,
+.section-tab:hover .section-tab-group {
+  color: var(--text-muted);
+}
+
 /* P33 S3 (D6): the assistant right rail on the Project Memory screen — the
    full-variant analogue of the record surfaces' .record-right, so the assistant
    stays visible across all three tabs. Neutral region divider, never a rail. */
