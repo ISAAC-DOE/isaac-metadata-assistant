@@ -95,7 +95,7 @@ import type { RecordChangeSummary } from '../lib/recordChanges';
  * the extension is redundant and the prop takes the shared type directly. A second
  * declaration of a field the producer now owns would be free to drift from it.
  */
-import type { ApiRunView } from '../lib/types';
+import type { ApiRunCheckResponse, ApiRunView } from '../lib/types';
 import { RUNS_PAGE_SIZE, RUN_LIST_LIMIT_MAX } from '../lib/runPaging';
 import { mutationFailureCopy } from '../lib/mutationErrors';
 
@@ -180,11 +180,21 @@ export function RunsSection({
   experimentId,
   activity,
   recordVersion,
-  onFirstRun,
+  onMirroredRun,
+  onCheck,
 }: {
   experimentId: string;
   /**
-   * Called with the first run of the loaded page, or `null` when there is none.
+   * Called with the run the Record Map beside this section should describe, or
+   * `null` when there is none.
+   *
+   * IT IS THE FOCUSED RUN WHEN ONE IS FOCUSED, AND THE PAGE'S FIRST RUN
+   * OTHERWISE — and it used to be the first run unconditionally, under the name
+   * `onFirstRun`. That was wrong the moment the map became clickable: a reader
+   * editing run 7 saw run 1's values on the right, and a row offering to focus
+   * an input would have focused an input belonging to a different run. The map
+   * also names the run it describes now, so the two cannot be confused even
+   * before a row is pressed.
    *
    * WHY THIS EXISTS RATHER THAN A SECOND FETCH. `RunSchemaMirror` renders beside
    * this section and needs a run to say what is recorded on it. Its first
@@ -198,7 +208,13 @@ export function RunsSection({
    * so the mirror and the run card can never show different states of the same
    * run.
    */
-  onFirstRun?: (run: ApiRunView | null) => void;
+  onMirroredRun?: (run: ApiRunView | null) => void;
+  /**
+   * The focused run's last Check Run result, or `null`. Forwarded verbatim from
+   * `RunCard` — see its own doc on `onCheck` for what each value means and why
+   * `null` is sent as a check starts.
+   */
+  onCheck?: (data: ApiRunCheckResponse | null) => void;
   /**
    * THE FAST PATH — a RUN-scoped change-feed summary, or `null`. See the note
    * above this file's imports for which field of it this path reads (`runRev`,
@@ -271,7 +287,8 @@ export function RunsSection({
         experimentId={experimentId}
         activity={activity ?? null}
         recordVersion={recordVersion ?? null}
-        onFirstRun={onFirstRun}
+        onMirroredRun={onMirroredRun}
+        onCheck={onCheck}
       />
     </section>
   );
@@ -281,13 +298,16 @@ function RunsBrowser({
   experimentId,
   activity,
   recordVersion,
-  onFirstRun,
+  onMirroredRun,
+  onCheck,
 }: {
   experimentId: string;
   activity: RecordChangeSummary | null;
   recordVersion: string | null;
   /** Forwarded from `RunsSection` — see the prop's note there. */
-  onFirstRun?: (run: ApiRunView | null) => void;
+  onMirroredRun?: (run: ApiRunView | null) => void;
+  /** Forwarded from `RunsSection` — see the prop's note there. */
+  onCheck?: (data: ApiRunCheckResponse | null) => void;
 }) {
   const baseId = useId();
   const searchId = `${baseId}-search`;
@@ -429,19 +449,10 @@ function RunsBrowser({
   const runsRef = useRef<ApiRunView[]>([]);
   runsRef.current = list.status === 'data' ? list.loaded.runs : [];
 
-  /* Report the first run upward whenever the loaded page changes. An effect, not
-     a render-time call: calling a parent's setter during render is the loop this
-     codebase has been bitten by, and the value is derived from state that has
-     already settled. */
+  /* The page's first run. Reported upward only when no run is FOCUSED — see
+     the notify effect further down, which is where the choice is made, because
+     the focused run is not resolved until then. */
   const firstRun = list.status === 'data' ? (list.loaded.runs[0] ?? null) : null;
-  const firstRunId = firstRun?.id ?? null;
-  const firstRunVersion = firstRun?.version ?? null;
-  useEffect(() => {
-    onFirstRun?.(firstRun);
-    /* Keyed on the run's IDENTITY and VERSION rather than the object, so a
-       re-render with an equal run does not re-notify. */
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [firstRunId, firstRunVersion]);
 
   /*
    * THE LOADED SNAPSHOT, read the same way — see `runsRef` immediately above for
@@ -1694,6 +1705,31 @@ function RunsBrowser({
       : loaded?.runs.find((r) => r.id === focusRunId);
 
   /*
+   * REPORT THE MIRRORED RUN UPWARD — the FOCUSED run when one is focused, the
+   * page's first run otherwise.
+   *
+   * IT LIVES HERE, AND NOT BESIDE `firstRun` WHERE IT USED TO, because
+   * `focusedRun` is not resolved until this point and the effect cannot choose
+   * between them before it is. An effect, not a render-time call: calling a
+   * parent's setter during render is the loop this codebase has been bitten by,
+   * and both values are derived from state that has already settled.
+   *
+   * `undefined` — a focus that is still loading, or an id that resolves to no
+   * run — deliberately reports `null` rather than falling back to the first
+   * run. The alternative is a map describing run 1 while the screen is opening
+   * run 7, which is the exact confusion naming the run was meant to end.
+   */
+  const mirroredRun = focused ? (focusedRun ?? null) : firstRun;
+  const mirroredRunId = mirroredRun?.id ?? null;
+  const mirroredRunVersion = mirroredRun?.version ?? null;
+  useEffect(() => {
+    onMirroredRun?.(mirroredRun);
+    /* Keyed on the run's IDENTITY and VERSION rather than the object, so a
+       re-render with an equal run does not re-notify. */
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mirroredRunId, mirroredRunVersion]);
+
+  /*
    * BRING THE ADDRESS A COMPARISON LINKED TO INTO VIEW, and mark it.
    *
    * `RunInheritedPanel` already renders `data-address` on every resolved row, so
@@ -2289,6 +2325,7 @@ function RunsBrowser({
             removeError={removeError}
             onReloadSection={reloadSection}
             onHeldInvalidChange={setFocusedHeldInvalid}
+            onCheck={onCheck}
             onLeave={() => {
               setCardFocusId(focusRunId);
               setFocusRun(null);
@@ -2597,6 +2634,7 @@ function FocusedRun({
   removeError,
   onReloadSection,
   onHeldInvalidChange,
+  onCheck,
   onLeave,
 }: {
   experimentId: string;
@@ -2619,6 +2657,8 @@ function FocusedRun({
   onReloadSection: () => void;
   /** Passed straight through to `RunCard` — see its own doc on `onHeldInvalidChange`. */
   onHeldInvalidChange: (heldInvalid: boolean) => void;
+  /** Passed straight through to `RunCard` — see its own doc on `onCheck`. */
+  onCheck?: (data: ApiRunCheckResponse | null) => void;
   onLeave: () => void;
 }) {
   if (focus.status === 'loading') {
@@ -2682,6 +2722,7 @@ function FocusedRun({
         }
         onReloadSection={onReloadSection}
         onHeldInvalidChange={onHeldInvalidChange}
+        onCheck={onCheck}
       />
     </div>
   );

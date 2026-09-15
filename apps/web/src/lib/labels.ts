@@ -758,6 +758,21 @@ export const LABELS = {
   cited: 'Cited',
   readOnly: 'read-only',
 
+  /*
+   * THE RECORD MAP's three group titles. Register 1 (Title Case), here rather
+   * than inline for the reason `casing-registers.test.tsx` refuses a new
+   * label-slot literal: a `.eyebrow` group heading is a label slot, and three
+   * of them authored in place is three strings nobody has to re-read when the
+   * vocabulary next moves.
+   *
+   * "Needs Attention" is DELIBERATELY the queue's existing words — it is the
+   * same claim in a second place ("something here wants you"), and the one
+   * thing worse than a new vocabulary is two words for one state.
+   */
+  recordMapNeedsAttention: 'Needs Attention',
+  recordMapThisRun: 'This Run',
+  recordMapInherited: 'Shared By The Record',
+
   // Assistant
   assistant: 'Assistant',
   assistantSuggestion: 'Assistant Suggestion',

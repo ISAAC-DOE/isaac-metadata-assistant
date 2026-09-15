@@ -1,6 +1,6 @@
 import './screens.css';
 import '../components/evidence.css';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Navigate, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { AppShell } from '../components/AppShell';
 import { TopBar } from '../components/TopBar';
@@ -24,6 +24,7 @@ import { ValidateReview } from '../components/ValidateReview';
 import { disposeExperiment, flushExperiment } from '../lib/runAutosaveStore';
 import { AssistantPanel, type AgentPrompt } from '../components/AssistantPanel';
 import { AssistantDrawer } from '../components/AssistantDrawer';
+import { AssistantAskContext, type AssistantPrefill } from '../lib/assistantAsk';
 import { LiveSyncNote } from '../components/LiveSyncNote';
 import { RecordActivityNote } from '../components/RecordActivityNote';
 import { needsCanonicalRefetch, type RecordChangeSummary } from '../lib/recordChanges';
@@ -53,6 +54,7 @@ import { compose } from '../lib/assistantComposer';
 import type {
   ApiEvidenceEntry,
   ApiPendingItem,
+  ApiRunCheckResponse,
   ApiRunView,
   ApiWorkflow,
   RecordBundle,
@@ -767,9 +769,46 @@ function LoadedWorkbench({
   });
   if (activeView !== 'graph') mounted.current[activeView] = true;
 
-  /* The run the schema mirror describes, reported by `RunsSection` from the page
-     it already loaded. Held here because the two are siblings. */
+  /* The run the Record Map describes — the FOCUSED run when one is focused,
+     otherwise the page's first — reported by `RunsSection` from the page it
+     already loaded. Held here because the two are siblings. */
   const [mirrorRun, setMirrorRun] = useState<ApiRunView | null>(null);
+  /* That run's last Check Run result, or `null`. The ONLY thing the map does
+     with it is mark a row `Needs Review`, and it drops it whole when its
+     `checked_run_version` is not the run's current one — see the map's own
+     `currentCheck`. It is reported as `null` the moment a new check starts, so
+     a stale read is never left standing beside a check in flight. */
+  const [mirrorCheck, setMirrorCheck] = useState<ApiRunCheckResponse | null>(null);
+
+  /*
+   * ── "ASK ISAAC" — ONE CHANNEL FROM A FINDING ROW TO THE COMPOSER ─────────
+   *
+   * The project owner, 2026-09-15, on a blocker a scientist cannot read:
+   * *"there could be a button right next to it that points to the agent, and
+   * then the agent will have the context of 'oh, the user is asking about this
+   * specific blocker'."*
+   *
+   * WHAT IT DOES: puts a composed question in the Assistant composer and
+   * reveals the rail. WHAT IT DOES NOT DO: send it. There is no language model
+   * in any deployment of this build — `ASSISTANT_NO_MODEL_CLAIM` states that in
+   * the panel's own dock — and the composer submits to a bounded deterministic
+   * intent resolver (`api.askAssistant`) that refuses honestly when a question
+   * is outside its catalog. A control that asked its own question and rendered an
+   * answer beside a blocker would read as a model explaining the science, which
+   * is the one thing this surface must not imply
+   * (`docs/ai-integration-decision-packet.md` §6, §9). The scientist presses
+   * Send. Nothing here fills a field, validates, accepts, submits or exports.
+   *
+   * `nonce` is why this is an object and not a string: pressing the same button
+   * twice carries an identical question, and an effect keyed on the text alone
+   * would not re-run — the panel would silently do nothing.
+   */
+  const [askPrefill, setAskPrefill] = useState<AssistantPrefill | null>(null);
+  const [assistantReveal, setAssistantReveal] = useState(0);
+  const askIsaac = useCallback((question: string) => {
+    setAskPrefill((prev) => ({ text: question, nonce: (prev?.nonce ?? 0) + 1 }));
+    setAssistantReveal((n) => n + 1);
+  }, []);
 
   const evidenceByPath = useMemo(
     () => new Map<string, ApiEvidenceEntry>(evidence.map((e) => [e.path, e])),
@@ -826,9 +865,10 @@ function LoadedWorkbench({
   // lives inline on every field row (truth, in the main column); the whole-record
   // Evidence Trail affordance now sits beneath the WorkflowSpine (see `sidebar`).
   const rightPanel = (
-    <AssistantDrawer railClassName="record-right narrow">
+    <AssistantDrawer railClassName="record-right narrow" revealSignal={assistantReveal}>
       <AssistantPanel
         {...compose({ context: 'review', bundle })}
+        prefill={askPrefill}
         experimentId={id}
         recordRev={detail.rev}
         availability={graph.availability}
@@ -871,6 +911,12 @@ function LoadedWorkbench({
   );
 
   return (
+    /* Every finding row under this screen — `RunCard`'s Check Run and
+       `ValidateReview`'s per-run detail alike — reaches the composer through
+       this one value. A screen that provides none renders no `Ask ISAAC`
+       control at all, which is why the consumer checks for `null` rather than
+       rendering a button that would do nothing. */
+    <AssistantAskContext.Provider value={askIsaac}>
     <AppShell
       variant="record"
       topBar={
@@ -1181,9 +1227,10 @@ function LoadedWorkbench({
              */
             recordVersion={detail.version}
             /* ONE READ, TWO CONSUMERS — see the prop's note in `RunsSection`. */
-            onFirstRun={setMirrorRun}
+            onMirroredRun={setMirrorRun}
+            onCheck={setMirrorCheck}
           />
-          <RunSchemaMirror run={mirrorRun} />
+          <RunSchemaMirror run={mirrorRun} check={mirrorCheck} />
           </div>
 
           {/*
@@ -1287,6 +1334,7 @@ function LoadedWorkbench({
         </section>
       )}
     </AppShell>
+    </AssistantAskContext.Provider>
   );
 }
 

@@ -1127,6 +1127,83 @@
   flex: none;
 }
 
+/* ---- the acquisition-timestamp controls --------------------------------- */
+
+/* The picker and its zone marker on one line. The marker is a VISIBLE `UTC`
+   beside the control rather than a suffix on the label, because renaming the
+   field would break every surface that addresses it by name — see the JSX. */
+.run-field-datetime {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  min-width: 0;
+}
+/*
+ * `flex: 1 1 0` AND `min-width: 0`, AND BOTH ARE LOAD-BEARING — measured, not
+ * defensive.
+ *
+ * A `datetime-local` control has a LARGE intrinsic minimum: the browser's own
+ * date/time spinner and calendar glyph set a min-content width of roughly
+ * 200px, and a flex item defaults to `min-width: auto`, which is that
+ * min-content width. Measured on the running app at 1280px with the Assistant
+ * rail expanded (so the runs column is 402px): without these two declarations
+ * the picker pushed `.run-fields`' min-content width past the column, the run
+ * card's own header row was squeezed in response, and `.run-card-conditions`
+ * rendered at **13px wide by 1041px tall** — one character per line. The same
+ * screen before the picker existed: 147px by 74px.
+ *
+ * `min-width: 0` alone is not enough, because `flex-basis: auto` then sizes the
+ * item from its content anyway; `flex: 1 1 0` is what makes the control take
+ * the space it is GIVEN rather than the space it wants.
+ */
+.run-field-datetime .run-input {
+  flex: 1 1 0;
+  min-width: 0;
+}
+.run-field-zone {
+  flex: none;
+  font-size: var(--font-size-meta);
+  font-weight: var(--font-weight-medium);
+  color: var(--text-slate);
+}
+
+/* WHAT IS ACTUALLY STORED, in both spellings. Not a caption on the control: it
+   is the one line that lets a reader confirm the picker and the record agree
+   without opening the text path. */
+.run-field-readback {
+  font-size: var(--font-size-meta);
+  line-height: var(--line-height-normal);
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+
+/* The ISO text path. Native `<details>`, so it is keyboard-operable with no JS
+   and `querySelectorAll` reaches its contents whether it is open or shut. */
+.run-field-iso {
+  margin-top: var(--space-2xs);
+}
+.run-field-iso-summary {
+  cursor: pointer;
+  font-size: var(--font-size-meta);
+  color: var(--text-strong);
+}
+.run-field-iso-summary:focus-visible {
+  outline: 2px solid var(--ring-active);
+  outline-offset: 2px;
+}
+.run-field-iso > *:not(summary) {
+  display: block;
+  margin-top: var(--space-2xs);
+}
+/* A real label, not a placeholder: the box has its own name because it is a
+   second control for the same field and a screen reader must be able to tell
+   the two apart. */
+.run-field-iso-label {
+  font-size: var(--font-size-meta);
+  font-weight: var(--font-weight-medium);
+  color: var(--text-secondary);
+}
+
 /* ---- check result ------------------------------------------------------- */
 
 .run-check {
@@ -1173,19 +1250,101 @@
   color: var(--text-slate);
 }
 
+/* A FINDING IS A STRUCTURED ROW NOW, NOT A BULLET. Subject and state on one
+   line, the server's own sentence under it, the actions under that — so the
+   two questions a scientist asks first ("what is this about" and "how bad is
+   it") are answered before the prose, and a row that is only prose still
+   reads as one row. The list marker is dropped because a bullet beside a
+   two-line structured row reads as a typographic accident. */
 .run-check-list {
+  list-style: none;
   margin: 0;
-  padding-left: 18px;
+  padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: var(--space-sm);
 }
 
 .run-check-item {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2xs);
+  padding: var(--space-sm);
+  background: var(--surface);
+  border: 1px solid var(--border-faint);
+  border-radius: var(--radius-inner);
   font-size: 12.5px;
   line-height: 1.5;
   color: var(--text-secondary);
   overflow-wrap: anywhere;
+}
+
+.run-check-item-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-sm);
+}
+
+/* The subject. `.mono` is added at the call site when the text is a raw
+   official PATH rather than a human name — the same demotion every other path
+   in this app gets, and never a substitute for one. */
+.run-check-item-subject {
+  font-size: var(--font-size-meta);
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-heading);
+}
+
+/* NEVER COLOUR ALONE — and here, never colour AT ALL. The state is a word in a
+   bordered chip; the hue is the same for every state, so nothing about a
+   finding is signalled by a colour a reader has to have learned. Reserved
+   pass/fail hues are deliberately absent: a finding row is not a verdict
+   surface, and official validation is the only thing that issues one. */
+.run-check-item-state {
+  margin-left: auto;
+  flex: none;
+  padding: 0 var(--space-xs);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  font-size: var(--font-size-meta);
+  font-weight: var(--font-weight-medium);
+  color: var(--text-slate);
+  white-space: nowrap;
+}
+
+.run-check-item-text {
+  display: block;
+}
+
+.run-check-item-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-xs);
+  margin-top: var(--space-2xs);
+}
+
+.run-check-item-action {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2xs);
+  padding: var(--space-2xs) var(--space-xs);
+  background: var(--surface-subtle);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  font: inherit;
+  font-size: var(--font-size-meta);
+  color: var(--text-strong);
+  cursor: pointer;
+}
+
+.run-check-item-action:hover {
+  background: var(--action-tint);
+  border-color: var(--action-selected-border);
+}
+
+.run-check-item-action:focus-visible {
+  outline: 2px solid var(--ring-active);
+  outline-offset: 2px;
 }
 
 .run-check-item-opaque {
