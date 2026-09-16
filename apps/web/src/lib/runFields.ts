@@ -65,6 +65,7 @@
  * server's own validation is what will say so — this file never validates.
  */
 
+import { formatStoredDatetime } from './runDatetime';
 import type { ApiRunCheckFinding, ApiRunFieldEnvelope, ApiRunView } from './types';
 
 /** How one run-level field is entered. Drives the control, nothing else. */
@@ -247,7 +248,29 @@ export function runConditionsSummary(run: ApiRunView): string | null {
   const parts = RUN_FIELDS.map((spec) => {
     const value = envelopeValue(run.fields?.[spec.path]);
     if (value === null || value === undefined) return null;
-    return spec.unit ? `${String(value)} ${spec.unit}` : String(value);
+    /*
+     * A `datetime` GOES THROUGH THE ONE RENDERER, and this is a fix found by
+     * looking at the screen rather than by a failing test.
+     *
+     * Measured in Chrome on a run holding all three values: this line read
+     * `in_situ · 45 K · 2026-01-31T09:00:00Z` while the Record Map two hundred
+     * pixels to its right read `Jan 31, 2026 · 09:00 UTC` — ONE stored value, TWO
+     * spellings, on one screen. It is the defect this file's line-309 comment
+     * already records for a different field ("the header's conditions line reads
+     * `1000 K` — the same field, two renderings"), and it is the one
+     * `formatStoredDatetime`'s own docstring claims cannot happen: "the Record
+     * Map row and the run editor's read-back are the same function — so the two
+     * can never show one stored value in two spellings." That claim was true of
+     * the two sites it NAMES. This was a third, and it used `String(value)`.
+     *
+     * `formatStoredDatetime` RETURNS ITS INPUT VERBATIM for anything it cannot
+     * read, which is why routing through it is safe here: a half-typed or
+     * offset-bearing timestamp still shows exactly what the record holds. The
+     * official stored form is not lost either — it is what the run editor's ISO
+     * text box and the Record Map's own path line carry, and this is a summary.
+     */
+    const shown = spec.kind === 'datetime' ? formatStoredDatetime(String(value)) : String(value);
+    return spec.unit ? `${shown} ${spec.unit}` : shown;
   }).filter((p): p is string => p !== null);
   return parts.length > 0 ? parts.join(' · ') : null;
 }

@@ -4523,6 +4523,41 @@ move with it rather than silently checking an empty store.
 
 Measured: `test_historical_import_routes.py` → **83 passed**.
 
+### 6. One stored timestamp was showing in two spellings, 200px apart — found by LOOKING
+
+A final visual pass over the Runs screen, on a record built for it, confirmed the five things the
+owner complained about are answered: the Record Map carries a `✓ Filled` / `◌ Missing` chip **and
+the value** per field (`in_situ`, `45 K`, `Jan 31, 2026 · 09:00 UTC`) with its schema path beneath;
+the pane says what it is and what it is not (*"reports what the run carries; it runs no validation
+of its own"*); *"check failed"* is gone in favour of **"3 Fields Need Your Confirmation — values the
+system refuses to guess … expected, not a failure"** with a `Review & Answer →` control; and `DATA
+CAPTURE` is a sidebar group, not a sixth workflow step.
+
+**And it found a defect no test was going to.** The run card's own summary line read
+`in_situ · 45 K · 2026-01-31T09:00:00Z` while the Record Map two hundred pixels to its right read
+`Jan 31, 2026 · 09:00 UTC` — **one stored value, two spellings, on one screen**, and the owner's
+mandate was *human-friendly timestamps preserving the official stored format*.
+
+**`formatStoredDatetime`'s own docstring claims this cannot happen** — *"the Record Map row and the
+run editor's read-back are the same function — so the two can never show one stored value in two
+spellings."* That claim was **true of the two sites it names**. The summary was a **third**, and it
+called `String(value)`. It is the same defect `runFields.ts`'s own line-309 comment already records
+for a different field (*"the header's conditions line reads `1000 K` — the same field, two
+renderings"*), which is what makes this a recurrence rather than a surprise.
+
+Routed through the one renderer, keyed on `spec.kind === 'datetime'`, which is safe precisely
+because that function **returns its input verbatim** for anything it cannot read — so a half-typed
+or offset-bearing timestamp still shows exactly what the record holds. Measured after the fix in
+Chrome: the summary reads `in_situ · 45 K · Jan 31, 2026 · 09:00 UTC`, and the raw
+`2026-01-31T09:00:00Z` appears **exactly once**, in the `mono` ISO box — so the official stored form
+is preserved where it belongs rather than removed.
+
+**Four tests**, one of them a negative control on SCOPE (the obvious over-fix is to route
+everything through the datetime renderer, which would be invisible because it passes non-timestamps
+through unchanged) and one asserting the output **by calling the renderer** rather than
+transcribing it, so a future format change moves all three sites together or fails here.
+`run-datetime` → **18 passed**; `run-workspace` + `run-datetime` → **71 passed**.
+
 ### Verification
 
 | what | command | result |
