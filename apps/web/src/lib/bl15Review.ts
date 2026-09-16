@@ -24,9 +24,12 @@
  *
  * ── THE ONE THING NOT YET COMMITTED IS THE CONTAINER ───────────────────────
  *
- * `Bl15CorpusReview` groups those five payloads. No route emits it yet — the
- * archive source kind is another slice's step 1, and `historical_import.SOURCE_KINDS`
- * today holds only `reference` and `synthetic_fixture`. The container is therefore
+ * `Bl15CorpusReview` groups those five payloads. No route emits it yet. ~~the archive
+ * source kind is another slice's step 1, and `historical_import.SOURCE_KINDS` today
+ * holds only `reference` and `synthetic_fixture`~~ — **IT SHIPPED (`6cdb2279`, this
+ * branch), so that reason is FALSE.** The honest status is that the server's
+ * `_archive_view` and this shape were built independently and have not been joined, and
+ * that is named residue rather than an unbuilt step. The container is therefore
  * the single shape here that is a proposal rather than a mirror, and it is
  * deliberately nothing but the union of the committed ones: every member is a
  * verbatim `to_state()` output, so a route can satisfy it by serialising objects it

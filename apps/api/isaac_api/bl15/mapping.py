@@ -80,13 +80,44 @@ PROPOSABLE_STATUSES: frozenset[str] = frozenset(
 
 
 ASSETS_BLOCKED_REASON = (
-    "The official schema requires assets[].sha256, and this build computes no digest "
-    "for any historical source — not even for a file it reads. So a historical file "
-    "cannot become an official asset entry without fabricating a required field. The "
-    "asset content_role vocabulary otherwise fits this corpus exactly "
-    "(raw_data_pointer, reduction_product, calibration_reference), which is why this is "
-    "named as a boundary rather than left to surface as a failing export."
+    "The official schema requires both assets[].uri and assets[].sha256. This build "
+    "does not publish either for a historical source: a manifest digest is only ever "
+    "what the scientist stated, never one this application computed, and the location "
+    "of a file inside an archive is not a URI anything outside this working area could "
+    "resolve. So a historical file cannot become an official asset entry without this "
+    "application asserting two things it has no standing to assert. The asset "
+    "content_role vocabulary otherwise fits this corpus exactly (raw_data_pointer, "
+    "reduction_product, calibration_reference), which is why this is named as a "
+    "boundary rather than left to surface as a failing export."
 )
+
+#: ~~"this build computes no digest for any historical source — not even for a file it
+#: reads"~~ — **THAT WAS THE REASON ABOVE UNTIL 2026-09-16, AND IT WENT FALSE ON THIS
+#: BRANCH.** Found by independent review, which measured 14 member digests computed
+#: while this sentence was being served to a scientist on the same payload.
+#:
+#: The archive walk computes a SHA-256 per member, and it must: content hashing is the
+#: only thing that stops the corpus doubling (94 measurements became 181 without it) and
+#: the only correct way to recognise the 96 duplicate groups. So the digest now EXISTS,
+#: and the blocker is no longer its absence.
+#:
+#: **The conclusion did not change and the reason had to.** What blocks an asset entry is
+#: a POLICY about publishing, not an arithmetic gap: a manifest ``sha256`` is "what the
+#: scientist said", and a computed one published in the same field would put two meanings
+#: behind one name — which is the argument ``historical_import`` has made since
+#: ``HIST-001``. The ``uri`` half is new here and is the firmer of the two: an archive
+#: member's path resolves nowhere outside this working area.
+#:
+#: This is the sibling of the claim the wiring slice corrected one module away, and it is
+#: another instance of §15's incomplete-correction-sweep pattern — made worse by
+#: ``test_bl15_mapping.py``'s pinning this constant to ONE home, which guaranteed the
+#: false text was byte-identical in both places it was served.
+#:
+#: **Consequence worth naming rather than leaving implied:** a future slice COULD reach
+#: ``assets[]`` for an archive member, by deciding that a computed digest may be published
+#: in a field distinguishable from a stated one, and by giving the member a resolvable
+#: URI. Both are decisions; neither is blocked by a missing number.
+_ASSETS_BLOCKED_REASON_CORRECTION = "2026-09-16"
 
 TEMPERATURE_ABSENT_REASON = (
     "context.temperature_K is required by the official schema whenever a context block "

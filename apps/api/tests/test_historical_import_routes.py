@@ -1257,18 +1257,27 @@ def test_the_batch_sends_every_proposable_candidate_and_names_the_rest(client):
         "candidate_not_proposable",
     }
     # `runs_created` JOINED THIS DICT 2026-09-16 with the archive source kind.
-    # The four original numbers are UNCHANGED and are still asserted exactly;
-    # the fifth is `0` here because this bundle holds no archive and this request
+    # The four original numbers are UNCHANGED and are still asserted exactly; the
+    # last two are `0` here because this bundle holds no archive and this request
     # did not ask for runs, which is a measured zero rather than an absent key.
+    #
+    # `runs_already_present` was added 2026-09-16 with run idempotence: a batch that
+    # created nothing because every measurement already had a run is a DIFFERENT
+    # outcome from one that created nothing because there was nothing to create, and
+    # `runs_created: 0` alone cannot tell them apart. Asserted as a whole dict rather
+    # than key-by-key precisely so a new count cannot appear unnoticed — which is what
+    # caught this.
     assert body["counts"] == {
         "candidates": 4,
         "sent": 1,
         "already_sent": 0,
         "not_sent": 3,
         "runs_created": 0,
+        "runs_already_present": 0,
     }
     assert body["create_runs"] is False
     assert body["created_runs"] == []
+    assert body["runs_already_present"] == []
     # THE COUNTS SUM, which is what makes the report a report rather than four
     # independent numbers. `runs_created` is deliberately NOT in this sum: a run
     # is not a candidate, and adding it would make the identity stop holding.

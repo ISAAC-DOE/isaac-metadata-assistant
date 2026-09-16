@@ -425,7 +425,7 @@ describe('BL15 review · §7 five outcomes, never a progress bar', () => {
 
   it('renders NO progress bar and no completion percentage over mapping', () => {
     const { container } = renderReview();
-    // 6 of 45 proposable would read as 87% failure, when 24 of those are a
+    // 5 of 45 proposable would read as 89% failure, when 24 of those are a
     // correct description of the official schema's coverage and 14 are a
     // question for a domain owner. So there is no bar and no percentage.
     expect(container.querySelector('progress')).toBeNull();

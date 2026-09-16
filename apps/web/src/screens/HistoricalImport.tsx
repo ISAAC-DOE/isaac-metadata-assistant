@@ -590,9 +590,12 @@ function ImportSessionView({
 
         RENDERED ONLY WHEN THE SERVER SENDS ONE, and absent — not empty, not
         disabled, not a placeholder — otherwise. No route emits `corpus_review`
-        today: the archive source kind is a separate slice's step 1 and
-        `historical_import.SOURCE_KINDS` still holds only `reference` and
-        `synthetic_fixture`. `ai-integration-decision-packet.md` §9's rule is
+        today. ~~The archive source kind is a separate slice's step 1, and
+        `historical_import.SOURCE_KINDS` holds only `reference` and
+        `synthetic_fixture`.~~ — IT SHIPPED (`6cdb2279`, this branch), so that reason
+        is FALSE: the route exists and does not emit `corpus_review`, because the
+        server and this surface were built against different shapes and have not
+        been joined. `ai-integration-decision-packet.md` §9's rule is
         "build nothing that implies any of it exists", so a session without an
         archive shows nothing here at all.
 

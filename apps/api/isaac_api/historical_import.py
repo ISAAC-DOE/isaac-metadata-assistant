@@ -1958,9 +1958,28 @@ def read_archive(
                         # A WINDOW WITH ITS TOTAL BESIDE IT, never a trimmed
                         # list presented as a whole one — see
                         # `MAX_SKIPPED_PER_SOURCE` for the measurement.
-                        "skipped": [
-                            dict(s) for s in result.skipped[:MAX_SKIPPED_PER_SOURCE]
-                        ],
+                        #
+                        # THE CEILING DISCLOSURE IS PULLED TO THE FRONT, and this
+                        # is a fix rather than a nicety: `_emit.result()` APPENDS
+                        # that entry last, so the window dropped it on exactly the
+                        # sources that had most to report. Measured by independent
+                        # review with 6 prose skips plus a reached ceiling — the
+                        # five served entries were all prose and the ceiling
+                        # statement was gone, while `evidence.py` cites that entry
+                        # as the whole mitigation for the deliberate `alignment`
+                        # truncation ("names the exact line, header, motor and scan
+                        # where reading stopped"). `partial` and
+                        # `statements_suppressed` are read off the FULL list above,
+                        # so the quantity was always honest; what vanished was the
+                        # only thing saying WHERE.
+                        #
+                        # The remedy is the one this function already applies 50
+                        # lines below to the filename refusal, for the reason stated
+                        # there — "appending it would have put it past
+                        # `MAX_SKIPPED_PER_SOURCE` on exactly the sources that
+                        # already have the most to report" — and that argument was
+                        # simply not carried to the more load-bearing entry.
+                        "skipped": _skips_ceiling_first(result.skipped),
                         "skipped_total": len(result.skipped),
                         "refused_reason": result.refused_reason,
                     }
@@ -2838,6 +2857,34 @@ def add_source(
         # allowlist this module owns — and a second field would be a second
         # place for a hydration path to have to look.
         name = _clean(fixture_name, "fixture_name", maximum=200, required=True)
+        # ONE ARCHIVE PER BUNDLE, ENFORCED RATHER THAN ASSERTED. `remove_source`'s own
+        # comment relies on "a bundle may hold at most one archive" to justify dropping
+        # the reading unconditionally — and NOTHING CHECKED IT. Independent review
+        # measured the consequence: two archive entries were accepted, BOTH manifest rows
+        # reported `parse_state: parsed`, row 0's detail claimed N files inventoried and
+        # M candidates found, and `session.archive_reading` belonged to the SECOND source
+        # only, because `parse_session` rebinds it per archive and the last one wins. So
+        # the first row described a reading that no longer existed — a count not derived
+        # from what it claims to describe.
+        #
+        # Harmless only while the allowlist holds one name, which makes this exactly the
+        # kind of latent claim that goes false on a one-line change the module's own
+        # design anticipates. Refused here rather than accumulated in `parse_session`,
+        # because a session with two readings has no single `archive_reading` to serve and
+        # every consumer would need a branch that has to stay correct.
+        existing = [s for s in session.sources if s.kind == SOURCE_KIND_ARCHIVE]
+        if existing:
+            raise UnsupportedImport(
+                error="archive_already_in_bundle",
+                message=(
+                    "This import already holds an archive, and a bundle may hold one. "
+                    "Its reading is the session's whole memory of the corpus, so a "
+                    "second archive would replace the first while the first's manifest "
+                    "entry went on claiming it had been walked. Remove the existing "
+                    "archive first, or start a new import."
+                ),
+                existing_source_id=existing[0].source_id,
+            )
         # Raises `unknown_archive` for anything off the allowlist, which is also
         # the traversal boundary for this branch — and the same branch refuses a
         # name that merely looks plausible, so this cannot probe the filesystem.
@@ -2953,6 +3000,11 @@ def remove_source(session: ImportSession, source_id: object, *, now_utc: str) ->
     # a bundle the bundle no longer matches. Dropped unconditionally rather than
     # only when the removed entry WAS the archive, because a bundle may hold at
     # most one archive and the alternative is a branch that has to stay correct.
+    #
+    # THAT INVARIANT IS NOW ENFORCED IN `add_source` (`archive_already_in_bundle`),
+    # 2026-09-16. It was relied on here and checked nowhere, which independent review
+    # measured: two archives were accepted and the first manifest row kept reporting a
+    # reading the second had replaced.
     session.archive_reading = None
     session.archive_candidates = []
     session.updated_utc = now_utc
@@ -3059,6 +3111,28 @@ def parse_session(session: ImportSession, *, now_utc: str) -> list[ParsedSource]
     session.unmapped_keys = []
     session.updated_utc = now_utc
     return parsed
+
+
+def _skips_ceiling_first(
+    skipped: Sequence[Mapping], limit: int = MAX_SKIPPED_PER_SOURCE
+) -> list[dict]:
+    """Window a source's skip list, keeping the evidence-ceiling entry first.
+
+    ``_emit.result()`` appends the ceiling entry LAST, so a plain head window drops
+    the one entry that says a reading is incomplete — and drops it precisely on the
+    sources verbose enough to have reached the ceiling. That entry names the line,
+    header, motor and scan where reading stopped; the rest of the list is individual
+    lines a reader passed over. If exactly one of those must survive a window, it is
+    not a prose line.
+
+    **Order within the remainder is preserved**, so a reader still sees the earliest
+    skips rather than an arbitrary sample.
+    """
+    from .bl15._emit import SKIP_EVIDENCE_CEILING
+
+    ceiling = [dict(s) for s in skipped if s.get("reason") == SKIP_EVIDENCE_CEILING]
+    rest = [dict(s) for s in skipped if s.get("reason") != SKIP_EVIDENCE_CEILING]
+    return (ceiling + rest)[:limit]
 
 
 def _fixture_text(source: SourceReference) -> str:
@@ -3469,7 +3543,20 @@ def session_summary(session: ImportSession) -> dict:
         "parsed_source_count": sum(
             1 for s in session.sources if s.parse_state == PARSE_STATE_PARSED
         ),
+        # THE PROVIDER'S count, which is not the archive's. An archive reading carries
+        # its OWN candidates on `archive_reading`, bounded by
+        # `MAX_CANDIDATES_PER_SESSION` — so a list row that showed only this number on an
+        # archive session would report 0 while the session held hundreds. Both are served,
+        # and the truncation flag travels with the one that can be bounded, so no count
+        # here is ever shown as a whole one when it is not.
+        # Added 2026-09-16 after independent review.
         "candidate_count": 0 if reconstruction is None else len(reconstruction.candidates),
+        "archive_candidate_count": len(session.archive_candidates),
+        "archive_candidates_truncated": (
+            session.archive_reading.candidates_truncated
+            if session.archive_reading is not None
+            else False
+        ),
         "proposed_count": len(session.proposed),
     }
 

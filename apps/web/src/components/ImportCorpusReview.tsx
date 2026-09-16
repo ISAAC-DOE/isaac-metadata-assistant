@@ -68,7 +68,7 @@ import {
  * name what was OBSERVED (`Values read`, `Sources disagree`, `No values read`)
  * rather than how far along something is.
  *
- * Likewise no bar over "fields mapped": `deterministic` and `normalized` are 6 of 45
+ * Likewise no bar over "fields mapped": `deterministic` and `normalized` are 5 of 45
  * concepts, so a completion bar would read as 87% failure when it is mostly a
  * correct description of the schema's coverage. The five statuses are shown as five
  * first-class outcomes, each with the registry's own `reason`.
@@ -543,10 +543,12 @@ function ConflictView({ conflict, stem }: { conflict: Bl15Conflict; stem: string
 /**
  * The registry's five statuses, **as five outcomes and not as a progress bar**.
  *
- * `coverage()` measures 2 deterministic + 4 normalized + 14 needs_domain_review +
- * 24 not_expressible + 1 blocked_by_build = 45. A bar over "fields mapped" would
- * render 6/45 as 87% failure when 24 of those are a correct description of the
- * official schema's coverage and 14 are a question for a domain owner.
+ * `coverage()` measures 1 deterministic + 4 normalized + 15 needs_domain_review +
+ * 24 not_expressible + 1 blocked_by_build = 45 (~~2 / 4 / 14~~ — corrected 2026-09-16
+ * when `acquisition_method` moved to `needs_domain_review`; this transcription was
+ * missed by that commit's own sweep). A bar over "fields mapped" would render 5/45 as
+ * 89% failure when 24 of those are a correct description of the official schema's
+ * coverage and 15 are a question for a domain owner.
  *
  * ── A CONTRACT LIMIT, STATED RATHER THAN WORKED AROUND ─────────────────────
  *

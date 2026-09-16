@@ -469,7 +469,17 @@ def relate(
         # conflict list and loses none of the four real ones, which matters because a
         # conflict list with false entries in it is a list a scientist stops reading.
         declared_name = declared.rsplit("/", 1)[-1] if declared else None
-        if declared_name and declared_name != stem:
+        # AN EMPTY BASENAME IS A DISAGREEMENT, NOT A REASON TO SAY NOTHING. Added
+        # 2026-09-16: a declaration ending in `/` strips to `""`, which is falsy, so the
+        # branch below was skipped and NO observation was made at all — the file declared
+        # something that names no file and nothing said so. The raw value did survive on
+        # `internal_declaration`, so nothing was lost; it was merely unflagged, which for
+        # a conflict-detection anchor is the whole job.
+        #
+        # Folded into the same conflict rather than given a kind of its own, because what
+        # a scientist needs to see is identical: this acquisition's filename and its own
+        # internal declaration do not agree, and here is each verbatim.
+        if declared and declared_name != stem:
             readings = [
                 Reading(
                     source_path=entry.archive_path,
@@ -647,10 +657,22 @@ def _canonical_acquisitions(
     root and the copy inside the scan directory, so depth is the structural fact rather
     than a guess about names; lexicographic order only to make ties deterministic.
 
-    **Identity is CONTENT, never the name.** Two acquisitions with the same stem and
-    different bytes are two measurements and both are kept — the corpus's ``29``–``32``
-    group proves names are unreliable, and ``run29.mac`` / ``run29.mac.mac`` proves
-    similar names can hold different content.
+    **Identity is CONTENT AND THEN NAME, and the second half was missing.** Identical
+    bytes alone do not make two files one measurement:
+
+    * same stem, DIFFERENT bytes -> two measurements, both kept. The ``29``–``32`` group
+      proves names are unreliable, and ``run29.mac`` / ``run29.mac.mac`` proves similar
+      names can hold different content.
+    * DIFFERENT stems, same bytes -> **also two measurements, both kept** — added
+      2026-09-16, because the original rule collapsed them and picked a winner
+      alphabetically. Two aborted acquisitions writing identical bytes is not exotic, and
+      the archive already contains two empty scan directories.
+
+    So a duplicate is suppressed only when it is the same measurement by NAME as well:
+    the same basename, or a member of the canonical's own ``<stem>_dir``. That is exactly
+    the 92-of-96 shape the corpus has, and it invents no rule the archive does not
+    demonstrate. A file with shared bytes and a different stem keeps its unit, and its
+    group membership still reaches it through :attr:`MeasurementUnit.duplicate_copies`.
     """
     by_digest: dict[str, list[SourceRecord]] = defaultdict(list)
     for entry in candidates:
@@ -662,7 +684,36 @@ def _canonical_acquisitions(
         members = sorted(members, key=lambda e: (e.depth, e.archive_path))
         canonical = members[0]
         kept.append(canonical)
-        others = tuple(e.archive_path for e in members[1:])
+        # IDENTICAL BYTES ARE NOT SUFFICIENT — THE DUPLICATE MUST ALSO BE THE SAME
+        # MEASUREMENT. Added 2026-09-16 after independent review measured the inverse
+        # failure: two acquisitions differing in sample, medium, cycling state, potential
+        # AND legacy number, which happened to share bytes (both empty), collapsed to ONE
+        # unit — and the survivor was chosen ALPHABETICALLY. The second measurement then
+        # appeared in no unit and in no `unattached` list, so `unit_count`,
+        # `run_candidate_units` and the created-run count each understated by one, and the
+        # frontend reported it under "Byte-identical copies kept but not counted as
+        # witnesses" — a label asserting they are copies of one thing.
+        #
+        # The docstring below asserted only the safe direction ("same stem, different
+        # bytes are two measurements") and was silent on this one. Two aborted or stub
+        # acquisitions writing identical bytes is not exotic; the archive already contains
+        # two EMPTY scan directories.
+        #
+        # THE NARROWED RULE INVENTS NOTHING, and it is exactly the shape of the 92-of-96
+        # case the corpus actually has: a duplicate is the same measurement only if it
+        # carries the same basename, or sits inside the canonical's own `<stem>_dir`.
+        # Anything else stays a unit of its own, and its content-hash group membership
+        # still reaches it through `duplicate_copies` — so the shared bytes are still
+        # surfaced, without a claim that one is a copy of the other.
+        scan_dir = f"{canonical.basename}{SCAN_DIR_SUFFIX}"
+        same_measurement: list[SourceRecord] = []
+        for other in members[1:]:
+            parent = other.parent_dir.rsplit("/", 1)[-1] if other.parent_dir else ""
+            if other.basename == canonical.basename or parent == scan_dir:
+                same_measurement.append(other)
+            else:
+                kept.append(other)
+        others = tuple(e.archive_path for e in same_measurement)
         if others:
             suppressed[canonical.archive_path] = others
     # `copies` is accepted so a future change can cross-check the inventory's own

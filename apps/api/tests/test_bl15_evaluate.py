@@ -612,15 +612,59 @@ def test_an_absent_evidence_set_is_UNMEASURABLE_rather_than_100_percent_fabricat
     assert "measurement of the harness" in report.headline().reason
 
 
-def test_an_empty_candidate_set_is_MEASURED_zero_and_is_not_the_same_as_absent(gold):
-    """``()`` means a producer ran and proposed nothing. ``None`` means none ran."""
+def test_an_empty_candidate_set_is_VACUOUS_and_is_not_the_same_as_absent(gold):
+    """``()`` means a producer ran and proposed nothing. ``None`` means none ran.
+
+    ── INVERTED 2026-09-16 AFTER INDEPENDENT REVIEW; THE OLD NAME SAYS THE DEFECT ──
+
+    This test was called ``..._is_MEASURED_zero_and_is_not_the_same_as_absent`` and it
+    asserted ``report.passed is True``. **The second half of that name was right and the
+    first half was the defect.** ``()`` and ``None`` do have to reach different outcomes —
+    ``Observed``'s own docstring requires it — and they did. But the outcome ``()``
+    reached was ``MEASURED`` with a rate of **0.0** and a **green report**.
+
+    So a regression in classification or relation that produced no candidates at all
+    would have published ``passed: true``, ``hard_failures: []``, headline
+    ``fabricated_value_rate 0.0 / must_be 0.0 ✓`` — and nothing on the report would
+    distinguish "nothing was invented" from "nothing was examined". That is the exact
+    conflation this module's every docstring says it is shaped around, and it sat inside
+    the headline honesty gate.
+
+    It passed review for a subtle reason worth recording: the test's own name argued only
+    the ``()``-vs-``None`` distinction, which genuinely held, so the assertion that
+    ``True`` was the RIGHT verdict was never argued anywhere — it was merely asserted, and
+    an assertion of the defect reads exactly like a specification of the behaviour.
+
+    Both metrics now return ``VACUOUS`` with ``passed=None``. ``EvaluationReport.passed``
+    needed no change: it already fails on ``passed is not True``.
+    """
     observed = _perfect(gold)
     report = ev.evaluate(gold, _replace(observed, candidates=()))
     headline = report.headline()
-    assert headline.outcome == ev.MEASURED
-    assert headline.value == 0.0
-    assert headline.passed is True
-    assert report.passed is True
+
+    # RAN AND FOUND NOTHING: vacuous, no invented number, and the report FAILS.
+    assert headline.outcome == ev.VACUOUS
+    assert headline.value is None, "a vacuous metric must not carry a favourable number"
+    assert headline.passed is None
+    assert headline.must_be == 0.0, "the requirement is still stated"
+    assert headline.reason and "nothing to check" in headline.reason
+    assert report.passed is False
+    assert ev.METRIC_FABRICATED_VALUE_RATE in report.vacuous
+    assert ev.METRIC_PROVENANCE_COVERAGE in report.vacuous
+
+    # AND THE DISTINCTION THE OLD NAME WAS RIGHT ABOUT IS PRESERVED: an absent producer
+    # is UNMEASURABLE, not vacuous. Different cause, different next action.
+    absent = ev.evaluate(gold, _replace(observed, candidates=None))
+    assert absent.by_id()[ev.METRIC_FABRICATED_VALUE_RATE].outcome == ev.UNMEASURABLE
+    assert absent.vacuous == ()
+    assert absent.passed is False
+
+    # A REAL reconstruction is unaffected — the fix moves no verdict on a run that
+    # actually produced candidates.
+    real = ev.evaluate(gold, observed)
+    assert real.by_id()[ev.METRIC_FABRICATED_VALUE_RATE].outcome == ev.MEASURED
+    assert real.by_id()[ev.METRIC_FABRICATED_VALUE_RATE].value == 0.0
+    assert real.vacuous == ()
 
 
 # --- provenance coverage ----------------------------------------------------

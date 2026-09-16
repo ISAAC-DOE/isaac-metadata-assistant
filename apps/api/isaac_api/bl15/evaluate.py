@@ -120,7 +120,29 @@ UNMEASURABLE = "unmeasurable"
 #: A first-class outcome. See rule 1 in the module docstring.
 NEEDS_DOMAIN_REVIEW = "needs_domain_review"
 
-OUTCOMES: frozenset[str] = frozenset({MEASURED, UNMEASURABLE, NEEDS_DOMAIN_REVIEW})
+#: The producer RAN and produced an empty set, so the check was reachable and had
+#: nothing to check. **A third outcome, and it exists because the alternatives are both
+#: wrong.**
+#:
+#: Reporting :data:`MEASURED` with a rate of 0.0 or a coverage of 1.0 is the shape
+#: ``CLAUDE.md`` §11 names "0 failures was VACUOUSLY TRUE" — and for the two HARD
+#: honesty metrics it is the worst possible instance of it, because a regression in
+#: classification or relation that yields no candidates at all would publish
+#: ``fabricated_value_rate 0.0 ✓`` and a green report.
+#:
+#: Reporting :data:`UNMEASURABLE` is closer but still conflates two states that
+#: :class:`Observed` deliberately keeps apart: ``candidates=None`` means the producer was
+#: never built, and ``candidates=()`` means it ran and found nothing. Those have different
+#: causes and different next actions.
+#:
+#: Like an unmeasurable honesty metric, a vacuous one carries ``passed=None`` and so makes
+#: :attr:`EvaluationReport.passed` **False**. "There was nothing to check" must never read
+#: the same as "nothing was invented".
+VACUOUS = "vacuous"
+
+OUTCOMES: frozenset[str] = frozenset(
+    {MEASURED, UNMEASURABLE, NEEDS_DOMAIN_REVIEW, VACUOUS}
+)
 
 # --- metric ids, in report order --------------------------------------------
 #
@@ -524,11 +546,20 @@ class EvaluationReport:
 
     @property
     def passed(self) -> bool:
-        """False if any HARD metric failed **or could not be computed**.
+        """False if any HARD metric failed, **could not be computed, or was vacuous**.
 
         An unmeasurable honesty metric is not a pass. "We could not check whether
         anything was invented" must never read the same as "nothing was invented" —
         that conflation is the defect this whole module is shaped around.
+
+        **A VACUOUS one is not a pass either, and that was wrong here until 2026-09-16.**
+        Both hard metrics hand-wrote a zero-denominator branch that bypassed
+        :func:`_ratio` and returned 0.0 / 1.0, so a reconstruction that produced NO
+        candidates published a fully green report — ``passed: true``, no hard failures,
+        headline ``fabricated_value_rate 0.0 ✓``. Found by independent review. Nothing
+        needs to change here, because this loop already fails on ``passed is not True``;
+        what changed is that the two metrics now return :data:`VACUOUS` with
+        ``passed=None`` instead of inventing a favourable number.
         """
         for metric_id in HARD_REQUIREMENTS:
             result = self.by_id().get(metric_id)
@@ -539,6 +570,16 @@ class EvaluationReport:
     @property
     def unmeasurable(self) -> tuple[str, ...]:
         return tuple(m.metric_id for m in self.metrics if m.outcome == UNMEASURABLE)
+
+    @property
+    def vacuous(self) -> tuple[str, ...]:
+        """Metrics whose producer ran and produced nothing. Reported SEPARATELY.
+
+        Folding these into :attr:`unmeasurable` would lose the distinction
+        :class:`Observed` exists to keep — "never built" against "ran and found
+        nothing" — which have different causes and different next actions.
+        """
+        return tuple(m.metric_id for m in self.metrics if m.outcome == VACUOUS)
 
     @property
     def needs_domain_review(self) -> tuple[str, ...]:
@@ -553,6 +594,7 @@ class EvaluationReport:
             "headline": self.headline().to_state(),
             "hard_failures": list(self.hard_failures),
             "unmeasurable": list(self.unmeasurable),
+            "vacuous": list(self.vacuous),
             "needs_domain_review": list(self.needs_domain_review),
             "metrics": [m.to_state() for m in self.metrics],
         }
@@ -568,6 +610,22 @@ def _unmeasurable(metric_id: str, artifact: str, reason: str) -> MetricResult:
         required_artifact=artifact,
         reason=reason,
         must_be=HARD_REQUIREMENTS.get(metric_id),
+        passed=None,
+    )
+
+
+def _vacuous(metric_id: str, artifact: str, reason: str) -> MetricResult:
+    """The producer ran and produced nothing, so this metric had nothing to check.
+
+    ``passed=None``, which makes a HARD metric fail the report — see :data:`VACUOUS`.
+    """
+    return MetricResult(
+        metric_id=metric_id,
+        outcome=VACUOUS,
+        required_artifact=artifact,
+        reason=reason,
+        must_be=HARD_REQUIREMENTS.get(metric_id),
+        value=None,
         passed=None,
     )
 
@@ -748,7 +806,19 @@ def _fabricated_value_rate(gold: GoldStandard, observed: Observed) -> MetricResu
             fabricated.append(why)
 
     total = len(observed.candidates)
-    rate = 0.0 if total == 0 else len(fabricated) / total
+    if total == 0:
+        # NOT 0.0. A reconstruction that produced no candidate at all invented nothing
+        # only in the sense that it did nothing — and this is the headline honesty
+        # metric, so a vacuous 0.0 here would turn a total producer failure into a green
+        # report. See VACUOUS.
+        return _vacuous(
+            METRIC_FABRICATED_VALUE_RATE,
+            artifact,
+            "the reconstruction ran and produced no candidate with a value, so there "
+            "was nothing to check for fabrication. A rate of 0 over zero candidates is "
+            "not evidence that nothing was invented.",
+        )
+    rate = len(fabricated) / total
     return MetricResult(
         metric_id=METRIC_FABRICATED_VALUE_RATE,
         outcome=MEASURED,
@@ -790,7 +860,19 @@ def _provenance_coverage(gold: GoldStandard, observed: Observed) -> MetricResult
             )
 
     total = len(observed.candidates)
-    coverage = 1.0 if total == 0 else (total - len(without)) / total
+    if total == 0:
+        # NOT 1.0. This metric's own UNMEASURABLE reason already makes the argument —
+        # "provenance coverage over an absent candidate set is not 1.0, it is unknown" —
+        # and that argument applies verbatim to an EMPTY set. It was written for `None`
+        # and not applied to `()`.
+        return _vacuous(
+            METRIC_PROVENANCE_COVERAGE,
+            artifact,
+            "the reconstruction ran and produced no candidate, so there was nothing "
+            "whose provenance could be checked. Coverage of 1.0 over zero candidates is "
+            "not evidence that every value can name its source.",
+        )
+    coverage = (total - len(without)) / total
     return MetricResult(
         metric_id=METRIC_PROVENANCE_COVERAGE,
         outcome=MEASURED,

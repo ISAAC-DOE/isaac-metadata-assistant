@@ -16,9 +16,22 @@ resolves **6** deterministically or by a named rule, finds **no official field a
 **24**, finds **1** blocked by this build, and leaves **14** needing a domain owner. **This
 packet is those 14, and nothing else.**
 
-**No scientific value is quoted anywhere below.** Every question cites a filename or a
-structure, because those are what the owner already quoted in the authorizing brief.
-Nothing here asks Angel to look at a spectrum.
+**No measured or preparation value is quoted anywhere below** — no energy, no
+concentration, no mass, no pH figure, no stage coordinate, and no verbatim note prose.
+Every question cites a filename or a structure, because those are what the owner already
+quoted in the authorizing brief. Nothing here asks Angel to look at a spectrum.
+
+**One deliberate exception, named rather than left for a reader to find:** §1's reaction
+question refers to the reaction class the beamtime studied, in paraphrase. It is not a
+measured value, and the question is **unanswerable without it** — choosing between the
+schema's `OER`, `water_splitting` and `surface_oxidation` requires knowing which reaction
+was run. It is also addressed to the scientist who performed the work, so withholding
+their own subject from them would buy nothing.
+
+*(~~No scientific value is quoted anywhere below.~~ — the original wording, struck
+2026-09-16 after an independent review found a flow rate in the sibling analysis document
+under the same claim. "Scientific value" was too broad to be true and too vague to check;
+the enumerated form above is both.)*
 
 ---
 

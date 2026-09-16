@@ -166,9 +166,9 @@ export const FIELD_GROUP_SURFACES: ReadonlySet<string> = new Set(['record-detail
  * ── DECLARED AT ZERO, DELIBERATELY, AND THAT IS THE WHOLE ENTRY ────────────
  *
  * The review renders only when the session payload carries `corpus_review`, and
- * **no route emits one today** — the archive source kind is a separate slice's
- * step 1 and `historical_import.SOURCE_KINDS` holds only `reference` and
- * `synthetic_fixture`. So on `imports`, the one scanned surface that could ever
+ * **no route emits one today** — ~~the archive source kind is a separate slice's step 1~~ (IT SHIPPED, `6cdb2279`) and ~~`historical_import.SOURCE_KINDS` holds only `reference` and
+ * `synthetic_fixture`~~ — FALSE since `6cdb2279` on this same branch; the `archive` kind
+ * exists and the true gap is that no route emits `corpus_review`. So on `imports`, the one scanned surface that could ever
  * mount it, the count is **0** right now, which `?? 0` would have given anyway.
  *
  * IT IS WRITTEN DOWN REGARDLESS, because the Settings slice on 2026-09-16 proved

@@ -2407,7 +2407,17 @@ describe('the Full Description rule over the REAL generated contract', () => {
     // undocumented `create_runs` on a published contract is a contract that is wrong,
     // and the archive kind is this feature's central honesty boundary. It simply cost
     // nothing measurable.
-    expect(total).toBe(160433);
+    // 160,433 -> 160,724 (+291), 2026-09-16, same day: the idempotence paragraph of
+    // `.../add-to-experiment` was CORRECTED, not added to. It promised that running the
+    // operation twice "adds nothing" while `create_runs: true` created a second full set
+    // of runs — measured by independent review: `sent: 0, already_sent: 5` and four MORE
+    // runs, none carrying a proposal, so a double-click on a 94-measurement archive left
+    // 188 runs with 94 empty. The BEHAVIOUR moved to meet the promise (the run key is now
+    // the label) and the paragraph now also names `runs_already_present`. Paragraph count
+    // unchanged at 315 — the correction was woven INTO the existing paragraph, not
+    // appended, which is the choice that holds the count. Re-measured by running this
+    // file, not by adding the new text's length.
+    expect(total).toBe(160724);
     // 104,045 -> 114,959 (+10,914): the four new operations, and NO existing
     // description changed — `test_contract_description_parity.py` proves that rather
     // than leaving it asserted here. RE-DERIVED from the served document and never

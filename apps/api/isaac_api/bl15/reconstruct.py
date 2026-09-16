@@ -121,9 +121,19 @@ class ReconstructionReport:
     #: Candidates that belong to the import rather than to one measurement — the
     #: beamtime-scope README statements every unit inherits.
     shared: tuple[SemanticCandidate, ...] = ()
-    #: ``concept -> count``, over every candidate produced.
+    #: ``concept -> count`` — over every FIELD candidate, which is not every candidate.
+    #:
+    #: ~~over every candidate produced~~ — corrected 2026-09-16 after independent review
+    #: measured the arithmetic: `by_concept` and `by_mapping_status` each sum to **89**
+    #: against **97** candidates, because they count one per concept GROUP and the
+    #: structural `run`-kind candidates (`::unit`, `::conflict::N`) have no concept at
+    #: all. 8 + 89 = 97, verified. A surface rendering this breakdown beside a candidate
+    #: total will show fewer, and that is correct rather than a gap — but it must say so
+    #: rather than leaving a reader to find the difference.
     by_concept: Mapping[str, int] = None  # type: ignore[assignment]
     #: ``mapping status -> count``. Read this instead of a completion percentage.
+    #: Same scope as :attr:`by_concept` — field candidates only, so it sums to fewer
+    #: than the candidate total by exactly the number of structural candidates.
     by_mapping_status: Mapping[str, int] = None  # type: ignore[assignment]
     #: Concepts read from the sources for which the registry has NO entry. Should be
     #: empty; non-empty means a reader emitted a concept nobody examined, which is a

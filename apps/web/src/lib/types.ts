@@ -4028,9 +4028,12 @@ export interface ApiImportSession {
   /**
    * The BL15-2 large-corpus review, when this session was opened over an archive.
    *
-   * OPTIONAL BECAUSE NO ROUTE EMITS IT YET — the archive source kind is a separate
+   * OPTIONAL BECAUSE NO ROUTE EMITS IT YET. ~~the archive source kind is a separate
    * slice's step 1, and `historical_import.SOURCE_KINDS` holds only `reference`
-   * and `synthetic_fixture` today. `HistoricalImport` renders the review only when
+   * and `synthetic_fixture` today~~ — **IT SHIPPED (`6cdb2279`, this branch), so that
+   * reason is FALSE.** The route exists; what is missing is that the server's
+   * `_archive_view` and this shape were built independently and have not been joined.
+   * `HistoricalImport` renders the review only when
    * this member is present, so a session without an archive shows nothing rather
    * than an empty frame.
    *

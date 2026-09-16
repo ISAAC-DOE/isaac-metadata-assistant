@@ -25415,10 +25415,14 @@ def post_import_candidate_proposal(
         "mistake — refusing it would make the scientist send two requests to do "
         "one thing. The run is never inferred from the only run that happens to "
         "exist, in either operation.\n\n"
-        "IT IS EXACTLY-ONCE PER CANDIDATE, so running it twice, double-clicking, "
-        "or running it after sending some candidates by hand adds nothing: each "
-        "candidate already sent to this record is reported under `sent` with "
-        "`already_sent: true` and mints no second proposal.\n\n"
+        "IT IS EXACTLY-ONCE PER CANDIDATE AND EXACTLY-ONCE PER MEASUREMENT, so "
+        "running it twice, double-clicking, or running it after sending some "
+        "candidates by hand adds nothing. Each candidate already sent to this record "
+        "is reported under `sent` with `already_sent: true` and mints no second "
+        "proposal; each measurement that already has a run on this record is reported "
+        "under `runs_already_present` and no second run is made. The run key is the "
+        "label, which this import derives from the measurement itself, so it is the "
+        "same key twice for the same measurement.\n\n"
         "CANDIDATES THIS IMPORT CANNOT PROPOSE ARE REPORTED, NEVER DROPPED. Each "
         "appears under `not_sent` with the reason the review surface already "
         "shows for it — sources that disagree, a structural candidate about "
@@ -25809,6 +25813,11 @@ def post_import_add_to_experiment(
         # assertion that fails if this is ever reimplemented as a client loop.
         run_of_stem: dict[str, str] = {}
         created_runs: list[dict] = []
+        #: Measurements that already had a run on this record, so no second one was
+        #: made. Reported rather than omitted: a batch that created nothing because
+        #: everything was already there is a different outcome from a batch that
+        #: created nothing because there was nothing to create.
+        runs_already_present: list[dict] = []
         if create_runs:
             # `post_run`'s OWN 409, reused rather than re-argued. A zero-run
             # record exports under its own id; the first run moves the exported
@@ -25832,7 +25841,38 @@ def post_import_add_to_experiment(
                         ),
                     },
                 )
+            # EXACTLY-ONCE PER MEASUREMENT, KEYED ON THE LABEL, and this closes a
+            # defect independent review MEASURED: a second identical batch reported
+            # `sent: 0, already_sent: 5` and still created four MORE runs, none of
+            # which carried a single proposal — because every proposal deduplicated
+            # onto the FIRST set. So a double-click on a 94-measurement archive left
+            # 188 runs, 94 of them empty, while this operation's own published
+            # description promised that running it twice "adds nothing".
+            #
+            # THE DESCRIPTION'S PROMISE IS THE RIGHT ONE, so the behaviour moved to
+            # meet it rather than the text being weakened. The key is the LABEL,
+            # which `historical_import` derives deterministically from the
+            # measurement stem — so it is the same key twice for the same
+            # measurement, and it is not an identity this route invents.
+            #
+            # An already-present run is REPORTED, not silently skipped, and its id
+            # still binds into `run_of_stem`: the proposals of a re-run batch must
+            # land on the run that measurement already has, which is exactly where
+            # the deduplicated ones were going anyway.
+            existing_by_label = {run.label: run for run in exp.runs}
             for unit in units:
+                already = existing_by_label.get(unit.label)
+                if already is not None:
+                    run_of_stem[unit.stem] = already.id
+                    runs_already_present.append(
+                        {
+                            "run_id": already.id,
+                            "label": already.label,
+                            "ordinal": already.ordinal,
+                            "stem": unit.stem,
+                        }
+                    )
+                    continue
                 # `_seed_for_new_run(exp)` IS CALLED PER RUN AND INSIDE THE LOOP,
                 # so the first-run/later-run asymmetry it documents applies here
                 # exactly as it does to `POST .../runs`: the FIRST run adopts the
@@ -26018,6 +26058,7 @@ def post_import_add_to_experiment(
         # is unreachable because a batch with no run-candidate measurement is
         # refused before the lock.
         "created_runs": created_runs,
+        "runs_already_present": runs_already_present,
         "sent": sent,
         "not_sent": not_sent,
         "counts": {
@@ -26026,6 +26067,7 @@ def post_import_add_to_experiment(
             "already_sent": already,
             "not_sent": len(not_sent),
             "runs_created": len(created_runs),
+            "runs_already_present": len(runs_already_present),
         },
         "experiment_version": version,
     }

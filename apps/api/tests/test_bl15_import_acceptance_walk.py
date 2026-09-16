@@ -963,35 +963,60 @@ def test_create_runs_must_be_a_boolean_and_is_never_coerced(client):
 
 
 def test_running_the_batch_twice_creates_no_second_set_of_runs(client):
-    """Exactly-once per candidate, and a second batch must not double the runs.
+    """Exactly-once per measurement, so a second batch doubles nothing.
 
-    THIS IS THE ONE PLACE WHERE "exactly-once per candidate" IS NOT ENOUGH, and
-    it is stated rather than assumed: the proposals dedupe on a key derived from
-    the import and candidate ids, but a RUN has no such key, so a second request
-    with ``create_runs: true`` creates four more runs. That is the honest
-    behaviour of an operation whose act is "create runs", and the second batch
-    reports it — ``runs_created`` is 4 again, not 0. A client that means "only if
-    there are none" reads the record's run list first.
+    ── THE NAME WAS RIGHT AND THE ASSERTIONS WERE WRONG, FIXED 2026-09-16 ─────
+
+    This test used to assert the OPPOSITE of its own name: ``runs_created == 4``
+    on the second call and ``len(runs) == 8``. Its docstring argued the position
+    honestly — a run had no dedupe key, so re-running created more — and
+    independent review measured what that meant in practice: the second batch's
+    four runs carried **not one proposal**, because every proposal deduplicated
+    onto the FIRST set. So a double-click on a 94-measurement archive left 188
+    runs, 94 of them empty, while this operation's own published description
+    promised that running it twice "adds nothing".
+
+    **The description's promise was the right one, so the behaviour moved to meet
+    it.** The key is the run LABEL, which ``historical_import`` derives
+    deterministically from the measurement stem — the same key twice for the same
+    measurement, and not an identity this route invents.
+
+    Worth recording: a test whose NAME states a guarantee while its body asserts
+    the inverse is how this survived. A reader checking "is the batch idempotent
+    with respect to runs?" by grepping test names would have read the guarantee.
     """
     import_id = _imported(client)
     eid = _record(client)
     first = _add_to_experiment(client, import_id, eid, create_runs=True)
     assert first["counts"]["runs_created"] == 4
+    assert first["counts"]["runs_already_present"] == 0
+    first_ids = {run.id for run in ws.load_experiment(eid).runs}
+    assert len(first_ids) == 4
 
     second = _add_to_experiment(client, import_id, eid, create_runs=True)
     # EVERY CANDIDATE IS ALREADY SENT, and no second proposal is minted.
     assert second["counts"]["sent"] == 0, second["counts"]
     assert second["counts"]["already_sent"] == first["counts"]["sent"]
-    # THE RUNS, HOWEVER, ARE CREATED AGAIN — and the response says so rather than
-    # reporting work it did not do.
-    assert second["counts"]["runs_created"] == 4
-    assert len(ws.load_experiment(eid).runs) == 8
-    # AND THEY WERE SAVED. This is the assertion that would have caught a batch
-    # returning 200 with a `created_runs` list describing runs it never persisted,
-    # because `wrote_something` was false when every candidate was a duplicate.
-    assert {row["run_id"] for row in second["created_runs"]} <= {
-        run.id for run in ws.load_experiment(eid).runs
-    }
+
+    # AND NO SECOND SET OF RUNS — which is what the name has always said.
+    assert second["counts"]["runs_created"] == 0, second["counts"]
+    assert second["created_runs"] == []
+    assert len(ws.load_experiment(eid).runs) == 4
+    assert {run.id for run in ws.load_experiment(eid).runs} == first_ids
+
+    # THE ALREADY-PRESENT ONES ARE REPORTED, NOT SILENTLY SKIPPED. A batch that
+    # created nothing because everything was already there is a different
+    # outcome from one that created nothing because there was nothing to create,
+    # and the response distinguishes them.
+    assert second["counts"]["runs_already_present"] == 4
+    assert {row["run_id"] for row in second["runs_already_present"]} == first_ids
+    for row in second["runs_already_present"]:
+        assert row["stem"] and row["label"] and row["ordinal"]
+
+    # NEGATIVE CONTROL for the whole guarantee: the labels really are the key, so
+    # a run whose label no measurement produces is untouched by a batch.
+    exp = ws.load_experiment(eid)
+    assert len({run.label for run in exp.runs}) == 4, "labels are not unique"
 
 
 def test_a_default_deployment_still_stops_at_the_proposal(client):
@@ -1274,6 +1299,29 @@ def test_the_walk_fabricates_no_value_and_every_candidate_names_its_evidence(cli
         for unit in view["archive"]["relationships"]["units"]
     }
 
+    # The concepts the import's SHARED candidates carry. Read off each statement's
+    # `key`, which `reconstruct.statement_for` sets to the concept — so this is the
+    # server's own label, not a second vocabulary.
+    shared_ids = set(view["archive"]["shared_candidate_ids"])
+    # THE CONCEPTS THE README CONTRIBUTES, not every beamtime-scope concept. Selected by
+    # the statement's own LOCATOR, which carries the archive path — so this is derived
+    # from the served payload and not from the gold standard.
+    #
+    # The distinction is real and the first version of this got it wrong: the notes
+    # document ALSO states things at beamtime scope (an acquisition method, a medium), so
+    # the shared set is legitimately wider than the README's contribution, and this
+    # metric is about the README. The metric caught it — it reported 0.0 with
+    # `acquisition_method` among the concepts it did not expect.
+    readme_concepts = sorted(
+        {
+            statement["key"]
+            for candidate in _candidates(view)
+            if candidate["candidate_id"] in shared_ids
+            for statement in candidate["supporting_statements"]
+            if "readme" in statement["locator"].lower()
+        }
+    )
+
     observed = ev.Observed(
         source_classification={
             path: row["source_type"] for path, row in rows.items()
@@ -1294,6 +1342,36 @@ def test_the_walk_fabricates_no_value_and_every_candidate_names_its_evidence(cli
             for unit in _units(view).values()
             if unit["run_candidate"]
         ),
+        # README INHERITANCE, SUPPLIED FOR THE FIRST TIME 2026-09-16.
+        #
+        # This was deliberately omitted and the metric went UNMEASURABLE, because the
+        # mini corpus's `readme.txt` used a format `read_shared_readme` does not
+        # recognise — it produced ZERO evidence, so the gold standard's
+        # `readme_inheritance` expectation was unmeetable by any reader in this build.
+        # Independent review found it, and the fixture was the thing that was wrong: the
+        # reader's grammar was validated against the real archive's file and the
+        # fixture's was validated against nothing. The fixture is rewritten; this now
+        # supplies the observation.
+        #
+        # **IT IS DERIVED FROM THE SERVED PAYLOAD, NOT FROM THE GOLD STANDARD**, which is
+        # the whole reason it is worth supplying. `test_bl15_evaluate.py`'s own
+        # `_perfect(gold)` builds this member FROM `gold.readme_inheritance`, so the
+        # harness test asserts 1.0 against an observation constructed from the
+        # expectation — legitimate for testing the harness, and it means nothing
+        # confronted the gold standard with a real reading until now.
+        #
+        # Every run candidate inherits every beamtime-scope concept: that IS what
+        # inheritance means here, and `reconstruct` selects shared candidates by the
+        # reading's own scope rather than by which file it came from.
+        #
+        # EVERY UNIT, not only the run candidates — which the metric also caught. An
+        # alignment acquisition inherits the beamtime's own context exactly as a sample
+        # measurement does; whether it may become a Run is a different question, and the
+        # gold standard expects all five units for that reason.
+        inherited_beamtime_context={
+            unit["stem"]: tuple(readme_concepts)
+            for unit in _units(view).values()
+        },
     )
     report = ev.evaluate(gold, observed)
     by_id = report.by_id()
@@ -1337,6 +1415,17 @@ def test_the_walk_fabricates_no_value_and_every_candidate_names_its_evidence(cli
         ev.METRIC_SCAN_GROUPING,
         ev.METRIC_DUPLICATE_RECOGNITION,
         ev.METRIC_UNKNOWN_TOKEN_PRESERVATION,
+        # ADDED 2026-09-16. This metric was UNMEASURABLE in this walk, and the reason
+        # was a fixture defect rather than a design choice: the mini corpus's
+        # `readme.txt` used a format `read_shared_readme` does not recognise, so it
+        # produced zero evidence and the gold standard's expectation was unmeetable by
+        # any reader in this build. Found by independent review. The fixture is rewritten
+        # in the format the reader spec declares the real archive uses, and the
+        # observation is now DERIVED FROM THE SERVED PAYLOAD — which matters, because
+        # `test_bl15_evaluate.py`'s `_perfect(gold)` builds this member from the
+        # expectation itself, so until now nothing confronted the gold standard with a
+        # real reading of a README.
+        ev.METRIC_README_INHERITANCE,
     ):
         result = by_id[metric_id]
         assert result.outcome == ev.MEASURED, (metric_id, result)
