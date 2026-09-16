@@ -1,0 +1,18 @@
+# SYNTHETIC. Reproduces the real corpus's TWO spellings of the same potentials:
+# `<digits>mV` in most acquisitions, and a `p`-decimal volt form
+# (`1p2V` = 1.2 V) in others — the same scientist, the same week. A reader that
+# normalises only one of them silently reports half the corpus's potentials.
+# Also reproduces the lowercase `mv` a MERGE product uses.
+#
+# millivolt form
+20_02_ZZ2_base_after1500Cycling_filter10_1200mV
+21_02_ZZ2_base_after1500Cycling_filter10_1500mV
+22_02_ZZ2_base_after1500Cycling_filter10_1800mV
+# p-decimal volt form, the SAME magnitudes
+20_02_ZZ2_base_after1500Cycling_filter10_1p2V
+21_02_ZZ2_base_after1500Cycling_filter10_1p5V
+22_02_ZZ2_base_after1500Cycling_filter10_1p8V
+# lowercase unit, as a MERGE product writes it
+ave_ZZ2_filter10_1600mv
+# a zero-padded magnitude, which must not become 60 V
+03_01_ZZ1_acid_beforeCycling_060mV_filter10

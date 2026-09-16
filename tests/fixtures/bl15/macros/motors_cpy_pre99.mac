@@ -1,0 +1,10 @@
+# SYNTHETIC. Reproduces a motor-snapshot macro: every command is a motor move,
+# it declares no `newfile` and no `def`, and it acquires nothing. Two real ones
+# exist (motors_cpy_pre77.mac, motors_cpy_pre112.mac). Positions are invented
+# round decimals; the motor names are the real spectrometer-crystal names,
+# because the point of this fixture is that they are NOT the sample stage and
+# must not be reported as a sample position.
+umv c1p -0.1 c1y -0.2
+umv c2p -0.3 c2y 0.4
+umv c3p -0.5 c3y 0
+umv c4p -0.6 c4y -0.7
