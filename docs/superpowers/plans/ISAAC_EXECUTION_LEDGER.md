@@ -4690,6 +4690,39 @@ bannered. What the runs do carry, and what a sub-agent would not have added, is 
 on the tool itself** (`detect.mjs` returns `[]`/exit 0 on deliberately broken `.tsx` here) and
 **attribution by difference** (each surface scanned with and without the new element).
 
+### 3a. The full read-only e2e suite — 6 failures, TWO causes, both settled
+
+Run because it was the one integrated check this continuation had not done; the subsets run
+earlier (`tabs`+`structure` 461, `wide-prose`+`a11y-axe` 161, `states` 14) could not have caught
+either. **1,189 passed / 6 failed**, and CI's browser job is `npm run test:e2e` — the same whole
+suite — so both were going to surface there regardless.
+
+**FIVE were one spec, once per viewport project**, and the count growing as the run walked the
+projects is why it looked like five problems. `pill-shape.spec.ts` required exactly one unbuilt
+step and asserted its dotted border and its visible "Not built in this build" disclosure —
+`HIST-005` shipped that step, so the assertions had become assertions of a defect. The test's own
+failure message anticipated it (*"has the fixture changed?"*); the product had. **Fixed, and the
+owner's requirement kept rather than deleted with the assertion:** a dotted circle must still be
+what the NEXT unbuilt step looks like, so the CSS rule is now measured **directly** — the `unbuilt`
+class is applied to a real node in the real page, the computed border read, the class removed —
+**with a negative control in the same measurement** proving the node is not dotted without it. That
+is strictly stronger than the old check, which could only fire while some step happened to be
+unbuilt. Verified against the CSS before writing it: `.hi-step-node` is `2px solid
+var(--border-strong)`, `.hi-step.unbuilt .hi-step-node` sets `dotted` at equal specificity to
+`.reached` but later in the file, so it wins even on a reached first step. The disclosure MECHANISM
+stays covered in jsdom (`historical-import.test.tsx` §3, `UNBUILT_WORKFLOW`), because a browser test
+renders from the live server and cannot simulate a server that declares a step unbuilt.
+
+**ONE WAS CONTENTION, AND THAT IS MEASURED RATHER THAN ASSUMED.** `a11y scan at 390px: Record
+Detail (needs attention)` — read off `test-results/.../error-context.md` rather than waiting for the
+end-of-run summary: `Test timeout of 60000ms exceeded`, from a `locator.click` that hung 15s on a
+collapsible header Playwright reports as *visible, enabled, stable* and scrolled into view. **A
+blocked main thread in the sweep's SETUP step, not an axe assertion**, on markup this branch does
+not touch, and `record-detail@width-390` is a healthy baselined surface (25 nodes). Re-run alone:
+**2 passed in 3.5s, the 390px scan itself in 2.9s** — against 1.2 minutes under five parallel
+workers. This is the fourth instance in this repository's history of the rule that a test figure
+measured under contention is not a measurement.
+
 ### 3. Integrated verification on the final state
 
 Every figure measured in this continuation, with its command — see the per-slice tables above. The
