@@ -1,0 +1,15 @@
+# SYNTHETIC macro. Declares a target that NO acquisition fixture provides.
+# Reproduces the real archive's 9 "declared, never acquired" targets — and its 9
+# acquisitions with no declared target, which are the same finding from the other
+# side. A macro states an INTENTION; that intention and the files that exist
+# disagree in both directions, and both must survive.
+qdo Ir_XAS.mac
+
+mv Sx -1.25 Sy 2.5 Sz -3.5
+
+newfile 99_09_ZZ3_base_after1500Cycling_filter20_100mV
+
+###      time/point         number of scans
+IrL3_xas 0.5      1 		  1050       20
+
+trigger

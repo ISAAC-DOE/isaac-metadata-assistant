@@ -1,0 +1,95 @@
+﻿SYNTHETIC FIXTURE - invented beamtime notes. No real note prose, sample
+identity or scientific value appears anywhere in this file. It reproduces the
+DOCX-table-flattened structure of the real notes: one line per table cell,
+tab-prefixed, with an EMPTY cell flattening to a lone tab. This file is written
+with a UTF-8 BOM and CRLF line endings, which is what the real one has.
+
+Beam September 9-12, 2001
+Tuesday (11:00 am) - Friday (6:00 am)
+
+Main Scopes
+
+Invented study of a synthetic oxide under two invented media. Nothing here
+describes any real experiment.
+
+What to have ready
+-      1.0 M SynAcid solution
+-      Electrochemical cell
+-      Working electrode
+
+Procedure for Preparing Electrode
+-      Wipe the working electrode. Dry it.
+-      Dropcast 4 uL of the invented ink. Wait until it dries.
+
+Experimental Notes
+In ALL experiments we used 1.0 M SynBase from the same solution prepared in the beginning of the beam time
+
+Sample 1 ZZ1 in acid
+	Step
+	File Number
+	E-chem Procedure
+	Notes 
+	1
+	
+
+	Sets the working potential to 0.1 V vs  reference 
+	10 ohms resistance
+	2
+	
+
+	Sets the working potential to 0.4 V vs  reference 
+	
+
+	3
+	
+
+	Sets the working potential to 1.2 V vs  reference 
+	
+
+Sample 2 ZZ2 in base
+	Step
+	File Number
+	E-chem Procedure
+	Notes 
+	1
+	11
+
+
+	Sets the working potential to 0.1 V vs  reference 
+	200 ohm resistance seems large but it is working
+	2
+	12
+	Sets the working potential to 0.4 V vs
+  reference 
+	
+
+	3
+	13
+	Sets the working potential to 0.85 V vs  reference 
+	After 1200mV CV
+	4
+	14
+	Sets the working potential to 1.2 V vs  reference 
+	
+
+Sample 3 ZZ3 in base (bad) 
+did not work! 
+
+1.0 M SynBase, pH = 13
+Ar sat 
+Flow cell = 10 ml/min
+
+RHE electrode
+Filter = 20
+
+Cyclic voltammetry steps
+	Step
+	Window
+	1
+	0.4 - 0.8 V
+	2
+	0.2 - 1.0 V
+
+Sample 4
+No name, no medium, no table. A sample section may state neither.
+

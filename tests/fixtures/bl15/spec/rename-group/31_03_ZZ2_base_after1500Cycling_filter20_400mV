@@ -1,0 +1,14 @@
+#F 31_03_ZZ2_base_beforeCycling_filter20_400mV
+#E 1000102000
+#D Tue Sep 10 06:06:40 2001
+#C spec  User = synthetic
+#O0   dummy0    energy     emiss    filter        Sx        Sy        Sz        Sr
+
+#S 1  gscan energy 1000 1020 5 1100 2 0.500000
+#D Tue Sep 10 06:06:48 2001
+#T 0.5  (sec)
+#P0 4 1000.5 1050 20 -1.25 2.5 -3.7 -45
+#N 3
+#L energy  sec  I1
+1000.5 0.5 104
+1005 0.5 105

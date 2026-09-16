@@ -1,0 +1,53 @@
+# SYNTHETIC macro. Invented targets, sample codes and motor positions; round
+# fake energies. The COMMAND NAMES (`qdo`, `newfile`, `mv`, `mvr`, `trigger`,
+# `IrL3_xas`) are the real SPEC and beamline command names, because a fixture
+# that renamed them would exercise none of the reader's patterns — and a command
+# name is not a scientific value, a sample identity or note prose.
+#
+# Reproduces: a macro declaring SEVERAL measurements (the real maximum is 8, in
+# run15.mac), commands appearing BEFORE the first newfile declaration, and the
+# documented four-argument acquisition call.
+qdo Ir_XAS.mac
+
+mv Sx -1.25 Sy 2.5 Sz -3.5
+
+newfile 15_02_ZZ2_base_after1200Cycling_filter10_200mV
+
+###      time/point         number of scans
+IrL3_xas 0.5      2 		  1050       10
+mvr Sz -0.3
+
+###      time/point         number of scans
+IrL3_xas 0.5      2 		  1050       10
+mvr Sz -0.3
+
+trigger
+
+mv Sx -1.25 Sy 2.5 Sz -3.5
+
+newfile 16_02_ZZ2_base_after1200Cycling_filter10_400mV
+
+###      time/point         number of scans
+IrL3_xas 0.5      2 		  1050       10
+mvr Sz -0.3
+
+trigger
+
+#########################################################
+######### CV steps ######################################
+#########################################################
+
+mv Sx -1.25 Sy 2.5 Sz -3.5
+
+newfile 17_02_ZZ2_base_after1500Cycling_filter10_100mV
+
+###      time/point         number of scans
+IrL3_xas 0.5      3 		  1050       10
+mvr Sz -0.3
+
+trigger
+
+# A call with the WRONG argument count. No real macro contains one; it is here
+# because assigning four documented roles to three arguments by magnitude would
+# be a guess, and the refusal path needs cover.
+IrL3_xas 0.5 2 1050

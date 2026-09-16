@@ -1,0 +1,14 @@
+#S 1  gscan energy 1000 1020 5 1040 1 1100 2 0.500000
+#D Mon Sep  9 01:46:48 2001
+#T 0.5  (sec)
+#G0 0
+#G1 0
+#Q
+#P0 dummy0=4 energy=1000.5 emiss=1050 filter=10 Sx=-1.25 Sy=2.5 Sz=-3.5 Sr=-45
+#P1 gap=7.5 montopj=0.5 monbotj=-0.5
+#P2 monhgap=1.5 mono=1000.5 crystal=19.5
+#N 4
+#L energy  sec  I1  vortDT
+1000.5 0.5 100 1
+1005 0.5 101 2
+1010 0.5 102 3

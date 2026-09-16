@@ -1,0 +1,16 @@
+# SYNTHETIC. Reproduces the real corpus's ONE doubled-prefix filter typo,
+# `ffilter35`, beside the correctly-spelled family around it and the short `f35`
+# form the MERGE products use for the same filter. The literal must survive
+# verbatim: rewriting it would destroy the only thing that lets a scientist
+# disagree with the normalisation.
+#
+44_04_ZZ2_base_after1500Cycling_filter35_newSpots_1200mV
+45_04_ZZ2_base_after1500Cycling_filter35_newSpots_1500mV
+46_04_ZZ2_base_after1500Cycling_ffilter35_newSpots_1600mV
+47_04_ZZ2_base_after1500Cycling_filter35_newSpots_1800mV
+# the short form, same filter, as a processed product spells it
+43_04_ZZ2_base_after1500CV_f35_1200mV
+# a capital F, which a MERGE name really uses
+33_03_ZZ2_base_after1400cycling_Filter35_1600mV
+# filter zero is real and must not be read as "no filter"
+59_05_ZZ3_base_after1500Cycling_filter0_100mV
