@@ -331,9 +331,17 @@ NAMED RESIDUE THAT IS OURS, NOT EXTERNAL — the honest short list:
     rule is the root cause of the dead-whitespace FAMILY. Deliberately untouched:
     it reaches every `wide`/`full` screen, two lanes were editing such surfaces,
     and it needs its own before/after plus an a11y round-trip.
-  * Settings tab regroup (`Overview / Privacy & Governance / Integrations /
+  * ~~Settings tab regroup (`Overview / Privacy & Governance / Integrations /
     Advanced`) — skipped with reasons: a nested tablist is banned and the flat
-    seven are each deep-linked.
+    seven are each deep-linked.~~ **DONE 2026-09-15, and DIFFERENTLY FROM WHAT
+    THIS ROW PROPOSED** — which is why it is struck rather than ticked. The two
+    reasons were right and are what shaped the answer: the seven are GROUPED on
+    one flat tablist (four scientist-facing, then a divider, `ADVANCED`, then the
+    three developer ones) rather than collapsed into four tabs. Every deep link
+    and every accessible name is unchanged; the group reaches assistive technology
+    as an `aria-describedby` description. The collapse is declined at the site
+    with its own measured reason — three `search` landmarks would collide inside a
+    closed `<details>`.
   * Data & Privacy status-row restructure — BLOCKED BY THE REPOSITORY, not by
     taste: `settingsContent.ts` requires the mode-not-content caveat in the
     always-visible `detail`, and `settings-page.test.tsx` requires each summary
@@ -344,7 +352,13 @@ NAMED RESIDUE THAT IS OURS, NOT EXTERNAL — the honest short list:
     decision with the owner.
   * Impeccable coverage is PARTIAL: Statistics/Settings, Runs and Historical
     Import were critiqued; the file-staging panel, the stepper and the favicon
-    had browser measurement plus independent review instead.
+    had browser measurement plus independent review instead. **Extended
+    2026-09-15** to the Settings ADVANCED group and the `HIST-005` panel — run
+    DEGRADED (single-context, the five-agent cap being spent), bannered as the
+    playbook requires, with the detector's `.tsx` non-functionality re-proven by
+    negative control and attribution measured by scanning each surface with and
+    without the new element. It remains PARTIAL in the sense that matters: no run
+    in this session had the two isolated assessors `critique.md` asks for.
 
 *** A MEASUREMENT TRAP THAT LOOKS EXACTLY LIKE A PRODUCT DEFECT, and it cost a
 diagnosis before it was found: RUNNING THE READ-ONLY E2E SUITE WITH A
@@ -4522,6 +4536,10 @@ Measured: `test_historical_import_routes.py` → **83 passed**.
 | CSS guards | `npx vitest run src/__tests__/{type-scale-and-spacing,no-vertical-rail,palette-contrast,interaction-states,source-is-greppable}.test.ts` | all pass |
 | typecheck | `npx tsc -b apps/web` | exit 0 |
 | browser (Settings) | `npx playwright test e2e/specs/tabs.spec.ts e2e/specs/structure.spec.ts` | **461 passed, exit 0** |
+| frontend, WHOLE SUITE | `npx vitest run` (from `apps/web`) | **235 files / 6,100 tests passed**, exit 0 |
+| mutation e2e, WHOLE SUITE | `npx playwright test --config playwright.mutation.config.ts` (own backend, own workspace, `workers: 1`) | **123 passed**, exit 0 |
+| trusted e2e, WHOLE SUITE | `npx playwright test --config playwright.trusted.config.ts` | **8 passed**, exit 0 — the ONLY end-to-end walk that exercises proposal ACCEPTANCE, which is why it was run for a slice that mints proposals |
+| dead whitespace + darwin a11y | `npx playwright test e2e/specs/wide-prose.spec.ts e2e/specs/a11y-axe.spec.ts` | **161 passed**, exit 0 — no dead-whitespace regression from the new panel and **no baseline movement**, which is the local signal that the Linux job should also be clean |
 | browser (HIST-005) | real Chromium against a live uvicorn + vite, default `VITE_API_BASE` | whole-batch refusal surfaced verbatim; then 2 open proposals + 2 notes written, run-scoped one carrying the run and the record-scoped one not, `furthest_step` → `add_to_experiments`, report reading `2 sent · 0 already there · 1 could not be sent · 3 candidates in this import`, **both draft paths absent** |
 
 **Data governance:** synthetic only. The browser check used the committed
