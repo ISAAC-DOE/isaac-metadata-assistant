@@ -194,3 +194,68 @@ These are not ours to decide. Full detail in
 | **EXT-10** | Representative BL15-2 corpus + expert ground truth | Krish + Angel | **OPEN — gates Pillar 2.** See **DEC-13** |
 | **EXT-11** | Authenticated hosted QA, true 200% zoom, real-microphone check, hosted narrow widths | Krish | **OPEN.** *Partially advanced 2026-09-12*: rollout verified (hosted `commit` = `2f9a1133`), and that is the **rollout**, not the QA. No CDP method can drive true zoom; `resize_window` does not move the rendered viewport |
 | **EXT-12** | Personal deployment retirement (Vercel + Railway) | Krish | **OPEN** — both still live and public; Railway has a persistent volume, so deleting destroys what pausing preserves |
+
+### DEC-36 — Settings is grouped, not collapsed: "Advanced" is a label on a flat tablist
+*(2026-09-15, in response to the owner's "Settings simplified with developer material under
+Advanced")*
+
+**Decided.** The seven Settings tabs are reordered into two groups — the four scientist-facing
+tabs, then API Access, Endpoint Explorer and Connect Your Agent behind a neutral divider and the
+word ADVANCED. All seven remain `role="tab"` children of ONE tablist, keep their own deep links,
+and keep their accessible names unchanged; the group reaches assistive technology as an
+`aria-describedby` **description**.
+
+**Rejected, on measured grounds rather than taste:** collapsing the three developer tabs into a
+single "Advanced" tab holding three disclosures. `ApiDocs` alone renders two `search` landmarks,
+`a11y-landmarks-headings-and-tabs.test.tsx` already pins that exactly one region is named
+"Endpoint Explorer", and `querySelectorAll` reaches inside a closed `<details>` — so stacking the
+three collides those landmarks whether or not they are visibly collapsed. It would also relocate
+the a11y baseline cells of two separately-keyed scanned surfaces (`settings-api`,
+`settings-explorer`), and `settings-explorer`'s count already tracks the live OpenAPI document's
+own growth.
+
+**Reopenable.** If the grouping is not enough, the collapse is a decision to take deliberately,
+with the landmark collision solved first. The reasoning is recorded at `SETTINGS_TABS` in
+`apps/web/src/screens/SettingsPage.tsx` so it is not rediscovered.
+
+**Withdrawn en route, and recorded because the mistake generalises:** the group was first added as
+an `aria-label` suffix ("API Access — Advanced"), by analogy with the mode chip, whose accessible
+name opens with its visible text and then adds its claims. **A tab's name is its handle** —
+`getByRole('tab', { name })` matches exactly — and 98 assertions across three suites broke at once.
+A description is announced after the name and changes no handle.
+
+---
+
+### DEC-37 — Adding a whole import is ONE server operation, and it applies nothing
+*(2026-09-15, `HIST-005`)*
+
+**Decided.** `POST /api/imports/{import_id}/add-to-experiment` sends every proposable candidate of
+one import to review on one record, as OPEN proposals with their notes, inside one `record_lock`
+and one save. The record holds the whole batch or none of it. **No value is written** — the fields
+of the record and of every run are byte-identical afterwards, which is asserted rather than
+claimed.
+
+**Rejected:** a client-side loop over the existing per-candidate operation. It needs no backend
+change and is retry-safe, and it was still wrong for the reason
+`routes._mint_transcript_proposals` had already written down for the transcript case: N requests,
+each with its own `If-Match`, means a closed tab or a `412` partway through leaves a record holding
+part of an import with **no surface able to say which part**. The scientist's act is one act.
+
+**Decided — partial success is split by whether the caller can fix it.** A candidate that is
+intrinsically unproposable (sources disagree, structural, no write path in this build) is reported
+with the server's own reason and skipped; the review screen already shows that reason, so nothing
+is a surprise. A candidate that needs a run when none was named refuses the **whole batch**, because
+sending only the rest would silently leave the run's values behind.
+
+**Decided — `run_id` behaves differently here than on the per-candidate operation, deliberately.**
+There, a run given for a record-scoped target is refused, because the caller named one candidate.
+Here one run is given for a whole import and applied only to the candidates a run owns, because a
+record-scoped candidate in the same batch is not a mistake. The difference is stated on the
+operation, in the API client, and on the screen.
+
+**Consequence, stated rather than left to be found:** `historical_import.UNBUILT_STEP` is now
+`None`. The constant and the `session_view` mechanism are KEPT, so a future unbuilt step declares
+itself in the same list the surface renders from and cannot be shown as available by omission.
+`furthest_step` can now reach `add_to_experiments`, on the strict criterion that every proposable
+candidate has been sent — and it drops back to `review` when a re-reconstruction mints new ones.
+

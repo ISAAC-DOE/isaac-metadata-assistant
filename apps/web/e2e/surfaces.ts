@@ -580,17 +580,23 @@ export const TABBED_SURFACES = [
     // R0 added 'Help & Tutorial' (the tutorial replay surface). The tab COUNT the
     // APG-structure spec asserts is derived from this array, so the list is the
     // single place a new tab has to be declared — no magic number to chase.
+    /* REORDERED AND RENAMED 2026-09-15 — two groups on one flat tablist, the
+       four scientist-facing tabs then the three developer ones under an
+       "Advanced" marker. ONLY THE ORDER CHANGED — no accessible name did.
+       The group reaches assistive technology as an `aria-describedby`
+       DESCRIPTION, announced after the name, precisely so that a tab's name
+       stays the handle every suite queries it by. `tabs.spec.ts` asserts each
+       entry with `toHaveAccessibleName`, an EXACT match, and the tab COUNT the
+       APG-structure spec asserts is derived from this array, so the list stays
+       the single place a tab is declared. */
     tabs: [
       'Overview',
       'Data & Privacy',
       'About',
+      'Help & Tutorial',
       'API Access',
       'Endpoint Explorer',
-      // Connect Your Agent sits between the Explorer and Help: both describe
-      // reaching this build as a program, and this one states a deployment state
-      // rather than offering an action.
       'Connect Your Agent',
-      'Help & Tutorial',
     ],
     panelIdPrefix: 'settings-tabpanel-',
   },

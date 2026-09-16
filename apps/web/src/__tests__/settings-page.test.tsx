@@ -170,7 +170,22 @@ function selectedTabLabel(): string {
     .getAllByRole('tab')
     .filter((t) => t.getAttribute('aria-selected') === 'true');
   expect(selected, 'exactly one selected page tab').toHaveLength(1);
-  return selected[0].textContent ?? '';
+  return accessibleTextOf(selected[0]);
+}
+
+/**
+ * A tab's name-from-content, which is NOT its `textContent`.
+ *
+ * The first tab of the Advanced group carries a visible `aria-hidden` group
+ * marker, so its `textContent` reads "AdvancedAPI Access" while its accessible
+ * name is "API Access" — and the panel is `aria-labelledby` the tab, so the
+ * panel's name is the accessible one. Reading `textContent` here made this
+ * helper hand `getByRole('tabpanel', { name })` a string no panel has.
+ */
+function accessibleTextOf(el: Element): string {
+  const clone = el.cloneNode(true) as HTMLElement;
+  clone.querySelectorAll('[aria-hidden="true"]').forEach((n) => n.remove());
+  return clone.textContent ?? '';
 }
 
 afterEach(() => {
@@ -184,24 +199,29 @@ describe('Settings — tabs', () => {
     stubFetchRoutes(fullRoutes());
     renderSettings();
 
-    /* R0 added Help & Tutorial. It is last on purpose: every tab before it
-       reports what this build is, and it is the one thing on the page a reader
-       ACTS on (replaying the guided walkthrough), so it does not belong in the
-       middle of a readout.
+    /* REORDERED 2026-09-15 into two groups — the four scientist-facing tabs,
+       then the three developer ones under an "Advanced" marker.
 
-       Connect Your Agent is the SEVENTH tab and sits BEFORE Help, at position
-       six: it reports a deployment state and offers no action, so it belongs
-       with the readout tabs, and specifically next to the two other tabs about
-       reaching this build as a program. */
+       Help & Tutorial MOVED FROM LAST TO FOURTH, and the reason it needs a
+       permanent home is unchanged by the move: the first-run walkthrough offer
+       on My Experiments disappears for good once the walkthrough is finished,
+       so this is the only way back to it. Being LAST was never that reason — and
+       a reader looking for the walkthrough is not a reader looking for an API
+       key, which is what the three tabs after it are about.
+
+       Asserted on the ACCESSIBLE name, not `textContent`: the first Advanced tab
+       also renders a visible `aria-hidden` group marker, and asserting raw text
+       here would pin "AdvancedAPI Access" — a string that is not any tab's name
+       and that a reader never hears. */
     const tabs = screen.getAllByRole('tab');
-    expect(tabs.map((t) => t.textContent)).toEqual([
+    expect(tabs.map(accessibleTextOf)).toEqual([
       'Overview',
       'Data & Privacy',
       'About',
+      'Help & Tutorial',
       'API Access',
       'Endpoint Explorer',
       'Connect Your Agent',
-      'Help & Tutorial',
     ]);
     expect(tab('Overview')).toHaveAttribute('aria-selected', 'true');
     expect(screen.getByRole('tabpanel')).toHaveAttribute('id', 'settings-tabpanel-overview');
@@ -222,6 +242,87 @@ describe('Settings — tabs', () => {
    * they ARE in the accessibility tree and this page has two tablists. Hence the
    * name-scoped resolution below.
    */
+  /* ── the Advanced group · a LABEL on a flat tablist ───────────────────────
+   *
+   * The owner asked for Settings "simplified with developer material under
+   * Advanced". Three things have to be true at once for that to be honest, and
+   * each gets its own test below rather than one test asserting a rendering:
+   *
+   *   1. the word is VISIBLE, once, where the group starts;
+   *   2. it reaches a screen reader for EVERY tab in the group, because arrow
+   *      keys never show the third tab's reader the first tab's marker;
+   *   3. it changed no tab's NAME, because a name is the handle every suite and
+   *      every deep link resolves a tab by. The first attempt here appended the
+   *      group to `aria-label` and broke 98 assertions across three suites.
+   */
+  const ADVANCED_TABS = ['API Access', 'Endpoint Explorer', 'Connect Your Agent'];
+
+  it('shows the Advanced marker exactly once, on the first tab of the group', () => {
+    stubFetchRoutes(fullRoutes());
+    renderSettings();
+
+    const markers = pageTablist().querySelectorAll('.section-tab-group');
+    expect(markers, 'the row says "Advanced" once, where the group starts').toHaveLength(1);
+    expect(markers[0].textContent).toBe('Advanced');
+    // On the FIRST grouped tab, not floating in the middle of the group.
+    expect(markers[0].closest('[role="tab"]')).toBe(tab('API Access'));
+    // Hidden from assistive technology, which is what makes assertion 3 below
+    // true: it is a sighted-only marker and the group reaches a reader another
+    // way.
+    expect(markers[0]).toHaveAttribute('aria-hidden', 'true');
+  });
+
+  it('describes every Advanced tab as Advanced, not just the first', () => {
+    stubFetchRoutes(fullRoutes());
+    renderSettings();
+
+    for (const name of ADVANCED_TABS) {
+      const id = tab(name).getAttribute('aria-describedby');
+      expect(id, `${name}: points at a description`).toBeTruthy();
+      const described = document.getElementById(id as string);
+      expect(described, `${name}: the description element exists`).not.toBeNull();
+      expect(described?.textContent).toBe('Advanced');
+    }
+    // One description element, shared — not three copies of one word.
+    const ids = new Set(ADVANCED_TABS.map((n) => tab(n).getAttribute('aria-describedby')));
+    expect(ids.size).toBe(1);
+  });
+
+  it('leaves the four scientist-facing tabs ungrouped and undescribed', () => {
+    stubFetchRoutes(fullRoutes());
+    renderSettings();
+    for (const name of ['Overview', 'Data & Privacy', 'About', 'Help & Tutorial']) {
+      expect(tab(name), `${name}: no group description`).not.toHaveAttribute('aria-describedby');
+      expect(tab(name).querySelector('.section-tab-group'), `${name}: no marker`).toBeNull();
+    }
+  });
+
+  it('changed no tab name: the tablist still owns exactly seven tabs and nothing else', () => {
+    stubFetchRoutes(fullRoutes());
+    renderSettings();
+
+    /* WHY THIS IS ASSERTED OVER THE DOM CHILDREN and not over `getAllByRole`:
+       `role="tablist"` may only own `role="tab"` children, and the obvious way
+       to render a group marker — a wrapper or a separator element beside the
+       buttons — breaks `aria-required-children` in a way no name assertion
+       would notice. The marker is INSIDE the first grouped button and the
+       shared description is OUTSIDE the tablist, so every direct child here is
+       a tab. */
+    const children = Array.from(pageTablist().children);
+    expect(children).toHaveLength(7);
+    for (const child of children) {
+      expect(child.getAttribute('role'), `${child.textContent}: a tablist child is a tab`).toBe('tab');
+    }
+    // And the description is not one of them.
+    expect(pageTablist().querySelector('#settings-tab-group-advanced')).toBeNull();
+    expect(document.getElementById('settings-tab-group-advanced')).not.toBeNull();
+
+    // Every name is still exactly the visible label, group or no group.
+    for (const name of [...ADVANCED_TABS, 'Overview', 'Data & Privacy', 'About', 'Help & Tutorial']) {
+      expect(tab(name), `${name}: resolvable by its plain name`).toBeInTheDocument();
+    }
+  });
+
   it('has exactly ONE tablist on every tab — the nested sub-tablist is gone', () => {
     for (const id of SETTINGS_TAB_IDS) {
       stubFetchRoutes(fullRoutes());
@@ -299,20 +400,30 @@ describe('Settings — tabs', () => {
     fireEvent.keyDown(tab('Overview'), { key: 'ArrowRight' });
     expect(tab('Data & Privacy')).toHaveAttribute('aria-selected', 'true');
 
-    // End is the LAST tab — Help & Tutorial, now seventh rather than sixth.
+    // End is the LAST tab — Connect Your Agent since the 2026-09-15 regroup.
     fireEvent.keyDown(tab('Data & Privacy'), { key: 'End' });
-    expect(tab('Help & Tutorial')).toHaveAttribute('aria-selected', 'true');
+    expect(tab('Connect Your Agent')).toHaveAttribute('aria-selected', 'true');
 
-    fireEvent.keyDown(tab('Help & Tutorial'), { key: 'Home' });
+    fireEvent.keyDown(tab('Connect Your Agent'), { key: 'Home' });
     expect(tab('Overview')).toHaveAttribute('aria-selected', 'true');
 
     fireEvent.keyDown(tab('Overview'), { key: 'ArrowLeft' });
-    expect(tab('Help & Tutorial')).toHaveAttribute('aria-selected', 'true');
+    expect(tab('Connect Your Agent')).toHaveAttribute('aria-selected', 'true');
 
     // ArrowLeft from the last tab reaches the one before it, so the wrap is
-    // walking all seven entries rather than a stale shorter array.
-    fireEvent.keyDown(tab('Help & Tutorial'), { key: 'ArrowLeft' });
-    expect(tab('Connect Your Agent')).toHaveAttribute('aria-selected', 'true');
+    // walking all seven entries rather than a stale shorter array. It also
+    // crosses no group boundary special-case: the group is a LABEL, and the
+    // roving order is still one flat list of seven.
+    fireEvent.keyDown(tab('Connect Your Agent'), { key: 'ArrowLeft' });
+    expect(tab('Endpoint Explorer')).toHaveAttribute('aria-selected', 'true');
+
+    // ...and crossing back over the boundary reaches the scientist-facing side,
+    // which is the assertion that would fail if the marker had been made a
+    // tablist child and shifted the indices.
+    fireEvent.keyDown(tab('Endpoint Explorer'), { key: 'ArrowLeft' });
+    expect(tab('API Access')).toHaveAttribute('aria-selected', 'true');
+    fireEvent.keyDown(tab('API Access'), { key: 'ArrowLeft' });
+    expect(tab('Help & Tutorial')).toHaveAttribute('aria-selected', 'true');
   });
 
   it('keyboard selection moves focus with it, so the arrow keys stay usable', () => {
@@ -320,8 +431,8 @@ describe('Settings — tabs', () => {
     renderSettings();
     tab('Overview').focus();
     fireEvent.keyDown(tab('Overview'), { key: 'End' });
-    expect(tab('Help & Tutorial')).toHaveFocus();
-    expect(tab('Help & Tutorial')).toHaveAttribute('tabindex', '0');
+    expect(tab('Connect Your Agent')).toHaveFocus();
+    expect(tab('Connect Your Agent')).toHaveAttribute('tabindex', '0');
   });
 
   it('states plainly that there is nothing to configure (no invented settings)', () => {

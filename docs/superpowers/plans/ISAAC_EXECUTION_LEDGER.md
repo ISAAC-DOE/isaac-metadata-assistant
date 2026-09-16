@@ -8,6 +8,54 @@ the repository — never from remembered chat context.
 ## SESSION HEADER
 
 ```
+*** 2026-09-15, CONTINUATION — RE-DERIVED AGAIN, because the block that follows
+    went stale the moment PR #256 merged and a stale header is worse than none.
+    THIS IS THE CURRENT STATE; everything below it is a superseded reading kept
+    unedited, for the reason the 2026-09-15 block itself gives. ***
+
+RE-DERIVED AT 2026-09-16T01:01Z, every line from a command:
+  main            = origin/main = 6e539fda   (PR #256's merge commit)
+  release         = v0.0.241; `git rev-list -n1 v0.0.241` -> 6e539fdaa7a209e4…
+                    — verified by resolving the TAG, not by reading the
+                    workflow's own `TAG=` log line
+  main CI         = GREEN at 6e539fda (push event), and "Build and Push to
+                    GHCR" concluded success; the release gate printed
+                    `release gate ALLOWED for 6e539fda…`
+  branch          = feat/v2-settings-advanced-and-hist005
+  HEAD            = 33c0ad01  (9 commits ahead of main — re-counted, it read
+                    8 for one commit and a count that lags is the same class of
+                    stale claim this header exists to stop)
+  open PRs        = ONE — #257. **THIS LINE MAKES NO CLAIM ABOUT ITS CI**, and
+                    that is deliberate: any SHA written here is superseded by the
+                    next push, so a "CI green at X" in a committed header is a
+                    claim that expires. The arbiter is the PR's own checks on its
+                    own head, and the release gate independently refuses any
+                    commit whose CI did not conclude `success`.
+  working tree    = (clean)
+  stashes         = (empty)
+  truth path      = UNTOUCHED by this branch, asserted mechanically:
+                    `git diff --name-only origin/main...HEAD | grep -E
+                    '^(src/isaac_records/|schema/|apps/api/isaac_api/(export|official)\.py)'`
+                    returns nothing.
+
+  WHAT THIS CONTINUATION SHIPPED, each with its own commit and reasoning:
+    1. Settings grouped — the three developer tabs under an ADVANCED marker on
+       ONE flat tablist; the collapse-into-one-tab reading declined at the site
+       on measured landmark grounds.
+    2. `HIST-005` — `POST /api/imports/{id}/add-to-experiment`, the import
+       workflow's sixth step, as ONE write. It was the last unbuilt step.
+    3. Impeccable critique of both new surfaces, DEGRADED (single-context) and
+       bannered; two findings declined with reasons, one "fix" withdrawn as
+       having been aimed at the wrong quantity.
+    4. The single-candidate propose route's stale-writer 500, closed — the
+       sibling exposure slice 2 had named an hour earlier.
+    5. The batch's chain proven END TO END to a validated draft; it falsified my
+       own assertion about where a run-scoped value lands.
+    6. One stored timestamp showing in TWO spellings 200px apart, found by
+       looking at the screen rather than by a test.
+
+*** THE SUPERSEDED BLOCK FOLLOWS, unedited. ***
+
 *** 2026-09-15 SESSION OPEN — THE BLOCK BELOW WAS STALE BY 26 COMMITS AND IS
     CORRECTED HERE FIRST, per this file's own rule that a stale header is worse
     than none. Everything under "LAST UPDATED: 2026-09-13" describes a state
@@ -331,20 +379,51 @@ NAMED RESIDUE THAT IS OURS, NOT EXTERNAL — the honest short list:
     rule is the root cause of the dead-whitespace FAMILY. Deliberately untouched:
     it reaches every `wide`/`full` screen, two lanes were editing such surfaces,
     and it needs its own before/after plus an a11y round-trip.
-  * Settings tab regroup (`Overview / Privacy & Governance / Integrations /
+  * ~~Settings tab regroup (`Overview / Privacy & Governance / Integrations /
     Advanced`) — skipped with reasons: a nested tablist is banned and the flat
-    seven are each deep-linked.
+    seven are each deep-linked.~~ **DONE 2026-09-15, and DIFFERENTLY FROM WHAT
+    THIS ROW PROPOSED** — which is why it is struck rather than ticked. The two
+    reasons were right and are what shaped the answer: the seven are GROUPED on
+    one flat tablist (four scientist-facing, then a divider, `ADVANCED`, then the
+    three developer ones) rather than collapsed into four tabs. Every deep link
+    and every accessible name is unchanged; the group reaches assistive technology
+    as an `aria-describedby` description. The collapse is declined at the site
+    with its own measured reason — three `search` landmarks would collide inside a
+    closed `<details>`.
   * Data & Privacy status-row restructure — BLOCKED BY THE REPOSITORY, not by
     taste: `settingsContent.ts` requires the mode-not-content caveat in the
     always-visible `detail`, and `settings-page.test.tsx` requires each summary
     to render exactly once. The mandated shape would hide a privacy state.
+    **RE-EXAMINED 2026-09-15 and the block is CONFIRMED, with the reason stated
+    so the question is closed rather than left open.** The rule is at
+    `settingsContent.ts:936` and it is absolute: *"A caveat that keeps the
+    visible sentence from overstating what the code does may never go behind
+    `more`."* Read against the actual content, that leaves no third shape. The
+    `detail` paragraphs ARE the page — `no-telemetry` alone carries the
+    server-log, access-log and identity-gateway scope that stops
+    *"transmits nothing about your session"* from overstating the code — so no
+    layout that keeps every caveat visible can reduce the text. A two-column
+    grid would make long paragraphs harder to read, not easier. The only
+    remaining lever is SHORTER WORDING, which is a claim-accuracy decision and
+    not a layout one: every sentence a reader might cut is load-bearing against
+    a specific overstatement, and several were relocated here from other screens
+    precisely so the full statement would carry its scope. **A future session
+    should not retry this as a layout task.** If the page is to get shorter it is
+    by the owner deciding which caveats may be weakened, which is not an
+    engineering call.
   * `.hi-body` / `.hi-note` / `.hi-steps-disclosure` in the import session —
     bounded in `wide-prose.spec.ts` with measured ceilings and a stated reason,
     not silently forgiven. §10's remedy is shorter copy, which is a content
     decision with the owner.
   * Impeccable coverage is PARTIAL: Statistics/Settings, Runs and Historical
     Import were critiqued; the file-staging panel, the stepper and the favicon
-    had browser measurement plus independent review instead.
+    had browser measurement plus independent review instead. **Extended
+    2026-09-15** to the Settings ADVANCED group and the `HIST-005` panel — run
+    DEGRADED (single-context, the five-agent cap being spent), bannered as the
+    playbook requires, with the detector's `.tsx` non-functionality re-proven by
+    negative control and attribution measured by scanning each surface with and
+    without the new element. It remains PARTIAL in the sense that matters: no run
+    in this session had the two isolated assessors `critique.md` asks for.
 
 *** A MEASUREMENT TRAP THAT LOOKS EXACTLY LIKE A PRODUCT DEFECT, and it cost a
 diagnosis before it was found: RUNNING THE READ-ONLY E2E SUITE WITH A
@@ -1427,7 +1506,7 @@ work, and nothing about it has been decided. `MCP-020`/`MCP-021`/`SEC-001` stay 
 | BL15-001 | `.mac` parser | **BLOCKED — no representative file exists anywhere in reach.** §5 forbids designing against assumptions | HIST-000 |
 | HIST-003 | Semantic reconstruction into the **shared** Phase-D pipeline | BLOCKED on EXT-10 (~~DEC-13~~, resolved) | HIST-002 |
 | HIST-004 | Import review surface. **Banned pattern: Upload → Spinner → Mysterious JSON** | **DONE 2026-09-13 (shell)** — `apps/web/src/screens/HistoricalImport.tsx` at `/imports`, the SECOND primary destination. All three halves of the banned pattern refused and asserted: no file input (proven over the DOM, over the source with comments stripped, and over every request made — plus a control proving that predicate fires), no control for the one unbuilt step (not even a disabled one), and all NINE things the plan requires a scientist to see, each with its own test. ~~37~~ **38** frontend tests (corrected 2026-09-13, M-7: `npx vitest run src/__tests__/historical-import.test.tsx` -> `38 passed`), six mutation-verified. **Zero a11y baseline cells added** — `imports` passes `a11y-axe` and `structure` at all five viewports on darwin. **SCOPED 2026-09-13 (M-11): that is the EMPTY-LIST state only.** `SURFACES` reaches `/imports` at its index, so the scan never sees a loaded import session — roughly a thousand lines of state (source rows, parse verdicts, candidates, the review step) are unmeasured by axe at any viewport. The entry's own comment says so; this row did not, and "zero cells added" reads as coverage rather than as a measurement of one state. **The 38 frontend tests DO exercise the loaded states** — they are jsdom, not axe, which is a different question. Reaching the loaded state from the sweep needs a seeded session, which is why it was not done rather than overlooked | HIST-001 |
-| HIST-005 | Merge into the ordinary Library | **PLANNED — and it is now the workflow's ONE unbuilt step, named on the surface rather than implied.** `historical_import.UNBUILT_STEP` is `add_to_experiments`; the review screen renders the server's own `UNBUILT_STEP_DISCLOSURE` beside it and **no control at all** — not a disabled one, which would say the act exists and is temporarily unavailable (`test_...offers_NO_control` is mutation-verified against exactly that). What a scientist can do instead is send each field candidate to review on an experiment they create themselves, which is `HIST-001`'s ninth operation. **Two structural candidates are therefore refused by name** with `candidate_not_proposable`: a proposal is about one value at one official field path, so "an experiment exists here" has no proposal shape | HIST-004, LIB-003 |
+| HIST-005 | Merge into the ordinary Library | **DONE 2026-09-15 — `POST /api/imports/{import_id}/add-to-experiment`, the workflow's sixth step, built as ONE operation.** Sends every proposable candidate to review on one record inside ONE `record_lock` and ONE `_save_versioned` — the record holds the whole batch or none of it, at one new revision (asserted: `rev` moves by exactly +1 for N candidates, which is the test that fails if this is ever reimplemented as a client loop). It WRITES NO VALUE: measured, both target paths absent from the record draft and the run draft afterwards, with 2 open proposals and 2 notes present. `run_id` is applied to the candidates a run owns and IGNORED for the ones the record owns — deliberately unlike the single-candidate route, which refuses it; omitting it when a run-scoped candidate is sendable refuses the WHOLE batch (`422 target_requires_a_run`) rather than quietly leaving the run's values behind. Exactly-once per candidate and exactly-once ACROSS the two operations (shared `client_request_key`), so a candidate sent by hand and then included in a batch mints one proposal. Intrinsically unproposable candidates are reported with the server's own reason, never dropped. **The per-candidate mint is now ONE helper** (`routes._mint_import_candidate`) both operations call, so the five bounds it enforces — and the ORDER they are enforced in — have one expression. `UNBUILT_STEP` is now `None` and the mechanism is kept, not deleted; `furthest_step` can reach `add_to_experiments`, on the strict criterion that EVERY proposable candidate has been sent, and drops back to `review` when a re-reconstruction mints new ones. 17 backend tests + 11 frontend tests; verified end-to-end in a real browser. Previous state, kept because it is what the surface promised: ~~**PLANNED — and it is now the workflow's ONE unbuilt step, named on the surface rather than implied.** `historical_import.UNBUILT_STEP` is `add_to_experiments`; the review screen renders the server's own `UNBUILT_STEP_DISCLOSURE` beside it and **no control at all** — not a disabled one, which would say the act exists and is temporarily unavailable (`test_...offers_NO_control` is mutation-verified against exactly that). What a scientist can do instead is send each field candidate to review on an experiment they create themselves, which is `HIST-001`'s ninth operation. **Two structural candidates are therefore refused by name** with `candidate_not_proposable`: a proposal is about one value at one official field path, so "an experiment exists here" has no proposal shape~~ | HIST-004, LIB-003 |
 | HIST-006 | Gold-standard evaluation; the headline metric is **fabricated-value rate**, not fields-filled. Every metric must name the artifact required to compute it | BLOCKED on EXT-10 (~~DEC-13~~, resolved) | HIST-005 |
 | SRC-001 | **Already satisfied — do not rebuild.** Multi-source disagreement for a value in the draft is representable **today**: `evidence_classify.asserted_values` → `conflicting_evidence` at ≥2 values; `conflict_resolution` stores `competing_values` + set-digest with `deferred` first-class; `build_sidecar` copies the **whole** evidence list, so the record carries one value and the sidecar preserves the disagreement | CONFIRMED CURRENT | — |
 
@@ -1919,6 +1998,26 @@ claim means. Corrected in place — the figure held; the way I told a reader to 
 ---
 
 ## TASKS FROM THE NON-DEGRADED IMPECCABLE CRITIQUE (2026-09-12, post-Phase-A)
+
+*** THE `STATUS` COLUMN BELOW IS STALE — RE-MEASURED AGAINST THE CODE 2026-09-15,
+because every row still reads `PLANNED` and at least three are not. A table of ten
+open items where three are closed is worse than no table: it makes the real
+remainder look larger and invites a future session to rebuild what exists. The
+rows are left as written and the measured state is stated here. ***
+
+| id | measured 2026-09-15 | evidence |
+|---|---|---|
+| `UX-021` (Help regression) | **DONE** | `HelpPanel.tsx` holds 3 `<details>` over 9 `.help-section` references — the 7→4 top-level reduction by disclosure, shipped 2026-09-14 |
+| `A11Y-02` (Help has no focus trap) | **DONE** | `HelpPanel.tsx:173` — *"A11Y-02 — Escape, click-outside, AND Tab containment"*, with a freshly-queried focusable list per keystroke because the panel's content is conditional |
+| `UX-025` (banner line-length) | **DONE** | `workflow-progress-banner.css:52` — *"UX-025 — MEASURE, not width"* |
+| `UX-024` (`transition: width, height`) | **DECLINED, with its premise corrected** | the finding said *"on `body`"* and there is no such transition on `body`; the only matching rule is `.tutorial-ring`, which is `position: fixed` + `pointer-events: none`, so its box changing lays out nothing else. `transform` is not the fix — `scale()` scales a `box-shadow` spread, so the 2px/6px ring would visibly thicken and thin as it travels. Reasoned at the site in `tutorial.css` so it is not "fixed" into a defect |
+| `UX-019` (duplicate title) | **OPEN, deliberately** | `screens.css:62` — *"its own review; it is tracked as UX-019 rather than smuggled in here"* |
+| `UX-020` | **OPEN** | no reference in `apps/web/src` |
+| `UX-023` (`nested-cards` ×9) | **RESOLVED AS A HEURISTIC FALSE POSITIVE — measured on both surfaces, 2026-09-15. The critique's own "Grouping = PASS" was right and the overlay was wrong, which is the reconciliation the row asked for rather than an average.** | The row says *"every `section.field-group` is a card inside the page card … decide whether the inner cards earn their border/shadow."* They earn it: measured on a live record, the **10** groups are `rgb(255,255,255)` cards and the `.screen-card` ancestor the walk finds is `rgb(244,246,249)` — `--screen-base`, the **grey app shell** (1248×1019, its text beginning "ISAAC / My Experiments"). White-on-grey IS a card; there is no white-on-white nesting on `fields`. On **Settings**, where the detector reported it on 2026-09-15, 6 of 9 white bordered boxes do sit on white — and they are `icon-btn` and `settings-jump-btn`, i.e. **BUTTONS**, whose border and fill are required by the owner's own direction that *controls must look interactive*. **The defect is in the heuristic**: `border ∧ radius ∧ opaque background` cannot tell a page frame from a card, or a button from a card. Recorded rather than "fixed", because removing those borders would damage two surfaces to satisfy a detector. **AND MY FIRST PROBE MADE THE IDENTICAL MISTAKE** — an ad-hoc `isCard()` walk classified `.screen-card` as a card and I believed it until the rendered screenshot showed white rows on grey; that is why this row cites a rendered measurement and not a DOM predicate |
+| `UX-022`, `A11Y-03` | **AMBIGUOUS — DO NOT TICK EITHER FROM A GREP** | the ledger defines each exactly once (`:2017`, `:2022`), and the code cites both IDs for DIFFERENT work: `assistant.css:60,78` cites `UX-022` for a flex floor and a header rule, not the `fields.css` token migration this row names, and `EvidenceTrailPanel.tsx:86,102` cites `A11Y-03` for evidence-trail rows, not the mode chip — and says the thing *"A11Y-03 says is missing"* is **still missing for 30 of 31 rows**. The plan document carries its own `UX-0xx` numbering and the code follows that, so an ID match between code and this table is not evidence of the same task |
+
+**`A11Y-01` is unchanged and its row already says so**: A3 closed one of three causes.
+
 
 Method: two isolated assessments — a source-only design review in a sub-agent, and
 rendered+overlay evidence gathered separately. Neither saw the other. Full synthesis in
@@ -4265,3 +4364,407 @@ Each exists because it was violated, and each cost real time:
   measured that way is a tooling artifact, not a defect.
 - **Impeccable's mechanical detector is non-functional in this environment** (negative-control
   proven: no findings, exit 0, on deliberately broken TSX). Never cite "0 findings" from it.
+
+---
+
+## SESSION CONTINUATION — 2026-09-15 (after PR #256 merged)
+
+**PR #256 merged as `6e539fda`** on org `main` (all five checks green on its exact head
+`acfd7fe7`: frontend tests and build, backend tests and synthetic demo, migration against a real
+PostgreSQL, browser accessibility and responsive baseline, Docker smoke). `main` was verified not
+to have advanced since the branch point, so the merge result was the branch head and the
+exact-head-green run described the tree that merged — the check `CLAUDE.md` §11 records two
+`main`-red counterexamples for.
+
+Two of the owner's mandatory priorities were still unbuilt at that point. Both are now built.
+
+### 1. Settings is simplified with the developer material under Advanced
+
+The seven tabs are two groups: **Overview · Data & Privacy · About · Help & Tutorial**, then a
+neutral 1px divider, the word **ADVANCED**, and **API Access · Endpoint Explorer · Connect Your
+Agent**.
+
+**It is a LABEL on a flat tablist, not a second tablist and not a collapse into one tab.** A
+nested tablist is banned system-wide and each of the seven is independently deep-linked. The
+stronger reading — three disclosures inside one "Advanced" tab — was **declined on measured
+grounds, and the decline is recorded at the site** so asking for it is a decision rather than a
+rediscovery: `ApiDocs` alone renders two `search` landmarks, the landmark-name guard already pins
+that exactly one region is named "Endpoint Explorer", and `querySelectorAll` reaches inside a
+closed `<details>`, so stacking the three collides those landmarks whether or not they are
+visibly collapsed — and it would move the a11y baseline cells of two separately-keyed surfaces.
+
+**THE FIRST IMPLEMENTATION WAS WRONG AND THE CORRECTION IS THE USEFUL PART.** The group was first
+appended to each tab's `aria-label` ("API Access — Advanced"), reasoning from the mode chip, whose
+accessible name opens with its visible text and then adds its claims. That shape is right for a
+chip nobody queries by name and **wrong for a tab: a tab's name is its HANDLE**.
+`getByRole('tab', { name })` matches a string EXACTLY in testing-library, and **98 assertions
+across three suites broke at once**. `aria-describedby` is announced after the name, so a reader
+still learns the group and every existing name stays the name — including in `e2e/surfaces.ts`,
+where **only the ORDER changed**.
+
+The marker is rendered INSIDE the first grouped button and the shared description OUTSIDE the
+tablist, because `role="tablist"` may own only `role="tab"` children and the obvious rendering — a
+wrapper or separator beside the buttons — breaks `aria-required-children` in a way no name
+assertion notices. A test asserts every direct child of the tablist is a tab and that the
+description element is not one of them. Because the marker lives inside the button and the divider
+is that button's own border, **neither can be orphaned when the row wraps — structural, not luck**.
+
+`Help & Tutorial` moved from last to fourth. The reason it needs a permanent home is unchanged (the
+first-run walkthrough offer disappears for good once finished, so this is the only way back) and
+**being last was never that reason**: a reader looking for the walkthrough is not a reader looking
+for an API key.
+
+Measured in Chrome at 1280: all seven tabs report the same `top` and the same 30.5px height, so the
+inline marker did not pull the shared `.section-tabs` row out of alignment on the four pages that
+use it; the row occupies 855 of 960px and does not wrap. The marker is 11px/600 in `--text-muted`
+(#5b6570, 5.93:1) rather than `--text-tertiary`, because nothing in this app qualifies for the WCAG
+large-text exemption. The divider is neutral `--border-faint`, which the no-vertical-rail rule
+names as "not a rail". Spacing is even at 12px either side; it was 16/8 first, which put the word
+nearer the label than the boundary and invited reading "ADVANCED API Access" as one tab name.
+Playwright `tabs.spec.ts` + `structure.spec.ts`: **461 passed, exit 0**, all five viewports.
+
+### 2. HIST-005 — Historical Import can add a whole import to a record
+
+See the corrected `HIST-005` row above for what shipped. What belongs here is the reasoning a
+future session should not have to redo:
+
+**A CLIENT-SIDE LOOP WAS CONSIDERED FIRST AND THE REPOSITORY HAD ALREADY ARGUED IT DOWN.**
+`_mint_transcript_proposals`' own docstring says a client-side mint "would be N+1 requests … each
+able to fail on its own — so a browser that closed, a tab that slept, or a `412` partway through
+would leave a record whose notes were stored and whose proposals were not, with no surface able to
+say which candidates were missing. The scientist's act was ONE act." That is exactly this case, so
+the server route is precedent rather than invention.
+
+**PARTIAL SUCCESS IS SPLIT BY WHETHER THE CALLER CAN FIX IT.** A candidate that is intrinsically
+unproposable (sources disagree, structural, no write path) is reported and skipped — the review
+screen already shows that reason, so the scientist is not surprised. A candidate that needs a run
+when none was named refuses the **whole batch**, because sending only the rest would silently leave
+the run's values behind and leave no way to tell a finished import from a partial one.
+
+**A REAL DEFECT WAS FOUND ONLY IN A BROWSER, AND NO UNIT TEST COULD HAVE SEEN IT.** `act()` calls
+`session.reload()`, which puts `ImportSessionView` into `loading` and returns a `LoadingPanel` —
+**unmounting its whole subtree**, and with it the panel's report state. Measured: the batch wrote
+2 proposals and 2 notes, `furthest_step` advanced, and the screen said **nothing**. The report is
+now owned one level up, above the reload boundary. It **cannot** be re-derived from the reloaded
+session, which is why the per-candidate card does not have this problem and this panel could not
+copy its approach: a card's confirmation is `session.proposed[candidate_id]`, a fact the session
+carries, whereas the batch's counts and its per-candidate REASON are statements about one request
+the session never stores.
+
+**A DUPLICATE-COPY GUARD WAS SATISFIED BY EXTRACTION, NOT BY WIDENING.**
+`product-facing-language.test.tsx`'s P1 exemption for this screen is deliberately ONE STRING, ONE
+OCCURRENCE — "which is what makes this an act rather than a widening". The panel needed the same
+"New record from this import" control a candidate card has. Widening the exemption to two would
+have passed the test and defeated it; the control is now **one component with two call sites**, so
+there is one creation affordance on the screen, expressed once.
+
+**A STALE FIXTURE WAS MOVED RATHER THAN LEFT BESIDE A NEW ONE.** `historical-import.test.tsx`'s
+`WORKFLOW` marked `add_to_experiments` unbuilt, and §3 asserted the surface rendered its
+disclosure. That describes a server state that no longer occurs. The fixture now matches the
+server (all six built); §3's tests are **retargeted at the MECHANISM** with an explicit
+`UNBUILT_WORKFLOW`, because the mechanism is what has to keep working — and a new test asserts the
+state that actually ships renders no disclosure at all. Two backend tests were rewritten for the
+same reason: `assert hi.UNBUILT_STEP in steps` and `furthest_step() != hi.UNBUILT_STEP` would both
+be **vacuously true** against `None`, and a test that passes because its subject stopped existing
+is worse than no test.
+
+**FOUR CONSEQUENCES OF PUBLISHING AN OPERATION, EACH HANDLED RATHER THAN SUPPRESSED:** the
+documented-operation count 87 → 88 (backend) and the transcribed-contract count 87 → 88 with its
+character total 154,565 → 157,721 and post-lead paragraphs 303 → 310 (frontend) — every one
+**measured by running the file and reading what it reported**, never apportioned; the OpenAPI
+description transcribed into `apiFixtures.ts` **by a script reading the served document**, not by
+hand; and the submitted-history sweep extended with a named attempt, declared `refused(422,
+"target_requires_a_run")` rather than `ACCEPTED`, because a sweep that meets a refusal and calls it
+accepted asserts that a route which wrote nothing moved nothing.
+
+### 3. Impeccable critique of both new surfaces — ⚠️ DEGRADED: single-context (the session's 5-agent cap is exhausted)
+
+**The banner is the first thing here because the playbook demands it.** `critique.md` requires
+Assessments A and B to run as two isolated sub-agents whenever a sub-agent tool exists, and calls a
+silent degraded run "a failed critique". A sub-agent tool exists; using one would breach the
+owner's explicit cap of **five subordinate agents for the whole session**, all five of which were
+spent earlier. So both assessments ran inline, and this says so.
+
+**THE MECHANICAL DETECTOR IS STILL NON-FUNCTIONAL FOR `.tsx` HERE — RE-PROVEN BY NEGATIVE CONTROL,
+not assumed from the existing note.** `node detect.mjs --json` on a fixture holding an unlabelled
+`<img>`, a clickable `<div>` with no role, 8px text, a nested interactive element and an unlabelled
+`<input>` returned **`[]`, exit 0**. Reported as *deterministic scan unavailable*, never as "0
+findings".
+
+**THE IN-BROWSER OVERLAY IS A DIFFERENT CODE PATH AND DOES WORK.** Mutable injection was
+preflighted (`document.title` set, a `<script>` appended and its global read back) before any claim
+that an overlay ran; `live-server.mjs --background` on port 8400 served `detect.js`, and the
+overlay rendered **29 badges** with real findings. The server was stopped before reporting (pid
+27671).
+
+**ATTRIBUTION WAS MEASURED BY DIFFERENCE, NOT BY EYE.** Each surface was scanned twice in a fresh
+iframe — once as it ships, once with the new element removed — and the panel's contribution is the
+difference:
+
+| surface | as it ships | with the new element removed | attributable |
+|---|---:|---:|---:|
+| Settings → Overview (the ADVANCED marker) | 17 | 17 | **0** |
+| Historical Import, session open (the `HIST-005` panel) | 54 | 52 | **2** |
+
+The Settings group marker contributes **nothing**. The panel contributes **one `line-length` and
+one `tiny-text`**, and both are declined with reasons below.
+
+***AND THE FIRST FIX I MADE WAS AIMED AT THE WRONG QUANTITY — the session's fifth instance of a
+tool answering confidently and wrong.*** The `line-length` finding reads *"~86 chars/line (aim for
+<80)"*, so the lead copy was shortened from 172 characters to 157 to clear it. **It did not move.**
+Reading all twenty `line-length` findings on that screen revealed why: **every one reports the
+identical number, 86** — and twenty paragraphs of different lengths cannot all be 86 characters per
+line. The detector is measuring the **column** (≈557px ÷ average glyph width), so it reports one
+verdict per element in a shared measure. My own line-box measurement said **79**, under the aim,
+while the detector still counted it; two methods disagreeing is what exposed the third fact.
+
+**The shortened copy is KEPT** — 172 → 157 characters saying the same two things, on a screen whose
+owner asked for a streamlined low-text UI — **but the committed rationale was corrected in place**,
+because a comment claiming an edit cleared a finding it did not clear is the defect class this file
+exists to track. Both honesty clauses survived the cut and that is what bounded it: "nothing is
+applied" is the reason the copy exists at all, and a test asserts "no value is written" appears in
+the panel.
+
+**Two findings declined, each with its reason rather than silently:**
+
+- **`line-length` (the measure).** The only thing that clears it is a narrower column, and the
+  owner's recorded direction is *"don't cap prose narrow"*. It is the same measure residue this
+  ledger already carries against the global `68ch` rule, shared identically by the other nineteen
+  prose elements on the screen — a screen-wide type decision, not this panel's.
+- **`tiny-text` (11px).** The panel's note uses `--font-size-meta`, the app's own meta rung (503
+  uses). The screen already carries **28** of these findings; raising this one to 13px would make
+  it the only note on the surface that disagrees with its siblings. It meets contrast at 4.5:1,
+  which is the accessibility bar; the detector's 11px floor is a taste threshold this app has
+  already decided against globally.
+
+**Pre-existing findings NOT introduced here, listed so they are not mistaken for new:**
+`undersized-ui-text` on the 10.5px version chip (`isaac v0.1.0 · local dev`); `overused-font`
+(Roboto at 88%); `kicker-above-heading` on `About This Build` above the `Settings` `<h1>` — which
+`statistics-nav.test.tsx` deliberately protects; `layout-transition` on a `width, height`
+transition; `nested-cards`; `text-occlusion` ×1 on the imports screen.
+
+**What this critique did NOT do**, stated rather than implied: it did not score the ten Nielsen
+heuristics or persist a snapshot through `critique-storage.mjs`, because the playbook's own
+structure for those is the two-sub-agent synthesis this run could not perform. What it does carry
+is the part that cannot be faked — a negative control on the tool, a preflighted overlay, and
+attribution by difference.
+
+### 4. The sibling exposure the batch route named is closed, same day
+
+`HIST-005`'s batch route gained a guard against a persisted session naming a path this build no
+longer writes, and its comment named the single-candidate route as carrying the identical exposure
+— *"deliberately NOT changed here ... closing it is its own slice with its own test"*. That was
+true for about an hour. **It is closed**, in `post_import_candidate_proposal`, with the same
+refusal and its own test, and **the batch route's comment is struck in place rather than deleted**:
+a comment pointing at an open defect that has since been closed sends the next reader looking for
+something that is not there, and the PATTERN it records — name the sibling exposure in the change
+that finds it — is still the right one.
+
+**Why it is reachable at all, which is the part worth keeping.** `candidate.proposable` is
+recomputed from `not_proposable_reason`, and that is **stored in the session document** — so it
+records what the build that reconstructed the import found, and a session outlives that build.
+`_proposal_writer_for` answering `None` makes the `_PROPOSAL_WRITER_SCOPE` lookup a `KeyError`: a
+**500** out of the one route by which anything from an import reaches a record, on a document
+nobody hand-edited.
+
+**A negative control covers BOTH routes in one place**, because without it the two patched tests
+would pass just as well if the guards fired unconditionally — in which case nothing from an import
+could ever reach a record, which is the one thing these routes are for. It drives the single route
+on one record and the batch on a second, so the first one's exactly-once does not make the second
+assertion vacuous.
+
+Measured: `test_historical_import_routes.py` + `test_historical_import.py` → **149 passed**;
+submitted-history sweep, OpenAPI and contract-parity suites → **53 passed**; both committed
+snapshot artifacts regenerated, `--check` clean, **155** gate tests pass.
+
+### 5. The batch's chain is proven END TO END to a validated draft — and it measured a fact I had wrong
+
+`test_the_whole_chain_from_a_parsed_source_to_a_validated_draft` proves
+`parsed source → candidate → proposal → review → ISAAC draft → deterministic validation` for the
+**single-candidate** route only. A batch-minted proposal is built by the same `new_proposal` call,
+so acceptance *ought* to be identical — and **"ought to be identical" is exactly the claim this
+repository keeps catching.** The sibling now exists
+(`test_the_whole_chain_THROUGH_THE_BATCH_reaches_a_validated_draft`, under the fixture edge
+verifier, the only configuration in which a person can accept anything), with **two** candidates —
+one record-scoped, one run-scoped — because a batch of one kind would not exercise the
+per-candidate run resolution that is this route's one behavioural difference from its sibling.
+
+***AND IT IMMEDIATELY FALSIFIED MY OWN ASSERTION.*** The test first reached for
+`run.draft["fields"][RUN_PATH]` and raised `KeyError: 'fields'`. Probed: the run's draft holds only
+`assets` and `pending`, and `_proposal_writer_for("sample.material.name")` answers **`run_override`**
+— "one run holds its own value at one record-level address" — so the applied value is an `Override`
+keyed by the field **address** (`field:<path>`), a different store from a run field. Had I asserted
+the location I assumed, the test could only ever have failed; had I asserted it loosely, it would
+have proved nothing.
+
+**What it now establishes, which is the strongest available statement about `HIST-005`:** both
+values are not merely stored but **acceptable**; the record-scoped one lands on the record's field
+map (`sorted(exp.draft["fields"]) == ["system.technique"]`) and the run-scoped one as a run
+override with `user_confirmation` evidence; **neither crossed over** — `field:system.technique` is
+absent from `run.overrides`, which is the failure a request-wide run would have produced; and
+`validate_draft(exp.draft)` from the **unmodified truth core** returns **zero errors**. A guard
+asserts the writer is still `run_override`, so if that path ever stops being one, the assertions
+move with it rather than silently checking an empty store.
+
+Measured: `test_historical_import_routes.py` → **83 passed**.
+
+### 6. One stored timestamp was showing in two spellings, 200px apart — found by LOOKING
+
+A final visual pass over the Runs screen, on a record built for it, confirmed the five things the
+owner complained about are answered: the Record Map carries a `✓ Filled` / `◌ Missing` chip **and
+the value** per field (`in_situ`, `45 K`, `Jan 31, 2026 · 09:00 UTC`) with its schema path beneath;
+the pane says what it is and what it is not (*"reports what the run carries; it runs no validation
+of its own"*); *"check failed"* is gone in favour of **"3 Fields Need Your Confirmation — values the
+system refuses to guess … expected, not a failure"** with a `Review & Answer →` control; and `DATA
+CAPTURE` is a sidebar group, not a sixth workflow step.
+
+**And it found a defect no test was going to.** The run card's own summary line read
+`in_situ · 45 K · 2026-01-31T09:00:00Z` while the Record Map two hundred pixels to its right read
+`Jan 31, 2026 · 09:00 UTC` — **one stored value, two spellings, on one screen**, and the owner's
+mandate was *human-friendly timestamps preserving the official stored format*.
+
+**`formatStoredDatetime`'s own docstring claims this cannot happen** — *"the Record Map row and the
+run editor's read-back are the same function — so the two can never show one stored value in two
+spellings."* That claim was **true of the two sites it names**. The summary was a **third**, and it
+called `String(value)`. It is the same defect `runFields.ts`'s own line-309 comment already records
+for a different field (*"the header's conditions line reads `1000 K` — the same field, two
+renderings"*), which is what makes this a recurrence rather than a surprise.
+
+Routed through the one renderer, keyed on `spec.kind === 'datetime'`, which is safe precisely
+because that function **returns its input verbatim** for anything it cannot read — so a half-typed
+or offset-bearing timestamp still shows exactly what the record holds. Measured after the fix in
+Chrome: the summary reads `in_situ · 45 K · Jan 31, 2026 · 09:00 UTC`, and the raw
+`2026-01-31T09:00:00Z` appears **exactly once**, in the `mono` ISO box — so the official stored form
+is preserved where it belongs rather than removed.
+
+**Four tests**, one of them a negative control on SCOPE (the obvious over-fix is to route
+everything through the datetime renderer, which would be invisible because it passes non-timestamps
+through unchanged) and one asserting the output **by calling the renderer** rather than
+transcribing it, so a future format change moves all three sites together or fails here.
+`run-datetime` → **18 passed**; `run-workspace` + `run-datetime` → **71 passed**.
+
+### Verification
+
+| what | command | result |
+|---|---|---|
+| backend | `.venv/bin/python -m pytest apps/api/tests src tests -q -rs` | **9,463 passed, 45 skipped**, MAIN CHECKOUT (quoted because a worktree reads `+2` skips — `graphify-out/graph.json` is gitignored and two tests gate on it). The one failure was snapshot drift from `routes.py`; both committed artifacts were then regenerated with `--out` **and** `--detail-out`, `--check` reports no drift, and the **155** gate tests pass. Was recorded here as "re-run pending at time of writing" for one commit and is corrected rather than edited silently, because a stale `pending` in a verification table reads as a result |
+| historical import | `pytest apps/api/tests/test_historical_import_routes.py apps/api/tests/test_historical_import.py -q` | **145 passed** |
+| submitted-history sweep | `pytest apps/api/tests/test_submitted_history_survives_every_write_path.py -q` | **12 passed** |
+| OpenAPI contract | `pytest apps/api/tests/test_about_and_openapi.py -q` + `-k transcribed` | **37 passed**, **7 passed** |
+| frontend (import) | `npx vitest run src/__tests__/historical-import.test.tsx` | **52 passed** |
+| frontend (settings) | `npx vitest run src/__tests__/settings-page.test.tsx src/__tests__/settings-api.test.tsx src/__tests__/statistics-nav.test.tsx` | **140 / 78 / 21 passed** |
+| CSS guards | `npx vitest run src/__tests__/{type-scale-and-spacing,no-vertical-rail,palette-contrast,interaction-states,source-is-greppable}.test.ts` | all pass |
+| typecheck | `npx tsc -b apps/web` | exit 0 |
+| browser (Settings) | `npx playwright test e2e/specs/tabs.spec.ts e2e/specs/structure.spec.ts` | **461 passed, exit 0** |
+| frontend, WHOLE SUITE | `npx vitest run` (from `apps/web`) | **235 files / 6,100 tests passed**, exit 0 |
+| mutation e2e, WHOLE SUITE | `npx playwright test --config playwright.mutation.config.ts` (own backend, own workspace, `workers: 1`) | **123 passed**, exit 0 |
+| trusted e2e, WHOLE SUITE | `npx playwright test --config playwright.trusted.config.ts` | **8 passed**, exit 0 — the ONLY end-to-end walk that exercises proposal ACCEPTANCE, which is why it was run for a slice that mints proposals |
+| dead whitespace + darwin a11y | `npx playwright test e2e/specs/wide-prose.spec.ts e2e/specs/a11y-axe.spec.ts` | **161 passed**, exit 0 — no dead-whitespace regression from the new panel and **no baseline movement**, which is the local signal that the Linux job should also be clean |
+| browser (HIST-005) | real Chromium against a live uvicorn + vite, default `VITE_API_BASE` | whole-batch refusal surfaced verbatim; then 2 open proposals + 2 notes written, run-scoped one carrying the run and the record-scoped one not, `furthest_step` → `add_to_experiments`, report reading `2 sent · 0 already there · 1 could not be sent · 3 candidates in this import`, **both draft paths absent** |
+
+**Data governance:** synthetic only. The browser check used the committed
+`SYNTHETIC-bundle-a.txt` fixture and two records created for the purpose; **both records were
+discarded and both import sessions deleted afterwards**, and the workspace was re-verified empty
+(`experiments: 0`, `imports: 0`) because the read-only e2e setup requires it. No real data, no
+provider, no database, no hosted environment was touched.
+
+**Truth path:** untouched. `src/isaac_records/**`, `schema/**`, `export.py` and `official.py` are
+unmodified; the batch route writes only `state["notes"]` and `state["proposals"]`, which is
+asserted rather than claimed — both target field paths are absent from the record draft and the run
+draft after a successful batch.
+
+---
+
+## SCOPE V2 — CLOSURE ACCOUNTING (2026-09-15/16 continuation)
+
+Written against the goal's own five completion conditions, so a reader can check each rather than
+take a verdict.
+
+### 1. All safe executable Scope V2 work from the master prompt
+
+Every item on the owner's mandatory list, with where it lives:
+
+| owner's item | state | where |
+|---|---|---|
+| ISAAC favicon from the existing logo | DONE | 4 links, measured `rgb(44,106,176)` matching the header tile, identical path geometry |
+| Impeccable for every significant UI redesign | DONE, **DEGRADED on every run** | see §3 below — the banner is not a formality |
+| streamlined, scientist-first, low-text | DONE | Statistics 6,993→2,715px and 598→172 text elements; Help 7→4 top-level items by disclosure |
+| secondary explanations behind disclosures | DONE | Help popover, Settings sections, capture panels |
+| Settings simplified, developer material under Advanced | **DONE this continuation** | grouped on ONE flat tablist; the collapse declined at the site on measured landmark grounds |
+| Statistics restored to sidebar AND redesigned | DONE | 4-item primary nav, pinned by `statistics-nav.test.tsx` |
+| Project Memory out of primary navigation | DONE | reachable by URL and from Settings — demoted, not deleted, which is what was asked |
+| Runs split-screen → a clear Record Map | DONE | `✓ Filled` / `◌ Missing` chip **and the value** per field, with its schema path |
+| blockers field-specific, actionable, **navigable** | DONE | `onGoToField` focuses and scrolls the control, guarded so only the surface rendering the inputs offers it |
+| contextual `Ask ISAAC` | DONE | `ask={{experimentId, runId, runLabel}}` per finding |
+| human-friendly timestamps preserving the stored format | **DONE this continuation** | the summary was a THIRD site bypassing the one renderer; fixed, and the ISO form still appears exactly once in the mono box |
+| discoverable proposal creation | DONE | proven in a browser on a record with ZERO notes |
+| Historical Import finished, incl. Add-to-Experiment | **DONE this continuation** | `HIST-005` was the last unbuilt step; dropzone, removable rows, statuses, reference fallback, stepper and review already shipped |
+| all app-side MCP / capture / proposal / provenance / ambiguity / validation / revision / a11y / responsive / error-recovery | DONE app-side | each row of the external-blocker table above reads "complete, fail-closed" with an owner for the switch |
+
+### 2. Major scientist-facing pages have received Impeccable review
+
+Yes, and **with a limitation that must travel with the claim**: NO run in this session had the two
+isolated assessors `critique.md` requires, because the owner capped the session at five subordinate
+agents and all five were spent on implementation and review. Every critique was single-context and
+bannered. What the runs do carry, and what a sub-agent would not have added, is a **negative control
+on the tool itself** (`detect.mjs` returns `[]`/exit 0 on deliberately broken `.tsx` here) and
+**attribution by difference** (each surface scanned with and without the new element).
+
+### 3a. The full read-only e2e suite — 6 failures, TWO causes, both settled
+
+Run because it was the one integrated check this continuation had not done; the subsets run
+earlier (`tabs`+`structure` 461, `wide-prose`+`a11y-axe` 161, `states` 14) could not have caught
+either. **1,189 passed / 6 failed**, and CI's browser job is `npm run test:e2e` — the same whole
+suite — so both were going to surface there regardless.
+
+**FIVE were one spec, once per viewport project**, and the count growing as the run walked the
+projects is why it looked like five problems. `pill-shape.spec.ts` required exactly one unbuilt
+step and asserted its dotted border and its visible "Not built in this build" disclosure —
+`HIST-005` shipped that step, so the assertions had become assertions of a defect. The test's own
+failure message anticipated it (*"has the fixture changed?"*); the product had. **Fixed, and the
+owner's requirement kept rather than deleted with the assertion:** a dotted circle must still be
+what the NEXT unbuilt step looks like, so the CSS rule is now measured **directly** — the `unbuilt`
+class is applied to a real node in the real page, the computed border read, the class removed —
+**with a negative control in the same measurement** proving the node is not dotted without it. That
+is strictly stronger than the old check, which could only fire while some step happened to be
+unbuilt. Verified against the CSS before writing it: `.hi-step-node` is `2px solid
+var(--border-strong)`, `.hi-step.unbuilt .hi-step-node` sets `dotted` at equal specificity to
+`.reached` but later in the file, so it wins even on a reached first step. The disclosure MECHANISM
+stays covered in jsdom (`historical-import.test.tsx` §3, `UNBUILT_WORKFLOW`), because a browser test
+renders from the live server and cannot simulate a server that declares a step unbuilt.
+
+**ONE WAS CONTENTION, AND THAT IS MEASURED RATHER THAN ASSUMED.** `a11y scan at 390px: Record
+Detail (needs attention)` — read off `test-results/.../error-context.md` rather than waiting for the
+end-of-run summary: `Test timeout of 60000ms exceeded`, from a `locator.click` that hung 15s on a
+collapsible header Playwright reports as *visible, enabled, stable* and scrolled into view. **A
+blocked main thread in the sweep's SETUP step, not an axe assertion**, on markup this branch does
+not touch, and `record-detail@width-390` is a healthy baselined surface (25 nodes). Re-run alone:
+**2 passed in 3.5s, the 390px scan itself in 2.9s** — against 1.2 minutes under five parallel
+workers. This is the fourth instance in this repository's history of the rule that a test figure
+measured under contention is not a measurement.
+
+### 3. Integrated verification on the final state
+
+Every figure measured in this continuation, with its command — see the per-slice tables above. The
+five whole-suite runs are: backend **9,463**, frontend **6,100**, mutation e2e **123**, trusted e2e
+**8**, and the full read-only e2e (all five viewport projects). CI on the branch is the arbiter for
+the Linux-only half, and the release gate refuses any commit whose CI did not conclude `success`.
+
+### 4. The ledger reflects reality
+
+The header was re-derived at the top of this continuation because it had gone stale the moment
+PR #256 merged — it still read `main = dbf9d121`, `release = v0.0.240`, `open PRs = NONE`. Six
+in-place corrections were made to rows that had stopped being true, each struck rather than
+deleted: the `HIST-005` row, the Settings-regroup residue row, the Impeccable-coverage row, the
+"re-run pending" verification cell, the batch route's own "deliberately NOT changed here" comment,
+and the `addWholeLead` rationale.
+
+### 5. What remains — every item external, human, or data-blocked
+
+The table under **EXTERNAL BLOCKERS** above is the answer, each row carrying an owner and an exact
+next action. Nothing in it is waiting on application code. The residue that is OURS is three items,
+and each is a decision rather than a task: the app-wide prose measure (the owner's own "don't cap
+prose narrow" is what makes it a decision), the Data & Privacy status-row restructure (blocked by
+committed honesty guards — the mandated shape would hide a privacy state), and the fact that no
+Impeccable run in this session could have two assessors.
+

@@ -53,22 +53,44 @@ import type {
  * Fixtures — shaped exactly as the real server answers, and UNMISTAKABLY FAKE.
  * -------------------------------------------------------------------------- */
 
+/*
+ * ALL SIX STEPS ARE BUILT, as of `HIST-005` (2026-09-15).
+ *
+ * This fixture used to mark `add_to_experiments` `built: false` with the
+ * server's "Not built in this build" disclosure, and §3 below asserted the
+ * surface rendered it. That was true of the server then and is not true now:
+ * `historical_import.UNBUILT_STEP` is `None`, so every row the server sends
+ * reports `built: true` with a `null` disclosure.
+ *
+ * A FIXTURE THAT DESCRIBES A STATE THE SERVER NO LONGER PRODUCES is how a suite
+ * comes to pass while testing nothing — which is why this one moved rather than
+ * being left beside a new one. §3's tests are KEPT, retargeted at the MECHANISM
+ * with `UNBUILT_WORKFLOW` below, because the mechanism is what has to keep
+ * working: a step the server declares unbuilt must be shown as unbuilt, and the
+ * next such step should not need this surface changed.
+ */
 const WORKFLOW: ApiImportWorkflowStep[] = [
   { id: 'new_import', label: 'New Import', built: true, disclosure: null },
   { id: 'sources', label: 'Sources', built: true, disclosure: null },
   { id: 'parse', label: 'Parse', built: true, disclosure: null },
   { id: 'reconstruct', label: 'Reconstruct', built: true, disclosure: null },
   { id: 'review', label: 'Review', built: true, disclosure: null },
-  {
-    id: 'add_to_experiments',
-    label: 'Add to Experiments',
-    built: false,
-    disclosure:
-      'Not built in this build. A field candidate you propose becomes an ingestion ' +
-      'proposal on an experiment you choose, and you review it there; nothing here ' +
-      'creates an experiment for you.',
-  },
+  { id: 'add_to_experiments', label: 'Add to Experiments', built: true, disclosure: null },
 ];
+
+/** A server that declares one step unbuilt — the shape §3's mechanism needs. */
+const UNBUILT_WORKFLOW: ApiImportWorkflowStep[] = WORKFLOW.map((step) =>
+  step.id === 'add_to_experiments'
+    ? {
+        ...step,
+        built: false,
+        disclosure:
+          'Not built in this build. A field candidate you propose becomes an ingestion ' +
+          'proposal on an experiment you choose, and you review it there; nothing here ' +
+          'creates an experiment for you.',
+      }
+    : step,
+);
 
 const DURABILITY =
   'An import session is a working area. It is kept in this workspace and is not part ' +
@@ -304,6 +326,9 @@ function stub(
     list?: ApiImportListResponse;
     detail?: ApiImportSession;
     onPropose?: () => Response;
+    /** `HIST-005` — what `POST .../add-to-experiment` answers. */
+    added?: unknown;
+    onAdd?: () => Response;
     experiments?: unknown;
   } = {},
 ) {
@@ -322,6 +347,13 @@ function stub(
 
       if (/\/api\/imports\/[^/]+\/candidates\/[^/]+\/propose$/.test(url)) {
         return routes.onPropose ? routes.onPropose() : json({ deduplicated: false });
+      }
+      /* MATCHED BEFORE THE BARE `/api/imports/{id}` GET BELOW, which its own
+         regex would otherwise not catch — but order still matters here because a
+         future looser pattern would. */
+      if (/\/api\/imports\/[^/]+\/add-to-experiment$/.test(url)) {
+        if (routes.onAdd) return routes.onAdd();
+        return json(routes.added ?? null);
       }
       if (/\/api\/imports\/[^/]+$/.test(url) && method === 'GET') {
         return json({ import: routes.detail ?? session() });
@@ -342,6 +374,23 @@ function stub(
          * screen and was not.
          */
         return json({ id: '01RECORD00000000000000001', version: 'abc.1' });
+      }
+      if (url.endsWith('/api/experiments') && method === 'POST') {
+        /*
+         * CREATE ANSWERS AN EXPERIMENT, NOT A LIST — and this branch exists
+         * because its absence produced a crash rather than a failure. Without
+         * it, `POST /api/experiments` fell through to the list branch below,
+         * `created.id` was `undefined`, and the panel threw
+         * `Cannot read properties of undefined (reading 'trim')` from its own
+         * submit-disabled expression. That is a FIXTURE gap, not a screen
+         * defect: the real route answers `201` with the experiment as the whole
+         * body (`test_historical_import_routes.py::_record` records measuring
+         * exactly that). Worth naming, though — the panel and the candidate card
+         * both do `setExperimentId(created.id)` with no guard, so a server that
+         * really answered without an `id` would take the screen down. That is
+         * pre-existing and shared, and closing it is its own change.
+         */
+        return json({ id: '01RECORD00000000000000009', title: 'A fictional 2099 CuO bundle' }, 201);
       }
       if (url.includes('/api/experiments')) {
         return json(routes.experiments ?? { experiments: [] });
@@ -672,9 +721,32 @@ describe('§2 · every one of the nine things a scientist must see is on the scr
  * §3 the unbuilt step
  * -------------------------------------------------------------------------- */
 
-describe('§3 · the one step this build does not have says so, and offers nothing', () => {
+describe('§3 · a step the SERVER declares unbuilt says so, and offers nothing', () => {
+  /*
+   * RETARGETED 2026-09-15, not deleted. These tests were about
+   * `add_to_experiments` specifically, because it was the one unbuilt step; it
+   * shipped in `HIST-005`, so they are now about the MECHANISM, driven by a
+   * server that declares SOME step unbuilt. The mutation guard below is the
+   * reason they had to survive the change: it is the only thing standing between
+   * a future unbuilt step and a disabled button that implies the act exists.
+   */
+  async function openWithAnUnbuiltStep() {
+    // BOTH the list and the detail carry the workflow, and the strip renders the
+    // one on screen — overriding only `listResponse` left the session view
+    // showing the default (all-built) list, and the first version of this helper
+    // failed looking for the `Sources` heading because it never opened a session
+    // at all.
+    stub({
+      list: listResponse({ workflow: UNBUILT_WORKFLOW }),
+      detail: session({ workflow: UNBUILT_WORKFLOW }),
+    });
+    renderScreen();
+    fireEvent.click(await screen.findByRole('button', { name: IMPORT_COPY.actionStart }));
+    await screen.findByRole('heading', { name: 'Sources' });
+  }
+
   it('renders the server’s own disclosure beside the step', async () => {
-    await openSession();
+    await openWithAnUnbuiltStep();
     expect(screen.getByText(/Not built in this build/)).toBeTruthy();
   });
 
@@ -685,7 +757,7 @@ describe('§3 · the one step this build does not have says so, and offers nothi
      * temporarily unavailable, which is the claim §15's "build nothing that
      * implies any of it exists" forbids.
      */
-    await openSession();
+    await openWithAnUnbuiltStep();
     const steps = screen.getByRole('list', { name: 'Historical import workflow' });
     expect(within(steps).queryAllByRole('button')).toEqual([]);
     expect(within(steps).queryAllByRole('link')).toEqual([]);
@@ -693,7 +765,21 @@ describe('§3 · the one step this build does not have says so, and offers nothi
     expect(within(steps).getByText('Add to Experiments')).toBeTruthy();
   });
 
-  it('never marks the unbuilt step as the one the session has reached', async () => {
+  it('this build declares NO unbuilt step, so no disclosure is rendered', async () => {
+    /*
+     * THE STATE THAT ACTUALLY SHIPS. Without this, the retargeted tests above
+     * would keep passing on a hand-made server shape while the real one went
+     * unexercised — a suite green on a situation that no longer occurs, which is
+     * exactly what the fixture comment records happening once already.
+     */
+    await openSession();
+    expect(screen.queryByText(/Not built in this build/)).toBeNull();
+    const steps = screen.getByRole('list', { name: 'Historical import workflow' });
+    expect(within(steps).getByText('Add to Experiments')).toBeTruthy();
+    expect(steps.querySelectorAll('.unbuilt')).toHaveLength(0);
+  });
+
+  it('marks only the step the session has reached, wherever that is', async () => {
     stub({ list: listResponse(), detail: session({ furthest_step: 'review' }) });
     renderScreen();
     fireEvent.click(await screen.findByRole('button', { name: IMPORT_COPY.actionStart }));
@@ -701,6 +787,24 @@ describe('§3 · the one step this build does not have says so, and offers nothi
     const current = document.querySelectorAll('[aria-current="step"]');
     expect(current).toHaveLength(1);
     expect(current[0].textContent).toContain('Review');
+  });
+
+  it('marks the LAST step when the session has reached it', async () => {
+    /*
+     * REACHABLE NOW, AND IT WAS NOT BEFORE. The old test asserted the last step
+     * could NEVER be current, which was right while the step did not exist. The
+     * server reaches it when every proposable candidate has been sent.
+     */
+    stub({
+      list: listResponse(),
+      detail: session({ furthest_step: 'add_to_experiments' }),
+    });
+    renderScreen();
+    fireEvent.click(await screen.findByRole('button', { name: IMPORT_COPY.actionStart }));
+    await screen.findByRole('heading', { name: 'Sources' });
+    const current = document.querySelectorAll('[aria-current="step"]');
+    expect(current).toHaveLength(1);
+    expect(current[0].textContent).toContain('Add to Experiments');
   });
 });
 
@@ -1035,5 +1139,357 @@ describe('§8 · the loading panel is the one every sweep waits for', () => {
     expect(panel?.textContent).toContain('Loading imports');
     resolve?.(null);
     await screen.findByRole('heading', { name: 'Imports' });
+  });
+});
+
+/* --------------------------------------------------------------------------
+ * §10 HIST-005 — Add This Import to a Record
+ *
+ * The workflow's sixth step, built 2026-09-15. Three things have to be true for
+ * this control to be honest, and each gets its own test rather than one test
+ * asserting a rendering:
+ *
+ *   1. it is ONE request, not a loop — the defect it exists to prevent is a
+ *      record holding half an import with nothing able to say which half;
+ *   2. it reports what the SERVER said, including the parts that went badly;
+ *   3. it never says "applied", because nothing is.
+ * -------------------------------------------------------------------------- */
+
+/** A second sendable candidate, RUN-scoped, so the run half is exercisable. */
+const SENDABLE_RUN: ApiImportCandidate = {
+  ...SENDABLE,
+  candidate_id: '01CANDE0000000000000000005',
+  target_field_path: 'sample.material.name',
+  proposed_value: 'FICTIONAL-CuO',
+  rule: 'Read verbatim from `sample.material.name` in a fictional source.',
+};
+
+const TWO_SENDABLE = [SENDABLE, SENDABLE_RUN, DISAGREEING, NO_WRITE_PATH, STRUCTURAL];
+
+function addedResponse(overrides: Record<string, unknown> = {}) {
+  return {
+    experiment_id: '01RECORD00000000000000001',
+    run_id: null,
+    sent: [
+      {
+        candidate_id: SENDABLE.candidate_id,
+        target_field_path: 'system.technique',
+        rule: SENDABLE.rule,
+        proposal_id: '01PROPOSAL0000000000000001',
+        note_id: '01NOTE00000000000000000001',
+        run_id: null,
+        already_sent: false,
+      },
+      {
+        candidate_id: SENDABLE_RUN.candidate_id,
+        target_field_path: 'sample.material.name',
+        rule: SENDABLE_RUN.rule,
+        proposal_id: '01PROPOSAL0000000000000002',
+        note_id: '01NOTE00000000000000000002',
+        run_id: null,
+        already_sent: false,
+      },
+    ],
+    not_sent: [
+      {
+        candidate_id: DISAGREEING.candidate_id,
+        target_field_path: 'sample.material.name',
+        kind: 'field',
+        error: 'candidate_unresolved',
+        reason: 'A SENTENCE ONLY THE SERVER KNOWS about disagreeing sources.',
+      },
+    ],
+    counts: { candidates: 5, sent: 2, already_sent: 0, not_sent: 1 },
+    experiment_version: '7',
+    ...overrides,
+  };
+}
+
+async function openWithTwoSendable(added: unknown = addedResponse()) {
+  stub({
+    list: listResponse(),
+    detail: session({
+      reconstruction: { ...session().reconstruction!, candidates: TWO_SENDABLE },
+    }),
+    experiments: {
+      experiments: [{ id: '01RECORD00000000000000001', title: 'Cu K-edge campaign, 2019' }],
+    },
+    added,
+  });
+  renderScreen();
+  fireEvent.click(await screen.findByRole('button', { name: IMPORT_COPY.actionStart }));
+  await screen.findByRole('heading', { name: 'Sources' });
+}
+
+/**
+ * Choose the destination and submit, SCOPED TO THE PANEL.
+ *
+ * A loaded session renders FOUR comboboxes — this panel's and one per candidate
+ * card that offers a form — so an unscoped `getAllByRole('combobox')[0]` picks
+ * whichever happens to come first in the DOM. The first version of these tests
+ * did exactly that, changed a candidate card's select instead, submitted a panel
+ * whose own field was still empty, and failed looking for a result block that
+ * had correctly never been rendered. Measured, not guessed: a probe printed
+ * `COMBOS 4` with the panel present and its button found.
+ */
+async function chooseRecordAndAdd() {
+  const panel = document.querySelector('.hi-addwhole') as HTMLElement;
+  expect(panel).not.toBeNull();
+  fireEvent.change(within(panel).getByRole('combobox'), {
+    target: { value: '01RECORD00000000000000001' },
+  });
+  fireEvent.click(
+    within(panel).getByRole('button', { name: IMPORT_COPY.actionAddWhole }),
+  );
+}
+
+describe('§10 · adding a whole import to one record', () => {
+  it('offers the step as ONE control when more than one candidate can be sent', async () => {
+    await openWithTwoSendable();
+    expect(
+      screen.getByRole('button', { name: IMPORT_COPY.actionAddWhole }),
+    ).toBeTruthy();
+    // ITS HEADING IS THE SERVER'S OWN LABEL for its last step, so the panel and
+    // the stepper above it cannot call one step two things.
+    const headings = screen.getAllByRole('heading', { name: 'Add to Experiments' });
+    expect(headings.length).toBeGreaterThan(0);
+  });
+
+  it('does NOT offer it when exactly one candidate can be sent', async () => {
+    /*
+     * TWO CONTROLS FOR ONE ACT is what makes a reader wonder which is the real
+     * one. With a single sendable candidate, that candidate's own form already
+     * IS the whole batch. The step stays completable — sending the one candidate
+     * finishes it, and the server's `furthest_step` says so.
+     */
+    await openSession();
+    expect(screen.queryByRole('button', { name: IMPORT_COPY.actionAddWhole })).toBeNull();
+  });
+
+  it('MUTATION-GUARDED: sends ONE request for the whole batch, not one per candidate', async () => {
+    /**
+     * MUTATION: reimplementing the submit handler as
+     * `for (const c of sendable) await api.proposeImportCandidate(...)` makes
+     * this RED — two `/propose` calls and no `/add-to-experiment` call.
+     *
+     * This is the assertion the whole operation exists for. N requests, each with
+     * its own `If-Match`, means a closed tab or a `412` partway through leaves
+     * the record holding part of an import with nothing able to say which part.
+     */
+    await openWithTwoSendable();
+    await chooseRecordAndAdd();
+    await screen.findByText(IMPORT_COPY.addWholeResultTitle);
+
+    const batch = seen.filter((r) => r.url.includes('/add-to-experiment'));
+    const single = seen.filter((r) => r.url.includes('/propose'));
+    expect(batch).toHaveLength(1);
+    expect(single).toHaveLength(0);
+    expect(batch[0].method).toBe('POST');
+    // `seen` records the RAW body the client sent, which is a JSON string.
+    expect(JSON.parse(String(batch[0].body))).toEqual({
+      experiment_id: '01RECORD00000000000000001',
+    });
+    // THE RECORD'S OWN VALIDATOR, read immediately before the write — never the
+    // session's, which does not have one.
+    expect(batch[0].headers).toMatchObject({ 'If-Match': '"abc.1"' });
+  });
+
+  it('sends the run only when one was named, and never invents one', async () => {
+    await openWithTwoSendable();
+    await chooseRecordAndAdd();
+    await screen.findByText(IMPORT_COPY.addWholeResultTitle);
+    // NO `run_id` KEY AT ALL when the field is blank — not `run_id: null`, and
+    // not the only run that happens to exist.
+    const sentBody = JSON.parse(
+      String(seen.filter((r) => r.url.includes('/add-to-experiment'))[0].body),
+    );
+    expect(sentBody).toEqual({ experiment_id: '01RECORD00000000000000001' });
+    expect('run_id' in sentBody).toBe(false);
+  });
+
+  it('reports every one of the server’s counts, including the bad news', async () => {
+    await openWithTwoSendable();
+    await chooseRecordAndAdd();
+    await screen.findByText(IMPORT_COPY.addWholeResultTitle);
+
+    /* ALL FOUR NUMBERS. A surface that showed "2 sent" and stopped would tell a
+       reader less than the server said — and the one it left out is the one
+       that needs their attention. */
+    const counts = screen.getByText(/could not be sent/);
+    expect(counts.textContent).toContain('2 sent');
+    expect(counts.textContent).toContain('0 already there');
+    expect(counts.textContent).toContain('1 could not be sent');
+    expect(counts.textContent).toContain('5 candidates in this import');
+  });
+
+  it('gives the SERVER’s reason for each candidate it could not send', async () => {
+    await openWithTwoSendable();
+    await chooseRecordAndAdd();
+    // VERBATIM, and not a paraphrase composed here: the sentence the server will
+    // actually enforce is the one a scientist has to be able to act on.
+    expect(
+      await screen.findByText(/A SENTENCE ONLY THE SERVER KNOWS about disagreeing sources/),
+    ).toBeTruthy();
+  });
+
+  it('reads `already_sent` off the server rather than inferring a second click', async () => {
+    const already = addedResponse({
+      sent: addedResponse().sent.map((row) => ({ ...row, already_sent: true })),
+      counts: { candidates: 5, sent: 0, already_sent: 2, not_sent: 1 },
+    });
+    await openWithTwoSendable(already);
+    await chooseRecordAndAdd();
+    await screen.findByText(IMPORT_COPY.addWholeResultTitle);
+
+    expect(screen.getByText(IMPORT_COPY.addWholeNothingNew)).toBeTruthy();
+    expect(screen.getAllByText('already there').length).toBe(2);
+    // AND IT DOES NOT CLAIM TO HAVE SENT ANYTHING.
+    expect(screen.getByText(/could not be sent/).textContent).toContain('0 sent');
+  });
+
+  it('never says a value was applied, written or saved to the record', async () => {
+    await openWithTwoSendable();
+    await chooseRecordAndAdd();
+    await screen.findByText(IMPORT_COPY.addWholeResultTitle);
+
+    /* "Add This Import to a Record" is a name a reader can hear as "apply it",
+       which is exactly why the lead has to say otherwise and why nothing on the
+       surface may contradict it. Scoped to this panel rather than the document:
+       the word "applied" legitimately appears elsewhere on the screen, in the
+       reconstruction line that reports `nothing was applied`. */
+    const panel = document.querySelector('.hi-addwhole') as HTMLElement;
+    expect(panel).not.toBeNull();
+    const text = panel.textContent ?? '';
+    expect(text).toContain('no value is written');
+    for (const forbidden of [/\bapplied to\b/i, /\bwritten to the record\b/i, /\bsaved\b/i]) {
+      expect(text).not.toMatch(forbidden);
+    }
+    // And it says what each candidate BECAME.
+    expect(text).toContain('open proposal');
+  });
+
+  it('states that the run is used only for the values a run owns', async () => {
+    /*
+     * THE DIFFERENCE FROM THE PER-CANDIDATE FORM, SAID OUT LOUD. There, a run
+     * given for a record-scoped target is REFUSED; here one run is given for a
+     * whole import and used where it belongs. A reader who learned the first
+     * rule would otherwise expect this form to refuse the same thing.
+     */
+    await openWithTwoSendable();
+    expect(screen.getByText(IMPORT_COPY.addWholeRunNote)).toBeTruthy();
+  });
+
+  it('links each sent candidate to its proposal on that record', async () => {
+    await openWithTwoSendable();
+    await chooseRecordAndAdd();
+    await screen.findByText(IMPORT_COPY.addWholeResultTitle);
+
+    const links = within(
+      document.querySelector('.hi-addwhole-sent') as HTMLElement,
+    ).getAllByRole('link');
+    expect(links).toHaveLength(2);
+    expect(links[0].getAttribute('href')).toContain('01PROPOSAL0000000000000001');
+    expect(links[1].getAttribute('href')).toContain('01PROPOSAL0000000000000002');
+  });
+});
+
+/* --------------------------------------------------------------------------
+ * §11 the one control that CREATES the destination
+ * -------------------------------------------------------------------------- */
+
+describe('§11 · creating the destination, from either form', () => {
+  /*
+   * ONE COMPONENT, TWO CALL SITES. The label is exempted in
+   * `product-facing-language.test.tsx` as ONE STRING, ONE OCCURRENCE — the
+   * exemption's own comment calls that "what makes this an act rather than a
+   * widening" — so `HIST-005`'s panel could not carry a second copy of it.
+   * Extracting the control satisfies the guard for the reason it exists; these
+   * tests pin the behaviour that extraction had to preserve.
+   */
+  it('MUTATION-GUARDED: the new record appears in the SAME picker that submits', async () => {
+    /**
+     * MUTATION: give `NewDestinationButton` its own `useProposalDestinations()`
+     * instead of taking the caller's `reload` — this goes RED.
+     *
+     * A second hook instance is a second list. Creating a record would refresh
+     * the one nobody renders, while the form's own `<option>` list still lacked
+     * the new id, so `onCreated` would set a select value matching no option and
+     * the picker would read blank with the submit disabled. This is the defect
+     * the extraction introduced and the prop removes.
+     */
+    let listCalls = 0;
+    const created = { id: '01RECORD00000000000000009', title: 'A fictional 2099 CuO bundle' };
+    stub({
+      list: listResponse(),
+      detail: session({
+        reconstruction: { ...session().reconstruction!, candidates: TWO_SENDABLE },
+      }),
+      experiments: { experiments: [] },
+    });
+    // Re-stub with a list that GROWS once the record exists, so "the picker was
+    // reloaded" is observable rather than asserted.
+    const base = globalThis.fetch as unknown as (...a: unknown[]) => Promise<Response>;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(typeof input === 'string' ? input : (input as Request).url ?? input);
+        const method = (init?.method ?? 'GET').toUpperCase();
+        if (url.endsWith('/api/experiments') && method === 'POST') {
+          return new Response(JSON.stringify(created), {
+            status: 201,
+            headers: { 'Content-Type': 'application/json' },
+          });
+        }
+        if (url.endsWith('/api/experiments') && method === 'GET') {
+          listCalls += 1;
+          return new Response(
+            JSON.stringify({ experiments: listCalls > 1 ? [created] : [] }),
+            { status: 200, headers: { 'Content-Type': 'application/json' } },
+          );
+        }
+        return base(input, init);
+      }),
+    );
+
+    renderScreen();
+    fireEvent.click(await screen.findByRole('button', { name: IMPORT_COPY.actionStart }));
+    await screen.findByRole('heading', { name: 'Sources' });
+
+    const panel = document.querySelector('.hi-addwhole') as HTMLElement;
+    expect(panel).not.toBeNull();
+    // An empty workspace offers no picker yet — the honest empty state.
+    expect(within(panel).queryByRole('combobox')).toBeNull();
+
+    fireEvent.click(
+      within(panel).getByRole('button', { name: 'New record from this import' }),
+    );
+
+    // THE PICKER THIS FORM SUBMITS now holds the new record AND has it selected.
+    const select = (await within(panel).findByRole('combobox')) as HTMLSelectElement;
+    expect([...select.options].map((o) => o.textContent)).toContain(created.title);
+    expect(select.value).toBe(created.id);
+    expect(
+      within(panel).getByRole('button', { name: IMPORT_COPY.actionAddWhole }),
+    ).not.toBeDisabled();
+  });
+
+  it('titles the new record from the import and carries no field over', async () => {
+    await openWithTwoSendable();
+    const panel = document.querySelector('.hi-addwhole') as HTMLElement;
+    fireEvent.click(
+      within(panel).getByRole('button', { name: 'New record from this import' }),
+    );
+    await waitFor(() => {
+      expect(seen.some((r) => r.url.endsWith('/api/experiments') && r.method === 'POST')).toBe(
+        true,
+      );
+    });
+    const body = JSON.parse(
+      String(seen.find((r) => r.url.endsWith('/api/experiments') && r.method === 'POST')!.body),
+    );
+    // A TITLE AND NOTHING ELSE. No candidate has been reviewed yet, so carrying a
+    // value over would write an unreviewed one — which is the whole thing this
+    // surface refuses to do.
+    expect(body).toEqual({ title: 'A fictional 2099 CuO bundle' });
   });
 });

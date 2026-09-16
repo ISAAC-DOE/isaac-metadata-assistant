@@ -20,6 +20,7 @@ from __future__ import annotations
 import json
 import re
 from pathlib import Path
+from unittest import mock
 
 import pytest
 
@@ -944,7 +945,18 @@ def test_a_reparse_invalidates_the_reconstruction(workspace):
     assert session.unmapped_keys == []
 
 
-def test_the_furthest_step_is_derived_and_never_names_the_unbuilt_step(workspace):
+def test_the_furthest_step_is_derived_and_reaches_the_last_step_only_when_done(workspace):
+    """REWRITTEN 2026-09-15, and the previous assertion is quoted rather than dropped.
+
+    It ended with ``assert hi.UNBUILT_STEP in steps`` and
+    ``assert session.furthest_step() != hi.UNBUILT_STEP`` — "no session can ever
+    reach the step this build does not have". ``HIST-005`` shipped, so
+    ``UNBUILT_STEP`` is ``None`` and BOTH of those assertions would now be
+    vacuous: ``None`` is in no step set, and no step string equals ``None``. A
+    test that passes because its subject stopped existing is worse than no test,
+    which is why this asserts the NEW property instead: the last step is reached
+    when every proposable candidate has been sent, and not before.
+    """
     session = hi.new_session(label=None, now_utc=AT)
     assert session.furthest_step() == "new_import"
     _fixture_source(session, BUNDLE_A)
@@ -953,22 +965,58 @@ def test_the_furthest_step_is_derived_and_never_names_the_unbuilt_step(workspace
     assert session.furthest_step() == "parse"
     hi.reconstruct_session(session, now_utc=AT)
     assert session.furthest_step() == "reconstruct"
+
+    proposable = [c for c in hi.candidates_of(session) if c.proposable]
+    assert len(proposable) > 1, (
+        "this fixture must offer at least two proposable candidates, or the "
+        "partial case below cannot be distinguished from the complete one"
+    )
+
+    # ONE sent is still `review`. This is the assertion that fails if the
+    # criterion is ever loosened to "any candidate was sent".
     hi.record_proposed(
         session,
-        candidate_id="c",
+        candidate_id=proposable[0].candidate_id,
         experiment_id="e",
         proposal_id="p",
         note_id="n",
         proposed_utc=AT,
     )
     assert session.furthest_step() == "review"
-    # No session can ever reach the step this build does not have.
-    steps = {step for step, _ in hi.WORKFLOW_STEPS}
-    assert hi.UNBUILT_STEP in steps
-    assert session.furthest_step() != hi.UNBUILT_STEP
+
+    # EVERY proposable candidate sent reaches the last step.
+    for candidate in proposable[1:]:
+        hi.record_proposed(
+            session,
+            candidate_id=candidate.candidate_id,
+            experiment_id="e",
+            proposal_id="p",
+            note_id="n",
+            proposed_utc=AT,
+        )
+    assert session.furthest_step() == "add_to_experiments"
+    assert "add_to_experiments" in {step for step, _ in hi.WORKFLOW_STEPS}
+
+    # AND IT DROPS BACK when new work arrives. Re-parsing invalidates the
+    # reconstruction, so re-running it mints fresh candidate ids that nothing has
+    # been sent for — a finished-looking stepper over new work is exactly what
+    # deriving this on every call prevents.
+    hi.parse_session(session, now_utc=AT)
+    hi.reconstruct_session(session, now_utc=AT)
+    assert session.furthest_step() == "review"
 
 
-def test_the_workflow_names_the_unbuilt_step_as_unbuilt_with_its_reason(workspace):
+def test_the_workflow_reports_every_step_built_and_keeps_the_unbuilt_mechanism(workspace):
+    """REPLACES ``test_the_workflow_names_the_unbuilt_step_as_unbuilt_with_its_reason``.
+
+    That test required ``workflow["add_to_experiments"]["built"] is False`` and
+    its disclosure to be present. ``HIST-005`` shipped, so the assertion it made
+    is now the assertion of a defect. What is kept is the part that was never
+    about which step: the MECHANISM — the surface renders `built` out of the same
+    list the server declares the steps in, so a future unbuilt step cannot be
+    shown as available by omission. That is asserted below by naming one and
+    checking the view follows, rather than by leaving a step unbuilt forever.
+    """
     view = hi.session_view(_bundle())
     workflow = {row["id"]: row for row in view["workflow"]}
     assert [row["id"] for row in view["workflow"]] == [
@@ -979,11 +1027,25 @@ def test_the_workflow_names_the_unbuilt_step_as_unbuilt_with_its_reason(workspac
         "review",
         "add_to_experiments",
     ]
-    assert workflow[hi.UNBUILT_STEP]["built"] is False
-    assert workflow[hi.UNBUILT_STEP]["disclosure"] == hi.UNBUILT_STEP_DISCLOSURE
-    for step in ("new_import", "sources", "parse", "reconstruct", "review"):
-        assert workflow[step]["built"] is True
-        assert workflow[step]["disclosure"] is None
+    assert hi.UNBUILT_STEP is None, (
+        "this build has no unbuilt import step; if one is reintroduced, name it "
+        "in UNBUILT_STEP and this test's first branch covers it"
+    )
+    for step, row in workflow.items():
+        assert row["built"] is True, step
+        assert row["disclosure"] is None, step
+
+    # THE MECHANISM, EXERCISED RATHER THAN ASSUMED. Naming a step unbuilt must
+    # make the view say so, for that step and no other.
+    with mock.patch.object(hi, "UNBUILT_STEP", "reconstruct"):
+        patched = {row["id"]: row for row in hi.session_view(_bundle())["workflow"]}
+    assert patched["reconstruct"]["built"] is False
+    assert patched["reconstruct"]["disclosure"] == hi.UNBUILT_STEP_DISCLOSURE
+    for step, row in patched.items():
+        if step == "reconstruct":
+            continue
+        assert row["built"] is True, step
+        assert row["disclosure"] is None, step
 
 
 def test_the_view_states_that_a_session_is_not_durable(workspace):

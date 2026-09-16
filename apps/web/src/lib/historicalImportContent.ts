@@ -235,6 +235,8 @@ export const IMPORT_COPY = {
   actionParse: 'Read the Sources',
   actionReconstruct: 'Reconstruct Candidates',
   actionPropose: 'Send to Review',
+  /** `HIST-005` — the whole import at once, onto one record. */
+  actionAddWhole: 'Add This Import to a Record',
   actionRemoveSource: 'Remove',
   actionDiscard: 'Discard This Import',
   actionOpen: 'Open',
@@ -258,6 +260,69 @@ export const IMPORT_COPY = {
   deduplicatedNote:
     'That record already held this proposal, so nothing new was created. It is still ' +
     'open and awaiting review.',
+
+  /**
+   * `HIST-005`'s lead. It has TWO jobs and both are load-bearing.
+   *
+   * It says what the step does — every candidate that can be sent, in one go —
+   * and it says what the step does NOT do, because "Add This Import to a Record"
+   * is a name a reader can hear as "apply it". Nothing is applied: each candidate
+   * becomes an OPEN proposal you review on that record, one decision at a time.
+   */
+  /*
+   * TIGHTENED 2026-09-15 — 172 characters to 157, saying the same two things.
+   * Kept because the project owner asked for a streamlined, low-text UI; NOT
+   * kept for the reason the first version of this comment gave.
+   *
+   * *** THE STATED REASON WAS WRONG AND IS CORRECTED RATHER THAN DELETED,
+   * because it is a measurement error a future reader will otherwise repeat. ***
+   * The edit was made to clear the one `line-length` finding Impeccable's
+   * in-browser detector attributes to this panel (54 findings with the panel, 52
+   * without), and the comment claimed the first wording was "86 characters per
+   * line" and the new one "78". **The detector does not measure that.** All
+   * TWENTY `line-length` findings on this screen report the identical number,
+   * 86 — twenty paragraphs of different lengths cannot all be 86 characters per
+   * line. It is measuring the COLUMN (≈557px ÷ average glyph width), so it says
+   * "this measure is 86 characters wide" and every element in the column
+   * inherits the same verdict. Shortening the text moved it not at all: the
+   * finding is still present and still reads 86.
+   *
+   * SO THE FINDING IS DECLINED, WITH ITS REASON. The only thing that would clear
+   * it is a narrower column, and the owner's recorded direction is "don't cap
+   * prose narrow". It is the same measure residue the execution ledger already
+   * carries against the global `68ch` rule, shared identically by the other
+   * nineteen prose elements here, and it is a screen-wide type decision rather
+   * than this panel's to take.
+   *
+   * BOTH CLAIMS SURVIVE THE CUT, which is what limited how far it could go: the
+   * "nothing is applied" half is the reason this copy exists at all — "Add This
+   * Import to a Record" is a name a reader can hear as "apply it" — and
+   * `historical-import.test.tsx` asserts "no value is written" appears in this
+   * panel, so neither clause could be the thing that went.
+   */
+  addWholeLead:
+    'Send every candidate that can be sent to one record in one step. Each becomes ' +
+    'an open proposal you review there — nothing is applied and no value is written.',
+
+  /**
+   * What the run field is for HERE, and it differs from the per-candidate one
+   * on purpose. One run is given for the whole import and used only for the
+   * values a run owns; the values the record owns ignore it.
+   */
+  addWholeRunNote:
+    'Used only for the values a run owns. The values the record owns ignore it. If ' +
+    'this import has a value a run owns and no run is named, nothing is sent at all.',
+
+  /** The heading over the report of what the batch did. */
+  addWholeResultTitle: 'What was sent',
+
+  /**
+   * What a batch that sent nothing NEW says. Reached when every candidate was
+   * already on that record — a second click, or a batch after sending by hand.
+   */
+  addWholeNothingNew:
+    'That record already held every one of these proposals, so nothing new was ' +
+    'created. They are still open and awaiting review.',
 } as const;
 
 export type ImportCopyKey = keyof typeof IMPORT_COPY;

@@ -419,19 +419,38 @@ describe('the Settings destination reads "Settings"', () => {
     expect(await screen.findByText('About This Build')).toBeInTheDocument();
     /* R0 appended Help & Tutorial, and Connect Your Agent was later inserted
        before it. The FIVE tabs this guard was written for are unchanged in
-       label and in order, which is the whole point of it: this test belongs to
-       the `Settings` rename slice and exists to catch that rename
-       reaching the tab strip. Tabs added afterwards are listed here so the
-       assertion stays an equality — a weaker `toContain` would stop catching a
-       rename of the five, which is the one thing it is here to catch. */
-    expect(screen.getAllByRole('tab').map((t) => t.textContent)).toEqual([
+       LABEL, which is the whole point of it: this test belongs to the `Settings`
+       rename slice and exists to catch that rename reaching the tab strip. Tabs
+       added afterwards are listed here so the assertion stays an equality — a
+       weaker `toContain` would stop catching a rename of the five, which is the
+       one thing it is here to catch.
+
+       THE ORDER CHANGED 2026-09-15 and the LABELS DID NOT, which is exactly the
+       distinction this guard has to keep straight. The seven are now two groups —
+       the four scientist-facing tabs, then the three developer ones behind an
+       "Advanced" marker — so `Help & Tutorial` moved from seventh to fourth and
+       `Connect Your Agent` is now last. Not one label was touched, and the
+       accessible names were deliberately left alone too (the group reaches a
+       screen reader as an `aria-describedby` DESCRIPTION, never as part of a
+       name), so this stays an equality rather than becoming a set comparison.
+
+       ASSERTED ON THE ACCESSIBLE TEXT, NOT `textContent`: the first tab of the
+       Advanced group also renders a visible `aria-hidden` group marker, so raw
+       text there reads "AdvancedAPI Access" — a string that is not any tab's
+       name and that no reader ever hears. */
+    const accessibleText = (el: Element) => {
+      const clone = el.cloneNode(true) as HTMLElement;
+      clone.querySelectorAll('[aria-hidden="true"]').forEach((n) => n.remove());
+      return clone.textContent;
+    };
+    expect(screen.getAllByRole('tab').map(accessibleText)).toEqual([
       'Overview',
       'Data & Privacy',
       'About',
+      'Help & Tutorial',
       'API Access',
       'Endpoint Explorer',
       'Connect Your Agent',
-      'Help & Tutorial',
     ]);
   });
 });

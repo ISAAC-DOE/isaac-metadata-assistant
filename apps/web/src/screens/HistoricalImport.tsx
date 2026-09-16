@@ -20,6 +20,7 @@ import {
   SOURCE_KIND_LABELS,
 } from '../lib/historicalImportContent';
 import type {
+  ApiImportAddedToExperiment,
   ApiImportCandidate,
   ApiImportListResponse,
   ApiImportSession,
@@ -498,6 +499,33 @@ function ImportSessionView({
     [session],
   );
 
+  /*
+   * HIST-005's REPORT LIVES HERE, NOT IN THE PANEL THAT RENDERS IT, and that is
+   * a fix rather than a preference — measured in a real browser before it was
+   * moved.
+   *
+   * `act` calls `session.reload()`, which puts this component into `loading` and
+   * returns the `LoadingPanel` below. That early return UNMOUNTS this component's
+   * whole subtree, so state held inside `AddWholeImportPanel` is destroyed on the
+   * very reload the successful send triggers: the batch wrote two proposals, the
+   * server answered with its counts, and the panel came back with an empty
+   * report. Measured — 2 proposals and 2 notes on the record, `furthest_step`
+   * advanced, and NOTHING on screen to say so.
+   *
+   * IT CANNOT BE RE-DERIVED FROM THE RELOADED SESSION, which is why the per-
+   * candidate card does not have this problem and this panel cannot copy its
+   * approach: a card's confirmation is `session.proposed[candidate_id]`, a fact
+   * the session carries, whereas the batch's report includes the server's counts
+   * and its REASON per candidate it would not send — statements about one request
+   * that the session never stores. Reconstructing them here would be composing a
+   * report rather than relaying one.
+   *
+   * This component survives its own `loading` branch; only its children are
+   * unmounted by it. That is the whole reason the state moved up exactly one
+   * level and no further.
+   */
+  const [addedResult, setAddedResult] = useState<ApiImportAddedToExperiment | null>(null);
+
   if (session.status === 'loading') {
     // Same reason as the list's, above.
     return (
@@ -565,7 +593,14 @@ function ImportSessionView({
 
       <ParseSection data={data} busy={busy} onAct={act} importId={importId} />
 
-      <CandidatesSection data={data} busy={busy} onAct={act} importId={importId} />
+      <CandidatesSection
+        data={data}
+        busy={busy}
+        onAct={act}
+        importId={importId}
+        addedResult={addedResult}
+        onAdded={setAddedResult}
+      />
 
       {/*
         THE SAME RULE AS `New Import`: the section is titled by its subject and the
@@ -1070,11 +1105,16 @@ function CandidatesSection({
   busy,
   onAct,
   importId,
+  addedResult,
+  onAdded,
 }: {
   data: ApiImportSession;
   busy: string | null;
   onAct: ActFn;
   importId: string;
+  /** HIST-005's report, owned above the reload boundary. See `ImportSessionView`. */
+  addedResult: ApiImportAddedToExperiment | null;
+  onAdded: (result: ApiImportAddedToExperiment) => void;
 }) {
   const reconstruction = data.reconstruction;
   const candidates = reconstruction?.candidates ?? [];
@@ -1147,6 +1187,26 @@ function CandidatesSection({
             Reconstructed by {reconstruction.provider_id} ·{' '}
             {reconstruction.applied ? 'applied' : 'nothing was applied'}
           </p>
+
+          {/* HIST-005 — the workflow's sixth step, as ONE control.
+
+              SHOWN ONLY WHEN MORE THAN ONE CANDIDATE CAN BE SENT. With exactly
+              one, this panel and that candidate's own form would do the same
+              thing by different routes, and two controls for one act is what
+              makes a reader wonder which is the real one. The step is still
+              completable in that case — sending the one candidate finishes it,
+              and `furthest_step` says so. */}
+          {sendable.length > 1 && (
+            <AddWholeImportPanel
+              session={data}
+              sendable={sendable}
+              busy={busy}
+              onAct={onAct}
+              importId={importId}
+              result={addedResult}
+              onResult={onAdded}
+            />
+          )}
 
           {sendable.length > 0 && (
             <section className="hi-group">
@@ -1290,6 +1350,273 @@ function useProposalDestinations() {
   }, [reload]);
 
   return { rows, failed, reload };
+}
+
+/**
+ * `HIST-005` — add every proposable candidate of one import to one record.
+ *
+ * ONE REQUEST, AND THE REASON IS NOT CONVENIENCE. A client loop over the
+ * per-candidate operation would be N writes, each with its own `If-Match`, each
+ * able to fail alone; a closed tab or a `412` partway through would leave the
+ * record holding part of an import with nothing able to say which part. The
+ * server writes every note and every proposal in one record lock and one save.
+ *
+ * IT REPORTS WHAT THE SERVER SAID, NEVER WHAT WAS ASKED FOR. The result block
+ * below renders `counts`, `sent[].already_sent` and the server's own `reason`
+ * per unsent candidate — not "sent N candidates" computed from the list that was
+ * submitted. `CLAUDE.md` §11 records four surfaces that published a number
+ * nothing had derived, and one of them was a count of proposals.
+ */
+/**
+ * The one control on this screen that CREATES the destination.
+ *
+ * ONE COMPONENT, TWO CALL SITES, AND THAT IS NOT TIDINESS. `HIST-005`'s panel
+ * needs it for the same reason a candidate card does — a workspace with no
+ * records has nowhere to send anything — and writing it twice put a second copy
+ * of the label "New record from this import" in this file. That immediately
+ * tripped `product-facing-language.test.tsx`'s P1 guard, whose exemption for this
+ * screen is deliberately ONE STRING, ONE OCCURRENCE, "which is what makes this
+ * an act rather than a widening".
+ *
+ * Widening the exemption to two would have satisfied the test and defeated its
+ * purpose. Extracting the control satisfies it for the REASON it exists: there
+ * is one creation affordance on this screen, expressed once, and a reader who
+ * meets it in either place meets the same button.
+ *
+ * IT CREATES A TITLE AND NOTHING ELSE. No field is carried over from the import,
+ * because no candidate has been reviewed yet — and it calls the same
+ * `POST /api/experiments` My Experiments calls, so no second creation path
+ * exists.
+ */
+function NewDestinationButton({
+  session,
+  busy,
+  onAct,
+  actKey,
+  reloadDestinations,
+  onCreated,
+}: {
+  session: ApiImportSession;
+  busy: string | null;
+  onAct: ActFn;
+  /** Distinct per call site, so one site's spinner is never the other's. */
+  actKey: string;
+  /**
+   * THE CALLER'S `reload`, NOT THIS COMPONENT'S OWN.
+   *
+   * The first version of this component called `useProposalDestinations()`
+   * itself, which is a DIFFERENT instance from the one whose rows the caller's
+   * `<select>` renders. Creating a record would then have refreshed a list
+   * nobody displays, while the caller's `<option>` list still lacked the new id
+   * — so `onCreated` would set a value matching no option and the picker would
+   * read blank. Before the extraction the button and the select shared one hook
+   * because they shared one component; passing the reload down is what preserves
+   * that, and it is why this prop exists rather than being inferred.
+   */
+  reloadDestinations: () => Promise<void>;
+  onCreated: (experimentId: string) => void;
+}) {
+  return (
+    <button
+      type="button"
+      className="btn btn-ghost hi-new-destination"
+      disabled={busy !== null}
+      onClick={() => {
+        void onAct(actKey, async () => {
+          const created = await api.createExperiment({
+            title: session.label || 'Imported experiment',
+          });
+          await reloadDestinations();
+          onCreated(created.id);
+        });
+      }}
+    >
+      {busy === actKey ? 'Creating…' : 'New record from this import'}
+    </button>
+  );
+}
+
+function AddWholeImportPanel({
+  session,
+  sendable,
+  busy,
+  onAct,
+  importId,
+  result,
+  onResult,
+}: {
+  session: ApiImportSession;
+  sendable: ApiImportCandidate[];
+  busy: string | null;
+  onAct: ActFn;
+  importId: string;
+  /** OWNED ABOVE THE RELOAD BOUNDARY — see `ImportSessionView` for why. */
+  result: ApiImportAddedToExperiment | null;
+  onResult: (result: ApiImportAddedToExperiment) => void;
+}) {
+  const [experimentId, setExperimentId] = useState('');
+  const [runId, setRunId] = useState('');
+  const destinations = useProposalDestinations();
+  const key = `add-whole:${importId}`;
+
+  /* THE HEADING IS THE SERVER'S OWN LABEL FOR ITS LAST STEP, not a literal.
+     `WORKFLOW_STEPS` is ordered and this panel IS that step, so taking the last
+     row's label means the panel and the stepper above it cannot come to call the
+     same step two different things. Falls back only if the list is empty, which
+     would itself be a server that answered nothing. */
+  const stepLabel =
+    session.workflow[session.workflow.length - 1]?.label ?? IMPORT_COPY.actionAddWhole;
+
+  return (
+    <section className="hi-group hi-addwhole">
+      <h4 className="hi-group-title">{stepLabel}</h4>
+      <p className="hi-body">{IMPORT_COPY.addWholeLead}</p>
+      <p className="hi-counts">
+        {sendable.length} candidate{sendable.length === 1 ? '' : 's'} can be sent
+      </p>
+      <form
+        className="hi-send"
+        onSubmit={(event) => {
+          event.preventDefault();
+          void onAct(key, async () => {
+            const detail = await api.getExperiment(experimentId);
+            const added = await api.addImportToExperiment(importId, {
+              experimentId,
+              // THE RECORD'S OWN VERSION, read immediately before the write. An
+              // import session serves none, and sending a blank would be a 428
+              // reported to the reader as a server disagreement.
+              experimentVersion: detail.version,
+              ...(runId.trim() ? { runId: runId.trim() } : {}),
+            });
+            onResult(added);
+            setRunId('');
+          });
+        }}
+      >
+        <label className="hi-field">
+          <span className="hi-field-label">Which record?</span>
+          {destinations.failed ? (
+            /* A FAILED READ IS NOT A BLOCKED WRITE — the per-candidate form's
+               reasoning, unchanged: the id field stays, with the reason it is
+               being asked for. */
+            <>
+              <input
+                className="hi-input"
+                type="text"
+                required
+                value={experimentId}
+                onChange={(event) => setExperimentId(event.target.value)}
+                placeholder="the record's id"
+              />
+              <span className="hi-note">
+                The list of records could not be read, so this asks for the id instead.
+              </span>
+            </>
+          ) : destinations.rows === null ? (
+            <span className="hi-note">Reading your records…</span>
+          ) : destinations.rows.length === 0 ? (
+            <span className="hi-note">
+              This workspace holds no records yet. Create one below and it becomes the
+              destination.
+            </span>
+          ) : (
+            <select
+              className="hi-input"
+              required
+              value={experimentId}
+              onChange={(event) => setExperimentId(event.target.value)}
+            >
+              <option value="">Choose a record…</option>
+              {destinations.rows.map((row) => (
+                <option key={row.id} value={row.id}>
+                  {row.title}
+                </option>
+              ))}
+            </select>
+          )}
+        </label>
+        <NewDestinationButton
+          session={session}
+          busy={busy}
+          onAct={onAct}
+          actKey={`${key}:create`}
+          reloadDestinations={destinations.reload}
+          onCreated={setExperimentId}
+        />
+        <label className="hi-field">
+          <span className="hi-field-label">Which run? (for the values a run owns)</span>
+          <input
+            className="hi-input"
+            type="text"
+            value={runId}
+            onChange={(event) => setRunId(event.target.value)}
+            placeholder="leave blank if no value here belongs to a run"
+          />
+          <span className="hi-note">{IMPORT_COPY.addWholeRunNote}</span>
+        </label>
+        <button
+          type="submit"
+          className="btn btn-secondary"
+          disabled={busy !== null || !experimentId.trim()}
+        >
+          {busy === key ? 'Sending…' : IMPORT_COPY.actionAddWhole}
+        </button>
+      </form>
+
+      {result !== null && (
+        <div className="hi-addwhole-result">
+          <h5 className="hi-addwhole-result-title">{IMPORT_COPY.addWholeResultTitle}</h5>
+          {/* EVERY NUMBER FROM `counts`, AND ALL OF THEM. Showing only the ones
+              that went well would report less than the server said. */}
+          <p className="hi-counts">
+            {result.counts.sent} sent · {result.counts.already_sent} already there ·{' '}
+            {result.counts.not_sent} could not be sent · {result.counts.candidates}{' '}
+            candidate{result.counts.candidates === 1 ? '' : 's'} in this import
+          </p>
+          {result.counts.sent === 0 && result.counts.already_sent > 0 && (
+            <p className="hi-sent" role="note">
+              {IMPORT_COPY.addWholeNothingNew}
+            </p>
+          )}
+          {result.sent.length > 0 && (
+            <ul className="hi-addwhole-sent">
+              {result.sent.map((row) => (
+                <li key={row.candidate_id}>
+                  <span className="hi-candidate-target">
+                    {row.target_field_path ?? row.candidate_id}
+                  </span>
+                  {/* THE SERVER'S OWN `already_sent`, never inferred from
+                      whether this reader clicked twice. */}
+                  <span className="hi-sub">
+                    {row.already_sent ? 'already there' : 'sent'}
+                    {row.run_id !== null ? ' · on the run you named' : ''}
+                  </span>
+                  <Link to={ROUTES.recordProposal(result.experiment_id, row.proposal_id)}>
+                    Open it on that record
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          )}
+          {result.not_sent.length > 0 && (
+            <ul className="hi-addwhole-unsent">
+              {result.not_sent.map((row) => (
+                <li key={row.candidate_id}>
+                  <span className="hi-candidate-target">
+                    {row.target_field_path ?? `A candidate ${row.kind}`}
+                  </span>
+                  {/* WHY NOT, IN THE SERVER'S WORDS — the same sentence the
+                      candidate's own card shows, so a reader who scrolls down
+                      does not meet a second, differently-worded explanation. */}
+                  <span className="hi-blocked-reason">{row.reason}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+    </section>
+  );
 }
 
 function CandidateCard({
@@ -1450,24 +1777,14 @@ function CandidateCard({
             new record is recognisable; NOTHING else is carried over, because
             nothing in the import has been reviewed yet.
           */}
-          <button
-            type="button"
-            className="btn btn-ghost hi-new-destination"
-            disabled={busy !== null}
-            onClick={() => {
-              void onAct(`create:${candidate.candidate_id}`, async () => {
-                const created = await api.createExperiment({
-                  title: session.label || 'Imported experiment',
-                });
-                await destinations.reload();
-                setExperimentId(created.id);
-              });
-            }}
-          >
-            {busy === `create:${candidate.candidate_id}`
-              ? 'Creating…'
-              : 'New record from this import'}
-          </button>
+          <NewDestinationButton
+            session={session}
+            busy={busy}
+            onAct={onAct}
+            actKey={`create:${candidate.candidate_id}`}
+            reloadDestinations={destinations.reload}
+            onCreated={setExperimentId}
+          />
           <label className="hi-field">
             <span className="hi-field-label">
               Which run? (required for a value a run owns)

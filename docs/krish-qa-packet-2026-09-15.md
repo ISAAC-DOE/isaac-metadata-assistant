@@ -81,6 +81,13 @@ These are the things you asked for. All are verified functionally; what a human 
 | proposal creation | a record → Experiment Data | `New Proposal`, reachable on a record with no notes |
 | Statistics back in the sidebar | left nav | four destinations: My Experiments, Historical Import, Statistics, Settings |
 | Governance moved | Settings → Data & Privacy | `Governance & Safety` reachable from there; the Validator still one click from where it is offered |
+| **Settings under Advanced** | Settings | seven tabs in two groups — `Overview · Data & Privacy · About · Help & Tutorial`, then a faint divider, the word `ADVANCED`, then `API Access · Endpoint Explorer · Connect Your Agent`. Two things worth your taste specifically: does `ADVANCED` read as a **group marker** rather than as part of "API Access"; and at a narrow width the row wraps so the marker can start its own line — tell me if that reads as clutter |
+| **Add a whole import to a record** | Historical Import → open a session that has **two or more** sendable candidates | one `Add This Import to a Record` control above the candidate list, a record picker, and a run box. Three things to try: send **without** naming a run (it should refuse the *whole* thing and say why, not send half); then name the run and send (it should report `N sent · N already there · N could not be sent · N candidates`, with the reason for each one it would not send); then press it **again** (everything should read `already there`, and nothing new created) |
+
+**Why the import control only appears with two or more candidates:** with exactly one, that
+candidate's own `Send to Review` form already *is* the whole batch, and two controls for one act is
+the thing that makes a reader wonder which is the real one. If you would rather see it always, say
+so — it is one line.
 
 ---
 
@@ -97,3 +104,17 @@ Stated so this list does not look longer than it is:
   enabling real byte ingestion is a governance decision, not missing code.
 - **A `.mac` or spreadsheet parser** cannot be written until a representative BL15-2 file exists.
   Designing one against zero examples is forbidden, and this repository holds no such file.
+- **Nothing on this list is blocking the Add-to-Record step.** It is built and works against the
+  synthetic sources today; a real `.mac` file would give it more to find, not make it work.
+
+---
+
+## One thing I could not check, and it is not in the table above
+
+**Two prose findings on the import panel are declined rather than fixed, and one of them is your
+call.** Impeccable's in-browser detector flags the panel's lead as sitting in an 86-character-wide
+column. The only thing that clears it is a narrower column — and your recorded direction is *don't
+cap prose narrow*, so I left it and shortened the sentence instead. It is the same measure question
+as nineteen other prose blocks on that screen, so it is a **screen-wide type decision**, not this
+panel's. If you want prose capped to a reading measure app-wide, that is a single change with an
+accessibility round-trip, and it needs you to say so.
