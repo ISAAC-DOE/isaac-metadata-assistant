@@ -59,7 +59,7 @@ basis are two mappings with two different outcomes. Emitting a `potential_setpoi
 be able to say so rather than reporting it as a gap to be filled.
 
 The same asymmetry applies to pH: `context.electrochemistry.pH` is a number and
-`pH_basis` is `['measured','nominal','buffered_assumed']`. The notes state *"pH 13"* for the TiO2
+`pH_basis` is `['measured','nominal','buffered_assumed']`. The notes state a pH for the TiO2
 samples — a **nominal** figure quoted beside a NaOH concentration, not a measurement — so the
 basis is evidenced as `nominal` for those and **absent** everywhere else.
 
@@ -70,7 +70,7 @@ word and is auditable afterwards.
 
 | question | the schema's options | what the corpus says |
 |---|---|---|
-| `acid` / `base` → electrolyte | `context.electrochemistry.electrolyte` requires **BOTH** `name` (string) and `concentration_M` (number) | The filename says only `acid`/`base`. The notes say `0.5 M H2SO4` for Sample 1 and `0.1 M KOH` — but that KOH sentence is the **contradicted broad claim** (*"In ALL experiments"*, sitting above `Sample 1 JK3 in acid`). So the name is inferable per sample and the concentration is inferable **only from the disputed sentence**. `acid`/`base` alone satisfies neither required field. |
+| `acid` / `base` → electrolyte | `context.electrochemistry.electrolyte` requires **BOTH** `name` (string) and `concentration_M` (number) | The filename says only `acid`/`base`. The notes name an acid with its concentration for Sample 1, and an alkaline electrolyte with its concentration — but that second sentence is the **contradicted broad claim** (*"In ALL experiments…"*, sitting above `Sample 1 JK3 in acid`). So the name is inferable per sample and the concentration is inferable **only from the disputed sentence**. *(Values withheld: this document reproduces filenames, which the owner disclosed, and not measured or preparation values.)* `acid`/`base` alone satisfies neither required field. |
 | environment | `['operando','in_situ','ex_situ','in_silico']` | XAS under applied potential in an electrochemical cell. `operando` and `in_situ` are both defensible; the `AsIs`/`dry`/`NoElectrolyte` acquisitions are plainly a different one. |
 | reaction | 15 members incl. `OER`, `water_splitting`, `surface_oxidation` | The notes say *"water oxidation"* and *"oxidation state of Iridium catalyst"*. Three members fit; the corpus does not choose. |
 | cell type | 10 members incl. `three_electrode`, `flow_cell` | The notes describe a three-electrode cell for the JK samples and a flow cell (~10 ml/min) for TiO2 — so this is **per sample group**, not per beamtime. |
@@ -85,7 +85,7 @@ word and is auditable afterwards.
   schema field.** The schema names their home itself: `system.configuration` is described in the
   file as *"THE designated open extension namespace: instrument/station/beamline-specific
   configuration that does not generalize across facilities (slits, pass energies, GC columns,
-  channel IDs, logbook fields…)"*. A 1.2 mm vortex slit and a filter index are precisely that.
+  channel IDs, logbook fields…)"*. A spectrometer slit width and a filter index are precisely that.
   **Two cautions, and they pull in opposite directions, so state both:** the namespace is open by
   the schema's own words, *and* `CLAUDE.md` §15 records the six `system.configuration.*` fields as
   `unclassified, verified` with Angel's classification **outstanding** and no write route

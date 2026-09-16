@@ -2226,7 +2226,7 @@ def test_the_beamtime_dates_and_purpose_are_read_verbatim_and_not_parsed():
 
 
 def test_preparation_headings_are_declared_and_their_prose_is_not_parsed():
-    """``Weigh 21 mg of ...`` is a recipe step, not a metadata field."""
+    """A ``Weigh <mass> of <material>`` line is a recipe step, not a metadata field."""
     result = _notes_result()
     preparations = _by_concept(result, CONCEPT_SAMPLE_PREPARATION)
     assert [p.raw_literal for p in preparations] == [

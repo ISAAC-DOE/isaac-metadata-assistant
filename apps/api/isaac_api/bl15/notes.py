@@ -241,7 +241,8 @@ RULE_PREPARATION_SECTION = (
     "heading declares that the document describes sample preparation from that "
     "point. The HEADING is reported, with the line range of the block beneath "
     "it in the locator; the prose itself is NOT parsed into quantities. "
-    "`Weigh 21 mg of IrOx/C` is a recipe step, not a metadata field, and "
+    "A line of the form `Weigh <mass> of <material>` is a recipe step, not a "
+    "metadata field, and "
     "turning it into one would invent a schema the document does not have."
 )
 

@@ -1308,7 +1308,8 @@ def _conflict_preservation(gold: GoldStandard, observed: Observed) -> MetricResu
     3. **Macro intent versus acquired** — 9 declared-never-acquired and 9
        acquired-never-declared, and the two sets are not independent.
     4. **The notes' broad claim versus their own sample section** — *"In ALL
-       experiments we used 0.1 M KOH"* sitting above an acid sample, in a document
+       experiments we used <one alkaline electrolyte at a stated
+       concentration>"* sitting above an acid sample, in a document
        whose own preparation section says otherwise.
     5. **``ffilter35``** — a literal that must survive its own normalisation. The
        normalised reading (filter 35) sits BESIDE the literal; replacing it would

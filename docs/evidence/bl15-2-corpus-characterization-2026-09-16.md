@@ -6,11 +6,36 @@ representative BL15-2 corpus"* — as the gate on `HIST-002`, `BL15-001`, `HIST-
 and `HIST-006`. **This document is the measurement that retires that gate for the
 formats the archive contains, and for nothing else.**
 
+## 0. What this document does and does not reproduce
+
 **The corpus is NOT in this repository and must never be committed** (`CLAUDE.md` §6:
 real experimental artifacts and real human notes). It was read from a local folder the
-owner pointed at. Everything below is a count, a structure, or a sanitized excerpt;
-**no scientific value, sample identity, or note text is reproduced here** beyond the
-filenames the owner already quoted in the authorizing brief.
+owner pointed at. Everything below is a count, a structure, or a sanitized excerpt.
+
+**Two categories, and the boundary between them was got wrong once already:**
+
+- **Filenames and archive names ARE reproduced.** The owner quoted them verbatim in the
+  authorizing brief, so they are already disclosed, and the whole subject of this document
+  is what their tokens mean.
+- **Scientific and instrument VALUES are withheld** — energies, emission lines, stage
+  coordinates, concentrations, pH figures, note prose. Format examples use placeholders
+  (`<eV>`, `<mm>`, `<n>`), which convey the structure identically because the structure is
+  the position and the key, not the number.
+
+~~no scientific value … is reproduced here~~ — **THIS DOCUMENT BROKE ITS OWN RULE AND WAS
+CORRECTED 2026-09-16, the same day.** §3.2, §3.3 and §3.5 quoted four real instrument
+energies — a monochromator energy, an emission-line energy, a scan-grid literal and a beam
+energy — while this paragraph claimed none was reproduced. Low sensitivity (they are
+station configuration, not results or spectra) and **the false claim was the defect**: a
+governance statement nobody can rely on is worse than no statement. Found by a mechanical
+marker sweep over every changed file, not by review — and the readers slice had already
+applied exactly this discipline to its own docstrings, noting that *the brief's exemption
+covers filenames, not values*. I did not apply it here until the sweep ran.
+
+`apps/api/tests/test_bl15_readers.py` still contains one such value **deliberately**: it
+is an entry in the guard's own forbidden-marker list, which is the negative control
+proving the fixture sweep works. That is the same shape as the repository's existing
+redaction control and must not be "cleaned".
 
 ## 1. Inventory
 
@@ -209,16 +234,20 @@ anything counting statements per source must read the skip entry rather than tru
 length.
 
 **3.2 — The `.dat` scan exports carry `name=value` positions instead.** Same `#S`/`#D`/
-`#T`/`#N`/`#L` header, but `#P0 dummy0=4 energy=11164.999 emiss=9175.4 filter=10 Sx=...`
+`#T`/`#N`/`#L` header, but `#P0 dummy0=<n> energy=<eV> emiss=<eV> filter=<n> Sx=<mm> …`
 — already keyed, no `#O` block, no `#F`. So the two readers are genuinely different and
 the `.dat` reader is the simpler of the two. Useful motors observed: `energy`, `emiss`
-(emission energy, e.g. `9175.4`), `filter`, `Sx`/`Sy`/`Sz`/`Sr` (sample position).
+(the emission energy the spectrometer is parked at), `filter`, and `Sx`/`Sy`/`Sz`/`Sr`
+(sample stage position). **The values themselves are withheld — see §0.**
 
 **3.3 — `Ir_XAS.mac` defines the acquisition method**, not a measurement:
 `def IrL3_xas '{ ... }'`, with the energy grid as a literal
-(`XAS_MAIN_GRID = "11165 11195 5 11205 1 ... 11500 5"`) and a documented four-argument
+(`XAS_MAIN_GRID = "<start> <edge0> <step0> … <end> <step>"`, a whitespace-separated
+sequence of energy/step pairs) and a documented four-argument
 call signature `IrL3_xas cntSec nbrScan emission nbrFilter`. The `run*.mac` files call it:
-`IrL3_xas 0.5 2 9175.4 10` is *0.5 s/point, 2 scans, 9175.4 eV emission, filter 10*.
+A call of the form `IrL3_xas <sec> <nScans> <emissionEV> <filter>` therefore reads as
+*seconds per point, number of scans, emission energy, filter index* — which is how the
+four positions are recovered without transcribing any of the values.
 Other commands observed: `qdo` (include), `mv` / `mvr` (absolute / relative motor move),
 `newfile`, `trigger`. **Nothing is ever executed; a macro is read as text.**
 
@@ -228,8 +257,10 @@ acquisition says `filter10`, `43_44_04_...` naming two legacy numbers in one fil
 `ave_JK2_filter10_1600mv` naming no legacy number at all). A `MERGE` entry is a
 **candidate processed artifact**; nothing here makes it ISAAC's official reduced spectrum.
 
-**3.5 — `readme.txt` is beamtime-scope shared context** (13 lines): element `Ir`, beamsize
-at 11215 eV, spectrometer slit/crystal/emission line, monochromator calibration foil.
+**3.5 — `readme.txt` is beamtime-scope shared context** (13 lines): the absorbing
+element, a beamsize at a stated energy, the spectrometer slit / analyser crystal /
+emission line, and the monochromator's calibration foil. **The values are withheld — see
+§0.**
 **One root README only** — no nested READMEs in this archive, so nested-scope inheritance
 must not be designed against assumptions (the brief's §20).
 
@@ -240,9 +271,11 @@ contains DOCX-table-flattened sections `Sample N <name> in <medium>` with
 file number to condition. **Three files are one witness, not three.**
 
 **3.7 — The notes contain a broad claim that contradicts the same document.** *"In ALL
-experiments we used 0.1 M KOH from the same solution prepared in the beginning of the beam
+experiments we used <one alkaline electrolyte, named with its concentration> from the same
+solution prepared in the beginning of the beam
 time"* sits above `Sample 1 JK3 in acid`, in a document whose own preparation section
-specifies 0.5 M H2SO4. A broad human statement is **candidate shared context**, and
+specifies an acid at a stated concentration. A broad human statement is **candidate shared
+context**, and
 sample-specific contrary evidence is a **conflict** — never an app-wide overwrite.
 
 ## 4. Reproducing this

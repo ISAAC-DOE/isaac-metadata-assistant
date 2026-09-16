@@ -1591,9 +1591,10 @@ reason Historical Import exists, and a slice that "cleans" any of them has broke
    `44`–`46` families.
 3. **`ffilter35`** — a real doubled-prefix typo. The literal is preserved and "filter 35" sits
    beside it carrying the rule that produced it. **The source is never rewritten.**
-4. **The notes contradict themselves about the electrolyte** — *"In ALL experiments we used 0.1 M
-   KOH…"* sits above `Sample 1 JK3 in acid`, in a document whose own preparation section
-   specifies H2SO4. A broad human statement is **candidate shared context**; sample-specific
+4. **The notes contradict themselves about the electrolyte** — a broad sentence beginning
+   *"In ALL experiments we used …"* and naming ONE alkaline electrolyte sits above
+   `Sample 1 JK3 in acid`, in a document whose own preparation section specifies an acid. A broad human statement is **candidate shared
+   context**; sample-specific
    contrary evidence is a **conflict**, never an app-wide overwrite.
 
 

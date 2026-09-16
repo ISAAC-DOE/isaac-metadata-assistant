@@ -160,7 +160,7 @@ class NamingProfile:
 #: Recognizers this profile carries for which **no instance occurs anywhere in
 #: the measured filenames of the supplied archive.** The convention the project
 #: owner recorded names gas condition, pH and flow rate, and the beamtime notes
-#: state all three in prose for Sample 7 (``0.1 M NaOH, pH = 13`` / ``Ar sat`` /
+#: state all three in prose for Sample 7 (``NaOH at a stated concentration, with a pH`` / ``Ar sat`` /
 #: ``Flow cell = 10 ml/min``) — so the CONCEPTS are corpus-attested, but their
 #: **filename spellings are not**. These three recognizers are therefore
 #: convention-derived rather than corpus-measured, are exercised only by
@@ -229,7 +229,7 @@ SSRL_BL152_ANGEL_V1 = NamingProfile(
     ),
     medium_aliases=(
         # `acid` and `base` are read AS THEMSELVES and never expanded. The
-        # beamtime notes name `0.5 M H2SO4` and `0.1 M KOH`, and binding either
+        # beamtime notes name an acid and an alkali, each with a concentration, and binding either
         # to a filename token would be this package answering a question with a
         # domain owner (`docs/bl15-2-domain-questions-2026-09-16.md`) — and the
         # notes contradict themselves about it (characterization §3.7).

@@ -30,7 +30,8 @@ the scientist would have no way to see what was passed over, and no way to tell
   ``RHE electrode`` for the later TiO2 one. A magnitude with an unknown basis is
   a different fact from a magnitude with a known one, and this reader has no
   access to the second. Enforced by test.
-* It never expands ``acid`` to a concentration or ``base`` to ``0.1 M KOH``. The
+* It never expands ``acid`` to a named acid at a concentration, or ``base`` to a named
+  alkali at a concentration. The
   notes say both, and contradict themselves about it (characterization §3.7).
 * It never resolves whether the ``1500`` in ``after1500Cycling`` is millivolts or
   a cycle count. ``after1200mVCycling`` states millivolts explicitly and

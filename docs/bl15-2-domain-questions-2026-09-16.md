@@ -76,9 +76,9 @@ schema's sense is a judgement.
 **Q5. `acid` / `base` → electrolyte: which `name`, and is `concentration_M` answerable?**
 `context.electrochemistry.electrolyte` requires **BOTH** `name` (string) and
 `concentration_M` (number) — so `acid` alone satisfies neither. The notes state a
-concentration for Sample 1's medium, and separately contain the broad sentence *"In ALL
-experiments we used 0.1 M … from the same solution prepared in the beginning of the beam
-time"* sitting **above** the acid sample's own section, which its own preparation section
+concentration for Sample 1's medium, and separately contain a broad sentence beginning
+*"In ALL experiments we used …"* — naming one alkaline electrolyte and a concentration —
+sitting **above** the acid sample's own section, which its own preparation section
 contradicts.
 *→ Two sub-answers: the `name` per sample group, and whether the concentration may be taken
 from the broad sentence at all. **If not, say so** — the field then stays absent and the
