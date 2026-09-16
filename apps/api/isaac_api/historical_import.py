@@ -25,7 +25,18 @@ file input on the import surface** — the latter is not a claim, it is enforced
 ``apps/web/src/__tests__/upload-claim-parity.test.tsx``, which asserts that
 EXACTLY two non-test frontend files declare ``type="file"`` and names both.
 
-So a Source Bundle entry is one of exactly two kinds, and the distinction is the
+~~So a Source Bundle entry is one of exactly two kinds~~ — **CORRECTED 2026-09-16
+by the slice that added the third, and struck rather than rewritten because "one of
+exactly two" is a closed enumeration a future reader counts against.** There are
+**three**, and the third was added because one-source-per-file does not fit: the
+measured BL15-2 archive is **1,192 files** against a
+:data:`MAX_SOURCES_PER_SESSION` of 500, and raising that ceiling would have been
+the wrong fix rather than a bigger one — ``HIST-004``'s banned pattern is
+*"Upload -> Spinner -> Mysterious JSON"*, and a 1,192-row manifest a scientist
+cannot audit is the same as no manifest. So a folder or ZIP is **ONE** manifest
+entry whose *parse result* is an inventory.
+
+A Source Bundle entry is one of exactly three kinds, and the distinction is the
 whole honesty boundary of the feature:
 
 * :data:`SOURCE_KIND_REFERENCE` — a **pointer**. The scientist records where a
@@ -41,12 +52,40 @@ whole honesty boundary of the feature:
   (:func:`fixture_names`). These ARE read, because they are files inside this
   repository put there for this purpose, and each one says in its own first line
   that it is synthetic and was never produced by an instrument.
+* :data:`SOURCE_KIND_ARCHIVE` — one of the **committed archive fixtures** named
+  by :data:`ARCHIVE_FIXTURES`, a frozen allowlist resolved through
+  :func:`archive_root_for`. A folder or ZIP inside this repository, read by
+  :mod:`isaac_api.bl15.archive`'s bounded walk. It IS read, and it is a third
+  kind precisely so that being read does not weaken the pointer's rule for the
+  other two: a ``reference`` still means "NO BYTES, EVER", and this kind is
+  honest about being read exactly as ``synthetic_fixture`` already is. Its
+  ``provenance`` records ``bytes_read_by_this_application: True``.
 
-**A DIGEST IS NEVER COMPUTED HERE, not even for a fixture this module does
-read.** The scientist supplies it or it stays absent. Computing one for the
-fixture and not for the pointer would put two meanings behind one field name,
-and every surface reporting a digest would then have to say which it had —
-whereas today every surface can say "recorded", never "verified".
+~~**A DIGEST IS NEVER COMPUTED HERE, not even for a fixture this module does
+read.**~~ — **CORRECTED 2026-09-16, in the same slice that made it false, and
+struck rather than rewritten because an absolute is what a reader relies on.**
+A digest IS computed here now, for archive MEMBERS, inside the parse. It had to
+be: content hashing is the only thing that stops the corpus doubling (measured
+in ``bl15.relate`` — every ``*_dir`` holds a byte-identical copy of its root
+acquisition, and letting those copies become units turned **94** measurements
+into **181**), and it is the only correct way to recognise the **96** duplicate
+groups covering 193 files — one of which (``run22.mac``, ``run29``,
+``run29.mac.mac``) shares no name at all, so no name heuristic could ever
+assemble it.
+
+**THE NARROW POSITION THAT REPLACES IT, stated precisely because the old
+sentence was load-bearing for one specific surface:** a member digest is
+computed **inside the parse, for structural deduplication, and is NEVER
+published as a manifest** :attr:`SourceReference.sha256` **for any source, of
+any kind.** That field stays *"what the scientist said"* — the scientist
+supplies it or it stays absent, no surface may describe it as verified, and
+:func:`add_source` still validates its SHAPE and computes nothing. The two
+meanings behind one field name that the old sentence guarded against therefore
+never arise: the digest that IS computed lives on an archive member inside
+:class:`ArchiveReading`, never on a manifest entry. That distinction is
+**mechanical rather than prose** —
+``test_historical_import_archive.py`` asserts an archive source's
+``sha256`` is ``None`` unless the scientist supplied one.
 
 WHAT IS DELIBERATELY NOT BUILT, AND WHY IT IS NAMED RATHER THAN IMPLIED
 =======================================================================
@@ -172,7 +211,23 @@ SOURCE_KIND_REFERENCE = "reference"
 #: it is a file inside this repository placed there for this purpose.
 SOURCE_KIND_SYNTHETIC_FIXTURE = "synthetic_fixture"
 
-SOURCE_KINDS = frozenset({SOURCE_KIND_REFERENCE, SOURCE_KIND_SYNTHETIC_FIXTURE})
+#: A whole FOLDER or ZIP, as ONE manifest entry. Read by
+#: :mod:`isaac_api.bl15.archive`'s bounded walk; its parse result is an
+#: inventory rather than a list of statements.
+#:
+#: **ONE ENTRY FOR AN ARCHIVE OF ANY SIZE, AND THAT IS THE WHOLE REASON THIS
+#: KIND EXISTS.** :data:`MAX_SOURCES_PER_SESSION` is 500 and the measured
+#: BL15-2 corpus is 1,192 files. Raising the ceiling was considered and rejected:
+#: ``HIST-004`` bans *"Upload -> Spinner -> Mysterious JSON"*, and a 1,192-row
+#: manifest is that pattern wearing a manifest's clothes — complete, and
+#: unreadable. The ceiling is untouched and still bounds MANIFEST ENTRIES; the
+#: archive's own ceilings (:class:`isaac_api.bl15.inventory.ArchiveLimits`)
+#: bound its members.
+SOURCE_KIND_ARCHIVE = "archive"
+
+SOURCE_KINDS = frozenset(
+    {SOURCE_KIND_REFERENCE, SOURCE_KIND_SYNTHETIC_FIXTURE, SOURCE_KIND_ARCHIVE}
+)
 
 #: Registered, never parsed yet.
 PARSE_STATE_UNPARSED = "unparsed"
@@ -400,6 +455,64 @@ def fixture_path(name: str) -> Path:
             available=list(fixture_names()),
         )
     return FIXTURE_DIR / name
+
+
+# --- the committed archive fixtures (SOURCE_KIND_ARCHIVE) ---------------------
+
+#: Everything :data:`ARCHIVE_FIXTURES`' values are resolved against. Inside the
+#: repository, never inside a workspace, exactly as :data:`FIXTURE_DIR` is.
+ARCHIVE_FIXTURE_ROOT = ws.REPO_ROOT
+
+#: ``archive name -> repo-relative path of the folder or ZIP``. **A FROZEN
+#: MAPPING RATHER THAN A DERIVED DIRECTORY LISTING, and the difference is the
+#: traversal boundary.** :func:`fixture_names` can derive its allowlist from a
+#: flat directory because every entry is a bare filename; an archive fixture is
+#: a nested path (``tests/fixtures/bl15/gold/mini_corpus``), so a derived
+#: allowlist would have to admit ``/`` — and once a caller-supplied string may
+#: contain a separator, the allowlist stops being the boundary. Here the CALLER
+#: only ever supplies a key, and the path is this module's own literal.
+#:
+#: The name is the scientist's handle and says what the corpus is. It
+#: deliberately does not say "fixture" —
+#: ``product-facing-language.test.tsx`` retires that word as product copy, and
+#: this string reaches a screen.
+ARCHIVE_FIXTURES: Mapping[str, str] = {
+    "bl15_synthetic_mini_corpus": "tests/fixtures/bl15/gold/mini_corpus",
+}
+
+
+def archive_names() -> tuple[str, ...]:
+    """Every committed archive this build can walk, in name order.
+
+    Filtered by EXISTENCE, exactly as :func:`fixture_names` is: a key whose path
+    is not on disk is not offered, so a deployment whose image excluded the
+    fixtures advertises nothing it cannot read.
+    """
+    return tuple(
+        sorted(
+            name
+            for name, relative in ARCHIVE_FIXTURES.items()
+            if (ARCHIVE_FIXTURE_ROOT / relative).exists()
+        )
+    )
+
+
+def archive_root_for(name: str) -> Path:
+    """The folder or ZIP one named archive fixture lives at.
+
+    The membership test is against :func:`archive_names`, not against
+    :data:`ARCHIVE_FIXTURES` alone, for :func:`fixture_path`'s reason: a name
+    that merely LOOKS plausible but is not present must be refused by the same
+    branch, so this cannot be used to probe the filesystem.
+    """
+    if name not in archive_names():
+        raise UnsupportedImport(
+            "unknown_archive",
+            "That is not one of the committed archives this build can read.",
+            key=name if isinstance(name, str) else None,
+            available=list(archive_names()),
+        )
+    return ARCHIVE_FIXTURE_ROOT / ARCHIVE_FIXTURES[name]
 
 
 # --- parsers: the INTERFACE, and one fixture-format implementation ------------
@@ -727,6 +840,24 @@ class SemanticCandidate:
     disagreement: tuple[dict, ...] = ()
     unresolved_reason: str | None = None
     not_proposable_reason: str | None = None
+    #: How many statements this candidate ACTUALLY rests on, when
+    #: :attr:`supporting_statements` is a WINDOW onto more of them. ``None``
+    #: means the list is complete, which is the state of every candidate the
+    #: fixture provider builds.
+    #:
+    #: **IT EXISTS BECAUSE A LIST THAT IS A WINDOW MUST SAY SO, and the measured
+    #: reason is the archive path:** one SPEC acquisition records its motor
+    #: positions once per scan, so a single ``motor_position`` candidate over a
+    #: 14-scan file rests on **4,816** statements
+    #: (``bl15.evidence.MAX_EVIDENCE_PER_SOURCE``'s own measurement), and the
+    #: real corpus produces ~1,000 candidates. Storing every statement on every
+    #: candidate would put megabytes in one session document; storing the first
+    #: :data:`MAX_STATEMENTS_PER_CANDIDATE` and saying nothing would report a
+    #: window as a whole. Any count of witnesses reads THIS, never
+    #: ``len(supporting_statements)`` — the same discipline
+    #: ``bl15.evidence``'s own "a reader's evidence list can be a PARTIAL
+    #: reading" note imposes one layer down.
+    supporting_statement_total: int | None = None
 
     @property
     def proposable(self) -> bool:
@@ -771,6 +902,7 @@ class SemanticCandidate:
             "disagreement": [dict(d) for d in self.disagreement],
             "unresolved_reason": self.unresolved_reason,
             "not_proposable_reason": self.not_proposable_reason,
+            "supporting_statement_total": self.supporting_statement_total,
             # DERIVED, and serialised anyway. A client that recomputed it would be
             # a second expression of the rule, free to drift from this one.
             "proposable": self.proposable,
@@ -827,6 +959,14 @@ class SemanticCandidate:
             else None,
             not_proposable_reason=state.get("not_proposable_reason")
             if isinstance(state.get("not_proposable_reason"), str)
+            else None,
+            # `bool` excluded explicitly, for `SourceReference.from_state`'s
+            # reason: `isinstance(True, int)` is True in Python, so a persisted
+            # `true` would otherwise read as a total of 1.
+            supporting_statement_total=state.get("supporting_statement_total")
+            if isinstance(state.get("supporting_statement_total"), int)
+            and not isinstance(state.get("supporting_statement_total"), bool)
+            and state.get("supporting_statement_total") >= 0
             else None,
         )
 
@@ -1112,6 +1252,946 @@ def _title_from_filenames(parsed: Sequence[ParsedSource]) -> tuple[str, tuple[st
 PROVIDER: ReconstructionProvider = DeterministicFakeReconstructionProvider()
 
 
+# --- reading a whole archive (SOURCE_KIND_ARCHIVE) ----------------------------
+#
+# WHAT THIS SECTION IS, AND WHERE ITS LAYERS LIVE. Everything below composes
+# `isaac_api.bl15` — the archive walk, the content-led classifier, the five
+# readers, the relationship pass and the candidate assembly — and adds nothing
+# scientific of its own. Every decision about WHAT a file is, WHAT it says, WHAT
+# belongs to what and WHICH official field path a concept maps to is made there
+# and is not re-derived here.
+#
+# `bl15` IS IMPORTED LAZILY, INSIDE THE FUNCTIONS, AND THAT IS NOT STYLE.
+# `bl15.reconstruct` imports `EvidenceStatement`, `SemanticCandidate` and four
+# constants FROM THIS MODULE, so a module-level import here would be a cycle.
+# `_official_field_paths` already does the same thing for `routes`, for the same
+# reason.
+
+#: WHAT THIS SESSION PERSISTS, AND WHAT IT RECOMPUTES — the decision the design
+#: doc asked for, stated here rather than left to be inferred from the code.
+#:
+#: **MEASURED FIRST.** Over the real 1,192-file corpus the reading layer produces
+#: roughly **500,000 evidence items** and **~1,000 candidates**. A session
+#: document carrying every evidence item would be tens of megabytes: not merely
+#: slow, but a working area nobody can load, which is a worse failure than a
+#: refusal. So:
+#:
+#: **PERSISTED** (:class:`ArchiveReading`, written into the session document):
+#: the inventory's totals, refusals, truncation reason and duplicate groups; the
+#: per-entry MANIFEST; the per-entry CLASSIFICATION with its reason, confidence
+#: and overridability; a per-source READING ROW (which reader ran, how many
+#: statements it read, how many it suppressed, whether the reading is partial,
+#: why it was refused); the RELATIONSHIPS (units, sample groups, conflicts,
+#: unattached sources); the reconstruction's own concept and mapping-status
+#: AGGREGATES; and the CANDIDATES, each with a bounded window of its supporting
+#: statements.
+#:
+#: **NOT PERSISTED, and recomputed by re-running Parse:** the full
+#: :class:`~isaac_api.bl15.evidence.SourceEvidence` set. It is derived — the same
+#: asymmetry :func:`_hydrate_parsed` already applies to a parse result — and an
+#: unreadable or absent one costs a recomputation rather than a scientist's work.
+#: Nothing in the review pipeline consumes it: a candidate carries the statements
+#: it rests on, and the archive path travels in every locator.
+ARCHIVE_PERSISTENCE_DECISION = (
+    "An import session stores this archive's manifest, its classifications, its "
+    "relationships, its measurement units and its candidates. It does not store "
+    "every individual reading a parser made — over a real archive that is "
+    "hundreds of thousands of entries — so the per-statement detail is "
+    "recomputed by parsing again rather than kept. Nothing you review depends on "
+    "it: every candidate carries the statements it rests on, each naming the file "
+    "and the line it was read from."
+)
+
+#: Most supporting statements ONE candidate stores. Over the ceiling the list is
+#: a WINDOW and :attr:`SemanticCandidate.supporting_statement_total` states the
+#: true count — see that field for the measurement that forced it.
+#:
+#: **FIVE, AND THE NUMBER IS MEASURED RATHER THAN CHOSEN.** With no window at
+#: all, a session over the real corpus's cardinality persisted at **10,453,571
+#: bytes**, of which the candidates alone were **5,566,994** — 2,963 bytes each
+#: across 1,879 candidates, because every statement's locator carries the full
+#: archive path. At five the candidates come to roughly a third of that. The
+#: window is deliberately NOT applied to
+#: :attr:`SemanticCandidate.disagreement`, which is what carries EVERY competing
+#: reading of a conflict: windowing that would turn "the sources disagree, here
+#: is each one" into "here are some of them", which is the one thing this whole
+#: feature exists not to do.
+MAX_STATEMENTS_PER_CANDIDATE = 5
+
+#: Most ``skipped`` entries ONE source's reading row stores. Over it the list is
+#: a window and the row's ``skipped_total`` states the true count.
+#:
+#: **ALSO MEASURED.** Unbounded, the per-source reading rows came to
+#: **1,618,508 bytes** over 1,096 sources — 1,477 each — because a reader reports
+#: every prose block it passed over, with the first line of each. The rows exist
+#: so a scientist can see what a reader did not understand; five examples plus a
+#: true total serves that, and 1.5 MB of it does not.
+MAX_SKIPPED_PER_SOURCE = 5
+
+#: Most candidates one archive reading contributes. The real corpus produces
+#: ~1,000 across 94 measurements, so this is ~4x headroom rather than a round
+#: number. Over it, candidates are DROPPED FROM THE TAIL and the count is
+#: disclosed in :attr:`ArchiveReading.candidate_total` — never trimmed silently.
+MAX_CANDIDATES_PER_SESSION = 4_000
+
+#: Most manifest rows, unit rows or reading rows :func:`session_view` serves in
+#: one response. The archive KEEPS all of them; this bounds the WINDOW.
+#:
+#: **THE WINDOW BOUNDS WHAT IS FETCHED, NEVER WHAT IS CLAIMED** — the rule
+#: ``CLAUDE.md`` §11's 2026-09-02 entry states for ``PENDING_WINDOW``, applied
+#: here because the failure mode is identical: a surface that counted the rows it
+#: received would understate a 1,192-file corpus as 200 files. Every page served
+#: below carries its own ``total``, read off the persisted collection.
+ARCHIVE_PAGE_WINDOW = 200
+
+#: Why a candidate Run from a historical archive cannot be export-ready. THREE
+#: reasons, each measured, and the surface must say so rather than showing a
+#: progress indicator that can never fill.
+#:
+#: Two of the three are quoted from :mod:`isaac_api.bl15.mapping` rather than
+#: rewritten, so there is one wording per fact. The third has no home there
+#: because it is not about a CONCEPT's mapping at all — it is a property of the
+#: official schema's ``record_type`` conditional — so it is stated here, once.
+EXPORT_BLOCKED_NO_DESCRIPTORS = (
+    "An official ISAAC record of type `evidence` must carry `descriptors`, and "
+    "no historical source in this archive provides one. A descriptor is a "
+    "derived scientific product, not something a filename or an instrument "
+    "header states, so nothing here can supply it and nothing here will invent "
+    "it."
+)
+
+
+def export_blocked_reasons() -> tuple[str, ...]:
+    """The three sentences a surface shows instead of a progress bar. Derived.
+
+    Two are :mod:`bl15.mapping`'s own constants, read at call time rather than
+    transcribed: if that module's wording changes, this follows it. The third is
+    :data:`EXPORT_BLOCKED_NO_DESCRIPTORS`.
+    """
+    from .bl15 import mapping as mp
+
+    return (
+        mp.TEMPERATURE_ABSENT_REASON,
+        EXPORT_BLOCKED_NO_DESCRIPTORS,
+        mp.ASSETS_BLOCKED_REASON,
+    )
+
+
+@dataclass(frozen=True)
+class UnitReading:
+    """ONE measurement this archive found, as the session remembers it.
+
+    It is a projection of :class:`isaac_api.bl15.relate.MeasurementUnit` plus the
+    two things the session adds: the candidate ids this unit produced, and the
+    :attr:`label` a Run would carry.
+
+    :attr:`run_candidate` is **carried, not re-derived** — it is
+    ``MeasurementUnit.run_candidate``, which is itself derived from the
+    classification. An alignment scan and a reference pellet are real
+    measurements, fully assembled, and are deliberately **not** offered as Runs;
+    a scientist who disagrees changes the classification, which is a separate
+    act, and nothing is discarded either way.
+    """
+
+    stem: str
+    acquisition_path: str
+    source_type: str
+    run_candidate: bool
+    label: str
+    legacy_number: int | None = None
+    group_token: str | None = None
+    scan_count: int = 0
+    source_count: int = 0
+    conflict_count: int = 0
+    candidate_ids: tuple[str, ...] = ()
+
+    def to_state(self) -> dict:
+        return {
+            "stem": self.stem,
+            "acquisition_path": self.acquisition_path,
+            "source_type": self.source_type,
+            "run_candidate": self.run_candidate,
+            "label": self.label,
+            "legacy_number": self.legacy_number,
+            "group_token": self.group_token,
+            "scan_count": self.scan_count,
+            "source_count": self.source_count,
+            "conflict_count": self.conflict_count,
+            "candidate_ids": list(self.candidate_ids),
+        }
+
+    @classmethod
+    def from_state(cls, state: Mapping[str, Any]) -> "UnitReading":
+        if not isinstance(state, Mapping):
+            raise UnsupportedImport("invalid_entry", "A unit entry must be an object.")
+        stem = state.get("stem")
+        path = state.get("acquisition_path")
+        source_type = state.get("source_type")
+        label = state.get("label")
+        if not (
+            isinstance(stem, str)
+            and isinstance(path, str)
+            and isinstance(source_type, str)
+            and isinstance(label, str)
+        ):
+            raise UnsupportedImport(
+                "invalid_entry", "A unit entry is missing a required string."
+            )
+        return cls(
+            stem=stem,
+            acquisition_path=path,
+            source_type=source_type,
+            run_candidate=state.get("run_candidate") is True,
+            label=label,
+            legacy_number=_as_count(state.get("legacy_number")),
+            group_token=state.get("group_token")
+            if isinstance(state.get("group_token"), str)
+            else None,
+            scan_count=_as_count(state.get("scan_count")) or 0,
+            source_count=_as_count(state.get("source_count")) or 0,
+            conflict_count=_as_count(state.get("conflict_count")) or 0,
+            candidate_ids=tuple(
+                cid for cid in (state.get("candidate_ids") or []) if isinstance(cid, str)
+            )
+            if isinstance(state.get("candidate_ids"), list)
+            else (),
+        )
+
+
+def _as_count(value: object) -> int | None:
+    """A non-negative whole number, or ``None``. ``bool`` is excluded explicitly.
+
+    ``isinstance(True, int)`` is True in Python, so a persisted ``true`` would
+    otherwise read as the count 1 — the trap :meth:`SourceReference.from_state`
+    already names.
+    """
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        return None
+    return value
+
+
+@dataclass(frozen=True)
+class ArchiveReading:
+    """What ONE archive source's parse found. The session's whole memory of it.
+
+    **IT CARRIES NO CANDIDATES.** They live where every candidate already lives —
+    :attr:`ImportSession.reconstruction` — and each :class:`UnitReading` names
+    the ones it produced by id. Holding a second copy here would put the same
+    ~1,000 candidates in the session document twice, and would let the two
+    disagree about what the reconstruction found.
+    """
+
+    source_id: str
+    root_label: str
+    archive_name: str
+    walker_id: str
+    #: ``ArchiveInventory.to_state()``. Totals, refusals, truncation, duplicate
+    #: group count — and deliberately NOT the entries, which
+    #: :attr:`manifest` carries because ``inventory.to_state()`` omits them and
+    #: this module may not change that contract.
+    inventory: Mapping[str, Any] = field(default_factory=dict)
+    #: One row per accepted entry: the file facts AND its classification, joined
+    #: here because they are keyed identically and a surface renders them
+    #: together. ``content_sha256`` is a MEMBER digest computed inside the parse
+    #: for deduplication; it is never a manifest ``sha256``.
+    manifest: tuple[dict, ...] = ()
+    #: One row per source a reader was applied to: which reader, how much it
+    #: read, how much it SUPPRESSED, and whether the reading is partial.
+    reading: tuple[dict, ...] = ()
+    #: ``Relationships.to_state()`` — units, sample groups, corpus conflicts,
+    #: unattached sources, and which relate inputs were actually present.
+    relationships: Mapping[str, Any] = field(default_factory=dict)
+    units: tuple[UnitReading, ...] = ()
+    #: Candidate ids belonging to the import rather than to one measurement — the
+    #: beamtime-scope context every unit INHERITS and none of them copies.
+    shared_candidate_ids: tuple[str, ...] = ()
+    #: ``ReconstructionReport``'s OWN aggregates, served rather than recomputed
+    #: by any client: a client-side recount is a second expression of one number.
+    by_concept: Mapping[str, int] = field(default_factory=dict)
+    by_mapping_status: Mapping[str, int] = field(default_factory=dict)
+    unregistered_concepts: tuple[str, ...] = ()
+    #: How many candidates the reconstruction produced, BEFORE
+    #: :data:`MAX_CANDIDATES_PER_SESSION`. Equal to the stored count unless the
+    #: ceiling was reached, and :attr:`candidates_truncated` says which.
+    candidate_total: int = 0
+    candidates_truncated: bool = False
+    #: Evidence items every reader reported, and every item a reader SUPPRESSED
+    #: at its own per-source ceiling. The second is why the first is not a
+    #: completeness claim.
+    statements_read: int = 0
+    statements_suppressed: int = 0
+
+    def to_state(self) -> dict:
+        return {
+            "source_id": self.source_id,
+            "root_label": self.root_label,
+            "archive_name": self.archive_name,
+            "walker_id": self.walker_id,
+            "inventory": dict(self.inventory),
+            "manifest": [dict(row) for row in self.manifest],
+            "reading": [dict(row) for row in self.reading],
+            "relationships": dict(self.relationships),
+            "units": [u.to_state() for u in self.units],
+            "shared_candidate_ids": list(self.shared_candidate_ids),
+            "by_concept": dict(self.by_concept),
+            "by_mapping_status": dict(self.by_mapping_status),
+            "unregistered_concepts": list(self.unregistered_concepts),
+            "candidate_total": self.candidate_total,
+            "candidates_truncated": self.candidates_truncated,
+            "statements_read": self.statements_read,
+            "statements_suppressed": self.statements_suppressed,
+        }
+
+    @classmethod
+    def from_state(cls, state: Mapping[str, Any]) -> "ArchiveReading":
+        """Rehydrate. Raises on a shape this build cannot read.
+
+        The raise is what :func:`_hydrate_archive_reading` turns into ``None``
+        rather than a crash — an archive reading is DERIVED, so an unreadable one
+        costs a re-parse and never a scientist's work.
+        """
+        if not isinstance(state, Mapping):
+            raise UnsupportedImport(
+                "invalid_entry", "An archive reading must be an object."
+            )
+        source_id = state.get("source_id")
+        if not isinstance(source_id, str):
+            raise UnsupportedImport(
+                "invalid_entry", "An archive reading is missing its source id."
+            )
+        units: list[UnitReading] = []
+        for row in state.get("units") or []:
+            units.append(UnitReading.from_state(row))
+        return cls(
+            source_id=source_id,
+            root_label=state.get("root_label")
+            if isinstance(state.get("root_label"), str)
+            else "",
+            archive_name=state.get("archive_name")
+            if isinstance(state.get("archive_name"), str)
+            else "",
+            walker_id=state.get("walker_id")
+            if isinstance(state.get("walker_id"), str)
+            else "",
+            inventory=dict(state.get("inventory"))
+            if isinstance(state.get("inventory"), Mapping)
+            else {},
+            manifest=tuple(
+                dict(row) for row in (state.get("manifest") or []) if isinstance(row, Mapping)
+            )
+            if isinstance(state.get("manifest"), list)
+            else (),
+            reading=tuple(
+                dict(row) for row in (state.get("reading") or []) if isinstance(row, Mapping)
+            )
+            if isinstance(state.get("reading"), list)
+            else (),
+            relationships=dict(state.get("relationships"))
+            if isinstance(state.get("relationships"), Mapping)
+            else {},
+            units=tuple(units),
+            shared_candidate_ids=tuple(
+                cid
+                for cid in (state.get("shared_candidate_ids") or [])
+                if isinstance(cid, str)
+            )
+            if isinstance(state.get("shared_candidate_ids"), list)
+            else (),
+            by_concept={
+                k: v
+                for k, v in (state.get("by_concept") or {}).items()
+                if isinstance(k, str) and _as_count(v) is not None
+            }
+            if isinstance(state.get("by_concept"), Mapping)
+            else {},
+            by_mapping_status={
+                k: v
+                for k, v in (state.get("by_mapping_status") or {}).items()
+                if isinstance(k, str) and _as_count(v) is not None
+            }
+            if isinstance(state.get("by_mapping_status"), Mapping)
+            else {},
+            unregistered_concepts=tuple(
+                c
+                for c in (state.get("unregistered_concepts") or [])
+                if isinstance(c, str)
+            )
+            if isinstance(state.get("unregistered_concepts"), list)
+            else (),
+            candidate_total=_as_count(state.get("candidate_total")) or 0,
+            candidates_truncated=state.get("candidates_truncated") is True,
+            statements_read=_as_count(state.get("statements_read")) or 0,
+            statements_suppressed=_as_count(state.get("statements_suppressed")) or 0,
+        )
+
+    # -- derived ------------------------------------------------------------
+
+    def run_candidate_units(self) -> tuple[UnitReading, ...]:
+        """The units a Run may be created from. **Alignment and standards are not.**
+
+        Filtered on :attr:`UnitReading.run_candidate`, which is
+        ``MeasurementUnit.run_candidate`` carried across — so this cannot
+        disagree with the layer that decided it.
+        """
+        return tuple(u for u in self.units if u.run_candidate)
+
+    def unit_of_candidate(self, candidate_id: object) -> UnitReading | None:
+        """Which measurement produced this candidate, or ``None``.
+
+        ``None`` for a shared (beamtime-scope) candidate and for anything the
+        fixture provider built, both of which belong to no measurement.
+        """
+        for unit in self.units:
+            if candidate_id in unit.candidate_ids:
+                return unit
+        return None
+
+    def by_source_type(self) -> dict[str, int]:
+        """``source_type -> accepted entry count``, counted from :attr:`manifest`.
+
+        **The digest's core content, and it is COUNTED rather than declared.**
+        ``SourceRecord`` carries no ``source_type`` — classification is
+        ``bl15.classify``'s and lives nowhere on the record — so without this the
+        archive-wide "how many scans, how many macros, how many notes" figures
+        would not be derivable from anything on the wire, and a surface would be
+        tempted toward a literal.
+        """
+        out: dict[str, int] = {}
+        for row in self.manifest:
+            source_type = row.get("source_type")
+            if isinstance(source_type, str):
+                out[source_type] = out.get(source_type, 0) + 1
+        return dict(sorted(out.items()))
+
+    def by_confidence(self) -> dict[str, int]:
+        """``classification confidence -> count``. Counted, never declared.
+
+        Served beside :meth:`by_source_type` because a path-confidence
+        classification is a lead and a content-confidence one is a reading of the
+        file's own bytes, and a scientist deciding what to correct needs to know
+        which they are looking at.
+        """
+        out: dict[str, int] = {}
+        for row in self.manifest:
+            confidence = row.get("confidence")
+            if isinstance(confidence, str):
+                out[confidence] = out.get(confidence, 0) + 1
+        return dict(sorted(out.items()))
+
+    def partial_reading_count(self) -> int:
+        """How many sources were read PARTIALLY. Read from the reading rows.
+
+        A reader's evidence list can be a partial reading —
+        ``bl15.evidence.MAX_EVIDENCE_PER_SOURCE`` records one real file
+        suppressing ~41,000 statements — so a count of statements is never a
+        completeness claim and this is the number that says so.
+        """
+        return sum(1 for row in self.reading if row.get("partial") is True)
+
+    def refused_reading_count(self) -> int:
+        """How many sources a reader declined WHOLE, with nothing read."""
+        return sum(
+            1 for row in self.reading if isinstance(row.get("refused_reason"), str)
+        )
+
+
+def _run_label_for(unit, tokens: Sequence[tuple[str, str]]) -> str:
+    """The label a Run created from ``unit`` carries. **Verbatim tokens only.**
+
+    ``<legacy>`` first, because the registry marks the legacy number
+    ``not_expressible`` and records that it is *"the handle they already use"* —
+    so it is the scientist's own identifier for this measurement and belongs at
+    the front of the one string a Runs list shows.
+
+    Then the readable condition, as the SOURCE WROTE IT. ``tokens`` is
+    ``(concept, raw_literal)`` in the order the caller read them, and the
+    literals are interpolated unchanged: ``after1500Cycling`` is not expanded to
+    "After 1500 mV cycling" and ``ffilter35`` is not corrected to "filter 35",
+    because writing either would be this module composing scientific prose out of
+    a token — a small invention, in the one string a scientist identifies the run
+    by. The normalisation exists and travels on the CANDIDATE, where its rule is
+    named beside it.
+
+    Bounded to ``routes._MAX_LABEL_BYTES``' 512 characters by construction: the
+    caller supplies at most :data:`_LABEL_TOKEN_LIMIT` tokens and each is a
+    filename fragment. Truncation is still applied, and it is applied to the
+    WHOLE label rather than to a token, so a truncated label never reads as a
+    different complete value.
+    """
+    parts: list[str] = []
+    if unit.legacy_number is not None:
+        parts.append(f"Legacy {unit.legacy_number}")
+    seen: set[str] = set()
+    for _concept, literal in tokens:
+        text = literal.strip()
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        parts.append(text)
+        if len(parts) >= _LABEL_TOKEN_LIMIT:
+            break
+    if not parts:
+        # No legacy number and no readable token: the stem IS the only handle the
+        # scientist has, so it is used rather than inventing "Run 1" — which
+        # `workspace.new_run` would otherwise assign, naming an ordinal this
+        # import did not choose.
+        parts.append(unit.stem)
+    label = " · ".join(parts)
+    if len(label) > MAX_LABEL_CHARS:
+        label = label[: MAX_LABEL_CHARS - 1].rstrip() + "…"
+    return label
+
+
+#: Most tokens a Run label interpolates, beyond the legacy number. The brief's
+#: own example carries eight; this bounds a crafted stem rather than the real
+#: convention.
+_LABEL_TOKEN_LIMIT = 10
+
+#: Concepts whose literals go in a Run label, in the order a scientist reads
+#: them. **The brief's §47 example is the specification** — "Legacy Run/File 44 ·
+#: Sample 04 · JK2 · Base · After 1500 mV cycling · Filter 35 · Potential 1.2 V ·
+#: New spot" — and this is that ordering expressed as concepts, with the literals
+#: left verbatim. A concept the sources did not state simply does not appear; no
+#: placeholder is emitted, because "unknown" in a run label is a claim about the
+#: measurement.
+_LABEL_CONCEPTS: tuple[str, ...] = (
+    "sample_or_electrode_number",
+    "sample_name",
+    "electrolyte_or_medium",
+    "cycling_state",
+    "before_after_state",
+    "filter",
+    "potential_magnitude",
+    "new_spot",
+    "repeat_marker",
+    "step_number",
+)
+
+
+def _readers():
+    """``source_type -> the reader that reads it``. Built at call time.
+
+    **THE CLASSIFICATION SELECTS THE READER, and nothing here re-decides what a
+    file is.** ``bl15.classify`` is content-led and tests ``.mca`` BEFORE the
+    ``#F`` branch, for a measured reason (both detector products in the archive
+    are SPEC-format dumps, so a content-first order called them acquisitions and
+    produced two spurious measurement units). That order is not re-derived here
+    and must not be.
+
+    A source type absent from this map has NO reader in this build, which is a
+    fact rather than a gap: ``detector_product`` (`.mca`) content is deliberately
+    not read, ``processed_spectrum`` and ``unknown`` have no format this
+    repository holds a representative example of. Those entries still appear in
+    the manifest with their classification, and their reading row says a reader
+    was not applied — the same "no source is silently passed over" discipline
+    :func:`parse_session` already states per manifest entry.
+    """
+    from .bl15 import evidence as ev
+    from .bl15 import macros, notes, scans, spec
+
+    return {
+        ev.SOURCE_TYPE_SPEC_ACQUISITION: spec.read_spec_acquisition,
+        ev.SOURCE_TYPE_ALIGNMENT: spec.read_spec_acquisition,
+        ev.SOURCE_TYPE_STANDARD_OR_REFERENCE: spec.read_spec_acquisition,
+        ev.SOURCE_TYPE_SCAN_EXPORT: scans.read_scan_export,
+        ev.SOURCE_TYPE_MACRO: macros.read_macro,
+        ev.SOURCE_TYPE_ACQUISITION_METHOD_MACRO: macros.read_macro,
+        ev.SOURCE_TYPE_MOTOR_SNAPSHOT_MACRO: macros.read_macro,
+        ev.SOURCE_TYPE_SHARED_README: notes.read_shared_readme,
+        ev.SOURCE_TYPE_BEAMTIME_NOTES: notes.read_beamtime_notes,
+    }
+
+
+def _inventory_of(root: Path, *, root_label: str):
+    """Walk a folder or a ZIP. The suffix decides which, and neither raises.
+
+    ``bl15.archive`` returns an inventory carrying one refusal rather than
+    raising for a root that is missing, is a symlink, or is an unopenable ZIP —
+    so a scientist who chose the wrong thing gets a readable answer about it.
+    """
+    from .bl15 import archive
+
+    if root.is_dir():
+        return archive.inventory_folder(root, root_label=root_label)
+    return archive.inventory_zip(root, root_label=root_label)
+
+
+def _suppressed_in(skipped: Sequence[Mapping]) -> int:
+    """How many statements a reader suppressed at its own per-source ceiling.
+
+    **READ OFF THE SKIP ENTRY, never inferred from ``len(evidence)``.** The
+    ceiling entry is the only thing that distinguishes "this file states 1,376
+    things" from "this file states 49,000 things and 41,000 of them were not
+    reported", and ``bl15._emit`` puts the count there precisely so a consumer
+    does not have to guess.
+    """
+    from .bl15._emit import SKIP_EVIDENCE_CEILING
+
+    total = 0
+    for entry in skipped:
+        if entry.get("reason") != SKIP_EVIDENCE_CEILING:
+            continue
+        count = _as_count(entry.get("suppressed_count"))
+        if count is not None:
+            total += count
+    return total
+
+
+def read_archive(
+    source: SourceReference,
+) -> tuple[ArchiveReading, tuple[SemanticCandidate, ...]]:
+    """Walk, classify, read, relate and reconstruct ONE archive source.
+
+    Returns the session's durable memory of the archive and the candidates it
+    produced. **Writes nothing** — not a file, not a record, not a draft. The
+    caller owns persistence.
+
+    THE CHAIN, in order, with the layer that owns each decision:
+
+    1. ``bl15.archive`` walks the folder or ZIP under its own ceilings, refusing
+       per entry (and keeping going) or stopping the walk and saying so.
+    2. ``bl15.classify`` decides what each entry IS, from the first 8 KiB of its
+       own bytes where they are available and from the path otherwise — and
+       reports which, because a path decision is a lead and not a fact.
+    3. the reader its classification selects reads it, plus
+       ``bl15.filenames``, which reads the stem's tokens under a named profile
+       for EVERY entry.
+    4. ``bl15.relate`` attaches scans, macro declarations, processed products and
+       note rows to the acquisition each belongs to, and names what disagrees.
+    5. ``bl15.reconstruct`` turns evidence plus structure into candidates.
+
+    **THE ONE THING THIS FUNCTION DECIDES that the layers below do not:** whether
+    THIS BUILD has a write route for a candidate's target path. ``bl15.mapping``
+    answers the schema question (is there an official path, and is the mapping
+    deterministic enough to propose?) and six concepts pass it; three of those
+    six land on paths ``routes._proposal_writer_for`` answers ``None`` for. A
+    candidate left proposable there would be offered a *Send to Review* control
+    the server was always going to refuse, and in the batch operation it would
+    refuse the WHOLE batch with ``no_write_path_for_field``. So the writability
+    check is applied HERE, at the point the candidate is built, exactly as
+    :class:`DeterministicFakeReconstructionProvider` already applies it and with
+    the same constant — see :data:`CANDIDATE_NOT_PROPOSABLE_NO_WRITE_PATH`, whose
+    wording says the limitation is this build's and never the schema's.
+    """
+    from .bl15 import archive, classify
+    from .bl15 import evidence as ev
+    from .bl15 import filenames, macros, reconstruct as rc, relate as R
+
+    name = source.fixture_name or ""
+    root = archive_root_for(name)
+    inventory = _inventory_of(root, root_label=source.filename or name)
+
+    readers = _readers()
+    classifications: dict[str, classify.Classification] = {}
+    evidence_by_source: dict[str, list] = {}
+    reading_rows: list[dict] = []
+    manifest: list[dict] = []
+    internal_declarations: dict[str, str] = {}
+    macro_declarations: dict[str, Sequence[str]] = {}
+    note_file_numbers: dict[int, list[dict]] = {}
+    statements_read = 0
+    statements_suppressed = 0
+
+    for entry in inventory.entries:
+        head, _head_refusal = archive.read_source_head(
+            inventory, entry.archive_path, source_root=root
+        )
+        verdict = classify.classify(entry, head_text=head)
+        classifications[entry.archive_path] = verdict
+        manifest.append(
+            {
+                "archive_path": entry.archive_path,
+                "basename": entry.basename,
+                "extension": entry.extension,
+                "size_bytes": entry.size_bytes,
+                "parent_dir": entry.parent_dir,
+                "depth": entry.depth,
+                # THE MEMBER DIGEST. Computed inside this parse, for structural
+                # deduplication, and NEVER published as a manifest `sha256` —
+                # see this module's docstring for the corrected claim and the
+                # test that makes the distinction mechanical.
+                "content_sha256": entry.content_sha256,
+                **verdict.to_state(),
+            }
+        )
+
+        items: list = []
+        reader = readers.get(verdict.source_type)
+        row: dict = {
+            "archive_path": entry.archive_path,
+            "source_type": verdict.source_type,
+            "parser_id": None,
+            "statements_read": 0,
+            "statements_suppressed": 0,
+            "partial": False,
+            "skipped": [],
+            "skipped_total": 0,
+            "refused_reason": None,
+        }
+        if reader is None:
+            row["refused_reason"] = (
+                "This build has no reader for this kind of source, so nothing "
+                "was read out of it. It is listed with its classification "
+                "rather than passed over."
+            )
+        else:
+            text, refusal = archive.read_source_text(
+                inventory, entry.archive_path, source_root=root
+            )
+            if text is None:
+                row["refused_reason"] = (
+                    f"The archive would not give up this file's contents: "
+                    f"{refusal}. Nothing was read from it."
+                )
+            else:
+                result = reader(entry, text, id_prefix=f"{entry.archive_path}:")
+                suppressed = _suppressed_in(result.skipped)
+                row.update(
+                    {
+                        "parser_id": result.parser_id,
+                        "statements_read": len(result.evidence),
+                        "statements_suppressed": suppressed,
+                        # PARTIAL IS ITS OWN FLAG rather than `suppressed > 0`
+                        # restated at every consumer. It is the fact a count of
+                        # statements cannot carry.
+                        "partial": suppressed > 0,
+                        # A WINDOW WITH ITS TOTAL BESIDE IT, never a trimmed
+                        # list presented as a whole one — see
+                        # `MAX_SKIPPED_PER_SOURCE` for the measurement.
+                        "skipped": [
+                            dict(s) for s in result.skipped[:MAX_SKIPPED_PER_SOURCE]
+                        ],
+                        "skipped_total": len(result.skipped),
+                        "refused_reason": result.refused_reason,
+                    }
+                )
+                statements_suppressed += suppressed
+                items.extend(result.evidence)
+                for item in result.evidence:
+                    if item.concept == ev.CONCEPT_SPEC_FILE_DECLARATION:
+                        internal_declarations[entry.archive_path] = item.raw_literal
+                    elif item.concept == ev.CONCEPT_NOTE_FILE_NUMBER_ROW:
+                        number = _legacy_int(item.raw_literal)
+                        if number is not None:
+                            note_file_numbers.setdefault(number, []).append(
+                                {
+                                    "source_path": item.source_path,
+                                    "locator": item.locator,
+                                    "value": item.raw_literal,
+                                }
+                            )
+                if verdict.source_type in {
+                    ev.SOURCE_TYPE_MACRO,
+                    ev.SOURCE_TYPE_ACQUISITION_METHOD_MACRO,
+                    ev.SOURCE_TYPE_MOTOR_SNAPSHOT_MACRO,
+                }:
+                    # THE MACRO'S DECLARED TARGETS, IN ORDER, read by `bl15`'s own
+                    # function rather than re-parsed here. Order is the block
+                    # index a scientist is shown, and 29 macros in the real corpus
+                    # declare more than one target (maximum 8) while 4 declare
+                    # none — which is exactly why one macro is neither one
+                    # measurement nor zero.
+                    macro_declarations[entry.archive_path] = macros.newfile_targets(text)
+
+        # THE FILENAME IS READ FOR EVERY ENTRY, whatever its classification and
+        # whether or not a reader ran. It is the only thing every source in this
+        # corpus has, and it is where the sample, medium, cycling state,
+        # potential and filter actually live.
+        tokens = filenames.read_filename(
+            entry,
+            source_type=verdict.source_type,
+            id_prefix=f"filename:{entry.archive_path}:",
+        )
+        items.extend(tokens.evidence)
+        if tokens.refused_reason is not None:
+            # PREPENDED, and the total is bumped with it. A filename refusal is
+            # the one skip on this row that is about the source's NAME rather
+            # than its contents, so it must survive the window — appending it
+            # would have put it past `MAX_SKIPPED_PER_SOURCE` on exactly the
+            # sources that already have the most to report.
+            row["skipped"] = [
+                {
+                    "reason": "filename_not_read",
+                    "locator": "filename",
+                    "detail": tokens.refused_reason,
+                }
+            ] + list(row["skipped"])[: MAX_SKIPPED_PER_SOURCE - 1]
+            row["skipped_total"] = row["skipped_total"] + 1
+
+        row["statements_read"] = len(items)
+        statements_read += len(items)
+        reading_rows.append(row)
+        evidence_by_source[entry.archive_path] = items
+
+    relationships = R.relate(
+        entries=inventory.entries,
+        classifications={
+            path: verdict.source_type for path, verdict in classifications.items()
+        },
+        internal_declarations=internal_declarations,
+        macro_declarations=macro_declarations,
+        note_file_numbers=note_file_numbers,
+        duplicate_groups=inventory.duplicate_groups,
+    )
+
+    report = rc.reconstruct(
+        relationships=relationships,
+        evidence_by_source=evidence_by_source,
+        # ONE SOURCE ID FOR THE WHOLE ARCHIVE, because the archive IS one
+        # manifest entry. `reconstruct` documents exactly this case, and the
+        # archive path travels in every statement's locator regardless, so
+        # provenance never depends on this map.
+        source_ids={path: source.source_id for path in evidence_by_source},
+    )
+
+    writable = _writable_field_paths()
+    candidates: list[SemanticCandidate] = []
+    units: list[UnitReading] = []
+    candidate_total = 0
+    by_stem = relationships.by_stem()
+
+    for unit_candidates in report.units:
+        unit = by_stem.get(unit_candidates.stem)
+        bounded: list[SemanticCandidate] = []
+        for candidate in unit_candidates.candidates:
+            candidate_total += 1
+            if len(candidates) + len(bounded) >= MAX_CANDIDATES_PER_SESSION:
+                continue
+            bounded.append(_bound_candidate(candidate, writable))
+        label_tokens = _label_tokens_for(unit, evidence_by_source)
+        units.append(
+            UnitReading(
+                stem=unit_candidates.stem,
+                acquisition_path=unit.acquisition_path if unit else "",
+                source_type=unit.source_type if unit else ev.SOURCE_TYPE_UNKNOWN,
+                run_candidate=bool(unit and unit.run_candidate),
+                label=_run_label_for(unit, label_tokens) if unit else unit_candidates.stem,
+                legacy_number=unit.legacy_number if unit else None,
+                group_token=unit.group_token if unit else None,
+                scan_count=unit.scan_count if unit else 0,
+                source_count=unit.source_count if unit else 0,
+                conflict_count=len(unit.conflicts) if unit else 0,
+                candidate_ids=tuple(c.candidate_id for c in bounded),
+            )
+        )
+        candidates.extend(bounded)
+
+    shared_ids: list[str] = []
+    for candidate in report.shared:
+        candidate_total += 1
+        if len(candidates) >= MAX_CANDIDATES_PER_SESSION:
+            continue
+        bounded_shared = _bound_candidate(candidate, writable)
+        candidates.append(bounded_shared)
+        shared_ids.append(bounded_shared.candidate_id)
+
+    reading = ArchiveReading(
+        source_id=source.source_id,
+        root_label=inventory.root_label,
+        archive_name=name,
+        walker_id=archive.ARCHIVE_WALKER_ID,
+        inventory=inventory.to_state(),
+        manifest=tuple(manifest),
+        reading=tuple(reading_rows),
+        relationships=relationships.to_state(),
+        units=tuple(units),
+        shared_candidate_ids=tuple(shared_ids),
+        by_concept=dict(report.by_concept or {}),
+        by_mapping_status=dict(report.by_mapping_status or {}),
+        unregistered_concepts=tuple(report.unregistered_concepts),
+        candidate_total=candidate_total,
+        candidates_truncated=candidate_total > len(candidates),
+        statements_read=statements_read,
+        statements_suppressed=statements_suppressed,
+    )
+    return reading, tuple(candidates)
+
+
+def _label_tokens_for(
+    unit, evidence_by_source: Mapping[str, Sequence]
+) -> list[tuple[str, str]]:
+    """``(concept, raw_literal)`` for this unit's label, in reading order.
+
+    Drawn from the ACQUISITION's own evidence and deliberately nothing else: a
+    label built from a scan child's or a macro's tokens would describe a
+    different file. The FIRST literal for each concept wins — the acquisition's
+    filename and its internal declaration can disagree, and that disagreement is
+    preserved as a conflict CANDIDATE where a scientist decides it; silently
+    concatenating both into the label would present an unresolved question as a
+    name. The ordering is :data:`_LABEL_CONCEPTS`, so two units with the same
+    tokens produce the same label whatever order their readers ran in.
+    """
+    if unit is None:
+        return []
+    first: dict[str, str] = {}
+    for item in evidence_by_source.get(unit.acquisition_path, ()):
+        if item.concept in first:
+            continue
+        first[item.concept] = item.raw_literal
+    return [
+        (concept, first[concept]) for concept in _LABEL_CONCEPTS if concept in first
+    ]
+
+
+def _legacy_int(text: object) -> int | None:
+    """A note row's file number as an integer, or ``None``. Never raises.
+
+    ``relate`` keys note rows by the legacy number, which is an ``int``; a row
+    whose cell is not one is dropped from THAT index and is still present in the
+    reader's evidence, so nothing is lost — only the note-versus-filesystem
+    cross-reference is unavailable for it.
+    """
+    if not isinstance(text, str):
+        return None
+    try:
+        return int(text.strip())
+    except ValueError:
+        return None
+
+
+def _bound_candidate(
+    candidate: SemanticCandidate, writable: frozenset[str]
+) -> SemanticCandidate:
+    """Window the statements, and apply THIS BUILD's writability check.
+
+    Two changes, and neither invents anything:
+
+    * the supporting-statement list is cut to
+      :data:`MAX_STATEMENTS_PER_CANDIDATE` and
+      :attr:`SemanticCandidate.supporting_statement_total` records the true
+      count, so a window is never reported as a whole list;
+    * a candidate at a path this build has **no write route for** is marked not
+      proposable with :data:`CANDIDATE_NOT_PROPOSABLE_NO_WRITE_PATH` — which is
+      a statement about this build and explicitly not about the official schema.
+
+    An existing ``not_proposable_reason`` is never overwritten: the registry's
+    own reason for 39 of the 45 concepts, and the disagreement reason, are more
+    specific and are what a scientist should read.
+    """
+    statements = candidate.supporting_statements
+    total = len(statements)
+    windowed = (
+        statements[:MAX_STATEMENTS_PER_CANDIDATE]
+        if total > MAX_STATEMENTS_PER_CANDIDATE
+        else statements
+    )
+    reason = candidate.not_proposable_reason
+    if (
+        reason is None
+        and candidate.unresolved_reason is None
+        and candidate.kind == CANDIDATE_KIND_FIELD
+        and candidate.target_field_path is not None
+        and candidate.target_field_path not in writable
+    ):
+        reason = CANDIDATE_NOT_PROPOSABLE_NO_WRITE_PATH
+    return replace(
+        candidate,
+        supporting_statements=windowed,
+        supporting_statement_total=total if total > len(windowed) else None,
+        not_proposable_reason=reason,
+    )
+
+
 # --- the import session -------------------------------------------------------
 
 #: The workflow, in order, as the product states it. ONE list, so the surface and
@@ -1209,6 +2289,21 @@ class ImportSession:
     #: discard them. ``workspace._hydrate_notes``' arrangement, for its reason.
     unreadable_sources: list = field(default_factory=list)
     unreadable_candidates: list = field(default_factory=list)
+    #: What the archive source's parse found, when this bundle holds one. ``None``
+    #: for a bundle of pointers and fixtures, which is every session that
+    #: existed before :data:`SOURCE_KIND_ARCHIVE` did.
+    archive_reading: ArchiveReading | None = None
+    #: The candidates the ARCHIVE produced, as distinct from the ones the fixture
+    #: provider produced.
+    #:
+    #: **THE SPLIT EXISTS SO EACH CANDIDATE IS WRITTEN EXACTLY ONCE.**
+    #: :attr:`reconstruction` holds the UNION — it is where every consumer
+    #: already looks — but :meth:`to_state` writes the archive's under
+    #: ``archive_reading`` and the provider's under ``reconstruction``, and
+    #: :meth:`from_state` re-composes the union. Persisting the union under
+    #: ``reconstruction`` as well would put ~1,000 candidates in one document
+    #: twice, and would let the two copies disagree about what was found.
+    archive_candidates: list[SemanticCandidate] = field(default_factory=list)
 
     # -- derived ------------------------------------------------------------
 
@@ -1286,20 +2381,40 @@ class ImportSession:
             "sources": [s.to_state() for s in self.sources]
             + list(self.unreadable_sources),
             "parsed": [p.to_state() for p in self.parsed],
+            # EACH CANDIDATE IS WRITTEN EXACTLY ONCE, and the split is the reason
+            # `archive_candidates` exists as its own field. `reconstruction`
+            # holds the UNION in memory — every consumer already looks there —
+            # so this writes the PROVIDER's half here and the ARCHIVE's half
+            # under `archive_reading`, and `from_state` re-composes. Writing the
+            # union in both places would put ~1,000 candidates in one document
+            # twice and let the copies disagree.
             "reconstruction": (
                 None
                 if self.reconstruction is None
                 else {
                     **self.reconstruction.to_state(),
                     "candidates": [
-                        c.to_state() for c in self.reconstruction.candidates
+                        c.to_state()
+                        for c in self.reconstruction.candidates
+                        if c.candidate_id not in self._archive_candidate_ids()
                     ]
                     + list(self.unreadable_candidates),
+                }
+            ),
+            "archive_reading": (
+                None
+                if self.archive_reading is None
+                else {
+                    **self.archive_reading.to_state(),
+                    "candidates": [c.to_state() for c in self.archive_candidates],
                 }
             ),
             "unmapped_keys": [dict(entry) for entry in self.unmapped_keys],
             "proposed": {cid: dict(row) for cid, row in sorted(self.proposed.items())},
         }
+
+    def _archive_candidate_ids(self) -> frozenset[str]:
+        return frozenset(c.candidate_id for c in self.archive_candidates)
 
     @classmethod
     def from_state(cls, state: Mapping[str, Any]) -> "ImportSession":
@@ -1349,9 +2464,57 @@ class ImportSession:
         reconstruction, unreadable_candidates = _hydrate_reconstruction(
             state.get("reconstruction")
         )
-        session.reconstruction = reconstruction
         session.unreadable_candidates = unreadable_candidates
+        reading, archive_candidates = _hydrate_archive_reading(
+            state.get("archive_reading")
+        )
+        session.archive_reading = reading
+        session.archive_candidates = archive_candidates
+        # THE UNION IS RE-COMPOSED HERE, which is the read half of `to_state`'s
+        # write-once split. The archive's candidates come back in the order they
+        # were written, appended after the provider's, so `candidates_of` and
+        # every propose route see one list exactly as they did before an archive
+        # kind existed.
+        if reconstruction is not None and archive_candidates:
+            reconstruction = replace(
+                reconstruction,
+                candidates=reconstruction.candidates + tuple(archive_candidates),
+            )
+        session.reconstruction = reconstruction
         return session
+
+
+def _hydrate_archive_reading(
+    raw: object,
+) -> tuple[ArchiveReading | None, list[SemanticCandidate]]:
+    """``(reading, its candidates)``. Never raises.
+
+    **AN UNREADABLE ARCHIVE READING IS DROPPED, NOT PRESERVED, and the asymmetry
+    is the same one :func:`_hydrate_parsed` already makes.** A reading is
+    DERIVED — re-running Parse walks the archive again and recomputes all of it
+    from the manifest entry, which IS preserved — so an unreadable one costs a
+    recomputation. A source entry and a candidate are authored or judged content
+    and are kept verbatim.
+
+    A candidate this build cannot read is dropped for the same reason, and NOT
+    kept in ``unreadable_candidates``: that list is written back inside the
+    ``reconstruction`` array, and an archive candidate written there would be a
+    second copy of something that belongs under ``archive_reading``. Losing one
+    costs a re-parse; duplicating it would make the two halves disagree.
+    """
+    if not isinstance(raw, Mapping):
+        return None, []
+    try:
+        reading = ArchiveReading.from_state(raw)
+    except (UnsupportedImport, TypeError, ValueError, AttributeError):
+        return None, []
+    candidates: list[SemanticCandidate] = []
+    for entry in raw.get("candidates") or []:
+        try:
+            candidates.append(SemanticCandidate.from_state(entry))
+        except (UnsupportedImport, TypeError, ValueError, AttributeError):
+            continue
+    return reading, candidates
 
 
 def _hydrate_sources(raw: object) -> tuple[list[SourceReference], list]:
@@ -1609,7 +2772,7 @@ def add_source(
     if kind not in SOURCE_KINDS:
         raise UnsupportedImport(
             "unrecognized_kind",
-            "`kind` must name one of the two kinds of source this build stores.",
+            "`kind` must name one of the three kinds of source this build stores.",
             key=kind if isinstance(kind, str) else None,
             allowed=sorted(SOURCE_KINDS),
         )
@@ -1668,6 +2831,39 @@ def add_source(
             sha256=digest,
             fixture_name=name,
         )
+    elif kind == SOURCE_KIND_ARCHIVE:
+        # `fixture_name` CARRIES THE ARCHIVE'S NAME, reusing the field rather
+        # than adding a fourth "which committed thing is this" key. Both kinds
+        # answer the same question — WHICH committed artifact, chosen from an
+        # allowlist this module owns — and a second field would be a second
+        # place for a hydration path to have to look.
+        name = _clean(fixture_name, "fixture_name", maximum=200, required=True)
+        # Raises `unknown_archive` for anything off the allowlist, which is also
+        # the traversal boundary for this branch — and the same branch refuses a
+        # name that merely looks plausible, so this cannot probe the filesystem.
+        archive_root_for(name)
+        entry = SourceReference(
+            source_id=new_record_id(),
+            kind=kind,
+            filename=_clean(
+                filename, "filename", maximum=MAX_FILENAME_CHARS, required=False
+            )
+            or name,
+            # REPO-RELATIVE, never absolute, for the fixture branch's reason: an
+            # absolute path carries this machine's home directory into a stored
+            # document.
+            reference=ARCHIVE_FIXTURES[name],
+            parse_state=PARSE_STATE_UNPARSED,
+            provenance=_provenance(recorded_utc, kind),
+            media_type=media,
+            size_bytes=size,
+            # **WHAT THE SCIENTIST SAID, AND NOTHING ELSE.** The parse computes a
+            # digest for every MEMBER of this archive — it has to, or the corpus
+            # doubles — and not one of them is ever written here. See the module
+            # docstring's corrected claim.
+            sha256=digest,
+            fixture_name=name,
+        )
     else:
         entry = SourceReference(
             source_id=new_record_id(),
@@ -1711,13 +2907,27 @@ def _provenance(recorded_utc: str, kind: str) -> dict:
     return {
         "recorded_utc": recorded_utc,
         "recorded_by": PROVENANCE_NO_ACTOR,
-        "recorded_how": (
-            "a person entered this reference on the Historical Import surface"
-            if kind == SOURCE_KIND_REFERENCE
-            else "a person chose this committed synthetic fixture"
-        ),
-        "bytes_read_by_this_application": kind == SOURCE_KIND_SYNTHETIC_FIXTURE,
+        "recorded_how": _RECORDED_HOW[kind],
+        # TRUE FOR BOTH READ KINDS. An archive is read — that is its whole
+        # purpose — and the provenance says so rather than leaving a reader to
+        # infer it from the kind.
+        "bytes_read_by_this_application": kind
+        in {SOURCE_KIND_SYNTHETIC_FIXTURE, SOURCE_KIND_ARCHIVE},
     }
+
+
+#: One sentence per kind, in ONE place. Previously a two-branch conditional
+#: inside :func:`_provenance`, which a third kind would have made read as "a
+#: person chose this committed synthetic fixture" for an archive.
+_RECORDED_HOW: Mapping[str, str] = {
+    SOURCE_KIND_REFERENCE: (
+        "a person entered this reference on the Historical Import surface"
+    ),
+    SOURCE_KIND_SYNTHETIC_FIXTURE: "a person chose this committed synthetic fixture",
+    SOURCE_KIND_ARCHIVE: (
+        "a person chose this committed archive, and this build walked it"
+    ),
+}
 
 
 def remove_source(session: ImportSession, source_id: object, *, now_utc: str) -> bool:
@@ -1739,6 +2949,12 @@ def remove_source(session: ImportSession, source_id: object, *, now_utc: str) ->
     session.reconstruction = None
     session.unreadable_candidates = []
     session.unmapped_keys = []
+    # THE ARCHIVE READING GOES WITH IT, for the reason above: it is a reading of
+    # a bundle the bundle no longer matches. Dropped unconditionally rather than
+    # only when the removed entry WAS the archive, because a bundle may hold at
+    # most one archive and the alternative is a branch that has to stay correct.
+    session.archive_reading = None
+    session.archive_candidates = []
     session.updated_utc = now_utc
     return True
 
@@ -1751,10 +2967,58 @@ def parse_session(session: ImportSession, *, now_utc: str) -> list[ParsedSource]
     manifest's own column answers "what parsed and what did not" per entry. **No
     source is silently skipped**: every entry ends in exactly one of the four
     states, and the two that are not ``parsed`` carry a ``parse_detail``.
+
+    **AN ARCHIVE SOURCE TAKES A DIFFERENT PATH, and the difference is what the
+    parse RESULT is.** A fixture's parse result is a list of statements; an
+    archive's is an INVENTORY — 1,192 entries, their classifications, what each
+    reader read, the relationships between them and the candidates that follow.
+    So :func:`read_archive` runs the whole ``bl15`` chain (walk, classify, read,
+    relate, reconstruct) and its output lands on
+    :attr:`ImportSession.archive_reading` rather than in ``session.parsed``.
+    ``MAX_SOURCES_PER_SESSION`` is untouched and still bounds MANIFEST ENTRIES;
+    an archive's members are bounded by its own
+    :class:`~isaac_api.bl15.inventory.ArchiveLimits`.
+
+    The candidates it produces are held on :attr:`ImportSession.archive_candidates`
+    and reach :attr:`ImportSession.reconstruction` when :func:`reconstruct_session`
+    composes them — so Parse and Reconstruct remain the two steps the workflow
+    says they are, and a session that has parsed but not reconstructed reports
+    ``parse`` rather than looking finished.
     """
     parsed: list[ParsedSource] = []
     rewritten: list[SourceReference] = []
+    archive_reading: ArchiveReading | None = None
+    archive_candidates: list[SemanticCandidate] = []
     for source in session.sources:
+        if source.kind == SOURCE_KIND_ARCHIVE:
+            try:
+                archive_reading, minted = read_archive(source)
+            except UnsupportedImport as refusal:
+                rewritten.append(
+                    replace(
+                        source,
+                        parse_state=PARSE_STATE_FAILED,
+                        parse_detail=refusal.message,
+                    )
+                )
+                continue
+            archive_candidates = list(minted)
+            rewritten.append(
+                replace(
+                    source,
+                    parse_state=PARSE_STATE_PARSED,
+                    parse_detail=(
+                        f"Walked by {archive_reading.walker_id}: "
+                        f"{archive_reading.inventory.get('entry_count', 0)} file(s) "
+                        f"inventoried, "
+                        f"{len(archive_reading.inventory.get('refused') or ())} "
+                        f"refused, "
+                        f"{len(archive_reading.units)} measurement(s) found, "
+                        f"{archive_reading.candidate_total} candidate(s)."
+                    ),
+                )
+            )
+            continue
         parser = parser_for(source)
         if parser is None:
             rewritten.append(source)
@@ -1785,6 +3049,8 @@ def parse_session(session: ImportSession, *, now_utc: str) -> list[ParsedSource]
         )
     session.sources = rewritten
     session.parsed = parsed
+    session.archive_reading = archive_reading
+    session.archive_candidates = archive_candidates
     # A RE-PARSE INVALIDATES THE RECONSTRUCTION, and does not merely sit beside
     # it. Candidates derived from an earlier reading of a bundle that has been
     # re-read are a claim about evidence that may no longer exist.
@@ -1837,8 +3103,18 @@ def reconstruct_session(
     **THE RESULT IS CANDIDATES AND NOTHING ELSE.** No field is written, no
     evidence entry is minted, no record is touched:
     :data:`RECONSTRUCTION_APPLIED` is ``False`` and travels with the payload.
+
+    **THE ARCHIVE'S CANDIDATES ARE COMPOSED IN, NOT RE-DERIVED.**
+    :func:`read_archive` already ran the whole ``bl15`` chain during Parse, and
+    re-running it here would read every file in the archive a second time to
+    reach the same answer. So the union is ``provider candidates + archive
+    candidates``, in that order, and the provider is still asked even for an
+    archive-only bundle — over an empty ``parsed`` list it deterministically
+    returns none, which keeps ``provider_id`` on the payload saying which
+    provider this build has rather than leaving the field's meaning to depend on
+    what the bundle happened to contain.
     """
-    if not session.parsed:
+    if not session.parsed and not session.archive_candidates:
         raise UnsupportedImport(
             "nothing_parsed",
             (
@@ -1851,6 +3127,11 @@ def reconstruct_session(
     reconstruction = chosen.reconstruct(
         parsed=list(session.parsed), profile=profile, now_utc=now_utc, mint_id=mint_id
     )
+    if session.archive_candidates:
+        reconstruction = replace(
+            reconstruction,
+            candidates=reconstruction.candidates + tuple(session.archive_candidates),
+        )
     session.reconstruction = reconstruction
     session.unreadable_candidates = []
     session.unmapped_keys = unmapped_keys(session)
@@ -1908,6 +3189,103 @@ def record_proposed(
     session.updated_utc = proposed_utc
 
 
+def corpus_digest(session: ImportSession) -> dict | None:
+    """WHAT A SCIENTIST READS FIRST about an imported archive, or ``None``.
+
+    ``None`` when this bundle holds no archive — which is an honest absence and
+    not an empty digest: a bundle of pointers has no corpus to describe, and
+    zeroes would read as "a corpus with nothing in it".
+
+    **EVERY NUMBER HERE IS COUNTED FROM THE PAYLOAD. Not one is a literal, and
+    that is a rule rather than a style.** ``CLAUDE.md`` §11 records four separate
+    surfaces that shipped a figure they had not derived from what they claimed to
+    describe, and the archive case is the easiest one to get wrong: the
+    scientist-facing "how many scans, how many macros, how many notes" figures
+    are not on ``SourceRecord`` at all — classification is
+    :mod:`bl15.classify`'s and lives nowhere on the record — so a surface with no
+    classification map on the wire would be tempted to write the counts down. The
+    map is carried (:attr:`ArchiveReading.manifest`) and these are counted off it.
+
+    **THREE NUMBERS ARE HONESTY NUMBERS RATHER THAN PROGRESS NUMBERS**, and they
+    are here so the digest cannot read as a completeness claim:
+
+    * ``refused`` — entries the walk would not inventory, with the reason and the
+      measured value against the ceiling. An inventory that listed only what it
+      accepted could not be told apart from a smaller archive.
+    * ``truncated_reason`` — set when the WALK stopped early, which means the
+      inventory itself is incomplete and every count below it is a floor.
+    * ``partial_readings`` / ``statements_suppressed`` — sources a reader
+      understood and reported only PART of.
+      :data:`~isaac_api.bl15.evidence.MAX_EVIDENCE_PER_SOURCE` records one real
+      file suppressing ~41,000 statements, so ``statements_read`` is a count and
+      never a guarantee.
+
+    ``cannot_be_export_ready`` is the three measured reasons a Run from this
+    corpus cannot reach an official record, stated plainly instead of a progress
+    indicator that can never fill — see :func:`export_blocked_reasons`.
+    """
+    reading = session.archive_reading
+    if reading is None:
+        return None
+    inventory = dict(reading.inventory)
+    refused = list(inventory.get("refused") or [])
+    candidate_count = len(session.archive_candidates)
+    return {
+        "archive_name": reading.archive_name,
+        "root_label": reading.root_label,
+        "walker_id": reading.walker_id,
+        "total_sources": _as_count(inventory.get("entry_count")) or 0,
+        "total_bytes": _as_count(inventory.get("total_bytes")) or 0,
+        "by_source_type": reading.by_source_type(),
+        "by_classification_confidence": reading.by_confidence(),
+        "refused": refused,
+        "refused_count": len(refused),
+        "truncated_reason": inventory.get("truncated_reason"),
+        "duplicate_group_count": _as_count(inventory.get("duplicate_group_count")) or 0,
+        "statements_read": reading.statements_read,
+        "statements_suppressed": reading.statements_suppressed,
+        "partial_readings": reading.partial_reading_count(),
+        "sources_no_reader_ran_on": reading.refused_reading_count(),
+        "measurement_units": len(reading.units),
+        "run_candidate_units": len(reading.run_candidate_units()),
+        "sample_groups": len(reading.relationships.get("groups") or []),
+        "conflicts": _as_count(reading.relationships.get("conflict_count")) or 0,
+        "unattached_sources": len(reading.relationships.get("unattached") or []),
+        "relate_inputs_present": list(reading.relationships.get("inputs_present") or []),
+        # THE CANDIDATE TOTAL IS THE RECONSTRUCTION'S, NOT THE STORED COUNT, and
+        # `candidates_truncated` says when they differ. A surface reporting the
+        # stored count as the total would understate the corpus by exactly the
+        # amount `MAX_CANDIDATES_PER_SESSION` withheld.
+        "candidates": reading.candidate_total,
+        "candidates_stored": candidate_count,
+        "candidates_truncated": reading.candidates_truncated,
+        "candidate_ceiling": MAX_CANDIDATES_PER_SESSION,
+        "by_concept": dict(reading.by_concept),
+        "by_mapping_status": dict(reading.by_mapping_status),
+        "unregistered_concepts": list(reading.unregistered_concepts),
+        "cannot_be_export_ready": list(export_blocked_reasons()),
+        "persistence": ARCHIVE_PERSISTENCE_DECISION,
+    }
+
+
+def _page(rows: Sequence, *, limit: int = ARCHIVE_PAGE_WINDOW) -> dict:
+    """``{"rows": <first `limit`>, "total": <all of them>, "limit": <limit>}``.
+
+    **THE WINDOW BOUNDS WHAT IS FETCHED, NEVER WHAT IS CLAIMED** — ``CLAUDE.md``
+    §11's 2026-09-02 rule for ``PENDING_WINDOW``, applied here because the
+    failure mode is identical and worse: a surface counting the rows it received
+    would report a 1,192-file corpus as 200 files. ``total`` is read off the
+    whole collection, so every count a surface renders can come from the server.
+    """
+    rows = list(rows)
+    return {
+        "rows": rows[:limit],
+        "total": len(rows),
+        "limit": limit,
+        "truncated": len(rows) > limit,
+    }
+
+
 def session_view(session: ImportSession) -> dict:
     """The wire shape of one session. Derived, never a second store.
 
@@ -1961,9 +3339,7 @@ def session_view(session: ImportSession) -> dict:
         },
         "parsed": [p.to_state() for p in session.parsed],
         "unmapped_keys": [dict(entry) for entry in session.unmapped_keys],
-        "reconstruction": (
-            None if reconstruction is None else reconstruction.to_state()
-        ),
+        "reconstruction": _reconstruction_view(reconstruction),
         "unreadable_candidate_count": len(session.unreadable_candidates),
         "proposed": {cid: dict(row) for cid, row in sorted(session.proposed.items())},
         "parsers": [
@@ -1981,6 +3357,96 @@ def session_view(session: ImportSession) -> dict:
             "conventions_encoded": 0,
         },
         "available_fixtures": list(fixture_names()),
+        "available_archives": list(archive_names()),
+        # THE DIGEST FIRST, because it is what a scientist reads first. `None`
+        # for a bundle with no archive, which is an absence rather than zeroes.
+        "corpus_digest": corpus_digest(session),
+        "archive": _archive_view(session),
+    }
+
+
+def _reconstruction_view(reconstruction: Reconstruction | None) -> dict | None:
+    """The reconstruction on the wire, with its CANDIDATE LIST BOUNDED.
+
+    ``None`` when there is none. Otherwise exactly
+    :meth:`Reconstruction.to_state`'s shape, with two additions and one change:
+    ``candidates`` carries at most :data:`ARCHIVE_PAGE_WINDOW` entries, and
+    ``candidate_page`` states the true ``total``, the ``limit`` applied and
+    whether anything was withheld.
+
+    **THE WINDOW BOUNDS WHAT IS FETCHED, NEVER WHAT IS CLAIMED.** Measured at the
+    real corpus's cardinality, an unbounded response was **6,410,701 bytes**, of
+    which ``reconstruction`` alone was **5,567,110** — a single HTTP response
+    nobody can use, over ~1,879 candidates a surface could not render either.
+    ``candidate_page.total`` is read off the whole tuple, so every count a
+    surface shows comes from the server rather than from the length of what it
+    received; ``CLAUDE.md`` §11's 2026-09-02 entry records the defect class this
+    rule exists to prevent.
+
+    **NOTHING ABOUT PROPOSING IS AFFECTED, and that is why the window is safe
+    here.** Both propose operations resolve a candidate against the LOADED
+    SESSION (``ImportSession.candidate`` and :func:`candidates_of`), never
+    against this payload, so a candidate outside the window is still fully
+    proposable by id. The fixture path is unchanged in practice as well as in
+    shape: every committed example produces far fewer than the window, so its
+    ``candidates`` array is byte-identical to what it has always been.
+    """
+    if reconstruction is None:
+        return None
+    state = reconstruction.to_state()
+    candidates = state.get("candidates") or []
+    state["candidates"] = candidates[:ARCHIVE_PAGE_WINDOW]
+    state["candidate_page"] = {
+        "total": len(candidates),
+        "limit": ARCHIVE_PAGE_WINDOW,
+        "truncated": len(candidates) > ARCHIVE_PAGE_WINDOW,
+    }
+    return state
+
+
+def _archive_view(session: ImportSession) -> dict | None:
+    """The archive reading, PAGED. ``None`` when this bundle holds no archive.
+
+    Three collections are paged rather than served whole, and each carries its
+    own ``total``: the per-file MANIFEST (1,192 rows on the real corpus), the
+    per-source READING rows (the same cardinality), and the MEASUREMENT UNITS
+    (94). The units' page is the one a surface builds its Runs list from, and it
+    is bounded for the same reason the others are.
+
+    **THE MANIFEST IS SERVED AT ALL BECAUSE THE BRIEF REQUIRES IT under
+    disclosure, and it is PAGED because 1,192 flat rows by default is the
+    pattern ``HIST-004`` bans.** It is built here rather than in
+    :meth:`isaac_api.bl15.inventory.ArchiveInventory.to_state`, which omits
+    ``entries`` deliberately — paging belongs at the surface that has a request
+    to bound, not on a value type shared by a CLI and a walk.
+
+    Relationships are served WHOLE and that is a deliberate exception: `units`
+    inside it is the same 94 rows, but its `groups`, `corpus_conflicts` and
+    `unattached` are the things a scientist most needs to see completely, and
+    they are bounded by the archive's own entry ceiling rather than by its file
+    count. If the real corpus makes this large, it is the next thing to page —
+    named here so that is a decision rather than a discovery.
+    """
+    reading = session.archive_reading
+    if reading is None:
+        return None
+    return {
+        "source_id": reading.source_id,
+        "archive_name": reading.archive_name,
+        "root_label": reading.root_label,
+        "walker_id": reading.walker_id,
+        "inventory": dict(reading.inventory),
+        "manifest_page": _page(reading.manifest),
+        "reading_page": _page(reading.reading),
+        "units_page": _page([u.to_state() for u in reading.units]),
+        "relationships": dict(reading.relationships),
+        "shared_candidate_ids": list(reading.shared_candidate_ids),
+        "run_candidate_unit_count": len(reading.run_candidate_units()),
+        "statements_read": reading.statements_read,
+        "statements_suppressed": reading.statements_suppressed,
+        "candidate_total": reading.candidate_total,
+        "candidates_truncated": reading.candidates_truncated,
+        "persistence": ARCHIVE_PERSISTENCE_DECISION,
     }
 
 
