@@ -46,25 +46,41 @@ import { expect, test } from './own-session-fixtures';
  */
 async function expectClean(page: Page, step: string) {
   /*
-   * WAIT FOR THE SCOPE TO EXIST BEFORE SCANNING IT. Added 2026-09-16.
+   * RETRY THE SCAN, DO NOT MERELY WAIT BEFORE IT. Added 2026-09-16.
    *
    * `scan` is scoped to `main`, and axe throws `No elements found for include in
-   * page Context` when that selector matches nothing at the moment it runs. This
-   * screen re-renders on every workflow action, and a `toBeVisible()` on some
-   * inner heading can resolve in a paint where `main` itself is between renders —
-   * so the wait that preceded each call was on the wrong element.
+   * page Context` when that selector matches nothing at the instant it runs. This
+   * screen re-renders on every workflow action, so `main` is briefly detached
+   * while React swaps the subtree.
    *
-   * IT IS A PRE-EXISTING FLAKE, not one the archive tests introduced: two
-   * consecutive full-suite runs failed in DIFFERENT tests, the first of them one
-   * this spec already had. Adding more scans made it likelier to show, which is
-   * how it surfaced. Fixed in the shared helper rather than at a call site,
-   * because every scan here has the same exposure.
+   * A `waitFor({ state: 'attached' })` BEFORE the scan does not close it: a wait
+   * and a scan are two steps, and `main` can be attached when the wait resolves
+   * and gone by the time axe walks the frame. A wait cannot close a race whose
+   * window is after it. So the SCAN retries.
    *
-   * `attached` rather than `visible`: `main` is the scope, not the subject, and a
-   * scope that exists is exactly what axe needs.
+   * **THE ASSERTION IS DELIBERATELY OUTSIDE THE RETRY.** Inside, it would retry a
+   * GENUINE VIOLATION too — burning the timeout and then reporting it, or worse
+   * passing if some later render happened to be clean. Only the transient
+   * DOM-swap failure is retried; a real violation fails on the first scan that
+   * completes.
+   *
+   * ── AND THE RETRY IS HOW A HARD CRASH WAS TOLD APART FROM A FLAKE ───────────
+   *
+   * With it in place the archive test failed on EVERY local run instead of
+   * occasionally, because that one was never a race: pressing `Reconstruct
+   * Candidates` CRASHED THE WHOLE SCREEN, so `main` genuinely did not exist for
+   * the full 15 seconds. **The retry did not fix that** — the disagreement-row
+   * contract in `bl15.reconstruct` did. A flaky-looking symptom and a hard crash
+   * present identically through this helper, and the retry is what separated
+   * them by turning one into a reproducible failure.
+   *
+   * It is kept for the case it does address: the first full-suite failure was in
+   * the FIXTURE-path test, which that crash cannot reach.
    */
-  await page.locator('main').first().waitFor({ state: 'attached' });
-  const results = await scan(page, { include: 'main' });
+  let results!: Awaited<ReturnType<typeof scan>>;
+  await expect(async () => {
+    results = await scan(page, { include: 'main' });
+  }).toPass({ timeout: 15_000 });
   expect(
     results.violations.map(formatViolation).join('\n\n'),
     `the import session has an accessibility violation at: ${step}. This state had NEVER ` +

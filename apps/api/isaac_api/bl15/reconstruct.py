@@ -335,8 +335,24 @@ def _candidates_from_evidence(
                 supporting_source_ids=ids,
                 supporting_statements=statements,
                 target_field_path=entry.official_path if entry else None,
+                # THE ROW SHAPE IS `{value, source_ids, locators}`, NOT `{value,
+                # sources}`. Corrected 2026-09-16 after a browser test found the
+                # consequence: `CandidateCard` does `row.source_ids.map(...)`, so a
+                # candidate carrying a disagreement CRASHED THE WHOLE SCREEN to a
+                # blank page — React threw, unmounted the tree, and `main` vanished.
+                #
+                # This module invented a second spelling for a contract
+                # `historical_import`'s own provider had already established. Nothing
+                # caught it because no test rendered an archive candidate that
+                # disagreed: the shape is only reachable when two sources state
+                # different literals for one concept, which the fixture corpus does
+                # and the unit tests asserted only on the server side.
                 disagreement=tuple(
-                    {"value": value, "sources": _sources_stating(group, value)}
+                    {
+                        "value": value,
+                        "source_ids": _sources_stating(group, value),
+                        "locators": _locators_stating(group, value),
+                    }
                     for value in distinct
                 ),
                 unresolved_reason=UNRESOLVED_SOURCES_DISAGREE,
@@ -407,8 +423,14 @@ def _candidate_from_conflict(
             }
             for r in conflict.readings
         ),
+        # Same contract as above — `source_ids` and `locators`, never `sources`.
         disagreement=tuple(
-            {"value": r.value, "sources": [r.source_path]} for r in conflict.readings
+            {
+                "value": r.value,
+                "source_ids": [r.source_path],
+                "locators": [r.locator],
+            }
+            for r in conflict.readings
         ),
         unresolved_reason=UNRESOLVED_SOURCES_DISAGREE,
         not_proposable_reason=DISAGREEMENT_NOT_PROPOSABLE,
@@ -468,6 +490,17 @@ def _normalized_of(group: Sequence[ev.SourceEvidence]):
 
 def _sources_stating(group: Sequence[ev.SourceEvidence], reading: str) -> list[str]:
     return sorted({i.source_path for i in group if _reading_of(i) == reading})
+
+
+def _locators_stating(group: Sequence[ev.SourceEvidence], reading: str) -> list[str]:
+    """WHERE each source says it — the third key of the disagreement-row contract.
+
+    A scientist resolving a disagreement needs the locator, not only the filename: two
+    readings from one file at different lines are the common case in a SPEC header.
+    """
+    return [
+        f"{i.source_path} · {i.locator}" for i in group if _reading_of(i) == reading
+    ]
 
 
 def _rule_for(concept: str, group: Sequence[ev.SourceEvidence]) -> str:

@@ -537,3 +537,86 @@ def test_session_source_ids_replace_paths_when_supplied_and_paths_are_the_fallba
         for c in with_ids.units[0].candidates
         for s in c.supporting_statements
     )
+
+
+def test_a_disagreement_row_matches_the_CONTRACT_the_pipeline_already_had():
+    """THE SHAPE THAT CRASHED THE WHOLE SCREEN, pinned.
+
+    This module invented `{value, sources}` for a disagreement row while
+    `historical_import`'s own provider had long emitted `{value, source_ids,
+    locators}` — and `CandidateCard` does `row.source_ids.map(...)`. So an archive
+    candidate that disagreed made React throw, unmount the tree, and leave a BLANK
+    PAGE. Found by a browser test; no server-side test could see it, because every
+    assertion here checked the row's CONTENT and none checked its KEYS against the
+    other producer of the same shape.
+
+    Asserted as an exact key set rather than `"source_ids" in row`, because the
+    defect was an extra key AND a missing one, and `in` would have passed on the
+    half that mattered least.
+    """
+    report = rc.reconstruct(
+        relationships=one_unit(),
+        evidence_by_source={
+            STEM: [
+                item(STEM, ev.CONCEPT_FILTER, "filter10"),
+                item(f"{STEM}_dir/{STEM}_001.dat", ev.CONCEPT_FILTER, "filter20"),
+            ]
+        },
+    )
+    candidate = next(
+        c for c in report.units[0].candidates if c.candidate_id.endswith("filter")
+    )
+    assert candidate.disagreement
+    for row in candidate.disagreement:
+        assert set(row) == {"value", "source_ids", "locators"}, row
+        assert isinstance(row["source_ids"], list) and row["source_ids"]
+        assert isinstance(row["locators"], list) and row["locators"]
+
+
+def test_a_structural_conflicts_rows_match_the_same_contract():
+    """The second producer in this module, which had the same divergence."""
+    relationships = R.relate(
+        entries=[rec(STEM, content=f"#F {STEM}\n")],
+        classifications={STEM: SPEC},
+        internal_declarations={STEM: "15_02_ZZ1_base_filter10_060mV"},
+    )
+    report = rc.reconstruct(relationships=relationships, evidence_by_source={})
+    conflict = next(
+        c for c in report.units[0].candidates if "::conflict::" in c.candidate_id
+    )
+    assert conflict.disagreement
+    for row in conflict.disagreement:
+        assert set(row) == {"value", "source_ids", "locators"}, row
+
+
+def test_every_disagreement_row_this_module_emits_has_the_same_keys():
+    """ONE CONTRACT, BOTH PRODUCERS — the guard the divergence slipped through.
+
+    The two producers were written apart and only one was ever rendered, so the
+    shapes drifted silently. This walks every candidate from a reconstruction that
+    exercises both and requires one key set across all of them.
+    """
+    relationships = R.relate(
+        entries=[rec(STEM, content=f"#F {STEM}\n")],
+        classifications={STEM: SPEC},
+        internal_declarations={STEM: "15_02_ZZ1_base_filter10_060mV"},
+    )
+    report = rc.reconstruct(
+        relationships=relationships,
+        evidence_by_source={
+            STEM: [
+                item(STEM, ev.CONCEPT_FILTER, "filter10"),
+                item(STEM, ev.CONCEPT_FILTER, "filter20", locator="filename token 5"),
+            ]
+        },
+    )
+    rows = [
+        row
+        for unit in report.units
+        for candidate in unit.candidates
+        for row in candidate.disagreement
+    ]
+    assert len(rows) >= 2, "this fixture no longer exercises both producers"
+    assert {frozenset(row) for row in rows} == {
+        frozenset({"value", "source_ids", "locators"})
+    }
