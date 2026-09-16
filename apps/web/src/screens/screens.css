@@ -2195,6 +2195,47 @@
   font-weight: 700;
   color: var(--text-heading);
 }
+
+/* Data & Privacy concept rows, 2026-09-16. Twelve always-expanded definitions
+   rendered 2.5 viewports of prose at 1280x900 and 7.4 at 375x812 (measured), so
+   each `detail` now sits behind its own native `<details>`. NOTHING IS DELETED:
+   the whole paragraph is inside, verbatim, and the `<summary>` carries only the
+   heading — a topic, never a claim. See `PrivacyBody`'s doc comment for why that
+   distinction is what keeps `settingsContent.ts`' never-hide-a-caveat rule intact.
+
+   The row must LOOK openable, so the summary keeps the native disclosure
+   triangle, takes the pointer, and tints its heading on hover.
+
+   `list-style-position: inside` is declared rather than inherited: it puts the
+   marker in the summary's own content box, so the triangle stays inside the
+   card's 13px padding and the paragraph below needs no compensating indent. An
+   `outside` marker would hang over the card border, and correcting that with
+   negative margins would have to be re-tuned on every nested child. */
+/* No padding of its own, deliberately: `type-scale-and-spacing`'s UX-001 ratchet
+   counts every hand-authored `padding`/`margin`/`gap` length, and a `1px` here
+   pushed the axis 2400 -> 2401 for no gain. The row is already a full-card-width
+   target (measured 453 x 22 at 1280) sitting inside `.settings-points > li`'s own
+   11px/13px padding, so the literal bought nothing the card had not paid for. */
+.settings-concept > summary {
+  display: list-item;
+  list-style-position: inside;
+  cursor: pointer;
+  border-radius: var(--radius-inner, 8px);
+}
+.settings-concept > summary::marker {
+  color: var(--text-muted);
+}
+/* `<h3>` is a block, so it would otherwise drop below the marker's line box. */
+.settings-concept > summary > h3 {
+  display: inline;
+}
+.settings-concept > summary:hover > h3 {
+  color: var(--action);
+}
+.settings-concept > summary:focus-visible {
+  outline: 2px solid var(--action);
+  outline-offset: 2px;
+}
 /* A wider track must not simply become a wider line. With two columns at 1440
    the track carries ~500px of text, which is ~85 characters at 12px — past the
    comfortable measure in the other direction. `68ch` is the cap

@@ -160,6 +160,42 @@ export const PROSE_DISCLOSURES: Readonly<Record<string, number>> = Object.freeze
 export const FIELD_GROUP_SURFACES: ReadonlySet<string> = new Set(['record-detail']);
 
 /**
+ * How many `details.settings-concept` each surface mounts.
+ *
+ * ── ADDED 2026-09-16, AND IT IS THIS HELPER'S OWN RULE APPLIED TO A NEW SITE ──
+ *
+ * Data & Privacy rendered its twelve concept definitions always-expanded, which
+ * measured 2.5 viewports of prose at 1280x900 and 7.4 at 375x812. Each `detail`
+ * now sits behind its own `<details class="settings-concept">` — nothing deleted,
+ * every sentence still in the DOM.
+ *
+ * WITHOUT THIS ENTRY THAT CHANGE WOULD HAVE BEEN INVISIBLE AND WRONG. axe does
+ * not scan a closed disclosure, so twelve paragraphs would have left every scan
+ * at every viewport — and `settings-privacy` records NO baseline cell, i.e. zero
+ * violating nodes, so the loss could not even show up as a number moving. It
+ * would have looked exactly like nothing had happened, which is the failure mode
+ * the Statistics `Technical Details` history in this file's header describes.
+ *
+ * Opening them restores precisely the DOM the surface was scanned with before,
+ * so the correct outcome is that NO baseline cell moves. That is a checkable
+ * claim and it is the one this entry exists to keep true.
+ *
+ * EXACT COUNT, following `PROSE_DISCLOSURES` rather than `FIELD_GROUP_SURFACES`,
+ * because this number is a property of the APP's own content module
+ * (`settingsConcepts()` in `src/lib/settingsContent.ts`) and not of any record
+ * under test. A thirteenth concept therefore names itself here instead of
+ * quietly going unscanned.
+ *
+ * The nested `details.settings-more` drawers stay CLOSED, unchanged: they were
+ * closed before this change too, so leaving them shut is what keeps the scanned
+ * DOM identical. Their contents remain unscanned — a real, pre-existing
+ * limitation, named here rather than introduced here.
+ */
+export const SETTINGS_CONCEPT_DISCLOSURES: Readonly<Record<string, number>> = Object.freeze({
+  'settings-privacy': 12,
+});
+
+/**
  * Surfaces that MUST mount the COLLAPSED Asset References disclosure.
  *
  * Declared for exactly the reason `FIELD_GROUP_SURFACES` is, and the reason is
@@ -222,6 +258,29 @@ export async function openUnreachableDisclosures(page: Page, surfaceId: string):
   ).toBe(expectedProse);
   for (let i = 0; i < proseCount; i++) {
     const one = prose.nth(i);
+    await one.locator('> summary').click();
+    await expect(one).toHaveAttribute('open', '');
+  }
+
+  /*
+   * The Data & Privacy concept rows. Same mechanism and same reasoning as the
+   * prose disclosures above — declared count, opened by index, asserted open —
+   * and see `SETTINGS_CONCEPT_DISCLOSURES` for why an unopened row here would be
+   * a coverage loss that no baseline number could reveal.
+   */
+  const concepts = page.locator('details.settings-concept');
+  const expectedConcepts = SETTINGS_CONCEPT_DISCLOSURES[surfaceId] ?? 0;
+  const conceptCount = await concepts.count();
+  expect(
+    conceptCount,
+    `surface "${surfaceId}" mounts ${conceptCount} details.settings-concept; ` +
+      `SETTINGS_CONCEPT_DISCLOSURES in e2e/helpers/disclosures.ts declares ${expectedConcepts}. ` +
+      'A concept row that is not opened here has its whole definition exempt from every axe ' +
+      'scan at every viewport, and because settings-privacy records no baseline cell the loss ' +
+      'would move no number at all — update the map in the same change that adds or removes one.'
+  ).toBe(expectedConcepts);
+  for (let i = 0; i < conceptCount; i++) {
+    const one = concepts.nth(i);
     await one.locator('> summary').click();
     await expect(one).toHaveAttribute('open', '');
   }
