@@ -8,6 +8,54 @@ the repository — never from remembered chat context.
 ## SESSION HEADER
 
 ```
+*** 2026-09-15, CONTINUATION — RE-DERIVED AGAIN, because the block that follows
+    went stale the moment PR #256 merged and a stale header is worse than none.
+    THIS IS THE CURRENT STATE; everything below it is a superseded reading kept
+    unedited, for the reason the 2026-09-15 block itself gives. ***
+
+RE-DERIVED AT 2026-09-16T01:01Z, every line from a command:
+  main            = origin/main = 6e539fda   (PR #256's merge commit)
+  release         = v0.0.241; `git rev-list -n1 v0.0.241` -> 6e539fdaa7a209e4…
+                    — verified by resolving the TAG, not by reading the
+                    workflow's own `TAG=` log line
+  main CI         = GREEN at 6e539fda (push event), and "Build and Push to
+                    GHCR" concluded success; the release gate printed
+                    `release gate ALLOWED for 6e539fda…`
+  branch          = feat/v2-settings-advanced-and-hist005
+  HEAD            = 33c0ad01  (9 commits ahead of main — re-counted, it read
+                    8 for one commit and a count that lags is the same class of
+                    stale claim this header exists to stop)
+  open PRs        = ONE — #257. **THIS LINE MAKES NO CLAIM ABOUT ITS CI**, and
+                    that is deliberate: any SHA written here is superseded by the
+                    next push, so a "CI green at X" in a committed header is a
+                    claim that expires. The arbiter is the PR's own checks on its
+                    own head, and the release gate independently refuses any
+                    commit whose CI did not conclude `success`.
+  working tree    = (clean)
+  stashes         = (empty)
+  truth path      = UNTOUCHED by this branch, asserted mechanically:
+                    `git diff --name-only origin/main...HEAD | grep -E
+                    '^(src/isaac_records/|schema/|apps/api/isaac_api/(export|official)\.py)'`
+                    returns nothing.
+
+  WHAT THIS CONTINUATION SHIPPED, each with its own commit and reasoning:
+    1. Settings grouped — the three developer tabs under an ADVANCED marker on
+       ONE flat tablist; the collapse-into-one-tab reading declined at the site
+       on measured landmark grounds.
+    2. `HIST-005` — `POST /api/imports/{id}/add-to-experiment`, the import
+       workflow's sixth step, as ONE write. It was the last unbuilt step.
+    3. Impeccable critique of both new surfaces, DEGRADED (single-context) and
+       bannered; two findings declined with reasons, one "fix" withdrawn as
+       having been aimed at the wrong quantity.
+    4. The single-candidate propose route's stale-writer 500, closed — the
+       sibling exposure slice 2 had named an hour earlier.
+    5. The batch's chain proven END TO END to a validated draft; it falsified my
+       own assertion about where a run-scoped value lands.
+    6. One stored timestamp showing in TWO spellings 200px apart, found by
+       looking at the screen rather than by a test.
+
+*** THE SUPERSEDED BLOCK FOLLOWS, unedited. ***
+
 *** 2026-09-15 SESSION OPEN — THE BLOCK BELOW WAS STALE BY 26 COMMITS AND IS
     CORRECTED HERE FIRST, per this file's own rule that a stale header is worse
     than none. Everything under "LAST UPDATED: 2026-09-13" describes a state
@@ -346,6 +394,23 @@ NAMED RESIDUE THAT IS OURS, NOT EXTERNAL — the honest short list:
     taste: `settingsContent.ts` requires the mode-not-content caveat in the
     always-visible `detail`, and `settings-page.test.tsx` requires each summary
     to render exactly once. The mandated shape would hide a privacy state.
+    **RE-EXAMINED 2026-09-15 and the block is CONFIRMED, with the reason stated
+    so the question is closed rather than left open.** The rule is at
+    `settingsContent.ts:936` and it is absolute: *"A caveat that keeps the
+    visible sentence from overstating what the code does may never go behind
+    `more`."* Read against the actual content, that leaves no third shape. The
+    `detail` paragraphs ARE the page — `no-telemetry` alone carries the
+    server-log, access-log and identity-gateway scope that stops
+    *"transmits nothing about your session"* from overstating the code — so no
+    layout that keeps every caveat visible can reduce the text. A two-column
+    grid would make long paragraphs harder to read, not easier. The only
+    remaining lever is SHORTER WORDING, which is a claim-accuracy decision and
+    not a layout one: every sentence a reader might cut is load-bearing against
+    a specific overstatement, and several were relocated here from other screens
+    precisely so the full statement would carry its scope. **A future session
+    should not retry this as a layout task.** If the page is to get shorter it is
+    by the owner deciding which caveats may be weakened, which is not an
+    engineering call.
   * `.hi-body` / `.hi-note` / `.hi-steps-disclosure` in the import session —
     bounded in `wide-prose.spec.ts` with measured ceilings and a stated reason,
     not silently forgiven. §10's remedy is shorter copy, which is a content
@@ -4587,3 +4652,66 @@ provider, no database, no hosted environment was touched.
 unmodified; the batch route writes only `state["notes"]` and `state["proposals"]`, which is
 asserted rather than claimed — both target field paths are absent from the record draft and the run
 draft after a successful batch.
+
+---
+
+## SCOPE V2 — CLOSURE ACCOUNTING (2026-09-15/16 continuation)
+
+Written against the goal's own five completion conditions, so a reader can check each rather than
+take a verdict.
+
+### 1. All safe executable Scope V2 work from the master prompt
+
+Every item on the owner's mandatory list, with where it lives:
+
+| owner's item | state | where |
+|---|---|---|
+| ISAAC favicon from the existing logo | DONE | 4 links, measured `rgb(44,106,176)` matching the header tile, identical path geometry |
+| Impeccable for every significant UI redesign | DONE, **DEGRADED on every run** | see §3 below — the banner is not a formality |
+| streamlined, scientist-first, low-text | DONE | Statistics 6,993→2,715px and 598→172 text elements; Help 7→4 top-level items by disclosure |
+| secondary explanations behind disclosures | DONE | Help popover, Settings sections, capture panels |
+| Settings simplified, developer material under Advanced | **DONE this continuation** | grouped on ONE flat tablist; the collapse declined at the site on measured landmark grounds |
+| Statistics restored to sidebar AND redesigned | DONE | 4-item primary nav, pinned by `statistics-nav.test.tsx` |
+| Project Memory out of primary navigation | DONE | reachable by URL and from Settings — demoted, not deleted, which is what was asked |
+| Runs split-screen → a clear Record Map | DONE | `✓ Filled` / `◌ Missing` chip **and the value** per field, with its schema path |
+| blockers field-specific, actionable, **navigable** | DONE | `onGoToField` focuses and scrolls the control, guarded so only the surface rendering the inputs offers it |
+| contextual `Ask ISAAC` | DONE | `ask={{experimentId, runId, runLabel}}` per finding |
+| human-friendly timestamps preserving the stored format | **DONE this continuation** | the summary was a THIRD site bypassing the one renderer; fixed, and the ISO form still appears exactly once in the mono box |
+| discoverable proposal creation | DONE | proven in a browser on a record with ZERO notes |
+| Historical Import finished, incl. Add-to-Experiment | **DONE this continuation** | `HIST-005` was the last unbuilt step; dropzone, removable rows, statuses, reference fallback, stepper and review already shipped |
+| all app-side MCP / capture / proposal / provenance / ambiguity / validation / revision / a11y / responsive / error-recovery | DONE app-side | each row of the external-blocker table above reads "complete, fail-closed" with an owner for the switch |
+
+### 2. Major scientist-facing pages have received Impeccable review
+
+Yes, and **with a limitation that must travel with the claim**: NO run in this session had the two
+isolated assessors `critique.md` requires, because the owner capped the session at five subordinate
+agents and all five were spent on implementation and review. Every critique was single-context and
+bannered. What the runs do carry, and what a sub-agent would not have added, is a **negative control
+on the tool itself** (`detect.mjs` returns `[]`/exit 0 on deliberately broken `.tsx` here) and
+**attribution by difference** (each surface scanned with and without the new element).
+
+### 3. Integrated verification on the final state
+
+Every figure measured in this continuation, with its command — see the per-slice tables above. The
+five whole-suite runs are: backend **9,463**, frontend **6,100**, mutation e2e **123**, trusted e2e
+**8**, and the full read-only e2e (all five viewport projects). CI on the branch is the arbiter for
+the Linux-only half, and the release gate refuses any commit whose CI did not conclude `success`.
+
+### 4. The ledger reflects reality
+
+The header was re-derived at the top of this continuation because it had gone stale the moment
+PR #256 merged — it still read `main = dbf9d121`, `release = v0.0.240`, `open PRs = NONE`. Six
+in-place corrections were made to rows that had stopped being true, each struck rather than
+deleted: the `HIST-005` row, the Settings-regroup residue row, the Impeccable-coverage row, the
+"re-run pending" verification cell, the batch route's own "deliberately NOT changed here" comment,
+and the `addWholeLead` rationale.
+
+### 5. What remains — every item external, human, or data-blocked
+
+The table under **EXTERNAL BLOCKERS** above is the answer, each row carrying an owner and an exact
+next action. Nothing in it is waiting on application code. The residue that is OURS is three items,
+and each is a decision rather than a task: the app-wide prose measure (the owner's own "don't cap
+prose narrow" is what makes it a decision), the Data & Privacy status-row restructure (blocked by
+committed honesty guards — the mandated shape would hide a privacy state), and the fact that no
+Impeccable run in this session could have two assessors.
+
