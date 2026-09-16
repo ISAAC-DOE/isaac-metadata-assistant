@@ -1147,7 +1147,7 @@ describe('the Full Description rule over the REAL generated contract', () => {
    * rule recognises, NOT by widening the list. This is the THIRD recorded
    * instance of that miss, and the second the test caught rather than a human.
    */
-  it('describes the contract it claims to: 87 operations, MEASURED on the merged tree', () => {
+  it('describes the contract it claims to: 88 operations, MEASURED on the merged tree', () => {
     // FOUR slices have now raised this from 52 for real, different additions — the
     // asset slice, the transcript slice, run removal, and the two CONFLICT
     // RESOLUTION operations. Both sides of this merge conflict carried a number
@@ -2374,7 +2374,40 @@ describe('the Full Description rule over the REAL generated contract', () => {
     // `test_contract_description_parity.py` proves that rather than leaving it
     // asserted here. Not derived from the line above — MEASURED by running this file
     // and reading what it reported.
-    expect(total).toBe(157721);
+    // 157,721 -> 160,433 and 88 -> 88 operations, 2026-09-16: TWO EXISTING DESCRIPTIONS
+    // CHANGED AND NO OPERATION WAS ADDED, which is the opposite of every entry above and
+    // is why this one states it first. `POST .../sources` gained the ARCHIVE source kind
+    // (1,795 -> 2,699, +904, 6 -> 7 paragraphs) and `.../add-to-experiment` gained
+    // `create_runs` (3,170 -> 4,988, +1,818, 8 -> 12). Nothing else moved: measured by
+    // diffing the transcribed array against `origin/main` per operation, which reports
+    // exactly those two changed, none added and none removed.
+    //
+    // THE +2,712 RECONCILES AND WAS NOT TAKEN ON TRUST. The two raw deltas sum to
+    // +2,722; this block's rule subtracts 2 per `\n\n` separator, and the change adds 5
+    // paragraphs, so 2,722 - 10 = 2,712. That the arithmetic closes is what distinguishes
+    // this from the 2026-08-16 entry above, which records the same sum being got wrong by
+    // nine because it was derived from the new text's length instead of re-measured.
+    //
+    // ~~NAMED COST: +5 paragraphs means the `settings-explorer` accessibility cells move
+    // on BOTH platforms, so this needs a Linux CI round-trip.~~ — **PREDICTED, THEN
+    // MEASURED, AND THE PREDICTION WAS WRONG. No cell moves.** Run on darwin after this
+    // change: `a11y-axe.spec.ts` 150 passed and `a11y-narrow.spec.ts` 63 passed, zero
+    // baseline movement, `a11y-baseline.ts` untouched.
+    //
+    // The reasoning that produced the wrong prediction is worth keeping, because it is
+    // the reasoning anyone would reach for: the Endpoint Explorer renders each post-lead
+    // paragraph as its own `<p class="api-docs-description">`, so more paragraphs means
+    // more nodes. **But the baseline counts VIOLATING nodes, not rendered ones** — and
+    // that token is compliant since the palette correction, so prose added to it
+    // contributes zero failures however much of it there is. `CLAUDE.md` §11 records
+    // exactly this mechanism for the A3 / change-feed collision that also never fired,
+    // and this is the same mistake made again by someone who had read it.
+    //
+    // The editorial choice stands on its own merit rather than on a price: an
+    // undocumented `create_runs` on a published contract is a contract that is wrong,
+    // and the archive kind is this feature's central honesty boundary. It simply cost
+    // nothing measurable.
+    expect(total).toBe(160433);
     // 104,045 -> 114,959 (+10,914): the four new operations, and NO existing
     // description changed — `test_contract_description_parity.py` proves that rather
     // than leaving it asserted here. RE-DERIVED from the served document and never
@@ -2608,7 +2641,28 @@ describe('the Full Description rule over the REAL generated contract', () => {
       // `POST .../add-to-experiment`, carries seven post-lead paragraphs.
       // MEASURED by running this file and reading what it reported (`expected 310
       // to be 303`), not counted by eye and not apportioned.
-      310,
+      //
+      // 310 -> 315 (+5), 2026-09-16: NO NEW OPERATION — the two descriptions already
+      // published for Historical Import each grew. `POST .../sources` 6 -> 7 post-lead
+      // paragraphs (the ARCHIVE source kind) and `.../add-to-experiment` 8 -> 12
+      // (`create_runs`: what it creates, the label it writes, that it writes no VALUE,
+      // and the already-exported fan-out refusal). Measured per operation by diffing
+      // the transcribed array against `origin/main`, then confirmed by running this
+      // file and reading `expected 315 to be 310` — the two agree, which is the check
+      // this block's 2026-08-16 note exists to force.
+      //
+      // BOTH NUMBERS MOVED TOGETHER, which is the signature of prose APPENDED as new
+      // paragraphs rather than woven in. That was deliberate — each new paragraph states
+      // one separable thing a reader who stops early must not have skipped (what a run
+      // is created FROM, that no value is written, and the refusal that stops a second
+      // official record being published once per measurement).
+      //
+      // ~~and the five `settings-explorer` accessibility cells are the stated price~~ —
+      // **there is no price; measured, no cell moves.** See the struck prediction in the
+      // block above `expect(total)` for the measurement and for why the obvious
+      // reasoning (more paragraphs, more nodes) is wrong here: the baseline counts
+      // VIOLATING nodes, and that token is compliant.
+      315,
     );
     // 211 -> 235 (+24): the four new operations carry a lead plus 24 post-lead
     // paragraphs between them. It is asserted separately from the character total
