@@ -1,0 +1,259 @@
+{
+  "corpus_id": "bl15-mini-synthetic-v1",
+  "provenance": {
+    "authored_by_human": true,
+    "generated_from_parser_output": false,
+    "what_this_is": "DECLARED expectations for the synthetic mini corpus in ./mini_corpus. Every expectation below was written by a person from the fixture files' own contents, BEFORE any reader existed to produce them -- no parser output was consulted, harvested, or transcribed. A parser that scores itself is measuring nothing: it agrees with itself by construction and the report reads as a pass at any level of wrongness. `isaac_api.bl15.evaluate.load_gold_standard` refuses a document that declares otherwise, and `apps/api/tests/test_bl15_evaluate.py` asserts mechanically that no function in that module turns an `Observed` into a `GoldStandard`.",
+    "why_not_the_real_corpus": "The real SSRL BL15-2 archive is real experimental data and real human notes and is never committed (CLAUDE.md 6). Its scientific ground truth is also not this repository's to declare -- the mapping questions are itemised in docs/bl15-2-domain-questions-2026-09-16.md and are Angel's. A gold standard for it would be this repository answering them. The STRUCTURAL counts for the real corpus are re-derivable instead, with scripts/bl15_corpus_report.py.",
+    "what_the_fixture_reproduces": [
+      "2.1 -- the extension does not classify: `runsynth` is extensionless and is a MACRO, `alignsynth` is extensionless and is a SPEC ACQUISITION",
+      "2.2 -- one macro is not one measurement: run01.mac declares two targets, Synth_XAS.mac declares none",
+      "2.3 -- a measurement can have ZERO scan children: the `_again` measurement has none",
+      "2.4 -- every `*_dir` also holds a byte-identical copy of its root acquisition file",
+      "2.5 -- macro intent vs acquired: `99_NEVER_ACQUIRED_SYN` is declared and never acquired",
+      "2.6 -- a duplicate legacy number: two distinct files carry `03`",
+      "2.6a -- internal `#F` disagreeing with the filename: the `ffilter35` file declares `beforeCycling` while its name says `after1500Cycling`",
+      "2.7 -- `ffilter35`, a doubled-prefix literal that must survive its own normalisation",
+      "3.5/3.7 -- one root readme.txt as beamtime-scope context, and a notes file whose broad claim contradicts its own sample section",
+      "the beamtime notes file begins with a UTF-8 BOM, exactly as the real one does"
+    ],
+    "synthetic_marking": "Every file carries a SYNTHETIC FIXTURE line, every sample name is SYN1/SYN2, every motor is prefixed `syn`, every energy is a round invented number and every timestamp is in 2099. Nothing here came from an instrument."
+  },
+
+  "needs_domain_review_concepts": [
+    "potential_reference_basis",
+    "loading_or_thickness"
+  ],
+  "_comment_needs_domain_review_concepts": "Concepts this gold standard DECLINES TO SCORE in the filename-token metric, because no literal expectation can be stated without asserting a scientific reading. `potential_reference_basis` because no source in this corpus family states one -- the official schema's `potential_scale` enum has six members and no 'unknown', so the honest act is absence, and that expectation is scored by its own dedicated metric rather than as a token. `loading_or_thickness` because `0p5nm` (an overlayer thickness) and `5wpc` (a weight loading) are two different physical quantities sharing one filename slot and the schema has a natural home for neither (mapping analysis 4); the fixture carries one so the deferral mechanism is exercised rather than merely described. This set governs SCORING, not extraction: a reader is still expected to READ and preserve both tokens, and `unknown_tokens` is where an unrecognised one must appear.",
+
+  "declared_normalization_rules": [
+    "millivolts_to_volts_and_p_as_decimal_point",
+    "unix_epoch_seconds_to_iso8601_utc",
+    "doubled_prefix_filter_literal_preserved"
+  ],
+  "_comment_declared_normalization_rules": "The rule names a `normalized` candidate may cite. The first two are `bl15.mapping`'s own rule names, quoted so the gold standard and the registry cannot drift apart; the third is the `ffilter35` rule, which the registry does not name because `filter` has no official path at all (mapping analysis 5) -- the normalisation is valid regardless of where the value lands. A candidate citing a rule that is not in this list is counted as fabricated, so a producer cannot legitimise an arbitrary transformation by inventing a name for it.",
+
+  "source_classification": {
+    "01_01_SYN1_acid_beforeCycling_filter10_060mV": "spec_acquisition",
+    "01_01_SYN1_acid_beforeCycling_filter10_060mV_dir/01_01_SYN1_acid_beforeCycling_filter10_060mV": "spec_acquisition",
+    "01_01_SYN1_acid_beforeCycling_filter10_060mV_dir/01_01_SYN1_acid_beforeCycling_filter10_060mV_001.dat": "scan_export",
+    "01_01_SYN1_acid_beforeCycling_filter10_060mV_dir/01_01_SYN1_acid_beforeCycling_filter10_060mV_002.dat": "scan_export",
+    "02_01_SYN1_acid_beforeCycling_filter10_060mV_again": "spec_acquisition",
+    "02_01_SYN1_acid_beforeCycling_filter10_060mV_again_dir/02_01_SYN1_acid_beforeCycling_filter10_060mV_again": "spec_acquisition",
+    "03_02_SYN2_base_after1500Cycling_ffilter35_1200mV_zz9": "spec_acquisition",
+    "03_02_SYN2_base_after1500Cycling_filter20_0p5nm_1200mV": "spec_acquisition",
+    "990101 SYNTHETIC BL15 notes.txt": "beamtime_notes",
+    "Synth_XAS.mac": "acquisition_method_macro",
+    "alignsynth": "alignment",
+    "readme.txt": "shared_readme",
+    "run01.mac": "macro",
+    "runsynth": "macro"
+  },
+
+  "filename_tokens": {
+    "01_01_SYN1_acid_beforeCycling_filter10_060mV": {
+      "legacy_run_or_file_number": "01",
+      "sample_or_electrode_number": "01",
+      "sample_name": "SYN1",
+      "electrolyte_or_medium": "acid",
+      "cycling_state": "beforeCycling",
+      "filter": "filter10",
+      "potential_magnitude": "060mV"
+    },
+    "02_01_SYN1_acid_beforeCycling_filter10_060mV_again": {
+      "legacy_run_or_file_number": "02",
+      "sample_or_electrode_number": "01",
+      "sample_name": "SYN1",
+      "electrolyte_or_medium": "acid",
+      "cycling_state": "beforeCycling",
+      "filter": "filter10",
+      "potential_magnitude": "060mV",
+      "repeat_marker": "again"
+    },
+    "03_02_SYN2_base_after1500Cycling_ffilter35_1200mV_zz9": {
+      "legacy_run_or_file_number": "03",
+      "sample_or_electrode_number": "02",
+      "sample_name": "SYN2",
+      "electrolyte_or_medium": "base",
+      "cycling_state": "after1500Cycling",
+      "filter": "ffilter35",
+      "potential_magnitude": "1200mV",
+      "unknown_token": "zz9"
+    },
+    "03_02_SYN2_base_after1500Cycling_filter20_0p5nm_1200mV": {
+      "legacy_run_or_file_number": "03",
+      "sample_or_electrode_number": "02",
+      "sample_name": "SYN2",
+      "electrolyte_or_medium": "base",
+      "cycling_state": "after1500Cycling",
+      "filter": "filter20",
+      "loading_or_thickness": "0p5nm",
+      "potential_magnitude": "1200mV"
+    }
+  },
+
+  "legacy_numbers": {
+    "01_01_SYN1_acid_beforeCycling_filter10_060mV": "01",
+    "02_01_SYN1_acid_beforeCycling_filter10_060mV_again": "02",
+    "03_02_SYN2_base_after1500Cycling_ffilter35_1200mV_zz9": "03",
+    "03_02_SYN2_base_after1500Cycling_filter20_0p5nm_1200mV": "03"
+  },
+  "legacy_numbers_absent": [
+    "readme.txt",
+    "990101 SYNTHETIC BL15 notes.txt",
+    "run01.mac",
+    "Synth_XAS.mac",
+    "runsynth",
+    "alignsynth"
+  ],
+
+  "potential_magnitudes": {
+    "01_01_SYN1_acid_beforeCycling_filter10_060mV": "060mV",
+    "02_01_SYN1_acid_beforeCycling_filter10_060mV_again": "060mV",
+    "03_02_SYN2_base_after1500Cycling_ffilter35_1200mV_zz9": "1200mV",
+    "03_02_SYN2_base_after1500Cycling_filter20_0p5nm_1200mV": "1200mV"
+  },
+  "potential_reference_unresolved": [
+    "01_01_SYN1_acid_beforeCycling_filter10_060mV",
+    "02_01_SYN1_acid_beforeCycling_filter10_060mV_again",
+    "03_02_SYN2_base_after1500Cycling_ffilter35_1200mV_zz9",
+    "03_02_SYN2_base_after1500Cycling_filter20_0p5nm_1200mV"
+  ],
+  "_comment_potential_reference_unresolved": "ALL FOUR. No filename or header in this fixture states what the potential is measured against, and the official schema's own answer to that is vocabulary for absence (`rhe_basis: not_reported`), not a default. Leaving it absent is therefore RECOVERED here, and reporting a basis is a MISS -- the opposite polarity to every other metric in this file, and deliberate: a harness that scored an absent basis as a miss would improve as the reconstruction got less truthful.",
+
+  "filters": {
+    "01_01_SYN1_acid_beforeCycling_filter10_060mV": "filter10",
+    "02_01_SYN1_acid_beforeCycling_filter10_060mV_again": "filter10",
+    "03_02_SYN2_base_after1500Cycling_ffilter35_1200mV_zz9": "ffilter35",
+    "03_02_SYN2_base_after1500Cycling_filter20_0p5nm_1200mV": "filter20"
+  },
+  "_comment_filters": "`ffilter35` is expected VERBATIM. The normalised reading (filter 35) belongs beside the literal with its rule named, never instead of it.",
+
+  "cycling_states": {
+    "01_01_SYN1_acid_beforeCycling_filter10_060mV": "beforeCycling",
+    "02_01_SYN1_acid_beforeCycling_filter10_060mV_again": "beforeCycling",
+    "03_02_SYN2_base_after1500Cycling_ffilter35_1200mV_zz9": "after1500Cycling",
+    "03_02_SYN2_base_after1500Cycling_filter20_0p5nm_1200mV": "after1500Cycling"
+  },
+  "_comment_cycling_states": "Read from the FILENAME. The `ffilter35` file's own `#F` header says `beforeCycling`, which is the conflict named below -- and the conflict is preserved rather than resolved, so neither reading overwrites the other and this expectation is about the filename only.",
+
+  "sample_groups": {
+    "01": [
+      "01_01_SYN1_acid_beforeCycling_filter10_060mV",
+      "02_01_SYN1_acid_beforeCycling_filter10_060mV_again"
+    ],
+    "02": [
+      "03_02_SYN2_base_after1500Cycling_ffilter35_1200mV_zz9",
+      "03_02_SYN2_base_after1500Cycling_filter20_0p5nm_1200mV"
+    ]
+  },
+  "_comment_sample_groups": "Grouped by the SECOND numeric token. Whether that token always means the sample/electrode instance is domain question 1 and is NOT settled here; this expectation is about the grouping a reader can perform from the name, not about what the group means.",
+
+  "measurement_groups": {
+    "01_01_SYN1_acid_beforeCycling_filter10_060mV": [
+      "01_01_SYN1_acid_beforeCycling_filter10_060mV_dir/01_01_SYN1_acid_beforeCycling_filter10_060mV_001.dat",
+      "01_01_SYN1_acid_beforeCycling_filter10_060mV_dir/01_01_SYN1_acid_beforeCycling_filter10_060mV_002.dat"
+    ],
+    "02_01_SYN1_acid_beforeCycling_filter10_060mV_again": [],
+    "03_02_SYN2_base_after1500Cycling_ffilter35_1200mV_zz9": [],
+    "03_02_SYN2_base_after1500Cycling_filter20_0p5nm_1200mV": [],
+    "alignsynth": []
+  },
+  "_comment_measurement_groups": "FIVE measurement units, FOUR of them with no scan children. An empty list is the RIGHT answer, not a gap: two of the real corpus's 94 units have zero scans, so 'every measurement has at least one scan' would be false of the real archive too.",
+
+  "macro_declarations": {
+    "run01.mac": [
+      "01_01_SYN1_acid_beforeCycling_filter10_060mV",
+      "99_NEVER_ACQUIRED_SYN"
+    ],
+    "Synth_XAS.mac": [],
+    "runsynth": [
+      "02_01_SYN1_acid_beforeCycling_filter10_060mV_again"
+    ]
+  },
+  "_comment_macro_declarations": "Three macro files, three declarations, and ZERO of them may become a Run. `runsynth` has no extension, so a macro inventory built from `*.mac` alone finds two of the three -- which is the same off-by-one the real corpus produces with `run29`.",
+
+  "readme_inheritance": {
+    "01_01_SYN1_acid_beforeCycling_filter10_060mV": [
+      "element",
+      "beamsize",
+      "spectrometer_configuration",
+      "monochromator_calibration"
+    ],
+    "02_01_SYN1_acid_beforeCycling_filter10_060mV_again": [
+      "element",
+      "beamsize",
+      "spectrometer_configuration",
+      "monochromator_calibration"
+    ],
+    "03_02_SYN2_base_after1500Cycling_ffilter35_1200mV_zz9": [
+      "element",
+      "beamsize",
+      "spectrometer_configuration",
+      "monochromator_calibration"
+    ],
+    "03_02_SYN2_base_after1500Cycling_filter20_0p5nm_1200mV": [
+      "element",
+      "beamsize",
+      "spectrometer_configuration",
+      "monochromator_calibration"
+    ],
+    "alignsynth": [
+      "element",
+      "beamsize",
+      "spectrometer_configuration",
+      "monochromator_calibration"
+    ]
+  },
+  "_comment_readme_inheritance": "One root readme.txt, no nested ones -- the same shape as the real archive, which is why nested-scope inheritance must not be designed against assumptions. Inherited context is BEAMTIME-scope evidence and must stay labelled as such; presenting it as a per-measurement entry would misstate where it came from.",
+
+  "duplicate_groups": [
+    [
+      "01_01_SYN1_acid_beforeCycling_filter10_060mV",
+      "01_01_SYN1_acid_beforeCycling_filter10_060mV_dir/01_01_SYN1_acid_beforeCycling_filter10_060mV"
+    ],
+    [
+      "02_01_SYN1_acid_beforeCycling_filter10_060mV_again",
+      "02_01_SYN1_acid_beforeCycling_filter10_060mV_again_dir/02_01_SYN1_acid_beforeCycling_filter10_060mV_again"
+    ]
+  ],
+  "_comment_duplicate_groups": "By CONTENT digest, and every member is kept. Both copies are real files the scientist has; the only consequence of grouping is that they must not be counted as two independent witnesses to the same statement.",
+
+  "known_conflicts": [
+    "duplicate_legacy_number:03",
+    "internal_F_disagrees_with_filename:03_02_SYN2_base_after1500Cycling_ffilter35_1200mV_zz9",
+    "macro_target_never_acquired:99_NEVER_ACQUIRED_SYN",
+    "broad_notes_claim_contradicted_by_sample_section",
+    "doubled_prefix_literal_preserved:ffilter35"
+  ],
+  "_comment_known_conflicts": "FIVE named classes, mirroring the five the real corpus produces (characterization 2.5, 2.6, 2.6a, 2.7, 3.7). Scored BY NAME and never by count: a reconstruction that lost all five and invented five different ones would pass a count check perfectly. None of them may be silently resolved -- 'this is a conflict, not a defect to repair'.",
+
+  "unknown_tokens": {
+    "03_02_SYN2_base_after1500Cycling_ffilter35_1200mV_zz9": [
+      "zz9"
+    ]
+  },
+  "_comment_unknown_tokens": "An unrecognised token must be REPORTED, not dropped. Silently discarding the part of a filename a profile does not recognise leaves the scientist unable to see what was passed over, which is the banned Upload -> Spinner -> Mysterious JSON pattern one layer down.",
+
+  "technique": {
+    "official_path": "system.technique",
+    "value": "HERFD-XAS"
+  },
+  "_comment_technique": "The fixture notes name HERFD and the official schema's `system.technique` enum contains `HERFD-XAS` verbatim, so this is a deterministic mapping rather than a judgement. `XAS` is also in the enum and is the weaker reading; an observation choosing it is recorded as a miss with both values named.",
+
+  "links": [
+    {
+      "rel": "replica_of",
+      "basis": "replicate_preparation",
+      "from": "02_01_SYN1_acid_beforeCycling_filter10_060mV_again",
+      "to": "01_01_SYN1_acid_beforeCycling_filter10_060mV"
+    },
+    {
+      "rel": "same_sample_as",
+      "basis": "same_sample_id",
+      "from": "01_01_SYN1_acid_beforeCycling_filter10_060mV",
+      "to": "02_01_SYN1_acid_beforeCycling_filter10_060mV_again"
+    }
+  ],
+  "_comment_links": "Both `rel` and `basis` values are in the official schema's enums verbatim. The `_again` token is the evidence for the first. The second rests on the second numeric token being the sample instance, which is domain question 1 -- it is declared here only because this fixture was AUTHORED with that meaning, which a real corpus cannot assert about itself."
+}

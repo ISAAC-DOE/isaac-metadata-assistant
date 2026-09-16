@@ -1,0 +1,16 @@
+#F 01_01_SYN1_acid_beforeCycling_filter10_060mV
+#E 4102444800
+#D Fri Jan 01 00:00:00 2099
+#C SYNTHETIC FIXTURE -- NOT INSTRUMENT OUTPUT. Every value is invented.
+#O0     synmono   synemiss
+#O1     synSx     synSy
+
+#S 1 gscan 1000 1100 5 0.5
+#D Fri Jan 01 00:00:00 2099
+#T 0.5  (Seconds)
+#P0 1000.0 900.0
+#P1 0.0 0.0
+#N 3
+#L synenergy  synI1  synI2
+1000.0 1.0 2.0
+1005.0 1.1 2.1

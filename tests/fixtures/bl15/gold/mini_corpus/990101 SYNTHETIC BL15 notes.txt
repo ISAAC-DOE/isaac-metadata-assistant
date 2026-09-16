@@ -1,0 +1,16 @@
+﻿# SYNTHETIC FIXTURE -- NOT INSTRUMENT OUTPUT. Every value below is invented.
+SYNTHETIC BL15 SYN-oxide HERFD acid base -- invented notes, no real beamtime.
+
+In ALL experiments we used 0.1 M SynBase from the same solution prepared in
+the beginning of the beam time.
+
+Sample 1 SYN1 in acid
+Step	File Number	E-chem Procedure	Notes
+1	01	hold	synthetic row
+2	02	hold repeat	synthetic row
+
+Sample 2 SYN2 in base
+Step	File Number	E-chem Procedure	Notes
+1	03	hold	synthetic row
+
+Preparation: 0.5 M SynAcid for Sample 1.
