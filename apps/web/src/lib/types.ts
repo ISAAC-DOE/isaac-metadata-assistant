@@ -4093,3 +4093,60 @@ export interface ApiImportCandidateProposed {
   deduplicated: boolean;
   experiment_version: string;
 }
+
+/** One candidate's outcome in an `addImportToExperiment` batch. */
+export interface ApiImportSentCandidate {
+  candidate_id: string;
+  target_field_path: string | null;
+  rule: string;
+  proposal_id: string;
+  note_id: string;
+  /** The run the proposal is about, or `null` for a value the record owns. */
+  run_id: string | null;
+  /**
+   * READ THIS BEFORE REPORTING WHAT HAPPENED. `true` means the record already
+   * held this candidate's proposal and nothing was minted for it — do not
+   * describe it as something just sent.
+   */
+  already_sent: boolean;
+}
+
+/** One candidate the batch could NOT send, with the server's own reason. */
+export interface ApiImportUnsentCandidate {
+  candidate_id: string;
+  target_field_path: string | null;
+  kind: string;
+  error: string;
+  /**
+   * WHY, IN THE SERVER'S WORDS. The same sentence the candidate card shows for
+   * it, read off the candidate rather than composed a second time.
+   */
+  reason: string;
+}
+
+/**
+ * The result of adding a whole import to one record — `HIST-005`, the import
+ * workflow's sixth step.
+ *
+ * THE COUNTS SUM: `sent + already_sent + not_sent === candidates`. A surface
+ * reporting one of them without the others tells a reader less than the server
+ * said, and `CLAUDE.md` §11 records four occasions on which a number was shown
+ * that nothing had derived.
+ *
+ * NOTHING HERE IS A VALUE THAT WAS WRITTEN. Every row under `sent` is an OPEN
+ * proposal awaiting a person's judgement; the record's fields are byte-identical
+ * afterwards.
+ */
+export interface ApiImportAddedToExperiment {
+  experiment_id: string;
+  run_id: string | null;
+  sent: ApiImportSentCandidate[];
+  not_sent: ApiImportUnsentCandidate[];
+  counts: {
+    candidates: number;
+    sent: number;
+    already_sent: number;
+    not_sent: number;
+  };
+  experiment_version: string;
+}

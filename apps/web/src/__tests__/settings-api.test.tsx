@@ -1806,7 +1806,7 @@ describe('the Full Description rule over the REAL generated contract', () => {
     // RE-MEASURED from the served document via `test_contract_description_parity.py`,
     // which re-transcribed this entry mechanically rather than by hand, and read out
     // of this test's own failure output (`expected […(78)] to have a length of 77`).
-    expect(REAL_CONTRACT_DESCRIPTIONS).toHaveLength(87);
+    expect(REAL_CONTRACT_DESCRIPTIONS).toHaveLength(88);
     // 84,501 -> 84,584 (+83): the assistant seam's own description was corrected, in
     // ONE operation and with the paragraph count unchanged. It read "so every request
     // is answered `501`" while the paragraph two below it documented the `422` — a
@@ -2368,7 +2368,13 @@ describe('the Full Description rule over the REAL generated contract', () => {
     // `splitPurpose` over the transcribed array rather than by adding the length
     // of the new text, which is this block's standing rule and the one its own
     // 2026-08-16 note records being got wrong by nine.
-    expect(total).toBe(154565);
+    // 154,565 -> 157,721 and 87 -> 88 operations, 2026-09-15: `HIST-005` publishes
+    // `POST /api/imports/{import_id}/add-to-experiment`. Net +3,156 characters in ONE
+    // new description; no existing description changed, and
+    // `test_contract_description_parity.py` proves that rather than leaving it
+    // asserted here. Not derived from the line above — MEASURED by running this file
+    // and reading what it reported.
+    expect(total).toBe(157721);
     // 104,045 -> 114,959 (+10,914): the four new operations, and NO existing
     // description changed — `test_contract_description_parity.py` proves that rather
     // than leaving it asserted here. RE-DERIVED from the served document and never
@@ -2597,7 +2603,12 @@ describe('the Full Description rule over the REAL generated contract', () => {
       // existing paragraph, not a new one; `POST /api/imports` gained none), so
       // an arithmetic delta would have been wrong in the way this block's own
       // 2026-08-16 note records being wrong by nine.
-      303,
+      //
+      // 303 -> 310 (+7), 2026-09-15: `HIST-005`'s one new operation,
+      // `POST .../add-to-experiment`, carries seven post-lead paragraphs.
+      // MEASURED by running this file and reading what it reported (`expected 310
+      // to be 303`), not counted by eye and not apportioned.
+      310,
     );
     // 211 -> 235 (+24): the four new operations carry a lead plus 24 post-lead
     // paragraphs between them. It is asserted separately from the character total

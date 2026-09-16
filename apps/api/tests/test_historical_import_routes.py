@@ -37,6 +37,7 @@ from __future__ import annotations
 
 import copy
 import json
+from unittest import mock
 
 import pytest
 from fastapi.testclient import TestClient
@@ -207,9 +208,14 @@ def test_a_new_session_is_empty_and_says_it_is_not_durable(client):
         "Review",
         "Add to Experiments",
     ]
-    unbuilt = [row for row in body["workflow"] if not row["built"]]
-    assert [row["id"] for row in unbuilt] == ["add_to_experiments"]
-    assert "Not built in this build" in unbuilt[0]["disclosure"]
+    # EVERY STEP IS BUILT since 2026-09-15. This asserted
+    # `[row["id"] for row in unbuilt] == ["add_to_experiments"]` and that its
+    # disclosure said "Not built in this build"; `HIST-005` shipped that step, so
+    # the old assertion is now the assertion of a defect. The property that
+    # mattered is kept and is stronger here: the server declares `built` for
+    # every row, so a client cannot show an unbuilt step as available by omission.
+    assert [row["id"] for row in body["workflow"] if not row["built"]] == []
+    assert all(row["disclosure"] is None for row in body["workflow"])
 
 
 def test_creating_a_session_creates_no_experiment(client):
@@ -283,7 +289,10 @@ def test_no_upload_operation_exists_and_the_upload_route_is_untouched(client):
         for method, op in item.items()
         if method in ("get", "post", "put", "patch", "delete")
     ]
-    assert len(import_ops) == 9
+    # 10 since 2026-09-15 — `HIST-005` added `POST .../add-to-experiment`, which
+    # is JSON-only like every other one, so the property this test exists for is
+    # unchanged and the count is the thing that moved.
+    assert len(import_ops) == 10
     for path, method, op in import_ops:
         content = ((op.get("requestBody") or {}).get("content") or {})
         assert set(content) <= {"application/json"}, f"{method} {path}: {list(content)}"
@@ -556,9 +565,22 @@ def test_the_session_records_which_candidates_were_sent(client):
     candidate = _candidate(client, import_id, RECORD_PATH)
     _propose(client, import_id, candidate["candidate_id"], eid)
     body = client.get(f"/api/imports/{import_id}").json()["import"]
-    assert body["furthest_step"] == "review"
     (row,) = body["proposed"].values()
     assert row["experiment_id"] == eid
+
+    # `add_to_experiments` SINCE 2026-09-15, and it is not a loosening: this
+    # bundle has exactly ONE proposable candidate — measured here rather than
+    # assumed, because the assertion below only means what it says if that is
+    # true — so sending it really does finish the step. The other three are
+    # reported unproposable for reasons the review surface shows: sources that
+    # disagree, a path this build cannot write, and a structural candidate.
+    # `test_the_furthest_step_is_derived_and_reaches_the_last_step_only_when_done`
+    # covers the partial case, where one send of several is still `review`.
+    candidates = body["reconstruction"]["candidates"]
+    assert [c["target_field_path"] for c in candidates if c["proposable"]] == [
+        RECORD_PATH
+    ]
+    assert body["furthest_step"] == "add_to_experiments"
 
 
 def test_the_record_etag_is_required_not_the_session(client):
@@ -1152,3 +1174,613 @@ def test_a_note_larger_than_one_note_may_be_is_refused_not_shortened(client, mon
     # NEITHER HALF OF THE PAIR WAS WRITTEN.
     assert client.get(f"/api/experiments/{eid}/notes").json()["notes"] == []
     assert client.get(f"/api/experiments/{eid}/proposals").json()["proposals"] == []
+
+# --- HIST-005 · Add an Import to a Record -------------------------------------
+#
+# The import workflow's SIXTH step, which until 2026-09-15 the surface rendered
+# as unbuilt with the server's own reason and no control at all. It is one
+# operation because the scientist's act is one act: a client looping over the
+# single-candidate route would make N requests, each able to fail on its own, and
+# a `412` partway through would leave a record holding part of an import with
+# nothing able to say which part.
+#
+# EVERY TEST BELOW THAT CLAIMS "NOTHING WAS WRITTEN" CHECKS THREE THINGS — the
+# record's `rev` did not move, its proposal list is unchanged, and its note list
+# is unchanged. Checking only the proposals would pass while a batch left orphan
+# notes on the record, which is the exact half-written state one lock and one
+# save exist to make impossible.
+
+
+def _bundle_a_only(client) -> str:
+    """One fixture, parsed and reconstructed.
+
+    SEPARATE FROM `_bundle` ON PURPOSE, and the difference is the point: adding
+    BUNDLE_B makes the sources DISAGREE about `sample.material.name`, which makes
+    that candidate unproposable. `_bundle` therefore has exactly one proposable
+    candidate and it is record-scoped; this one has a proposable RUN-scoped
+    candidate, which is the only way to exercise the run half of the batch.
+    """
+    import_id = _new_import(client)
+    assert _add_fixture(client, import_id, BUNDLE_A).status_code == 200
+    assert client.post(f"/api/imports/{import_id}/parse").status_code == 200
+    assert client.post(f"/api/imports/{import_id}/reconstruct").status_code == 200
+    return import_id
+
+
+def _add_to(client, import_id, eid, *, if_match=..., **body):
+    body.setdefault("experiment_id", eid)
+    tag = _etag(client, eid) if if_match is ... else if_match
+    headers = {} if tag is None else {"If-Match": tag}
+    return client.post(
+        f"/api/imports/{import_id}/add-to-experiment", json=body, headers=headers
+    )
+
+
+def _record_shape(client, eid):
+    """(rev, proposal ids, note ids) — what "nothing was written" is measured over."""
+    exp = ws.load_experiment(eid)
+    assert exp is not None
+    return (
+        exp.rev,
+        sorted(p.proposal_id for p in exp.proposals),
+        sorted(n.id for n in exp.notes),
+    )
+
+
+def _run_on(client, eid, label="Run A") -> str:
+    run = client.post(
+        f"/api/experiments/{eid}/runs",
+        json={"label": label},
+        headers={"If-Match": _etag(client, eid)},
+    )
+    assert run.status_code == 201, run.text
+    return run.json()["run"]["id"]
+
+
+def test_the_batch_sends_every_proposable_candidate_and_names_the_rest(client):
+    import_id = _bundle(client)
+    eid = _record(client)
+    before = _record_shape(client, eid)
+
+    response = _add_to(client, import_id, eid)
+    assert response.status_code == 200, response.text
+    body = response.json()
+
+    # ONE candidate is proposable in this bundle; three are not, each for a
+    # reason the review surface already shows. Asserted by PATH rather than by
+    # count, so a fixture change cannot make this pass for the wrong candidate.
+    assert [row["target_field_path"] for row in body["sent"]] == [RECORD_PATH]
+    assert body["sent"][0]["already_sent"] is False
+    assert body["sent"][0]["run_id"] is None
+    assert {row["error"] for row in body["not_sent"]} == {
+        "candidate_unresolved",
+        "candidate_not_proposable",
+    }
+    assert body["counts"] == {
+        "candidates": 4,
+        "sent": 1,
+        "already_sent": 0,
+        "not_sent": 3,
+    }
+    # THE COUNTS SUM, which is what makes the report a report rather than four
+    # independent numbers.
+    assert (
+        body["counts"]["sent"]
+        + body["counts"]["already_sent"]
+        + body["counts"]["not_sent"]
+        == body["counts"]["candidates"]
+    )
+    # EVERY unproposable candidate carries its own reason, not a generic one.
+    for row in body["not_sent"]:
+        assert row["reason"], row
+        assert row["candidate_id"]
+
+    after = _record_shape(client, eid)
+    # ONE new revision for the whole batch, and the note and the proposal landed
+    # together.
+    assert after[0] == before[0] + 1
+    assert len(after[1]) == 1
+    assert len(after[2]) == 1
+
+
+def test_the_batch_is_one_write_for_many_candidates(client):
+    """Two proposable candidates, one revision, two proposals and two notes."""
+    import_id = _bundle_a_only(client)
+    eid = _record(client)
+    run_id = _run_on(client, eid)
+    before = _record_shape(client, eid)
+
+    response = _add_to(client, import_id, eid, run_id=run_id)
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["counts"]["sent"] >= 2, body["counts"]
+
+    after = _record_shape(client, eid)
+    # THE REVISION MOVED BY EXACTLY ONE for N candidates. This is the assertion
+    # that fails if this route is ever reimplemented as a loop over the
+    # single-candidate one.
+    assert after[0] == before[0] + 1, (before[0], after[0], body["counts"])
+    assert len(after[1]) == body["counts"]["sent"]
+    assert len(after[2]) == body["counts"]["sent"]
+
+
+def test_the_batch_writes_no_scientific_value(client):
+    import_id = _bundle_a_only(client)
+    eid = _record(client)
+    run_id = _run_on(client, eid)
+    before = _draft(client, eid)
+
+    assert _add_to(client, import_id, eid, run_id=run_id).status_code == 200
+    # BYTE-FOR-BYTE. A proposal is a suggestion awaiting a person's judgement;
+    # this operation puts an import in front of a scientist and applies nothing.
+    assert _draft(client, eid) == before
+
+
+def test_every_proposal_the_batch_mints_is_open_and_cites_a_note_on_the_record(client):
+    import_id = _bundle_a_only(client)
+    eid = _record(client)
+    run_id = _run_on(client, eid)
+    assert _add_to(client, import_id, eid, run_id=run_id).status_code == 200
+
+    proposals = client.get(f"/api/experiments/{eid}/proposals").json()["proposals"]
+    note_ids = {n["id"] for n in client.get(f"/api/experiments/{eid}/notes").json()["notes"]}
+    assert proposals
+    for proposal in proposals:
+        assert proposal["state"] == "open"
+        # THE CITATION RESOLVES. A proposal citing a note the record does not hold
+        # is the broken state the one-write guarantee exists to prevent, and it
+        # would be invisible to a test that only counted rows.
+        assert proposal["note_id"] in note_ids
+        assert proposal["client_request_key"].startswith(f"import:{import_id}:")
+
+
+def test_the_batch_is_exactly_once_and_a_second_run_writes_nothing(client):
+    import_id = _bundle(client)
+    eid = _record(client)
+    assert _add_to(client, import_id, eid).status_code == 200
+    after_first = _record_shape(client, eid)
+
+    second = _add_to(client, import_id, eid)
+    assert second.status_code == 200, second.text
+    body = second.json()
+    assert [row["already_sent"] for row in body["sent"]] == [True]
+    assert body["counts"]["sent"] == 0
+    assert body["counts"]["already_sent"] == 1
+    # NO SECOND PROPOSAL, AND NO SECOND REVISION. The revision matters as much as
+    # the count: the record's `version` is the basis of every `If-Match`, so a
+    # save for a request that changed nothing would invalidate a token another
+    # reader is legitimately holding.
+    assert _record_shape(client, eid) == after_first
+
+
+def test_the_batch_and_the_single_candidate_route_are_exactly_once_together(client):
+    """A candidate sent by hand and then included in a batch mints ONE proposal."""
+    import_id = _bundle(client)
+    eid = _record(client)
+    candidate = _candidate(client, import_id, RECORD_PATH)
+    assert _propose(client, import_id, candidate["candidate_id"], eid).status_code == 200
+
+    response = _add_to(client, import_id, eid)
+    assert response.status_code == 200, response.text
+    assert response.json()["sent"][0]["already_sent"] is True
+    proposals = client.get(f"/api/experiments/{eid}/proposals").json()["proposals"]
+    assert len(proposals) == 1
+    # THE SHARED KEY IS WHY. Both operations derive it from the import id and the
+    # candidate id, so neither can be fooled by the other having gone first.
+    assert proposals[0]["client_request_key"] == (
+        f"import:{import_id}:{candidate['candidate_id']}"
+    )
+
+
+def test_a_run_scoped_candidate_without_a_run_refuses_the_WHOLE_batch(client):
+    import_id = _bundle_a_only(client)
+    eid = _record(client)
+    _run_on(client, eid)  # the record HAS a run, and it is still not chosen for you
+    before = _record_shape(client, eid)
+
+    response = _add_to(client, import_id, eid)
+    assert response.status_code == 422, response.text
+    body = response.json()
+    assert body["error"] == "target_requires_a_run"
+    assert RUN_PATH in [row["target_field_path"] for row in body["candidates"]]
+    assert "WHOLE BATCH IS REFUSED" in body["message"]
+
+    # NOTHING WAS WRITTEN — not even the record-scoped candidates that COULD have
+    # gone. Sending only those would silently leave the run's values behind, and
+    # the scientist would have no way to tell a finished import from a partial one.
+    assert _record_shape(client, eid) == before
+
+
+def test_the_run_goes_only_to_the_candidates_written_on_a_run(client):
+    import_id = _bundle_a_only(client)
+    eid = _record(client)
+    run_id = _run_on(client, eid)
+
+    body = _add_to(client, import_id, eid, run_id=run_id).json()
+    by_path = {row["target_field_path"]: row for row in body["sent"]}
+    assert by_path[RUN_PATH]["run_id"] == run_id
+    # AND THE RECORD-SCOPED ONE DID NOT GET IT. This is the documented difference
+    # from the single-candidate route, which REFUSES a run_id for a record-scoped
+    # target; here one run is given for a whole import and applied where it
+    # belongs, because a record-scoped candidate in the same batch is not a
+    # mistake.
+    assert by_path[RECORD_PATH]["run_id"] is None
+
+    proposals = {
+        p["target_field_path"]: p
+        for p in client.get(f"/api/experiments/{eid}/proposals").json()["proposals"]
+    }
+    assert proposals[RUN_PATH]["run_id"] == run_id
+    assert proposals[RECORD_PATH]["run_id"] is None
+
+
+def test_an_unknown_run_refuses_the_batch_and_writes_nothing(client):
+    import_id = _bundle_a_only(client)
+    eid = _record(client)
+    _run_on(client, eid)
+    before = _record_shape(client, eid)
+
+    response = _add_to(client, import_id, eid, run_id="01NOPE")
+    assert response.status_code == 422, response.text
+    assert response.json()["error"] == "unknown_run"
+    assert _record_shape(client, eid) == before
+
+
+def test_the_record_etag_is_required_for_the_batch_not_the_sessions(client):
+    import_id = _bundle(client)
+    eid = _record(client)
+    before = _record_shape(client, eid)
+
+    assert _add_to(client, import_id, eid, if_match=None).status_code == 428
+    assert _add_to(client, import_id, eid, if_match="not-a-validator").status_code == 400
+    # A WELL-FORMED BUT WRONG STRONG VALIDATOR. `W/"0"` was the first attempt and
+    # it answers 400 `malformed_if_match`, not 412 — a weak validator never
+    # reaches the comparison, so that version proved the malformed branch twice
+    # and the stale branch not at all.
+    stale = _add_to(client, import_id, eid, if_match='"nope.0"')
+    assert stale.status_code == 412, stale.text
+    # Three refusals, and the record is exactly as it was after all of them.
+    assert _record_shape(client, eid) == before
+
+
+def test_the_batch_refuses_an_unknown_record_and_a_missing_one(client):
+    import_id = _bundle(client)
+    eid = _record(client)
+
+    unknown = client.post(
+        f"/api/imports/{import_id}/add-to-experiment",
+        json={"experiment_id": "01NOSUCHRECORD"},
+        headers={"If-Match": _etag(client, eid)},
+    )
+    assert unknown.status_code == 404, unknown.text
+
+    missing = _add_to(client, import_id, eid, experiment_id="   ")
+    assert missing.status_code == 422, missing.text
+    assert missing.json()["error"] == "missing_experiment_id"
+    # It is never chosen for you, not even with exactly one record in the
+    # workspace — which is the case here.
+    assert "never chosen for you" in missing.json()["message"]
+
+
+def test_a_body_key_the_batch_does_not_accept_is_refused_by_name(client):
+    import_id = _bundle(client)
+    eid = _record(client)
+    response = _add_to(client, import_id, eid, apply="yes")
+    assert response.status_code == 422, response.text
+    assert response.json()["error"] == "unrecognized_field"
+    assert response.json()["keys"] == ["apply"]
+
+
+def test_an_unknown_session_is_a_named_404_for_the_batch(client):
+    eid = _record(client)
+    response = client.post(
+        "/api/imports/01NOSUCHIMPORT/add-to-experiment",
+        json={"experiment_id": eid},
+        headers={"If-Match": _etag(client, eid)},
+    )
+    assert response.status_code == 404, response.text
+
+
+def test_a_session_with_candidates_but_none_proposable_refuses_and_lists_why(client):
+    """Candidates exist and NONE can be proposed: refused whole, each reason given.
+
+    WHY THIS ONE PATCHES AND THE OTHERS DO NOT, stated rather than left to be
+    found. No committed fixture reaches this state — `_bundle` always has exactly
+    one proposable candidate (`system.technique`), and making it unproposable
+    would need two sources DISAGREEING about the technique, which no fixture
+    here provides. Two wrong ways were tried first and are recorded so nobody
+    repeats them: sending the proposable candidate by hand does not help (exactly-
+    once makes the batch report it `already_sent`, which is a 200), and a
+    pointer-only session cannot be reconstructed at all (`POST /reconstruct`
+    answers 422), so it has no candidates and lands in the OTHER branch.
+
+    WHAT IS PATCHED IS THE DATA SOURCE, NOT THE LOGIC UNDER TEST. The candidates
+    handed to the route are the REAL objects a real reconstruction produced, with
+    the one proposable member filtered out — not fabricated stand-ins. The route's
+    own partitioning, message selection and refusal all run unmodified, which is
+    the behaviour this test is about. A control below proves the filter did what
+    it claims rather than silently returning everything.
+    """
+    import_id = _bundle(client)
+    eid = _record(client)
+    before = _record_shape(client, eid)
+
+    session = hist.load_session(import_id)
+    assert session is not None
+    real = list(hist.candidates_of(session))
+    unproposable = [c for c in real if not c.proposable]
+    # THE CONTROL: the filter must actually have removed something, or this test
+    # would be asserting the refusal of a batch that had work to do.
+    assert len(unproposable) == len(real) - 1 == 3, (len(real), len(unproposable))
+
+    with mock.patch.object(hist, "candidates_of", return_value=unproposable):
+        response = _add_to(client, import_id, eid)
+
+    assert response.status_code == 422, response.text
+    body = response.json()
+    assert body["error"] == "nothing_to_send"
+    assert "nothing to send" in body["message"]
+    assert body["counts"] == {
+        "candidates": 3,
+        "sent": 0,
+        "already_sent": 0,
+        "not_sent": 3,
+    }
+    # THE ANSWER EXPLAINS ITSELF: every candidate is listed with its own reason,
+    # so a scientist is not told "nothing could be sent" and left to guess which
+    # of four things went wrong.
+    assert len(body["not_sent"]) == 3
+    for row in body["not_sent"]:
+        assert row["reason"]
+        assert row["error"] in ("candidate_unresolved", "candidate_not_proposable")
+    assert _record_shape(client, eid) == before
+
+
+def test_a_session_with_no_reconstruction_yet_says_to_reconstruct_it_first(client):
+    import_id = _new_import(client)
+    assert _add_fixture(client, import_id, BUNDLE_A).status_code == 200
+    eid = _record(client)
+    before = _record_shape(client, eid)
+
+    response = _add_to(client, import_id, eid)
+    assert response.status_code == 422, response.text
+    body = response.json()
+    assert body["error"] == "nothing_to_send"
+    # A DIFFERENT SENTENCE FOR A DIFFERENT SITUATION. "Nothing can be proposed"
+    # and "you have not reconstructed yet" are not the same problem, and telling
+    # a scientist the first when the second is true sends them looking for a
+    # defect in their sources.
+    assert "reconstruct it first" in body["message"]
+    assert body["counts"]["candidates"] == 0
+    assert _record_shape(client, eid) == before
+
+
+def test_the_batch_records_every_send_in_the_session_and_finishes_the_step(client):
+    import_id = _bundle_a_only(client)
+    eid = _record(client)
+    run_id = _run_on(client, eid)
+
+    body = _add_to(client, import_id, eid, run_id=run_id).json()
+    view = client.get(f"/api/imports/{import_id}").json()["import"]
+
+    # EVERY sent candidate is recorded, not just the last one.
+    assert set(view["proposed"]) == {row["candidate_id"] for row in body["sent"]}
+    for row in view["proposed"].values():
+        assert row["experiment_id"] == eid
+        assert row["proposal_id"]
+        assert row["note_id"]
+
+    # AND THE WORKFLOW REACHES ITS LAST STEP, because every proposable candidate
+    # has now been sent. That is the strict criterion: `furthest_step` returns
+    # `review` while any remain.
+    assert view["furthest_step"] == "add_to_experiments"
+    assert [row["id"] for row in view["workflow"] if not row["built"]] == []
+
+
+def test_the_batch_appears_in_the_openapi_document_as_json_only(client):
+    schema = client.get("/api/openapi").json()
+    path = "/api/imports/{import_id}/add-to-experiment"
+    assert path in schema["paths"], sorted(schema["paths"])
+    operation = schema["paths"][path]["post"]
+    assert set((operation.get("requestBody") or {}).get("content") or {}) == {
+        "application/json"
+    }
+    # THE DESCRIPTION MUST NOT CLAIM TO APPLY ANYTHING. This route's whole safety
+    # argument is that it writes no value, and the document a machine reads is
+    # where that claim has to be true too.
+    assert "WRITES NO VALUE" in operation["description"]
+    assert "ignored for the ones written on the record" in operation["description"]
+
+
+def test_a_persisted_candidate_whose_writer_is_gone_is_refused_not_crashed(client):
+    """A session document outlives the code that wrote it.
+
+    `candidate.proposable` means the RECONSTRUCTION found a write path. A session
+    saved by an older build could name a path this one no longer writes, and
+    `_proposal_writer_for` would answer `None` — which, without the guard, makes
+    the `_PROPOSAL_WRITER_SCOPE` lookup a `KeyError`, i.e. a **500 out of a route
+    whose whole job is to refuse clearly**.
+
+    DRIVEN BY NARROWING WHAT THIS BUILD WRITES, not by hand-editing a session
+    document: `_proposal_writer_for` is patched to answer `None`, which is exactly
+    what a build that dropped a write operation would do. The candidates are the
+    real ones a real reconstruction produced and are still `proposable`, which is
+    the whole point — that flag records a past build's finding.
+
+    THE SINGLE-CANDIDATE ROUTE HAS THE SAME EXPOSURE and is deliberately not
+    covered here; it is pre-existing and is named in the route's own comment.
+    """
+    import_id = _bundle(client)
+    eid = _record(client)
+    before = _record_shape(client, eid)
+
+    with mock.patch.object(routes, "_proposal_writer_for", return_value=None):
+        response = _add_to(client, import_id, eid)
+
+    assert response.status_code == 422, response.text
+    body = response.json()
+    assert body["error"] == "no_write_path_for_field"
+    assert [row["target_field_path"] for row in body["candidates"]] == [RECORD_PATH]
+    # THE CLAUSE THAT MATTERS SCIENTIFICALLY: this says something about the build,
+    # never about the official schema, which defines the field.
+    assert "NOT A STATEMENT ABOUT THE OFFICIAL ISAAC SCHEMA" in body["message"]
+    assert _record_shape(client, eid) == before
+
+
+def test_the_guard_does_not_fire_when_every_writer_is_present(client):
+    """A negative control: the refusal above is reachable ONLY by removing a writer.
+
+    Without this, the test above would pass just as well if the guard fired on
+    every request, and the batch would refuse everything.
+    """
+    import_id = _bundle(client)
+    eid = _record(client)
+    response = _add_to(client, import_id, eid)
+    assert response.status_code == 200, response.text
+    assert response.json()["counts"]["sent"] == 1
+
+
+def test_the_single_candidate_route_refuses_a_vanished_writer_too(client):
+    """The sibling of `test_a_persisted_candidate_whose_writer_is_gone_...`.
+
+    Both routes reach `_PROPOSAL_WRITER_SCOPE[_proposal_writer_for(path)]`, and
+    both would raise `KeyError` on a session reconstructed by a build that had a
+    writer this one does not. The batch route's guard shipped first and NAMED this
+    one as open; it is closed here in the same change, so that comment is a
+    correction rather than a standing pointer at a defect.
+    """
+    import_id = _bundle(client)
+    eid = _record(client)
+    candidate = _candidate(client, import_id, RECORD_PATH)
+    before = _record_shape(client, eid)
+
+    with mock.patch.object(routes, "_proposal_writer_for", return_value=None):
+        response = _propose(client, import_id, candidate["candidate_id"], eid)
+
+    assert response.status_code == 422, response.text
+    body = response.json()
+    assert body["error"] == "no_write_path_for_field"
+    assert body["target_field_path"] == RECORD_PATH
+    assert "NOT A STATEMENT ABOUT THE OFFICIAL ISAAC SCHEMA" in body["message"]
+    assert _record_shape(client, eid) == before
+
+
+def test_neither_route_refuses_when_the_writer_is_present(client):
+    """A negative control covering BOTH routes in one place.
+
+    Without it, the two patched tests above would pass just as well if the guards
+    fired unconditionally — in which case nothing from an import could ever reach
+    a record, which is the one thing these routes are for.
+    """
+    import_id = _bundle(client)
+    eid = _record(client)
+    candidate = _candidate(client, import_id, RECORD_PATH)
+
+    single = _propose(client, import_id, candidate["candidate_id"], eid)
+    assert single.status_code == 200, single.text
+    assert single.json()["deduplicated"] is False
+
+    # And the batch, on a second record, so the first one's exactly-once does not
+    # make this vacuous.
+    other = _record(client, title="A second destination")
+    batch = _add_to(client, import_id, other)
+    assert batch.status_code == 200, batch.text
+    assert batch.json()["counts"]["sent"] == 1
+
+
+def test_the_whole_chain_THROUGH_THE_BATCH_reaches_a_validated_draft(armed_client):
+    """``HIST-005`` END TO END, over HTTP, with nothing stubbed.
+
+        parsed sources -> semantic candidates -> ONE batch write
+          -> scientist review of each -> ISAAC draft -> deterministic validation
+
+    THE SIBLING OF ``test_the_whole_chain_from_a_parsed_source_to_a_validated_draft``,
+    and it exists because that one proves the chain only for the SINGLE-candidate
+    route. A batch-minted proposal is built by the same ``new_proposal`` call, so
+    acceptance *ought* to be identical — and "ought to be identical" is the claim
+    this test replaces with a measurement. It is the strongest statement available
+    about `HIST-005`: that what the batch writes is not merely stored but
+    ACCEPTABLE, and that accepting all of it leaves a draft the truth core passes.
+
+    RUN UNDER THE FIXTURE EDGE VERIFIER, the only configuration in which a person
+    can accept anything. ``test_a_default_configured_deployment_refuses_the_acceptance``
+    is the other half: in every shipped configuration the chain stops at the
+    proposal.
+
+    TWO CANDIDATES, ONE RECORD-SCOPED AND ONE RUN-SCOPED, because a batch with
+    only one of each kind would not exercise the per-candidate run resolution that
+    is this route's one behavioural difference from its sibling.
+    """
+    client = armed_client
+    import_id = _bundle_a_only(client)
+    eid = _record(client)
+    run_id = _run_on(client, eid)
+
+    # 1-3. parsed evidence -> candidates -> proposals, in ONE write.
+    added = _add_to(client, import_id, eid, run_id=run_id)
+    assert added.status_code == 200, added.text
+    sent = added.json()["sent"]
+    assert len(sent) >= 2, sent
+    by_path = {row["target_field_path"]: row for row in sent}
+    assert by_path[RUN_PATH]["run_id"] == run_id
+    assert by_path[RECORD_PATH]["run_id"] is None
+
+    # 4. scientist review of EACH, by a person the deployment can attribute. The
+    # ETag is re-read between accepts: each acceptance is its own revision, and a
+    # stale token would be a 412 that looked like a defect in the batch.
+    for row in sent:
+        accepted = client.post(
+            f"/api/experiments/{eid}/proposals/{row['proposal_id']}/review",
+            json={
+                "action": "accept",
+                "accepted_from": "candidate",
+                "confirmed_by_user": True,
+            },
+            headers={"If-Match": _etag(client, eid)},
+        )
+        assert accepted.status_code == 200, (row["target_field_path"], accepted.text)
+        assert accepted.json()["proposal"]["state"] == "accepted"
+
+    # 5. THE ISAAC DRAFT now holds both values — the record-scoped one on the
+    # record's own field map, the run-scoped one on the RUN's. That split is the
+    # whole reason `run_id` is resolved per candidate rather than per request, and
+    # asserting it here is what makes the resolution observable in the document
+    # rather than only in the response.
+    exp = ws.load_experiment(eid)
+    assert exp is not None
+    record_envelope = exp.draft["fields"][RECORD_PATH]
+    assert record_envelope["value"] == "XAS"
+    assert record_envelope["status"] == "verified"
+    assert record_envelope["evidence"][0]["source_type"] == "user_confirmation"
+
+    # THE RUN-SCOPED VALUE LANDS IN `run.overrides`, NOT IN `run.draft["fields"]`,
+    # and that is MEASURED rather than assumed. The first version of this test
+    # reached for `run.draft["fields"][RUN_PATH]` and raised `KeyError: 'fields'`;
+    # probing showed the run's draft holds only `assets` and `pending`.
+    # `_proposal_writer_for("sample.material.name")` answers **`run_override`** —
+    # "one run holds its own value at one record-level address" — so the applied
+    # value is an `Override` keyed by the field ADDRESS (`field:<path>`), a
+    # different store from a run field. Asserting the wrong location would have
+    # been a test that could only ever have failed.
+    run = exp.get_run(run_id)
+    assert run is not None
+    assert routes._proposal_writer_for(RUN_PATH) == "run_override", (
+        "if this path stops being an override, the assertions below are looking "
+        "in the wrong store and must move with it"
+    )
+    override = run.overrides[ws.field_address(RUN_PATH)]
+    assert override.payload["value"] == "SYNTHETIC-CuO-FAKE-001"
+    assert override.payload["status"] == "verified"
+    assert override.payload["evidence"][0]["source_type"] == "user_confirmation"
+
+    # AND THE RECORD-SCOPED VALUE DID NOT BECOME A RUN OVERRIDE, which is the
+    # failure a request-wide run would have produced: `system.technique` is
+    # written on the record, and this batch was handed a run.
+    assert ws.field_address(RECORD_PATH) not in run.overrides
+    assert sorted(exp.draft["fields"]) == [RECORD_PATH]
+
+    # 6. DETERMINISTIC VALIDATION over that draft — the truth core, unmodified.
+    from isaac_records.draft_validator import validate_draft
+
+    report = validate_draft(exp.draft)
+    assert report.errors == [], report.errors

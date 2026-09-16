@@ -24,7 +24,7 @@ import {
   isoToPickerValue,
   pickerValueToIso,
 } from '../lib/runDatetime';
-import { RUN_FIELDS, parseRunField } from '../lib/runFields';
+import { RUN_FIELDS, parseRunField, runConditionsSummary } from '../lib/runFields';
 
 const START = RUN_FIELDS.find((s) => s.path === 'timestamps.acquired_start_utc')!;
 
@@ -138,5 +138,75 @@ describe('the one renderer for a stored timestamp', () => {
   it('a month number outside 1–12 falls through rather than indexing off the list', () => {
     expect(formatStoredDatetime('2026-00-31T09:00:00Z')).toBe('2026-00-31T09:00:00Z');
     expect(formatStoredDatetime('2026-13-31T09:00:00Z')).toBe('2026-13-31T09:00:00Z');
+  });
+});
+
+/* --------------------------------------------------------------------------
+ * ONE STORED VALUE, ONE SPELLING — across every site that shows it.
+ * -------------------------------------------------------------------------- */
+
+describe('the run conditions summary uses the SAME renderer as the Record Map', () => {
+  /*
+   * FOUND BY LOOKING AT THE SCREEN, not by a failing test, which is why this
+   * guard exists now and did not before. Measured in Chrome on a run holding all
+   * three values: the run card's summary line read
+   * `in_situ · 45 K · 2026-01-31T09:00:00Z` while the Record Map beside it read
+   * `Jan 31, 2026 · 09:00 UTC` — one stored value, two spellings, on one screen.
+   *
+   * `formatStoredDatetime`'s docstring claims "the Record Map row and the run
+   * editor's read-back are the same function — so the two can never show one
+   * stored value in two spellings". That was true of the two sites it NAMES. The
+   * summary was a third, and it called `String(value)`.
+   */
+  const runWith = (fields: Record<string, unknown>) =>
+    ({
+      id: 'r1',
+      label: 'Scan 0012',
+      fields: Object.fromEntries(
+        Object.entries(fields).map(([k, v]) => [k, { value: v, status: 'verified', evidence: [] }]),
+      ),
+    }) as unknown as Parameters<typeof runConditionsSummary>[0];
+
+  it('renders a stored UTC timestamp the human way, exactly as the Record Map does', () => {
+    const summary = runConditionsSummary(
+      runWith({ 'timestamps.acquired_start_utc': '2026-01-31T09:00:00Z' }),
+    );
+    // THE SAME STRING THE OTHER TWO SITES PRODUCE — asserted by calling the
+    // renderer, not by transcribing its output, so a change to the format moves
+    // all three together or fails here.
+    expect(summary).toBe(formatStoredDatetime('2026-01-31T09:00:00Z'));
+    expect(summary).toBe('Jan 31, 2026 · 09:00 UTC');
+    // MUTATION: reverting the summary to `String(value)` makes this RED.
+    expect(summary).not.toContain('2026-01-31T09:00:00Z');
+  });
+
+  it('leaves the other kinds exactly as they were, units included', () => {
+    /* A NEGATIVE CONTROL ON SCOPE. Routing everything through the datetime
+       renderer would be the obvious over-fix; it returns its input verbatim for
+       anything it cannot read, so the bug would be invisible here without this. */
+    expect(
+      runConditionsSummary(
+        runWith({ 'context.environment': 'in_situ', 'context.temperature_K': 45 }),
+      ),
+    ).toBe('in_situ · 45 K');
+  });
+
+  it('shows an unreadable timestamp VERBATIM rather than guessing at it', () => {
+    /* The renderer's own rule, relied on here: re-spelling something you could
+       not read is how a surface shows a value nobody entered. A half-typed entry
+       must still read back as exactly what the record holds. */
+    const half = '2026-01-3';
+    expect(runConditionsSummary(runWith({ 'timestamps.acquired_start_utc': half }))).toBe(half);
+  });
+
+  it('keeps the field ORDER and the separator the summary always had', () => {
+    const summary = runConditionsSummary(
+      runWith({
+        'context.environment': 'in_situ',
+        'context.temperature_K': 45,
+        'timestamps.acquired_start_utc': '2026-01-31T09:00:00Z',
+      }),
+    );
+    expect(summary).toBe('in_situ · 45 K · Jan 31, 2026 · 09:00 UTC');
   });
 });

@@ -803,7 +803,33 @@ test.describe('R5 · the Run workspace', () => {
     // talked about the detached one. The server-side poll proved the timestamp
     // landed; this proves the re-mounted card actually shows it.
     await expect(conditions(remounted)).toContainText('301 K');
-    await expect(conditions(remounted)).toContainText('2026-01-31T09:00:00Z');
+
+    /*
+     * THE SUMMARY NOW SHOWS THE HUMAN FORM, AND THE ASSERTION IS STRONGER FOR IT
+     * rather than merely re-spelled.
+     *
+     * This line read `toContainText('2026-01-31T09:00:00Z')`. On 2026-09-15 the
+     * conditions summary was routed through `formatStoredDatetime` — the run card
+     * was a THIRD site rendering a stored timestamp, and it was showing the
+     * machine form beside a Record Map showing the human one, 200px apart. CI
+     * caught this assertion; the local mutation run that had reported 123/123
+     * was taken BEFORE that fix, so it was green about a rendering that no longer
+     * existed. A green run that predates the change it is meant to validate is
+     * not validation.
+     *
+     * BOTH HALVES ARE NOW ASSERTED, which is what the owner's requirement
+     * actually is — human-friendly display PRESERVING the official stored format:
+     *   * the SUMMARY carries the human rendering, and
+     *   * the run's own ISO control still carries the exact stored string.
+     * Asserting only the first would let a future change delete the stored form
+     * from the card entirely and still pass, which is the half that matters to a
+     * curator.
+     */
+    await expect(conditions(remounted)).toContainText('Jan 31, 2026 · 09:00 UTC');
+    await expect(conditions(remounted)).not.toContainText('2026-01-31T09:00:00Z');
+    await expect(await openFieldIso(remounted, 'timestamps.acquired_start_utc')).toHaveValue(
+      '2026-01-31T09:00:00Z',
+    );
   });
 
   test('a stale run version is refused, writes nothing, and Refresh adopts the SERVER value', async ({

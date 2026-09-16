@@ -1126,23 +1126,40 @@ WORKFLOW_STEPS: tuple[tuple[str, str], ...] = (
 )
 
 #: The step that is NOT BUILT, named in the same list the surface renders from so
-#: it cannot be shown as available. ``HIST-005``.
-UNBUILT_STEP = "add_to_experiments"
+#: it cannot be shown as available.
+#:
+#: **THERE IS NO LONGER ONE (2026-09-15), AND THE MECHANISM IS KEPT RATHER THAN
+#: DELETED.** ``HIST-005`` shipped: ``POST /api/imports/{id}/add-to-experiment``
+#: sends every proposable candidate to review on one record in one write, so
+#: ``add_to_experiments`` is built and every workflow row now reports
+#: ``built: true`` with no disclosure. The constant stays because it is how a
+#: future step declares itself unbuilt in the SAME list the surface renders from
+#: — the property that kept the old surface honest — and because deleting
+#: it would let the next unbuilt step be shown as available by omission.
+UNBUILT_STEP: str | None = None
 
-#: What the unbuilt step says instead of offering an action.
+#: What an unbuilt step would say instead of offering an action. Unused while
+#: :data:`UNBUILT_STEP` is ``None``; :func:`session_view` reads it only for the
+#: step that constant names.
 UNBUILT_STEP_DISCLOSURE = (
     "Not built in this build as a single step. Each candidate you send becomes an "
     "ingestion proposal on the record you choose \u2014 or on a new record created "
     "from this import \u2014 and you review it there. Nothing is applied for you."
 )
-#: WHY THE WORDING CHANGED (2026-09-14). The clause "nothing here creates an
-#: experiment for you" became FALSE when the surface gained "New record from this
-#: import": a scientist can now make the destination without leaving the screen.
-#: The step is still not built AS A STEP — there is no one-click "apply this
-#: whole import" — and that is what the sentence now says. The rest of the
-#: original wording is kept because it is the part that is still exactly true:
-#: a candidate becomes a proposal, reviewed on the record, and never applied
-#: automatically.
+#: WHAT THE RETIRED SENTENCE CLAIMED, kept because the claim was TRUE when it was
+#: written and a future reader must be able to see a recorded change rather than a
+#: drift. It said the step was "not built in this build as a single step", and it
+#: named exactly what was missing: a one-click way to put a whole import in front
+#: of a scientist. That is what now exists.
+#:
+#: The half of the old wording that is STILL exactly true is stated on the batch
+#: operation itself rather than repeated here: a candidate becomes a PROPOSAL,
+#: reviewed on the record, and nothing is applied for you — the new step writes
+#: no scientific value at all.
+#:
+#: An earlier revision (2026-09-14) had already narrowed the sentence once, when
+#: "nothing here creates an experiment for you" became false as the surface gained
+#: "New record from this import".
 
 #: The session's durability, stated on the surface rather than assumed. Measured:
 #: an import session is one JSON file under the workspace directory, and the
@@ -1218,11 +1235,34 @@ class ImportSession:
 
         Derived for ``workspace.Experiment.status``'s reason: a stored step goes
         stale the moment a source is added, and a surface showing a stale step
-        tells the reader they are somewhere they are not. It never returns
-        :data:`UNBUILT_STEP`, because no session can reach a step this build does
-        not have.
+        tells the reader they are somewhere they are not.
+
+        IT CAN NOW REACH ``add_to_experiments`` (2026-09-15), and the criterion is
+        the strict one: EVERY candidate this import can propose has been sent.
+        Before ``HIST-005`` shipped, this function could not return that step at
+        all and said so — "no session can reach a step this build does not
+        have" — which was true, and is why that sentence is quoted here rather
+        than deleted.
+
+        "SOME WERE SENT" IS DELIBERATELY NOT ENOUGH. A stepper marking the last
+        step reached while three candidates still sat unsent in the review list
+        would tell the reader they had finished something they had not. And the
+        criterion is re-derived from the CURRENT candidates on every call, so
+        adding a source and reconstructing again drops the session back to
+        ``review`` rather than leaving a finished-looking stepper over new work.
         """
         if self.proposed:
+            sendable = [
+                candidate.candidate_id
+                for candidate in (
+                    self.reconstruction.candidates
+                    if self.reconstruction is not None
+                    else ()
+                )
+                if candidate.proposable
+            ]
+            if sendable and all(cid in self.proposed for cid in sendable):
+                return "add_to_experiments"
             return "review"
         if self.reconstruction is not None:
             return "reconstruct"
@@ -1887,8 +1927,14 @@ def session_view(session: ImportSession) -> dict:
             {
                 "id": step,
                 "label": label,
-                "built": step != UNBUILT_STEP,
-                "disclosure": UNBUILT_STEP_DISCLOSURE if step == UNBUILT_STEP else None,
+                # `UNBUILT_STEP` is `None` in this build, so every row reports
+                # built. Compared against the CONSTANT rather than a literal, so
+                # naming a future unbuilt step changes one line and the surface
+                # follows it.
+                "built": UNBUILT_STEP is None or step != UNBUILT_STEP,
+                "disclosure": UNBUILT_STEP_DISCLOSURE
+                if UNBUILT_STEP is not None and step == UNBUILT_STEP
+                else None,
             }
             for step, label in WORKFLOW_STEPS
         ],

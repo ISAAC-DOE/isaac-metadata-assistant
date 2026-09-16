@@ -121,24 +121,67 @@ import { TUTORIAL_ANCHORS } from '../lib/tutorialSteps';
 
 type SettingsTab = SettingsTabId;
 
-const SETTINGS_TABS: { id: SettingsTab; label: string }[] = [
+/*
+ * The name of the developer group, in ONE place: the tab row renders it, every
+ * grouped tab's accessible name ends with it, and `e2e/surfaces.ts` declares
+ * the resulting names. A second spelling would let the row and the names
+ * disagree about what the group is called.
+ */
+const SETTINGS_ADVANCED_GROUP = 'Advanced';
+
+/** The id of the one element carrying that word for assistive technology. */
+const SETTINGS_GROUP_DESC_ID = 'settings-tab-group-advanced';
+
+/*
+ * THE SEVEN SETTINGS TABS, IN TWO GROUPS — reordered 2026-09-15 on the project
+ * owner's direction that Settings be "simplified with developer material under
+ * Advanced".
+ *
+ * THE GROUP IS A LABEL ON A FLAT TABLIST, NOT A SECOND TABLIST. A nested
+ * tablist is banned system-wide, and each of the seven tabs is independently
+ * deep-linked (`/settings?tab=explorer` is a URL a reader may hold), so
+ * collapsing three of them into one tab would either break those links or
+ * invent a second way to reach one panel. Grouping keeps every link exact and
+ * every panel's own accessibility identity — `settings-api` and
+ * `settings-explorer` are separately scanned surfaces — while still saying, in
+ * the tab row, which three are for reaching this build as a program.
+ *
+ * WHAT WAS CONSIDERED AND NOT DONE, so a future session does not read this as
+ * the only option: collapsing `api` + `explorer` + `mcp` into ONE "Advanced"
+ * tab holding three disclosures. It is the stronger reading of the direction
+ * and it was declined on measured grounds, not taste — `ApiDocs` alone renders
+ * two `search` landmarks, the landmark-name guard already pins that exactly one
+ * region is named "Endpoint Explorer", and `querySelectorAll` reaches inside a
+ * closed `<details>`, so stacking the three would collide those landmarks
+ * whether or not they are visibly collapsed. It would also move the a11y
+ * baseline cells of two separately-keyed surfaces. Ask for it explicitly if the
+ * grouping is not enough.
+ *
+ * `group` IS RENDERED TWICE, DELIBERATELY: once visibly, on the first tab of
+ * the group only (so the row says the word once, where the group starts), and
+ * once in the ACCESSIBLE NAME of every tab in the group — because a
+ * screen-reader user moving with arrow keys never sees the first tab's visible
+ * marker from the third tab. The visible marker is `aria-hidden`, so no tab's
+ * name is the word twice.
+ */
+const SETTINGS_TABS: { id: SettingsTab; label: string; group?: string }[] = [
   { id: 'overview', label: 'Overview' },
   { id: 'privacy', label: 'Data & Privacy' },
   { id: 'about', label: 'About' },
-  { id: 'api', label: 'API Access' },
-  { id: 'explorer', label: 'Endpoint Explorer' },
-  /* Connect Your Agent — the machine-interface surface, next to the other two
-     tabs about reaching this build as a program. It states a deployment state
-     and offers no action, so it belongs with the readout tabs rather than
-     after the one thing on the page a reader acts on. */
-  { id: 'mcp', label: 'Connect Your Agent' },
-  /* R0 — the LAST tab (it was the sixth; Connect Your Agent above made it the
-     seventh, and the reason it is last is unchanged by that). It is the ONE
-     permanent home of the guided walkthrough's
-     replay control: the first-run offer on My Experiments disappears for good
-     once the walkthrough is finished, so without a fixed home a reader who
-     completed it could never get it back. */
+  /* R0 — the ONE permanent home of the guided walkthrough's replay control: the
+     first-run offer on My Experiments disappears for good once the walkthrough
+     is finished, so without a fixed home a reader who completed it could never
+     get it back. IT WAS THE LAST TAB UNTIL 2026-09-15 and is now the last
+     SCIENTIST-FACING one. The reason it needs a fixed home is unchanged by the
+     move; being last was never the reason, and a reader looking for the
+     walkthrough is not a reader looking for an API key. */
   { id: 'help', label: LABELS.settingsTabHelp },
+  /* Advanced — the three tabs about reaching this build as a program. Two are
+     readouts and one states a deployment state; none of them is something a
+     scientist recording an experiment has to visit. */
+  { id: 'api', label: 'API Access', group: SETTINGS_ADVANCED_GROUP },
+  { id: 'explorer', label: 'Endpoint Explorer', group: SETTINGS_ADVANCED_GROUP },
+  { id: 'mcp', label: 'Connect Your Agent', group: SETTINGS_ADVANCED_GROUP },
 ];
 
 const tabId = (id: SettingsTab) => `settings-tab-${id}`;
@@ -303,7 +346,16 @@ function SettingsSectionTabs({
   }
 
   return (
-    <div
+    <>
+      {/* The description the three Advanced tabs point at. OUTSIDE the tablist,
+          because `role="tablist"` may only own `role="tab"` children; and NOT
+          inside the first grouped button, because an un-hidden span there would
+          be read into that one tab's name-from-content and make it say the word
+          twice. */}
+      <span id={SETTINGS_GROUP_DESC_ID} className="sr-only">
+        {SETTINGS_ADVANCED_GROUP}
+      </span>
+      <div
       className="section-tabs"
       role="tablist"
       aria-label="Settings sections"
@@ -313,6 +365,11 @@ function SettingsSectionTabs({
     >
       {SETTINGS_TABS.map((tab, i) => {
         const selected = active === tab.id;
+        // The FIRST tab of a group carries the visible marker. Compared against
+        // the previous entry's group rather than an index, so reordering the
+        // list cannot leave the marker in the middle of a group.
+        const startsGroup =
+          tab.group !== undefined && tab.group !== SETTINGS_TABS[i - 1]?.group;
         return (
           <button
             key={tab.id}
@@ -322,15 +379,38 @@ function SettingsSectionTabs({
             aria-selected={selected}
             aria-controls={selected ? panelId(tab.id) : undefined}
             tabIndex={selected ? 0 : -1}
-            className={`section-tab${selected ? ' active' : ''}`}
+            className={
+              `section-tab${selected ? ' active' : ''}` +
+              (startsGroup ? ' section-tab-group-start' : '')
+            }
+            /* THE GROUP IS A DESCRIPTION, NOT PART OF THE NAME — and this is a
+               correction, measured rather than reasoned. It was first written as
+               an `aria-label` suffix ("API Access \u2014 Advanced"), on the
+               reasoning that the mode chip's accessible name opens with its
+               visible text and then adds its claims. That shape is right for a
+               chip nobody queries by name; it is wrong here. A tab's name is its
+               HANDLE: `getByRole('tab', { name })` matches a string EXACTLY in
+               testing-library, and 98 assertions across three suites broke at
+               once. A description is announced after the name, so a reader still
+               learns the group, and every existing name stays the name.
+               Set on every tab in the group, not only the first: arrow-key
+               navigation never shows the third tab's reader the first tab's
+               visible marker. */
+            aria-describedby={tab.group ? SETTINGS_GROUP_DESC_ID : undefined}
             onClick={() => onSelect(tab.id)}
             onKeyDown={(e) => onKeyDown(e, i)}
           >
+            {startsGroup && (
+              <span className="section-tab-group" aria-hidden="true">
+                {tab.group}
+              </span>
+            )}
             {tab.label}
           </button>
         );
       })}
-    </div>
+      </div>
+    </>
   );
 }
 
