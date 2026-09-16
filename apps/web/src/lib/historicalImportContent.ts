@@ -235,6 +235,8 @@ export const IMPORT_COPY = {
   actionParse: 'Read the Sources',
   actionReconstruct: 'Reconstruct Candidates',
   actionPropose: 'Send to Review',
+  /** `HIST-005` — the whole import at once, onto one record. */
+  actionAddWhole: 'Add This Import to a Record',
   actionRemoveSource: 'Remove',
   actionDiscard: 'Discard This Import',
   actionOpen: 'Open',
@@ -258,6 +260,39 @@ export const IMPORT_COPY = {
   deduplicatedNote:
     'That record already held this proposal, so nothing new was created. It is still ' +
     'open and awaiting review.',
+
+  /**
+   * `HIST-005`'s lead. It has TWO jobs and both are load-bearing.
+   *
+   * It says what the step does — every candidate that can be sent, in one go —
+   * and it says what the step does NOT do, because "Add This Import to a Record"
+   * is a name a reader can hear as "apply it". Nothing is applied: each candidate
+   * becomes an OPEN proposal you review on that record, one decision at a time.
+   */
+  addWholeLead:
+    'Send every candidate that can be sent to one record, in a single step. Each ' +
+    'becomes an open proposal you review there — no value is written, and nothing ' +
+    'is applied for you.',
+
+  /**
+   * What the run field is for HERE, and it differs from the per-candidate one
+   * on purpose. One run is given for the whole import and used only for the
+   * values a run owns; the values the record owns ignore it.
+   */
+  addWholeRunNote:
+    'Used only for the values a run owns. The values the record owns ignore it. If ' +
+    'this import has a value a run owns and no run is named, nothing is sent at all.',
+
+  /** The heading over the report of what the batch did. */
+  addWholeResultTitle: 'What was sent',
+
+  /**
+   * What a batch that sent nothing NEW says. Reached when every candidate was
+   * already on that record — a second click, or a batch after sending by hand.
+   */
+  addWholeNothingNew:
+    'That record already held every one of these proposals, so nothing new was ' +
+    'created. They are still open and awaiting review.',
 } as const;
 
 export type ImportCopyKey = keyof typeof IMPORT_COPY;

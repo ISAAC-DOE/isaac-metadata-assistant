@@ -412,6 +412,46 @@ def test_no_shipped_write_route_mutates_a_submitted_records_history(client, db):
             headers={"If-Match": _etag(client, eid)},
         )
 
+    def add_a_whole_import():
+        """Send EVERY proposable candidate of an import onto this submitted record.
+
+        SWEPT RATHER THAN EXEMPTED, for `propose_from_an_import`'s reason and one
+        more of its own. It names an experiment in its body and rewrites that
+        experiment's document — and unlike the single-candidate route it does so
+        N TIMES INSIDE ONE `record_lock` AND ONE `save_versioned`. A loop that
+        writes several notes and several proposals under one lock is exactly the
+        shape in which "it only touches `state['notes']` and `state['proposals']`"
+        stops being obvious, so the question this file exists to ask is MORE live
+        for it, not less.
+
+        THE RUN IS DELIBERATELY NOT NAMED. This bundle has a run-scoped candidate,
+        so the route refuses the WHOLE batch with `422 target_requires_a_run` and
+        writes nothing. That is a REFUSAL, and this sweep therefore declares it
+        `REFUSED` below: a sweep that met a refusal and declared it `ACCEPTED`
+        would be asserting that a route which wrote nothing moved nothing, which
+        is the vacuity this file's own comments warn about twice. The write path
+        of this operation is the same `_mint_import_candidate` the single-candidate
+        attempt above already drives into a submitted record; what is swept HERE is
+        that the batch's all-or-nothing refusal also leaves the history alone.
+        """
+        created = client.post("/api/imports", json={"label": "sweep-batch"})
+        if created.status_code >= 300:  # pragma: no cover - the create cannot refuse
+            return created
+        import_id = created.json()["import"]["import_id"]
+        client.post(
+            f"/api/imports/{import_id}/sources",
+            json={"kind": "synthetic_fixture", "fixture_name": "SYNTHETIC-bundle-a.txt"},
+        )
+        client.post(f"/api/imports/{import_id}/parse")
+        reconstructed = client.post(f"/api/imports/{import_id}/reconstruct")
+        if reconstructed.status_code >= 300:  # pragma: no cover
+            return reconstructed
+        return client.post(
+            f"/api/imports/{import_id}/add-to-experiment",
+            json={"experiment_id": eid},
+            headers={"If-Match": _etag(client, eid)},
+        )
+
     attempts: list[tuple[str, object, object]] = [
         (
             "PATCH /experiments/{id}",
@@ -606,6 +646,21 @@ def test_no_shipped_write_route_mutates_a_submitted_records_history(client, db):
             "POST /imports/{id}/candidates/{id}/propose",
             ACCEPTED,
             propose_from_an_import,
+        ),
+        (
+            # THE BATCH PRODUCER, `HIST-005`. Declared REFUSED rather than
+            # ACCEPTED, and the reason is in `add_a_whole_import`'s docstring: with
+            # no run named and a run-scoped candidate present, this route refuses
+            # the whole batch and writes nothing. Both outcomes belong in this
+            # sweep and only one of them is this attempt's.
+            "POST /imports/{id}/add-to-experiment",
+            refused(
+                422,
+                "target_requires_a_run",
+                "no run is named and this bundle has a run-scoped candidate, so the "
+                "whole batch is refused and nothing is written",
+            ),
+            add_a_whole_import,
         ),
         (
             # ACCEPTED, AND THE ACCEPTANCE REALLY WRITES. This app fixture sets the
@@ -1272,6 +1327,10 @@ def test_the_sweep_covers_every_mutating_route_this_api_publishes(app):
             "POST",
             "/api/imports/{import_id}/candidates/{candidate_id}/propose",
         ): "POST /imports/{id}/candidates/{id}/propose",
+        (
+            "POST",
+            "/api/imports/{import_id}/add-to-experiment",
+        ): "POST /imports/{id}/add-to-experiment",
     }
 
     unaccounted = sorted(

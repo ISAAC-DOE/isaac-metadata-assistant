@@ -722,8 +722,25 @@ def test_every_operation_has_a_summary_that_is_not_the_function_name(client):
     # history. A session is one JSON file under the workspace directory, and the
     # response says so rather than implying durability it does not have.
     #
+    #
+    # ── 87 -> 88, 2026-09-15: `HIST-005`, ONE operation ─────────────────────────
+    # `POST /api/imports/{import_id}/add-to-experiment` — the import workflow's
+    # sixth step, which until now the surface rendered as UNBUILT with the
+    # server's own reason and no control at all.
+    #
+    # IT IS THE SECOND OPERATION IN THIS GROUP THAT WRITES AN EXPERIMENT, and it
+    # writes exactly what the first one writes, N times over, in ONE record lock
+    # and ONE save: one note plus one OPEN proposal per candidate, and NO FIELD.
+    # The note in the block above — "exactly ONE writes an experiment" — was true
+    # when written and is corrected here rather than deleted, because a reader
+    # counting write operations from that sentence would now be off by one.
+    #
+    # NO TABLE, NO MIGRATION, AND NO NEW STORAGE LOCATION. Proposals live at
+    # `state["proposals"]` where they already lived, and a session is still one
+    # JSON file under the workspace directory.
+    #
     # MEASURED from `create_app().openapi()`, not derived from the line above it.
-    assert checked == 87, f"expected 87 documented operations, found {checked}"
+    assert checked == 88, f"expected 88 documented operations, found {checked}"
 
 
 def test_the_auto_summary_check_can_actually_fail(client):
@@ -1183,6 +1200,13 @@ EXPECTED_RESPONSE_CODES: dict[tuple[str, str], list[str]] = {
     ("/api/imports", "post"): ["200", "401", "404", "422"],
     ("/api/imports/{import_id}", "delete"): ["200", "401", "404", "422"],
     ("/api/imports/{import_id}", "get"): ["200", "401", "404", "422"],
+    # THE SAME CODES AS THE SINGLE-CANDIDATE OPERATION BELOW, and that is the
+    # point rather than a coincidence: the batch is the same write N times inside
+    # one lock, so it refuses for the same reasons and with the same preconditions.
+    (
+        "/api/imports/{import_id}/add-to-experiment",
+        "post",
+    ): ["200", "400", "401", "404", "412", "422", "428", "503"],
     (
         "/api/imports/{import_id}/candidates/{candidate_id}/propose",
         "post",

@@ -1427,7 +1427,7 @@ work, and nothing about it has been decided. `MCP-020`/`MCP-021`/`SEC-001` stay 
 | BL15-001 | `.mac` parser | **BLOCKED — no representative file exists anywhere in reach.** §5 forbids designing against assumptions | HIST-000 |
 | HIST-003 | Semantic reconstruction into the **shared** Phase-D pipeline | BLOCKED on EXT-10 (~~DEC-13~~, resolved) | HIST-002 |
 | HIST-004 | Import review surface. **Banned pattern: Upload → Spinner → Mysterious JSON** | **DONE 2026-09-13 (shell)** — `apps/web/src/screens/HistoricalImport.tsx` at `/imports`, the SECOND primary destination. All three halves of the banned pattern refused and asserted: no file input (proven over the DOM, over the source with comments stripped, and over every request made — plus a control proving that predicate fires), no control for the one unbuilt step (not even a disabled one), and all NINE things the plan requires a scientist to see, each with its own test. ~~37~~ **38** frontend tests (corrected 2026-09-13, M-7: `npx vitest run src/__tests__/historical-import.test.tsx` -> `38 passed`), six mutation-verified. **Zero a11y baseline cells added** — `imports` passes `a11y-axe` and `structure` at all five viewports on darwin. **SCOPED 2026-09-13 (M-11): that is the EMPTY-LIST state only.** `SURFACES` reaches `/imports` at its index, so the scan never sees a loaded import session — roughly a thousand lines of state (source rows, parse verdicts, candidates, the review step) are unmeasured by axe at any viewport. The entry's own comment says so; this row did not, and "zero cells added" reads as coverage rather than as a measurement of one state. **The 38 frontend tests DO exercise the loaded states** — they are jsdom, not axe, which is a different question. Reaching the loaded state from the sweep needs a seeded session, which is why it was not done rather than overlooked | HIST-001 |
-| HIST-005 | Merge into the ordinary Library | **PLANNED — and it is now the workflow's ONE unbuilt step, named on the surface rather than implied.** `historical_import.UNBUILT_STEP` is `add_to_experiments`; the review screen renders the server's own `UNBUILT_STEP_DISCLOSURE` beside it and **no control at all** — not a disabled one, which would say the act exists and is temporarily unavailable (`test_...offers_NO_control` is mutation-verified against exactly that). What a scientist can do instead is send each field candidate to review on an experiment they create themselves, which is `HIST-001`'s ninth operation. **Two structural candidates are therefore refused by name** with `candidate_not_proposable`: a proposal is about one value at one official field path, so "an experiment exists here" has no proposal shape | HIST-004, LIB-003 |
+| HIST-005 | Merge into the ordinary Library | **DONE 2026-09-15 — `POST /api/imports/{import_id}/add-to-experiment`, the workflow's sixth step, built as ONE operation.** Sends every proposable candidate to review on one record inside ONE `record_lock` and ONE `_save_versioned` — the record holds the whole batch or none of it, at one new revision (asserted: `rev` moves by exactly +1 for N candidates, which is the test that fails if this is ever reimplemented as a client loop). It WRITES NO VALUE: measured, both target paths absent from the record draft and the run draft afterwards, with 2 open proposals and 2 notes present. `run_id` is applied to the candidates a run owns and IGNORED for the ones the record owns — deliberately unlike the single-candidate route, which refuses it; omitting it when a run-scoped candidate is sendable refuses the WHOLE batch (`422 target_requires_a_run`) rather than quietly leaving the run's values behind. Exactly-once per candidate and exactly-once ACROSS the two operations (shared `client_request_key`), so a candidate sent by hand and then included in a batch mints one proposal. Intrinsically unproposable candidates are reported with the server's own reason, never dropped. **The per-candidate mint is now ONE helper** (`routes._mint_import_candidate`) both operations call, so the five bounds it enforces — and the ORDER they are enforced in — have one expression. `UNBUILT_STEP` is now `None` and the mechanism is kept, not deleted; `furthest_step` can reach `add_to_experiments`, on the strict criterion that EVERY proposable candidate has been sent, and drops back to `review` when a re-reconstruction mints new ones. 17 backend tests + 11 frontend tests; verified end-to-end in a real browser. Previous state, kept because it is what the surface promised: ~~**PLANNED — and it is now the workflow's ONE unbuilt step, named on the surface rather than implied.** `historical_import.UNBUILT_STEP` is `add_to_experiments`; the review screen renders the server's own `UNBUILT_STEP_DISCLOSURE` beside it and **no control at all** — not a disabled one, which would say the act exists and is temporarily unavailable (`test_...offers_NO_control` is mutation-verified against exactly that). What a scientist can do instead is send each field candidate to review on an experiment they create themselves, which is `HIST-001`'s ninth operation. **Two structural candidates are therefore refused by name** with `candidate_not_proposable`: a proposal is about one value at one official field path, so "an experiment exists here" has no proposal shape~~ | HIST-004, LIB-003 |
 | HIST-006 | Gold-standard evaluation; the headline metric is **fabricated-value rate**, not fields-filled. Every metric must name the artifact required to compute it | BLOCKED on EXT-10 (~~DEC-13~~, resolved) | HIST-005 |
 | SRC-001 | **Already satisfied — do not rebuild.** Multi-source disagreement for a value in the draft is representable **today**: `evidence_classify.asserted_values` → `conflicting_evidence` at ≥2 values; `conflict_resolution` stores `competing_values` + set-digest with `deferred` first-class; `build_sidecar` copies the **whole** evidence list, so the record carries one value and the sidecar preserves the disagreement | CONFIRMED CURRENT | — |
 
@@ -4265,3 +4265,141 @@ Each exists because it was violated, and each cost real time:
   measured that way is a tooling artifact, not a defect.
 - **Impeccable's mechanical detector is non-functional in this environment** (negative-control
   proven: no findings, exit 0, on deliberately broken TSX). Never cite "0 findings" from it.
+
+---
+
+## SESSION CONTINUATION — 2026-09-15 (after PR #256 merged)
+
+**PR #256 merged as `6e539fda`** on org `main` (all five checks green on its exact head
+`acfd7fe7`: frontend tests and build, backend tests and synthetic demo, migration against a real
+PostgreSQL, browser accessibility and responsive baseline, Docker smoke). `main` was verified not
+to have advanced since the branch point, so the merge result was the branch head and the
+exact-head-green run described the tree that merged — the check `CLAUDE.md` §11 records two
+`main`-red counterexamples for.
+
+Two of the owner's mandatory priorities were still unbuilt at that point. Both are now built.
+
+### 1. Settings is simplified with the developer material under Advanced
+
+The seven tabs are two groups: **Overview · Data & Privacy · About · Help & Tutorial**, then a
+neutral 1px divider, the word **ADVANCED**, and **API Access · Endpoint Explorer · Connect Your
+Agent**.
+
+**It is a LABEL on a flat tablist, not a second tablist and not a collapse into one tab.** A
+nested tablist is banned system-wide and each of the seven is independently deep-linked. The
+stronger reading — three disclosures inside one "Advanced" tab — was **declined on measured
+grounds, and the decline is recorded at the site** so asking for it is a decision rather than a
+rediscovery: `ApiDocs` alone renders two `search` landmarks, the landmark-name guard already pins
+that exactly one region is named "Endpoint Explorer", and `querySelectorAll` reaches inside a
+closed `<details>`, so stacking the three collides those landmarks whether or not they are
+visibly collapsed — and it would move the a11y baseline cells of two separately-keyed surfaces.
+
+**THE FIRST IMPLEMENTATION WAS WRONG AND THE CORRECTION IS THE USEFUL PART.** The group was first
+appended to each tab's `aria-label` ("API Access — Advanced"), reasoning from the mode chip, whose
+accessible name opens with its visible text and then adds its claims. That shape is right for a
+chip nobody queries by name and **wrong for a tab: a tab's name is its HANDLE**.
+`getByRole('tab', { name })` matches a string EXACTLY in testing-library, and **98 assertions
+across three suites broke at once**. `aria-describedby` is announced after the name, so a reader
+still learns the group and every existing name stays the name — including in `e2e/surfaces.ts`,
+where **only the ORDER changed**.
+
+The marker is rendered INSIDE the first grouped button and the shared description OUTSIDE the
+tablist, because `role="tablist"` may own only `role="tab"` children and the obvious rendering — a
+wrapper or separator beside the buttons — breaks `aria-required-children` in a way no name
+assertion notices. A test asserts every direct child of the tablist is a tab and that the
+description element is not one of them. Because the marker lives inside the button and the divider
+is that button's own border, **neither can be orphaned when the row wraps — structural, not luck**.
+
+`Help & Tutorial` moved from last to fourth. The reason it needs a permanent home is unchanged (the
+first-run walkthrough offer disappears for good once finished, so this is the only way back) and
+**being last was never that reason**: a reader looking for the walkthrough is not a reader looking
+for an API key.
+
+Measured in Chrome at 1280: all seven tabs report the same `top` and the same 30.5px height, so the
+inline marker did not pull the shared `.section-tabs` row out of alignment on the four pages that
+use it; the row occupies 855 of 960px and does not wrap. The marker is 11px/600 in `--text-muted`
+(#5b6570, 5.93:1) rather than `--text-tertiary`, because nothing in this app qualifies for the WCAG
+large-text exemption. The divider is neutral `--border-faint`, which the no-vertical-rail rule
+names as "not a rail". Spacing is even at 12px either side; it was 16/8 first, which put the word
+nearer the label than the boundary and invited reading "ADVANCED API Access" as one tab name.
+Playwright `tabs.spec.ts` + `structure.spec.ts`: **461 passed, exit 0**, all five viewports.
+
+### 2. HIST-005 — Historical Import can add a whole import to a record
+
+See the corrected `HIST-005` row above for what shipped. What belongs here is the reasoning a
+future session should not have to redo:
+
+**A CLIENT-SIDE LOOP WAS CONSIDERED FIRST AND THE REPOSITORY HAD ALREADY ARGUED IT DOWN.**
+`_mint_transcript_proposals`' own docstring says a client-side mint "would be N+1 requests … each
+able to fail on its own — so a browser that closed, a tab that slept, or a `412` partway through
+would leave a record whose notes were stored and whose proposals were not, with no surface able to
+say which candidates were missing. The scientist's act was ONE act." That is exactly this case, so
+the server route is precedent rather than invention.
+
+**PARTIAL SUCCESS IS SPLIT BY WHETHER THE CALLER CAN FIX IT.** A candidate that is intrinsically
+unproposable (sources disagree, structural, no write path) is reported and skipped — the review
+screen already shows that reason, so the scientist is not surprised. A candidate that needs a run
+when none was named refuses the **whole batch**, because sending only the rest would silently leave
+the run's values behind and leave no way to tell a finished import from a partial one.
+
+**A REAL DEFECT WAS FOUND ONLY IN A BROWSER, AND NO UNIT TEST COULD HAVE SEEN IT.** `act()` calls
+`session.reload()`, which puts `ImportSessionView` into `loading` and returns a `LoadingPanel` —
+**unmounting its whole subtree**, and with it the panel's report state. Measured: the batch wrote
+2 proposals and 2 notes, `furthest_step` advanced, and the screen said **nothing**. The report is
+now owned one level up, above the reload boundary. It **cannot** be re-derived from the reloaded
+session, which is why the per-candidate card does not have this problem and this panel could not
+copy its approach: a card's confirmation is `session.proposed[candidate_id]`, a fact the session
+carries, whereas the batch's counts and its per-candidate REASON are statements about one request
+the session never stores.
+
+**A DUPLICATE-COPY GUARD WAS SATISFIED BY EXTRACTION, NOT BY WIDENING.**
+`product-facing-language.test.tsx`'s P1 exemption for this screen is deliberately ONE STRING, ONE
+OCCURRENCE — "which is what makes this an act rather than a widening". The panel needed the same
+"New record from this import" control a candidate card has. Widening the exemption to two would
+have passed the test and defeated it; the control is now **one component with two call sites**, so
+there is one creation affordance on the screen, expressed once.
+
+**A STALE FIXTURE WAS MOVED RATHER THAN LEFT BESIDE A NEW ONE.** `historical-import.test.tsx`'s
+`WORKFLOW` marked `add_to_experiments` unbuilt, and §3 asserted the surface rendered its
+disclosure. That describes a server state that no longer occurs. The fixture now matches the
+server (all six built); §3's tests are **retargeted at the MECHANISM** with an explicit
+`UNBUILT_WORKFLOW`, because the mechanism is what has to keep working — and a new test asserts the
+state that actually ships renders no disclosure at all. Two backend tests were rewritten for the
+same reason: `assert hi.UNBUILT_STEP in steps` and `furthest_step() != hi.UNBUILT_STEP` would both
+be **vacuously true** against `None`, and a test that passes because its subject stopped existing
+is worse than no test.
+
+**FOUR CONSEQUENCES OF PUBLISHING AN OPERATION, EACH HANDLED RATHER THAN SUPPRESSED:** the
+documented-operation count 87 → 88 (backend) and the transcribed-contract count 87 → 88 with its
+character total 154,565 → 157,721 and post-lead paragraphs 303 → 310 (frontend) — every one
+**measured by running the file and reading what it reported**, never apportioned; the OpenAPI
+description transcribed into `apiFixtures.ts` **by a script reading the served document**, not by
+hand; and the submitted-history sweep extended with a named attempt, declared `refused(422,
+"target_requires_a_run")` rather than `ACCEPTED`, because a sweep that meets a refusal and calls it
+accepted asserts that a route which wrote nothing moved nothing.
+
+### Verification
+
+| what | command | result |
+|---|---|---|
+| backend | `.venv/bin/python -m pytest apps/api/tests src tests -q -rs` | re-run pending at time of writing; the four failures the HIST-005 slice caused are each closed and re-run green in isolation |
+| historical import | `pytest apps/api/tests/test_historical_import_routes.py apps/api/tests/test_historical_import.py -q` | **145 passed** |
+| submitted-history sweep | `pytest apps/api/tests/test_submitted_history_survives_every_write_path.py -q` | **12 passed** |
+| OpenAPI contract | `pytest apps/api/tests/test_about_and_openapi.py -q` + `-k transcribed` | **37 passed**, **7 passed** |
+| frontend (import) | `npx vitest run src/__tests__/historical-import.test.tsx` | **52 passed** |
+| frontend (settings) | `npx vitest run src/__tests__/settings-page.test.tsx src/__tests__/settings-api.test.tsx src/__tests__/statistics-nav.test.tsx` | **140 / 78 / 21 passed** |
+| CSS guards | `npx vitest run src/__tests__/{type-scale-and-spacing,no-vertical-rail,palette-contrast,interaction-states,source-is-greppable}.test.ts` | all pass |
+| typecheck | `npx tsc -b apps/web` | exit 0 |
+| browser (Settings) | `npx playwright test e2e/specs/tabs.spec.ts e2e/specs/structure.spec.ts` | **461 passed, exit 0** |
+| browser (HIST-005) | real Chromium against a live uvicorn + vite, default `VITE_API_BASE` | whole-batch refusal surfaced verbatim; then 2 open proposals + 2 notes written, run-scoped one carrying the run and the record-scoped one not, `furthest_step` → `add_to_experiments`, report reading `2 sent · 0 already there · 1 could not be sent · 3 candidates in this import`, **both draft paths absent** |
+
+**Data governance:** synthetic only. The browser check used the committed
+`SYNTHETIC-bundle-a.txt` fixture and two records created for the purpose; **both records were
+discarded and both import sessions deleted afterwards**, and the workspace was re-verified empty
+(`experiments: 0`, `imports: 0`) because the read-only e2e setup requires it. No real data, no
+provider, no database, no hosted environment was touched.
+
+**Truth path:** untouched. `src/isaac_records/**`, `schema/**`, `export.py` and `official.py` are
+unmodified; the batch route writes only `state["notes"]` and `state["proposals"]`, which is
+asserted rather than claimed — both target field paths are absent from the record draft and the run
+draft after a successful batch.

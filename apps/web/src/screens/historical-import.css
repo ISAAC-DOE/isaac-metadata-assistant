@@ -1171,3 +1171,61 @@
 .hi-reference-fallback[open] > summary::before {
   transform: rotate(90deg);
 }
+
+/* --------------------------------------------------------------------------
+ * HIST-005 — Add This Import to a Record.
+ *
+ * The workflow's sixth step, as ONE control. It is a `.hi-group` like the
+ * candidate sections it sits above, with a tinted card behind it so a reader can
+ * see it is the step rather than a fifth grouping of candidates. A TINTED CARD
+ * WITH A NEUTRAL BORDER, never a coloured left rail: the no-vertical-rail rule
+ * is permanent and system-wide, and this file already learned that lesson once.
+ * -------------------------------------------------------------------------- */
+
+.hi-addwhole {
+  border-radius: var(--radius-inner);
+  border: 1px solid var(--border);
+  background: var(--surface-subtle);
+  padding: var(--space-sm);
+}
+
+.hi-addwhole-result {
+  margin-top: var(--space-sm);
+  padding-top: var(--space-sm);
+  border-top: 1px solid var(--border-faint);
+}
+
+.hi-addwhole-result-title {
+  margin: 0 0 var(--space-2xs);
+  font-size: var(--font-size-body);
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-primary);
+}
+
+.hi-addwhole-sent,
+.hi-addwhole-unsent {
+  list-style: none;
+  margin: var(--space-xs) 0 0;
+  padding: 0;
+  font-size: var(--font-size-meta);
+}
+
+.hi-addwhole-sent li,
+.hi-addwhole-unsent li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-xs);
+  align-items: baseline;
+  padding: var(--space-2xs) 0;
+}
+
+/* The server's own reason a candidate was not sent. `--text-secondary`, not a
+   status colour: it is an explanation, and the candidate's own card already
+   carries whatever emphasis that reason deserves. It is allowed to wrap onto its
+   own line rather than being truncated — a reason a reader cannot finish reading
+   is a reason that was not given. */
+.hi-blocked-reason {
+  flex: 1 1 100%;
+  min-width: 0;
+  color: var(--text-secondary);
+}

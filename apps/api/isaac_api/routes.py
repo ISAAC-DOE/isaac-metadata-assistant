@@ -24762,6 +24762,225 @@ def _import_note_value_span(statement: Mapping, filename: str) -> tuple[int, int
     return len(text) - len(value), len(text)
 
 
+def _mint_import_candidate(
+    exp: Experiment,
+    candidate,
+    *,
+    run_id: str | None,
+    filename: str,
+    statement: Mapping,
+    client_request_key: str,
+) -> JSONResponse | tuple[object | None, object, bool]:
+    """Put ONE import candidate's note and proposal on ``exp``. In memory only.
+
+    Returns either a typed refusal to hand straight back to the caller, or
+    ``(note, proposal, deduplicated)`` — where ``note`` is ``None`` exactly when
+    ``deduplicated`` is true, because a candidate already sent mints nothing.
+
+    **NOTHING IS PERSISTED HERE.** The caller owns the ``record_lock``, the
+    ``If-Match`` check and the single ``_save_versioned``, which is what lets the
+    batch route mint N candidates and still write once. A refusal returned from
+    the middle of that loop therefore leaves nothing written: ``capture_note``
+    and ``add_proposal`` mutate the loaded object, and the loaded object is
+    re-read from the store on every request.
+
+    WHY THIS IS A HELPER AND NOT TWO COPIES. It carries five bounds — the
+    per-record proposal count, the two note ceilings, the per-note byte bound and
+    the per-record proposal byte ceiling — and each is enforced at a POSITION
+    that was argued for (the deduplication branch first, so a retry of work
+    already done is never refused for want of capacity). A second transcription
+    of that order in the batch route would be a second thing to keep right, and
+    ``CLAUDE.md`` §11 records four surfaces that shipped a number they had not
+    derived from what they claimed to describe.
+
+    THE RUN IS DECIDED BY THE CALLER, not here, and the two callers decide it
+    differently on purpose. The single-candidate route REFUSES a ``run_id`` for a
+    record-scoped target and refuses its absence for a run-scoped one, because
+    the caller named one candidate and either got its scope right or did not. The
+    batch route is given one run for a whole import and applies it only to the
+    candidates written on a run, because a record-scoped candidate in the same
+    batch is not a mistake — so it passes ``None`` for those rather than making
+    the scientist send two requests.
+    """
+    # THE TARGET PATH IS DERIVED HERE, from the candidate, rather than passed in.
+    # It is the one value both callers would otherwise have had to compute and
+    # agree on, and a caller that computed it differently would put a note on one
+    # path and a proposal on another inside a single write.
+    path = candidate.target_field_path
+
+    # EXACTLY-ONCE, INSIDE THE LOCK, AND IT DOES NOT DEPEND ON THE SESSION.
+    # The key is derived from the import id and the candidate id, so it is the
+    # same string on every attempt — including one made after the session was
+    # discarded and rebuilt. That is why `record_proposed` below is a
+    # convenience for the surface and not the guard: if this route's session
+    # write never landed, the record's own proposal list still answers "this
+    # candidate was already sent" and no second proposal is minted.
+    existing = proposals.find_by_client_request_key(
+        exp.sorted_proposals(), client_request_key
+    )
+    if existing is not None:
+        # THE EXISTING PROPOSAL IS HANDED BACK, NOT RENDERED HERE. The single-
+        # candidate route answers 200 with it; the batch route counts it as
+        # already-sent and carries on to the next candidate. Rendering inside
+        # this helper would have forced the batch to parse a response body to
+        # find out what happened, which is how a surface comes to report a
+        # number it did not derive.
+        return (None, existing, True)
+
+    if len(exp.proposals) >= _MAX_PROPOSALS_PER_RECORD:
+        return _proposal_refusal(
+            "too_many_proposals",
+            (
+                "This record already holds the maximum number of proposals. "
+                "Nothing was written."
+            ),
+            max_per_record=_MAX_PROPOSALS_PER_RECORD,
+            total=len(exp.proposals),
+        )
+
+    # THE TWO NOTE CEILINGS TOO, because this operation mints a NOTE as well as
+    # a proposal and the note lands in the same document.
+    #
+    # `_note_capacity_refusal` is CALLED rather than reimplemented, and this is
+    # its SECOND caller. A second expression of the same bound is the drift
+    # `test_each_capture_count_has_exactly_one_expression_in_the_route_module`
+    # exists to forbid, and this bound's whole reason is that the record
+    # document is parsed on every read and hashed on every save — a reason that
+    # does not care which route grew it.
+    #
+    # AFTER THE DEDUPLICATION BRANCH, for `post_note`'s reason: a retry of a
+    # candidate the record already holds adds nothing, so refusing it for want
+    # of capacity would make a record at its ceiling unable to confirm work it
+    # had already done.
+    #
+    # **A PRE-EXISTING GAP IS NAMED HERE RATHER THAN FIXED**, because it is not
+    # this slice's to close: `POST .../transcript` mints one note per segment
+    # and calls this helper at NO point, so the note ceilings do not bind there.
+    # That route has its own all-or-nothing proposal byte ceiling and its own
+    # argument for it; widening it is a separate change with its own review.
+    capacity = _note_capacity_refusal(exp)
+    if capacity is not None:
+        return capacity
+
+    problem = _proposal_value_problem(candidate.proposed_value, candidate.rule)
+    if problem is not None:
+        error, message, extra = problem
+        return _proposal_refusal(error, message, **extra)
+
+    text = _import_note_text(statement, filename)
+    start_char, end_char = _import_note_value_span(statement, filename)
+    # THE PER-NOTE BYTE BOUND, AND `_note_text_refusal` IS ITS THIRD CALLER.
+    #
+    # A note's own size limit is enforced at the ROUTE — `notes.Note` does not
+    # check it — so a route that mints a note and does not call this is a route
+    # with no per-note bound at all. The per-RECORD ceilings checked above are a
+    # different bound and do not imply this one: `_MAX_NOTE_STATE_BYTES` is
+    # sixteen times `_MAX_NOTE_BYTES`, so one oversized note passes it.
+    #
+    # UNREACHABLE ON THE COMMITTED EXAMPLE SOURCES, and that is exactly why it
+    # is written rather than reasoned away. The only readable sources today are
+    # two short committed files, but a parsed line is bounded only by
+    # `MAX_SOURCE_TEXT_BYTES` (1,000,000) while a note is bounded by 256 KiB —
+    # so a single long line in a future source would mint a note no other route
+    # would have accepted. It also covers the lone-surrogate case, which a
+    # hand-edited session document could carry into `statement`.
+    too_big = _note_text_refusal(text, what="The words read from this source")
+    if too_big is not None:
+        return too_big
+    try:
+        note = exp.capture_note(
+            text=text,
+            source=_IMPORT_NOTE_SOURCE,
+            run_id=run_id,
+            candidate_field_path=path,
+            candidate_rule=candidate.rule,
+        )
+    except notes.UnsupportedNote as refusal:
+        # The model's own refusals reach the client as a typed 422, never a
+        # 500. Nothing was saved: `capture_note` mutates the in-memory record
+        # only, and the save below has not run.
+        return _proposal_refusal("unsupported_note", str(refusal))
+
+    run = exp.get_run(run_id) if run_id is not None else None
+    try:
+        digest = proposals.target_digest(_proposal_target_state(exp, run, path))
+    except (TypeError, ValueError) as refusal:  # pragma: no cover - hand-edited doc
+        return _proposal_refusal(
+            "unrepresentable_value",
+            (
+                "What this record currently holds at that path could not be "
+                "digested, so a proposal for it would have no acceptance "
+                f"precondition to check against: {refusal}. Nothing was written."
+            ),
+        )
+    try:
+        proposal = proposals.new_proposal(
+            proposal_id=new_record_id(),
+            experiment_id=exp.id,
+            note_id=note.id,
+            target_field_path=path,
+            proposed_value=candidate.proposed_value,
+            # THE RECONSTRUCTION'S OWN RULE SENTENCE, carried verbatim. It
+            # names the key and the line the value was read from, or the stored
+            # rule that inferred it, which is exactly what a reviewer needs and
+            # is not something this route may paraphrase.
+            rule=candidate.rule,
+            # READ OFF THE NOTE, never chosen here — the note already records
+            # what produced its content, and a second answer could disagree.
+            source=note.source,
+            proposed_utc=_now_iso(),
+            base_rev=exp.rev,
+            target_digest=digest,
+            # THE PROPOSER'S ACTOR SEAM STAYS UNSET. Creating a proposal
+            # requires no attributable actor — it writes no scientific value —
+            # and no trusted authentication boundary exists in this build, so a
+            # subject here would be a name nothing vouched for.
+            trust_basis=submissions.TRUST_BASIS_UNATTRIBUTED,
+            run_id=run_id,
+            start_char=start_char,
+            end_char=end_char,
+            client_request_key=client_request_key,
+        )
+    except proposals.UnsupportedProposal as refusal:
+        return _proposal_refusal("unsupported_proposal", str(refusal))
+
+    # THE PER-RECORD PROPOSAL BYTE CEILING, measured over the proposal that
+    # WOULD be stored — `post_proposal`'s check, at its position, for its
+    # reason. Minting is pure: nothing is on the record until `add_proposal`
+    # below, so measuring here and refusing costs the caller nothing and
+    # writes nothing. The note this request also minted is already in
+    # `exp.notes` and was bounded by `_note_capacity_refusal` above.
+    try:
+        projected = _render_exactly_as_a_response_would(
+            [existing.to_state() for existing in exp.proposals]
+            + [proposal.to_state()]
+        )
+    except (ValueError, TypeError, UnicodeEncodeError):  # pragma: no cover
+        return _proposal_refusal(
+            "unrepresentable_value",
+            (
+                "This record already holds a proposal that could not be "
+                "measured, so the per-record ceiling could not be checked and "
+                "nothing was written."
+            ),
+        )
+    if len(projected) > _MAX_PROPOSAL_STATE_BYTES:
+        return _proposal_refusal(
+            "proposals_too_large",
+            (
+                "This record's proposals would be larger together than one "
+                "record's may be. They are REFUSED rather than trimmed to make "
+                "room. Nothing was written."
+            ),
+            max_bytes=_MAX_PROPOSAL_STATE_BYTES,
+            bytes=len(projected),
+            total=len(exp.proposals),
+        )
+
+    exp.add_proposal(proposal)
+    return (note, proposal, False)
+
+
 @router.post(
     "/imports/{import_id}/candidates/{candidate_id}/propose",
     tags=[TAG_INGESTION],
@@ -24972,181 +25191,33 @@ def post_import_candidate_proposal(
         if precondition is not None:
             return precondition
 
-        # EXACTLY-ONCE, INSIDE THE LOCK, AND IT DOES NOT DEPEND ON THE SESSION.
-        # The key is derived from the import id and the candidate id, so it is the
-        # same string on every attempt — including one made after the session was
-        # discarded and rebuilt. That is why `record_proposed` below is a
-        # convenience for the surface and not the guard: if this route's session
-        # write never landed, the record's own proposal list still answers "this
-        # candidate was already sent" and no second proposal is minted.
-        existing = proposals.find_by_client_request_key(
-            exp.sorted_proposals(), client_request_key
+        minted = _mint_import_candidate(
+            exp,
+            candidate,
+            run_id=run_id,
+            filename=filename,
+            statement=statement,
+            client_request_key=client_request_key,
         )
-        if existing is not None:
+        if isinstance(minted, JSONResponse):
+            return minted
+        note, proposal, deduplicated = minted
+        if deduplicated:
+            # The candidate was already sent to this record. Answered here rather
+            # than in the helper so this route keeps the exact 200 shape it has
+            # always had, `note: null` included.
             return JSONResponse(
                 status_code=200,
                 headers={"ETag": exp.etag()},
                 content=jsonable_encoder(
                     {
-                        "proposal": _proposal_view(exp, existing),
+                        "proposal": _proposal_view(exp, proposal),
                         "note": None,
                         "deduplicated": True,
                         "experiment_version": exp.version_token(),
                     }
                 ),
             )
-
-        if len(exp.proposals) >= _MAX_PROPOSALS_PER_RECORD:
-            return _proposal_refusal(
-                "too_many_proposals",
-                (
-                    "This record already holds the maximum number of proposals. "
-                    "Nothing was written."
-                ),
-                max_per_record=_MAX_PROPOSALS_PER_RECORD,
-                total=len(exp.proposals),
-            )
-
-        # THE TWO NOTE CEILINGS TOO, because this operation mints a NOTE as well as
-        # a proposal and the note lands in the same document.
-        #
-        # `_note_capacity_refusal` is CALLED rather than reimplemented, and this is
-        # its SECOND caller. A second expression of the same bound is the drift
-        # `test_each_capture_count_has_exactly_one_expression_in_the_route_module`
-        # exists to forbid, and this bound's whole reason is that the record
-        # document is parsed on every read and hashed on every save — a reason that
-        # does not care which route grew it.
-        #
-        # AFTER THE DEDUPLICATION BRANCH, for `post_note`'s reason: a retry of a
-        # candidate the record already holds adds nothing, so refusing it for want
-        # of capacity would make a record at its ceiling unable to confirm work it
-        # had already done.
-        #
-        # **A PRE-EXISTING GAP IS NAMED HERE RATHER THAN FIXED**, because it is not
-        # this slice's to close: `POST .../transcript` mints one note per segment
-        # and calls this helper at NO point, so the note ceilings do not bind there.
-        # That route has its own all-or-nothing proposal byte ceiling and its own
-        # argument for it; widening it is a separate change with its own review.
-        capacity = _note_capacity_refusal(exp)
-        if capacity is not None:
-            return capacity
-
-        problem = _proposal_value_problem(candidate.proposed_value, candidate.rule)
-        if problem is not None:
-            error, message, extra = problem
-            return _proposal_refusal(error, message, **extra)
-
-        text = _import_note_text(statement, filename)
-        start_char, end_char = _import_note_value_span(statement, filename)
-        # THE PER-NOTE BYTE BOUND, AND `_note_text_refusal` IS ITS THIRD CALLER.
-        #
-        # A note's own size limit is enforced at the ROUTE — `notes.Note` does not
-        # check it — so a route that mints a note and does not call this is a route
-        # with no per-note bound at all. The per-RECORD ceilings checked above are a
-        # different bound and do not imply this one: `_MAX_NOTE_STATE_BYTES` is
-        # sixteen times `_MAX_NOTE_BYTES`, so one oversized note passes it.
-        #
-        # UNREACHABLE ON THE COMMITTED EXAMPLE SOURCES, and that is exactly why it
-        # is written rather than reasoned away. The only readable sources today are
-        # two short committed files, but a parsed line is bounded only by
-        # `MAX_SOURCE_TEXT_BYTES` (1,000,000) while a note is bounded by 256 KiB —
-        # so a single long line in a future source would mint a note no other route
-        # would have accepted. It also covers the lone-surrogate case, which a
-        # hand-edited session document could carry into `statement`.
-        too_big = _note_text_refusal(text, what="The words read from this source")
-        if too_big is not None:
-            return too_big
-        try:
-            note = exp.capture_note(
-                text=text,
-                source=_IMPORT_NOTE_SOURCE,
-                run_id=run_id,
-                candidate_field_path=path,
-                candidate_rule=candidate.rule,
-            )
-        except notes.UnsupportedNote as refusal:
-            # The model's own refusals reach the client as a typed 422, never a
-            # 500. Nothing was saved: `capture_note` mutates the in-memory record
-            # only, and the save below has not run.
-            return _proposal_refusal("unsupported_note", str(refusal))
-
-        run = exp.get_run(run_id) if run_id is not None else None
-        try:
-            digest = proposals.target_digest(_proposal_target_state(exp, run, path))
-        except (TypeError, ValueError) as refusal:  # pragma: no cover - hand-edited doc
-            return _proposal_refusal(
-                "unrepresentable_value",
-                (
-                    "What this record currently holds at that path could not be "
-                    "digested, so a proposal for it would have no acceptance "
-                    f"precondition to check against: {refusal}. Nothing was written."
-                ),
-            )
-        try:
-            proposal = proposals.new_proposal(
-                proposal_id=new_record_id(),
-                experiment_id=exp.id,
-                note_id=note.id,
-                target_field_path=path,
-                proposed_value=candidate.proposed_value,
-                # THE RECONSTRUCTION'S OWN RULE SENTENCE, carried verbatim. It
-                # names the key and the line the value was read from, or the stored
-                # rule that inferred it, which is exactly what a reviewer needs and
-                # is not something this route may paraphrase.
-                rule=candidate.rule,
-                # READ OFF THE NOTE, never chosen here — the note already records
-                # what produced its content, and a second answer could disagree.
-                source=note.source,
-                proposed_utc=_now_iso(),
-                base_rev=exp.rev,
-                target_digest=digest,
-                # THE PROPOSER'S ACTOR SEAM STAYS UNSET. Creating a proposal
-                # requires no attributable actor — it writes no scientific value —
-                # and no trusted authentication boundary exists in this build, so a
-                # subject here would be a name nothing vouched for.
-                trust_basis=submissions.TRUST_BASIS_UNATTRIBUTED,
-                run_id=run_id,
-                start_char=start_char,
-                end_char=end_char,
-                client_request_key=client_request_key,
-            )
-        except proposals.UnsupportedProposal as refusal:
-            return _proposal_refusal("unsupported_proposal", str(refusal))
-
-        # THE PER-RECORD PROPOSAL BYTE CEILING, measured over the proposal that
-        # WOULD be stored — `post_proposal`'s check, at its position, for its
-        # reason. Minting is pure: nothing is on the record until `add_proposal`
-        # below, so measuring here and refusing costs the caller nothing and
-        # writes nothing. The note this request also minted is already in
-        # `exp.notes` and was bounded by `_note_capacity_refusal` above.
-        try:
-            projected = _render_exactly_as_a_response_would(
-                [existing.to_state() for existing in exp.proposals]
-                + [proposal.to_state()]
-            )
-        except (ValueError, TypeError, UnicodeEncodeError):  # pragma: no cover
-            return _proposal_refusal(
-                "unrepresentable_value",
-                (
-                    "This record already holds a proposal that could not be "
-                    "measured, so the per-record ceiling could not be checked and "
-                    "nothing was written."
-                ),
-            )
-        if len(projected) > _MAX_PROPOSAL_STATE_BYTES:
-            return _proposal_refusal(
-                "proposals_too_large",
-                (
-                    "This record's proposals would be larger together than one "
-                    "record's may be. They are REFUSED rather than trimmed to make "
-                    "room. Nothing was written."
-                ),
-                max_bytes=_MAX_PROPOSAL_STATE_BYTES,
-                bytes=len(projected),
-                total=len(exp.proposals),
-            )
-
-        exp.add_proposal(proposal)
         _changed, stale = _save_versioned(exp, if_match)
         if stale is not None:
             return stale  # another writer won the race; nothing was stored
@@ -25178,5 +25249,409 @@ def post_import_candidate_proposal(
         "proposal": proposal_view,
         "note": note_view,
         "deduplicated": False,
+        "experiment_version": version,
+    }
+
+
+@router.post(
+    "/imports/{import_id}/add-to-experiment",
+    tags=[TAG_INGESTION],
+    summary="Add an Import to a Record",
+    description=(
+        "Sends **every candidate this import can propose** to review on one "
+        "record, as open ingestion proposals with the notes carrying each "
+        "source's own words, in ONE write. This is the import workflow's sixth "
+        "step, `add_to_experiments`.\n\n"
+        "**IT WRITES NO VALUE.** Every field of the record, and of every run, is "
+        "left byte-for-byte unchanged. A proposal is a suggestion awaiting a "
+        "person's judgement and is inert to export; the separate review "
+        "operation is what writes anything, one decision at a time, through the "
+        "same routes manual entry already uses. So this operation does not "
+        "'apply an import' — it puts the import in front of a scientist.\n\n"
+        "WHY IT IS ONE REQUEST AND NOT N. The scientist's act is ONE act. A "
+        "client looping over the single-candidate operation would make N "
+        "requests, each with its own `If-Match`, each able to fail on its own — "
+        "so a closed browser or a `412` partway through would leave a record "
+        "holding some of an import with no surface able to say which candidates "
+        "were missing. All the notes and all the proposals are written inside one "
+        "`record_lock` and one save: the record holds the whole batch or it holds "
+        "none of it, at one new revision.\n\n"
+        "THE RECORD'S OWN `ETag` IS REQUIRED in `If-Match` — omitted is `428`, "
+        "malformed is `400`, stale is `412` with nothing written. It is the "
+        "RECORD's, never the session's: an import session has no revision "
+        "contract and serves no validator of its own.\n\n"
+        "`run_id` NAMES THE RUN FOR THE CANDIDATES WRITTEN ON A RUN, and is "
+        "ignored for the ones written on the record. **This differs from the "
+        "single-candidate operation on purpose**, and the difference is named "
+        "rather than left to be discovered: there, a `run_id` given for a "
+        "record-scoped target is REFUSED, because the caller named one candidate "
+        "and either got its scope right or did not. Here one run is given for a "
+        "whole import, and a record-scoped candidate in the same batch is not a "
+        "mistake — refusing it would make the scientist send two requests to do "
+        "one thing. The run is never inferred from the only run that happens to "
+        "exist, in either operation.\n\n"
+        "IT IS EXACTLY-ONCE PER CANDIDATE, so running it twice, double-clicking, "
+        "or running it after sending some candidates by hand adds nothing: each "
+        "candidate already sent to this record is reported under `sent` with "
+        "`already_sent: true` and mints no second proposal.\n\n"
+        "CANDIDATES THIS IMPORT CANNOT PROPOSE ARE REPORTED, NEVER DROPPED. Each "
+        "appears under `not_sent` with the reason the review surface already "
+        "shows for it — sources that disagree, a structural candidate about "
+        "whether an experiment or a run exists rather than about a value, or a "
+        "path this build has no write operation for. None of those is fixable by "
+        "retrying, which is why they do not refuse the batch.\n\n"
+        "REFUSED WHOLE, WITH NOTHING WRITTEN, in the cases that ARE fixable by "
+        "the caller: a run-scoped candidate is sendable and no `run_id` was given "
+        "(`422 target_requires_a_run`, naming them); no candidate is sendable at "
+        "all (`422 nothing_to_send`, with the same `not_sent` report, so the "
+        "answer explains itself); or the record is at one of its note or proposal "
+        "ceilings, where a partial batch would be a record filled to the brim "
+        "with half an import."
+    ),
+    response_description=(
+        "What was sent, what was not and why, and the record's new revision and "
+        "`ETag`."
+    ),
+    responses={
+        **_R_STORAGE_UNAVAILABLE,
+        **_R_UNAUTHORIZED,
+        **_R_IMPORT_NOT_FOUND,
+        **_R_PRECONDITION,
+    },
+)
+def post_import_add_to_experiment(
+    scope: TutorialScopeDep,
+    import_id: ImportId,
+    response: Response,
+    body: dict = Body(
+        ...,
+        description=(
+            "`{\"experiment_id\": \"<the record to propose onto>\", \"run_id\": "
+            "\"<the run for the candidates written on a run>\"}`. Any other key is "
+            "refused with `422`."
+        ),
+    ),
+    if_match: str | None = Header(
+        default=None,
+        alias="If-Match",
+        description=(
+            "Required. The RECORD's current `ETag`, exactly as a read operation "
+            "returned it. An import session has no validator of its own."
+        ),
+    ),
+):
+    if not isinstance(body, dict):
+        return JSONResponse(
+            status_code=422,
+            content={
+                "error": "invalid_body",
+                "message": "The request body must be a JSON object.",
+            },
+        )
+    refused = _unknown_import_keys(body, _IMPORT_PROPOSE_KEYS)
+    if refused is not None:
+        return refused
+
+    # The session is READ, and its lock is not held across the record write, for
+    # the single-candidate route's reason: two locks in one critical section is
+    # how a deadlock is built, and the session needs no protection while it is
+    # only being read to resolve candidates.
+    session, missing = _load_import_or_404(import_id, scope)
+    if missing is not None:
+        return missing
+
+    experiment_id = body.get("experiment_id")
+    if not isinstance(experiment_id, str) or not experiment_id.strip():
+        return JSONResponse(
+            status_code=422,
+            content={
+                "error": "missing_experiment_id",
+                "message": (
+                    "`experiment_id` must name the record to propose onto. It is "
+                    "never chosen for you, not even when the workspace holds "
+                    "exactly one record. Nothing was written."
+                ),
+            },
+        )
+    if ws.load_experiment(experiment_id, session_id=scope) is None:
+        return _not_found(experiment_id)
+
+    # PARTITIONED BEFORE THE LOCK, because none of it touches the record. A
+    # candidate's reason for being unsendable is a property of the candidate, and
+    # it is the reason the review surface ALREADY shows for it — read off the
+    # candidate rather than re-derived here, so the batch's explanation and the
+    # screen's cannot disagree.
+    sendable = []
+    not_sent: list[dict] = []
+    for candidate in hist.candidates_of(session):
+        if candidate.unresolved_reason is not None:
+            not_sent.append(
+                {
+                    "candidate_id": candidate.candidate_id,
+                    "target_field_path": candidate.target_field_path,
+                    "kind": candidate.kind,
+                    "error": "candidate_unresolved",
+                    "reason": candidate.not_proposable_reason
+                    or hist.CANDIDATE_NOT_PROPOSABLE_DISAGREEMENT,
+                }
+            )
+        elif not candidate.proposable:
+            not_sent.append(
+                {
+                    "candidate_id": candidate.candidate_id,
+                    "target_field_path": candidate.target_field_path,
+                    "kind": candidate.kind,
+                    "error": "candidate_not_proposable",
+                    "reason": candidate.not_proposable_reason
+                    or hist.CANDIDATE_NOT_PROPOSABLE_NO_EXPERIMENT_CREATION,
+                }
+            )
+        else:
+            sendable.append(candidate)
+
+    total_candidates = len(sendable) + len(not_sent)
+    if not sendable:
+        return JSONResponse(
+            status_code=422,
+            content={
+                "error": "nothing_to_send",
+                "message": (
+                    "Nothing in this import can be proposed onto a record, so "
+                    "there was nothing to send and nothing was written. Each "
+                    "candidate's own reason is listed."
+                    if total_candidates
+                    else "This import has no candidates yet — reconstruct it "
+                    "first. Nothing was written."
+                ),
+                "not_sent": not_sent,
+                "counts": {
+                    "candidates": total_candidates,
+                    "sent": 0,
+                    "already_sent": 0,
+                    "not_sent": len(not_sent),
+                },
+            },
+        )
+
+    run_id = body.get("run_id")
+    if run_id is not None and not isinstance(run_id, str):
+        return _proposal_refusal(
+            "unknown_run",
+            (
+                "`run_id` must be the id of a run on this record. It is never "
+                "inferred from the only run that happens to exist. Nothing was "
+                "written."
+            ),
+        )
+
+    with ws.record_lock(experiment_id, session_id=scope):
+        exp = ws.load_experiment(experiment_id, session_id=scope)
+        if exp is None:
+            return _not_found(experiment_id)  # deleted in the pre-check->lock window
+
+        if run_id is not None and exp.get_run(run_id) is None:
+            return _proposal_refusal(
+                "unknown_run",
+                (
+                    "This record has no run with that id, so a proposal cannot be "
+                    "made against it. It is never inferred from the only run that "
+                    "happens to exist. Nothing was written."
+                ),
+                run_id=run_id,
+            )
+
+        # A PERSISTED SESSION COULD NAME A PATH THIS BUILD NO LONGER WRITES, and
+        # that is refused rather than crashed on. `candidate.proposable` means the
+        # RECONSTRUCTION found a writer, and a session document outlives the code
+        # that wrote it: `_proposal_writer_for` answering `None` would make the
+        # `_PROPOSAL_WRITER_SCOPE` lookup below a `KeyError`, i.e. a 500 out of a
+        # route whose whole job is to refuse clearly.
+        #
+        # THE SINGLE-CANDIDATE ROUTE HAS THE IDENTICAL EXPOSURE and is deliberately
+        # NOT changed here — it is pre-existing, it is one candidate rather than N,
+        # and closing it is its own slice with its own test. Named rather than
+        # silently fixed, and named rather than left unnamed.
+        no_writer = [
+            candidate
+            for candidate in sendable
+            if _proposal_writer_for(candidate.target_field_path) is None
+        ]
+        if no_writer:
+            return JSONResponse(
+                status_code=422,
+                content={
+                    "error": "no_write_path_for_field",
+                    "message": (
+                        "This import names a field that no write operation in this "
+                        "build accepts, so a proposal for it could be created and "
+                        "never applied. Reconstruct this import again — it was "
+                        "reconstructed by a build that did accept it. Nothing was "
+                        "written. THIS IS A LIMITATION OF THIS BUILD AND NOT A "
+                        "STATEMENT ABOUT THE OFFICIAL ISAAC SCHEMA."
+                    ),
+                    "candidates": [
+                        {
+                            "candidate_id": candidate.candidate_id,
+                            "target_field_path": candidate.target_field_path,
+                        }
+                        for candidate in no_writer
+                    ],
+                },
+            )
+
+        # THE RUN IS RESOLVED PER CANDIDATE, from the SAME writer-scope map the
+        # single-candidate route gates on, so the two operations cannot disagree
+        # about which paths are written on a run.
+        needs_a_run = [
+            candidate
+            for candidate in sendable
+            if _PROPOSAL_WRITER_SCOPE[_proposal_writer_for(candidate.target_field_path)]
+            == "run"
+        ]
+        if needs_a_run and run_id is None:
+            return JSONResponse(
+                status_code=422,
+                content={
+                    "error": "target_requires_a_run",
+                    "message": (
+                        "Some of this import's values are applied through a run's "
+                        "writer, so this request must name the run they are "
+                        "about; it is never inferred. THE WHOLE BATCH IS REFUSED "
+                        "and nothing was written — sending only the rest would "
+                        "silently leave the run's values behind. Name a run and "
+                        "send again."
+                    ),
+                    "candidates": [
+                        {
+                            "candidate_id": candidate.candidate_id,
+                            "target_field_path": candidate.target_field_path,
+                        }
+                        for candidate in needs_a_run
+                    ],
+                },
+            )
+
+        precondition = _check_if_match(if_match, exp)
+        if precondition is not None:
+            return precondition
+
+        sent: list[dict] = []
+        minted_notes: dict[str, object] = {}
+        wrote_something = False
+        for candidate in sendable:
+            scope_of_target = _PROPOSAL_WRITER_SCOPE[
+                _proposal_writer_for(candidate.target_field_path)
+            ]
+            candidate_run_id = run_id if scope_of_target == "run" else None
+            statement = (
+                candidate.supporting_statements[0]
+                if candidate.supporting_statements
+                else None
+            )
+            if statement is None:  # pragma: no cover - a field candidate cites one
+                return JSONResponse(
+                    status_code=422,
+                    content={
+                        "error": "candidate_cites_no_source",
+                        "message": (
+                            "One of this import's candidates cites no source "
+                            "statement, so a note carrying what the source said "
+                            "could not be written and a proposal has nothing to "
+                            "cite. Nothing was written."
+                        ),
+                        "candidate_id": candidate.candidate_id,
+                    },
+                )
+            filename = next(
+                (
+                    entry.filename
+                    for entry in session.sources
+                    if entry.source_id == statement.get("source_id")
+                ),
+                statement.get("source_id") or "",
+            )
+            minted = _mint_import_candidate(
+                exp,
+                candidate,
+                run_id=candidate_run_id,
+                filename=filename,
+                statement=statement,
+                # THE SAME KEY THE SINGLE-CANDIDATE ROUTE USES, which is what
+                # makes the two operations exactly-once with respect to EACH
+                # OTHER and not merely each to itself: a candidate sent by hand
+                # and then included in a batch mints one proposal, not two.
+                client_request_key=f"import:{import_id}:{candidate.candidate_id}",
+            )
+            if isinstance(minted, JSONResponse):
+                # A CEILING OR A TYPED REFUSAL ENDS THE WHOLE BATCH, and nothing
+                # is written: every mint so far touched only the loaded object,
+                # and the single `_save_versioned` below has not run. Returning
+                # the refusal unchanged is deliberate — it already names which
+                # bound was hit, and a batch-flavoured paraphrase would be a
+                # second wording of one rule.
+                return minted
+            note, proposal, deduplicated = minted
+            if not deduplicated:
+                wrote_something = True
+                minted_notes[note.id] = note
+            sent.append(
+                {
+                    "candidate_id": candidate.candidate_id,
+                    "target_field_path": candidate.target_field_path,
+                    "rule": candidate.rule,
+                    "proposal_id": proposal.proposal_id,
+                    "note_id": proposal.note_id,
+                    "run_id": candidate_run_id,
+                    "already_sent": deduplicated,
+                }
+            )
+
+        if wrote_something:
+            _changed, stale = _save_versioned(exp, if_match)
+            if stale is not None:
+                return stale  # another writer won the race; nothing was stored
+        # WHEN EVERY CANDIDATE WAS ALREADY SENT, NOTHING IS SAVED. The record is
+        # byte-identical to what it was, so a save would spend a revision saying
+        # so — and the record's `version` is the basis of every `If-Match`, so
+        # moving it for a request that changed nothing would invalidate a token
+        # another reader is legitimately holding.
+
+        response.headers["ETag"] = exp.etag()
+        version = exp.version_token()
+        sent_count = sum(1 for row in sent if not row["already_sent"])
+        already = len(sent) - sent_count
+
+    # THE SESSION IS WRITTEN AFTER THE RECORD AND OUTSIDE ITS LOCK, and a failure
+    # here costs nothing that matters — the single-candidate route's reason,
+    # unchanged: the record is the durable half and holds every note and every
+    # proposal, while this only records WHICH candidates were sent so the surface
+    # can say so without re-reading them. If it does not land, the exactly-once
+    # key still refuses a second proposal.
+    with hist.import_lock(import_id, session_id=scope):
+        fresh = hist.load_session(import_id, session_id=scope)
+        if fresh is not None:
+            now = _now_iso()
+            for row in sent:
+                hist.record_proposed(
+                    fresh,
+                    candidate_id=row["candidate_id"],
+                    experiment_id=experiment_id,
+                    proposal_id=row["proposal_id"],
+                    note_id=row["note_id"],
+                    proposed_utc=now,
+                )
+            hist.save_session(fresh, session_id=scope)
+
+    return {
+        "experiment_id": experiment_id,
+        "run_id": run_id,
+        "sent": sent,
+        "not_sent": not_sent,
+        "counts": {
+            "candidates": total_candidates,
+            "sent": sent_count,
+            "already_sent": already,
+            "not_sent": len(not_sent),
+        },
         "experiment_version": version,
     }

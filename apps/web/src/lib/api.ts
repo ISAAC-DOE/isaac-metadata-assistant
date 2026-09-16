@@ -38,6 +38,7 @@ import type {
   ApiCsvPreview,
   ApiDraftResponse,
   ApiEvidenceClassification,
+  ApiImportAddedToExperiment,
   ApiImportCandidateProposed,
   ApiImportListResponse,
   ApiImportSessionResponse,
@@ -2901,6 +2902,55 @@ export const api = {
         : {}),
     });
     if (res.ok) return readJson<ApiImportCandidateProposed>(res, path);
+    throw await mutationError(res, path);
+  },
+
+  /**
+   * Send EVERY proposable candidate of one import into review on ONE record —
+   * `HIST-005`, the import workflow's sixth step.
+   *
+   * ONE REQUEST, NOT N. Looping `proposeImportCandidate` here would make one
+   * request per candidate, each with its own `If-Match`, each able to fail on its
+   * own — so a closed tab or a `412` partway through would leave the record
+   * holding part of an import with nothing able to say which part. The server
+   * writes every note and every proposal inside one record lock and one save.
+   *
+   * IT WRITES NO VALUE. Every row in `sent` is an OPEN proposal; the record's
+   * fields are byte-identical afterwards. Accepting one is `reviewProposal`,
+   * which needs a trusted human identity no default-configured deployment
+   * establishes.
+   *
+   * `runId` IS FOR THE CANDIDATES A RUN OWNS and is ignored for the ones the
+   * record owns — which is deliberately UNLIKE `proposeImportCandidate`, where a
+   * run given for a record-scoped target is refused. Omitting it when the import
+   * has a run-scoped candidate refuses the WHOLE batch (`422
+   * target_requires_a_run`) and writes nothing, rather than quietly sending the
+   * rest.
+   *
+   * `experimentVersion` IS THE RECORD'S, not the session's, truthiness-guarded
+   * exactly as every other mutation here is: a blank must send NO header (→ 428
+   * naming the missing precondition) rather than `If-Match: ""`, which is
+   * malformed (→ 400) and would report a client bug as a server disagreement.
+   *
+   * READ `counts` AND `already_sent` BEFORE REPORTING WHAT HAPPENED. A candidate
+   * the record already held is returned under `sent` with `already_sent: true`
+   * and minted nothing.
+   */
+  async addImportToExperiment(
+    importId: string,
+    opts: { experimentId: string; experimentVersion: string; runId?: string },
+  ): Promise<ApiImportAddedToExperiment> {
+    const path = `/imports/${enc(importId)}/add-to-experiment`;
+    const body: Record<string, unknown> = { experiment_id: opts.experimentId };
+    if (opts.runId !== undefined) body.run_id = opts.runId;
+    const res = await request(path, {
+      method: 'POST',
+      body: JSON.stringify(body),
+      ...(opts.experimentVersion
+        ? { headers: { 'If-Match': `"${opts.experimentVersion}"` } }
+        : {}),
+    });
+    if (res.ok) return readJson<ApiImportAddedToExperiment>(res, path);
     throw await mutationError(res, path);
   },
 } as const;
