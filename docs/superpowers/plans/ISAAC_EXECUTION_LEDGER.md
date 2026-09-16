@@ -1999,6 +1999,26 @@ claim means. Corrected in place — the figure held; the way I told a reader to 
 
 ## TASKS FROM THE NON-DEGRADED IMPECCABLE CRITIQUE (2026-09-12, post-Phase-A)
 
+*** THE `STATUS` COLUMN BELOW IS STALE — RE-MEASURED AGAINST THE CODE 2026-09-15,
+because every row still reads `PLANNED` and at least three are not. A table of ten
+open items where three are closed is worse than no table: it makes the real
+remainder look larger and invites a future session to rebuild what exists. The
+rows are left as written and the measured state is stated here. ***
+
+| id | measured 2026-09-15 | evidence |
+|---|---|---|
+| `UX-021` (Help regression) | **DONE** | `HelpPanel.tsx` holds 3 `<details>` over 9 `.help-section` references — the 7→4 top-level reduction by disclosure, shipped 2026-09-14 |
+| `A11Y-02` (Help has no focus trap) | **DONE** | `HelpPanel.tsx:173` — *"A11Y-02 — Escape, click-outside, AND Tab containment"*, with a freshly-queried focusable list per keystroke because the panel's content is conditional |
+| `UX-025` (banner line-length) | **DONE** | `workflow-progress-banner.css:52` — *"UX-025 — MEASURE, not width"* |
+| `UX-024` (`transition: width, height`) | **DECLINED, with its premise corrected** | the finding said *"on `body`"* and there is no such transition on `body`; the only matching rule is `.tutorial-ring`, which is `position: fixed` + `pointer-events: none`, so its box changing lays out nothing else. `transform` is not the fix — `scale()` scales a `box-shadow` spread, so the 2px/6px ring would visibly thicken and thin as it travels. Reasoned at the site in `tutorial.css` so it is not "fixed" into a defect |
+| `UX-019` (duplicate title) | **OPEN, deliberately** | `screens.css:62` — *"its own review; it is tracked as UX-019 rather than smuggled in here"* |
+| `UX-020` | **OPEN** | no reference in `apps/web/src` |
+| `UX-023` (`nested-cards` ×9) | **RESOLVED AS A HEURISTIC FALSE POSITIVE — measured on both surfaces, 2026-09-15. The critique's own "Grouping = PASS" was right and the overlay was wrong, which is the reconciliation the row asked for rather than an average.** | The row says *"every `section.field-group` is a card inside the page card … decide whether the inner cards earn their border/shadow."* They earn it: measured on a live record, the **10** groups are `rgb(255,255,255)` cards and the `.screen-card` ancestor the walk finds is `rgb(244,246,249)` — `--screen-base`, the **grey app shell** (1248×1019, its text beginning "ISAAC / My Experiments"). White-on-grey IS a card; there is no white-on-white nesting on `fields`. On **Settings**, where the detector reported it on 2026-09-15, 6 of 9 white bordered boxes do sit on white — and they are `icon-btn` and `settings-jump-btn`, i.e. **BUTTONS**, whose border and fill are required by the owner's own direction that *controls must look interactive*. **The defect is in the heuristic**: `border ∧ radius ∧ opaque background` cannot tell a page frame from a card, or a button from a card. Recorded rather than "fixed", because removing those borders would damage two surfaces to satisfy a detector. **AND MY FIRST PROBE MADE THE IDENTICAL MISTAKE** — an ad-hoc `isCard()` walk classified `.screen-card` as a card and I believed it until the rendered screenshot showed white rows on grey; that is why this row cites a rendered measurement and not a DOM predicate |
+| `UX-022`, `A11Y-03` | **AMBIGUOUS — DO NOT TICK EITHER FROM A GREP** | the ledger defines each exactly once (`:2017`, `:2022`), and the code cites both IDs for DIFFERENT work: `assistant.css:60,78` cites `UX-022` for a flex floor and a header rule, not the `fields.css` token migration this row names, and `EvidenceTrailPanel.tsx:86,102` cites `A11Y-03` for evidence-trail rows, not the mode chip — and says the thing *"A11Y-03 says is missing"* is **still missing for 30 of 31 rows**. The plan document carries its own `UX-0xx` numbering and the code follows that, so an ID match between code and this table is not evidence of the same task |
+
+**`A11Y-01` is unchanged and its row already says so**: A3 closed one of three causes.
+
+
 Method: two isolated assessments — a source-only design review in a sub-agent, and
 rendered+overlay evidence gathered separately. Neither saw the other. Full synthesis in
 [`2026-09-12-isaac-ux-ia-plan.md`](2026-09-12-isaac-ux-ia-plan.md) Part 10. Score **26/40**, up
