@@ -1686,3 +1686,101 @@ def test_neither_route_refuses_when_the_writer_is_present(client):
     batch = _add_to(client, import_id, other)
     assert batch.status_code == 200, batch.text
     assert batch.json()["counts"]["sent"] == 1
+
+
+def test_the_whole_chain_THROUGH_THE_BATCH_reaches_a_validated_draft(armed_client):
+    """``HIST-005`` END TO END, over HTTP, with nothing stubbed.
+
+        parsed sources -> semantic candidates -> ONE batch write
+          -> scientist review of each -> ISAAC draft -> deterministic validation
+
+    THE SIBLING OF ``test_the_whole_chain_from_a_parsed_source_to_a_validated_draft``,
+    and it exists because that one proves the chain only for the SINGLE-candidate
+    route. A batch-minted proposal is built by the same ``new_proposal`` call, so
+    acceptance *ought* to be identical — and "ought to be identical" is the claim
+    this test replaces with a measurement. It is the strongest statement available
+    about `HIST-005`: that what the batch writes is not merely stored but
+    ACCEPTABLE, and that accepting all of it leaves a draft the truth core passes.
+
+    RUN UNDER THE FIXTURE EDGE VERIFIER, the only configuration in which a person
+    can accept anything. ``test_a_default_configured_deployment_refuses_the_acceptance``
+    is the other half: in every shipped configuration the chain stops at the
+    proposal.
+
+    TWO CANDIDATES, ONE RECORD-SCOPED AND ONE RUN-SCOPED, because a batch with
+    only one of each kind would not exercise the per-candidate run resolution that
+    is this route's one behavioural difference from its sibling.
+    """
+    client = armed_client
+    import_id = _bundle_a_only(client)
+    eid = _record(client)
+    run_id = _run_on(client, eid)
+
+    # 1-3. parsed evidence -> candidates -> proposals, in ONE write.
+    added = _add_to(client, import_id, eid, run_id=run_id)
+    assert added.status_code == 200, added.text
+    sent = added.json()["sent"]
+    assert len(sent) >= 2, sent
+    by_path = {row["target_field_path"]: row for row in sent}
+    assert by_path[RUN_PATH]["run_id"] == run_id
+    assert by_path[RECORD_PATH]["run_id"] is None
+
+    # 4. scientist review of EACH, by a person the deployment can attribute. The
+    # ETag is re-read between accepts: each acceptance is its own revision, and a
+    # stale token would be a 412 that looked like a defect in the batch.
+    for row in sent:
+        accepted = client.post(
+            f"/api/experiments/{eid}/proposals/{row['proposal_id']}/review",
+            json={
+                "action": "accept",
+                "accepted_from": "candidate",
+                "confirmed_by_user": True,
+            },
+            headers={"If-Match": _etag(client, eid)},
+        )
+        assert accepted.status_code == 200, (row["target_field_path"], accepted.text)
+        assert accepted.json()["proposal"]["state"] == "accepted"
+
+    # 5. THE ISAAC DRAFT now holds both values — the record-scoped one on the
+    # record's own field map, the run-scoped one on the RUN's. That split is the
+    # whole reason `run_id` is resolved per candidate rather than per request, and
+    # asserting it here is what makes the resolution observable in the document
+    # rather than only in the response.
+    exp = ws.load_experiment(eid)
+    assert exp is not None
+    record_envelope = exp.draft["fields"][RECORD_PATH]
+    assert record_envelope["value"] == "XAS"
+    assert record_envelope["status"] == "verified"
+    assert record_envelope["evidence"][0]["source_type"] == "user_confirmation"
+
+    # THE RUN-SCOPED VALUE LANDS IN `run.overrides`, NOT IN `run.draft["fields"]`,
+    # and that is MEASURED rather than assumed. The first version of this test
+    # reached for `run.draft["fields"][RUN_PATH]` and raised `KeyError: 'fields'`;
+    # probing showed the run's draft holds only `assets` and `pending`.
+    # `_proposal_writer_for("sample.material.name")` answers **`run_override`** —
+    # "one run holds its own value at one record-level address" — so the applied
+    # value is an `Override` keyed by the field ADDRESS (`field:<path>`), a
+    # different store from a run field. Asserting the wrong location would have
+    # been a test that could only ever have failed.
+    run = exp.get_run(run_id)
+    assert run is not None
+    assert routes._proposal_writer_for(RUN_PATH) == "run_override", (
+        "if this path stops being an override, the assertions below are looking "
+        "in the wrong store and must move with it"
+    )
+    override = run.overrides[ws.field_address(RUN_PATH)]
+    assert override.payload["value"] == "SYNTHETIC-CuO-FAKE-001"
+    assert override.payload["status"] == "verified"
+    assert override.payload["evidence"][0]["source_type"] == "user_confirmation"
+
+    # AND THE RECORD-SCOPED VALUE DID NOT BECOME A RUN OVERRIDE, which is the
+    # failure a request-wide run would have produced: `system.technique` is
+    # written on the record, and this batch was handed a run.
+    assert ws.field_address(RECORD_PATH) not in run.overrides
+    assert sorted(exp.draft["fields"]) == [RECORD_PATH]
+
+    # 6. DETERMINISTIC VALIDATION over that draft — the truth core, unmodified.
+    from isaac_records.draft_validator import validate_draft
+
+    report = validate_draft(exp.draft)
+    assert report.errors == [], report.errors

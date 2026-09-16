@@ -4478,11 +4478,42 @@ Measured: `test_historical_import_routes.py` + `test_historical_import.py` → *
 submitted-history sweep, OpenAPI and contract-parity suites → **53 passed**; both committed
 snapshot artifacts regenerated, `--check` clean, **155** gate tests pass.
 
+### 5. The batch's chain is proven END TO END to a validated draft — and it measured a fact I had wrong
+
+`test_the_whole_chain_from_a_parsed_source_to_a_validated_draft` proves
+`parsed source → candidate → proposal → review → ISAAC draft → deterministic validation` for the
+**single-candidate** route only. A batch-minted proposal is built by the same `new_proposal` call,
+so acceptance *ought* to be identical — and **"ought to be identical" is exactly the claim this
+repository keeps catching.** The sibling now exists
+(`test_the_whole_chain_THROUGH_THE_BATCH_reaches_a_validated_draft`, under the fixture edge
+verifier, the only configuration in which a person can accept anything), with **two** candidates —
+one record-scoped, one run-scoped — because a batch of one kind would not exercise the
+per-candidate run resolution that is this route's one behavioural difference from its sibling.
+
+***AND IT IMMEDIATELY FALSIFIED MY OWN ASSERTION.*** The test first reached for
+`run.draft["fields"][RUN_PATH]` and raised `KeyError: 'fields'`. Probed: the run's draft holds only
+`assets` and `pending`, and `_proposal_writer_for("sample.material.name")` answers **`run_override`**
+— "one run holds its own value at one record-level address" — so the applied value is an `Override`
+keyed by the field **address** (`field:<path>`), a different store from a run field. Had I asserted
+the location I assumed, the test could only ever have failed; had I asserted it loosely, it would
+have proved nothing.
+
+**What it now establishes, which is the strongest available statement about `HIST-005`:** both
+values are not merely stored but **acceptable**; the record-scoped one lands on the record's field
+map (`sorted(exp.draft["fields"]) == ["system.technique"]`) and the run-scoped one as a run
+override with `user_confirmation` evidence; **neither crossed over** — `field:system.technique` is
+absent from `run.overrides`, which is the failure a request-wide run would have produced; and
+`validate_draft(exp.draft)` from the **unmodified truth core** returns **zero errors**. A guard
+asserts the writer is still `run_override`, so if that path ever stops being one, the assertions
+move with it rather than silently checking an empty store.
+
+Measured: `test_historical_import_routes.py` → **83 passed**.
+
 ### Verification
 
 | what | command | result |
 |---|---|---|
-| backend | `.venv/bin/python -m pytest apps/api/tests src tests -q -rs` | re-run pending at time of writing; the four failures the HIST-005 slice caused are each closed and re-run green in isolation |
+| backend | `.venv/bin/python -m pytest apps/api/tests src tests -q -rs` | **9,463 passed, 45 skipped**, MAIN CHECKOUT (quoted because a worktree reads `+2` skips — `graphify-out/graph.json` is gitignored and two tests gate on it). The one failure was snapshot drift from `routes.py`; both committed artifacts were then regenerated with `--out` **and** `--detail-out`, `--check` reports no drift, and the **155** gate tests pass. Was recorded here as "re-run pending at time of writing" for one commit and is corrected rather than edited silently, because a stale `pending` in a verification table reads as a result |
 | historical import | `pytest apps/api/tests/test_historical_import_routes.py apps/api/tests/test_historical_import.py -q` | **145 passed** |
 | submitted-history sweep | `pytest apps/api/tests/test_submitted_history_survives_every_write_path.py -q` | **12 passed** |
 | OpenAPI contract | `pytest apps/api/tests/test_about_and_openapi.py -q` + `-k transcribed` | **37 passed**, **7 passed** |
