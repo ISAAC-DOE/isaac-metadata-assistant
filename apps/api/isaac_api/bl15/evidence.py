@@ -375,8 +375,8 @@ class ReaderResult:
 #
 # Measured against the real corpus so they are bounds, not guesses: the largest SPEC
 # acquisition file is **1,620,639 bytes** (`alignment`), the largest NUMBERED acquisition
-# 874,026 bytes, the largest `.dat` ~40 KB, the beamtime notes ~30 KB, and the whole
-# archive 89,163,651 bytes over 1,192 files.
+# 874,026 bytes, the largest `.dat` **45,747 bytes**, the beamtime notes ~30 KB, and the
+# whole archive 89,163,651 bytes over 1,192 files.
 #
 # ~~the largest SPEC acquisition file is ~500 KB~~ — CORRECTED 2026-09-16, the same day,
 # by the slice that implemented the walk and re-measured independently here. The ceiling
@@ -389,9 +389,35 @@ class ReaderResult:
 #: the measured size and this ceiling, so nothing is read partly and reported
 #: as whole.
 MAX_SOURCE_BYTES = 8_000_000
-#: Most evidence items one source may contribute. A SPEC acquisition file
-#: carries ~180 motor positions plus headers; the ceiling is well clear of that
-#: and well under anything that could exhaust memory.
-MAX_EVIDENCE_PER_SOURCE = 4_000
+#: Most evidence items one source may contribute.
+#:
+#: ~~A SPEC acquisition file carries ~180 motor positions plus headers; the ceiling is
+#: well clear of that.~~ — **FALSE, and the ceiling was REACHED BY THREE REAL FILES.
+#: Corrected 2026-09-16 by the slice that implemented the readers, and re-measured
+#: independently here.** A SPEC acquisition names its motors once and records them
+#: **once per scan**, and a scan count of 16–22 is ordinary: the per-file demand is
+#: therefore in the thousands, not the hundreds. Measured over all 94 real acquisitions,
+#: median demand **1,376**, and at the old ceiling of 4,000 three files returned a
+#: PARTIAL reading — one of them suppressing **44,954** statements.
+#:
+#: **RAISED 4,000 -> 8,000, and the number is derived rather than rounded up:** the
+#: second-largest demand in the corpus is **4,816** (`56_05_…`, 14 scans × 344 named
+#: motors), so 8,000 clears every acquisition by 1.66x — except one. That is the whole
+#: decision, and it is deliberate:
+#:
+#: **`alignment` STAYS PARTIAL, by design.** It carries **233 scans** and wants roughly
+#: 49,000 statements — two orders of magnitude past anything else in the corpus, because
+#: it is a beamline being aligned, not a sample being measured. Reading it whole would
+#: mean sizing a per-source ceiling for the single most extreme file in the archive, and
+#: what would be gained is ~49,000 near-identical motor readings from a source that
+#: `relate` does not even offer as a Run (`RUN_CANDIDATE_SOURCE_TYPES` excludes
+#: `alignment`). The truncation is DISCLOSED — the skip entry names the exact line,
+#: header, motor and scan where reading stopped, the suppressed count, and the ceiling,
+#: and says the reading "must not be treated as complete".
+#:
+#: **Consequence a consumer must honour:** a reader's evidence list can be a partial
+#: reading, so anything counting statements per source must read the skip entry rather
+#: than trusting `len(evidence)`.
+MAX_EVIDENCE_PER_SOURCE = 8_000
 #: Most data rows a reader will walk in one scan export or processed spectrum.
 MAX_DATA_ROWS = 20_000

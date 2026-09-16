@@ -23,6 +23,7 @@ Measured with `find`, `os.walk` and `hashlib` over the extracted folder.
 | uncompressed size | **89,163,651 bytes** (88 MB) |
 | largest single file | **1,620,639 bytes** — `alignment`, a SPEC acquisition |
 | largest *numbered* acquisition | **874,026 bytes** |
+| largest `.dat` scan export | **45,747 bytes** |
 | `.dat` (scan exports) | **908** |
 | extensionless | **187** |
 | `.mac` | **59** |
@@ -179,6 +180,33 @@ NAMES, ~180 motors), then per-scan `#S` `#D` `#T` `#G*` `#Q` `#P0`–`#P21` (pos
 the same order), `#N` (column count), `#L` (whitespace-separated column names), then the
 data rows. **The `#O`/`#P` blocks must be paired by index and zipped by position** — the
 names are in `#O`, the values in `#P`, and nothing in a `#P` line names its motor.
+
+**3.1a — `#N` IS THE COLUMN COUNT, NOT A POINT COUNT.** §3.1 above lists `#N` as
+"column count", which is right — but the authorizing brief and my own reader brief both
+called for reading it as a *point count*, and that would have published a false number in
+every record. Measured over **920 of 920** scan blocks: `#N` equals the `#L` column-name
+count **exactly** (39/39, 40/40, 24/24), while the same scans carry **444 to 7,320** data
+rows. So no reader emits a point count at all; `#N` goes to `skipped` with the
+measurement, each `#L` name is read as a detector column, and row counts are reported per
+scan. *(The mapping registry's `point_count` entry is unaffected and was already right
+for an unrelated reason: a point count is a property of the series values, not a separate
+field.)*
+
+**3.1b — Three acquisitions exceed a per-source evidence ceiling, and one still does.** A
+SPEC acquisition names its motors once and records them **once per scan**, so the
+per-file demand is in the thousands: median **1,376**, second-largest **4,816** (14 scans
+× 344 named motors). At the original ceiling of 4,000, three files returned a **partial**
+reading. The ceiling was raised to **8,000** — derived from that 4,816, not rounded up —
+so **no numbered acquisition is partial**. Exactly one file still is: **`alignment`**,
+which carries **233 scans** and suppresses **40,954** statements. It stays partial
+deliberately: it is two orders of magnitude past anything else in the archive, it is a
+beamline being aligned rather than a sample being measured, and `relate` does not offer it
+as a Run. The truncation names the exact line, header, motor and scan where reading
+stopped, and says the reading must not be treated as complete.
+
+**Consequence for any consumer:** a reader's evidence list can be a *partial* reading, so
+anything counting statements per source must read the skip entry rather than trusting its
+length.
 
 **3.2 — The `.dat` scan exports carry `name=value` positions instead.** Same `#S`/`#D`/
 `#T`/`#N`/`#L` header, but `#P0 dummy0=4 energy=11164.999 emiss=9175.4 filter=10 Sx=...`

@@ -1515,18 +1515,31 @@ def test_an_oversized_source_is_refused_with_both_numbers():
 
 
 def test_the_evidence_ceiling_truncates_and_says_so():
-    """**The ceiling IS reached by real files, so this is not hypothetical.**
+    """**The ceiling IS reached by a real file, so this is not hypothetical.**
 
-    Measured: three of the archive's 94 acquisitions exceed
-    ``MAX_EVIDENCE_PER_SOURCE`` (``alignment`` wanted about 49,000 items).
-    Truncating silently would report a partial reading as a whole one.
+    Measured at ``MAX_EVIDENCE_PER_SOURCE = 4_000``: THREE of the archive's 94
+    acquisitions returned a partial reading. The ceiling was then **raised to 8,000**,
+    derived from the second-largest demand in the corpus (4,816), so that **no numbered
+    acquisition is partial** — and exactly one file still is: ``alignment``, which
+    carries 233 scans and suppresses 40,954 statements. It stays partial by design, and
+    ``bl15/evidence.py`` records the argument.
+
+    **THE INPUT IS SIZED FROM THE CONSTANT, NOT FROM A LITERAL, AND THAT IS THE POINT.**
+    An earlier version hard-coded 60 scans x 100 motors = 6,121 items, which exceeded
+    4,000 and then **stopped exceeding the ceiling the moment it was raised** — so the
+    test would have passed while asserting nothing about truncation. A ceiling test
+    whose fixture can fall under the ceiling retires itself silently.
     """
-    header = "#F big\n#O0 " + " ".join(f"m{i}" for i in range(100)) + "\n"
+    motors = 100
+    # Enough scans to overshoot whatever the ceiling is, with margin for the header
+    # statements, so this holds for any future value of the constant.
+    scan_count = (MAX_EVIDENCE_PER_SOURCE // motors) + 10
+    header = "#F big\n#O0 " + " ".join(f"m{i}" for i in range(motors)) + "\n"
     scans_text = []
-    for index in range(60):
+    for index in range(scan_count):
         scans_text.append(
             f"#S {index + 1}  gscan energy 1 2 0.5\n"
-            "#P0 " + " ".join(str(i) for i in range(100)) + "\n"
+            "#P0 " + " ".join(str(i) for i in range(motors)) + "\n"
         )
     body = header + "".join(scans_text)
     result = spec.read_spec_acquisition(_synthetic_record("big", body=body), body)
