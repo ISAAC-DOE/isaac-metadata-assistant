@@ -75,17 +75,33 @@ def test_only_the_statuses_that_carry_a_value_are_proposable():
             assert not m.proposable, concept
 
 
-def test_the_proposable_set_is_exactly_these_six_and_the_number_is_the_point():
-    """**Only 6 of 45 concepts in a real historical corpus can reach a field today.**
+def test_the_proposable_set_is_exactly_these_five_and_the_number_is_the_point():
+    """**Only 5 of 45 concepts in a real historical corpus can reach a field today.**
 
     Pinned as a number because it is the most honest single statement about what
     historical import can do with this corpus, and because a future slice that raises it
     should have to come here and say why. Raising it by reasoning about the schema is
     legitimate; raising it by pointing a refusal at a nearby field is not.
+
+    ── IT WAS SIX, AND THE SIXTH WAS WRONG ────────────────────────────────────────
+
+    ``acquisition_method`` was mapped ``deterministic`` to ``system.technique`` on the
+    reasoning that the corpus names a technique the schema's enum contains verbatim.
+    **That was reasoning about what a human reading the corpus knows, and a mapping is
+    about what the readers emit.** Measured when the registry was first wired to a route:
+    from a macro this concept carries THE MACRO'S OWN NAME, and from a filename the
+    profile's lowercase alias reading — and **not one of those is a member of that enum**,
+    so it proposed an off-enum value from every source. One alias is a detection MODE,
+    which the enum has no member for and which is not a technique at all.
+
+    **So this number went DOWN on a correction, which is the direction worth noticing.**
+    The wrong value was fully evidenced — a source literally said it, at a locator — so
+    ``fabricated_value_rate`` was 0 and stayed 0 throughout. A suite that only checked for
+    fabrication would never have seen it: **a mapping error is not a fabrication**, and
+    that is the whole reason this registry is checked separately from the harness.
     """
     assert sorted(c for c, m in mp.MAPPINGS.items() if m.proposable) == [
         "acquisition_epoch",
-        "acquisition_method",
         "acquisition_timestamp",
         "flow_rate",
         "ph",
@@ -93,8 +109,8 @@ def test_the_proposable_set_is_exactly_these_six_and_the_number_is_the_point():
     ]
     cov = mp.coverage()
     assert cov["concepts_total"] == 45
-    assert cov["deterministic"] + cov["normalized"] == 6
-    assert cov["needs_domain_review"] == 14
+    assert cov["deterministic"] + cov["normalized"] == 5
+    assert cov["needs_domain_review"] == 15
     assert cov["not_expressible"] == 24
     assert cov["blocked_by_build"] == 1
 
@@ -291,10 +307,25 @@ def test_system_configuration_is_never_a_default_landing_place():
             ), concept
 
 
-def test_technique_maps_deterministically_because_the_enum_contains_it_verbatim():
+def test_technique_is_DEFERRED_because_no_reader_emits_an_enum_member():
+    """INVERTED 2026-09-16. It asserted ``deterministic`` and that was wrong.
+
+    The old name — "because the enum contains it verbatim" — states the error exactly:
+    the enum does contain ``HERFD-XAS`` verbatim, and **nothing in this build ever
+    produces that string for this concept**. The enum containing a value is a fact about
+    the schema; what a reader emits is a fact about the readers, and only the second one
+    decides whether a mapping is a transcription.
+
+    Kept and inverted rather than deleted, because a test that asserted the defect is the
+    most useful place to record why it looked right.
+    """
     m = mp.mapping_for(ev.CONCEPT_ACQUISITION_METHOD)
     assert m is not None
-    assert m.status == mp.STATUS_DETERMINISTIC
+    assert m.status == mp.STATUS_NEEDS_DOMAIN_REVIEW
+    assert not m.proposable
+    # The path is still NAMED, because a scientist asked to choose is owed the field the
+    # choice lands in — that is what `needs_domain_review` means as against
+    # `not_expressible`.
     assert m.official_path == "system.technique"
 
     root = Path(mp.__file__).resolve().parents[4]
@@ -303,7 +334,22 @@ def test_technique_maps_deterministically_because_the_enum_contains_it_verbatim(
     )
     enum = schema["properties"]["system"]["properties"]["technique"]["enum"]
     assert "HERFD-XAS" in enum
+    # The options offered are real members, so the domain question is answerable in one
+    # word and the answer is auditable.
     assert set(m.allowed_values) <= set(enum)
+
+    # AND THE MEASUREMENT THE CORRECTION RESTS ON, asserted rather than described: the
+    # profile's own alias readings for this concept are not enum members. This is what
+    # makes the old `deterministic` status impossible rather than merely unlucky.
+    from isaac_api.bl15 import profiles
+
+    aliases = profiles.PROFILES["ssrl_bl152_angel"].acquisition_method_aliases
+    assert aliases, "the profile recognises no acquisition-method token at all"
+    readings = {normalized for _token, normalized in aliases}
+    assert readings.isdisjoint(set(enum)), (
+        "a profile alias now normalises straight to a schema technique member, so the "
+        f"deterministic reading may be recoverable for those tokens: {readings & set(enum)}"
+    )
 
 
 def test_shared_reasons_have_exactly_one_home():

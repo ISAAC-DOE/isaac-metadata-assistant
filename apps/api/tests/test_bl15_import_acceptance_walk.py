@@ -1356,29 +1356,37 @@ def test_the_walk_fabricates_no_value_and_every_candidate_names_its_evidence(cli
 # --- negative control ---------------------------------------------------------
 
 
-def test_the_technique_mapping_MISSES_AND_THAT_IS_RECORDED_NOT_HIDDEN(client):
-    """A MEASURED MISS, pinned so it cannot be quietly "fixed" by a value change.
+def test_the_technique_mapping_IS_NOW_DEFERRED_TO_A_SCIENTIST(client):
+    """WAS a measured miss; the registry was corrected and this is the inversion.
 
-    **THE FINDING.** The gold standard declares ``system.technique`` should be
-    ``HERFD-XAS`` — the notes name HERFD and that string is in the official
-    schema's own enum verbatim, so it is a deterministic mapping rather than a
-    judgement. What the reconstruction proposes is **the macro's filename**
-    (``Synth_XAS.mac``), because ``bl15.mapping`` maps the ``acquisition_method``
-    concept to ``system.technique`` with status ``deterministic``, and the
-    ``acquisition_method`` a macro states is the file it includes.
+    ── HISTORY, KEPT BECAUSE THE DEFECT IS THE INSTRUCTIVE PART ────────────────
 
-    **WHY THIS TEST ASSERTS THE MISS RATHER THAN THE FIX.**
-    ``fabricated_value_rate`` is 0 and stays 0: the value IS evidenced — a source
-    literally says ``Synth_XAS.mac``, at a named locator — so nothing was
-    invented, and the honesty metrics are right to pass. What is wrong is the
-    MAPPING, and the mapping lives in ``bl15/mapping.py``, which this slice may
-    not change. So the miss is recorded here, with both values, and the
-    consequence is stated: a proposal at ``system.technique`` carrying a macro
-    filename is a proposal whose acceptance will be refused for an off-enum
-    value, which is work a scientist is offered and cannot complete.
+    This test was written to pin a miss it could not fix, and it did its job: the
+    registry was corrected within the hour and this test went red, exactly as its
+    own last paragraph predicted. It is INVERTED rather than deleted, which is
+    this repository's established remedy for a test that pinned a defect.
 
-    If a future slice corrects the registry, THIS TEST GOES RED — which is the
-    point. It is a ratchet on a known defect, not an endorsement of it.
+    **The original finding.** The gold standard declares ``system.technique``
+    should be ``HERFD-XAS``. What the reconstruction proposed was **the macro's
+    filename**, because ``bl15.mapping`` mapped the ``acquisition_method`` concept
+    to ``system.technique`` with status ``deterministic``.
+
+    **Why the honesty metrics were right to pass anyway**, which is the subtle
+    part: ``fabricated_value_rate`` was 0 and stayed 0, because the value WAS
+    evidenced — a source literally says that filename, at a named locator. Nothing
+    was invented. What was wrong was the MAPPING, and a mapping error is not a
+    fabrication. A suite that only checked for fabrication would never have seen
+    it.
+
+    **What the correction rests on**, measured rather than reasoned: this concept
+    carries the macro's own name from a macro, and a lowercase alias reading from
+    a filename, and **not one of those is a member of the schema's technique
+    enum** — so the old status proposed an off-enum value from every source. One
+    of those aliases is a DETECTION MODE, which the enum has no member for and
+    which is not a technique at all.
+
+    Below: the technique candidate still EXISTS and still carries its readings, and
+    it proposes nothing.
     """
     from isaac_api.bl15 import evaluate as ev
     from isaac_api.bl15 import mapping as mp
@@ -1386,24 +1394,41 @@ def test_the_technique_mapping_MISSES_AND_THAT_IS_RECORDED_NOT_HIDDEN(client):
     import_id = _imported(client)
     view = _view(client, import_id)
 
-    proposed = [
-        candidate["proposed_value"]
+    # THE RATCHET FIRED AND THE REGISTRY WAS CORRECTED. What follows is the
+    # inverted assertion: no value is proposed at this path at all, and the
+    # candidate that WOULD have carried one now carries the registry's reason.
+    entry = mp.MAPPINGS["acquisition_method"]
+    assert entry.status == mp.STATUS_NEEDS_DOMAIN_REVIEW
+    assert not entry.proposable
+    assert entry.official_path == RECORD_TARGET_PATH
+
+    at_path = [
+        candidate
         for candidate in _candidates(view)
         if candidate["target_field_path"] == RECORD_TARGET_PATH
-        and candidate["proposed_value"] is not None
     ]
-    assert proposed, "no candidate proposes a technique at all"
-    # NEITHER value is a member of the schema's own enum for this field, which is
-    # the concrete consequence rather than a restatement of the gold standard.
-    allowed = set(mp.MAPPINGS["acquisition_method"].allowed_values or ())
-    if allowed:
-        assert set(proposed).isdisjoint(allowed), (
-            "the technique candidate now names a schema enum member, so the "
-            "registry mapping has been corrected and this ratchet should be "
-            f"retired: {proposed}"
-        )
-    # And the harness says the same thing, from the gold standard's side.
-    assert "HERFD-XAS" not in proposed, proposed
+    assert at_path, "the technique candidate vanished entirely, which loses evidence"
+
+    # NOT PROPOSABLE, AND CARRYING NO VALUE — the two together are the fix. A
+    # candidate that kept its value while being unproposable would still be a
+    # macro filename sitting at a schema path, one surface away from a record.
+    for candidate in at_path:
+        assert candidate["proposed_value"] is None, candidate
+        assert candidate["proposable"] is False, candidate
+        assert candidate["not_proposable_reason"], candidate
+
+    # The evidence still survives in full — the point of deferring rather than
+    # dropping. The macro's own name is still readable at its locator.
+    literals = {
+        statement["value"]
+        for candidate in at_path
+        for statement in candidate["supporting_statements"]
+    }
+    assert literals, "the readings behind the deferred candidate were dropped"
+
+    # And the enum members a scientist chooses between are named, so the domain
+    # question is answerable in one word.
+    assert "HERFD-XAS" in (entry.allowed_values or ())
     assert ev.METRIC_TECHNIQUE_MAPPING == "technique_mapping"
 
 

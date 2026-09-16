@@ -547,15 +547,28 @@ _MAPPINGS: tuple[ConceptMapping, ...] = (
     # another to learn why.
     ConceptMapping(
         concept=ev.CONCEPT_ACQUISITION_METHOD,
-        status=STATUS_DETERMINISTIC,
+        status=STATUS_NEEDS_DOMAIN_REVIEW,
         official_path="system.technique",
         reason=(
-            "The acquisition-method macro defines a named high-energy-resolution "
-            "fluorescence-detected absorption scan, and the beamtime notes name that "
-            "technique in their own title. The schema's technique enum contains it "
-            "verbatim, so this is a transcription rather than a judgement. The broader "
-            "'XAS' member is also present and is the weaker reading; the stronger one "
-            "is what the sources actually state."
+            "~~The acquisition-method macro defines a named high-energy-resolution "
+            "fluorescence-detected absorption scan … so this is a transcription rather "
+            "than a judgement.~~ CORRECTED 2026-09-16, the same day, by the slice that "
+            "wired this registry to a route and MEASURED what the concept actually "
+            "carries. The reasoning was about what a human reading the corpus knows; "
+            "the mapping is about what the readers emit, and those are different. "
+            "Measured: from a macro this concept carries THE MACRO'S OWN NAME — the "
+            "file a `qdo` includes, or the symbol a `def` block defines — and from a "
+            "filename it carries the profile's alias reading, whose normalised values "
+            "are lowercase shorthands. NOT ONE OF THOSE IS A MEMBER OF THE SCHEMA'S "
+            "TECHNIQUE ENUM, so the old status proposed an off-enum value from every "
+            "source, and a proposal at this path is then work a scientist is offered "
+            "and cannot complete. Two further reasons it is a judgement and not a "
+            "transcription: one alias normalises to a DETECTION MODE, which the enum "
+            "has no member for at all and which is not a technique; and the strongest "
+            "evidence for the real technique is a word in the beamtime document's "
+            "TITLE, which no reader in this build reads as a technique statement. So "
+            "the enum member is a scientist's to choose, and the options are named "
+            "below so that choice is one word."
         ),
         allowed_values=("XAS", "HERFD-XAS", "XES", "RIXS"),
         requires_siblings=("system.domain",),
