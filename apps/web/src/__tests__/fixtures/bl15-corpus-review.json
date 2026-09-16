@@ -1,0 +1,1445 @@
+{
+  "inventory": {
+    "root_label": "ZZ-Beamtime-2099-04 (synthetic)",
+    "entry_count": 38,
+    "total_bytes": 2208,
+    "refused": [
+      {
+        "archive_path": "ZZ_oversize_detector_dump.mca",
+        "reason": "entry_too_large",
+        "detail": "measured 9,400,000 bytes; ceiling 8,000,000 bytes"
+      }
+    ],
+    "truncated_reason": null,
+    "duplicate_group_count": 8
+  },
+  "relationships": {
+    "units": [
+      {
+        "stem": "ZZOxide_5wpc_pellet_transmission",
+        "acquisition_path": "ZZOxide_5wpc_pellet_transmission",
+        "source_type": "standard_or_reference",
+        "run_candidate": false,
+        "legacy_number": null,
+        "group_token": null,
+        "scan_dir": "ZZOxide_5wpc_pellet_transmission_dir",
+        "scans": [
+          {
+            "path": "ZZOxide_5wpc_pellet_transmission_dir/ZZOxide_5wpc_pellet_transmission_001.dat",
+            "scan_index": 1
+          }
+        ],
+        "scan_count": 1,
+        "duplicate_copies": [
+          "ZZOxide_5wpc_pellet_transmission_dir/ZZOxide_5wpc_pellet_transmission"
+        ],
+        "suppressed_duplicate_acquisitions": [
+          "ZZOxide_5wpc_pellet_transmission_dir/ZZOxide_5wpc_pellet_transmission"
+        ],
+        "declared_by": [],
+        "processed_products": [],
+        "note_rows": [],
+        "internal_declaration": "ZZOxide_5wpc_pellet_transmission",
+        "conflicts": [],
+        "source_count": 2
+      },
+      {
+        "stem": "alignment",
+        "acquisition_path": "alignment",
+        "source_type": "alignment",
+        "run_candidate": false,
+        "legacy_number": null,
+        "group_token": null,
+        "scan_dir": "alignment_dir",
+        "scans": [
+          {
+            "path": "alignment_dir/alignment_001.dat",
+            "scan_index": 1
+          }
+        ],
+        "scan_count": 1,
+        "duplicate_copies": [
+          "alignment_dir/alignment"
+        ],
+        "suppressed_duplicate_acquisitions": [
+          "alignment_dir/alignment"
+        ],
+        "declared_by": [],
+        "processed_products": [],
+        "note_rows": [],
+        "internal_declaration": "alignment",
+        "conflicts": [],
+        "source_count": 2
+      },
+      {
+        "stem": "03_01_ZZ1_base_beforeCycling_filter10_0600mV",
+        "acquisition_path": "03_01_ZZ1_base_beforeCycling_filter10_0600mV",
+        "source_type": "spec_acquisition",
+        "run_candidate": true,
+        "legacy_number": 3,
+        "group_token": "01",
+        "scan_dir": "03_01_ZZ1_base_beforeCycling_filter10_0600mV_dir",
+        "scans": [
+          {
+            "path": "03_01_ZZ1_base_beforeCycling_filter10_0600mV_dir/03_01_ZZ1_base_beforeCycling_filter10_0600mV_001.dat",
+            "scan_index": 1
+          },
+          {
+            "path": "03_01_ZZ1_base_beforeCycling_filter10_0600mV_dir/03_01_ZZ1_base_beforeCycling_filter10_0600mV_002.dat",
+            "scan_index": 2
+          },
+          {
+            "path": "03_01_ZZ1_base_beforeCycling_filter10_0600mV_dir/03_01_ZZ1_base_beforeCycling_filter10_0600mV_003.dat",
+            "scan_index": 3
+          }
+        ],
+        "scan_count": 3,
+        "duplicate_copies": [
+          "03_01_ZZ1_base_beforeCycling_filter10_0600mV_dir/03_01_ZZ1_base_beforeCycling_filter10_0600mV"
+        ],
+        "suppressed_duplicate_acquisitions": [
+          "03_01_ZZ1_base_beforeCycling_filter10_0600mV_dir/03_01_ZZ1_base_beforeCycling_filter10_0600mV"
+        ],
+        "declared_by": [
+          {
+            "macro_path": "runZZ1.mac",
+            "block_index": 0,
+            "declared_target": "03_01_ZZ1_base_beforeCycling_filter10_0600mV",
+            "acquired": true
+          }
+        ],
+        "processed_products": [
+          "MERGE/03_merged.txt"
+        ],
+        "note_rows": [
+          {
+            "source_path": "beamtime_notes.txt",
+            "locator": "line 12",
+            "row": "Sample 01 - baseline before cycling"
+          }
+        ],
+        "internal_declaration": "03_01_ZZ1_base_beforeCycling_filter10_0600mV",
+        "conflicts": [],
+        "source_count": 7
+      },
+      {
+        "stem": "04_01_ZZ1_base_after1stCycling_filter10_0600mV",
+        "acquisition_path": "04_01_ZZ1_base_after1stCycling_filter10_0600mV",
+        "source_type": "spec_acquisition",
+        "run_candidate": true,
+        "legacy_number": 4,
+        "group_token": "01",
+        "scan_dir": "04_01_ZZ1_base_after1stCycling_filter10_0600mV_dir",
+        "scans": [
+          {
+            "path": "04_01_ZZ1_base_after1stCycling_filter10_0600mV_dir/04_01_ZZ1_base_after1stCycling_filter10_0600mV_001.dat",
+            "scan_index": 1
+          },
+          {
+            "path": "04_01_ZZ1_base_after1stCycling_filter10_0600mV_dir/04_01_ZZ1_base_after1stCycling_filter10_0600mV_002.dat",
+            "scan_index": 2
+          }
+        ],
+        "scan_count": 2,
+        "duplicate_copies": [
+          "04_01_ZZ1_base_after1stCycling_filter10_0600mV_dir/04_01_ZZ1_base_after1stCycling_filter10_0600mV"
+        ],
+        "suppressed_duplicate_acquisitions": [
+          "04_01_ZZ1_base_after1stCycling_filter10_0600mV_dir/04_01_ZZ1_base_after1stCycling_filter10_0600mV"
+        ],
+        "declared_by": [
+          {
+            "macro_path": "runZZ1.mac",
+            "block_index": 1,
+            "declared_target": "04_01_ZZ1_base_after1stCycling_filter10_0600mV",
+            "acquired": true
+          }
+        ],
+        "processed_products": [],
+        "note_rows": [],
+        "internal_declaration": "04_01_ZZ1_base_after1stCycling_filter10_0600mV",
+        "conflicts": [],
+        "source_count": 4
+      },
+      {
+        "stem": "05_01_ZZ1_base_dry_filter10_0600mV",
+        "acquisition_path": "05_01_ZZ1_base_dry_filter10_0600mV",
+        "source_type": "spec_acquisition",
+        "run_candidate": true,
+        "legacy_number": 5,
+        "group_token": "01",
+        "scan_dir": null,
+        "scans": [],
+        "scan_count": 0,
+        "duplicate_copies": [
+          "05_01_ZZ1_base_dry_filter10_0600mV_dir/05_01_ZZ1_base_dry_filter10_0600mV"
+        ],
+        "suppressed_duplicate_acquisitions": [
+          "05_01_ZZ1_base_dry_filter10_0600mV_dir/05_01_ZZ1_base_dry_filter10_0600mV"
+        ],
+        "declared_by": [
+          {
+            "macro_path": "runZZ1.mac",
+            "block_index": 2,
+            "declared_target": "05_01_ZZ1_base_dry_filter10_0600mV",
+            "acquired": true
+          }
+        ],
+        "processed_products": [],
+        "note_rows": [],
+        "internal_declaration": "05_01_ZZ1_base_dry_filter10_0600mV",
+        "conflicts": [],
+        "source_count": 2
+      },
+      {
+        "stem": "12_02_ZZ2_acid_after1500Cycling_ffilter35_newSpots_1200mV",
+        "acquisition_path": "12_02_ZZ2_acid_after1500Cycling_ffilter35_newSpots_1200mV",
+        "source_type": "spec_acquisition",
+        "run_candidate": true,
+        "legacy_number": 12,
+        "group_token": "02",
+        "scan_dir": "12_02_ZZ2_acid_after1500Cycling_ffilter35_newSpots_1200mV_dir",
+        "scans": [
+          {
+            "path": "12_02_ZZ2_acid_after1500Cycling_ffilter35_newSpots_1200mV_dir/12_02_ZZ2_acid_after1500Cycling_ffilter35_newSpots_1200mV_001.dat",
+            "scan_index": 1
+          },
+          {
+            "path": "12_02_ZZ2_acid_after1500Cycling_ffilter35_newSpots_1200mV_dir/12_02_ZZ2_acid_after1500Cycling_ffilter35_newSpots_1200mV_002.dat",
+            "scan_index": 2
+          },
+          {
+            "path": "12_02_ZZ2_acid_after1500Cycling_ffilter35_newSpots_1200mV_dir/12_02_ZZ2_acid_after1500Cycling_ffilter35_newSpots_1200mV_003.dat",
+            "scan_index": 3
+          },
+          {
+            "path": "12_02_ZZ2_acid_after1500Cycling_ffilter35_newSpots_1200mV_dir/12_02_ZZ2_acid_after1500Cycling_ffilter35_newSpots_1200mV_004.dat",
+            "scan_index": 4
+          }
+        ],
+        "scan_count": 4,
+        "duplicate_copies": [
+          "12_02_ZZ2_acid_after1500Cycling_ffilter35_newSpots_1200mV_dir/12_02_ZZ2_acid_after1500Cycling_ffilter35_newSpots_1200mV"
+        ],
+        "suppressed_duplicate_acquisitions": [
+          "12_02_ZZ2_acid_after1500Cycling_ffilter35_newSpots_1200mV_dir/12_02_ZZ2_acid_after1500Cycling_ffilter35_newSpots_1200mV"
+        ],
+        "declared_by": [],
+        "processed_products": [
+          "MERGE/12_merged.txt"
+        ],
+        "note_rows": [
+          {
+            "source_path": "beamtime_notes.txt",
+            "locator": "line 31",
+            "row": "Sample 02 - after 1500 cycles, new spot"
+          }
+        ],
+        "internal_declaration": "12_02_ZZ2_acid_after1500Cycling_filter35_newSpots_1200mV",
+        "conflicts": [
+          {
+            "kind": "internal_declaration_vs_filename",
+            "subject": "12_02_ZZ2_acid_after1500Cycling_ffilter35_newSpots_1200mV",
+            "readings": [
+              {
+                "source_path": "12_02_ZZ2_acid_after1500Cycling_ffilter35_newSpots_1200mV",
+                "locator": "filename",
+                "value": "12_02_ZZ2_acid_after1500Cycling_ffilter35_newSpots_1200mV",
+                "source_type": "spec_acquisition"
+              },
+              {
+                "source_path": "12_02_ZZ2_acid_after1500Cycling_ffilter35_newSpots_1200mV",
+                "locator": "#F",
+                "value": "12_02_ZZ2_acid_after1500Cycling_filter35_newSpots_1200mV",
+                "source_type": "spec_acquisition"
+              },
+              {
+                "source_path": "runZZ2.mac",
+                "locator": "newfile block 0",
+                "value": "12_02_ZZ2_acid_after1500Cycling_filter35_newSpots_1200mV",
+                "source_type": "macro"
+              }
+            ],
+            "unresolved_reason": "sources_disagree",
+            "explanation": "This acquisition's filename and the name it declares inside itself are different. Neither is preferred automatically: a file may have been renamed afterwards to correct it, or the header may be the only untouched record. Which applies is yours to say."
+          },
+          {
+            "kind": "acquired_never_declared",
+            "subject": "12_02_ZZ2_acid_after1500Cycling_ffilter35_newSpots_1200mV",
+            "readings": [
+              {
+                "source_path": "12_02_ZZ2_acid_after1500Cycling_ffilter35_newSpots_1200mV",
+                "locator": "filename",
+                "value": "12_02_ZZ2_acid_after1500Cycling_ffilter35_newSpots_1200mV",
+                "source_type": "spec_acquisition"
+              },
+              {
+                "source_path": "(the macros in this import)",
+                "locator": "newfile declarations",
+                "value": "no macro declares this measurement",
+                "source_type": "macro"
+              }
+            ],
+            "unresolved_reason": "sources_disagree",
+            "explanation": "This measurement exists but no macro in the import declared it. That is normal for work driven by hand, and it also happens when a file was renamed after acquisition \u2014 the acquisition is real either way."
+          }
+        ],
+        "source_count": 7
+      },
+      {
+        "stem": "12_02_ZZ2_acid_repeat_filter35_1200mV",
+        "acquisition_path": "12_02_ZZ2_acid_repeat_filter35_1200mV",
+        "source_type": "spec_acquisition",
+        "run_candidate": true,
+        "legacy_number": 12,
+        "group_token": "02",
+        "scan_dir": "12_02_ZZ2_acid_repeat_filter35_1200mV_dir",
+        "scans": [
+          {
+            "path": "12_02_ZZ2_acid_repeat_filter35_1200mV_dir/12_02_ZZ2_acid_repeat_filter35_1200mV_001.dat",
+            "scan_index": 1
+          }
+        ],
+        "scan_count": 1,
+        "duplicate_copies": [
+          "12_02_ZZ2_acid_repeat_filter35_1200mV_dir/12_02_ZZ2_acid_repeat_filter35_1200mV"
+        ],
+        "suppressed_duplicate_acquisitions": [
+          "12_02_ZZ2_acid_repeat_filter35_1200mV_dir/12_02_ZZ2_acid_repeat_filter35_1200mV"
+        ],
+        "declared_by": [],
+        "processed_products": [
+          "MERGE/12_merged.txt"
+        ],
+        "note_rows": [
+          {
+            "source_path": "beamtime_notes.txt",
+            "locator": "line 31",
+            "row": "Sample 02 - after 1500 cycles, new spot"
+          }
+        ],
+        "internal_declaration": "12_02_ZZ2_acid_repeat_filter35_1200mV",
+        "conflicts": [
+          {
+            "kind": "acquired_never_declared",
+            "subject": "12_02_ZZ2_acid_repeat_filter35_1200mV",
+            "readings": [
+              {
+                "source_path": "12_02_ZZ2_acid_repeat_filter35_1200mV",
+                "locator": "filename",
+                "value": "12_02_ZZ2_acid_repeat_filter35_1200mV",
+                "source_type": "spec_acquisition"
+              },
+              {
+                "source_path": "(the macros in this import)",
+                "locator": "newfile declarations",
+                "value": "no macro declares this measurement",
+                "source_type": "macro"
+              }
+            ],
+            "unresolved_reason": "sources_disagree",
+            "explanation": "This measurement exists but no macro in the import declared it. That is normal for work driven by hand, and it also happens when a file was renamed after acquisition \u2014 the acquisition is real either way."
+          }
+        ],
+        "source_count": 4
+      },
+      {
+        "stem": "23_03_ZZ3_base_beforeCycling_filter20_0850mV",
+        "acquisition_path": "23_03_ZZ3_base_beforeCycling_filter20_0850mV",
+        "source_type": "spec_acquisition",
+        "run_candidate": true,
+        "legacy_number": 23,
+        "group_token": "03",
+        "scan_dir": "23_03_ZZ3_base_beforeCycling_filter20_0850mV_dir",
+        "scans": [
+          {
+            "path": "23_03_ZZ3_base_beforeCycling_filter20_0850mV_dir/23_03_ZZ3_base_beforeCycling_filter20_0850mV_001.dat",
+            "scan_index": 1
+          },
+          {
+            "path": "23_03_ZZ3_base_beforeCycling_filter20_0850mV_dir/23_03_ZZ3_base_beforeCycling_filter20_0850mV_002.dat",
+            "scan_index": 2
+          }
+        ],
+        "scan_count": 2,
+        "duplicate_copies": [
+          "23_03_ZZ3_base_beforeCycling_filter20_0850mV_dir/23_03_ZZ3_base_beforeCycling_filter20_0850mV"
+        ],
+        "suppressed_duplicate_acquisitions": [
+          "23_03_ZZ3_base_beforeCycling_filter20_0850mV_dir/23_03_ZZ3_base_beforeCycling_filter20_0850mV"
+        ],
+        "declared_by": [],
+        "processed_products": [],
+        "note_rows": [],
+        "internal_declaration": "23_03_ZZ3_base_beforeCycling_filter20_0850mV",
+        "conflicts": [
+          {
+            "kind": "acquired_never_declared",
+            "subject": "23_03_ZZ3_base_beforeCycling_filter20_0850mV",
+            "readings": [
+              {
+                "source_path": "23_03_ZZ3_base_beforeCycling_filter20_0850mV",
+                "locator": "filename",
+                "value": "23_03_ZZ3_base_beforeCycling_filter20_0850mV",
+                "source_type": "spec_acquisition"
+              },
+              {
+                "source_path": "(the macros in this import)",
+                "locator": "newfile declarations",
+                "value": "no macro declares this measurement",
+                "source_type": "macro"
+              }
+            ],
+            "unresolved_reason": "sources_disagree",
+            "explanation": "This measurement exists but no macro in the import declared it. That is normal for work driven by hand, and it also happens when a file was renamed after acquisition \u2014 the acquisition is real either way."
+          }
+        ],
+        "source_count": 3
+      }
+    ],
+    "groups": [
+      {
+        "group_token": "01",
+        "stems": [
+          "03_01_ZZ1_base_beforeCycling_filter10_0600mV",
+          "04_01_ZZ1_base_after1stCycling_filter10_0600mV",
+          "05_01_ZZ1_base_dry_filter10_0600mV"
+        ],
+        "measurement_count": 3,
+        "legacy_low": 3,
+        "legacy_high": 5,
+        "contiguous": true
+      },
+      {
+        "group_token": "02",
+        "stems": [
+          "12_02_ZZ2_acid_after1500Cycling_ffilter35_newSpots_1200mV",
+          "12_02_ZZ2_acid_repeat_filter35_1200mV"
+        ],
+        "measurement_count": 2,
+        "legacy_low": 12,
+        "legacy_high": 12,
+        "contiguous": true
+      },
+      {
+        "group_token": "03",
+        "stems": [
+          "23_03_ZZ3_base_beforeCycling_filter20_0850mV"
+        ],
+        "measurement_count": 1,
+        "legacy_low": 23,
+        "legacy_high": 23,
+        "contiguous": true
+      },
+      {
+        "group_token": null,
+        "stems": [
+          "ZZOxide_5wpc_pellet_transmission",
+          "alignment"
+        ],
+        "measurement_count": 2,
+        "legacy_low": null,
+        "legacy_high": null,
+        "contiguous": false
+      }
+    ],
+    "corpus_conflicts": [
+      {
+        "kind": "duplicate_legacy_number",
+        "subject": "12",
+        "readings": [
+          {
+            "source_path": "12_02_ZZ2_acid_after1500Cycling_ffilter35_newSpots_1200mV",
+            "locator": "filename",
+            "value": "12_02_ZZ2_acid_after1500Cycling_ffilter35_newSpots_1200mV",
+            "source_type": "spec_acquisition"
+          },
+          {
+            "source_path": "12_02_ZZ2_acid_repeat_filter35_1200mV",
+            "locator": "filename",
+            "value": "12_02_ZZ2_acid_repeat_filter35_1200mV",
+            "source_type": "spec_acquisition"
+          }
+        ],
+        "unresolved_reason": "sources_disagree",
+        "explanation": "Two separate measurements were both recorded as number 12. Both files exist and both are kept; neither is a duplicate of the other and neither is the 'real' one."
+      },
+      {
+        "kind": "macro_declared_never_acquired",
+        "subject": "99_01_ZZ1_base_neverRan_filter10_0600mV",
+        "readings": [
+          {
+            "source_path": "runZZ1.mac",
+            "locator": "newfile block 3",
+            "value": "99_01_ZZ1_base_neverRan_filter10_0600mV",
+            "source_type": "macro"
+          },
+          {
+            "source_path": "(this import's acquisitions)",
+            "locator": "filenames",
+            "value": "no acquisition file of this name is present",
+            "source_type": "spec_acquisition"
+          }
+        ],
+        "unresolved_reason": "sources_disagree",
+        "explanation": "A macro said it was about to record this measurement and no matching file is in the import. The measurement may have been abandoned, renamed afterwards, or saved somewhere not included here. Nothing is assumed either way."
+      },
+      {
+        "kind": "macro_declared_never_acquired",
+        "subject": "12_02_ZZ2_acid_after1500Cycling_filter35_newSpots_1200mV",
+        "readings": [
+          {
+            "source_path": "runZZ2.mac",
+            "locator": "newfile block 0",
+            "value": "12_02_ZZ2_acid_after1500Cycling_filter35_newSpots_1200mV",
+            "source_type": "macro"
+          },
+          {
+            "source_path": "(this import's acquisitions)",
+            "locator": "filenames",
+            "value": "no acquisition file of this name is present",
+            "source_type": "spec_acquisition"
+          }
+        ],
+        "unresolved_reason": "sources_disagree",
+        "explanation": "A macro said it was about to record this measurement and no matching file is in the import. The measurement may have been abandoned, renamed afterwards, or saved somewhere not included here. Nothing is assumed either way."
+      }
+    ],
+    "unattached": [
+      {
+        "archive_path": "MERGE/unmatched_merged.txt",
+        "source_type": "processed_spectrum",
+        "reason": "a processed product whose filename names no measurement number this import contains"
+      },
+      {
+        "archive_path": "beamtime_notes.txt",
+        "source_type": "beamtime_notes",
+        "reason": "human documentation for the whole beamtime; its individual rows attach to measurements by file number"
+      },
+      {
+        "archive_path": "motors.mac",
+        "source_type": "motor_snapshot_macro",
+        "reason": "a snapshot of instrument state, not a measurement"
+      },
+      {
+        "archive_path": "readme.txt",
+        "source_type": "shared_readme",
+        "reason": "beamtime-scope context \u2014 belongs to the whole import, not to one measurement, and is inherited rather than copied"
+      },
+      {
+        "archive_path": "runZZ2.mac",
+        "source_type": "macro",
+        "reason": "a macro whose declared measurements are all attached elsewhere, or which declares none"
+      }
+    ],
+    "inputs_present": [
+      "entries",
+      "classifications",
+      "internal_declarations",
+      "macro_declarations",
+      "note_file_numbers",
+      "duplicate_groups"
+    ],
+    "unit_count": 8,
+    "conflict_count": 7
+  },
+  "evidence": [
+    {
+      "evidence_id": "zz-e1",
+      "source_path": "03_01_ZZ1_base_beforeCycling_filter10_0600mV",
+      "source_type": "spec_acquisition",
+      "locator": "filename[3:5]",
+      "raw_literal": "01",
+      "concept": "sample_or_electrode_number",
+      "parser_id": "zz-fixture-reader@0",
+      "determinism": "read",
+      "scope": "measurement",
+      "normalized_value": null,
+      "unit": null,
+      "normalization_rule": null,
+      "profile_id": null,
+      "profile_version": null,
+      "timestamp_utc": null,
+      "measurement_stem": "03_01_ZZ1_base_beforeCycling_filter10_0600mV"
+    },
+    {
+      "evidence_id": "zz-e2",
+      "source_path": "03_01_ZZ1_base_beforeCycling_filter10_0600mV",
+      "source_type": "spec_acquisition",
+      "locator": "filename[6:9]",
+      "raw_literal": "ZZ1",
+      "concept": "sample_name",
+      "parser_id": "zz-fixture-reader@0",
+      "determinism": "read",
+      "scope": "measurement",
+      "normalized_value": null,
+      "unit": null,
+      "normalization_rule": null,
+      "profile_id": null,
+      "profile_version": null,
+      "timestamp_utc": null,
+      "measurement_stem": "03_01_ZZ1_base_beforeCycling_filter10_0600mV"
+    },
+    {
+      "evidence_id": "zz-e3",
+      "source_path": "03_01_ZZ1_base_beforeCycling_filter10_0600mV",
+      "source_type": "spec_acquisition",
+      "locator": "filename[10:14]",
+      "raw_literal": "base",
+      "concept": "electrolyte_or_medium",
+      "parser_id": "zz-fixture-reader@0",
+      "determinism": "read",
+      "scope": "measurement",
+      "normalized_value": null,
+      "unit": null,
+      "normalization_rule": null,
+      "profile_id": null,
+      "profile_version": null,
+      "timestamp_utc": null,
+      "measurement_stem": "03_01_ZZ1_base_beforeCycling_filter10_0600mV"
+    },
+    {
+      "evidence_id": "zz-e4",
+      "source_path": "03_01_ZZ1_base_beforeCycling_filter10_0600mV",
+      "source_type": "spec_acquisition",
+      "locator": "filename[15:29]",
+      "raw_literal": "beforeCycling",
+      "concept": "cycling_state",
+      "parser_id": "zz-fixture-reader@0",
+      "determinism": "read",
+      "scope": "measurement",
+      "normalized_value": null,
+      "unit": null,
+      "normalization_rule": null,
+      "profile_id": null,
+      "profile_version": null,
+      "timestamp_utc": null,
+      "measurement_stem": "03_01_ZZ1_base_beforeCycling_filter10_0600mV"
+    },
+    {
+      "evidence_id": "zz-e5",
+      "source_path": "03_01_ZZ1_base_beforeCycling_filter10_0600mV",
+      "source_type": "spec_acquisition",
+      "locator": "filename[30:38]",
+      "raw_literal": "filter10",
+      "concept": "filter",
+      "parser_id": "zz-fixture-reader@0",
+      "determinism": "normalized",
+      "scope": "measurement",
+      "normalized_value": "10",
+      "unit": null,
+      "normalization_rule": "filter_prefix_strip",
+      "profile_id": null,
+      "profile_version": null,
+      "timestamp_utc": null,
+      "measurement_stem": "03_01_ZZ1_base_beforeCycling_filter10_0600mV"
+    },
+    {
+      "evidence_id": "zz-e6",
+      "source_path": "03_01_ZZ1_base_beforeCycling_filter10_0600mV",
+      "source_type": "spec_acquisition",
+      "locator": "filename[39:45]",
+      "raw_literal": "0600mV",
+      "concept": "potential_magnitude",
+      "parser_id": "zz-fixture-reader@0",
+      "determinism": "normalized",
+      "scope": "measurement",
+      "normalized_value": 0.6,
+      "unit": "V",
+      "normalization_rule": "mV_to_V",
+      "profile_id": null,
+      "profile_version": null,
+      "timestamp_utc": null,
+      "measurement_stem": "03_01_ZZ1_base_beforeCycling_filter10_0600mV"
+    },
+    {
+      "evidence_id": "zz-e7",
+      "source_path": "03_01_ZZ1_base_beforeCycling_filter10_0600mV",
+      "source_type": "spec_acquisition",
+      "locator": "#D",
+      "raw_literal": "Tue Apr 08 11:04:02 2099",
+      "concept": "acquisition_timestamp",
+      "parser_id": "zz-fixture-reader@0",
+      "determinism": "read",
+      "scope": "measurement",
+      "normalized_value": null,
+      "unit": null,
+      "normalization_rule": null,
+      "profile_id": null,
+      "profile_version": null,
+      "timestamp_utc": null,
+      "measurement_stem": "03_01_ZZ1_base_beforeCycling_filter10_0600mV"
+    },
+    {
+      "evidence_id": "zz-e8",
+      "source_path": "12_02_ZZ2_acid_after1500Cycling_ffilter35_newSpots_1200mV",
+      "source_type": "spec_acquisition",
+      "locator": "filename[30:39]",
+      "raw_literal": "ffilter35",
+      "concept": "filter",
+      "parser_id": "zz-fixture-reader@0",
+      "determinism": "normalized",
+      "scope": "measurement",
+      "normalized_value": "35",
+      "unit": null,
+      "normalization_rule": "doubled_prefix_ffilter",
+      "profile_id": null,
+      "profile_version": null,
+      "timestamp_utc": null,
+      "measurement_stem": "12_02_ZZ2_acid_after1500Cycling_ffilter35_newSpots_1200mV"
+    },
+    {
+      "evidence_id": "zz-e9",
+      "source_path": "12_02_ZZ2_acid_after1500Cycling_ffilter35_newSpots_1200mV",
+      "source_type": "spec_acquisition",
+      "locator": "filename[3:5]",
+      "raw_literal": "02",
+      "concept": "sample_or_electrode_number",
+      "parser_id": "zz-fixture-reader@0",
+      "determinism": "read",
+      "scope": "measurement",
+      "normalized_value": null,
+      "unit": null,
+      "normalization_rule": null,
+      "profile_id": null,
+      "profile_version": null,
+      "timestamp_utc": null,
+      "measurement_stem": "12_02_ZZ2_acid_after1500Cycling_ffilter35_newSpots_1200mV"
+    },
+    {
+      "evidence_id": "zz-e10",
+      "source_path": "12_02_ZZ2_acid_after1500Cycling_ffilter35_newSpots_1200mV",
+      "source_type": "spec_acquisition",
+      "locator": "filename[6:9]",
+      "raw_literal": "ZZ2",
+      "concept": "sample_name",
+      "parser_id": "zz-fixture-reader@0",
+      "determinism": "read",
+      "scope": "measurement",
+      "normalized_value": null,
+      "unit": null,
+      "normalization_rule": null,
+      "profile_id": null,
+      "profile_version": null,
+      "timestamp_utc": null,
+      "measurement_stem": "12_02_ZZ2_acid_after1500Cycling_ffilter35_newSpots_1200mV"
+    },
+    {
+      "evidence_id": "zz-e11",
+      "source_path": "12_02_ZZ2_acid_after1500Cycling_ffilter35_newSpots_1200mV",
+      "source_type": "spec_acquisition",
+      "locator": "filename[10:14]",
+      "raw_literal": "acid",
+      "concept": "electrolyte_or_medium",
+      "parser_id": "zz-fixture-reader@0",
+      "determinism": "read",
+      "scope": "measurement",
+      "normalized_value": null,
+      "unit": null,
+      "normalization_rule": null,
+      "profile_id": null,
+      "profile_version": null,
+      "timestamp_utc": null,
+      "measurement_stem": "12_02_ZZ2_acid_after1500Cycling_ffilter35_newSpots_1200mV"
+    },
+    {
+      "evidence_id": "zz-e12",
+      "source_path": "12_02_ZZ2_acid_after1500Cycling_ffilter35_newSpots_1200mV",
+      "source_type": "spec_acquisition",
+      "locator": "filename[15:33]",
+      "raw_literal": "after1500Cycling",
+      "concept": "cycling_state",
+      "parser_id": "zz-fixture-reader@0",
+      "determinism": "read",
+      "scope": "measurement",
+      "normalized_value": null,
+      "unit": null,
+      "normalization_rule": null,
+      "profile_id": null,
+      "profile_version": null,
+      "timestamp_utc": null,
+      "measurement_stem": "12_02_ZZ2_acid_after1500Cycling_ffilter35_newSpots_1200mV"
+    },
+    {
+      "evidence_id": "zz-e13",
+      "source_path": "12_02_ZZ2_acid_after1500Cycling_ffilter35_newSpots_1200mV",
+      "source_type": "spec_acquisition",
+      "locator": "filename[45:51]",
+      "raw_literal": "1200mV",
+      "concept": "potential_magnitude",
+      "parser_id": "zz-fixture-reader@0",
+      "determinism": "normalized",
+      "scope": "measurement",
+      "normalized_value": 1.2,
+      "unit": "V",
+      "normalization_rule": "mV_to_V",
+      "profile_id": null,
+      "profile_version": null,
+      "timestamp_utc": null,
+      "measurement_stem": "12_02_ZZ2_acid_after1500Cycling_ffilter35_newSpots_1200mV"
+    },
+    {
+      "evidence_id": "zz-e14",
+      "source_path": "12_02_ZZ2_acid_after1500Cycling_ffilter35_newSpots_1200mV",
+      "source_type": "spec_acquisition",
+      "locator": "filename[40:49]",
+      "raw_literal": "newSpots",
+      "concept": "new_spot",
+      "parser_id": "zz-fixture-reader@0",
+      "determinism": "read",
+      "scope": "measurement",
+      "normalized_value": null,
+      "unit": null,
+      "normalization_rule": null,
+      "profile_id": null,
+      "profile_version": null,
+      "timestamp_utc": null,
+      "measurement_stem": "12_02_ZZ2_acid_after1500Cycling_ffilter35_newSpots_1200mV"
+    },
+    {
+      "evidence_id": "zz-e15",
+      "source_path": "beamtime_notes.txt",
+      "source_type": "beamtime_notes",
+      "locator": "line 4",
+      "raw_literal": "IrOx OER stability, April 2099",
+      "concept": "beamtime_purpose",
+      "parser_id": "zz-fixture-reader@0",
+      "determinism": "read",
+      "scope": "measurement",
+      "normalized_value": null,
+      "unit": null,
+      "normalization_rule": null,
+      "profile_id": null,
+      "profile_version": null,
+      "timestamp_utc": null,
+      "measurement_stem": null
+    }
+  ],
+  "mapping": {
+    "coverage": {
+      "blocked_by_build": 1,
+      "deterministic": 2,
+      "needs_domain_review": 14,
+      "normalized": 4,
+      "not_expressible": 24,
+      "examined": 45,
+      "not_examined": 0,
+      "concepts_total": 45
+    },
+    "concepts": [
+      {
+        "concept": "acquisition_timestamp",
+        "status": "deterministic",
+        "official_path": "timestamps.acquired_start_utc",
+        "reason": "Each acquisition file states its own start time in its SPEC header. The epoch line and the date line are two separate statements and are NOT reconciled here: if they disagree, both are read and the disagreement is a conflict for a scientist, not an arithmetic problem.",
+        "rule": null,
+        "requires_siblings": [],
+        "allowed_values": [],
+        "candidate_homes": [],
+        "proposable": true
+      },
+      {
+        "concept": "acquisition_epoch",
+        "status": "normalized",
+        "official_path": "timestamps.acquired_start_utc",
+        "reason": "The SPEC header states the acquisition instant twice \u2014 once as Unix seconds and once as a formatted local date \u2014 and the epoch line is the one that converts without assuming a timezone, which is why the rule hangs off it. THE TWO ARE NOT RECONCILED HERE: they are two statements the file makes, and if they disagree both are read and the disagreement belongs to a scientist. Choosing the epoch as the mappable one is a statement about which is convertible, not about which is right.",
+        "rule": "unix_epoch_seconds_to_iso8601_utc",
+        "requires_siblings": [],
+        "allowed_values": [],
+        "candidate_homes": [],
+        "proposable": true
+      },
+      {
+        "concept": "potential_magnitude",
+        "status": "normalized",
+        "official_path": "context.electrochemistry.potential_setpoint_V",
+        "reason": "Filenames state a potential magnitude in two unit conventions. The schema's field is in volts. THE MAGNITUDE IS ALL THAT IS MAPPED HERE \u2014 the electrochemical reference it is measured against is a separate concept with a separate and usually absent mapping, and collapsing the two would assert a basis no source states.",
+        "rule": "millivolts_to_volts_and_p_as_decimal_point",
+        "requires_siblings": [
+          "context.electrochemistry.control_mode"
+        ],
+        "allowed_values": [],
+        "candidate_homes": [],
+        "proposable": true
+      },
+      {
+        "concept": "ph",
+        "status": "normalized",
+        "official_path": "context.electrochemistry.pH",
+        "reason": "The beamtime notes state a pH for the later oxide samples. The schema pairs it with pH_basis, whose members are 'measured', 'nominal' and 'buffered_assumed'; a figure quoted beside a hydroxide concentration is evidenced as nominal, and no source states a basis for any other sample.",
+        "rule": "ph_figure_read_verbatim_basis_nominal_only_where_quoted_with_a_concentration",
+        "requires_siblings": [
+          "context.electrochemistry.pH_basis"
+        ],
+        "allowed_values": [],
+        "candidate_homes": [],
+        "proposable": true
+      },
+      {
+        "concept": "flow_rate",
+        "status": "normalized",
+        "official_path": "context.transport.feed.flow_rate",
+        "reason": "The notes state a flow rate for the flow-cell samples. The schema keeps the unit in a sibling field rather than in the number, so both are carried; the feed object additionally REQUIRES phase and composition, which a flow rate alone does not supply.",
+        "rule": "flow_rate_value_and_unit_carried_separately_never_converted",
+        "requires_siblings": [
+          "context.transport.feed.flow_rate_unit",
+          "context.transport.feed.phase",
+          "context.transport.feed.composition"
+        ],
+        "allowed_values": [],
+        "candidate_homes": [],
+        "proposable": true
+      },
+      {
+        "concept": "potential_reference_basis",
+        "status": "needs_domain_review",
+        "official_path": "context.electrochemistry.potential_vs_RHE.rhe_basis",
+        "reason": "THIS IS THE COROLLARY OF THE POTENTIAL MAGNITUDE MAPPING AND THE MOST CONSEQUENTIAL ENTRY IN THIS REGISTRY. A filename states a magnitude and says nothing about the basis. potential_scale's six members are each a specific claim with no 'unknown' member, so that field is left ABSENT rather than guessed. rhe_basis, by contrast, has vocabulary FOR the absence: 'not_reported' where no source names a basis, and 'not_convertible_no_reference_offset' where a reference is mentioned but its offset is not. value_V is nullable, so 'no RHE value, and here is why' is a complete and valid statement. Which member applies to which sample group is a domain judgement, because only a scientist can say whether a note naming RHE for one group covers its neighbours.",
+        "rule": null,
+        "requires_siblings": [],
+        "allowed_values": [
+          "measured_direct",
+          "derived_calibrated",
+          "reported_as_RHE",
+          "derived_nominal",
+          "in_silico_setpoint",
+          "not_convertible_no_pH",
+          "not_convertible_no_reference_offset",
+          "not_reported",
+          "not_applicable"
+        ],
+        "candidate_homes": [
+          "context.electrochemistry.potential_scale"
+        ],
+        "proposable": false
+      },
+      {
+        "concept": "electrolyte_or_medium",
+        "status": "needs_domain_review",
+        "official_path": "context.electrochemistry.electrolyte.name",
+        "reason": "Filenames say only 'acid' or 'base', which is a medium class and not an electrolyte name, and the schema REQUIRES both a name and a molar concentration in the same object. The notes name a specific acid for one sample; the one sentence that would supply a concentration for the rest is the corpus's own contradicted broad claim \u2014 it asserts a single hydroxide for ALL experiments while sitting above a sample section labelled acid, in a document whose preparation steps specify the acid. So this concept cannot be mapped from a filename at all, and the note that would complete it is in conflict with the same document.",
+        "rule": null,
+        "requires_siblings": [
+          "context.electrochemistry.electrolyte.concentration_M"
+        ],
+        "allowed_values": [],
+        "candidate_homes": [],
+        "proposable": false
+      },
+      {
+        "concept": "gas_condition",
+        "status": "needs_domain_review",
+        "official_path": "context.transport.feed.composition",
+        "reason": "The notes describe purging an inert gas and saturating the later samples with it. Whether that is the cell's FEED in the schema's sense \u2014 the transport block is written for flowing reactant feeds \u2014 or an atmosphere belonging in context.thermodynamics.atmosphere, is a judgement about the experiment rather than about the text.",
+        "rule": null,
+        "requires_siblings": [
+          "context.transport.feed.phase"
+        ],
+        "allowed_values": [],
+        "candidate_homes": [
+          "context.thermodynamics.atmosphere"
+        ],
+        "proposable": false
+      },
+      {
+        "concept": "sample_name",
+        "status": "needs_domain_review",
+        "official_path": "sample.material.name",
+        "reason": "A filename's sample token is the scientist's own shorthand \u2014 an electrode label for some samples and a material description for others. Which of those two it is decides whether it belongs at sample.material.name or sample.sample_id, and only the scientist who wrote it can say. The schema also requires a sample_form alongside, which no filename states.",
+        "rule": null,
+        "requires_siblings": [
+          "sample.sample_form"
+        ],
+        "allowed_values": [],
+        "candidate_homes": [
+          "sample.sample_id",
+          "sample.electrode_type"
+        ],
+        "proposable": false
+      },
+      {
+        "concept": "sample_or_electrode_number",
+        "status": "needs_domain_review",
+        "official_path": "sample.sample_id",
+        "reason": "The second numeric filename token behaves like a sample or electrode instance, and the grouping it implies agrees with the beamtime notes' own sample sections. AGREEMENT IS NOT CONFIRMATION: whether that token always means the instance is the first question in the domain packet, and the notes could agree with a token that means something else.",
+        "rule": null,
+        "requires_siblings": [],
+        "allowed_values": [],
+        "candidate_homes": [
+          "sample.library.sample_no"
+        ],
+        "proposable": false
+      },
+      {
+        "concept": "loading_or_thickness",
+        "status": "needs_domain_review",
+        "official_path": null,
+        "reason": "One filename slot carries two physically different quantities in this corpus \u2014 an overlayer thickness in nanometres for the oxide samples and a weight loading in percent for the pellets. The schema has a composition object and a geometry object and a natural home for neither, so this is both a mapping question and a question about what the token means.",
+        "rule": null,
+        "requires_siblings": [],
+        "allowed_values": [],
+        "candidate_homes": [
+          "sample.composition",
+          "sample.geometry"
+        ],
+        "proposable": false
+      },
+      {
+        "concept": "element",
+        "status": "needs_domain_review",
+        "official_path": null,
+        "reason": "The beamtime README names the absorbing element in one line, for the whole beamtime. The official schema has no absorber-element field; the absorbing element and edge are recorded as implicit/sidecar-only for the XANES path and must not be forced into the official record where the schema provides no valid path. The schema describes system.configuration as 'THE designated open extension namespace' for instrument- and station-specific configuration that does not generalize across facilities \u2014 naming slits, pass energies and logbook fields, which is what a filter index and a spectrometer crystal are. So a natural home exists. BUT the six system.configuration.* fields are recorded as unclassified with the domain owner's classification outstanding, and no write route in this build accepts them. Candidate home; NOT a settled mapping and not writable today.",
+        "rule": null,
+        "requires_siblings": [],
+        "allowed_values": [],
+        "candidate_homes": [
+          "system.configuration"
+        ],
+        "proposable": false
+      },
+      {
+        "concept": "cycling_state",
+        "status": "not_expressible",
+        "official_path": null,
+        "reason": "The official schema has no field for electrochemical cycling history (beforeCycling / after1500Cycling / after1stCycling). It is the single most important experimental variable in this corpus, which makes it the strongest schema-request case the corpus produced \u2014 and a schema request is upstream's decision, not this repository's. measurement.series[].conditions is a schema-legal candidate home for it as a per-series condition; nothing here places it there.",
+        "rule": null,
+        "requires_siblings": [],
+        "allowed_values": [],
+        "candidate_homes": [
+          "measurement.series[].conditions"
+        ],
+        "proposable": false
+      },
+      {
+        "concept": "before_after_state",
+        "status": "not_expressible",
+        "official_path": null,
+        "reason": "The before/after qualifier is one half of the cycling-state concept and has no field for the same reason.",
+        "rule": null,
+        "requires_siblings": [],
+        "allowed_values": [],
+        "candidate_homes": [
+          "measurement.series[].conditions"
+        ],
+        "proposable": false
+      },
+      {
+        "concept": "filter",
+        "status": "not_expressible",
+        "official_path": null,
+        "reason": "An attenuator index is beamline-specific instrument state. The official schema has no field for it. The schema describes system.configuration as 'THE designated open extension namespace' for instrument- and station-specific configuration that does not generalize across facilities \u2014 naming slits, pass energies and logbook fields, which is what a filter index and a spectrometer crystal are. So a natural home exists. BUT the six system.configuration.* fields are recorded as unclassified with the domain owner's classification outstanding, and no write route in this build accepts them. Candidate home; NOT a settled mapping and not writable today.",
+        "rule": null,
+        "requires_siblings": [],
+        "allowed_values": [],
+        "candidate_homes": [
+          "measurement.series[].conditions",
+          "system.configuration"
+        ],
+        "proposable": false
+      },
+      {
+        "concept": "emission_energy",
+        "status": "not_expressible",
+        "official_path": null,
+        "reason": "The emission energy the spectrometer is parked at is stated by the acquisition headers and by the macro call, and the official schema has no field for it. The schema describes system.configuration as 'THE designated open extension namespace' for instrument- and station-specific configuration that does not generalize across facilities \u2014 naming slits, pass energies and logbook fields, which is what a filter index and a spectrometer crystal are. So a natural home exists. BUT the six system.configuration.* fields are recorded as unclassified with the domain owner's classification outstanding, and no write route in this build accepts them. Candidate home; NOT a settled mapping and not writable today.",
+        "rule": null,
+        "requires_siblings": [],
+        "allowed_values": [],
+        "candidate_homes": [
+          "measurement.series[].conditions",
+          "system.configuration"
+        ],
+        "proposable": false
+      },
+      {
+        "concept": "legacy_run_or_file_number",
+        "status": "not_expressible",
+        "official_path": null,
+        "reason": "The leading filename number is the CORPUS'S identifier, not ISAAC's. It must not be forced into record_id, which the server mints, nor into sample.sample_id, which identifies a sample rather than a measurement. It is preserved as source evidence and is the right label to show a scientist, because it is the handle they already use.",
+        "rule": null,
+        "requires_siblings": [],
+        "allowed_values": [],
+        "candidate_homes": [],
+        "proposable": false
+      },
+      {
+        "concept": "new_spot",
+        "status": "not_expressible",
+        "official_path": null,
+        "reason": "Moving to an unexposed spot on the same electrode is a real experimental act with no schema field. It is not a replicate \u2014 the sample is the same one \u2014 so links[].rel = replica_of would be wrong about it.",
+        "rule": null,
+        "requires_siblings": [],
+        "allowed_values": [],
+        "candidate_homes": [
+          "measurement.series[].conditions"
+        ],
+        "proposable": false
+      },
+      {
+        "concept": "monochromator_calibration",
+        "status": "not_expressible",
+        "official_path": null,
+        "reason": "The README states which foil the monochromator was calibrated against. There is no calibration field; links[].rel = calibration_of with basis same_absorber_edge can express the RELATIONSHIP once a calibration record exists to point at, which this corpus does not contain. The schema describes system.configuration as 'THE designated open extension namespace' for instrument- and station-specific configuration that does not generalize across facilities \u2014 naming slits, pass energies and logbook fields, which is what a filter index and a spectrometer crystal are. So a natural home exists. BUT the six system.configuration.* fields are recorded as unclassified with the domain owner's classification outstanding, and no write route in this build accepts them. Candidate home; NOT a settled mapping and not writable today.",
+        "rule": null,
+        "requires_siblings": [],
+        "allowed_values": [],
+        "candidate_homes": [
+          "system.configuration",
+          "links[]"
+        ],
+        "proposable": false
+      },
+      {
+        "concept": "spectrometer_configuration",
+        "status": "not_expressible",
+        "official_path": null,
+        "reason": "Slit width, analyser crystal and emission line are exactly the facility-specific configuration the schema declines to generalize. The schema describes system.configuration as 'THE designated open extension namespace' for instrument- and station-specific configuration that does not generalize across facilities \u2014 naming slits, pass energies and logbook fields, which is what a filter index and a spectrometer crystal are. So a natural home exists. BUT the six system.configuration.* fields are recorded as unclassified with the domain owner's classification outstanding, and no write route in this build accepts them. Candidate home; NOT a settled mapping and not writable today.",
+        "rule": null,
+        "requires_siblings": [],
+        "allowed_values": [],
+        "candidate_homes": [
+          "system.configuration"
+        ],
+        "proposable": false
+      },
+      {
+        "concept": "beamsize",
+        "status": "not_expressible",
+        "official_path": null,
+        "reason": "Beam dimensions at a stated energy are station configuration. The schema describes system.configuration as 'THE designated open extension namespace' for instrument- and station-specific configuration that does not generalize across facilities \u2014 naming slits, pass energies and logbook fields, which is what a filter index and a spectrometer crystal are. So a natural home exists. BUT the six system.configuration.* fields are recorded as unclassified with the domain owner's classification outstanding, and no write route in this build accepts them. Candidate home; NOT a settled mapping and not writable today.",
+        "rule": null,
+        "requires_siblings": [],
+        "allowed_values": [],
+        "candidate_homes": [
+          "system.configuration"
+        ],
+        "proposable": false
+      },
+      {
+        "concept": "unknown_token",
+        "status": "not_expressible",
+        "official_path": null,
+        "reason": "A token no profile recognised has no concept, so it can have no mapping. IT IS STILL CARRIED: an unrecognised token is preserved as source evidence and shown to the scientist, because the alternative is dropping part of a filename silently.",
+        "rule": null,
+        "requires_siblings": [],
+        "allowed_values": [],
+        "candidate_homes": [],
+        "proposable": false
+      },
+      {
+        "concept": "scan_command",
+        "status": "blocked_by_build",
+        "official_path": "assets[].uri",
+        "reason": "The official schema requires assets[].sha256, and this build computes no digest for any historical source \u2014 not even for a file it reads. So a historical file cannot become an official asset entry without fabricating a required field. The asset content_role vocabulary otherwise fits this corpus exactly (raw_data_pointer, reduction_product, calibration_reference), which is why this is named as a boundary rather than left to surface as a failing export.",
+        "rule": null,
+        "requires_siblings": [],
+        "allowed_values": [],
+        "candidate_homes": [],
+        "proposable": false
+      },
+      {
+        "concept": "energy_grid",
+        "status": "needs_domain_review",
+        "official_path": "measurement.series[].independent_variables[].values",
+        "reason": "The scan grid is stated literally by the acquisition command and by the method macro, so the VALUES are evidenced. What the schema needs alongside them is a channel set with a role for each, and which detector column carries the primary signal among the many a scan export records is a domain fact this repository must not choose.",
+        "rule": null,
+        "requires_siblings": [
+          "measurement.series[].series_id",
+          "measurement.series[].independent_variables[].name",
+          "measurement.series[].independent_variables[].unit",
+          "measurement.series[].channels[]"
+        ],
+        "allowed_values": [],
+        "candidate_homes": [],
+        "proposable": false
+      },
+      {
+        "concept": "detector_column",
+        "status": "needs_domain_review",
+        "official_path": "measurement.series[].channels[].name",
+        "reason": "A scan export names its columns, so the names are evidenced. The schema requires a role for each from a closed set, and assigning those roles is a scientific reading of the detector set, not a transcription.",
+        "rule": null,
+        "requires_siblings": [
+          "measurement.series[].channels[].unit",
+          "measurement.series[].channels[].role"
+        ],
+        "allowed_values": [
+          "primary_signal",
+          "measured_response",
+          "simulated_observable",
+          "derived_signal",
+          "auxiliary_signal",
+          "control_readback",
+          "quality_monitor"
+        ],
+        "candidate_homes": [],
+        "proposable": false
+      },
+      {
+        "concept": "acquisition_method",
+        "status": "deterministic",
+        "official_path": "system.technique",
+        "reason": "The acquisition-method macro defines a named high-energy-resolution fluorescence-detected absorption scan, and the beamtime notes name that technique in their own title. The schema's technique enum contains it verbatim, so this is a transcription rather than a judgement. The broader 'XAS' member is also present and is the weaker reading; the stronger one is what the sources actually state.",
+        "rule": null,
+        "requires_siblings": [
+          "system.domain"
+        ],
+        "allowed_values": [
+          "XAS",
+          "HERFD-XAS",
+          "XES",
+          "RIXS"
+        ],
+        "candidate_homes": [],
+        "proposable": true
+      },
+      {
+        "concept": "repeat_marker",
+        "status": "needs_domain_review",
+        "official_path": "links[].rel",
+        "reason": "A repeat qualifier on an otherwise identical filename is the corpus saying 'this is the same measurement again', and the schema has exactly that relationship \u2014 replica_of, with basis replicate_preparation. But a link needs a TARGET RECORD, and whether the earlier acquisition is a replicate or a failed first attempt that should not be linked at all is a scientific reading. Note the contrast with a new-spot qualifier, which looks similar and is NOT a replicate: the sample is the same one.",
+        "rule": null,
+        "requires_siblings": [
+          "links[].target",
+          "links[].basis"
+        ],
+        "allowed_values": [
+          "replica_of",
+          "follows",
+          "same_sample_as"
+        ],
+        "candidate_homes": [],
+        "proposable": false
+      },
+      {
+        "concept": "quality_note",
+        "status": "needs_domain_review",
+        "official_path": "measurement.qc.notes",
+        "reason": "The beamtime notes carry the scientist's own remarks about which acquisitions were poor, which sample misbehaved, and which were repeated. The prose has a home. THE VERDICT DOES NOT FOLLOW FROM IT: qc.status is a closed set of four, and reading a human's aside as 'compromised' or 'failed' is a scientific classification this repository may not perform. A record already carries the stronger constraint that a status must have evidence behind it.",
+        "rule": null,
+        "requires_siblings": [
+          "measurement.qc.status"
+        ],
+        "allowed_values": [
+          "valid",
+          "compromised",
+          "failed",
+          "pending"
+        ],
+        "candidate_homes": [],
+        "proposable": false
+      },
+      {
+        "concept": "sample_preparation",
+        "status": "needs_domain_review",
+        "official_path": "sample.material.provenance",
+        "reason": "The notes describe ink preparation, dropcasting and electrode assembly at length. The schema has a provenance string and a notes string on the material, so there is a home \u2014 but the preparation described is beamtime-wide prose covering several samples, and deciding how much of it is provenance OF ONE SAMPLE is a scoping judgement, not an extraction.",
+        "rule": null,
+        "requires_siblings": [],
+        "allowed_values": [],
+        "candidate_homes": [
+          "sample.material.notes"
+        ],
+        "proposable": false
+      },
+      {
+        "concept": "echem_procedure",
+        "status": "needs_domain_review",
+        "official_path": "context.electrochemistry.notes",
+        "reason": "The notes tabulate the electrochemical program step by step, including an impedance-compensation step whose parameters the schema models properly in its ir_compensation object rather than as prose. So part of this concept has a STRUCTURED home and part has only a notes field, and which rows are which is a reading of the protocol.",
+        "rule": null,
+        "requires_siblings": [],
+        "allowed_values": [],
+        "candidate_homes": [
+          "context.electrochemistry.ir_compensation.method",
+          "context.electrochemistry.control_mode"
+        ],
+        "proposable": false
+      },
+      {
+        "concept": "beamtime_dates",
+        "status": "needs_domain_review",
+        "official_path": null,
+        "reason": "The notes state the beamtime window. The schema's timestamps are per record \u2014 an acquisition's own start and end \u2014 and a campaign window is neither. Writing it into a record's acquired_start_utc would claim a measurement began when the beamtime did.",
+        "rule": null,
+        "requires_siblings": [],
+        "allowed_values": [],
+        "candidate_homes": [
+          "timestamps.revision_note"
+        ],
+        "proposable": false
+      },
+      {
+        "concept": "beamtime_purpose",
+        "status": "not_expressible",
+        "official_path": null,
+        "reason": "The scientific aim of the campaign is stated in the notes' own words. There is no purpose or abstract field; tags is a free array and would reduce a paragraph to keywords, which loses the statement rather than recording it. Preserved as source evidence.",
+        "rule": null,
+        "requires_siblings": [],
+        "allowed_values": [],
+        "candidate_homes": [
+          "tags"
+        ],
+        "proposable": false
+      },
+      {
+        "concept": "motor_position",
+        "status": "not_expressible",
+        "official_path": null,
+        "reason": "An acquisition header records roughly a hundred and eighty motor positions. They are genuine instrument state and the schema has no field for any of them. The schema describes system.configuration as 'THE designated open extension namespace' for instrument- and station-specific configuration that does not generalize across facilities \u2014 naming slits, pass energies and logbook fields, which is what a filter index and a spectrometer crystal are. So a natural home exists. BUT the six system.configuration.* fields are recorded as unclassified with the domain owner's classification outstanding, and no write route in this build accepts them. Candidate home; NOT a settled mapping and not writable today.",
+        "rule": null,
+        "requires_siblings": [],
+        "allowed_values": [],
+        "candidate_homes": [
+          "system.configuration"
+        ],
+        "proposable": false
+      },
+      {
+        "concept": "sample_position",
+        "status": "not_expressible",
+        "official_path": null,
+        "reason": "Stage coordinates are how the corpus distinguishes one spot on an electrode from another, which makes them scientifically load-bearing here and still gives them no schema field. The library block holds plate coordinates for combinatorial samples, which is a different thing from a stage position and must not be reused for it. The schema describes system.configuration as 'THE designated open extension namespace' for instrument- and station-specific configuration that does not generalize across facilities \u2014 naming slits, pass energies and logbook fields, which is what a filter index and a spectrometer crystal are. So a natural home exists. BUT the six system.configuration.* fields are recorded as unclassified with the domain owner's classification outstanding, and no write route in this build accepts them. Candidate home; NOT a settled mapping and not writable today.",
+        "rule": null,
+        "requires_siblings": [],
+        "allowed_values": [],
+        "candidate_homes": [
+          "system.configuration"
+        ],
+        "proposable": false
+      },
+      {
+        "concept": "counting_time",
+        "status": "not_expressible",
+        "official_path": null,
+        "reason": "Dwell time per point is stated by the acquisition header and by the macro call. It is an acquisition parameter with no schema field; as a per-series operating condition it has a schema-legal candidate home.",
+        "rule": null,
+        "requires_siblings": [],
+        "allowed_values": [],
+        "candidate_homes": [
+          "measurement.series[].conditions"
+        ],
+        "proposable": false
+      },
+      {
+        "concept": "scan_count",
+        "status": "not_expressible",
+        "official_path": null,
+        "reason": "How many scans a macro asked for is intent; how many scan files exist is fact, and in this corpus THEY DISAGREE. Neither has a schema field, and mapping either one would quietly pick a side of a real conflict.",
+        "rule": null,
+        "requires_siblings": [],
+        "allowed_values": [],
+        "candidate_homes": [
+          "measurement.series[].conditions"
+        ],
+        "proposable": false
+      },
+      {
+        "concept": "point_count",
+        "status": "not_expressible",
+        "official_path": null,
+        "reason": "The number of points in a scan is a property OF the series values, not a separate field. If the values are ever carried, the count is implied by them; recording it alongside would create a second place for one fact to be wrong.",
+        "rule": null,
+        "requires_siblings": [],
+        "allowed_values": [],
+        "candidate_homes": [],
+        "proposable": false
+      },
+      {
+        "concept": "absorption_edge",
+        "status": "not_expressible",
+        "official_path": null,
+        "reason": "The absorbing element and its edge are implicit/sidecar-only for this technique path and must not be forced into the official record while the schema provides no valid field. That is a standing project rule, not a judgement made here. The schema describes system.configuration as 'THE designated open extension namespace' for instrument- and station-specific configuration that does not generalize across facilities \u2014 naming slits, pass energies and logbook fields, which is what a filter index and a spectrometer crystal are. So a natural home exists. BUT the six system.configuration.* fields are recorded as unclassified with the domain owner's classification outstanding, and no write route in this build accepts them. Candidate home; NOT a settled mapping and not writable today.",
+        "rule": null,
+        "requires_siblings": [],
+        "allowed_values": [],
+        "candidate_homes": [
+          "system.configuration"
+        ],
+        "proposable": false
+      },
+      {
+        "concept": "dry_state",
+        "status": "not_expressible",
+        "official_path": null,
+        "reason": "A dry or as-received measurement is a condition with no schema field. It interacts with the environment enum \u2014 an ex-situ reading is plausible for these \u2014 but the enum describes the MEASUREMENT context and this token describes the sample's state, and conflating them would assert something no source states.",
+        "rule": null,
+        "requires_siblings": [],
+        "allowed_values": [],
+        "candidate_homes": [
+          "measurement.series[].conditions"
+        ],
+        "proposable": false
+      },
+      {
+        "concept": "step_number",
+        "status": "not_expressible",
+        "official_path": null,
+        "reason": "A step index refers to a position in the electrochemical program, which the notes tabulate and the schema does not model. It is the join key between a filename and a human note row, which makes it valuable as evidence and still not a record field.",
+        "rule": null,
+        "requires_siblings": [],
+        "allowed_values": [],
+        "candidate_homes": [],
+        "proposable": false
+      },
+      {
+        "concept": "trigger",
+        "status": "not_expressible",
+        "official_path": null,
+        "reason": "A trigger command in a macro is the handshake between the acquisition and the potentiostat. It explains how the two instruments were synchronised and asserts nothing about the sample, so there is nothing for it to map to. It matters for relationship reconstruction, where it marks where one measurement ends and the next begins.",
+        "rule": null,
+        "requires_siblings": [],
+        "allowed_values": [],
+        "candidate_homes": [],
+        "proposable": false
+      },
+      {
+        "concept": "spec_user_string",
+        "status": "not_expressible",
+        "official_path": null,
+        "reason": "REFUSED ON PURPOSE, AND THIS IS THE ONE ENTRY THAT WOULD BE ACTIVELY HARMFUL TO 'FIX'. An acquisition header carries the account string the beamline software was running under. The schema does have an uploader field \u2014 and it is SERVER-STAMPED, requires a verified trust basis that no verifier in this build mints, and is therefore absent from every record this deployment produces. Copying a beamline account string into it would manufacture exactly the attribution the trust boundary exists to withhold. It stays raw source evidence, and it is never an ISAAC identity or actor.",
+        "rule": null,
+        "requires_siblings": [],
+        "allowed_values": [],
+        "candidate_homes": [],
+        "proposable": false
+      },
+      {
+        "concept": "spec_file_declaration",
+        "status": "not_expressible",
+        "official_path": null,
+        "reason": "The name an acquisition file declares for ITSELF, internally. It is not a value to map \u2014 it is the ANCHOR for conflict detection, because in this corpus an internal declaration and the external filename disagree about the experimental state of the sample. Mapping it anywhere would settle that disagreement by accident.",
+        "rule": null,
+        "requires_siblings": [],
+        "allowed_values": [],
+        "candidate_homes": [],
+        "proposable": false
+      },
+      {
+        "concept": "acquisition_target",
+        "status": "not_expressible",
+        "official_path": null,
+        "reason": "The measurement name a macro DECLARES it is about to write. It is intent, and in this corpus nine declared targets were never acquired while nine acquisitions were never declared. It is a relationship key, not a field.",
+        "rule": null,
+        "requires_siblings": [],
+        "allowed_values": [],
+        "candidate_homes": [],
+        "proposable": false
+      },
+      {
+        "concept": "note_file_number_row",
+        "status": "not_expressible",
+        "official_path": null,
+        "reason": "A row from the human file-number table is the scientist's own independent mapping from a file number to a condition. Its VALUE is as corroboration and as a cross-check against the filesystem \u2014 which is a relationship question \u2014 and the individual concepts inside such a row have their own entries in this registry.",
+        "rule": null,
+        "requires_siblings": [],
+        "allowed_values": [],
+        "candidate_homes": [],
+        "proposable": false
+      }
+    ],
+    "temperature_absent_reason": "context.temperature_K is required by the official schema whenever a context block is present, and this corpus states no temperature anywhere \u2014 not in the beamtime README, not in the notes, not in any acquisition header. A candidate assembled from these sources is therefore incomplete by the schema's own rule. That is the correct outcome: room temperature is the obvious guess, and 298 must not be defaulted into context.temperature_K, because a plausible number in a required field is a fabricated measurement that nothing downstream can tell from a measured one.",
+    "assets_blocked_reason": "The official schema requires assets[].sha256, and this build computes no digest for any historical source \u2014 not even for a file it reads. So a historical file cannot become an official asset entry without fabricating a required field. The asset content_role vocabulary otherwise fits this corpus exactly (raw_data_pointer, reduction_product, calibration_reference), which is why this is named as a boundary rather than left to surface as a failing export.",
+    "cycling_state_no_field_reason": "The official schema has no field for electrochemical cycling history (beforeCycling / after1500Cycling / after1stCycling). It is the single most important experimental variable in this corpus, which makes it the strongest schema-request case the corpus produced \u2014 and a schema request is upstream's decision, not this repository's. measurement.series[].conditions is a schema-legal candidate home for it as a per-series condition; nothing here places it there."
+  }
+}

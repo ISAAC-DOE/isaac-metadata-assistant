@@ -9,6 +9,8 @@
 // Defined next to the pure triage consumer that owns its contract; re-exported
 // here so it reads alongside the other Api* shapes.
 export type { RuntimeRecord } from './crossRecordTriage';
+export type { Bl15CorpusReview } from './bl15Review';
+import type { Bl15CorpusReview } from './bl15Review';
 
 // --- primitives -------------------------------------------------------
 
@@ -4023,6 +4025,20 @@ export interface ApiImportSession {
   /** The server's own sentence about what a session is and is not. */
   durability: string;
   sources: ApiImportSource[];
+  /**
+   * The BL15-2 large-corpus review, when this session was opened over an archive.
+   *
+   * OPTIONAL BECAUSE NO ROUTE EMITS IT YET — the archive source kind is a separate
+   * slice's step 1, and `historical_import.SOURCE_KINDS` holds only `reference`
+   * and `synthetic_fixture` today. `HistoricalImport` renders the review only when
+   * this member is present, so a session without an archive shows nothing rather
+   * than an empty frame.
+   *
+   * Every MEMBER of `Bl15CorpusReview` mirrors a committed `to_state()` verbatim
+   * (`bl15/inventory.py`, `relate.py`, `evidence.py`, `mapping.py`). The CONTAINER
+   * grouping them is the one shape not yet committed — see `lib/bl15Review.ts`.
+   */
+  corpus_review?: Bl15CorpusReview;
   unreadable_source_count: number;
   source_counts: {
     total: number;
