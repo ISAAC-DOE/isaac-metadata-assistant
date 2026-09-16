@@ -1,0 +1,15 @@
+# SYNTHETIC. Reproduces the real corpus's duplicate legacy number: TWO DISTINCT
+# measurements carrying the same leading number (real: 32, on two files whose
+# cycling states differ). Neither may be dropped, neither may overwrite the
+# other, and a legacy number is therefore NOT a key.
+#
+# the two that collide — same legacy 32, different cycling state
+32_03_ZZ2_base_after1400Cycling_filter20_1500mV
+32_03_ZZ2_base_after1500Cycling_filter20_1500mV
+# their unremarkable neighbours, so a test can show only one number collides
+31_03_ZZ2_base_after1500Cycling_filter20_1200mV
+33_03_ZZ2_base_after1400cycling_filter20_1600mV
+# a processed product naming TWO legacy numbers in one name. The third bare
+# integer gets NO role: which of 43/44 is "the" legacy number is a question
+# about a merged artifact that only a scientist can answer.
+43_44_04_ZZ2_base_after1500CV_f20_f35_1200mV

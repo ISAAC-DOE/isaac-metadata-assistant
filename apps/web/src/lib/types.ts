@@ -9,6 +9,8 @@
 // Defined next to the pure triage consumer that owns its contract; re-exported
 // here so it reads alongside the other Api* shapes.
 export type { RuntimeRecord } from './crossRecordTriage';
+export type { Bl15CorpusReview } from './bl15Review';
+import type { Bl15CorpusReview } from './bl15Review';
 
 // --- primitives -------------------------------------------------------
 
@@ -4023,6 +4025,26 @@ export interface ApiImportSession {
   /** The server's own sentence about what a session is and is not. */
   durability: string;
   sources: ApiImportSource[];
+  /**
+   * The BL15-2 large-corpus review, when this session was opened over an archive.
+   *
+   * OPTIONAL BECAUSE A SESSION NEED NOT HOLD AN ARCHIVE — and only for that reason
+   * now. ~~no route emits it yet; the archive source kind is a separate slice's step 1,
+   * and `historical_import.SOURCE_KINDS` holds only `reference` and
+   * `synthetic_fixture`~~ — **both false, and both closed 2026-09-16**: the kind shipped
+   * in `6cdb2279` and `historical_import._corpus_review` now serves this member at the
+   * session level whenever an archive reading exists. It returns a mapping to be spread,
+   * so a session without one carries NO key rather than a `null` a client would have to
+   * tell apart from an empty review.
+   * `HistoricalImport` renders the review only when
+   * this member is present, so a session without an archive shows nothing rather
+   * than an empty frame.
+   *
+   * Every MEMBER of `Bl15CorpusReview` mirrors a committed `to_state()` verbatim
+   * (`bl15/inventory.py`, `relate.py`, `evidence.py`, `mapping.py`). The CONTAINER
+   * grouping them is the one shape not yet committed — see `lib/bl15Review.ts`.
+   */
+  corpus_review?: Bl15CorpusReview;
   unreadable_source_count: number;
   source_counts: {
     total: number;
@@ -4046,6 +4068,8 @@ export interface ApiImportSession {
     conventions_encoded: number;
   };
   available_fixtures: string[];
+  /** Archive names the server will walk, from its own allowlist. */
+  available_archives: string[];
 }
 
 /** A session IN A LIST: counts, never the bundle. */
@@ -4067,6 +4091,8 @@ export interface ApiImportListResponse {
   workflow: ApiImportWorkflowStep[];
   durability: string;
   available_fixtures: string[];
+  /** Archive names the server will walk, from its own allowlist. */
+  available_archives: string[];
 }
 
 export interface ApiImportSessionResponse {

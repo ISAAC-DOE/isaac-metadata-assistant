@@ -2111,6 +2111,7 @@ def _authoritative_signature(exp: "Experiment") -> str:
 #   [caller] routes.py::get_evidence
 #   [caller] routes.py::post_audit
 #   [caller] routes.py::post_export
+#   [caller] routes.py::post_import_add_to_experiment
 #   [caller] routes.py::post_run
 #   [caller] routes.py::post_validate
 #   [caller] runtime_records.py::_project_one
@@ -2207,6 +2208,16 @@ def _authoritative_signature(exp: "Experiment") -> str:
 #     official record with the same science, a different id, and no relation between
 #     them. It reads the singular state precisely because the singular state is the
 #     thing it is asking about, and it names it in the refusal body.
+#   * ``routes.post_import_add_to_experiment`` reads ``exported()`` for EXACTLY the
+#     reason above, and reuses ``post_run``'s refusal rather than arguing it again.
+#     Added 2026-09-16 with the archive source kind: that operation can create one
+#     ordinary run per measurement a historical import found, so a batch against an
+#     already-exported zero-run record would publish the same second official record
+#     ``post_run`` exists to prevent — once per measurement rather than once. It is
+#     checked BEFORE any run is added, inside the same ``record_lock``, so the batch
+#     writes nothing when it refuses. It reads the singular state only on the
+#     ``create_runs`` path; without that flag the operation writes no run and asks no
+#     fan-out question.
 #   * ``routes.post_export`` itself: the 409 named one arbitrary run's record as
 #     though it were THE record (FIXED, C10), the prune could delete a record a
 #     surviving run or a surviving link still named (FIXED, C3/C4/C7), and it could

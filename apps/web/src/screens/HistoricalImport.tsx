@@ -8,6 +8,7 @@ import { LeftNav } from '../components/LeftNav';
 import { BackendDown, LoadingPanel } from '../components/FetchStates';
 import { CircleAlert, Inbox, Plus, TriangleAlert } from '../components/icons';
 import { ImportFileStaging } from '../components/ImportFileStaging';
+import { ImportCorpusReview } from '../components/ImportCorpusReview';
 import { LABELS } from '../lib/labels';
 import { stripLifecycleSuffix } from '../lib/adapt';
 import { ROUTES } from '../lib/routes';
@@ -584,6 +585,33 @@ function ImportSessionView({
         {error !== null && <Refusal error={error} />}
       </div>
 
+      {/*
+        THE LARGE-CORPUS REVIEW — `BL15R-012`.
+
+        RENDERED ONLY WHEN THE SERVER SENDS ONE, and absent — not empty, not
+        disabled, not a placeholder — otherwise. No route emits `corpus_review`
+        when this session holds an archive. ~~No route emits `corpus_review`: the
+        archive source kind is a separate slice's step 1, and
+        `historical_import.SOURCE_KINDS` holds only `reference` and
+        `synthetic_fixture`.~~ — BOTH HALVES OF THAT WERE FALSE AND BOTH ARE NOW
+        CLOSED. The kind shipped in `6cdb2279` on this branch, and the route emits
+        `corpus_review` since the two halves were joined — they had been built
+        against different shapes and simply never met, which independent review
+        found. `ai-integration-decision-packet.md` §9's rule is
+        "build nothing that implies any of it exists", so a session without an
+        archive shows nothing here at all.
+
+        It sits ABOVE `SourcesSection` because it is the digest: `HIST-004` bans
+        `Upload -> Spinner -> Mysterious JSON`, and for a 1,192-file archive the
+        per-source list is the "mysterious" part. The scientist reads what the
+        archive contains, then drills in.
+      */}
+      {data.corpus_review && (
+        <div className="hi-section">
+          <ImportCorpusReview review={data.corpus_review} />
+        </div>
+      )}
+
       <SourcesSection
         data={data}
         busy={busy}
@@ -656,6 +684,7 @@ function SourcesSection({
   const [reference, setReference] = useState('');
   const [sha256, setSha256] = useState('');
   const [fixture, setFixture] = useState(data.available_fixtures[0] ?? '');
+  const [archive, setArchive] = useState(data.available_archives[0] ?? '');
 
   return (
     <div className="hi-section">
@@ -922,6 +951,56 @@ function SourcesSection({
           instead" would hide the only entry that can produce a candidate. */}
       <div className="hi-forms">
 
+        {/* THE ARCHIVE, AND IT IS THE ONLY CONTROL THAT REACHES THE CORPUS REVIEW.
+            Added 2026-09-16, and it is the last link of the chain: the server has
+            served `available_archives` and emitted `corpus_review` for a session
+            holding an archive — but NO CONTROL CREATED ONE, so a scientist could not
+            reach the review however complete the rest was. The payload and the
+            surface met; the user could not get to either.
+
+            Out in the open beside the example source rather than behind the
+            external-reference disclosure, for the same reason that one is: these are
+            the two kinds this build actually READS, and burying the one that walks a
+            whole corpus would hide the entry the feature exists for. */}
+        {data.available_archives.length > 0 && (
+          <form
+            className="hi-form"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void onAct('add-archive', () =>
+                api.addImportSource(importId, {
+                  kind: 'archive',
+                  archiveName: archive,
+                }),
+              );
+            }}
+          >
+            <h4 className="hi-group-title">{IMPORT_COPY.actionAddArchive}</h4>
+            <label className="hi-field">
+              <span className="hi-field-label">Which archive</span>
+              <select
+                className="hi-input"
+                value={archive}
+                onChange={(event) => setArchive(event.target.value)}
+              >
+                {data.available_archives.map((name) => (
+                  <option key={name} value={name}>
+                    {name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <p className="hi-note">{IMPORT_COPY.addArchiveNote}</p>
+            <button
+              type="submit"
+              className="btn btn-secondary"
+              disabled={busy !== null || !archive}
+            >
+              {IMPORT_COPY.actionAddArchive}
+            </button>
+          </form>
+        )}
+
         {data.available_fixtures.length > 0 && (
           <form
             className="hi-form"
@@ -1141,7 +1220,15 @@ function CandidatesSection({
       <button
         type="button"
         className="btn btn-primary"
-        disabled={busy !== null || data.parsed.length === 0}
+        /* AN ARCHIVE HAS SOMETHING TO RECONSTRUCT FROM even though `parsed` is
+           empty: `read_archive` runs the whole chain at the READ, so the candidates
+           already exist and this gate was dead-ending the only path to them. The
+           control is kept rather than hidden, because a bundle may hold an archive
+           AND example sources, and the provider's reconstruction over the latter is
+           real work this button is the only way to do. */
+        disabled={
+          busy !== null || (data.parsed.length === 0 && !data.corpus_review)
+        }
         onClick={() => onAct('reconstruct', () => api.reconstructImport(importId))}
       >
         {busy === 'reconstruct' ? 'Reconstructing…' : IMPORT_COPY.actionReconstruct}

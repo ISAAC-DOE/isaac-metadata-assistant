@@ -1,0 +1,5 @@
+# SYNTHETIC FIXTURE -- read as TEXT, never executed.
+SYN_MAIN_GRID = "1000 1050 5 1100 1"
+def Syn_xas 'cntSec nbrScan emission nbrFilter' '{
+  # declares no newfile: this is the acquisition METHOD, not a measurement
+}'

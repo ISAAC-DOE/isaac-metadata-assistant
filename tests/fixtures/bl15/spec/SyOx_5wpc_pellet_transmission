@@ -1,0 +1,14 @@
+#F SyOx_5wpc_pellet_transmission
+#E 1000300000
+#D Thu Sep 12 13:06:40 2001
+#C spec  User = synthetic
+#O0   dummy0    energy     emiss    filter        Sx        Sy        Sz        Sr
+
+#S 1  gscan energy 1000 1020 5 1100 2 0.500000
+#D Thu Sep 12 13:06:48 2001
+#T 1  (sec)
+#P0 4 1000.5 1050 35 -9 9 -9 -45
+#N 4
+#L energy  sec  I1  I2
+1000.5 1 500 400
+1005 1 501 401

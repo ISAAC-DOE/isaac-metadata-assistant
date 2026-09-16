@@ -1,0 +1,6 @@
+# SYNTHETIC FIXTURE -- read as TEXT, never executed.
+qdo Synth_XAS.mac
+newfile 01_01_SYN1_acid_beforeCycling_filter10_060mV
+Syn_xas 0.5 2 900.0 10
+newfile 99_NEVER_ACQUIRED_SYN
+Syn_xas 0.5 2 900.0 10

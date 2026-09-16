@@ -1,0 +1,18 @@
+# SYNTHETIC. The NEGATIVE CONTROL of the whole filename reader: every stem here
+# carries at least one token the profile does not know, and every stem must still
+# yield a named statement for every token it DOES know, plus an `unknown_token`
+# statement for the rest. One unknown token never discards a filename.
+#
+# an English word in the middle of an otherwise readable stem (real: the `for`
+# in a MERGE product's name)
+SyOx_5wpc_pellet_HERFD_for_TRANSMISSION
+# a stem that is one unknown word and nothing else (real: `alignment`)
+alignment
+# an invented word no profile will ever know, between two it does
+07_01_ZZ1_acid_zzzUnknownToken_filter10_100mV
+# two unknowns in one stem, and the recognised tokens on both sides of them
+55_05_ZZ3_base_widgetMode_after1500Cycling_flubber_filter20_400mV
+# a doubled separator, which changes the token indices a scientist counts by eye
+08_01_ZZ1__acid_beforeCycling_filter10_100mV
+# a stem with NO recognisable token at all
+totally_opaque_thing

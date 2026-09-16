@@ -1491,24 +1491,220 @@ work, and nothing about it has been decided. `MCP-020`/`MCP-021`/`SEC-001` stay 
 > RESOLVED by the 2026-09-12 revision** — a self-contradiction across one document, and the kind
 > a reader resolves by believing whichever half they happen to read first.
 >
-> **The real gate was always `EXT-10`: there is no representative BL15-2 corpus.** That is an
+> ~~**The real gate was always `EXT-10`: there is no representative BL15-2 corpus.** That is an
 > external blocker nothing in this repository can clear, and it is sufficient on its own — §5
 > forbids designing a parser against assumptions. Naming the resolved decision instead made the
 > phase look blocked on a pending human answer when it is blocked on absent evidence, which are
 > different things with different next actions: one is a question to ask, the other is material
-> to request (`HIST-000`, prepared and unsent).
+> to request (`HIST-000`, prepared and unsent).~~
+>
+> ***`EXT-10` IS MATERIALLY RESOLVED AS OF 2026-09-16, AND THE PARAGRAPH ABOVE IS KEPT STRUCK
+> RATHER THAN DELETED BECAUSE "no representative corpus exists" IS EXACTLY THE KIND OF CLAIM A
+> FUTURE SESSION ACTS ON — by declining to build a parser that is now buildable.*** The project
+> owner supplied a real SSRL BL15-2 beamtime archive directly (April 2025, Sokaras/IrOx, 1,192
+> files, 88 MB) together with the beamtime notes in three representations. **The paragraph was
+> RIGHT in every particular while it stood**, including its distinction between a question to ask
+> and material to request — the material arrived, which is the one thing that could retire it.
+>
+> **Read the resolution precisely, because it is narrower than "EXT-10 is closed".** What is
+> resolved is the *evidence* blocker, **for the formats this one archive contains**: extensionless
+> SPEC acquisitions, `.dat` scan exports, `.mac` macros, Angel-style filenames, a root
+> `readme.txt`, and DOCX/PDF/TXT beamtime notes. Measured inventory and every derived count:
+> [`docs/evidence/bl15-2-corpus-characterization-2026-09-16.md`](../../evidence/bl15-2-corpus-characterization-2026-09-16.md),
+> re-derivable by `scripts/bl15_corpus_report.py <folder>`. What is **NOT** resolved, and must not
+> be read as resolved: spreadsheet/XLSX conventions (**no spreadsheet is in this archive** — so §5
+> still forbids designing that parser), the scientific *mapping* questions (Angel's, itemised in
+> `docs/bl15-2-domain-questions-2026-09-16.md`), and `HIST-003b`'s provider approval (**DEC-22**,
+> untouched). **One beamtime, one scientist, one element** — the profile built from it is
+> `SSRL BL15-2 — Angel-style historical naming profile v1`, the FIRST profile and not a beamline
+> standard.
+>
+> **THE CORPUS IS NOT AND MUST NEVER BE COMMITTED** (`CLAUDE.md` §6: real experimental artifacts
+> and real human notes). CI runs against sanitized fixtures under `tests/fixtures/bl15/`. No part
+> of it has been or may be sent to any external provider.
 
 | ID | Objective | Status | Depends |
 |---|---|---|---|
-| **HIST-000** | **Issue the BL15-2 data request.** This is the phase's first deliverable and its gate. | **PLANNED — do this immediately on approval; it costs nothing and unblocks everything else** | — |
+| **HIST-000** | **Issue the BL15-2 data request.** This is the phase's first deliverable and its gate. | **OVERTAKEN 2026-09-16, not completed — and the distinction is the useful part.** The request at `docs/bl15-2-data-request-2026-09-12.md` was still prepared and unsent when the project owner **supplied the corpus directly**. So the gate is open without the deliverable having been issued, and this repository cannot witness whether the document was ever sent — only Krish can say. It is kept, not withdrawn: it is the artifact for the NEXT scientist's corpus, and its question list is what made this archive legible on arrival | — |
 | HIST-001 | Import Session + Source Bundle + manifest, reusing `assets[]` pointer-only (`"NO BYTES, EVER"`) | **DONE 2026-09-13** — `apps/api/isaac_api/historical_import.py` + nine HTTP operations (78 → 87). Two source kinds: a POINTER this build records and does not open, and the committed example sources it reads because they ship inside the application. **No digest is ever computed**, not even for a file it does read. NO migration, NO new table, `db_write.OWNED_TABLES` unchanged — a session is one atomically-written JSON file under `_imports/`, which `workspace._experiment_dirs` skips unconditionally, so no experiment read can reach it. **It is therefore NOT durable, and the server says so on ~~every~~ EIGHT OF NINE responses** (`durability`) — corrected 2026-09-13 (M-10), measured over all nine operations: `DELETE /api/imports/{id}` carries no `durability`, which is defensible (no session is left to describe) but is not "every"; DEC-24's write-`0006` route was deliberately NOT taken, because a working area that says it is a working area does not need one | CAP-003 |
-| HIST-002 | First-wave deterministic parsers (filenames, directories, spreadsheet cells — ~~needs `openpyxl`, not currently a dependency~~ **`openpyxl>=3.1` IS a declared dependency since `dea4a7ae`; corrected 2026-09-13. The blocker is the absent corpus alone** — CSV, explicit key/value) | **BLOCKED on EXT-10** (~~DEC-13~~, resolved) | HIST-000 |
-| BL15-001 | `.mac` parser | **BLOCKED — no representative file exists anywhere in reach.** §5 forbids designing against assumptions | HIST-000 |
-| HIST-003 | Semantic reconstruction into the **shared** Phase-D pipeline | BLOCKED on EXT-10 (~~DEC-13~~, resolved) | HIST-002 |
+| HIST-002 | First-wave deterministic parsers (filenames, directories, spreadsheet cells — ~~needs `openpyxl`, not currently a dependency~~ **`openpyxl>=3.1` IS a declared dependency since `dea4a7ae`; corrected 2026-09-13. The blocker is the absent corpus alone** — CSV, explicit key/value) | ~~**BLOCKED on EXT-10**~~ **UNBLOCKED 2026-09-16 for the formats the corpus contains — see the `BL15R` workstream below, which supersedes this row. The SPREADSHEET half stays blocked and is not superseded: no spreadsheet exists in this archive, so §5 still forbids designing that parser** (~~DEC-13~~, resolved) | HIST-000 |
+| BL15-001 | `.mac` parser | ~~**BLOCKED — no representative file exists anywhere in reach.** §5 forbids designing against assumptions~~ **UNBLOCKED 2026-09-16: 59 `.mac` files plus one extensionless macro (`run29`) are in reach and measured. Superseded by `BL15R-006`.** The row's reasoning was correct and is what kept a guessed parser out of the build for four months | HIST-000 |
+| HIST-003 | Semantic reconstruction into the **shared** Phase-D pipeline | ~~BLOCKED on EXT-10~~ **UNBLOCKED 2026-09-16; superseded by `BL15R-011`** (~~DEC-13~~, resolved) | HIST-002 |
 | HIST-004 | Import review surface. **Banned pattern: Upload → Spinner → Mysterious JSON** | **DONE 2026-09-13 (shell)** — `apps/web/src/screens/HistoricalImport.tsx` at `/imports`, the SECOND primary destination. All three halves of the banned pattern refused and asserted: no file input (proven over the DOM, over the source with comments stripped, and over every request made — plus a control proving that predicate fires), no control for the one unbuilt step (not even a disabled one), and all NINE things the plan requires a scientist to see, each with its own test. ~~37~~ **38** frontend tests (corrected 2026-09-13, M-7: `npx vitest run src/__tests__/historical-import.test.tsx` -> `38 passed`), six mutation-verified. **Zero a11y baseline cells added** — `imports` passes `a11y-axe` and `structure` at all five viewports on darwin. **SCOPED 2026-09-13 (M-11): that is the EMPTY-LIST state only.** `SURFACES` reaches `/imports` at its index, so the scan never sees a loaded import session — roughly a thousand lines of state (source rows, parse verdicts, candidates, the review step) are unmeasured by axe at any viewport. The entry's own comment says so; this row did not, and "zero cells added" reads as coverage rather than as a measurement of one state. **The 38 frontend tests DO exercise the loaded states** — they are jsdom, not axe, which is a different question. Reaching the loaded state from the sweep needs a seeded session, which is why it was not done rather than overlooked | HIST-001 |
 | HIST-005 | Merge into the ordinary Library | **DONE 2026-09-15 — `POST /api/imports/{import_id}/add-to-experiment`, the workflow's sixth step, built as ONE operation.** Sends every proposable candidate to review on one record inside ONE `record_lock` and ONE `_save_versioned` — the record holds the whole batch or none of it, at one new revision (asserted: `rev` moves by exactly +1 for N candidates, which is the test that fails if this is ever reimplemented as a client loop). It WRITES NO VALUE: measured, both target paths absent from the record draft and the run draft afterwards, with 2 open proposals and 2 notes present. `run_id` is applied to the candidates a run owns and IGNORED for the ones the record owns — deliberately unlike the single-candidate route, which refuses it; omitting it when a run-scoped candidate is sendable refuses the WHOLE batch (`422 target_requires_a_run`) rather than quietly leaving the run's values behind. Exactly-once per candidate and exactly-once ACROSS the two operations (shared `client_request_key`), so a candidate sent by hand and then included in a batch mints one proposal. Intrinsically unproposable candidates are reported with the server's own reason, never dropped. **The per-candidate mint is now ONE helper** (`routes._mint_import_candidate`) both operations call, so the five bounds it enforces — and the ORDER they are enforced in — have one expression. `UNBUILT_STEP` is now `None` and the mechanism is kept, not deleted; `furthest_step` can reach `add_to_experiments`, on the strict criterion that EVERY proposable candidate has been sent, and drops back to `review` when a re-reconstruction mints new ones. 17 backend tests + 11 frontend tests; verified end-to-end in a real browser. Previous state, kept because it is what the surface promised: ~~**PLANNED — and it is now the workflow's ONE unbuilt step, named on the surface rather than implied.** `historical_import.UNBUILT_STEP` is `add_to_experiments`; the review screen renders the server's own `UNBUILT_STEP_DISCLOSURE` beside it and **no control at all** — not a disabled one, which would say the act exists and is temporarily unavailable (`test_...offers_NO_control` is mutation-verified against exactly that). What a scientist can do instead is send each field candidate to review on an experiment they create themselves, which is `HIST-001`'s ninth operation. **Two structural candidates are therefore refused by name** with `candidate_not_proposable`: a proposal is about one value at one official field path, so "an experiment exists here" has no proposal shape~~ | HIST-004, LIB-003 |
-| HIST-006 | Gold-standard evaluation; the headline metric is **fabricated-value rate**, not fields-filled. Every metric must name the artifact required to compute it | BLOCKED on EXT-10 (~~DEC-13~~, resolved) | HIST-005 |
+| HIST-006 | Gold-standard evaluation; the headline metric is **fabricated-value rate**, not fields-filled. Every metric must name the artifact required to compute it | ~~BLOCKED on EXT-10~~ **UNBLOCKED 2026-09-16; superseded by `BL15R-014`.** One constraint the row already implied and that the corpus makes sharp: the harness may carry a gold standard for the **sanitized fixtures** only. The real corpus's scientific ground truth is Angel's and **may not be generated from parser output** — a parser scoring itself measures nothing | HIST-005 |
 | SRC-001 | **Already satisfied — do not rebuild.** Multi-source disagreement for a value in the draft is representable **today**: `evidence_classify.asserted_values` → `conflicting_evidence` at ≥2 values; `conflict_resolution` stores `competing_values` + set-digest with `deferred` first-class; `build_sidecar` copies the **whole** evidence list, so the record carries one value and the sidecar preserves the disagreement | CONFIRMED CURRENT | — |
+
+### `BL15R` — the real BL15-2 corpus workstream (opened 2026-09-16)
+
+**Why a new workstream rather than more `HIST` rows.** The `HIST` rows describe the import
+*session, surface and merge* — all built. What the corpus unblocked is a different thing: reading
+one scientist's real files. Those rows supersede `HIST-002`, `BL15-001`, `HIST-003` and `HIST-006`
+and are listed separately so a reader can see which work is corpus-derived and therefore which
+work a *second* scientist's corpus would extend rather than repeat.
+
+**The architectural requirement, stated once so every row inherits it:** adding the next
+scientist must mean **adding a profile, aliases, observed structural rules and fixtures** — not
+rewriting Historical Import. The layering that enforces it is in
+`apps/api/isaac_api/bl15/__init__.py`.
+
+**Three findings from the corpus that are mandatory constraints, not preferences.** Each is
+measured, each is the kind of shortcut a convenient implementation reaches for, and each would
+have invented measurements nobody performed:
+
+1. **The extension does not classify the file.** `run29` is extensionless and is a macro;
+   `alignment` is extensionless and is a SPEC acquisition. Classification is content-led.
+2. **One `.mac` is NOT one Run.** 156 `newfile` declarations over 60 macro files; 29 declare more
+   than one, the maximum is 8, and **4 declare none at all**. One-macro-one-Run would have made
+   60 Runs for 95 declared measurements and turned four non-measurements into measurements.
+3. **One `.dat` is NOT one Run.** 908 scan exports over 94 directories, **0 to 233 each**, and
+   **two directories are empty** — so "has scans" cannot gate a candidate, and one-file-one-Run
+   would have invented 816 measurements.
+
+| ID | Objective | Status | Depends |
+|---|---|---|---|
+| `BL15R-001` | Corpus characterization + the shared evidence/inventory contract | **DONE 2026-09-16** — `d315fca0`. `bl15/evidence.py` (45 concepts, 12 source types, 4 scopes) and `bl15/inventory.py` (`SourceRecord`, `ArchiveLimits`, 11 refusal reasons). `SourceEvidence` **refuses at construction** to hold a normalised value with no named rule behind it, so an unexplained normalisation cannot exist. Characterization doc + `scripts/bl15_corpus_report.py`, which re-derives every count and prints no scientific value or note text | — |
+| `BL15R-002` | Content-led source classifier | **DONE 2026-09-16.** `bl15/classify.py`, `overridable=True` always and a `confidence` of `content`/`path`/`unknown`. **`.mca` is tested BEFORE the `#F` branch and the order is the point** — both `.mca` files begin with `#F`, so a content-first test calls detector products acquisitions; the code says why the obvious ordering is wrong for that one case and why it does not weaken content-led classification (`run29` and `alignment` need content because their names carry nothing; for `.mca` the extension is the MORE SPECIFIC fact) | `BL15R-001` |
+| `BL15R-003` | `SSRL BL15-2 — Angel-style historical naming profile v1` + token reader | **DONE 2026-09-16.** `bl15/profiles.py` + `filenames.py`. A REGISTRY: the profile records the owner's convention verbatim and then shows with five measured counterexamples that it is a VOCABULARY, not a grammar — tokens are recognised by shape and alias, never by position. **44 normalisation rules, each warranted by something the corpus states**, and case-folding cites a DIFFERENT rule from an exact match so a reviewer can tell them apart; nine are declared UNEXERCISED (no filename carries a pH or a flow rate) and asserted as such. A test rejects any rule string not in the declared set, so a rule cannot be invented at a call site. **The architecture requirement is made checkable**: a test builds a second profile with different aliases and reads a stem through it without touching any reader. Measured over the corpus: only **4** `unknown_token` items over **3** distinct literals | `BL15R-001` |
+| `BL15R-004` | SPEC acquisition reader | **DONE 2026-09-16, and the pairing is PROVEN BY AN INDEPENDENT ORACLE rather than by inspection.** The root acquisition keeps motor NAMES in one block and positions in another; the `.dat` export writes the same state as `name=value`. The two readers share no pairing code, and on one scan they agree on **172 of 172 motors, 0 mismatches**. A `#P` line whose field count does not match its `#O` line is REFUSED with both counts, because a mispaired mapping is worse than none. `#E` and `#D` are **not reconciled** — two statements, and a disagreement belongs to a scientist. `#C` is raw evidence and never an identity | `BL15R-001` |
+| `BL15R-005` | `.dat` scan reader | **DONE 2026-09-16** — 908/908 parsed, 0 refused. Deliberately does **not** share the `#O` pairing code: a mispairing is impossible in this format, so carrying its refusal path would invite a future change to make one format's assumption true of the other | `BL15R-001` |
+| `BL15R-006` | `.mac` reader | **DONE 2026-09-16** — 60/60 parsed, **156** `newfile` declarations over **95** distinct targets. Nothing is evaluated, and that is asserted by walking the module's **AST** for forbidden imports and call targets, with a negative control proving the walk fires. The acquisition method's four-argument signature is read from the archive's OWN printed help text, and a wrong argument count yields **nothing** rather than a guessed mapping | `BL15R-001` |
+| `BL15R-007` | Safe folder/ZIP inventory | **DONE + VERIFIED AGAINST THE REAL ARCHIVE AND ITS REAL ZIP 2026-09-16.** `bl15/archive.py`. Every guard has its own test, with negative controls where one could pass vacuously (`..hidden` is legal; legitimately compressible text is accepted). **The load-bearing one: a member LYING about its size** — its test first asserts the declared-ratio pre-check *cannot* catch it (declared ratio under 1), then that the READ stops at the cap, because trusting the central directory is the whole vulnerability. Nothing is executed, asserted by an **AST sweep** rather than a comment. **Three-way agreement**: folder walk, ZIP walk and `scripts/bl15_corpus_report.py` all read 1,192 entries / 89,163,651 B / 96 duplicate groups over 193 files / 0 refusals, with 14 checks including byte-identical `to_state()` and digests matching an independent `os.walk`+`hashlib` pass. **Two traps recorded in the code:** the ZIP wraps everything in one directory (unstripped, the same corpus read two ways gives a different path for every file), and `zipfile.writestr` stores permission bits with NO file-type bits, so an `S_ISREG` check refuses every ordinary member of every `zipfile`-written archive — 18 tests failed on it and the real corpus HID it (`external_attr` is 0 for all 1,194 members) | `BL15R-001` |
+| `BL15R-008` | `readme.txt` shared beamtime context | **DONE 2026-09-16.** Read at beamtime scope and INHERITED — `reconstruct` selects shared candidates by the reading's own `scope`, never by which file it came from, so a sample-specific remark inside a beamtime document cannot be attached to all 94 measurements. **A real defect the corpus found:** the beamsize section was SILENTLY SKIPPED because the label pattern allowed only letters and spaces and never matched a label containing `@` | `BL15R-003` |
+| `BL15R-009` | Beamtime-note integration | **DONE 2026-09-16 for the `.txt`; DOCX and PDF extraction deliberately not built** and the module says the trio is one witness. **A FABRICATION DEFECT THE CORPUS FOUND, and the most important one in the programme:** the reader was INVENTING file numbers — pairing *any two* bare integers read one sample's STEP numbers as FILE numbers, producing `2, 4, 6, 8, 10` for a sample that has none, because an empty DOCX cell flattens to a lone tab that a blank-line skip swallowed. Fixed by requiring ADJACENCY, with an empty cell DISCLOSED rather than filled; measured after, file numbers read are exactly 11-51, 41 rows, contiguous. The broad *"In ALL experiments…"* claim is read at beamtime scope and **applied to nothing** | `BL15R-003` |
+| `BL15R-010` | Source→ISAAC v1.05 mapping registry | **DONE 2026-09-16.** `bl15/mapping.py`, all **45** concepts examined: **2 deterministic, 4 normalized, 14 needs-domain-review, 24 not-expressible, 1 blocked-by-build.** **ONLY 6 OF 45 CAN REACH AN OFFICIAL FIELD TODAY**, pinned as a test so a future slice that raises it must come and say why — raising it by reasoning about the schema is legitimate, by pointing a refusal at a nearby field is not. `official_paths()` WALKS the schema at runtime (nothing transcribes a path list) and `registry_paths_exist()` checks primary paths AND required siblings AND candidate homes against all 290 declared paths, so a schema refresh breaks it loudly. `blocked_by_build` is kept apart from `not_expressible` because the remedies differ — an application change versus an upstream schema request — so nobody is sent to ask for a field that already exists. `mapping_for` returning `None` is deliberately NOT the same as `not_expressible`: `None` means nobody looked, and `unmapped_concepts()` keeps that visible | `BL15R-004`, `BL15R-005` |
+| `BL15R-011` | Relationship reconstruction + candidate assembly | **DONE 2026-09-16 for both halves; the ROUTE wiring is the remaining slice.** `bl15/relate.py` (24 tests) + `bl15/reconstruct.py` (17 tests). Driven over the real corpus, every conflict count equals an independent measurement: **4** declaration-vs-filename, **1** duplicate legacy number, **9** declared-never-acquired, **908 of 908** scans attached, max 233, 10 groups at 8/12/13/13/12/11/12/5/4. **THREE FALSE POSITIVES REMOVED, each found by running it** — see the four-conflict list below and the PR. `reconstruct` is the ONLY module in the package that interprets, and a test greps its own source to fail if a schema path literal appears in it. Agreement is compared on the NORMALISED reading, so `1200mV` and `1p2V` are one value with two witnesses rather than a manufactured conflict, and both literals stay attached | `BL15R-004`…`BL15R-009` |
+| `BL15R-012` | Large-corpus review UI | **DONE 2026-09-16.** `apps/web/src/components/ImportCorpusReview.tsx` + `lib/bl15Review.ts`. Digest-first with **15 derived counts, each carrying the payload expression it came from** (`derivedFrom`) — because §11 records four surfaces that shipped a number they had not derived from what they claimed to describe. No 1,192-row table. Renders `source_count` (which excludes byte-identical duplicates) and not `scans + 1`. Conflicts render **all three readings** with the server's `explanation` verbatim and no winner. **NO progress bar and no "Ready" state, asserted absent** — a candidate Run from this corpus cannot be export-ready, so a bar that can never fill would be a lie. Measured in real Chromium: 3,316px at 1280x900, **zero paragraphs over 400 chars**, 30 disclosures all closed, no horizontal overflow at 375px. **Extrapolated** to 94 units and 21 conflicts that is ~11,400px, of which conflicts are ~3,700 — labelled an extrapolation and named as where the design will strain. **Four repository guards caught defects in the slice's own work**, one serious: its radio controls would have painted CRIMSON, the reserved verdict colour, on a surface whose whole argument is that nothing in it is a pass or a failure. Four contract gaps named rather than invented around (G-1: `ArchiveInventory.to_state()` omits `entries`, so no per-file manifest is on the wire and the surface STATES the absence; G-2: `SourceRecord` has no `source_type`, so archive-wide type counts are not derivable and are not shown). **The Impeccable in-browser overlay was NOT run** — a named gap, blocked on a payload no route emits yet, not a silence | `BL15R-011` |
+| `BL15R-013` | Imported Runs appear in the ordinary Runs workspace | **DONE 2026-09-16.** `create_runs: true` on the existing batch route makes one ordinary `Run` per reviewed run-candidate unit, inside ONE `record_lock` and ONE `_save_versioned` — `rev` moves by exactly +1 for N runs, asserted, which is the test that fails if this is ever reimplemented as a client loop. **NO field added to `Run`**: verified, not one non-comment line of `workspace.py` changed, so the signature's 7 keys and `test_run_row_parity.py`'s CI-only key set are untouched. Provenance is the note beside every proposal, which says WHICH FILE supports which value — strictly better than a run-level flag. Label is the legacy number plus verbatim tokens. Alignment and standards never become Runs. **It caught a fan-out nobody anticipated:** a batch against an already-exported zero-run record would publish the second official record `post_run` exists to prevent, once per measurement — refused before any run is added, inside the same lock. **And run creation is EXACTLY-ONCE per measurement** (keyed on the label), after independent review measured a second identical batch creating four MORE runs carrying not one proposal: a double-click on a 94-measurement archive would have left 188 runs, 94 empty, against a published description promising it "adds nothing" | `BL15R-011`, `HIST-005` |
+| `BL15R-014` | Evaluation harness | **DONE 2026-09-16.** `bl15/evaluate.py`. **Exactly two hard gates, and a test asserts there are only two**: fabricated-value rate (must be 0, reported first) and provenance coverage (must be 1.0). Fabrication is caught four independent ways, each with a negative control. **The rule that makes it trustworthy: an UNMEASURABLE honesty metric makes the report FAIL**, so "we could not check" never reads as "nothing was invented"; and `_ratio(0, 0)` returns `None` rather than 1.0 — the vacuously-true shape, tested. **Mapping coverage is a BREAKDOWN, not a ratio**: at 6 of 45 a percentage would read as 87% failure and would *improve* if a slice started forcing concepts into the extension namespace. Reference basis is scored with **inverted polarity** — leaving it absent is recovered, reporting one is a miss. Ground truth cannot come from the parser: `load_gold_standard` refuses generator keys, a missing `authored_by_human`, a true `generated_from_parser_output` and unknown concepts, and a test asserts mechanically **over the module's own type hints** that no function turns an observation into ground truth. The committed gold standard is for the SYNTHETIC mini corpus only | `BL15R-011` |
+| `BL15R-015` | Hardening + the domain-question packet | **PACKET DONE 2026-09-16 and PREPARED, NOT SENT** — `docs/bl15-2-domain-questions-2026-09-16.md`, and only Krish can say whether it was delivered; the repository records preparation, never delivery. **It is the 14 `needs_domain_review` concepts and nothing else.** Almost every question is "which named option", because the schema carries closed enums for nearly all of them — so an answer is one word and is auditable. **It DROPS its own flagship question**: "when only a magnitude is encoded, what reference basis may be assumed?" is answered by the schema (*none*, and it carries vocabulary for the absence), replaced by the narrow question for the one group whose notes DO name a reference. Twelve further candidates are dropped with what answers each, and three items are stated as BOUNDARIES rather than questions — including that `context.temperature_K` is required and a loose sweep over all 1,190 text files returns **zero** temperature hits | `BL15R-010` |
+
+### The independent review, and the twelve findings it closed (2026-09-16)
+
+A reviewer that implemented none of the branch returned **14 findings** and a
+**MERGE-after-fixes** verdict. Five were gating. All five are closed, plus five more, plus
+the two items it recorded as residue. What a future session must not re-derive:
+
+**THE HONESTY GATE FOR THE WHOLE PROGRAMME PASSED ON NOTHING.** Both hard metrics
+hand-wrote a zero-denominator branch that BYPASSED `_ratio` — whose entire purpose is to
+stop this — and returned `0.0` and `1.0`. A reconstruction producing NO candidates
+published `passed: true`, no hard failures, headline `fabricated_value_rate 0.0 ✓`. It
+contradicted three committed sentences in its own file. Fixed with a **third outcome**,
+`VACUOUS`, because both obvious answers were wrong: `MEASURED 0.0` *is* the vacuous pass,
+and `UNMEASURABLE` would conflate "ran and found nothing" with "never built", which
+`Observed` exists to keep apart. `EvaluationReport.passed` needed no change — it already
+fails on `passed is not True`. **The test that pinned it is the lesson**: its name argued
+only the `()`-vs-`None` distinction, which held, so that `True` was the RIGHT verdict was
+never argued anywhere — merely asserted, and an assertion of a defect reads exactly like a
+specification of the behaviour.
+
+**A MAPPING ERROR IS NOT A FABRICATION, and only a separate check can see one.**
+`acquisition_method` was mapped `deterministic` to `system.technique`; measured, that
+concept carries the *macro's own filename* or a lowercase alias, never a schema enum
+member, so it proposed an off-enum value from every source. `fabricated_value_rate` was 0
+before and after — correctly, because the value WAS evidenced at a named locator. A suite
+checking only for fabrication would never have seen it. Proposable concepts **6 → 5**,
+which is the direction worth noticing.
+
+**TWO SERVED CLAIMS WENT FALSE ON THIS BRANCH.** `ASSETS_BLOCKED_REASON` said the build
+"computes no digest … not even for a file it reads" while the archive walk computes one
+per member — the sibling of a sentence the wiring slice had already corrected one module
+away, and a test pinning it to ONE home *guaranteed* the false text was byte-identical in
+both places it was served. **The conclusion survived and the reason had to change**: the
+digest exists, so the blocker is a policy about publishing plus the `uri` half, which is
+firmer. And the `add-to-experiment` description promised idempotence the behaviour did not
+have; the promise was right, so the behaviour moved.
+
+**IDENTICAL BYTES DID NOT MEAN THE SAME MEASUREMENT.** `_canonical_acquisitions` grouped on
+the digest alone, so two acquisitions differing in sample, medium, cycling state, potential
+AND legacy number that happened to share bytes collapsed to one unit — winner chosen
+alphabetically — and the survivor's disclosure called the other a "copy". Narrowed to
+require the same basename or membership of the canonical's `<stem>_dir`, which is exactly
+the measured 92-of-96 shape. **The real corpus is unchanged at 96 units / 908 scans / 21
+conflicts**, so this fixed a latent failure without moving a measured number.
+
+**THE CEILING DISCLOSURE WAS THE FIRST THING THE WINDOW DROPPED** — `_emit.result()`
+appends it last and the window takes the first five, so on exactly the sources verbose
+enough to reach the ceiling, the only entry saying WHERE reading stopped was cut. Fixed by
+prepending, which is the remedy the same function already applied 50 lines below.
+
+**A COMMITTED GOLD-STANDARD EXPECTATION WAS UNMEETABLE BY ANY READER, and the fixture was
+what was wrong.** The mini corpus's `readme.txt` used a format `read_shared_readme` does
+not recognise. Changing the reader would author a second grammar with no corpus warrant
+(§5); changing the gold standard would lower an expectation to match a fixture defect. The
+fixture was rewritten — and `readme_inheritance` is now **MEASURED end to end at 1.0 for
+the first time**, from the served payload rather than from the expectation, because the
+harness's own `_perfect(gold)` builds that member from the gold and so nothing had ever
+confronted it with a real reading. **The metric immediately caught two errors in the
+adapter that supplied it**, which is the best evidence it works.
+
+**THE TWO HALVES DID NOT MEET, AND NOW DO.** `grep -rn corpus_review apps/api/` returned
+**zero**: the review surface's whole component tree rendered behind a member no route set,
+while three comments justified the gap with a reason that had gone false on the same
+branch. Joined at the session level — where the committed client type declares it, rather
+than reshaping a contract the other half was built against. The bound is what made it
+possible: the surface needs **six** of the forty-five concepts, and only readings that name
+a measurement, so the set is a few per unit instead of the ~500,000 the wiring slice
+rightly declined to persist. **The cap is on DISTINCT literals, not on count** — a count
+cap could drop the one reading that differed and turn a `disputed` cell into a settled one,
+which is a conflict silently resolved by a payload bound.
+
+**AN ASSOCIATION CLAIM IS NOW DISCLOSED.** `_seed_for_new_run` gives the first run of a
+record the run-level content the record already held; for `POST /runs` a human chose that
+run, but a batch creates several and the inheriting one is whichever measurement `relate`
+ordered first. The inheritance is kept — `{}` reintroduces a measured data-loss defect —
+and `created_runs[].inherited_record_level_content` now names it, derived from the draft
+actually written rather than from list position.
+
+Also closed: the "at most one archive" invariant `remove_source` relied on and nothing
+checked (now `422 archive_already_in_bundle`); a test named for the opposite of what it
+asserted; `by_concept`'s docstring claiming "every candidate" when it is field candidates
+only (89 of 97, arithmetic verified); a summary count that could understate an archive
+session by everything it held; an empty `#F` basename silently skipping the conflict
+branch; the stale 6/45 mapping distribution; and a real flow rate in a document whose own
+table asserted preparation values were withheld.
+
+**Verification at closure, all from the right directory and the main checkout:** backend
+**9,075 passed / 46 skipped / 0 failed**; frontend **236 files / 6,149 passed**; `tsc -b`
+0; `typecheck:e2e` 0; `a11y-axe` 150 passed and `a11y-narrow` 63 passed with **no baseline
+movement and no edit to `a11y-baseline.ts`**; contract parity 4 passed; snapshot and
+deep-artifact gates green; truth path diff empty.
+
+**Corrected the same day, because the first version of this paragraph was wrong.**
+~~The loaded review state is unmeasured at every viewport, and the slice that seeds a
+session into `SURFACES` must change the disclosure count.~~ That repeated the disclosure
+registry's framing without checking `surfaces.ts`, which records the opposite: adding
+`imports-session` to `SURFACES` was **declined**, because it would enrol the surface in
+thirteen sweeps across seven viewport projects, every one needing a POST the read-only
+config forbids. The loaded state is covered in the suite that IS allowed to POST, and
+that suite now drives **six** states — four from an example source, two from an archive
+including the corpus review — each required axe-clean. The read-only registry's 0 is
+correct for the read-only sweep and says nothing about coverage.
+
+**Still open, and genuinely:** the 15 `needs_domain_review` concepts are Angel's and the
+packet is prepared, not sent; PDF extraction (the `.txt` of the same notes is read, and
+the three representations are ONE witness, so this adds no evidence); and every hosted QA
+remains `HOSTED QA PENDING (Krish)` — `/krish` sits behind an Authentik edge this
+environment cannot authenticate to.
+
+**Four conflicts this corpus contains that must SURVIVE rather than be repaired.** They are the
+reason Historical Import exists, and a slice that "cleans" any of them has broken the feature:
+
+1. **Duplicate legacy number `32`** — two distinct acquisition files carry it, and one of them
+   *also disagrees with itself*: its external name reads `after1500Cycling` while its internal
+   `#F` reads `beforeCycling`, while its sibling reads `after1400Cycling`. Three readings, one
+   number. Neither file may be overwritten; none of the three readings may be silently chosen.
+2. **Macro intent vs acquired files differ 9 times in each direction** — 95 distinct `newfile`
+   targets, 9 never acquired and 9 acquired but never declared, concentrated in the `29`–`32` and
+   `44`–`46` families.
+3. **`ffilter35`** — a real doubled-prefix typo. The literal is preserved and "filter 35" sits
+   beside it carrying the rule that produced it. **The source is never rewritten.**
+4. **The notes contradict themselves about the electrolyte** — a broad sentence beginning
+   *"In ALL experiments we used …"* and naming ONE alkaline electrolyte sits above
+   `Sample 1 JK3 in acid`, in a document whose own preparation section specifies an acid. A broad human statement is **candidate shared
+   context**; sample-specific
+   contrary evidence is a **conflict**, never an app-wide overwrite.
+
 
 ---
 
@@ -1536,7 +1732,7 @@ rendered viewport does not follow)** · **`QA-008` real-microphone + OS-indicato
 | `REV-002` | **Revision-state UI**: visibly distinguish **`Last Submitted Revision`** from **`Current Working Changes`**, show the path to the next submission, and **surface the rename trap rather than hiding it** — a rename does not move `content_signature`, so submit → rename → resubmit yields `409 already_submitted`. | C | **DONE — row was stale, measured 2026-09-13.** `components/RevisionHistoryPanel.tsx` + `revision-history.css` ship it. **AND ITS TWO CRITICALS ARE THE REASON THIS ROW IS WORTH RE-READING RATHER THAN JUST RE-STATUSING:** the final review of PR #248 found `C-3` (this slice reported `not_applicable` — which the server's own description calls *"a fact rather than an inability"*, served **200** — as *"could not read the submission history"*) and `C-4` (it rendered **`Last Submitted Revision · None`** about a history that had **not been read**, breaking this module's own Rule 1, *"ABSENCE IS NOT A VALUE"*). Both fixed in `f8bb87db`. **The reason a five-mutant sweep missed both: `PGHOST` is unset in every shipped deployment, so `unknown` is the only render path that SHIPS — and it had no rendering coverage at all.** Every mutant killed had been on an unreachable branch. | REV-001 |
 | `MCP-019` | **Local/synthetic end-to-end MCP proof** — `MCP client → create note → proposal/candidate → change-feed event → website Review → accept/edit/reject under an explicitly-enabled trusted TEST identity → deterministic validation`. Also prove: duplicate/retry protection, payload/read bounds enforced, provenance identifies the source channel, ambiguity stays unresolved when appropriate, **MCP cannot final Submit**, and **no production provider, account or data is needed**. **Must be green BEFORE the operator is asked to mount the production endpoint.** | E | PLANNED | MCP-001, MCP-002, CAP-004 |
 | `HIST-003a` | **Provider-neutral semantic-reconstruction contract**, exercised with a **deterministic fake** over synthetic/authorized fixtures. Prove semantic output enters the shared proposal/ambiguity/conflict Review pipeline and **cannot become record truth automatically**. | G | **DONE 2026-09-13.** `ReconstructionProvider` is a Protocol given no network client, no credential and no model handle; the only implementation is `DeterministicFakeReconstructionProvider`. **The chain is proven END TO END over HTTP with nothing stubbed** — `test_the_whole_chain_from_a_parsed_source_to_a_validated_draft` walks parsed evidence → candidate → the shared proposal model → scientist review → the ISAAC draft → `isaac_records.draft_validator.validate_draft` with `report.errors == []`. **And the other half of the claim is a separate test:** acceptance answers `409 human_actor_required` in every default-configured deployment, so in anything shipped the chain STOPS at the open proposal. The mapping rule is verbatim-path-only — no alias table, no case folding — with a mutation control feeding it `System.Technique`/` system.technique`/`system_technique` and asserting ZERO candidates | HIST-001 |
-| `HIST-003b` | **Real BL15-2 Claude/model reconstruction.** | G | **BLOCKED** | **EXT-10** (corpus) **AND** institutional provider/data-egress approval (**DEC-22**) |
+| `HIST-003b` | **Real BL15-2 Claude/model reconstruction.** | G | **STILL BLOCKED 2026-09-16 — and now on ONE gate rather than two, which is a narrowing and NOT an unblocking.** ~~EXT-10~~ is resolved (the corpus arrived); **DEC-22 is untouched.** No part of this corpus may be sent to any provider, and the deterministic readers built in `BL15R` are the reason that costs little: they recover the structure without a model | ~~**EXT-10** (corpus) **AND**~~ institutional provider/data-egress approval (**DEC-22**) |
 
 ### Two rules the revision hardened, recorded here because they reverse the plan's own advice
 

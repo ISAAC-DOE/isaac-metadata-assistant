@@ -1,0 +1,36 @@
+# SYNTHETIC. Reproduces the real acquisition-METHOD macro: a `def` block, a
+# quoted energy-grid literal, a printed call signature, and ZERO `newfile`
+# declarations. Four real macros declare no target and this is one of their
+# shapes; zero is a RESULT, not a failure.
+#
+# The energy grid values are invented round numbers (1000-1100), nowhere near any
+# real absorption edge. The command and variable names are the real ones.
+def IrL3_xas '{
+
+    plotselect vortDT
+    local scan_ctime scan_repeat
+    global XAS_MAIN_GRID
+
+        XAS_MAIN_GRID  = "1000 1020 5 1040 1 1060 0.5 1100 2"
+    split(XAS_MAIN_GRID, arr_tmp)
+
+    if ($# < 1) {
+        printf("\n\nSyntax:\n")
+        printf("    IrL3_xas  cntSec  nbrScan  emission  nbrFilter\n\n")
+        return
+    }
+}'
+
+
+def IrL3_short_xas '{
+
+    global XAS_MAIN_GRID
+        XAS_MAIN_GRID  = "1000 1020 5 1050 1 1100 5"
+    split(XAS_MAIN_GRID, arr_tmp)
+
+    if ($# < 1) {
+        printf("\n\nSyntax:\n")
+        printf("    IrL3_xas  cntSec  nbrScan  emission  nbrFilter\n\n")
+        return
+    }
+}'

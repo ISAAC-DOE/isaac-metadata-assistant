@@ -1,0 +1,23 @@
+#F alignment
+#E 1000200000
+#D Wed Sep 11 09:20:00 2001
+#C spec  User = synthetic
+#O0   dummy0    energy     emiss    filter        Sx        Sy        Sz        Sr
+
+#S 1  ascan Sy 2 3 10 0.500000
+#D Wed Sep 11 09:20:08 2001
+#T 0.5  (sec)
+#P0 4 1000.5 1050 10 -1.25 2 -3.5 -45
+#N 3
+#L Sy  sec  I1
+2 0.5 100
+2.5 0.5 140
+
+#S 2  loopscan 5 0.500000
+#D Wed Sep 11 09:25:00 2001
+#T 0.5  (sec)
+#P0 4 1000.5 1050 10 -1.25 2.5 -3.5 -45
+#N 3
+#L Epoch  sec  I1
+1 0.5 141
+2 0.5 142

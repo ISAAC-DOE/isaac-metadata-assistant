@@ -160,6 +160,52 @@ export const PROSE_DISCLOSURES: Readonly<Record<string, number>> = Object.freeze
 export const FIELD_GROUP_SURFACES: ReadonlySet<string> = new Set(['record-detail']);
 
 /**
+ * How many `details.bl15-digest-row` / `.bl15-disclosure` / `.bl15-unit-disclosure`
+ * each surface mounts — the BL15-2 large-corpus review (`BL15R-012`).
+ *
+ * ── DECLARED AT ZERO, AND THE REASON CHANGED 2026-09-16 ───────────────────
+ *
+ * ~~The review renders only when the session payload carries `corpus_review`, and
+ * **no route emits one today** — the archive source kind is a separate slice's step 1
+ * and `historical_import.SOURCE_KINDS` holds only `reference` and `synthetic_fixture`.~~
+ * **Every clause of that was false by the time it was written or shortly after**: the
+ * kind shipped in `6cdb2279` on the same branch, and `historical_import._corpus_review`
+ * now serves the member. Independent review found the stale reason.
+ *
+ * **THE NUMBER IS STILL 0, AND NOW IT IS A MEASUREMENT RATHER THAN AN ABSENCE.** The
+ * sweep reaches `/imports` at its INDEX — the empty-list state, no session open — so no
+ * archive reading exists there and `corpus_review` is absent, which is why the surface
+ * mounts none of these. Verified after the route landed: `a11y-axe` 150 passed and
+ * `a11y-narrow` 63 passed with no baseline movement and no edit to `a11y-baseline.ts`.
+ *
+ * IT IS WRITTEN DOWN REGARDLESS, because the Settings slice on 2026-09-16 proved what
+ * the silence costs. Twelve Data & Privacy definitions went behind `<details>` and would
+ * have left every axe scan at every viewport while `settings-privacy`'s baseline — which
+ * records no cell at all — could not move to reveal it. A disclosure that is not opened
+ * here is not scanned, and a surface with zero recorded violations cannot signal the
+ * loss by a number changing.
+ *
+ * So a slice that makes THIS sweep reach a loaded session changes this number, and the
+ * assertion below names the file to edit — an `imports` surface that suddenly mounts
+ * disclosures against a declared 0 fails loudly instead of quietly exempting a
+ * nine-column table, every conflict explanation and the whole mapping registry.
+ *
+ * ~~That is the only remaining precondition — a seeded session in `SURFACES`.~~ —
+ * **WRONG, AND CORRECTED 2026-09-16 the same day it was written.** It repeated this
+ * registry's framing without checking `surfaces.ts`, which records the opposite:
+ * adding `imports-session` to `SURFACES` was DECLINED, because it would enrol the
+ * surface in thirteen sweeps across seven viewport projects, **every one of which
+ * needs a POST this config forbids**.
+ *
+ * The loaded state is covered, in the suite that IS allowed to POST:
+ * `e2e/mutation/imports-session-a11y.spec.ts`, which now drives SIX states — four
+ * from an example source and two from an ARCHIVE, including the corpus review — and
+ * requires each axe-clean. So the honest statement is not "unmeasured", it is
+ * "measured elsewhere, by design, and not by this registry".
+ */
+export const BL15_REVIEW_DISCLOSURES: Readonly<Record<string, number>> = Object.freeze({});
+
+/**
  * How many `details.settings-concept` each surface mounts.
  *
  * ── ADDED 2026-09-16, AND IT IS THIS HELPER'S OWN RULE APPLIED TO A NEW SITE ──
@@ -258,6 +304,31 @@ export async function openUnreachableDisclosures(page: Page, surfaceId: string):
   ).toBe(expectedProse);
   for (let i = 0; i < proseCount; i++) {
     const one = prose.nth(i);
+    await one.locator('> summary').click();
+    await expect(one).toHaveAttribute('open', '');
+  }
+
+  /*
+   * The BL15-2 corpus review's disclosures — digest rows, the four explanatory
+   * blocks, and one per measurement. Same mechanism and same reasoning as the
+   * prose disclosures above; see `BL15_REVIEW_DISCLOSURES` for why the declared
+   * count is 0 today and why it is written down anyway.
+   */
+  const bl15 = page.locator(
+    'details.bl15-digest-row, details.bl15-disclosure, details.bl15-unit-disclosure'
+  );
+  const expectedBl15 = BL15_REVIEW_DISCLOSURES[surfaceId] ?? 0;
+  const bl15Count = await bl15.count();
+  expect(
+    bl15Count,
+    `surface "${surfaceId}" mounts ${bl15Count} BL15 corpus-review disclosure(s); ` +
+      `BL15_REVIEW_DISCLOSURES in e2e/helpers/disclosures.ts declares ${expectedBl15}. ` +
+      'A disclosure that is not opened here is exempt from every axe scan at every ' +
+      'viewport, and because this surface records no baseline cell the loss would move ' +
+      'no number at all — update the map in the same change that adds or removes one.'
+  ).toBe(expectedBl15);
+  for (let i = 0; i < bl15Count; i++) {
+    const one = bl15.nth(i);
     await one.locator('> summary').click();
     await expect(one).toHaveAttribute('open', '');
   }

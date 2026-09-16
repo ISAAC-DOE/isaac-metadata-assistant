@@ -1,0 +1,50 @@
+# SYNTHETIC. Invented measurement stems, one per line, in the shape of the
+# Angel-style BL15-2 naming convention. Sample codes (ZZ1/ZZ2/ZZ3/SYNTH2) and
+# materials (SyOx/SyTiO2) are fake; potentials are round numbers. Reproduces:
+# every concept `bl15.profiles.SSRL_BL152_ANGEL_V1` recognises, and the real
+# corpus's habit of omitting, reordering and adding fields.
+#
+# ONE DELIBERATE CONSEQUENCE OF SANITISATION, so it does not read as a defect:
+# `SyOx` and `SyTiO2` come out as `unknown_token` under the shipped profile.
+# They are stand-ins for the REAL formula names the shipped alias table
+# declares, and `CLAUDE.md` §6 keeps those out of a fixture — so the alias
+# MECHANISM is exercised with a purpose-built test profile
+# (`test_a_formula_style_sample_name_needs_a_profile_alias`) and the shipped
+# table is checked against itself
+# (`test_the_shipped_profile_alias_tables_each_resolve`). The uppercase-code
+# shape rule genuinely cannot reach a mixed-case formula, which is the point.
+#
+# potential BEFORE filter, the real ordering of the early acquisitions
+03_01_ZZ1_acid_beforeCycling_100mV_filter10
+# potential AFTER filter, the real ordering of the later ones
+06_01_ZZ1_acid_after1200mVCycling_filter10_100mV
+# a step index the convention does not mention at all
+52_05_ZZ3_base_after1stCycling_filter20_200mV_step05
+# no potential and no filter; a positional reader misreads this one
+71_07_SyTiO2_0p5nm_AsIs_NoElectrolyte
+# one numeric token where the convention implies two
+01_SyOx_oldPellet_f35
+# lowercase `cycling`, which the real corpus writes both ways
+33_03_ZZ2_base_after1400cycling_filter20_400mV
+# ordinal cycling, which the bare-magnitude form is ambiguous against
+54_05_ZZ3_base_after2ndCycling_filter22_100mV
+# a fresh spot, a repeat and a new grid
+46_04_ZZ2_base_after1500Cycling_filter35_newSpots_400mV
+04_01_ZZ1_acid_beforeCycling_100mV_filter10_again
+02_SyOx_oldPellet_f35_newGrid
+# a dry sample measured as-is
+90_09_SyTiO2_2nm_dry_asIs
+# weight-percent loading, both spellings the real corpus uses
+11_02_SYNTH2_0p2wpc_base_beforeCycling_filter10_100mV
+12_02_SYNTH2_0p2wtpc_base_beforeCycling_filter10_200mV
+# acquisition method and preparation, from the reference pellets
+SyOx_5wpc_pellet_transmission
+SyOx_5wtpc_pellet_TRANSMISSION
+# an averaged MERGE product naming no legacy number
+ave_ZZ2_filter10_400mv
+# the convention's gas / pH / flow-rate fields. NO REAL EXAMPLE EXISTS: the
+# measured archive has none of these in any filename, and the beamtime notes
+# state all three only in prose. These three lines are the ONLY exercise those
+# recognisers get, and `bl15.profiles.UNEXERCISED_RECOGNIZERS` says so.
+80_08_SyTiO2_0p5nm_base_ArSat_pH13_10mLmin_filter10_100mV
+81_08_SyTiO2_0p5nm_base_N2_pH7_5sccm_filter10_200mV

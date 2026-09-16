@@ -1,0 +1,9 @@
+#S 2 gscan 1000 1100 5 0.5
+#C SYNTHETIC FIXTURE -- NOT INSTRUMENT OUTPUT. Every value is invented.
+#D Fri Jan 01 00:00:00 2099
+#T 0.5  (Seconds)
+#P0 dummy0=4 synenergy=1000.0 synemiss=900.0 filter=10 synSx=0.0
+#N 3
+#L synenergy  synI1  synI2
+1000.0 1.0 2.0
+1005.0 1.1 2.1

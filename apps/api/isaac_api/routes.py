@@ -24277,6 +24277,47 @@ _IMPORT_SOURCE_KEYS = frozenset(
 
 _IMPORT_PROPOSE_KEYS = frozenset({"experiment_id", "run_id"})
 
+#: The BATCH operation's keys. A SUPERSET of `_IMPORT_PROPOSE_KEYS`, and
+#: deliberately a separate constant rather than a widening of it: `create_runs`
+#: is meaningless for one candidate, and the single-candidate route must keep
+#: refusing it by name rather than accepting and ignoring it.
+_IMPORT_BATCH_KEYS = _IMPORT_PROPOSE_KEYS | {"create_runs"}
+
+#: Most Runs one import batch creates. The measured BL15-2 corpus yields **94**
+#: run-candidate measurements, so this is ~2x headroom and not a round number.
+#: Over it the batch is REFUSED WHOLE with the two numbers named — a partial
+#: batch would leave a record holding some of an import with no surface able to
+#: say which measurements were missing, which is the reason this operation is one
+#: request rather than N in the first place.
+_MAX_RUNS_PER_IMPORT_BATCH = 200
+
+#: Why a run-scoped candidate is not sent when this batch is CREATING the runs:
+#: it belongs to a measurement this import does not offer as a Run.
+#:
+#: **ALIGNMENT SCANS AND REFERENCE STANDARDS ARE REAL MEASUREMENTS AND ARE
+#: DELIBERATELY NOT RUNS.** `bl15.relate.MeasurementUnit.run_candidate` derives
+#: that from the classification, and the unit is fully assembled either way —
+#: with its scans, its macros and its conflicts — so nothing is discarded. A
+#: scientist who disagrees changes the classification, which is a separate act.
+_IMPORT_CANDIDATE_UNIT_IS_NOT_A_RUN = (
+    "This value belongs to a measurement this import does not offer as a Run — "
+    "an alignment scan or a reference standard rather than a sample "
+    "measurement. Its reading is kept and nothing is discarded; there is simply "
+    "no run for it to be proposed against. Change the measurement's "
+    "classification if you disagree."
+)
+
+#: Why a beamtime-scope candidate is not sent when this batch is creating runs:
+#: it belongs to the whole import rather than to any one measurement, and the
+#: value is written on a run.
+_IMPORT_CANDIDATE_IS_BEAMTIME_SCOPE = (
+    "This value is stated for the whole import rather than for one measurement "
+    "— it comes from the shared README or the beamtime notes — and this build "
+    "writes a value at its field path on a RUN. Every measurement inherits it "
+    "as context; it is deliberately not copied onto each one as though it had "
+    "been entered there. Propose it against the run you mean, one at a time."
+)
+
 
 def _unknown_import_keys(body: dict, allowed: frozenset[str]) -> JSONResponse | None:
     """A body key this operation does not accept, refused BY NAME.
@@ -24499,10 +24540,24 @@ def delete_import_session(scope: TutorialScopeDep, import_id: ImportId):
         "instrument. A name outside that list is refused; the check is the same "
         "branch for a name that could describe a path and for one that is merely "
         "absent, so this operation cannot be used to find out what files exist.\n\n"
+        "Send `kind: \"archive\"` with a `fixture_name` from the list "
+        "`GET /api/imports` reports under `available_archives`, and this build "
+        "records a whole committed folder as ONE entry. Its parse WALKS it: an "
+        "inventory of every file inside, what kind each one is and why, what each "
+        "reader could and could not read, which files belong to which "
+        "measurement, and the candidate values that follow. One manifest entry "
+        "for an archive of any size is deliberate — a flat row per file would be "
+        "a complete manifest nobody can audit — and the full per-file manifest "
+        "stays available on the session under disclosure.\n\n"
         "`sha256` is optional, is checked for SHAPE only — 64 lowercase hex "
-        "characters — and is **never computed**, not even for a fixture this build "
+        "characters — and is **never computed**, not even for a source this build "
         "does read. So a digest here records what you say identifies the file, and no "
-        "surface may describe it as verified, checked or matched. `size_bytes` and "
+        "surface may describe it as verified, checked or matched. That holds for an "
+        "archive too, and the distinction is worth stating because the walk DOES "
+        "hash: it computes a digest of each file INSIDE the archive, so that a file "
+        "copied into two places is recognised as one file rather than counted twice. "
+        "Not one of those digests is ever recorded here or reported as yours. "
+        "`size_bytes` and "
         "`media_type` are likewise yours, are stored verbatim, and are consulted by "
         "nothing.\n\n"
         "Adding a source does not re-read the bundle. Run the parse operation again "
@@ -24760,6 +24815,49 @@ def _import_note_value_span(statement: Mapping, filename: str) -> tuple[int, int
     text = _import_note_text(statement, filename)
     value = str(statement.get("value"))
     return len(text) - len(value), len(text)
+
+
+def _import_statement_filename(session, candidate, statement: Mapping) -> str:
+    """WHICH SOURCE this statement was read from, in the scientist's own words.
+
+    It prefixes every import-minted note (``_import_note_text``), so an empty
+    answer is not cosmetic: the note reads ``" (…): key = value"`` with nothing
+    naming the file, in the one durable record of which source supports which
+    value.
+
+    **THREE RESOLUTIONS, TRIED IN ORDER, AND THE SECOND EXISTS BECAUSE THE FIRST
+    RETURNED THE EMPTY STRING FOR EVERY ARCHIVE CANDIDATE.** Measured over the
+    committed BL15 mini corpus before this function existed: the note read
+    ``" (01_01_SYN1_… · line 2 header #E): acquisition_epoch = 4102444800"``.
+    The cause is a shape difference the two producers were entitled to have.
+    ``DeterministicFakeReconstructionProvider`` puts a ``source_id`` ON each
+    supporting statement; ``bl15.reconstruct.statement_for`` deliberately does
+    not — ``EvidenceStatement`` has exactly three fields, and widening it was
+    refused for a stated reason — so ``statement["source_id"]`` is absent and the
+    first lookup matches nothing.
+
+    1. the ``source_id`` the STATEMENT names, when it names one this session
+       holds. The fixture path, unchanged.
+    2. otherwise the candidate's single ``supporting_source_ids`` entry, when it
+       names a source this session holds. An archive is ONE manifest entry, so
+       every candidate read out of it names exactly that entry — and the member's
+       own path is already in the statement's locator, which is why this answer is
+       the archive's label rather than a file name and is not a loss.
+    3. otherwise whatever id the statement carried, or ``""``. Reached only by a
+       statement citing a source the session no longer holds.
+
+    **Nothing is parsed out of the locator**, deliberately: its format is
+    ``bl15.reconstruct``'s to change, and splitting on a separator here would
+    make a note's text depend on a punctuation choice one layer down.
+    """
+    by_id = {entry.source_id: entry for entry in session.sources}
+    named = statement.get("source_id")
+    if isinstance(named, str) and named in by_id:
+        return by_id[named].filename
+    supporting = tuple(getattr(candidate, "supporting_source_ids", ()) or ())
+    if len(supporting) == 1 and supporting[0] in by_id:
+        return by_id[supporting[0]].filename
+    return named if isinstance(named, str) else ""
 
 
 def _mint_import_candidate(
@@ -25118,14 +25216,10 @@ def post_import_candidate_proposal(
                 ),
             },
         )
-    filename = next(
-        (
-            entry.filename
-            for entry in session.sources
-            if entry.source_id == statement.get("source_id")
-        ),
-        statement.get("source_id") or "",
-    )
+    # ONE RESOLUTION, SHARED WITH THE BATCH ROUTE. Both sites had the identical
+    # `next(...)` expression, and both returned the empty string for every
+    # archive candidate — see `_import_statement_filename` for the measurement.
+    filename = _import_statement_filename(session, candidate, statement)
 
     experiment_id = body.get("experiment_id")
     if not isinstance(experiment_id, str) or not experiment_id.strip():
@@ -25321,10 +25415,14 @@ def post_import_candidate_proposal(
         "mistake — refusing it would make the scientist send two requests to do "
         "one thing. The run is never inferred from the only run that happens to "
         "exist, in either operation.\n\n"
-        "IT IS EXACTLY-ONCE PER CANDIDATE, so running it twice, double-clicking, "
-        "or running it after sending some candidates by hand adds nothing: each "
-        "candidate already sent to this record is reported under `sent` with "
-        "`already_sent: true` and mints no second proposal.\n\n"
+        "IT IS EXACTLY-ONCE PER CANDIDATE AND EXACTLY-ONCE PER MEASUREMENT, so "
+        "running it twice, double-clicking, or running it after sending some "
+        "candidates by hand adds nothing. Each candidate already sent to this record "
+        "is reported under `sent` with `already_sent: true` and mints no second "
+        "proposal; each measurement that already has a run on this record is reported "
+        "under `runs_already_present` and no second run is made. The run key is the "
+        "label, which this import derives from the measurement itself, so it is the "
+        "same key twice for the same measurement.\n\n"
         "CANDIDATES THIS IMPORT CANNOT PROPOSE ARE REPORTED, NEVER DROPPED. Each "
         "appears under `not_sent` with the reason the review surface already "
         "shows for it — sources that disagree, a structural candidate about "
@@ -25337,7 +25435,35 @@ def post_import_candidate_proposal(
         "all (`422 nothing_to_send`, with the same `not_sent` report, so the "
         "answer explains itself); or the record is at one of its note or proposal "
         "ceilings, where a partial batch would be a record filled to the brim "
-        "with half an import."
+        "with half an import.\n\n"
+        "`create_runs: true` CREATES ONE ORDINARY RUN PER MEASUREMENT this "
+        "import found in an archive, instead of naming an existing one — and it "
+        "is refused together with `run_id`, because those are two different "
+        "answers to the same question and neither may silently win. Every run is "
+        "an ordinary run of this record, indistinguishable from one you add by "
+        "hand: same fields, same editing, same export path. Its label carries "
+        "the legacy file number the archive already used plus the condition the "
+        "filename states, exactly as the source wrote it — nothing in it is "
+        "expanded, corrected or translated.\n\n"
+        "**EVERY CREATED RUN'S DRAFT HOLDS NO VALUE FROM THE IMPORT.** A "
+        "historical import proposes; it does not fill anything in. Each run "
+        "starts exactly as one added by hand does, and every value this import "
+        "read arrives as an open proposal on the run it was read from, with a "
+        "note carrying the source file and the line it came from.\n\n"
+        "The runs and all the proposals are written in ONE record lock and ONE "
+        "save, so the record's revision moves once for the whole batch however "
+        "many runs it creates. Measurements this import does not offer as a "
+        "Run — an alignment scan, a reference standard — never become one, and a "
+        "value belonging to one of them, or to the whole beamtime rather than to "
+        "any single measurement, is reported under `not_sent` with that reason "
+        "rather than refusing the batch.\n\n"
+        "WHAT A CANDIDATE RUN FROM A HISTORICAL ARCHIVE CANNOT BE is stated "
+        "rather than discovered: it cannot be export-ready. "
+        "`GET /api/imports/{import_id}` lists the measured reasons under "
+        "`corpus_digest.cannot_be_export_ready` — a required temperature no "
+        "source in such a corpus states, a required descriptor no historical "
+        "source provides, and a required file digest this build never computes. "
+        "No progress indicator here can fill, and none is offered."
     ),
     response_description=(
         "What was sent, what was not and why, and the record's new revision and "
@@ -25358,8 +25484,8 @@ def post_import_add_to_experiment(
         ...,
         description=(
             "`{\"experiment_id\": \"<the record to propose onto>\", \"run_id\": "
-            "\"<the run for the candidates written on a run>\"}`. Any other key is "
-            "refused with `422`."
+            "\"<the run for the candidates written on a run>\", \"create_runs\": "
+            "<optional boolean>}`. Any other key is refused with `422`."
         ),
     ),
     if_match: str | None = Header(
@@ -25379,7 +25505,7 @@ def post_import_add_to_experiment(
                 "message": "The request body must be a JSON object.",
             },
         )
-    refused = _unknown_import_keys(body, _IMPORT_PROPOSE_KEYS)
+    refused = _unknown_import_keys(body, _IMPORT_BATCH_KEYS)
     if refused is not None:
         return refused
 
@@ -25390,6 +25516,25 @@ def post_import_add_to_experiment(
     session, missing = _load_import_or_404(import_id, scope)
     if missing is not None:
         return missing
+
+    # `create_runs` IS VALIDATED FOR TYPE AND NEVER COERCED. A truthy string
+    # would otherwise silently create runs on a record for a caller that sent
+    # `"false"`, which is a destructive-by-surprise outcome from a spelling
+    # mistake.
+    raw_create_runs = body.get("create_runs")
+    if raw_create_runs is not None and not isinstance(raw_create_runs, bool):
+        return JSONResponse(
+            status_code=422,
+            content={
+                "error": "invalid_create_runs",
+                "message": (
+                    "`create_runs` must be true or false. It is never inferred "
+                    "from a value that merely looks like one. Nothing was "
+                    "written."
+                ),
+            },
+        )
+    create_runs = raw_create_runs is True
 
     experiment_id = body.get("experiment_id")
     if not isinstance(experiment_id, str) or not experiment_id.strip():
@@ -25460,6 +25605,12 @@ def post_import_add_to_experiment(
                     "sent": 0,
                     "already_sent": 0,
                     "not_sent": len(not_sent),
+                    # PRESENT AND ZERO on the refusal path too, so the counts
+                    # block has ONE shape. A key that appears only on success
+                    # makes a client branch on its presence to learn whether
+                    # anything was created, which is the same conflation
+                    # `official_validator_ran` was published to end.
+                    "runs_created": 0,
                 },
             },
         )
@@ -25474,6 +25625,74 @@ def post_import_add_to_experiment(
                 "written."
             ),
         )
+
+    # --- `create_runs`: the preconditions, all of them before the lock --------
+    #
+    # Each of these is a property of the REQUEST and the SESSION, so none needs
+    # the record and none may hold the record lock while it is decided.
+    units: tuple = ()
+    if create_runs:
+        if run_id is not None:
+            return JSONResponse(
+                status_code=422,
+                content={
+                    "error": "run_id_and_create_runs",
+                    "message": (
+                        "`run_id` names a run that already exists and "
+                        "`create_runs` asks this import to create one per "
+                        "measurement. They are two different answers to the same "
+                        "question, so naming both is refused rather than one "
+                        "silently winning. Nothing was written."
+                    ),
+                },
+            )
+        reading = session.archive_reading
+        if reading is None:
+            return JSONResponse(
+                status_code=422,
+                content={
+                    "error": "no_archive_in_this_import",
+                    "message": (
+                        "`create_runs` creates one run per measurement this "
+                        "import found in an archive, and this bundle holds no "
+                        "archive — only references and example sources, which "
+                        "describe individual files rather than measurements. "
+                        "Nothing was written."
+                    ),
+                },
+            )
+        units = reading.run_candidate_units()
+        if not units:
+            return JSONResponse(
+                status_code=422,
+                content={
+                    "error": "no_run_candidate_measurements",
+                    "message": (
+                        "This import found no measurement it offers as a Run. An "
+                        "alignment scan and a reference standard are real "
+                        "measurements and are deliberately not Runs; if that is "
+                        "what this archive holds, change a classification rather "
+                        "than expecting a run. Nothing was written."
+                    ),
+                    "measurements": len(reading.units),
+                },
+            )
+        if len(units) > _MAX_RUNS_PER_IMPORT_BATCH:
+            return JSONResponse(
+                status_code=422,
+                content={
+                    "error": "too_many_runs_for_one_batch",
+                    "message": (
+                        "This import found more measurements than one batch may "
+                        "turn into runs. THE WHOLE BATCH IS REFUSED and nothing "
+                        "was written — a partial batch would leave this record "
+                        "holding some of the import with nothing able to say "
+                        "which measurements were missing."
+                    ),
+                    "measurements": len(units),
+                    "maximum": _MAX_RUNS_PER_IMPORT_BATCH,
+                },
+            )
 
     with ws.record_lock(experiment_id, session_id=scope):
         exp = ws.load_experiment(experiment_id, session_id=scope)
@@ -25546,7 +25765,7 @@ def post_import_add_to_experiment(
             if _PROPOSAL_WRITER_SCOPE[_proposal_writer_for(candidate.target_field_path)]
             == "run"
         ]
-        if needs_a_run and run_id is None:
+        if needs_a_run and run_id is None and not create_runs:
             return JSONResponse(
                 status_code=422,
                 content={
@@ -25573,6 +25792,147 @@ def post_import_add_to_experiment(
         if precondition is not None:
             return precondition
 
+        # --- `create_runs`: ONE ORDINARY RUN PER REVIEWED MEASUREMENT ---------
+        #
+        # THIS ADDS NO FIELD TO `Run`, and that is a decision rather than an
+        # omission. A run's authoritative content is exactly
+        # `{id, experiment_id, label, ordinal, draft, record_id, overrides}`
+        # (`workspace._run_signature_payload`), so an `origin` marker would touch
+        # the run signature, the `isaac_run_projection` write and
+        # `test_run_row_parity.py`'s exact key set — which is CI-only against a
+        # real PostgreSQL and cannot be verified from a developer machine. It is
+        # also not needed: `_mint_import_candidate` writes a NOTE carrying the
+        # source filename and the statement beside every proposal, which records
+        # WHICH FILE SUPPORTS WHICH VALUE rather than merely "this run came from
+        # somewhere".
+        #
+        # THE RUNS ARE CREATED BEFORE THE PROPOSALS, INSIDE THIS ONE LOCK, and
+        # the single `_save_versioned` below persists runs and proposals
+        # together: the record holds the whole batch or none of it, at ONE new
+        # revision. `rev` therefore moves by exactly +1 for N runs, which is the
+        # assertion that fails if this is ever reimplemented as a client loop.
+        run_of_stem: dict[str, str] = {}
+        created_runs: list[dict] = []
+        #: Measurements that already had a run on this record, so no second one was
+        #: made. Reported rather than omitted: a batch that created nothing because
+        #: everything was already there is a different outcome from a batch that
+        #: created nothing because there was nothing to create.
+        runs_already_present: list[dict] = []
+        if create_runs:
+            # `post_run`'s OWN 409, reused rather than re-argued. A zero-run
+            # record exports under its own id; the first run moves the exported
+            # identity onto the run, so adding one here would publish a second
+            # official record with the same science and no operation withdraws
+            # the first.
+            if not exp.runs and exp.exported():
+                return JSONResponse(
+                    status_code=409,
+                    content={
+                        "error": "already_exported_without_runs",
+                        "experiment_id": exp.id,
+                        "record_id": exp.record_id,
+                        "message": (
+                            "This record has already been exported under its own "
+                            "identity. Adding a run would move the exported "
+                            "identity onto the run and publish a second official "
+                            "record with the same science, and there is no "
+                            "operation that withdraws the first. Nothing was "
+                            "written."
+                        ),
+                    },
+                )
+            # EXACTLY-ONCE PER MEASUREMENT, KEYED ON THE LABEL, and this closes a
+            # defect independent review MEASURED: a second identical batch reported
+            # `sent: 0, already_sent: 5` and still created four MORE runs, none of
+            # which carried a single proposal — because every proposal deduplicated
+            # onto the FIRST set. So a double-click on a 94-measurement archive left
+            # 188 runs, 94 of them empty, while this operation's own published
+            # description promised that running it twice "adds nothing".
+            #
+            # THE DESCRIPTION'S PROMISE IS THE RIGHT ONE, so the behaviour moved to
+            # meet it rather than the text being weakened. The key is the LABEL,
+            # which `historical_import` derives deterministically from the
+            # measurement stem — so it is the same key twice for the same
+            # measurement, and it is not an identity this route invents.
+            #
+            # An already-present run is REPORTED, not silently skipped, and its id
+            # still binds into `run_of_stem`: the proposals of a re-run batch must
+            # land on the run that measurement already has, which is exactly where
+            # the deduplicated ones were going anyway.
+            existing_by_label = {run.label: run for run in exp.runs}
+            for unit in units:
+                already = existing_by_label.get(unit.label)
+                if already is not None:
+                    run_of_stem[unit.stem] = already.id
+                    runs_already_present.append(
+                        {
+                            "run_id": already.id,
+                            "label": already.label,
+                            "ordinal": already.ordinal,
+                            "stem": unit.stem,
+                        }
+                    )
+                    continue
+                # `_seed_for_new_run(exp)` IS CALLED PER RUN AND INSIDE THE LOOP,
+                # so the first-run/later-run asymmetry it documents applies here
+                # exactly as it does to `POST .../runs`: the FIRST run adopts the
+                # run-level content the RECORD already holds (otherwise adding a
+                # run silently drops evidenced answers a person entered), and a
+                # later run starts from `blank_draft`'s run-level questions
+                # (otherwise copying one run's spectrum onto another asserts they
+                # measured the same thing).
+                #
+                # **NOTHING FROM THE ARCHIVE ENTERS ANY DRAFT.** The brief says
+                # "seed the draft EMPTY" and this reuses the existing seeder
+                # instead — a deliberate difference, recorded here rather than
+                # left to be discovered. The REASON the brief gives is honoured
+                # in full: a historical import writes no value, and every value
+                # this import read arrives as a PROPOSAL awaiting a person.
+                # Passing `{}` would additionally reintroduce the measured defect
+                # `_seed_for_new_run` exists to close — pending 0, metadata
+                # reported complete, and an export that refuses. A test asserts
+                # both target paths are absent from every created run's draft.
+                # WHETHER THIS RUN IS THE ONE THAT INHERITS, captured BEFORE the add,
+                # because `_seed_for_new_run`'s asymmetry keys on whether the record has
+                # runs yet and that is true of at most one run per batch.
+                inherits = not exp.runs
+                run = exp.add_run(label=unit.label, draft=_seed_for_new_run(exp))
+                run_of_stem[unit.stem] = run.id
+                created_runs.append(
+                    {
+                        "run_id": run.id,
+                        "label": run.label,
+                        "ordinal": run.ordinal,
+                        "stem": unit.stem,
+                        "acquisition_path": unit.acquisition_path,
+                        "legacy_number": unit.legacy_number,
+                        "scan_count": unit.scan_count,
+                        "source_count": unit.source_count,
+                        # AN ASSOCIATION CLAIM, DISCLOSED RATHER THAN SILENT. Added
+                        # 2026-09-16 after independent review.
+                        #
+                        # `_seed_for_new_run` gives the FIRST run of a record the
+                        # run-level content the record already held — a spectrum, a QC
+                        # verdict — because otherwise adding a run silently drops answers
+                        # a person entered. For `POST /runs` that is unobjectionable: a
+                        # human chose that run. HERE the batch creates several at once
+                        # and the inheriting one is whichever measurement `relate`
+                        # ordered first, so the record's measured spectrum ends up
+                        # claiming to be a measurement of THAT acquisition — an
+                        # association nothing evidenced.
+                        #
+                        # The inheritance itself is kept (passing `{}` reintroduces the
+                        # measured data-loss defect the seeder exists to close, and a
+                        # test proves nothing from the archive reaches any draft). What
+                        # was missing was that the response said nothing about it. Now
+                        # exactly one row per batch can carry `true`, and a surface can
+                        # tell a scientist which measurement their existing answers were
+                        # attached to — which is the only thing that makes it reviewable.
+                        "inherited_record_level_content": inherits
+                        and bool(run.draft.get("fields") or run.draft.get("blocks")),
+                    }
+                )
+
         sent: list[dict] = []
         minted_notes: dict[str, object] = {}
         wrote_something = False
@@ -25581,6 +25941,39 @@ def post_import_add_to_experiment(
                 _proposal_writer_for(candidate.target_field_path)
             ]
             candidate_run_id = run_id if scope_of_target == "run" else None
+            if create_runs and scope_of_target == "run":
+                # THE RUN IS RESOLVED FROM THE CANDIDATE'S OWN MEASUREMENT, which
+                # is what makes this operation put each value on the run it was
+                # read from rather than all of them on one.
+                unit = session.archive_reading.unit_of_candidate(
+                    candidate.candidate_id
+                )
+                candidate_run_id = (
+                    run_of_stem.get(unit.stem) if unit is not None else None
+                )
+                if candidate_run_id is None:
+                    # NOT A REFUSAL OF THE BATCH. There is no run for this value
+                    # and there never will be one from this import — an alignment
+                    # scan is not a Run, and a beamtime-scope reading belongs to
+                    # the whole import rather than to a measurement — so it is
+                    # reported with its own reason and the rest proceeds. None of
+                    # it is fixable by retrying, which is the existing test for
+                    # `not_sent` rather than a refusal.
+                    not_sent.append(
+                        {
+                            "candidate_id": candidate.candidate_id,
+                            "target_field_path": candidate.target_field_path,
+                            "kind": candidate.kind,
+                            "error": "no_run_for_this_candidate",
+                            "reason": (
+                                _IMPORT_CANDIDATE_IS_BEAMTIME_SCOPE
+                                if candidate.candidate_id
+                                in session.archive_reading.shared_candidate_ids
+                                else _IMPORT_CANDIDATE_UNIT_IS_NOT_A_RUN
+                            ),
+                        }
+                    )
+                    continue
             statement = (
                 candidate.supporting_statements[0]
                 if candidate.supporting_statements
@@ -25600,14 +25993,7 @@ def post_import_add_to_experiment(
                         "candidate_id": candidate.candidate_id,
                     },
                 )
-            filename = next(
-                (
-                    entry.filename
-                    for entry in session.sources
-                    if entry.source_id == statement.get("source_id")
-                ),
-                statement.get("source_id") or "",
-            )
+            filename = _import_statement_filename(session, candidate, statement)
             minted = _mint_import_candidate(
                 exp,
                 candidate,
@@ -25644,7 +26030,14 @@ def post_import_add_to_experiment(
                 }
             )
 
-        if wrote_something:
+        # A CREATED RUN IS A WRITE EVEN IF EVERY CANDIDATE WAS ALREADY SENT, and
+        # this `or` is why: `wrote_something` tracked minted proposals alone, so
+        # re-running a batch that had already sent every candidate would have
+        # added N runs to the loaded object and then NOT SAVED THEM — returning
+        # 200 with a `created_runs` list describing runs that do not exist. That
+        # is the exact class of defect `CLAUDE.md` §11 records four times: a
+        # surface reporting work it had not done.
+        if wrote_something or created_runs:
             _changed, stale = _save_versioned(exp, if_match)
             if stale is not None:
                 return stale  # another writer won the race; nothing was stored
@@ -25683,6 +26076,15 @@ def post_import_add_to_experiment(
     return {
         "experiment_id": experiment_id,
         "run_id": run_id,
+        "create_runs": create_runs,
+        # EVERY RUN THIS REQUEST CREATED, with the measurement each came from.
+        # Empty when `create_runs` was not asked for, which is a measured empty
+        # list rather than an absent key: a client can tell "no runs were asked
+        # for" from "runs were asked for and none was created", and the second
+        # is unreachable because a batch with no run-candidate measurement is
+        # refused before the lock.
+        "created_runs": created_runs,
+        "runs_already_present": runs_already_present,
         "sent": sent,
         "not_sent": not_sent,
         "counts": {
@@ -25690,6 +26092,8 @@ def post_import_add_to_experiment(
             "sent": sent_count,
             "already_sent": already,
             "not_sent": len(not_sent),
+            "runs_created": len(created_runs),
+            "runs_already_present": len(runs_already_present),
         },
         "experiment_version": version,
     }
