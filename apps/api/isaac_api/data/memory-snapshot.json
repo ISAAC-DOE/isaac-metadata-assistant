@@ -10524,7 +10524,7 @@
       },
       {
         "path": "apps/web/src/lib/types.ts",
-        "sha256": "1f3b5c0100a5010b30011956ce1600bfd58e87accd4a421d47142d4beb9a8124"
+        "sha256": "77dde8d8a4c1a3e3122783bb9cb54f89ab50ced7fb757b5d1afade3174a3a4ca"
       },
       {
         "path": "apps/web/src/lib/useFetch.ts",
@@ -11012,7 +11012,7 @@
       }
     ],
     "served_file_count": 200,
-    "served_manifest_fingerprint": "aa7c6c0e7b9fb69f63386b4131b7a09f2ee3b5d4e7680979f5174058beaf50a0"
+    "served_manifest_fingerprint": "b1b99ddd5c0c3c7c7b9976c448e861fed36b1ee1c6f21352f38ffaaf49d78058"
   },
   "overview": {
     "built_at_commit": "caab1d0a69c1733524bda5dde495623bc4b7bad1",
