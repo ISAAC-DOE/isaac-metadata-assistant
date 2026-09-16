@@ -25166,6 +25166,37 @@ def post_import_candidate_proposal(
                 ),
                 run_id=run_id if isinstance(run_id, str) else None,
             )
+
+        # A PERSISTED SESSION CAN NAME A PATH THIS BUILD NO LONGER WRITES, and it
+        # is refused rather than crashed on. `candidate.proposable` is recomputed
+        # from `not_proposable_reason`, which is STORED IN THE SESSION DOCUMENT —
+        # so it records what the build that reconstructed the import found, and a
+        # session outlives that build. If `_proposal_writer_for` answers `None`,
+        # the `_PROPOSAL_WRITER_SCOPE` lookup on the next line is a `KeyError`:
+        # a 500 out of the one route by which anything from an import reaches a
+        # record, on a document nobody hand-edited.
+        #
+        # ADDED 2026-09-15, in the same change that named it on the batch route.
+        # That comment said this exposure was "deliberately NOT changed here ...
+        # closing it is its own slice with its own test" — which was true for
+        # about an hour, and is corrected there rather than left standing, because
+        # a comment pointing at an open defect that has since been closed sends
+        # the next reader looking for something that is not there.
+        if _proposal_writer_for(path) is None:
+            return _proposal_refusal(
+                "no_write_path_for_field",
+                (
+                    "No write operation in this build accepts a value at that "
+                    "path, so a proposal for it could be created and never "
+                    "applied. Reconstruct this import again — it was "
+                    "reconstructed by a build that did accept it. Nothing was "
+                    "written. THIS IS A LIMITATION OF THIS BUILD AND NOT A "
+                    "STATEMENT ABOUT THE OFFICIAL ISAAC SCHEMA, which defines "
+                    "this field."
+                ),
+                target_field_path=path,
+            )
+
         scope_of_target = _PROPOSAL_WRITER_SCOPE[_proposal_writer_for(path)]
         if scope_of_target == "run" and run_id is None:
             return _proposal_refusal(
@@ -25467,10 +25498,17 @@ def post_import_add_to_experiment(
         # `_PROPOSAL_WRITER_SCOPE` lookup below a `KeyError`, i.e. a 500 out of a
         # route whose whole job is to refuse clearly.
         #
-        # THE SINGLE-CANDIDATE ROUTE HAS THE IDENTICAL EXPOSURE and is deliberately
-        # NOT changed here — it is pre-existing, it is one candidate rather than N,
-        # and closing it is its own slice with its own test. Named rather than
-        # silently fixed, and named rather than left unnamed.
+        # ~~THE SINGLE-CANDIDATE ROUTE HAS THE IDENTICAL EXPOSURE and is
+        # deliberately NOT changed here — it is pre-existing, it is one candidate
+        # rather than N, and closing it is its own slice with its own test.~~
+        #
+        # CORRECTED THE SAME DAY: it IS closed, in `post_import_candidate_proposal`,
+        # with the same refusal and its own test. Struck rather than deleted because
+        # a comment naming an open defect that has since been closed is what sends
+        # the next reader looking for something that is not there — and because the
+        # PATTERN it records is still the right one: name the sibling exposure in
+        # the change that finds it, so that closing it is a decision rather than a
+        # rediscovery.
         no_writer = [
             candidate
             for candidate in sendable

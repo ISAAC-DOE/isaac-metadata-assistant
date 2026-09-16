@@ -1638,3 +1638,51 @@ def test_the_guard_does_not_fire_when_every_writer_is_present(client):
     response = _add_to(client, import_id, eid)
     assert response.status_code == 200, response.text
     assert response.json()["counts"]["sent"] == 1
+
+
+def test_the_single_candidate_route_refuses_a_vanished_writer_too(client):
+    """The sibling of `test_a_persisted_candidate_whose_writer_is_gone_...`.
+
+    Both routes reach `_PROPOSAL_WRITER_SCOPE[_proposal_writer_for(path)]`, and
+    both would raise `KeyError` on a session reconstructed by a build that had a
+    writer this one does not. The batch route's guard shipped first and NAMED this
+    one as open; it is closed here in the same change, so that comment is a
+    correction rather than a standing pointer at a defect.
+    """
+    import_id = _bundle(client)
+    eid = _record(client)
+    candidate = _candidate(client, import_id, RECORD_PATH)
+    before = _record_shape(client, eid)
+
+    with mock.patch.object(routes, "_proposal_writer_for", return_value=None):
+        response = _propose(client, import_id, candidate["candidate_id"], eid)
+
+    assert response.status_code == 422, response.text
+    body = response.json()
+    assert body["error"] == "no_write_path_for_field"
+    assert body["target_field_path"] == RECORD_PATH
+    assert "NOT A STATEMENT ABOUT THE OFFICIAL ISAAC SCHEMA" in body["message"]
+    assert _record_shape(client, eid) == before
+
+
+def test_neither_route_refuses_when_the_writer_is_present(client):
+    """A negative control covering BOTH routes in one place.
+
+    Without it, the two patched tests above would pass just as well if the guards
+    fired unconditionally — in which case nothing from an import could ever reach
+    a record, which is the one thing these routes are for.
+    """
+    import_id = _bundle(client)
+    eid = _record(client)
+    candidate = _candidate(client, import_id, RECORD_PATH)
+
+    single = _propose(client, import_id, candidate["candidate_id"], eid)
+    assert single.status_code == 200, single.text
+    assert single.json()["deduplicated"] is False
+
+    # And the batch, on a second record, so the first one's exactly-once does not
+    # make this vacuous.
+    other = _record(client, title="A second destination")
+    batch = _add_to(client, import_id, other)
+    assert batch.status_code == 200, batch.text
+    assert batch.json()["counts"]["sent"] == 1

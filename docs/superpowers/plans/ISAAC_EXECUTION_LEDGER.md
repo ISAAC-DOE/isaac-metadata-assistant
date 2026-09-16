@@ -4450,6 +4450,34 @@ structure for those is the two-sub-agent synthesis this run could not perform. W
 is the part that cannot be faked — a negative control on the tool, a preflighted overlay, and
 attribution by difference.
 
+### 4. The sibling exposure the batch route named is closed, same day
+
+`HIST-005`'s batch route gained a guard against a persisted session naming a path this build no
+longer writes, and its comment named the single-candidate route as carrying the identical exposure
+— *"deliberately NOT changed here ... closing it is its own slice with its own test"*. That was
+true for about an hour. **It is closed**, in `post_import_candidate_proposal`, with the same
+refusal and its own test, and **the batch route's comment is struck in place rather than deleted**:
+a comment pointing at an open defect that has since been closed sends the next reader looking for
+something that is not there, and the PATTERN it records — name the sibling exposure in the change
+that finds it — is still the right one.
+
+**Why it is reachable at all, which is the part worth keeping.** `candidate.proposable` is
+recomputed from `not_proposable_reason`, and that is **stored in the session document** — so it
+records what the build that reconstructed the import found, and a session outlives that build.
+`_proposal_writer_for` answering `None` makes the `_PROPOSAL_WRITER_SCOPE` lookup a `KeyError`: a
+**500** out of the one route by which anything from an import reaches a record, on a document
+nobody hand-edited.
+
+**A negative control covers BOTH routes in one place**, because without it the two patched tests
+would pass just as well if the guards fired unconditionally — in which case nothing from an import
+could ever reach a record, which is the one thing these routes are for. It drives the single route
+on one record and the batch on a second, so the first one's exactly-once does not make the second
+assertion vacuous.
+
+Measured: `test_historical_import_routes.py` + `test_historical_import.py` → **149 passed**;
+submitted-history sweep, OpenAPI and contract-parity suites → **53 passed**; both committed
+snapshot artifacts regenerated, `--check` clean, **155** gate tests pass.
+
 ### Verification
 
 | what | command | result |
