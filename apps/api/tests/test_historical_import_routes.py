@@ -1256,14 +1256,22 @@ def test_the_batch_sends_every_proposable_candidate_and_names_the_rest(client):
         "candidate_unresolved",
         "candidate_not_proposable",
     }
+    # `runs_created` JOINED THIS DICT 2026-09-16 with the archive source kind.
+    # The four original numbers are UNCHANGED and are still asserted exactly;
+    # the fifth is `0` here because this bundle holds no archive and this request
+    # did not ask for runs, which is a measured zero rather than an absent key.
     assert body["counts"] == {
         "candidates": 4,
         "sent": 1,
         "already_sent": 0,
         "not_sent": 3,
+        "runs_created": 0,
     }
+    assert body["create_runs"] is False
+    assert body["created_runs"] == []
     # THE COUNTS SUM, which is what makes the report a report rather than four
-    # independent numbers.
+    # independent numbers. `runs_created` is deliberately NOT in this sum: a run
+    # is not a candidate, and adding it would make the identity stop holding.
     assert (
         body["counts"]["sent"]
         + body["counts"]["already_sent"]
@@ -1520,11 +1528,16 @@ def test_a_session_with_candidates_but_none_proposable_refuses_and_lists_why(cli
     body = response.json()
     assert body["error"] == "nothing_to_send"
     assert "nothing to send" in body["message"]
+    # `runs_created` IS PRESENT AND ZERO ON THE REFUSAL PATH TOO, added
+    # 2026-09-16 with the archive source kind. The counts block has ONE shape on
+    # every path, so a client never learns whether anything was created by
+    # branching on a key's presence. The four original numbers are unchanged.
     assert body["counts"] == {
         "candidates": 3,
         "sent": 0,
         "already_sent": 0,
         "not_sent": 3,
+        "runs_created": 0,
     }
     # THE ANSWER EXPLAINS ITSELF: every candidate is listed with its own reason,
     # so a scientist is not told "nothing could be sent" and left to guess which
