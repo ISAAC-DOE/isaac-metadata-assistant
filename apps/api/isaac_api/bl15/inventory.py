@@ -20,15 +20,31 @@ from dataclasses import dataclass, field
 class ArchiveLimits:
     """Resource ceilings for one inventory walk.
 
-    Defaults are set against the **measured** real BL15-2 archive (1,192 files, 88 MB
-    uncompressed, largest single file ~500 KB — see
+    Defaults are set against the **measured** real BL15-2 archive (1,192 files,
+    89,163,651 bytes uncompressed — see
     ``docs/evidence/bl15-2-corpus-characterization-2026-09-16.md``) with headroom, so
     they are bounds a real corpus clears rather than numbers chosen to be round.
 
-    A walk that meets a ceiling **refuses the entry and keeps going**, recording the
-    refusal; it does not abort the inventory. A corpus with one pathological member is
-    still worth inventorying, and a scientist who can see *"this file was skipped and
-    why"* is better served than one handed an error page.
+    ~~largest single file ~500 KB~~ — **CORRECTED 2026-09-16, the same day, by the slice
+    that implemented the walk.** The largest single file is **1,620,639 bytes**
+    (``alignment``, a SPEC acquisition, re-measured independently here); the largest
+    *numbered* acquisition is 874,026 bytes. Both clear
+    :attr:`max_entry_bytes` by a wide margin, so **no ceiling changes and no behaviour
+    changes** — it is the stated fact that was wrong. Kept struck rather than replaced
+    because a ceiling justified by a wrong measurement is a ceiling somebody will later
+    "correct" downward on the strength of the same wrong number.
+
+    **TWO DIFFERENT BEHAVIOURS, and the distinction is the contract.** A **per-entry**
+    ceiling (:attr:`max_entry_bytes`, :attr:`max_depth`, :attr:`max_path_chars`,
+    :attr:`max_compression_ratio`) **refuses that entry and keeps going**, recording the
+    refusal: a corpus with one pathological member is still worth inventorying, and a
+    scientist who can see *"this file was skipped and why"* is better served than one
+    handed an error page. A **whole-archive** ceiling (:attr:`max_entries`,
+    :attr:`max_total_bytes`) **stops the walk** and sets
+    :attr:`ArchiveInventory.truncated_reason`, because past it the inventory is no longer
+    a description of the archive and must say so. An earlier revision of this docstring
+    stated only the first behaviour while :attr:`ArchiveInventory.truncated_reason` stated
+    only the second; both are true, of different ceilings.
     """
 
     #: Most entries one archive may contribute. 1,192 measured; 4x headroom.
@@ -102,11 +118,22 @@ class SourceRecord:
     basename: str
     extension: str
     size_bytes: int
-    #: SHA-256 of the raw bytes. **The only identity used for deduplication.** In the
-    #: real corpus every ``*_dir`` also holds a byte-identical copy of its root
-    #: acquisition file — 96 duplicate groups over 193 files — so a name-similarity
-    #: heuristic would both miss these and wrongly fuse ``run29.mac`` with
-    #: ``run29.mac.mac``, which have different content.
+    #: SHA-256 of the raw bytes. **The only identity used for deduplication.**
+    #:
+    #: Measured over the real corpus: **96 duplicate groups covering 193 files**, of
+    #: which **92 are a root acquisition and the byte-identical copy inside its own
+    #: ``*_dir``** — 92 and not 94, because the two empty scan directories hold no copy.
+    #: The other **4 groups cover 9 files**, and one of them is why a name heuristic
+    #: could not do this job at all: ``run22.mac``, ``run29`` and ``run29.mac.mac`` are
+    #: **byte-identical to each other** (4,013 bytes), while ``run29.mac`` is a
+    #: **different file** (4,059 bytes).
+    #:
+    #: ~~a name-similarity heuristic would wrongly fuse ``run29.mac`` with
+    #: ``run29.mac.mac``~~ — that is true and was **not the whole point**, corrected
+    #: 2026-09-16. The stronger fact is that no name heuristic could ever ASSEMBLE the
+    #: real group, because its third member is called ``run22.mac``. A digest finds a
+    #: group whose members share no name at all; a name rule can only ever split or fuse
+    #: things that look alike.
     content_sha256: str
     #: Archive-relative directory, ``""`` at the archive root.
     parent_dir: str

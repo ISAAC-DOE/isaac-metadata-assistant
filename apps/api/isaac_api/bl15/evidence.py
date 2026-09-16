@@ -373,9 +373,17 @@ class ReaderResult:
 
 # --- reader resource ceilings ------------------------------------------------
 #
-# Measured against the real corpus so they are bounds, not guesses: the largest
-# SPEC acquisition file is ~500 KB, the largest `.dat` ~40 KB, the beamtime notes
-# ~30 KB, and the whole archive is 88 MB uncompressed over 1,192 files.
+# Measured against the real corpus so they are bounds, not guesses: the largest SPEC
+# acquisition file is **1,620,639 bytes** (`alignment`), the largest NUMBERED acquisition
+# 874,026 bytes, the largest `.dat` ~40 KB, the beamtime notes ~30 KB, and the whole
+# archive 89,163,651 bytes over 1,192 files.
+#
+# ~~the largest SPEC acquisition file is ~500 KB~~ — CORRECTED 2026-09-16, the same day,
+# by the slice that implemented the walk and re-measured independently here. The ceiling
+# below is unchanged and was never in danger: 1.6 MB clears 8 MB. It is the stated fact
+# that was wrong, and it is struck rather than replaced because a bound justified by a
+# wrong measurement invites a later "correction" downward on the strength of that same
+# wrong number.
 
 #: Largest single source a reader will accept. Over it the reader REFUSES with
 #: the measured size and this ceiling, so nothing is read partly and reported

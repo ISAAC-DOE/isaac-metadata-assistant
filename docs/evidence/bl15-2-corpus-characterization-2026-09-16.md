@@ -19,8 +19,10 @@ Measured with `find`, `os.walk` and `hashlib` over the extracted folder.
 | Quantity | Value |
 |---|---:|
 | files | **1,192** |
-| directories | **96** (95 top-level + `MERGE`) |
-| uncompressed size | **88 MB** |
+| directories | **95** subdirectories (94 `*_dir` + `MERGE`); `find . -type d` reports **96** because it counts the root |
+| uncompressed size | **89,163,651 bytes** (88 MB) |
+| largest single file | **1,620,639 bytes** — `alignment`, a SPEC acquisition |
+| largest *numbered* acquisition | **874,026 bytes** |
 | `.dat` (scan exports) | **908** |
 | extensionless | **187** |
 | `.mac` | **59** |
@@ -58,10 +60,34 @@ directories, **0 to 233 per directory**. Two `_dir`s are **empty**
 (`01_IrO2_oldPellet_f35_dir`, `02_IrO2_oldPellet_f35_newGrid_dir`) — so a measurement can
 exist with zero scan children, and "has scans" cannot be a precondition for a candidate.
 
-**2.4 — Every `_dir` also contains a byte-identical copy of its root acquisition file.**
-92 extensionless entries inside `_dir` directories; 96 duplicate-content groups covering
-193 files. Deduplication must be by **content hash**, and the copy must not be counted as
-a second source of corroboration.
+**2.4 — Almost every `_dir` also contains a byte-identical copy of its root acquisition
+file.** 92 extensionless entries inside `_dir` directories; 96 duplicate-content groups
+covering 193 files. Deduplication must be by **content hash**, and the copy must not be
+counted as a second source of corroboration.
+
+~~Every `_dir`~~ — **CORRECTED 2026-09-16, same day: it is 92 of 94**, because the two
+empty scan directories (§2.3) hold no copy. Measured composition of the 96 groups:
+
+| | groups | files |
+|---|---:|---:|
+| a root acquisition and its byte-identical `*_dir` copy | **92** | 184 |
+| everything else | **4** | **9** |
+
+And the four others are the more instructive half, because one of them defeats any
+name-based rule outright:
+
+- **`run22.mac` = `run29` = `run29.mac.mac`** — byte-identical, 4,013 bytes each — while
+  **`run29.mac` is a different file** (4,059 bytes). So the group's three members share no
+  common name, and a name heuristic could not assemble it at *all*; it could only ever
+  split or fuse things that already look alike.
+- `run00.mac` = `run55.mac`
+- `run48.mac` = `run49.mac`
+- two differently-named `MERGE/` products of the same old-pellet measurement
+
+**Consequence, and it is the reason this correction matters rather than being cosmetic:**
+a reader who believed "every `_dir` has a copy" would treat a missing copy as corruption,
+and a reader who believed the duplicates were *only* root/`_dir` pairs would never look
+for a three-member group among the macros.
 
 **2.5 — Macro intent and acquired files disagree, 9 times in each direction.** 95 distinct
 `newfile` targets; **9 targets have no acquisition file** and **9 acquisitions have no
