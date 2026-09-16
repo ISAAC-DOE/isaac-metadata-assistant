@@ -744,9 +744,46 @@ function PrivacyTab({ state }: { state: AboutState }) {
 /**
  * The ONE canonical home of the detailed definitions. Every string comes from
  * `settingsConcepts()`; nothing here is authored inline, and no `detail` is
- * rendered by any other tab. Secondary edge cases sit behind a native
- * `<details>` — never an honesty caveat, which would let the visible copy
- * overstate what the code checks.
+ * rendered by any other tab.
+ *
+ * TWO DISCLOSURE LAYERS, AND THE RULE THAT SEPARATES THEM IS ABOUT WHAT THE
+ * VISIBLE TEXT *CLAIMS*, NOT ABOUT WHAT IS COLLAPSED.
+ *
+ * The inner layer is `concept.more` — `details.settings-more`, a secondary edge
+ * case. Its rule is unchanged and still absolute (`settingsContent.ts`, the
+ * `no-telemetry` block): *a caveat that keeps the visible sentence from
+ * overstating what the code does may never go behind `more`.* That is because a
+ * `more` summary sits BESIDE an always-visible sentence which makes a claim, so
+ * hiding that claim's scope leaves the claim standing unqualified.
+ *
+ * The outer layer, added 2026-09-16, is `details.settings-concept` — one per
+ * concept, holding the WHOLE `detail` verbatim. This does not reverse the rule
+ * above; it does not meet it, because **a `<summary>` here renders
+ * `concept.heading` and nothing else, and a heading is a TOPIC, not an
+ * assertion.** "No Telemetry or Analytics" names a subject; it claims nothing,
+ * so there is no claim left standing unqualified when the row is shut. Nothing
+ * is deleted, shortened, merged or reworded, and every sentence stays in the DOM
+ * and reachable — `querySelectorAll` and Testing Library's text queries reach
+ * inside a closed `<details>`, which is why every claim-parity guard still
+ * matches unchanged.
+ *
+ * THE DISTINCTION IS LOAD-BEARING AND IS ENFORCED MECHANICALLY, because it is
+ * exactly one edit away from being violated. `concept.summary` — the vetted
+ * one-liner Overview renders — must NEVER become this `<summary>`: `no-telemetry`'s
+ * reads *"This application measures and transmits nothing about your session"*,
+ * while its `detail` carries the server-log, access-log and identity-gateway scope
+ * that stops precisely that sentence from overstating the code. Promoting it here
+ * would restore, behind a shut drawer, the exact overstatement the `detail` was
+ * written to retract. `settings-page.test.tsx` asserts every concept `<summary>`'s
+ * `textContent` equals its `heading` exactly, and separately that no concept's
+ * `summary` string appears in any `<summary>` element.
+ *
+ * WHY NO ROW IS OPEN BY DEFAULT: opening any subset would rank these twelve
+ * privacy facts against each other, which is a judgement no measurement here
+ * supports, and the two likeliest candidates are carried elsewhere anyway (the
+ * mode chip's accessible name, and `ASSISTANT_NO_MODEL_CLAIM` in the Assistant
+ * dock). The card heading, the marker and the pointer cursor are what say a row
+ * opens.
  */
 function PrivacyBody({ data }: { data: ApiAboutResponse }) {
   const concepts = useMemo(() => settingsConcepts(settingsFactsFrom(data)), [data]);
@@ -755,14 +792,22 @@ function PrivacyBody({ data }: { data: ApiAboutResponse }) {
       <ul className="settings-points">
         {concepts.map((concept) => (
           <li key={concept.id}>
-            <h3>{concept.heading}</h3>
-            <p>{concept.detail}</p>
-            {concept.more && (
-              <details className="settings-more">
-                <summary>{concept.more.label}</summary>
-                <p>{concept.more.text}</p>
-              </details>
-            )}
+            {/* `<h3>` inside `<summary>` is the spec's own allowance: a first
+                `<summary>` takes phrasing content OR one heading element. So the
+                heading keeps its level and its role, and `.settings-points h3`
+                keeps styling it. */}
+            <details className="settings-concept">
+              <summary>
+                <h3>{concept.heading}</h3>
+              </summary>
+              <p>{concept.detail}</p>
+              {concept.more && (
+                <details className="settings-more">
+                  <summary>{concept.more.label}</summary>
+                  <p>{concept.more.text}</p>
+                </details>
+              )}
+            </details>
           </li>
         ))}
       </ul>
