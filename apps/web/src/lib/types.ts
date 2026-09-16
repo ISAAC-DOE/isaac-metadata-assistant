@@ -4068,6 +4068,8 @@ export interface ApiImportSession {
     conventions_encoded: number;
   };
   available_fixtures: string[];
+  /** Archive names the server will walk, from its own allowlist. */
+  available_archives: string[];
 }
 
 /** A session IN A LIST: counts, never the bundle. */
@@ -4089,6 +4091,8 @@ export interface ApiImportListResponse {
   workflow: ApiImportWorkflowStep[];
   durability: string;
   available_fixtures: string[];
+  /** Archive names the server will walk, from its own allowlist. */
+  available_archives: string[];
 }
 
 export interface ApiImportSessionResponse {

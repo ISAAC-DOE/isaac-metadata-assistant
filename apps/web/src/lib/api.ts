@@ -2835,12 +2835,30 @@ export const api = {
           mediaType?: string;
           sizeBytes?: number;
           sha256?: string;
+        }
+      /*
+       * A WHOLE FOLDER OR ARCHIVE, from the server's own allowlist. One bundle entry
+       * for the whole thing — the manifest stays ONE row while the parse walks 1,192
+       * files, which is why `MAX_SOURCES_PER_SESSION` is untouched at 500.
+       *
+       * `archiveName` reuses the `fixture_name` field on the wire: both kinds answer
+       * the same question — WHICH committed artifact, from an allowlist the server
+       * owns — and a fourth key would be a second place for a hydration path to look.
+       */
+      | {
+          kind: 'archive';
+          archiveName: string;
+          mediaType?: string;
+          sizeBytes?: number;
+          sha256?: string;
         },
   ): Promise<ApiImportSourceCreated> {
     const body: Record<string, unknown> = { kind: input.kind };
     if (input.kind === 'reference') {
       body.filename = input.filename.trim();
       body.reference = input.reference.trim();
+    } else if (input.kind === 'archive') {
+      body.fixture_name = input.archiveName;
     } else {
       body.fixture_name = input.fixtureName;
     }

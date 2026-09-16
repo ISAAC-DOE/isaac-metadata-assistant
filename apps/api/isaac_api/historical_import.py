@@ -2456,8 +2456,35 @@ class ImportSession:
         return None
 
     def parsable_sources(self) -> list[SourceReference]:
-        """Sources a registered parser can read. Never a count of the manifest."""
-        return [s for s in self.sources if parser_for(s) is not None]
+        """Sources this build can READ. Never a count of the manifest.
+
+        **AN ARCHIVE COUNTS, AND LEAVING IT OUT MADE THE WHOLE FEATURE
+        UNREACHABLE.** Added 2026-09-16, found by a browser test rather than by
+        review or by any unit test.
+
+        This read ``parser_for(s) is not None``, which asks a narrower question
+        than the name: *is there a registered* :class:`SourceParser` *for this*.
+        An archive has none by design — it takes :func:`read_archive`, a
+        different path with a different output, which is why
+        :data:`SOURCE_KIND_ARCHIVE` exists as a third kind at all.
+
+        So ``parse_session`` read an archive perfectly well while this count said
+        nothing here could be read, the surface disabled `Read the Sources` on
+        that count, and a scientist could add an archive and then do nothing with
+        it. Every layer was correct in isolation: the route parsed, the walk
+        worked, the review rendered — and the one number gating the button
+        described a different question from the one it was asked.
+
+        That is the recurring shape this repository records: **a count not
+        derived from what it claims to describe.** It is stated here rather than
+        only fixed, because the narrower predicate is the one a reader reaches
+        for, and the name will keep inviting it.
+        """
+        return [
+            s
+            for s in self.sources
+            if parser_for(s) is not None or s.kind == SOURCE_KIND_ARCHIVE
+        ]
 
     def furthest_step(self) -> str:
         """WHICH STEP THIS SESSION HAS REACHED — derived, never stored.
@@ -2493,9 +2520,28 @@ class ImportSession:
             if sendable and all(cid in self.proposed for cid in sendable):
                 return "add_to_experiments"
             return "review"
+        # AN ARCHIVE REACHES `reconstruct` AT THE READ, and saying otherwise
+        # misreported the workflow. Added 2026-09-16, found by a browser test.
+        #
+        # For an archive the parse IS the reconstruction: `read_archive` runs the
+        # whole chain and produces the candidates, so a session holding one has
+        # 101 of them while `self.reconstruction` — the PROVIDER's reconstruction
+        # over `self.parsed` — is still `None` and `self.parsed` is empty. The
+        # derivation below asked only about those two, so a fully-reconstructed
+        # archive session reported `sources`: two steps behind where it was.
+        #
+        # This is the same shape as `parsable_sources`' defect one method above,
+        # and they were found together: a predicate asking about the FIXTURE path
+        # while the archive path does the same work somewhere else.
+        if self.archive_candidates:
+            return "reconstruct"
         if self.reconstruction is not None:
             return "reconstruct"
         if self.parsed:
+            return "parse"
+        if self.archive_reading is not None:
+            # Read, but it produced no candidate — a real outcome for an archive
+            # of sources this build can classify and not interpret.
             return "parse"
         if self.sources:
             return "sources"

@@ -1670,10 +1670,22 @@ table asserted preparation values were withheld.
 movement and no edit to `a11y-baseline.ts`**; contract parity 4 passed; snapshot and
 deep-artifact gates green; truth path diff empty.
 
-**Named rather than implied, and still open:** the axe sweep reaches `/imports` at its
-INDEX, so the loaded review state is unmeasured at every viewport — the disclosure registry
-records 0 as a *measurement* now rather than as an absence, and the slice that seeds a
-session into `SURFACES` must change it. Every hosted QA remains `HOSTED QA PENDING (Krish)`.
+**Corrected the same day, because the first version of this paragraph was wrong.**
+~~The loaded review state is unmeasured at every viewport, and the slice that seeds a
+session into `SURFACES` must change the disclosure count.~~ That repeated the disclosure
+registry's framing without checking `surfaces.ts`, which records the opposite: adding
+`imports-session` to `SURFACES` was **declined**, because it would enrol the surface in
+thirteen sweeps across seven viewport projects, every one needing a POST the read-only
+config forbids. The loaded state is covered in the suite that IS allowed to POST, and
+that suite now drives **six** states — four from an example source, two from an archive
+including the corpus review — each required axe-clean. The read-only registry's 0 is
+correct for the read-only sweep and says nothing about coverage.
+
+**Still open, and genuinely:** the 15 `needs_domain_review` concepts are Angel's and the
+packet is prepared, not sent; PDF extraction (the `.txt` of the same notes is read, and
+the three representations are ONE witness, so this adds no evidence); and every hosted QA
+remains `HOSTED QA PENDING (Krish)` — `/krish` sits behind an Authentik edge this
+environment cannot authenticate to.
 
 **Four conflicts this corpus contains that must SURVIVE rather than be repaired.** They are the
 reason Historical Import exists, and a slice that "cleans" any of them has broken the feature:

@@ -296,6 +296,7 @@ function session(overrides: Partial<ApiImportSession> = {}): ApiImportSession {
       conventions_encoded: 0,
     },
     available_fixtures: ['SYNTHETIC-bundle-a.txt', 'SYNTHETIC-bundle-b.txt'],
+    available_archives: ['bl15_synthetic_mini_corpus'],
     ...overrides,
   };
 }
@@ -309,6 +310,7 @@ function listResponse(
     workflow: WORKFLOW,
     durability: DURABILITY,
     available_fixtures: ['SYNTHETIC-bundle-a.txt', 'SYNTHETIC-bundle-b.txt'],
+    available_archives: ['bl15_synthetic_mini_corpus'],
     ...overrides,
   };
 }

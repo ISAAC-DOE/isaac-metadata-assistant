@@ -185,13 +185,23 @@ export const FIELD_GROUP_SURFACES: ReadonlySet<string> = new Set(['record-detail
  * here is not scanned, and a surface with zero recorded violations cannot signal the
  * loss by a number changing.
  *
- * So the slice that makes the sweep reach a LOADED import session changes THIS NUMBER in
- * the same change, and the assertion below names the file to edit. An `imports` surface
- * that suddenly mounts disclosures against a declared 0 fails loudly here instead of
- * quietly exempting a nine-column table, every conflict explanation and the whole
- * mapping registry from every scan. **That is now the only remaining precondition** —
- * a seeded session in `SURFACES`, which the ledger already records as the reason the
- * loaded state is unmeasured by axe at any viewport.
+ * So a slice that makes THIS sweep reach a loaded session changes this number, and the
+ * assertion below names the file to edit — an `imports` surface that suddenly mounts
+ * disclosures against a declared 0 fails loudly instead of quietly exempting a
+ * nine-column table, every conflict explanation and the whole mapping registry.
+ *
+ * ~~That is the only remaining precondition — a seeded session in `SURFACES`.~~ —
+ * **WRONG, AND CORRECTED 2026-09-16 the same day it was written.** It repeated this
+ * registry's framing without checking `surfaces.ts`, which records the opposite:
+ * adding `imports-session` to `SURFACES` was DECLINED, because it would enrol the
+ * surface in thirteen sweeps across seven viewport projects, **every one of which
+ * needs a POST this config forbids**.
+ *
+ * The loaded state is covered, in the suite that IS allowed to POST:
+ * `e2e/mutation/imports-session-a11y.spec.ts`, which now drives SIX states — four
+ * from an example source and two from an ARCHIVE, including the corpus review — and
+ * requires each axe-clean. So the honest statement is not "unmeasured", it is
+ * "measured elsewhere, by design, and not by this registry".
  */
 export const BL15_REVIEW_DISCLOSURES: Readonly<Record<string, number>> = Object.freeze({});
 

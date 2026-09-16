@@ -232,6 +232,18 @@ export const IMPORT_COPY = {
   actionStart: 'Start an Import',
   actionAddReference: 'Record a Reference',
   actionAddFixture: 'Add an Example Source',
+  /** The whole-archive entry — the only control that reaches the corpus review. */
+  actionAddArchive: 'Add an Archive',
+  /**
+   * WHAT ADDING AN ARCHIVE ACTUALLY DOES, said before it is pressed.
+   *
+   * It is ONE bundle entry for a whole folder, which is the thing a reader would
+   * otherwise have to infer from a manifest that stays at one row while hundreds of
+   * files are walked. It names no count, because the count is a property of the
+   * archive and is reported after the walk rather than promised before it.
+   */
+  addArchiveNote:
+    'One entry for the whole archive. Reading it walks every file inside, groups them into measurements, and reports what it found — including anything it could not place and anything the sources disagree about.',
   actionParse: 'Read the Sources',
   actionReconstruct: 'Reconstruct Candidates',
   actionPropose: 'Send to Review',
