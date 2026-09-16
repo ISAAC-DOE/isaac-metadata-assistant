@@ -8,6 +8,7 @@ import { LeftNav } from '../components/LeftNav';
 import { BackendDown, LoadingPanel } from '../components/FetchStates';
 import { CircleAlert, Inbox, Plus, TriangleAlert } from '../components/icons';
 import { ImportFileStaging } from '../components/ImportFileStaging';
+import { ImportCorpusReview } from '../components/ImportCorpusReview';
 import { LABELS } from '../lib/labels';
 import { stripLifecycleSuffix } from '../lib/adapt';
 import { ROUTES } from '../lib/routes';
@@ -583,6 +584,28 @@ function ImportSessionView({
         </p>
         {error !== null && <Refusal error={error} />}
       </div>
+
+      {/*
+        THE LARGE-CORPUS REVIEW — `BL15R-012`.
+
+        RENDERED ONLY WHEN THE SERVER SENDS ONE, and absent — not empty, not
+        disabled, not a placeholder — otherwise. No route emits `corpus_review`
+        today: the archive source kind is a separate slice's step 1 and
+        `historical_import.SOURCE_KINDS` still holds only `reference` and
+        `synthetic_fixture`. `ai-integration-decision-packet.md` §9's rule is
+        "build nothing that implies any of it exists", so a session without an
+        archive shows nothing here at all.
+
+        It sits ABOVE `SourcesSection` because it is the digest: `HIST-004` bans
+        `Upload -> Spinner -> Mysterious JSON`, and for a 1,192-file archive the
+        per-source list is the "mysterious" part. The scientist reads what the
+        archive contains, then drills in.
+      */}
+      {data.corpus_review && (
+        <div className="hi-section">
+          <ImportCorpusReview review={data.corpus_review} />
+        </div>
+      )}
 
       <SourcesSection
         data={data}
