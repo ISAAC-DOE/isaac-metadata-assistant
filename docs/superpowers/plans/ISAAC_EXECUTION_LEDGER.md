@@ -4378,6 +4378,78 @@ hand; and the submitted-history sweep extended with a named attempt, declared `r
 "target_requires_a_run")` rather than `ACCEPTED`, because a sweep that meets a refusal and calls it
 accepted asserts that a route which wrote nothing moved nothing.
 
+### 3. Impeccable critique of both new surfaces — ⚠️ DEGRADED: single-context (the session's 5-agent cap is exhausted)
+
+**The banner is the first thing here because the playbook demands it.** `critique.md` requires
+Assessments A and B to run as two isolated sub-agents whenever a sub-agent tool exists, and calls a
+silent degraded run "a failed critique". A sub-agent tool exists; using one would breach the
+owner's explicit cap of **five subordinate agents for the whole session**, all five of which were
+spent earlier. So both assessments ran inline, and this says so.
+
+**THE MECHANICAL DETECTOR IS STILL NON-FUNCTIONAL FOR `.tsx` HERE — RE-PROVEN BY NEGATIVE CONTROL,
+not assumed from the existing note.** `node detect.mjs --json` on a fixture holding an unlabelled
+`<img>`, a clickable `<div>` with no role, 8px text, a nested interactive element and an unlabelled
+`<input>` returned **`[]`, exit 0**. Reported as *deterministic scan unavailable*, never as "0
+findings".
+
+**THE IN-BROWSER OVERLAY IS A DIFFERENT CODE PATH AND DOES WORK.** Mutable injection was
+preflighted (`document.title` set, a `<script>` appended and its global read back) before any claim
+that an overlay ran; `live-server.mjs --background` on port 8400 served `detect.js`, and the
+overlay rendered **29 badges** with real findings. The server was stopped before reporting (pid
+27671).
+
+**ATTRIBUTION WAS MEASURED BY DIFFERENCE, NOT BY EYE.** Each surface was scanned twice in a fresh
+iframe — once as it ships, once with the new element removed — and the panel's contribution is the
+difference:
+
+| surface | as it ships | with the new element removed | attributable |
+|---|---:|---:|---:|
+| Settings → Overview (the ADVANCED marker) | 17 | 17 | **0** |
+| Historical Import, session open (the `HIST-005` panel) | 54 | 52 | **2** |
+
+The Settings group marker contributes **nothing**. The panel contributes **one `line-length` and
+one `tiny-text`**, and both are declined with reasons below.
+
+***AND THE FIRST FIX I MADE WAS AIMED AT THE WRONG QUANTITY — the session's fifth instance of a
+tool answering confidently and wrong.*** The `line-length` finding reads *"~86 chars/line (aim for
+<80)"*, so the lead copy was shortened from 172 characters to 157 to clear it. **It did not move.**
+Reading all twenty `line-length` findings on that screen revealed why: **every one reports the
+identical number, 86** — and twenty paragraphs of different lengths cannot all be 86 characters per
+line. The detector is measuring the **column** (≈557px ÷ average glyph width), so it reports one
+verdict per element in a shared measure. My own line-box measurement said **79**, under the aim,
+while the detector still counted it; two methods disagreeing is what exposed the third fact.
+
+**The shortened copy is KEPT** — 172 → 157 characters saying the same two things, on a screen whose
+owner asked for a streamlined low-text UI — **but the committed rationale was corrected in place**,
+because a comment claiming an edit cleared a finding it did not clear is the defect class this file
+exists to track. Both honesty clauses survived the cut and that is what bounded it: "nothing is
+applied" is the reason the copy exists at all, and a test asserts "no value is written" appears in
+the panel.
+
+**Two findings declined, each with its reason rather than silently:**
+
+- **`line-length` (the measure).** The only thing that clears it is a narrower column, and the
+  owner's recorded direction is *"don't cap prose narrow"*. It is the same measure residue this
+  ledger already carries against the global `68ch` rule, shared identically by the other nineteen
+  prose elements on the screen — a screen-wide type decision, not this panel's.
+- **`tiny-text` (11px).** The panel's note uses `--font-size-meta`, the app's own meta rung (503
+  uses). The screen already carries **28** of these findings; raising this one to 13px would make
+  it the only note on the surface that disagrees with its siblings. It meets contrast at 4.5:1,
+  which is the accessibility bar; the detector's 11px floor is a taste threshold this app has
+  already decided against globally.
+
+**Pre-existing findings NOT introduced here, listed so they are not mistaken for new:**
+`undersized-ui-text` on the 10.5px version chip (`isaac v0.1.0 · local dev`); `overused-font`
+(Roboto at 88%); `kicker-above-heading` on `About This Build` above the `Settings` `<h1>` — which
+`statistics-nav.test.tsx` deliberately protects; `layout-transition` on a `width, height`
+transition; `nested-cards`; `text-occlusion` ×1 on the imports screen.
+
+**What this critique did NOT do**, stated rather than implied: it did not score the ten Nielsen
+heuristics or persist a snapshot through `critique-storage.mjs`, because the playbook's own
+structure for those is the two-sub-agent synthesis this run could not perform. What it does carry
+is the part that cannot be faked — a negative control on the tool, a preflighted overlay, and
+attribution by difference.
+
 ### Verification
 
 | what | command | result |

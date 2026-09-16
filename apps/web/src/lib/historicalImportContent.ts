@@ -269,10 +269,40 @@ export const IMPORT_COPY = {
    * is a name a reader can hear as "apply it". Nothing is applied: each candidate
    * becomes an OPEN proposal you review on that record, one decision at a time.
    */
+  /*
+   * TIGHTENED 2026-09-15 — 172 characters to 157, saying the same two things.
+   * Kept because the project owner asked for a streamlined, low-text UI; NOT
+   * kept for the reason the first version of this comment gave.
+   *
+   * *** THE STATED REASON WAS WRONG AND IS CORRECTED RATHER THAN DELETED,
+   * because it is a measurement error a future reader will otherwise repeat. ***
+   * The edit was made to clear the one `line-length` finding Impeccable's
+   * in-browser detector attributes to this panel (54 findings with the panel, 52
+   * without), and the comment claimed the first wording was "86 characters per
+   * line" and the new one "78". **The detector does not measure that.** All
+   * TWENTY `line-length` findings on this screen report the identical number,
+   * 86 — twenty paragraphs of different lengths cannot all be 86 characters per
+   * line. It is measuring the COLUMN (≈557px ÷ average glyph width), so it says
+   * "this measure is 86 characters wide" and every element in the column
+   * inherits the same verdict. Shortening the text moved it not at all: the
+   * finding is still present and still reads 86.
+   *
+   * SO THE FINDING IS DECLINED, WITH ITS REASON. The only thing that would clear
+   * it is a narrower column, and the owner's recorded direction is "don't cap
+   * prose narrow". It is the same measure residue the execution ledger already
+   * carries against the global `68ch` rule, shared identically by the other
+   * nineteen prose elements here, and it is a screen-wide type decision rather
+   * than this panel's to take.
+   *
+   * BOTH CLAIMS SURVIVE THE CUT, which is what limited how far it could go: the
+   * "nothing is applied" half is the reason this copy exists at all — "Add This
+   * Import to a Record" is a name a reader can hear as "apply it" — and
+   * `historical-import.test.tsx` asserts "no value is written" appears in this
+   * panel, so neither clause could be the thing that went.
+   */
   addWholeLead:
-    'Send every candidate that can be sent to one record, in a single step. Each ' +
-    'becomes an open proposal you review there — no value is written, and nothing ' +
-    'is applied for you.',
+    'Send every candidate that can be sent to one record in one step. Each becomes ' +
+    'an open proposal you review there — nothing is applied and no value is written.',
 
   /**
    * What the run field is for HERE, and it differs from the per-candidate one
