@@ -138,7 +138,7 @@ for (const width of WIDTHS) {
   });
 }
 
-test('@responsive the /imports strip is SIX circle nodes on a connecting line, not pills, and the sentence is not a node', async ({
+test('@responsive the /imports strip is SIX circle nodes on a connecting line, not pills, and no step claims to be unbuilt', async ({
   page,
   app,
 }) => {
@@ -216,12 +216,52 @@ test('@responsive the /imports strip is SIX circle nodes on a connecting line, n
     expect(step.liBorderStyle, `"${step.text}" row itself has a border`).toBe('none');
   }
 
-  // (3) THE UNBUILT NODE IS DOTTED OR DASHED, NOT A SOLID OUTLINE AND NOT A
-  //     FILLED DISC -- the owner's own requested shape for exactly this step,
-  //     and no rectangle anywhere.
+  // (3) NO STEP IS UNBUILT ANY MORE, and the dotted shape is measured anyway.
+  //
+  //     *** THIS IS THE THIRD INVERSION OF THIS TEST, and the first caused by
+  //     a step being BUILT rather than by a design changing. *** It read
+  //     `expect(unbuilt.length).toBe(1)` and then asserted that node's border
+  //     was dotted and that it named a visible "Not built in this build"
+  //     disclosure. `HIST-005` shipped `add_to_experiments` on 2026-09-15, so
+  //     `historical_import.UNBUILT_STEP` is `None`, every row reports
+  //     `built: true`, and the disclosure renders nowhere. The old assertions
+  //     would now be asserting a defect. The test's own failure message
+  //     anticipated exactly this -- "has the fixture changed?" -- and the
+  //     answer is that the PRODUCT did.
+  //
+  //     WHAT SURVIVES, AND HOW. The owner asked for the unbuilt node to be a
+  //     dotted circle, and that requirement does not stop mattering because no
+  //     step currently uses it -- the next unbuilt step must still look right.
+  //     So the CSS RULE is measured directly instead of being measured through
+  //     whichever step happens to be unbuilt: the `unbuilt` class is applied to
+  //     a real node in the real page, its computed border style is read, and the
+  //     class is removed again. That is a stronger check than the old one, which
+  //     could only fire while a step happened to be unbuilt.
   const unbuilt = steps.filter((s) => s.unbuilt);
-  expect(unbuilt.length, 'no unbuilt step found -- has the fixture changed?').toBe(1);
-  expect(['dotted', 'dashed']).toContain(unbuilt[0]!.nodeBorderStyle);
+  expect(
+    unbuilt.length,
+    'a step reports itself unbuilt; this build declares none (UNBUILT_STEP is None)',
+  ).toBe(0);
+
+  const dottedWhenUnbuilt = await page.evaluate(() => {
+    const li = document.querySelector<HTMLElement>('.hi-steps > .hi-step');
+    if (li === null) return null;
+    const node = li.querySelector<HTMLElement>('.hi-step-node');
+    if (node === null) return null;
+    const before = window.getComputedStyle(node).borderTopStyle;
+    li.classList.add('unbuilt');
+    const after = window.getComputedStyle(node).borderTopStyle;
+    li.classList.remove('unbuilt');
+    return { before, after };
+  });
+  expect(dottedWhenUnbuilt, 'no step node to measure').not.toBeNull();
+  // A NEGATIVE CONTROL IN THE SAME MEASUREMENT: without the class the node is
+  // not dotted, so the assertion below cannot pass by the rule being universal.
+  expect(['dotted', 'dashed']).not.toContain(dottedWhenUnbuilt!.before);
+  expect(
+    ['dotted', 'dashed'],
+    'the `unbuilt` rule no longer dots the node, so the next unbuilt step will not look unbuilt',
+  ).toContain(dottedWhenUnbuilt!.after);
 
   // (4) No node holds a sentence -- a label, not prose.
   for (const step of steps) {
@@ -229,12 +269,21 @@ test('@responsive the /imports strip is SIX circle nodes on a connecting line, n
     expect(step.text, `"${step.text}" contains sentence punctuation`).not.toMatch(/[.!?]\s/);
   }
 
-  // (5) The unbuilt step still SAYS it is unbuilt -- associated rather than
-  //     merely adjacent, and the disclosure is prose in the document, not
-  //     another node in the row.
-  expect(unbuilt[0]!.describedBy, 'the unbuilt node names no disclosure').toBeTruthy();
-  const note = page.locator(`#${unbuilt[0]!.describedBy}`);
-  await expect(note).toBeVisible();
-  await expect(note).toContainText(/Not built in this build/);
-  expect(await note.evaluate((el) => el.classList.contains('hi-step'))).toBe(false);
+  // (5) NO DISCLOSURE PROSE IS RENDERED, because no step claims to be unbuilt.
+  //
+  //     The retired assertions were that the unbuilt node named a visible
+  //     disclosure by `aria-describedby` and that the disclosure was prose in
+  //     the document rather than another node in the row. Both were about a
+  //     state this build no longer has. THE MECHANISM IS STILL COVERED, and
+  //     deliberately not here: `src/__tests__/historical-import.test.tsx` §3
+  //     drives a server that DOES declare a step unbuilt (`UNBUILT_WORKFLOW`)
+  //     and asserts the disclosure, the `aria-describedby` association, and
+  //     that no control is offered for it. A browser test renders from the live
+  //     server and cannot simulate that, which is why the mechanism belongs in
+  //     jsdom and the SHIPPING STATE belongs here.
+  for (const step of steps) {
+    expect(step.describedBy, `"${step.text}" names a disclosure that should not exist`).toBeNull();
+  }
+  await expect(page.locator('.hi-steps-disclosure')).toHaveCount(0);
+  await expect(page.getByText(/Not built in this build/)).toHaveCount(0);
 });
