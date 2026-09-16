@@ -1589,3 +1589,50 @@ def test_nothing_in_this_file_borrows_a_reconstruction():
         and any(alias.name in forbidden for alias in node.names)
         for node in ast.walk(sample)
     ), "the guard's own predicate does not match the shape it forbids"
+
+
+def test_the_run_that_inherits_the_records_existing_answers_is_NAMED(client):
+    """AN ASSOCIATION CLAIM, DISCLOSED. Independent review found it undisclosed.
+
+    ``_seed_for_new_run`` gives the FIRST run of a record the run-level content the
+    record already held — a spectrum, a QC verdict — because otherwise adding a run
+    silently drops answers a person entered. For ``POST /runs`` that is
+    unobjectionable: a human chose that run.
+
+    **Here the batch creates several at once, so the inheriting one is whichever
+    measurement `relate` ordered first** — and the record's measured spectrum then
+    claims to be a measurement of THAT acquisition, an association nothing evidenced.
+    The inheritance is kept (passing ``{}`` reintroduces the measured data-loss defect
+    the seeder exists to close, and another test proves nothing from the archive
+    reaches any draft); what was missing was that the response said nothing about it.
+
+    At most ONE row per batch can carry the flag, because the seeder's asymmetry keys
+    on whether the record has runs yet.
+    """
+    import_id = _imported(client)
+    eid = _record(client)
+    body = _add_to_experiment(client, import_id, eid, create_runs=True)
+    rows = body["created_runs"]
+    assert rows
+
+    # EVERY ROW CARRIES THE KEY, so absence is never ambiguous with false.
+    for row in rows:
+        assert "inherited_record_level_content" in row, row
+        assert isinstance(row["inherited_record_level_content"], bool)
+
+    # AT MOST ONE, and it can only be the first — asserted over the ordinals rather
+    # than over list position, because the response order is not the contract.
+    inheriting = [r for r in rows if r["inherited_record_level_content"]]
+    assert len(inheriting) <= 1, inheriting
+    for row in inheriting:
+        assert row["ordinal"] == min(r["ordinal"] for r in rows), row
+
+    # AND THE FLAG IS DERIVED FROM THE DRAFT THAT WAS ACTUALLY WRITTEN, not from
+    # "this is the first row" — a positional flag would keep reading `true` on a
+    # record that had nothing to inherit.
+    exp = ws.load_experiment(eid)
+    by_id = {run.id: run for run in exp.runs}
+    for row in rows:
+        draft = by_id[row["run_id"]].draft
+        carries = bool(draft.get("fields") or draft.get("blocks"))
+        assert row["inherited_record_level_content"] == carries, row

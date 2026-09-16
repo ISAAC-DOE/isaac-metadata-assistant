@@ -25892,6 +25892,10 @@ def post_import_add_to_experiment(
                 # `_seed_for_new_run` exists to close — pending 0, metadata
                 # reported complete, and an export that refuses. A test asserts
                 # both target paths are absent from every created run's draft.
+                # WHETHER THIS RUN IS THE ONE THAT INHERITS, captured BEFORE the add,
+                # because `_seed_for_new_run`'s asymmetry keys on whether the record has
+                # runs yet and that is true of at most one run per batch.
+                inherits = not exp.runs
                 run = exp.add_run(label=unit.label, draft=_seed_for_new_run(exp))
                 run_of_stem[unit.stem] = run.id
                 created_runs.append(
@@ -25904,6 +25908,28 @@ def post_import_add_to_experiment(
                         "legacy_number": unit.legacy_number,
                         "scan_count": unit.scan_count,
                         "source_count": unit.source_count,
+                        # AN ASSOCIATION CLAIM, DISCLOSED RATHER THAN SILENT. Added
+                        # 2026-09-16 after independent review.
+                        #
+                        # `_seed_for_new_run` gives the FIRST run of a record the
+                        # run-level content the record already held — a spectrum, a QC
+                        # verdict — because otherwise adding a run silently drops answers
+                        # a person entered. For `POST /runs` that is unobjectionable: a
+                        # human chose that run. HERE the batch creates several at once
+                        # and the inheriting one is whichever measurement `relate`
+                        # ordered first, so the record's measured spectrum ends up
+                        # claiming to be a measurement of THAT acquisition — an
+                        # association nothing evidenced.
+                        #
+                        # The inheritance itself is kept (passing `{}` reintroduces the
+                        # measured data-loss defect the seeder exists to close, and a
+                        # test proves nothing from the archive reaches any draft). What
+                        # was missing was that the response said nothing about it. Now
+                        # exactly one row per batch can carry `true`, and a surface can
+                        # tell a scientist which measurement their existing answers were
+                        # attached to — which is the only thing that makes it reviewable.
+                        "inherited_record_level_content": inherits
+                        and bool(run.draft.get("fields") or run.draft.get("blocks")),
                     }
                 )
 

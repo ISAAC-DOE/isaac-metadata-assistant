@@ -1328,6 +1328,48 @@ MAX_STATEMENTS_PER_CANDIDATE = 5
 #: true total serves that, and 1.5 MB of it does not.
 MAX_SKIPPED_PER_SOURCE = 5
 
+#: The concepts the review surface's scientific columns read, and the ONLY evidence an
+#: archive reading retains per measurement.
+#:
+#: **THIS EXISTS BECAUSE THE SURFACE AND THE PAYLOAD DID NOT MEET.** The review surface
+#: was built against a ``Bl15CorpusReview.evidence`` list and the server persisted no
+#: evidence at all — measured at the real corpus's cardinality, the full set is ~500,000
+#: items, which is why the wiring slice deliberately did not keep it. So the surface
+#: rendered behind a payload no route emitted, and three comments justified that with a
+#: reason that had gone false. Independent review found both.
+#:
+#: The join is possible because the surface needs **six** concepts, not forty-five: it
+#: reads them for five columns (sample, medium, state, filter, potential) and ignores the
+#: rest. Restricted to those, and to readings that name a measurement, the set is a few
+#: per unit rather than five thousand.
+#:
+#: Kept in step with ``apps/web/src/lib/bl15Review.ts``'s ``BL15_COLUMN_CONCEPTS`` by
+#: ``test_historical_import_archive.py``, so a sixth column cannot be added on one side
+#: only.
+REVIEW_COLUMN_CONCEPTS: frozenset[str] = frozenset(
+    {
+        "sample_name",
+        "electrolyte_or_medium",
+        "cycling_state",
+        "before_after_state",
+        "filter",
+        "potential_magnitude",
+    }
+)
+
+#: Most DISTINCT readings retained per measurement-and-concept.
+#:
+#: **THE CAP IS BY DISTINCT LITERAL, NOT BY COUNT, AND THAT IS WHAT MAKES IT SAFE.** The
+#: surface's cell has three states — absent, read, disputed — and `disputed` fires on two
+#: or more DIFFERENT literals. A cap on the raw count could drop the one reading that
+#: differed and silently turn a disputed cell into a settled one, which is the class of
+#: defect this whole feature exists to prevent. Keeping the first reading of each distinct
+#: literal preserves that decision exactly, whatever the corpus does.
+#:
+#: Four rather than two, so a scientist opening a disputed cell sees more than the minimum
+#: needed to prove the dispute. The number of readings DROPPED is carried beside the list.
+MAX_DISTINCT_COLUMN_READINGS = 4
+
 #: Most candidates one archive reading contributes. The real corpus produces
 #: ~1,000 across 94 measurements, so this is ~4x headroom rather than a round
 #: number. Over it, candidates are DROPPED FROM THE TAIL and the count is
@@ -1502,6 +1544,17 @@ class ArchiveReading:
     #: unattached sources, and which relate inputs were actually present.
     relationships: Mapping[str, Any] = field(default_factory=dict)
     units: tuple[UnitReading, ...] = ()
+    #: ``SourceEvidence.to_state()`` for the review surface's five scientific columns,
+    #: and nothing else — see :data:`REVIEW_COLUMN_CONCEPTS` for why this is six concepts
+    #: rather than forty-five, and :data:`MAX_DISTINCT_COLUMN_READINGS` for why the cap is
+    #: by distinct literal. Only readings that NAME a measurement are here; a
+    #: beamtime-scope statement belongs to the import and the surface is explicit that
+    #: folding one into a unit would invent a relationship ``relate`` declined to make.
+    column_readings: tuple[dict, ...] = ()
+    #: How many readings the per-cell cap dropped, over the whole archive. Carried so the
+    #: list is never a trimmed one presented as whole — the same rule every other page
+    #: here follows.
+    column_readings_dropped: int = 0
     #: Candidate ids belonging to the import rather than to one measurement — the
     #: beamtime-scope context every unit INHERITS and none of them copies.
     shared_candidate_ids: tuple[str, ...] = ()
@@ -1532,6 +1585,8 @@ class ArchiveReading:
             "reading": [dict(row) for row in self.reading],
             "relationships": dict(self.relationships),
             "units": [u.to_state() for u in self.units],
+            "column_readings": [dict(row) for row in self.column_readings],
+            "column_readings_dropped": self.column_readings_dropped,
             "shared_candidate_ids": list(self.shared_candidate_ids),
             "by_concept": dict(self.by_concept),
             "by_mapping_status": dict(self.by_mapping_status),
@@ -1590,6 +1645,20 @@ class ArchiveReading:
             if isinstance(state.get("relationships"), Mapping)
             else {},
             units=tuple(units),
+            # READ, NOT REFUSED, exactly as every other persisted collection here is:
+            # a malformed row in a document a reader did not write must not make the
+            # session unreadable to the person whose it is.
+            column_readings=tuple(
+                dict(row)
+                for row in (state.get("column_readings") or [])
+                if isinstance(row, Mapping)
+            )
+            if isinstance(state.get("column_readings"), list)
+            else (),
+            column_readings_dropped=state.get("column_readings_dropped")
+            if isinstance(state.get("column_readings_dropped"), int)
+            and not isinstance(state.get("column_readings_dropped"), bool)
+            else 0,
             shared_candidate_ids=tuple(
                 cid
                 for cid in (state.get("shared_candidate_ids") or [])
@@ -2104,6 +2173,7 @@ def read_archive(
         candidates.append(bounded_shared)
         shared_ids.append(bounded_shared.candidate_id)
 
+    column_readings, column_dropped = _column_readings(evidence_by_source)
     reading = ArchiveReading(
         source_id=source.source_id,
         root_label=inventory.root_label,
@@ -2114,6 +2184,8 @@ def read_archive(
         reading=tuple(reading_rows),
         relationships=relationships.to_state(),
         units=tuple(units),
+        column_readings=column_readings,
+        column_readings_dropped=column_dropped,
         shared_candidate_ids=tuple(shared_ids),
         by_concept=dict(report.by_concept or {}),
         by_mapping_status=dict(report.by_mapping_status or {}),
@@ -2124,6 +2196,49 @@ def read_archive(
         statements_suppressed=statements_suppressed,
     )
     return reading, tuple(candidates)
+
+
+def _column_readings(
+    evidence_by_source: Mapping[str, Sequence],
+) -> tuple[tuple[dict, ...], int]:
+    """The review surface's five scientific columns, bounded. ``(rows, dropped)``.
+
+    **THE WHOLE EVIDENCE SET IS NOT PERSISTED AND MUST NOT BE** — measured at the real
+    corpus's cardinality it is roughly 500,000 items. The review surface does not need it:
+    it reads :data:`REVIEW_COLUMN_CONCEPTS`, six of the forty-five, for five columns, and
+    only for readings that NAME a measurement. Restricted that way the set is a few per
+    unit.
+
+    **The cap is on DISTINCT LITERALS per measurement-and-concept, and that is the whole
+    safety argument.** The surface's cell is ``absent`` / ``read`` / ``disputed``, and
+    ``disputed`` fires on two or more different literals. A cap on the raw count could
+    drop the one reading that differed and turn a disputed cell into a settled one — a
+    conflict silently resolved by a payload bound, which is the exact class of defect this
+    feature exists to prevent. Keeping the FIRST reading of each distinct literal
+    preserves the cell's verdict whatever the corpus does; only corroboration is thinned.
+
+    A beamtime-scope reading is excluded because it has no ``measurement_stem``, and the
+    surface is explicit that folding one into a unit would invent a relationship
+    ``relate`` declined to make.
+    """
+    seen: dict[tuple[str, str], set[str]] = {}
+    rows: list[dict] = []
+    dropped = 0
+    for path in sorted(evidence_by_source):
+        for item in evidence_by_source[path]:
+            if item.concept not in REVIEW_COLUMN_CONCEPTS or not item.measurement_stem:
+                continue
+            key = (item.measurement_stem, item.concept)
+            literals = seen.setdefault(key, set())
+            if item.raw_literal in literals:
+                dropped += 1
+                continue
+            if len(literals) >= MAX_DISTINCT_COLUMN_READINGS:
+                dropped += 1
+                continue
+            literals.add(item.raw_literal)
+            rows.append(item.to_state())
+    return tuple(rows), dropped
 
 
 def _label_tokens_for(
@@ -3392,6 +3507,26 @@ def session_view(session: ImportSession) -> dict:
         ],
         "durability": SESSION_DURABILITY_DISCLOSURE,
         "sources": [s.to_state() for s in session.sources],
+        # THE SHAPE THE REVIEW SURFACE CONSUMES, added 2026-09-16 to JOIN two halves
+        # that had been built independently and did not meet.
+        #
+        # Independent review measured the gap: `grep -rn corpus_review apps/api/` ->
+        # 0 hits, and the surface's whole component tree rendered behind a member no
+        # route ever set. Worse, three comments justified that with a reason that had
+        # gone FALSE — "the archive source kind is a separate slice's step 1" — when
+        # the kind had shipped on this same branch. So the honest product status was
+        # neither built nor stated.
+        #
+        # SERVED AT THE SESSION LEVEL, not inside `archive`, because that is where the
+        # committed client type declares it (`lib/types.ts`). Reshaping a contract the
+        # other half was already built against would have been the same mistake twice.
+        #
+        # It is a PROJECTION of what is already here, not a second source of truth:
+        # `inventory` and `relationships` are the identical dicts `_archive_view`
+        # serves, and `mapping` is the static registry. The only new collection is
+        # `evidence`, and it is the bounded six-concept set — see
+        # `REVIEW_COLUMN_CONCEPTS`.
+        **_corpus_review(session),
         "unreadable_source_count": len(session.unreadable_sources),
         "source_counts": {
             "total": len(session.sources),
@@ -3521,6 +3656,53 @@ def _archive_view(session: ImportSession) -> dict | None:
         "candidate_total": reading.candidate_total,
         "candidates_truncated": reading.candidates_truncated,
         "persistence": ARCHIVE_PERSISTENCE_DECISION,
+    }
+
+
+def _corpus_review(session: "ImportSession") -> dict:
+    """``{"corpus_review": ...}`` when this bundle holds an archive reading, else ``{}``.
+
+    Returns a mapping to be spread, so a session without an archive carries no key at all
+    rather than a ``None`` the client would have to distinguish from an empty review.
+    """
+    reading = session.archive_reading
+    if reading is None:
+        return {}
+    return {
+        "corpus_review": {
+            "inventory": dict(reading.inventory),
+            "relationships": dict(reading.relationships),
+            "evidence": [dict(row) for row in reading.column_readings],
+            # A WINDOW WITH ITS COST BESIDE IT. Nonzero means corroborating readings were
+            # thinned; it can never mean a disputed cell was settled, because the cap is
+            # on distinct literals.
+            "evidence_readings_dropped": reading.column_readings_dropped,
+            "evidence_scope": sorted(REVIEW_COLUMN_CONCEPTS),
+            "mapping": _mapping_block(),
+        }
+    }
+
+
+def _mapping_block() -> dict:
+    """The registry, served. Static, 45 entries, and cheap.
+
+    Served from the session rather than a schema route because the review surface needs
+    it in the same response it renders from, and a second request would let the two drift
+    within one screen. It is regenerated from `bl15.mapping` on every call rather than
+    cached, so a registry correction cannot be served stale — `acquisition_method` moved
+    status on this branch and a cached copy would have kept publishing the old one.
+    """
+    from .bl15 import mapping as bl15_mapping
+
+    return {
+        "coverage": dict(bl15_mapping.coverage()),
+        "concepts": [
+            bl15_mapping.MAPPINGS[concept].to_state()
+            for concept in sorted(bl15_mapping.MAPPINGS)
+        ],
+        "temperature_absent_reason": bl15_mapping.TEMPERATURE_ABSENT_REASON,
+        "assets_blocked_reason": bl15_mapping.ASSETS_BLOCKED_REASON,
+        "cycling_state_no_field_reason": bl15_mapping.CYCLING_STATE_NO_FIELD_REASON,
     }
 
 

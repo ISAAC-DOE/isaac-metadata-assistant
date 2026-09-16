@@ -23,6 +23,8 @@ DATA BOUNDARY: none. The only archive read is the committed sanitized
 from __future__ import annotations
 
 import json
+import pathlib
+import re
 import zipfile
 
 import pytest
@@ -668,3 +670,130 @@ def test_an_archive_root_that_is_not_there_is_refused_not_crashed(
     with pytest.raises(hist.UnsupportedImport) as raised:
         _with_archive(session, fixture_name="gone")
     assert raised.value.error == "unknown_archive"
+
+
+# --- the review surface's payload, joined 2026-09-16 --------------------------
+
+
+def _parsed(session):
+    """An archive session, parsed and reconstructed, ready to serve a view."""
+    _with_archive(session)
+    hist.parse_session(session, now_utc=NOW)
+    return hist.session_view(session)
+
+
+def test_the_session_serves_the_shape_the_review_surface_consumes(session):
+    """THE TWO HALVES NOW MEET, and this is the test that would have caught that
+    they did not.
+
+    The review surface's whole component tree rendered behind `data.corpus_review`
+    and **no route ever set it** — `grep -rn corpus_review apps/api/` returned zero.
+    Independent review found it, along with three comments justifying the gap with a
+    reason that had gone false on the same branch. Nothing failed, because nothing
+    on either side asserted that the other existed.
+    """
+    view = _parsed(session)
+    review = view.get("corpus_review")
+    assert review is not None, "no route emits corpus_review"
+    assert set(review) == {
+        "inventory",
+        "relationships",
+        "evidence",
+        "evidence_readings_dropped",
+        "evidence_scope",
+        "mapping",
+    }
+
+    # A PROJECTION, NOT A SECOND SOURCE OF TRUTH: the two large members are the
+    # identical dicts the archive view already serves, so they cannot drift.
+    archive = view["archive"]
+    assert review["inventory"] == archive["inventory"]
+    assert review["relationships"] == archive["relationships"]
+
+    # THE REGISTRY IS SERVED WHOLE — 45 entries, static and cheap — and REGENERATED
+    # per call rather than cached, so a status correction cannot be published stale.
+    mapping = review["mapping"]
+    assert len(mapping["concepts"]) == 45
+    assert mapping["coverage"]["concepts_total"] == 45
+    assert mapping["temperature_absent_reason"]
+    assert mapping["assets_blocked_reason"]
+    assert mapping["cycling_state_no_field_reason"]
+
+
+def test_a_session_with_no_archive_carries_no_corpus_review_key_at_all(session):
+    """Absent, not `null`. A client must not have to tell an empty review from none."""
+    assert "corpus_review" not in hist.session_view(session)
+
+
+def test_the_served_evidence_is_the_five_columns_and_nothing_else(session):
+    """THE BOUND THAT MAKES THE JOIN POSSIBLE.
+
+    The whole evidence set is ~500,000 items at the real corpus's cardinality, which
+    is why it is not persisted. The surface needs SIX concepts of the forty-five, for
+    five scientific columns, and only for readings that name a measurement.
+    """
+    review = _parsed(session)["corpus_review"]
+
+    assert set(review["evidence_scope"]) == set(hist.REVIEW_COLUMN_CONCEPTS)
+    assert len(review["evidence_scope"]) == 6
+    assert review["evidence"], "the bounded set is empty, so the columns render nothing"
+    for row in review["evidence"]:
+        assert row["concept"] in hist.REVIEW_COLUMN_CONCEPTS
+        # A BEAMTIME-SCOPE READING IS EXCLUDED. Folding one into a unit would invent a
+        # relationship `relate` declined to make, which the surface says explicitly.
+        assert row["measurement_stem"], row
+
+
+def test_the_evidence_cap_is_on_DISTINCT_literals_so_a_dispute_cannot_be_thinned(session):
+    """THE WHOLE SAFETY ARGUMENT FOR THE CAP, asserted rather than described.
+
+    The surface's cell is absent / read / disputed, and `disputed` fires on two or
+    more DIFFERENT literals. A cap on the raw COUNT could drop the one reading that
+    differed and turn a disputed cell into a settled one — a conflict silently
+    resolved by a payload bound, which is the class of defect this feature exists to
+    prevent. Capping distinct literals preserves the verdict whatever the corpus does.
+    """
+    review = _parsed(session)["corpus_review"]
+
+    distinct: dict[tuple[str, str], set[str]] = {}
+    served: dict[tuple[str, str], int] = {}
+    for row in review["evidence"]:
+        key = (row["measurement_stem"], row["concept"])
+        distinct.setdefault(key, set()).add(row["raw_literal"])
+        served[key] = served.get(key, 0) + 1
+
+    for key, count in served.items():
+        assert count <= hist.MAX_DISTINCT_COLUMN_READINGS, key
+        assert count == len(distinct[key]), (
+            f"{key} served {count} readings over {len(distinct[key])} distinct "
+            "literals — a duplicate survived the cap, so the cap is on count"
+        )
+
+    # AND WHAT THE CAP REMOVED IS REPORTED, so the list is never a trimmed one
+    # presented as whole.
+    assert isinstance(review["evidence_readings_dropped"], int)
+    assert review["evidence_readings_dropped"] >= 0
+
+
+def test_the_served_concepts_match_the_clients_column_map():
+    """One vocabulary, two languages — pinned so a sixth column cannot be added on
+    one side only.
+
+    `CLAUDE.md` records a rename that stranded three of four copies of a workflow
+    vocabulary; this is the same hazard with a language boundary in between.
+    """
+    source = (
+        pathlib.Path(__file__).resolve().parents[3]
+        / "apps"
+        / "web"
+        / "src"
+        / "lib"
+        / "bl15Review.ts"
+    ).read_text(encoding="utf-8")
+    block = source.split("BL15_COLUMN_CONCEPTS = {", 1)[1].split("} as const", 1)[0]
+    client_concepts = set(re.findall(r"'([a-z_]+)'", block))
+    assert client_concepts == set(hist.REVIEW_COLUMN_CONCEPTS), (
+        "the client's column concepts and the server's REVIEW_COLUMN_CONCEPTS have "
+        f"drifted: client-only {sorted(client_concepts - set(hist.REVIEW_COLUMN_CONCEPTS))}, "
+        f"server-only {sorted(set(hist.REVIEW_COLUMN_CONCEPTS) - client_concepts)}"
+    )

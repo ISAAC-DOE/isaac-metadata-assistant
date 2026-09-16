@@ -163,26 +163,35 @@ export const FIELD_GROUP_SURFACES: ReadonlySet<string> = new Set(['record-detail
  * How many `details.bl15-digest-row` / `.bl15-disclosure` / `.bl15-unit-disclosure`
  * each surface mounts — the BL15-2 large-corpus review (`BL15R-012`).
  *
- * ── DECLARED AT ZERO, DELIBERATELY, AND THAT IS THE WHOLE ENTRY ────────────
+ * ── DECLARED AT ZERO, AND THE REASON CHANGED 2026-09-16 ───────────────────
  *
- * The review renders only when the session payload carries `corpus_review`, and
- * **no route emits one today** — ~~the archive source kind is a separate slice's step 1~~ (IT SHIPPED, `6cdb2279`) and ~~`historical_import.SOURCE_KINDS` holds only `reference` and
- * `synthetic_fixture`~~ — FALSE since `6cdb2279` on this same branch; the `archive` kind
- * exists and the true gap is that no route emits `corpus_review`. So on `imports`, the one scanned surface that could ever
- * mount it, the count is **0** right now, which `?? 0` would have given anyway.
+ * ~~The review renders only when the session payload carries `corpus_review`, and
+ * **no route emits one today** — the archive source kind is a separate slice's step 1
+ * and `historical_import.SOURCE_KINDS` holds only `reference` and `synthetic_fixture`.~~
+ * **Every clause of that was false by the time it was written or shortly after**: the
+ * kind shipped in `6cdb2279` on the same branch, and `historical_import._corpus_review`
+ * now serves the member. Independent review found the stale reason.
  *
- * IT IS WRITTEN DOWN REGARDLESS, because the Settings slice on 2026-09-16 proved
- * what the silence costs. Twelve Data & Privacy definitions went behind
- * `<details>` and would have left every axe scan at every viewport while
- * `settings-privacy`'s baseline — which records no cell at all — could not move to
- * reveal it. A disclosure that is not opened here is not scanned, and a surface
- * with zero recorded violations cannot signal the loss by a number changing.
+ * **THE NUMBER IS STILL 0, AND NOW IT IS A MEASUREMENT RATHER THAN AN ABSENCE.** The
+ * sweep reaches `/imports` at its INDEX — the empty-list state, no session open — so no
+ * archive reading exists there and `corpus_review` is absent, which is why the surface
+ * mounts none of these. Verified after the route landed: `a11y-axe` 150 passed and
+ * `a11y-narrow` 63 passed with no baseline movement and no edit to `a11y-baseline.ts`.
  *
- * So the slice that gives `corpus_review` a route changes THIS NUMBER in the same
- * change, and the assertion below names the file to edit. An `imports` surface
- * that suddenly mounts disclosures against a declared 0 fails loudly here instead
- * of quietly exempting a nine-column table, every conflict explanation and the
- * whole mapping registry from every scan.
+ * IT IS WRITTEN DOWN REGARDLESS, because the Settings slice on 2026-09-16 proved what
+ * the silence costs. Twelve Data & Privacy definitions went behind `<details>` and would
+ * have left every axe scan at every viewport while `settings-privacy`'s baseline — which
+ * records no cell at all — could not move to reveal it. A disclosure that is not opened
+ * here is not scanned, and a surface with zero recorded violations cannot signal the
+ * loss by a number changing.
+ *
+ * So the slice that makes the sweep reach a LOADED import session changes THIS NUMBER in
+ * the same change, and the assertion below names the file to edit. An `imports` surface
+ * that suddenly mounts disclosures against a declared 0 fails loudly here instead of
+ * quietly exempting a nine-column table, every conflict explanation and the whole
+ * mapping registry from every scan. **That is now the only remaining precondition** —
+ * a seeded session in `SURFACES`, which the ledger already records as the reason the
+ * loaded state is unmeasured by axe at any viewport.
  */
 export const BL15_REVIEW_DISCLOSURES: Readonly<Record<string, number>> = Object.freeze({});
 
