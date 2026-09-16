@@ -88,7 +88,62 @@ So the external name says `after1500Cycling`, the internal declaration says
 `beforeCycling`, and a sibling file says `after1400Cycling`. Three readings, one legacy
 number. Neither file may be overwritten and none of the three may be silently chosen.
 
+**2.6a — CORRECTED 2026-09-16, same day: the internal-`#F` disagreement is FOUR files,
+not one, and that changes what it means.** §2.6 was written from the one example the
+authorizing brief named, and reads as though a single file disagrees with itself.
+Measured over all 94 SPEC acquisitions by comparing each `#F` against its own filename:
+
+| file | its own `#F` says |
+|---|---|
+| `29_03_JK2_base_after1500Cycling_filter20_060mV` | `29_03_JK2_base_beforeCycling_filter20_060mV` |
+| `30_03_JK2_base_after1500Cycling_filter20_850mV` | `30_03_JK2_base_beforeCycling_filter20_850mV` |
+| `31_03_JK2_base_after1500Cycling_filter20_1200mV` | `31_03_JK2_base_beforeCycling_filter20_1200mV` |
+| `32_03_JK2_base_after1500Cycling_filter20_1500mV` | `32_03_JK2_base_beforeCycling_filter20_1500mV` |
+
+**Four consecutive files, one sample group, the same substitution every time** —
+`beforeCycling` internally, `after1500Cycling` externally. A single file disagreeing
+with itself looks like a typo; four consecutive files agreeing with each other and
+disagreeing with their names is a **systematic rename after acquisition**, which is a
+different finding and a stronger one. It also lines up exactly with §2.5's
+"declared, never acquired" list, which contains `29_03_..._beforeCycling_...`,
+`30_..._after1400Cycling_...` and `31_..._after1400Cycling_...`: the macro, the internal
+declaration and the filename are **three** sources and at least two of them disagree
+for this group.
+
+**Consequence for the reconstruction:** conflict detection must run over every
+acquisition rather than being seeded with a known case, and the surface must be able to
+show a THREE-way disagreement, not just two. It also means a plausible-sounding
+"trust the internal `#F`, it is closer to the instrument" rule would be wrong for these
+four — the rename is likelier to be the scientist's correction than the header is.
+
 **2.7 — `ffilter35` is real.** `46_04_JK2_base_after1500Cycling_ffilter35_newSpots_1600mV`.
+
+**2.8 — The candidate-unit arithmetic, measured, because it is what the reconstruction
+must reproduce.** Classification content-led (first line begins `#F`):
+
+| quantity | value |
+|---|---:|
+| SPEC acquisitions — **the candidate measurement units** | **94** |
+| of which numbered `^\d+_` | 92 |
+| of which unnumbered | 2 — `alignment`, `IrO2_5wpc_pellet_transmission` |
+| extensionless files that are **macros**, not acquisitions | 1 — `run29` |
+| distinct legacy numbers | **91**, range 1–91, **no gaps** |
+| legacy numbers carried by more than one file | **1** — number 32 |
+| sample/electrode groups (second numeric token) | **10** |
+| scan children over all 94 | **908**, max 233 in one, **2 with zero** |
+| `MERGE/` entries | 34 — 27 leading with a number, 7 without |
+
+Group sizes, which are what a review surface groups by: token `01` 8 measurements
+(legacy 3–10), `02` 12 (11–22), `03` 13 (23–34), `04` 13 (35–47), `05` 12 (48–59),
+`06` 11 (60–70), `07` 12 (71–82), `08` 5 (83–87), `09` 4 (88–91), and 2 measurements
+with no group token at all (legacy 1–2, the old pellets — which are also the two with
+zero scan children).
+
+**The ranges are contiguous and non-overlapping**, which is independent corroboration of
+the beamtime notes' own `Sample N … File Number` sections. **Corroboration is not proof**:
+the second token could mean something else and still produce contiguous ranges, which is
+why "does the second token always mean the sample/electrode instance" is the first
+question in the domain packet rather than an assumption in the parser.
 
 ## 3. Formats, as they actually are
 

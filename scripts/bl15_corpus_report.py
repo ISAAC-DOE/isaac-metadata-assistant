@@ -107,6 +107,51 @@ def main(root: str) -> int:
     print(f"declaring more than one     {sum(1 for c in per_macro.values() if c > 1)}")
     print(f"declaring none              {sorted(f for f, c in per_macro.items() if c == 0)}")
 
+    print("\n== SPEC acquisitions, content-led ==")
+    spec = [f for f in sorted(stems) if _first_line_starts(os.path.join(root, f), "#F")]
+    macros_without_extension = sorted(set(stems) - set(spec))
+    print(f"SPEC acquisitions            {len(spec)}")
+    print(f"  numbered ^\\d+_             {sum(1 for f in spec if NUMBERED.match(f))}")
+    print(f"  unnumbered                 {[f for f in spec if not NUMBERED.match(f)]}")
+    print(f"extensionless NON-acquisition {macros_without_extension}")
+
+    by_number: dict[int, list[str]] = collections.defaultdict(list)
+    for f in spec:
+        if NUMBERED.match(f):
+            by_number[int(f.split("_")[0])].append(f)
+    dup = {k: v for k, v in by_number.items() if len(v) > 1}
+    print(f"distinct legacy numbers      {len(by_number)}")
+    if by_number:
+        lo, hi = min(by_number), max(by_number)
+        gaps = sorted(set(range(lo, hi + 1)) - set(by_number))
+        print(f"  range                      {lo}-{hi}, gaps: {gaps or 'none'}")
+    print(f"  carried by >1 file         {({k: v for k, v in dup.items()}) or 'none'}")
+
+    groups: dict[str, list[int]] = collections.defaultdict(list)
+    for f in spec:
+        parts = f.split("_")
+        if NUMBERED.match(f):
+            key = parts[1] if len(parts) > 1 and parts[1].isdigit() else "(none)"
+            groups[key].append(int(parts[0]))
+    print(f"sample/electrode groups      {len(groups)}")
+    for key in sorted(groups, key=lambda k: (k == "(none)", k)):
+        v = sorted(groups[key])
+        print(f"  token {key:>6}             {len(v):3d} measurements, legacy {min(v)}-{max(v)}")
+
+    print("\n== internal #F vs external filename ==")
+    # The conflict this corpus is most likely to be misread on. It is FOUR files, not
+    # one: a single self-disagreeing file looks like a typo, four consecutive files in
+    # one sample group making the identical substitution is a systematic rename.
+    mismatched = []
+    for f in spec:
+        declared = _spec_file_declaration(os.path.join(root, f))
+        if declared and declared != f:
+            mismatched.append((f, declared))
+    print(f"disagreeing                  {len(mismatched)}")
+    for name, declared in mismatched:
+        print(f"  file: {name}")
+        print(f"  #F:   {declared}")
+
     print("\n== macro intent vs acquired ==")
     print(f"distinct newfile targets    {len(targets)}")
     print(f"declared, never acquired    {len(targets - stems)}")
@@ -116,6 +161,28 @@ def main(root: str) -> int:
     for s in sorted(stems - targets):
         print(f"  {s}")
     return 0
+
+
+def _first_line_starts(path: str, prefix: str) -> bool:
+    try:
+        with open(path, errors="replace") as fh:
+            return fh.readline().startswith(prefix)
+    except OSError:
+        return False
+
+
+def _spec_file_declaration(path: str) -> str | None:
+    """The name a SPEC acquisition declares for ITSELF, on its ``#F`` line.
+
+    Read rather than inferred, because it is the anchor for the corpus's
+    external-name-versus-internal-declaration conflict. Nothing here reconciles the two.
+    """
+    try:
+        with open(path, errors="replace") as fh:
+            first = fh.readline().strip()
+    except OSError:
+        return None
+    return first[2:].strip() if first.startswith("#F") else None
 
 
 def _looks_like_macro(path: str) -> bool:
