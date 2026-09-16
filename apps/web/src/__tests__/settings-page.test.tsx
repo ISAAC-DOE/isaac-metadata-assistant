@@ -1250,6 +1250,88 @@ describe('Settings — Data & Privacy', () => {
     expect(hidden).not.toContain('no way to report whether either restriction is active');
   });
 
+  /*
+   * ── THE OUTER DISCLOSURE LAYER, 2026-09-16 ──────────────────────────────────
+   *
+   * Each concept's whole `detail` now sits behind its own `details.settings-concept`,
+   * because twelve always-expanded definitions rendered 2.5 viewports of prose at
+   * 1280x900 and 7.4 at 375x812 (measured in Chromium). Nothing was deleted,
+   * shortened, merged or reworded — the test above still passes unchanged, and so
+   * does every claim-parity guard, because `querySelectorAll` and Testing
+   * Library's text queries reach inside a closed `<details>`.
+   *
+   * THESE TWO TESTS ARE WHAT MAKES THAT SAFE, and they are not decoration. The
+   * rule the test above enforces is that a caveat may never hide BESIDE a claim
+   * it qualifies. This layer does not break it only because a `<summary>` here
+   * carries the `heading` and NOTHING else — a heading is a TOPIC, not an
+   * assertion, so shutting a row leaves no claim standing unqualified.
+   *
+   * That property is one edit away from being lost. `concept.summary` is a vetted
+   * one-liner and would look like the obvious thing to put in a `<summary>`; for
+   * `no-telemetry` it reads "This application measures and transmits nothing about
+   * your session", while its `detail` carries the server-log, access-log and
+   * identity-gateway scope that stops exactly that sentence from overstating the
+   * code. Promoting it would restore that overstatement behind a shut drawer —
+   * a regression no existing test could see, since every string would still be
+   * in the DOM.
+   */
+  it('gives every concept a disclosure whose summary is the heading and nothing else', async () => {
+    stubFetchRoutes(fullRoutes());
+    const { container } = renderSettings();
+    openTab('Data & Privacy');
+    await screen.findByText(/two things are stored/i);
+
+    const concepts = settingsConcepts(settingsFactsFrom(aboutResponse));
+    const rows = Array.from(
+      container.querySelectorAll('ul.settings-points > li > details.settings-concept'),
+    ) as HTMLDetailsElement[];
+
+    // One row per concept, in the tab's own order, each collapsed.
+    expect(rows).toHaveLength(concepts.length);
+    rows.forEach((d) => expect(d.open).toBe(false));
+
+    rows.forEach((row, i) => {
+      const concept = concepts[i];
+      const summary = row.querySelector(':scope > summary');
+      expect(summary).not.toBeNull();
+      // EXACT equality, not `toContain`: a summary that merely INCLUDES the
+      // heading could carry a claim after it and still pass.
+      expect(summary?.textContent).toBe(concept.heading);
+      // The heading keeps its level and its element — `<h3>` inside a first
+      // `<summary>` is the spec's own allowance, so nothing that queries
+      // `.settings-points h3` or a level-3 heading role has to change.
+      expect(summary?.querySelector('h3')?.textContent).toBe(concept.heading);
+      // The definition is present, verbatim, inside the row.
+      expect(row.querySelector(':scope > p')?.textContent).toBe(concept.detail);
+    });
+  });
+
+  it('never promotes a concept summary line into a disclosure summary', async () => {
+    stubFetchRoutes(fullRoutes());
+    const { container } = renderSettings();
+    openTab('Data & Privacy');
+    await screen.findByText(/two things are stored/i);
+
+    const concepts = settingsConcepts(settingsFactsFrom(aboutResponse));
+    // EVERY `<summary>` on the tab, not only the concept rows — the `more`
+    // drawers are covered too, so neither layer can acquire a claim.
+    const summaries = Array.from(container.querySelectorAll('summary')).map((s) =>
+      norm(s.textContent ?? ''),
+    );
+    expect(summaries.length).toBeGreaterThan(0);
+
+    const allowed = new Set<string>([
+      ...concepts.map((c) => c.heading),
+      ...concepts.flatMap((c) => (c.more ? [c.more.label] : [])),
+    ]);
+    // Stated as a set difference rather than a per-item loop so an entirely new
+    // summary — one belonging to no concept at all — also fails.
+    expect(summaries.filter((s) => !allowed.has(s))).toEqual([]);
+    concepts.forEach((c) => {
+      expect(summaries).not.toContain(norm(c.summary));
+    });
+  });
+
   it('says there is no language model and nothing typed leaves the app', async () => {
     stubFetchRoutes(fullRoutes());
     renderSettings();
