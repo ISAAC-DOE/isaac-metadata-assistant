@@ -5011,6 +5011,227 @@ Impeccable run in this session could have two assessors.
 
 ---
 
+## SESSION 2026-09-17, CONTINUATION (SECOND HALF) — SIX PRs MERGED, THE APP-SIDE BLOCKED LIST EMPTIED, AND THE FIRST HOSTED ROLLOUT THIS SESSION ACTUALLY OBSERVED
+
+**Extends the entry immediately below, which covers PR #261 and the `0005` approval.** No
+production infrastructure was touched, no migration was applied, no database connection was
+opened, and no message was sent.
+
+### 1. Release provenance — resolved from the TAG, never read off a workflow log line
+
+| tag | commit | PR |
+|---|---|---|
+| `v0.0.246` | `37ff6e5b` | #261 Hao package + domain reconciliation |
+| `v0.0.247` | `70b48390` | #263 `CTX-001/002/003` + `DOM-001` — **this is the commit hosted is serving** |
+| `v0.0.248` | `e34983a9` | #262 `0005` approval + the nine-document sweep |
+| *(untagged at writing)* | `ed27be6e` | #265 MCP proof |
+| *(untagged at writing)* | `ddfb014e` | #264 `ACT-001`/`ACT-002` Activity history |
+
+**Do not quote `main` from this table** — re-derive it. Any SHA written in a committed ledger is
+superseded by the next push, which is why the two untagged rows make no claim about their release:
+the release gate is the arbiter and it independently refuses any commit whose CI did not conclude
+`success`.
+
+### 2. What shipped, and the one premise that had to be overturned first
+
+- **`ACT-001` + `ACT-002`** (#264) — a durable append-only activity/audit history at
+  `ACTIVITY_STATE_KEY = "activity"`, top-level in the experiment state document, **beside** `draft`.
+  Bounded vocabularies (4 channels, 21 actions, 10 object types), an `ABSENT` sentinel so "was
+  absent" ≠ "was null", a read module split from the write module per `revision_history.py`, and the
+  channel stamped at **all 22** `_save_versioned` write paths.
+- **`CTX-001`…`CTX-003` + `DOM-001`** (#263) — the `DEC-41` placement hierarchy with the level
+  **derived** from `official_path` (so rule 1 cannot be violated by a registry edit), the Extended
+  Context companion, the fenced nominal 298 K, and seven File-32 tests written against the *tidy-up*.
+- **The Extended Context producer, durability, companion artifact and 298 K offer** (#267).
+- **The MCP capability proved end to end** (#265) — no tool added; see §5.
+- **`0005` owner approval with six recorded checks** (#262), and the `CLAUDE.md`
+  documented-operations figure corrected for the fifth time (#266).
+- **The first hosted rollout observed this session** (#268) — see §6.
+
+**`DEC-49` had to overturn a premise this very file had committed.** `ACT-001`'s row said the model
+*"Needs migration `0006`, which means it needs an approval packet and an operator act"*. **That was
+false, and it is the kind of false premise that silently converts buildable work into blocked work —
+it is why the row sat unbuilt.** The `proposals` precedent settles it: a top-level state-document key
+needs no migration, because `Experiment.from_state` reads optional keys with `.get`. `CLAUDE.md`
+§15's 2026-08-29 extension chose that deliberately, recording four occasions on which a table
+reached `OWNED_TABLES` before any committed sentence named it and stating that *"a fifth is avoidable
+by not needing one"*. **`db_write.OWNED_TABLES` is UNCHANGED by every slice in this session.**
+
+### 3. THE `save_versioned` TRAP, MET TWICE, AND ANSWERED OPPOSITELY BOTH TIMES — the most
+### transferable thing in this session
+
+`save_versioned` **writes nothing** when `_authoritative_signature` is unchanged. Two slices added a
+new top-level state key, and the correct answer was different for each:
+
+| | `activity` (#264) | `extended_context` (#267) |
+|---|---|---|
+| in the signature? | **OUTSIDE** | **INSIDE** |
+| why | a trail of acts appended by **every** write path; putting it in the signature would make every recorded act an authoritative change and move `rev`, the `If-Match` token and the change feed | **content the experiment holds** — the `notes`/`proposals`/`folder` class, written only by an explicit producer |
+| how the silent drop is prevented | **staging** (`_staged_activity` → committed only on `save_versioned`'s write branch, re-staged on a refused save) | not needed — inside the signature there is no silent drop, **so no call site can get it wrong** |
+
+**Neither answer is the default.** `_authoritative_signature`'s own docstring records that `folder`
+*"HAD to"* join it, because a `folder` outside the payload made every first assignment a silent
+no-op. The question to ask is not "is this authoritative?" but **"is this content, or is it a trail
+of acts?"** — and the answer decides whether staging is required.
+
+Also settled: **extended context does NOT enter `submissions.content_signature`**, asserted over the
+digest *and paired with an assertion that the record's own signature DID move* — because asserting
+only the first half would pass on a change that moved neither.
+
+### 4. Activity declined a change-feed `kind`, and the argument is arithmetic
+
+`activity` sorts **first** of the five kinds as a string (`activity < experiment < note < proposal <
+run`), so a v3 cursor resting at `(R, "experiment", X)` is **already past** every position an
+activity event at that rev would occupy — those events would be missed **not late, but never**.
+Adding the kind therefore forces `CURSOR_VERSION` 3 → 4 and the refusal of every cursor in flight,
+to duplicate a signal the feed already sends (every event is written inside the same save as the
+authoritative change that fires an `experiment`/`run`/`note`/`proposal` entry). **`CURSOR_VERSION`
+stays 3**, and a test pins both the decision and the unmoved version.
+
+### 5. THE COMMISSIONED MCP FEATURE ALREADY EXISTED, AND THE BRIEF THAT SAID OTHERWISE WAS MINE
+
+The slice was commissioned to let an agent give a Run its `series`, `qc` and `descriptor` over MCP.
+Measured first, over MCP, against a record created through `POST /api/experiments` with values
+written out: **every "no" row in the table the brief quoted is a `yes` today, and has been since
+2026-08-19.** One `isaac_answer_questions` call answers all three; the record exports; the bytes
+validate. **No tool was added** — `PERMITTED_TOOL_NAMES` stays 16, `ALLOWED_METHODS` stays
+`{GET, POST, PATCH}`, `FORBIDDEN_TOOL_TOKENS` untouched.
+
+**The cause is structural and is the durable lesson.** `docs/mcp-capability-audit.md` §5A has read
+**CLOSED** at the top since 2026-08-19 while a **present-tense rationale for an open gap** sat at the
+bottom of the same section. The orchestrator's brief quoted both as current specification. §5A's
+history block is now marked as history. **This is the third stale claim §5A has had to record.**
+
+What the measurement found *instead* was worth more than the feature: the capability was real and
+**nothing pinned it end to end**. No test had ever answered an **open** `qc` question on a Run (every
+existing case was a refusal or a correction, because the seed arrives with `qc` pre-answered), none
+set all three blocks on one Run, and none exported afterwards. 28 tests now do, borrowing nothing.
+
+**And one mutation proved nothing, which is the finding to carry:** disabling the `elif key == "qc"`
+*condition* left all 28 green, because `qc` is also in `_NAMED_ANSWER_KEYS` and the generic branch
+forwards it anyway. **A mutation of that branch is not a test of `qc` forwarding.** Found by
+disbelieving a green run.
+
+### 6. THE HOSTED DEPLOYMENT WAS OBSERVED, READ-ONLY — and it confirms the `0005` boundary
+
+Evidence: [`docs/evidence/hosted-observation-2026-09-17.md`](../../evidence/hosted-observation-2026-09-17.md).
+The project owner signed in to Chrome; four same-origin `GET`s were issued and nothing else.
+
+**No credential entered. No write of any kind. NO DATABASE CONNECTION OPENED** — and that last is the
+**strong form the 2026-09-13 observation could not use**, verified in source before being claimed:
+`health()` states *"ZERO I/O in the database block"* and `run_authority_summary()` returns a copy of
+an **in-process** dict. No recon scan was triggered; triggering one is what opened a pod-side
+connection last time.
+
+| reading | value | what it settles |
+|---|---|---|
+| `commit` | `70b48390` = #263's merge = `v0.0.247` | **Extended Context is deployed and serving.** A rollout *observed*, not assumed |
+| `run_projection.last_pass.unavailable` | **3** | all three hosted experiments have an unreadable run projection — **the direct consequence of `0005` being owner-approved and applied NOWHERE.** Independent evidence that an owner approval changes nothing about the deployed system |
+| `submission.actor_trust_basis` / `verifier_id` | `null` / `"unconfigured"` | **`EXT-01` open, actor seam unset in production** — which independently vindicates Activity recording `unattributed` rather than reading a forgeable header |
+| `GET /api/mcp` | **404**, posture `unmounted` | `EXT-02` open. An absent route, not a broken one |
+| `database.record_display` | `"closed"` | **G2** still closed by default |
+| `/api/openapi` | **78 paths / 88 operations** | matches the local figures exactly — the deployment itself confirms #266's correction |
+
+**It is a ROLLOUT observation and NOT a QA pass.** No screen, workflow, narrow width, zoom or
+microphone was exercised. `HOSTED QA PENDING (Krish)` is unchanged for every image. It does **not**
+close `G3`: re-confirming the five withheld aggregates needs a recon scan, which **would** open a
+connection, and was deliberately not run — so no claim is made either way.
+
+### 7. THE a11y EPISODE — a refusal to predict, vindicated by measurement two hours later
+
+#264's first CI run **failed** `browser accessibility and responsive baseline`: five
+`settings-explorer` `color-contrast` cells +1. **The cause is the one `a11y-baseline.ts` has already
+predicted by name twice** — the branch publishes one more operation
+(`GET /api/experiments/{id}/activity`) and the Endpoint Explorer renders every operation the **live**
+`/api/openapi` exposes, so the text on that surface changed. No palette or component moved.
+
+**The darwin column was NOT predicted.** `DARWIN_CARRIED_FORWARD` went from `[]` — **non-empty for
+the first time in its history** — to four keys, with `A11Y_BASELINE_DARWIN_UNVERIFIED_NODES` 0 → 74
+in the same edit, which is the procedure that register's contract demands. A predicted `+1` was
+deliberately not written, because *a prediction that happens to be right is indistinguishable from a
+measurement and would remove the prompt to take one.*
+
+**TWO CELLS WERE LEFT UNTOUCHED, AND THE NEXT RUN PROVED THAT WAS RIGHT.** The failing run reported
+**665 skipped**, so `@mobile-375x812` and `@width-320` were never measured. The passing run shows the
+Endpoint Explorer **is** scanned at both 320px and 390px — and **both cells passed at their old
+values.** So **two of the seven cells genuinely did not move**, and a uniform `+1` would have written
+two wrong numbers into the file whose entire purpose is distinguishing measurement from reasoning.
+The measured precedent that made this plausible was already in the file: a 2026-09-01 A/B probe read
+one cell's darwin value identically **with and without** a new operation, because it depends on the
+wrap boundary.
+
+**A CONTRADICTION BETWEEN TWO OF THAT FILE'S OWN GUARDS was found by hitting it, and is REPORTED
+rather than silently decided.** When a transcription raises a split's linux half to **meet** its
+darwin half, `auditA11yWellFormedness` demands a scalar (*"both numbers are the same"*) while the
+register's invariant forbids registering a scalar — and `DARWIN_CARRIED_FORWARD`'s own **prose
+contract** instructs you to register exactly that case. **Pre-existing.** Resolved locally for
+`@width-390` (scalar, unregistered, provenance documented at the cell); the real fix is either
+permitting an equal-halves pair when the key is registered, or letting the register name a scalar,
+and both are changes to shared a11y infrastructure that deserve their own slice.
+
+### 8. Impeccable pass on the UI this session added — one real defect
+
+⚠️ Run **DEGRADED: single-context**, banner'd on #267, because the playbook mandates two isolated
+sub-agents and the session's 5-agent cap was spent. Mode **Operate**.
+
+**The defect:** `unresolved_questions` is `['Q6']`, so the corpus-review surface rendered *"Still
+waiting on a domain answer: **Q6**."* — an internal packet number with no meaning outside this
+repository's own documents. **Exactly the class §11 records at length and closed on 2026-09-14 for
+blocker keys**, recurring on a new surface. Fixable client-side because the human text was *already
+in the payload*: `mapping.domain_questions` ships a `subject` for all twenty. It now reads
+*"context.environment member (Q6)"* — subject **verbatim** (this component's existing discipline),
+id **kept** as the traceable handle, dotted schema paths left alone per `UX-014`.
+
+**A hierarchy fix:** five statements shared one 11px `--text-muted` treatment, so the line reporting
+that a domain owner still owes an answer looked identical to *"The schema allows: …"*. It now
+differentiates by weight and a **darker** token — `--text-secondary` **8.07:1** vs `--text-muted`
+**5.93:1** on `--surface`, both computed — which is the only direction that **cannot add** a
+`color-contrast` node, so it needs no Linux round trip. No hue, so it stays clear of `P22C`.
+
+**A finding WITHDRAWN:** `.bl15-concept-extra` flagged as a duplicate selector on a grep count of 2;
+reading the full region shows a deliberate shared-base-plus-override. **The count was right; the
+interpretation was wrong.**
+
+**IMPECCABLE'S MECHANICAL DETECTOR IS A NON-ANSWER HERE, PROVEN BY NEGATIVE CONTROL.** `detect.mjs`
+returned `[]` exit 0 on the component; fed a deliberately broken `.tsx` (unlabelled `img`, 7px text,
+nested interactive, clickable `div`, unlabelled `input`) it returned `[]`, exit 0, **empty stderr**,
+while the identical markup as `.html` at least warns it is DEGRADED. **No "0 findings" claim is made
+from it**, consistent with §11.
+
+### 9. An existing test broke and was made STRONGER; my own §17 miss caught before CI
+
+The Impeccable fix broke a test that regexed page prose and split on a comma to recover bare ids —
+load-bearing on copy that was always going to change, and its `[^.]+` capture **truncates at the
+first dot**, so `Q14` (*"is measurement.qc.status derivable from the notes?"*) would have been cut
+mid-path. It now queries `.bl15-concept-open` and asserts **the subject is present**. **Both halves
+negative-controlled independently**, because a containment assertion that never executes is not a
+guard: removing humanization fails the id check; keeping the id and dropping the subject fails
+`toContain` at line 561.
+
+**And #266 carried snapshot drift of my own making.** `CLAUDE.md` is one of the 200 manifest entries
+and I edited it without regenerating — measured `--check` **EXIT 6** before CI saw it. §17's own
+warning is *"do not assume a slice is 'frontend only, so the snapshot is not my problem'"*; this was
+the **documentation-only** variant of the same assumption.
+
+### 10. What remains — and every item is external, human, or a named decision
+
+`ACT-003`/`ACT-004` (the Activity UI and Statistics-from-activity) are **the one unbuilt app-side
+item**, deferred only because the 5-agent budget was exhausted; the backend they need is merged and
+the read API is live. Everything else: `ACT-005` (blocked on `EXT-01`), the operator's eleven-step
+migration sequence, `EXT-02`/`EXT-13`/`G3`, Angel's eight questions, the human 200%-zoom and
+narrow-width sign-off, personal-deploy retirement, and every hosted QA. The two split watch lists
+are [`docs/external-watch-lists-2026-09-17.md`](../../external-watch-lists-2026-09-17.md).
+
+**Named residue created by this session, rather than implied:** no parity guard on the BL15 mapping
+block's key set across the language boundary (which is how a frontend fixture went three commits
+stale while the suite stayed green over it); a batch near `_MAX_PROPOSALS_PER_RECORD` now needs one
+extra slot per created run, so **a batch that used to pass can now be refused** (fails closed, typed,
+nothing written); `ORIGIN_DOMAIN_GUIDANCE`'s precedence placement is a judgement argued in a comment
+rather than settled; `MAX_EXTENDED_CONTEXT_ENTRIES = 1_000` is not derived from a corpus measurement
+and says so; scan-child statements stay experiment-scoped; and the a11y guard contradiction in §7.
+
+---
+
 ## SESSION 2026-09-17, CONTINUATION — PR #261 MERGED, `0005` OWNER-APPROVED, AND A NINE-DOCUMENT HONESTY SWEEP THE APPROVAL FORCED
 
 **No production infrastructure was touched, no migration was applied, no database connection was
