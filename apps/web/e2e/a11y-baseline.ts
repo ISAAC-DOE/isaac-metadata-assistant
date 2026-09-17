@@ -1662,8 +1662,8 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
          can fix inside its own scope: closing it means moving `--verified-text`,
          a palette decision affecting every surface that paints a verified/GET
          chip — the same kind of decision A3 was for the neutrals. */
-      'settings-explorer@desktop-1280x800': 17,
-      'settings-explorer@laptop-1024x768': 17,
+      'settings-explorer@desktop-1280x800': { darwin: 17, linux: 18 },
+      'settings-explorer@laptop-1024x768': { darwin: 17, linux: 18 },
       /*
        * ── CREATE EXPERIMENT, 2026-08-07: 63 -> 62 (tablet) and 56 -> 55 (mobile) ──
        *
@@ -1740,7 +1740,7 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
          darwin from two consecutive local runs). Cause, the A/B that established
          it, and the colour: the block above
          `settings-explorer@desktop-1280x800`. */
-      'settings-explorer@tablet-768x1024': 20,
+      'settings-explorer@tablet-768x1024': { darwin: 20, linux: 21 },
       // 55 -> 54 on 2026-08-01: a genuine IMPROVEMENT, lowered rather than left
       // stale. The suite's own message is the reason to bother — "a stale
       // number would re-admit the defect". Linux is the authority.
@@ -1860,7 +1860,7 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
       /* ASSISTANT COMPANION DEEP LINK, 2026-09-01: 19 -> 20, still a scalar —
          both faces measured 20 at `11e08da`. Cause and provenance: the block
          above `settings-explorer@desktop-1280x800`. */
-      'settings-explorer@zoom-200': 20,
+      'settings-explorer@zoom-200': { darwin: 20, linux: 21 },
       /*
        * ── STATISTICS-TAB SLICE, 2026-08-04 ──────────────────────────────────
        *
@@ -2265,7 +2265,34 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
          two cells by copying either column across — that is the exact failure this
          file records 15 times. Cause and provenance: the block above
          `settings-explorer@desktop-1280x800`. */
-      'settings-explorer@width-390': { darwin: 21, linux: 20 },
+      /* 2026-09-17: BACK TO A SCALAR, and the round trip is worth recording because it
+         exposed a contradiction between two of this file's own guards.
+
+         Its linux half rose 20 -> 21 (TRANSCRIBED, CI run 35272170788) to MEET its
+         darwin 21. Written as `{ darwin: 21, linux: 21 }` it was REFUSED by
+         `auditA11yWellFormedness`: *"is written per-platform but both numbers are the
+         same. Write a bare number instead."* Written as a scalar it cannot be listed in
+         `DARWIN_CARRIED_FORWARD`, because that register's invariant is *"no registered
+         key names a SCALAR cell"*.
+
+         SO THE TWO GUARDS CONTRADICT EACH OTHER for a state that is reachable exactly
+         when a linux transcription raises a split's linux half to meet its darwin half —
+         and `DARWIN_CARRIED_FORWARD`'s own CONTRACT anticipates this case in prose,
+         saying to register "one that merely leaves a scalar standing while raising its
+         linux twin into a split". The prose and the invariant disagree. That is
+         PRE-EXISTING, it is not resolved here, and it is reported rather than silently
+         decided: resolving it means either permitting an equal-halves pair when the key
+         is registered, or letting the register name a scalar. Both are changes to shared
+         a11y infrastructure and belong in their own slice.
+
+         WHAT IS TRUE OF THIS CELL, so the scalar is not read as more than it is: linux 21
+         is MEASURED at this head. darwin 21 was MEASURED on 2026-09-01 at head `11e08da`
+         — BEFORE this branch added an operation — so at THIS head it is unverified, and
+         the scalar cannot say so. Note the measured precedent that stops this being an
+         obvious +1: the 2026-09-01 A/B probe read `@mobile-375x812` darwin 20 both WITH
+         and WITHOUT a new operation, so darwin does not necessarily move per operation —
+         it depends on the wrap boundary. Predicting 22 here would have been invention. */
+      'settings-explorer@width-390': 21,
       /* SPLIT 2026-08-16, linux 15 -> 14. Same cause and same reasoning as
          `settings-about@width-320` above; ~~darwin carried forward unmeasured~~.
 
@@ -4402,7 +4429,19 @@ export const A11Y_BASELINE_TOTAL_NODES: Readonly<Record<BaselinePlatform, number
   // removed is a CSS declaration rather than a platform-dependent rendering, so
   // there is no mechanism by which the columns could diverge here. CI adjudicates.
   // 829 -> 822, the same seven pairs; see the note over `darwin` above.
-  linux: 822,
+  //
+  // 2026-09-17, ACTIVITY HISTORY: 822 -> 827. FIVE `settings-explorer` cells each
+  // +1 on linux, TRANSCRIBED from CI run 35272170788 at head `f21aca90`. The cause
+  // is one more published operation (`GET /api/experiments/{id}/activity`) rendered
+  // by the Endpoint Explorer, which reads the LIVE `/api/openapi` — the mechanism
+  // the 2026-09-01 note already named. `darwin` does NOT move in this edit: no
+  // darwin run has seen any of the five, and all five are registered in
+  // `DARWIN_CARRIED_FORWARD` (four of them; `@width-390` became a scalar and cannot
+  // be registered) with `A11Y_BASELINE_DARWIN_UNVERIFIED_NODES` at 74.
+  // TWO further cells (`@mobile-375x812`, `@width-320`) are expected to have moved
+  // and are NOT counted here, because that run reported 665 skipped and never
+  // measured them. The next CI run is expected to fail on them.
+  linux: 827,
   // 2026-08-30, ROUND TWO — CI's linux figures for the merged tree: 2287 -> 2291.
   //
   //   desktop-1280x800   59 -> 60   (+1)      laptop-1024x768   59 -> 60   (+1)
@@ -4602,7 +4641,71 @@ export const DARWIN_MEASUREMENT = {
  * on darwin in March and edited by a product change in April is stale without being
  * listed here. Only `DARWIN_MEASUREMENT.commit` speaks to that, and only loosely.
  */
-export const DARWIN_CARRIED_FORWARD: readonly BaselineKey[] = [];
+export const DARWIN_CARRIED_FORWARD: readonly BaselineKey[] = [
+  /* ══ 2026-09-17, THE ACTIVITY HISTORY BRANCH. THE FIRST TIME THIS REGISTER HAS
+     BEEN NON-EMPTY — FOUR KEYS, NOT THE FIVE CELLS THAT MOVED (see `@width-390`), and the contract above says that is a debt register filling up
+     rather than a guarantee breaking. ════════════════════════════════════════════
+
+     THE CAUSE IS THE ONE THIS FILE ALREADY PREDICTED BY NAME. The branch publishes
+     one more operation — `GET /api/experiments/{experiment_id}/activity` — and the
+     Endpoint Explorer renders every operation the LIVE `/api/openapi` exposes, so the
+     TEXT on that surface changed. The 2026-09-01 note in
+     `e2e/invariants/baseline-aggregate.invariant.test.ts` describes the identical
+     mechanism for `GET /api/runtime/assistant-companion` (76 -> 77) and said the
+     splits would return from exactly this cause. They have.
+
+     WHERE EACH HALF CAME FROM, which is the only question this register exists to
+     force anyone to answer:
+
+       · linux 18 @desktop-1280x800 — TRANSCRIBED from CI run 35272170788, head
+         `f21aca90`: `GREW … rule "color-contrast" grew from 17 to 18`.
+       · linux 18 @laptop-1024x768  — TRANSCRIBED, same run, same message shape.
+       · linux 21 @tablet-768x1024  — TRANSCRIBED, same run (`20 to 21`).
+       · linux 21 @zoom-200         — TRANSCRIBED, same run (`20 to 21`).
+       · linux 21 @width-390        — TRANSCRIBED, same run (`20 to 21`). This cell was
+         ALREADY a split, `{ darwin: 21, linux: 20 }`; its linux half rose to MEET its
+         darwin half. It stays a SPLIT rather than collapsing to a scalar, because the
+         invariant `no registered key names a SCALAR cell` is right: a scalar asserts
+         BOTH columns with one number, which is exactly the claim that cannot be made
+         about a carried-forward half.
+       · EVERY darwin half above — **CARRIED FORWARD. NO darwin run has seen one of
+         them.** Each is the last MEASURED darwin value (2026-08-27 / 2026-09-01), left
+         standing while its linux twin moved.
+
+     WHY THEY WERE NOT MEASURED — a deferral, not an impossibility, and said plainly
+     because the difference matters. This host CAN measure darwin (~2 min, and it once
+     predicted Linux exactly). The obstacle is mechanical: the branch is held by a git
+     WORKTREE, and a worktree has **no `node_modules`**, so Playwright cannot run there
+     at all; the main checkout cannot check the same branch out concurrently. Measuring
+     would have required a detached checkout plus the read-only config's hand-started
+     backend. This register is what makes that choice VISIBLE rather than silent, which
+     is the entire reason it was built.
+
+     WHAT IS EXPECTED AND DELIBERATELY NOT WRITTEN. The cause is uniform — one more
+     rendered operation — so each darwin half is very likely +1 too. **That is
+     reasoning, and reasoning is precisely what this list exists to flag.** The
+     conservative last-measured value is kept rather than a predicted one, because a
+     prediction that happens to be right is indistinguishable from a measurement and
+     would quietly remove the prompt to take one. Remove these keys when a darwin run
+     measures the cells.
+
+     TWO CELLS ARE ABSENT FROM THIS LIST AND THAT IS NOT AN OVERSIGHT.
+     `settings-explorer@mobile-375x812` and `@width-320` almost certainly moved as well,
+     and neither is touched: CI run 35272170788 reported **665 skipped** — Playwright
+     stopped early — so NEITHER WAS MEASURED, and `width-320` appears **zero** times in
+     its log. Writing +1 into them would be the "reasoned rather than measured" defect
+     this file has recorded fifteen times. They keep their last measured values, the
+     next CI run is EXPECTED to fail on them, and its figures are what will be
+     transcribed. ════════════════════════════════════════════════════════════════ */
+  'settings-explorer@desktop-1280x800',
+  'settings-explorer@laptop-1024x768',
+  'settings-explorer@tablet-768x1024',
+  'settings-explorer@zoom-200',
+  /* `settings-explorer@width-390` IS DELIBERATELY ABSENT and is NOT an oversight: its
+     two halves now agree at 21, so well-formedness requires a scalar, and a scalar
+     cannot be registered here. Its darwin provenance is documented at the cell itself,
+     together with the guard contradiction that forces the omission. */
+];
 
 /**
  * How many `darwin` nodes of `A11Y_BASELINE_TOTAL_NODES.darwin` sit in cells listed in
@@ -4612,7 +4715,7 @@ export const DARWIN_CARRIED_FORWARD: readonly BaselineKey[] = [];
  * Hand-written and checked, exactly like `A11Y_BASELINE_TOTAL_NODES`, so that growth
  * is visible in a diff rather than absorbed by a derivation.
  */
-export const A11Y_BASELINE_DARWIN_UNVERIFIED_NODES = 0;
+export const A11Y_BASELINE_DARWIN_UNVERIFIED_NODES = 74;
 
 /**
  * Exact tolerated node count for a (rule, surface, project) triple on one
