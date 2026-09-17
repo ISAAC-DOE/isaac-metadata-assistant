@@ -80,8 +80,14 @@ Establish, and report, each of the following:
    its own reviewed approval packet. Before any migration is applied:
    - Confirm which migrations are **already recorded as applied** by querying the
      `isaac_schema_migrations` ledger table — **read the ledger, do not infer from table existence.**
-   - Confirm the migration text has been **approved by the project owner** (Krish). `0003` and
-     `0004` are approved; **`0005` is not.**
+   - Confirm the migration text has been **approved by the project owner** (Krish). **UPDATED
+     2026-09-17: `0003`, `0004` AND `0005` are ALL owner-approved now.** (`0005` was approved on
+     2026-09-17 on its exact bytes, after a fresh SHA-256 recomputation matched the packet in three
+     independent places — see [`docs/migration-approval-packet-0005.md`](migration-approval-packet-0005.md)
+     §12.) **This does NOT mean apply them in one step.** All three approved means three sequenced
+     operator acts, not one: `0003`+`0004` together and bounded, verified, and only then `0005`,
+     bounded to itself. The bounded command is what makes "sequenced" mechanical rather than a
+     matter of your vigilance — see §12A of that packet for the ordered eleven-step sequence.
    - Use `scripts/db_migrate.py --through VERSION`. **Do not use a bare `--apply`**, which globs
      every migration file present on disk and will apply more than intended.
    - **That script is NOT in the container image.** The Dockerfile copies exactly one script, and
@@ -208,10 +214,10 @@ prompt:
 | `0002_runs` | applied (2026-08-12) |
 | `0003_revisions` | **owner-approved, NOT applied** |
 | `0004_submissions` | **owner-approved, NOT applied** — apply only together with `0003` |
-| `0005_run_projection` | **NOT owner-approved.** Do not apply |
+| `0005_run_projection` | ~~**NOT owner-approved.** Do not apply~~ → **OWNER-APPROVED 2026-09-17, STILL NOT APPLIED. Apply only AFTER `0003`+`0004` are applied and verified, and bounded to itself (`--apply --through 0005_run_projection`).** The old row is struck rather than replaced because "do not apply" is exactly the kind of line an operator acts on, and the *sequencing* half of it survives the approval: `0005` must still never land in the same step as `0003`/`0004` |
 
 The run backfill (`scripts/db_backfill_runs.py`) **has never been run anywhere**. It must not run
-before `0005` is approved and applied, and the Stage-2b read cutover must not happen until the
+before `0005` is applied (it is now **approved** — 2026-09-17 — which is a different thing), and the Stage-2b read cutover must not happen until the
 backfill reports every `UNREADABLE`/`refused`/`failed` count as **0** *and* the operator's two
 completeness queries both return **0**.
 

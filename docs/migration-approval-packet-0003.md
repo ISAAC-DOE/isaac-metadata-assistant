@@ -486,7 +486,10 @@ alone, so *"`0005` was not applied"* is something you read rather than something
 > **The first correction left the section honest and the ask impossible**, and it said so: it
 > replaced the command with a bare `--apply` plus a table of states, one of whose rows was
 > *"**STOP.** `0005` is not approved. Do not run `--apply` in this state"* — and that row is the
-> state the hosted database is actually in. So §9's own instruction could not be carried out. The
+> state the hosted database is actually in. **(Historical: `0005` was approved on 2026-09-17. That
+> does NOT make a bare `--apply` safe here — it makes it worse, since it would now land three
+> approved migrations in one unverifiable step. The quoted row is preserved as the record of what
+> §9 used to say; the bounded command below is the answer, and it is unchanged.)* So §9's own instruction could not be carried out. The
 > operator addendum recorded that as **BLOCKED** rather than pending, which was the right call and is
 > now discharged: ~~*"`scripts/db_migrate.py` exposes `--plan` and `--apply` and **no `--only
 > <version>`**"*~~ — **the runner now takes `--through VERSION`**, which applies every pending

@@ -737,8 +737,10 @@ Current state:
     `isaac_run_projection` (`0005_run_projection`) IS the completeness marker, and
     `scripts/db_backfill_runs.py` IS the backfill. The reason a read cutover still cannot distinguish
     "zero runs" from "never projected" is unchanged and is the reason both were built — but the
-    blocker is now an EXECUTION, not an absence: the backfill **has never been run anywhere**, `0005`
-    is **not owner-approved**, and Stage 2b additionally needs the operator's two completeness queries
+    blocker is now an EXECUTION, not an absence: the backfill **has never been run anywhere**,
+    ~~`0005` is **not owner-approved**~~ — **APPROVED BY THE PROJECT OWNER 2026-09-17; see the
+    correction at the second site below, and note that approval moved ONE of the three blockers and
+    not the other two** — and Stage 2b additionally needs the operator's two completeness queries
     (`docs/migration-approval-packet-0005.md` §8A) both returning 0. Kept struck rather than edited so
     a future session sees that §11 was the stale half of the contradiction, not §15; actor stamping (authorized by Dean, blocked in practice — no trusted boundary
     exists, and the seam stays unset); ~~the native assistant, MCP and voice product surfaces beyond
@@ -2277,9 +2279,29 @@ Out of scope unless explicitly approved:
   — **FALSE NOW, re-measured 2026-08-30: THREE statements name it** — the write path's stamp, the
   Stage-2b reader (`FROM isaac_run_projection WHERE experiment_id = ANY(...)`), and the discard's
   delete. Stage 2b IS this build, and `/api/health` says so on the wire
-  (`run_projection.authoritative: true`). The two halves of the old gating claim that DO survive:
-  `0005` is still **not owner-approved**, and the backfill has still **never been run anywhere** —
-  and **no** hosted application of `0005`. **Making `isaac_runs` a read source (Stage 2b) is still a
+  (`run_projection.authoritative: true`). ~~The two halves of the old gating claim that DO survive:
+  `0005` is still **not owner-approved**, and the backfill has still **never been run anywhere**~~ —
+  **ONE OF THOSE TWO MOVED ON 2026-09-17 AND THE OTHER DID NOT, which is exactly why they are
+  separated here rather than corrected as a pair.**
+
+  **`0005_run_projection` IS NOW APPROVED BY THE PROJECT OWNER (2026-09-17).** The approval is of the
+  **exact bytes** and was recorded only after a fresh SHA-256 recomputation matched in three
+  independent places — the working tree, `git show origin/main:…`, and the packet's own digest table:
+  forward `86bf111cf030c15c…2da98304`, rollback `54a17432150525f7…bda90e735`. Four further mechanical
+  checks are recorded in [`docs/migration-approval-packet-0005.md`](docs/migration-approval-packet-0005.md)
+  §12, and **two of them found something**: check 3 established that these bytes have had **two**
+  commits and not `0003`'s "one version, ever" (the second, `9b35c204`, is a 46-insertion change whose
+  comment-stripped diff is **empty** — comments only, measured, not taken from its commit message), and
+  check 4 found that the four constraint names §7 tells an operator to verify **were pinned by no test
+  at all**, which is now closed by four new rows in
+  `apps/api/tests/test_submission_store.py::test_the_approval_packets_named_constraints_are_in_the_committed_text`.
+
+  **EVERYTHING ELSE IS UNCHANGED, and the approval must not be read as moving any of it.** The
+  backfill has still **never been run anywhere**; there is still **no hosted application of `0005`**,
+  nor of `0003` or `0004`; and **applying it remains the operator's act, which no agent may perform** —
+  the hard stop below is untouched. Owner approval is a **precondition** for the operator's step, never
+  a substitute for it. The ordered eleven-step sequence, whose ordering is itself the safety property,
+  is §12A of that packet. **Making `isaac_runs` a read source (Stage 2b) is still a
   separate decision and is gated on the backfill having RUN with every one of its
   `UNREADABLE`/`refused`/`failed` counts at 0, AND on the operator's two completeness
   queries (`docs/migration-approval-packet-0005.md` §8A) both returning 0. ~~"the backfill
@@ -2566,6 +2588,7 @@ amended §2 for exactly what is and is not permitted.
 | **Create Experiment durable persistence** (`isaac_experiments`) | **authorized 2026-08-07**, narrowly — see the scope note above. Implementation and local/CI testing only; **applying the migration to the hosted database is the owner's act, not the agent's.** Dean applied `0001_experiments` to the hosted database on **2026-08-09** ([evidence](docs/evidence/hosted-0001-verification-2026-08-09.md)) — which changes nothing about gate **G2**, gate **G3**, or the prohibition on an agent connecting to that database. ~~which changes nothing about `0002` (still unapplied and unauthorized for hosted application)~~ — **superseded 2026-08-12, see the next row.** |
 | **`0002_runs`** (the `isaac_runs` table) | **APPLIED TO THE HOSTED DATABASE BY DEAN, 2026-08-12 00:30 UTC** ([evidence](docs/evidence/hosted-0002-verification-2026-08-12.md); packet [`docs/migration-approval-packet-0002.md`](docs/migration-approval-packet-0002.md), STATUS + §12C). Both SHA-256 digests Dean reported were **recomputed here and MATCH** the committed files, so the bytes applied are the bytes Krish approved on 2026-08-11. Verified from the hosted server: table, PK, FK, five CHECKs, the index, no `ON DELETE`/`CASCADE`, row count **0**, idempotent re-run, app health OK / `postgres` / `durable`. **Operator testimony, not a captured artifact** — no agent connected to that database. **NOT reported, and named as gaps:** the `records` and `isaac_experiments` before/after counts (packet postchecks 1 and 2) and the hosted engine build string. **The table existing is NOT permission to write it** — the run write path is a later, separately-reviewed slice, and `db_write.OWNED_TABLES` listing `isaac_runs` "grants nothing on its own". |
 | **`0003_revisions` + `0004_submissions`** (the five submission-lifecycle tables) | **APPROVED BY THE PROJECT OWNER 2026-08-17; NOT APPLIED TO THE HOSTED DATABASE, ANYWHERE.** Two different people's acts — see the paragraph above and each packet's STATUS block. They are ONE decision (`0004` declares a foreign key into a table `0003` creates) and must be applied together or not at all. Proven forward, rollback and wrong-order-refusal against a `postgres:18` container in CI; **a real PostgreSQL has now executed cases blaming 41 of the 46 declared constraints on `main`** — run `32800763199`, job `97660962127`, at `c153ec9`, step *"Prove every 0003 and 0004 constraint rejects what it claims to reject"*. **THREE LAYERS OF CORRECTION SIT ON THIS ONE FIGURE AND ALL THREE ARE KEPT, because the sequence is the point: 41 (false) → 27 (true) → 41 (true, by a different run).** (i) ~~"**41 of the 46 declared constraints** are exercised there (27 until 2026-08-19)"~~ credited a run with a file's coverage. (ii) The 2026-08-24 correction — the workflow DECLARES 41, of which **27** had been executed on `main` (`fe374c0`, run `32099627898`), the other fourteen sitting in `77de2db` which was not in `main` — was right, and its instruction ~~"**An operator weighing this evidence should read 27, not 41.**"~~ is **RETIRED 2026-08-25**: `77de2db` merged to `main` via `c153ec9` (`git merge-base --is-ancestor 77de2db origin/main` now exits 0) and run `32800763199` executed the 41. **An operator should now read 41, and 27 remains the correct figure for run `32099627898` at `fe374c0` — that correction was overtaken, not wrong.** Three of the five still-unblamed cannot be blamed individually because the table's equality CHECKs subsume its shape CHECKs. Applying them is the operator's act, and no agent may do it. |
+| **`0005_run_projection`** (the per-experiment completeness claim) | **APPROVED BY THE PROJECT OWNER 2026-09-17; NOT APPLIED TO THE HOSTED DATABASE, ANYWHERE.** Two different people's acts, exactly as the row above — and **this row is NEW: the readiness table had no `0005` row at all until 2026-09-17**, which is itself worth recording, because a migration with an approval packet and a live in-application reader was absent from the table an operator reads to see where things stand. Approved on the **exact bytes**, after a fresh SHA-256 recomputation matched in three independent places (working tree, `git show origin/main:…`, and the packet's own table): forward `86bf111cf030c15c…2da98304`, rollback `54a17432150525f7…bda90e735`. Four further mechanical checks are in [`docs/migration-approval-packet-0005.md`](docs/migration-approval-packet-0005.md) §12; **two of them found a defect rather than confirming a claim** — the bytes have had **two** commits, not `0003`'s "one version, ever" (the second changed **comments only**, measured by a comment-stripped diff, not inferred from its commit message), and the four constraint names §7 tells an operator to verify **were pinned by no test at all**, now closed. Executable content is **two statements**: `CREATE TABLE IF NOT EXISTS` + `CREATE INDEX IF NOT EXISTS`, no `ON DELETE`, no `CASCADE`, no `ALTER`/`DROP`/`TRUNCATE`/DML, and the identifier `records` in no statement in either file. **THE APPROVAL MOVED EXACTLY ONE BLOCKER.** Unchanged: the backfill has **never been run anywhere**; `0003`/`0004` are still unapplied and must be applied **first**, together, bounded (`--apply --through 0004_submissions`); an **unbounded** `--apply` would now land **three** approved migrations in one unverifiable step, which is the failure the bounded form exists to prevent; and the **Stage-2b read cutover is a separate decision** gated on §8A's two queries both returning 0 *after* a backfill whose `UNREADABLE`/`refused`/`failed` counts are all 0. The ordered eleven-step operator sequence is §12A. **Applying it is the operator's act, and no agent may do it** — not any of the eleven steps. |
 | **Hosted real-record display** | **closed by default**, pending Dean's explicit visibility decision. Dean's guide §"Displaying record content" requires the boundary to be built into the read path from the start, not bolted on later. |
 
 Two separate **questions**, which Dean's guide is explicit about not conflating: **writing** to this

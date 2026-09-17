@@ -346,8 +346,11 @@ withheld by --through 0004_submissions: 0005_run_projection
 > *"Expected output, exactly: `applied: 0003_revisions, 0004_submissions`"*. That was true when
 > written and became false when `0005_run_projection.sql` was committed — the same defect 0003's
 > packet §9 records, in the same words, one document over. The bound is what makes the quoted output
-> true again. **`0005_run_projection` is NOT owner-approved and must not be applied**; the second
-> line of each block is how you see that it was not.
+> true again. ~~**`0005_run_projection` is NOT owner-approved and must not be applied**~~ — **CORRECTED
+> 2026-09-17: it IS owner-approved, and must still not be applied IN THIS STEP.** The bound is what
+> keeps it out of this window; the second line of each block is how you *see* that it was left
+> alone rather than infer it. `0005` has its own packet and its own bounded apply, after these
+> two are applied and verified.
 
 ## 10. Postchecks — what would prove it worked
 

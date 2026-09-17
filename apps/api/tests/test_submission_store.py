@@ -382,6 +382,28 @@ def test_the_new_tables_are_owned_before_their_own_create_can_run():
         ("0004_submissions", "isaac_submissions_subject_non_empty"),
         ("0004_submissions", "isaac_submission_runs_one_record_per_unit"),
         ("0004_submissions", "isaac_submission_runs_unit_unique"),
+        # 0005 — ADDED 2026-09-17, WITH THE OWNER APPROVAL OF `0005_run_projection`,
+        # AND THE REASON IT WAS MISSING IS THE REASON IT MATTERS.
+        #
+        # `docs/migration-approval-packet-0005.md` §7 instructs the operator, in
+        # capitals, to verify these four names are PRESENT after applying the
+        # migration. Measured at `37ff6e5b`, before this change:
+        #
+        #     grep -rl -a <each name> apps/api/tests/   ->   0 files, all four
+        #
+        # So the packet directed a human to check four strings that nothing in the
+        # repository tied to the committed SQL. A rename in the migration, or a typo
+        # in the packet, would have sent the operator hunting for a constraint that
+        # never existed, mid-way through a hosted database change, with no failing
+        # test anywhere to contradict them. `0003` and `0004` had this guard from the
+        # start; `0005` was simply absent from the parameter list.
+        #
+        # `_statements()` reads `db_migrate.load_migrations()` generically, so it
+        # resolved `0005` with no change — the gap was the list, not the mechanism.
+        ("0005_run_projection", "isaac_run_projection_experiment_fk"),
+        ("0005_run_projection", "isaac_run_projection_rev_non_negative"),
+        ("0005_run_projection", "isaac_run_projection_count_non_negative"),
+        ("0005_run_projection", "isaac_run_projection_projector_known"),
     ],
 )
 def test_the_approval_packets_named_constraints_are_in_the_committed_text(version, constraint):
@@ -588,36 +610,50 @@ def test_the_packets_do_not_claim_a_hosted_application(version="0003"):
     claim, because that is the one a reader could mistake for standing permission.
     """
     root = Path(sstore.__file__).resolve().parents[3]
-    # `0005` IS COVERED HERE TOO, and its STATUS wording is deliberately different:
-    # `0003`/`0004` are APPROVED-and-unapplied, while `0005` is NOT APPROVED. So the
-    # exact literal cannot be shared, and each packet is checked against the phrasing
-    # its own state requires. What is shared, and is the invariant, is that neither
-    # reads as applied and neither reads as a delegation.
+    # ALL THREE PACKETS ARE NOW CHECKED AGAINST THE SAME LITERALS, AND THE BRANCH THAT
+    # USED TO SPLIT THEM IS DELETED. THIS IS THIS TEST'S OWN LESSON APPLIED TO ITSELF.
+    #
+    # The deleted comment read: "`0005` IS COVERED HERE TOO, and its STATUS wording is
+    # deliberately different: `0003`/`0004` are APPROVED-and-unapplied, while `0005` is
+    # NOT APPROVED. So the exact literal cannot be shared." That was accurate on the day
+    # it was written and it is what made the branch look principled — but the condition
+    # it branched on was **the approval state**, which is precisely the kind of
+    # transient this function's own docstring says never to pin. The owner approved
+    # `0005` on 2026-09-17, all three packets entered the SAME state
+    # (APPROVED-and-unapplied), and the branch then began REQUIRING `0005` to keep
+    # saying `NOT APPROVED` — a test mechanically demanding that the repository
+    # understate a decision the owner had made. That is the identical failure mode the
+    # docstring above records for `"No PostgreSQL has ever executed this file"`, in the
+    # same file, one approval later.
+    #
+    # THE `NOT APPROVED` ASSERTION ALSO CONTRADICTED THE DOCSTRING DIRECTLY. It says:
+    # "The owner's APPROVAL is likewise not pinned here, in either direction." The
+    # `0005` arm pinned it in one direction anyway. It is gone, and approval remains
+    # unpinned — recorded in each packet's STATUS block, which is where a decision
+    # belongs, not in an assertion that has to be edited to record one.
+    #
+    # WHAT IS PINNED IS THE INVARIANT, unchanged and now uniform: no packet reads as
+    # applied, and no packet reads as a delegation.
+    #
+    # Whitespace-normalisation is kept and extended to all three, because it was never
+    # specific to `0005` — a Markdown file wraps at 90 columns and a phrase straddling a
+    # line break is not a different phrase. Reflowing a document to satisfy a test would
+    # be the tail wagging the dog.
     for packet in ("0003", "0004", "0005"):
         doc = (root / "docs" / f"migration-approval-packet-{packet}.md").read_text(
             encoding="utf-8"
         )
-        if packet == "0005":
-            # WHITESPACE-NORMALISED, because a Markdown file wraps at 90 columns and
-            # a phrase that happens to straddle a line break is not a different
-            # phrase. The first version of this assertion failed for exactly that
-            # reason, and reflowing the document to satisfy a test would have been
-            # the tail wagging the dog.
-            flat = " ".join(doc.split())
-            assert "NOT APPLIED ANYWHERE" in flat, packet
-            assert "NOT APPROVED" in flat, packet
-            assert "no agent may do it" in flat, packet
-        else:
-            assert "NOT APPLIED TO THE HOSTED DATABASE, ANYWHERE." in doc, packet
-            # The operator's act is outstanding, and the packet must say so in a form
-            # a reader cannot mistake for a delegation.
-            assert "no agent may run it" in doc, packet
+        flat = " ".join(doc.split())
+        assert "NOT APPLIED TO THE HOSTED DATABASE, ANYWHERE." in flat, packet
+        # The operator's act is outstanding, and the packet must say so in a form
+        # a reader cannot mistake for a delegation.
+        assert "no agent may run it" in flat, packet
         # And it must not have quietly acquired the opposite claim.
         for forbidden in (
             "APPLIED TO THE HOSTED DATABASE BY DEAN",
             "has been applied to the hosted database",
         ):
-            assert forbidden not in doc, (packet, forbidden)
+            assert forbidden not in flat, (packet, forbidden)
 
 
 def test_the_0005_packet_does_not_read_as_proven_against_real_data():
@@ -1637,18 +1673,38 @@ def test_the_operator_handoff_quotes_digests_that_match_the_committed_files():
     )
 
 
-def test_the_operator_handoff_does_not_read_as_if_0005_were_approved():
-    """A NEW MIGRATION FILE MUST NOT ACQUIRE AN APPROVAL BY PROXIMITY.
+def test_the_operator_handoff_does_not_read_as_if_0005_were_part_of_ITS_ask():
+    """A MIGRATION MUST NOT ACQUIRE AN OPERATOR WINDOW BY PROXIMITY.
 
-    The handoff's §1 lists two migrations the owner HAS approved and that need an
-    operator window. `0005_run_projection` is not one of them. The specific failure
-    this guards is not a false sentence but a false IMPRESSION: a third migration
-    appearing in a document whose subject is "migrations awaiting an operator" reads
-    as a third thing waiting on the operator, and an operator who applied it would
-    have skipped the owner's review entirely.
+    RENAMED AND RE-SCOPED 2026-09-17, AND THE OLD ASSERTION WAS PASSING FOR THE WRONG
+    REASON WHEN IT WAS FOUND — which is the reason this docstring is long.
 
-    So the document must say the word, in the section that names it, and must
-    instruct against applying it.
+    It was `test_the_operator_handoff_does_not_read_as_if_0005_were_approved`, and it
+    required the handoff to contain `"NOT approved"` or `"NOT APPROVED"`. Krish
+    approved `0005_run_projection` on 2026-09-17, so the handoff's approval sentences
+    were struck in place (this repository's convention for a claim a reader acts on).
+    **The assertion then still passed — because the struck text still CONTAINS the
+    words.** A guard that cannot tell a live claim from a struck one is not measuring
+    the document a human reads; it was one edit away from requiring the handoff to
+    keep understating a decision the owner had made, which is the identical failure
+    `test_the_packets_do_not_claim_a_hosted_application` records above for
+    ``"No PostgreSQL has ever executed this file"``.
+
+    THE INVARIANT IS NOT "0005 IS UNAPPROVED". It never was — that was a transient
+    that happened to be true for the document's whole life until now. The invariant is
+    the one the original docstring actually described, one sentence earlier: **the
+    specific failure is not a false sentence but a false IMPRESSION** — a third
+    migration appearing in a document whose subject is "migrations awaiting an
+    operator" reading as a third thing to apply in THAT window.
+
+    That risk did not go away when the approval arrived. It got sharper. With three
+    approved migrations pending, a bare `--apply` lands all three in one unverifiable
+    step, and the thing standing between an operator and that outcome is this
+    document continuing to say "not in this window" in a form they cannot misread.
+
+    So what is pinned is: `0005` is named, it is instructed against **for this ask**,
+    and the document does not assert it may be applied here. Approval is pinned in
+    NEITHER direction, per the rule the sibling test states.
     """
     root = Path(sstore.__file__).resolve().parents[3]
     doc = (root / "docs" / "dean-handoff-consolidated-2026-08-18.md").read_text(
@@ -1656,8 +1712,17 @@ def test_the_operator_handoff_does_not_read_as_if_0005_were_approved():
     )
     flat = " ".join(doc.split())
     assert "0005_run_projection" in flat
-    assert "NOT approved" in flat or "NOT APPROVED" in flat
+    # The instruction, which survives the approval unchanged: this document's ask is
+    # `0003`+`0004`, and `0005` is sequenced after it rather than blocked before it.
     assert "Do NOT apply `0005`" in flat
+    # And it must not have acquired the opposite. These are the phrasings that would
+    # turn a sequencing note into a licence.
+    for forbidden in (
+        "apply all three with a bare",
+        "`0005` is part of this ask",
+        "0005 may be applied in this window",
+    ):
+        assert forbidden not in flat, forbidden
     # AND THE HEADING MUST NOT PROMISE TWO WHILE LISTING THREE. "Two migrations,
     # approved" was the original heading and became misleading the moment a third
     # appeared in the file.

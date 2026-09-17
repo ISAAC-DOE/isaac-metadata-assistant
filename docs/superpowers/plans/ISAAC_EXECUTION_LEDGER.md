@@ -8,6 +8,50 @@ the repository — never from remembered chat context.
 ## SESSION HEADER
 
 ```
+*** 2026-09-17, SECOND CONTINUATION — RE-DERIVED AGAIN. Everything below this block is
+    a SUPERSEDED reading, kept unedited, per this file's own rule that a superseded
+    header read as a correction is safe and one silently rewritten is not. ***
+
+RE-DERIVED AT CONTINUATION OPEN, every line from a command, not from a handoff:
+  main (at open)  = origin/main = 9ef921d2   (PR #259's merge)
+  release         = v0.0.245; `git rev-list -n1 v0.0.245` -> 9ef921d211a6
+                    — resolved from the TAG, not read off a workflow log line
+  main CI         = success at 9ef921d2 (both "CI" and "Build and Push to GHCR")
+  open PRs        = ONE — #261, mergeStateStatus UNSTABLE, which is a PENDING CHECK
+                    and NOT a refusal; four checks SUCCESS, the a11y baseline still
+                    IN_PROGRESS. It was left alone until it concluded.
+  working tree    = clean
+  stashes         = (empty)
+
+  THEN, IN THIS CONTINUATION:
+  PR #261 merged  = 37ff6e5b  (5/5 checks SUCCESS at exact head 6192e579; base had
+                    NOT moved, so the CI head content IS the merge-result content)
+  main (now)      = 37ff6e5b + this continuation's own PRs — RE-DERIVE IT, do not
+                    quote this line; any SHA written in a committed header is
+                    superseded by the next push, which is why no "CI green at X"
+                    claim is made here. The arbiter is each PR's own checks on its
+                    own head, and the release gate independently refuses any commit
+                    whose CI did not conclude `success`.
+  truth path      = UNTOUCHED by this continuation's documentation slice, asserted
+                    mechanically (see the session entry's §2 for the command).
+
+  WHAT THIS CONTINUATION SHIPPED — see the SESSION entries below for each, with
+  every figure's command:
+    1. PR #261 merged, after waiting out a still-running check rather than reading
+       UNSTABLE as a failure.
+    2. `0005_run_projection` OWNER-APPROVED on a fresh three-way digest match — and
+       two of the five recorded checks found a DEFECT rather than confirming a claim.
+    3. A nine-document / eleven-site honesty sweep the approval forced, in which my
+       own hand-enumeration was INCOMPLETE and a mechanical sweep found four more.
+    4. Two guards re-scoped: one FAILED correctly, and one KEPT PASSING WHILE WRONG.
+    5. `DEC-48`, `DEC-49`, `DEC-50` — including one that overturns a premise this
+       same file had committed.
+```
+
+*** THE SUPERSEDED BLOCK FOLLOWS, unedited. ***
+
+
+```
 *** 2026-09-15, CONTINUATION — RE-DERIVED AGAIN, because the block that follows
     went stale the moment PR #256 merged and a stale header is worse than none.
     THIS IS THE CURRENT STATE; everything below it is a superseded reading kept
@@ -4967,6 +5011,236 @@ Impeccable run in this session could have two assessors.
 
 ---
 
+## SESSION 2026-09-17, CONTINUATION — PR #261 MERGED, `0005` OWNER-APPROVED, AND A NINE-DOCUMENT HONESTY SWEEP THE APPROVAL FORCED
+
+**No production infrastructure was touched, no migration was applied, no database connection was
+opened, no credential was entered, and no message was sent.** Starting point `main = 9ef921d2`
+(`v0.0.245`). This entry covers the first slice of the continuation; later slices extend it.
+
+### 1. State re-derived at continuation open, every line from a command
+
+```
+main (open)     = origin/main = 9ef921d2   (PR #259's merge)
+release (open)  = v0.0.245; `git rev-list -n1 v0.0.245` -> 9ef921d211a6  — resolved from the TAG
+main CI (open)  = success at 9ef921d2 (CI + "Build and Push to GHCR")
+open PRs (open) = ONE — #261, mergeStateStatus UNSTABLE
+working tree    = clean
+```
+
+### 2. PR #261 — merged, and the "UNSTABLE" was a pending check, not a failure
+
+`mergeStateStatus: UNSTABLE` is **not** a refusal and was not read as one. Re-polled on the PR's
+own head: four checks `SUCCESS` and **`browser accessibility and responsive baseline` still
+`IN_PROGRESS`**. It was left alone until it concluded `SUCCESS`, and only then merged.
+
+| what | measured |
+|---|---|
+| exact head | `6192e579` — equal to the local `HEAD`, so the checks describe the tree that merged |
+| base movement | **none.** `git merge-base origin/main HEAD` == `origin/main` == `9ef921d2`, so the branch was a descendant and the CI head content *is* the merge-result content |
+| required checks | **5 of 5 `SUCCESS`** at that head |
+| scope | docs-only, 6 files, +1156/-0 |
+| truth path | **UNTOUCHED**, asserted mechanically (`git diff --name-only origin/main...HEAD \| grep -E '^(src/isaac_records/\|schema/\|apps/api/isaac_api/(export\|official)\.py)'` → empty) |
+| merge commit | **`37ff6e5b`** |
+
+### 3. `0005_run_projection` — OWNER APPROVED, and two of the five checks found a defect
+
+The owner's approval was **conditional on a fresh digest recomputation matching the packet.** It
+does, and in **three** independent places rather than one:
+
+| file | working tree | `git show origin/main:` | packet's table |
+|---|---|---|---|
+| forward | `86bf111cf030c15c…2da98304` | same | same |
+| rollback | `54a17432150525f7…bda90e735` | same | same |
+
+`git diff origin/main -- apps/api/isaac_api/migrations/` is **empty**, so branch and `main` bytes
+are identical. **The condition is satisfied and the approval is recorded** — packet STATUS block +
+new §12, `CLAUDE.md` §15 (two claim sites + a new readiness-table row), and `EXT-08`.
+
+**Independent safety recheck, comment-stripped rather than read:** the forward file is **exactly two
+statements** — `CREATE TABLE IF NOT EXISTS isaac_run_projection (…)` and `CREATE INDEX IF NOT
+EXISTS …` — with the four named constraints present and **no** `ALTER`/`DROP`/`TRUNCATE`/DML/
+`ON DELETE`/`CASCADE`/dollar-quoting in any statement, and the identifier `records` in **no**
+statement in either file. Rollback: three statements in one transaction, dropping only its own table
+and deleting only its own ledger row. **Every forbidden-keyword hit in the file is in a comment**,
+which is why the scan was run on the comment-stripped text and not on the raw file.
+
+**CHECK 3 DIVERGED FROM `0003`'s PRECEDENT AND COPYING ITS WORDING WOULD HAVE BEEN A FALSE CLAIM.**
+`0003`'s §12D says its bytes *"have had exactly one version, ever"*. **Not true of `0005`:**
+`git log` gives **two** commits — `6dce6fd9` (created) and `9b35c204`, a **46-insertion /
+7-deletion** change to the forward `.sql`. That is exactly the shape of thing an approval must not
+wave past. **Measured rather than believed:** stripping every line whose first non-space characters
+are `--` and diffing across `9b35c204` yields an **empty diff of executable lines** — the change was
+comments, including the withdrawal of a `never_projected: 0` claim this repository had already
+recorded as impossible, sitting inside the artifact the owner approves byte-for-byte. The rollback
+file was never touched, which is why its digest is unchanged across both commits.
+
+**CHECK 4 FOUND THAT THE PACKET DIRECTED AN OPERATOR TO VERIFY FOUR STRINGS NO TEST PINNED.** §7's
+postcheck says, in capitals, to check for `isaac_run_projection_experiment_fk`, `_rev_non_negative`,
+`_count_non_negative` and `_projector_known`. Measured at `37ff6e5b`:
+`grep -rl -a <each> apps/api/tests/` → **0 files, for all four.** `0003` and `0004` have exactly
+this guard (`test_the_approval_packets_named_constraints_are_in_the_committed_text`, 15 rows) and
+`0005` was simply absent from the parameter list — so a rename in the SQL, or a typo in the packet,
+would have sent an operator hunting mid-change for a constraint that never existed, with no failing
+test anywhere. **Closed here: 4 new rows, 15 → 19.** `_statements()` reads `load_migrations()`
+generically, so it resolved `0005` unmodified — the gap was the list, not the mechanism.
+**Negative-controlled:** a one-character typo in the fourth name fails with
+`AssertionError: isaac_run_projection_projector_knowm`; restored, 19 pass.
+
+### 4. TWO CORRECTIONS TO THE PACKET ITSELF, because an operator reads it before acting
+
+- **§4's *"nothing reads it"* is FALSE and is struck in place.** Re-measured: **three** statements
+  name the table (`experiment_repository.py:1143` write, **`:1210` READ — the Stage-2b reader**,
+  `:1659` delete), and the cited test no longer exists under that name — the codebase renamed it to
+  `…_read_by_ONE_reader` and recorded that invariant 5 was *"DISCHARGED, NOT DELETED"* through the
+  process it named. **Only the packet went stale.** This matters operationally, not cosmetically: an
+  **incomplete** table is not inert, it is a wrong answer to "how many runs does this experiment
+  have" — which is exactly why §8A is a **gate** and not a postcheck. The half of the bullet that
+  survives is re-verified: the **backfill** still reads nothing.
+- **§6's code block showed the UNBOUNDED command** while the prose authorized only the bounded one.
+  Now that all three migrations are approved the failure it invites has changed shape rather than
+  gone away: a bare `--apply` would land **three** approved migrations in one unverifiable event.
+  The authorized form is bounded **twice** — `--apply --through 0004_submissions`, verify, then
+  `--apply --through 0005_run_projection`.
+
+### 5. The bounded operator sequence — new packet §12A
+
+Eleven ordered steps, from backup/restore verification through to the Stage-2b gate, with the
+reasoning for each ordering constraint. Four points that are decisions rather than formalities:
+step 3 applies two migrations *deliberately* (`0003`/`0004` are one decision — `0004` declares a FK
+into a table `0003` creates); steps 4 and 6 are **separate** verifications and merging them makes a
+failure unattributable; **step 8 is a REQUIREMENT, not a report** — with a non-zero
+`UNREADABLE`/`refused`/`failed`, the §8A queries would return 0 **for the wrong reason**, the one
+place in the sequence where a green reading actively misleads; and **step 11 is a DECISION, not a
+continuation** — steps 1-10 make the cutover safe to *consider*. **None of the eleven may be
+performed by an agent.**
+
+### 6. THE APPROVAL FORCED AN HONESTY SWEEP, AND MY OWN ENUMERATION OF IT WAS INCOMPLETE
+
+`0005`'s approval status was asserted **live** in **nine documents, at eleven sites.** I enumerated
+**five documents by hand and then ran a mechanical sweep, which found four more.** That is the
+fourth-instance lesson §15 records — *"all N artifacts are fixed" is itself a checkable claim* —
+reproduced by the session applying it, and it is recorded rather than quietly fixed because the
+hand-enumeration **felt** complete.
+
+| document | sites | status |
+|---|---|---|
+| `CLAUDE.md` §15 | 2 + new readiness row | found by hand |
+| `docs/migration-approval-packet-0005.md` | STATUS, §4, §6, stale 2026-08-25 pointer | found by hand |
+| `docs/hao-production-unblock-package-2026-09-17.md` | 6 (heading, DB-1, the 5-row summary) | found by hand |
+| `docs/hao-production-ai-execution-prompt-2026-09-17.md` | 3 (rule 8, migration ledger table, backfill gate) | found by hand |
+| `docs/dean-handoff-consolidated-2026-08-18.md` | 3 | found by hand |
+| `docs/dean-operator-addendum-2026-08-25.md` | 4 | **3 by hand, 1 by the sweep** |
+| `docs/migration-approval-packet-0003.md` | 1 | **by the sweep** |
+| `docs/migration-approval-packet-0004.md` | 1 | **by the sweep** |
+| `docs/ingestion-proposal-contract.md` | 1 | **by the sweep** |
+| `docs/superpowers/plans/2026-09-12-isaac-blockers-and-risks.md` | 1 | **by the sweep** |
+| `docs/superpowers/plans/2026-09-12-isaac-master-implementation-plan.md` | 1 | **by the sweep** |
+
+**THE SHAPE OF EVERY CORRECTION IS THE SAME AND IT IS THE INTERESTING PART: the INSTRUCTION
+survived and only its REASON changed.** Four sent-or-prepared operator documents say *"do not apply
+`0005`"*. That instruction is **still correct** — `0005` must never land in the same step as
+`0003`/`0004` — but its stated reason ("it is unapproved") would leave an operator waiting for
+something that has happened. So each was rewritten as **sequenced after, not blocked before**, with
+the old reason struck and the instruction kept verbatim. An operator who remembered only *"do not
+apply `0005`"* and acted on it would still be acting correctly, which is the property the
+strike-don't-replace convention exists to preserve.
+
+### 7. AND A GUARD WAS PASSING FOR THE WRONG REASON — found by checking, not by CI
+
+Two tests pinned the pre-approval state. Both are re-scoped to the **invariant**, which is this
+file's own standing rule (*"pin the invariant, never the transient"*) applied to the tests that
+state it:
+
+- **`test_the_packets_do_not_claim_a_hosted_application` FAILED** — the only failure in 9,923 — and
+  it failed **correctly**: it branched on `packet == "0005"` and required the literal
+  `"NOT APPLIED ANYWHERE"`. The branch condition was **the approval state**, a transient. With
+  `0005` approved, all three packets are in the identical state (APPROVED-and-unapplied), so the
+  branch is **deleted** and all three are checked against the same literals, whitespace-normalised.
+  **Its `assert "NOT APPROVED" in flat` also contradicted its own docstring**, which says *"The
+  owner's APPROVAL is likewise not pinned here, in either direction."* It is gone; approval lives in
+  the STATUS block, where a decision belongs, not in an assertion that must be edited to record one.
+- **`test_the_operator_handoff_does_not_read_as_if_0005_were_approved` KEPT PASSING WHILE BEING
+  WRONG**, which is worse than the failure. Its required words `"NOT approved"` survive **inside the
+  struck text** — a guard that cannot tell a live claim from a struck one is not reading the
+  document a human reads. Renamed `…_does_not_read_as_if_0005_were_part_of_ITS_ask` and re-pointed
+  at what its own docstring already described as the real risk: *"not a false sentence but a false
+  IMPRESSION."* That risk got **sharper**, not softer, with three approved migrations pending.
+  **Negative-controlled twice:** deleting the instruction fails; injecting
+  `` `0005` is part of this ask `` fails.
+
+### 8. Decisions recorded — `DEC-48`, `DEC-49`, `DEC-50` (register §B5)
+
+- **`DEC-48` — no Authentik logout link now.** This **closes** an item `CLAUDE.md` §15 explicitly
+  left *"still open, and Krish's"*. It does not retract Dean's answer (the path stays recorded, so a
+  future session starts from a known-good endpoint) and removes nothing. **Stated honestly: a
+  scientist on a shared workstation has no in-app way to end a session** — a real gap, deliberately
+  accepted as lower priority, on the record as a decision rather than an oversight.
+- **`DEC-49` — the Activity history persists in the EXPERIMENT STATE DOCUMENT; migration `0006` is
+  NOT to be written.** This **overturns a premise committed in this very file**: `ACT-001`'s row
+  says the model *"Needs migration `0006`, which means it needs an approval packet and an operator
+  act."* That is false, and it is the kind of false premise that silently converts buildable work
+  into blocked work. The `proposals` precedent settles it — `STATE_KEY = "proposals"` and its own
+  comment block recording that **no migration is required** because `from_state` reads optional keys
+  with `.get`. §15's 2026-08-29 extension made that choice deliberately: four tables have reached
+  `OWNED_TABLES` before a committed sentence named them, and *"a fifth is avoidable by not needing
+  one."* **`db_write.OWNED_TABLES` is UNCHANGED.**
+- **`DEC-50` — build `ACT-001`…`ACT-004` now; actor reads `unattributed`.** Only `ACT-005` is
+  externally blocked (`EXT-01`, Hao). An actor read from `X-authentik-username` would be a
+  **forgeable** claim rendered as a fact — Dean's own 2026-08-12 answer is that the Service is a
+  plain ClusterIP with no NetworkPolicy. Append-only, no `DELETE`, no `UPDATE`; Statistics may
+  summarize the history and may never replace it.
+
+### 8b. Two split external watch lists — Angel and Hao
+
+[`docs/external-watch-lists-2026-09-17.md`](../../external-watch-lists-2026-09-17.md). The existing
+`EXT-*` matrix mixes owners, which is correct for a register and useless for a session deciding
+whether it is blocked. The split lists add the column that answers that question: **what each answer
+unlocks**. If a row's "unlocks" cell does not name the work in hand, that row is **not** the blocker.
+
+Three properties worth stating because each corrects a way this has gone wrong before. **No row
+asserts a send state** — `CLAUDE.md` §11 records two documents described as "ready and UNSENT" while
+one had been sent and the other superseded; the repository can witness *preparation*, not
+*delivery*, and only Krish can say otherwise. **A third category is named rather than folded in** —
+`EXT-03` (owner **UNKNOWN**; do not assume Hao or Dean), `EXT-11` and `EXT-12` (Krish's own), and
+`DEC-48` — because a two-list framing makes a Krish item look like it is awaiting someone else.
+And **Angel's list contains no mapping or placement questions at all**: `DEC-41` settled placement
+and `DEC-47` settled the filename vocabulary, so all eight remaining rows are judgements the corpus
+does not state.
+
+### 9. Verification
+
+| command | result |
+|---|---|
+| `.venv/bin/pytest -q` (first run, main checkout) | **1 failed, 9,923 passed, 47 skipped** — the failure is §7's, and it was the guard doing its job. Recorded rather than replaced by the green run below, because the failure is the most informative measurement in this slice |
+| `.venv/bin/pytest -q` (second run, after the two guards were re-scoped, main checkout) | **9,924 passed, 47 skipped, 0 failed** in 604.18s |
+| `.venv/bin/pytest apps/api/tests/test_submission_store.py -q` | **59 passed** |
+| snapshot + deep-artifact drift check (`--detail-out` passed, per §17) | **ok, no drift** on both, after regeneration |
+| `apps/api/tests/test_committed_snapshot.py` + `test_memory_graph_detail.py` | **155 passed** |
+
+**Skip count vantage point, per this file's own rule:** 47 measured in the **main checkout**, not a
+worktree (a worktree reads `+2`, `graphify-out/graph.json` being gitignored).
+
+### 10. What was deliberately NOT done
+
+- **`0005` was NOT applied**, no database connection was opened, no kubeconfig / port-forward /
+  Secret was requested, the backfill was NOT run, Kubernetes was NOT touched, and **no Stage-2b
+  cutover was performed or authorized.** Owner approval is a precondition for the operator's step,
+  never a substitute for it.
+- **No migration file was created or edited.** `0006` is deliberately not written (`DEC-49`).
+- **`db_write.OWNED_TABLES` unchanged. Truth path untouched.**
+- **Neither external document was sent.** Delivery is the owner's act and this repository cannot
+  witness it; both keep their `PREPARED, NOT SENT` header. The Hao documents were *corrected*
+  before sending, not after — which is the only reason those edits are cheap.
+- **No Angel answer was invented.** The eight open questions are unchanged.
+
+### 11. Data boundary
+
+**None.** No production-derived content was read, and nothing under `examples/` was staged. The only
+files touched are committed documentation, one test file, and the two regenerated memory artifacts.
+This is a stronger claim than silence and is stated because §12's extended contract asks for it.
+
+---
+
 ## SESSION 2026-09-17 — DOMAIN RECONCILIATION + HAO PRODUCTION-UNBLOCK PACKAGE
 
 **Documentation and decision work only. No production infrastructure was touched, no migration was
@@ -5003,7 +5277,7 @@ states the dependency and explicitly assigns the work to ISAAC.
 
 | ID | Task | Blocked by | Notes |
 |---|---|---|---|
-| **ACT-001** | Design the append-only activity/event model: actor, action, object, field, before, after, timestamp, channel | nothing — **designable today** | Reuses two proven precedents: `db_write._APPEND_ONLY_TABLES` (mechanical no-`DELETE`) and `revision_history.py` (read module separate from write module). **Needs migration `0006`**, which means it needs an approval packet and an operator act — so the design must be worth that cost before it is written |
+| **ACT-001** | Design the append-only activity/event model: actor, action, object, field, before, after, timestamp, channel | nothing — **designable today** | Reuses two proven precedents: `db_write._APPEND_ONLY_TABLES` (mechanical no-`DELETE`) and `revision_history.py` (read module separate from write module). ~~**Needs migration `0006`**, which means it needs an approval packet and an operator act — so the design must be worth that cost before it is written~~ — **FALSE, AND OVERTURNED BY `DEC-49` ON 2026-09-17. Struck rather than deleted because this sentence is exactly the kind that silently converts buildable work into blocked work, and it had already done so once: it is the reason this row sat unbuilt.** No migration is needed. The `proposals` precedent is the answer and it was already in the tree: `proposals.STATE_KEY = "proposals"` is a top-level key in the **experiment state document**, and its own comment block records that *"no migration is required, because `Experiment.from_state` reads every optional key with `.get` and a default"* — so a document written before the feature existed hydrates to an empty history. `CLAUDE.md` §15's 2026-08-29 extension chose that **deliberately**, recording four occasions on which a table reached `db_write.OWNED_TABLES` before any committed sentence named it and stating that *"a fifth is avoidable by not needing one."* **`OWNED_TABLES` is therefore UNCHANGED by this work**, and two properties come free rather than by assertion: activity is durable exactly where the experiment document is durable, and an activity event is **structurally** invisible to `export.transform`, to every submission content signature, and to every run's `resolved_run_draft`, because it lives outside `draft` |
 | **ACT-002** | Record the **channel** on every write path (`web`, `mcp`, `historical_import`, `system`) | `ACT-001` | The channel is knowable **today**, at every write site, with no external dependency. This is the half of `DEC-44` that is not blocked on `EXT-01` |
 | **ACT-003** | Activity History read API + scientist-facing UI | `ACT-001` | Must render `unattributed` honestly rather than hiding entries that lack an actor |
 | **ACT-004** | Statistics reads the activity history as a **summary**, never as its source of truth | `ACT-003` | `DEC-44` is explicit. This also interacts with `DEC-25`'s standing obligation that Statistics must earn its sidebar slot by becoming scientist-first |

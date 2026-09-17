@@ -1,7 +1,34 @@
 # Migration approval packet — `0005_run_projection`
 
-**STATUS: NOT APPROVED. NOT APPLIED ANYWHERE. Applying it is the operator's act, and no
-agent may do it.**
+> ## STATUS: **APPROVED BY THE PROJECT OWNER 2026-09-17. NOT APPLIED TO THE HOSTED DATABASE, ANYWHERE.**
+>
+> **Read both halves. They are different acts by different people, and collapsing them is the one
+> misreading this block exists to prevent** — the same warning `0003` and `0004` carry, for the same
+> reason.
+>
+> **The approval (Krish, project owner, 2026-09-17).** Krish approves the **exact bytes** recorded in
+> the digest table below, conditional on a fresh SHA-256 recomputation matching this packet. That
+> recomputation was performed before this line was written and is recorded in **§12**, together with
+> four further mechanical checks. Both digests **match**, and they match in three independent places:
+> the working tree, `git show origin/main:…`, and this packet's own table.
+>
+> The approval is of **these bytes and nothing else.** Editing either `.sql` file voids it: the digest
+> stops matching and this packet then describes something other than what is on disk.
+>
+> **THE APPROVAL IS NOT AN APPLICATION, AND IT AUTHORIZES NO AGENT TO DO ANYTHING.** Applying this
+> migration to the hosted database remains **the operator's act, and no agent may run it.** `CLAUDE.md` §15's hard stop is
+> untouched: no agent may apply a migration, connect to the SLAC PostgreSQL, request a kubeconfig, a
+> port-forward or a Secret, run the backfill, change Kubernetes, or perform the Stage-2b cutover.
+> Owner approval is a **precondition** for the operator's step, never a substitute for it.
+>
+> **THIS APPROVAL ALSO DOES NOT AUTHORIZE THE STAGE-2b READ CUTOVER.** Creating the table and
+> trusting it are two decisions. The gate is §8A's two queries plus a clean backfill, and it is
+> restated as an ordered sequence in **§12A**.
+>
+> **TWO CORRECTIONS WERE MADE TO THIS PACKET IN THE SAME CHANGE THAT RECORDED THE APPROVAL**, because
+> an operator reads this document before acting and a stale safety claim in it is worse than none:
+> §4's *"nothing reads it"* is now **false** and is struck in place, and §6's code block showed the
+> **unbounded** command while the prose authorized only the bounded one. See §12's checks 4 and 5.
 
 > **POINTER, added 2026-08-25.** §9A below says its two new coverage items *"HAVE NOT YET RUN"*.
 > **They have now run** — run `32800763199`, job `97660962127`, on `main` at `c153ec9`, every step
@@ -9,7 +36,12 @@ agent may do it.**
 > [`docs/dean-operator-addendum-2026-08-25.md`](dean-operator-addendum-2026-08-25.md) §2. §9A is left
 > as written rather than rewritten, because this packet's own convention is that a claim promoted from
 > "declared" to "proven" must be promoted by quoting a job, not by editing the sentence that said it
-> had not happened. **Approval status is unchanged: still NOT APPROVED.**
+> had not happened. ~~**Approval status is unchanged: still NOT APPROVED.**~~ — **STALE as of
+> 2026-09-17 and struck rather than deleted, because this pointer sits ABOVE the STATUS block and a
+> reader scanning downward would meet it first.** The sentence was exactly true when written
+> (2026-08-25) and described that date's state; the owner approved these bytes on **2026-09-17** —
+> see the STATUS block immediately below and §12. **What has NOT changed, and is the half of this
+> pointer still worth reading: NOT APPLIED ANYWHERE, and applying it is the operator's act.**
 
 | | |
 |---|---|
@@ -113,13 +145,47 @@ constraint was a free choice when it was also forced.
 
 ## 4. What it deliberately does not do
 
-- **No read moves.** Exactly ONE statement in the application names this table
+- ~~**No read moves.** Exactly ONE statement in the application names this table
   (`experiment_repository.Q_UPSERT_RUN_PROJECTION`) and nothing reads it — pinned by
   `test_0005_is_written_by_the_write_path_and_read_by_nothing`, measured over the
-  module-level constants rather than asserted. **That includes the backfill**, which
-  computes its own report from the experiment documents and never reads the claim table;
-  the Stage-2b completeness question is therefore answered by an SQL query an operator
-  runs (§8A), not by the script.
+  module-level constants rather than asserted.~~ **FALSE AT `37ff6e5b`, AND CORRECTED
+  2026-09-17 IN THE SAME CHANGE THAT RECORDED THE OWNER APPROVAL. It is struck rather
+  than rewritten because this is the document an operator reads before acting, and a
+  reader who takes "nothing reads it" as current would mis-scope the blast radius of the
+  table they are about to create.**
+
+  Re-measured, not read — `grep -rn -a isaac_run_projection` over `apps/api/isaac_api/`
+  and `scripts/`, then each hit classified by whether it is an SQL statement or a comment:
+  **THREE statements name this table, and exactly ONE of them is a read.**
+
+  | statement | site | kind |
+  |---|---|---|
+  | `Q_UPSERT_RUN_PROJECTION` | `experiment_repository.py:1143` | write — the write path's stamp |
+  | `… FROM isaac_run_projection WHERE experiment_id = ANY(%s::text[])` | `experiment_repository.py:1210` | **read — the Stage-2b reader** |
+  | `DELETE FROM isaac_run_projection WHERE experiment_id = %s` | `experiment_repository.py:1659` | delete, only with the experiment it describes |
+
+  **The cited test no longer exists under that name**, and the codebase handled that
+  honestly rather than silently: it is now
+  `test_0005_is_written_by_the_write_path_and_read_by_ONE_reader`
+  (`apps/api/tests/test_experiment_repository.py:2981`), whose docstring records that
+  invariant 5 was *"DISCHARGED, NOT DELETED"* — the Stage-2a invariant's own second
+  sentence said *"Turning a reader on is Stage 2b, is a separate reviewed slice"*, and
+  that slice happened. `/api/health` says so on the wire
+  (`run_projection.authoritative: true`). So the invariant was **superseded through the
+  process it named**, not broken; it was only this packet that went stale.
+
+  **WHAT THIS CHANGES FOR THE OPERATOR, AND WHAT IT DOES NOT.** It changes nothing about
+  the migration bytes, which are unmoved and whose digests still match. It changes the
+  consequence of applying it: the table is **read by this application**, so an
+  **incomplete** table is not inert — it is a wrong answer to "how many runs does this
+  experiment have". That is precisely why §8A's gate exists and why it is a gate rather
+  than a postcheck, and it is why **§12A's sequence must not be reordered.**
+
+- **The backfill still reads nothing.** This half of the old bullet **survives and is
+  re-verified**: `scripts/db_backfill_runs.py` computes its report from the experiment
+  documents and never reads the claim table (its own lines 102, 108, 189 say so). The
+  Stage-2b completeness question is therefore answered by an SQL query an operator runs
+  (§8A), not by a number the script prints.
 - **No backfill runs.** `scripts/db_backfill_runs.py` exists, has **never been executed
   anywhere**, and is deliberately absent from the container image (the Dockerfile COPY
   allowlist ships one file out of `scripts/`; a test asserts this one is not it).
@@ -214,15 +280,40 @@ own instruction.**
 What is NOT acceptable is running the command because this packet said to and discovering
 afterwards that three migrations landed.
 
+**THE CODE BLOCK BELOW SHOWED THE UNBOUNDED COMMAND UNTIL 2026-09-17, WHILE THE PROSE ABOVE IT
+AUTHORIZED ONLY THE BOUNDED ONE. Corrected in the same change that recorded the owner approval.**
+The old block is kept struck, because an operator who has read this packet before may remember the
+command rather than the caveat — and the caveat was the whole content:
+
+~~`python scripts/db_migrate.py --apply`~~ — **NOT the command to run.** It applies every pending
+migration in lexical order. Now that `0005` is owner-approved, the failure mode it invites has
+*changed shape rather than gone away*: an unbounded run against a hosted database still pending
+`0003` and `0004` would land **three** owner-approved migrations in one step, collapsing three
+operator acts — each with its own packet, its own prechecks and its own postchecks — into one
+unverifiable event.
+
+**THE AUTHORIZED COMMAND IS BOUNDED, ALWAYS, AND IT IS BOUNDED TWICE:**
+
 ```bash
-python scripts/db_migrate.py --apply
-#    EXPECT (once 0003/0004 are applied): applied: 0005_run_projection
-#    EXPECT (if they are not):            applied: 0003_revisions, 0004_submissions, 0005_run_projection
-#
-#    THE SECOND LINE IS THE STATE TO STOP IN, NOT TO PROCEED FROM. If 0003/0004
-#    are pending, apply them first with `--apply --through 0004_submissions` from
-#    their own packets; do not let this command pick them up.
+# Step 1 — 0003 and 0004, from THEIR packets, bounded to 0004.
+python scripts/db_migrate.py --apply --through 0004_submissions
+#    EXPECT: applied: 0003_revisions, 0004_submissions
+#    Then run 0003's and 0004's OWN postchecks before going further.
+
+# Step 2 — this migration, bounded to itself.
+python scripts/db_migrate.py --apply --through 0005_run_projection
+#    EXPECT: applied: 0005_run_projection
+#    If it reports anything else, STOP: the state is not what this packet describes.
 ```
+
+`--through` applies every pending migration up to and including the named version and nothing after
+it, and bounds `--plan` the same way. Use `--plan --through <version>` first, every time, and read
+the output before the `--apply`.
+
+**Do not use raw `psql` as a migration substitute.** The runner records the version in
+`isaac_schema_migrations` inside the same transaction as the DDL; a hand-run `CREATE TABLE` produces
+the table **without** its bookkeeping row, which is precisely the "a table that exists without its
+ledger entry" state precheck 1 exists to catch, and which makes every later `--plan` wrong.
 
 One transaction. The runner issues `CREATE TABLE IF NOT EXISTS isaac_schema_migrations`
 once per transaction (which is what makes losing the bookkeeping table survivable), then
@@ -501,6 +592,127 @@ enumeration followed the write rather than preceding it. **This slice's authoriz
 is §15's "minimum supporting persistence architecture" clause PLUS the enumeration, and the
 enumeration was committed after the table**, which is a smaller gap than the two before it
 and is still not the thing that was claimed.
+
+## 12. The five approval checks, and what each one actually verified
+
+Recorded here because the STATUS block's approval is **conditional** on them, and a condition nobody
+can audit is not a condition. Performed **2026-09-17** on `main` at **`37ff6e5b`**, before the STATUS
+block was written. This follows `0003`'s §12D convention deliberately — **and diverges from it in one
+place, check 3, where copying `0003`'s wording would have produced a false claim.**
+
+| # | Condition | Command / method | Result |
+|---|---|---|---|
+| 1 | Forward SHA-256 matches this packet's table | `shasum -a 256` on the working-tree file **and** `git show origin/main:… \| shasum -a 256` | **match, in both** — `86bf111cf030c15c…2da98304` |
+| 2 | Rollback SHA-256 matches | same, both vantage points | **match, in both** — `54a17432150525f7…bda90e735` |
+| 3 | No material SQL change since technical review | `git log --oneline --` on both files, then a diff of the **comment-stripped** forward file across the second commit | **TWO commits, not one** — see the divergence note below. **The executable statements have had exactly ONE version, ever;** the second commit changed comments only, measured, not taken on trust |
+| 4 | Prior review findings remain resolved, and the constraints this packet names are in the committed text | read the forward SQL end to end; then grep every constraint name §7 tells the operator to look for | **resolved — but the pinning was MISSING and was added in this change.** See below |
+| 5 | No new material safety defect | comment-stripped statement inventory of both files; token scan for `ALTER`/`DROP`/`TRUNCATE`/`GRANT`/`REVOKE`/DML/`ON DELETE`/`CASCADE`/dollar-quoting; search for any identifier naming `records` | **none found** |
+
+**CHECK 3 — THE DIVERGENCE FROM `0003`, STATED BECAUSE THE OBVIOUS WORDING WOULD HAVE BEEN WRONG.**
+`0003`'s §12D says its bytes *"have had exactly one version, ever"*. **That is not true of `0005`**,
+and an approval that copied the sentence would have asserted something checkably false. `git log`
+gives two commits touching the forward file:
+
+- `6dce6fd9` — *"feat(db): isaac_runs Stage 2a — the completeness claim, and NOT a read cutover"* (created it)
+- `9b35c204` — *"docs(0005): four corrections an independent review required before approval"*
+
+`9b35c204` is a **46-insertion, 7-deletion** change to the forward `.sql`, which is why it moved the
+forward digest and is exactly the sort of thing an approval must not wave past. **Measured rather
+than inferred from the commit message:** stripping every line whose first non-space characters are
+`--` and diffing across that commit yields **an empty diff of executable lines.** The change was
+comments — including the withdrawal of a `never_projected: 0` claim that this repository had already
+recorded as impossible, sitting inside the artifact the owner approves byte-for-byte. Left alone,
+approval would have frozen it there permanently, since `ALTER` is a forbidden verb and a comment in
+an applied migration cannot be edited without a fresh packet. **The rollback file was never touched**,
+which is why its digest is unchanged across both commits.
+
+**CHECK 4 — THE PACKET TOLD THE OPERATOR TO VERIFY FOUR CONSTRAINT NAMES THAT NO TEST PINNED.**
+§7's postcheck says, in capitals, to check for `isaac_run_projection_experiment_fk`,
+`_rev_non_negative`, `_count_non_negative` and `_projector_known`. Measured at `37ff6e5b`:
+
+```
+grep -rl -a <each name> apps/api/tests/   ->   0 files, for all four
+```
+
+`0003` and `0004` have exactly this guard — `test_the_approval_packets_named_constraints_are_in_the_committed_text`
+in `apps/api/tests/test_submission_store.py`, sixteen parametrized rows — and **`0005` was absent from
+it.** So nothing in the repository guaranteed that the names this packet instructs an operator to look
+for are the names the committed SQL actually declares; a rename, or a packet typo, would have sent the
+operator hunting for a constraint that never existed and there would have been no failing test. The
+four rows are added in this change. Its `_statements()` helper reads
+`db_migrate.load_migrations()` generically, so it resolved `0005` without modification — the gap was
+the parameter list, not the mechanism.
+
+**WHAT CHECK 5 ACTUALLY LOOKED AT, so it is not read as broader than it was.** With comments stripped,
+the forward file is **exactly two statements** and nothing else:
+
+```sql
+CREATE TABLE IF NOT EXISTS isaac_run_projection ( … )
+CREATE INDEX IF NOT EXISTS isaac_run_projection_projector_idx ON isaac_run_projection (projector, projected_utc)
+```
+
+No `ALTER`, no `DROP`, no `TRUNCATE`, no `GRANT`/`REVOKE`, no DML, no dollar-quoted body, and **no
+`ON DELETE` clause in any statement** — the phrase occurs only in comments, so the foreign key takes
+the SQL default `NO ACTION` and no cascade exists. The identifier `records` appears in **no statement
+in either file**. The rollback is three statements in one transaction: it drops only the table this
+migration creates and deletes only its own bookkeeping row.
+
+**This check was a READ of the committed text plus a structural scan — not a runtime observation, and
+not a substitute for the independent technical review that produced this packet.** The behavioural
+evidence is §9's, and §9's own *"DECLARED IN THE WORKFLOW AND NOT YET RUN"* framing is unchanged by
+this approval. The residual risk is the one §9 names and **only the operator can retire it**: CI
+proves this migration against an empty `postgres:18` container with a synthetic stand-in for
+`records`, which is not the same as proving it against the hosted database with its real data, roles
+and grants.
+
+---
+
+## 12A. The bounded operator sequence — ordered, and the order is the safety property
+
+**This is the whole sequence, and no step may be skipped, reordered, or run in parallel with
+another.** It is restated here as one block because three of its steps live in three different
+packets, and the failure this ordering prevents is not a bad statement — it is a **correct statement
+run at the wrong time**.
+
+```text
+ 1.  verify backup / restore
+ 2.  verify the migration ledger          (this packet's §5 prechecks 1-5)
+ 3.  apply approved 0003 + 0004 TOGETHER  python scripts/db_migrate.py --apply --through 0004_submissions
+ 4.  verify                               0003's and 0004's OWN postchecks
+ 5.  apply approved 0005                  python scripts/db_migrate.py --apply --through 0005_run_projection
+ 6.  verify                               this packet's §7 postchecks
+ 7.  run the isaac_runs backfill          python scripts/db_backfill_runs.py --apply
+ 8.  REQUIRE every failed / refused / UNREADABLE count = 0
+ 9.  run BOTH §8A completeness queries
+10.  REQUIRE both = 0
+11.  only then may the Stage-2b read cutover be permitted
+```
+
+Five things about that sequence that are decisions rather than formalities:
+
+- **Step 3 applies two migrations deliberately, and that is not a violation of the bounded rule.**
+  `0003` and `0004` are ONE decision — `0004` declares a foreign key into a table `0003` creates —
+  and they must be applied together or not at all. `--through 0004_submissions` is what makes
+  "together" mean "and not `0005` as well".
+- **Steps 4 and 6 are separate verifications and must not be merged.** Running 3 and 5 back to back
+  and verifying once at the end produces a state where a failure cannot be attributed.
+- **Step 8 is a REQUIREMENT, not a report.** A non-zero `UNREADABLE`, `refused` or `failed` means
+  some experiment was not projected, and steps 9-10 would then be describing an incomplete pass
+  **while returning 0** — the gate would pass for the wrong reason. This is the one place in the
+  sequence where a green reading is actively misleading if step 8 was not checked first.
+- **Step 11 is a DECISION, not a continuation.** Nothing in steps 1-10 authorizes it. §8A's queries
+  returning 0 makes the cutover *safe to consider*; whether to make `isaac_runs` a read source is a
+  separate reviewed slice, and removing `runs` from the experiment document is a **third** decision
+  justified by no measurement in this repository.
+- **Do not use raw `psql` as a migration substitute at any step**, and never issue an unbounded
+  `--apply`. See §6.
+
+**None of these eleven steps may be performed by an agent.** `CLAUDE.md` §15's hard stop is
+unchanged and is not softened by the owner approval recorded above: no agent may apply a migration,
+open a connection to the SLAC PostgreSQL, request a kubeconfig, a port-forward or a Secret, run the
+backfill, or change Kubernetes.
+
+---
 
 ## 11. What this packet does not cover
 

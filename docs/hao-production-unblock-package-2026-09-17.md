@@ -56,7 +56,7 @@ it cannot trust.
 |---|---|---|---|---|
 | **1** | **Trusted authentication boundary.** The Service is a plain ClusterIP with no NetworkPolicy, so forwarded identity headers are forgeable by any in-cluster pod | **Hao** | attribution, submission, audit actor, all future sharing | a NetworkPolicy, **or** a decision to use Bearer validation for the API path |
 | **2** | **Remote MCP reachability and OAuth** (Dean's `D1`, `D2`, deferred 2026-08-12) | **Hao** | agent access to ISAAC from Claude | route/ingress + an authorization-server decision |
-| **3** | **Migration `0005` + run backfill** | **Krish** approves, **operator** applies | Stage-2b run reads | one reviewed migration, one script run |
+| **3** | **Three approved migrations (`0003`+`0004`, then `0005`) + run backfill** | ~~**Krish** approves,~~ **Krish has approved all three; the operator applies** | Stage-2b run reads | three sequenced operator acts and one script run — **no further review is owed by Krish** |
 | **4** | **Governance decision on real scientific file bytes** | **Institution**, via Hao | real historical import of BL15-2 files | a retention/classification answer, not a build |
 | **5** | **AI provider decision** (`D1`–`D9`) | **Hao / institution** — *deferred, and ISAAC is content with that* | production LLM and transcription only | nothing, unless the deferral is revisited |
 | **6** | **Gate `G3`** — five withheld aggregates | **Hao** | one diagnostic response's completeness | a yes/no |
@@ -480,26 +480,55 @@ touches infrastructure — and so nobody assigns it to him.**
 
 ## I. Outstanding database / migration state
 
-### DB-1 — `0005_run_projection` is unapproved, and the backfill has never run
+### DB-1 — ~~`0005_run_projection` is unapproved, and~~ three migrations are approved and unapplied, and the backfill has never run
+
+> **UPDATED 2026-09-17, BEFORE THIS PACKAGE WAS SENT.** The heading and the first two bullets of this
+> section were written while `0005_run_projection` was unapproved. **Krish approved it on
+> 2026-09-17**, on its exact bytes, after a fresh SHA-256 recomputation matched the packet in three
+> independent places. **The ask to the operator did not get bigger — it got SIMPLER**, because the
+> step that used to sit in the middle of the sequence waiting on Krish is now done. What did **not**
+> change: nothing has been applied anywhere, the backfill has never run, and the ordering is still
+> load-bearing. The corrections are made in place and struck rather than rewritten, per this
+> repository's convention for a claim a reader acts on.
 
 - **Current measured state.** `0001_experiments` applied hosted **2026-08-09**; `0002_runs` applied
   hosted **2026-08-12** (both by the infrastructure owner, both digest-verified against the
   approved bytes). `0003_revisions` + `0004_submissions` are **owner-approved 2026-08-17 and
-  applied NOWHERE**. `0005_run_projection` is **not owner-approved**. `scripts/db_backfill_runs.py`
+  applied NOWHERE**. ~~`0005_run_projection` is **not owner-approved**.~~ → **`0005_run_projection`
+  is OWNER-APPROVED as of 2026-09-17 and applied NOWHERE.** So the true current state is **three
+  owner-approved migrations, none of them applied anywhere.** `scripts/db_backfill_runs.py`
   has **never been run anywhere**. Observed hosted 2026-09-12:
   `run_projection.last_pass.unavailable: 3` — all three hosted experiments have an unreadable run
   projection.
-- **Desired state.** `0003`+`0004` applied together; `0005` approved, applied, and backfilled;
-  Stage-2b run reads cut over.
-- **Owner.** **Krish** approves the migration text. **The operator** applies it. **No agent may do
-  either.**
+- **Desired state.** `0003`+`0004` applied together and verified; `0005` applied separately and
+  verified; the backfill run clean; both completeness queries returning 0; and **then** a separate
+  decision on whether to cut Stage-2b run reads over. (`0005` **approved** is no longer part of the
+  desired state — it is part of the current state.)
+- **Owner.** ~~**Krish** approves the migration text.~~ **Krish HAS approved all three (2026-08-17
+  for `0003`/`0004`, 2026-09-17 for `0005`).** **The operator** applies them — that act is
+  outstanding for all three. **No agent may do either**, and owner approval is a precondition for
+  the operator's step, never a substitute for it.
 - **Exact action or decision needed.** In this order, and the order matters:
-  1. Apply `0003`+`0004` **together** — `0004` declares a foreign key into a table `0003` creates,
-     so they are one decision.
-  2. Krish reviews and approves `0005`.
-  3. Apply `0005`; run the backfill; confirm every `UNREADABLE`/`refused`/`failed` count is **0**.
+  0. Verify backup/restore, then verify the migration **ledger** (`isaac_schema_migrations`) — read
+     the ledger, do not infer from table existence.
+  1. Apply `0003`+`0004` **together and bounded** — `python scripts/db_migrate.py --apply --through
+     0004_submissions`. `0004` declares a foreign key into a table `0003` creates, so they are one
+     decision. Then run **their own** postchecks before continuing.
+  2. ~~Krish reviews and approves `0005`.~~ **DONE 2026-09-17.** This step is struck rather than
+     deleted so the sequence keeps its numbering and an operator comparing this against the sent
+     2026-08-18 package can see which step closed.
+  3. Apply `0005` **bounded to itself** — `--apply --through 0005_run_projection`; run this packet's
+     §7 postchecks; **then** run the backfill and confirm every `UNREADABLE`/`refused`/`failed`
+     count is **0**. A non-zero there means some experiment was not projected, and step 4 would
+     then return 0 **for the wrong reason**.
   4. Run the operator's **two completeness queries** (`docs/migration-approval-packet-0005.md` §8A)
-     and confirm **both return 0**. Only then may Stage-2b read from `isaac_runs`.
+     and confirm **both return 0**.
+  5. **Only then may a Stage-2b cutover be CONSIDERED.** Steps 0-4 make it safe to consider; they do
+     not authorize it. It is a separate reviewed slice, and removing `runs` from the experiment
+     document is a **third** decision justified by no measurement in this repository.
+
+  The full ordered sequence, with the reasoning for each ordering constraint, is
+  [`docs/migration-approval-packet-0005.md`](migration-approval-packet-0005.md) §12A.
 - **Security boundary.** **Use `scripts/db_migrate.py --through VERSION`** — and note **it is NOT
   in the container image.** `Dockerfile:59` copies exactly one script
   (`check_graphify_freshness.py`), so `db_migrate.py` and `db_backfill_runs.py` must be run **from

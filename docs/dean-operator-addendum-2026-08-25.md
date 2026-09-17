@@ -58,7 +58,7 @@ form, here is what actually holds, by kind:
 |---|---|
 | **DO — unchanged from 2026-08-18** | Answer **G2** and **G3** (§5). Neither touches infrastructure; both are decisions, and they gate more work than anything else here. |
 | **DO — unchanged from 2026-08-18; the COMMAND changed 2026-08-25** | Apply **`0003_revisions` + `0004_submissions`** together, and report the `records` and `isaac_experiments` counts before and after. Their four digests are re-verified below and **unchanged**. **The command is now bounded, and this row is UNBLOCKED** — see the note immediately below this table, which is corrected in place rather than rewritten because the row was *accurately* blocked when it was written. Run the plan, read it, then the apply: `python scripts/db_migrate.py --plan --through 0004_submissions`, then `python scripts/db_migrate.py --apply --through 0004_submissions`. The exact expected output of both is quoted below and in [`docs/migration-approval-packet-0003.md`](migration-approval-packet-0003.md) §9. ~~"`python scripts/db_migrate.py --apply` has **no per-version option** and applies **every** pending migration, so with `0005_run_projection` committed it would land **three**, not two"~~ — that was true when written; `--through` is what changed it. A bare `--apply` still lands three, so **do not run the unbounded form.** |
-| **DO NOT** | Apply **`0005_run_projection`**. It is **not owner-approved**. **Now avoided by the tool rather than by your vigilance:** the bounded command in the DO row selects every pending migration up to and including `0004_submissions` and nothing after it, and it prints `withheld by --through 0004_submissions: 0005_run_projection` so you can *read* that it was left alone rather than infer it. ~~"it is avoided only by reading `--plan`'s output before `--apply`, because the runner has no way to select a version: `scripts/db_migrate.py` exposes `--plan` and `--apply` and nothing else"~~ — **that was an accurate measurement of the CLI on 2026-08-25 and is now out of date**; the source it described has changed, which is the only reason this strike is not a retraction. Read the bounded `--plan` anyway: it is still the check that tells you which state the database is in. **Two documents said otherwise and are corrected:** `docs/migration-approval-packet-0003.md` §9 promised the output `applied: 0003_revisions, 0004_submissions` *"exactly"*, which was **false while `0005` was pending** — §9 now carries a bounded command whose quoted output is true again; and `docs/migration-approval-packet-0005.md` §6 offers *"apply all three together, deliberately"* as an acceptable sequence — **that option is NOT authorized by this addendum**, because `0005` has no owner approval and an operator cannot supply one. `0005` is described in §2 so it is not a surprise, and because §2's last line is an operational consequence that survives whether or not you ever apply it. |
+| **DO NOT** | Apply **`0005_run_projection`** *in this window*. ~~It is **not owner-approved**.~~ — **CORRECTED 2026-09-17: it IS owner-approved now, and this row's INSTRUCTION is unchanged while its REASON is not.** `0005` is now **sequenced after** this ask rather than **blocked before** it: it must never land in the same step as `0003`/`0004`, and it gets its own bounded apply and its own postchecks once those two are applied and verified. Keeping the instruction and striking only the reason is deliberate — an operator who remembered "do not apply `0005`" and acted on it would still be acting correctly. **Now avoided by the tool rather than by your vigilance:** the bounded command in the DO row selects every pending migration up to and including `0004_submissions` and nothing after it, and it prints `withheld by --through 0004_submissions: 0005_run_projection` so you can *read* that it was left alone rather than infer it. ~~"it is avoided only by reading `--plan`'s output before `--apply`, because the runner has no way to select a version: `scripts/db_migrate.py` exposes `--plan` and `--apply` and nothing else"~~ — **that was an accurate measurement of the CLI on 2026-08-25 and is now out of date**; the source it described has changed, which is the only reason this strike is not a retraction. Read the bounded `--plan` anyway: it is still the check that tells you which state the database is in. **Two documents said otherwise and are corrected:** `docs/migration-approval-packet-0003.md` §9 promised the output `applied: 0003_revisions, 0004_submissions` *"exactly"*, which was **false while `0005` was pending** — §9 now carries a bounded command whose quoted output is true again; and `docs/migration-approval-packet-0005.md` §6 offers *"apply all three together, deliberately"* as an acceptable sequence — **that option is NOT authorized by this addendum**, because `0005` has no owner approval and an operator cannot supply one. `0005` is described in §2 so it is not a surprise, and because §2's last line is an operational consequence that survives whether or not you ever apply it. |
 | **FYI — evidence got stronger** | The `0003`/`0004` constraint evidence is now **41 of 46 executed by a real PostgreSQL on `main`**, not 27. §1. This raises the evidence behind a decision you already have; it changes no byte you would apply. |
 | **FYI — a correction to a number you were sent** | If your copy of the 2026-08-18 package shows `0005`'s forward digest as `ebff660f…`, that value is stale. §3. |
 | **Not for you at all** | §4 (external configuration contracts, stated as contracts and **not** as requests) and §5 (open governance questions and their current fail-closed state). |
@@ -85,6 +85,11 @@ Stated plainly, with the source verified rather than recalled:
 
 1. **Krish reviews and approves `0005`**, and all three are applied deliberately in one window, with
    the postchecks reported for all three. This is the clean resolution and needs no tooling change.
+   **UPDATED 2026-09-17: the approval half of this resolution IS DONE.** One clarification that
+   matters, because "one window" has been read as "one command": it means one **maintenance
+   window**, containing **three sequenced BOUNDED applies with verification between them** —
+   `--apply --through 0004_submissions`, verify, `--apply --through 0005_run_projection`, verify.
+   **It does not license a bare `--apply`.** The ordered sequence is §12A of the `0005` packet.
 2. **`0003` and `0004` are applied from their verbatim SQL by psql**, digest-verified against the
    packets, with the two `isaac_schema_migrations` rows inserted in the same transactions. This
    bypasses the runner, and therefore also bypasses the write-statement policy the runner applies —
@@ -133,8 +138,10 @@ in the first place.
 
 **Resolution 2 was NOT chosen, for the reason stated above** — applying the SQL by hand bypasses
 `db_write.WriteStatementPolicy`, and every statement a bounded run issues still passes it. Nothing
-here changes resolution 1's standing either: if Krish approves `0005`, applying all three in one
-window remains the clean path, and it remains his approval to give.
+here changes resolution 1's standing either: ~~if Krish approves `0005`, applying all three in one
+window remains the clean path, and it remains his approval to give.~~ — **UPDATED 2026-09-17: he HAS
+given it.** Applying all three in one maintenance window remains the clean path, **as three
+sequenced bounded applies with verification between**, never as one unbounded command.
 
 **What is bounded, and what deliberately is not.** *Up to and including* is the flag's only shape.
 There is no per-version pick and no way to skip one in the middle, because `0004` declares a foreign
@@ -253,7 +260,14 @@ on is **41** (run `32800763199`, at `c153ec9`); **27** keeps its own vantage poi
 
 ---
 
-## 2. `0005_run_projection` — NOT APPROVED, NOT AN ASK
+## 2. `0005_run_projection` — ~~NOT APPROVED,~~ APPROVED 2026-09-17, STILL NOT AN ASK IN THIS DOCUMENT
+
+> **CORRECTED 2026-09-17, after this addendum was sent.** Krish reviewed and approved `0005`'s exact
+> bytes on 2026-09-17 — see [`docs/migration-approval-packet-0005.md`](migration-approval-packet-0005.md)
+> §12 for the five recorded checks, two of which found a defect rather than confirming a claim. **The
+> second half of the old heading still holds:** this addendum's ask is `0003`+`0004`, and `0005` is
+> not in it. **The DO NOT row in §1's table is UNCHANGED in effect and changed in reason** — see the
+> correction on that row.
 
 | | |
 |---|---|
@@ -337,8 +351,13 @@ reference `isaac_runs`, so it is **independent of `0002`**, and it must be rolle
 2026-08-25 — the runner now takes `--through VERSION`** (see §0's resolution note). An **unbounded**
 `--apply` still lands **three** migrations while `0003` and `0004` are pending, so the warning behind
 the strike has not gone away; what has changed is that avoiding it no longer depends on your reading
-the plan carefully. **`0005` is not owner-approved, so the bounded command in §0 is the one to run,
-and `--through 0005_run_projection` is not authorized by this document.** Precheck 1 of the packet
+the plan carefully. ~~**`0005` is not owner-approved, so the bounded command in §0 is the one to run,
+and `--through 0005_run_projection` is not authorized by this document.**~~ — **CORRECTED
+2026-09-17: `0005` IS owner-approved now, and the second half of the sentence SURVIVES for a
+different reason.** `--through 0005_run_projection` is still not authorized *by this document*,
+because this document's ask is `0003`+`0004` and its window must not carry a third migration.
+`0005` is authorized by **its own** packet, in **its own** bounded step, after these two are
+applied and verified. So the bounded command in §0 remains the one to run **here**. Precheck 1 of the packet
 (`select version from isaac_schema_migrations order by version`) still comes first, and still catches a
 database that is not where you think it is — which no bound can do for you.
 

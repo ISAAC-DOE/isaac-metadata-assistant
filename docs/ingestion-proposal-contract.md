@@ -765,9 +765,15 @@ The argument is mechanical, not preferential:
    submission-lifecycle tables, and `isaac_run_projection` each being added before any committed
    `CLAUDE.md` §15 sentence named them — and `db_write.py:176-186` records that even the *correction*
    was false by one commit. A fifth instance is avoidable by not needing a table.
-4. **The highest migration is `0005_run_projection`, which is NOT approved and NOT applied
-   anywhere** (`CLAUDE.md` §15). A `0006` would queue behind an unapproved `0005`, and applying any
-   migration to the hosted environment is the operator's act, not an agent's — a hard stop.
+4. **The highest migration is `0005_run_projection`.** ~~which is NOT approved and NOT applied
+   anywhere~~ — **CORRECTED 2026-09-17: it IS owner-approved (2026-09-17) and is still applied
+   NOWHERE.** The argument this item makes is **unchanged, and in fact strengthened**: a `0006`
+   would queue behind THREE approved-but-unapplied migrations, so it would not function until an
+   operator acted on all of them — and applying any migration to the hosted environment is the
+   operator's act, not an agent's, which is a hard stop (`CLAUDE.md` §15). The reason to avoid
+   needing a table was never that `0005` was unapproved; it was that a feature gated on an operator
+   act is a feature that does not work. See `DEC-49`, which decides exactly this for the activity
+   history.
 5. **Signature and CAS come for free.** `_experiment_signature` hashes `notes` (`workspace.py:1607`)
    with the reasoning that capture, mapping, editing and dismissal each change what the record holds,
    so `rev` and the `ETag` must move and a stale second writer must be refused
