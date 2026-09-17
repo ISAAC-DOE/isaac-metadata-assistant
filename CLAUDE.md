@@ -843,6 +843,33 @@ Current state:
   unrelated reasons. Say "paths" explicitly if that is the count meant, and re-derive rather than
   quoting — this figure has now been wrong four times, and the fourth time was in the paragraph
   warning against it.
+
+  ***STALE A FIFTH TIME, AND THE FIFTH TIME IS THE WORST ONE, because the stale number is now
+  CORRECT FOR THE OTHER COUNT — re-measured 2026-09-17 by a slice that was told to re-derive
+  rather than quote, and did.*** Over `create_app().openapi()` at `e34983a9`:
+
+  | | |
+  |---|---:|
+  | **paths** (`len(schema["paths"])`) | **78** |
+  | **method-operations** | **88** |
+  | what `test_about_and_openapi.py:743` asserts | `assert checked == 88` |
+
+  **So "quote **78**" above is no longer merely stale — it now names the PATHS count while
+  labelling it "documented operations".** A reader who quotes it is not off by ten; they are
+  reporting a different metric under the wrong name, and the number will look plausible to anyone
+  who checks it against `len(schema["paths"])`. This is precisely the confusion the paragraph above
+  says *"the two were briefly equal at 69 for unrelated reasons"* — it has happened again, at a
+  different pair of numbers, inside the paragraph that exists to prevent it.
+
+  **The instruction, restated because five drifts in one figure is evidence the instruction is the
+  only durable part: DO NOT QUOTE EITHER NUMBER. Re-derive both, and say which one you mean.**
+
+  ```bash
+  .venv/bin/python -c "import sys; sys.path.insert(0,'apps/api'); from isaac_api.app import create_app; s=create_app().openapi(); print('paths', len(s['paths'])); print('operations', sum(1 for p,i in s['paths'].items() for m in i if m.lower() in ('get','post','put','patch','delete','head','options')))"
+  ```
+
+  The figures above were produced by that command and cross-checked against the test's own
+  assertion, which is the only one of the three that CI enforces.
   `test_about_and_openapi.py` pins. So the sentence was not describing a gap; it was describing
   absent *routes* that existed. **The true residue, which is what the clause was reaching for and
   what still holds: no product screen advertises the assistant seam** — deliberately, per
