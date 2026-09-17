@@ -358,6 +358,37 @@ untouched by this change.
 
 **The original 5A state, kept for the record:**
 
+> **READ THE NEXT THREE BLOCKS AS HISTORY. THEY DESCRIBE 2026-08-19, NOT THIS BUILD —
+> and that warning is here because the ambiguity DEMONSTRABLY COST A SLICE.** On
+> **2026-09-17** a slice was commissioned to "close the measured gap" in §5A, and its
+> brief quoted this table *and* the **Why it was not closed in the same change**
+> paragraph below as its current specification. Both were labelled history; the table
+> says so in its own caption, and §5A's heading has said **CLOSED** since the day it was
+> written. What misled the reader is that the label sits at the TOP of the section while
+> a present-tense rationale for leaving the gap open sits at the BOTTOM, after the
+> corrections — so a reader scanning to the end of §5A finds the reasoning for an open
+> gap as the last thing §5A says.
+>
+> **The gap was RE-MEASURED before anything was built, over MCP against a record created
+> through `POST /api/experiments` with values written out rather than harvested, and it
+> is CLOSED in every particular:** an agent creates a Run, `isaac_list_questions` shows
+> `series` + `qc` + `descriptor` open and run-scoped, one `isaac_answer_questions` call
+> at the run level answers all three (`operation: answer_run_question`, `200`,
+> `pending: []`, `status: ready_to_export`), and the record then exports and validates
+> against the vendored official schema. So that slice added **no tool** —
+> `PERMITTED_TOOL_NAMES` is unchanged at **16** — and closed instead the narrower thing
+> the measurement found: **the capability was real and CI did not prove it end to end.**
+> The proof is `apps/api/tests/test_an_agent_can_finish_a_run.py`, and what it covers
+> that nothing did is named in its docstring — chiefly that an **OPEN `qc` question on a
+> Run had been answered by no test anywhere**, every MCP `qc` case being a refusal or a
+> correction on a seed whose verdict was already present.
+>
+> **This is the third time this document has had to record a stale claim in §5A**, after
+> the absorption-edge row and the "no product screen mentions MCP" parenthetical. The
+> pattern is the same one `CLAUDE.md` §15 records for the `isaac_run_projection`
+> correction: the correction lands where the author was already editing, and the copy
+> that a later reader actually reaches is not looked for.
+
 | Act | Possible? |
 |---|---|
 | create a Run | yes |
@@ -370,7 +401,12 @@ untouched by this change.
 above. It is kept as written, because this table is the historical record of what §5A
 said, and editing it would destroy the thing it is being kept for.)*
 
-**Why it was not closed in the same change.** Adding a run-level write to the tool surface
+**Why it was not closed in the same change** *(HISTORY — this reasoning applied on
+2026-08-19 and the gap closed the same day; see the box above. It is kept because the
+reasoning for leaving a write path open for even one slice is part of the record, and
+because `confirmed_by_user`'s rule below is STILL LIVE and still binding.)*
+
+Adding a run-level write to the tool surface
 is a new authorized write path for scientific values, and this project's rule is that
 each of those gets its own slice and its own independent review. It also inherits a
 question the existing tools already answer, and must answer the same way:
@@ -385,6 +421,45 @@ acceptable at the time: the `409` body names the run, names
 `POST /api/experiments/{experiment_id}/runs/{run_id}/answers`, and says nothing was
 written. An agent that reads it knows exactly what it cannot do and where the capability
 would live.
+
+### 5A.3 One finding from the 2026-09-17 re-measurement that is NOT about §5A
+
+Recorded here because it was found by mutating the run-level answer path and belongs
+beside it, and because it contradicts a committed comment rather than a claim in this
+document.
+
+`routes.py`'s `_answers_to_apply_shape` screens `qc` with `is_qc_shaped`, under a comment
+saying the screen *"is now belt-and-braces rather than the only guard"* and that
+**"this branch's `is_qc_shaped` no longer decides any HTTP outcome."** The first half is
+right. **The second half is false, and the case it is false in is the one the codebase
+already documents elsewhere.** Measured by removing the screen and re-running the suite:
+exactly one test fails,
+`test_answers_that_cannot_land.py::test_an_off_enum_qc_STAYS_A_422_ON_A_RECORD_WITH_RUNS_and_here_is_why`,
+and the outcome moves from
+
+```
+422 {"error": "invalid_field_value", "keys": ["qc"]}
+```
+
+to
+
+```
+409 {"error": "belongs_to_a_run", "keys": ["qc"], "answer_at": "POST /api/experiments/{experiment_id}/runs/{run_id}/answers"}
+```
+
+So on a record that has runs, the screen decides **which of two refusals** an off-enum
+verdict receives. The mechanism is stated correctly in that test's own docstring — an
+off-enum `qc` never reaches the shape, so `_run_level_keys_in` cannot see it and the
+`409` cannot fire — so this is one comment sentence overstating, not a defect in
+behaviour, and **nothing about the behaviour was changed.** It is reported rather than
+edited because a comment claiming a guard is inert is precisely the kind of claim that
+invites a later slice to delete the guard.
+
+A second measurement from the same pass, kept because it is the trap and not the finding:
+the obvious mutation — disabling that `elif key == "qc"` branch — is an **equivalent
+mutant**. `qc` is also in `_NAMED_ANSWER_KEYS`, so the generic branch forwards it anyway
+and the whole suite stays green. A mutation of that branch's *condition* proves nothing;
+only dropping the key from the loop does.
 
 ## 6. Exact external actions
 
