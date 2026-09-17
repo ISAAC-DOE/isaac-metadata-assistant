@@ -5171,6 +5171,7 @@ class Experiment:
         # them is the one thing `CLAUDE.md` §5 forbids outright.
         exp.activity, exp.unreadable_activity = _hydrate_activity(
             state.get(activity_module.ACTIVITY_STATE_KEY)
+        )
         # NO MIGRATION IS REQUIRED FOR EXTENDED CONTEXT EITHER, for the reason stated
         # above the ``runs`` line and restated for notes and proposals: the key is read
         # with ``.get`` and a default, so a document written before the companion
