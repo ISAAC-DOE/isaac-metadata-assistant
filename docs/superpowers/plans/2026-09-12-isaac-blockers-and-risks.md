@@ -13,6 +13,44 @@
 > with prose written before the gate cleared. Source: `2026-09-12-plan-review-and-revisions.md`.
 
 
+## 0. UPDATE 2026-09-17 — addressee change and the operator package
+
+**New asks go to Hao, not Dean.** Every committed row below keeps Dean's name, because those rows
+record who answered or deferred and when; rewriting them would falsify the history. Where a row
+says *"Dean deferred D1–D9, 2026-08-12"*, that is a still-in-force decision, not an instruction to
+ask Dean again.
+
+**The operator handoff for every `EXT-*` row is now packaged**, so a future session does not
+re-derive it:
+
+- [`docs/hao-production-unblock-package-2026-09-17.md`](../../hao-production-unblock-package-2026-09-17.md)
+  — nine subject areas, each with current measured state / desired state / owner / exact action /
+  security boundary / verification / rollback / what ISAAC already proves.
+- [`docs/hao-production-ai-execution-prompt-2026-09-17.md`](../../hao-production-ai-execution-prompt-2026-09-17.md)
+  — a paste-ready read-only-first discovery prompt.
+
+**Both are PREPARED, NOT SENT.** Delivery is the project owner's act and this repository cannot
+witness it.
+
+**Two things the package settles that this register left implicit.**
+
+1. **`EXT-01` is the highest-value single item**, because it blocks attribution, submission,
+   `DEC-44`'s audit actor, and all future sharing **simultaneously**. It has two acceptable
+   resolutions and either suffices: a **NetworkPolicy** restricting the Service to the Authentik
+   outpost, or **independent Bearer validation** on the API path. The second also advances
+   `EXT-02`.
+2. **`EXT-13` is new** — the governance decision (classification, storage location, retention,
+   egress) that gates real historical file bytes. It is the gate `DEC-33` names, and it is a
+   policy answer rather than a build. `POST /api/uploads` remains an unconditional **403**, which
+   is correct behaviour and must not be "repaired".
+
+**One risk this package adds, stated rather than left to be discovered.** An AI assistant given
+operator access will treat the `403` on uploads and the `404` on `/api/mcp` as faults and try to
+fix them. The execution prompt forbids it explicitly, and the note at the end of that document
+warns Hao so the suggestion is easy to decline.
+
+---
+
 ## 1. External blocker matrix
 
 Re-verified against the repository and the live hosted deployment this session, not carried

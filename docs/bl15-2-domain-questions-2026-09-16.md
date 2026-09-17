@@ -35,6 +35,118 @@ the enumerated form above is both.)*
 
 ---
 
+# RECONCILED 2026-09-17 — 12 OF THE 20 QUESTIONS BELOW ARE CLOSED
+
+**Read this section instead of §1 for what is still being asked.** §1 is preserved
+unedited underneath, because a question that turned out to be answerable is evidence
+about how the corpus reads, and deleting it would hide that.
+
+**Three things closed these twelve**, and each is attributed because the evidentiary
+classes are different:
+
+| source | what it is | what a reader can verify |
+|---|---|---|
+| **Angel, relayed by the project owner 2026-09-17** | domain-owner confirmation of the filename convention | **nothing in-repo.** An owner instruction relayed in-session, the same class `CLAUDE.md` §15 records for Dean's answers. Only Krish can confirm it was given |
+| **The beamtime document** | `250411 BL 15 IrOx NP HERFD acid base.docx`, read in full on 2026-09-17 — 639 extracted lines, 14 tables | the file itself; extraction is `zipfile` + the WordprocessingML namespace, no dependency |
+| **Project-owner decision** | `ISAAC_PRODUCT_DECISIONS.md` §B4 | the register row |
+
+**A correction to this packet's own preamble, first.** It says *"leaves **14** needing a
+domain owner. This packet is those 14, and nothing else."* **There are twenty numbered
+questions below, and the registry today has fifteen `needs_domain_review` rows.** Neither
+figure matched the body even when written: several questions (Q15, Q16, Q17) are about
+CONFLICTS and CLASSIFICATION rather than about a registry row, so they never corresponded
+to one. The honest statement is: **20 questions, 15 registry rows, and they are different
+sets.**
+
+## What Angel confirmed
+
+The filename convention, in full:
+
+```text
+runNo_sample/electrodeNo_sampleName_loading_electrolyte_gas_condition_pH_flowRate_filter_Potential
+```
+
+**This is a vocabulary for the Angel-style BL15-2 profile, not a positional grammar and
+not a universal convention.** The parser stays profile-based and tolerant: filenames still
+omit tokens, reorder them, spell potentials two ways and contain at least one typo. What
+changed is that the MEANINGS are now domain-confirmed for this profile.
+
+## Question-by-question
+
+| Q | Subject | Disposition |
+|---|---|---|
+| **Q1** | second token = sample/electrode instance | **ANSWERED BY ANGEL.** Explicitly confirmed. Stop asking |
+| **Q2** | Experiment-level vs Run-level | **RESOLVED BY PRODUCT DECISION** (`DEC-40`): inheritance + explicit Run overrides, never duplication |
+| **Q3** | `sample.material.name` per stem | **ANSWERED BY DOCUMENT.** Every sample section names its electrode label and medium; the material itself is stated in the opening scope |
+| **Q4** | `sample.material.provenance` | **ANSWERED BY DOCUMENT.** The JK samples name their preparer; Samples 7–8 give a full deposition recipe |
+| **Q5** | `acid`/`base` → electrolyte name + concentration | **ANSWERED BY DOCUMENT**, with a conflict resolved by `DEC-42`: each sample section names its own electrolyte, and the broad *"in ALL experiments…"* sentence is contradicted by the document's own acid sample AND by Samples 7–8. Sample-specific evidence wins; the broad claim is preserved as a superseded shared-context candidate |
+| **Q6** | `context.environment` | **PARTIAL.** The dry/`AsIs` acquisitions are stated as such by the document. The member for the electrochemical acquisitions **STILL NEEDS ANGEL** — one word |
+| **Q7** | `context.electrochemistry.reaction` | **NARROWED — STILL NEEDS ANGEL.** The document names the reaction studied, in prose; three enum members remain compatible and choosing between them is a scientific call |
+| **Q8** | `cell_type` per group | **PARTIAL.** Samples 7–8 are explicitly a flow cell. The JK cell's enum member **STILL NEEDS ANGEL** |
+| **Q9** | reference basis | **PARTIAL, and this is the one the corpus most clearly cannot settle.** Samples 7–8 name RHE explicitly, with a measured offset against a reference RHE. Every JK table row says only *"vs reference"* and the equipment list says only *"Reference electrode"*. **STILL NEEDS ANGEL** for the JK samples |
+| **Q10** | where the `E-chem Procedure` rows go | **RESOLVED BY PRODUCT DECISION** (`DEC-41`): the baseline-plus-extended-context hierarchy places them. Whether the `Notes` column should drive QC state is Q14 and is separate |
+| **Q11** | primary `.dat` channel | **NARROWED — STILL NEEDS ANGEL.** The document names the normalisation pairs it used, which rules out most columns but does not identify one of the several vortex-derived columns as THE HERFD signal |
+| **Q12** | expand the scan-grid literal into values? | **RESOLVED BY EXISTING RULE.** Expanding a segmented grid into a value series is this repository computing a scientific quantity, which `CLAUDE.md` §5 forbids. The literal is preserved as extended context. **No longer an Angel question** |
+| **Q13** | element / absorption edge | **RESOLVED.** "Is the schema really silent" was answered by measurement — the walk covers all declared paths and there is no native field. `DEC-41` now gives them a structured home, so the question is closed rather than merely unanswerable |
+| **Q14** | is `qc.status` derivable from the notes? | **STILL NEEDS ANGEL.** The document's `Notes` column contains real quality judgements; whether they may drive a QC state automatically is exactly the question |
+| **Q15** | source precedence when three sources disagree | **STILL NEEDS ANGEL** |
+| **Q16** | duplicate legacy number `32` | **NARROWED BY THE DOCUMENT — see below.** **STILL NEEDS ANGEL**, but a much smaller question |
+| **Q17** | standards / alignment → Runs? | **RESOLVED BY PRODUCT DECISION.** The build already treats them as units that are not run candidates, which is the behaviour this question was asking about |
+| **Q18** | loading vs thickness | **ANSWERED BY DOCUMENT: they are TWO concepts.** The thin-film samples state a deposition time and a thickness; the nanoparticle samples state a weight loading. Placement is `DEC-41` |
+| **Q19** | `system.configuration` vs `series[].conditions` | **RESOLVED BY PRODUCT DECISION** (`DEC-41`'s hierarchy) |
+| **Q20** | which fields are intentionally custom Run conditions | **RESOLVED BY PRODUCT DECISION** (`DEC-41`) |
+
+## File 32 — the stale wording is retired
+
+~~"Two duplicate 32 files."~~ **They are not duplicates**, and that phrasing is withdrawn
+wherever it appears. The corpus holds two distinct acquisitions:
+
+```text
+32_03_JK2_base_after1400Cycling_filter20_1500mV
+32_03_JK2_base_after1500Cycling_filter20_1500mV
+```
+
+**The beamtime document's Sample 3 table settles which one the final log describes.** Its
+step 10 carries File Number **32** and records the condition as **after 1500 mV cycling**, at a
+potential matching the `1500mV` token already present in both filenames.
+
+**And the absence is stronger than that one table.** The string `1400` occurs **zero times in the
+whole document**. That is not because the document names a single cycling voltage — the same
+sample's earlier steps record a *different, lower* cycling voltage — so **1400 specifically
+appears nowhere**, while the value in the surviving filename does. `after1500Cycling` matches the
+final log; `after1400Cycling` matches nothing in it.
+
+*Disclosure boundary applied here, per the characterization document's §0: the two filenames are
+reproduced because the authorizing brief quoted them verbatim, and the `1500` figure is one of
+their own tokens. The document's procedure prose and the other cycling value are **withheld** —
+they are note text and an instrument value not otherwise disclosed, which §0 places outside what
+may be reproduced. The structural fact is stated instead, and it is the whole of the evidence.*
+
+**That narrows the question; it does not answer it.** What remains for Angel:
+
+1. Was `runNo = 32` **deliberately reused** for two acquisitions under different cycling
+   conditions?
+2. Or is the `after1400Cycling` file an **earlier or mislabelled** source superseded by the
+   final log?
+3. Is `runNo` **normally unique**, or may it legitimately repeat when conditions differ?
+
+**Until Angel answers, both acquisitions and the disagreement are preserved. Neither is
+overwritten, and neither is preferred.** Note that (3) is the question that decides whether
+the legacy number may ever be a stable scientist-facing identifier.
+
+## The remaining Angel set — eight, of which five were predicted
+
+**Q6** (environment member) · **Q7** (reaction member) · **Q8** (JK cell type) ·
+**Q9** (JK reference electrode/scale) · **Q11** (primary HERFD channel) ·
+**Q14** (QC from free-text notes) · **Q15** (source precedence) · **Q16** (runNo 32 reuse).
+
+Every one is a scientific judgement the corpus does not state. **None is a mapping
+question any more** — the mapping policy is settled by `DEC-41`.
+
+---
+
+---
+
 ## 0. How to answer, and why the questions are shaped this way
 
 **Almost every question below is "which named option", not "what should we do".** That is
