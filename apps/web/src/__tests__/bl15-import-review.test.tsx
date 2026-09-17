@@ -523,17 +523,47 @@ describe('BL15 review · §7 five outcomes, never a progress bar', () => {
       .map((q) => q.question_id);
     expect(closed.length).toBeGreaterThan(0);
 
-    // `matchAll` RATHER THAN `match(/…/g)`, because the `g` form yields the WHOLE
-    // match including the trailing period — the first version of this test asserted
-    // `open.has('Q11.')` and failed, which is the assertion doing its job on itself.
-    const waiting = [...text.matchAll(/Still waiting on a domain answer: ([^.]+)\./g)];
-    expect(waiting.length).toBeGreaterThan(0);
-    for (const line of waiting) {
-      for (const id of line[1].split(/,\s*/)) {
+    /*
+     * QUERIED BY CLASS, NOT REGEXED OUT OF THE PAGE PROSE — and the previous version
+     * of this assertion is why.
+     *
+     * It read `text.matchAll(/Still waiting on a domain answer: ([^.]+)\./g)` and then
+     * split the capture on `,\s*` to recover bare ids. That worked only while the line
+     * rendered `Q6` and nothing else. It breaks on the humanized line two ways at once:
+     * the separator is now `; `, and `[^.]+` truncates at the FIRST dot — so `Q14`,
+     * whose subject is "is measurement.qc.status derivable from the notes?", would have
+     * been cut mid-path. A prose regex was load-bearing on copy that was always going
+     * to change.
+     *
+     * Reading `.bl15-concept-open` and pulling the id out of its parenthetical is
+     * stable under any rewording, and it lets the assertion get STRONGER rather than
+     * merely survive: the subject must be present, which is the guard that stops this
+     * line ever regressing to a bare internal number.
+     */
+    const byId = new Map((REVIEW.mapping.domain_questions ?? []).map((q) => [q.question_id, q]));
+    const lines = [...container.querySelectorAll('.bl15-concept-open')];
+    expect(lines.length).toBeGreaterThan(0);
+    for (const el of lines) {
+      const line = el.textContent ?? '';
+      const ids = [...line.matchAll(/\(([A-Z]\d+)\)/g)].map((m) => m[1]);
+      expect(ids.length).toBeGreaterThan(0);
+      for (const id of ids) {
         expect(open.has(id)).toBe(true);
         expect(closed).not.toContain(id);
+        // THE HUMANIZATION GUARD. `CLAUDE.md` §11 records this defect class at length
+        // and closed it on 2026-09-14 for blocker keys: an internal identifier
+        // rendered to a scientist beside an already-correct human label. `Q6` is a
+        // packet number with no meaning outside this repository's own documents, and
+        // the server already ships the text — so a line that shows the id ALONE is a
+        // defect, not a style choice.
+        const subject = byId.get(id)?.subject ?? '';
+        expect(subject.length).toBeGreaterThan(0);
+        expect(line).toContain(subject);
       }
     }
+    // And the id is KEPT, not replaced: it is the traceable handle into
+    // `docs/bl15-2-domain-questions-2026-09-16.md`.
+    expect(text).toMatch(/\([A-Z]\d+\)/);
   });
 
   it('renders no Python module path and no field:/block: address as a schema path', () => {
