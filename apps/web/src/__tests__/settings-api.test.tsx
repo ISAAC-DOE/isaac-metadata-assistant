@@ -1806,7 +1806,20 @@ describe('the Full Description rule over the REAL generated contract', () => {
     // RE-MEASURED from the served document via `test_contract_description_parity.py`,
     // which re-transcribed this entry mechanically rather than by hand, and read out
     // of this test's own failure output (`expected […(78)] to have a length of 77`).
-    expect(REAL_CONTRACT_DESCRIPTIONS).toHaveLength(88);
+    //
+    // ── 88 -> 89, 2026-09-17: `ACT-001`/`ACT-002`, ONE operation ────────────────
+    // `GET /api/experiments/{experiment_id}/activity` — the append-only Experiment
+    // Activity / Audit History. READ-ONLY, and the only operation that slice adds:
+    // the history is written as a side effect of the write paths that already
+    // existed, never by a request of its own, because an audit row a caller could
+    // POST would be an audit row a caller could compose.
+    //
+    // RE-MEASURED, NEVER INCREMENTED — this block's own standing instruction. The
+    // entry was transcribed MECHANICALLY out of `create_app().openapi()` rather than
+    // by hand, and `test_contract_description_parity.py` is what proves the copy is
+    // byte-identical to the served document in both directions; the three figures
+    // below were then read out of this test's own failure output.
+    expect(REAL_CONTRACT_DESCRIPTIONS).toHaveLength(89);
     // 84,501 -> 84,584 (+83): the assistant seam's own description was corrected, in
     // ONE operation and with the paragraph count unchanged. It read "so every request
     // is answered `501`" while the paragraph two below it documented the `422` — a
@@ -2417,7 +2430,19 @@ describe('the Full Description rule over the REAL generated contract', () => {
     // unchanged at 315 — the correction was woven INTO the existing paragraph, not
     // appended, which is the choice that holds the count. Re-measured by running this
     // file, not by adding the new text's length.
-    expect(total).toBe(160724);
+    // 160,724 -> 163,257 (+2,533), 2026-09-17: ONE new operation,
+    // `GET .../activity`, and NO existing description changed —
+    // `test_contract_description_parity.py` proves that rather than leaving it
+    // asserted here. It is a long description for one read operation and that is
+    // deliberate: it has to say that `actor` reads `unattributed` for every event
+    // this build records (a fact about the deployment, not a missing feature), that
+    // `before`/`after` are ENVELOPES so a client reading `.value` without `.present`
+    // conflates "there was no value" with "the value was null", and that three acts
+    // — create, discard, reset — are NOT recorded, so a reader must not infer from
+    // an absence that nothing happened. Each of those is a sentence a reader acts
+    // on wrongly if it is missing. Re-measured by running this file, not by adding
+    // the new text's length.
+    expect(total).toBe(163257);
     // 104,045 -> 114,959 (+10,914): the four new operations, and NO existing
     // description changed — `test_contract_description_parity.py` proves that rather
     // than leaving it asserted here. RE-DERIVED from the served document and never
@@ -2672,7 +2697,17 @@ describe('the Full Description rule over the REAL generated contract', () => {
       // block above `expect(total)` for the measurement and for why the obvious
       // reasoning (more paragraphs, more nodes) is wrong here: the baseline counts
       // VIOLATING nodes, and that token is compliant.
-      315,
+      //
+      // 315 -> 321 (+6), 2026-09-17: `GET .../activity`'s lead plus six post-lead
+      // paragraphs. BOTH NUMBERS MOVED TOGETHER, which is the signature of prose
+      // arriving as WHOLE NEW PARAGRAPHS rather than woven into existing ones —
+      // correct here, because this is one new operation and every paragraph of it is
+      // separable: the unattributed actor, the before/after envelope, the
+      // append-only guarantee, the three unrecorded acts, the four counts, and the
+      // served vocabularies. A reader who stops early must not have skipped any one
+      // of them. Re-measured by running this file and reading
+      // `expected 321 to be 315`, never by apportioning.
+      321,
     );
     // 211 -> 235 (+24): the four new operations carry a lead plus 24 post-lead
     // paragraphs between them. It is asserted separately from the character total

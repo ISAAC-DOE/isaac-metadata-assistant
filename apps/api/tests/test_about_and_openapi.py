@@ -739,8 +739,23 @@ def test_every_operation_has_a_summary_that_is_not_the_function_name(client):
     # `state["proposals"]` where they already lived, and a session is still one
     # JSON file under the workspace directory.
     #
+    #
+    # ── 88 -> 89, 2026-09-17: `ACT-001`/`ACT-002`, ONE operation ────────────────
+    # `GET /api/experiments/{experiment_id}/activity` — the append-only Experiment
+    # Activity / Audit History `DEC-44` makes a product requirement. READ-ONLY, and
+    # it is the only operation the activity slice adds: the history is WRITTEN as a
+    # side effect of the write paths that already existed, never by a request of its
+    # own, because an audit row a caller could POST would be an audit row a caller
+    # could compose.
+    #
+    # NO TABLE, NO MIGRATION, AND NO NEW STORAGE LOCATION — events live at
+    # `state["activity"]`, beside `state["notes"]` and `state["proposals"]`, for the
+    # reason `isaac_api.activity`'s docstring gives. `db_write.OWNED_TABLES` is
+    # unchanged. The ledger row `ACT-001` says the model "Needs migration `0006`";
+    # it does not, and that is argued in the module rather than here.
+    #
     # MEASURED from `create_app().openapi()`, not derived from the line above it.
-    assert checked == 88, f"expected 88 documented operations, found {checked}"
+    assert checked == 89, f"expected 89 documented operations, found {checked}"
 
 
 def test_the_auto_summary_check_can_actually_fail(client):
@@ -1071,6 +1086,15 @@ EXPECTED_RESPONSE_CODES: dict[tuple[str, str], list[str]] = {
     ("/api/experiments/{experiment_id}/proposals/{proposal_id}/review", "post"): [
         "200", "400", "401", "404", "409", "412", "422", "428", "503",
     ],
+    # The append-only Activity / Audit History (`DEC-44`, ledger `ACT-001`). READ-ONLY,
+    # and the code set says so: there is no `412`/`428` because nothing is written, and
+    # no `409` because there is nothing to conflict with. The `422` is TWO conditions,
+    # not one — FastAPI's own parameter validation, and this route's typed
+    # `unknown_activity_filter`, which refuses a filter value outside one of the three
+    # bounded vocabularies rather than answering an empty list. An empty list would be a
+    # claim about the RECORD ("it has no such activity"); the honest answer is that no
+    # such action, channel or object type exists.
+    ("/api/experiments/{experiment_id}/activity", "get"): ["200", "401", "404", "422", "503"],
     ("/api/experiments/{experiment_id}/notes", "get"): ["200", "401", "404", "422", "503"],
     ("/api/experiments/{experiment_id}/notes", "post"): ["201", "400", "401", "404", "412", "422", "428", "503"],
     ("/api/experiments/{experiment_id}/notes/{note_id}", "get"): ["200", "401", "404", "422", "503"],

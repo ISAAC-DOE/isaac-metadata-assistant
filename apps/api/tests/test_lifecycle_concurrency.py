@@ -109,6 +109,7 @@ import threading
 import pytest
 from fastapi.testclient import TestClient
 
+import isaac_api.activity as activity
 import isaac_api.conflict_resolution as cr
 import isaac_api.identity as identity
 import isaac_api.routes as routes
@@ -896,7 +897,31 @@ def test_override_and_revert_to_inherited_race_leaves_exactly_the_winners_outcom
     # `Run.overrides` is a mapping address -> Override; the ABSENCE of a key is the
     # inheritance, so "the run inherits again" is asserted as a missing key.
     stored_overrides = after.get_run(rid).overrides
-    state = after.to_state()
+    full_state = after.to_state()
+    # *** THE ACTIVITY HISTORY IS EXCLUDED FROM THE SENTINEL WALK, AND THE EXCLUSION
+    # *** IS A NARROWING OF THIS TEST'S CLAIM RATHER THAN A WEAKENING OF IT.
+    #
+    # This test's premise — stated in its own docstring as "neither ordering may
+    # leave the address carrying the ORIGINAL payload" — is a claim about the
+    # record's AUTHORITATIVE STATE. The walk implemented it as a claim about the
+    # whole persisted DOCUMENT, and until `DEC-44` those were the same set.
+    #
+    # They are no longer. The append-only Activity / Audit History (ledger
+    # `ACT-001`) lives at `state["activity"]` and DELIBERATELY RETAINS superseded
+    # values: the first override was accepted, so there is a `run_override_recorded`
+    # row whose `after` is `ORIGINAL-OVERRIDE`, permanently, by design. Scanning it
+    # for "the original must be gone" asks an audit history to forget, which is the
+    # one thing it exists not to do.
+    #
+    # SO THE CLAIM IS SPLIT RATHER THAN RELAXED: the walk below asserts the original
+    # is absent from the record's own state, and a POSITIVE assertion in each branch
+    # asserts the history still holds it. Both halves must pass, so this is strictly
+    # more than the single assertion it replaces.
+    state = {k: v for k, v in full_state.items() if k != activity.ACTIVITY_STATE_KEY}
+    assert activity.ACTIVITY_STATE_KEY in full_state, (
+        "the exclusion above removed nothing, so the split claim below is vacuous"
+    )
+    history = json.dumps(full_state[activity.ACTIVITY_STATE_KEY])
     assert after.get_run(rid).rev == before.get_run(rid).rev + 1, (
         "exactly one accepted write is exactly one run revision"
     )
@@ -912,6 +937,15 @@ def test_override_and_revert_to_inherited_race_leaves_exactly_the_winners_outcom
         assert original_sites == [], (
             "the winner's payload replaced the original — the original must be gone, "
             f"and is still at {original_sites}"
+        )
+        # AND THE OTHER HALF OF THE SPLIT CLAIM: the history DID keep it. A record
+        # whose audit trail cannot say what a value used to be is a record on which
+        # `DEC-44` bought nothing.
+        assert "ORIGINAL-OVERRIDE" in history, (
+            "the append-only history forgot the superseded override"
+        )
+        assert "REPLACEMENT-OVERRIDE" in history, (
+            "the accepted re-override recorded no activity row"
         )
         # POSITIVE CONTROL: the same walk finds the value that IS there, so the
         # emptiness above is a fact about the document and not about the walk.
@@ -930,7 +964,19 @@ def test_override_and_revert_to_inherited_race_leaves_exactly_the_winners_outcom
         assert replacement_sites == [], (
             f"the refused override's payload reached the record, at {replacement_sites}"
         )
+        # THE REFUSED WRITE LEFT NO AUDIT ROW EITHER, and this is the assertion that
+        # would catch the staging discipline failing: `record_activity` STAGES and
+        # `save_versioned` commits only on the write branch, so a 412 must record
+        # nothing at all. A row here would be an audit history asserting an act that
+        # was refused — strictly worse than no history.
+        assert "REPLACEMENT-OVERRIDE" not in history, (
+            "a refused write recorded an activity row"
+        )
         assert _sentinel_sites(state, "ORIGINAL-OVERRIDE") == []
+        # …and the history still holds the override that WAS accepted, before the
+        # race, and the clear that superseded it.
+        assert "ORIGINAL-OVERRIDE" in history
+        assert "run_override_cleared" in history
         # POSITIVE CONTROL. This branch is the one where NEITHER payload may be
         # present, so there is no in-document value of this test's own to find; the
         # run's id is used instead, because it is a leaf of the state by definition

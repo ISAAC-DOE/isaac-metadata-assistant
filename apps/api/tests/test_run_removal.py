@@ -63,6 +63,7 @@ import json
 
 import pytest
 
+import isaac_api.activity as activity
 import isaac_api.db_write as dbw
 import isaac_api.experiment_repository as repo
 import isaac_api.identity as identity
@@ -798,6 +799,40 @@ def test_a_run_ADDED_AND_REMOVED_BEFORE_the_first_submission_leaves_no_trace(
 
     The submission must describe the record as it IS — two units, not three — and no
     revision row may name a run that was removed before the snapshot was taken.
+
+    *** "NO TRACE" IS NARROWED, 2026-09-17, AND THE NARROWING IS THE POINT RATHER
+    *** THAN A CONCESSION. ***
+
+    The title's claim was measured false by this test itself the day the
+    append-only Activity / Audit History landed (`DEC-44`, ledger `ACT-001`): the
+    removed run's id was still in `json.dumps(db.revisions)`, because the revision
+    snapshot is `exp.to_state()` and the history at `state["activity"]` carries a
+    `run_added` row and a `run_removed` row naming it — permanently, by design.
+
+    **That is `DEC-44` working, not a defect.** A history that could not say "a run
+    was added and then removed" is exactly the history this project decided to
+    build; `change_feed.DELETION_LIMITATION` publishes that the change feed cannot
+    report a deletion, and the removal row is one of the two things the new model
+    exists to add. So the claim splits into the three that were always meant:
+
+    1. the submission describes the record as it IS — two units, not three;
+    2. no `isaac_run_revisions` and no `isaac_submission_runs` ROW names the removed
+       run, which is the durable-history claim this test is really about;
+    3. the removed run's own DOCUMENT is not in the snapshot — the audit ROWS name
+       it, and that is a different and much smaller statement than carrying its
+       draft, its overrides and its evidence into a revision.
+
+    The blanket `mistake not in json.dumps(db.revisions)` could not express (3)
+    separately from the audit rows, so it is replaced by an assertion over the
+    snapshot's `runs` array plus a POSITIVE assertion that the history did keep the
+    two rows. Both must pass, so this is more than the line it replaces.
+
+    **THE DISCLOSED COST, stated rather than discovered:** the revision snapshot is
+    the whole state document, so it now carries the activity history too, and a
+    record with a long history duplicates it into every revision. That is the cost
+    `notes`, `proposals` and `answer_log` already pay in this same column — this
+    adds a fourth member to an existing class rather than a new class — and contract
+    §8 D7's relational rows is the one fix for all four.
     """
     _make(runs=("run A", "run B"))
     kept = _run_ids()
@@ -817,7 +852,25 @@ def test_a_run_ADDED_AND_REMOVED_BEFORE_the_first_submission_leaves_no_trace(
     assert response.json()["unit_count"] == 2
     assert {row["run_id"] for row in db.run_revisions} == set(kept)
     assert {row["run_id"] for row in db.submission_runs} == set(kept)
-    assert mistake not in json.dumps(db.revisions)
+
+    # (3) THE REMOVED RUN'S DOCUMENT IS NOT IN THE SNAPSHOT. Asserted over the
+    # snapshot's own `runs` array rather than over the serialised text, because the
+    # text now legitimately contains the id (see the docstring).
+    assert len(db.revisions) == 1, "the assertions below must not be vacuous"
+    snapshot = json.loads(db.revisions[0]["state"])
+    assert {run["id"] for run in snapshot["runs"]} == set(kept)
+    assert mistake not in json.dumps(snapshot["runs"])
+
+    # AND THE HISTORY DID KEEP BOTH ROWS — the positive half of the split claim, and
+    # the one that fails if the append-only model ever starts forgetting. The removal
+    # is the act `change_feed.DELETION_LIMITATION` says the feed structurally cannot
+    # report, so nothing else in this build records it.
+    recorded = {
+        (event["action"], event["run_id"])
+        for event in snapshot[activity.ACTIVITY_STATE_KEY]
+    }
+    assert ("run_added", mistake) in recorded, recorded
+    assert ("run_removed", mistake) in recorded, recorded
 
 
 def test_after_a_submission_EVERY_captured_run_refuses_removal(armed, wired, db):
