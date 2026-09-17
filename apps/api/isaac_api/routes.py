@@ -47,6 +47,8 @@ from isaac_records.official import EXPECTED_VERSION, schema_path, validate_offic
 from isaac_records.portal_warnings import portal_warnings
 
 from . import __version__
+from . import activity
+from . import activity_history
 from . import artifact_link
 from . import assets
 from . import assistant_query
@@ -1061,6 +1063,35 @@ def _first_client_token(if_match: str | None) -> str | None:
     if not first or not _STRONG_TAG_RE.match(first):
         return None
     return first[1:-1]
+
+
+def _api_channel() -> str:
+    """The activity channel for an act reached through this application's HTTP API.
+
+    ``mcp`` when the in-process MCP client established that scope, and otherwise
+    ``web``. ``ACT-002`` requires the channel stamped at every write path; this is
+    the answer for the twenty-odd write paths that are ordinary API operations.
+
+    **WHAT ``web`` HONESTLY MEANS HERE, stated rather than implied, because the word
+    promises slightly more than it can deliver.** It means *reached through this
+    application's own HTTP API* — which is what the browser client uses, and which a
+    ``curl``, an OpenAPI consumer or a script is INDISTINGUISHABLE from. Nothing in a
+    request separates the three, and ``DEC-44``'s four-value vocabulary has no term
+    for "some other HTTP caller", so inventing a fifth would be a change to a
+    committed decision rather than a fix. ``web`` is therefore the widest of the
+    four that is true of every request reaching it, and the narrowing a reader might
+    expect ("a person in a browser") is NOT claimed by it.
+
+    THE DEFAULT IS PASSED EXPLICITLY AND ``ambient_channel`` HAS NONE OF ITS OWN, on
+    purpose: a signature that defaulted would let a future write path record ``web``
+    by omission, which is exactly the guess ``activity.CHANNEL_SYSTEM`` exists to
+    make unnecessary.
+
+    The two historical-import routes and the system paths deliberately do NOT use
+    this function — they know something more specific about themselves, and each says
+    so at its own call site.
+    """
+    return activity.ambient_channel(activity.CHANNEL_WEB)
 
 
 def _save_versioned(exp, if_match: str | None) -> tuple[bool, JSONResponse | None]:
@@ -3349,7 +3380,23 @@ def rename_experiment(
                 },
             )
 
+        # READ BEFORE THE ASSIGNMENT, because after it there is nothing left to
+        # record as the prior name. `before` is the stored title and never `ABSENT`:
+        # `Experiment.from_state` subscripts `title` unconditionally, so a loaded
+        # record always has one.
+        title_before = exp.title
         exp.title = title
+        # ACT-002. Staged, not appended — `save_versioned` commits it only if this
+        # rename actually moves the authoritative signature, so re-sending the name
+        # the record already had records nothing.
+        exp.record_activity(
+            action=activity.ACTION_EXPERIMENT_RENAMED,
+            object_type=activity.OBJECT_EXPERIMENT,
+            object_id=exp.id,
+            channel=_api_channel(),
+            before=title_before,
+            after=title,
+        )
         # `save_versioned`, NOT `save`. The difference is the whole `If-Match`
         # contract: `title` is inside `_authoritative_signature`, so this is what
         # bumps `rev` and moves the ETag when the name actually changes, and what
@@ -3602,7 +3649,21 @@ def move_experiment_to_folder(
         if precondition is not None:
             return precondition
 
+        # READ BEFORE THE ASSIGNMENT. `""` IS THE UNFILED VALUE AND IS NOT `ABSENT`:
+        # `from_state` yields `""` for an absent key, so "this record was in no
+        # folder" is a real stored value rather than a missing one, and recording it
+        # as absent would make an un-filing indistinguishable from a first filing.
+        folder_before = exp.folder
         exp.folder = folder
+        # ACT-002.
+        exp.record_activity(
+            action=activity.ACTION_EXPERIMENT_MOVED,
+            object_type=activity.OBJECT_EXPERIMENT,
+            object_id=exp.id,
+            channel=_api_channel(),
+            before=folder_before,
+            after=folder,
+        )
         # `save_versioned`, NOT `save`, and for `folder` this is not merely the
         # better choice — it is the only one that works. `folder` is inside
         # `_authoritative_signature`, so this is what bumps `rev` and moves the
@@ -6962,11 +7023,43 @@ def post_answers(
                 key: submitted_record_values[key] for key in enum_written
             }
         exp.answer_log.append(log_entry)
+        # ACT-001 / ACT-002. STAGED BEFORE THE SAVE, because `save_versioned` is what
+        # commits a staged event — and computed before it too, which is sound because
+        # `_fields_the_write_landed` is a pure function of the two drafts and both
+        # already exist here. The call below re-derives the same set for the response;
+        # the duplication is deliberate rather than hoisted, because the response's
+        # version is additionally gated on `changed`, and threading one value through
+        # both would mean staging events for a no-op or reporting fields for a write.
+        # `save_versioned` discards the staging on a no-op, so the two agree anyway.
+        #
+        # THE RECORD-LEVEL ENUM KEYS ARE UNIONED IN, exactly as the response's
+        # `changed_fields` unions them, and for the same measured reason: `apply_shape`
+        # never carries them, so a `system.technique` answer would otherwise record no
+        # activity at all. `enum_written` is what the writers actually changed.
+        _landed_for_activity = _fields_the_write_landed(
+            apply_shape, submitted_fields, draft_before, exp.draft
+        )
+        if enum_written:
+            _union = set(_landed_for_activity) | set(enum_written)
+            _landed_for_activity = [k for k in submitted_fields if k in _union]
+        _record_field_activity(
+            exp,
+            action=activity.ACTION_FIELD_ANSWERED,
+            keys=_landed_for_activity,
+            apply_shape=apply_shape,
+            draft_before=draft_before,
+            draft_after=exp.draft,
+            channel=_api_channel(),
+        )
         changed, stale = _save_versioned(exp, if_match)
         if stale is not None:
             return stale  # another replica won the race; this change was not applied
         if not changed:
             exp.answer_log.pop()  # no-op re-entry: discard the speculative log append
+            # The staged activity needed no `pop()` — `save_versioned` cleared it on
+            # this same branch. That asymmetry is the point of the staging: the one
+            # audit trail that predates it still needs a call site to undo its own
+            # speculative append, and the new one cannot forget to.
         # Derived downstream invalidation (P28.2) at the post-mutation revision. A
         # byte-stable no-op reports changed=False with empty deltas and no rev bump.
         # WHAT LANDED, NOT WHAT WAS SUBMITTED. `_fields_the_shape_carries` removes keys
@@ -7652,6 +7745,93 @@ def _fields_the_write_landed(
     return landed
 
 
+def _slot_value(draft: dict, slot: str):
+    """The value at a draft slot, or :data:`activity.ABSENT` when the slot is missing.
+
+    ``dict.get(slot)`` WOULD NOT DO, and the difference is the whole reason
+    :class:`activity.Absent` exists: a draft with no ``qc`` key and a draft whose
+    ``qc`` is ``None`` both answer ``None`` to ``.get``, and an audit row cannot then
+    say whether an edit CREATED a verdict or changed one to null.
+    """
+    return draft[slot] if slot in draft else activity.ABSENT
+
+
+def _record_field_activity(
+    exp,
+    *,
+    action: str,
+    keys: Sequence[str],
+    apply_shape: dict,
+    draft_before: dict,
+    draft_after: dict,
+    channel: str,
+    run_id: str | None = None,
+) -> None:
+    """Stage one activity event per field whose write LANDED. ``ACT-001``/``ACT-002``.
+
+    ``keys`` IS THE LANDED SET, NOT THE SUBMITTED SET, and the caller passes
+    :func:`_fields_the_write_landed`'s answer for exactly the reason that function
+    exists: a wrong-typed ``series`` is accepted by the route, declined by the core,
+    and reported as *"Updated 1 field(s)"* by the surface that counted the submission
+    instead of the write. An audit row naming a field that was never written is the
+    same defect with a longer memory.
+
+    THE BEFORE/AFTER PAIR IS READ FROM THE TWO DRAFTS, never from the request body.
+    A request states what a caller WANTED; the drafts state what the record HELD and
+    now holds. ``_ANSWER_KEY_VALUE_SLOT`` is the same table
+    :func:`_fields_the_write_landed` decides "landed" with, so the two cannot
+    disagree about where a key's value lives.
+    """
+    asset_uris = set(apply_shape.get("asset_sha256") or {})
+    for key in keys:
+        if key in asset_uris:
+            # An asset is keyed by its URI and has no fixed slot — `_asset_entry`'s
+            # arrangement, reused rather than re-derived. `None` becomes ABSENT
+            # because an asset the draft does not hold genuinely is not there.
+            entry_before = _asset_entry(draft_before, key)
+            entry_after = _asset_entry(draft_after, key)
+            before = activity.ABSENT if entry_before is None else entry_before
+            after = activity.ABSENT if entry_after is None else entry_after
+        else:
+            slot = _ANSWER_KEY_VALUE_SLOT.get(key)
+            if slot is None:
+                # A key `_answers_to_apply_shape` produces that the slot table does
+                # not know. THIS IS THE WEAKER CLAIM, KEPT DELIBERATELY, and it is
+                # `_fields_the_write_landed`'s own answer to this same case in this
+                # same table: "Keep the older, weaker claim rather than dropping the
+                # field silently … The pinning test is what stops this branch from
+                # ever being the live path."
+                #
+                # Stated plainly rather than left implicit, because here the weaker
+                # claim is a POSITIVE one: both slots read ABSENT, which asserts
+                # "there was no value and there is none" about a field that may hold
+                # both. That is a real cost, and it is paid rather than avoided
+                # because the alternatives are worse — dropping the event loses the
+                # act, and 500ing a write path over a table gap punishes the
+                # scientist for a developer's omission.
+                # `test_activity_channel_guard.py` asserts the branch is DEAD: every
+                # key `_answers_to_apply_shape` can produce is either an asset URI or
+                # has a slot. If that test ever goes red, this comment is the defect.
+                before = after = activity.ABSENT
+            else:
+                before = _slot_value(draft_before, slot)
+                after = _slot_value(draft_after, slot)
+        exp.record_activity(
+            action=action,
+            object_type=activity.OBJECT_FIELD,
+            # THE OBJECT IS THE RUN WHEN THE FIELD BELONGS TO ONE, and the record
+            # otherwise. `object_id` answers "what was acted on"; a run-level answer
+            # acted on that run's document, and naming the record would make two
+            # runs' answers indistinguishable in the history.
+            object_id=run_id or exp.id,
+            channel=channel,
+            run_id=run_id,
+            field_path=key,
+            before=before,
+            after=after,
+        )
+
+
 @router.post(
     "/experiments/{experiment_id}/edit",
     tags=[TAG_DRAFTS],
@@ -7939,6 +8119,29 @@ def post_edit(
         if enum_written:
             log_entry["fields"] = {key: record_answers[key] for key in enum_written}
         exp.answer_log.append(log_entry)
+        # ACT-001 / ACT-002. `ACTION_FIELD_CORRECTED`, NOT `ACTION_FIELD_ANSWERED`,
+        # and the two verbs are kept apart deliberately: answering a question and
+        # overwriting an already-confirmed value are different acts with different
+        # provenance, and the whole reason this route exists separately from
+        # `/answers` is that the second one needs `confirmed_by_user`. A history that
+        # spelled both `field_answered` would make a correction indistinguishable from
+        # a first answer — which is the one distinction a reader of an audit log for a
+        # corrected value is looking for.
+        _landed_for_activity = _fields_the_write_landed(
+            apply_shape, submitted_fields, draft_before, exp.draft
+        )
+        if enum_written:
+            _union = set(_landed_for_activity) | set(enum_written)
+            _landed_for_activity = [k for k in submitted_fields if k in _union]
+        _record_field_activity(
+            exp,
+            action=activity.ACTION_FIELD_CORRECTED,
+            keys=_landed_for_activity,
+            apply_shape=apply_shape,
+            draft_before=draft_before,
+            draft_after=exp.draft,
+            channel=_api_channel(),
+        )
         changed, stale = _save_versioned(exp, if_match)
         if stale is not None:
             return stale  # another replica won the race; this change was not applied
@@ -8989,6 +9192,27 @@ def _is_storable_value(value, *, max_bytes: int = _MAX_VALUE_BYTES) -> bool:
     return len(rendered) <= max_bytes
 
 
+def _envelope_value(stored):
+    """The VALUE a stored draft envelope carries, or :data:`activity.ABSENT`.
+
+    A run's field is an evidence envelope — ``{value, status, evidence}`` — and an
+    audit row wants the value, not the envelope: the envelope additionally carries a
+    fresh ``user_confirmation`` timestamp on every write, so recording it whole would
+    make every ``before``/``after`` pair differ even when the value did not.
+
+    ``ABSENT`` for a missing field, and ``ABSENT`` for an envelope with no ``value``
+    key, because in both cases nothing states a value. An envelope whose ``value`` IS
+    ``None`` reads as ``None`` — the distinction :class:`activity.Absent` exists for.
+    A non-dict stored value is returned as-is rather than refused: a persisted shape
+    this build did not write must be READ, not refused (``CLAUDE.md`` §11).
+    """
+    if stored is activity.ABSENT:
+        return activity.ABSENT
+    if isinstance(stored, dict):
+        return stored["value"] if "value" in stored else activity.ABSENT
+    return stored
+
+
 def _apply_run_field(
     fields: dict, path: str, value, timestamp: str, *, question: str | None = None
 ) -> bool:
@@ -9447,6 +9671,20 @@ def post_run(
                 },
             )
         run = exp.add_run(label=label, draft=_seed_for_new_run(exp))
+        # ACT-002. `before` is ABSENT and that is literally true: this run did not
+        # exist. `after` is the label rather than the whole seeded draft — the draft
+        # is adopted from the record by `_seed_for_new_run`, so putting it in the
+        # audit row would record a copy of content the record already holds and
+        # already records elsewhere, in a document that is rewritten whole on every
+        # save.
+        exp.record_activity(
+            action=activity.ACTION_RUN_ADDED,
+            object_type=activity.OBJECT_RUN,
+            object_id=run.id,
+            channel=_api_channel(),
+            run_id=run.id,
+            after=run.label,
+        )
         _changed, stale = _save_versioned(exp, if_match)
         if stale is not None:
             return stale  # another writer won the race; this run was not added
@@ -9685,12 +9923,61 @@ def patch_run(
         fields = existing_fields if isinstance(existing_fields, dict) else {}
         timestamp = _now_iso()
         wrote = False
+        channel = _api_channel()
         for path, value in raw_fields.items():
+            # READ BEFORE THE WRITE, per path, because `_apply_run_field` mutates
+            # `fields` in place and a `null` DELETES the key.
+            before = _envelope_value(
+                fields[path] if path in fields else activity.ABSENT
+            )
             if _apply_run_field(fields, path, value, timestamp):
                 wrote = True
+                # ACT-002. ONLY WHEN THE WRITER SAID IT CHANGED SOMETHING. That
+                # return value is the same signal `wrote` is built from, so an
+                # idempotent re-submission of a value this envelope already records
+                # records no activity either — which it must not, because
+                # `_apply_run_field`'s idempotence exists precisely so such a request
+                # is not a change.
+                exp.record_activity(
+                    action=activity.ACTION_RUN_UPDATED,
+                    object_type=activity.OBJECT_FIELD,
+                    object_id=run.id,
+                    channel=channel,
+                    run_id=run.id,
+                    field_path=path,
+                    before=before,
+                    # A `null` CLEARS the field by removing the key, so `after` is
+                    # ABSENT — "there is no value here now" — rather than `None`,
+                    # which would assert a present field holding null. That is
+                    # exactly the statement `_apply_run_field`'s own docstring
+                    # refuses to store, and the audit row must not make it either.
+                    after=activity.ABSENT if value is None else value,
+                )
         if wrote and not isinstance(existing_fields, dict):
             draft["fields"] = fields
         if label is not None:
+            # ACT-002, AND GATED ON THE LABEL ACTUALLY MOVING. The staging discipline
+            # alone is not enough here, and the difference is worth stating because it
+            # is the one place in this slice where it is not: `save_versioned` drops
+            # staged events only when the WHOLE record's signature is unmoved, so a
+            # request that re-sent the same label AND changed a field would have
+            # committed a row reading `before: "Run 1", after: "Run 1"`. That row is
+            # not false, but it records an act nobody performed, and an audit history
+            # padded with no-ops is one a reader stops reading.
+            #
+            # `field_path` IS `None` AND THAT IS DELIBERATE: a run's label is its own
+            # name, not a schema field path, and putting `"label"` there would render
+            # beside real official-schema paths as though it were one.
+            if label != run.label:
+                exp.record_activity(
+                    action=activity.ACTION_RUN_UPDATED,
+                    object_type=activity.OBJECT_RUN,
+                    object_id=run.id,
+                    channel=channel,
+                    run_id=run.id,
+                    before=run.label,
+                    after=label,
+                )
             run.label = label
 
         # The client's validator is the RUN's, so it is deliberately NOT passed to
@@ -10473,6 +10760,33 @@ def post_run_override(
                 run, _attribution_confirmations(body.get("payload"), _now_iso())
             )
 
+        # ACT-002. `before` IS `override.displaced` — the experiment's payload at the
+        # moment the override was recorded — and NOT the run's prior override payload,
+        # and the choice is argued because both are defensible readings of "before".
+        # `Override.displaced` is what the model already documents as "what this
+        # override displaced", and it is the value a reader of an audit row wants: the
+        # act being recorded is "this run stopped inheriting and started stating its
+        # own", so the thing it moved away from is the inherited value. `None` is a
+        # real possibility there and means "displaced no inherited value"
+        # (`Override.to_state`'s own distinction), so it is recorded as `None` rather
+        # than folded into ABSENT.
+        #
+        # `field_path`/`object_type` use the ADDRESS, which is namespaced
+        # (`field:...` / `block:...`) and is therefore deliberately NOT a bare
+        # official-schema path. It is recorded verbatim because it is exactly the
+        # token the route accepts and refuses on, and translating it here would give
+        # the history a third spelling of a vocabulary that already has two.
+        exp.record_activity(
+            action=activity.ACTION_RUN_OVERRIDE_RECORDED,
+            object_type=activity.OBJECT_RUN,
+            object_id=run.id,
+            channel=_api_channel(),
+            run_id=run.id,
+            field_path=address,
+            before=override.displaced,
+            after=override.payload,
+        )
+
         # The client's validator is the RUN's, so it is deliberately NOT passed to
         # `_save_versioned` — see `patch_run` for why echoing a run version as a
         # record conflict's `expected_version` would be two things wearing one name.
@@ -10559,10 +10873,40 @@ def post_run_override_clear(
         if resolved is None:
             return _not_overridable(body.get("address"))
         address, _kind, _name = resolved
+        # READ BEFORE THE CLEAR, because `clear_run_override` returns a BOOLEAN and
+        # not the override it dropped, so after this line there is nothing left to
+        # record as the prior value. `.get` on a possibly-non-dict container is
+        # guarded the way every other read of persisted content here is.
+        overrides = run.overrides if isinstance(run.overrides, dict) else {}
+        dropped_override = overrides.get(address)
         try:
             cleared = exp.clear_run_override(run, address)
         except ValueError:
             return _not_overridable(address)
+        # ACT-002, AND GATED ON `cleared`. A clear that removed nothing is not an act:
+        # the save below is deliberately unconditional (so the durable-conflict check
+        # runs on every path), so the staging discipline alone would have committed a
+        # row for it whenever some other change moved the signature — the same reason
+        # `patch_run`'s label event is gated.
+        if cleared:
+            exp.record_activity(
+                action=activity.ACTION_RUN_OVERRIDE_CLEARED,
+                object_type=activity.OBJECT_RUN,
+                object_id=run.id,
+                channel=_api_channel(),
+                run_id=run.id,
+                field_path=address,
+                before=(
+                    dropped_override.payload
+                    if isinstance(dropped_override, ws.Override)
+                    else activity.ABSENT
+                ),
+                # ABSENT, NOT `None`. The run now carries no value at this address at
+                # all and inherits again BY REFERENCE — `clear_run_override`'s own
+                # words — so "there is no value here" is the true statement and
+                # `None` would assert that this run states a null.
+                after=activity.ABSENT,
+            )
 
         # AND THE CONFIRMATIONS THAT OVERRIDE EARNED GO WITH IT. The run holds no
         # attribution block of its own any more, so a stored confirmation for one of
@@ -10946,6 +11290,36 @@ def _apply_to_run(
         exp.answer_log.append(
             {("edited" if correcting else "applied"): apply_shape, "run_id": run.id, "at": timestamp}
         )
+        # ACT-001 / ACT-002. THE RUN-LEVEL TWIN OF THE RECORD PATH'S STAGING, with
+        # `run_id` carried so a run's history is distinguishable from the record's —
+        # the identical argument the `answer_log` entry directly above makes about
+        # `run_id`, and it was missing there once.
+        #
+        # The verb follows `correcting`, for the reason `post_edit` gives: answering a
+        # question and overwriting an already-confirmed value are different acts, and
+        # this ONE function serves both routes.
+        #
+        # `draft_before` is `run_draft` — the draft the writer was handed, INCLUDING a
+        # legacy run's materialised `pending` — which is what makes the landed set
+        # honest here; the response's own `changed_fields` compares the same pair.
+        # Record-level enum keys are deliberately NOT unioned in: they are not
+        # writable at the run level at all, so `enum_written` does not exist here.
+        _record_field_activity(
+            exp,
+            action=(
+                activity.ACTION_FIELD_CORRECTED
+                if correcting
+                else activity.ACTION_FIELD_ANSWERED
+            ),
+            keys=_fields_the_write_landed(
+                apply_shape, submitted_fields, draft_before, run.draft
+            ),
+            apply_shape=apply_shape,
+            draft_before=draft_before,
+            draft_after=run.draft,
+            channel=_api_channel(),
+            run_id=run.id,
+        )
         changed, stale = _save_versioned(exp, if_match=None)
         if not changed:
             # Byte-stable no-op: discard the speculative append, exactly as the record
@@ -11297,6 +11671,25 @@ def post_run_remove(
         removed_label, removed_ordinal = run.label, run.ordinal
         removed = exp.remove_run(run_id)
         assert removed is not None  # `get_run` above already resolved it under the lock
+        # ACT-002. THE ONE ACT IN THIS BUILD THE CHANGE FEED STRUCTURALLY CANNOT
+        # REPORT — `change_feed.DELETION_LIMITATION` says so in terms — which is why
+        # `DEC-44` needed an append-only model and not an extension of the feed. It is
+        # recorded here at full strength: `before` is the label and ordinal that
+        # existed, `after` is ABSENT because the run does not.
+        #
+        # `dropped_assets` IS DELIBERATELY NOT RECORDED AS A CHANGE. The library
+        # entries are not removed — the comment above says an asset may still be cited
+        # by other runs and by the record — so a row claiming they went would be false.
+        # They are reachable from the run's own removal row through `run_id`.
+        exp.record_activity(
+            action=activity.ACTION_RUN_REMOVED,
+            object_type=activity.OBJECT_RUN,
+            object_id=run_id,
+            channel=_api_channel(),
+            run_id=run_id,
+            before={"label": removed_label, "ordinal": removed_ordinal},
+            after=activity.ABSENT,
+        )
         _changed, stale = _save_versioned(exp, if_match)
         if stale is not None:
             return stale  # another writer won the race; this run was not removed
@@ -12284,6 +12677,135 @@ def list_notes(
     return _notes_payload(exp, selected=selected)
 
 
+_ACTIVITY_LIMIT_DESC = (
+    "How many events to return. Clamped to the server maximum rather than refused, "
+    "and the effective value is echoed back as `limit`."
+)
+_ACTIVITY_SINCE_DESC = (
+    "Return only events STRICTLY AFTER this sequence position. A poller passes back "
+    "the `highest_seq` it last saw and is handed exactly what arrived since."
+)
+_ACTIVITY_BEFORE_DESC = (
+    "Return only events STRICTLY BEFORE this sequence position — the cursor for the "
+    "next page, echoed as `next_before_seq`."
+)
+
+
+@router.get(
+    "/experiments/{experiment_id}/activity",
+    tags=[TAG_EXPERIMENTS],
+    summary="Read a Record's Activity History",
+    description=(
+        "Lists what has been done to this record — who, what, to which object and "
+        "field, from what value to what value, when, and through which channel. "
+        "Read-only, append-only and bounded.\n\n"
+        "**`actor` reads `unattributed` for every event this build records, and "
+        "that is a fact about the deployment rather than a missing feature.** No "
+        "trusted authentication boundary exists in this build, so nothing may "
+        "truthfully name a person; `actor_trust_basis` carries `unattributed` "
+        "beside it so a reader never has to infer what vouched for a name. A "
+        "forwarded identity header is never consulted and can never become an "
+        "actor. An event whose actor is unattributed is still a complete record of "
+        "WHAT happened.\n\n"
+        "**`before` and `after` are ENVELOPES, not bare values** — "
+        "`{\"present\": false, \"value\": null}` means *there was no value here*, "
+        "and `{\"present\": true, \"value\": null}` means *the value was null*. "
+        "Those are different facts: the first says an edit CREATED a value, the "
+        "second says it changed one to null. A client that reads `.value` without "
+        "reading `.present` will conflate them.\n\n"
+        "**Nothing here is ever revised or removed.** There is no operation that "
+        "edits an event and none that deletes one. `seq` is a durable per-record "
+        "monotonic position starting at 1; it is minted only when a write actually "
+        "lands, so a request that changed nothing records nothing and burns no "
+        "position.\n\n"
+        "**THREE ACTS ARE NOT RECORDED, and a reader should not infer from their "
+        "absence that they did not happen.** Creating a record is not recorded "
+        "(`created_utc` on the record already says when it appeared); discarding a "
+        "record and resetting the workspace are not recorded, because this history "
+        "lives inside the record document that those two acts destroy. Removing a "
+        "RUN *is* recorded.\n\n"
+        "`total` is how many events this record HOLDS and `matched` is how many "
+        "satisfied the filters — both independent of how many this page returned, "
+        "so a filtered or paged read never understates the record. "
+        "`unreadable_entries` counts stored entries this build could not present as "
+        "events; they are preserved in the record untouched and counted rather than "
+        "rendered, because this server cannot say what a refused entry contains "
+        "without inventing it.\n\n"
+        "`actions`, `channels` and `object_types` are the server's own bounded "
+        "vocabularies, served rather than transcribed so a client's filter cannot "
+        "drift from the set this route enforces. A filter value outside one of them "
+        "is refused with `422` rather than answered with an empty list, which would "
+        "be a claim about the record instead of about the request."
+    ),
+    response_description=(
+        "One bounded page of the record's activity, newest first by default, with "
+        "the record's true totals and the record's current `ETag`."
+    ),
+    responses={**_R_STORAGE_UNAVAILABLE, **_R_UNAUTHORIZED, **_R_TUTORIAL_SCOPE},
+)
+def list_activity(
+    scope: TutorialScopeDep,
+    experiment_id: ExperimentId,
+    response: Response,
+    limit: Annotated[
+        int | None, Query(ge=0, description=_ACTIVITY_LIMIT_DESC)
+    ] = None,
+    since_seq: Annotated[
+        int | None, Query(ge=0, description=_ACTIVITY_SINCE_DESC)
+    ] = None,
+    before_seq: Annotated[
+        int | None, Query(ge=0, description=_ACTIVITY_BEFORE_DESC)
+    ] = None,
+    action: Annotated[str | None, Query(description="Narrow to one action verb.")] = None,
+    channel: Annotated[str | None, Query(description="Narrow to one channel.")] = None,
+    object_type: Annotated[
+        str | None, Query(description="Narrow to one object type.")
+    ] = None,
+    run_id: Annotated[
+        str | None, Query(description="Narrow to one run's own activity.")
+    ] = None,
+    newest_first: Annotated[
+        bool, Query(description="Newest event first. Default true.")
+    ] = True,
+):
+    exp = ws.load_experiment(experiment_id, session_id=scope)
+    if exp is None:
+        return _not_found(experiment_id)
+    response.headers["ETag"] = exp.etag()
+    try:
+        return activity_history.activity_page(
+            exp,
+            limit=limit,
+            action=action,
+            channel=channel,
+            object_type=object_type,
+            run_id=run_id,
+            since_seq=since_seq,
+            before_seq=before_seq,
+            newest_first=newest_first,
+        )
+    except ValueError as refusal:
+        # A FILTER VALUE OUTSIDE A BOUNDED VOCABULARY, REFUSED RATHER THAN ANSWERED
+        # WITH AN EMPTY LIST. `CLAUDE.md` §11's rule: a malformed value in a REQUEST
+        # may be refused with a typed 422, while a malformed value already PERSISTED
+        # must be read. An empty list here would tell a caller "this record has no
+        # such activity", which is a claim about the record; the honest answer is
+        # that no such action, channel or object type exists.
+        #
+        # The vocabularies are served in every successful response, so a client never
+        # has to guess what is admissible.
+        return JSONResponse(
+            status_code=422,
+            content={
+                "error": "unknown_activity_filter",
+                "message": f"{refusal} Nothing was read.",
+                "actions": sorted(activity.ACTIVITY_ACTIONS),
+                "channels": sorted(activity.ACTIVITY_CHANNELS),
+                "object_types": sorted(activity.ACTIVITY_OBJECT_TYPES),
+            },
+        )
+
+
 @router.post(
     "/experiments/{experiment_id}/notes",
     tags=[TAG_EXPERIMENTS],
@@ -12548,6 +13070,22 @@ def post_note(
             # only the model knows — a candidate rule with no path, a blank optional
             # sent as `""` — so a malformed payload can never escape as a traceback.
             return _note_refusal("unsupported_note", str(refusal))
+        # ACT-002. `before` IS ABSENT — this note did not exist — and `after` IS
+        # DELIBERATELY NOT THE NOTE'S TEXT. The verbatim capture already lives on the
+        # note, which survives every review outcome including dismissal
+        # (`notes.py`'s invariant), and copying it into the audit row would store a
+        # scientist's words twice in a document that is rewritten whole on every save.
+        # `source_ref` is the note id, which is how a reader gets to the words.
+        exp.record_activity(
+            action=activity.ACTION_NOTE_CAPTURED,
+            object_type=activity.OBJECT_NOTE,
+            object_id=note.id,
+            channel=_api_channel(),
+            run_id=note.run_id,
+            field_path=note.candidate_field_path,
+            after=note.state,
+            source_ref=note.id,
+        )
         _changed, stale = _save_versioned(exp, if_match)
         if stale is not None:
             return stale  # another writer won the race; this note was not captured
@@ -12768,6 +13306,31 @@ def post_note_review(
             return _note_refusal("unsupported_note", str(refusal))
 
         exp.replace_note(revised)
+        # ACT-002. THE BEFORE/AFTER PAIR IS THE REVIEW STATE, not the text, and that
+        # is the honest reading of what a review act changes: mapping, keeping,
+        # editing and dismissing all leave `note.text` untouched — `notes.py` refuses
+        # otherwise — so a pair built from the text would read `before == after` on
+        # three of the four acts and would copy a scientist's words on the fourth.
+        # The superseded wording is not lost: an edit appends it to the note's own
+        # `history` as `superseded_text`, which is where it belongs and where it
+        # already is.
+        #
+        # `source_ref` IS THE NOTE ID and `field_path` IS THE PATH THE SCIENTIST
+        # NAMED when this act named one — `mapped_field_path`, never
+        # `candidate_field_path`, because collapsing the two would make a machine's
+        # suggestion indistinguishable from a person's decision, which is the exact
+        # distinction `notes.Note` keeps two fields to preserve.
+        exp.record_activity(
+            action=activity.ACTION_NOTE_REVIEWED,
+            object_type=activity.OBJECT_NOTE,
+            object_id=revised.id,
+            channel=_api_channel(),
+            run_id=revised.run_id,
+            field_path=revised.mapped_field_path,
+            before=note.state,
+            after=revised.state,
+            source_ref=revised.id,
+        )
         _changed, stale = _save_versioned(exp, if_match)
         if stale is not None:
             return stale  # another writer won the race; this act was not recorded
@@ -14327,6 +14890,23 @@ def post_proposal(
             )
 
         exp.add_proposal(proposal)
+        # ACT-002. `before` IS ABSENT — this proposal did not exist — and `after` IS
+        # THE PROPOSED VALUE, which is the whole content of the act: a proposal is
+        # exactly "somebody suggests this value for that path". It is NOT the field's
+        # current value: creating a proposal writes no field, and recording the
+        # record's stored value as `before` would read as though it had been
+        # displaced. `target_digest` is the proposal's own record of what the field
+        # held; the audit row points at the proposal rather than duplicating it.
+        exp.record_activity(
+            action=activity.ACTION_PROPOSAL_CREATED,
+            object_type=activity.OBJECT_PROPOSAL,
+            object_id=proposal.proposal_id,
+            channel=_api_channel(),
+            run_id=proposal.run_id,
+            field_path=proposal.target_field_path,
+            after=proposal.proposed_value,
+            source_ref=proposal.proposal_id,
+        )
         _changed, stale = _save_versioned(exp, if_match)
         if stale is not None:
             return stale  # another writer won the race; this proposal was not stored
@@ -14974,6 +15554,38 @@ def post_proposal_review(
                 return _proposal_refusal("unsupported_proposal", str(refusal))
 
         exp.replace_proposal(revised)
+        # ACT-002. THE PAIR IS THE PROPOSAL'S STATE, for `post_note_review`'s reason:
+        # a review act settles a judgement, it does not write a field. Accepting one
+        # deliberately does NOT make the accepted value the field's value — that is a
+        # separate act through a separate route, and it records its own event there —
+        # so a pair built from values would assert a field write this route did not
+        # perform.
+        #
+        # `before` IS THE PRIOR STATE AND IS ALWAYS `open` IN PRACTICE, because
+        # `proposals.py` refuses every act from a non-`open` state; it is read from
+        # the proposal rather than written as a literal so the row stays true if that
+        # ever changes.
+        #
+        # THE ACTOR IS STILL `unattributed` HERE, AND THAT IS WORTH NAMING because
+        # this is the ONE route in the build that already resolves an identity:
+        # `actor_trust_basis`/`actor_subject` a few lines up come from
+        # `require_human_actor`, and the acceptance route answers `409
+        # human_actor_required` in every default deployment for exactly that reason.
+        # Wiring that identity into the event is `ACT-005`, which is blocked on
+        # `EXT-01` and deliberately NOT built here — see
+        # `activity.actor_from_identity`. Passing the fixture subject through would
+        # make the history claim an attribution the deployment cannot make.
+        exp.record_activity(
+            action=activity.ACTION_PROPOSAL_REVIEWED,
+            object_type=activity.OBJECT_PROPOSAL,
+            object_id=revised.proposal_id,
+            channel=_api_channel(),
+            run_id=revised.run_id,
+            field_path=revised.target_field_path,
+            before=proposal.state,
+            after=revised.state,
+            source_ref=revised.proposal_id,
+        )
         _changed, stale = _save_versioned(exp, if_match)
         if stale is not None:
             return stale  # another writer won the race; this act was not recorded
@@ -16245,6 +16857,37 @@ def post_transcript(
             exp, reading, run_id=run_id, captured=captured
         )
 
+        # ACT-002. ONE EVENT FOR THE FINALIZE, NOT ONE PER MINTED PROPOSAL, and the
+        # choice is argued. Each minted proposal is itself a durable, addressable,
+        # already-audited object with its own `proposal_id` and its own history; a row
+        # per proposal would duplicate that and would bury the act a person actually
+        # performed — finalizing one capture — under N rows they did not.
+        #
+        # `after` IS THE COUNTS, which are the facts this act produced and which no
+        # other row states: how many notes the segments became (the losslessness
+        # guarantee — `transcript_capture.py` stores EVERY segment as a note precisely
+        # so the words survive rejection) and how many candidates became proposals.
+        # `unproposable` is recorded too, because "some candidate could not become a
+        # proposal" is exactly the kind of partial outcome a surface has previously
+        # reported as success in this repository.
+        exp.record_activity(
+            action=activity.ACTION_TRANSCRIPT_FINALIZED,
+            object_type=activity.OBJECT_NOTE,
+            # THE OBJECT IS THE RUN WHEN ONE WAS CHOSEN, else the record. A capture
+            # finalized with no run chosen genuinely belongs to no run — every
+            # readable field path is run-scoped, so nothing was proposed in that case
+            # — and attaching it to the only run that happens to exist would be the
+            # invention `capture_note` refuses.
+            object_id=run_id or exp.id,
+            channel=_api_channel(),
+            run_id=run_id,
+            after={
+                "notes_captured": len(captured),
+                "proposals_minted": len(minted),
+                "candidates_unproposable": len(unproposable),
+            },
+        )
+
         _changed, stale = _save_versioned(exp, if_match)
         if stale is not None:
             return stale  # another writer won the race; nothing was stored
@@ -16847,6 +17490,19 @@ def post_asset(
         # runs; `None` (the key omitted) leaves every run without it, because a
         # brand-new asset is associated with nothing until someone says otherwise.
         assets.set_associations(exp, entry, run_ids or set())
+        # ACT-002. `before` ABSENT (`creating=True` was refused above if the asset
+        # already existed), `after` the library entry as stored. `run_id` is `None`
+        # even when exactly one run was associated: an asset belongs to the record's
+        # library and may be cited by any number of runs, so naming one would assert
+        # an ownership the model does not have. The associated run ids are in `after`,
+        # where they are a fact about this act rather than a claim about the object.
+        exp.record_activity(
+            action=activity.ACTION_ASSET_ADDED,
+            object_type=activity.OBJECT_ASSET,
+            object_id=entry["asset_id"],
+            channel=_api_channel(),
+            after={"asset": entry, "run_ids": sorted(run_ids or set())},
+        )
         _changed, stale = _save_versioned(exp, if_match)
         if stale is not None:
             return stale  # another writer won the race; this asset was not recorded
@@ -16897,6 +17553,13 @@ def patch_asset(
         existing = assets.find(exp.draft, asset_id)
         if existing is None:
             return _asset_not_found(experiment_id, asset_id)
+        # COPIED, NOT ALIASED, FOR THE ACTIVITY ROW BELOW. `assets.find` returns the
+        # LIVE dict inside `exp.draft`, and `assets.upsert` rewrites the entry in
+        # place — so holding the reference would give the audit row a `before` that
+        # equals its own `after`. That is the shape `workspace.Override` records
+        # having been bitten by: "an override that silently tracks the object it was
+        # built from" could never show a divergence.
+        _asset_before = copy.deepcopy(existing)
         if not isinstance(body, dict):
             return JSONResponse(
                 status_code=422,
@@ -16967,6 +17630,26 @@ def patch_asset(
         # what makes the library and the run copies one fact: an edited digest can
         # never be left stale on a run that already cited it.
         assets.set_associations(exp, entry, run_ids)
+        # ACT-002. `before` IS THE STORED LIBRARY ENTRY AS IT WAS, read before
+        # `assets.upsert` overwrote it — see `_asset_before` at the top of this
+        # handler. ABSENT is not reachable here (`creating=False` requires the asset
+        # to exist and `assets.find` was checked above), but it is the honest reading
+        # if it ever is, rather than `None`.
+        exp.record_activity(
+            action=activity.ACTION_ASSET_UPDATED,
+            object_type=activity.OBJECT_ASSET,
+            object_id=entry["asset_id"],
+            channel=_api_channel(),
+            before=_asset_before if _asset_before is not None else activity.ABSENT,
+            # `run_ids` IS `None` WHEN THE KEY WAS OMITTED, which means "leave the
+            # associations alone" and is a different statement from "associate with
+            # nothing". It is carried through unchanged rather than normalised to an
+            # empty list, which would record an un-association nobody asked for.
+            after={
+                "asset": entry,
+                "run_ids": None if run_ids is None else sorted(run_ids),
+            },
+        )
         _changed, stale = _save_versioned(exp, if_match)
         if stale is not None:
             return stale  # another writer won the race; nothing was changed
@@ -17024,8 +17707,30 @@ def post_asset_remove(
         if precondition is not None:
             return precondition
         detached = assets.associated_run_ids(exp, asset_id)
+        # READ BEFORE THE REMOVAL, and COPIED rather than aliased, for the reason
+        # `patch_asset` copies its own: `assets.find` returns the live dict, and after
+        # `assets.remove` there is nothing left to record.
+        removed_asset = copy.deepcopy(assets.find(exp.draft, asset_id))
         assets.detach_everywhere(exp, asset_id)
         assets.remove(exp, asset_id)
+        # ACT-002. `after` IS ABSENT because the library entry is gone. `detached` is
+        # in `before` beside the entry, because "which runs stopped citing this" is a
+        # fact this act produced and one no other row states — the runs themselves are
+        # unchanged in every other respect, so no per-run event is recorded.
+        exp.record_activity(
+            action=activity.ACTION_ASSET_REMOVED,
+            object_type=activity.OBJECT_ASSET,
+            object_id=asset_id,
+            channel=_api_channel(),
+            before={
+                "asset": removed_asset,
+                # IN RUN ORDER, NOT SORTED. `associated_run_ids` returns "every run of
+                # this experiment that carries this asset, IN RUN ORDER", and sorting
+                # ULIDs here would replace a meaningful order with a lexical one.
+                "detached_run_ids": list(detached),
+            },
+            after=activity.ABSENT,
+        )
         _changed, stale = _save_versioned(exp, if_match)
         if stale is not None:
             return stale  # another writer won the race; nothing was removed
@@ -17435,6 +18140,36 @@ def _materialise_pending_units(
     for unit, unit_result in results:
         written_records[unit.target_id] = _write_record(
             exp, unit_result, unit, uploaded_by=uploaded_by
+        )
+        # ACT-002, ONE EVENT PER EXPORTED UNIT. Per unit and not per call, because
+        # contract §1 D1 makes each run its own official ISAAC record: a single row
+        # for a fan-out would say "an export happened" where the fact is "these N
+        # records were published, each under its own id".
+        #
+        # `before` IS ABSENT AND `after` IS THE RECORD ID, and the pair is narrower
+        # than it could be on purpose. It is NOT the record's content: the official
+        # record and its evidence sidecar are on disk, addressable, and byte-stable,
+        # and copying an exported artifact into an audit row inside the experiment
+        # document would duplicate the whole record on every export.
+        #
+        # ABSENT is honest even on a SELF-HEAL of an already-exported record, where
+        # `record_id` was already set: what this row records is "this artifact was
+        # written", and nothing was published under a different id. That is the one
+        # reading a reader should not over-interpret, and it is why the row carries
+        # `run_id` — a reader can tell a fan-out unit's export from the record's own.
+        exp.record_activity(
+            action=activity.ACTION_RECORD_EXPORTED,
+            object_type=activity.OBJECT_RECORD,
+            object_id=unit.target_id,
+            # THE CHANNEL IS THE CALLER'S, NOT `system`. An export is something a
+            # person or an agent asked for through the API — `post_export` and
+            # `post_submit` are the only two callers — so `web`/`mcp` is the true
+            # answer and `system` would misattribute a deliberate act to the
+            # application.
+            channel=_api_channel(),
+            run_id=unit.run_id,
+            after=unit.target_id,
+            source_ref=unit.target_id,
         )
     # export normally changes the authoritative state (record_id: None -> id), so
     # this bumps rev and stamps updated_utc, persisting the state atomically. On a
@@ -21644,6 +22379,32 @@ def post_conflict_resolution(
             return _conflict_refusal("unsupported_resolution", str(refusal))
 
         cr.write_resolution(exp.draft, resolution)
+        # ACT-002. `before` IS THE PRIOR OUTCOME WHEN THIS REVISED A DECISION, and
+        # ABSENT when it is the first one — the distinction the existence of
+        # `cr.revise_resolution` beside `cr.new_resolution` already makes, and one a
+        # reader of an audit history needs: "somebody changed their mind" and
+        # "somebody decided" are different acts.
+        #
+        # `after` IS THE OUTCOME, NOT THE CHOSEN VALUE, and that is the honest
+        # reading. `conflict_resolution`'s central property is that a decision
+        # carrying a value still reports `is_field_value: False` — the chosen value
+        # deliberately does NOT become the field's value, which is a separate act
+        # through a separate route. An audit row whose `after` were the chosen value
+        # would read as a field write that did not happen.
+        exp.record_activity(
+            action=activity.ACTION_CONFLICT_DECISION_RECORDED,
+            object_type=activity.OBJECT_CONFLICT,
+            object_id=resolution.resolution_id,
+            channel=_api_channel(),
+            run_id=run_id,
+            # THE NAMESPACED ADDRESS, verbatim, for the reason the run-override rows
+            # record theirs verbatim: it is the token this route accepts and refuses
+            # on, and a third spelling would be a third vocabulary.
+            field_path=address,
+            before=activity.ABSENT if existing is None else existing.outcome,
+            after=resolution.outcome,
+            source_ref=resolution.resolution_id,
+        )
         _changed, stale = _save_versioned(exp, if_match)
         if stale is not None:
             return stale  # another writer won the race; this decision was not stored
@@ -25343,6 +26104,29 @@ def post_import_candidate_proposal(
                     }
                 ),
             )
+        # ACT-002, AND THE CHANNEL IS `historical_import` RATHER THAN `_api_channel()`.
+        # This route is an HTTP operation like any other, so `_api_channel()` would
+        # answer `web` and would not be false — but `DEC-44` enumerates
+        # `historical_import` as one of its four channels precisely so that material
+        # arriving from an archive is distinguishable in the history from a value a
+        # scientist typed. Using the wider term here would make that distinction
+        # unavailable and the vocabulary's fourth value unreachable.
+        #
+        # THE DISTINCTION IS NOT DERIVABLE FROM ANYTHING ELSE IN THE ROW: the minted
+        # object is an ordinary `IngestionProposal` with an ordinary note behind it.
+        exp.record_activity(
+            action=activity.ACTION_PROPOSAL_CREATED,
+            object_type=activity.OBJECT_PROPOSAL,
+            object_id=proposal.proposal_id,
+            channel=activity.CHANNEL_HISTORICAL_IMPORT,
+            run_id=proposal.run_id,
+            field_path=proposal.target_field_path,
+            after=proposal.proposed_value,
+            # THE IMPORT, not the proposal, because the proposal id is already
+            # `object_id` and the useful provenance here is which archive reading this
+            # came from.
+            source_ref=import_id,
+        )
         _changed, stale = _save_versioned(exp, if_match)
         if stale is not None:
             return stale  # another writer won the race; nothing was stored
@@ -26038,6 +26822,57 @@ def post_import_add_to_experiment(
         # is the exact class of defect `CLAUDE.md` §11 records four times: a
         # surface reporting work it had not done.
         if wrote_something or created_runs:
+            # ACT-002, CHANNEL `historical_import`, for the reason
+            # `post_import_candidate_proposal` gives: `DEC-44` has a fourth channel so
+            # that archive-derived material is distinguishable from a typed value, and
+            # `_api_channel()` would answer `web` and make that unavailable.
+            #
+            # ONE `archive_attached` EVENT FOR THE BATCH, plus one `run_added` per run
+            # this batch created. The split is argued rather than arbitrary: the runs
+            # are objects a scientist will later open, edit, export and possibly
+            # remove, and the `run_removed` row for one of them has to have a
+            # `run_added` row to pair with — a batch-level summary alone would leave a
+            # removal with no creation. The PROPOSALS are deliberately NOT one row
+            # each: each is already a durable addressable object with its own history,
+            # and a 94-measurement archive would otherwise write hundreds of rows for
+            # one human act.
+            for created in created_runs:
+                exp.record_activity(
+                    action=activity.ACTION_RUN_ADDED,
+                    object_type=activity.OBJECT_RUN,
+                    object_id=created["run_id"],
+                    channel=activity.CHANNEL_HISTORICAL_IMPORT,
+                    run_id=created["run_id"],
+                    after={
+                        "label": created["label"],
+                        "stem": created["stem"],
+                        # THE DISCLOSURE THE RESPONSE ALREADY MAKES, CARRIED INTO THE
+                        # HISTORY. At most one run per batch inherits the record's
+                        # existing run-level content, and the comment above records
+                        # that this attaches a measured spectrum to whichever
+                        # acquisition `relate` happened to order first — "an
+                        # association nothing evidenced". A response a client may not
+                        # have rendered is a weak place for that fact to live; an
+                        # append-only row is a durable one.
+                        "inherited_record_level_content": created[
+                            "inherited_record_level_content"
+                        ],
+                    },
+                    source_ref=import_id,
+                )
+            exp.record_activity(
+                action=activity.ACTION_ARCHIVE_ATTACHED,
+                object_type=activity.OBJECT_IMPORT,
+                object_id=import_id,
+                channel=activity.CHANNEL_HISTORICAL_IMPORT,
+                after={
+                    "proposals_sent": len(sent),
+                    "runs_created": len(created_runs),
+                    "runs_already_present": len(runs_already_present),
+                    "candidates_not_sent": len(not_sent),
+                },
+                source_ref=import_id,
+            )
             _changed, stale = _save_versioned(exp, if_match)
             if stale is not None:
                 return stale  # another writer won the race; nothing was stored

@@ -65,6 +65,7 @@ from typing import Any, Mapping, Protocol
 
 import httpx
 
+from .. import activity as activity_module
 from ..config import base_path
 from .policy import OPERATIONS, Operation
 
@@ -210,18 +211,47 @@ class AsgiApiClient:
         headers = self._render_headers(operation, if_match)
 
         transport = httpx.ASGITransport(app=self.app)
-        async with httpx.AsyncClient(
-            transport=transport,
-            base_url="http://isaac.invalid",
-            timeout=_TIMEOUT_SECONDS,
-        ) as http:
-            response = await http.request(
-                operation.method,
-                path,
-                params=params or None,
-                json=dict(json_body) if json_body is not None else None,
-                headers=headers,
-            )
+        # ── THE ACTIVITY CHANNEL IS ESTABLISHED HERE, AND THIS IS THE ONLY PLACE ──
+        # ── IT CAN HONESTLY BE ESTABLISHED. ──────────────────────────────────────
+        # `DEC-44` requires a `source channel` on every recorded act and `ACT-002`
+        # requires it stamped at every write path. `web` and `mcp` reach the SAME
+        # route functions — this client calls them in-process over
+        # `httpx.ASGITransport` — so nothing inside a route can tell the two apart
+        # unless something outside it says so. This is that something.
+        #
+        # A ContextVar RATHER THAN A HEADER, and the difference is the point.
+        # `docs/identity-trust-contract.md` §2 (Q4) records that the Service is a
+        # plain ClusterIP with no NetworkPolicy, so any in-cluster pod can send this
+        # application whatever headers it likes; an `X-Isaac-Channel: mcp` would let
+        # an arbitrary caller write a false line into an audit log. A channel
+        # authorizes nothing, so that is not an authorization hole — but a false
+        # audit row is precisely the defect an audit log exists to prevent, and
+        # `DEC-45`'s "no authorization decision may ever be derived from an untrusted
+        # forwarded header" is the same instinct one step out.
+        #
+        # IT WORKS BECAUSE THE CALL IS A DIRECT AWAIT. `httpx`'s
+        # `ASGITransport.handle_async_request` does `await self.app(scope, receive,
+        # send)` — no task is spawned — so the variable set here is visible to the
+        # route handler, in the same context, and to nothing else in the process.
+        # Starlette runs a SYNCHRONOUS endpoint through `anyio.to_thread.run_sync`,
+        # which copies the context into the worker thread, so a sync route sees it
+        # too; `test_activity_channel_guard.py` measures that rather than assuming it.
+        #
+        # `channel_scope` sets and RESETS with the token, so the scope is exactly this
+        # call and a leak into an unrelated request is not representable.
+        with activity_module.channel_scope(activity_module.CHANNEL_MCP):
+            async with httpx.AsyncClient(
+                transport=transport,
+                base_url="http://isaac.invalid",
+                timeout=_TIMEOUT_SECONDS,
+            ) as http:
+                response = await http.request(
+                    operation.method,
+                    path,
+                    params=params or None,
+                    json=dict(json_body) if json_body is not None else None,
+                    headers=headers,
+                )
 
         if response.status_code == 401:
             raise ApiRefusal(

@@ -176,11 +176,41 @@ describe('the darwin column says how much of itself is measured', () => {
    * the cell, THIS test is the one that fails, and its failure is the prompt to update
    * both literals in the same edit.
    */
-  it('reports that NO darwin node is currently carried forward', () => {
+  it('reports the FOUR carried-forward cells and their exact node debt', () => {
+    /*
+     * RENAMED AND RE-POINTED 2026-09-17, AND THIS TEST FAILING IS THE DESIGN WORKING.
+     *
+     * It was `reports that NO darwin node is currently carried forward`, and the
+     * comment block above it said exactly what would happen: *"If a later slice
+     * transcribes a linux figure and correctly registers the cell, THIS test is the
+     * one that fails, and its failure is the prompt to update both literals in the
+     * same edit."* That slice is the activity-history branch, the transcription is
+     * five `settings-explorer` cells from CI run 35272170788 (four of which are
+     * registrable), and both literals moved
+     * here — `A11Y_BASELINE_DARWIN_UNVERIFIED_NODES` 0 -> 74.
+     *
+     * THE ASSERTION IS NOT WEAKENED, it is re-pointed. The old form pinned a
+     * transient (the register happened to be empty) in a file whose own rule is to pin
+     * the invariant. The invariant is that the register AGREES WITH THE FILE: every
+     * carried-forward half is named, and the declared debt equals the sum of the named
+     * halves. That is now asserted against exact values rather than against zero, and
+     * `toBeGreaterThan(0)` — which could never have failed once a single node was
+     * registered — is replaced by the exact figure.
+     */
     const provenance = auditDarwinProvenance(A11Y_BASELINE, DARWIN_CARRIED_FORWARD);
-    expect(provenance.unverifiedKeys).toEqual([]);
-    expect(provenance.unverifiedFraction).toBe(0);
-    expect(provenance.totalNodes).toBeGreaterThan(0);
+    expect(provenance.unverifiedKeys.slice().sort()).toEqual([
+      'settings-explorer@desktop-1280x800',
+      'settings-explorer@laptop-1024x768',
+      'settings-explorer@tablet-768x1024',
+      'settings-explorer@zoom-200',
+    ]);
+    // 17 + 17 + 20 + 20. Written out so a change to any ONE cell fails here rather
+    // than being absorbed by a total that still happens to add up. `@width-390` is
+    // NOT here: it moved, but its halves now agree, so it is a scalar and a scalar
+    // cannot be registered — see the cell's own note.
+    expect(provenance.unverifiedNodes).toBe(74);
+    expect(provenance.unverifiedFraction).toBeGreaterThan(0);
+    expect(provenance.totalNodes).toBe(822);
   });
 
   /*
@@ -479,9 +509,31 @@ describe('the darwin column says how much of itself is measured', () => {
       // `DARWIN_CARRIED_FORWARD` stays empty and
       // `A11Y_BASELINE_DARWIN_UNVERIFIED_NODES` stays 0: both halves of both cells
       // were measured at the same head, `11e08da`.
+      // ── RE-DERIVED 2026-09-17, ACTIVITY HISTORY BRANCH: 2 -> 6. ──
+      // The predicted cause fired a THIRD time: one more published operation
+      // (`GET /api/experiments/{id}/activity`) rendered by the Endpoint Explorer,
+      // which reads the LIVE `/api/openapi`. Four scalars split; `@width-390` was
+      // already split and stays split with both halves now 21.
+      //
+      // UNLIKE 2026-09-01, `DARWIN_CARRIED_FORWARD` does NOT stay empty: FOUR keys are
+      // registered and `A11Y_BASELINE_DARWIN_UNVERIFIED_NODES` moves 0 -> 74 in this
+      // same edit, which is exactly the procedure the assertion message below demands.
+      //
+      // `@width-390` MOVED BUT LEFT THIS SET: its linux half rose to MEET its darwin 21,
+      // and equal halves are refused by `auditA11yWellFormedness`, so it is a scalar
+      // again. It therefore cannot be registered either — the two guards contradict each
+      // other for exactly this transition, which is reported at the cell in
+      // `a11y-baseline.ts` rather than silently decided here.
+      //
+      // `@mobile-375x812` keeps its 2026-09-01 halves untouched: CI run 35272170788
+      // reported 665 skipped and never measured it, so it is neither transcribed nor
+      // registered. It is expected to fail on the next run.
       [
+        'color-contrast @ settings-explorer@desktop-1280x800',
+        'color-contrast @ settings-explorer@laptop-1024x768',
         'color-contrast @ settings-explorer@mobile-375x812',
-        'color-contrast @ settings-explorer@width-390',
+        'color-contrast @ settings-explorer@tablet-768x1024',
+        'color-contrast @ settings-explorer@zoom-200',
       ] as string[]
     );
   });

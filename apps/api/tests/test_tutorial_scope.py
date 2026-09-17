@@ -35,6 +35,7 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
+import isaac_api.activity as activity
 import isaac_api.proposals as proposals
 import isaac_api.submissions as submissions
 import isaac_api.workspace as ws
@@ -1029,6 +1030,31 @@ def test_the_persisted_state_keys_are_unchanged_by_scoping():
         # It satisfies the property THIS test defends for the identical reason: the
         # keys are note ids, the values are integers, and neither can encode a scope.
         "note_change_revs",
+        # ``activity`` was added with the append-only Activity / Audit History
+        # (``DEC-44``, ledger ``ACT-001``), and is ADMITTED HERE DELIBERATELY rather
+        # than because a test went red — the rule every key above earned.
+        #
+        # It belongs in the persisted document because it is the history of acts
+        # performed on THIS record, stored beside ``notes`` and ``proposals`` and
+        # outside ``draft``, which is what makes "an activity event is inert to
+        # export" structural rather than asserted. No table and no migration is added
+        # for it; ``db_write.OWNED_TABLES`` is unchanged.
+        #
+        # AND IT SATISFIES THE PROPERTY THIS TEST DEFENDS, by construction rather
+        # than by argument: an ``ActivityEvent`` is a frozen, slotted dataclass whose
+        # field set is fixed (``activity.IMMUTABLE_EVENT_FIELDS``) and contains no
+        # ``session_id``, no ``scope`` and no path — it carries an ``experiment_id``,
+        # a ``run_id`` and a ``field_path``, none of which can name a directory. So a
+        # state file still cannot record a scope that goes stale when the directory
+        # moves. That is checked per entry immediately below, over a NON-EMPTY list,
+        # for the reason the run and proposal assertions are: ``all(...)`` over an
+        # empty list cannot fail and would look like coverage while testing nothing.
+        #
+        # THE ONE PLACE A SCOPE COULD HIDE is ``before``/``after``, which carry
+        # arbitrary JSON taken from the record's own drafts. That is the same exposure
+        # ``draft`` itself has and is not new: the values recorded are values the
+        # record already holds, and nothing here composes a path from one.
+        "activity",
     }
     assert "session_id" not in state and "scope" not in state and "root" not in state
     # THE FOLDER IS ``""`` HERE AND THAT IS ASSERTED, not merely stated: a record
@@ -1077,6 +1103,29 @@ def test_the_persisted_state_keys_are_unchanged_by_scoping():
     )
     assert all(
         "session_id" not in p and "scope" not in p for p in state["proposals"]
+    )
+    # AN ACTIVITY EVENT IS RECORDED FOR THE SAME REASON THE RUN AND THE PROPOSAL ARE:
+    # without one, `state["activity"]` is empty and the per-event assertion is
+    # vacuous. It is STAGED AND COMMITTED without a save, because `record_activity`
+    # only stages — `_commit_staged_activity` is what mints `seq` and is called from
+    # `save_versioned`'s write branch, and this test is about the SHAPE of `to_state`
+    # rather than about persistence.
+    exp.record_activity(
+        action=activity.ACTION_EXPERIMENT_RENAMED,
+        object_type=activity.OBJECT_EXPERIMENT,
+        object_id=exp.id,
+        channel=activity.CHANNEL_WEB,
+        before="an older title",
+        after=exp.title,
+    )
+    exp._commit_staged_activity()
+    state = exp.to_state()
+    assert len(state["activity"]) == 1, (
+        "the per-event assertion below must not be vacuous"
+    )
+    assert all(
+        "session_id" not in e and "scope" not in e and "root" not in e
+        for e in state["activity"]
     )
     # A round trip defaults to the ordinary scope unless the reader says otherwise.
     assert ws.Experiment.from_state(state).session_id is None

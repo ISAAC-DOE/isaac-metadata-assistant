@@ -57,6 +57,7 @@ from __future__ import annotations
 
 import contextlib
 import copy
+import dataclasses
 import hashlib
 import json
 import logging
@@ -70,6 +71,7 @@ import unicodedata
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import Any
 
 from isaac_records.complete import apply_answers
 from isaac_records.draft_validator import validate_draft
@@ -78,8 +80,10 @@ from isaac_records.extract.draft_builder import build_draft
 from isaac_records.ids import is_record_id, new_record_id
 from isaac_records.models import derivation
 
+from . import activity as activity_module
 from . import notes as notes_module
 from . import proposals as proposals_module
+from .activity import ActivityEvent
 from .notes import Note
 from .proposals import IngestionProposal
 
@@ -1781,6 +1785,94 @@ def _proposal_state_payload(exp: "Experiment") -> list:
     )
 
 
+# --- the append-only activity / audit history ---------------------------------
+#
+# Events live inside the experiment's state document, BESIDE ``notes`` and
+# ``proposals`` and outside ``draft``, exactly as proposals do and for the reason
+# ``activity.ACTIVITY_STATE_KEY`` states: the draft is what export reads, so storing
+# an event outside it makes "an activity event is inert to export" STRUCTURAL rather
+# than asserted. NO DATABASE TABLE AND NO MIGRATION IS ADDED HERE — the state
+# document is already upserted whole into ``isaac_experiments.state``, so a new key
+# inside it needs no DDL, and ``db_write.OWNED_TABLES`` is unchanged. The ledger row
+# ``ACT-001`` says this model "Needs migration ``0006``"; it does not, and
+# ``activity.py``'s docstring carries the authorization basis for storing it here.
+
+
+def _hydrate_activity(raw: object) -> tuple[list[ActivityEvent], list]:
+    """``(events, unreadable raw entries)``. Never raises, AND NEVER DISCARDS.
+
+    :func:`_hydrate_proposals`' arrangement for :func:`_hydrate_proposals`' reason,
+    and the reason is sharper here than anywhere else it has been applied. An audit
+    history whose READER silently drops a row it cannot parse is not an audit
+    history: the one property a reader must be able to rely on is that nothing
+    recorded has quietly gone. And a reader that 500ed on such a row would be the
+    measured whole-list defect ``CLAUDE.md`` §11 records — one malformed persisted
+    value taking a screen down for a record whose owner did nothing wrong.
+
+    So an entry :meth:`ActivityEvent.from_state` refuses is returned VERBATIM in the
+    second list. It is never coerced, parsed, walked or dropped:
+    :meth:`Experiment.to_state` writes those entries back out unchanged, so the next
+    save preserves them byte-for-byte, and :func:`activity_history.activity_page`
+    COUNTS them rather than rendering them, because this server cannot say what a
+    refused entry contains without inventing it.
+
+    Two things are still normalised, and neither loses content: a top-level value
+    that is not a list yields no events at all (there is nothing to iterate), and a
+    DUPLICATE ``id`` keeps the first occurrence and files the rest as unreadable —
+    they are preserved, but they cannot both answer to one id.
+
+    **DE-DUPLICATION IS ON ``id`` AND DELIBERATELY NOT ON ``seq``.** An id is what a
+    reader cites and what :meth:`Experiment.record_activity` guarantees unique; a
+    duplicate ``seq`` is a position collision, which makes the order ambiguous but
+    loses nothing, and ``activity_history.sorted_events`` breaks that tie on ``id``
+    so paging stays deterministic. Filing one of two events at one position as
+    "unreadable" would hide a real recorded act to tidy a coordinate.
+    """
+    if not isinstance(raw, list):
+        return [], []
+    hydrated: list[ActivityEvent] = []
+    unreadable: list = []
+    seen: set[str] = set()
+    for entry in raw:
+        if not isinstance(entry, dict):
+            unreadable.append(entry)
+            continue
+        try:
+            event = ActivityEvent.from_state(entry)
+        except (
+            activity_module.UnsupportedActivityEvent,
+            TypeError,
+            ValueError,
+            AttributeError,
+        ):
+            unreadable.append(entry)
+            continue
+        if event.id in seen:
+            unreadable.append(entry)
+            continue
+        seen.add(event.id)
+        hydrated.append(event)
+    return hydrated, unreadable
+
+
+def _activity_state_payload(exp: "Experiment") -> list:
+    """Every event this experiment holds, in sequence order, plus the unreadable.
+
+    ONE function, used by :meth:`Experiment.to_state` and by nothing else — and the
+    "and by nothing else" is the difference from :func:`_note_state_payload` and
+    :func:`_proposal_state_payload`, which are each ALSO used by
+    :func:`_authoritative_signature`. This payload is deliberately absent from that
+    signature; see :func:`_authoritative_signature`'s own note on ``activity``.
+
+    The unreadable raw entries are written back out at the end of the array, so "no
+    recorded act is silently discarded" holds across a save of a document this build
+    could not fully parse.
+    """
+    return [event.to_state() for event in activity_module.sorted_events(exp.activity)] + list(
+        exp.unreadable_activity
+    )
+
+
 def _authoritative_signature(exp: "Experiment") -> str:
     """Deterministic hash of the AUTHORITATIVE scientific state of an experiment.
 
@@ -1918,6 +2010,36 @@ def _authoritative_signature(exp: "Experiment") -> str:
         # rev bump on legacy state — the same property runs and notes both relied
         # on, and pinned by the same kind of test.
         "proposals": _proposal_state_payload(exp),
+        # ``activity`` IS DELIBERATELY ABSENT FROM THIS PAYLOAD, AND IT IS THE FIRST
+        # CONTENT-SHAPED KEY OF WHICH THAT IS TRUE — so the omission is argued here
+        # rather than left to be read as an oversight, and it is argued at the point
+        # where a future slice would add it.
+        #
+        # An activity event is ``answer_log``'s class, not ``notes``'. This
+        # docstring already excludes ``answer_log`` as "an audit trail, not
+        # scientific state", and that sentence is the whole argument: recording that
+        # a field was answered is not itself an answer.
+        #
+        # INCLUDING IT WOULD HAVE BROKEN THE BYTE-STABLE NO-OP, which is not a
+        # nicety — the ``If-Match`` contract, the change feed and the durable
+        # compare-and-swap are all built on ``rev`` moving exactly when the
+        # authoritative state moves. An event staged before this comparison would
+        # make every idempotent re-entry hash differently: ``rev`` bumped, every held
+        # ETag invalidated and a change-feed event fired, for an act that did
+        # nothing. ``notes`` and ``proposals`` are safe inside the payload precisely
+        # because every mutator in those two modules is idempotent or refuses from a
+        # closed state; "record what just happened" cannot be idempotent, because
+        # what just happened happened again.
+        #
+        # THE HAZARD THE EXCLUSION CREATES IS CLOSED STRUCTURALLY, NOT BY CARE.
+        # ``folder``'s own note above states the mechanical cost of being outside
+        # this payload — "a ``folder`` outside this payload would make every first
+        # assignment a silent no-op" — and it applies here too. It is closed by the
+        # events never being appended by a route at all:
+        # :meth:`Experiment.record_activity` STAGES, and ``save_versioned`` commits
+        # the staged events only on the branch that writes. So an event can never be
+        # silently dropped by a save that did not happen, because a save that did not
+        # happen never committed one.
     }
     blob = json.dumps(payload, sort_keys=True, ensure_ascii=False)
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()
@@ -3319,6 +3441,51 @@ class Experiment:
     #: can move an entry into ``unreadable_notes`` — an entity the feed can never name
     #: — so a map that only grew would keep a coordinate for something unreportable.
     note_change_revs: dict[str, int] = field(default_factory=dict)
+    #: THE APPEND-ONLY ACTIVITY / AUDIT HISTORY (``DEC-44``, ledger ``ACT-001``).
+    #:
+    #: Carried inside this experiment's state document for the reason runs, notes and
+    #: proposals are, with the same disclosed cost and — like proposals — with NO new
+    #: table and NO migration. See :mod:`isaac_api.activity` for the authorization
+    #: basis and for why the ledger row's "Needs migration ``0006``" is answered
+    #: rather than obeyed.
+    #:
+    #: NOT part of the draft, and that is a boundary rather than a filing decision:
+    #: ``draft`` is what export reads, so an event is inert to ``export.transform``,
+    #: absent from ``submissions.content_signature`` and absent from every run's
+    #: ``resolved_run_draft`` — structurally, because nothing that exports looks here.
+    #:
+    #: **AND NOT PART OF** :func:`_authoritative_signature`, which is the OPPOSITE
+    #: choice from notes and proposals and is argued at that function's ``activity``
+    #: note. In short: an event is ``answer_log``'s class — an audit trail, not
+    #: scientific state — and including it would have made every idempotent re-entry
+    #: look like a change.
+    #:
+    #: APPENDED ONLY BY ``save_versioned``, out of :attr:`_staged_activity`. Nothing
+    #: else may append to this list, and nothing anywhere may remove from it or
+    #: replace an entry in it: there is no ``replace_activity`` and no
+    #: ``remove_activity``, by design and by test.
+    activity: list["ActivityEvent"] = field(default_factory=list)
+    #: RAW ``activity`` entries the model could not read, kept VERBATIM so a save
+    #: cannot discard them. See :func:`_hydrate_activity` — the alternative is an
+    #: audit history whose own reader silently deletes a recorded act, or one that
+    #: 500s a screen over a single malformed row.
+    unreadable_activity: list = field(default_factory=list)
+    #: EVENTS STAGED BY :meth:`record_activity` AND NOT YET COMMITTED.
+    #:
+    #: THE STAGING IS THE MECHANISM THAT MAKES "an event is recorded iff the state
+    #: actually changed" STRUCTURAL. ``save_versioned`` writes nothing when the
+    #: authoritative signature is unchanged, and activity is outside that signature,
+    #: so an event appended straight into :attr:`activity` by a route whose write
+    #: turned out to be a byte-stable no-op would be silently dropped — the defect
+    #: ``answer_log``'s speculative-append-then-``pop()`` dance exists to avoid, at
+    #: every one of two dozen call sites. Staging moves the decision into the one
+    #: function that knows the answer: ``save_versioned`` commits these on the write
+    #: branch and discards them otherwise, so no call site can get it wrong.
+    #:
+    #: DELIBERATELY NOT PERSISTED and deliberately not in any signature. A staged
+    #: event describes a change that has not landed; writing one out would record an
+    #: act that may never happen.
+    _staged_activity: list["ActivityEvent"] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         # Legacy-safe default: a pre-P27.2 state file (or a bare construction)
@@ -3448,6 +3615,23 @@ class Experiment:
             "note_change_revs": {
                 nid: self.note_change_revs[nid] for nid in sorted(self.note_change_revs)
             },
+            # THE APPEND-ONLY ACTIVITY / AUDIT HISTORY (`DEC-44`, `ACT-001`). The
+            # unreadable raw entries are written back out INSIDE this array by
+            # `_activity_state_payload`, exactly as they are for notes and proposals,
+            # which is what makes "no recorded act is silently discarded" hold across a
+            # save of a document this build could not fully parse.
+            #
+            # IT IS IN `to_state` AND OUT OF `_authoritative_signature`, and it is the
+            # only CONTENT key for which those two disagree. That is deliberate and is
+            # argued at the signature's own `activity` note: an event is `answer_log`'s
+            # class — an audit trail, not scientific state. The consequence a reader
+            # should know rather than discover: a save whose ONLY difference is a
+            # staged event does not happen at all, because `save_versioned` never
+            # commits a staged event on the no-op branch.
+            #
+            # `_staged_activity` IS ABSENT FROM THIS DOCUMENT, on purpose. A staged
+            # event describes a change that has not landed.
+            activity_module.ACTIVITY_STATE_KEY: _activity_state_payload(self),
         }
 
     def save(self) -> None:
@@ -3899,6 +4083,119 @@ class Experiment:
                 self.proposals[index] = proposal
                 return
         raise KeyError(proposal.proposal_id)
+
+    # -- the append-only activity / audit history (DEC-44, ACT-001/ACT-002) -----
+
+    def sorted_activity(self) -> list["ActivityEvent"]:
+        """This experiment's recorded activity in sequence order. INCLUDING everything.
+
+        There is no filtered variant and deliberately so, which is
+        :meth:`sorted_proposals`' rule for a sharper version of its reason: an audit
+        history with a store-level filter is an audit history somebody can be shown a
+        subset of without being told. Filtering is the caller's, and
+        :func:`activity_history.activity_page` reports ``total`` beside ``matched`` so
+        a client cannot show a subset without knowing it is one.
+        """
+        return activity_module.sorted_events(self.activity)
+
+    def record_activity(
+        self,
+        *,
+        action: str,
+        object_type: str,
+        object_id: str,
+        channel: str,
+        actor: str = activity_module.ACTOR_UNATTRIBUTED,
+        actor_trust_basis: str = activity_module.TRUST_BASIS_UNATTRIBUTED,
+        run_id: str | None = None,
+        field_path: str | None = None,
+        before: Any = activity_module.ABSENT,
+        after: Any = activity_module.ABSENT,
+        source_ref: str | None = None,
+        recorded_utc: str | None = None,
+        id: str | None = None,
+    ) -> None:
+        """STAGE one activity event. It is committed by ``save_versioned``, or not at all.
+
+        **This does not append to** :attr:`activity`, and the indirection is the whole
+        design rather than an implementation detail — see :attr:`_staged_activity`. An
+        event describes a change; ``save_versioned`` is the only code that knows
+        whether the change landed. Committing here would record acts that a
+        byte-stable no-op then threw away, and every call site would have to undo its
+        own speculative append the way ``post_answers`` undoes its ``answer_log``
+        entry.
+
+        **It returns ``None``, deliberately.** An earlier shape returned the staged
+        event, which invites a caller to read a ``seq`` off it — and a staged event has
+        no meaningful position, because the position is minted at commit. Returning
+        nothing makes the mistake unwritable.
+
+        ``channel`` is REQUIRED and keyword-only: ``ACT-002``'s mechanical half. A
+        write path that records an event without stating a channel raises
+        ``TypeError`` at the call rather than defaulting to the commonest one.
+
+        The id is a fresh ULID from the same function record, run, note and proposal
+        ids come from. AN ACTIVITY ID IS NOT A RECORD ID: it names no exported
+        artifact, and no event reaches an export.
+
+        NOTHING IS DEFAULTED THAT COULD BE INVENTED. ``run_id`` stays ``None`` when the
+        caller does not know which run an act belongs to, even when the experiment has
+        exactly one run — :meth:`capture_note`'s rule, for its reason. ``before``/``after``
+        default to :data:`~isaac_api.activity.ABSENT`, which means *there was no value
+        here*, and that is distinct from ``None``, which means *the value was null*.
+        """
+        event = activity_module.new_event(
+            id=id or new_record_id(),
+            experiment_id=self.id,
+            # A PLACEHOLDER POSITION, REPLACED AT COMMIT. `1` rather than `0` because
+            # `ActivityEvent` refuses `seq < 1` — there is no "unpositioned" value the
+            # model admits, and adding one would be a second meaning for a field whose
+            # whole job is to be a position. `_commit_staged_activity` replaces it
+            # unconditionally, so this number is never persisted.
+            seq=1,
+            recorded_utc=recorded_utc or _now_iso(),
+            actor=actor,
+            actor_trust_basis=actor_trust_basis,
+            channel=channel,
+            action=action,
+            object_type=object_type,
+            object_id=object_id,
+            run_id=run_id,
+            field_path=field_path,
+            before=before,
+            after=after,
+            source_ref=source_ref,
+        )
+        self._staged_activity.append(event)
+
+    def _commit_staged_activity(self) -> None:
+        """Move staged events into :attr:`activity`, minting each one's ``seq``.
+
+        CALLED ONLY FROM ``save_versioned``, on the write branch, AFTER the no-op
+        decision. So a save that writes nothing records nothing and burns no position.
+
+        The position is ``max(existing seq) + 1``, taken over the events this
+        experiment ALREADY HOLDS rather than from a counter, for the reason
+        ``save_versioned`` takes ``rev`` from ``max(self.rev, disk_rev)``: a stale
+        in-memory instance must not be able to hand out a position another writer has
+        already used. It is floored at ``0`` before the ``+ 1`` so that a persisted
+        document carrying a nonsense position cannot produce a position below
+        ``1`` — ``ActivityEvent`` refuses ``seq < 1`` and would raise here rather
+        than record, which on an audit path would turn a malformed historical row
+        into a refusal of the CURRENT act.
+
+        ``dataclasses.replace`` is how the position is applied: the event is frozen,
+        and replacing it yields a new frozen event rather than mutating a recorded
+        one. Nothing in :attr:`activity` is ever touched — the list only grows.
+        """
+        if not self._staged_activity:
+            return
+        highest = max((event.seq for event in self.activity), default=0)
+        highest = max(highest, 0)
+        for event in self._staged_activity:
+            highest += 1
+            self.activity.append(dataclasses.replace(event, seq=highest))
+        self._staged_activity = []
 
     def resolve_run(self, run: "Run") -> dict[str, "Resolution"]:
         """Every inherited experiment-level address, resolved for ``run``. Read-only.
@@ -4478,8 +4775,26 @@ class Experiment:
         old_sig, disk_rev = self._persisted_sig_and_rev()
         new_sig = _authoritative_signature(self)
         if old_sig is not None and old_sig == new_sig:
+            # THE STAGED ACTIVITY IS DISCARDED HERE, AND THAT IS THE CORRECT
+            # OUTCOME RATHER THAN A TOLERATED ONE. Nothing about this record's
+            # authoritative state moved, so nothing happened, so there is nothing
+            # to record. Committing the staged events instead would put a row in
+            # an audit log describing an act with no effect — and, because
+            # `activity` is outside the signature, would not even make the write
+            # happen: the document would be identical and this branch would still
+            # return `False`, losing the row anyway while claiming to have kept it.
+            #
+            # It is cleared rather than left in place so a caller that re-enters
+            # the same no-op twice does not accumulate a growing staging list that
+            # a LATER real change would then flush as history.
+            self._staged_activity = []
             return False
         previous = (self.rev, self.updated_utc)
+        # CAPTURED FOR THE ROLLBACK BELOW, as a shallow copy of the list rather than a
+        # reference to it, because `_commit_staged_activity` APPENDS to
+        # `self.activity` in place.
+        previous_activity = list(self.activity)
+        previous_staged = list(self._staged_activity)
         previous_runs = {
             run.id: (run.rev, run.updated_utc, run.changed_at_rev) for run in self.runs
         }
@@ -4507,12 +4822,43 @@ class Experiment:
         self._bump_changed_runs(next_rev)
         self._bump_changed_proposals(next_rev)
         self._bump_changed_notes(next_rev)  # MCP-005
+        # COMMITTED ON THE WRITE BRANCH ONLY, which is the whole of the
+        # "an event is recorded iff the state actually changed" guarantee. It runs
+        # BEFORE `self.save()` because `to_state` is what `save` serialises, so an
+        # event committed afterwards would not be in the document it was recorded
+        # for — it would land on the NEXT save, attached to a different change.
+        #
+        # It deliberately does NOT feed back into the decision that authorised it:
+        # `activity` is absent from `_authoritative_signature`, so committing here
+        # cannot alter the comparison already made above. That is the same
+        # no-feedback property `_run_signature_payload` buys by EXCLUDING a run's
+        # version metadata; here it is bought by the key never being in the payload
+        # at all.
+        self._commit_staged_activity()
         self.rev = next_rev
         self.updated_utc = _now_iso()
         try:
             self.save()
         except BaseException:
             self.rev, self.updated_utc = previous
+            # THE COMMITTED EVENTS ARE ROLLED BACK AND RE-STAGED, not dropped, and
+            # the pair matters for a different reason each.
+            #
+            # Rolled back, because `save_versioned`'s own docstring argues that an
+            # instance whose write was refused must not go on reporting state that
+            # exists nowhere. An event left in `self.activity` would be reported by
+            # `GET .../activity` as a recorded act, at a position no document holds,
+            # and the NEXT successful save would then mint a SECOND event at a
+            # position derived from it — a phantom act and a burned position from one
+            # un-rolled-back append.
+            #
+            # Re-staged, because the caller's act is not cancelled by a refused
+            # write: `_adopt_winner_locally` makes re-read/re-apply/retry converge,
+            # and a retry that re-applied the change but had silently lost its audit
+            # row would produce exactly the untraceable mutation this history exists
+            # to prevent.
+            self.activity = previous_activity
+            self._staged_activity = previous_staged
             for run in self.runs:
                 prior = previous_runs.get(run.id)
                 if prior is not None:
@@ -4635,6 +4981,17 @@ class Experiment:
         # coordinate map, and a second reader would be free to disagree about what a
         # malformed one means.
         exp.note_change_revs = _hydrate_change_revs(state.get("note_change_revs"))
+        # NO MIGRATION IS REQUIRED FOR THE ACTIVITY HISTORY EITHER, and this line is
+        # the mechanical reason the ledger row's "Needs migration `0006`" is answered
+        # rather than obeyed: an absent key hydrates to an empty PAIR rather than
+        # raising, so a document written before the history existed reads as "no
+        # activity has been recorded on this record", which is precisely true of it.
+        # It also needs no backfill — there is nothing to backfill, because the acts
+        # that happened before the history existed were not recorded and inventing
+        # them is the one thing `CLAUDE.md` §5 forbids outright.
+        exp.activity, exp.unreadable_activity = _hydrate_activity(
+            state.get(activity_module.ACTIVITY_STATE_KEY)
+        )
         return exp
 
     # -- derived views --
