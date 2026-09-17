@@ -4964,3 +4964,132 @@ prose narrow" is what makes it a decision), the Data & Privacy status-row restru
 committed honesty guards — the mandated shape would hide a privacy state), and the fact that no
 Impeccable run in this session could have two assessors.
 
+
+---
+
+## SESSION 2026-09-17 — DOMAIN RECONCILIATION + HAO PRODUCTION-UNBLOCK PACKAGE
+
+**Documentation and decision work only. No production infrastructure was touched, no migration was
+applied, no database was connected to, no message was sent, and no application behaviour changed.**
+Starting point `main = 9ef921d2` (`v0.0.245`), CI `success`, working tree clean.
+
+### 1. What was produced
+
+| Artifact | Path | What it is |
+|---|---|---|
+| **Hao unblock package** | [`docs/hao-production-unblock-package-2026-09-17.md`](../../hao-production-unblock-package-2026-09-17.md) | Nine subject areas **A**–**I** plus a verification matrix **J**. Every item carries all eight required fields: current measured state, desired state, owner, exact action, security boundary, verification, rollback/fail-closed, and what ISAAC code already proves |
+| **Hao AI execution prompt** | [`docs/hao-production-ai-execution-prompt-2026-09-17.md`](../../hao-production-ai-execution-prompt-2026-09-17.md) | Self-contained, paste-ready. Read-only phase 1; eleven numbered operating rules; two findings that must be **proved rather than asserted**; the governance gates; the migration ledger table; and the required closing report table |
+| **Domain reconciliation** | [`docs/bl15-2-domain-questions-2026-09-16.md`](../../bl15-2-domain-questions-2026-09-16.md) | Prepended reconciliation section. All 20 questions classified; **12 closed**, **8 remain Angel's**. §1 preserved unedited beneath |
+| **Decision register** | §B4 of this directory's `ISAAC_PRODUCT_DECISIONS.md` | Ten new rows, `DEC-38`…`DEC-47`, plus `EXT-13` and the Dean→Hao addressee note |
+
+### 2. Three measurements taken this session, because prose was about to rest on them
+
+| Claim | Command | Result |
+|---|---|---|
+| The change feed **cannot** serve an audit history | read `change_feed.ChangeEntry` fields + the module docstring | fields are `kind, entity_id, changed_at_rev, rev, generation, updated_utc, state` — **no actor, no before/after, no channel**. The docstring itself says *"no actor"* and describes its **coalescing** property |
+| `POST /api/uploads` is still an unconditional 403 | `TestClient(create_app()).post("/api/uploads")` | **403** |
+| `GET /api/mcp` 404s when unmounted | same client | **404**, with `mcp.posture: "unmounted"` |
+
+**The first of these decided an architecture.** Coalescing — *"a proposal that was accepted between
+two polls is reported as being `accepted` NOW, with no entry saying an acceptance happened"* — is
+correct for a feed and **disqualifying** for an audit log. So `DEC-44` specifies a **separate
+append-only activity/event model**, not an extension of the feed. Had this not been measured, the
+obvious-looking move would have been to add a kind to the feed and discover the gap later.
+
+### 3. App-side tasks created — the audit of what is OURS and not Hao's
+
+**These are filed here precisely so they are not in the Hao package.** Section `C` of that package
+states the dependency and explicitly assigns the work to ISAAC.
+
+| ID | Task | Blocked by | Notes |
+|---|---|---|---|
+| **ACT-001** | Design the append-only activity/event model: actor, action, object, field, before, after, timestamp, channel | nothing — **designable today** | Reuses two proven precedents: `db_write._APPEND_ONLY_TABLES` (mechanical no-`DELETE`) and `revision_history.py` (read module separate from write module). **Needs migration `0006`**, which means it needs an approval packet and an operator act — so the design must be worth that cost before it is written |
+| **ACT-002** | Record the **channel** on every write path (`web`, `mcp`, `historical_import`, `system`) | `ACT-001` | The channel is knowable **today**, at every write site, with no external dependency. This is the half of `DEC-44` that is not blocked on `EXT-01` |
+| **ACT-003** | Activity History read API + scientist-facing UI | `ACT-001` | Must render `unattributed` honestly rather than hiding entries that lack an actor |
+| **ACT-004** | Statistics reads the activity history as a **summary**, never as its source of truth | `ACT-003` | `DEC-44` is explicit. This also interacts with `DEC-25`'s standing obligation that Statistics must earn its sidebar slot by becoming scientist-first |
+| **ACT-005** | Actor column populated from the trusted boundary | **`EXT-01` (Hao)** | The **only** part of `DEC-44` that is externally blocked. `record_attribution.py` already implements the `trust_basis == verified_edge_assertion` gate, so this is wiring, not design |
+| **CTX-001** | Implement the `DEC-41` four-level placement hierarchy in `bl15/mapping.py` | nothing | The registry already carries the five statuses and the concept set; this adds the **level** each concept lands at, so the 40 non-native concepts have a recorded home rather than only a refusal reason |
+| **CTX-002** | Structured **ISAAC Extended Context** companion artifact | `CTX-001` | Same architectural class as the evidence sidecar. **Must never gate export** and must carry concept + raw literal + source + locator per entry — `bl15/evidence.py` already records all four |
+| **CTX-003** | `DEC-43`'s nominal 298 K, profile-scoped, with provenance marked assumed | `CTX-001` | Four binding conditions in `DEC-43`. The provenance qualifier is **not optional**: a record showing 298 K without it is a defect. Must be **impossible** to reach from a non-BL15-2-Angel profile |
+| **DOM-001** | Encode `DEC-46` — File 32 preserves both acquisitions and the disagreement | nothing | The reconstruction layer already preserves conflicts; this adds the **test** that pins it, so a future "tidy-up" that prefers the document-matching file fails loudly |
+
+### 4. Corrections made to this repository's own claims
+
+| Claim | Status |
+|---|---|
+| *"two duplicate 32 files"* | **RETIRED.** They are two **distinct acquisitions** under one legacy number. `DEC-46`. The beamtime document narrows it — its Sample 3 step 10 carries File Number 32 under the condition **after 1500 mV cycling**, and `1400` occurs **zero times in the whole document** (procedure prose and the other cycling value withheld per the characterization doc's §0 boundary; `1500` is a token of the already-disclosed filenames) — but **narrowing is not answering**, and both are preserved |
+| The domain packet's *"leaves **14** needing a domain owner. This packet is those 14, and nothing else."* | **CORRECTED.** There are **twenty** numbered questions and the registry holds **fifteen** `needs_domain_review` rows. Neither figure matched the body even when written, because several questions (`Q15`, `Q16`, `Q17`) concern conflicts and classification and never corresponded to a registry row at all |
+| Q1, the second filename token | **CLOSED by Angel.** It is a sample/electrode instance number, explicitly confirmed. `DEC-47`. **Stop asking** |
+
+### 4b. A disclosure boundary I crossed in my own first draft, and caught by sweeping my own diff
+
+The File 32 evidence was first written with a **verbatim quote of the beamtime document's
+procedure prose**, and with a second cycling voltage the document states. Both are outside the
+boundary this repository already committed to in the characterization document's §0: *filenames
+are reproducible* (the authorizing brief quoted them verbatim), *scientific and instrument values
+and note prose are withheld*.
+
+All three sites were rewritten to the structural fact, which carries the entire evidential weight
+— `1400` appears **zero times in the document** — while reproducing nothing new. The `1500`
+figure is kept because it is a token of the filenames themselves.
+
+**Recorded rather than silently fixed, for the reason §0 gives:** the same document broke the same
+rule on 2026-09-16 and the finding then was that *the false claim was the defect*, not the low
+sensitivity of the values. A boundary that is quietly re-crossed and quietly repaired teaches a
+future session nothing. **The mechanism that caught it was a grep of my own diff for the withheld
+categories, run before commit** — not review, which is the same way the 2026-09-16 instance was
+found.
+
+### 4c. Authorization basis and data boundary — CLAUDE.md §12's two required fields
+
+**These were absent from the first version of this entry and an independent review was right to
+call it.** §12's extended contract requires both on any slice touching production-derived content,
+and this session read a real, private scientific document in full.
+
+**Authorization basis.** The project owner's in-session instruction of 2026-09-17, which directs
+reading *"the real `250411 BL 15 IrOx NP HERFD acid base.docx` completely"* and says *"Do not rely
+on an old summary of it."* The disclosure boundary applied to what came out of it is the committed
+one: [`docs/evidence/bl15-2-corpus-characterization-2026-09-16.md`](../../evidence/bl15-2-corpus-characterization-2026-09-16.md) §0.
+
+**Data boundary.**
+
+| question | answer |
+|---|---|
+| what was touched | one private beamtime document, `250411 BL 15 IrOx NP HERFD acid base.docx`, read in full (639 extracted lines, 14 tables). **Untracked** — `git ls-files` returns nothing for it |
+| where it lived | the owner's local `~/Downloads` corpus folder, plus a plain-text extraction in this session's scratchpad, outside the repository |
+| how long | the session only. **Nothing was copied into the repository** |
+| what left the process | **structural facts and question classifications only.** No electrolyte, concentration, pH, energy, coordinate or potential value beyond tokens already present in the filenames the authorizing brief itself quoted verbatim. Procedure prose: **none** — see §4b, where the first draft did quote some and was corrected |
+| was it synthetic or real | **real**, and private |
+| did a model see it | **yes** — it was read by this agent to perform the reconciliation, which is what the owner instructed. It was **not** sent to any external provider; none is configured, and every provider seam answers `501` |
+| anything staged from `examples/` | **no** |
+
+**The repository is PUBLIC**, which is why this matters and why it is stated rather than implied.
+The corpus filenames were already committed at HEAD before this session, so nothing here is a new
+exposure — but *"no secret read"*, which is all the first draft said, is not the same claim as
+this table, and the difference is exactly what §12 exists to force.
+
+### 5. The eight questions that remain Angel's
+
+`Q6` environment member · `Q7` reaction member · `Q8` JK cell type · `Q9` **JK reference
+electrode/scale** · `Q11` **primary HERFD channel** · `Q14` **QC state from free-text notes** ·
+`Q15` **source precedence** · `Q16` **runNo 32 reuse**.
+
+**Five of these were predicted in advance and three were narrowed by reading the beamtime document
+in full.** Every one is a scientific judgement the corpus does not state — **none is a mapping
+question any more**, because `DEC-41` settles placement. Nothing in the programme is blocked on
+them: the import preserves literals, conflicts and unknowns, which is what makes it safe to ship
+before they are answered.
+
+### 6. What was deliberately NOT done
+
+- **No production infrastructure change**, no migration applied, no database connection opened, no
+  credential entered, no secret read.
+- **Neither new document was sent.** Delivery is the project owner's act and this repository cannot
+  witness it — both carry a `PREPARED, NOT SENT` header.
+- **No Angel answer was invented.** Where the beamtime document narrows a question without settling
+  it, the narrowing is recorded and the question stays open.
+- **`DEC-41` and `DEC-43` were not implemented** — they are filed as `CTX-001`…`CTX-003`. This
+  session produced the decisions and the reconciliation; building against them is a separate slice
+  with its own review.
+- **No app-side work was assigned to Hao**, and no secret value is requested anywhere in either
+  document.
