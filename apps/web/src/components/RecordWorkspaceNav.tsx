@@ -80,6 +80,7 @@ export const RECORD_WORKSPACES: readonly { id: RecordViewId; label: string }[] =
   { id: 'runs', label: LABELS.workspaceRuns },
   { id: 'capture', label: LABELS.workspaceCapture },
   { id: 'graph', label: LABELS.workspaceGraph },
+  { id: 'activity', label: LABELS.workspaceActivity },
 ] as const;
 
 /**

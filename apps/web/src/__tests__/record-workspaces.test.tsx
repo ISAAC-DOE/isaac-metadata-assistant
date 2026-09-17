@@ -163,6 +163,26 @@ describe('the record workspace list', () => {
       'Experiment Data',
       'Runs',
       'Record Fields',
+      /*
+       * *** FOUR SINCE 2026-09-17 — `ACT-003` adds `Activity`. ***
+       *
+       * ~~['Experiment Data', 'Runs', 'Record Fields']~~ — extended in place,
+       * because this list IS the intended design and a future session reads it
+       * as such.
+       *
+       * IT IS IN THE SIDEBAR AND DELIBERATELY NOT `URL_ONLY`, which is the one
+       * decision worth arguing here. `graph` is URL-only by an explicit owner
+       * decision (`EVG-002`/`DEC-04`) that took it OUT of this list; treating a
+       * new destination as URL-only by default would borrow that decision
+       * without it having been made. And `ACT-003` asks for a SCIENTIST-FACING
+       * activity history — a destination reachable only by typing `?view=` is
+       * not scientist-facing in any sense that matters, because nobody can find
+       * it.
+       *
+       * It is LAST, after the three the owner shaped, so nothing about the
+       * existing order or the promoted `Data Capture` group moves.
+       */
+      'Activity',
     ]);
     /*
      * STILL DERIVED FROM THE ROUTE CONTRACT, and the guard's PURPOSE is
