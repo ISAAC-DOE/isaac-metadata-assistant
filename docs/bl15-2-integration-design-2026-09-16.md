@@ -151,7 +151,15 @@ The surface must say so plainly; it must not show a progress bar that can never 
 
 1. **`context.temperature_K` is required whenever `context` is present, and the corpus
    states no temperature anywhere.** `mapping.TEMPERATURE_ABSENT_REASON` is the sentence.
-   298 must not be defaulted in.
+   ~~298 must not be defaulted in.~~ **NARROWED 2026-09-17 by `DEC-43`, and struck rather
+   than deleted because "must not be defaulted in" is exactly the kind of clause a future
+   session enforces.** It is still true of the PARSER and of every profile but one: for
+   the **BL15-2 Angel-style historical profile only**, the project owner has adopted
+   298 K as a nominal room-temperature assumption, recorded as nominal, domain-supplied
+   and **NOT measured** (`apps/api/isaac_api/bl15/nominal.py`). The corpus measurement is
+   unchanged — no source states a temperature — so the value comes from the scientist's
+   authority rather than from anything read. Any other profile leaves the field absent and
+   the record blocked.
 2. **`record_type: "evidence"` requires `descriptors`** (`schema allOf[0]`), and no
    historical source provides one.
 3. **`assets[]` requires `sha256`** — `mapping.ASSETS_BLOCKED_REASON`. So the acquisition

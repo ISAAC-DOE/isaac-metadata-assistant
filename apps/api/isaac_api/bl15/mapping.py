@@ -79,6 +79,78 @@ PROPOSABLE_STATUSES: frozenset[str] = frozenset(
 )
 
 
+# --- DEC-41: the four-level placement hierarchy ------------------------------
+#
+# A STATUS says whether a value can travel. A PLACEMENT says WHERE the information
+# lands. They are different questions and the registry answered only the first until
+# `CTX-001`: 40 of 45 concepts carried a refusal reason and no home at all, which is
+# exactly the "shrug" `DEC-41` exists to replace.
+#
+# `ISAAC_PRODUCT_DECISIONS.md` §B4 `DEC-41`, verbatim in order: (1) a native official
+# ISAAC field where one genuinely fits; (2) a schema-approved configuration/extension
+# point; (3) Run / series conditions where the value is genuinely per-acquisition;
+# (4) a structured ISAAC Extended Context companion.
+#
+# **THE LEVEL IS DERIVED, NOT TRANSCRIBED**, for the reason `CONCEPT_POINT_COUNT`'s own
+# entry gives about the scan-point count: a stored level beside the paths that decide it
+# would be a second place for one fact to be wrong. :attr:`ConceptMapping.placement_level`
+# reads the paths this registry already declares — every one of which
+# :func:`registry_paths_exist` checks against the vendored schema at runtime — so a
+# schema refresh moves the levels and cannot leave a stale one behind.
+#
+# **AND THAT IS WHAT MAKES `DEC-41`'s FIRST RULE STRUCTURAL.** "Never skip a level to
+# reach 4 when a real field exists" cannot be violated by a registry row, because no row
+# states a level. It CAN be violated by a consumer that writes an entry into the
+# companion claiming level 4 for a concept the schema has a field for, which is the
+# defect the rule names — so the enforcement lives at that boundary
+# (:func:`check_placement`, called by :mod:`isaac_api.extended_context`).
+
+#: A native official ISAAC v1.05 field the schema declares for this concept.
+PLACEMENT_OFFICIAL_FIELD = 1
+#: The schema's own designated open extension namespace. Not a fallback: the schema
+#: describes it as the home for configuration that does not generalize across
+#: facilities, which is what a filter index and a spectrometer crystal are.
+PLACEMENT_SCHEMA_EXTENSION_POINT = 2
+#: A genuinely per-acquisition operating condition, at a schema-legal series home.
+PLACEMENT_RUN_SERIES_CONDITION = 3
+#: The structured ISAAC Extended Context companion — the same architectural class as
+#: the evidence sidecar (``CLAUDE.md`` §4), and **never** a record field.
+PLACEMENT_EXTENDED_CONTEXT = 4
+
+PLACEMENT_LEVELS: tuple[int, ...] = (
+    PLACEMENT_OFFICIAL_FIELD,
+    PLACEMENT_SCHEMA_EXTENSION_POINT,
+    PLACEMENT_RUN_SERIES_CONDITION,
+    PLACEMENT_EXTENDED_CONTEXT,
+)
+
+#: **NOT A PLACEMENT, AND THAT IS `DEC-41`'s OWN WORDING.** It is what an OPEN domain
+#: question renders as: unresolved evidence, waiting on a person.
+#:
+#: Read the distinction precisely, because collapsing it is the easy mistake here. Every
+#: EXAMINED CONCEPT has a placement level 1-4 — `DEC-41` settles placement for all of
+#: them, which is the half of the domain packet it closed. What is still unresolved is a
+#: set of **questions**, eight of them, and a question is not a concept: a concept can
+#: sit at level 1 with a real native field and still have its enum member blocked on
+#: Angel (``potential_reference_basis`` is exactly that). So a consumer shows *"level 1,
+#: and the member is blocked on Q9"* rather than ``"-"``, because that is the true state
+#: and the two facts move independently.
+PLACEMENT_UNRESOLVED = "-"
+
+PLACEMENT_NAMES: dict[int, str] = {
+    PLACEMENT_OFFICIAL_FIELD: "native official ISAAC v1.05 field",
+    PLACEMENT_SCHEMA_EXTENSION_POINT: "schema-approved extension point",
+    PLACEMENT_RUN_SERIES_CONDITION: "Run / series condition",
+    PLACEMENT_EXTENDED_CONTEXT: "structured ISAAC Extended Context companion",
+}
+
+#: The schema's designated open extension namespace, read as a PREFIX so
+#: ``system.configuration.slit_width`` places at level 2 as well as the bare object.
+EXTENSION_NAMESPACE = "system.configuration"
+#: The schema-legal per-acquisition condition home level 3 is about.
+SERIES_CONDITIONS_HOME = "measurement.series[].conditions"
+
+
 ASSETS_BLOCKED_REASON = (
     "The official schema requires both assets[].uri and assets[].sha256. This build "
     "does not publish either for a historical source: a manifest digest is only ever "
@@ -119,15 +191,32 @@ ASSETS_BLOCKED_REASON = (
 #: URI. Both are decisions; neither is blocked by a missing number.
 _ASSETS_BLOCKED_REASON_CORRECTION = "2026-09-16"
 
+#: **NARROWED 2026-09-17 BY `DEC-43`, AND THE OLD SENTENCE IS KEPT INSIDE THE NEW ONE
+#: RATHER THAN DELETED.** This text is SERVED TO SCIENTISTS (``historical_import``'s
+#: ``_mapping_block`` renders it on the corpus-review screen), and until `CTX-003` it
+#: said flatly that *"298 must not be defaulted into context.temperature_K"* — which is
+#: still exactly right about the PARSER and became wrong as a blanket statement the day
+#: the project owner adopted 298 as domain guidance for one profile. A screen that kept
+#: saying the unqualified version would be telling a scientist the opposite of the
+#: standing decision.
+#:
+#: The measurement behind it has not moved an inch and is restated first: **the corpus
+#: states no temperature anywhere.** What moved is the AUTHORITY — see
+#: :mod:`bl15.nominal`, where the value, its nominal basis and its
+#: profile scope live, and where ``measured`` is a derived, always-``False`` property.
 TEMPERATURE_ABSENT_REASON = (
     "context.temperature_K is required by the official schema whenever a context block "
     "is present, and this corpus states no temperature anywhere — not in the beamtime "
     "README, not in the notes, not in any acquisition header. A candidate assembled "
-    "from these sources is therefore incomplete by the schema's own rule. That is the "
-    "correct outcome: room temperature is the obvious guess, and 298 must not be "
-    "defaulted into context.temperature_K, because a plausible number in a required "
-    "field is a fabricated measurement that nothing downstream can tell from a "
-    "measured one."
+    "from these sources is therefore incomplete by the schema's own rule, and 298 must "
+    "not be defaulted into context.temperature_K by this application, because a "
+    "plausible number in a required field is a fabricated measurement that nothing "
+    "downstream can tell from a measured one. ONE NARROW EXCEPTION, ADDED 2026-09-17: "
+    "for the BL15-2 Angel-style historical profile, and for no other profile, the "
+    "project owner has adopted 298 K as a nominal room-temperature assumption "
+    "(DEC-43). It is recorded as nominal, domain-supplied and NOT measured, on the "
+    "scientist's authority rather than the parser's; under any other profile the field "
+    "stays absent and the record stays blocked, exactly as described above."
 )
 
 CYCLING_STATE_NO_FIELD_REASON = (
@@ -148,6 +237,250 @@ SYSTEM_CONFIGURATION_CAUTION = (
     "with the domain owner's classification outstanding, and no write route in this "
     "build accepts them. Candidate home; NOT a settled mapping and not writable today."
 )
+
+
+# --- the domain packet, reconciled ------------------------------------------
+#
+# `docs/bl15-2-domain-questions-2026-09-16.md` asks twenty numbered questions. On
+# 2026-09-17 **twelve closed and eight did not**, and the registry has to be able to say
+# which is which — because a row that keeps presenting a CLOSED question as blocked is
+# telling a scientist to wait for an answer that has arrived.
+#
+# **The evidentiary classes are different and are recorded separately on purpose**, in
+# the same spirit as `CLAUDE.md` §15's treatment of Dean's answers: a question closed by
+# a domain owner, by reading a document, and by a product decision are three different
+# kinds of closed, and a reader weighing one is owed which it is.
+#
+# **What this does NOT do: it moves no status.** A question closing does not make a value
+# proposable — the packet's own §1 says an answer moves one row "from
+# `needs_domain_review` to `deterministic` or `normalized`", and that move requires the
+# ANSWER'S CONTENT, which for the document-closed questions is scientific text this
+# repository may not commit (the characterization document's §0 boundary). So the twelve
+# are recorded as closed and every status is exactly as it was.
+
+QUESTION_CLOSED_BY_DOMAIN_OWNER = "closed_by_domain_owner"
+QUESTION_CLOSED_BY_DOCUMENT = "closed_by_beamtime_document"
+QUESTION_CLOSED_BY_PRODUCT_DECISION = "closed_by_product_decision"
+QUESTION_CLOSED_BY_EXISTING_RULE = "closed_by_existing_rule"
+QUESTION_OPEN_NEEDS_DOMAIN_OWNER = "open_needs_domain_owner"
+
+QUESTION_DISPOSITIONS: frozenset[str] = frozenset(
+    {
+        QUESTION_CLOSED_BY_DOMAIN_OWNER,
+        QUESTION_CLOSED_BY_DOCUMENT,
+        QUESTION_CLOSED_BY_PRODUCT_DECISION,
+        QUESTION_CLOSED_BY_EXISTING_RULE,
+        QUESTION_OPEN_NEEDS_DOMAIN_OWNER,
+    }
+)
+
+
+@dataclass(frozen=True)
+class DomainQuestion:
+    """One numbered question from the domain packet, and what became of it."""
+
+    question_id: str
+    #: The subject in a few words, matching the packet's own table so the two can be
+    #: read side by side.
+    subject: str
+    disposition: str
+    #: What closed it, or what is still being asked. One sentence, no scientific value:
+    #: the packet is the place that argues it, this is the place that records it.
+    note: str
+
+    def __post_init__(self) -> None:
+        if self.disposition not in QUESTION_DISPOSITIONS:
+            raise ValueError(
+                f"{self.question_id}: unknown disposition {self.disposition!r}"
+            )
+
+    @property
+    def is_open(self) -> bool:
+        return self.disposition == QUESTION_OPEN_NEEDS_DOMAIN_OWNER
+
+    @property
+    def placement(self) -> int | str:
+        """``"-"`` while open. **A question is never given a level 1-4** — see
+        :data:`PLACEMENT_UNRESOLVED`, and note this property exists so a surface can
+        render the packet's own row without inventing a fifth level for a concept."""
+        return PLACEMENT_UNRESOLVED if self.is_open else PLACEMENT_LEVELS[-1]
+
+    def to_state(self) -> dict:
+        return {
+            "question_id": self.question_id,
+            "subject": self.subject,
+            "disposition": self.disposition,
+            "note": self.note,
+            "is_open": self.is_open,
+        }
+
+
+_QUESTIONS: tuple[DomainQuestion, ...] = (
+    DomainQuestion(
+        "Q1",
+        "second filename token = sample/electrode instance",
+        QUESTION_CLOSED_BY_DOMAIN_OWNER,
+        "Angel confirmed the convention explicitly (DEC-47). The token is a "
+        "sample/electrode instance number. Stop asking.",
+    ),
+    DomainQuestion(
+        "Q2",
+        "Experiment-level vs Run-level concepts",
+        QUESTION_CLOSED_BY_PRODUCT_DECISION,
+        "DEC-40: inheritance with EXPLICIT Run overrides, never duplication, and "
+        "never a silent override.",
+    ),
+    DomainQuestion(
+        "Q3",
+        "sample.material.name per stem",
+        QUESTION_CLOSED_BY_DOCUMENT,
+        "Every sample section of the beamtime document names its electrode label "
+        "and medium, and the material is stated in the opening scope.",
+    ),
+    DomainQuestion(
+        "Q4",
+        "sample.material.provenance",
+        QUESTION_CLOSED_BY_DOCUMENT,
+        "The document names a preparer for one sample family and gives a full "
+        "deposition recipe for another.",
+    ),
+    DomainQuestion(
+        "Q5",
+        "acid/base -> electrolyte name and concentration",
+        QUESTION_CLOSED_BY_DOCUMENT,
+        "Each sample section names its own electrolyte, and DEC-42 rules on the "
+        "document's disagreement with itself: sample-specific evidence wins and the "
+        "broad claim is PRESERVED as superseded, not deleted.",
+    ),
+    DomainQuestion(
+        "Q6",
+        "context.environment member",
+        QUESTION_OPEN_NEEDS_DOMAIN_OWNER,
+        "Partial. The dry / as-received acquisitions are stated as such. The member "
+        "for the electrochemical acquisitions is one word only Angel can say.",
+    ),
+    DomainQuestion(
+        "Q7",
+        "context.electrochemistry.reaction member",
+        QUESTION_OPEN_NEEDS_DOMAIN_OWNER,
+        "Narrowed. The document names the reaction in prose and three enum members "
+        "remain compatible; choosing between them is a scientific call.",
+    ),
+    DomainQuestion(
+        "Q8",
+        "cell_type per sample group",
+        QUESTION_OPEN_NEEDS_DOMAIN_OWNER,
+        "Partial. One sample family is explicitly a flow cell; the other family's "
+        "enum member is still Angel's.",
+    ),
+    DomainQuestion(
+        "Q9",
+        "reference basis / rhe_basis",
+        QUESTION_OPEN_NEEDS_DOMAIN_OWNER,
+        "Partial, and the one the corpus most clearly cannot settle: one group names "
+        "RHE explicitly, the other names only a reference electrode.",
+    ),
+    DomainQuestion(
+        "Q10",
+        "where the E-chem Procedure rows go",
+        QUESTION_CLOSED_BY_PRODUCT_DECISION,
+        "DEC-41's hierarchy places them. Whether the Notes column may drive a QC "
+        "state is Q14 and stays separate.",
+    ),
+    DomainQuestion(
+        "Q11",
+        "primary_signal channel",
+        QUESTION_OPEN_NEEDS_DOMAIN_OWNER,
+        "Narrowed. The document names the normalisation pairs it used, which rules "
+        "out most columns without identifying THE signal column.",
+    ),
+    DomainQuestion(
+        "Q12",
+        "expand the scan-grid literal into values?",
+        QUESTION_CLOSED_BY_EXISTING_RULE,
+        "Expanding a segmented grid into a value series is this repository computing "
+        "a scientific quantity, which CLAUDE.md §5 forbids. The literal is preserved "
+        "as extended context. No longer a domain question at all.",
+    ),
+    DomainQuestion(
+        "Q13",
+        "element and absorption edge",
+        QUESTION_CLOSED_BY_PRODUCT_DECISION,
+        "'Is the schema really silent' was answered by measurement — the walk covers "
+        "every declared path and there is no native field. DEC-41 now gives both a "
+        "structured home, so the question is closed rather than merely unanswerable.",
+    ),
+    DomainQuestion(
+        "Q14",
+        "is measurement.qc.status derivable from the notes?",
+        QUESTION_OPEN_NEEDS_DOMAIN_OWNER,
+        "The Notes column carries real quality judgements; whether they may drive a "
+        "QC state automatically is exactly the question, and 'no' is a complete "
+        "answer that leaves the field absent.",
+    ),
+    DomainQuestion(
+        "Q15",
+        "source precedence when three sources disagree",
+        QUESTION_OPEN_NEEDS_DOMAIN_OWNER,
+        "Still Angel's. Note DEC-42 settles a document that disagrees with ITSELF "
+        "and is NOT the answer to this, which is about three different sources.",
+    ),
+    DomainQuestion(
+        "Q16",
+        "legacy number 32 carried by two acquisitions",
+        QUESTION_OPEN_NEEDS_DOMAIN_OWNER,
+        "NARROWED, NOT ANSWERED (DEC-46). Whether the number was deliberately "
+        "reused, whether one file is superseded or mislabelled, and whether the "
+        "number is unique at all are all still Angel's. Preferring either "
+        "acquisition is forbidden meanwhile, including on the document's evidence.",
+    ),
+    DomainQuestion(
+        "Q17",
+        "standards / alignment -> Runs?",
+        QUESTION_CLOSED_BY_PRODUCT_DECISION,
+        "The build already treats them as units that are not run candidates, which "
+        "is the behaviour the question was asking about.",
+    ),
+    DomainQuestion(
+        "Q18",
+        "loading vs thickness",
+        QUESTION_CLOSED_BY_DOCUMENT,
+        "They are TWO concepts: one sample family states a deposition time and a "
+        "thickness, the other a weight loading. Placement is DEC-41's.",
+    ),
+    DomainQuestion(
+        "Q19",
+        "system.configuration vs series[].conditions",
+        QUESTION_CLOSED_BY_PRODUCT_DECISION,
+        "DEC-41's hierarchy orders the two: the extension namespace is level 2 and a "
+        "per-acquisition condition is level 3, so a concept with both homes places "
+        "at the first one the hierarchy reaches.",
+    ),
+    DomainQuestion(
+        "Q20",
+        "which fields are intentionally custom Run conditions",
+        QUESTION_CLOSED_BY_PRODUCT_DECISION,
+        "DEC-41. A custom Run condition is a placement, and placement is decided.",
+    ),
+)
+
+DOMAIN_QUESTIONS: dict[str, DomainQuestion] = {
+    q.question_id: q for q in _QUESTIONS
+}
+
+
+def open_domain_questions() -> tuple[str, ...]:
+    """The question ids still waiting on a domain owner, sorted by number.
+
+    Eight as of 2026-09-17. Exposed as a function rather than a constant so a
+    disposition change moves it, and pinned by test so a change has to be deliberate.
+    """
+    return tuple(
+        sorted(
+            (qid for qid, q in DOMAIN_QUESTIONS.items() if q.is_open),
+            key=lambda qid: int(qid[1:]),
+        )
+    )
 
 
 @dataclass(frozen=True)
@@ -179,12 +512,27 @@ class ConceptMapping:
     allowed_values: tuple[str, ...] = ()
     #: Candidate homes for a concept with no field of its own. Named, never applied.
     candidate_homes: tuple[str, ...] = ()
+    #: Which numbered questions from the domain packet this concept's remaining
+    #: judgement belongs to, if any. Ids only: :data:`DOMAIN_QUESTIONS` holds the
+    #: dispositions, so a question closing does not need 45 rows edited.
+    #:
+    #: **An empty tuple is a real state and is not the same as "nothing outstanding".**
+    #: Four rows carry :data:`STATUS_NEEDS_DOMAIN_REVIEW` and no question id, because
+    #: the packet's twenty questions and the registry's rows are different sets — the
+    #: packet says so itself. :func:`needs_review_without_a_question` names them rather
+    #: than leaving a reader to subtract.
+    domain_questions: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if self.status not in MAPPING_STATUSES:
             raise ValueError(f"unknown mapping status: {self.status!r}")
         if self.concept not in ev.CONCEPTS:
             raise ValueError(f"unknown concept: {self.concept!r}")
+        for question_id in self.domain_questions:
+            if question_id not in DOMAIN_QUESTIONS:
+                raise ValueError(
+                    f"{self.concept}: unknown domain question {question_id!r}"
+                )
         if self.status == STATUS_NORMALIZED and not self.rule:
             raise ValueError(f"{self.concept}: normalized mapping needs a rule")
         if self.status in PROPOSABLE_STATUSES and not self.official_path:
@@ -204,6 +552,76 @@ class ConceptMapping:
         """
         return self.status in PROPOSABLE_STATUSES
 
+    # --- DEC-41 placement, derived ------------------------------------------
+
+    @property
+    def declared_homes(self) -> tuple[str, ...]:
+        """Every schema path this row names — the primary one and the candidates.
+
+        All of them are checked against the vendored schema by
+        :func:`registry_paths_exist`, which is what makes a derived level trustworthy:
+        the level can only ever be as wrong as the paths, and the paths are verified.
+        """
+        primary = (self.official_path,) if self.official_path else ()
+        return primary + self.candidate_homes
+
+    @property
+    def placement_level(self) -> int:
+        """Where this concept's information lands, per :data:`PLACEMENT_LEVELS`.
+
+        **The FIRST level of `DEC-41`'s hierarchy at which this concept has a home**,
+        which is `DEC-41`'s ordering read literally rather than restated. Level 4 is
+        therefore reached only when 1, 2 and 3 are all genuinely unavailable — so
+        *"never skip a level to reach 4 when a real field exists"* is not a rule this
+        property obeys, it is the definition it is built from.
+
+        Note ``blocked_by_build`` still places at **1**: ``assets[].uri`` genuinely
+        fits, and the obstacle is an application decision (``ASSETS_BLOCKED_REASON``),
+        not the absence of a field. Placing it at 4 would record a build boundary as a
+        schema fact.
+
+        **LEVEL 1 IS DECIDED BY ``official_path`` ALONE AND DELIBERATELY NOT BY A
+        CANDIDATE HOME**, and the first draft of this property got that wrong — it read
+        any non-extension candidate home as a native field and returned level 1 for
+        ``beamtime_purpose``, ``beamtime_dates`` and ``loading_or_thickness``. All three
+        are wrong, and the registry's own rows say so: ``tags`` *"would reduce a
+        paragraph to keywords, which loses the statement rather than recording it"*, and
+        the loading/thickness row reads *"a composition object and a geometry object and
+        a natural home for neither"*. `DEC-41`'s level 1 is *"a native official ISAAC
+        field **where one genuinely fits**"*; a ``candidate_homes`` entry is by this
+        registry's own definition *"named, never applied"*, and several are argued
+        AGAINST in the very reason beside them. So a candidate home is consulted only
+        for levels **2** and **3**, where the home in question is the hierarchy's own
+        (the schema's designated extension namespace, and the schema-legal per-series
+        condition) rather than a near-miss somebody named.
+        """
+        homes = self.declared_homes
+        if self.official_path and not self.official_path.startswith(
+            EXTENSION_NAMESPACE
+        ):
+            return PLACEMENT_OFFICIAL_FIELD
+        if any(p.startswith(EXTENSION_NAMESPACE) for p in homes):
+            return PLACEMENT_SCHEMA_EXTENSION_POINT
+        if SERIES_CONDITIONS_HOME in homes:
+            return PLACEMENT_RUN_SERIES_CONDITION
+        return PLACEMENT_EXTENDED_CONTEXT
+
+    @property
+    def placement_name(self) -> str:
+        return PLACEMENT_NAMES[self.placement_level]
+
+    @property
+    def unresolved_questions(self) -> tuple[str, ...]:
+        """This concept's domain questions that are STILL OPEN. Empty is the common case.
+
+        Separate from :attr:`domain_questions` because twelve of the twenty closed on
+        2026-09-17: a surface that read the full list would keep telling a scientist to
+        wait for an answer that has arrived, which is the defect ``CTX-001`` names.
+        """
+        return tuple(
+            q for q in self.domain_questions if DOMAIN_QUESTIONS[q].is_open
+        )
+
     def to_state(self) -> dict:
         return {
             "concept": self.concept,
@@ -215,6 +633,12 @@ class ConceptMapping:
             "allowed_values": list(self.allowed_values),
             "candidate_homes": list(self.candidate_homes),
             "proposable": self.proposable,
+            # DEC-41. Both the number and its words: a bare integer on a screen is a
+            # rank a reader has to look up, and the level is the more useful half.
+            "placement_level": self.placement_level,
+            "placement_name": self.placement_name,
+            "domain_questions": list(self.domain_questions),
+            "unresolved_questions": list(self.unresolved_questions),
         }
 
 
@@ -262,6 +686,7 @@ _MAPPINGS: tuple[ConceptMapping, ...] = (
         ),
         rule="millivolts_to_volts_and_p_as_decimal_point",
         requires_siblings=("context.electrochemistry.control_mode",),
+            domain_questions=("Q2", "Q20"),
     ),
     ConceptMapping(
         concept=ev.CONCEPT_PH,
@@ -323,6 +748,7 @@ _MAPPINGS: tuple[ConceptMapping, ...] = (
             "not_applicable",
         ),
         candidate_homes=("context.electrochemistry.potential_scale",),
+            domain_questions=("Q9",),
     ),
     ConceptMapping(
         concept=ev.CONCEPT_ELECTROLYTE_OR_MEDIUM,
@@ -340,6 +766,7 @@ _MAPPINGS: tuple[ConceptMapping, ...] = (
             "that would complete it is in conflict with the same document."
         ),
         requires_siblings=("context.electrochemistry.electrolyte.concentration_M",),
+            domain_questions=("Q2", "Q5"),
     ),
     ConceptMapping(
         concept=ev.CONCEPT_GAS_CONDITION,
@@ -368,19 +795,23 @@ _MAPPINGS: tuple[ConceptMapping, ...] = (
         ),
         requires_siblings=("sample.sample_form",),
         candidate_homes=("sample.sample_id", "sample.electrode_type"),
+            domain_questions=("Q2", "Q3"),
     ),
     ConceptMapping(
         concept=ev.CONCEPT_SAMPLE_OR_ELECTRODE_NUMBER,
         status=STATUS_NEEDS_DOMAIN_REVIEW,
         official_path="sample.sample_id",
         reason=(
-            "The second numeric filename token behaves like a sample or electrode "
-            "instance, and the grouping it implies agrees with the beamtime notes' own "
-            "sample sections. AGREEMENT IS NOT CONFIRMATION: whether that token always "
-            "means the instance is the first question in the domain packet, and the "
-            "notes could agree with a token that means something else."
+            "The second numeric filename token IS a sample/electrode instance "
+            "number — confirmed by the domain owner on 2026-09-17 (DEC-47), so the "
+            "question this row used to ask is closed. What still needs a domain owner "
+            "is narrower and is about the schema rather than the corpus: an instance "
+            "number could land at sample.sample_id or at sample.library.sample_no, and "
+            "the schema requires a sample_form alongside whichever is chosen, which no "
+            "filename states."
         ),
         candidate_homes=("sample.library.sample_no",),
+            domain_questions=("Q1",),
     ),
     ConceptMapping(
         concept=ev.CONCEPT_LOADING_OR_THICKNESS,
@@ -394,6 +825,7 @@ _MAPPINGS: tuple[ConceptMapping, ...] = (
             "both a mapping question and a question about what the token means."
         ),
         candidate_homes=("sample.composition", "sample.geometry"),
+            domain_questions=("Q18",),
     ),
     ConceptMapping(
         concept=ev.CONCEPT_ELEMENT,
@@ -407,6 +839,7 @@ _MAPPINGS: tuple[ConceptMapping, ...] = (
             "no valid path."
         ) + " " + SYSTEM_CONFIGURATION_CAUTION,
         candidate_homes=("system.configuration",),
+            domain_questions=("Q13", "Q19"),
     ),
     # ---- not expressible ----------------------------------------------------
     ConceptMapping(
@@ -415,6 +848,7 @@ _MAPPINGS: tuple[ConceptMapping, ...] = (
         official_path=None,
         reason=CYCLING_STATE_NO_FIELD_REASON,
         candidate_homes=("measurement.series[].conditions",),
+            domain_questions=("Q20",),
     ),
     ConceptMapping(
         concept=ev.CONCEPT_BEFORE_AFTER_STATE,
@@ -425,6 +859,7 @@ _MAPPINGS: tuple[ConceptMapping, ...] = (
             "has no field for the same reason."
         ),
         candidate_homes=("measurement.series[].conditions",),
+            domain_questions=("Q20",),
     ),
     ConceptMapping(
         concept=ev.CONCEPT_FILTER,
@@ -438,6 +873,7 @@ _MAPPINGS: tuple[ConceptMapping, ...] = (
             "measurement.series[].conditions",
             "system.configuration",
         ),
+            domain_questions=("Q19", "Q20"),
     ),
     ConceptMapping(
         concept=ev.CONCEPT_EMISSION_ENERGY,
@@ -452,6 +888,7 @@ _MAPPINGS: tuple[ConceptMapping, ...] = (
             "measurement.series[].conditions",
             "system.configuration",
         ),
+            domain_questions=("Q19",),
     ),
     ConceptMapping(
         concept=ev.CONCEPT_LEGACY_NUMBER,
@@ -464,6 +901,7 @@ _MAPPINGS: tuple[ConceptMapping, ...] = (
             "is preserved as source evidence and is the right label to show a "
             "scientist, because it is the handle they already use."
         ),
+            domain_questions=("Q16",),
     ),
     ConceptMapping(
         concept=ev.CONCEPT_NEW_SPOT,
@@ -475,6 +913,7 @@ _MAPPINGS: tuple[ConceptMapping, ...] = (
             "one — so links[].rel = replica_of would be wrong about it."
         ),
         candidate_homes=("measurement.series[].conditions",),
+            domain_questions=("Q20",),
     ),
     ConceptMapping(
         concept=ev.CONCEPT_MONOCHROMATOR_CALIBRATION,
@@ -488,6 +927,7 @@ _MAPPINGS: tuple[ConceptMapping, ...] = (
             + SYSTEM_CONFIGURATION_CAUTION
         ),
         candidate_homes=("system.configuration", "links[]"),
+            domain_questions=("Q19",),
     ),
     ConceptMapping(
         concept=ev.CONCEPT_SPECTROMETER_CONFIG,
@@ -499,6 +939,7 @@ _MAPPINGS: tuple[ConceptMapping, ...] = (
             + SYSTEM_CONFIGURATION_CAUTION
         ),
         candidate_homes=("system.configuration",),
+            domain_questions=("Q19",),
     ),
     ConceptMapping(
         concept=ev.CONCEPT_BEAMSIZE,
@@ -509,6 +950,7 @@ _MAPPINGS: tuple[ConceptMapping, ...] = (
             + SYSTEM_CONFIGURATION_CAUTION
         ),
         candidate_homes=("system.configuration",),
+            domain_questions=("Q19",),
     ),
     ConceptMapping(
         concept=ev.CONCEPT_UNKNOWN_TOKEN,
@@ -545,6 +987,7 @@ _MAPPINGS: tuple[ConceptMapping, ...] = (
             "measurement.series[].independent_variables[].unit",
             "measurement.series[].channels[]",
         ),
+            domain_questions=("Q11", "Q12"),
     ),
     ConceptMapping(
         concept=ev.CONCEPT_DETECTOR_COLUMN,
@@ -568,6 +1011,7 @@ _MAPPINGS: tuple[ConceptMapping, ...] = (
             "control_readback",
             "quality_monitor",
         ),
+            domain_questions=("Q11",),
     ),
     # ---- the acquisition and instrument vocabulary --------------------------
     #
@@ -635,6 +1079,7 @@ _MAPPINGS: tuple[ConceptMapping, ...] = (
         ),
         requires_siblings=("measurement.qc.status",),
         allowed_values=("valid", "compromised", "failed", "pending"),
+            domain_questions=("Q10", "Q14"),
     ),
     ConceptMapping(
         concept=ev.CONCEPT_SAMPLE_PREPARATION,
@@ -648,6 +1093,7 @@ _MAPPINGS: tuple[ConceptMapping, ...] = (
             "is provenance OF ONE SAMPLE is a scoping judgement, not an extraction."
         ),
         candidate_homes=("sample.material.notes",),
+            domain_questions=("Q4",),
     ),
     ConceptMapping(
         concept=ev.CONCEPT_ECHEM_PROCEDURE,
@@ -664,6 +1110,7 @@ _MAPPINGS: tuple[ConceptMapping, ...] = (
             "context.electrochemistry.ir_compensation.method",
             "context.electrochemistry.control_mode",
         ),
+            domain_questions=("Q8", "Q10"),
     ),
     ConceptMapping(
         concept=ev.CONCEPT_BEAMTIME_DATES,
@@ -688,6 +1135,7 @@ _MAPPINGS: tuple[ConceptMapping, ...] = (
             "recording it. Preserved as source evidence."
         ),
         candidate_homes=("tags",),
+            domain_questions=("Q7",),
     ),
     # ---- instrument state: real, stated, and not the schema's business ------
     ConceptMapping(
@@ -700,6 +1148,7 @@ _MAPPINGS: tuple[ConceptMapping, ...] = (
             "for any of them. " + SYSTEM_CONFIGURATION_CAUTION
         ),
         candidate_homes=("system.configuration",),
+            domain_questions=("Q19",),
     ),
     ConceptMapping(
         concept=ev.CONCEPT_SAMPLE_POSITION,
@@ -713,6 +1162,7 @@ _MAPPINGS: tuple[ConceptMapping, ...] = (
             "stage position and must not be reused for it."
         ) + " " + SYSTEM_CONFIGURATION_CAUTION,
         candidate_homes=("system.configuration",),
+            domain_questions=("Q19",),
     ),
     ConceptMapping(
         concept=ev.CONCEPT_COUNTING_TIME,
@@ -724,6 +1174,7 @@ _MAPPINGS: tuple[ConceptMapping, ...] = (
             "operating condition it has a schema-legal candidate home."
         ),
         candidate_homes=("measurement.series[].conditions",),
+            domain_questions=("Q20",),
     ),
     ConceptMapping(
         concept=ev.CONCEPT_SCAN_COUNT,
@@ -735,6 +1186,7 @@ _MAPPINGS: tuple[ConceptMapping, ...] = (
             "mapping either one would quietly pick a side of a real conflict."
         ),
         candidate_homes=("measurement.series[].conditions",),
+            domain_questions=("Q20",),
     ),
     ConceptMapping(
         concept=ev.CONCEPT_POINT_COUNT,
@@ -758,6 +1210,7 @@ _MAPPINGS: tuple[ConceptMapping, ...] = (
             "judgement made here."
         ) + " " + SYSTEM_CONFIGURATION_CAUTION,
         candidate_homes=("system.configuration",),
+            domain_questions=("Q13", "Q19"),
     ),
     ConceptMapping(
         concept=ev.CONCEPT_DRY_STATE,
@@ -771,6 +1224,7 @@ _MAPPINGS: tuple[ConceptMapping, ...] = (
             "no source states."
         ),
         candidate_homes=("measurement.series[].conditions",),
+            domain_questions=("Q6", "Q20"),
     ),
     ConceptMapping(
         concept=ev.CONCEPT_STEP_NUMBER,
@@ -782,6 +1236,7 @@ _MAPPINGS: tuple[ConceptMapping, ...] = (
             "between a filename and a human note row, which makes it valuable as "
             "evidence and still not a record field."
         ),
+            domain_questions=("Q10",),
     ),
     ConceptMapping(
         concept=ev.CONCEPT_TRIGGER,
@@ -823,6 +1278,7 @@ _MAPPINGS: tuple[ConceptMapping, ...] = (
             "the experimental state of the sample. Mapping it anywhere would settle "
             "that disagreement by accident."
         ),
+            domain_questions=("Q15",),
     ),
     ConceptMapping(
         concept=ev.CONCEPT_ACQUISITION_TARGET,
@@ -871,6 +1327,110 @@ def unmapped_concepts() -> tuple[str, ...]:
     should be quoted alongside any claim about mapping coverage.
     """
     return tuple(sorted(ev.CONCEPTS - set(MAPPINGS)))
+
+
+def needs_review_without_a_question() -> tuple[str, ...]:
+    """``needs_domain_review`` rows that no numbered packet question covers, sorted.
+
+    **Non-empty, and that is a measured finding rather than a gap in this function.**
+    The packet's own reconciliation records it: *"20 questions, 15 registry rows, and
+    they are different sets."* Exposed because the alternative is a reader subtracting
+    two numbers and guessing which four rows are missing — and because a row whose
+    remaining judgement belongs to nobody in particular is exactly the row that gets
+    "fixed" by pointing it at a nearby field.
+    """
+    return tuple(
+        sorted(
+            concept
+            for concept, m in MAPPINGS.items()
+            if m.status == STATUS_NEEDS_DOMAIN_REVIEW and not m.domain_questions
+        )
+    )
+
+
+class PlacementSkipError(ValueError):
+    """`DEC-41`'s first rule, refused at the boundary where it can be broken.
+
+    Raised when a consumer records a concept at a placement level other than the one
+    the registry derives for it — above all at level 4 when the official schema has a
+    field. That is the *"skip a level to reach 4"* the decision forbids, and it is the
+    shape a careless companion entry takes: the information looks preserved, and a
+    native field silently stopped being offered.
+    """
+
+
+def check_placement(concept: str, level: int) -> None:
+    """Refuse a placement that disagrees with the registry. Returns ``None`` or raises.
+
+    **Equality, not "level >= expected"**, and the direction matters in both
+    directions: claiming level 4 for a concept with a native field hides the field, and
+    claiming level 1 for a concept the schema has nowhere for asserts a home that does
+    not exist. Neither is a placement a companion may record.
+
+    A concept with **no registry entry** may only be recorded at level 4 — nobody has
+    established a home for it, and level 4 is the level that claims none.
+    """
+    if level not in PLACEMENT_LEVELS:
+        raise PlacementSkipError(
+            f"{concept}: {level!r} is not one of the four DEC-41 placement levels "
+            f"{PLACEMENT_LEVELS}"
+        )
+    entry = MAPPINGS.get(concept)
+    expected = entry.placement_level if entry else PLACEMENT_EXTENDED_CONTEXT
+    if level == expected:
+        return
+    if level == PLACEMENT_EXTENDED_CONTEXT:
+        raise PlacementSkipError(
+            f"{concept}: DEC-41 forbids skipping to level 4 (extended context) when a "
+            f"home exists at level {expected} ({PLACEMENT_NAMES[expected]}"
+            + (f", {entry.official_path}" if entry and entry.official_path else "")
+            + ")"
+        )
+    raise PlacementSkipError(
+        f"{concept}: placement level {level} ({PLACEMENT_NAMES[level]}) disagrees with "
+        f"the registry, which places it at {expected} "
+        f"({PLACEMENT_NAMES[expected]})"
+    )
+
+
+def placement_violations() -> tuple[str, ...]:
+    """Registry rows whose derived placement contradicts `DEC-41`. Empty is correct.
+
+    The level is derived, so most ways of getting it wrong are unreachable — but two
+    are not, and both are edits a future slice could plausibly make:
+
+    * a row at level 4 that nonetheless names an ``official_path`` (the rule `DEC-41`
+      states in words);
+    * a row at level 1 with no ``official_path`` at all.
+    """
+    bad: list[str] = []
+    for concept, m in sorted(MAPPINGS.items()):
+        level = m.placement_level
+        if level == PLACEMENT_EXTENDED_CONTEXT and m.official_path:
+            bad.append(
+                f"{concept}: level 4 while naming {m.official_path}"
+            )
+        if level == PLACEMENT_OFFICIAL_FIELD and not m.official_path:
+            bad.append(f"{concept}: level 1 with no official_path")
+    return tuple(bad)
+
+
+def placement_coverage() -> dict[str, int]:
+    """``level -> count``, plus the open-question count. For reports, not for gating.
+
+    Keys are the levels as strings so the block survives a JSON round trip unchanged;
+    ``open_domain_questions`` is beside them because a reader comparing *"40 concepts
+    now have a home"* against *"8 questions are still open"* needs both numbers at
+    once, and they are not the same measurement.
+    """
+    out = {str(level): 0 for level in PLACEMENT_LEVELS}
+    for m in MAPPINGS.values():
+        out[str(m.placement_level)] += 1
+    out["open_domain_questions"] = len(open_domain_questions())
+    out["concepts_with_an_open_question"] = sum(
+        1 for m in MAPPINGS.values() if m.unresolved_questions
+    )
+    return out
 
 
 def coverage() -> dict[str, int]:

@@ -140,6 +140,18 @@ So the external name says `after1500Cycling`, the internal declaration says
 `beforeCycling`, and a sibling file says `after1400Cycling`. Three readings, one legacy
 number. Neither file may be overwritten and none of the three may be silently chosen.
 
+**RULED ON 2026-09-17 (`DEC-46`), and the ruling is narrower than it may look.** They are
+**two distinct acquisitions**, not duplicates of each other, and this repository's own
+"two duplicate 32 files" phrasing is retired. The beamtime document NARROWS the question —
+its final log matches one of the two readings and `1400` occurs nowhere in the document at
+all — and `DEC-46` is explicit that **a narrowing is not an answer**: `Q16` (was the number
+deliberately reused, is one file superseded or mislabelled, is `runNo` unique at all) stays
+with the domain owner. Until then **preferring either acquisition is forbidden, including
+on the document's evidence**. The rule is stored as
+`bl15.relate.LEGACY_NUMBER_REUSE_RULE` and pinned by
+`apps/api/tests/test_bl15_file_32_is_two_acquisitions.py`, so a later "tidy-up" that kept
+the document-matching file fails a test rather than shipping.
+
 **2.6a — CORRECTED 2026-09-16, same day: the internal-`#F` disagreement is FOUR files,
 not one, and that changes what it means.** §2.6 was written from the one example the
 authorizing brief named, and reads as though a single file disagrees with itself.
@@ -192,10 +204,18 @@ with no group token at all (legacy 1–2, the old pellets — which are also the
 zero scan children).
 
 **The ranges are contiguous and non-overlapping**, which is independent corroboration of
-the beamtime notes' own `Sample N … File Number` sections. **Corroboration is not proof**:
-the second token could mean something else and still produce contiguous ranges, which is
-why "does the second token always mean the sample/electrode instance" is the first
-question in the domain packet rather than an assumption in the parser.
+the beamtime notes' own `Sample N … File Number` sections. ~~**Corroboration is not
+proof**: the second token could mean something else and still produce contiguous ranges,
+which is why "does the second token always mean the sample/electrode instance" is the
+first question in the domain packet rather than an assumption in the parser.~~
+
+**SUPERSEDED 2026-09-17, NOT REFUTED, and kept struck because the reasoning was right and
+only the STATUS moved.** The domain owner confirmed the meaning directly (`DEC-47`,
+relayed by the project owner): the second token is a sample/electrode instance number.
+The corroboration above is still corroboration and was still not proof — what closed the
+question was an answer, which is exactly what that paragraph said it would take. The
+parser is unchanged and is still not positional: `DEC-47` is *"a vocabulary, not a
+grammar"*, so recognition stays by shape and alias.
 
 ## 3. Formats, as they actually are
 
@@ -294,10 +314,15 @@ deliberately prints counts and structure only.
 
 ## 5. What this does NOT establish
 
-- **No scientific mapping.** Which ISAAC v1.05 path `acid`/`base` belongs at, whether the
-  second numeric token is always an electrode instance, and what reference basis a bare
-  `850mV` may be assumed to have are **domain questions with Angel**, itemised in
+- **No scientific mapping.** Which ISAAC v1.05 path `acid`/`base` belongs at, ~~whether
+  the second numeric token is always an electrode instance,~~ and what reference basis a
+  bare `850mV` may be assumed to have are **domain questions with Angel**, itemised in
   `docs/bl15-2-domain-questions-2026-09-16.md`. Nothing in this repository answers them.
+  **Two of those three moved on 2026-09-17 and the middle clause is struck: the second
+  token is CONFIRMED** a sample/electrode instance number (`DEC-47`), and `acid`/`base`
+  is answered by the beamtime document with its internal conflict ruled on by `DEC-42`.
+  The reference basis for the JK samples is `Q9` and is **still Angel's** — it is one of
+  the eight that remain.
 - **No provider approval.** `HIST-003b` (model-assisted reconstruction over this corpus)
   stays blocked on **DEC-22** institutional data-egress approval. Nothing in this corpus
   has been or may be sent to any external provider.

@@ -399,6 +399,13 @@ def test_to_state_is_complete_and_round_trips_as_json():
             "allowed_values",
             "candidate_homes",
             "proposable",
+            # DEC-41 / CTX-001, added 2026-09-17. The key set is pinned rather than
+            # sampled, so adding a served key has to come here and say so — which is
+            # the whole reason this test was written as an equality.
+            "placement_level",
+            "placement_name",
+            "domain_questions",
+            "unresolved_questions",
         }, concept
         json.dumps(state)
 

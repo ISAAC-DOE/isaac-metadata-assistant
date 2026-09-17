@@ -939,19 +939,32 @@ def test_the_bare_integer_ordinal_rule_and_its_boundaries():
     assert [u.raw_literal for u in unknown] == ["04"]
 
 
-def test_reading_the_second_numeric_token_is_not_a_claim_about_what_it_means():
-    """It is a recognised CONCEPT, not an established fact.
+def test_the_second_numeric_tokens_meaning_is_recorded_as_domain_confirmed():
+    """``DEC-47``: the token IS a sample/electrode instance number.
 
-    The grouping the token implies agrees with the notes' own sample sections,
-    but agreement is not confirmation — ``bl15.mapping`` marks the concept
-    ``needs_domain_review`` and it is the first question in the domain packet.
+    **This test was INVERTED, not deleted, and the inversion is the point.** It used to
+    require the rule string to say ``NOT ESTABLISHED`` and *"agreement is not
+    confirmation"* — a correct caveat that became a false one when the domain owner
+    confirmed the meaning on 2026-09-17. A test pinning a retired caveat is a test that
+    fails the correction, which is why the repository's established remedy is to invert
+    it.
+
+    Two things it keeps asserting, because neither changed: the rule still carries its
+    VERSIONED ID (the reading is byte-identical, so the id stays ``.v1``), and the
+    convention is still a vocabulary rather than a grammar.
     """
     item = _one(
         _read_stem("52_05_ZZ3_base_filter20_850mV"),
         CONCEPT_SAMPLE_OR_ELECTRODE_NUMBER,
     )
-    assert "NOT ESTABLISHED" in item.normalization_rule
-    assert "agreement is not confirmation" in item.normalization_rule
+    rule = item.normalization_rule
+    assert "bl15.filenames.bare_integer_ordinal.v1" in rule
+    assert "CONFIRMED" in rule
+    assert "DEC-47" in rule
+    assert "NOT A GRAMMAR" in rule
+    # and the caveat that was retired is gone rather than softened
+    assert "NOT ESTABLISHED" not in rule
+    assert "agreement is not confirmation" not in rule
 
 
 def test_a_duplicate_legacy_number_is_read_twice_and_never_deduplicated():
