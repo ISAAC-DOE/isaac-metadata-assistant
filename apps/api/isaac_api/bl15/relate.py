@@ -84,6 +84,14 @@ _SCAN_INDEX = re.compile(r"_(\d+)\.dat\Z", re.IGNORECASE)
 CONFLICT_DECLARATION_VS_FILENAME = "internal_declaration_vs_filename"
 #: Two distinct measurements carry one legacy number. Neither may be overwritten and
 #: neither is "the real one" — they are two files the scientist has.
+#:
+#: **THE NAME IS ABOUT THE NUMBER, NOT ABOUT THE FILES, AND `DEC-46` TURNS ON THAT
+#: DISTINCTION.** What is duplicated is the leading integer; the acquisitions are
+#: **TWO DISTINCT ACQUISITIONS**, not duplicates of each other, and this repository's
+#: own "two duplicate 32 files" wording is retired. The constant keeps its spelling
+#: because it is a wire value a client keys on, and renaming it would change a contract
+#: to fix a sentence — but nothing this kind is attached to may call the FILES
+#: duplicates, and :data:`LEGACY_NUMBER_REUSE_RULE` is the sentence that says so.
 CONFLICT_DUPLICATE_LEGACY_NUMBER = "duplicate_legacy_number"
 #: A macro declared a measurement that no acquisition file provides. 9 in the corpus.
 CONFLICT_DECLARED_NEVER_ACQUIRED = "macro_declared_never_acquired"
@@ -100,6 +108,30 @@ CONFLICT_KINDS: frozenset[str] = frozenset(
         CONFLICT_ACQUIRED_NEVER_DECLARED,
         CONFLICT_NOTE_VS_FILESYSTEM,
     }
+)
+
+#: `DEC-46`, in the sentence that travels with the conflict. **THIS IS THE PROVENANCE
+#: HALF OF `DOM-001`** — the other half is the test that fails if a later slice prefers
+#: one acquisition.
+#:
+#: The rule is stronger than "we have not decided yet": **preferring either acquisition
+#: is FORBIDDEN, including on the beamtime document's evidence.** The document narrows
+#: the question — one of the two readings matches its final log and the other matches
+#: nothing in it — and `DEC-46` is explicit that *a narrowing is not an answer*. Whether
+#: the number was deliberately reused, whether one file is superseded or mislabelled,
+#: and whether the number is unique at all are `Q16` and remain the domain owner's.
+#:
+#: So a "tidy-up" that kept the document-matching file would be discarding an
+#: acquisition on the strength of evidence that was measured and then explicitly ruled
+#: insufficient. That is why this is a stored sentence rather than a comment.
+LEGACY_NUMBER_REUSE_RULE = (
+    "Both acquisitions are preserved and the disagreement is preserved with them. "
+    "Neither file may be overwritten, dropped, merged, or preferred over the other — "
+    "not even on the evidence of a later log that matches one of them, because "
+    "matching a log narrows the question without answering it. Whether the number was "
+    "deliberately reused, whether one acquisition supersedes the other, and whether "
+    "this number identifies a measurement or a file are open questions for the "
+    "scientist who ran the beamtime."
 )
 
 #: The one value a conflict's resolution may take in this build. A conflict is
@@ -226,9 +258,12 @@ class MeasurementUnit:
     #: overriding a classification changes ONE value.
     source_type: str = ev.SOURCE_TYPE_SPEC_ACQUISITION
     legacy_number: int | None = None
-    #: The second filename token when numeric — the sample/electrode instance
-    #: **candidate**. NOT an established fact: the registry marks it
-    #: ``needs_domain_review`` and it is the first question in the domain packet.
+    #: The second filename token when numeric — the sample/electrode instance.
+    #: **CONFIRMED by the domain owner** (`DEC-47`, 2026-09-17); this comment used to
+    #: read *"NOT an established fact … the first question in the domain packet"* and
+    #: that question is closed. The registry row keeps ``needs_domain_review`` for a
+    #: DIFFERENT reason — which official path the token lands at, and the sample_form
+    #: the schema requires beside it — so do not read the status as the old caveat.
     group_token: str | None = None
     scan_dir: str | None = None
     scans: tuple[ScanChild, ...] = ()
@@ -835,7 +870,8 @@ def _duplicate_legacy_conflicts(units: Sequence[MeasurementUnit]):
             explanation=(
                 f"Two separate measurements were both recorded as number {number}. "
                 "Both files exist and both are kept; neither is a duplicate of the "
-                "other and neither is the 'real' one."
+                "other and neither is the 'real' one. "
+                + LEGACY_NUMBER_REUSE_RULE
             ),
         )
 

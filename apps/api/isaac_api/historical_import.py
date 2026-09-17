@@ -3749,6 +3749,29 @@ def _mapping_block() -> dict:
         "temperature_absent_reason": bl15_mapping.TEMPERATURE_ABSENT_REASON,
         "assets_blocked_reason": bl15_mapping.ASSETS_BLOCKED_REASON,
         "cycling_state_no_field_reason": bl15_mapping.CYCLING_STATE_NO_FIELD_REASON,
+        # DEC-41 / CTX-001. Served BESIDE `coverage` and never folded into it: a status
+        # count answers "can a value travel" and a placement count answers "does the
+        # information have a home", and the second is the number that changed. They sum
+        # to the same 45 and mean different things.
+        "placement": dict(bl15_mapping.placement_coverage()),
+        "placement_levels": {
+            str(level): bl15_mapping.PLACEMENT_NAMES[level]
+            for level in bl15_mapping.PLACEMENT_LEVELS
+        },
+        # The packet, reconciled: twelve closed and eight open, each with WHAT closed it.
+        # A surface that showed only the eight would leave a reader unable to tell a
+        # closed question from one nobody has looked at.
+        "domain_questions": [
+            bl15_mapping.DOMAIN_QUESTIONS[qid].to_state()
+            for qid in sorted(
+                bl15_mapping.DOMAIN_QUESTIONS, key=lambda q: int(q[1:])
+            )
+        ],
+        "open_domain_questions": list(bl15_mapping.open_domain_questions()),
+        # Named rather than left to be subtracted — see the function's own docstring.
+        "needs_review_without_a_question": list(
+            bl15_mapping.needs_review_without_a_question()
+        ),
     }
 
 

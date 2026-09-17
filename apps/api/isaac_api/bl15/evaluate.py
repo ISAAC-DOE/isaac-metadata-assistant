@@ -1491,9 +1491,11 @@ def _link_mapping(gold: GoldStandard, observed: Observed) -> MetricResult:
     Both enum values are in the schema verbatim (schema-mapping analysis §1), and
     the ``_again`` token is the evidence — so this is a scorable deterministic
     mapping rather than something to mark unmeasurable. The same-sample link rests
-    on the second numeric token being the sample instance, which is **domain
-    question 1**; a gold standard that is not sure of that should leave those links
-    out rather than declare them.
+    on the second numeric token being the sample instance, which the domain owner
+    **CONFIRMED** on 2026-09-17 (`DEC-47`) — this docstring used to call it "domain
+    question 1" and that question is closed. A gold standard may now declare those
+    links on the token's meaning; it should still leave them out where it is unsure
+    of the TARGET, which is a different uncertainty.
     """
     artifact = "observed.links"
     if gold.links is None:
