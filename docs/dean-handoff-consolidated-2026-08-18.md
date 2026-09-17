@@ -38,9 +38,16 @@ the time of sending. Re-print it before forwarding rather than trusting a copied
 ## 1. Migrations awaiting an operator — TWO approved, and a THIRD that is NOT
 
 **Read the split before the table.** `0003` and `0004` are approved by the project owner and waiting
-only on an operator window. **`0005_run_projection` is NOT approved and is NOT part of this ask** —
+only on an operator window. ~~**`0005_run_projection` is NOT approved and is NOT part of this ask** —
 it is listed in §1A so it is not a surprise later, and it needs Krish's approval before it needs
-yours. Do not apply it.
+yours.~~ — **CORRECTED 2026-09-17, AFTER THIS DOCUMENT WAS SENT: `0005_run_projection` IS NOW
+OWNER-APPROVED** (2026-09-17, on its exact bytes; see
+[`docs/migration-approval-packet-0005.md`](migration-approval-packet-0005.md) §12). **It is still
+NOT part of THIS ask, and the instruction below is unchanged** — but the *reason* has changed and
+that matters, because the old reason would leave you waiting for something that has happened.
+**`0005` is now sequenced after this ask, not blocked before it.** **Do not apply it in this
+window.** It must never land in the same step as `0003`/`0004`; it gets its own bounded apply and
+its own postchecks once these two are applied and verified.
 
 `0003_revisions` and `0004_submissions` are **ONE decision** — `0004` declares a foreign key into a
 table `0003` creates, so 0003-without-0004 leaves the application unable to record a submission and
@@ -164,12 +171,18 @@ the commands are in `0003`'s packet.
 
 ---
 
-## 1A. `0005_run_projection` — NOT APPROVED, NOT AN ASK. Listed so it is not a surprise.
+## 1A. `0005_run_projection` — ~~NOT APPROVED,~~ APPROVED 2026-09-17 BUT STILL NOT AN ASK IN THIS DOCUMENT. Listed so it is not a surprise.
+
+> **CORRECTED 2026-09-17, after this document was sent.** Krish reviewed and approved `0005`'s exact
+> bytes on 2026-09-17. **The heading's second clause is the one that still holds:** this document's
+> ask is `0003`+`0004`, and `0005` is not in it. It is now **sequenced after** rather than **blocked
+> before**. The digests below are unchanged and were re-verified on 2026-09-17 as part of the
+> approval.
 
 | | `0005_run_projection` |
 |---|---|
-| **Owner approval** | **NOT APPROVED** (Krish has not reviewed the text) |
-| **Hosted application** | **NOT APPLIED, anywhere** |
+| **Owner approval** | ~~**NOT APPROVED** (Krish has not reviewed the text)~~ → **APPROVED BY THE PROJECT OWNER 2026-09-17**, on the exact bytes below, after a fresh SHA-256 recomputation matched in three independent places |
+| **Hosted application** | **NOT APPLIED, anywhere** — unchanged by the approval |
 | **Forward SHA-256** | `86bf111cf030c15cb3d2349f428370476ad84262da9e5127a1e213c62da98304` |
 | **Rollback SHA-256** | `54a17432150525f75a6e94557a137029a3ce3fd41cea9debced361abda90e735` |
 | **Table created** | `isaac_run_projection` (one table, one index) |
@@ -260,8 +273,13 @@ Also unanswered from earlier rounds and therefore exactly as open as before: **Q
    still MATCH the values Krish approved**, so the bytes are unchanged and the approval stands.
 3. Apply `0003` and `0004` **together**, and report the `records` and `isaac_experiments` counts
    before and after.
-4. **Do NOT apply `0005`.** It appears in §1A only so it is not a surprise later. It has not been
-   approved by Krish, and owner approval comes before an operator window, never after.
+4. **Do NOT apply `0005` in this window.** It appears in §1A only so it is not a surprise later.
+   ~~It has not been approved by Krish, and owner approval comes before an operator window, never
+   after.~~ — **CORRECTED 2026-09-17: Krish HAS now approved it** (and that principle still holds —
+   the approval came before the window, which is why this instruction is now about SEQUENCING and
+   not about approval). Apply `0003`+`0004` first, bounded and verified; `0005` then gets its own
+   bounded apply. **Never run a bare `--apply`**: with three approved migrations pending it would
+   land all three in one unverifiable step, which is precisely what the bounded form prevents.
 5. Everything in §2 can wait; nothing is broken while it does, and no surface claims otherwise.
 
 ---

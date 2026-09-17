@@ -119,8 +119,12 @@ exactly as `ingestion-proposal-contract.md` §8.1 records for proposals.
 
 A `folders` **table** was rejected for a measured reason: it needs `0006` **plus an `ALTER`, which
 is a forbidden verb in the write policy** — so it would require weakening the safety policy itself,
-and would queue behind an unapproved `0005`. That is a feature that does not work until two humans
-act.
+and would queue behind ~~an unapproved `0005`~~ **three approved-but-unapplied migrations**
+(`0003`, `0004` and — since 2026-09-17 — `0005`). **The rejection is UNCHANGED and the reason is
+stronger, not weaker:** the objection was never that `0005` lacked an approval, it was that a
+feature gated on an operator act does not work until that act happens. With three approved and
+none applied, a `0006` would queue behind more, not less. That is a feature that does not work
+until two humans act.
 
 **The one mechanical trap that governs every state-document change:** `save_versioned()` returns
 `False` **writing nothing** when `_authoritative_signature` is unchanged, and `from_state` drops
