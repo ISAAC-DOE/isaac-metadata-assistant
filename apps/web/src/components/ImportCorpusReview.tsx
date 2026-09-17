@@ -590,6 +590,34 @@ function MappingReview({ review }: { review: Bl15CorpusReview }) {
                       </p>
                       {/* The registry's own sentence, verbatim. */}
                       <p className="bl15-concept-reason">{c.reason}</p>
+                      {/* `DEC-41` — WHERE THE INFORMATION LANDS, which is a
+                          different question from whether a value may travel.
+                          Without this line a scientist reading `not_expressible`
+                          has no way to tell "the schema has no place for this" from
+                          "this is kept, in the companion" — and the second is what
+                          the hierarchy actually decided for all twelve of them.
+
+                          BOTH THE WORDS AND THE NUMBER, because a bare rank is
+                          something a reader has to look up. The words are the
+                          server's `placement_name`, rendered verbatim: no label is
+                          re-authored here, and nothing on this line is a schema path
+                          or a module path. */}
+                      {c.placement_name && (
+                        <p className="bl15-concept-extra">
+                          Where this information lands: {c.placement_name} (level{' '}
+                          {c.placement_level}).
+                        </p>
+                      )}
+                      {/* THE OPEN SUBSET, NEVER THE WHOLE LIST. Twelve of the twenty
+                          packet questions closed on 2026-09-17, so showing
+                          `domain_questions` here would tell a scientist to wait for
+                          an answer that has arrived. */}
+                      {c.unresolved_questions && c.unresolved_questions.length > 0 && (
+                        <p className="bl15-concept-extra">
+                          Still waiting on a domain answer:{' '}
+                          {c.unresolved_questions.join(', ')}.
+                        </p>
+                      )}
                       {c.allowed_values.length > 0 && (
                         <p className="bl15-concept-extra">
                           The schema allows: {c.allowed_values.join(', ')}.

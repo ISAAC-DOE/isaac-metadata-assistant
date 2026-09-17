@@ -219,6 +219,65 @@ export interface Bl15ConceptMapping {
   allowed_values: string[];
   candidate_homes: string[];
   proposable: boolean;
+  /**
+   * `DEC-41`'s placement level, 1-4 — WHERE this concept's information lands.
+   *
+   * **A PLACEMENT IS NOT A STATUS, and the two are served side by side precisely
+   * because they answer different questions.** `status` says whether a value may
+   * TRAVEL toward a candidate; this says whether the information has a HOME at all.
+   * A `not_expressible` concept at level 4 is not a dead end — it lands in the
+   * structured ISAAC Extended Context companion, which is the whole point of the
+   * hierarchy.
+   *
+   * DERIVED ON THE SERVER from the paths the registry declares, never stated by a
+   * registry row, so it cannot disagree with `official_path`. Optional here for the
+   * reason every added mirror member is: a persisted session document written before
+   * the server published it carries neither key.
+   */
+  placement_level?: number;
+  /**
+   * The level's own words. Rendered VERBATIM and never re-authored here.
+   *
+   * Both the number and the words are published because a bare integer on a screen
+   * is a rank a reader has to look up — the server's own reasoning, kept.
+   */
+  placement_name?: string;
+  /** Packet question ids touching this concept. */
+  domain_questions?: string[];
+  /**
+   * The subset of `domain_questions` that are STILL OPEN.
+   *
+   * Separate from `domain_questions` because twelve of the twenty closed on
+   * 2026-09-17: a surface reading the full list would keep telling a scientist to
+   * wait for an answer that has already arrived.
+   */
+  unresolved_questions?: string[];
+}
+
+/**
+ * `mapping.DomainQuestion.to_state()` — one packet question and its disposition.
+ *
+ * MIRRORED FROM THE SERVER'S ACTUAL OUTPUT, not from what a question "should" carry:
+ * there is no `answer` member and no `closed_by`. What closed a question is in
+ * `note`, which is prose a scientist reads, and `disposition` is the vocabulary.
+ */
+export interface Bl15DomainQuestion {
+  question_id: string;
+  subject: string;
+  disposition: string;
+  /** WHAT closed it, or what narrowed it. Rendered verbatim. */
+  note: string;
+  is_open: boolean;
+}
+
+/** `mapping.placement_coverage()` — how many concepts land at each level. */
+export interface Bl15PlacementCoverage {
+  '1': number;
+  '2': number;
+  '3': number;
+  '4': number;
+  open_domain_questions: number;
+  concepts_with_an_open_question: number;
 }
 
 /** `mapping.coverage()` — counts per status plus the unexamined remainder. */
@@ -247,6 +306,29 @@ export interface Bl15CorpusReview {
     assets_blocked_reason: string;
     /** `mapping.CYCLING_STATE_NO_FIELD_REASON`. */
     cycling_state_no_field_reason?: string;
+    /**
+     * `mapping.placement_coverage()` — `DEC-41` / `CTX-001`.
+     *
+     * Served BESIDE `coverage` and never folded into it, which is the server's own
+     * decision and is preserved here rather than reinterpreted: a status count
+     * answers "can a value travel" and a placement count answers "does the
+     * information have a home". Both sum to the same 45 concepts and mean different
+     * things, so a surface that added them would be double-counting.
+     */
+    placement?: Bl15PlacementCoverage;
+    /** `level -> the level's own words`, from `mapping.PLACEMENT_NAMES`. */
+    placement_levels?: Record<string, string>;
+    /** All twenty packet questions, closed ones included. */
+    domain_questions?: Bl15DomainQuestion[];
+    /** The ids still open — eight of the twenty as of 2026-09-17. */
+    open_domain_questions?: string[];
+    /**
+     * Concepts marked `needs_domain_review` with no packet question behind them.
+     *
+     * Named by the server rather than left to be subtracted, which is why it is
+     * mirrored rather than derived here.
+     */
+    needs_review_without_a_question?: string[];
   };
 }
 

@@ -4,6 +4,7 @@
  * is always paired with a text label at the call site (never icon-only signal).
  */
 import {
+  BookMarked,
   Check,
   User,
   UserCheck,
@@ -133,6 +134,13 @@ export const CHIP_ICON: Record<ChipKind, LucideIcon> = {
   origAssistant: Cpu,
   origDerived: CornerDownRight,
   origEvidence: Quote,
+  // `DEC-43`. `BookMarked` — a decision somebody wrote down and can be looked up —
+  // and deliberately NOT a warning mark. The origin axis is neutral by construction
+  // (see the paragraph above): an alarming glyph here would encode a judgement about
+  // the VALUE, when what this origin states is where the value came from. That the
+  // number was not measured is carried by the chip's own words, "Domain Guidance,
+  // Not Measured", which is a claim a reader does not have to decode a picture for.
+  origDomainGuidance: BookMarked,
   origUnknown: CircleDashed,
   // REVIEW axis.
   revSupported: Check,

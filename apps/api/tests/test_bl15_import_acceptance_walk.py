@@ -800,6 +800,21 @@ def test_the_proposals_and_notes_are_present_and_each_names_its_source_file(clie
     Every proposal cites a note, and the note carries the source's own words
     prefixed by the FILE and the LINE they were read from — so a reader meeting
     it later can say which file supports which value.
+
+    **THE EQUALITY `len(rows) == counts["sent"]` WAS PINNED HERE AND IS NOW AN
+    IDENTITY OVER TWO PRODUCERS, 2026-09-17 (`DEC-43`, `CTX-002`).** The batch
+    additionally OFFERS the one nominal value in this programme —
+    ``context.temperature_K = 298`` for the BL15-2 Angel profile — as a proposal per
+    created run, and a nominal offer is deliberately NOT in ``counts``: nothing read
+    it from any source, so it is not a candidate and counting it as one would break
+    the sum identity ``test_historical_import_routes.py`` asserts over that block.
+    The count is therefore taken from BOTH published lists rather than relaxed to an
+    inequality — a relaxed assertion here would no longer catch a proposal nothing
+    accounted for, which is what this line exists to catch.
+
+    The per-source assertions below run over the CANDIDATE proposals only, because a
+    nominal offer cites no source file — that is the whole of `DEC-43` — and its own
+    provenance is asserted in ``test_extended_context_wiring.py``.
     """
     import_id = _imported(client)
     eid = _record(client)
@@ -809,7 +824,13 @@ def test_the_proposals_and_notes_are_present_and_each_names_its_source_file(clie
     proposals = client.get(f"/api/experiments/{eid}/proposals")
     assert proposals.status_code == 200, proposals.text
     rows = proposals.json()["proposals"]
-    assert len(rows) == body["counts"]["sent"], (len(rows), body["counts"])
+    nominal_ids = {row["proposal_id"] for row in body["nominal_offers"]}
+    assert len(rows) == body["counts"]["sent"] + len(nominal_ids), (
+        len(rows),
+        body["counts"],
+        len(nominal_ids),
+    )
+    rows = [row for row in rows if row["proposal_id"] not in nominal_ids]
 
     notes = client.get(f"/api/experiments/{eid}/notes")
     assert notes.status_code == 200, notes.text

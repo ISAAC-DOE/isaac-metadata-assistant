@@ -281,7 +281,7 @@
               }
             ],
             "unresolved_reason": "sources_disagree",
-            "explanation": "This measurement exists but no macro in the import declared it. That is normal for work driven by hand, and it also happens when a file was renamed after acquisition \u2014 the acquisition is real either way."
+            "explanation": "This measurement exists but no macro in the import declared it. That is normal for work driven by hand, and it also happens when a file was renamed after acquisition — the acquisition is real either way."
           }
         ],
         "source_count": 7
@@ -338,7 +338,7 @@
               }
             ],
             "unresolved_reason": "sources_disagree",
-            "explanation": "This measurement exists but no macro in the import declared it. That is normal for work driven by hand, and it also happens when a file was renamed after acquisition \u2014 the acquisition is real either way."
+            "explanation": "This measurement exists but no macro in the import declared it. That is normal for work driven by hand, and it also happens when a file was renamed after acquisition — the acquisition is real either way."
           }
         ],
         "source_count": 4
@@ -391,7 +391,7 @@
               }
             ],
             "unresolved_reason": "sources_disagree",
-            "explanation": "This measurement exists but no macro in the import declared it. That is normal for work driven by hand, and it also happens when a file was renamed after acquisition \u2014 the acquisition is real either way."
+            "explanation": "This measurement exists but no macro in the import declared it. That is normal for work driven by hand, and it also happens when a file was renamed after acquisition — the acquisition is real either way."
           }
         ],
         "source_count": 3
@@ -524,7 +524,7 @@
       {
         "archive_path": "readme.txt",
         "source_type": "shared_readme",
-        "reason": "beamtime-scope context \u2014 belongs to the whole import, not to one measurement, and is inherited rather than copied"
+        "reason": "beamtime-scope context — belongs to the whole import, not to one measurement, and is inherited rather than copied"
       },
       {
         "archive_path": "runZZ2.mac",
@@ -818,8 +818,8 @@
   "mapping": {
     "coverage": {
       "blocked_by_build": 1,
-      "deterministic": 2,
-      "needs_domain_review": 14,
+      "deterministic": 1,
+      "needs_domain_review": 15,
       "normalized": 4,
       "not_expressible": 24,
       "examined": 45,
@@ -827,6 +827,78 @@
       "concepts_total": 45
     },
     "concepts": [
+      {
+        "concept": "absorption_edge",
+        "status": "not_expressible",
+        "official_path": null,
+        "reason": "The absorbing element and its edge are implicit/sidecar-only for this technique path and must not be forced into the official record while the schema provides no valid field. That is a standing project rule, not a judgement made here. The schema describes system.configuration as 'THE designated open extension namespace' for instrument- and station-specific configuration that does not generalize across facilities — naming slits, pass energies and logbook fields, which is what a filter index and a spectrometer crystal are. So a natural home exists. BUT the six system.configuration.* fields are recorded as unclassified with the domain owner's classification outstanding, and no write route in this build accepts them. Candidate home; NOT a settled mapping and not writable today.",
+        "rule": null,
+        "requires_siblings": [],
+        "allowed_values": [],
+        "candidate_homes": [
+          "system.configuration"
+        ],
+        "proposable": false,
+        "placement_level": 2,
+        "placement_name": "schema-approved extension point",
+        "domain_questions": [
+          "Q13",
+          "Q19"
+        ],
+        "unresolved_questions": []
+      },
+      {
+        "concept": "acquisition_epoch",
+        "status": "normalized",
+        "official_path": "timestamps.acquired_start_utc",
+        "reason": "The SPEC header states the acquisition instant twice — once as Unix seconds and once as a formatted local date — and the epoch line is the one that converts without assuming a timezone, which is why the rule hangs off it. THE TWO ARE NOT RECONCILED HERE: they are two statements the file makes, and if they disagree both are read and the disagreement belongs to a scientist. Choosing the epoch as the mappable one is a statement about which is convertible, not about which is right.",
+        "rule": "unix_epoch_seconds_to_iso8601_utc",
+        "requires_siblings": [],
+        "allowed_values": [],
+        "candidate_homes": [],
+        "proposable": true,
+        "placement_level": 1,
+        "placement_name": "native official ISAAC v1.05 field",
+        "domain_questions": [],
+        "unresolved_questions": []
+      },
+      {
+        "concept": "acquisition_method",
+        "status": "needs_domain_review",
+        "official_path": "system.technique",
+        "reason": "~~The acquisition-method macro defines a named high-energy-resolution fluorescence-detected absorption scan … so this is a transcription rather than a judgement.~~ CORRECTED 2026-09-16, the same day, by the slice that wired this registry to a route and MEASURED what the concept actually carries. The reasoning was about what a human reading the corpus knows; the mapping is about what the readers emit, and those are different. Measured: from a macro this concept carries THE MACRO'S OWN NAME — the file a `qdo` includes, or the symbol a `def` block defines — and from a filename it carries the profile's alias reading, whose normalised values are lowercase shorthands. NOT ONE OF THOSE IS A MEMBER OF THE SCHEMA'S TECHNIQUE ENUM, so the old status proposed an off-enum value from every source, and a proposal at this path is then work a scientist is offered and cannot complete. Two further reasons it is a judgement and not a transcription: one alias normalises to a DETECTION MODE, which the enum has no member for at all and which is not a technique; and the strongest evidence for the real technique is a word in the beamtime document's TITLE, which no reader in this build reads as a technique statement. So the enum member is a scientist's to choose, and the options are named below so that choice is one word.",
+        "rule": null,
+        "requires_siblings": [
+          "system.domain"
+        ],
+        "allowed_values": [
+          "XAS",
+          "HERFD-XAS",
+          "XES",
+          "RIXS"
+        ],
+        "candidate_homes": [],
+        "proposable": false,
+        "placement_level": 1,
+        "placement_name": "native official ISAAC v1.05 field",
+        "domain_questions": [],
+        "unresolved_questions": []
+      },
+      {
+        "concept": "acquisition_target",
+        "status": "not_expressible",
+        "official_path": null,
+        "reason": "The measurement name a macro DECLARES it is about to write. It is intent, and in this corpus nine declared targets were never acquired while nine acquisitions were never declared. It is a relationship key, not a field.",
+        "rule": null,
+        "requires_siblings": [],
+        "allowed_values": [],
+        "candidate_homes": [],
+        "proposable": false,
+        "placement_level": 4,
+        "placement_name": "structured ISAAC Extended Context companion",
+        "domain_questions": [],
+        "unresolved_questions": []
+      },
       {
         "concept": "acquisition_timestamp",
         "status": "deterministic",
@@ -836,44 +908,306 @@
         "requires_siblings": [],
         "allowed_values": [],
         "candidate_homes": [],
-        "proposable": true
+        "proposable": true,
+        "placement_level": 1,
+        "placement_name": "native official ISAAC v1.05 field",
+        "domain_questions": [],
+        "unresolved_questions": []
       },
       {
-        "concept": "acquisition_epoch",
-        "status": "normalized",
-        "official_path": "timestamps.acquired_start_utc",
-        "reason": "The SPEC header states the acquisition instant twice \u2014 once as Unix seconds and once as a formatted local date \u2014 and the epoch line is the one that converts without assuming a timezone, which is why the rule hangs off it. THE TWO ARE NOT RECONCILED HERE: they are two statements the file makes, and if they disagree both are read and the disagreement belongs to a scientist. Choosing the epoch as the mappable one is a statement about which is convertible, not about which is right.",
-        "rule": "unix_epoch_seconds_to_iso8601_utc",
+        "concept": "beamsize",
+        "status": "not_expressible",
+        "official_path": null,
+        "reason": "Beam dimensions at a stated energy are station configuration. The schema describes system.configuration as 'THE designated open extension namespace' for instrument- and station-specific configuration that does not generalize across facilities — naming slits, pass energies and logbook fields, which is what a filter index and a spectrometer crystal are. So a natural home exists. BUT the six system.configuration.* fields are recorded as unclassified with the domain owner's classification outstanding, and no write route in this build accepts them. Candidate home; NOT a settled mapping and not writable today.",
+        "rule": null,
         "requires_siblings": [],
         "allowed_values": [],
-        "candidate_homes": [],
-        "proposable": true
+        "candidate_homes": [
+          "system.configuration"
+        ],
+        "proposable": false,
+        "placement_level": 2,
+        "placement_name": "schema-approved extension point",
+        "domain_questions": [
+          "Q19"
+        ],
+        "unresolved_questions": []
       },
       {
-        "concept": "potential_magnitude",
-        "status": "normalized",
-        "official_path": "context.electrochemistry.potential_setpoint_V",
-        "reason": "Filenames state a potential magnitude in two unit conventions. The schema's field is in volts. THE MAGNITUDE IS ALL THAT IS MAPPED HERE \u2014 the electrochemical reference it is measured against is a separate concept with a separate and usually absent mapping, and collapsing the two would assert a basis no source states.",
-        "rule": "millivolts_to_volts_and_p_as_decimal_point",
+        "concept": "beamtime_dates",
+        "status": "needs_domain_review",
+        "official_path": null,
+        "reason": "The notes state the beamtime window. The schema's timestamps are per record — an acquisition's own start and end — and a campaign window is neither. Writing it into a record's acquired_start_utc would claim a measurement began when the beamtime did.",
+        "rule": null,
+        "requires_siblings": [],
+        "allowed_values": [],
+        "candidate_homes": [
+          "timestamps.revision_note"
+        ],
+        "proposable": false,
+        "placement_level": 4,
+        "placement_name": "structured ISAAC Extended Context companion",
+        "domain_questions": [],
+        "unresolved_questions": []
+      },
+      {
+        "concept": "beamtime_purpose",
+        "status": "not_expressible",
+        "official_path": null,
+        "reason": "The scientific aim of the campaign is stated in the notes' own words. There is no purpose or abstract field; tags is a free array and would reduce a paragraph to keywords, which loses the statement rather than recording it. Preserved as source evidence.",
+        "rule": null,
+        "requires_siblings": [],
+        "allowed_values": [],
+        "candidate_homes": [
+          "tags"
+        ],
+        "proposable": false,
+        "placement_level": 4,
+        "placement_name": "structured ISAAC Extended Context companion",
+        "domain_questions": [
+          "Q7"
+        ],
+        "unresolved_questions": [
+          "Q7"
+        ]
+      },
+      {
+        "concept": "before_after_state",
+        "status": "not_expressible",
+        "official_path": null,
+        "reason": "The before/after qualifier is one half of the cycling-state concept and has no field for the same reason.",
+        "rule": null,
+        "requires_siblings": [],
+        "allowed_values": [],
+        "candidate_homes": [
+          "measurement.series[].conditions"
+        ],
+        "proposable": false,
+        "placement_level": 3,
+        "placement_name": "Run / series condition",
+        "domain_questions": [
+          "Q20"
+        ],
+        "unresolved_questions": []
+      },
+      {
+        "concept": "counting_time",
+        "status": "not_expressible",
+        "official_path": null,
+        "reason": "Dwell time per point is stated by the acquisition header and by the macro call. It is an acquisition parameter with no schema field; as a per-series operating condition it has a schema-legal candidate home.",
+        "rule": null,
+        "requires_siblings": [],
+        "allowed_values": [],
+        "candidate_homes": [
+          "measurement.series[].conditions"
+        ],
+        "proposable": false,
+        "placement_level": 3,
+        "placement_name": "Run / series condition",
+        "domain_questions": [
+          "Q20"
+        ],
+        "unresolved_questions": []
+      },
+      {
+        "concept": "cycling_state",
+        "status": "not_expressible",
+        "official_path": null,
+        "reason": "The official schema has no field for electrochemical cycling history (beforeCycling / after1500Cycling / after1stCycling). It is the single most important experimental variable in this corpus, which makes it the strongest schema-request case the corpus produced — and a schema request is upstream's decision, not this repository's. measurement.series[].conditions is a schema-legal candidate home for it as a per-series condition; nothing here places it there.",
+        "rule": null,
+        "requires_siblings": [],
+        "allowed_values": [],
+        "candidate_homes": [
+          "measurement.series[].conditions"
+        ],
+        "proposable": false,
+        "placement_level": 3,
+        "placement_name": "Run / series condition",
+        "domain_questions": [
+          "Q20"
+        ],
+        "unresolved_questions": []
+      },
+      {
+        "concept": "detector_column",
+        "status": "needs_domain_review",
+        "official_path": "measurement.series[].channels[].name",
+        "reason": "A scan export names its columns, so the names are evidenced. The schema requires a role for each from a closed set, and assigning those roles is a scientific reading of the detector set, not a transcription.",
+        "rule": null,
         "requires_siblings": [
+          "measurement.series[].channels[].unit",
+          "measurement.series[].channels[].role"
+        ],
+        "allowed_values": [
+          "primary_signal",
+          "measured_response",
+          "simulated_observable",
+          "derived_signal",
+          "auxiliary_signal",
+          "control_readback",
+          "quality_monitor"
+        ],
+        "candidate_homes": [],
+        "proposable": false,
+        "placement_level": 1,
+        "placement_name": "native official ISAAC v1.05 field",
+        "domain_questions": [
+          "Q11"
+        ],
+        "unresolved_questions": [
+          "Q11"
+        ]
+      },
+      {
+        "concept": "dry_state",
+        "status": "not_expressible",
+        "official_path": null,
+        "reason": "A dry or as-received measurement is a condition with no schema field. It interacts with the environment enum — an ex-situ reading is plausible for these — but the enum describes the MEASUREMENT context and this token describes the sample's state, and conflating them would assert something no source states.",
+        "rule": null,
+        "requires_siblings": [],
+        "allowed_values": [],
+        "candidate_homes": [
+          "measurement.series[].conditions"
+        ],
+        "proposable": false,
+        "placement_level": 3,
+        "placement_name": "Run / series condition",
+        "domain_questions": [
+          "Q6",
+          "Q20"
+        ],
+        "unresolved_questions": [
+          "Q6"
+        ]
+      },
+      {
+        "concept": "echem_procedure",
+        "status": "needs_domain_review",
+        "official_path": "context.electrochemistry.notes",
+        "reason": "The notes tabulate the electrochemical program step by step, including an impedance-compensation step whose parameters the schema models properly in its ir_compensation object rather than as prose. So part of this concept has a STRUCTURED home and part has only a notes field, and which rows are which is a reading of the protocol.",
+        "rule": null,
+        "requires_siblings": [],
+        "allowed_values": [],
+        "candidate_homes": [
+          "context.electrochemistry.ir_compensation.method",
           "context.electrochemistry.control_mode"
         ],
-        "allowed_values": [],
-        "candidate_homes": [],
-        "proposable": true
+        "proposable": false,
+        "placement_level": 1,
+        "placement_name": "native official ISAAC v1.05 field",
+        "domain_questions": [
+          "Q8",
+          "Q10"
+        ],
+        "unresolved_questions": [
+          "Q8"
+        ]
       },
       {
-        "concept": "ph",
-        "status": "normalized",
-        "official_path": "context.electrochemistry.pH",
-        "reason": "The beamtime notes state a pH for the later oxide samples. The schema pairs it with pH_basis, whose members are 'measured', 'nominal' and 'buffered_assumed'; a figure quoted beside a hydroxide concentration is evidenced as nominal, and no source states a basis for any other sample.",
-        "rule": "ph_figure_read_verbatim_basis_nominal_only_where_quoted_with_a_concentration",
+        "concept": "electrolyte_or_medium",
+        "status": "needs_domain_review",
+        "official_path": "context.electrochemistry.electrolyte.name",
+        "reason": "Filenames say only 'acid' or 'base', which is a medium class and not an electrolyte name, and the schema REQUIRES both a name and a molar concentration in the same object. The notes name a specific acid for one sample; the one sentence that would supply a concentration for the rest is the corpus's own contradicted broad claim — it asserts a single hydroxide for ALL experiments while sitting above a sample section labelled acid, in a document whose preparation steps specify the acid. So this concept cannot be mapped from a filename at all, and the note that would complete it is in conflict with the same document.",
+        "rule": null,
         "requires_siblings": [
-          "context.electrochemistry.pH_basis"
+          "context.electrochemistry.electrolyte.concentration_M"
         ],
         "allowed_values": [],
         "candidate_homes": [],
-        "proposable": true
+        "proposable": false,
+        "placement_level": 1,
+        "placement_name": "native official ISAAC v1.05 field",
+        "domain_questions": [
+          "Q2",
+          "Q5"
+        ],
+        "unresolved_questions": []
+      },
+      {
+        "concept": "element",
+        "status": "needs_domain_review",
+        "official_path": null,
+        "reason": "The beamtime README names the absorbing element in one line, for the whole beamtime. The official schema has no absorber-element field; the absorbing element and edge are recorded as implicit/sidecar-only for the XANES path and must not be forced into the official record where the schema provides no valid path. The schema describes system.configuration as 'THE designated open extension namespace' for instrument- and station-specific configuration that does not generalize across facilities — naming slits, pass energies and logbook fields, which is what a filter index and a spectrometer crystal are. So a natural home exists. BUT the six system.configuration.* fields are recorded as unclassified with the domain owner's classification outstanding, and no write route in this build accepts them. Candidate home; NOT a settled mapping and not writable today.",
+        "rule": null,
+        "requires_siblings": [],
+        "allowed_values": [],
+        "candidate_homes": [
+          "system.configuration"
+        ],
+        "proposable": false,
+        "placement_level": 2,
+        "placement_name": "schema-approved extension point",
+        "domain_questions": [
+          "Q13",
+          "Q19"
+        ],
+        "unresolved_questions": []
+      },
+      {
+        "concept": "emission_energy",
+        "status": "not_expressible",
+        "official_path": null,
+        "reason": "The emission energy the spectrometer is parked at is stated by the acquisition headers and by the macro call, and the official schema has no field for it. The schema describes system.configuration as 'THE designated open extension namespace' for instrument- and station-specific configuration that does not generalize across facilities — naming slits, pass energies and logbook fields, which is what a filter index and a spectrometer crystal are. So a natural home exists. BUT the six system.configuration.* fields are recorded as unclassified with the domain owner's classification outstanding, and no write route in this build accepts them. Candidate home; NOT a settled mapping and not writable today.",
+        "rule": null,
+        "requires_siblings": [],
+        "allowed_values": [],
+        "candidate_homes": [
+          "measurement.series[].conditions",
+          "system.configuration"
+        ],
+        "proposable": false,
+        "placement_level": 2,
+        "placement_name": "schema-approved extension point",
+        "domain_questions": [
+          "Q19"
+        ],
+        "unresolved_questions": []
+      },
+      {
+        "concept": "energy_grid",
+        "status": "needs_domain_review",
+        "official_path": "measurement.series[].independent_variables[].values",
+        "reason": "The scan grid is stated literally by the acquisition command and by the method macro, so the VALUES are evidenced. What the schema needs alongside them is a channel set with a role for each, and which detector column carries the primary signal among the many a scan export records is a domain fact this repository must not choose.",
+        "rule": null,
+        "requires_siblings": [
+          "measurement.series[].series_id",
+          "measurement.series[].independent_variables[].name",
+          "measurement.series[].independent_variables[].unit",
+          "measurement.series[].channels[]"
+        ],
+        "allowed_values": [],
+        "candidate_homes": [],
+        "proposable": false,
+        "placement_level": 1,
+        "placement_name": "native official ISAAC v1.05 field",
+        "domain_questions": [
+          "Q11",
+          "Q12"
+        ],
+        "unresolved_questions": [
+          "Q11"
+        ]
+      },
+      {
+        "concept": "filter",
+        "status": "not_expressible",
+        "official_path": null,
+        "reason": "An attenuator index is beamline-specific instrument state. The official schema has no field for it. The schema describes system.configuration as 'THE designated open extension namespace' for instrument- and station-specific configuration that does not generalize across facilities — naming slits, pass energies and logbook fields, which is what a filter index and a spectrometer crystal are. So a natural home exists. BUT the six system.configuration.* fields are recorded as unclassified with the domain owner's classification outstanding, and no write route in this build accepts them. Candidate home; NOT a settled mapping and not writable today.",
+        "rule": null,
+        "requires_siblings": [],
+        "allowed_values": [],
+        "candidate_homes": [
+          "measurement.series[].conditions",
+          "system.configuration"
+        ],
+        "proposable": false,
+        "placement_level": 2,
+        "placement_name": "schema-approved extension point",
+        "domain_questions": [
+          "Q19",
+          "Q20"
+        ],
+        "unresolved_questions": []
       },
       {
         "concept": "flow_rate",
@@ -888,7 +1222,194 @@
         ],
         "allowed_values": [],
         "candidate_homes": [],
-        "proposable": true
+        "proposable": true,
+        "placement_level": 1,
+        "placement_name": "native official ISAAC v1.05 field",
+        "domain_questions": [],
+        "unresolved_questions": []
+      },
+      {
+        "concept": "gas_condition",
+        "status": "needs_domain_review",
+        "official_path": "context.transport.feed.composition",
+        "reason": "The notes describe purging an inert gas and saturating the later samples with it. Whether that is the cell's FEED in the schema's sense — the transport block is written for flowing reactant feeds — or an atmosphere belonging in context.thermodynamics.atmosphere, is a judgement about the experiment rather than about the text.",
+        "rule": null,
+        "requires_siblings": [
+          "context.transport.feed.phase"
+        ],
+        "allowed_values": [],
+        "candidate_homes": [
+          "context.thermodynamics.atmosphere"
+        ],
+        "proposable": false,
+        "placement_level": 1,
+        "placement_name": "native official ISAAC v1.05 field",
+        "domain_questions": [],
+        "unresolved_questions": []
+      },
+      {
+        "concept": "legacy_run_or_file_number",
+        "status": "not_expressible",
+        "official_path": null,
+        "reason": "The leading filename number is the CORPUS'S identifier, not ISAAC's. It must not be forced into record_id, which the server mints, nor into sample.sample_id, which identifies a sample rather than a measurement. It is preserved as source evidence and is the right label to show a scientist, because it is the handle they already use.",
+        "rule": null,
+        "requires_siblings": [],
+        "allowed_values": [],
+        "candidate_homes": [],
+        "proposable": false,
+        "placement_level": 4,
+        "placement_name": "structured ISAAC Extended Context companion",
+        "domain_questions": [
+          "Q16"
+        ],
+        "unresolved_questions": [
+          "Q16"
+        ]
+      },
+      {
+        "concept": "loading_or_thickness",
+        "status": "needs_domain_review",
+        "official_path": null,
+        "reason": "One filename slot carries two physically different quantities in this corpus — an overlayer thickness in nanometres for the oxide samples and a weight loading in percent for the pellets. The schema has a composition object and a geometry object and a natural home for neither, so this is both a mapping question and a question about what the token means.",
+        "rule": null,
+        "requires_siblings": [],
+        "allowed_values": [],
+        "candidate_homes": [
+          "sample.composition",
+          "sample.geometry"
+        ],
+        "proposable": false,
+        "placement_level": 4,
+        "placement_name": "structured ISAAC Extended Context companion",
+        "domain_questions": [
+          "Q18"
+        ],
+        "unresolved_questions": []
+      },
+      {
+        "concept": "monochromator_calibration",
+        "status": "not_expressible",
+        "official_path": null,
+        "reason": "The README states which foil the monochromator was calibrated against. There is no calibration field; links[].rel = calibration_of with basis same_absorber_edge can express the RELATIONSHIP once a calibration record exists to point at, which this corpus does not contain. The schema describes system.configuration as 'THE designated open extension namespace' for instrument- and station-specific configuration that does not generalize across facilities — naming slits, pass energies and logbook fields, which is what a filter index and a spectrometer crystal are. So a natural home exists. BUT the six system.configuration.* fields are recorded as unclassified with the domain owner's classification outstanding, and no write route in this build accepts them. Candidate home; NOT a settled mapping and not writable today.",
+        "rule": null,
+        "requires_siblings": [],
+        "allowed_values": [],
+        "candidate_homes": [
+          "system.configuration",
+          "links[]"
+        ],
+        "proposable": false,
+        "placement_level": 2,
+        "placement_name": "schema-approved extension point",
+        "domain_questions": [
+          "Q19"
+        ],
+        "unresolved_questions": []
+      },
+      {
+        "concept": "motor_position",
+        "status": "not_expressible",
+        "official_path": null,
+        "reason": "An acquisition header records roughly a hundred and eighty motor positions. They are genuine instrument state and the schema has no field for any of them. The schema describes system.configuration as 'THE designated open extension namespace' for instrument- and station-specific configuration that does not generalize across facilities — naming slits, pass energies and logbook fields, which is what a filter index and a spectrometer crystal are. So a natural home exists. BUT the six system.configuration.* fields are recorded as unclassified with the domain owner's classification outstanding, and no write route in this build accepts them. Candidate home; NOT a settled mapping and not writable today.",
+        "rule": null,
+        "requires_siblings": [],
+        "allowed_values": [],
+        "candidate_homes": [
+          "system.configuration"
+        ],
+        "proposable": false,
+        "placement_level": 2,
+        "placement_name": "schema-approved extension point",
+        "domain_questions": [
+          "Q19"
+        ],
+        "unresolved_questions": []
+      },
+      {
+        "concept": "new_spot",
+        "status": "not_expressible",
+        "official_path": null,
+        "reason": "Moving to an unexposed spot on the same electrode is a real experimental act with no schema field. It is not a replicate — the sample is the same one — so links[].rel = replica_of would be wrong about it.",
+        "rule": null,
+        "requires_siblings": [],
+        "allowed_values": [],
+        "candidate_homes": [
+          "measurement.series[].conditions"
+        ],
+        "proposable": false,
+        "placement_level": 3,
+        "placement_name": "Run / series condition",
+        "domain_questions": [
+          "Q20"
+        ],
+        "unresolved_questions": []
+      },
+      {
+        "concept": "note_file_number_row",
+        "status": "not_expressible",
+        "official_path": null,
+        "reason": "A row from the human file-number table is the scientist's own independent mapping from a file number to a condition. Its VALUE is as corroboration and as a cross-check against the filesystem — which is a relationship question — and the individual concepts inside such a row have their own entries in this registry.",
+        "rule": null,
+        "requires_siblings": [],
+        "allowed_values": [],
+        "candidate_homes": [],
+        "proposable": false,
+        "placement_level": 4,
+        "placement_name": "structured ISAAC Extended Context companion",
+        "domain_questions": [],
+        "unresolved_questions": []
+      },
+      {
+        "concept": "ph",
+        "status": "normalized",
+        "official_path": "context.electrochemistry.pH",
+        "reason": "The beamtime notes state a pH for the later oxide samples. The schema pairs it with pH_basis, whose members are 'measured', 'nominal' and 'buffered_assumed'; a figure quoted beside a hydroxide concentration is evidenced as nominal, and no source states a basis for any other sample.",
+        "rule": "ph_figure_read_verbatim_basis_nominal_only_where_quoted_with_a_concentration",
+        "requires_siblings": [
+          "context.electrochemistry.pH_basis"
+        ],
+        "allowed_values": [],
+        "candidate_homes": [],
+        "proposable": true,
+        "placement_level": 1,
+        "placement_name": "native official ISAAC v1.05 field",
+        "domain_questions": [],
+        "unresolved_questions": []
+      },
+      {
+        "concept": "point_count",
+        "status": "not_expressible",
+        "official_path": null,
+        "reason": "The number of points in a scan is a property OF the series values, not a separate field. If the values are ever carried, the count is implied by them; recording it alongside would create a second place for one fact to be wrong.",
+        "rule": null,
+        "requires_siblings": [],
+        "allowed_values": [],
+        "candidate_homes": [],
+        "proposable": false,
+        "placement_level": 4,
+        "placement_name": "structured ISAAC Extended Context companion",
+        "domain_questions": [],
+        "unresolved_questions": []
+      },
+      {
+        "concept": "potential_magnitude",
+        "status": "normalized",
+        "official_path": "context.electrochemistry.potential_setpoint_V",
+        "reason": "Filenames state a potential magnitude in two unit conventions. The schema's field is in volts. THE MAGNITUDE IS ALL THAT IS MAPPED HERE — the electrochemical reference it is measured against is a separate concept with a separate and usually absent mapping, and collapsing the two would assert a basis no source states.",
+        "rule": "millivolts_to_volts_and_p_as_decimal_point",
+        "requires_siblings": [
+          "context.electrochemistry.control_mode"
+        ],
+        "allowed_values": [],
+        "candidate_homes": [],
+        "proposable": true,
+        "placement_level": 1,
+        "placement_name": "native official ISAAC v1.05 field",
+        "domain_questions": [
+          "Q2",
+          "Q20"
+        ],
+        "unresolved_questions": []
       },
       {
         "concept": "potential_reference_basis",
@@ -911,305 +1432,15 @@
         "candidate_homes": [
           "context.electrochemistry.potential_scale"
         ],
-        "proposable": false
-      },
-      {
-        "concept": "electrolyte_or_medium",
-        "status": "needs_domain_review",
-        "official_path": "context.electrochemistry.electrolyte.name",
-        "reason": "Filenames say only 'acid' or 'base', which is a medium class and not an electrolyte name, and the schema REQUIRES both a name and a molar concentration in the same object. The notes name a specific acid for one sample; the one sentence that would supply a concentration for the rest is the corpus's own contradicted broad claim \u2014 it asserts a single hydroxide for ALL experiments while sitting above a sample section labelled acid, in a document whose preparation steps specify the acid. So this concept cannot be mapped from a filename at all, and the note that would complete it is in conflict with the same document.",
-        "rule": null,
-        "requires_siblings": [
-          "context.electrochemistry.electrolyte.concentration_M"
+        "proposable": false,
+        "placement_level": 1,
+        "placement_name": "native official ISAAC v1.05 field",
+        "domain_questions": [
+          "Q9"
         ],
-        "allowed_values": [],
-        "candidate_homes": [],
-        "proposable": false
-      },
-      {
-        "concept": "gas_condition",
-        "status": "needs_domain_review",
-        "official_path": "context.transport.feed.composition",
-        "reason": "The notes describe purging an inert gas and saturating the later samples with it. Whether that is the cell's FEED in the schema's sense \u2014 the transport block is written for flowing reactant feeds \u2014 or an atmosphere belonging in context.thermodynamics.atmosphere, is a judgement about the experiment rather than about the text.",
-        "rule": null,
-        "requires_siblings": [
-          "context.transport.feed.phase"
-        ],
-        "allowed_values": [],
-        "candidate_homes": [
-          "context.thermodynamics.atmosphere"
-        ],
-        "proposable": false
-      },
-      {
-        "concept": "sample_name",
-        "status": "needs_domain_review",
-        "official_path": "sample.material.name",
-        "reason": "A filename's sample token is the scientist's own shorthand \u2014 an electrode label for some samples and a material description for others. Which of those two it is decides whether it belongs at sample.material.name or sample.sample_id, and only the scientist who wrote it can say. The schema also requires a sample_form alongside, which no filename states.",
-        "rule": null,
-        "requires_siblings": [
-          "sample.sample_form"
-        ],
-        "allowed_values": [],
-        "candidate_homes": [
-          "sample.sample_id",
-          "sample.electrode_type"
-        ],
-        "proposable": false
-      },
-      {
-        "concept": "sample_or_electrode_number",
-        "status": "needs_domain_review",
-        "official_path": "sample.sample_id",
-        "reason": "The second numeric filename token behaves like a sample or electrode instance, and the grouping it implies agrees with the beamtime notes' own sample sections. AGREEMENT IS NOT CONFIRMATION: whether that token always means the instance is the first question in the domain packet, and the notes could agree with a token that means something else.",
-        "rule": null,
-        "requires_siblings": [],
-        "allowed_values": [],
-        "candidate_homes": [
-          "sample.library.sample_no"
-        ],
-        "proposable": false
-      },
-      {
-        "concept": "loading_or_thickness",
-        "status": "needs_domain_review",
-        "official_path": null,
-        "reason": "One filename slot carries two physically different quantities in this corpus \u2014 an overlayer thickness in nanometres for the oxide samples and a weight loading in percent for the pellets. The schema has a composition object and a geometry object and a natural home for neither, so this is both a mapping question and a question about what the token means.",
-        "rule": null,
-        "requires_siblings": [],
-        "allowed_values": [],
-        "candidate_homes": [
-          "sample.composition",
-          "sample.geometry"
-        ],
-        "proposable": false
-      },
-      {
-        "concept": "element",
-        "status": "needs_domain_review",
-        "official_path": null,
-        "reason": "The beamtime README names the absorbing element in one line, for the whole beamtime. The official schema has no absorber-element field; the absorbing element and edge are recorded as implicit/sidecar-only for the XANES path and must not be forced into the official record where the schema provides no valid path. The schema describes system.configuration as 'THE designated open extension namespace' for instrument- and station-specific configuration that does not generalize across facilities \u2014 naming slits, pass energies and logbook fields, which is what a filter index and a spectrometer crystal are. So a natural home exists. BUT the six system.configuration.* fields are recorded as unclassified with the domain owner's classification outstanding, and no write route in this build accepts them. Candidate home; NOT a settled mapping and not writable today.",
-        "rule": null,
-        "requires_siblings": [],
-        "allowed_values": [],
-        "candidate_homes": [
-          "system.configuration"
-        ],
-        "proposable": false
-      },
-      {
-        "concept": "cycling_state",
-        "status": "not_expressible",
-        "official_path": null,
-        "reason": "The official schema has no field for electrochemical cycling history (beforeCycling / after1500Cycling / after1stCycling). It is the single most important experimental variable in this corpus, which makes it the strongest schema-request case the corpus produced \u2014 and a schema request is upstream's decision, not this repository's. measurement.series[].conditions is a schema-legal candidate home for it as a per-series condition; nothing here places it there.",
-        "rule": null,
-        "requires_siblings": [],
-        "allowed_values": [],
-        "candidate_homes": [
-          "measurement.series[].conditions"
-        ],
-        "proposable": false
-      },
-      {
-        "concept": "before_after_state",
-        "status": "not_expressible",
-        "official_path": null,
-        "reason": "The before/after qualifier is one half of the cycling-state concept and has no field for the same reason.",
-        "rule": null,
-        "requires_siblings": [],
-        "allowed_values": [],
-        "candidate_homes": [
-          "measurement.series[].conditions"
-        ],
-        "proposable": false
-      },
-      {
-        "concept": "filter",
-        "status": "not_expressible",
-        "official_path": null,
-        "reason": "An attenuator index is beamline-specific instrument state. The official schema has no field for it. The schema describes system.configuration as 'THE designated open extension namespace' for instrument- and station-specific configuration that does not generalize across facilities \u2014 naming slits, pass energies and logbook fields, which is what a filter index and a spectrometer crystal are. So a natural home exists. BUT the six system.configuration.* fields are recorded as unclassified with the domain owner's classification outstanding, and no write route in this build accepts them. Candidate home; NOT a settled mapping and not writable today.",
-        "rule": null,
-        "requires_siblings": [],
-        "allowed_values": [],
-        "candidate_homes": [
-          "measurement.series[].conditions",
-          "system.configuration"
-        ],
-        "proposable": false
-      },
-      {
-        "concept": "emission_energy",
-        "status": "not_expressible",
-        "official_path": null,
-        "reason": "The emission energy the spectrometer is parked at is stated by the acquisition headers and by the macro call, and the official schema has no field for it. The schema describes system.configuration as 'THE designated open extension namespace' for instrument- and station-specific configuration that does not generalize across facilities \u2014 naming slits, pass energies and logbook fields, which is what a filter index and a spectrometer crystal are. So a natural home exists. BUT the six system.configuration.* fields are recorded as unclassified with the domain owner's classification outstanding, and no write route in this build accepts them. Candidate home; NOT a settled mapping and not writable today.",
-        "rule": null,
-        "requires_siblings": [],
-        "allowed_values": [],
-        "candidate_homes": [
-          "measurement.series[].conditions",
-          "system.configuration"
-        ],
-        "proposable": false
-      },
-      {
-        "concept": "legacy_run_or_file_number",
-        "status": "not_expressible",
-        "official_path": null,
-        "reason": "The leading filename number is the CORPUS'S identifier, not ISAAC's. It must not be forced into record_id, which the server mints, nor into sample.sample_id, which identifies a sample rather than a measurement. It is preserved as source evidence and is the right label to show a scientist, because it is the handle they already use.",
-        "rule": null,
-        "requires_siblings": [],
-        "allowed_values": [],
-        "candidate_homes": [],
-        "proposable": false
-      },
-      {
-        "concept": "new_spot",
-        "status": "not_expressible",
-        "official_path": null,
-        "reason": "Moving to an unexposed spot on the same electrode is a real experimental act with no schema field. It is not a replicate \u2014 the sample is the same one \u2014 so links[].rel = replica_of would be wrong about it.",
-        "rule": null,
-        "requires_siblings": [],
-        "allowed_values": [],
-        "candidate_homes": [
-          "measurement.series[].conditions"
-        ],
-        "proposable": false
-      },
-      {
-        "concept": "monochromator_calibration",
-        "status": "not_expressible",
-        "official_path": null,
-        "reason": "The README states which foil the monochromator was calibrated against. There is no calibration field; links[].rel = calibration_of with basis same_absorber_edge can express the RELATIONSHIP once a calibration record exists to point at, which this corpus does not contain. The schema describes system.configuration as 'THE designated open extension namespace' for instrument- and station-specific configuration that does not generalize across facilities \u2014 naming slits, pass energies and logbook fields, which is what a filter index and a spectrometer crystal are. So a natural home exists. BUT the six system.configuration.* fields are recorded as unclassified with the domain owner's classification outstanding, and no write route in this build accepts them. Candidate home; NOT a settled mapping and not writable today.",
-        "rule": null,
-        "requires_siblings": [],
-        "allowed_values": [],
-        "candidate_homes": [
-          "system.configuration",
-          "links[]"
-        ],
-        "proposable": false
-      },
-      {
-        "concept": "spectrometer_configuration",
-        "status": "not_expressible",
-        "official_path": null,
-        "reason": "Slit width, analyser crystal and emission line are exactly the facility-specific configuration the schema declines to generalize. The schema describes system.configuration as 'THE designated open extension namespace' for instrument- and station-specific configuration that does not generalize across facilities \u2014 naming slits, pass energies and logbook fields, which is what a filter index and a spectrometer crystal are. So a natural home exists. BUT the six system.configuration.* fields are recorded as unclassified with the domain owner's classification outstanding, and no write route in this build accepts them. Candidate home; NOT a settled mapping and not writable today.",
-        "rule": null,
-        "requires_siblings": [],
-        "allowed_values": [],
-        "candidate_homes": [
-          "system.configuration"
-        ],
-        "proposable": false
-      },
-      {
-        "concept": "beamsize",
-        "status": "not_expressible",
-        "official_path": null,
-        "reason": "Beam dimensions at a stated energy are station configuration. The schema describes system.configuration as 'THE designated open extension namespace' for instrument- and station-specific configuration that does not generalize across facilities \u2014 naming slits, pass energies and logbook fields, which is what a filter index and a spectrometer crystal are. So a natural home exists. BUT the six system.configuration.* fields are recorded as unclassified with the domain owner's classification outstanding, and no write route in this build accepts them. Candidate home; NOT a settled mapping and not writable today.",
-        "rule": null,
-        "requires_siblings": [],
-        "allowed_values": [],
-        "candidate_homes": [
-          "system.configuration"
-        ],
-        "proposable": false
-      },
-      {
-        "concept": "unknown_token",
-        "status": "not_expressible",
-        "official_path": null,
-        "reason": "A token no profile recognised has no concept, so it can have no mapping. IT IS STILL CARRIED: an unrecognised token is preserved as source evidence and shown to the scientist, because the alternative is dropping part of a filename silently.",
-        "rule": null,
-        "requires_siblings": [],
-        "allowed_values": [],
-        "candidate_homes": [],
-        "proposable": false
-      },
-      {
-        "concept": "scan_command",
-        "status": "blocked_by_build",
-        "official_path": "assets[].uri",
-        "reason": "The official schema requires assets[].sha256, and this build computes no digest for any historical source \u2014 not even for a file it reads. So a historical file cannot become an official asset entry without fabricating a required field. The asset content_role vocabulary otherwise fits this corpus exactly (raw_data_pointer, reduction_product, calibration_reference), which is why this is named as a boundary rather than left to surface as a failing export.",
-        "rule": null,
-        "requires_siblings": [],
-        "allowed_values": [],
-        "candidate_homes": [],
-        "proposable": false
-      },
-      {
-        "concept": "energy_grid",
-        "status": "needs_domain_review",
-        "official_path": "measurement.series[].independent_variables[].values",
-        "reason": "The scan grid is stated literally by the acquisition command and by the method macro, so the VALUES are evidenced. What the schema needs alongside them is a channel set with a role for each, and which detector column carries the primary signal among the many a scan export records is a domain fact this repository must not choose.",
-        "rule": null,
-        "requires_siblings": [
-          "measurement.series[].series_id",
-          "measurement.series[].independent_variables[].name",
-          "measurement.series[].independent_variables[].unit",
-          "measurement.series[].channels[]"
-        ],
-        "allowed_values": [],
-        "candidate_homes": [],
-        "proposable": false
-      },
-      {
-        "concept": "detector_column",
-        "status": "needs_domain_review",
-        "official_path": "measurement.series[].channels[].name",
-        "reason": "A scan export names its columns, so the names are evidenced. The schema requires a role for each from a closed set, and assigning those roles is a scientific reading of the detector set, not a transcription.",
-        "rule": null,
-        "requires_siblings": [
-          "measurement.series[].channels[].unit",
-          "measurement.series[].channels[].role"
-        ],
-        "allowed_values": [
-          "primary_signal",
-          "measured_response",
-          "simulated_observable",
-          "derived_signal",
-          "auxiliary_signal",
-          "control_readback",
-          "quality_monitor"
-        ],
-        "candidate_homes": [],
-        "proposable": false
-      },
-      {
-        "concept": "acquisition_method",
-        "status": "deterministic",
-        "official_path": "system.technique",
-        "reason": "The acquisition-method macro defines a named high-energy-resolution fluorescence-detected absorption scan, and the beamtime notes name that technique in their own title. The schema's technique enum contains it verbatim, so this is a transcription rather than a judgement. The broader 'XAS' member is also present and is the weaker reading; the stronger one is what the sources actually state.",
-        "rule": null,
-        "requires_siblings": [
-          "system.domain"
-        ],
-        "allowed_values": [
-          "XAS",
-          "HERFD-XAS",
-          "XES",
-          "RIXS"
-        ],
-        "candidate_homes": [],
-        "proposable": true
-      },
-      {
-        "concept": "repeat_marker",
-        "status": "needs_domain_review",
-        "official_path": "links[].rel",
-        "reason": "A repeat qualifier on an otherwise identical filename is the corpus saying 'this is the same measurement again', and the schema has exactly that relationship \u2014 replica_of, with basis replicate_preparation. But a link needs a TARGET RECORD, and whether the earlier acquisition is a replicate or a failed first attempt that should not be linked at all is a scientific reading. Note the contrast with a new-spot qualifier, which looks similar and is NOT a replicate: the sample is the same one.",
-        "rule": null,
-        "requires_siblings": [
-          "links[].target",
-          "links[].basis"
-        ],
-        "allowed_values": [
-          "replica_of",
-          "follows",
-          "same_sample_as"
-        ],
-        "candidate_homes": [],
-        "proposable": false
+        "unresolved_questions": [
+          "Q9"
+        ]
       },
       {
         "concept": "quality_note",
@@ -1227,99 +1458,133 @@
           "pending"
         ],
         "candidate_homes": [],
-        "proposable": false
+        "proposable": false,
+        "placement_level": 1,
+        "placement_name": "native official ISAAC v1.05 field",
+        "domain_questions": [
+          "Q10",
+          "Q14"
+        ],
+        "unresolved_questions": [
+          "Q14"
+        ]
+      },
+      {
+        "concept": "repeat_marker",
+        "status": "needs_domain_review",
+        "official_path": "links[].rel",
+        "reason": "A repeat qualifier on an otherwise identical filename is the corpus saying 'this is the same measurement again', and the schema has exactly that relationship — replica_of, with basis replicate_preparation. But a link needs a TARGET RECORD, and whether the earlier acquisition is a replicate or a failed first attempt that should not be linked at all is a scientific reading. Note the contrast with a new-spot qualifier, which looks similar and is NOT a replicate: the sample is the same one.",
+        "rule": null,
+        "requires_siblings": [
+          "links[].target",
+          "links[].basis"
+        ],
+        "allowed_values": [
+          "replica_of",
+          "follows",
+          "same_sample_as"
+        ],
+        "candidate_homes": [],
+        "proposable": false,
+        "placement_level": 1,
+        "placement_name": "native official ISAAC v1.05 field",
+        "domain_questions": [],
+        "unresolved_questions": []
+      },
+      {
+        "concept": "sample_name",
+        "status": "needs_domain_review",
+        "official_path": "sample.material.name",
+        "reason": "A filename's sample token is the scientist's own shorthand — an electrode label for some samples and a material description for others. Which of those two it is decides whether it belongs at sample.material.name or sample.sample_id, and only the scientist who wrote it can say. The schema also requires a sample_form alongside, which no filename states.",
+        "rule": null,
+        "requires_siblings": [
+          "sample.sample_form"
+        ],
+        "allowed_values": [],
+        "candidate_homes": [
+          "sample.sample_id",
+          "sample.electrode_type"
+        ],
+        "proposable": false,
+        "placement_level": 1,
+        "placement_name": "native official ISAAC v1.05 field",
+        "domain_questions": [
+          "Q2",
+          "Q3"
+        ],
+        "unresolved_questions": []
+      },
+      {
+        "concept": "sample_or_electrode_number",
+        "status": "needs_domain_review",
+        "official_path": "sample.sample_id",
+        "reason": "The second numeric filename token IS a sample/electrode instance number — confirmed by the domain owner on 2026-09-17 (DEC-47), so the question this row used to ask is closed. What still needs a domain owner is narrower and is about the schema rather than the corpus: an instance number could land at sample.sample_id or at sample.library.sample_no, and the schema requires a sample_form alongside whichever is chosen, which no filename states.",
+        "rule": null,
+        "requires_siblings": [],
+        "allowed_values": [],
+        "candidate_homes": [
+          "sample.library.sample_no"
+        ],
+        "proposable": false,
+        "placement_level": 1,
+        "placement_name": "native official ISAAC v1.05 field",
+        "domain_questions": [
+          "Q1"
+        ],
+        "unresolved_questions": []
+      },
+      {
+        "concept": "sample_position",
+        "status": "not_expressible",
+        "official_path": null,
+        "reason": "Stage coordinates are how the corpus distinguishes one spot on an electrode from another, which makes them scientifically load-bearing here and still gives them no schema field. The library block holds plate coordinates for combinatorial samples, which is a different thing from a stage position and must not be reused for it. The schema describes system.configuration as 'THE designated open extension namespace' for instrument- and station-specific configuration that does not generalize across facilities — naming slits, pass energies and logbook fields, which is what a filter index and a spectrometer crystal are. So a natural home exists. BUT the six system.configuration.* fields are recorded as unclassified with the domain owner's classification outstanding, and no write route in this build accepts them. Candidate home; NOT a settled mapping and not writable today.",
+        "rule": null,
+        "requires_siblings": [],
+        "allowed_values": [],
+        "candidate_homes": [
+          "system.configuration"
+        ],
+        "proposable": false,
+        "placement_level": 2,
+        "placement_name": "schema-approved extension point",
+        "domain_questions": [
+          "Q19"
+        ],
+        "unresolved_questions": []
       },
       {
         "concept": "sample_preparation",
         "status": "needs_domain_review",
         "official_path": "sample.material.provenance",
-        "reason": "The notes describe ink preparation, dropcasting and electrode assembly at length. The schema has a provenance string and a notes string on the material, so there is a home \u2014 but the preparation described is beamtime-wide prose covering several samples, and deciding how much of it is provenance OF ONE SAMPLE is a scoping judgement, not an extraction.",
+        "reason": "The notes describe ink preparation, dropcasting and electrode assembly at length. The schema has a provenance string and a notes string on the material, so there is a home — but the preparation described is beamtime-wide prose covering several samples, and deciding how much of it is provenance OF ONE SAMPLE is a scoping judgement, not an extraction.",
         "rule": null,
         "requires_siblings": [],
         "allowed_values": [],
         "candidate_homes": [
           "sample.material.notes"
         ],
-        "proposable": false
+        "proposable": false,
+        "placement_level": 1,
+        "placement_name": "native official ISAAC v1.05 field",
+        "domain_questions": [
+          "Q4"
+        ],
+        "unresolved_questions": []
       },
       {
-        "concept": "echem_procedure",
-        "status": "needs_domain_review",
-        "official_path": "context.electrochemistry.notes",
-        "reason": "The notes tabulate the electrochemical program step by step, including an impedance-compensation step whose parameters the schema models properly in its ir_compensation object rather than as prose. So part of this concept has a STRUCTURED home and part has only a notes field, and which rows are which is a reading of the protocol.",
+        "concept": "scan_command",
+        "status": "blocked_by_build",
+        "official_path": "assets[].uri",
+        "reason": "The official schema requires both assets[].uri and assets[].sha256. This build does not publish either for a historical source: a manifest digest is only ever what the scientist stated, never one this application computed, and the location of a file inside an archive is not a URI anything outside this working area could resolve. So a historical file cannot become an official asset entry without this application asserting two things it has no standing to assert. The asset content_role vocabulary otherwise fits this corpus exactly (raw_data_pointer, reduction_product, calibration_reference), which is why this is named as a boundary rather than left to surface as a failing export.",
         "rule": null,
         "requires_siblings": [],
         "allowed_values": [],
-        "candidate_homes": [
-          "context.electrochemistry.ir_compensation.method",
-          "context.electrochemistry.control_mode"
-        ],
-        "proposable": false
-      },
-      {
-        "concept": "beamtime_dates",
-        "status": "needs_domain_review",
-        "official_path": null,
-        "reason": "The notes state the beamtime window. The schema's timestamps are per record \u2014 an acquisition's own start and end \u2014 and a campaign window is neither. Writing it into a record's acquired_start_utc would claim a measurement began when the beamtime did.",
-        "rule": null,
-        "requires_siblings": [],
-        "allowed_values": [],
-        "candidate_homes": [
-          "timestamps.revision_note"
-        ],
-        "proposable": false
-      },
-      {
-        "concept": "beamtime_purpose",
-        "status": "not_expressible",
-        "official_path": null,
-        "reason": "The scientific aim of the campaign is stated in the notes' own words. There is no purpose or abstract field; tags is a free array and would reduce a paragraph to keywords, which loses the statement rather than recording it. Preserved as source evidence.",
-        "rule": null,
-        "requires_siblings": [],
-        "allowed_values": [],
-        "candidate_homes": [
-          "tags"
-        ],
-        "proposable": false
-      },
-      {
-        "concept": "motor_position",
-        "status": "not_expressible",
-        "official_path": null,
-        "reason": "An acquisition header records roughly a hundred and eighty motor positions. They are genuine instrument state and the schema has no field for any of them. The schema describes system.configuration as 'THE designated open extension namespace' for instrument- and station-specific configuration that does not generalize across facilities \u2014 naming slits, pass energies and logbook fields, which is what a filter index and a spectrometer crystal are. So a natural home exists. BUT the six system.configuration.* fields are recorded as unclassified with the domain owner's classification outstanding, and no write route in this build accepts them. Candidate home; NOT a settled mapping and not writable today.",
-        "rule": null,
-        "requires_siblings": [],
-        "allowed_values": [],
-        "candidate_homes": [
-          "system.configuration"
-        ],
-        "proposable": false
-      },
-      {
-        "concept": "sample_position",
-        "status": "not_expressible",
-        "official_path": null,
-        "reason": "Stage coordinates are how the corpus distinguishes one spot on an electrode from another, which makes them scientifically load-bearing here and still gives them no schema field. The library block holds plate coordinates for combinatorial samples, which is a different thing from a stage position and must not be reused for it. The schema describes system.configuration as 'THE designated open extension namespace' for instrument- and station-specific configuration that does not generalize across facilities \u2014 naming slits, pass energies and logbook fields, which is what a filter index and a spectrometer crystal are. So a natural home exists. BUT the six system.configuration.* fields are recorded as unclassified with the domain owner's classification outstanding, and no write route in this build accepts them. Candidate home; NOT a settled mapping and not writable today.",
-        "rule": null,
-        "requires_siblings": [],
-        "allowed_values": [],
-        "candidate_homes": [
-          "system.configuration"
-        ],
-        "proposable": false
-      },
-      {
-        "concept": "counting_time",
-        "status": "not_expressible",
-        "official_path": null,
-        "reason": "Dwell time per point is stated by the acquisition header and by the macro call. It is an acquisition parameter with no schema field; as a per-series operating condition it has a schema-legal candidate home.",
-        "rule": null,
-        "requires_siblings": [],
-        "allowed_values": [],
-        "candidate_homes": [
-          "measurement.series[].conditions"
-        ],
-        "proposable": false
+        "candidate_homes": [],
+        "proposable": false,
+        "placement_level": 1,
+        "placement_name": "native official ISAAC v1.05 field",
+        "domain_questions": [],
+        "unresolved_questions": []
       },
       {
         "concept": "scan_count",
@@ -1332,44 +1597,66 @@
         "candidate_homes": [
           "measurement.series[].conditions"
         ],
-        "proposable": false
+        "proposable": false,
+        "placement_level": 3,
+        "placement_name": "Run / series condition",
+        "domain_questions": [
+          "Q20"
+        ],
+        "unresolved_questions": []
       },
       {
-        "concept": "point_count",
+        "concept": "spec_file_declaration",
         "status": "not_expressible",
         "official_path": null,
-        "reason": "The number of points in a scan is a property OF the series values, not a separate field. If the values are ever carried, the count is implied by them; recording it alongside would create a second place for one fact to be wrong.",
+        "reason": "The name an acquisition file declares for ITSELF, internally. It is not a value to map — it is the ANCHOR for conflict detection, because in this corpus an internal declaration and the external filename disagree about the experimental state of the sample. Mapping it anywhere would settle that disagreement by accident.",
         "rule": null,
         "requires_siblings": [],
         "allowed_values": [],
         "candidate_homes": [],
-        "proposable": false
+        "proposable": false,
+        "placement_level": 4,
+        "placement_name": "structured ISAAC Extended Context companion",
+        "domain_questions": [
+          "Q15"
+        ],
+        "unresolved_questions": [
+          "Q15"
+        ]
       },
       {
-        "concept": "absorption_edge",
+        "concept": "spec_user_string",
         "status": "not_expressible",
         "official_path": null,
-        "reason": "The absorbing element and its edge are implicit/sidecar-only for this technique path and must not be forced into the official record while the schema provides no valid field. That is a standing project rule, not a judgement made here. The schema describes system.configuration as 'THE designated open extension namespace' for instrument- and station-specific configuration that does not generalize across facilities \u2014 naming slits, pass energies and logbook fields, which is what a filter index and a spectrometer crystal are. So a natural home exists. BUT the six system.configuration.* fields are recorded as unclassified with the domain owner's classification outstanding, and no write route in this build accepts them. Candidate home; NOT a settled mapping and not writable today.",
+        "reason": "REFUSED ON PURPOSE, AND THIS IS THE ONE ENTRY THAT WOULD BE ACTIVELY HARMFUL TO 'FIX'. An acquisition header carries the account string the beamline software was running under. The schema does have an uploader field — and it is SERVER-STAMPED, requires a verified trust basis that no verifier in this build mints, and is therefore absent from every record this deployment produces. Copying a beamline account string into it would manufacture exactly the attribution the trust boundary exists to withhold. It stays raw source evidence, and it is never an ISAAC identity or actor.",
+        "rule": null,
+        "requires_siblings": [],
+        "allowed_values": [],
+        "candidate_homes": [],
+        "proposable": false,
+        "placement_level": 4,
+        "placement_name": "structured ISAAC Extended Context companion",
+        "domain_questions": [],
+        "unresolved_questions": []
+      },
+      {
+        "concept": "spectrometer_configuration",
+        "status": "not_expressible",
+        "official_path": null,
+        "reason": "Slit width, analyser crystal and emission line are exactly the facility-specific configuration the schema declines to generalize. The schema describes system.configuration as 'THE designated open extension namespace' for instrument- and station-specific configuration that does not generalize across facilities — naming slits, pass energies and logbook fields, which is what a filter index and a spectrometer crystal are. So a natural home exists. BUT the six system.configuration.* fields are recorded as unclassified with the domain owner's classification outstanding, and no write route in this build accepts them. Candidate home; NOT a settled mapping and not writable today.",
         "rule": null,
         "requires_siblings": [],
         "allowed_values": [],
         "candidate_homes": [
           "system.configuration"
         ],
-        "proposable": false
-      },
-      {
-        "concept": "dry_state",
-        "status": "not_expressible",
-        "official_path": null,
-        "reason": "A dry or as-received measurement is a condition with no schema field. It interacts with the environment enum \u2014 an ex-situ reading is plausible for these \u2014 but the enum describes the MEASUREMENT context and this token describes the sample's state, and conflating them would assert something no source states.",
-        "rule": null,
-        "requires_siblings": [],
-        "allowed_values": [],
-        "candidate_homes": [
-          "measurement.series[].conditions"
+        "proposable": false,
+        "placement_level": 2,
+        "placement_name": "schema-approved extension point",
+        "domain_questions": [
+          "Q19"
         ],
-        "proposable": false
+        "unresolved_questions": []
       },
       {
         "concept": "step_number",
@@ -1380,7 +1667,13 @@
         "requires_siblings": [],
         "allowed_values": [],
         "candidate_homes": [],
-        "proposable": false
+        "proposable": false,
+        "placement_level": 4,
+        "placement_name": "structured ISAAC Extended Context companion",
+        "domain_questions": [
+          "Q10"
+        ],
+        "unresolved_questions": []
       },
       {
         "concept": "trigger",
@@ -1391,55 +1684,202 @@
         "requires_siblings": [],
         "allowed_values": [],
         "candidate_homes": [],
-        "proposable": false
+        "proposable": false,
+        "placement_level": 4,
+        "placement_name": "structured ISAAC Extended Context companion",
+        "domain_questions": [],
+        "unresolved_questions": []
       },
       {
-        "concept": "spec_user_string",
+        "concept": "unknown_token",
         "status": "not_expressible",
         "official_path": null,
-        "reason": "REFUSED ON PURPOSE, AND THIS IS THE ONE ENTRY THAT WOULD BE ACTIVELY HARMFUL TO 'FIX'. An acquisition header carries the account string the beamline software was running under. The schema does have an uploader field \u2014 and it is SERVER-STAMPED, requires a verified trust basis that no verifier in this build mints, and is therefore absent from every record this deployment produces. Copying a beamline account string into it would manufacture exactly the attribution the trust boundary exists to withhold. It stays raw source evidence, and it is never an ISAAC identity or actor.",
+        "reason": "A token no profile recognised has no concept, so it can have no mapping. IT IS STILL CARRIED: an unrecognised token is preserved as source evidence and shown to the scientist, because the alternative is dropping part of a filename silently.",
         "rule": null,
         "requires_siblings": [],
         "allowed_values": [],
         "candidate_homes": [],
-        "proposable": false
-      },
-      {
-        "concept": "spec_file_declaration",
-        "status": "not_expressible",
-        "official_path": null,
-        "reason": "The name an acquisition file declares for ITSELF, internally. It is not a value to map \u2014 it is the ANCHOR for conflict detection, because in this corpus an internal declaration and the external filename disagree about the experimental state of the sample. Mapping it anywhere would settle that disagreement by accident.",
-        "rule": null,
-        "requires_siblings": [],
-        "allowed_values": [],
-        "candidate_homes": [],
-        "proposable": false
-      },
-      {
-        "concept": "acquisition_target",
-        "status": "not_expressible",
-        "official_path": null,
-        "reason": "The measurement name a macro DECLARES it is about to write. It is intent, and in this corpus nine declared targets were never acquired while nine acquisitions were never declared. It is a relationship key, not a field.",
-        "rule": null,
-        "requires_siblings": [],
-        "allowed_values": [],
-        "candidate_homes": [],
-        "proposable": false
-      },
-      {
-        "concept": "note_file_number_row",
-        "status": "not_expressible",
-        "official_path": null,
-        "reason": "A row from the human file-number table is the scientist's own independent mapping from a file number to a condition. Its VALUE is as corroboration and as a cross-check against the filesystem \u2014 which is a relationship question \u2014 and the individual concepts inside such a row have their own entries in this registry.",
-        "rule": null,
-        "requires_siblings": [],
-        "allowed_values": [],
-        "candidate_homes": [],
-        "proposable": false
+        "proposable": false,
+        "placement_level": 4,
+        "placement_name": "structured ISAAC Extended Context companion",
+        "domain_questions": [],
+        "unresolved_questions": []
       }
     ],
-    "temperature_absent_reason": "context.temperature_K is required by the official schema whenever a context block is present, and this corpus states no temperature anywhere \u2014 not in the beamtime README, not in the notes, not in any acquisition header. A candidate assembled from these sources is therefore incomplete by the schema's own rule. That is the correct outcome: room temperature is the obvious guess, and 298 must not be defaulted into context.temperature_K, because a plausible number in a required field is a fabricated measurement that nothing downstream can tell from a measured one.",
-    "assets_blocked_reason": "The official schema requires assets[].sha256, and this build computes no digest for any historical source \u2014 not even for a file it reads. So a historical file cannot become an official asset entry without fabricating a required field. The asset content_role vocabulary otherwise fits this corpus exactly (raw_data_pointer, reduction_product, calibration_reference), which is why this is named as a boundary rather than left to surface as a failing export.",
-    "cycling_state_no_field_reason": "The official schema has no field for electrochemical cycling history (beforeCycling / after1500Cycling / after1stCycling). It is the single most important experimental variable in this corpus, which makes it the strongest schema-request case the corpus produced \u2014 and a schema request is upstream's decision, not this repository's. measurement.series[].conditions is a schema-legal candidate home for it as a per-series condition; nothing here places it there."
+    "temperature_absent_reason": "context.temperature_K is required by the official schema whenever a context block is present, and this corpus states no temperature anywhere — not in the beamtime README, not in the notes, not in any acquisition header. A candidate assembled from these sources is therefore incomplete by the schema's own rule, and 298 must not be defaulted into context.temperature_K by this application, because a plausible number in a required field is a fabricated measurement that nothing downstream can tell from a measured one. ONE NARROW EXCEPTION, ADDED 2026-09-17: for the BL15-2 Angel-style historical profile, and for no other profile, the project owner has adopted 298 K as a nominal room-temperature assumption (DEC-43). It is recorded as nominal, domain-supplied and NOT measured, on the scientist's authority rather than the parser's; under any other profile the field stays absent and the record stays blocked, exactly as described above.",
+    "assets_blocked_reason": "The official schema requires both assets[].uri and assets[].sha256. This build does not publish either for a historical source: a manifest digest is only ever what the scientist stated, never one this application computed, and the location of a file inside an archive is not a URI anything outside this working area could resolve. So a historical file cannot become an official asset entry without this application asserting two things it has no standing to assert. The asset content_role vocabulary otherwise fits this corpus exactly (raw_data_pointer, reduction_product, calibration_reference), which is why this is named as a boundary rather than left to surface as a failing export.",
+    "cycling_state_no_field_reason": "The official schema has no field for electrochemical cycling history (beforeCycling / after1500Cycling / after1stCycling). It is the single most important experimental variable in this corpus, which makes it the strongest schema-request case the corpus produced — and a schema request is upstream's decision, not this repository's. measurement.series[].conditions is a schema-legal candidate home for it as a per-series condition; nothing here places it there.",
+    "placement": {
+      "1": 18,
+      "2": 9,
+      "3": 6,
+      "4": 12,
+      "open_domain_questions": 8,
+      "concepts_with_an_open_question": 9
+    },
+    "placement_levels": {
+      "1": "native official ISAAC v1.05 field",
+      "2": "schema-approved extension point",
+      "3": "Run / series condition",
+      "4": "structured ISAAC Extended Context companion"
+    },
+    "domain_questions": [
+      {
+        "question_id": "Q1",
+        "subject": "second filename token = sample/electrode instance",
+        "disposition": "closed_by_domain_owner",
+        "note": "Angel confirmed the convention explicitly (DEC-47). The token is a sample/electrode instance number. Stop asking.",
+        "is_open": false
+      },
+      {
+        "question_id": "Q2",
+        "subject": "Experiment-level vs Run-level concepts",
+        "disposition": "closed_by_product_decision",
+        "note": "DEC-40: inheritance with EXPLICIT Run overrides, never duplication, and never a silent override.",
+        "is_open": false
+      },
+      {
+        "question_id": "Q3",
+        "subject": "sample.material.name per stem",
+        "disposition": "closed_by_beamtime_document",
+        "note": "Every sample section of the beamtime document names its electrode label and medium, and the material is stated in the opening scope.",
+        "is_open": false
+      },
+      {
+        "question_id": "Q4",
+        "subject": "sample.material.provenance",
+        "disposition": "closed_by_beamtime_document",
+        "note": "The document names a preparer for one sample family and gives a full deposition recipe for another.",
+        "is_open": false
+      },
+      {
+        "question_id": "Q5",
+        "subject": "acid/base -> electrolyte name and concentration",
+        "disposition": "closed_by_beamtime_document",
+        "note": "Each sample section names its own electrolyte, and DEC-42 rules on the document's disagreement with itself: sample-specific evidence wins and the broad claim is PRESERVED as superseded, not deleted.",
+        "is_open": false
+      },
+      {
+        "question_id": "Q6",
+        "subject": "context.environment member",
+        "disposition": "open_needs_domain_owner",
+        "note": "Partial. The dry / as-received acquisitions are stated as such. The member for the electrochemical acquisitions is one word only Angel can say.",
+        "is_open": true
+      },
+      {
+        "question_id": "Q7",
+        "subject": "context.electrochemistry.reaction member",
+        "disposition": "open_needs_domain_owner",
+        "note": "Narrowed. The document names the reaction in prose and three enum members remain compatible; choosing between them is a scientific call.",
+        "is_open": true
+      },
+      {
+        "question_id": "Q8",
+        "subject": "cell_type per sample group",
+        "disposition": "open_needs_domain_owner",
+        "note": "Partial. One sample family is explicitly a flow cell; the other family's enum member is still Angel's.",
+        "is_open": true
+      },
+      {
+        "question_id": "Q9",
+        "subject": "reference basis / rhe_basis",
+        "disposition": "open_needs_domain_owner",
+        "note": "Partial, and the one the corpus most clearly cannot settle: one group names RHE explicitly, the other names only a reference electrode.",
+        "is_open": true
+      },
+      {
+        "question_id": "Q10",
+        "subject": "where the E-chem Procedure rows go",
+        "disposition": "closed_by_product_decision",
+        "note": "DEC-41's hierarchy places them. Whether the Notes column may drive a QC state is Q14 and stays separate.",
+        "is_open": false
+      },
+      {
+        "question_id": "Q11",
+        "subject": "primary_signal channel",
+        "disposition": "open_needs_domain_owner",
+        "note": "Narrowed. The document names the normalisation pairs it used, which rules out most columns without identifying THE signal column.",
+        "is_open": true
+      },
+      {
+        "question_id": "Q12",
+        "subject": "expand the scan-grid literal into values?",
+        "disposition": "closed_by_existing_rule",
+        "note": "Expanding a segmented grid into a value series is this repository computing a scientific quantity, which CLAUDE.md §5 forbids. The literal is preserved as extended context. No longer a domain question at all.",
+        "is_open": false
+      },
+      {
+        "question_id": "Q13",
+        "subject": "element and absorption edge",
+        "disposition": "closed_by_product_decision",
+        "note": "'Is the schema really silent' was answered by measurement — the walk covers every declared path and there is no native field. DEC-41 now gives both a structured home, so the question is closed rather than merely unanswerable.",
+        "is_open": false
+      },
+      {
+        "question_id": "Q14",
+        "subject": "is measurement.qc.status derivable from the notes?",
+        "disposition": "open_needs_domain_owner",
+        "note": "The Notes column carries real quality judgements; whether they may drive a QC state automatically is exactly the question, and 'no' is a complete answer that leaves the field absent.",
+        "is_open": true
+      },
+      {
+        "question_id": "Q15",
+        "subject": "source precedence when three sources disagree",
+        "disposition": "open_needs_domain_owner",
+        "note": "Still Angel's. Note DEC-42 settles a document that disagrees with ITSELF and is NOT the answer to this, which is about three different sources.",
+        "is_open": true
+      },
+      {
+        "question_id": "Q16",
+        "subject": "legacy number 32 carried by two acquisitions",
+        "disposition": "open_needs_domain_owner",
+        "note": "NARROWED, NOT ANSWERED (DEC-46). Whether the number was deliberately reused, whether one file is superseded or mislabelled, and whether the number is unique at all are all still Angel's. Preferring either acquisition is forbidden meanwhile, including on the document's evidence.",
+        "is_open": true
+      },
+      {
+        "question_id": "Q17",
+        "subject": "standards / alignment -> Runs?",
+        "disposition": "closed_by_product_decision",
+        "note": "The build already treats them as units that are not run candidates, which is the behaviour the question was asking about.",
+        "is_open": false
+      },
+      {
+        "question_id": "Q18",
+        "subject": "loading vs thickness",
+        "disposition": "closed_by_beamtime_document",
+        "note": "They are TWO concepts: one sample family states a deposition time and a thickness, the other a weight loading. Placement is DEC-41's.",
+        "is_open": false
+      },
+      {
+        "question_id": "Q19",
+        "subject": "system.configuration vs series[].conditions",
+        "disposition": "closed_by_product_decision",
+        "note": "DEC-41's hierarchy orders the two: the extension namespace is level 2 and a per-acquisition condition is level 3, so a concept with both homes places at the first one the hierarchy reaches.",
+        "is_open": false
+      },
+      {
+        "question_id": "Q20",
+        "subject": "which fields are intentionally custom Run conditions",
+        "disposition": "closed_by_product_decision",
+        "note": "DEC-41. A custom Run condition is a placement, and placement is decided.",
+        "is_open": false
+      }
+    ],
+    "open_domain_questions": [
+      "Q6",
+      "Q7",
+      "Q8",
+      "Q9",
+      "Q11",
+      "Q14",
+      "Q15",
+      "Q16"
+    ],
+    "needs_review_without_a_question": [
+      "acquisition_method",
+      "beamtime_dates",
+      "gas_condition",
+      "repeat_marker"
+    ]
   }
 }

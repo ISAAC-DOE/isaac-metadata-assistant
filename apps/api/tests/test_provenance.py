@@ -94,6 +94,14 @@ def _draft(**fields) -> dict:
 
 
 def test_the_two_dimensions_are_the_declared_closed_vocabularies():
+    """``domain_guidance`` joined 2026-09-17 with `DEC-43` (`CTX-002`).
+
+    Kept as an EXACT tuple rather than relaxed to a membership check: this test
+    firing is how a new origin gets argued instead of slotted in, and it fired.
+    Its reason and its ``ORIGIN_PRECEDENCE`` placement are at the constant's own
+    docstring; the one-line form is that no source in the corpus states 298 K, so
+    every other origin in this tuple would have claimed something false about it.
+    """
     assert provenance.ORIGINS == (
         "manual",
         "file",
@@ -101,6 +109,7 @@ def test_the_two_dimensions_are_the_declared_closed_vocabularies():
         "inherited",
         "assistant",
         "derived",
+        "domain_guidance",
         "evidence",
         "unknown",
     )

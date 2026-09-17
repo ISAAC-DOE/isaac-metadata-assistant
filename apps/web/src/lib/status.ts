@@ -61,6 +61,7 @@ export type ChipKind =
   | 'origAssistant'
   | 'origDerived'
   | 'origEvidence'
+  | 'origDomainGuidance'
   | 'origUnknown'
   // The unified-provenance REVIEW axis — what, if anything, establishes the
   // value. This is the half that carries colour, and it is still not a validity,
@@ -103,11 +104,18 @@ export const CHIP_META: Record<ChipKind, ChipMeta> = {
   reconMatch: { label: LABELS.chipReconMatch, className: 'chip-recon-match' },
   reconConflict: { label: LABELS.chipReconConflict, className: 'chip-recon-conflict' },
   reconAbsent: { label: LABELS.chipReconAbsent, className: 'chip-recon-absent' },
-  // ORIGIN axis. SEVEN of the eight share ONE neutral palette class, and that
+  // ORIGIN axis. EIGHT of the nine share ONE neutral palette class, and that
   // repetition is the assertion, not an oversight: no origin may be styled as
   // reassuring or as alarming. `origUnknown` gets the dashed variant of the same
   // neutral palette because it is an ABSENCE, which is a different fact from any
-  // of the seven — not a different level of confidence in the value.
+  // of the eight — not a different level of confidence in the value.
+  //
+  // `origDomainGuidance` JOINED 2026-09-17 (`DEC-43`) AND TAKES THE SAME NEUTRAL
+  // PALETTE, deliberately. A value supplied by domain guidance rather than measured
+  // is exactly the case where an alarming colour would be tempting — and colour
+  // here encodes NOTHING about support, which is what the repetition asserts. The
+  // qualifier is carried by the label's own words ("Not Measured") and by the
+  // disclosure beside it, never by a hue a reader has to decode.
   origManual: { label: ORIGIN_LABEL.manual, className: 'chip-origin' },
   origFile: { label: ORIGIN_LABEL.file, className: 'chip-origin' },
   origVoice: { label: ORIGIN_LABEL.voice, className: 'chip-origin' },
@@ -115,6 +123,7 @@ export const CHIP_META: Record<ChipKind, ChipMeta> = {
   origAssistant: { label: ORIGIN_LABEL.assistant, className: 'chip-origin' },
   origDerived: { label: ORIGIN_LABEL.derived, className: 'chip-origin' },
   origEvidence: { label: ORIGIN_LABEL.evidence, className: 'chip-origin' },
+  origDomainGuidance: { label: ORIGIN_LABEL.domain_guidance, className: 'chip-origin' },
   origUnknown: { label: ORIGIN_LABEL.unknown, className: 'chip-origin-absent' },
   // REVIEW axis. `revUnmapped` is dashed for the same reason `missing` is: it is
   // content that has not been placed, never an established fact.
@@ -143,6 +152,7 @@ export const ORIGIN_CHIP: Record<ProvenanceOrigin, ChipKind> = {
   assistant: 'origAssistant',
   derived: 'origDerived',
   evidence: 'origEvidence',
+  domain_guidance: 'origDomainGuidance',
   unknown: 'origUnknown',
 };
 

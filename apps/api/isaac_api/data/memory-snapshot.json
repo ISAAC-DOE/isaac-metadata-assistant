@@ -10276,7 +10276,7 @@
       },
       {
         "path": "apps/api/isaac_api/routes.py",
-        "sha256": "0531b6bd754f585aca0e8042d99d5c3c3eb808aee6a4615f70cd1113b1fa76b0"
+        "sha256": "2fe64bc92139dbe9930159595cb23856032dd6c35ecbdf3e84fc157b1fe6096e"
       },
       {
         "path": "apps/api/isaac_api/serialize.py",
@@ -10288,11 +10288,11 @@
       },
       {
         "path": "apps/api/isaac_api/workspace.py",
-        "sha256": "046fca6dcd6a1923b78413c1210517d1272fa11fe54ec575377880bb07fd40d3"
+        "sha256": "cfd5c7acb59c07fa8170abca59a3e5bc890672f3688298b7ef391375e0414270"
       },
       {
         "path": "apps/api/tests/test_api.py",
-        "sha256": "91376a3675cdb0b5ab1ff79de84c352a5960beb0490f888cd09eeaf6a275499d"
+        "sha256": "987bc6c9852bc78e16d7ba8eb1105922ddc99910bce9aaf73dadc9b59f81adc4"
       },
       {
         "path": "apps/api/tests/test_build_memory_snapshot.py",
@@ -10496,7 +10496,7 @@
       },
       {
         "path": "apps/web/src/components/icons.tsx",
-        "sha256": "6863976453854d3e146c03244bb7b1a163aa0370355372ee8ea9a04beb192cd8"
+        "sha256": "7b200c11f00b9e35021b4c285c376241a8b7721028ab2f6cd8f0ccb2c9dc008b"
       },
       {
         "path": "apps/web/src/lib/adapt.ts",
@@ -10520,7 +10520,7 @@
       },
       {
         "path": "apps/web/src/lib/status.ts",
-        "sha256": "3bd6adad5e30304650cc120666a5918aa387ad1b9d50b1edb75fedf9499117c4"
+        "sha256": "7794adc5a8784610350869e4174cbddad751ae6bb236951855753b3fbbbc4e6a"
       },
       {
         "path": "apps/web/src/lib/types.ts",
@@ -11012,7 +11012,7 @@
       }
     ],
     "served_file_count": 200,
-    "served_manifest_fingerprint": "5db9bc4ed24cfddab6db76ec0aaabbdfb5bc5d1de173b3cddfcd7fc5a6d35fe3"
+    "served_manifest_fingerprint": "f4d5c8a8972037e719ee81523aa289d54b33e09fd8c27786f498ad379a734eb0"
   },
   "overview": {
     "built_at_commit": "caab1d0a69c1733524bda5dde495623bc4b7bad1",
