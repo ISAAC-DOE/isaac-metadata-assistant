@@ -9,7 +9,8 @@
 > **The approval (Krish, project owner, 2026-09-17).** Krish approves the **exact bytes** recorded in
 > the digest table below, conditional on a fresh SHA-256 recomputation matching this packet. That
 > recomputation was performed before this line was written and is recorded in **§12**, together with
-> four further mechanical checks. Both digests **match**, and they match in three independent places:
+> four further mechanical checks — and a sixth, added in the same change, which verified §8A's own
+> gate queries against the schema this migration declares. Both digests **match**, and they match in three independent places:
 > the working tree, `git show origin/main:…`, and this packet's own table.
 >
 > The approval is of **these bytes and nothing else.** Editing either `.sql` file voids it: the digest
@@ -593,12 +594,13 @@ is §15's "minimum supporting persistence architecture" clause PLUS the enumerat
 enumeration was committed after the table**, which is a smaller gap than the two before it
 and is still not the thing that was claimed.
 
-## 12. The five approval checks, and what each one actually verified
+## 12. The six approval checks, and what each one actually verified
 
 Recorded here because the STATUS block's approval is **conditional** on them, and a condition nobody
 can audit is not a condition. Performed **2026-09-17** on `main` at **`37ff6e5b`**, before the STATUS
-block was written. This follows `0003`'s §12D convention deliberately — **and diverges from it in one
-place, check 3, where copying `0003`'s wording would have produced a false claim.**
+block was written. This follows `0003`'s §12D convention deliberately — **and diverges from it in two
+places: check 3, where copying `0003`'s wording would have produced a false claim, and check 6, which
+`0003` has no equivalent of because `0003` has no operator gate built on its own SQL.**
 
 | # | Condition | Command / method | Result |
 |---|---|---|---|
@@ -607,6 +609,29 @@ place, check 3, where copying `0003`'s wording would have produced a false claim
 | 3 | No material SQL change since technical review | `git log --oneline --` on both files, then a diff of the **comment-stripped** forward file across the second commit | **TWO commits, not one** — see the divergence note below. **The executable statements have had exactly ONE version, ever;** the second commit changed comments only, measured, not taken on trust |
 | 4 | Prior review findings remain resolved, and the constraints this packet names are in the committed text | read the forward SQL end to end; then grep every constraint name §7 tells the operator to look for | **resolved — but the pinning was MISSING and was added in this change.** See below |
 | 5 | No new material safety defect | comment-stripped statement inventory of both files; token scan for `ALTER`/`DROP`/`TRUNCATE`/`GRANT`/`REVOKE`/DML/`ON DELETE`/`CASCADE`/dollar-quoting; search for any identifier naming `records` | **none found** |
+| 6 | §8A's own gate queries are well-formed against the schema this migration declares | parsed the `CREATE TABLE` for declared columns and the §8A block for every `p.<column>` it references, then intersected | **every referenced column exists; none absent. And `run_count` is correctly NOT referenced** — contract §7.4 forbids it as a mismatch detector |
+
+**CHECK 6 — THE GATE'S OWN QUERIES WERE RUN AGAINST THE SCHEMA THIS MIGRATION CREATES, NOT JUST
+READ.** Added because §8A is the **gate** for a decision this migration enables, and a gate whose
+SQL names a column that does not exist would fail at the worst possible moment: mid-window, after
+the migration is applied, with the operator holding an error instead of a verdict. Checked by
+parsing the `CREATE TABLE` for its declared columns and the §8A block for every `p.<column>` it
+references:
+
+| | |
+|---|---|
+| columns the migration creates | `experiment_id`, `experiment_rev`, `experiment_generation`, `run_count`, `projector`, `projected_utc` |
+| columns §8A's two queries reference on this table | `experiment_id`, `experiment_rev`, `experiment_generation` |
+| referenced-but-absent | **none** |
+
+**And §8A correctly does NOT reference `run_count`** — verified mechanically, not assumed. That is
+not an omission: `docs/isaac-runs-stage-2-contract.md` §7.4 **forbids** using it to detect a
+mismatch, because §2.2 invariant 4 records that it is `len(desired_ids)` — an *intention*, not an
+*observation*. A completeness gate built on it would compare the writer's belief against itself.
+
+**What this check does NOT establish:** that either query *executes* against the hosted database, or
+that either returns 0 there. It establishes that they are well-formed against the table as declared.
+The execution is the operator's, at step 9 of §12A.
 
 **CHECK 3 — THE DIVERGENCE FROM `0003`, STATED BECAUSE THE OBVIOUS WORDING WOULD HAVE BEEN WRONG.**
 `0003`'s §12D says its bytes *"have had exactly one version, ever"*. **That is not true of `0005`**,

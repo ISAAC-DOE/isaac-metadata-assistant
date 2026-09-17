@@ -5086,6 +5086,22 @@ generically, so it resolved `0005` unmodified — the gap was the list, not the 
 **Negative-controlled:** a one-character typo in the fourth name fails with
 `AssertionError: isaac_run_projection_projector_knowm`; restored, 19 pass.
 
+### 3b. A SIXTH CHECK `0003` HAS NO EQUIVALENT OF — §8A's gate queries, run against the schema
+
+§8A is the **gate** for the Stage-2b decision this migration enables, and its SQL had never been
+checked against the table the migration declares. A gate naming a column that does not exist fails
+at the worst possible moment: mid-window, after the apply, with the operator holding an error
+instead of a verdict. Parsed the `CREATE TABLE` for declared columns and the §8A block for every
+`p.<column>` it references, then intersected: the queries touch `experiment_id`, `experiment_rev`
+and `experiment_generation`, **all three exist, none is absent.**
+
+**And §8A correctly does NOT reference `run_count`** — verified mechanically rather than assumed,
+because the omission looks like a gap and is the opposite: the Stage-2 contract §7.4 **forbids**
+using it as a mismatch detector, since §2.2 invariant 4 records it is `len(desired_ids)` — an
+*intention*, not an *observation*. A completeness gate built on it would compare the writer's belief
+against itself. **What this does NOT establish:** that either query executes against the hosted
+database, or returns 0 there. That is the operator's step 9.
+
 ### 4. TWO CORRECTIONS TO THE PACKET ITSELF, because an operator reads it before acting
 
 - **§4's *"nothing reads it"* is FALSE and is struck in place.** Re-measured: **three** statements
