@@ -2735,8 +2735,19 @@ export interface ApiActivitySummaryRow {
   title: string;
   events_in_window: number;
   last_event_utc: string;
-  /** A server vocabulary token. Humanize with `humanizeActivityToken`. */
+  /**
+   * RESERVED — SERVED AND RENDERED NOWHERE, and said plainly rather than left to be
+   * discovered. It is on the wire because `test_activity_summary.py` pins
+   * `last_action`/`last_seq` against what the per-record history serves as its newest
+   * event, which is what proves the summary's one-pass `_latest` agrees with
+   * `activity.sorted_events`' canonical order. An earlier version of this comment read
+   * "Humanize with `humanizeActivityToken`" and so described a consumer that does not
+   * exist; if one is ever added it MUST go through that humanizer, because this is a
+   * bounded server token and a bare `field_answered` rendered at a scientist is the
+   * defect `CLAUDE.md` §11 records.
+   */
   last_action: string;
+  /** RESERVED, with `last_action` — see above. */
   last_seq: number;
 }
 
@@ -2781,7 +2792,22 @@ export interface ApiActivitySummary {
     /** Stored entries the model could not read at all. Counted, never rendered. */
     unreadable_entries: number;
   };
-  /** Complete maps over the server's bounded vocabularies — every key, always. */
+  /**
+   * Complete maps over the server's bounded vocabularies — every key, always, so the
+   * response shape does not change with the data.
+   *
+   * ALL THREE ARE WINDOW-SCOPED: a key's count is how many events INSIDE
+   * `window` carried it, not how many the records hold. `totals.events_all_time` is
+   * the only all-time figure in this payload, and any label rendered over one of
+   * these maps has to name the window or it invites being read as a description of
+   * that total.
+   *
+   * `by_object_type` is RESERVED — served, and rendered nowhere. It has no ranked
+   * slice and no `*_with_events` companion (those exist for actions and channels
+   * only), and it is on the wire because `DEC-44`'s columns are actor/action/object
+   * and an API consumer asking "what kinds of thing were acted on" should not have to
+   * page the per-record history to find out.
+   */
   by_action: Record<string, number>;
   by_channel: Record<string, number>;
   by_object_type: Record<string, number>;
@@ -2789,7 +2815,8 @@ export interface ApiActivitySummary {
   ranked_actions: ApiActivityRanked[];
   ranked_channels: ApiActivityRanked[];
   /** The TRUE number of distinct kinds seen, so a short display never states a count
-   *  taken from a list. */
+   *  taken from a list. There is deliberately no `object_types_with_events`: nothing
+   *  renders that map, and a count with no consumer is a figure waiting to go stale. */
   actions_with_events: number;
   channels_with_events: number;
   /**

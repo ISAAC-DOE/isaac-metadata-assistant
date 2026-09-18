@@ -1947,7 +1947,14 @@ function windowPhrase(days: number): string {
 }
 
 /** The unit noun, agreeing with its count. `1 changes` is the kind of small
- *  wrongness that makes a surface read as generated rather than written. */
+ *  wrongness that makes a surface read as generated rather than written.
+ *
+ *  THIS FUNCTION EXISTED AND FOUR VISIBLE SENTENCES DID NOT USE IT, which an
+ *  independent review found and which is worse than not having written it: the
+ *  docstring above states the rule that the sentences below were breaking, and one
+ *  of this slice's own tests was ASSERTING the ungrammatical string. The four are
+ *  now built by the four functions beneath this one, so the agreement is in one
+ *  place per sentence rather than inline in JSX where it was forgotten. */
 function plural(n: number): string {
   return n === 1 ? 'change' : 'changes';
 }
@@ -1955,6 +1962,81 @@ function plural(n: number): string {
 /** A per-record count with its noun, as ONE string. */
 function changeCount(n: number): string {
   return `${count(n)} ${plural(n)}`;
+}
+
+/*
+ * THE FOUR SENTENCES THAT AGREE WITH THEIR OWN COUNTS.
+ *
+ * Each is a whole sentence rather than a noun, because the number governs more than
+ * the noun: `1 stored entry ... is counted ... It is kept in its record` moves the
+ * verb, the pronoun and the possessive too, and a `plural()` call spliced into JSX
+ * fixes only the first of those. Written as functions so each reads as prose and so
+ * a test can exercise both arms without rendering a page.
+ *
+ * `attributedSentence` is UNREACHABLE in this build — `attribution.attributed_events`
+ * is structurally 0 while `ACT-005` is blocked on `EXT-01` — and is corrected anyway,
+ * because the day that seam is wired is the day the sentence renders, and a defect
+ * waiting behind a feature flag is still a defect.
+ */
+
+function unreadableEntriesSentence(n: number): string {
+  return n === 1
+    ? '1 stored entry could not be read and is counted in none of the figures above. It is kept in its record untouched — saying what it contains would mean inventing it.'
+    : `${count(n)} stored entries could not be read and are counted in none of the figures above. They are kept in their records untouched — saying what one contains would mean inventing it.`;
+}
+
+function unreadableTimestampSentence(n: number): string {
+  return n === 1
+    ? '1 recorded act carries a time this build could not read. It is in the all-time total and in neither window figure, because placing it inside or outside the window would be a guess.'
+    : `${count(n)} recorded acts carry a time this build could not read. They are in the all-time total and in neither window figure, because placing one inside or outside the window would be a guess.`;
+}
+
+function furtherKindsSentence(n: number, what: string): string {
+  return n === 1
+    ? `1 further ${what} is not listed.`
+    : `${count(n)} further ${what}s are not listed.`;
+}
+
+function attributedSentence(n: number): string {
+  return n === 1
+    ? '1 of these changes does carry an actor.'
+    : `${count(n)} of these changes do carry an actor.`;
+}
+
+/**
+ * The caption above the changed-record list — WHICH RECORDS, HOW MANY, AND OVER
+ * WHAT WINDOW.
+ *
+ * ── TWO DEFECTS IT CLOSES, BOTH FOUND BY INDEPENDENT REVIEW ────────────────
+ *
+ * 1. THE LIST NAMED NO WINDOW. Its rows are window-scoped (each count is
+ *    `events_in_window`) and it sat under an `All Time` figure, so on a workspace
+ *    with 5,000 recorded acts and 12 this week, a list describing the 12 read as a
+ *    description of the 5,000. The caption now states the window in every branch —
+ *    including the branches that have data, which is the asymmetry that made this
+ *    sharp: the zero case already named it.
+ *
+ * 2. THE EMPTY BRANCH WAS CHOSEN BY `rows.length`. `rows` is the bounded array;
+ *    `total` is how many records changed. They differ whenever the list is capped,
+ *    so at `record_rows = 0` the section rendered `Records Changed 7` beside
+ *    *No record changed* beside *The 0 busiest of the 7*. Latent — `RECORD_ROWS` is
+ *    5 and the route exposes no parameter — but it was guarded by a CONSTANT rather
+ *    than by the predicate, and the honest predicate is `total`.
+ *
+ * The `returned === 0 && total > 0` branch is therefore a real sentence rather than
+ * an impossible one: it says records changed and none are shown, which is the only
+ * truthful thing to say in that state.
+ */
+function changedCaption(total: number, returned: number, window: string): string {
+  const over = `in ${window}`;
+  if (total === 0) return `No record changed ${over}.`;
+  if (returned === 0) {
+    return `${count(total)} ${total === 1 ? 'record' : 'records'} changed ${over}, and none are listed here.`;
+  }
+  if (total > returned) {
+    return `The ${count(returned)} busiest of the ${count(total)} records that changed ${over}. Open a record to see its own history.`;
+  }
+  return `The ${count(total)} ${total === 1 ? 'record' : 'records'} that changed ${over}.`;
 }
 
 /**
@@ -2055,6 +2137,9 @@ function ActivityFigures({ summary }: { summary: ApiActivitySummary }) {
   const rankedActions = summary.ranked_actions.slice(0, ACTIVITY_KINDS_SHOWN);
   const rankedChannels = summary.ranked_channels.slice(0, ACTIVITY_KINDS_SHOWN);
   const moreActions = summary.actions_with_events - rankedActions.length;
+  /* DERIVED THE SAME WAY as `moreActions`, from the server's own count of distinct
+     kinds minus what is shown — so a slice and its disclosure cannot disagree. */
+  const moreChannels = summary.channels_with_events - rankedChannels.length;
 
   return (
     <>
@@ -2080,9 +2165,19 @@ function ActivityFigures({ summary }: { summary: ApiActivitySummary }) {
         ]}
       />
 
+      {/* BOTH BREAKDOWN LABELS NAME THE WINDOW, and both name it EXPLICITLY rather
+          than by reference to the label above. `by_action` and `by_channel` are
+          incremented only for events inside the window, so a label reading just
+          "What Changed" under a `Recorded Acts, All Time` figure invited a reader
+          to take a breakdown summing to 12 as a description of 5,000 — found by
+          independent review, reproduced in jsdom and over HTTP. The channel row
+          could have leaned on "those changes" (it renders only when the action row
+          does, because every counted event carries both), but a truth claim that
+          depends on two elements staying adjacent is one refactor from being
+          false. */}
       {rankedActions.length > 0 && (
         <MiniBreakdown
-          label="What Changed"
+          label={`What Changed in ${windowPhrase(win.days)}`}
           items={rankedActions.map((entry) => ({
             key: entry.name,
             /* The server's token, turned into words by the ONE humanizer both
@@ -2099,14 +2194,14 @@ function ActivityFigures({ summary }: { summary: ApiActivitySummary }) {
       )}
       {moreActions > 0 && (
         <p className="stats-note">
-          {count(moreActions)} further kinds of change are not listed. Open a record's
-          Activity view for its full history.
+          {furtherKindsSentence(moreActions, 'kind of change')} Open a record's Activity
+          view for its full history.
         </p>
       )}
 
       {rankedChannels.length > 0 && (
         <MiniBreakdown
-          label="Through Which Surface"
+          label={`Through Which Surface, in ${windowPhrase(win.days)}`}
           items={rankedChannels.map((entry) => ({
             key: entry.name,
             chip: (
@@ -2119,8 +2214,18 @@ function ActivityFigures({ summary }: { summary: ApiActivitySummary }) {
           }))}
         />
       )}
+      {/* THE CHANNEL ROW'S OWN "AND N MORE" GUARD, which did not exist and was safe
+          only by COINCIDENCE: `ACTIVITY_CHANNELS` has exactly four members and
+          `ACTIVITY_KINDS_SHOWN` is four, so nothing could be dropped. A fifth
+          channel would have been silently omitted with no disclosure — the precise
+          defect the actions row above already had a guard for. `DEC-44` fixes the
+          vocabulary at four, so this is expected never to render; it is here so the
+          section does not depend on two unrelated constants agreeing. */}
+      {moreChannels > 0 && (
+        <p className="stats-note">{furtherKindsSentence(moreChannels, 'surface')}</p>
+      )}
 
-      {changed.rows.length > 0 ? (
+      {changed.total > 0 ? (
         <ul className="stats-recent">
           {changed.rows.map((row) => (
             <li className="stats-recent-row" key={row.experiment_id}>
@@ -2146,18 +2251,14 @@ function ActivityFigures({ summary }: { summary: ApiActivitySummary }) {
             </li>
           ))}
         </ul>
-      ) : (
-        <p className="stats-note">
-          No record changed in {windowPhrase(win.days).toLowerCase()}.
-        </p>
-      )}
-
-      {changed.total > changed.returned && (
-        <p className="stats-note">
-          The {count(changed.returned)} busiest of the {count(changed.total)} records that
-          changed. Open a record to see its own history.
-        </p>
-      )}
+      ) : null}
+      {/* ONE CAPTION, ALL BRANCHES, AND IT IS CHOSEN BY `total` — never by
+          `rows.length`. See `changedCaption` for the two defects that shape it. It
+          sits BELOW the list, where the note it replaces sat, so a reader meets the
+          rows and then their scope in the same order they always did. */}
+      <p className="stats-note">
+        {changedCaption(changed.total, changed.returned, windowPhrase(win.days).toLowerCase())}
+      </p>
 
       {/* ── the qualifications, each beside the figures it qualifies ───────── */}
       <p className="stats-note">
@@ -2168,17 +2269,12 @@ function ActivityFigures({ summary }: { summary: ApiActivitySummary }) {
       {summary.incomplete ? <p className="stats-note">{summary.incomplete.message}</p> : null}
       {totals.unreadable_entries > 0 && (
         <p className="stats-note">
-          {count(totals.unreadable_entries)} stored entries could not be read and are
-          counted in none of the figures above. They are kept in their records
-          untouched — saying what one contains would mean inventing it.
+          {unreadableEntriesSentence(totals.unreadable_entries)}
         </p>
       )}
       {totals.events_with_unreadable_timestamp > 0 && (
         <p className="stats-note">
-          {count(totals.events_with_unreadable_timestamp)} recorded acts carry a time
-          this build could not read. They are in the all-time total and in neither
-          window figure, because placing one inside or outside the window would be a
-          guess.
+          {unreadableTimestampSentence(totals.events_with_unreadable_timestamp)}
         </p>
       )}
       {/* THE SAME SENTENCE THE RECORD'S OWN ACTIVITY PANEL SHOWS, not a second copy.
@@ -2188,9 +2284,7 @@ function ActivityFigures({ summary }: { summary: ApiActivitySummary }) {
           been named, which is a thing this build cannot do. */}
       <p className="stats-note">{LABELS.activityActorUnattributed}</p>
       {attribution.attributed_events > 0 && (
-        <p className="stats-note">
-          {count(attribution.attributed_events)} of these changes do carry an actor.
-        </p>
+        <p className="stats-note">{attributedSentence(attribution.attributed_events)}</p>
       )}
     </>
   );

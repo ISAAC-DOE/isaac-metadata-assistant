@@ -123,6 +123,37 @@ in ``exp.unreadable_activity`` by the time it arrives, and a *readable* event wi
 **unparseable timestamp** is counted into its own disclosed bucket rather than being
 quietly placed inside or outside the window.
 
+EVERY BREAKDOWN IS WINDOW-SCOPED, AND EXACTLY ONE FIGURE IS NOT
+===============================================================
+``by_action``, ``by_channel``, ``by_object_type``, both ranked slices and every
+``changed_records`` row count are incremented only inside the window test, so they
+describe events at or after ``window.since_utc`` and nothing before it.
+``totals.events_all_time`` is the ONLY all-time figure in the payload.
+
+**THAT IS A CONSTRAINT ON EVERY CONSUMER AND IT IS PUBLISHED RATHER THAN IMPLIED,**
+because an independent review measured the mistake it invites: a breakdown summing
+to 12 rendered beneath an all-time total of 5,000, with no label naming the window,
+reads as a description of the 5,000. Both numbers are true and the sentence they
+assemble is false. Any label over one of these maps must name the window; the route
+description says so, and ``StatisticsPage.tsx`` builds its own labels from
+``window.days`` for exactly this reason.
+
+RESERVED, AND NAMED RATHER THAN LEFT TO BE DISCOVERED
+=====================================================
+Three served fields have no renderer today, and each is here for a stated reason
+rather than by accident:
+
+* ``by_object_type`` — no ranked slice and no ``*_with_events`` companion (those
+  exist for actions and channels only, which is a real asymmetry and not an
+  oversight). It is served because ``DEC-44``'s columns are actor/action/OBJECT, so
+  an API consumer asking what kinds of thing were acted on should not have to page
+  the per-record history to find out.
+* ``changed_records[].last_action`` and ``last_seq`` — served because
+  ``test_activity_summary.py`` pins them against what the per-record history reports
+  as its newest event, which is what proves this module's one-pass :func:`_latest`
+  agrees with ``activity.sorted_events``' canonical order. If either is ever
+  rendered, ``last_action`` is a bounded server token and must be humanized.
+
 TIME IS DECIDED SERVER-SIDE, AND THE WINDOW TRAVELS WITH THE FIGURE
 ===================================================================
 "This week" is relative to a clock, and two clocks disagree. The window is computed

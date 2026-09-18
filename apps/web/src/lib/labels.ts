@@ -120,6 +120,16 @@ export function titleCase(input: string): string {
  * `ACT-004` added a second renderer of the same tokens and a copy would have been the
  * "one vocabulary, three copies" drift this repository has been caught shipping: a
  * rename strands every copy but the one the author was looking at.
+ *
+ * *** NEVER APPLY THIS TO AN ACTOR. *** It takes an `action`, a `channel` or an
+ * `object_type` — the three BOUNDED SERVER VOCABULARIES — and nothing else. An actor
+ * is a person's name, and running it through here MEASURABLY RENAMES THEM:
+ * `humanizeActivityToken('k_verma')` returns **"K Verma"**. That was a real defect in
+ * a sibling slice's review, in the one surface whose whole job is saying who did
+ * what. The same reasoning rules out a `field_path`, a `source_ref`, a run label, a
+ * record title and any locator: this function is only safe on a token whose segments
+ * this application chose, and it is now a public export, which is why the rule is
+ * stated at the export site rather than left to each caller to rediscover.
  */
 const INITIALISMS: Readonly<Record<string, string>> = Object.freeze({
   /* Two segments the product already writes as initialisms in its own prose to a

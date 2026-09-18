@@ -2467,7 +2467,20 @@ describe('the Full Description rule over the REAL generated contract', () => {
     // people, and that the two kinds of unreadable are counted separately. A
     // summary whose caveats were not on the wire would be a summary a client
     // could render as complete. Re-measured by running this file.
-    expect(total).toBe(166669);
+    //
+    // 166,669 -> 167,315 (+646), same day, SAME operation, in response to an
+    // independent review: the description gained a paragraph stating that every
+    // breakdown it serves (`by_action`, `by_channel`, `by_object_type`, both ranked
+    // slices, every `changed_records` row count) is WINDOW-scoped and that
+    // `totals.events_all_time` is the only all-time figure — so a label rendered
+    // over one of them has to name the window. The review measured the mistake that
+    // omission invites on the rendered screen: a breakdown summing to 12 beneath an
+    // all-time total of 5,000 reads as a description of the 5,000, and both numbers
+    // are true while the sentence they assemble is false. An API consumer has less
+    // context than a scientist, so the constraint belongs on the wire too. It also
+    // states that `object_types_with_events` deliberately does not exist. Paragraph
+    // count moves with it, 329 -> 330. Re-measured by running this file.
+    expect(total).toBe(167315);
     // 104,045 -> 114,959 (+10,914): the four new operations, and NO existing
     // description changed — `test_contract_description_parity.py` proves that rather
     // than leaving it asserted here. RE-DERIVED from the served document and never
@@ -2744,7 +2757,16 @@ describe('the Full Description rule over the REAL generated contract', () => {
       // unreadable, the two independent counts, the vocabularies, and what it
       // does not do), and a reader who stops early must not have skipped one.
       // MEASURED by running this file and reading `expected 329 to be 321`.
-      329,
+      //
+      // 329 -> 330 (+1), same day, SAME operation: the window-scoping paragraph the
+      // independent review's Important-1 finding put on the wire. See the note above
+      // `expect(total)` for what it says and why it belongs in the contract rather
+      // than only in the screen's labels. ONE paragraph and +646 characters moved
+      // together, which is the signature of prose arriving as a whole new paragraph
+      // — correct here, because the constraint is separable from every other
+      // sentence in that description and a reader who stops early must not skip it.
+      // MEASURED by running this file and reading `expected 330 to be 329`.
+      330,
     );
     // 211 -> 235 (+24): the four new operations carry a lead plus 24 post-lead
     // paragraphs between them. It is asserted separately from the character total

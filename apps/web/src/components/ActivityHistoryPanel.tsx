@@ -55,9 +55,18 @@ import type { ApiActivityEvent, ApiActivityResponse } from '../lib/types';
  * strands every copy but the one the author was looking at.
  *
  * So there is still exactly ONE humanizer for these tokens, and it is now
- * somewhere both surfaces can reach. Its behaviour is unchanged — the
- * `activity-history-panel` suite passes against it untouched, which is the check
- * that matters for a move. */
+ * somewhere both surfaces can reach.
+ *
+ * ~~Its behaviour is unchanged — the `activity-history-panel` suite passes against
+ * it untouched, which is the check that matters for a move.~~ **FALSE, and
+ * corrected rather than deleted, because "behaviour is unchanged" is exactly the
+ * claim a future session would rely on when judging whether this move was safe.**
+ * The shared version added an initialism map, so a row on the `mcp` channel moved
+ * **"Mcp" -> "MCP"** on THIS panel as well as on the Statistics summary that
+ * prompted the map. The change is an improvement and is deliberate; the suite
+ * passing is true and was never evidence of no change, because no test named
+ * either spelling. What IS unchanged: every other token, and the fact that every
+ * output word is an input word — casing only, so no name is invented. */
 
 /** `{present: false}` and `{present: true, value: null}` are DIFFERENT FACTS and are
  *  rendered differently. Branching on `value` instead of `present` would collapse
