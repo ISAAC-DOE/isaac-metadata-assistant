@@ -2858,6 +2858,130 @@ export interface ApiActivityResponse {
   object_types: string[];
 }
 
+/**
+ * `GET /api/activity/summary` — the cross-experiment SUMMARY (`ACT-004`).
+ *
+ * `DEC-44` authorizes a summary of the activity history in the same sentence that
+ * forbids one from becoming its source of truth, and the SHAPE is what enforces the
+ * second half: there is no event id here, no `before`/`after` pair, and no way to
+ * reconstruct an act. Every row carries `experiment_id`, which is the address of the
+ * history that does hold them.
+ */
+export interface ApiActivitySummaryRow {
+  experiment_id: string;
+  title: string;
+  events_in_window: number;
+  last_event_utc: string;
+  /**
+   * RESERVED — SERVED AND RENDERED NOWHERE, and said plainly rather than left to be
+   * discovered. It is on the wire because `test_activity_summary.py` pins
+   * `last_action`/`last_seq` against what the per-record history serves as its newest
+   * event, which is what proves the summary's one-pass `_latest` agrees with
+   * `activity.sorted_events`' canonical order. An earlier version of this comment read
+   * "Humanize with `humanizeActivityToken`" and so described a consumer that does not
+   * exist; if one is ever added it MUST go through that humanizer, because this is a
+   * bounded server token and a bare `field_answered` rendered at a scientist is the
+   * defect `CLAUDE.md` §11 records.
+   */
+  last_action: string;
+  /** RESERVED, with `last_action` — see above. */
+  last_seq: number;
+}
+
+/** One `{name, count}` pair from a ranked, nonzero slice of a complete count map. */
+export interface ApiActivityRanked {
+  name: string;
+  count: number;
+}
+
+export interface ApiActivitySummary {
+  /**
+   * THE WINDOW THE SERVER USED, served so a label cannot disagree with its figure.
+   * `since_utc` is INCLUSIVE and there is no upper bound — an event counts when its
+   * `recorded_utc` is at or after it. Render the label from `days`/`since_utc`, never
+   * from a clock of your own.
+   */
+  window: { days: number; since_utc: string; computed_at_utc: string };
+  /**
+   * WHAT THIS SUMMARY COVERED. Summarizing is O(workspace), so it is bounded:
+   * `experiments_summarized` may be fewer than `experiments_in_scope`, and when it
+   * is, `truncated` is `true` and **every count below is a count over the summarized
+   * subset only**. `selection` names the rule that chose them.
+   */
+  scope: {
+    experiments_in_scope: number;
+    experiments_summarized: number;
+    experiment_limit: number;
+    truncated: boolean;
+    selection: string;
+    /** `false` when a durably-stored record could not be restored before this read. */
+    hydration_complete: boolean;
+  };
+  totals: {
+    events_in_window: number;
+    events_all_time: number;
+    /**
+     * Readable events whose stored timestamp could not be parsed. They are inside
+     * `events_all_time` and in NEITHER window bucket, because placing one inside or
+     * outside the window would be a guess.
+     */
+    events_with_unreadable_timestamp: number;
+    /** Stored entries the model could not read at all. Counted, never rendered. */
+    unreadable_entries: number;
+  };
+  /**
+   * Complete maps over the server's bounded vocabularies — every key, always, so the
+   * response shape does not change with the data.
+   *
+   * ALL THREE ARE WINDOW-SCOPED: a key's count is how many events INSIDE
+   * `window` carried it, not how many the records hold. `totals.events_all_time` is
+   * the only all-time figure in this payload, and any label rendered over one of
+   * these maps has to name the window or it invites being read as a description of
+   * that total.
+   *
+   * `by_object_type` is RESERVED — served, and rendered nowhere. It has no ranked
+   * slice and no `*_with_events` companion (those exist for actions and channels
+   * only), and it is on the wire because `DEC-44`'s columns are actor/action/object
+   * and an API consumer asking "what kinds of thing were acted on" should not have to
+   * page the per-record history to find out.
+   */
+  by_action: Record<string, number>;
+  by_channel: Record<string, number>;
+  by_object_type: Record<string, number>;
+  /** The nonzero slices, ordered by the server: descending count, then name. */
+  ranked_actions: ApiActivityRanked[];
+  ranked_channels: ApiActivityRanked[];
+  /** The TRUE number of distinct kinds seen, so a short display never states a count
+   *  taken from a list. There is deliberately no `object_types_with_events`: nothing
+   *  renders that map, and a count with no consumer is a figure waiting to go stale. */
+  actions_with_events: number;
+  channels_with_events: number;
+  /**
+   * EVENT COUNTS AND NAMES — NEVER A NUMBER OF PEOPLE. Every event in this build is
+   * `unattributed` (`ACT-005` is blocked on `EXT-01`), so `attributed_actors` is
+   * empty and there is deliberately no headcount to render: `0` collaborators would
+   * be a claim about the people where the true statement is about the deployment.
+   */
+  attribution: {
+    unattributed_events: number;
+    attributed_events: number;
+    attributed_actors: string[];
+    actor_basis: string;
+  };
+  /** `total` is how many records changed; `returned` is how many rows are here. */
+  changed_records: {
+    rows: ApiActivitySummaryRow[];
+    total: number;
+    returned: number;
+    limit: number;
+  };
+  actions: string[];
+  channels: string[];
+  object_types: string[];
+  /** ABSENT when the read was whole — `GET /api/experiments`' established shape. */
+  incomplete?: { reason: string | null; missing_count: null; message: string };
+}
+
 export interface ApiNotesResponse {
   notes: ApiNote[];
   total: number;

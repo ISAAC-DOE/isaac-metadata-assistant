@@ -17,6 +17,7 @@ import {
 } from '../lib/tutorialController';
 import {
   STATISTICS_ROUTE_KEYS,
+  activitySummaryFixture,
   STATISTICS_VERIFICATION_ROUTE_KEY,
   TUTORIAL_SESSION_ID,
   aboutResponse,
@@ -2160,12 +2161,12 @@ describe('Refresh', () => {
        discriminator: the pre-fix page announced exactly this clean sentence with
        the CURRENT time, for a round in which a read had failed. */
     expect(live?.textContent).toMatch(
-      /^Refresh finished, but 1 of 6 reads failed — the figures shown were last read at /,
+      /^Refresh finished, but 1 of 7 reads failed — the figures shown were last read at /,
     );
     expect(live?.textContent).not.toMatch(/^Refresh finished\. The page last read the API at/);
 
     // Stated on SCREEN as well, not only to a screen reader.
-    expect(screen.getByText(/1 of 6 reads failed on the most recent attempt/)).toBeInTheDocument();
+    expect(screen.getByText(/1 of 7 reads failed on the most recent attempt/)).toBeInTheDocument();
     expect(
       screen.getByText(/either absent or older than the last-read time above/),
     ).toBeInTheDocument();
@@ -2186,8 +2187,8 @@ describe('Refresh', () => {
     expect(container.querySelector('p.sr-only[role="status"]')).toBe(live);
   });
 
-  it('a Refresh where ALL SIX reads fail leaves the timestamp at the last successful read', async () => {
-    const allSixOnce = {
+  it('a Refresh where ALL SEVEN reads fail leaves the timestamp at the last successful read', async () => {
+    const allSevenOnce = {
       'GET /api/runtime/records': firstCallOnly(statisticsRecordsBody),
       'GET /api/graph/status': firstCallOnly(graphStatusAvailable),
       'GET /api/about': firstCallOnly(aboutResponse),
@@ -2199,11 +2200,16 @@ describe('Refresh', () => {
          used to render a note with no `role` — the very defect that slice
          fixed. `/api/imports` is the sixth, added 2026-09-15, and it is here
          for exactly the same reason: without it the round would be 5→6 and
-         one section would never have had data to keep. */
+         one section would never have had data to keep. `/api/activity/summary`
+         is the SEVENTH, added 2026-09-18 with `ACT-004`, and it is here for the
+         same reason a third time: the round's denominator is COUNTED, so a read
+         missing from this map would make the sentence below describe a smaller
+         round than the page actually ran. */
       'GET /api/schema': firstCallOnly(schemaBrowserFixture),
       'GET /api/imports': firstCallOnly(importListFixture),
+      'GET /api/activity/summary': firstCallOnly(activitySummaryFixture),
     };
-    const { container } = renderStatistics(allSixOnce);
+    const { container } = renderStatistics(allSevenOnce);
     await settled();
     const live = container.querySelector('p.sr-only[role="status"]');
     expect(live).not.toBeNull();
@@ -2223,7 +2229,7 @@ describe('Refresh', () => {
     await waitFor(() => expect(live?.textContent).toMatch(/^Refresh finished/));
 
     expect(live?.textContent).toMatch(
-      /^Refresh finished, but 6 of 6 reads failed — the figures shown were last read at /,
+      /^Refresh finished, but 7 of 7 reads failed — the figures shown were last read at /,
     );
     expect(live?.textContent).not.toContain('The page last read the API at');
 
@@ -2234,7 +2240,7 @@ describe('Refresh', () => {
     expect(metaLabel(container)).toBe('Last Read From the API');
 
     // Stated on screen, once, as information rather than as an alert.
-    expect(screen.getByText(/6 of 6 reads failed on the most recent attempt/)).toBeInTheDocument();
+    expect(screen.getByText(/7 of 7 reads failed on the most recent attempt/)).toBeInTheDocument();
     expect(screen.queryAllByRole('alert')).toHaveLength(0);
 
     // Every figure is still the one that was actually read, unchanged and
@@ -2258,13 +2264,14 @@ describe('Refresh', () => {
       'GET /api/openapi': firstCallOnly(openApiFixture),
       'GET /api/schema': firstCallOnly(schemaBrowserFixture),
       'GET /api/imports': firstCallOnly(importListFixture),
+      'GET /api/activity/summary': firstCallOnly(activitySummaryFixture),
     });
     await settled();
     fireEvent.click(refreshButton());
     await waitFor(() =>
       expect(
         build.container.querySelector('p.sr-only[role="status"]')?.textContent ?? '',
-      ).toMatch(/^Refresh finished, but 6 of 6 reads failed/),
+      ).toMatch(/^Refresh finished, but 7 of 7 reads failed/),
     );
     expect(figureValue('API Surface', 'Documented Operations')).toBe(OPERATION_COUNT);
     expect(figureValue('Project Memory', 'Nodes')).toBe(String(graphStatusAvailable.node_count));

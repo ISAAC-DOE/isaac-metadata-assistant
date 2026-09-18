@@ -1147,7 +1147,7 @@ describe('the Full Description rule over the REAL generated contract', () => {
    * rule recognises, NOT by widening the list. This is the THIRD recorded
    * instance of that miss, and the second the test caught rather than a human.
    */
-  it('describes the contract it claims to: 88 operations, MEASURED on the merged tree', () => {
+  it('describes the contract it claims to: 91 operations, MEASURED on the merged tree', () => {
     // FOUR slices have now raised this from 52 for real, different additions — the
     // asset slice, the transcript slice, run removal, and the two CONFLICT
     // RESOLUTION operations. Both sides of this merge conflict carried a number
@@ -1820,7 +1820,8 @@ describe('the Full Description rule over the REAL generated contract', () => {
     // byte-identical to the served document in both directions; the three figures
     // below were then read out of this test's own failure output.
     //
-    // 89 -> 90 operations, 163,257 -> 165,467 characters, 321 -> 326 paragraphs:
+    // ── 89 -> 90 (this branch's own base): `CTX-004`, ONE operation ──────────
+    // 163,257 -> 165,467 characters, 321 -> 326 paragraphs:
     //
     // ~~"303 -> 326 paragraphs"~~ -- CORRECTED after review, and it is the house error
     // committed inside the house's own warning block: 303 is the figure from two
@@ -1837,7 +1838,39 @@ describe('the Full Description rule over the REAL generated contract', () => {
     // records, and it cost a round here too), and
     // `test_contract_description_parity.py` proves the copy byte-identical in both
     // directions. NO existing description changed.
-    expect(REAL_CONTRACT_DESCRIPTIONS).toHaveLength(90);
+    //
+    // ── 89 -> 90 (the other branch's own base): `ACT-004`, ONE operation ──────
+    // `GET /api/activity/summary` — the cross-experiment SUMMARY of the
+    // append-only activity history, which `DEC-44` authorizes in the same
+    // sentence that forbids it from becoming the source of truth. READ-ONLY, and
+    // it adds no second write path.
+    //
+    // RE-MEASURED, NEVER INCREMENTED — this block's own standing instruction. The
+    // entry was transcribed MECHANICALLY out of `create_app().openapi()` rather
+    // than by hand, `test_contract_description_parity.py` proves the copy is
+    // byte-identical to the served document in both directions, and the three
+    // figures here were read out of this test's own failure output.
+    //
+    // ── THE TITLE WAS STALE BEFORE EITHER BRANCH, AND IS NOW CORRECTED ───────
+    // `88 operations` -> `91`. This block's own standing instruction is that *"THE
+    // TITLE IS EDITED IN THE SAME CHANGE AS THE ASSERTION"*, and its 2026-09-13 note
+    // already records that being forgotten once. Measured: at the merge base
+    // `938e4829` the title read 88 while the assertion read 89, so it was ALREADY
+    // stale by one before either branch existed, and neither `ACT-004` nor the first
+    // pass of `CTX-004` corrected it — it was stale by three by the time this merge
+    // landed. Nothing can fail on a title, which is exactly why it drifts and why the
+    // instruction exists.
+    //
+    // ── THE MERGE OF `ACT-004` AND `CTX-004`, 2026-09-18 ──────────────────────
+    // Both branches added exactly ONE operation, so both set the three figures in
+    // this file to their own `+1` values — each correct against its own base and
+    // each WRONG for the merge. Taking either side gives a number that LOOKS
+    // measured and fails only on the merge commit, which is this block's standing
+    // warning arriving for real. Neither side was taken: every figure below was
+    // re-run on the MERGED tree and transcribed from this test's own failure
+    // output, and both operation-log comments above are kept because they document
+    // different operations.
+    expect(REAL_CONTRACT_DESCRIPTIONS).toHaveLength(91);
     // 84,501 -> 84,584 (+83): the assistant seam's own description was corrected, in
     // ONE operation and with the paragraph count unchanged. It read "so every request
     // is answered `501`" while the paragraph two below it documented the `422` — a
@@ -2460,9 +2493,46 @@ describe('the Full Description rule over the REAL generated contract', () => {
     // an absence that nothing happened. Each of those is a sentence a reader acts
     // on wrongly if it is missing. Re-measured by running this file, not by adding
     // the new text's length.
-    // 163,257 -> 165,467 (+2,210): `CTX-004`'s one new operation. Re-measured by
-    // running the rule over the array, not by adding the new text's length.
-    expect(total).toBe(165467);
+    // 163,257 -> 165,467 (+2,210) on this branch's own base: `CTX-004`'s one new
+    // operation. Re-measured by running the rule over the array, not by adding the
+    // new text's length.
+    //
+    // 163,257 -> 166,669 (+3,412), 2026-09-18: ONE new operation,
+    // `GET /api/activity/summary` (`ACT-004`), and NO existing description
+    // changed — `test_contract_description_parity.py` proves that rather than
+    // leaving it asserted here. It is longer than the per-record read above and
+    // for the same kind of reason: a SUMMARY has to publish the conditions under
+    // which its own numbers are true, so the description states that every total
+    // is a total over `scope.experiments_summarized` and may be fewer than the
+    // workspace holds, that the window is decided server-side and travels with
+    // the figure, that `attribution` reports event counts and never a number of
+    // people, and that the two kinds of unreadable are counted separately. A
+    // summary whose caveats were not on the wire would be a summary a client
+    // could render as complete. Re-measured by running this file.
+    //
+    // 166,669 -> 167,315 (+646), same day, SAME operation, in response to an
+    // independent review: the description gained a paragraph stating that every
+    // breakdown it serves (`by_action`, `by_channel`, `by_object_type`, both ranked
+    // slices, every `changed_records` row count) is WINDOW-scoped and that
+    // `totals.events_all_time` is the only all-time figure — so a label rendered
+    // over one of them has to name the window. The review measured the mistake that
+    // omission invites on the rendered screen: a breakdown summing to 12 beneath an
+    // all-time total of 5,000 reads as a description of the 5,000, and both numbers
+    // are true while the sentence they assemble is false. An API consumer has less
+    // context than a scientist, so the constraint belongs on the wire too. It also
+    // states that `object_types_with_events` deliberately does not exist. Paragraph
+    // count moves with it, 329 -> 330. Re-measured by running this file.
+    //
+    // ── THE MERGE, 2026-09-18: 165,467 (CTX) and 167,315 (ACT) ARE BOTH WRONG ──
+    // Each side is correct against its own base and neither is correct for the
+    // merge, which now carries BOTH new operations. The figure below was measured
+    // on the MERGED tree by running this file and transcribing its failure output
+    // — not by adding the two deltas, which would also have been wrong: an
+    // arithmetic prediction of 168,879 was made before the merge, and a second one of
+    // 169,521 was made while resolving it; the measured value is 169,525. Neither is what
+    // the tree measures, because ACT's own figure moved twice on its branch after
+    // that prediction was formed.
+    expect(total).toBe(169525);
     // 104,045 -> 114,959 (+10,914): the four new operations, and NO existing
     // description changed — `test_contract_description_parity.py` proves that rather
     // than leaving it asserted here. RE-DERIVED from the served document and never
@@ -2728,7 +2798,8 @@ describe('the Full Description rule over the REAL generated contract', () => {
       // of them. Re-measured by running this file and reading
       // `expected 321 to be 315`, never by apportioning.
       //
-      // 321 -> 326 (+5), 2026-09-18: `CTX-004`'s ONE new operation carries a lead plus
+      // 321 -> 326 (+5) on this branch's own base: `CTX-004`'s ONE new operation
+      // carries a lead plus
       // five post-lead paragraphs. BOTH NUMBERS MOVED TOGETHER, which is the signature
       // of prose arriving as WHOLE NEW PARAGRAPHS rather than woven into existing ones
       // — correct here, because this is one new operation and each of its five is
@@ -2738,7 +2809,45 @@ describe('the Full Description rule over the REAL generated contract', () => {
       // state and not the exported file, what the counts describe, and that no literal
       // is interpreted. Re-measured by running `splitPurpose` over the array, never by
       // apportioning.
-      326,
+      //
+      // 321 -> 329 (+8) on the other branch's own base: `GET /api/activity/summary`'s lead plus
+      // EIGHT post-lead paragraphs (`ACT-004`), and no other description moved.
+      // Both numbers moved together — +3,412 characters AND +8 paragraphs —
+      // which is the signature of prose arriving as whole new paragraphs rather
+      // than being woven into existing ones, and here that is unavoidable
+      // because the change IS a whole new operation. Each of the eight states
+      // one separable condition under which the summary's numbers are true (the
+      // window, the bound, hydration completeness, attribution, the two kinds of
+      // unreadable, the two independent counts, the vocabularies, and what it
+      // does not do), and a reader who stops early must not have skipped one.
+      // MEASURED by running this file and reading `expected 329 to be 321`.
+      //
+      // 329 -> 330 (+1), same day, SAME operation: the window-scoping paragraph the
+      // independent review's Important-1 finding put on the wire. See the note above
+      // `expect(total)` for what it says and why it belongs in the contract rather
+      // than only in the screen's labels. ONE paragraph and +646 characters moved
+      // together, which is the signature of prose arriving as a whole new paragraph
+      // — correct here, because the constraint is separable from every other
+      // sentence in that description and a reader who stops early must not skip it.
+      // MEASURED by running this file and reading `expected 330 to be 329`.
+      //
+      // ── THE MERGE: 326 AND 330 ARE BOTH WRONG ────────────────────────────
+      //
+      // AND THIS FIGURE WAS NOT VERIFIED BY THE FIRST RUN OF THIS FILE. All three
+      // figures in this block live inside ONE `it`, so the failure at
+      // `expect(total)` several hundred lines above aborted the test before
+      // reaching here — the same trap `backend-down-state.test.tsx` records twice,
+      // where a third counter hid behind the first failure and two targeted runs
+      // passed over it. It is confirmed only by the CLEAN re-run (78 passed). Run
+      // this WHOLE file to a clean pass; a single green-looking run after one edit
+      // is not evidence about the assertions below the first failure.
+      // Both branches added one operation and each set this to its own +N. The
+      // figure below was measured on the MERGED tree from this file's own failure
+      // output. A prediction of 334 was formed before the merge from the two
+      // pre-merge deltas and is not what the tree measures — ACT's own count moved
+      // 329 -> 330 after that prediction, which is exactly why this block says to
+      // re-run rather than apportion.
+      335,
     );
     // 211 -> 235 (+24): the four new operations carry a lead plus 24 post-lead
     // paragraphs between them. It is asserted separately from the character total

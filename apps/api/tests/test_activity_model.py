@@ -654,3 +654,78 @@ def test_no_truth_path_module_imports_the_activity_modules():
         if "activity_history" in text or "import activity" in text:
             offenders.append(path.name)
     assert offenders == [], offenders
+
+
+def test_the_activity_panel_transcribes_the_server_actor_constants_exactly():
+    """The frontend copies two server constants; nothing made them agree.
+
+    ``ActivityHistoryPanel.tsx`` declares ``ACTOR_UNATTRIBUTED`` and
+    ``TRUST_BASIS_TEST_FIXTURE`` because the frontend has no import path to Python.
+    Both decide BEHAVIOUR, not wording: the first gates whether any per-row actor is
+    rendered at all and which standing disclosure appears, the second gates
+    ``DEC-45``'s "a name never travels unqualified" qualification.
+
+    **A drift in either spelling fails NO frontend test**, because every frontend
+    fixture supplies the same literal the component compares against — so the two
+    sides would agree with each other and disagree with the server. The visible
+    result would be an actor column silently appearing on every row of every record
+    (the sentinel no longer matching), or a fixture-minted name rendered with no
+    qualification at all. This is the mirror of the parity guards ``CLAUDE.md`` §11
+    records for the blocker keys and for ``RUN_LIST_LIMIT_MAX``.
+
+    The declarations are matched as whole lines, in the exact one-per-line form the
+    component's own comment says to keep them in, so a reformat that merges them is
+    a visible failure here rather than a silent hole.
+    """
+    import pathlib
+    import re
+
+    from isaac_api import identity
+
+    panel = (
+        pathlib.Path(ws.__file__).resolve().parents[3]
+        / "apps"
+        / "web"
+        / "src"
+        / "components"
+        / "ActivityHistoryPanel.tsx"
+    )
+    assert panel.is_file(), panel
+    # `errors="replace"` and a plain read: §11's NUL-byte trap is about `grep`
+    # exiting 0 on a file it skipped, and a Python read cannot fail that way.
+    source = panel.read_text(encoding="utf-8", errors="replace")
+
+    def declared(name: str) -> str:
+        found = re.findall(rf"^const {name} = '([^']*)';$", source, flags=re.MULTILINE)
+        assert len(found) == 1, f"expected exactly one `const {name} = '...';` line, found {found}"
+        return found[0]
+
+    assert declared("ACTOR_UNATTRIBUTED") == activity.ACTOR_UNATTRIBUTED
+    assert declared("TRUST_BASIS_TEST_FIXTURE") == identity.TRUST_BASIS_TEST_FIXTURE
+
+    # NEGATIVE CONTROL: the two are different strings, so a guard that accidentally
+    # compared one constant against itself would still be doing work.
+    assert activity.ACTOR_UNATTRIBUTED != identity.TRUST_BASIS_TEST_FIXTURE
+
+
+def test_the_other_frontend_sites_spell_test_fixture_the_same_way():
+    """Two more frontend files hard-code ``test_fixture``, and they must not diverge.
+
+    ``revisionHistory.actorBasisNote`` is the rule ``ActivityHistoryPanel`` reuses
+    rather than re-invents, and ``currentUserContract`` declares the basis as a
+    TypeScript union member. Three spellings of one value is how a vocabulary
+    drifts — which is the reason ``activity.TRUST_BASIS_UNATTRIBUTED``'s own
+    docstring gives for reusing ``submissions``' constant instead of minting a new
+    one. Asserted over PRESENCE of the correct literal rather than over absence of a
+    wrong one, because the wrong one is unbounded.
+    """
+    import pathlib
+
+    from isaac_api import identity
+
+    web = pathlib.Path(ws.__file__).resolve().parents[3] / "apps" / "web" / "src"
+    quoted = f"'{identity.TRUST_BASIS_TEST_FIXTURE}'"
+    for rel in ("lib/revisionHistory.ts", "lib/currentUserContract.ts"):
+        path = web / rel
+        assert path.is_file(), path
+        assert quoted in path.read_text(encoding="utf-8", errors="replace"), rel

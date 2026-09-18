@@ -198,18 +198,40 @@ describe('the darwin column says how much of itself is measured', () => {
      * registered — is replaced by the exact figure.
      */
     const provenance = auditDarwinProvenance(A11Y_BASELINE, DARWIN_CARRIED_FORWARD);
+    /*
+     * ── FOUR -> SEVEN, 2026-09-18, `ACT-004`. ────────────────────────────────
+     *
+     * One more published operation (`GET /api/activity/summary`) rendered by the
+     * Endpoint Explorer's live-`/api/openapi` read moved SIX `settings-explorer`
+     * cells on linux, all `color-contrast`, all +1, all TRANSCRIBED from CI job
+     * 105678012414. Three of the six were already registered; the other three join
+     * here. `@zoom-200` did NOT move and stays registered from the previous round.
+     *
+     * ~~`@width-390` is NOT here: its halves now agree, so it is a scalar and a
+     * scalar cannot be registered.~~ **THAT REASON EXPIRED.** Its linux half rose to
+     * 22 against a darwin 21, so it is a legitimate split again and IS registered.
+     * The struck sentence is kept because it was correct when written and is the
+     * kind of line a future session would otherwise obey without re-deriving.
+     */
     expect(provenance.unverifiedKeys.slice().sort()).toEqual([
       'settings-explorer@desktop-1280x800',
       'settings-explorer@laptop-1024x768',
+      'settings-explorer@mobile-375x812',
       'settings-explorer@tablet-768x1024',
+      'settings-explorer@width-320',
+      'settings-explorer@width-390',
       'settings-explorer@zoom-200',
     ]);
-    // 17 + 17 + 20 + 20. Written out so a change to any ONE cell fails here rather
-    // than being absorbed by a total that still happens to add up. `@width-390` is
-    // NOT here: it moved, but its halves now agree, so it is a scalar and a scalar
-    // cannot be registered — see the cell's own note.
-    expect(provenance.unverifiedNodes).toBe(74);
+    // 17 + 17 + 20 + 20 + 20 + 21 + 21 = 136. Written out so a change to any ONE
+    // cell fails here rather than being absorbed by a total that still happens to
+    // add up — and the sum is a CHECK, not the source: the figure was read out of
+    // this test's own failure (`expected 136 to be 74`).
+    expect(provenance.unverifiedNodes).toBe(136);
     expect(provenance.unverifiedFraction).toBeGreaterThan(0);
+    // DARWIN IS UNCHANGED at 822 and that is the point of this whole round: six
+    // linux halves moved and not one darwin half was measured, so the darwin total
+    // cannot have moved. If this figure ever changes in the same edit as a linux
+    // transcription, something was carried forward AS IF it had been measured.
     expect(provenance.totalNodes).toBe(822);
   });
 
@@ -528,11 +550,39 @@ describe('the darwin column says how much of itself is measured', () => {
       // `@mobile-375x812` keeps its 2026-09-01 halves untouched: CI run 35272170788
       // reported 665 skipped and never measured it, so it is neither transcribed nor
       // registered. It is expected to fail on the next run.
+      //
+      // ── RE-DERIVED 2026-09-18, `ACT-004`: 5 -> 7. ──
+      // The predicted cause fired a FOURTH time — one more published operation
+      // (`GET /api/activity/summary`), same live-`/api/openapi` mechanism. SIX cells
+      // moved on linux; the two that were SCALARS become splits and are added here:
+      //
+      //   ADDED  settings-explorer@width-320  scalar 21 -> { darwin: 21, linux: 22 }
+      //   ADDED  settings-explorer@width-390  scalar 21 -> { darwin: 21, linux: 22 }
+      //
+      //     Both linux halves TRANSCRIBED from CI job 105678012414 (`21 -> 22`).
+      //     Both darwin halves are CARRIED FORWARD — no darwin run has seen either —
+      //     so both keys are registered in `DARWIN_CARRIED_FORWARD` and
+      //     `A11Y_BASELINE_DARWIN_UNVERIFIED_NODES` moves 74 -> 136 in this same
+      //     edit, which is the procedure the assertion message above demands.
+      //
+      // A NEAR-MISS THAT DECIDED THE ENCODING: both rose ABOVE their old value, so
+      // they are legitimate splits. Had linux risen to MEET an unmeasured darwin,
+      // this edit would have hit the standing `@width-390` contradiction —
+      // `auditA11yWellFormedness` refuses equal halves, `DARWIN_CARRIED_FORWARD`
+      // refuses a registered scalar. That contradiction is PRE-EXISTING and is not
+      // resolved here.
+      //
+      // The other four moved but were already splits, so this SET does not see them:
+      // desktop/laptop 18 -> 19, tablet/mobile 21 -> 22. `@zoom-200` did not move at
+      // all — "one operation therefore +1 everywhere" is the invention this file
+      // records the wrap-boundary precedent against.
       [
         'color-contrast @ settings-explorer@desktop-1280x800',
         'color-contrast @ settings-explorer@laptop-1024x768',
         'color-contrast @ settings-explorer@mobile-375x812',
         'color-contrast @ settings-explorer@tablet-768x1024',
+        'color-contrast @ settings-explorer@width-320',
+        'color-contrast @ settings-explorer@width-390',
         'color-contrast @ settings-explorer@zoom-200',
       ] as string[]
     );

@@ -76,6 +76,13 @@ import {
   Cpu,
   Quote,
   Inbox,
+  // The Workspace Activity glyph (`ACT-004`). A clock with a counter-clockwise
+  // arrow: *what has already happened*, which is exactly what an append-only audit
+  // history holds. Deliberately NOT `Activity` (Lucide's ECG line), which reads as
+  // a live signal or a health trace — this section counts recorded acts and states
+  // no trend and no health at all, the same reasoning that chose `BarChart3` for
+  // the Statistics destination over a trend or gauge mark.
+  History,
   type LucideIcon,
 } from 'lucide-react';
 import type { SourceType } from '../lib/types';
@@ -244,5 +251,6 @@ export {
    * alone.
    */
   Inbox,
+  History,
 };
 export type { LucideIcon };
