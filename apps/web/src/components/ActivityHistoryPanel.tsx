@@ -183,26 +183,34 @@ function sideLabel(side: Side): string {
 }
 
 /**
- * THE INLINE THRESHOLD, AND WHY IT IS 40.
+ * THE INLINE THRESHOLD, AND WHY IT IS 40 — with the one thing it is NOT.
  *
- * `activityHistory.css` caps this panel's prose at `68ch`, which is the measure a
- * reader here actually gets. An inline change is two values plus a three-character
- * arrow on one line, so 40 characters on ONE side already exceeds half that
- * measure: the second value starts on a new line and the arrow lands at the end of
- * a paragraph, where it reads as punctuation rather than as a relation between two
- * things. Below 40 both values and the arrow stay adjacent. The number is a
- * property of the measure declared beside it, not a taste.
+ * `activityHistory.css` declares this panel's reading measure as `68ch`
+ * (`.activity-lead`, `.activity-actor-note`). An inline change is two values plus a
+ * three-character arrow on one line, so 40 characters on ONE side already exceeds
+ * half that measure: the second value starts on a new line and the arrow lands at
+ * the end of a paragraph, where it reads as punctuation rather than as a relation
+ * between two things. Below 40, both values and the arrow stay adjacent.
+ *
+ * WHAT THIS IS NOT, stated because the first draft of this comment overstated it:
+ * `.activity-change` itself carries NO `max-width`, so 68ch is the measure this
+ * panel DECLARES for prose, not a measured width of the change line — which is as
+ * wide as the record content column at whatever viewport the reader has. The
+ * threshold is derived from the panel's own declared measure, which is a checkable
+ * property of the stylesheet beside it; it is not a browser measurement, and no
+ * browser measurement was taken for it.
  */
 const INLINE_MAX_CHARS = 40;
 
 /**
  * THE BLOCK CAP, AND WHY IT IS 400.
  *
- * About six lines at the `68ch` measure — enough to see WHAT changed in a long text
- * without one audit row becoming a page. A longer value is cut, the reader is TOLD
- * the exact character counts, and the whole value sits under the disclosure
- * unchanged. `ACT-003b`'s rule is that nothing is truncated SILENTLY; it is not
- * that nothing is ever truncated.
+ * About six lines at the declared `68ch` measure — enough to see WHAT changed in a
+ * long text without one audit row becoming a page. The same caveat as above applies
+ * to "six lines": it is arithmetic over the declared measure, not a rendered count.
+ * A longer value is cut, the reader is TOLD the exact character counts, and the
+ * whole value sits under the disclosure unchanged. `ACT-003b`'s rule is that
+ * nothing is truncated SILENTLY; it is not that nothing is ever truncated.
  */
 const BLOCK_MAX_CHARS = 400;
 
