@@ -212,6 +212,21 @@ export function recordPathExperimentId(path: string | undefined): string | undef
  * only the values are copy.
  */
 export const SUB_RESOURCE_LABELS: Readonly<Record<string, string>> = {
+  /*
+   * `GET .../activity`, the append-only audit history (`ACT-003`). "The activity
+   * history" is the product's own word for this surface, so a scientist told a read
+   * failed hears the name of the thing they opened.
+   *
+   * IT IS DISTINCT FROM `changes` BY DESIGN, and the `changes` entry below already
+   * argued why — before this history existed. That comment says the feed is
+   * deliberately NOT called "recent activity" because "copy naming acts would
+   * describe a product this one is not." That product NOW EXISTS, which makes the
+   * old reasoning MORE right rather than stale: "activity" is a taken word now, and
+   * the two reads answer different questions — the feed reports WHICH PARTS of the
+   * record moved, this history reports WHAT HAPPENED and on which channel. Neither
+   * label may drift into the other's territory.
+   */
+  activity: 'the activity history',
   answers: 'saved answers',
   artifacts: 'exported artifacts',
   assets: 'the asset references',

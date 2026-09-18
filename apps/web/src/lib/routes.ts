@@ -119,7 +119,13 @@ export function isStatisticsTab(value: string | null | undefined): value is Stat
  */
 export const RECORD_VIEW_PARAM = 'view';
 
-export const RECORD_VIEW_IDS = ['fields', 'runs', 'capture', 'graph'] as const;
+/* `activity` JOINED 2026-09-17 (`ACT-003`). It is a DESTINATION, not a workflow
+   step: there is no derivable criterion for "the history is finished", so it
+   carries no completion state — the same argument `workflow.py:128-149` makes for
+   submission and the capture group makes for itself. Appended last so no existing
+   bookmark or test changes meaning, and `fields` remains what a bare
+   `/record/<id>` resolves to. */
+export const RECORD_VIEW_IDS = ['fields', 'runs', 'capture', 'graph', 'activity'] as const;
 
 export type RecordViewId = (typeof RECORD_VIEW_IDS)[number];
 

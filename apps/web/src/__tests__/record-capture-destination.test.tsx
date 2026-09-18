@@ -197,6 +197,18 @@ describe('the promoted capture destination', () => {
       'Experiment Data',
       'Runs',
       'Record Fields',
+      /*
+       * `Activity` JOINED THE WORKSPACE LANDMARK, 2026-09-17 (`ACT-003`), which
+       * is why this union grew rather than moved. The assertion's PURPOSE is
+       * unchanged and is exactly why it is extended instead of loosened: it is
+       * the union over BOTH landmarks so that a destination appearing in, or
+       * moving between, them stays covered. A new destination in the workspace
+       * landmark is precisely the case it was written for.
+       *
+       * Nothing about the CAPTURE landmark changed — `Experiment Data` and
+       * `Runs` are still its two links, still first, still above the spine.
+       */
+      'Activity',
     ]);
   });
 

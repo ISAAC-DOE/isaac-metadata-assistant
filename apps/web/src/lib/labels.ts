@@ -430,6 +430,47 @@ export const LABELS = {
    */
   workspaceCapture: 'Experiment Data',
   workspaceGraph: 'Graph',
+  workspaceActivity: 'Activity',
+
+  /* ── ACTIVITY HISTORY (`ACT-003`) ──────────────────────────────────────────
+     Every string this surface renders, in one place, because the panel invents no
+     vocabulary of its own: the actions, channels and object types come from the
+     server and are humanized from their own segments, never re-authored. */
+  activityTitle: 'Activity History',
+  activityLead:
+    'Every recorded change to this record, newest first. This history is read-only: an entry is written by the act it describes, and nothing here can edit or remove one.',
+  /* `ACT-003` requires `unattributed` be rendered HONESTLY rather than hidden. It is
+     said once, in words, instead of printing an uninterpretable token on every row —
+     and it names the reason, because "unattributed" alone reads like a fault. */
+  activityActorUnattributed:
+    'Entries are not attributed to a person. This deployment has no verified sign-in boundary, so a name taken from the request could not be trusted — and recording one anyway would be a guess presented as a fact.',
+  activityLoading: 'Reading this record\u2019s history\u2026',
+  activityUnavailable:
+    'This record\u2019s history could not be read just now. Nothing has been lost — reopen this view to try again.',
+  activityEmpty: 'Nothing has been recorded on this record yet.',
+  /* THE COUNT NEEDS A NOUN. "3 of 200" is a bare fraction — three what? — and on an
+     Operate surface the reader is mid-task and should not have to infer it. */
+  activityShowing: 'Showing the most recent',
+  activityOf: 'of',
+  activityEntries: 'entries',
+  /* `ACT-003`'s dead end, closed. The server pages (`next_before_seq`), so a reader
+     told "50 of 200" must be able to reach the other 150. A count that names hidden
+     facts with no control to reach them is not a finished surface. */
+  activityShowOlder: 'Show Older Entries',
+  activityLoadingOlder: 'Reading older entries\u2026',
+  activityAllShown: 'That is the whole history for this record.',
+  /* The disclosure summary. The sentence behind it is unchanged and still honest —
+     it simply stops being permanent furniture for a reader who has met it once. */
+  activityWhyUnattributed: 'Why are entries not attributed to a person?',
+  /* COUNTED, never rendered: saying what an unreadable entry contains would mean
+     inventing it. Disclosed rather than silently dropped. */
+  activityUnreadable: '\u00b7 entries this build could not read:',
+  /* The two halves of the server's `{present, value}` envelope, which carries two
+     DIFFERENT facts. Collapsing them would lose the distinction it exists for. */
+  activityAbsent: 'was not set',
+  activityNull: 'was empty',
+  activityEmptyString: '(blank)',
+  activityChangedTo: 'changed to',
 
   /*
    * DATA CAPTURE — the group label above the promoted capture destination.

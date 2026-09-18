@@ -768,9 +768,12 @@ describe('the sub-read inventory this file derives from api.ts', () => {
     // the record, not a container that could be fetched, and naming it as a thing
     // would describe a capability this build does not have.
     //
-    // Read out of this test's own failure output (`expected 47 to be 46`), not
-    // derived by adding a delta.
-    expect(experimentPathLiterals.length).toBe(47);
+    // Read out of this test's own failure output (`expected 48 to be 47`), not
+    // derived by adding a delta. 47 -> 48 on 2026-09-17: `ACT-003` adds the
+    // `GET .../activity` sub-read, which is the ONE new per-record path literal in
+    // that slice. Its label is in `SUB_RESOURCE_LABELS`, so the sibling assertions
+    // below pass for the right reason rather than by the count being widened.
+    expect(experimentPathLiterals.length).toBe(48);
     expect(bareRecordLiterals.length).toBeGreaterThan(0);
     // 31 -> 33: `runs/SEG-1/answers` and `runs/SEG-1/edit`, the two run-level write
     // suffixes. Both are WRITES rather than reads, and they appear here because this
@@ -793,7 +796,15 @@ describe('the sub-read inventory this file derives from api.ts', () => {
     // LABEL on the record and not a container that could be fetched. Read out of this
     // test's own failure output (`have a length of 37 but got 38`), not derived by
     // adding a delta.
-    expect(SUB_READ_SUFFIXES).toHaveLength(38);
+    // 38 -> 39 on 2026-09-17: `activity`, the append-only audit history's read
+    // (`ACT-003`). A NEW first segment, so `SUB_RESOURCE_LABELS` needs a product
+    // word for it, and the word is "the activity history" — the name of the surface
+    // the scientist opened. It is deliberately NOT a variation on "recent changes":
+    // that label belongs to the change FEED, which reports which parts of the record
+    // moved rather than what happened to it, and the `changes` entry argued exactly
+    // that distinction before this history existed. Read out of this test's own
+    // failure output (`have a length of 38 but got 39`), not derived by adding a delta.
+    expect(SUB_READ_SUFFIXES).toHaveLength(39);
     // 19, AND THE ROUTE TO THAT NUMBER IS WORTH KEEPING.
     //
     // THIS INCIDENT RECORD WAS LOST IN A MERGE RESOLUTION AND IS RESTORED HERE, an
@@ -843,7 +854,16 @@ describe('the sub-read inventory this file derives from api.ts', () => {
     // first failure aborted its own test before reaching this assertion. Read out of
     // this test's own failure output (`have a length of 23 but got 24`), not derived
     // by adding a delta.
-    expect(SUB_READ_SEGMENTS).toHaveLength(24);
+    // *** AND IT HAPPENED AGAIN, EXACTLY AS THE PARAGRAPH ABOVE PREDICTED — 2026-09-17,
+    // `ACT-003`'s `GET .../activity`. *** Three counts in this file moved for that one
+    // route too (literal 47 -> 48, suffix 38 -> 39, and this one 24 -> 25), and this
+    // third one surfaced ONLY in the full suite: two targeted runs had passed over it
+    // because the file's earlier failure aborted its own test before reaching here.
+    // The note above is therefore not a historical curiosity but a live instruction —
+    // after changing a sub-read, run this WHOLE file to a clean pass, never a
+    // targeted assertion. Read out of the failure output (`have a length of 24 but
+    // got 25`), not derived by adding a delta.
+    expect(SUB_READ_SEGMENTS).toHaveLength(25);
     // THE CONFLICT-RESOLUTION PAIR, and how these three numbers were arrived at.
     // `listConflicts` and `resolveConflict` add TWO literals and TWO suffixes —
     // `conflicts` and `conflicts/resolve`, the second of which carries no `${…}`

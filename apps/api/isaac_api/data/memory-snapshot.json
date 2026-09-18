@@ -10436,7 +10436,7 @@
       },
       {
         "path": "apps/web/src/components/FetchStates.tsx",
-        "sha256": "70a526e6061fe00a6bbf439fb18c1f59bbc1dd71c4bc7d878b7dac4e168a8ddb"
+        "sha256": "a33776a8980e18e06810ba396d1712a8c676405861bf2c0cceb128717aa7c836"
       },
       {
         "path": "apps/web/src/components/FieldGroup.tsx",
@@ -10504,7 +10504,7 @@
       },
       {
         "path": "apps/web/src/lib/api.ts",
-        "sha256": "595959912d383a5af58ee9a12500f38839c663f937f51958ba78d7ff666912f8"
+        "sha256": "f1f3b53640d0af946e7d3723868aa105de9b1f1cdfe1989e24b2af7c521c2aa5"
       },
       {
         "path": "apps/web/src/lib/assistant.ts",
@@ -10512,11 +10512,11 @@
       },
       {
         "path": "apps/web/src/lib/labels.ts",
-        "sha256": "4b6247acb2aa9b29ee6350a9acb457216d4fda3b4031b3d379332e1d2ed1cf00"
+        "sha256": "6d988e5d862b606b9c226f62a82c0278d3934d654e8622fa3c89d94fef0340d0"
       },
       {
         "path": "apps/web/src/lib/routes.ts",
-        "sha256": "3def978eb52caa6d20cbcbaa8aa912ee0ab46def7ab1eee258c69f3d31d89792"
+        "sha256": "6bda62bab25a80d8f3c4e88561eb9aab4f29f5c50bda51a0326895352c6f227b"
       },
       {
         "path": "apps/web/src/lib/status.ts",
@@ -10524,7 +10524,7 @@
       },
       {
         "path": "apps/web/src/lib/types.ts",
-        "sha256": "07a1c173d18261ce58245c1d1141649837156c81820ca140b9e759d776202edc"
+        "sha256": "c9e551dcbc5894465433db5aa2f5ff85dbd34a06da9669be70a3916677a51956"
       },
       {
         "path": "apps/web/src/lib/useFetch.ts",
@@ -10564,7 +10564,7 @@
       },
       {
         "path": "apps/web/src/screens/RecordWorkbench.tsx",
-        "sha256": "2d0aa4a93b01c20b9ce10ce413e026a601e35cd515c03abbe02f158c7831b2a6"
+        "sha256": "96230525ec868da532d155f7bf5870678523f87345f9faeb787c5bf55e2fa4b2"
       },
       {
         "path": "apps/web/src/screens/SettingsPage.tsx",
@@ -11012,7 +11012,7 @@
       }
     ],
     "served_file_count": 200,
-    "served_manifest_fingerprint": "521310058df96b01ba06a6fe5cf98b7da3111c25bf658992b3696c3a47f37668"
+    "served_manifest_fingerprint": "e2d97e0743542023fc79f603324a1d6633aa9c5a7ddf332b94e0935cb22672ee"
   },
   "overview": {
     "built_at_commit": "caab1d0a69c1733524bda5dde495623bc4b7bad1",

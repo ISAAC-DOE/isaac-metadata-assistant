@@ -6,6 +6,7 @@ import { AppShell } from '../components/AppShell';
 import { TopBar } from '../components/TopBar';
 import { WorkflowSpine } from '../components/WorkflowSpine';
 import { RECORD_WORKSPACES } from '../components/RecordWorkspaceNav';
+import { ActivityHistoryPanel } from '../components/ActivityHistoryPanel';
 import { RecordRail } from '../components/RecordRail';
 import { StatusBar } from '../components/StatusBar';
 import { FieldGroup } from '../components/FieldGroup';
@@ -489,6 +490,14 @@ const WORKSPACE_PROMPT_LEADS: Record<RecordViewId, readonly AgentPrompt['intent'
    * lead list that is a no-op reads as a decision when it is not one.
    */
   graph: [],
+  /*
+   * DELIBERATELY EMPTY, for `graph`'s reason and not for symmetry. A reader on the
+   * history is asking "what happened", which is a question this surface answers
+   * directly and the assistant's bounded catalog has no better entry for. Naming
+   * `explain_current_state` would promote a prompt about the record's CURRENT state
+   * to a reader looking at its PAST — a different question.
+   */
+  activity: [],
 };
 
 /** The seven pills, led by this workspace's own. Stable and total: every intent
@@ -762,12 +771,21 @@ function LoadedWorkbench({
    * a stale experiment graph structurally impossible; keeping it mounted would
    * cache it.
    */
-  const mounted = useRef<Record<Exclude<RecordViewId, 'graph'>, boolean>>({
+  const mounted = useRef<Record<Exclude<RecordViewId, 'graph' | 'activity'>, boolean>>({
     fields: activeView === 'fields',
     runs: activeView === 'runs',
     capture: activeView === 'capture',
   });
-  if (activeView !== 'graph') mounted.current[activeView] = true;
+  /*
+   * `activity` JOINS `graph` AS CONDITIONAL, and for the same reason stated above:
+   * the graph is excluded because keeping it mounted would cache it, and a cached
+   * AUDIT HISTORY is a stale one. Every other workspace holds unsaved text that must
+   * survive a trip through a sibling; this one holds none — it is read-only — so
+   * there is nothing to preserve and a fresh read on open is strictly better.
+   */
+  if (activeView !== 'graph' && activeView !== 'activity') {
+    mounted.current[activeView] = true;
+  }
 
   /* The run the Record Map describes — the FOCUSED run when one is focused,
      otherwise the page's first — reported by `RunsSection` from the page it
@@ -1002,6 +1020,25 @@ function LoadedWorkbench({
           tabIndex={-1}
         >
           <RecordGraphView id={id} />
+        </section>
+      )}
+
+      {/* ── ACTIVITY — what HAPPENED to this record (`ACT-003`) ───────────────
+          Conditional, beside the graph and for the graph's own reason: a cached
+          audit history is a stale one. This panel also holds no unsaved text to
+          preserve across a workspace switch, because it is read-only, so a fresh
+          read on open costs nothing and guarantees currency. Same
+          `record-view-panel` chrome and the same region naming as the other four,
+          so the sidebar's five destinations are one system rather than four plus
+          an exception. */}
+      {activeView === 'activity' && (
+        <section
+          id={workspacePanelId('activity')}
+          className="record-view-panel"
+          aria-label={workspaceRegionName('activity')}
+          tabIndex={-1}
+        >
+          <ActivityHistoryPanel experimentId={id} />
         </section>
       )}
 

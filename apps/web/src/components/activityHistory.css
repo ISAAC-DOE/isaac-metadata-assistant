@@ -1,0 +1,150 @@
+/* ── ACTIVITY HISTORY (`ACT-003`) ──────────────────────────────────────────────
+   Every value below is a DECLARED token from `styles/tokens.css`. No literal hex,
+   px or rem appears here: `palette-contrast.test.ts` fails on an undeclared custom
+   property and `type-scale-and-spacing` counts hand-authored literals, and both
+   guards are right — a phantom resolves to an invalid value and the declaration is
+   dropped silently at computed-value time.
+
+   NO RESERVED HUE. Nothing here encodes pass/fail or good/bad in colour: an audit
+   history reports what happened, and colouring a `run_removed` red would editorialise
+   a scientist's own act. That also keeps this file clear of the `P22C` guard. */
+
+.activity-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+
+.activity-heading {
+  margin: 0;
+  font-size: var(--font-size-heading-sm);
+  font-weight: var(--font-weight-bold);
+  color: var(--text-heading);
+}
+
+.activity-lead,
+.activity-actor-note {
+  margin: 0;
+  font-size: var(--font-size-body);
+  line-height: var(--line-height-normal);
+  color: var(--text-secondary);
+  max-width: 68ch;
+}
+
+/* The actor disclosure, now behind a native `<details>` (`HelpPanel`/`AssistantPanel`
+   idiom). The SUMMARY carries the question, so a closed disclosure still states what
+   it is about rather than hiding it behind a neutral label; the paragraph keeps its
+   set-apart treatment — structural, not hue — because it is the one paragraph here a
+   reader must not skim once opened. */
+.activity-actor-details {
+  font-size: var(--font-size-body);
+  color: var(--text-secondary);
+}
+
+.activity-actor-summary {
+  cursor: pointer;
+  font-size: var(--font-size-body);
+  font-weight: var(--font-weight-bold);
+  color: var(--text-heading);
+}
+
+.activity-actor-note {
+  margin-top: var(--space-xs);
+  padding: var(--space-sm);
+  /* `--space-2xs` as the stroke, the form `run-schema-mirror.css` already uses —
+     a rung rather than a hand-authored `2px`, which `type-scale-and-spacing`
+     refuses and was right to. */
+  border-left: var(--space-2xs) solid var(--border-strong);
+  background: var(--surface-subtle);
+}
+
+/* The paging control. `.btn .btn-secondary` (`styles/base.css:207`) already defines
+   default, hover, focus, active and disabled, so NO interaction state is reinvented
+   here and none is half-shipped — Operate mode's rule. Only placement is set. */
+.activity-older {
+  align-self: flex-start;
+}
+
+.activity-counts {
+  margin: 0;
+  font-size: var(--font-size-meta);
+  color: var(--text-muted);
+}
+
+.activity-unreadable {
+  color: var(--text-secondary);
+}
+
+.activity-status {
+  margin: 0;
+  font-size: var(--font-size-body);
+  color: var(--text-secondary);
+}
+
+.activity-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+}
+
+.activity-row {
+  padding: var(--space-sm);
+  border: 1px solid var(--border-faint);
+  border-radius: var(--radius-inner);
+  background: var(--surface);
+}
+
+.activity-row-head {
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-sm);
+  /* See the note below: a flex container whose children cannot shrink propagates
+     their min-content width outward. */
+  min-width: 0;
+}
+
+.activity-action {
+  font-size: var(--font-size-body);
+  font-weight: var(--font-weight-bold);
+  color: var(--text-heading);
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+
+/* `overflow-wrap: anywhere` ON EVERY HEAD SPAN, and `min-width: 0` on the row so a
+   flex child may actually shrink to its wrapped width. Without the pair, an
+   unbreakable token sets a min-content floor for the whole content column and clips
+   the WORKFLOW SPINE above — CI measured `scrollWidth 200 vs clientWidth 1` on
+   `span.spine-meta`, a sibling this panel never touches. A too-wide child clips its
+   neighbours rather than itself, which is why the failure named someone else's
+   selector. */
+.activity-object,
+.activity-channel,
+.activity-when {
+  font-size: var(--font-size-meta);
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+
+.activity-field,
+.activity-change {
+  margin-top: var(--space-xs);
+  margin-bottom: 0;
+  font-size: var(--font-size-meta);
+  line-height: var(--line-height-normal);
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+
+/* NO `.activity-sr-only` HERE. `styles/base.css:564` already ships `.sr-only`, and
+   a second copy of a visually-hidden utility is the kind of duplication that drifts:
+   one of the two gets a `clip-path` fix and the other does not. The panel uses the
+   global class. The first draft of this file defined its own, and
+   `type-scale-and-spacing` caught it by counting the five raw literals the duplicate
+   needed — the guard was measuring spacing and found a design defect. */

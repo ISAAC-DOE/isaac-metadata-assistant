@@ -23,26 +23,22 @@ import type { RuntimeRecord } from './crossRecordTriage';
 import type { ApiGraphDetailResponse } from './graphDeep';
 import type {
   ApiAboutResponse,
+  ApiActivityResponse,
   ApiAnswersResponse,
   ApiArtifactsResponse,
   ApiAssetRemoved,
-  ApiAssetsResponse,
   ApiAssetWritten,
+  ApiAssetsResponse,
+  ApiAssistantCompanion,
   ApiAuditResponse,
   ApiChangeFeedPage,
-  AssistantQueryResponse,
   ApiConflictResolved,
   ApiConflictsResponse,
-  ApiResolutionChosenFrom,
-  ApiResolutionOutcome,
   ApiCsvPreview,
+  ApiDemoResetResult,
+  ApiDemoRunResponse,
   ApiDraftResponse,
   ApiEvidenceClassification,
-  ApiImportAddedToExperiment,
-  ApiImportCandidateProposed,
-  ApiImportListResponse,
-  ApiImportSessionResponse,
-  ApiImportSourceCreated,
   ApiEvidenceEntry,
   ApiEvidenceResponse,
   ApiExperimentDetail,
@@ -51,6 +47,11 @@ import type {
   ApiExportResponse,
   ApiGraphStatus,
   ApiHealth,
+  ApiImportAddedToExperiment,
+  ApiImportCandidateProposed,
+  ApiImportListResponse,
+  ApiImportSessionResponse,
+  ApiImportSourceCreated,
   ApiListIncomplete,
   ApiMemoryConceptResponse,
   ApiMemoryConceptsResponse,
@@ -59,23 +60,24 @@ import type {
   ApiMemoryGraphResponse,
   ApiNoteCaptured,
   ApiNoteReviewed,
-  ApiNotesResponse,
   ApiNoteState,
+  ApiNotesResponse,
   ApiOpenApiResponse,
   ApiPendingItem,
   ApiPendingPage,
   ApiPendingResponse,
   ApiProposalAcceptedFrom,
   ApiProposalCreated,
+  ApiProposalOrder,
   ApiProposalReviewAction,
   ApiProposalReviewed,
-  ApiProposalOrder,
   ApiProposalState,
   ApiProposalsResponse,
   ApiProvenanceResponse,
   ApiProviderCapabilities,
-  ApiAssistantCompanion,
   ApiProviderRefusal,
+  ApiResolutionChosenFrom,
+  ApiResolutionOutcome,
   ApiRevisionDetail,
   ApiRevisionDiff,
   ApiRevisionHistory,
@@ -93,13 +95,12 @@ import type {
   ApiTranscriptCapture,
   ApiTranscriptionResult,
   ApiTutorialSession,
-  ApiDemoRunResponse,
-  ApiDemoResetResult,
   ApiUploadsBlocked,
   ApiValidateRecordError,
   ApiValidateRecordResult,
   ApiValidateResult,
   ApiWarningsResponse,
+  AssistantQueryResponse,
   EvidenceBundle,
   ExperimentGraphBundle,
   ExportReadinessBundle,
@@ -1570,6 +1571,32 @@ export const api = {
    * derive its sub-read inventory, and interpolating the query into the literal
    * makes the scanner see `notes?…` as a sub-resource with no product word.
    */
+
+  /**
+   * --- Activity history (`ACT-003`) -----------------------------------------
+   *
+   * READ-ONLY, and there is no sibling write method here on purpose: an activity
+   * event is recorded by the act it describes, never by a client asking for one.
+   * `activity.py` exposes no mutator at all.
+   *
+   * THE PATH LITERAL STAYS WHOLE and the query is appended separately, exactly as
+   * `listNotes` and `listRuns` do — `backend-down-state.test.tsx` reads this
+   * module's source to derive its sub-read inventory, and interpolating the query
+   * into the literal makes the scanner see `activity?…` as a sub-resource with no
+   * product word.
+   */
+  listActivity(
+    experimentId: string,
+    query: { limit?: number; beforeSeq?: number; channel?: string } = {},
+  ): Promise<ApiActivityResponse> {
+    const params = new URLSearchParams();
+    if (query.limit !== undefined) params.set('limit', String(query.limit));
+    if (query.beforeSeq !== undefined) params.set('before_seq', String(query.beforeSeq));
+    if (query.channel !== undefined) params.set('channel', query.channel);
+    const path = `/experiments/${enc(experimentId)}/activity`;
+    const search = params.toString();
+    return getJson<ApiActivityResponse>(search === '' ? path : `${path}?${search}`);
+  },
 
   listNotes(
     experimentId: string,

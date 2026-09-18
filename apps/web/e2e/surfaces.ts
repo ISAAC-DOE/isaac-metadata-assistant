@@ -272,6 +272,30 @@ export const SURFACES: readonly Surface[] = [
     ready: { role: 'heading', name: /Experiment Graph/i },
   },
   {
+    /*
+     * `record-activity` — REGISTERED WITH THE WORKSPACE, NOT AFTER IT (`ACT-003`).
+     *
+     * `QA-018` is the precedent and the reason this entry exists in the same change
+     * as the panel rather than a later one. That item closed a gap where
+     * `record-graph` "had never been accessibility-scanned" — three of the record's
+     * four workspaces were axe- and narrow-width-measured and the fourth was not,
+     * because it had simply never been added here. A fifth workspace shipped without
+     * an entry would repeat that exactly, and the argument `record-graph`'s own note
+     * makes applies unchanged: a destination a scientist can open is a destination
+     * that has to be usable.
+     *
+     * THE CONSEQUENCE IS ACCEPTED RATHER THAN AVOIDED: adding a surface here means
+     * the sweep scans it at every viewport and produces NEW baseline cells, which
+     * only Linux CI can measure. That round trip is the cost of the surface being
+     * covered, and skipping it to avoid the cost is the thing `QA-018` names.
+     */
+    id: 'record-activity',
+    name: 'Record Detail — Activity',
+    path: `/record/${SEED.partial}?view=activity`,
+    scope: 'example',
+    ready: { role: 'heading', name: /Activity History/i },
+  },
+  {
     id: 'guided-completion',
     name: 'Guided Completion',
     path: recordSub(SEED.partial, 'complete'),

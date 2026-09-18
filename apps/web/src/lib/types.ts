@@ -2651,6 +2651,76 @@ export interface ApiNote {
  * as the record's size would let a scientist read "no notes" off a record that
  * holds several.
  */
+/**
+ * ONE RECORDED ACT, from the append-only activity history (`DEC-44`, `ACT-001`).
+ *
+ * The wire shape is `activity.ActivityEvent.to_state()` unchanged — the server's
+ * `event_view` exists so the two can diverge one day, and today they do not.
+ */
+export interface ApiActivityEvent {
+  id: string;
+  experiment_id: string;
+  /** The durable per-experiment position. Monotonic; the paging cursor. */
+  seq: number;
+  recorded_utc: string;
+  /**
+   * `'unattributed'` in every deployment of this build, and that is HONEST rather
+   * than missing. No trusted authentication boundary exists (`EXT-01`), so a name
+   * read from a forwarded header would be a forgeable claim rendered as a fact.
+   * Confirmed on the hosted deployment 2026-09-17: `actor_trust_basis: null`,
+   * `verifier_id: "unconfigured"`.
+   */
+  actor: string;
+  /** Recorded BESIDE every actor, per `DEC-45`, so a name never travels unqualified. */
+  actor_trust_basis: string;
+  channel: string;
+  action: string;
+  object_type: string;
+  object_id: string;
+  run_id: string | null;
+  field_path: string | null;
+  /**
+   * `{present: false}` means THERE WAS NO PRIOR VALUE; `{present: true, value: null}`
+   * means there was one and it was null. The envelope exists because those are two
+   * different facts and a bare `null` cannot tell them apart — so a renderer MUST
+   * branch on `present` rather than on `value`.
+   */
+  before: { present: boolean; value: unknown };
+  after: { present: boolean; value: unknown };
+  source_ref: string | null;
+}
+
+/** `GET /experiments/{id}/activity`. */
+export interface ApiActivityResponse {
+  events: ApiActivityEvent[];
+  /**
+   * FOUR SEPARATE NUMBERS, never collapsed. `total` is every recorded act on this
+   * record, `matched` is how many satisfy the active filters, `returned` is how many
+   * this page carries. A count taken from `events.length` would understate the
+   * history the moment a page is smaller than it — the defect `CLAUDE.md` §11
+   * records for `pendingTotal`.
+   */
+  total: number;
+  matched: number;
+  returned: number;
+  /** The highest `seq` on the record, so "you are at the newest" is knowable. */
+  highest_seq: number;
+  /**
+   * Stored events this build could not read: preserved verbatim in the record and
+   * COUNTED rather than rendered, for the reason `ApiNotesResponse.unreadable_entries`
+   * is — saying what one contains would mean inventing it.
+   */
+  unreadable_entries: number;
+  limit: number;
+  newest_first: boolean;
+  next_since_seq: number | null;
+  next_before_seq: number | null;
+  /** The server's own vocabularies. Never transcribed here. */
+  actions: string[];
+  channels: string[];
+  object_types: string[];
+}
+
 export interface ApiNotesResponse {
   notes: ApiNote[];
   total: number;
