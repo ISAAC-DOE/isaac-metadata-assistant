@@ -912,9 +912,13 @@ describe('My Stats invents no personal figure — the six traps', () => {
   it('2 — issues NO request, so no record in any scope can be shown as personal', async () => {
     const { calls } = await renderMineTab();
     /*
-     * The SIX tracked page-level reads still happen on mount (they are not
-     * tab-keyed), and NOTHING else does. ~~five~~ — `GET /api/imports` joined
-     * them on 2026-09-15 with the Historical Imports figures, and its presence
+     * The SEVEN tracked page-level reads still happen on mount (they are not
+     * tab-keyed), and NOTHING else does. ~~five~~ ~~six~~ — `GET /api/imports`
+     * joined them on 2026-09-15 with the Historical Imports figures, and
+     * `GET /api/activity/summary` on 2026-09-18 with Workspace Activity
+     * (`ACT-004`); the second is a WORKSPACE-wide count and is listed here for a
+     * reason this tab cares about specifically — see the note beside it below.
+     * Their presence
      * here is the assertion that it is PAGE-level rather than tab-keyed: were
      * it keyed on the tab, it would be absent from this list and this tab would
      * be issuing a different set of requests from the Overview one. `stubFetchRoutes` records each call as
@@ -937,6 +941,17 @@ describe('My Stats invents no personal figure — the six traps', () => {
         'GET /api/runtime/records',
         'GET /api/schema',
         'GET /api/imports',
+        /*
+         * `ACT-004`'s workspace activity summary. It is read on mount because the
+         * page's reads are not tab-keyed, and it is listed here rather than being
+         * treated as an intrusion — but the reason it is SAFE for this tab is the
+         * thing worth pinning: the summary contains no per-person figure of any
+         * kind. Every event in this build is `unattributed`, its payload carries
+         * event counts and an empty `attributed_actors`, and there is no
+         * collaborator count anywhere in it. So nothing this request returns could
+         * be relabelled as personal, which is trap 1 of the six above.
+         */
+        'GET /api/activity/summary',
         // Record Verification's read. A Build-tab section, not tab-keyed, so
         // it fires here too — and it is a GET, so this tab still cannot mutate.
         'GET /api/runtime/verification',

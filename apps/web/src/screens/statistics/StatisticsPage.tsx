@@ -7,13 +7,14 @@ import { AppShell } from '../../components/AppShell';
 import { TopBar } from '../../components/TopBar';
 import { LeftNav } from '../../components/LeftNav';
 import { BackendDown, LoadingPanel } from '../../components/FetchStates';
-import { LABELS, formatInstant } from '../../lib/labels';
+import { LABELS, formatInstant, humanizeActivityToken } from '../../lib/labels';
 import { StatusChip } from '../../components/StatusChip';
 import {
   BarChart3,
   CircleDashed,
   CircleHelp,
   FileJson,
+  History,
   Inbox,
   LayoutList,
   List,
@@ -30,6 +31,7 @@ import { subscribeWorkspaceRebuilt } from '../../lib/workspaceInvalidation';
 import type { RuntimeRecord } from '../../lib/crossRecordTriage';
 import type {
   ApiAboutResponse,
+  ApiActivitySummary,
   ApiGraphStatus,
   ApiOpenApiResponse,
   ApiSchemaResponse,
@@ -683,6 +685,19 @@ export function StatisticsPage() {
    */
   const imports = useFetch(() => track(api.listImports()), [scope]);
   /*
+   * THE SEVENTH TRACKED READ, added 2026-09-18 with Workspace Activity (`ACT-004`).
+   *
+   * Keyed on `scope` for the record read's reason: activity is stored inside each
+   * experiment's own document, so a worked-example session and the ordinary
+   * workspace have entirely different histories.
+   *
+   * IT JOINS THE ROUND, so `Refresh` re-reads it and the "N of M reads failed"
+   * sentence counts it. The denominator has always been COUNTED rather than
+   * hard-coded (see `Round`) precisely so a read could be added without that
+   * sentence going wrong.
+   */
+  const activity = useFetch(() => track(api.getActivitySummary()), [scope]);
+  /*
    * The SIXTH read, and it is deliberately NOT a `useFetch` and NOT tracked.
    *
    * It lives HERE rather than inside `RecordVerification` because the section is
@@ -716,6 +731,18 @@ export function StatisticsPage() {
   useEffect(() => subscribeWorkspaceRebuilt(reloadRecordsSilent), [reloadRecordsSilent]);
 
   /*
+   * ...AND SO DOES THE ACTIVITY READ, for the same reason and not by analogy: the
+   * guarded reset destroys the record documents, and the activity history lives
+   * INSIDE those documents (`activity.py` names this as the one act it cannot
+   * record, because the row would have to be written to the thing being deleted).
+   * So a reset takes every figure in this section to zero, and leaving the old
+   * counts on screen would state activity for records that no longer exist.
+   * SILENT, as the record read's is.
+   */
+  const { reloadSilent: reloadActivitySilent } = activity;
+  useEffect(() => subscribeWorkspaceRebuilt(reloadActivitySilent), [reloadActivitySilent]);
+
+  /*
    * Did the latest round come back complete? This reads the round's own TALLY,
    * not a comparison of the two clocks: a round whose failing read settles
    * BEFORE its succeeding ones leaves `lastAttempt` equal to `lastSuccess`, so a
@@ -733,13 +760,14 @@ export function StatisticsPage() {
   function refreshAll() {
     if (refreshing) return;
     // Silent reloads: current data stays on screen, so the page does not blank
-    // and scroll position is kept. SIX GETs, no write, nothing else.
+    // and scroll position is kept. SEVEN GETs, no write, nothing else.
     records.reloadSilent();
     graph.reloadSilent();
     about.reloadSilent();
     openapi.reloadSilent();
     schema.reloadSilent();
     imports.reloadSilent();
+    activity.reloadSilent();
     setRefreshing(true);
     setRefreshMessage('Refreshing — re-reading the API.');
   }
@@ -750,7 +778,8 @@ export function StatisticsPage() {
     about.status === 'error' &&
     openapi.status === 'error' &&
     schema.status === 'error' &&
-    imports.status === 'error';
+    imports.status === 'error' &&
+    activity.status === 'error';
 
   function retryAll() {
     records.reload();
@@ -759,6 +788,7 @@ export function StatisticsPage() {
     openapi.reload();
     schema.reload();
     imports.reload();
+    activity.reload();
   }
 
   return (
@@ -827,6 +857,12 @@ export function StatisticsPage() {
               <OpenQuestions records={records} />
               <EvidenceAndValidation records={records} />
               <RecentWork records={records} />
+              {/* `ACT-004`. It sits beside Recent Work because both answer "what
+                  happened lately", and the two are DIFFERENT questions rather than
+                  two renderings of one: Recent Work orders records by when their
+                  state last changed, this counts the acts their own append-only
+                  histories recorded. Each section's `sub` says which. */}
+              <WorkspaceActivity activity={activity} />
               <HistoricalImports imports={imports} />
               <NoAnalytics />
             </>
@@ -1020,6 +1056,10 @@ type SchemaFetch = Fetched<ApiSchemaResponse>;
    this build does not recognise degrade to an unavailable figure instead of
    throwing during render. */
 type ImportsFetch = Fetched<unknown>;
+/* `ACT-004`. TYPED, unlike `ImportsFetch` above, because this body is read by key
+   rather than passed to a tolerant derivation — the summary route's shape is
+   pinned by `test_activity_summary.py` in both directions. */
+type ActivityFetch = Fetched<ApiActivitySummary>;
 
 /**
  * The at-a-glance row — the KPI form, deliberately not a chart.
@@ -1884,6 +1924,295 @@ function RecordStatusWord({ status }: { status: string }) {
     <span className="stats-recent-state" data-tone={known === undefined ? 'quiet' : tone}>
       {known ?? (status.length > 0 ? status : UNAVAILABLE)}
     </span>
+  );
+}
+
+/* ---- Workspace Activity (`ACT-004`) ------------------------------------ */
+
+/** How many ranked kinds the two breakdown rows show. FOUR, because this section
+ *  earns its place on the Overview tab only by staying compact (`DEC-25`), and the
+ *  TRUE number of kinds is stated beside the row when there are more. */
+const ACTIVITY_KINDS_SHOWN = 4;
+
+/**
+ * The window in words, DERIVED FROM THE PAYLOAD and never from a constant here.
+ *
+ * `ACT-004`'s sixth rule: it must be impossible for the figure and its label to
+ * disagree. The server computes the window at request time and reports `days`
+ * beside the count; this turns that same number into the label, so the two cannot
+ * come apart. A literal "7" anywhere in this file would be a second source.
+ */
+function windowPhrase(days: number): string {
+  return days === 1 ? 'the Last Day' : `the Last ${count(days)} Days`;
+}
+
+/** The unit noun, agreeing with its count. `1 changes` is the kind of small
+ *  wrongness that makes a surface read as generated rather than written. */
+function plural(n: number): string {
+  return n === 1 ? 'change' : 'changes';
+}
+
+/** A per-record count with its noun, as ONE string. */
+function changeCount(n: number): string {
+  return `${count(n)} ${plural(n)}`;
+}
+
+/**
+ * WORKSPACE ACTIVITY — a summary of the append-only history, never a replacement
+ * for it.
+ *
+ * ── WHAT THIS SECTION IS, AND THE LINE IT MUST NOT CROSS ───────────────────
+ *
+ * `DEC-44` authorizes exactly this in the same sentence that forbids its opposite:
+ * *"Statistics may SUMMARIZE this history; Statistics must never be its source of
+ * truth."* So every figure here is a COUNT, the payload carries no event id and no
+ * `before`/`after` pair (the route's own shape refuses to), and every record named
+ * is a LINK into that record's own Activity workspace, which is where the acts
+ * themselves are. A count that advertised content with no control to reach it is
+ * the dead end an Impeccable pass over the Activity panel already caught once
+ * (`d308b827` — "the count named 150 facts a reader could not reach").
+ *
+ * ── WHY IT IS HERE AND NOT ON MY STATS ─────────────────────────────────────
+ *
+ * `MyStats.tsx` enumerates six things that tab must never do, and the first is "no
+ * workspace total presented as personal". Every figure below is a WORKSPACE total —
+ * there is no per-person activity in this build and there cannot be, because no
+ * event carries an actor. Putting it there would have been precisely the relabelled
+ * workspace count that file exists to make unrepresentable.
+ *
+ * ── ONE READ, AND EVERY COUNT COMES FROM THE SERVER ────────────────────────
+ *
+ * `GET /api/activity/summary`. Not one figure below is computed from a fetched
+ * array: `changed_records.total` is how many records changed and
+ * `changed_records.returned` is how many rows arrived, and this component renders
+ * both rather than `rows.length` — `CLAUDE.md` §11's measured defect. Likewise
+ * `actions_with_events` is the true number of distinct kinds, so "and N more" is
+ * never derived from the four that are shown.
+ *
+ * ── THREE QUALIFICATIONS STAY VISIBLE, BESIDE THE FIGURES ──────────────────
+ *
+ * The density rule sends explanation behind a disclosure; the older rule outranks
+ * it — *a sentence that qualifies a specific figure stays beside that figure*. The
+ * scope line (these totals cover N records, and when truncated, which N), the
+ * unreadable counts, and the attribution sentence are all qualifications of the
+ * numbers above them, so all three are rendered in the flow. They are single lines.
+ *
+ * ── THE FIGURE THIS SECTION REFUSES TO RENDER ──────────────────────────────
+ *
+ * A number of collaborators. Every event in this build is `unattributed` — no
+ * trusted authentication boundary exists, so `ACT-005` is blocked on `EXT-01` and
+ * nothing may truthfully name a person. A "0 collaborators" figure would be a claim
+ * about the PEOPLE where the true statement is about the DEPLOYMENT, so the wire
+ * carries event counts and a (currently empty) list of names, and this section says
+ * the true thing in words instead. The sentence is `LABELS.activityActorUnattributed`
+ * — the SAME string the record's own Activity panel shows, not a second copy of one
+ * claim.
+ */
+function WorkspaceActivity({ activity }: { activity: ActivityFetch }) {
+  return (
+    <StatsSection
+      id="stats-activity"
+      title="Workspace Activity"
+      sub="Recorded acts across this workspace's records. Each record's own activity history remains the record of what happened; this only counts it."
+      icon={<History size={18} strokeWidth={2} aria-hidden="true" />}
+    >
+      {activity.status === 'loading' && (
+        <LoadingPanel label="Loading the recorded activity…" />
+      )}
+      {activity.status === 'error' && (
+        <SectionUnavailable
+          message="The workspace's recorded activity could not be read, so no counts are shown. Each record's own Activity view is unaffected."
+          onRetry={activity.reload}
+        />
+      )}
+      {activity.status === 'data' && <ActivityFigures summary={activity.data} />}
+    </StatsSection>
+  );
+}
+
+function ActivityFigures({ summary }: { summary: ApiActivitySummary }) {
+  const { window: win, scope, totals, changed_records: changed, attribution } = summary;
+
+  /* THE EMPTY WORKSPACE IS ITS OWN ANSWER, and it is a different one from "nothing
+     has been recorded". A workspace with no records has nothing to summarise; a
+     workspace whose records have never been touched has been summarised and the
+     answer is zero. Rendering a grid of zeros for the first would state a fact about
+     activity when the fact is about records. */
+  if (scope.experiments_in_scope === 0) {
+    return (
+      <>
+        <p className="stats-note">
+          This workspace holds no records yet, so there is no recorded activity to
+          summarise.
+        </p>
+        <p className="stats-actions">
+          <Link to={ROUTES.experiments}>Open My Experiments</Link>
+        </p>
+      </>
+    );
+  }
+
+  const rankedActions = summary.ranked_actions.slice(0, ACTIVITY_KINDS_SHOWN);
+  const rankedChannels = summary.ranked_channels.slice(0, ACTIVITY_KINDS_SHOWN);
+  const moreActions = summary.actions_with_events - rankedActions.length;
+
+  return (
+    <>
+      <FigureList
+        rows={[
+          {
+            label: `Changes in ${windowPhrase(win.days)}`,
+            value: count(totals.events_in_window),
+            mono: true,
+          },
+          {
+            label: 'Records Changed',
+            /* `changed_records.total`, NEVER `rows.length`. The list below is
+               capped; this number is not. */
+            value: count(changed.total),
+            mono: true,
+          },
+          {
+            label: 'Recorded Acts, All Time',
+            value: count(totals.events_all_time),
+            mono: true,
+          },
+        ]}
+      />
+
+      {rankedActions.length > 0 && (
+        <MiniBreakdown
+          label="What Changed"
+          items={rankedActions.map((entry) => ({
+            key: entry.name,
+            /* The server's token, turned into words by the ONE humanizer both
+               activity surfaces use. No vocabulary is authored here. */
+            chip: (
+              <span className="stats-recent-state" data-tone="neutral">
+                {humanizeActivityToken(entry.name)}
+              </span>
+            ),
+            count: entry.count,
+            noun: plural(entry.count),
+          }))}
+        />
+      )}
+      {moreActions > 0 && (
+        <p className="stats-note">
+          {count(moreActions)} further kinds of change are not listed. Open a record's
+          Activity view for its full history.
+        </p>
+      )}
+
+      {rankedChannels.length > 0 && (
+        <MiniBreakdown
+          label="Through Which Surface"
+          items={rankedChannels.map((entry) => ({
+            key: entry.name,
+            chip: (
+              <span className="stats-recent-state" data-tone="neutral">
+                {humanizeActivityToken(entry.name)}
+              </span>
+            ),
+            count: entry.count,
+            noun: plural(entry.count),
+          }))}
+        />
+      )}
+
+      {changed.rows.length > 0 ? (
+        <ul className="stats-recent">
+          {changed.rows.map((row) => (
+            <li className="stats-recent-row" key={row.experiment_id}>
+              {/* THE DRILL-DOWN. The title is the link, as it is in Recent Work,
+                  and it goes to the record's OWN activity history — the source of
+                  truth this section only counts. */}
+              <span className="stats-recent-title">
+                <Link to={ROUTES.recordView(row.experiment_id, 'activity')}>
+                  {row.title}
+                </Link>
+              </span>
+              {/* ONE text node, not a visible number beside an `sr-only` gloss.
+                  The first draft split it that way and the window phrase then
+                  appeared TWICE in the row's text — once for the eye and once for
+                  a screen reader — which is a duplication a `textContent` sweep
+                  sees and a reader eventually does too. The window is already
+                  stated above the list and again below it, so the row needs only
+                  its own count. */}
+              <span className="stats-recent-state" data-tone="neutral">
+                {changeCount(row.events_in_window)}
+              </span>
+              <ActivityWhen recordedUtc={row.last_event_utc} />
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="stats-note">
+          No record changed in {windowPhrase(win.days).toLowerCase()}.
+        </p>
+      )}
+
+      {changed.total > changed.returned && (
+        <p className="stats-note">
+          The {count(changed.returned)} busiest of the {count(changed.total)} records that
+          changed. Open a record to see its own history.
+        </p>
+      )}
+
+      {/* ── the qualifications, each beside the figures it qualifies ───────── */}
+      <p className="stats-note">
+        {scope.truncated
+          ? `These figures cover the ${count(scope.experiments_summarized)} most recently created of the ${count(scope.experiments_in_scope)} records in this workspace; the rest are not counted here.`
+          : `These figures cover all ${count(scope.experiments_summarized)} records in this workspace.`}
+      </p>
+      {summary.incomplete ? <p className="stats-note">{summary.incomplete.message}</p> : null}
+      {totals.unreadable_entries > 0 && (
+        <p className="stats-note">
+          {count(totals.unreadable_entries)} stored entries could not be read and are
+          counted in none of the figures above. They are kept in their records
+          untouched — saying what one contains would mean inventing it.
+        </p>
+      )}
+      {totals.events_with_unreadable_timestamp > 0 && (
+        <p className="stats-note">
+          {count(totals.events_with_unreadable_timestamp)} recorded acts carry a time
+          this build could not read. They are in the all-time total and in neither
+          window figure, because placing one inside or outside the window would be a
+          guess.
+        </p>
+      )}
+      {/* THE SAME SENTENCE THE RECORD'S OWN ACTIVITY PANEL SHOWS, not a second copy.
+          It is rendered unconditionally rather than only when
+          `attributed_events === 0`, because it states a property of the DEPLOYMENT:
+          a conditional would make its disappearance the signal that somebody had
+          been named, which is a thing this build cannot do. */}
+      <p className="stats-note">{LABELS.activityActorUnattributed}</p>
+      {attribution.attributed_events > 0 && (
+        <p className="stats-note">
+          {count(attribution.attributed_events)} of these changes do carry an actor.
+        </p>
+      )}
+    </>
+  );
+}
+
+/**
+ * The last recorded act's time, formatted by the app's one formatter.
+ *
+ * A TIME THAT WILL NOT PARSE IS RENDERED AS UNAVAILABLE, never as an invented
+ * instant and never as the raw wire string. The server already reports such an
+ * event in its own `events_with_unreadable_timestamp` bucket, so this is the
+ * client's half of the same rule: a value it cannot read is named as unread.
+ */
+function ActivityWhen({ recordedUtc }: { recordedUtc: string }) {
+  const when = new Date(recordedUtc);
+  if (!Number.isFinite(when.getTime())) {
+    return <span className="stats-recent-when">{UNAVAILABLE}</span>;
+  }
+  return (
+    <time className="stats-recent-when mono" dateTime={when.toISOString()}>
+      {formatInstant(when)}
+    </time>
   );
 }
 

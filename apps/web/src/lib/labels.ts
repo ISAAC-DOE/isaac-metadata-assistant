@@ -98,6 +98,49 @@ export function titleCase(input: string): string {
     .join(' ');
 }
 
+/**
+ * The activity history's server vocabularies (`action`, `channel`, `object_type`)
+ * as words. ONE humanizer for both surfaces that render them.
+ *
+ * IT INVENTS NO VOCABULARY. A token with no special case is Title Cased from its
+ * OWN segments, so a server that adds an action keeps working and a scientist still
+ * reads English — never a guess at what the token meant. That is `CLAUDE.md` §11's
+ * measured rule (a bare internal identifier rendered at a scientist is a defect, and
+ * the fix is the words the token already contains) and it mirrors the humanizer
+ * `assistant_query` already uses on the server.
+ *
+ * DELIBERATELY NOT `titleCase` ABOVE, which is the app's general label caser and
+ * would be WRONG here: `isTechnical` classifies any string containing `_` as a
+ * technical identifier and passes it through VERBATIM, so `titleCase('field_answered')`
+ * returns `field_answered` — exactly the raw-token rendering this function exists to
+ * prevent. Two casers, two jobs, and the difference is stated so nobody consolidates
+ * them into the one that silently does nothing.
+ *
+ * IT LIVES HERE RATHER THAN IN `ActivityHistoryPanel.tsx`, WHERE IT STARTED, because
+ * `ACT-004` added a second renderer of the same tokens and a copy would have been the
+ * "one vocabulary, three copies" drift this repository has been caught shipping: a
+ * rename strands every copy but the one the author was looking at.
+ */
+const INITIALISMS: Readonly<Record<string, string>> = Object.freeze({
+  /* Two segments the product already writes as initialisms in its own prose to a
+     scientist, so the generic Title Case would render them WRONG rather than
+     merely plain — `qc` as "Qc" and `mcp` as "Mcp". This is CASING ONLY: every
+     output word is an input word, so no name is invented, which is the same rule
+     the server-side blocker humanizer was held to (`CLAUDE.md` §11, 2026-09-14).
+     `mcp` was added with `ACT-004`, when the channel vocabulary reached a second
+     surface and "Mcp" was measured on the Statistics Overview tab. */
+  qc: 'QC',
+  mcp: 'MCP',
+});
+
+export function humanizeActivityToken(token: string): string {
+  return token
+    .split('_')
+    .filter((part) => part.length > 0)
+    .map((part) => INITIALISMS[part] ?? part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ');
+}
+
 // Approved Title Case UI labels (verbatim from casing-and-copy.md).
 /**
  * THE SETTINGS DESTINATION'S NAME, HOISTED OUT OF THE OBJECT — because six other

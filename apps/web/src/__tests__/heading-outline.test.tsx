@@ -240,6 +240,7 @@ describe('A11Y — heading levels never skip a level or go backwards', () => {
       3 /* Export Gate */,
       2 /* What Each Position Means — a closed prose disclosure's summary */,
       2 /* Recent Work */,
+      2 /* Workspace Activity — `ACT-004`, added 2026-09-18 */,
       2 /* Historical Imports */,
       2 /* This Application Collects No Analytics */,
     ]);

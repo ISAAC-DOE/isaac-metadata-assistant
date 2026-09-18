@@ -3467,6 +3467,7 @@ export const REAL_CONTRACT_DESCRIPTIONS: readonly { op: string; description: str
   { op: "POST /api/experiments/{experiment_id}/runs/{run_id}/check", description: "Checks the official record ONE run would export — its own content plus the record-level content it inherits — and returns the no-guessing draft verdict, the `official` block, and the run\'s open blocking questions.\n\n**The `official` block carries the vendored official ISAAC schema\'s verdict WHERE THE OFFICIAL VALIDATOR RAN — and otherwise the findings that stopped the export before it could.** `official.official_validator_ran` SAYS WHICH, and it is the field to branch on: `true` means the official validator examined the document these `errors` describe, `false` means the export was refused before it was reached — by the no-guessing draft check, or by ISAAC\'s own anchored-pattern exactness gate (a value matching a `^...$` pattern only because Python\'s `$` also matches before a trailing newline). Both kinds arrive under the same `errors` key, so `official.ok: false` is not by itself evidence that the official schema rejected anything — and `dry_run` does not answer it, because a dry-run PASS does require official validation while a dry-run FAILURE may never have reached it. `official_validator_ran: false` is NOT a verdict: it says the vendored schema did not speak, never that it refused. `official.schema` names the schema this deployment would validate against and is stamped on every response. `POST /api/validate/record` reports the two gates separately (`schema_ok` and `exactness_errors`).\n\nRead-only: it writes nothing, exports nothing, and does not advance the run\'s or the record\'s revision. `checked_run_version` states which revision of the run the verdict describes. Every entry in `blockers` carries a non-empty `message` taken from what that blocking question already records — no finding text is composed here.\n\nBoth verdicts come from the same deterministic core functions the command line and the record-level validate operation use; no second validator exists. `ok` is true only when both pass, and it is computed from those alone — an advisory warning never turns a pass into a failure. If the run has already been exported and its written record cannot be read, no verdict is invented: the official block reports the single fixed error `Validation could not be completed.`" },
   { op: "POST /api/experiments/{experiment_id}/runs/{run_id}/remove", description: "Removes one run from this record and reports what was removed.\n\nONLY A RUN THAT KEEPS NO PUBLISHED RECORD CLAIMED. A run that has produced an official ISAAC record holds a record and an evidence sidecar that this application never rewrites. Removing the run that names them would leave them claimed by nothing, and a later export of this record deletes exactly such a pair — so this operation refuses that run with `409 run_exported` and writes nothing. The refusal asks BOTH whether the run carries a `record_id` AND whether an artifact pair is present on disk under its own id, because an export writes both files before it persists the state and a refused state save leaves the pair with no `record_id` naming it.\n\nEvery run that has appeared in a submitted revision carries a `record_id` — a submission materialises every unit before it records anything — so a SUBMITTED record is out of this operation\'s reach. That is a statement about submitted records specifically, not a claim that removal is the only way a record can stop being claimed. No revision, submission or official record is deleted, rewritten or marked by this operation in any case.\n\nWHAT IS REMOVED is the run\'s own draft content: the run-level values it holds, the overrides it recorded, its association with any asset reference, and its open questions. The record\'s own values are unchanged, no other run is changed, the record\'s asset library keeps every entry, and no file at an asset `uri` is read or altered — this application has never read one.\n\nTHE REMAINING RUNS KEEP THEIR NUMBERS. Ordinals are not renumbered, so a record whose runs were 1, 2 and 3 reads 1 and 3 after the second is removed, and every surviving run\'s revision and `ETag` are untouched by this request. `ordinals_compacted` is `false` in the response so a client never has to infer it. A run added afterwards takes the next number above the highest still present.\n\nRemoving a run rewrites the record, so this requires `confirmed_by_user: true` and the RECORD\'s current `ETag` in `If-Match` — omitted is `428`, malformed is `400`, and stale is `412` with nothing removed. Repeating the request for a run that is already gone is `404` rather than a second success: this operation is addressed to a run, and every other run operation answers `404` for an id this record does not hold." },
   { op: "GET /api/experiments/{experiment_id}/activity", description: "Lists what has been done to this record — who, what, to which object and field, from what value to what value, when, and through which channel. Read-only, append-only and bounded.\n\n**`actor` reads `unattributed` for every event this build records, and that is a fact about the deployment rather than a missing feature.** No trusted authentication boundary exists in this build, so nothing may truthfully name a person; `actor_trust_basis` carries `unattributed` beside it so a reader never has to infer what vouched for a name. A forwarded identity header is never consulted and can never become an actor. An event whose actor is unattributed is still a complete record of WHAT happened.\n\n**`before` and `after` are ENVELOPES, not bare values** — `{\"present\": false, \"value\": null}` means *there was no value here*, and `{\"present\": true, \"value\": null}` means *the value was null*. Those are different facts: the first says an edit CREATED a value, the second says it changed one to null. A client that reads `.value` without reading `.present` will conflate them.\n\n**Nothing here is ever revised or removed.** There is no operation that edits an event and none that deletes one. `seq` is a durable per-record monotonic position starting at 1; it is minted only when a write actually lands, so a request that changed nothing records nothing and burns no position.\n\n**THREE ACTS ARE NOT RECORDED, and a reader should not infer from their absence that they did not happen.** Creating a record is not recorded (`created_utc` on the record already says when it appeared); discarding a record and resetting the workspace are not recorded, because this history lives inside the record document that those two acts destroy. Removing a RUN *is* recorded.\n\n`total` is how many events this record HOLDS and `matched` is how many satisfied the filters — both independent of how many this page returned, so a filtered or paged read never understates the record. `unreadable_entries` counts stored entries this build could not present as events; they are preserved in the record untouched and counted rather than rendered, because this server cannot say what a refused entry contains without inventing it.\n\n`actions`, `channels` and `object_types` are the server's own bounded vocabularies, served rather than transcribed so a client's filter cannot drift from the set this route enforces. A filter value outside one of them is refused with `422` rather than answered with an empty list, which would be a claim about the record instead of about the request." },
+  { op: "GET /api/activity/summary", description: "How much has been recorded across this workspace's records recently — a **summary of the append-only activity history, never a substitute for it**. Read-only.\n\n`DEC-44` is explicit in both directions: a summary may be derived from the history, and the history remains the source of truth. So every figure here is a COUNT OF EVENTS. No event id, no `before`/`after` pair and no act is reconstructable from this payload; each `changed_records` row carries the `experiment_id` a reader follows to `GET /api/experiments/{experiment_id}/activity`, which is where the acts themselves live.\n\n**THE WINDOW IS DECIDED HERE, AT REQUEST TIME, AND TRAVELS WITH THE FIGURE.** \"This week\" depends on a clock and two clocks disagree, so `window.since_utc` and `window.computed_at_utc` are served beside `window.days`. The window is INCLUSIVE of its start and has no upper bound — an event counts when its `recorded_utc` is at or after `since_utc`. Clamping the top at \"now\" would create a silent third bucket for an event timestamped in the future.\n\n**EVERY TOTAL IS A TOTAL OVER `scope.experiments_summarized`, WHICH MAY BE FEWER THAN THE WORKSPACE HOLDS.** Summarizing is O(workspace), so it is bounded: `scope.experiment_limit` records are read, the most recently created first (`scope.selection`), and `scope.truncated` is `true` when the scope held more. A summary computed over a truncated set that read as complete would be a false claim about how much work exists, so the truncation is in band rather than implied.\n\n`scope.hydration_complete` is `false` when a durably-stored record could not be restored before this read, in which case the totals describe fewer records than the workspace has and the response also carries the same `incomplete` block `GET /api/experiments` serves. **A short summary is evidence about this read, never an inventory.**\n\n**`attribution` REPORTS EVENT COUNTS AND THE NAMES ACTUALLY RECORDED — NEVER A NUMBER OF PEOPLE.** Every event in every deployment of this build carries `actor: \"unattributed\"`: no trusted authentication boundary exists, and a name read from a forwarded header would be a forgeable claim rendered as a fact. So `attributed_actors` is an empty list here, and there is deliberately no count of collaborators — `0` there would be a claim about the people when the true statement is about the deployment.\n\n**Two kinds of unreadable are counted separately and neither is dropped.** `totals.unreadable_entries` counts stored entries the model could not read at all (preserved verbatim in the record, counted rather than rendered, exactly as the per-record route reports them). `totals.events_with_unreadable_timestamp` counts readable events whose stored timestamp could not be parsed: they are inside `events_all_time` and in NEITHER window bucket, because placing one inside or outside the window would be a guess.\n\n`changed_records.total` is how many records changed in the window and is independent of how many rows this response carries (`changed_records.returned`). `actions_with_events` and `channels_with_events` are the true numbers of distinct kinds seen, so a client showing the first few never takes a count from a list. `actions`, `channels` and `object_types` are the server's own bounded vocabularies, served rather than transcribed.\n\nNothing here mutates, validates, gates or classifies anything, and there is no operation anywhere that edits or deletes an activity event." },
   { op: "GET /api/experiments/{experiment_id}/notes", description: "Lists the content captured against this record that has no confident schema home — a remark, an unrecognised column heading, an aside in a transcript — each with what produced it, the run it belongs to when that is known, its verbatim text, and its review state. Read-only.\n\nDISMISSED NOTES ARE INCLUDED. Dismissing is a review state reached by an explicit act and recorded in the note\'s history; it is not a deletion, and this API has no operation that deletes a note. `state` narrows the list on the server and `total` remains how many notes EXIST, so a client filtering to one state can always say how much of the record it is showing.\n\nA note is never a field value. Every note carries `verified: false`, `is_evidence: false`, `is_field_value: false` and a `status` of `unmapped_note`, which is deliberately not one of the draft field statuses — these are constants of the shape, not fields a request can set. `candidate_field_path` is present only when something deterministic proposed it and stated the rule it applied; when nothing did, the field is null rather than a plausible-looking guess.\n\n`mappable_field_paths` is the server\'s own list of the field paths a note may be mapped to. It is a SUBSET of the official schema\'s field paths — the ones this build knows how to place — so a target absent from it may still be a real schema field, and a refusal against this list says what this application can map a note to rather than what the official schema defines.\n\n`value_writable_field_paths` is the SUBSET of those paths that some write operation in this build accepts a value at — `PATCH /api/experiments/{experiment_id}/runs/{run_id}` for a run\'s own field, `POST /api/experiments/{experiment_id}/answers` (corrected at `.../edit`) for a record-level one, and `POST /api/experiments/{experiment_id}/runs/{run_id}/overrides` to record ONE run\'s divergence from a record-level value. MAPPING A NOTE AND ENTERING ITS VALUE ARE DIFFERENT ACTS, and for 7 of the 25 mappable paths the second one has no route at all: every write operation refuses them. Mapping to such a path is still correct and still keeps the content on the record in full — this key says only that no request can then put a value there, so a client must not tell a person to go and do it. It promises nothing about a value being ACCEPTED: a closed enum, a declared JSON type, a required sibling property or the no-guessing rules may still refuse the particular value. The record-level paths are writable on a record with no runs at all, through the record\'s own answers operation; only the 5 run-level paths need a run to exist. `record_writable_field_paths` is the sub-subset a RECORD-level operation also accepts — `POST /api/experiments/{experiment_id}/answers` to answer and `POST /api/experiments/{experiment_id}/edit` to correct. It is DERIVED from the same expression the record routes enforce, so it cannot describe a capability they do not have; a path in it can be given a value on a record with no runs at all, and a path outside it needs a run first. The two keys are served separately because a client that tells a person WHERE to enter a value must be right about the path in front of them, and that answer cannot be inferred from the wider subset.\n\n`unreadable_entries` counts stored entries this build cannot present as notes. There are two kinds and the count does not separate them: an entry the note model refused, and an entry whose id another note already holds — a duplicate is perfectly readable, but two notes cannot answer to one id. Either way the entry is preserved in the record untouched and is counted rather than rendered: for a refused entry this server cannot say what it contains without inventing it, and for a duplicate it cannot say which entry the id names." },
   { op: "POST /api/experiments/{experiment_id}/notes", description: "Stores one piece of captured content that has no confident schema home, verbatim, and returns it with the record's new revision.\n\nCapturing a note rewrites the record, so this requires the RECORD's current `ETag` in `If-Match` — omitted is `428`, malformed is `400`, and stale is `412` with nothing written. `text` is stored exactly as sent: it is not trimmed, normalised or shortened, and text too large to store is REFUSED with `422` rather than truncated, because a shortened note misrepresents what was written.\n\n`source` must be one of the values `GET .../notes` reports under `sources`, and there is no default — a producer that cannot say what produced its own output is not described by inventing a label for it. These are this feature's own vocabulary and are deliberately not ISAAC evidence source types, because a note is not evidence.\n\n**`source` IS ASSERTED BY THE CALLER ON THIS ROUTE, AND IS THEREFORE NOT PROOF OF ANYTHING.** That has always been true of every member — nothing stops a program sending `typed_note` — and it is stated explicitly because one member now names a channel rather than a format: `connected_agent` means the content arrived through the machine-callable (agent) interface. Where that claim IS trustworthy is the agent interface itself, which stamps it server-side and accepts no `source` argument at all, so a caller there cannot choose. Treat the value as what the producer said about itself, never as an identity, and never as an actor: no member of this vocabulary names a person, and nothing on a note is attributed to one.\n\n`run_id`, `candidate_field_path` and `candidate_rule` are optional and nothing supplies them on a caller's behalf. An omitted `run_id` means the note belongs to the record rather than to a run, and it is never filled in from the only run that happens to exist. A `candidate_field_path` must be one of the paths `GET .../notes` reports under `mappable_field_paths` — a subset of the official schema's paths, not the whole of it — AND must arrive with the `candidate_rule` that produced it — an unexplained proposal is a guess, and either half without the other is `422`. Absent is absent: an empty string is refused, not stored.\n\n`client_request_key` is OPTIONAL and makes this operation exactly-once. Send the SAME key again and the SAME note is returned with `deduplicated: true` and a `200` rather than a `201`, and nothing is captured; send a new key, or none, and you have captured a separate note. The key is checked INSIDE the record lock and AFTER `If-Match`, so a retry carrying the ETag held before the first attempt is refused `412` — re-read the record and retry with the same key. A blank key is refused rather than treated as absent, because a caller that sent one is relying on exactly-once and silently ignoring it would quietly downgrade that to at-least-once.\n\n**READ `deduplicated` BEFORE REPORTING WHAT HAPPENED.** `false` means this request captured the note in the body. `true` means a note with your key was already on the record, so nothing was captured and the EXISTING one is returned — its text, source and run may differ from what you just sent, and it may already have been mapped, kept or dismissed by a person. Do not describe a deduplicated result as content you just captured.\n\nTWO PER-RECORD CAPACITY BOUNDS apply, and both REFUSE rather than evict: `too_many_notes` counts rows and `notes_too_large` bounds how much one record's notes may occupy, whichever binds first. Dropping the oldest note to make room would destroy a verbatim capture, which is the one thing this feature exists not to do. Both name their ceiling and the measured value. They are checked AFTER deduplication, so a retry of a note the record already holds is always answerable even at the ceiling.\n\nAny other body key is refused with `422` naming it. A note carries no status, no verification and no evidence, so a request that tries to set one is rejected rather than accepted and quietly ignored." },
   { op: "GET /api/experiments/{experiment_id}/notes/{note_id}", description: "Returns one note: its verbatim text, any revised wording, what produced it, the run it belongs to when that is known, its review state, and the full history of the acts performed on it. Read-only.\n\nA DISMISSED NOTE IS RETURNED NORMALLY. Dismissal is a state, not a deletion, and the history records when it happened and what it was dismissed from. The verbatim capture is returned even when the note has been edited — an edit stores the corrected wording beside the original and never replaces it, and each superseded wording is kept on the history entry that replaced it.\n\nThe `ETag` header carries THE RECORD\'s current revision, which is what capturing or reviewing a note requires in `If-Match`. Notes have no separate validator of their own, because a note is stored inside the record\'s own document." },
@@ -3654,6 +3655,106 @@ export const importListFixture = {
  * records is tracked-versus-not, and getting this one wrong would make the
  * Refresh assertion silently weaker rather than fail.
  */
+/**
+ * `GET /api/activity/summary` — the cross-experiment activity SUMMARY (`ACT-004`).
+ *
+ * SHAPE-FAITHFUL to `activity_summary.summarize`, and every value is derived by
+ * hand from the two rows below so a test can transcribe a literal rather than
+ * recompute one:
+ *
+ *   window      7 days, since 2099-07-01, computed 2099-07-08
+ *   scope       3 records in scope, 3 summarized, NOT truncated
+ *   totals      9 in window · 12 all time · 1 unreadable timestamp · 2 unreadable entries
+ *   actions     field_answered 5 · run_added 2 · proposal_reviewed 1 · note_captured 1
+ *   channels    web 7 · mcp 2
+ *   changed     2 records, both returned
+ *
+ * `attributed_actors` is EMPTY and `unattributed_events` carries every event,
+ * because that is what every deployment of this build produces: `ACT-005` is
+ * blocked on `EXT-01`, so nothing can mint an actor. A fixture with a name in it
+ * would let a test pass against a state the product cannot reach.
+ */
+export const activitySummaryFixture = {
+  window: {
+    days: 7,
+    since_utc: '2099-07-01T00:00:00Z',
+    computed_at_utc: '2099-07-08T00:00:00Z',
+  },
+  scope: {
+    experiments_in_scope: 3,
+    experiments_summarized: 3,
+    experiment_limit: 500,
+    truncated: false,
+    selection: 'most_recently_created',
+    hydration_complete: true,
+  },
+  totals: {
+    events_in_window: 9,
+    events_all_time: 12,
+    events_with_unreadable_timestamp: 1,
+    unreadable_entries: 2,
+  },
+  by_action: {
+    field_answered: 5,
+    run_added: 2,
+    proposal_reviewed: 1,
+    note_captured: 1,
+    field_corrected: 0,
+  },
+  by_channel: { web: 7, mcp: 2, historical_import: 0, system: 0 },
+  by_object_type: { field: 5, run: 2, proposal: 1, note: 1 },
+  ranked_actions: [
+    { name: 'field_answered', count: 5 },
+    { name: 'run_added', count: 2 },
+    { name: 'note_captured', count: 1 },
+    { name: 'proposal_reviewed', count: 1 },
+  ],
+  actions_with_events: 4,
+  ranked_channels: [
+    { name: 'web', count: 7 },
+    { name: 'mcp', count: 2 },
+  ],
+  channels_with_events: 2,
+  attribution: {
+    unattributed_events: 9,
+    attributed_events: 0,
+    attributed_actors: [],
+    actor_basis: 'unattributed',
+  },
+  changed_records: {
+    rows: [
+      {
+        experiment_id: '01SYNTHTESTEXP000000000000',
+        title: 'Synthetic Record \u2014 Second Needs Attention',
+        events_in_window: 6,
+        last_event_utc: '2099-07-07T12:00:00Z',
+        last_action: 'field_answered',
+        last_seq: 11,
+      },
+      {
+        experiment_id: '01SYNTHTESTDONE00000000000',
+        title: 'Synthetic Record \u2014 Exported',
+        events_in_window: 3,
+        last_event_utc: '2099-07-05T08:30:00Z',
+        last_action: 'run_added',
+        last_seq: 4,
+      },
+    ],
+    total: 2,
+    returned: 2,
+    limit: 5,
+  },
+  actions: [
+    'field_answered',
+    'field_corrected',
+    'note_captured',
+    'proposal_reviewed',
+    'run_added',
+  ],
+  channels: ['historical_import', 'mcp', 'system', 'web'],
+  object_types: ['field', 'note', 'proposal', 'run'],
+};
+
 export const STATISTICS_ROUTE_KEYS = [
   'GET /api/runtime/records',
   'GET /api/graph/status',
@@ -3661,6 +3762,10 @@ export const STATISTICS_ROUTE_KEYS = [
   'GET /api/openapi',
   'GET /api/schema',
   'GET /api/imports',
+  // `ACT-004`'s SEVENTH tracked read. It joins the page's round and Refresh
+  // re-issues it, which is the property this constant records — see the note
+  // above about why the verification key is deliberately NOT in here.
+  'GET /api/activity/summary',
 ] as const;
 
 /**
@@ -3689,7 +3794,14 @@ export const STATISTICS_VERIFICATION_ROUTE_KEY = 'GET /api/runtime/verification'
 export function statisticsRoutes(
   over: Partial<
     Record<
-      'records' | 'graph' | 'about' | 'openapi' | 'schema' | 'imports' | 'verification',
+      | 'records'
+      | 'graph'
+      | 'about'
+      | 'openapi'
+      | 'schema'
+      | 'imports'
+      | 'activity'
+      | 'verification',
       RouteEntry
     >
   > = {},
@@ -3701,6 +3813,7 @@ export function statisticsRoutes(
     'GET /api/openapi': over.openapi ?? { body: openApiFixture },
     'GET /api/schema': over.schema ?? { body: schemaBrowserFixture },
     'GET /api/imports': over.imports ?? { body: importListFixture },
+    'GET /api/activity/summary': over.activity ?? { body: activitySummaryFixture },
     [STATISTICS_VERIFICATION_ROUTE_KEY]: over.verification ?? { body: verificationReportOk },
   };
 }

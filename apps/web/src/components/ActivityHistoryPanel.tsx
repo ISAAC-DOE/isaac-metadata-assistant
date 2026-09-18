@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import './activityHistory.css';
 import { api } from '../lib/api';
-import { LABELS } from '../lib/labels';
+import { LABELS, humanizeActivityToken as humanizeToken } from '../lib/labels';
 import type { ApiActivityEvent, ApiActivityResponse } from '../lib/types';
 
 /**
@@ -43,22 +43,21 @@ import type { ApiActivityEvent, ApiActivityResponse } from '../lib/types';
  * beside every row, and rather than dropping the rows that "lack" an actor.
  */
 
-/** The server's vocabularies arrive as snake_case tokens; this is the ONLY place
- *  they are turned into words, and it invents no vocabulary of its own.
+/* THE HUMANIZER MOVED TO `lib/labels.ts`, and this note is why rather than a
+ * silent import.
  *
- *  A token with no entry is HUMANIZED generically rather than dropped or shown
- *  raw — `Title Case` from its own segments, so a server that adds an action keeps
- *  working and a scientist still reads English. That mirrors the humanizer
- *  `assistant_query` already uses, and the reason is `CLAUDE.md` §11's measured
- *  rule: a bare internal identifier rendered at a scientist is a defect, and the
- *  fix is the words the token already contains — never a guess at what it meant. */
-function humanizeToken(token: string): string {
-  return token
-    .split('_')
-    .filter((part) => part.length > 0)
-    .map((part) => (part === 'qc' ? 'QC' : part.charAt(0).toUpperCase() + part.slice(1)))
-    .join(' ');
-}
+ * It was defined HERE, with a comment saying "this is the ONLY place they are
+ * turned into words" — true when it was written, and it stopped being true the
+ * moment a SECOND surface rendered the same server vocabularies (`ACT-004`'s
+ * activity summary on the Statistics Overview tab). Copying six lines would have
+ * made two functions that agree today and are free to disagree later, which is
+ * the defect this repository records as "one vocabulary, three copies": a rename
+ * strands every copy but the one the author was looking at.
+ *
+ * So there is still exactly ONE humanizer for these tokens, and it is now
+ * somewhere both surfaces can reach. Its behaviour is unchanged — the
+ * `activity-history-panel` suite passes against it untouched, which is the check
+ * that matters for a move. */
 
 /** `{present: false}` and `{present: true, value: null}` are DIFFERENT FACTS and are
  *  rendered differently. Branching on `value` instead of `present` would collapse

@@ -754,8 +754,32 @@ def test_every_operation_has_a_summary_that_is_not_the_function_name(client):
     # unchanged. The ledger row `ACT-001` says the model "Needs migration `0006`";
     # it does not, and that is argued in the module rather than here.
     #
+    #
+    #
+    # ── 89 -> 90, 2026-09-18: `ACT-004`, ONE operation ─────────────────────────
+    # `GET /api/activity/summary` — the cross-experiment SUMMARY of the same
+    # append-only history, which `DEC-44` authorizes in the same sentence that
+    # forbids it from becoming the source of truth. READ-ONLY, and it adds no
+    # second write path: an activity event is still recorded only as a side effect
+    # of the write that caused it.
+    #
+    # IT IS THE FIRST WORKSPACE-SCOPED ACTIVITY READ, and it exists because the
+    # history is stored per-experiment-document, so until now the only way to ask
+    # "how much changed this week" was N requests from a client. The arithmetic is
+    # now done once, in `isaac_api.activity_summary`, and bounded — every total it
+    # reports is a total over `scope.experiments_summarized`, which the response
+    # states rather than implies.
+    #
+    # NO TABLE, NO MIGRATION, AND NO NEW STORAGE LOCATION. It reads the events
+    # already hydrated at `state["activity"]` and opens no connection of its own;
+    # `db_write.OWNED_TABLES` is unchanged.
+    #
+    # ALSO NOT AN MCP OPERATION, deliberately, and for the same reason
+    # `GET /api/experiments/{id}/activity` is not one: neither activity read is
+    # exposed as a tool, so the agent surface's inventory is unmoved by this slice.
+    #
     # MEASURED from `create_app().openapi()`, not derived from the line above it.
-    assert checked == 89, f"expected 89 documented operations, found {checked}"
+    assert checked == 90, f"expected 90 documented operations, found {checked}"
 
 
 def test_the_auto_summary_check_can_actually_fail(client):
@@ -1095,6 +1119,15 @@ EXPECTED_RESPONSE_CODES: dict[tuple[str, str], list[str]] = {
     # claim about the RECORD ("it has no such activity"); the honest answer is that no
     # such action, channel or object type exists.
     ("/api/experiments/{experiment_id}/activity", "get"): ["200", "401", "404", "422", "503"],
+    # The cross-experiment SUMMARY of that same history (`DEC-44`, ledger `ACT-004`).
+    # THE SAME CODE SET AS THE PER-RECORD READ, and every member is there for the same
+    # reason: no `412`/`428` because nothing is written, no `409` because there is
+    # nothing to conflict with. The `404` is the tutorial scope's (an unknown session
+    # id), never a record's — this operation names no record and so cannot fail to
+    # find one. Its `422` is FastAPI's parameter validation ALONE: `window_days` is
+    # bounded in the signature, and unlike the per-record route this one takes no
+    # vocabulary filter, so it has no typed refusal of its own.
+    ("/api/activity/summary", "get"): ["200", "401", "404", "422", "503"],
     ("/api/experiments/{experiment_id}/notes", "get"): ["200", "401", "404", "422", "503"],
     ("/api/experiments/{experiment_id}/notes", "post"): ["201", "400", "401", "404", "412", "422", "428", "503"],
     ("/api/experiments/{experiment_id}/notes/{note_id}", "get"): ["200", "401", "404", "422", "503"],
