@@ -472,6 +472,70 @@ export const LABELS = {
   activityEmptyString: '(blank)',
   activityChangedTo: 'changed to',
 
+  /* ── ACTIVITY HISTORY, `ACT-003b` ──────────────────────────────────────────
+     Three named defects in `ACT-003`'s panel: no time hierarchy, a primary line
+     that read at the same weight as its own metadata, and `JSON.stringify` as the
+     DEFAULT scientist view of a structured change. Every string below belongs to
+     one of those three, and none of them names or classifies a scientific value —
+     the counts are counted off the stored value in front of the reader and the
+     field names are the record's own. */
+
+  /* THE TWO RELATIVE DAY NAMES. They are claims about the clock at the moment of
+     reading, so the panel recomputes them on every render rather than capturing a
+     "today" at mount that goes false overnight. Every other group heading is an
+     absolute date from `toLocaleDateString`, year included — the sketch this came
+     from showed "September 14", and a history spanning a year boundary would then
+     carry two indistinguishable headings. */
+  activityToday: 'Today',
+  activityYesterday: 'Yesterday',
+
+  /* THE TWO SIDES, NAMED. A long text change rendered as `old → new` wraps into
+     itself and the reader cannot tell where the old value ended, so above the
+     inline threshold the two sides become labelled blocks. Because the labels are
+     visible, that form needs no `sr-only` "changed to": the relation is stated. */
+  activityBefore: 'Before',
+  activityAfter: 'After',
+
+  /* THE RAW STORED DOCUMENT, BEHIND A NATIVE `<details>`. It is not deleted — it
+     stops being the default view. The summary says what is inside rather than
+     "Details", so a reader knows before opening it. */
+  activityShowStored: 'Show the stored values',
+
+  /* A CHANGED KEY WHOSE OWN VALUES ARE NOT SENTENCE-SIZED. Named and nothing more:
+     §5 forbids guessing what a key means, so the fallback is to say WHICH key moved
+     and point at the document, never to describe it. */
+  activityChangedSeeBelow: 'changed — the stored values are below',
+
+  /* TWO MECHANICAL FACTS ABOUT A STRUCTURED PAIR, each stated only when true.
+     The first is reachable — an entry rewritten whole can produce the same fields
+     in a different stored order — and saying "no field differs" without saying why
+     would leave a reader hunting for a change that is not there. */
+  activityStoredOrderOnly: 'No field differs. The stored order changed.',
+  activityStoredIdentical: 'The stored value is the same on both sides.',
+
+  /* WHAT A STRUCTURED SIDE IS, in words its own value supplies: how many fields an
+     object holds, how many values an array holds. Deliberately NOT what it means —
+     calling one a spectrum, a digest or a unit is the scientific interpretation §5
+     forbids, and the keys are named individually below where a reader sees them. */
+  activityFieldSingular: 'field',
+  activityFieldPlural: 'fields',
+  activityValueSingular: 'value',
+  activityValuePlural: 'values',
+
+  /* TRUNCATION IS DISCLOSED WITH ITS EXACT NUMBERS. The rule is that nothing is cut
+     SILENTLY, not that nothing is ever cut: a single audit row must not become a
+     page, and the whole value is under the disclosure unchanged. */
+  activityTruncatedShown: 'Shown here:',
+  activityCharacters: 'characters.',
+  activityTruncatedRest: 'The whole value is below, unchanged.',
+
+  /* `DEC-45`: a name never travels unqualified. Reused from
+     `revisionHistory.actorBasisNote`'s rule rather than re-invented — a
+     qualification appears exactly when the basis is one a reader would otherwise
+     take at face value. A fixture-verified deployment mints a subject from its own
+     process environment, which is not proof anybody authenticated. */
+  activityTrustFixture: 'recorded on a test-fixture basis — not proof anyone authenticated',
+
   /*
    * DATA CAPTURE — the group label above the promoted capture destination.
    *

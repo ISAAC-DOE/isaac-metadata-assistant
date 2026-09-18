@@ -10512,7 +10512,7 @@
       },
       {
         "path": "apps/web/src/lib/labels.ts",
-        "sha256": "6d988e5d862b606b9c226f62a82c0278d3934d654e8622fa3c89d94fef0340d0"
+        "sha256": "2cecffa46795c7ac6defcfe539ba72b8d534e1f83701ce72e96731cb147d1322"
       },
       {
         "path": "apps/web/src/lib/routes.ts",
@@ -11012,7 +11012,7 @@
       }
     ],
     "served_file_count": 200,
-    "served_manifest_fingerprint": "e2d97e0743542023fc79f603324a1d6633aa9c5a7ddf332b94e0935cb22672ee"
+    "served_manifest_fingerprint": "60bf0c0bd227425264b0e4c6e2fa8bf67bff4147943358ed5e5b21b707e15e06"
   },
   "overview": {
     "built_at_commit": "caab1d0a69c1733524bda5dde495623bc4b7bad1",

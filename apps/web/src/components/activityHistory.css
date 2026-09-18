@@ -81,7 +81,43 @@
   color: var(--text-secondary);
 }
 
+/* ── THE DAY GROUPING (`ACT-003b`, defect A) ──────────────────────────────────
+   NESTED LISTS, not a heading floating beside a flat list. The outer list holds one
+   item per calendar day; each item carries its own `<h3>` and its own list of rows,
+   so the structure stays a valid list a screen reader can walk — a bare `<div>`
+   between `<li>`s would break the outer list's semantics, and a heading that is a
+   SIBLING of the list is not associated with the rows it names.
+
+   The gap between GROUPS is a rung wider than the gap between rows inside one, which
+   is the whole hierarchy: a reader scanning for "when" reads the headings, and the
+   rows under each are visibly one thing. */
 .activity-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+}
+
+.activity-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+}
+
+/* The heading is meta-sized and set apart by WEIGHT and by the rung above it, not by
+   a hue: an audit history's date is a label, and colouring it would start a system
+   this file deliberately does not have (see the NO RESERVED HUE note at the top). */
+.activity-group-heading {
+  margin: 0;
+  font-size: var(--font-size-meta);
+  font-weight: var(--font-weight-semibold);
+  line-height: var(--line-height-snug);
+  color: var(--text-secondary);
+}
+
+.activity-group-list {
   margin: 0;
   padding: 0;
   list-style: none;
@@ -116,29 +152,217 @@
   min-width: 0;
 }
 
-/* `overflow-wrap: anywhere` ON EVERY HEAD SPAN, and `min-width: 0` on the row so a
-   flex child may actually shrink to its wrapped width. Without the pair, an
-   unbreakable token sets a min-content floor for the whole content column and clips
-   the WORKFLOW SPINE above — CI measured `scrollWidth 200 vs clientWidth 1` on
-   `span.spine-meta`, a sibling this panel never touches. A too-wide child clips its
-   neighbours rather than itself, which is why the failure named someone else's
-   selector. */
-.activity-object,
-.activity-channel,
-.activity-when {
-  font-size: var(--font-size-meta);
-  color: var(--text-muted);
+/* THE OBJECT IS RANK 2 (`ACT-003b`, defect B) and is painted as such: the SAME size
+   as the action so it reads as part of the same phrase, a lighter ink and a regular
+   weight so it does not compete with it. Before this it was meta-sized and muted,
+   sitting in one flex row beside the CHANNEL and the TIMESTAMP at identical weight —
+   so "Web" and "Jan 1, 2099" arrived with the same emphasis as "Updated", and the
+   reader had four equal things to read instead of one act. */
+.activity-object {
+  font-size: var(--font-size-body);
+  font-weight: var(--font-weight-regular);
+  color: var(--text-secondary);
   overflow-wrap: anywhere;
   min-width: 0;
 }
 
-.activity-field,
-.activity-change {
+/* `overflow-wrap: anywhere` ON EVERY HEAD AND META SPAN, and `min-width: 0` on their
+   rows so a flex child may actually shrink to its wrapped width. Without the pair, an
+   unbreakable token sets a min-content floor for the whole content column and clips
+   the WORKFLOW SPINE above — CI measured `scrollWidth 200 vs clientWidth 1` on
+   `span.spine-meta`, a sibling this panel never touches. A too-wide child clips its
+   neighbours rather than itself, which is why the failure named someone else's
+   selector. THE ISO TIMESTAMP NO LONGER RENDERS AS TEXT at all (it is `dateTime` and
+   `title`), but the pair stays: the values here are server-supplied and the next
+   unbreakable one must not re-open that failure. */
+.activity-channel,
+.activity-when,
+.activity-actor,
+.activity-trust {
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+
+/* THE METADATA LINE — rank 3, 4 and 5 together, demoted as a unit. The separator is
+   a CSS `::before` rather than a rendered character: it is decoration, and a screen
+   reader should not spell out a middot between every pair of facts. */
+.activity-meta {
+  margin: var(--space-xs) 0 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-xs);
+  min-width: 0;
+  font-size: var(--font-size-meta);
+  line-height: var(--line-height-snug);
+  color: var(--text-muted);
+}
+
+.activity-meta > * + *::before {
+  content: '\00b7';
+  padding-right: var(--space-xs);
+  color: var(--text-muted);
+}
+
+.activity-field {
   margin-top: var(--space-xs);
   margin-bottom: 0;
   font-size: var(--font-size-meta);
   line-height: var(--line-height-normal);
   color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+
+/* THE CHANGE IS THE SUBSTANCE OF THE ROW, so it reads at body size in the primary
+   ink — rank between the act above it and the metadata below. It was meta-sized and
+   secondary before, which put the one thing a scientist came here to read at the
+   same weight as the channel. */
+.activity-change {
+  margin-top: var(--space-xs);
+  margin-bottom: 0;
+  font-size: var(--font-size-body);
+  line-height: var(--line-height-normal);
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+
+/* The arrow is `aria-hidden` and purely a relation mark; the `sr-only` "changed to"
+   beside it is what a screen reader hears. Muted rather than faint: it still has to
+   be legible to a sighted reader, and `--text-muted` clears AA on every ground in
+   this application. */
+.activity-arrow {
+  color: var(--text-muted);
+}
+
+/* ── A LONG TEXT CHANGE (`ACT-003b`, defect C) ────────────────────────────────
+   Labelled blocks, because two long values joined by an arrow wrap into one another
+   and the reader cannot tell where the old value ended. */
+.activity-change-blocks,
+.activity-change-structured {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  margin-top: var(--space-xs);
+  min-width: 0;
+}
+
+.activity-change-side {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2xs);
+  min-width: 0;
+  font-size: var(--font-size-body);
+  line-height: var(--line-height-normal);
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+
+.activity-change-label {
+  font-size: var(--font-size-meta);
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-secondary);
+}
+
+.activity-change-note,
+.activity-truncated {
+  margin: 0;
+  font-size: var(--font-size-meta);
+  line-height: var(--line-height-normal);
+  color: var(--text-secondary);
+}
+
+/* ── THE FIELD-LEVEL DIFF (`ACT-003b`, defect C) ──────────────────────────────
+   One row per key that moved, in the stored document's own order. A key whose values
+   are not sentence-sized is NAMED and nothing more; the document itself is under the
+   disclosure below. */
+.activity-diff {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2xs);
+  min-width: 0;
+}
+
+.activity-diff-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-xs);
+  min-width: 0;
+  font-size: var(--font-size-body);
+  line-height: var(--line-height-normal);
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+
+.activity-diff-key {
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-secondary);
+}
+
+.activity-diff-opaque {
+  font-size: var(--font-size-meta);
+  color: var(--text-secondary);
+}
+
+.activity-diff-pair {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* ── THE STORED DOCUMENT, BEHIND A NATIVE DISCLOSURE ──────────────────────────
+   `HelpPanel`/`AssistantPanel`/`SchemaBrowser`'s idiom, and this panel's own actor
+   note: keyboard-operable with no ARIA. It reinvents NO interaction state — the
+   summary's focus ring is the browser's, which is `styles/base.css`'s standing
+   decision for native disclosures here. */
+.activity-stored {
+  font-size: var(--font-size-meta);
+  color: var(--text-secondary);
+}
+
+.activity-stored-summary {
+  cursor: pointer;
+  font-size: var(--font-size-meta);
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-secondary);
+}
+
+.activity-stored-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2xs);
+  margin-top: var(--space-xs);
+  min-width: 0;
+}
+
+.activity-stored-label {
+  margin: 0;
+  font-size: var(--font-size-meta);
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-secondary);
+}
+
+/* `white-space: pre-wrap` AND `overflow-wrap: anywhere` TOGETHER, deliberately. A
+   `<pre>` defaults to `pre`, which does not wrap — a 2 000-character stored document
+   would then set a min-content floor for the whole content column and clip its
+   neighbours, which is the exact failure the ISO timestamp caused once already and
+   which is reported against a SIBLING selector, not this one. `pre-wrap` keeps the
+   indentation that makes the document readable while allowing the wrap. */
+.activity-stored-pre {
+  margin: 0;
+  padding: var(--space-sm);
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: var(--font-size-meta);
+  line-height: var(--line-height-normal);
+  color: var(--text-primary);
+  background: var(--surface-subtle);
+  border: 1px solid var(--border-faint);
+  border-radius: var(--radius-token);
+  white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
 
