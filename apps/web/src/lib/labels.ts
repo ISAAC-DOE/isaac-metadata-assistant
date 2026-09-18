@@ -525,6 +525,115 @@ export const LABELS = {
   activityEmptyString: '(blank)',
   activityChangedTo: 'changed to',
 
+  /* ── ACTIVITY HISTORY, `ACT-003b` ──────────────────────────────────────────
+     Three named defects in `ACT-003`'s panel: no time hierarchy, a primary line
+     that read at the same weight as its own metadata, and `JSON.stringify` as the
+     DEFAULT scientist view of a structured change. Every string below belongs to
+     one of those three, and none of them names or classifies a scientific value —
+     the counts are counted off the stored value in front of the reader and the
+     field names are the record's own. */
+
+  /* THE TWO RELATIVE DAY NAMES. They are claims about the clock at the moment of
+     reading, so the panel recomputes them on every render rather than capturing a
+     "today" at mount that goes false overnight. Every other group heading is an
+     absolute date from `toLocaleDateString`, year included — the sketch this came
+     from showed "September 14", and a history spanning a year boundary would then
+     carry two indistinguishable headings. */
+  activityToday: 'Today',
+  activityYesterday: 'Yesterday',
+
+  /* THE TWO SIDES, NAMED. A long text change rendered as `old → new` wraps into
+     itself and the reader cannot tell where the old value ended, so above the
+     inline threshold the two sides become labelled blocks. Because the labels are
+     visible, that form needs no `sr-only` "changed to": the relation is stated. */
+  activityBefore: 'Before',
+  activityAfter: 'After',
+
+  /* THE RAW STORED DOCUMENT, BEHIND A NATIVE `<details>`. It is not deleted — it
+     stops being the default view. The summary says what is inside rather than
+     "Details", so a reader knows before opening it. */
+  activityShowStored: 'Show the stored values',
+
+  /* A CHANGED KEY WHOSE OWN VALUES ARE NOT SENTENCE-SIZED. Named and nothing more:
+     §5 forbids guessing what a key means, so the fallback is to say WHICH key moved
+     and point at the document, never to describe it. */
+  activityChangedSeeBelow: 'changed — the stored values are below',
+
+  /* TWO MECHANICAL FACTS ABOUT A STRUCTURED PAIR, each stated only when true.
+     The first is reachable — an entry rewritten whole can produce the same fields
+     in a different stored order — and saying "no field differs" without saying why
+     would leave a reader hunting for a change that is not there. */
+  activityStoredOrderOnly: 'No field differs. The stored order changed.',
+  activityStoredIdentical: 'The stored value is the same on both sides.',
+
+  /* WHAT A STRUCTURED SIDE IS, in words its own value supplies: how many fields an
+     object holds, how many values an array holds. Deliberately NOT what it means —
+     calling one a spectrum, a digest or a unit is the scientific interpretation §5
+     forbids, and the keys are named individually below where a reader sees them. */
+  activityFieldSingular: 'field',
+  activityFieldPlural: 'fields',
+  activityValueSingular: 'value',
+  activityValuePlural: 'values',
+
+  /* TRUNCATION IS DISCLOSED WITH ITS EXACT NUMBERS. The rule is that nothing is cut
+     SILENTLY, not that nothing is ever cut: a single audit row must not become a
+     page, and the whole value is under the disclosure unchanged. */
+  activityTruncatedShown: 'Shown here:',
+  activityCharacters: 'characters.',
+  activityTruncatedRest: 'The whole value is below, unchanged.',
+
+  /* `DEC-45`: a name never travels unqualified. Reused from
+     `revisionHistory.actorBasisNote`'s rule rather than re-invented — a
+     qualification appears exactly when the basis is one a reader would otherwise
+     take at face value. A fixture-verified deployment mints a subject from its own
+     process environment, which is not proof anybody authenticated. */
+  activityTrustFixture: 'recorded on a test-fixture basis — not proof anyone authenticated',
+
+  /* ── ACT-003b, ROUND 2: THREE FINDINGS FROM AN INDEPENDENT REVIEW ──────────
+
+     THE SENTINEL'S DISPLAY FORM, AND THE ONE THING IT IS NOT. `unattributed` is
+     this application's own word for nobody, not somebody's name, so it gets a
+     display form here. Every OTHER actor is rendered VERBATIM: the review's
+     Important 2 found the panel running `humanizeToken` over it, which displayed
+     `k_verma` as "K Verma" and `svc_import_bot` as "Svc Import Bot" — not
+     searchable, not copyable, not correlatable to the identity system, in the one
+     surface whose job is saying who did what. `CLAUDE.md` §15 (Dean, 2026-08-12)
+     makes the canonical actor the Authentik username, and a username is a literal.
+     It is NOT "System", NOT "Unknown user" and NOT "—", for the reason
+     `revisionHistory.NO_ACTOR_TEXT` already gives: each of those reads as a party. */
+  activityActorSentinel: 'Unattributed',
+
+  /* THE MIXED-HISTORY DISCLOSURE. The review's Important 1: the panel rendered
+     `activityActorUnattributed` — which asserts "This deployment has no verified
+     sign-in boundary" — unconditionally, so a history containing one attributed act
+     showed a row naming a person directly beneath a sentence saying nobody can be
+     named. This pair says the same true thing about THOSE ENTRIES and asserts
+     nothing about the deployment as a whole, because a deployment that attributed
+     one act plainly does have a boundary for some requests. When every loaded entry
+     is attributed, NEITHER disclosure renders: there is nothing left to explain. */
+  activityWhySomeUnattributed: 'Why are some entries not attributed to a person?',
+  activityActorSomeUnattributed:
+    'Some entries below are not attributed to a person. An entry carries a name only when the act that wrote it arrived through a verified sign-in; when nothing verified who was acting, the entry says so rather than recording a name that could not be trusted.',
+
+  /* A FAILED OLDER-PAGE READ, SAID WHERE A SIGHTED READER CAN SEE IT. The review's
+     Important 3: the `.catch` announced this into the `sr-only` live region and
+     nowhere else, so the screen-reader user was better informed than the sighted
+     one — §11 records the same inversion for the recording state. It is a separate
+     sentence from `activityUnavailable` because it describes a different event: the
+     history DID load, and one further page did not. The list is untouched, and the
+     copy says so, because that is the property a reader most needs to trust here. */
+  activityOlderFailed:
+    'Those older entries could not be read just now. Nothing has been lost and nothing above has changed — Show Older Entries will try again.',
+
+  /* AN ORDER-ONLY CHANGE, ONE LEVEL DOWN. The review's Minor 5:
+     `activityStoredOrderOnly` fired only when the TOP-LEVEL keys were reordered,
+     while `sameStored` is key-order sensitive at every depth — so
+     `{asset: {uri, sha256}}` -> `{asset: {sha256, uri}}` read "Asset changed — the
+     stored values are below" and sent the curator to a disclosure holding two
+     documents they could not tell apart. That is the exact outcome the top-level
+     note exists to prevent. */
+  activityStoredOrderOnlyField: 'the same values, in a different stored order',
+
   /*
    * DATA CAPTURE — the group label above the promoted capture destination.
    *
