@@ -196,6 +196,37 @@ export const HIDDEN_TEXT_ALLOWANCES: readonly OverflowAllowance[] = [
       // be false: it is a deliberate allowance the other three workspaces
       // already hold.
       'record-graph',
+      // `record-activity` added 2026-09-17 (`ACT-003`), and the `record-graph`
+      // paragraph above describes this case VERBATIM — same cause, same signature,
+      // same remedy. The workflow spine renders on ALL the record workspaces; this
+      // one was missing only because `record-activity` did not exist as a SURFACE
+      // until `ACT-003` enrolled it, and enrolling a surface in `e2e/surfaces.ts`
+      // joins the layout sweep as well as the axe sweep. Linux CI failed at
+      // 1280/1024/768/640/390/375/320 with the identical `scrollWidth 200 vs
+      // clientWidth 1`.
+      //
+      // VERIFIED BEFORE ADDING, not inherited on the strength of the paragraph
+      // above: `workflow.css:319-328` inside the `<=1024px` query gives this class
+      // `position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path:
+      // inset(50%)` — the standard visually-hidden technique — so nothing is
+      // clipped from a sighted reader and the text stays in the accessibility tree,
+      // which is the point of the rule.
+      //
+      // A FALSE TRAIL WORTH RECORDING, because it cost a CI round trip. The failing
+      // selector names the SPINE, a sibling this slice never touches, so the first
+      // hypothesis was that the new panel's unbreakable ISO timestamp set a
+      // min-content floor and squeezed the spine's flex children — "a too-wide child
+      // clips its neighbours". That was WRONG: the fix landed and the selector and
+      // its numbers were byte-identical. The timestamp fix was worth keeping on its
+      // own merits (an ISO string with a `T` and a `Z` is a wire format shown to a
+      // scientist) but it addressed a different defect. The right first move was the
+      // one the `record-graph` paragraph prescribes: check this allowlist before
+      // theorising.
+      //
+      // A `layout-baseline.ts` entry would be WRONG here, and that paragraph says
+      // why: it would record a deliberate allowance the other workspaces already
+      // hold as though it were DEBT.
+      'record-activity',
       'guided-completion',
       'evidence',
       'evidence-graph',
