@@ -168,6 +168,55 @@ describe('the activity history panel', () => {
     // The row is still there, and the panel did NOT fall back to an error state.
     expect(container.querySelectorAll('.activity-row')).toHaveLength(1);
     expect(screen.queryByText(LABELS.activityEmpty)).toBeNull();
+
+    /*
+     * EXTENDED BY THE `ACT-003b` REVIEW (Important 3), and the extension is the
+     * half this case was missing. Surviving the failure is necessary and was all
+     * that was asserted; a reader also has to be TOLD. The `.catch` announced into
+     * the `sr-only` live region and nowhere else, and `status: 'error'` was the only
+     * path that rendered anything visible — so a sighted scientist saw the button
+     * flicker and come back, no new rows, no reason, and no way to tell a failure
+     * from "there is nothing more". The screen-reader user was better informed than
+     * the sighted one, which is the inversion §11 records for the recording state.
+     */
+    const visible = container.querySelector('.activity-older-error');
+    expect(visible?.textContent).toBe(LABELS.activityOlderFailed);
+    // NOT `sr-only` — that is the entire point, so it is asserted rather than
+    // assumed from the class name above.
+    expect(visible?.className ?? '').not.toContain('sr-only');
+    expect(visible?.closest('.sr-only')).toBeNull();
+    // The live region still carries it too, so the two readers are told the SAME
+    // thing rather than one of them being told instead of the other.
+    const live = container.querySelector('[aria-live]');
+    expect(live?.textContent).toContain(LABELS.activityOlderFailed);
+  });
+
+  it('clears the failure notice once a later page succeeds, rather than warning forever', async () => {
+    /*
+     * A stale warning over a list that has since grown is its own honesty defect:
+     * it tells a reader something is missing when nothing is. Asserted rather than
+     * assumed, because the flag is the kind of state that is easy to set and easy
+     * to forget to clear.
+     */
+    vi.spyOn(api, 'listActivity')
+      .mockResolvedValueOnce(
+        body({ events: [event({ id: 'a', seq: 9 })], total: 3, returned: 1, next_before_seq: 9 }),
+      )
+      .mockRejectedValueOnce(new Error('down'))
+      .mockResolvedValueOnce(
+        body({ events: [event({ id: 'b', seq: 8 })], total: 3, returned: 1, next_before_seq: null }),
+      );
+    const { container } = render(<ActivityHistoryPanel experimentId="demo" />);
+
+    fireEvent.click(await screen.findByRole('button', { name: LABELS.activityShowOlder }));
+    // `findAll`: the sentence is deliberately in TWO places — the visible notice and
+    // the live region — which is the property the case above asserts.
+    await screen.findAllByText(LABELS.activityOlderFailed);
+
+    fireEvent.click(screen.getByRole('button', { name: LABELS.activityShowOlder }));
+    await screen.findByText(LABELS.activityAllShown);
+    expect(container.querySelectorAll('.activity-older-error')).toHaveLength(0);
+    expect(container.querySelectorAll('.activity-row')).toHaveLength(2);
   });
 
   it('says in WORDS that entries are unattributed, and says why', async () => {
@@ -447,12 +496,20 @@ describe('ACT-003b · A · the history has a time hierarchy', () => {
     expect(container.querySelectorAll('.activity-group')).toHaveLength(1);
   });
 
-  it('recomputes "Today" on every render, so a tab left open overnight does not lie', async () => {
+  it('uses the clock at RENDER TIME, not one captured at mount (and see the withdrawn claim)', async () => {
     /*
      * MUTATION-GUARDED. Cache `now` at mount — `useRef(new Date())` or a module
      * constant — and this is the only test that fails: every other case renders
-     * once. The panel holds no unsaved state and re-reads on open, so recomputing
-     * costs one `Date` per render and buys a claim that cannot go stale.
+     * once. Verified by running exactly that mutant: 1 failure, this one.
+     *
+     * THE TITLE USED TO READ "so a tab left open overnight does not lie" AND THAT
+     * WAS AN OVERSTATEMENT (independent review, Minor 4 — flagged as a reading, and
+     * re-derived here before being accepted). This panel has NO timer, NO poller
+     * and NO change-feed subscription, so an IDLE tab opened at 23:50 still reads
+     * "Today" at 09:00. What the mechanism delivers, and what this test actually
+     * proves, is the narrower claim now in the title: the clock is read again on
+     * the NEXT RENDER. Below, that render is caused by a click — deliberately, so
+     * the test cannot be read as evidence of anything happening on its own.
      */
     useFixedClock();
     const yesterdayNoon = agoMs(0);
@@ -480,6 +537,12 @@ describe('ACT-003b · A · the history has a time hierarchy', () => {
     // The clock moves a day forward while the tab sits open; the next render must
     // call the same instant "Yesterday".
     vi.setSystemTime(new Date(FIXED_NOW.getTime() + DAY_MS));
+    // NOTHING HAS RE-RENDERED YET, and the panel schedules nothing that would — so
+    // the stale label is still on screen. This assertion is the withdrawn claim's
+    // negative control: it FAILS if somebody adds a timer and then reads the title
+    // above as though it had always been true.
+    expect(screen.getByText(LABELS.activityToday)).toBeTruthy();
+
     fireEvent.click(screen.getByRole('button', { name: LABELS.activityShowOlder }));
     await screen.findByText(LABELS.activityAllShown);
 
@@ -534,6 +597,91 @@ describe('ACT-003b · A · the history has a time hierarchy', () => {
   });
 });
 
+describe('ACT-003b · the two counts are taken from two different places, on purpose', () => {
+  /*
+   * THE GAP THIS CLOSES WAS FOUND BY THE REVIEWER, NOT BY A TEST — and the way it
+   * was found is the point: they swapped `rendered.length` for
+   * `state.body.returned + older.length` and got **30/30 passing**. The panel's own
+   * source carries a long note arguing that TOTAL must come from the server and
+   * SHOWN must come from the rendered rows, and NOTHING enforced either half.
+   *
+   * It stayed invisible because every fixture in this file sets `returned` equal to
+   * `events.length` — which is exactly the shape §11 records for the ORIGINAL
+   * `shown` mutant, where a guard citing `pendingTotal` turned out to be an
+   * equivalent mutant for the same reason. The fixtures below deliberately DISAGREE
+   * with the arrays they carry, which is the only way either claim is checkable.
+   *
+   * The precedent is `live-refresh-request-graph.test.tsx`, which fails if a count
+   * is taken from a fetched array. This is its mirror: one count must be, and the
+   * other must not.
+   */
+  it('TOTAL comes from the server and never from the page (the §11 pendingTotal rule)', async () => {
+    useFixedClock();
+    const { container } = mount({
+      events: [event({ id: 'a', seq: 2 }), event({ id: 'b', seq: 1 })],
+      total: 200,
+      matched: 200,
+      returned: 2,
+      highest_seq: 200,
+    });
+    await screen.findAllByText('Experiment Renamed');
+    const counts = container.querySelector('.activity-counts')?.textContent ?? '';
+    expect(counts).toContain('200');
+    // 2 is the rendered count and belongs in the sentence; what must NOT happen is
+    // the TOTAL collapsing to it.
+    expect(counts).not.toMatch(/\bof 2\b/);
+  });
+
+  it('SHOWN comes from the rendered rows and never from the server\u2019s page fields', async () => {
+    /*
+     * MUTATION-GUARDED against the exact swap the reviewer performed. `returned` is
+     * set to a value the page does not carry, so a `shown` built from it prints a
+     * number of rows the reader cannot see — a sentence describing a list that is
+     * not on screen, which is what `shown`'s own note says it exists to prevent.
+     */
+    useFixedClock();
+    const spy = vi
+      .spyOn(api, 'listActivity')
+      .mockResolvedValueOnce(
+        body({
+          events: [event({ id: 'a', seq: 9 }), event({ id: 'b', seq: 8 })],
+          total: 40,
+          matched: 40,
+          returned: 99, // deliberately NOT events.length
+          next_before_seq: 8,
+        }),
+      )
+      .mockResolvedValueOnce(
+        body({
+          events: [event({ id: 'c', seq: 7 })],
+          total: 40,
+          matched: 40,
+          returned: 50, // deliberately NOT events.length
+          next_before_seq: null,
+        }),
+      );
+    const { container } = render(<ActivityHistoryPanel experimentId="demo" />);
+
+    await screen.findByRole('button', { name: LABELS.activityShowOlder });
+    const first = container.querySelector('.activity-counts')?.textContent ?? '';
+    expect(container.querySelectorAll('.activity-row')).toHaveLength(2);
+    expect(first).toContain('2');
+    expect(first).not.toContain('99');
+
+    fireEvent.click(screen.getByRole('button', { name: LABELS.activityShowOlder }));
+    await screen.findByText(LABELS.activityAllShown);
+    expect(spy).toHaveBeenCalledTimes(2);
+    const after = container.querySelector('.activity-counts')?.textContent ?? '';
+    expect(container.querySelectorAll('.activity-row')).toHaveLength(3);
+    expect(after).toContain('3');
+    expect(after).not.toContain('149'); // 99 + 50, the summed-server-fields mutant
+    expect(after).not.toContain('99');
+    // And the total is STILL the server's throughout — the two halves are asserted
+    // in one place so neither can be "fixed" into agreement with the other.
+    expect(after).toContain('40');
+  });
+});
+
 describe('ACT-003b · B · the act reads louder than its own metadata', () => {
   it('puts ONLY the action and the object on the primary line', async () => {
     /*
@@ -579,7 +727,12 @@ describe('ACT-003b · B · the act reads louder than its own metadata', () => {
     });
     await screen.findAllByText('Experiment Renamed');
     expect(container.querySelectorAll('.activity-actor')).toHaveLength(0);
-    // Not dropped as a fact — said once, in words, with its reason.
+    // Not dropped as a fact — said once, in words, with its reason. THIS branch is
+    // the one whose sentence asserts something about the deployment, and it is
+    // correct here precisely because nothing on screen contradicts it.
+    expect(container.querySelector('.activity-actor-summary')?.textContent).toBe(
+      LABELS.activityWhyUnattributed,
+    );
     expect(container.querySelector('.activity-actor-note')?.textContent).toBe(
       LABELS.activityActorUnattributed,
     );
@@ -587,13 +740,27 @@ describe('ACT-003b · B · the act reads louder than its own metadata', () => {
     expect(container.querySelectorAll('.activity-row')).toHaveLength(2);
   });
 
-  it('shows the actor on EVERY row once any event names one — including the honest ones', async () => {
+  it('INVERTED: renders a username VERBATIM — it used to be run through the humanizer', async () => {
     /*
      * THE OTHER HALF OF THE SAME DECISION, and the reason it is per-LIST rather than
      * per-row. Suppressing only the unattributed rows in a mixed history would make
      * "nobody was established" indistinguishable from "this build failed to read the
      * actor". Once one act has a name, every row says who — and the unattributed
-     * ones say so in words rather than going blank.
+     * ones say so in words rather than going blank. THAT SUBJECT IS UNCHANGED.
+     *
+     * WHAT IS INVERTED, and why the title says so (independent review, Important 2):
+     * this case used to assert `'aresearcher' -> 'Aresearcher'`, i.e. IT PINNED THE
+     * MANGLING AS INTENDED. The panel ran `humanizeToken` over the actor, so a real
+     * username `k_verma` displayed as "K Verma" — not searchable, not copyable, not
+     * correlatable to the identity system, on the one surface whose job is saying
+     * who did what. The fixture is now a username with an underscore precisely
+     * because the old assertion would have passed on `aresearcher`: a single-segment
+     * lowercase name is a FIXED POINT of the humanizer's capitalisation only in its
+     * first letter, and the defect is invisible unless the name has a separator.
+     *
+     * NOTE WHAT DOES NOT FIX IT: routing the actor through `humanizeKeyName` would
+     * change nothing, because `BARE_IDENTIFIER` MATCHES `k_verma`. The only correct
+     * answer is not to humanize an actor at all — asserted below, on both segments.
      */
     useFixedClock();
     const { container } = mount({
@@ -602,7 +769,7 @@ describe('ACT-003b · B · the act reads louder than its own metadata', () => {
           id: 'named',
           seq: 2,
           recorded_utc: agoMs(60 * 60 * 1000),
-          actor: 'aresearcher',
+          actor: 'k_verma',
           actor_trust_basis: 'verified_edge_assertion',
         }),
         event({ id: 'nobody', seq: 1, recorded_utc: agoMs(2 * 60 * 60 * 1000) }),
@@ -610,10 +777,85 @@ describe('ACT-003b · B · the act reads louder than its own metadata', () => {
     });
     await screen.findAllByText('Experiment Renamed');
     const actors = [...container.querySelectorAll('.activity-actor')].map((n) => n.textContent);
-    expect(actors).toEqual(['Aresearcher', 'Unattributed']);
+    // VERBATIM for the real name; the SENTINEL alone gets a display form, because
+    // `unattributed` is this application's word for nobody and not somebody's name.
+    expect(actors).toEqual(['k_verma', LABELS.activityActorSentinel]);
+    // Stated as the inversion, so a future reader sees the old assertion refused.
+    expect(actors[0]).not.toBe('K Verma');
+    expect(container.textContent ?? '').not.toContain('K Verma');
     // A verified edge assertion is what an attributed row is EXPECTED to be, so it
     // carries no extra qualification — the same rule `revisionHistory` already uses.
     expect(container.querySelectorAll('.activity-trust')).toHaveLength(0);
+  });
+
+  it('does NOT also claim nobody can be named, on the same screen (review, Important 1)', async () => {
+    /*
+     * THE CONTRADICTION THIS REFUSES, reproduced by the reviewer by adding ONE
+     * assertion to the case above — whose fixture already built this exact state and
+     * simply never looked. The standing `<details>` rendered UNCONDITIONALLY while
+     * the per-row actor was gated, so a history with one attributed act showed a row
+     * reading a person's name directly beneath "Entries are not attributed to a
+     * person. This deployment has no verified sign-in boundary…". Two contradictory
+     * claims about the deployment's configuration, on one screen.
+     *
+     * Not reachable in a default deployment; reachable under
+     * `ISAAC_EDGE_TRUST_VERIFIER=test_fixture`, which is exactly the future the
+     * per-row conditional was built for. A conditional whose counterpart is
+     * hard-coded is not a conditional.
+     */
+    useFixedClock();
+    const { container } = mount({
+      events: [
+        event({
+          id: 'named',
+          seq: 2,
+          recorded_utc: agoMs(60 * 60 * 1000),
+          actor: 'k_verma',
+          actor_trust_basis: 'verified_edge_assertion',
+        }),
+        event({ id: 'nobody', seq: 1, recorded_utc: agoMs(2 * 60 * 60 * 1000) }),
+      ],
+    });
+    await screen.findAllByText('Experiment Renamed');
+    // The name IS on screen...
+    expect(container.textContent ?? '').toContain('k_verma');
+    // ...so the sentence denying that anyone can be named must NOT be.
+    expect(container.textContent ?? '').not.toContain(LABELS.activityActorUnattributed);
+    expect(screen.queryByText(LABELS.activityWhyUnattributed)).toBeNull();
+    // Some entries ARE unattributed, so that narrower sentence is what appears — it
+    // describes those entries and asserts nothing about the deployment as a whole.
+    expect(container.querySelector('.activity-actor-summary')?.textContent).toBe(
+      LABELS.activityWhySomeUnattributed,
+    );
+    expect(container.querySelector('.activity-actor-note')?.textContent).toBe(
+      LABELS.activityActorSomeUnattributed,
+    );
+  });
+
+  it('drops the disclosure entirely when EVERY loaded entry is attributed', async () => {
+    /*
+     * The third branch, asserted so the fix is a derivation and not two hard-coded
+     * cases: with nothing unattributed there is nothing to explain, and a standing
+     * note about unattributed entries would be furniture describing a state the
+     * reader is not in.
+     */
+    useFixedClock();
+    const { container } = mount({
+      events: [
+        event({
+          id: 'named',
+          recorded_utc: agoMs(60 * 60 * 1000),
+          actor: 'k_verma',
+          actor_trust_basis: 'verified_edge_assertion',
+        }),
+      ],
+    });
+    await screen.findByText('Experiment Renamed');
+    expect(container.querySelectorAll('details.activity-actor-details')).toHaveLength(0);
+    expect(container.textContent ?? '').not.toContain(LABELS.activityActorUnattributed);
+    expect(container.textContent ?? '').not.toContain(LABELS.activityActorSomeUnattributed);
+    // The actor is still on the row: dropping the EXPLANATION is not dropping the FACT.
+    expect(container.querySelector('.activity-actor')?.textContent).toBe('k_verma');
   });
 
   it('qualifies a name whose basis a reader would otherwise take at face value (DEC-45)', async () => {
@@ -778,6 +1020,65 @@ describe('ACT-003b · C · a structured change is not a JSON dump', () => {
       LABELS.activityStoredOrderOnly,
     );
     expect(container.querySelectorAll('.activity-diff-row')).toHaveLength(0);
+  });
+
+  it('says so when a NESTED reorder is all that differs — not "changed, look below"', async () => {
+    /*
+     * INDEPENDENT REVIEW, Minor 5, and REPRODUCED by the reviewer before it was
+     * filed. `activityStoredOrderOnly` fired only when `keys.length === 0`, i.e.
+     * only for a reordering of the TOP-LEVEL keys — while `sameStored` is
+     * `JSON.stringify` equality and so is key-order sensitive at EVERY depth. So
+     * `{asset: {uri, sha256}}` -> `{asset: {sha256, uri}}` produced exactly one
+     * changed key, fell past the note, and rendered "Asset changed — the stored
+     * values are below". The curator opened the disclosure and found two documents
+     * that say the same thing, hunting for a difference that is not there: the
+     * exact outcome the top-level note exists to prevent, one level down.
+     */
+    useFixedClock();
+    const { container } = mount({
+      events: [
+        objectEvent({
+          before: { present: true, value: { asset: { uri: 'x://a', sha256: 'abc' } } },
+          after: { present: true, value: { asset: { sha256: 'abc', uri: 'x://a' } } },
+        }),
+      ],
+    });
+    await screen.findByText('Asset Updated');
+    const rows = [...container.querySelectorAll('.activity-diff-row')].map((n) => n.textContent);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toContain('Asset');
+    expect(rows[0]).toContain(LABELS.activityStoredOrderOnlyField);
+    expect(rows[0]).not.toContain(LABELS.activityChangedSeeBelow);
+    // Every changed key being order-only, the summary says so too.
+    expect(container.querySelector('.activity-change-note')?.textContent).toBe(
+      LABELS.activityStoredOrderOnly,
+    );
+  });
+
+  it('does NOT call a reordered ARRAY cosmetic — an array\u2019s order is data', async () => {
+    /*
+     * The negative control for the case above, and the reason the comparison is
+     * positional for arrays: an object's key order carries nothing a reader can act
+     * on, but `detached_run_ids` in a different order is a different statement —
+     * `assets.detach_everywhere` returns its runs "IN RUN ORDER, NOT SORTED" for
+     * exactly that reason. Treating the two alike would report a real change as
+     * cosmetic, which is worse than the defect it fixes.
+     */
+    useFixedClock();
+    const { container } = mount({
+      events: [
+        objectEvent({
+          before: { present: true, value: { run_ids: ['r1', 'r2'] } },
+          after: { present: true, value: { run_ids: ['r2', 'r1'] } },
+        }),
+      ],
+    });
+    await screen.findByText('Asset Updated');
+    const rows = [...container.querySelectorAll('.activity-diff-row')].map((n) => n.textContent);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toContain(LABELS.activityChangedSeeBelow);
+    expect(rows[0]).not.toContain(LABELS.activityStoredOrderOnlyField);
+    expect(container.querySelectorAll('.activity-change-note')).toHaveLength(0);
   });
 
   it('renders a long text change as labelled blocks, not as an inline arrow', async () => {

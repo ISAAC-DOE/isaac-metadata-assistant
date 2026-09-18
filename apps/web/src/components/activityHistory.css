@@ -183,9 +183,17 @@
   min-width: 0;
 }
 
-/* THE METADATA LINE — rank 3, 4 and 5 together, demoted as a unit. The separator is
-   a CSS `::before` rather than a rendered character: it is decoration, and a screen
-   reader should not spell out a middot between every pair of facts. */
+/* THE METADATA LINE — rank 3, 4 and 5 together, demoted as a unit.
+
+   THE SEPARATOR IS A CSS `::before`, AND THE CLAIM FOR THAT IS NARROWER THAN THE
+   ONE FIRST WRITTEN HERE. This comment said a screen reader "should not spell out a
+   middot between every pair of facts", which reads as an assertion that it will not.
+   **Chrome and Firefox DO expose CSS generated content in the accessibility tree**,
+   so that is a reading and not a measurement, and none was taken. What the choice
+   DOES buy, checkably: the separator is absent from `textContent`, so it never
+   appears in copied text and never has to be filtered out of a test assertion; and
+   it stays out of the label vocabulary, where it would be a decoration masquerading
+   as copy. Those are the reasons; silence in a screen reader is not one of them. */
 .activity-meta {
   margin: var(--space-xs) 0 0;
   display: flex;
@@ -303,8 +311,14 @@
   color: var(--text-secondary);
 }
 
+/* READING SIZE, not meta size — independent review, Minor 8. This span is the
+   SENTENCE that tells a reader a field changed; it is the row's content, not a
+   caption on it. At `--font-size-meta` it sat 2px below the key on its own
+   baseline, so the one row whose value could not be shown inline was also the one
+   set smallest. It stays `--text-secondary`, a rung lighter than the primary ink,
+   which is the distinction actually worth drawing here. */
 .activity-diff-opaque {
-  font-size: var(--font-size-meta);
+  font-size: var(--font-size-body);
   color: var(--text-secondary);
 }
 
@@ -351,12 +365,18 @@
    neighbours, which is the exact failure the ISO timestamp caused once already and
    which is reported against a SIBLING selector, not this one. `pre-wrap` keeps the
    indentation that makes the document readable while allowing the wrap. */
+/* READING SIZE, for the same reason — independent review, Minor 8. This is the
+   authoritative stored document a curator opens the disclosure to read CHARACTER BY
+   CHARACTER (a digest, a URI, a unit), and it was set at the smallest type in the
+   system. `--font-size-body` is 13px; at mono that is the same rung the rest of the
+   panel's content uses, so the raw document is no longer the hardest thing on the
+   screen to read. */
 .activity-stored-pre {
   margin: 0;
   padding: var(--space-sm);
   min-width: 0;
   font-family: var(--font-mono);
-  font-size: var(--font-size-meta);
+  font-size: var(--font-size-body);
   line-height: var(--line-height-normal);
   color: var(--text-primary);
   background: var(--surface-subtle);

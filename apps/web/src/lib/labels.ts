@@ -536,6 +536,51 @@ export const LABELS = {
      process environment, which is not proof anybody authenticated. */
   activityTrustFixture: 'recorded on a test-fixture basis — not proof anyone authenticated',
 
+  /* ── ACT-003b, ROUND 2: THREE FINDINGS FROM AN INDEPENDENT REVIEW ──────────
+
+     THE SENTINEL'S DISPLAY FORM, AND THE ONE THING IT IS NOT. `unattributed` is
+     this application's own word for nobody, not somebody's name, so it gets a
+     display form here. Every OTHER actor is rendered VERBATIM: the review's
+     Important 2 found the panel running `humanizeToken` over it, which displayed
+     `k_verma` as "K Verma" and `svc_import_bot` as "Svc Import Bot" — not
+     searchable, not copyable, not correlatable to the identity system, in the one
+     surface whose job is saying who did what. `CLAUDE.md` §15 (Dean, 2026-08-12)
+     makes the canonical actor the Authentik username, and a username is a literal.
+     It is NOT "System", NOT "Unknown user" and NOT "—", for the reason
+     `revisionHistory.NO_ACTOR_TEXT` already gives: each of those reads as a party. */
+  activityActorSentinel: 'Unattributed',
+
+  /* THE MIXED-HISTORY DISCLOSURE. The review's Important 1: the panel rendered
+     `activityActorUnattributed` — which asserts "This deployment has no verified
+     sign-in boundary" — unconditionally, so a history containing one attributed act
+     showed a row naming a person directly beneath a sentence saying nobody can be
+     named. This pair says the same true thing about THOSE ENTRIES and asserts
+     nothing about the deployment as a whole, because a deployment that attributed
+     one act plainly does have a boundary for some requests. When every loaded entry
+     is attributed, NEITHER disclosure renders: there is nothing left to explain. */
+  activityWhySomeUnattributed: 'Why are some entries not attributed to a person?',
+  activityActorSomeUnattributed:
+    'Some entries below are not attributed to a person. An entry carries a name only when the act that wrote it arrived through a verified sign-in; when nothing verified who was acting, the entry says so rather than recording a name that could not be trusted.',
+
+  /* A FAILED OLDER-PAGE READ, SAID WHERE A SIGHTED READER CAN SEE IT. The review's
+     Important 3: the `.catch` announced this into the `sr-only` live region and
+     nowhere else, so the screen-reader user was better informed than the sighted
+     one — §11 records the same inversion for the recording state. It is a separate
+     sentence from `activityUnavailable` because it describes a different event: the
+     history DID load, and one further page did not. The list is untouched, and the
+     copy says so, because that is the property a reader most needs to trust here. */
+  activityOlderFailed:
+    'Those older entries could not be read just now. Nothing has been lost and nothing above has changed — Show Older Entries will try again.',
+
+  /* AN ORDER-ONLY CHANGE, ONE LEVEL DOWN. The review's Minor 5:
+     `activityStoredOrderOnly` fired only when the TOP-LEVEL keys were reordered,
+     while `sameStored` is key-order sensitive at every depth — so
+     `{asset: {uri, sha256}}` -> `{asset: {sha256, uri}}` read "Asset changed — the
+     stored values are below" and sent the curator to a disclosure holding two
+     documents they could not tell apart. That is the exact outcome the top-level
+     note exists to prevent. */
+  activityStoredOrderOnlyField: 'the same values, in a different stored order',
+
   /*
    * DATA CAPTURE — the group label above the promoted capture destination.
    *

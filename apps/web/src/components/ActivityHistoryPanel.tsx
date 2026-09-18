@@ -152,6 +152,44 @@ function sameStored(a: unknown, b: unknown): boolean {
   return JSON.stringify(a) === JSON.stringify(b);
 }
 
+/**
+ * THE SAME VALUE, WRITTEN IN A DIFFERENT KEY ORDER — at ANY depth.
+ *
+ * `sameStored` is text equality over `JSON.stringify`, so it is key-order sensitive
+ * all the way down. THAT IS RIGHT for deciding whether a document was rewritten, and
+ * it is WRONG for deciding what to tell a reader: `{asset: {uri, sha256}}` becoming
+ * `{asset: {sha256, uri}}` is a real difference in the stored document and NOT a
+ * difference a curator can act on. Without this, that change rendered as "Asset
+ * changed — the stored values are below", and the reader opened the disclosure to
+ * find two documents that say the same thing, hunting for a difference that is not
+ * there. That is the exact outcome the top-level order-only note exists to prevent,
+ * and it was prevented at the top level only — found by independent review.
+ *
+ * ARRAY ORDER IS COMPARED POSITIONALLY AND DELIBERATELY SO. An object's key order
+ * carries no meaning a reader can act on; an array's order IS data — a reordered
+ * `detached_run_ids` is a different statement, and `assets.detach_everywhere` returns
+ * its runs "IN RUN ORDER, NOT SORTED" for precisely that reason. Treating the two
+ * the same would have this function report a real change as cosmetic.
+ *
+ * NOTHING IS REWRITTEN OR NORMALISED BY THIS. It is a comparison; the documents
+ * under the disclosure are still `JSON.stringify` of the stored values in the order
+ * they were stored, which is §5's requirement.
+ */
+function sameIgnoringKeyOrder(a: unknown, b: unknown): boolean {
+  if (sameStored(a, b)) return true;
+  if (Array.isArray(a) && Array.isArray(b)) {
+    return a.length === b.length && a.every((item, i) => sameIgnoringKeyOrder(item, b[i]));
+  }
+  if (isPlainObject(a) && isPlainObject(b)) {
+    const ka = Object.keys(a);
+    if (ka.length !== Object.keys(b).length) return false;
+    return ka.every(
+      (k) => Object.prototype.hasOwnProperty.call(b, k) && sameIgnoringKeyOrder(a[k], b[k]),
+    );
+  }
+  return false;
+}
+
 function countPhrase(n: number, one: string, many: string): string {
   return `${n} ${n === 1 ? one : many}`;
 }
@@ -247,6 +285,10 @@ interface KeyChange {
   readonly kind: 'added' | 'removed' | 'changed';
   /** The inline `a -> b` pair, or `null` when the values are not sentence-sized. */
   readonly pair: { before: string; after: string } | null;
+  /** This key's two values say the same thing in a different stored key order. See
+   *  `sameIgnoringKeyOrder`: without this the row read "changed — the values are
+   *  below" and the disclosure held two documents a reader could not tell apart. */
+  readonly orderOnly: boolean;
 }
 
 function keyChanges(before: Record<string, unknown>, after: Record<string, unknown>): KeyChange[] {
@@ -263,6 +305,7 @@ function keyChanges(before: Record<string, unknown>, after: Record<string, unkno
         present ? { present: true, value: before[key] } : { present: false, value: null },
         { present: true, value: after[key] },
       ),
+      orderOnly: present && sameIgnoringKeyOrder(before[key], after[key]),
     });
   }
   for (const key of Object.keys(before)) {
@@ -271,6 +314,10 @@ function keyChanges(before: Record<string, unknown>, after: Record<string, unkno
       key,
       kind: 'removed',
       pair: inlinePair({ present: true, value: before[key] }, { present: false, value: null }),
+      /* A key that is GONE cannot be an order-only difference: there is no second
+         document to have written it in another order. Stated rather than left to
+         the reader of `false`. */
+      orderOnly: false,
     });
   }
   return changes;
@@ -306,18 +353,28 @@ function changeShape(before: Side, after: Side): ChangeShape {
     if (isPlainObject(before.value) && isPlainObject(after.value) && before.present && after.present) {
       keys = keyChanges(before.value, after.value);
     }
-    /* THE TWO NOTES ARE EACH A MECHANICAL FACT, not a reading of the science. The
-       first is reachable: an asset entry rewritten whole can produce two documents
-       with the same fields in a different stored order, and saying "no field
-       differs" without saying why would leave a reader hunting for a change that is
-       not there. The second covers a pair that is identical as a document — the
-       write paths gate on a change, so it should not occur, and if it ever does the
-       honest answer is to say so rather than to render an empty diff. */
+    /* THE NOTES ARE EACH A MECHANICAL FACT, not a reading of the science. The
+       order-only one is reachable: an asset entry rewritten whole can produce two
+       documents with the same fields in a different stored order, and saying "no
+       field differs" without saying why would leave a reader hunting for a change
+       that is not there. The identical one covers a pair that is the same document —
+       the write paths gate on a change, so it should not occur, and if it ever does
+       the honest answer is to say so rather than to render an empty diff.
+
+       THE THIRD CASE WAS MISSING AND IS WHY THIS BLOCK CHANGED (independent review,
+       Minor 5). `keys.length === 0` only catches a reordering of the TOP-LEVEL keys.
+       A reordering one level down — `{asset: {uri, sha256}}` -> `{asset: {sha256,
+       uri}}` — produces exactly one changed key and so fell straight past this,
+       rendering "Asset changed — the stored values are below" over two documents a
+       curator cannot tell apart. When every changed key is order-only, the summary
+       now says so, and each such row says so for itself. */
     let note: string | null = null;
     if (keys !== null && keys.length === 0) {
       note = sameStored(before.value, after.value)
         ? LABELS.activityStoredIdentical
         : LABELS.activityStoredOrderOnly;
+    } else if (keys !== null && keys.every((change) => change.orderOnly)) {
+      note = LABELS.activityStoredOrderOnly;
     }
     return { mode: 'structured', before: sideLabel(before), after: sideLabel(after), keys, note };
   }
@@ -338,11 +395,32 @@ function changeShape(before: Side, after: Side): ChangeShape {
 /**
  * THE RELATIVE DAY NAMES ARE RECOMPUTED ON EVERY RENDER, DELIBERATELY.
  *
- * "Today" and "Yesterday" are claims about the clock at the moment of reading, and
- * a value captured at mount goes wrong in a tab left open overnight — the panel
- * would then assert that yesterday's acts happened today. `now` is therefore taken
- * inside the render body and threaded down; nothing memoises it. This panel holds no
- * unsaved state and re-reads on open, so recomputing costs a `Date` per render.
+ * "Today" and "Yesterday" are claims about the clock at the moment of reading, so
+ * `now` is taken inside the render body and threaded down; nothing memoises it. A
+ * value captured at mount would be wrong on the NEXT RENDER after midnight — the
+ * panel would assert that yesterday's acts happened today, while the reader watched
+ * it repaint. This panel holds no unsaved state and re-reads on open, so
+ * recomputing costs one `Date` per render.
+ *
+ * ── WHAT THIS DOES NOT FIX, AND THE CLAIM THAT WAS WITHDRAWN ───────────────
+ *
+ * An earlier version of this note, and of its test's title, said "a tab left open
+ * overnight does not lie". **That overstated it and is withdrawn** (independent
+ * review, Minor 4 — and the reviewer flagged it as a reading rather than a
+ * reproduction, which is why it was re-derived here before being accepted).
+ *
+ * Re-derived: this panel has NO timer, NO poller and NO change-feed subscription —
+ * `useEffect(load, [load])` fires on mount and on an `experimentId` change, and
+ * nothing else schedules work. So an IDLE tab opened at 23:50 still reads "Today"
+ * at 09:00, and will go on doing so until something causes a render. What the
+ * mechanism actually delivers is narrower and is what the test now says: **the next
+ * render uses the clock at that moment, not the clock at mount.**
+ *
+ * A TIMER WAS DELIBERATELY NOT ADDED. It would be a background render on a
+ * read-only destination to correct one word, and it would be the first scheduled
+ * work on this panel — a cost with a real failure mode (a re-render while a reader
+ * has a disclosure open) against a label that the group's own absolute date already
+ * disambiguates for anyone who looks twice.
  */
 function calendarDay(at: Date): string {
   /* The reader's LOCAL calendar day, not the UTC one: "Today" has to mean today
@@ -486,7 +564,37 @@ function readableTimeOfDay(iso: string): string {
  * `revisionHistory.actorBasisNote`'s rule reused rather than re-invented: a
  * qualification is rendered exactly when the basis is one a reader would otherwise
  * take at face value.
+ *
+ * ── THE STANDING DISCLOSURE MOVES WITH THIS, AND DID NOT AT FIRST ───────────
+ *
+ * INDEPENDENT REVIEW, Important 1: this argument spends four paragraphs on why the
+ * suppression must be conditional on the value, and then left its COUNTERPART hard
+ * coded — the `<details>` rendered unconditionally. A history with one attributed
+ * act therefore showed a row naming a person directly beneath a sentence reading
+ * *"Entries are not attributed to a person. This deployment has no verified sign-in
+ * boundary…"*: two contradictory claims about the deployment on one screen. Not
+ * reachable in a default build, reachable under `ISAAC_EDGE_TRUST_VERIFIER=
+ * test_fixture` — which is exactly the future the conditional exists for. The
+ * reviewer reproduced it by adding ONE assertion to my own mixed-history test,
+ * whose fixture already built the state; the test simply never looked.
+ *
+ * `attributionNote` is the fix, and it is derived from the loaded events rather
+ * than from a belief about the deployment, which is the property the old sentence
+ * lacked:
+ *
+ *   nothing named   -> the original sentence, unchanged
+ *   some named      -> a sentence about THOSE entries, asserting nothing about the
+ *                      deployment as a whole
+ *   all named       -> no disclosure; there is nothing to explain
  */
+/* THE TWO SERVER CONSTANTS, TRANSCRIBED — and now guarded rather than trusted.
+   `activity.ACTOR_UNATTRIBUTED` and `identity.TRUST_BASIS_TEST_FIXTURE` are the
+   authorities; these are copies, because the frontend has no import path to Python.
+   `apps/api/tests/test_activity_model.py` re-reads BOTH lines below and fails if
+   either spelling drifts from the constant it mirrors — a drift would silently
+   un-suppress every actor or silently drop `DEC-45`'s qualification, and neither
+   would fail any frontend test. The declarations are kept one per line, in this
+   exact form, because that parity test matches on them. */
 const ACTOR_UNATTRIBUTED = 'unattributed';
 const TRUST_BASIS_TEST_FIXTURE = 'test_fixture';
 
@@ -494,9 +602,67 @@ function PER_ROW_ACTOR(events: readonly ApiActivityEvent[]): boolean {
   return events.some((e) => e.actor !== ACTOR_UNATTRIBUTED);
 }
 
+/**
+ * THE ACTOR IS RENDERED VERBATIM. It is a NAME, not a vocabulary token.
+ *
+ * INDEPENDENT REVIEW, Important 2, and the finding is right: this used to be
+ * `humanizeToken(event.actor)`, so an audit row for `k_verma` displayed
+ * **"K Verma"** and `svc_import_bot` displayed "Svc Import Bot". That is not the
+ * recorded actor. It is not searchable, not copyable and not correlatable back to
+ * the identity system — in the one surface whose entire job is saying who did what.
+ * `CLAUDE.md` §15 (Dean, 2026-08-12) makes the canonical actor the Authentik
+ * **username**, and a username is a literal.
+ *
+ * `humanizeKeyName`'s own docstring already stated the rule this broke: the
+ * humanizer applies to a BARE INTERNAL IDENTIFIER only, because otherwise it
+ * "replaces information with a guess". `action`, `object_type` and `channel` are
+ * exempt as closed server vocabularies declared by `activity.py`. An actor is
+ * neither — and note that routing it through `humanizeKeyName` would NOT have
+ * fixed it, because `BARE_IDENTIFIER` matches `k_verma` and would mangle it just
+ * the same. The only correct answer is not to humanize it at all.
+ *
+ * THE ONE EXCEPTION IS THE SENTINEL, which is not a name: `unattributed` is this
+ * application's own word for nobody, so it gets a display form from `LABELS` —
+ * one value, mapped explicitly, rather than a transformation applied to a class.
+ */
+function actorDisplay(actor: string): string {
+  return actor === ACTOR_UNATTRIBUTED ? LABELS.activityActorSentinel : actor;
+}
+
 function actorBasisNote(event: ApiActivityEvent): string | null {
   if (event.actor === ACTOR_UNATTRIBUTED) return null;
   if (event.actor_trust_basis === TRUST_BASIS_TEST_FIXTURE) return LABELS.activityTrustFixture;
+  return null;
+}
+
+/**
+ * WHICH STANDING ATTRIBUTION SENTENCE IS TRUE OF WHAT IS ON SCREEN, if any.
+ *
+ * Derived from the loaded events. See `PER_ROW_ACTOR`'s note for the defect this
+ * closes: the old code rendered the "no verified sign-in boundary" sentence
+ * unconditionally, including beside a row that named somebody.
+ *
+ * THE `nothing named` BRANCH ALSO COVERS AN EMPTY, LOADING OR FAILED LIST, and that
+ * is deliberate rather than incidental: with nothing loaded the panel knows nothing
+ * that contradicts the sentence, and dropping the standing explanation from the
+ * empty state would remove the one place a reader meets it before there is any
+ * history to read.
+ */
+function attributionNote(events: readonly ApiActivityEvent[]): { summary: string; body: string } | null {
+  const named = events.some((e) => e.actor !== ACTOR_UNATTRIBUTED);
+  const unnamed = events.some((e) => e.actor === ACTOR_UNATTRIBUTED);
+  if (!named) {
+    return {
+      summary: LABELS.activityWhyUnattributed,
+      body: LABELS.activityActorUnattributed,
+    };
+  }
+  if (unnamed) {
+    return {
+      summary: LABELS.activityWhySomeUnattributed,
+      body: LABELS.activityActorSomeUnattributed,
+    };
+  }
   return null;
 }
 
@@ -588,7 +754,11 @@ function ChangeBody({ event }: { event: ApiActivityEvent }) {
             <li className="activity-diff-row" key={change.key}>
               <span className="activity-diff-key">{humanizeKeyName(change.key)}</span>
               {change.pair === null ? (
-                <span className="activity-diff-opaque">{LABELS.activityChangedSeeBelow}</span>
+                <span className="activity-diff-opaque">
+                  {change.orderOnly
+                    ? LABELS.activityStoredOrderOnlyField
+                    : LABELS.activityChangedSeeBelow}
+                </span>
               ) : (
                 <span className="activity-diff-pair">
                   <span className="activity-before">{change.pair.before}</span>
@@ -629,10 +799,12 @@ function EventRow({ event, showActor }: { event: ApiActivityEvent; showActor: bo
           puts the channel before the time and so contradicts its own ranking. That
           contradiction is reported rather than resolved silently; what both agree
           on, and what this line delivers, is that none of the three competes with
-          the action above. The separator is a CSS `::before`, so it is decoration
-          and never text a reader's screen reader has to spell out. */}
+          the action above. The separator is a CSS `::before` — which keeps it out
+          of `textContent` and out of the label vocabulary, and does NOT make it
+          silent: Chrome and Firefox expose CSS generated content in the
+          accessibility tree. See `activityHistory.css` for the narrowed claim. */}
       <p className="activity-meta">
-        {showActor && <span className="activity-actor">{humanizeToken(event.actor)}</span>}
+        {showActor && <span className="activity-actor">{actorDisplay(event.actor)}</span>}
         {basis !== null && <span className="activity-trust">{basis}</span>}
         {/* The machine value stays in `dateTime` — that attribute exists for it —
             and the full absolute timestamp stays in `title`, so splitting the date
@@ -672,6 +844,25 @@ export function ActivityHistoryPanel({ experimentId }: { experimentId: string })
 
   const [cursor, setCursor] = useState<number | null>(null);
   const [loadingOlder, setLoadingOlder] = useState(false);
+  /*
+   * A FAILED OLDER PAGE, VISIBLE TO EVERYONE — independent review, Important 3.
+   *
+   * The `.catch` below announced into the `sr-only` live region and cleared the
+   * spinner, and correctly did NOT set `status: 'error'`: that would have destroyed
+   * the list, which is §11's rule for exactly this shape. But `status: 'error'` was
+   * the ONLY path rendering anything visible, so a sighted scientist saw the button
+   * flicker and come back, no new rows, and no reason — unable to tell "the read
+   * failed" from "there was nothing more". The SCREEN-READER USER WAS BETTER
+   * INFORMED THAN THE SIGHTED ONE, which is the same inversion §11 records for the
+   * recording state, and it is half of a pattern: `IngestionProposalsPanel` and
+   * `UnmappedNotesPanel` — the two panels this module's own docstring cites — were
+   * both fixed to DISCLOSE INLINE rather than merely announce.
+   *
+   * So: a flag beside the list, never a replacement for it. It is cleared by the
+   * next successful page and by a fresh read, so a transient failure does not leave
+   * a permanent warning over a list that has since grown.
+   */
+  const [olderFailed, setOlderFailed] = useState(false);
   /* Announced to screen readers, which otherwise hear NOTHING when a read finishes or
      a page arrives — the panel's own status text is not a live region. The alternating
      NBSP is `IngestionProposalsPanel.announce()`'s idiom: an identical string is not
@@ -691,6 +882,7 @@ export function ActivityHistoryPanel({ experimentId }: { experimentId: string })
     setState({ status: 'loading' });
     setOlder([]);
     setCursor(null);
+    setOlderFailed(false);
     api
       .listActivity(experimentId)
       .then((body) => {
@@ -726,12 +918,19 @@ export function ActivityHistoryPanel({ experimentId }: { experimentId: string })
         setOlder((prev) => [...prev, ...body.events]);
         setCursor(body.next_before_seq);
         setLoadingOlder(false);
+        setOlderFailed(false);
         announce(`${LABELS.activityShowing} ${body.returned} ${LABELS.activityEntries}.`);
       })
       .catch(() => {
         if (wanted.current !== experimentId) return;
         setLoadingOlder(false);
-        announce(LABELS.activityUnavailable);
+        /* VISIBLE, AND NOT INSTEAD OF THE LIST. `setState` is deliberately NOT
+           touched here: `status: 'error'` would replace the rows the reader is
+           looking at, which is the destructive-silent-failure defect, not the fix
+           for it. The announcement is the SAME sentence the flag renders, so the
+           screen-reader user and the sighted one are now told the same thing. */
+        setOlderFailed(true);
+        announce(LABELS.activityOlderFailed);
       });
   }, [cursor, experimentId, loadingOlder, announce]);
 
@@ -757,10 +956,15 @@ export function ActivityHistoryPanel({ experimentId }: { experimentId: string })
    */
   const rendered = state.status === 'data' ? [...state.body.events, ...older] : [];
   const shown = rendered.length;
-  /* Taken HERE, in the render body, and threaded down — see `dayKey`'s note: a
-     "Today" captured once at mount is a claim that goes false overnight. */
+  /* Taken HERE, in the render body, and threaded down — see `calendarDay`'s note: a
+     "Today" captured once at mount is wrong on the next render after midnight. It
+     does NOT rescue an idle tab; that claim was withdrawn, and the note says why. */
   const groups = groupByDay(rendered, new Date());
   const showActor = PER_ROW_ACTOR(rendered);
+  /* The standing attribution sentence, chosen from what is LOADED — see
+     `attributionNote`. Computed beside `showActor` from the same array, so the two
+     cannot disagree about the same history, which is the defect they had. */
+  const attribution = attributionNote(rendered);
 
   return (
     <section className="activity-panel" aria-labelledby="activity-heading">
@@ -778,11 +982,19 @@ export function ActivityHistoryPanel({ experimentId }: { experimentId: string })
           stop being permanent furniture for a reader who has met them once, which
           is the owner's own direction: honest prose goes behind a collapsible
           rather than being capped or deleted. The SUMMARY still states the fact,
-          so nothing is hidden behind a neutral label. */}
-      <details className="activity-actor-details">
-        <summary className="activity-actor-summary">{LABELS.activityWhyUnattributed}</summary>
-        <p className="activity-actor-note">{LABELS.activityActorUnattributed}</p>
-      </details>
+          so nothing is hidden behind a neutral label.
+
+          CONDITIONAL SINCE THE `ACT-003b` REVIEW (Important 1). It used to render
+          unconditionally, so a history containing one attributed act showed a row
+          naming a person above a sentence saying nobody can be named. Which
+          sentence appears — or whether any does — is now derived from the loaded
+          events by `attributionNote`, from the same array `showActor` reads. */}
+      {attribution !== null && (
+        <details className="activity-actor-details">
+          <summary className="activity-actor-summary">{attribution.summary}</summary>
+          <p className="activity-actor-note">{attribution.body}</p>
+        </details>
+      )}
       {/* The only live region on this panel. Without it a screen-reader user hears
           nothing when a read finishes or an older page arrives, because the status
           text below is static. */}
@@ -834,6 +1046,17 @@ export function ActivityHistoryPanel({ experimentId }: { experimentId: string })
                   </li>
                 ))}
               </ol>
+              {/* VISIBLE, BESIDE THE LIST THAT SURVIVED — see `olderFailed`. Before
+                  this, the only rendered account of a failed older-page read lived in
+                  the `sr-only` live region, so a sighted reader saw the button
+                  flicker and return with no new rows and no reason, unable to tell a
+                  failure from "there is nothing more". It is placed ABOVE the paging
+                  control because the control is what they will reach for next. */}
+              {olderFailed && (
+                <p className="activity-status activity-status-error activity-older-error">
+                  {LABELS.activityOlderFailed}
+                </p>
+              )}
               {cursor !== null ? (
                 <button
                   type="button"
