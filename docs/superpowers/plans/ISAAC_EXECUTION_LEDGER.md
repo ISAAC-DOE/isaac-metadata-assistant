@@ -8,6 +8,46 @@ the repository — never from remembered chat context.
 ## SESSION HEADER
 
 ```
+*** 2026-09-18, FINAL UNBLOCKED-COMPLETION RUN — RE-DERIVED FROM COMMANDS, NOT FROM A
+    HANDOFF. Everything below this block is a SUPERSEDED reading, kept unedited, per
+    this file's own rule that a superseded header read as a correction is safe and one
+    silently rewritten is not. ***
+
+RE-DERIVED AT RUN OPEN, every line from a command:
+  main = origin/main   = 938e4829   (PR #270's merge — the ACT-003 Activity UI)
+  ahead/behind         = 0 / 0
+  working tree         = clean
+  stashes              = (empty)
+  open PRs             = NONE  (`gh pr list --state open` -> empty)
+  release              = v0.0.253; `git rev-list -n1 v0.0.253` -> 938e4829…
+                         resolved from the TAG, not read off a workflow log line
+  main CI              = success at 938e4829 (both "CI" and "Build and Push to GHCR")
+  worktrees            = 100+ stale scratchpad/agent worktrees; EVERY ONE measured
+                         clean (`git status --porcelain` empty in all). No WIP was
+                         stranded by the previous session, and none was destroyed here.
+
+  *** THE PREVIOUS HEADER WAS STALE IN A WAY WORTH NAMING, because it is the exact
+      failure this file exists to prevent. Its §10 said `ACT-003`/`ACT-004` were
+      "the one unbuilt app-side item". `ACT-003` SHIPPED in PR #270 (`938e4829`)
+      AFTER the ledger's last commit (`6f1242a9`, PR #269), so the ledger described
+      as unbuilt a feature that was merged and released. Corrected here. ***
+
+  MIGRATION STATE — RE-VERIFIED MECHANICALLY THIS RUN, not quoted:
+    all six 0003/0004/0005 SHA-256 digests RECOMPUTED from the files and matched
+    against each packet's own digest table — six for six;
+    `git diff origin/main -- apps/api/isaac_api/migrations/ docs/migration-approval-packet-*.md`
+    is EMPTY, so the approved bytes and their packets are published and identical on
+    `origin/main`. 0003+0004 owner-approved 2026-08-17; 0005 owner-approved
+    2026-09-17. NOTHING IS APPLIED ANYWHERE. No agent touched a database, opened a
+    connection, requested a kubeconfig, or applied a migration in this run.
+
+  truth path            = UNTOUCHED by this run's orchestrator work, asserted
+                          mechanically (see the session entry).
+```
+
+*** THE SUPERSEDED BLOCKS FOLLOW, unedited. ***
+
+```
 *** 2026-09-17, SECOND CONTINUATION — RE-DERIVED AGAIN. Everything below this block is
     a SUPERSEDED reading, kept unedited, per this file's own rule that a superseded
     header read as a correction is safe and one silently rewritten is not. ***
