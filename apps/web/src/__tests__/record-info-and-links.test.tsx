@@ -69,6 +69,9 @@ function artifacts(record: Record<string, unknown> | null): ApiArtifactsResponse
     record_filename: record === null ? null : `${ID_A}.json`,
     sidecar_filename: null,
     artifact: { state: record === null ? 'none' : 'current', reason: null },
+    // `CTX-004` — always served, including as nulls. See `apiFixtures.artifactsExported`.
+    extended_context: null,
+    extended_context_filename: null,
   };
 }
 

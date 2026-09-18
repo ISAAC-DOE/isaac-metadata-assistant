@@ -193,6 +193,9 @@ export const graphArtifactsNull: ApiArtifactsResponse = {
   record_filename: null,
   sidecar_filename: null,
   artifact: { state: 'none', reason: null },
+  // `CTX-004` — always served, including as nulls. See `apiFixtures.artifactsExported`.
+  extended_context: null,
+  extended_context_filename: null,
 };
 
 /** A synthetic exported record: two channels, one independent variable, one
@@ -252,6 +255,9 @@ export function graphArtifactsExported(
     record_filename: `${GRAPH_RECORD_ID}.json`,
     sidecar_filename: `${GRAPH_RECORD_ID}.evidence.json`,
     artifact: { state, reason: state === 'stale' ? 'record changed after export' : null },
+    // `CTX-004` — always served, including as nulls. See `apiFixtures.artifactsExported`.
+    extended_context: null,
+    extended_context_filename: null,
   };
 }
 
@@ -392,6 +398,9 @@ export function stressExperimentGraphBundle(opts?: {
       record_filename: `${GRAPH_RECORD_ID}.json`,
       sidecar_filename: `${GRAPH_RECORD_ID}.evidence.json`,
       artifact: { state: 'current', reason: null },
+      // `CTX-004` — always served, including as nulls. See `apiFixtures.artifactsExported`.
+      extended_context: null,
+      extended_context_filename: null,
     },
     validate: { ok: true, errors: [], schema: 'ISAAC v1.05', dry_run: false },
     warnings: { advisory: true, gating: false, warnings: [] },

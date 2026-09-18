@@ -131,6 +131,25 @@ SHARED_CLAIMS: tuple[tuple[str, str, str], ...] = (
         "create_transcript",
         "AMBIGUITY IS NEVER RESOLVED BY PREFERENCE.",
     ),
+    (
+        # `CTX-004`. THE ONLY CLAIM A SURFACE CAN GET CATASTROPHICALLY WRONG ABOUT A
+        # LEVEL-4 ENTRY, and the one an agent is most likely to soften, because every
+        # entry LOOKS like a field value: it carries a concept, a literal, a unit and
+        # an `official_path`. A paraphrase such as "these are not part of the official
+        # record yet" would invert it — there is no "yet"; the schema has no field for
+        # this information, which is what level 4 means — and an agent believing that
+        # would relay a source's verbatim words to a scientist as the record's value.
+        #
+        # `extended_context.py` enforces the same claim three structural ways (a
+        # derived always-False flag, storage outside `draft` so export cannot reach
+        # it, and its own filename), and this row is the fourth: it pins the SENTENCE
+        # in the two places a reader meets it.
+        "isaac_get_extended_context",
+        "get_extended_context",
+        "NOTHING HERE IS AN OFFICIAL FIELD VALUE, AND NOTHING HERE MAKES A RECORD "
+        "EXPORTABLE OR UN-EXPORTABLE: A RECORD IS EXPORTABLE OR NOT ON THE OFFICIAL "
+        "SCHEMA ALONE.",
+    ),
 )
 
 #: Sentences that must appear in NO tool description, with the reason they were

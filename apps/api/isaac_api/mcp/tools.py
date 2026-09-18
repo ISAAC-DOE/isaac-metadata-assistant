@@ -76,6 +76,7 @@ from .policy import (
     PERMITTED_TOOL_NAMES,
     Scope,
     changes_query_parameters,
+    extended_context_query_parameters,
     forbidden_tool_reason,
     note_text_byte_ceiling,
     pending_query_parameters,
@@ -850,6 +851,26 @@ async def _get_proposal(ctx: ToolContext, args: Mapping[str, Any]) -> ToolOutcom
     return _settle("get_proposal", result)
 
 
+async def _get_extended_context(
+    ctx: ToolContext, args: Mapping[str, Any]
+) -> ToolOutcome:
+    """`CTX-004`. One page of the DEC-41 level-4 companion. Forwards; adds nothing.
+
+    The route's own payload is returned unmodified, which is the point rather than
+    laziness: it already carries ``not_official``, ``placement_hierarchy``, every
+    entry's ``is_official_field_value: False``, and the record's own ``total``. Any
+    projection performed here would be a second place those claims could be dropped,
+    and the one a language model reads.
+    """
+    query = {k: v for k, v in args.items() if k != "experiment_id"}
+    result = await ctx.client.call(
+        "get_extended_context",
+        path_params={"experiment_id": args["experiment_id"]},
+        query=query,
+    )
+    return _settle("get_extended_context", result)
+
+
 async def _get_changes(ctx: ToolContext, args: Mapping[str, Any]) -> ToolOutcome:
     query = {k: v for k, v in args.items() if k != "experiment_id"}
     result = await ctx.client.call(
@@ -1250,6 +1271,17 @@ def _list_proposals_schema() -> dict:
 def _changes_schema() -> dict:
     """``isaac_get_changes``'s schema, with the parameters the ROUTE actually has."""
     return _query_schema("get_changes", changes_query_parameters())
+
+
+def _extended_context_schema() -> dict:
+    """``isaac_get_extended_context``'s schema, with the filters the ROUTE actually has.
+
+    Both string parameters declare ``max_length`` on the route, so ``_query_schema``
+    publishes the route's own bound and needs no ``_DECLARED_STRING_BOUNDS`` entry —
+    see ``policy.extended_context_query_parameters`` for why that is the safer of the
+    two ways to satisfy the same check.
+    """
+    return _query_schema("get_extended_context", extended_context_query_parameters())
 
 
 def _tools() -> tuple[Tool, ...]:
@@ -2638,6 +2670,63 @@ def _tools() -> tuple[Tool, ...]:
             operation_ids=("get_changes",),
             input_schema=_changes_schema(),
             handler=_get_changes,
+            read_only=True,
+            idempotent=True,
+        ),
+        Tool(
+            name="isaac_get_extended_context",
+            title="Read a record's extended context",
+            description=(
+                "The `DEC-41` **level-4 ISAAC Extended Context companion** a record "
+                "holds: the scientifically useful metadata the official ISAAC v1.05 "
+                "record has no field for. Each entry carries the concept, the source's "
+                "own words VERBATIM (`raw_literal`), which source it came from "
+                "(`source`), and where in that source (`locator`). All four are "
+                "required at construction, so an entry that cannot say where it came "
+                "from cannot exist. Read-only.\n\n"
+                "**NOTHING HERE IS AN OFFICIAL FIELD VALUE, AND NOTHING HERE MAKES A "
+                "RECORD EXPORTABLE OR UN-EXPORTABLE: A RECORD IS EXPORTABLE OR NOT ON "
+                "THE OFFICIAL SCHEMA ALONE.** Do not relay one of these values to a "
+                "scientist as the record's value for anything, do not answer a question "
+                "about a record's official content from this list, and do not treat a "
+                "`concept` here as a field that has been filled in. Every entry carries "
+                "`is_official_field_value: false`, and `official_path` names where the "
+                "schema's home for that CONCEPT is as a pointer to ISAAC's registry — it "
+                "is never a destination for the literal beside it, and an entry sitting "
+                "at level 4 is precisely one whose information is NOT at that path.\n\n"
+                "**DO NOT INTERPRET, CONVERT, UNIT-NORMALISE, ROUND OR CLASSIFY A "
+                "`raw_literal`.** `ffilter35` stays `ffilter35`. A cleaned reading "
+                "appears in `normalized_value` ONLY when a stored named rule produced "
+                "one, with `normalization_rule` naming that rule and `determinism` "
+                "saying what kind of reading it was; where those are null, nothing has "
+                "been derived and deriving one here would be a guess. If you cannot "
+                "present an entry's meaning, present its literal and its source — that "
+                "is what the artifact is for.\n\n"
+                "**AN ABSENT COMPANION IS THE NORMAL STATE OF ALMOST EVERY RECORD AND IS "
+                "NOT AN ERROR.** A record with none answers with `present: false` and "
+                "`entry_count: 0`. Report that as \"this record states no extra "
+                "context\", never as a missing artifact or a failure.\n\n"
+                "**THIS LIST IS BOUNDED BY DEFAULT.** Omitting `limit` returns a window. "
+                "Read `total` for how many entries the record HOLDS and `matched` for how "
+                "many satisfied your filters; `returned` is this page alone. Never infer "
+                "the record's state from the length of this list. Page with `offset`, "
+                "which is stable because the companion is append-only — no operation "
+                "removes or reorders an entry.\n\n"
+                "`run_id` returns everything that APPLIES to that run: the run's own "
+                "entries plus the experiment-scoped ones it inherits. Each entry still "
+                "carries its own `scope`, so read that rather than assuming a returned "
+                "entry was taken on the run you asked about. `concept` matches exactly.\n\n"
+                "`unreadable_entries` counts stored rows the server could not read. They "
+                "are preserved in the record and counted rather than rendered, because "
+                "nothing can say what one contains without inventing it. A non-zero count "
+                "means the record holds more than this list can show.\n\n"
+                "Reading this changes nothing. It writes no value, mints no evidence, "
+                "creates no proposal, and cannot make a record exportable."
+            ),
+            scope=Scope.READ,
+            operation_ids=("get_extended_context",),
+            input_schema=_extended_context_schema(),
+            handler=_get_extended_context,
             read_only=True,
             idempotent=True,
         ),

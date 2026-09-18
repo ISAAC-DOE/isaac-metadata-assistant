@@ -514,6 +514,22 @@ export const MCP_CAPABILITIES_ALLOWED: readonly McpCapability[] = [
       'Ask what on a record is at a later version than the last time it looked, so an agent can notice you answered a suggestion instead of asking again. It reports where things stand NOW, not what happened: several edits between two checks appear as one entry, and nothing in it can say how many there were, in what order, or what the intermediate values were. Reads only.',
     tools: ['isaac_get_changes'],
   },
+  {
+    /*
+     * `CTX-004`. THE ROW HAS TO SAY "NOT A FIELD VALUE" IN THE SCIENTIST'S OWN
+     * SENTENCE, not only in the tool's description, because this tab is where a
+     * person decides what to hand an agent — and the decision they are making is
+     * about a list of literals that look exactly like field values and are not.
+     * An agent relaying one as "the record says X" would be the failure, and the
+     * person granting the permission should be able to see that it cannot happen
+     * from the row rather than from a schema.
+     */
+    id: 'read-extended-context',
+    action: 'Read the extra context an import kept',
+    detail:
+      'Read the scientifically useful statements an import found that the official ISAAC record has no field for — each with the source’s own words, which source they came from, and where in it. None of them is a field value, none was validated against the official schema, and none affects whether a record can be exported, so an agent can quote them as "a source said this" and never as "the record says this". The list arrives one window at a time and reports how many the record actually holds. Reads only.',
+    tools: ['isaac_get_extended_context'],
+  },
 ];
 
 /**

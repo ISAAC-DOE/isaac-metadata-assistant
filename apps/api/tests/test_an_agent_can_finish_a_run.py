@@ -506,8 +506,24 @@ def test_this_slice_added_no_tool(client, agent):
     Sixteen tools, re-derived rather than quoted. If a later slice adds a run-level write
     tool it will fail here and have to say so — which is the deliberate act
     ``PERMITTED_TOOL_NAMES`` exists to make visible.
+
+    ***16 -> 17 on 2026-09-18, AND THE TEST'S SUBJECT IS UNCHANGED.*** `CTX-004` added
+    `isaac_get_extended_context`, a READ over the `DEC-41` level-4 companion. **That is
+    not the thing this test guards against.** Its name and its own sentence are about a
+    RUN-LEVEL WRITE tool: the 2026-09-17 slice's finding was that finishing a run needed
+    no new tool, and the assertion exists so a later slice that adds one has to say so
+    out loud. A read that touches no draft content does not weaken that, and the
+    assertion two lines down — that every registered name is a permitted name — is what
+    actually keeps the set closed. Saying so here is the visible act the docstring asks
+    for.
     """
-    assert len(PERMITTED_TOOL_NAMES) == 16, sorted(PERMITTED_TOOL_NAMES)
+    assert len(PERMITTED_TOOL_NAMES) == 17, sorted(PERMITTED_TOOL_NAMES)
+    # THE ADDED TOOL IS A READ, asserted rather than asserted-by-count: a bare count
+    # moving from 16 to 17 is equally consistent with a run-level write having been
+    # added, which is the one outcome this test exists to make loud.
+    from isaac_api.mcp.tools import TOOLS as _TOOLS
+
+    assert _TOOLS["isaac_get_extended_context"].read_only is True
     assert set(TOOLS) == set(PERMITTED_TOOL_NAMES)
     # The pair that closes §5A is present, and nothing new joined them.
     assert {"isaac_list_questions", "isaac_answer_questions"} <= set(TOOLS)

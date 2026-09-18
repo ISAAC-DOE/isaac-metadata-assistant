@@ -251,7 +251,13 @@ def test_tools_list_is_filtered_by_the_callers_scopes(reader, writer):
         assert name in both, name
     # 10 -> 13: the registry is 14 and exactly one tool costs a scope neither of these
     # callers holds.
-    assert len(both) == 13
+    # 13 -> 14: `CTX-004`'s `isaac_get_extended_context` costs READ, so BOTH callers
+    # hold it. Asserted by name below rather than left to this count, for the reason
+    # the three `not in` lines above give in their own words: a count catches a tool
+    # that vanished, not one that arrived in the wrong grant.
+    assert "isaac_get_extended_context" in read_only
+    assert "isaac_get_extended_context" in both
+    assert len(both) == 14
 
 
 def test_every_descriptor_states_the_scope_a_call_will_cost(app, session_id):

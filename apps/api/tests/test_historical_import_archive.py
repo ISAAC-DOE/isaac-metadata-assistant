@@ -701,7 +701,26 @@ def test_the_session_serves_the_shape_the_review_surface_consumes(session):
         "evidence",
         "evidence_readings_dropped",
         "evidence_scope",
+        # `CTX-004`. The `DEC-41` level-4 block: how much landed at level 4 and the
+        # three separate reasons a statement the archive made did not. Added here in
+        # the same change that adds it to the payload — this test IS the "the two
+        # halves meet" guard its own docstring describes, so a member reaching the
+        # wire without reaching this set would be the exact failure it exists for.
+        "extended_context",
         "mapping",
+    }
+    # THE THREE COSTS ARE THREE, AND ARE NEVER A SUM. They were ONE server-side
+    # integer until `CTX-004` measured the three sites that incremented it, while two
+    # comments described that integer as the tail cap alone. Asserted as a key set so
+    # a future change that re-merged them would fail here rather than in a scientist's
+    # reading of a number that means three different things.
+    assert set(review["extended_context"]) == {
+        "available",
+        "dropped",
+        "thinned",
+        "unplaceable",
+        "ceiling",
+        "not_official",
     }
 
     # A PROJECTION, NOT A SECOND SOURCE OF TRUTH: the two large members are the

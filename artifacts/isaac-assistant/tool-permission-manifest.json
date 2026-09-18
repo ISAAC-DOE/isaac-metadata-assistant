@@ -44,6 +44,13 @@
       "purpose": "Read one record's current draft state and workflow status."
     },
     {
+      "tool": "isaac_get_extended_context",
+      "title": "Read a record's extended context",
+      "scope": "isaac:read",
+      "mutates": false,
+      "purpose": "Read a bounded page of the DEC-41 level-4 companion: the statements an import found that the official ISAAC record has no field for, each with the source's own words, which source, and where in it. None of them is a field value, none was validated against the official schema, and none affects whether a record can be exported."
+    },
+    {
       "tool": "isaac_get_proposal",
       "title": "Read one proposal",
       "scope": "isaac:read",

@@ -773,7 +773,23 @@ describe('the sub-read inventory this file derives from api.ts', () => {
     // `GET .../activity` sub-read, which is the ONE new per-record path literal in
     // that slice. Its label is in `SUB_RESOURCE_LABELS`, so the sibling assertions
     // below pass for the right reason rather than by the count being widened.
-    expect(experimentPathLiterals.length).toBe(48);
+    // 48 -> 49 on 2026-09-18: `CTX-004` adds the `GET .../extended-context` sub-read,
+    // the ONE new per-record path literal in that slice.
+    //
+    // IT IS THE `getProvenance`/`ACT-003` SHAPE, NOT THE `renameExperiment` ONE: a new
+    // first segment, so all THREE counters in this file move together (literal 48 ->
+    // 49, suffix 39 -> 40, segments 25 -> 26) and `SUB_RESOURCE_LABELS` needs a product
+    // word. The word is "the extra context an import kept" rather than "the extended
+    // context", deliberately — the second is a document-format name rather than
+    // something a scientist opened, and any wording built on "fields", "values" or
+    // "metadata" would imply the one thing a level-4 entry is defined as not being.
+    //
+    // THE FILE'S OWN LIVE INSTRUCTION WAS FOLLOWED: this whole file was run to a clean
+    // pass rather than a targeted assertion, because the note above records the third
+    // counter hiding behind the first failure twice — once for `folder` and once for
+    // `activity`. Every number read out of this test's own failure output, never
+    // derived by adding a delta.
+    expect(experimentPathLiterals.length).toBe(49);
     expect(bareRecordLiterals.length).toBeGreaterThan(0);
     // 31 -> 33: `runs/SEG-1/answers` and `runs/SEG-1/edit`, the two run-level write
     // suffixes. Both are WRITES rather than reads, and they appear here because this
@@ -804,7 +820,8 @@ describe('the sub-read inventory this file derives from api.ts', () => {
     // moved rather than what happened to it, and the `changes` entry argued exactly
     // that distinction before this history existed. Read out of this test's own
     // failure output (`have a length of 38 but got 39`), not derived by adding a delta.
-    expect(SUB_READ_SUFFIXES).toHaveLength(39);
+    // 39 -> 40: `CTX-004`'s `extended-context`. See the literal-count note above.
+    expect(SUB_READ_SUFFIXES).toHaveLength(40);
     // 19, AND THE ROUTE TO THAT NUMBER IS WORTH KEEPING.
     //
     // THIS INCIDENT RECORD WAS LOST IN A MERGE RESOLUTION AND IS RESTORED HERE, an
@@ -863,7 +880,9 @@ describe('the sub-read inventory this file derives from api.ts', () => {
     // after changing a sub-read, run this WHOLE file to a clean pass, never a
     // targeted assertion. Read out of the failure output (`have a length of 24 but
     // got 25`), not derived by adding a delta.
-    expect(SUB_READ_SEGMENTS).toHaveLength(25);
+    // 25 -> 26: `CTX-004`'s `extended-context`, a first segment nothing else used.
+    // See the literal-count note above for why all three moved together.
+    expect(SUB_READ_SEGMENTS).toHaveLength(26);
     // THE CONFLICT-RESOLUTION PAIR, and how these three numbers were arrived at.
     // `listConflicts` and `resolveConflict` add TWO literals and TWO suffixes —
     // `conflicts` and `conflicts/resolve`, the second of which carries no `${…}`

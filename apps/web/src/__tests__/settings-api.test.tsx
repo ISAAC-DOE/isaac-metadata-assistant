@@ -1819,7 +1819,17 @@ describe('the Full Description rule over the REAL generated contract', () => {
     // by hand, and `test_contract_description_parity.py` is what proves the copy is
     // byte-identical to the served document in both directions; the three figures
     // below were then read out of this test's own failure output.
-    expect(REAL_CONTRACT_DESCRIPTIONS).toHaveLength(89);
+    //
+    // 89 -> 90 operations, 163,257 -> 165,467 characters, 303 -> 326 paragraphs:
+    // `CTX-004`'s `GET /api/experiments/{experiment_id}/extended-context`, the READ
+    // surface over the `DEC-41` level-4 companion. ALL THREE RE-MEASURED by running
+    // `splitPurpose` over the transcribed array, never incremented — the entry was
+    // transcribed mechanically from `create_app().openapi()` with
+    // `json.dumps(..., ensure_ascii=False)` (the em-dash warning this block already
+    // records, and it cost a round here too), and
+    // `test_contract_description_parity.py` proves the copy byte-identical in both
+    // directions. NO existing description changed.
+    expect(REAL_CONTRACT_DESCRIPTIONS).toHaveLength(90);
     // 84,501 -> 84,584 (+83): the assistant seam's own description was corrected, in
     // ONE operation and with the paragraph count unchanged. It read "so every request
     // is answered `501`" while the paragraph two below it documented the `422` — a
@@ -2442,7 +2452,9 @@ describe('the Full Description rule over the REAL generated contract', () => {
     // an absence that nothing happened. Each of those is a sentence a reader acts
     // on wrongly if it is missing. Re-measured by running this file, not by adding
     // the new text's length.
-    expect(total).toBe(163257);
+    // 163,257 -> 165,467 (+2,210): `CTX-004`'s one new operation. Re-measured by
+    // running the rule over the array, not by adding the new text's length.
+    expect(total).toBe(165467);
     // 104,045 -> 114,959 (+10,914): the four new operations, and NO existing
     // description changed — `test_contract_description_parity.py` proves that rather
     // than leaving it asserted here. RE-DERIVED from the served document and never
@@ -2707,7 +2719,18 @@ describe('the Full Description rule over the REAL generated contract', () => {
       // served vocabularies. A reader who stops early must not have skipped any one
       // of them. Re-measured by running this file and reading
       // `expected 321 to be 315`, never by apportioning.
-      321,
+      //
+      // 321 -> 326 (+5), 2026-09-18: `CTX-004`'s ONE new operation carries a lead plus
+      // five post-lead paragraphs. BOTH NUMBERS MOVED TOGETHER, which is the signature
+      // of prose arriving as WHOLE NEW PARAGRAPHS rather than woven into existing ones
+      // — correct here, because this is one new operation and each of its five is
+      // separable and is a sentence a reader who stops early must not have skipped:
+      // that nothing in it is an official field value or affects export, that an absent
+      // companion is the normal case rather than an error, that this reads the RECORD's
+      // state and not the exported file, what the counts describe, and that no literal
+      // is interpreted. Re-measured by running `splitPurpose` over the array, never by
+      // apportioning.
+      326,
     );
     // 211 -> 235 (+24): the four new operations carry a lead plus 24 post-lead
     // paragraphs between them. It is asserted separately from the character total

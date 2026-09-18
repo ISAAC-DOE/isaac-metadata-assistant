@@ -77,6 +77,7 @@ __all__ = [
     "Operation",
     "Scope",
     "changes_query_parameters",
+    "extended_context_query_parameters",
     "forbidden_tool_reason",
     "note_capture_ceilings",
     "note_text_byte_ceiling",
@@ -410,6 +411,39 @@ PROPOSAL_LIST_QUERY_ALLOWLIST = frozenset({"state", "limit", "after", "order"})
 #: nothing else.
 CHANGES_QUERY_ALLOWLIST = frozenset({"cursor", "limit"})
 
+#: Extended-context query parameters this package is permitted to expose. **`CTX-004`.**
+#:
+#: WHAT WAS REVIEWED, because "it is only paging plus two filters" is not a review, and
+#: two of these four are genuinely filters on content rather than on position.
+#:
+#: `limit` and `offset` carry no record content at all. `offset` is safe as a cursor here
+#: for a reason that is structural rather than conventional: the companion is APPEND-ONLY
+#: (``Experiment.add_extended_context_entries`` is the only writer, there is no remove and
+#: no replace), so a position a caller already read cannot shift under it.
+#:
+#: `run_id` is a filter on a value the agent ALREADY HOLDS — ``isaac_list_runs`` lists
+#: every run of a record and ``isaac_get_run`` reads one — so it selects nothing the
+#: caller could not already see. It is the same ground ``PENDING_QUERY_ALLOWLIST``'s own
+#: `run_id` was reviewed on, with one deliberate difference recorded rather than glossed:
+#: the extended-context route does NOT refuse an unknown run, because an experiment-scoped
+#: entry applies to every run and a record legitimately answers with its inherited
+#: entries. That makes the parameter useless as a probe for run ids in the opposite way —
+#: an unknown run does not return an empty page, so absence of rows proves nothing.
+#:
+#: `concept` IS THE ONE THAT NEEDED A REAL DECISION, and it is exposed because it is a
+#: CONCEPT NAME rather than a free-text selector. The registry is a closed, committed,
+#: 45-entry vocabulary (``bl15.mapping.MAPPINGS``) that this application already publishes
+#: in full through ``_mapping_block``, so naming one reveals nothing a reader of the
+#: registry does not already know. It selects on the concept an entry is ABOUT, never on
+#: the literal it carries.
+#:
+#: **THERE IS NO `q` HERE AND NONE IS PRE-APPROVED.** The route has no free-text selector
+#: and listing one pre-emptively would be pre-approving a search over a source's verbatim
+#: words — which is exactly what an extended-context entry's ``raw_literal`` is. That is
+#: the question this gate exists to stop being answered by accident, and the answer is the
+#: same one ``PENDING_QUERY_ALLOWLIST`` and ``PROPOSAL_LIST_QUERY_ALLOWLIST`` both give.
+EXTENDED_CONTEXT_QUERY_ALLOWLIST = frozenset({"limit", "offset", "run_id", "concept"})
+
 
 @dataclass(frozen=True)
 class QueryParameter:
@@ -574,6 +608,24 @@ def changes_query_parameters() -> tuple[QueryParameter, ...]:
     from ..routes import get_changes  # local: keeps module import order flexible
 
     return _query_parameters(get_changes, CHANGES_QUERY_ALLOWLIST, "changes")
+
+
+def extended_context_query_parameters() -> tuple[QueryParameter, ...]:
+    """The extended-context route's own query parameters, gated by
+    :data:`EXTENDED_CONTEXT_QUERY_ALLOWLIST`. **`CTX-004`.**
+
+    Same derivation rule as every set here. It matters slightly more for this route than
+    for the others because both of its string parameters declare their ``max_length`` ON
+    THE ROUTE (``routes._CONTEXT_FILTER_MAX``), so ``_query_schema`` reads the published
+    bound from the same place FastAPI enforces it and no entry in
+    ``tools._DECLARED_STRING_BOUNDS`` is needed — a second copy that could drift low
+    (refusing what the route would accept) or high (promising a filter that then fails).
+    """
+    from ..routes import get_extended_context  # local: keeps import order flexible
+
+    return _query_parameters(
+        get_extended_context, EXTENDED_CONTEXT_QUERY_ALLOWLIST, "extended-context"
+    )
 
 
 def proposal_target_field_paths() -> tuple[str, ...]:
@@ -815,6 +867,10 @@ def _proposal_list_query_names() -> frozenset[str]:
 
 def _changes_query_names() -> frozenset[str]:
     return frozenset(p.name for p in changes_query_parameters())
+
+
+def _extended_context_query_names() -> frozenset[str]:
+    return frozenset(p.name for p in extended_context_query_parameters())
 
 
 # --------------------------------------------------------------------------
@@ -1155,6 +1211,22 @@ def _operations() -> tuple[Operation, ...]:
             ),
             query_parameters=_changes_query_names(),
         ),
+        Operation(
+            id="get_extended_context",
+            method="GET",
+            path_template="/api/experiments/{experiment_id}/extended-context",
+            scope=Scope.READ,
+            mutates=False,
+            # NOT "the record's extra metadata". The summary says what the artifact IS,
+            # because `create_run`'s own summary drifted into a false claim that nothing
+            # read and so nobody caught — and the claim most easily got wrong about these
+            # entries is that they are field values. They are not, at any level.
+            summary=(
+                "A bounded page of the record's DEC-41 level-4 extended context "
+                "companion; no entry is an official field value."
+            ),
+            query_parameters=_extended_context_query_names(),
+        ),
     )
 
 
@@ -1272,6 +1344,15 @@ PERMITTED_TOOL_NAMES = frozenset(
         "isaac_list_proposals",
         "isaac_get_proposal",
         "isaac_get_changes",
+        # CTX-004, a reviewed widening of this set, and a READ. The DEC-41 level-4
+        # companion was durable, exported and served on the wire and reachable from no
+        # tool at all, so an agent asked about a record's extra scientific context had
+        # to answer that it could not see any. It contains none of
+        # `FORBIDDEN_TOOL_TOKENS` -- checked by `forbidden_tool_reason` at import for
+        # this name as for every other, and asserted again over the registry by
+        # `test_mcp_boundaries`. It adds NO write: `tools.py`'s header property, that
+        # every write touches DRAFT content only, is unchanged because this is not one.
+        "isaac_get_extended_context",
     }
 )
 

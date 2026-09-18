@@ -754,8 +754,28 @@ def test_every_operation_has_a_summary_that_is_not_the_function_name(client):
     # unchanged. The ledger row `ACT-001` says the model "Needs migration `0006`";
     # it does not, and that is argued in the module rather than here.
     #
+    # 89 -> 90: `GET /experiments/{experiment_id}/extended-context` (`CTX-004`), the
+    # READ surface over the `DEC-41` level-4 companion. READ-ONLY, and the only
+    # operation that slice adds: the companion is WRITTEN by historical import, never
+    # by a request of its own.
+    #
+    # WHY A ROUTE RATHER THAN A KEY ON THE DETAIL PAYLOAD. `GET .../artifacts` already
+    # served the companion and serves it only once a record is EXPORTED, so a record
+    # that had imported extended context and not yet exported had no read surface at
+    # all. Folding the entries into `_detail` instead would have put an up-to-1,000
+    # entry list into every record read, on a payload §11 records bounding twice.
+    #
+    # NO TABLE, NO MIGRATION, AND NO NEW STORAGE LOCATION — the companion already
+    # lived at `state["extended_context"]`, beside `draft` and outside it, for the
+    # reason `extended_context.STATE_KEY` gives. `db_write.OWNED_TABLES` is unchanged.
+    #
+    # THE TWO COUNTS THIS FILE HAS CONFLATED BEFORE: at this head the document has 80
+    # PATHS and 90 METHOD-OPERATIONS, and `checked` has always been the second. §11's
+    # standing instruction is to re-derive both and say which you mean rather than
+    # quoting either.
+    #
     # MEASURED from `create_app().openapi()`, not derived from the line above it.
-    assert checked == 89, f"expected 89 documented operations, found {checked}"
+    assert checked == 90, f"expected 90 documented operations, found {checked}"
 
 
 def test_the_auto_summary_check_can_actually_fail(client):
@@ -1095,6 +1115,12 @@ EXPECTED_RESPONSE_CODES: dict[tuple[str, str], list[str]] = {
     # claim about the RECORD ("it has no such activity"); the honest answer is that no
     # such action, channel or object type exists.
     ("/api/experiments/{experiment_id}/activity", "get"): ["200", "401", "404", "422", "503"],
+    # `CTX-004`. The SAME five as `/activity` beside it, and that is a consequence of
+    # the route's shape rather than a copy: both are tutorial-scoped read-only reads
+    # over a record, so both declare the storage, auth and not-found responses, and
+    # both can be handed a query parameter FastAPI refuses (a negative `limit` or
+    # `offset` here). There is no `412` and no `428` because nothing is written.
+    ("/api/experiments/{experiment_id}/extended-context", "get"): ["200", "401", "404", "422", "503"],
     ("/api/experiments/{experiment_id}/notes", "get"): ["200", "401", "404", "422", "503"],
     ("/api/experiments/{experiment_id}/notes", "post"): ["201", "400", "401", "404", "412", "422", "428", "503"],
     ("/api/experiments/{experiment_id}/notes/{note_id}", "get"): ["200", "401", "404", "422", "503"],

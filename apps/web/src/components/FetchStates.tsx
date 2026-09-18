@@ -248,6 +248,25 @@ export const SUB_RESOURCE_LABELS: Readonly<Record<string, string>> = {
   evidence: 'the evidence trail',
   'evidence-classification': 'evidence support',
   export: 'the export',
+  /*
+   * `GET .../extended-context`, the `DEC-41` level-4 companion (`CTX-004`).
+   *
+   * "The extra context an import kept" and NOT "the extended context". Three reasons,
+   * and the third is the one that decides it:
+   *
+   *  1. `extended-context` is the wire segment, and "extended context" is barely less
+   *     of a wire word — it names a DOCUMENT FORMAT, which is not what a scientist
+   *     opened. The register here is the one `pending` and `provenance` already use:
+   *     say what the thing IS, in the words a reader would use for it.
+   *  2. It says where the content came from, which is the whole of what a reader
+   *     needs to know when a read of it fails: extended context arrives through
+   *     historical import and through nothing else in this build.
+   *  3. IT MUST NOT READ AS FIELDS OR AS VALIDATED CONTENT. "Additional metadata",
+   *     "extra fields" or "other values" would each imply the one thing this
+   *     artifact is defined as not carrying, in a sentence a scientist reads while
+   *     something is already going wrong.
+   */
+  'extended-context': 'the extra context an import kept',
   // `PATCH .../folder`. "Which folder this is in" rather than "the folder": the
   // reader is being told which read or write failed, and a folder is a LABEL ON
   // THIS RECORD rather than a container that could be fetched — so "the folder"

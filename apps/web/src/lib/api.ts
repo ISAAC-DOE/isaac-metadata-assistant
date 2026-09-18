@@ -45,6 +45,7 @@ import type {
   ApiExperimentList,
   ApiExperimentSummary,
   ApiExportResponse,
+  ApiExtendedContextResponse,
   ApiGraphStatus,
   ApiHealth,
   ApiImportAddedToExperiment,
@@ -2278,6 +2279,47 @@ export const api = {
   // the backend reads only the two files export wrote inside the workspace.
   getArtifacts(id: string): Promise<ApiArtifactsResponse> {
     return getJson<ApiArtifactsResponse>(`/experiments/${enc(id)}/artifacts`);
+  },
+
+  /**
+   * `CTX-004` — one bounded page of a record's `DEC-41` level-4 extended context.
+   *
+   * **THIS IS NOT `getArtifacts`' COMPANION AND THE DIFFERENCE IS THE REASON IT
+   * EXISTS.** `getArtifacts` serves `extended_context` only once a record has been
+   * EXPORTED; this reads the record's own durable state, so it answers from the moment
+   * the companion is written. Before this route there was no read surface at all for a
+   * record that had imported extended context and not yet exported.
+   *
+   * Read-only. Nothing here writes, so no version token is sent and none is needed.
+   *
+   * THE PATH LITERAL STAYS WHOLE, as `listNotes` and `listAssets` both record:
+   * `backend-down-state.test.tsx` reads this module's source to derive its sub-read
+   * inventory, and a path built from fragments is invisible to it.
+   */
+  getExtendedContext(
+    id: string,
+    options?: {
+      limit?: number;
+      offset?: number;
+      /** Everything APPLYING to this run — its own entries plus what it inherits. */
+      runId?: string;
+      /** Exact match on the concept an entry is about. Never a text search. */
+      concept?: string;
+    },
+  ): Promise<ApiExtendedContextResponse> {
+    const params = new URLSearchParams();
+    // `!== undefined` AND NOT TRUTHINESS: `limit: 0` and `offset: 0` are meaningful
+    // requests the server accepts (`ge=0`), and a falsy guard would silently drop
+    // them and return the default window instead of the page that was asked for.
+    if (options?.limit !== undefined) params.set('limit', String(options.limit));
+    if (options?.offset !== undefined) params.set('offset', String(options.offset));
+    if (options?.runId !== undefined) params.set('run_id', options.runId);
+    if (options?.concept !== undefined) params.set('concept', options.concept);
+    const path = `/experiments/${enc(id)}/extended-context`;
+    const search = params.toString();
+    return getJson<ApiExtendedContextResponse>(
+      search === '' ? path : `${path}?${search}`,
+    );
   },
 
   /*
