@@ -1820,7 +1820,15 @@ describe('the Full Description rule over the REAL generated contract', () => {
     // byte-identical to the served document in both directions; the three figures
     // below were then read out of this test's own failure output.
     //
-    // 89 -> 90 operations, 163,257 -> 165,467 characters, 303 -> 326 paragraphs:
+    // 89 -> 90 operations, 163,257 -> 165,467 characters, 321 -> 326 paragraphs:
+    //
+    // ~~"303 -> 326 paragraphs"~~ -- CORRECTED after review, and it is the house error
+    // committed inside the house's own warning block: 303 is the figure from two
+    // revisions ago, carried in from the stale summary table near the top of this
+    // comment rather than read from the assertion site. The assertion itself
+    // (`321 -> 326 (+5)`, and the diff `-321/+326`) was right; only this summary line
+    // was wrong. Read the number off the site that asserts it, never off a prose table
+    // above it.
     // `CTX-004`'s `GET /api/experiments/{experiment_id}/extended-context`, the READ
     // surface over the `DEC-41` level-4 companion. ALL THREE RE-MEASURED by running
     // `splitPurpose` over the transcribed array, never incremented — the entry was

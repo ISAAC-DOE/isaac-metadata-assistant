@@ -3,7 +3,7 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 
 import { ExtendedContextPanel } from '../components/ExtendedContextPanel';
 import { LABELS } from '../lib/labels';
-import { api } from '../lib/api';
+import { api, ApiError } from '../lib/api';
 import type {
   ApiExtendedContextEntry,
   ApiExtendedContextResponse,
@@ -33,6 +33,10 @@ function entry(over: Partial<ApiExtendedContextEntry> = {}): ApiExtendedContextE
     entry_id: 'ctx_1',
     concept: 'spec_user_string',
     raw_literal: 'ffilter35',
+    // Overridden per entry by the paging tests, which need the RENDERED text to say
+    // which entry it is — a list of 300 identical literals cannot show that index 299
+    // arrived.
+
     source: 'synthetic/mini/01_SYN1.0001',
     locator: 'line 3 header #C',
     placement_level: 4,
@@ -118,6 +122,58 @@ describe('an absent companion', () => {
     expect(document.body.textContent).not.toMatch(/missing|error|failed|unavailable/i);
   });
 
+  it('a companion that ACCOUNTS FOR NOTHING neither claims nor denies that content was lost', async () => {
+    /*
+     * ── THE THIRD EMPTY STATE, AND THE TWO FALSE CLAIMS IT REPLACES ───────────
+     *
+     * The first version rendered, in this exact state:
+     *
+     *     "This record holds an extended context companion with no entry this build
+     *      can present. Nothing has been discarded — see the count above."
+     *
+     * Both halves were wrong at once. **"Nothing has been discarded" is not knowable
+     * here** — a persisted document whose `entries` is not a list hydrates to exactly
+     * this shape, and in that case the stored content really was dropped with no count
+     * recording it. And **"see the count above" named a row that is not on screen**:
+     * the `unreadable_entries` line is gated on `> 0`, so in this state the only count
+     * above reads `0 entries on this record`. A scientist reviewing a corrupted import
+     * was told, by the surface built to disclose loss, that no loss occurred.
+     *
+     * MEASURED REACHABILITY (and the reviewer's stated trigger was wrong, so this is
+     * asserted rather than assumed): going through a SAVE cannot reach it —
+     * `state_payload` answers `None` for an empty companion, so nothing persists and
+     * the route reads back `present: false`. It is reachable from a persisted DOCUMENT
+     * this build would not write, which is precisely the class §11's persisted-value
+     * rule exists for. `test_extended_context_surface.py` pins both halves.
+     */
+    mount(
+      body({
+        entries: [],
+        present: true,
+        entry_count: 0,
+        total: 0,
+        matched: 0,
+        returned: 0,
+        unreadable_entries: 0,
+        concept_count: 0,
+        by_level: { '1': 0, '2': 0, '3': 0, '4': 0 },
+      }),
+    );
+    await screen.findByText(/lists no entries/i);
+    const text = document.body.textContent ?? '';
+    // NEITHER FALSE CLAIM SURVIVES.
+    expect(text).not.toMatch(/nothing has been discarded/i);
+    expect(text).not.toMatch(/see the count above/i);
+    // AND IT DOES NOT OVER-CORRECT INTO THE OPPOSITE ASSERTION either: the panel
+    // cannot know that content WAS lost, so it must not say so.
+    expect(text).not.toMatch(/was discarded|were discarded|content was lost/i);
+    // What it does say: the observable facts, and what it cannot determine.
+    expect(screen.getByText(/records none as unreadable/i)).toBeTruthy();
+    expect(screen.getByText(/cannot say what it held/i)).toBeTruthy();
+    // It is distinct from the ABSENT state, which is the common case.
+    expect(screen.queryByText(LABELS.extendedContextEmpty)).toBeNull();
+  });
+
   it('is NOT the same state as a companion whose entries cannot be read', async () => {
     /*
      * THE TWO WOULD BE ONE IF THE PANEL BRANCHED ON `entry_count === 0`, and
@@ -138,11 +194,17 @@ describe('an absent companion', () => {
         concept_count: 0,
       }),
     );
-    await screen.findByText(/no entry this build can present/i);
+    await screen.findByText(/cannot read any of its 2 entries/i);
     expect(screen.queryByText(LABELS.extendedContextEmpty)).toBeNull();
     // COUNTED AND NEVER RENDERED — the reader is told the record holds more than
     // the list shows, and nothing is invented about what it holds.
     expect(screen.getByText(/2 entries this build cannot read/i)).toBeTruthy();
+    /* THE NUMBER IS NAMED INLINE rather than by pointing at the neighbouring count
+       row. That row IS rendered in this case — but a sentence that depends on a
+       neighbour being present is a sentence that goes wrong when the neighbour's
+       condition changes, which is exactly how the third case came to cite a row
+       that is not on screen. */
+    expect(document.body.textContent ?? '').not.toMatch(/see the count above/i);
   });
 });
 
@@ -341,18 +403,115 @@ describe('every count describes the record', () => {
     await waitFor(() => expect(summary()).toBe('1 entry'));
   });
 
-  it('asks the server for a larger page rather than filtering what it already has', async () => {
-    const spy = mount(
-      body({ entries: [entry()], total: 120, entry_count: 120, returned: 1, has_more: true }),
-    );
-    await screen.findByText('spec_user_string');
+  /*
+   * ── THE INVERTED TEST ───────────────────────────────────────────────────────
+   *
+   * ~~"asks the server for a larger page rather than filtering what it already
+   * has"~~ — that test PINNED THE DEFECT. It asserted `second > first` on the
+   * `limit` argument, which is exactly what growing `limit` and never sending
+   * `offset` does, so it passed on a panel that could not reach past entry 199 of a
+   * 300-entry record. The SUBJECT is kept — a "Show more" must ask the server rather
+   * than filter what it already holds — and the assertion is corrected to the thing
+   * that makes the content reachable.
+   */
+  it('pages by OFFSET, so every entry is reachable past the server clamp', async () => {
+    /*
+     * THE STUB CLAMPS EXACTLY AS THE SERVER DOES — `limit` capped at 200, `has_more`
+     * computed from `total` — because that combination IS the defect. A stub that
+     * honoured any `limit` would have let the old implementation pass, which is how
+     * the defect survived its own test.
+     *
+     * Reproduced server-side first, over HTTP: `limit=250/300/1000` all answered
+     * `limit=200, returned=200, has_more=true`, with the highest entry rendered
+     * stuck at index 199.
+     */
+    const CLAMP = 200;
+    const TOTAL = 300;
+    const calls: { limit?: number; offset?: number }[] = [];
+    vi.spyOn(api, 'getExtendedContext').mockImplementation(async (_id, options) => {
+      calls.push({ limit: options?.limit, offset: options?.offset });
+      const limit = Math.min(options?.limit ?? 50, CLAMP);
+      const offset = options?.offset ?? 0;
+      const slice = Array.from(
+        { length: Math.max(0, Math.min(limit, TOTAL - offset)) },
+        (_unused, i) => entry({ entry_id: `e${offset + i}`, raw_literal: `LIT-e${offset + i}` }),
+      );
+      return body({
+        entries: slice,
+        total: TOTAL,
+        matched: TOTAL,
+        entry_count: TOTAL,
+        returned: slice.length,
+        limit,
+        offset,
+        has_more: offset + slice.length < TOTAL,
+      });
+    });
+    render(<ExtendedContextPanel experimentId="demo" collapsedByDefault={false} />);
+    await screen.findByText('LIT-e0');
+
+    // Six clicks at a 50-entry page walks the whole 300.
+    for (let click = 0; click < 6; click += 1) {
+      const more = screen.queryByRole('button', { name: 'Show more' });
+      if (more === null) break;
+      fireEvent.click(more);
+      await waitFor(() => expect(calls.length).toBe(click + 2));
+    }
+
+    // EVERY REQUEST AFTER THE FIRST CARRIED AN OFFSET. That is the whole fix: the old
+    // implementation sent none, ever.
+    expect(calls.slice(1).every((c) => (c.offset ?? 0) > 0)).toBe(true);
+    // …and it never asked for more than the server's own window, so the clamp is
+    // never the thing bounding the read.
+    expect(calls.every((c) => (c.limit ?? 0) <= CLAMP)).toBe(true);
+
+    // THE LAST ENTRY IS ON SCREEN — index 299, which the old panel could never reach.
+    expect(screen.getByText('LIT-e299')).toBeTruthy();
+    expect(document.querySelectorAll('.extctx-entry')).toHaveLength(TOTAL);
+    // …and the control is GONE rather than permanently offered.
+    expect(screen.queryByRole('button', { name: 'Show more' })).toBeNull();
+  });
+
+  it('the control disappears at the end rather than staying permanently dead', async () => {
+    // MUTATION-GUARDED against the specific symptom: `has_more` stayed true forever
+    // because the clamp made every further request identical, so the button was
+    // present on a panel that could not add a row.
+    mount(body({ entries: [entry()], total: 1, entry_count: 1, returned: 1, has_more: false }));
+    await screen.findByText('ffilter35');
+    expect(screen.queryByRole('button', { name: 'Show more' })).toBeNull();
+  });
+
+  it('a FAILED "Show more" discloses beside the list and never destroys it', async () => {
+    /*
+     * `CLAUDE.md` §11's 2026-09-10 rule, which this repository learned by destroying a
+     * scientist's typed text with a failed background read. The entries on screen are
+     * the reader's; a failed request for MORE of them is no reason to take them away.
+     */
+    let call = 0;
+    vi.spyOn(api, 'getExtendedContext').mockImplementation(async () => {
+      call += 1;
+      if (call === 1) {
+        return body({
+          entries: [entry({ entry_id: 'kept', raw_literal: 'LIT-kept' })],
+          total: 2,
+          matched: 2,
+          entry_count: 2,
+          returned: 1,
+          has_more: true,
+        });
+      }
+      throw new ApiError('the read did not complete');
+    });
+    render(<ExtendedContextPanel experimentId="demo" collapsedByDefault={false} />);
+    await screen.findByText('LIT-kept');
     fireEvent.click(screen.getByRole('button', { name: 'Show more' }));
-    await waitFor(() => expect(spy).toHaveBeenCalledTimes(2));
-    // The second request asks for a bigger window — it does not re-request the same
-    // page and it does not page client-side over rows it never received.
-    const first = spy.mock.calls[0][1]?.limit ?? 0;
-    const second = spy.mock.calls[1][1]?.limit ?? 0;
-    expect(second).toBeGreaterThan(first);
+
+    await screen.findByText(/could not be read just now/i);
+    // THE LIST IS STILL THERE — no `BackendDown`, no blanked panel.
+    expect(screen.getByText('LIT-kept')).toBeTruthy();
+    expect(screen.queryByRole('alert')).toBeNull();
+    // …and the count still describes the record, not what survived.
+    expect(screen.getByText(/2 entries on this record/)).toBeTruthy();
   });
 });
 

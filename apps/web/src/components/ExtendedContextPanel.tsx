@@ -44,8 +44,17 @@
  *     remove and no replace), so putting it there would imply a triage that has no
  *     control and can never be finished.
  *   * `activity` is a history of ACTS. These are content, not acts.
- *   * `runs` would strand every experiment-scoped entry, which is most of them: the
- *     producer emits everything experiment-scoped because no run exists at read time.
+ *   * `runs` would strand the experiment-scoped entries. The PRODUCER emits every
+ *     entry experiment-scoped, because no run exists at read time.
+ *
+ *     ~~"which is most of them"~~ -- WITHDRAWN as unmeasured, and it was wrong in a
+ *     direction worth recording: the APPLY path rebinds run scope
+ *     (`routes.py:26069-26074`, pre-existing) for every entry whose `source` matches
+ *     a unit's `acquisition_path`, so on a real BL15 import a large share becomes
+ *     run-scoped. The conclusion never depended on the proportion -- ONE stranded
+ *     experiment-scoped entry is enough, and a beamtime-wide reading is precisely the
+ *     kind that has no run to be strung from -- so the quantifier bought nothing and
+ *     asserted something nobody had counted.
  *
  * AND IT IS NOT A SIXTH WORKSPACE. `RECORD_VIEW_IDS` is five and `DEC-51` settles
  * that Activity-class surfaces live inside the Experiment with the global nav at
@@ -126,10 +135,35 @@ function asApiError(err: unknown): ApiError {
 type LoadState =
   | { status: 'loading' }
   | { status: 'error'; error: ApiError }
-  | { status: 'data'; loaded: ApiExtendedContextResponse };
+  | {
+      status: 'data';
+      /**
+       * The MOST RECENT page's envelope. Every server-owned count on screen is read
+       * from here — `total`, `matched`, `unreadable_entries`, `has_more`, `present`.
+       */
+      loaded: ApiExtendedContextResponse;
+      /**
+       * Every entry fetched so far, in stored order, ACROSS pages.
+       *
+       * Held separately from `loaded.entries` because `loaded` is one page and this is
+       * what the reader can see. Which of the two a given count comes from is the whole
+       * of `CTX-004`'s paging correctness — see `shownLine`.
+       */
+      shown: ApiExtendedContextEntry[];
+      /** A "Show more" is in flight. The list stays rendered while it is. */
+      appending: boolean;
+      /**
+       * A "Show more" that FAILED. Disclosed beside the list and NEVER allowed to
+       * replace it — `CLAUDE.md` §11's 2026-09-10 rule, which this repository learned
+       * by destroying a scientist's typed text with a failed background reload. The
+       * entries already on screen are the reader's, and a failed request for MORE of
+       * them is no reason to take them away.
+       */
+      appendError: ApiError | null;
+    };
 
 /**
- * How many entries one "Show more" adds.
+ * How many entries one request asks for.
  *
  * DERIVED FROM THE SERVER'S OWN WINDOW rather than chosen here: this asks for
  * `limit` entries and the server's default page is what it would have returned
@@ -233,31 +267,122 @@ export function ExtendedContextPanel({
 }) {
   const [expanded, setExpanded] = useState(!collapsedByDefault);
   const [state, setState] = useState<LoadState>({ status: 'loading' });
-  const [limit, setLimit] = useState(PAGE);
   const bodyId = useId();
   /* Keyed against the record so a stale response from the PREVIOUS record can never
      land in this one's state. `AssetReferencesPanel` solves the same hazard with a
      `key` at the call site; this panel is mounted once per workspace and hidden
-     rather than unmounted on a workspace switch, so it guards the id itself. */
-  const requested = useRef(`${experimentId}::${limit}`);
+     rather than unmounted on a workspace switch, so it guards the id itself.
 
+     IT ALSO GUARDS THE OFFSET, which is why the token carries it: a "Show more" and
+     a record switch can be in flight together, and a page-2 response must not be
+     appended to a different record's page 1. */
+  const requested = useRef(`${experimentId}::0`);
+
+  /**
+   * THE FIRST PAGE. Replaces everything — this is the read a reader ASKED for, so it
+   * is allowed to show a spinner and to replace what is on screen.
+   */
   const load = useCallback(() => {
-    const token = `${experimentId}::${limit}`;
+    const token = `${experimentId}::0`;
     requested.current = token;
     setState({ status: 'loading' });
     api
-      .getExtendedContext(experimentId, { limit })
+      .getExtendedContext(experimentId, { limit: PAGE, offset: 0 })
       .then((loaded) => {
         if (requested.current !== token) return;
-        setState({ status: 'data', loaded });
+        setState({
+          status: 'data',
+          loaded,
+          shown: loaded.entries,
+          appending: false,
+          appendError: null,
+        });
       })
       .catch((err: unknown) => {
         if (requested.current !== token) return;
         setState({ status: 'error', error: asApiError(err) });
       });
-  }, [experimentId, limit]);
+  }, [experimentId]);
 
   useEffect(load, [load]);
+
+  /**
+   * THE NEXT PAGE, BY `offset` — AND THIS IS THE `CTX-004` PAGING FIX.
+   *
+   * ── THE DEFECT THIS REPLACES, MEASURED ──────────────────────────────────────
+   *
+   * The first version paged by GROWING `limit` and never sent `offset` at all. The
+   * server clamps `limit` at `EXTENDED_CONTEXT_LIMIT_MAX = 200` and computes
+   * `has_more` from `matched`, so on a record holding 300 entries — well inside the
+   * 1,000-per-import ceiling — every click past the third re-fetched the SAME first
+   * 200 rows and left the button on screen forever. Measured over HTTP:
+   *
+   *     ask limit=200  -> limit=200 returned=200 has_more=true  highest=e0199
+   *     ask limit=250  -> limit=200 returned=200 has_more=true  highest=e0199
+   *     ask limit=1000 -> limit=200 returned=200 has_more=true  highest=e0199
+   *
+   * Highest entry index ever rendered: 199 of 299. So 100 of 300 entries were
+   * unreachable from the website, behind a permanently dead control — while
+   * `isaac_get_extended_context`'s own description tells an AGENT to "page with
+   * `offset`", and an agent could read all of them. A scientist having strictly less
+   * access to their own record than a language model is the wrong way round.
+   *
+   * It is also, exactly, the defect class the commit before this branch's base is
+   * named for: `d308b827`, "the count named 150 facts a reader could not reach".
+   *
+   * ── THE FIX, AND WHY IT IS `shown.length` RATHER THAN A PAGE COUNTER ────────
+   *
+   * `offset` is the number of entries already held, read off the accumulated list
+   * rather than from a separately-incremented counter. A counter is a second
+   * expression of the same quantity and would be free to disagree with the array the
+   * moment any response returned fewer rows than it asked for — which is the normal
+   * last page. Derived, it cannot.
+   *
+   * `offset` paging is SOUND here for a structural reason rather than a hopeful one:
+   * the companion is append-only (`add_extended_context_entries` is the only writer;
+   * there is no remove and no replace), so an arrival lands AFTER every offset
+   * already read and shifts none of them.
+   *
+   * ── IT IS NOT DESTRUCTIVE, AND THAT IS THE OTHER HALF ───────────────────────
+   *
+   * The list stays rendered while the request is in flight and stays rendered if it
+   * FAILS. `CLAUDE.md` §11 records this repository destroying a scientist's typed
+   * text with exactly the naive shape (`setState({status:'error'})` on a background
+   * read), and the remedy both sibling panels now carry is the one here: a failure
+   * that arrives while something is on screen is disclosed BESIDE it, never in place
+   * of it.
+   */
+  const loadMore = useCallback(() => {
+    if (state.status !== 'data' || state.appending) return;
+    const offset = state.shown.length;
+    const token = `${experimentId}::${offset}`;
+    requested.current = token;
+    setState({ ...state, appending: true, appendError: null });
+    api
+      .getExtendedContext(experimentId, { limit: PAGE, offset })
+      .then((next) => {
+        if (requested.current !== token) return;
+        setState((prev) =>
+          prev.status !== 'data'
+            ? prev
+            : {
+                status: 'data',
+                loaded: next,
+                shown: [...prev.shown, ...next.entries],
+                appending: false,
+                appendError: null,
+              },
+        );
+      })
+      .catch((err: unknown) => {
+        if (requested.current !== token) return;
+        setState((prev) =>
+          prev.status !== 'data'
+            ? prev
+            : { ...prev, appending: false, appendError: asApiError(err) },
+        );
+      });
+  }, [experimentId, state]);
 
   /* THE COUNT ON THE HEADER IS THE SERVER'S `total`, NEVER `entries.length`, and it
      is `null` until the read answers. A collapsed header with no count is the honest
@@ -296,7 +421,15 @@ export function ExtendedContextPanel({
       <div id={bodyId} className="fg-body extctx-body" hidden={!expanded}>
         {state.status === 'loading' && <LoadingPanel label="Reading extended context…" />}
         {state.status === 'error' && <BackendDown error={state.error} onRetry={load} />}
-        {state.status === 'data' && <Loaded loaded={state.loaded} onMore={() => setLimit((n) => n + PAGE)} />}
+        {state.status === 'data' && (
+          <Loaded
+            loaded={state.loaded}
+            shown={state.shown}
+            appending={state.appending}
+            appendError={state.appendError}
+            onMore={loadMore}
+          />
+        )}
       </div>
     </section>
   );
@@ -304,19 +437,72 @@ export function ExtendedContextPanel({
 
 function Loaded({
   loaded,
+  shown,
+  appending,
+  appendError,
   onMore,
 }: {
+  /** The MOST RECENT page. Every server-owned count is read from here. */
   loaded: ApiExtendedContextResponse;
+  /** Every entry fetched so far, across pages. What the reader can actually see. */
+  shown: ApiExtendedContextEntry[];
+  appending: boolean;
+  appendError: ApiError | null;
   onMore: () => void;
 }) {
-  /* `present` AND NOT `entry_count === 0`: a companion holding only rows this build
-     cannot read is PRESENT with an `entry_count` of 0, and telling the reader "this
-     record states no extended context" there would be false — it states some, and
-     none of it could be read. That case falls through to the counts below, which say
-     so. */
+  /*
+   * -- THREE EMPTY STATES, NOT TWO -- `CTX-004`, corrected after review ---------
+   *
+   * The first version had two, and the missing third made the panel say the opposite
+   * of the truth in the one surface built to disclose loss. Each of these is a
+   * different fact and a reader acts on them differently:
+   *
+   *  1. `present: false` -- NO companion document. The ordinary case, since extended
+   *     context arrives through historical import and nothing else in this build.
+   *  2. `present: true`, no readable entries, `unreadable_entries > 0` -- a companion
+   *     that holds rows this build cannot read. They are preserved in the record and
+   *     counted; nothing is invented about what they say.
+   *  3. `present: true`, no readable entries, `unreadable_entries === 0` -- a
+   *     companion document that ACCOUNTS FOR NOTHING. This is the case that was
+   *     missing.
+   *
+   * -- WHAT CASE 3 USED TO SAY, AND WHY IT WAS TWO LIES IN ONE SENTENCE ---------
+   *
+   * It read: *"This record holds an extended context companion with no entry this
+   * build can present. Nothing has been discarded - see the count above."*
+   *
+   *  * **"Nothing has been discarded" is not something this panel can know.**
+   *    `extended_context.hydrate` returns an empty-but-present companion for a
+   *    persisted document whose `entries` is not a list, and for one whose `entries`
+   *    is an empty list -- and in the first of those the stored content really was
+   *    dropped, with no count recording it. Asserting no loss there is false; the
+   *    honest position is that this build cannot say either way.
+   *  * **"see the count above" pointed at a line that is not on screen.** It meant
+   *    the `unreadable_entries` row, which is gated on `> 0` and therefore absent in
+   *    precisely this case. The only count above reads `0 entries on this record`.
+   *
+   * So case 3 now states the observable facts, names what it cannot determine, and
+   * directs the reader at the artifact itself rather than at an absent number.
+   * Nothing is reconstructed from the document, which is the S5 position and also the
+   * only one available: the content is gone or was never there, and those look
+   * identical from here.
+   */
   if (!loaded.present) {
     return <p className="extctx-empty">{LABELS.extendedContextEmpty}</p>;
   }
+
+  /*
+   * HOW MANY ARE ON SCREEN -- read from `shown`, and this is a DELIBERATE INVERSION
+   * of the rule three lines down, not an exception to it.
+   *
+   * The rule is that no count describing the RECORD may come from an array; `total`,
+   * `matched` and `unreadable_entries` are therefore always the server's. But "how
+   * many can I see right now" is a fact ABOUT the array and about nothing else, and
+   * once pages accumulate the server's `returned` describes only the LAST page -- so
+   * using it here would have under-reported the screen by every page but one. The
+   * two halves of `N of M shown` come from two different places on purpose.
+   */
+  const shownCount = shown.length;
 
   return (
     <>
@@ -326,14 +512,15 @@ function Loaded({
       <p className="extctx-not-official">{loaded.not_official}</p>
 
       <ul className="extctx-counts">
-        {/* EVERY NUMBER HERE IS THE SERVER'S. `total` is what the record holds, and
-            it is stated even when the page shows all of it, because a reader must be
-            able to tell a complete list from a first page without counting rows. */}
+        {/* EVERY NUMBER DESCRIBING THE RECORD IS THE SERVER'S. `total` is what the
+            record holds, and it is stated even when the page shows all of it, because
+            a reader must be able to tell a complete list from a first page without
+            counting rows. */}
         <li className="extctx-count">
           {loaded.total} {loaded.total === 1 ? 'entry' : 'entries'} on this record
         </li>
-        {loaded.returned < loaded.total && (
-          <li className="extctx-count">Showing the first {loaded.returned}</li>
+        {shownCount > 0 && shownCount < loaded.total && (
+          <li className="extctx-count">Showing the first {shownCount}</li>
         )}
         {loaded.concept_count > 0 && (
           <li className="extctx-count">
@@ -349,37 +536,74 @@ function Loaded({
           <li className="extctx-count">
             {loaded.unreadable_entries}{' '}
             {loaded.unreadable_entries === 1 ? 'entry' : 'entries'} this build cannot
-            read — kept in the record, not shown here
+            read &mdash; kept in the record, not shown here
           </li>
         )}
       </ul>
 
-      {loaded.entries.length === 0 ? (
-        /* PRESENT, AND NOTHING READABLE IN IT. Distinct from the absent case above,
-           and worth its own sentence: the first says the record states nothing, this
-           says it states something nobody here can read. */
-        <p className="extctx-empty">
-          This record holds an extended context companion with no entry this build can
-          present. Nothing has been discarded — see the count above.
-        </p>
+      {shownCount === 0 ? (
+        loaded.unreadable_entries > 0 ? (
+          /* CASE 2 -- a companion whose rows this build cannot read. The number is
+             named INLINE rather than by pointing at another line: the count row above
+             IS rendered in this case, but a sentence that depends on a neighbour being
+             present is a sentence that goes wrong when the neighbour's condition
+             changes, which is exactly how case 3 came to cite an absent row. */
+          <p className="extctx-empty">
+            This record holds an extended context companion, and this build cannot
+            read{' '}
+            {loaded.unreadable_entries === 1
+              ? 'its one entry'
+              : `any of its ${loaded.unreadable_entries} entries`}
+            . They are kept in the record exactly as they were found. Nothing here is
+            reconstructed from them, because nothing can say what one contains without
+            inventing it.
+          </p>
+        ) : (
+          /* CASE 3 -- present, and accounting for nothing. See the block above for the
+             two false claims this replaces. It asserts no loss and denies none. */
+          <p className="extctx-empty">
+            This record holds an extended context companion that lists no entries, and
+            records none as unreadable. This build cannot say what it held &mdash; an
+            empty list and a document whose entries could not be read at all look the
+            same from here &mdash; so nothing is reconstructed from it and nothing is
+            claimed about it. The document itself is kept exactly as it was found.
+          </p>
+        )
       ) : (
         <ul className="extctx-list">
-          {loaded.entries.map((entry) => (
+          {shown.map((entry) => (
             <EntryCard key={entry.entry_id} entry={entry} />
           ))}
         </ul>
       )}
 
+      {/* A FAILED "SHOW MORE", DISCLOSED BESIDE THE LIST AND NEVER IN PLACE OF IT.
+          `CLAUDE.md` S11's 2026-09-10 rule: the entries already on screen are the
+          reader's, and a failed request for MORE of them is no reason to take them
+          away. */}
+      {appendError !== null && (
+        <p className="extctx-count" role="status">
+          Those additional entries could not be read just now
+          {appendError.message === '' ? '' : `: ${appendError.message}`}. Nothing
+          already shown has changed &mdash; try again.
+        </p>
+      )}
+
       {loaded.has_more && (
         <div className="extctx-more">
-          <button type="button" className="btn btn-secondary" onClick={onMore}>
-            Show more
+          <button
+            type="button"
+            className="btn btn-secondary"
+            onClick={onMore}
+            disabled={appending}
+          >
+            {appending ? 'Reading…' : 'Show more'}
           </button>
-          {/* BOTH NUMBERS FROM THE SERVER. `returned` describes this page and `total`
-              describes the record; deriving either from the rendered array is the
-              defect this line exists to not have. */}
+          {/* TWO NUMBERS FROM TWO PLACES, ON PURPOSE -- see `shownCount` above.
+              `shownCount` is what the reader can see and comes from the accumulated
+              array; `total` is what the record holds and comes from the server. */}
           <span>
-            {loaded.returned} of {loaded.total} shown
+            {shownCount} of {loaded.total} shown
           </span>
         </div>
       )}

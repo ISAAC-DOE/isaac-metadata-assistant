@@ -265,5 +265,12 @@ def context_page(
             str(level): mp.PLACEMENT_NAMES[level] for level in mp.PLACEMENT_LEVELS
         },
     }
-    payload.update(summary)
-    return payload
+    # THE SUMMARY IS SPREAD FIRST, SO THE PAGING KEYS WIN -- structural rather than
+    # positional, after review. `payload.update(summary)` ran last, which meant a
+    # future `context_summary` key named `total`, `returned`, `limit` or `offset`
+    # would silently overwrite the paging value, and this function's own argument
+    # that `total` and `entry_count` "are the same number from the same expression"
+    # would quietly stop being true. Merged this way round, a collision can only
+    # resolve toward the paging contract, and the one deliberate overlap -- `total`
+    # is `summary["entry_count"]` -- is still a single expression.
+    return {**summary, **payload}

@@ -45,6 +45,7 @@ anything.
 
 from __future__ import annotations
 
+import json
 import pytest
 from fastapi.testclient import TestClient
 
@@ -218,6 +219,60 @@ def test_offset_pages_the_whole_record_without_repeating_or_skipping_an_entry(cl
     assert seen == [f"e{i}" for i in range(5)]
 
 
+def test_a_growing_limit_alone_can_never_reach_past_the_clamp(client):
+    """THE SERVER HALF OF THE `CTX-004` PAGING DEFECT, pinned so it stays visible.
+
+    This asserts a property of the ROUTE, not of the client: because `limit` is
+    CLAMPED at :data:`EXTENDED_CONTEXT_LIMIT_MAX` while ``has_more`` is computed from
+    ``matched``, a caller that pages by growing ``limit`` and never sends ``offset``
+    is handed the same first window forever, with ``has_more`` permanently ``True``.
+
+    **The website did exactly that until review caught it**, so on a 300-entry record
+    — well inside the 1,000-per-import ceiling — the highest entry a scientist could
+    reach was index 199, behind a button that never stopped being offered. Meanwhile
+    ``isaac_get_extended_context``'s own description tells an agent to page with
+    ``offset``, so an agent could read all 300.
+
+    The route's behaviour is CORRECT and is deliberately unchanged: clamping rather
+    than refusing is ``activity_history.ACTIVITY_LIMIT_MAX``'s rule, and ``has_more``
+    describing the match set rather than the window is what makes the count honest.
+    What was wrong was a client reading the clamp as a page. This test exists so that
+    the combination is written down where the next client author will meet it.
+    """
+    entries = [_entry(f"e{i:04d}") for i in range(300)]
+    eid = _record_with_context(client, entries)
+    base = f"/api/experiments/{eid}/extended-context"
+
+    highest_seen = -1
+    for asked in (200, 250, 300, 1000):
+        body = client.get(f"{base}?limit={asked}").json()
+        assert body["limit"] == view.EXTENDED_CONTEXT_LIMIT_MAX
+        assert body["returned"] == view.EXTENDED_CONTEXT_LIMIT_MAX
+        # PERMANENTLY TRUE, which is what made the control permanently dead.
+        assert body["has_more"] is True
+        highest_seen = max(
+            highest_seen, int(body["entries"][-1]["entry_id"][1:])
+        )
+    assert highest_seen == view.EXTENDED_CONTEXT_LIMIT_MAX - 1, (
+        "growing `limit` alone reached a new entry; the clamp no longer bounds it, "
+        "which would make this test's premise stale rather than wrong"
+    )
+
+    # AND `offset` REACHES ALL OF THEM — the fix the route already supported. Asserted
+    # in the same test as the trap, so the contrast is one failure away from anyone
+    # who breaks either half.
+    walked: list[str] = []
+    offset = 0
+    while True:
+        body = client.get(f"{base}?limit=200&offset={offset}").json()
+        walked.extend(e["entry_id"] for e in body["entries"])
+        if not body["has_more"]:
+            break
+        offset += body["returned"]
+    assert walked == [e.entry_id for e in entries]
+    assert len(walked) == 300
+
+
 def test_an_oversized_limit_is_clamped_and_the_clamp_is_reported(client):
     """CLAMPED, NEVER REFUSED, and never silently — ``activity_history``'s rule.
 
@@ -367,6 +422,56 @@ def test_an_unreadable_stored_entry_is_counted_and_never_rendered(client):
     assert body["total"] == 0
     assert body["entries"] == []
     assert body["unreadable_entries"] == 1
+
+
+def test_an_empty_but_present_companion_reports_no_unreadable_count(client):
+    """THE STATE THE PANEL'S THIRD EMPTY CASE EXISTS FOR — and its real trigger.
+
+    ``present: True`` with ``entry_count: 0`` AND ``unreadable_entries: 0``: a
+    companion document that accounts for nothing. The panel used to tell a reader
+    "Nothing has been discarded" here, which it cannot know.
+
+    **IT IS NOT REACHABLE THROUGH A SAVE, AND THAT IS WORTH ASSERTING RATHER THAN
+    ASSUMING.** ``state_payload`` answers ``None`` for a companion with no entries and
+    no unreadable rows, so persisting ``hydrate(7)`` writes nothing at all and the
+    route reads back ``present: False`` — the ORDINARY empty state, which is honest.
+    The state below is reachable only from a persisted DOCUMENT this build would not
+    write: an older build, an external writer, a hand edit. That is precisely the
+    class ``CLAUDE.md`` §11's persisted-value rule exists for, so it is read rather
+    than refused — and the read must not then make a claim about it.
+    """
+    # (a) THROUGH A SAVE: not reachable. `present` is False, not an empty companion.
+    eid = _record_with_context(client, [_entry("e1")])
+    exp = ws.load_experiment(eid)
+    assert exp is not None
+    exp.extended_context = ctx.hydrate(7, experiment_id=eid)
+    exp.save_versioned()
+    saved = client.get(f"/api/experiments/{eid}/extended-context").json()
+    assert saved["present"] is False
+    assert saved["entry_count"] == 0
+    assert saved["unreadable_entries"] == 0
+
+    # (b) FROM A PERSISTED DOCUMENT: reachable, and read rather than refused.
+    for stored in ({"entries": []}, {"entries": "not a list"}):
+        other = client.post("/api/experiments", json={"title": "empty companion"})
+        oid = other.json()["id"]
+        exp2 = ws.load_experiment(oid)
+        assert exp2 is not None
+        document = json.loads(exp2.state_path.read_text())
+        document[ctx.STATE_KEY] = stored
+        exp2.state_path.write_text(json.dumps(document))
+
+        body = client.get(f"/api/experiments/{oid}/extended-context")
+        assert body.status_code == 200, body.text
+        payload = body.json()
+        assert payload["present"] is True, stored
+        assert payload["entry_count"] == 0, stored
+        # THE COUNT THE OLD COPY POINTED AT IS ZERO, which is why "see the count
+        # above" named a row that is not rendered.
+        assert payload["unreadable_entries"] == 0, stored
+        # …and neither whole-list read vanishes, which is the §11 half that holds.
+        assert client.get("/api/experiments").status_code == 200
+        assert client.get(f"/api/experiments/{oid}").status_code == 200
 
 
 # =============================================================================
