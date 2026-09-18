@@ -21,6 +21,7 @@ import { TranscriptCapturePanel } from '../components/TranscriptCapturePanel';
 import { UnmappedNotesPanel } from '../components/UnmappedNotesPanel';
 import { IngestionProposalsPanel } from '../components/IngestionProposalsPanel';
 import { AssetReferencesPanel } from '../components/AssetReferencesPanel';
+import { ExtendedContextPanel } from '../components/ExtendedContextPanel';
 import { ValidateReview } from '../components/ValidateReview';
 import { disposeExperiment, flushExperiment } from '../lib/runAutosaveStore';
 import { AssistantPanel, type AgentPrompt } from '../components/AssistantPanel';
@@ -1094,6 +1095,37 @@ function LoadedWorkbench({
               }
             />
           ))}
+
+          {/*
+            ── EXTENDED CONTEXT — `DEC-41` LEVEL 4, `CTX-004` ─────────────────
+
+            WHY IT SITS EXACTLY HERE: after the draft blocks, before the identity
+            eyebrow. Extended context is the scientifically useful information the
+            official ISAAC v1.05 record has NO FIELD FOR, so it is legible only as
+            the remainder of the fields above it — and it is science, not reference
+            material about the record, so it belongs on the science side of the
+            eyebrow below. The reading order is then `DEC-41`'s own hierarchy: the
+            fields the schema has, then the statements it could not take.
+
+            NOT ABOVE THE BLOCKS, for the reason the identity group's own note gives
+            two paragraphs down: four existing specs address "the first `.fg-header`
+            on the screen" as the way to reach the first DRAFT block, and mounting
+            anything above them silently re-points that selector.
+
+            IT SELF-FETCHES AND IS COLLAPSED ON ARRIVAL, the discipline
+            `AssetReferencesPanel` records: the count on its header is the SERVER's
+            total and is absent until the read resolves, never a number this screen
+            guessed. The read is its own route rather than `bundle.artifacts` because
+            `get_artifacts` serves the companion only once a record has been
+            EXPORTED, and a reader reviewing a fresh import has not exported yet.
+
+            NOT A SIXTH WORKSPACE, and not a step. It carries no completion state and
+            can never be "finished": nothing in the product writes extended context
+            except historical import, so a criterion invented for it would nag every
+            record that legitimately has none — `workflow.py:128-149`'s standing
+            argument, applied again.
+          */}
+          <ExtendedContextPanel experimentId={id} />
 
           {/*
             ── THE RECORD IDENTITY GROUP ──────────────────────────────────────

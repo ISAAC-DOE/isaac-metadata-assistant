@@ -166,6 +166,15 @@ export function ImportCorpusReview({ review }: { review: Bl15CorpusReview }) {
 
       <MappingReview review={review} />
 
+      {/* IMMEDIATELY AFTER THE MAPPING REVIEW, because that is the block that raises
+          the question this one answers. `MappingReview` renders the server's
+          `placement_name` on every concept — "Where this information lands: ISAAC
+          Extended Context (level 4)" — and until `CTX-004` a reader could see that a
+          concept LANDS there and had no way to learn how much did, or what the
+          reading declined to carry. Read anywhere else on this screen it is a count
+          with nothing to be the count of. */}
+      <ExtendedContextReview extended={review.extended_context} />
+
       <LeftOut unattached={unattached} refused={review.inventory.refused} />
     </section>
   );
@@ -220,6 +229,124 @@ function Digest({
  * it is stated here as the one sentence this component authors, and it is marked as
  * such rather than passed off as the server's.
  */
+/* ── DEC-41 level 4, and the three reasons a statement is not in it ─────── */
+
+/**
+ * WHAT LANDED AT LEVEL 4, AND WHAT DID NOT. `CTX-004`.
+ *
+ * ── THE ASYMMETRY THIS CLOSES ───────────────────────────────────────────────
+ *
+ * `MappingReview` above renders the server's `placement_name` verbatim, so a reader
+ * can see a concept LAND at ISAAC Extended Context (level 4) — and then had nowhere
+ * to learn how much landed there, or what this reading declined to carry. The second
+ * half is the more consequential: `historical_import` drops a tail at a ceiling, and
+ * the number dropped reached no frontend file at all.
+ *
+ * ── THE THREE COSTS ARE NEVER ADDED TOGETHER ────────────────────────────────
+ *
+ * They were ONE server-side integer until `CTX-004` measured the three sites that
+ * incremented it, and the repository described that integer two incompatible ways in
+ * three places. Summing them here would undo the split and tell a scientist they had
+ * lost information when they may have lost none:
+ *
+ *   * `dropped` means statements the archive made are ABSENT — the corpus is larger
+ *     than the companion holds. Actionable, and the only one of the three that is.
+ *   * `thinned` means a literal repeated inside ONE source kept its first locator and
+ *     lost the later ones. No statement was lost. A SPEC acquisition names its motors
+ *     once per scan, so a 22-scan file states the same value 22 times.
+ *   * `unplaceable` means this BUILD could not construct an entry. Not a bound: a
+ *     bigger ceiling and a re-import would both leave it unchanged.
+ *
+ * ── WHAT IT WILL NOT DO ─────────────────────────────────────────────────────
+ *
+ *  1. IT NEVER RENDERS A DROPPED ENTRY. They were not kept. Showing one would mean
+ *     inventing it, which is the defect `CLAUDE.md` §5 exists for.
+ *  2. A NON-ZERO COUNT IS ALWAYS VISIBLE AND ALWAYS A NUMBER — never implied by a
+ *     short list, and never behind the disclosure. A zero renders no row rather than
+ *     a "0", so the block states what happened instead of enumerating what did not.
+ *  3. IT ASSERTS NOTHING ABOUT VALIDITY. Level 4 is where information goes when the
+ *     official schema has no field for it; the block carries the server's own
+ *     `not_official` sentence verbatim and adds no verdict of its own.
+ */
+function ExtendedContextReview({
+  extended,
+}: {
+  extended: Bl15CorpusReview['extended_context'];
+}) {
+  /* ABSENT MEANS THE SERVER DID NOT SERVE THE BLOCK, which is not the same as zero
+     and must not render as zero. A build without it shows nothing at all. */
+  if (!extended) return null;
+  const { available, dropped, thinned, unplaceable, ceiling } = extended;
+  const anyCost = dropped > 0 || thinned > 0 || unplaceable > 0;
+
+  return (
+    <div className="bl15-block">
+      <details className="bl15-disclosure">
+        <summary>
+          {/* THE SUMMARY CARRIES A TOPIC AND A COUNT, never a verdict — the rule this
+              file's own header states for every `<details>` on this screen. */}
+          <h4 className="bl15-block-title">
+            {BL15_COPY.extendedContextTitle}
+            <span className="bl15-count">{available.toLocaleString('en-US')}</span>
+          </h4>
+        </summary>
+        <p className="bl15-lead">{BL15_COPY.extendedContextLead}</p>
+        {/* THE SERVER'S OWN SENTENCE, VERBATIM. Not paraphrased: it is the artifact's
+            definition of itself, and every softening is a step toward a reader
+            treating one of these literals as a field value. */}
+        <p className="bl15-concept-reason">{extended.not_official}</p>
+        {anyCost ? (
+          <ul className="bl15-ceiling">
+            {dropped > 0 && (
+              <li>
+                <h5>
+                  {dropped.toLocaleString('en-US')} not carried — this reading reached
+                  its limit of {ceiling.toLocaleString('en-US')}
+                </h5>
+                <p>
+                  Statements past that limit are not in the companion. They are not
+                  shown here either: they were not kept, so nothing can say what they
+                  said without inventing it.
+                </p>
+              </li>
+            )}
+            {thinned > 0 && (
+              <li>
+                <h5>
+                  {thinned.toLocaleString('en-US')} repeated inside a single source
+                </h5>
+                <p>
+                  The same value stated more than once in one file. The first mention
+                  kept its location; the later ones did not. No statement was lost, and
+                  two sources that disagree are never merged — they are different
+                  entries.
+                </p>
+              </li>
+            )}
+            {unplaceable > 0 && (
+              <li>
+                <h5>
+                  {unplaceable.toLocaleString('en-US')} this build could not record
+                </h5>
+                <p>
+                  This build could not turn these into companion entries. That is a
+                  limit of the software rather than of the archive, so re-importing
+                  would not change it. They are still in this reading&apos;s other
+                  counts.
+                </p>
+              </li>
+            )}
+          </ul>
+        ) : (
+          <p className="bl15-concept-reason">
+            {BL15_COPY.extendedContextNoneLeftOut}
+          </p>
+        )}
+      </details>
+    </div>
+  );
+}
+
 function Ceiling({ review }: { review: Bl15CorpusReview }) {
   const { temperature_absent_reason: temp, assets_blocked_reason: assets } = review.mapping;
   return (

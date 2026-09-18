@@ -259,6 +259,30 @@ export const SETTINGS_CONCEPT_DISCLOSURES: Readonly<Record<string, number>> = Ob
  */
 export const ASSET_DISCLOSURE_SURFACES: ReadonlySet<string> = new Set(['record-detail']);
 
+/**
+ * Which surfaces mount the collapsed Extended Context disclosure — `CTX-004`.
+ *
+ * `record-detail` is the record workbench: `ExtendedContextPanel` is mounted in the
+ * Record Fields workspace, ALWAYS and unconditionally, and always collapsed. It is
+ * declared rather than measured-and-accepted for the reason
+ * `ASSET_DISCLOSURE_SURFACES` and `FIELD_GROUP_SURFACES` both give — a panel that
+ * quietly stopped being mounted would otherwise take its whole body out of every
+ * scan at every viewport while the baselines merely drifted DOWN, which this
+ * helper's own history shows reads as an accessibility win.
+ *
+ * WHAT IS *NOT* DECLARED, AND WHY THE NUMBER WOULD BE WRONG. The count of per-entry
+ * `details.extctx-details` inside it is deliberately undeclared: it is one per
+ * companion entry, and the seeded records this sweep reaches hold none, because
+ * extended context arrives through historical import and through nothing else in
+ * this build. Declaring `0` would be true today and would become a trap the first
+ * time a seeded record carried a companion; declaring a positive number would be
+ * false now. So the opener opens every one it finds and asserts only the thing that
+ * must hold — that the COLLAPSIBLE itself is there.
+ */
+export const EXTENDED_CONTEXT_DISCLOSURE_SURFACES: ReadonlySet<string> = new Set([
+  'record-detail',
+]);
+
 export async function openUnreachableDisclosures(page: Page, surfaceId: string): Promise<void> {
   const technical = page.locator('details.stats-technical');
   const mounted = await technical.count();
@@ -358,6 +382,7 @@ export async function openUnreachableDisclosures(page: Page, surfaceId: string):
 
   await openDraftBlocks(page, surfaceId);
   await openAssetReferences(page, surfaceId);
+  await openExtendedContext(page, surfaceId);
 }
 
 /**
@@ -398,6 +423,71 @@ export async function openAssetReferences(page: Page, surfaceId: string): Promis
   /* AND THE BODY IS REALLY OPEN. `aria-expanded` moving is the button's claim
      about itself; this is the thing axe will actually scan. */
   await expect(page.locator('.assets-collapsible .fg-body').first()).toBeVisible();
+}
+
+/**
+ * Open the Extended Context disclosure, and every raw-entry `<details>` inside it.
+ *
+ * ── TWO MECHANISMS, IN ORDER, AND THE ORDER IS NOT OPTIONAL ─────────────────
+ *
+ * The panel is a `button[aria-expanded]` accordion whose body is `hidden` while
+ * collapsed, and each companion entry inside carries its own native `<details>`
+ * holding the entry verbatim. A `<summary>` inside a `hidden` ancestor cannot be
+ * clicked, so the outer control has to open first — which is why this is one
+ * function and not two, and why it asserts the body is visible before reaching for
+ * the inner ones.
+ *
+ * ── IT ASSERTS THAT IT OPENED SOMETHING ────────────────────────────────────
+ *
+ * `openAssetReferences` records why, and the same trap applies verbatim: a guard of
+ * `count() === 0 → return` followed by `toHaveCount(0)` on the same selector is
+ * satisfied by finding NOTHING, so a broken selector reads exactly like a surface
+ * with no disclosure. `EXTENDED_CONTEXT_DISCLOSURE_SURFACES` is what makes the
+ * difference checkable.
+ *
+ * ── WHAT IS EXEMPT IF THIS IS WRONG ────────────────────────────────────────
+ *
+ * Everything the panel says: the artifact's own not-official claim, the counts, and
+ * every entry's concept, verbatim literal, source and locator. All of it lives
+ * inside a `hidden` body, so a broken selector here leaves the whole surface out of
+ * every axe scan at every viewport while the baseline merely fails to move — and on
+ * a record with no companion the body is one sentence, so the loss would not show up
+ * as a number changing either.
+ */
+export async function openExtendedContext(page: Page, surfaceId: string): Promise<void> {
+  const COLLAPSED = '.extctx-collapsible .fg-header[aria-expanded="false"]';
+  const toggle = page.locator(COLLAPSED);
+  const mounted = await toggle.count();
+  if (EXTENDED_CONTEXT_DISCLOSURE_SURFACES.has(surfaceId)) {
+    expect(
+      mounted,
+      `surface "${surfaceId}" is declared in EXTENDED_CONTEXT_DISCLOSURE_SURFACES ` +
+        '(e2e/helpers/disclosures.ts) but mounts no collapsed Extended Context ' +
+        `disclosure matching "${COLLAPSED}". Either the panel stopped being mounted ` +
+        'collapsed there — in which case remove it from the set — or this selector is ' +
+        'broken, in which case the DEC-41 level-4 companion, the not-official claim ' +
+        'and every entry’s provenance are silently exempt from every axe scan at ' +
+        'every viewport while the counts merely drift down.'
+    ).toBeGreaterThan(0);
+  }
+  if (mounted === 0) return;
+  await toggle.first().click();
+  await expect(page.locator(COLLAPSED)).toHaveCount(0);
+  /* AND THE BODY IS REALLY OPEN — `aria-expanded` moving is the button's claim about
+     itself; this is the thing axe will scan, and the thing the inner `<summary>`
+     elements need in order to be clickable at all. */
+  await expect(page.locator('.extctx-collapsible .fg-body').first()).toBeVisible();
+
+  /* THE PER-ENTRY RAW DISCLOSURES. Count NOT declared — see
+     `EXTENDED_CONTEXT_DISCLOSURE_SURFACES` for why a number would be either false
+     now or a trap later. Whatever is there is opened. */
+  const raw = page.locator('details.extctx-details');
+  const rawCount = await raw.count();
+  for (let i = 0; i < rawCount; i++) {
+    const one = raw.nth(i);
+    await one.locator('> summary').click();
+    await expect(one).toHaveAttribute('open', '');
+  }
 }
 
 /**

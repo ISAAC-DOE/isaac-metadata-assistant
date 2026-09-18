@@ -293,10 +293,50 @@ export interface Bl15MappingCoverage {
 }
 
 /** The container — the one shape here no route emits yet. See the header. */
+/**
+ * `DEC-41` LEVEL 4, AND THE THREE REASONS A STATEMENT IS NOT IN IT. `CTX-004`.
+ *
+ * Mirrors the server's `_corpus_review()["extended_context"]` verbatim. Optional
+ * because a build that does not serve it should render nothing rather than zeros —
+ * the same posture `placement` and `domain_questions` above already take.
+ *
+ * **THE THREE COSTS ARE NEVER SUMMED, AND THAT IS THE WHOLE REASON THEY ARE THREE.**
+ * Until `CTX-004` the server carried ONE integer, incremented at three sites, and
+ * described it as the tail cap in two places while the attribute's own docstring
+ * described it as two of the three. The causes mean different things to a reader:
+ *
+ *  * `dropped` — the tail cap (`ceiling`) was reached, so statements the archive made
+ *    are ABSENT from the companion. The reader's corpus is larger than it holds.
+ *  * `thinned` — the same literal was stated more than once INSIDE ONE source; the
+ *    first kept its locator and the later ones did not. No statement was lost, and no
+ *    disagreement was settled: two different sources are two different keys.
+ *  * `unplaceable` — this BUILD could not construct an entry. Not a bound: a bigger
+ *    ceiling and a re-import would both leave it unchanged.
+ *
+ * A surface that added them would tell a scientist they had lost information when
+ * they may have lost none.
+ */
+export interface Bl15ExtendedContext {
+  /** How many level-4 entries this reading holds. The reading's own total. */
+  available: number;
+  /** Statements absent because the tail cap was reached. */
+  dropped: number;
+  /** Repeated literals inside one source whose later locators were not kept. */
+  thinned: number;
+  /** Statements this build could not place at all. */
+  unplaceable: number;
+  /** The cap `dropped` refers to, served so no surface transcribes the number. */
+  ceiling: number;
+  /** The companion's own denial that any of it is official. Rendered verbatim. */
+  not_official: string;
+}
+
 export interface Bl15CorpusReview {
   inventory: Bl15ArchiveInventory;
   relationships: Bl15Relationships;
   evidence: Bl15SourceEvidence[];
+  /** `DEC-41` level 4 and its three costs. See {@link Bl15ExtendedContext}. */
+  extended_context?: Bl15ExtendedContext;
   mapping: {
     coverage: Bl15MappingCoverage;
     concepts: Bl15ConceptMapping[];

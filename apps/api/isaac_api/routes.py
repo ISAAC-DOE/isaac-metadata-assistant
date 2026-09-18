@@ -62,6 +62,7 @@ from . import dependencies
 from . import conflict_resolution as cr
 from . import evidence_classify
 from . import extended_context
+from . import extended_context_view
 from . import experiment_repository
 from . import historical_import as hist
 from . import identity as identity_module
@@ -22848,6 +22849,122 @@ def get_artifacts(scope: TutorialScopeDep, experiment_id: ExperimentId):
         "sidecar_filename": sidecar_path.name,
         "artifact": artifact,
     }
+
+
+# --- 13c. extended context (the DEC-41 level-4 companion, read-only) ---------
+
+
+#: `run_id` and `concept` are the two filters the model already answers, and both are
+#: bounded strings because `mcp.policy._query_schema` refuses to publish an unbounded
+#: one — a bound declared HERE, on the route, is the bound the tool schema reads, so
+#: there is no second copy to drift. The values are ids, not prose: 128 is generous
+#: for both and refuses a body smuggled through a query string.
+_CONTEXT_FILTER_MAX = 128
+
+_CONTEXT_LIMIT_DESC = (
+    "How many entries to return. Omitted is the server's window "
+    f"({extended_context_view.EXTENDED_CONTEXT_WINDOW}); a larger value is CLAMPED to "
+    f"{extended_context_view.EXTENDED_CONTEXT_LIMIT_MAX} rather than refused, and the "
+    "value actually used is reported back as `limit`."
+)
+_CONTEXT_OFFSET_DESC = (
+    "How many entries to skip, in stored order. Stable paging: this list is "
+    "append-only — no operation removes or reorders an entry — so an arrival lands "
+    "after every offset already read."
+)
+_CONTEXT_RUN_DESC = (
+    "Narrow to everything that APPLIES to one run: that run's own entries plus the "
+    "experiment-scoped ones it inherits. Each entry still carries its own `scope`, so "
+    "the inheritance stays visible and nothing is copied onto the run."
+)
+_CONTEXT_CONCEPT_DESC = (
+    "Narrow to one concept, matched exactly. Never fuzzy, stemmed or case-folded."
+)
+
+
+@router.get(
+    "/experiments/{experiment_id}/extended-context",
+    tags=[TAG_EXPERIMENTS],
+    summary="Read a Record's Extended Context",
+    description=(
+        "The `DEC-41` level-4 **ISAAC Extended Context companion** this record "
+        "holds: the scientifically useful metadata the official ISAAC v1.05 record "
+        "has no field for, each entry carrying the concept, the source's own words "
+        "VERBATIM, where that source was, and where in it. Read-only and bounded.\n\n"
+        "**NOTHING HERE IS AN OFFICIAL FIELD VALUE, AND NOTHING HERE MAKES A RECORD "
+        "EXPORTABLE OR UN-EXPORTABLE: A RECORD IS EXPORTABLE OR NOT ON THE OFFICIAL "
+        "SCHEMA ALONE.** Every entry carries `is_official_field_value: false` from a "
+        "derived property with no stored field behind it, so it cannot be written "
+        "otherwise; the companion is stored BESIDE the draft rather than inside it, "
+        "so the export path cannot reach it at all; and `not_official` carries the "
+        "artifact's own full denial in every response. `official_path` names where "
+        "the schema's home for a CONCEPT is, as a pointer to the registry — it is "
+        "never a destination for the literal beside it.\n\n"
+        "**An ABSENT companion is the normal state of almost every record and is not "
+        "an error.** Extended context arrives through historical import and through "
+        "nothing else in this build. A record with none answers `200` with "
+        "`present: false` and `entry_count: 0`, never a `404` and never an empty "
+        "artifact frame.\n\n"
+        "**This reads the RECORD'S OWN STATE, not the exported file.** "
+        "`GET .../artifacts` serves `extended_context` only once a record has been "
+        "exported; this operation answers from the moment the companion is written, "
+        "which is what a reader reviewing a fresh import needs.\n\n"
+        "`total` is how many entries this record HOLDS and `matched` is how many "
+        "satisfied the filters — both independent of how many this page returned, so "
+        "a filtered or paged read never understates the record. "
+        "`unreadable_entries` counts stored rows this build could not read; they are "
+        "preserved in the record untouched and counted rather than rendered, because "
+        "this server cannot say what a refused row contains without inventing it.\n\n"
+        "**No value here is interpreted, normalised, unit-converted or classified by "
+        "this operation.** `normalized_value` and `unit` are present only when a "
+        "stored NAMED rule produced them, and `normalization_rule` names that rule; "
+        "`raw_literal` is what the source said and is never replaced."
+    ),
+    response_description=(
+        "One bounded page of the record's extended context in stored order, with the "
+        "record's true totals, the companion's own summary, and the record's "
+        "current `ETag`."
+    ),
+    responses={**_R_STORAGE_UNAVAILABLE, **_R_UNAUTHORIZED, **_R_TUTORIAL_SCOPE},
+)
+def get_extended_context(
+    scope: TutorialScopeDep,
+    experiment_id: ExperimentId,
+    response: Response,
+    limit: Annotated[int | None, Query(ge=0, description=_CONTEXT_LIMIT_DESC)] = None,
+    offset: Annotated[int, Query(ge=0, description=_CONTEXT_OFFSET_DESC)] = 0,
+    run_id: Annotated[
+        str | None,
+        Query(max_length=_CONTEXT_FILTER_MAX, description=_CONTEXT_RUN_DESC),
+    ] = None,
+    concept: Annotated[
+        str | None,
+        Query(max_length=_CONTEXT_FILTER_MAX, description=_CONTEXT_CONCEPT_DESC),
+    ] = None,
+):
+    """One page of the record's `DEC-41` level-4 companion. Reads, and nothing else.
+
+    NO FILTER IS REFUSED FOR BEING UNKNOWN, and that is the opposite of
+    ``list_activity``'s rule one route above — deliberately, because the two are
+    filtering on different KINDS of thing. Activity's ``action``, ``channel`` and
+    ``object_type`` are CLOSED server-owned vocabularies, so a value outside one
+    names nothing that could ever exist and an empty list would be a false claim
+    about the record. A ``concept`` is NOT a closed set here: ``extended_context``
+    admits a concept the registry has not examined — that is precisely the state
+    level 4 exists for — so refusing an unregistered concept would refuse a filter
+    that may legitimately match, and an empty result honestly means "this record
+    states nothing under that name".
+
+    The ``ETag`` is the RECORD's: the companion has no validator of its own, because
+    it lives inside the record's own document.
+    """
+    exp = ws.load_experiment(experiment_id, session_id=scope)
+    if exp is None:
+        return _not_found(experiment_id)
+    response.headers["ETag"] = exp.etag()
+    return extended_context_view.context_page(
+        exp, limit=limit, offset=offset, run_id=run_id, concept=concept
+    )
 
 
 # --- 14. graph status (memory plane) ------------------------------------------

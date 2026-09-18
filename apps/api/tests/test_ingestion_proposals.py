@@ -1964,7 +1964,20 @@ def test_DEC7_no_mcp_operation_or_tool_reaches_the_proposal_REVIEW_route():
     # failure mode §15 records.
     # 15 -> 16: MCP-005's `isaac_capture_transcript`. Still THE THIRD OF THREE SITES,
     # and all three were swept in this change too.
-    assert len(policy.PERMITTED_TOOL_NAMES) == 16
+    #
+    # ~~"THE THIRD OF THREE SITES"~~ — **THERE ARE FIVE, corrected 2026-09-18
+    # (`CTX-004`), and the count above is struck rather than edited because "all three
+    # were swept" is itself the checkable claim this comment makes.** The two it did
+    # not name are `test_an_agent_can_finish_a_run.py:510` (which did not exist when
+    # this was written) and `test_assistant_artifact_companion.py:166` (which asserts
+    # set EQUALITY against the manifest rather than a count, so it is a fifth site
+    # this count-shaped grep would never have found). All five are swept in this
+    # change, and the lesson is §15's own: *"all N artifacts are fixed" is itself a
+    # checkable claim*, and enumerating by grepping for the NUMBER misses the site
+    # that pins the same property a different way.
+    #
+    # 16 -> 17: `CTX-004`'s `isaac_get_extended_context`, a READ.
+    assert len(policy.PERMITTED_TOOL_NAMES) == 17
 
 
 # --- DEC-8: still_current is derived, never stored ----------------------------

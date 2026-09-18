@@ -114,7 +114,11 @@ def test_the_registry_is_exactly_the_permitted_set_in_both_directions():
     # transcript to ISAAC's own deterministic reader. It adds no artifact kind: its
     # two outputs are the note `isaac_capture_note` already produces and the open
     # proposal `isaac_propose_field_value` already produces, under the same scope.
-    assert len(PERMITTED_TOOL_NAMES) == 16
+    # 16 -> 17 for CTX-004's `isaac_get_extended_context`, a READ over the DEC-41
+    # level-4 companion. It is the first widening of this set that adds no write and no
+    # artifact kind at all: the companion already existed, was already durable and was
+    # already served on the wire, and no tool could reach it.
+    assert len(PERMITTED_TOOL_NAMES) == 17
 
 
 def test_no_forbidden_capability_is_registered_under_any_name():

@@ -1484,6 +1484,143 @@ export interface ApiArtifactsResponse {
   // exported" (`state: 'none'`) or "exported, but the artifact file is missing or
   // unreadable" (`state: 'stale'`). This is the field that tells them apart.
   artifact: ApiArtifactState;
+  /**
+   * The `DEC-41` level-4 **extended context companion** written beside the record —
+   * `records/<ULID>.context.json`. `CTX-004`.
+   *
+   * **THESE TWO KEYS WERE SERVED AND UNDECLARED.** `routes.get_artifacts` has always
+   * returned both; this interface named neither, so the companion was reachable from a
+   * client only as untyped JSON. Measured at `938e4829`:
+   * `rg --text --files-with-matches "extended_context|extendedContext" apps/web/src/`
+   * returned nothing at all.
+   *
+   * **`null` HERE DOES NOT MEAN THE RECORD HOLDS NO EXTENDED CONTEXT.** This key is the
+   * EXPORTED FILE, so it is `null` on every record that has not been exported, whatever
+   * that record's companion holds. The record's own durable companion is
+   * `GET /api/experiments/{id}/extended-context` (`api.getExtendedContext`), which
+   * answers from the moment it is written. Do not use this key to decide whether a
+   * record has extended context — use the other route's `present`/`entry_count`.
+   */
+  extended_context: Record<string, unknown> | null;
+  /**
+   * The companion's bare basename, or `null` when the file is not there.
+   *
+   * DELIBERATELY ASYMMETRIC WITH `record_filename`/`sidecar_filename`, and the server
+   * says why: those two name what the export ALWAYS writes, so reporting a basename for
+   * an absent one still describes the export. A companion is written only when there IS
+   * extended context, so a basename served for a record with none would name a file the
+   * export never wrote.
+   */
+  extended_context_filename: string | null;
+}
+
+/**
+ * ONE ENTRY of a record's `DEC-41` level-4 extended context companion. `CTX-004`.
+ *
+ * Mirrors `extended_context.ContextEntry.to_state()` verbatim. Every key is present on
+ * every entry, including the empty ones — the server's own rule, and its reason is worth
+ * keeping at this boundary too: omitting a `null` would make *"this reader looked and
+ * found no unit"* indistinguishable from *"this reader does not report units"*, and a
+ * review surface has to tell those apart.
+ *
+ * **NOTHING HERE IS AN OFFICIAL FIELD VALUE.** `is_official_field_value` is `false` on
+ * every entry, derived server-side from a property with no stored field behind it, so it
+ * is typed as the literal `false` rather than `boolean`: a client that branches on it is
+ * branching on a constant, which is the point.
+ */
+export interface ApiExtendedContextEntry {
+  entry_id: string;
+  /** The concept this statement is ABOUT. A registry name, or one it has not examined. */
+  concept: string;
+  /** **VERBATIM, AND NEVER REPLACED.** Do not parse, convert or normalise it here. */
+  raw_literal: string;
+  /** WHERE FROM — an archive-relative path or a document name, never an opaque id. */
+  source: string;
+  /** WHERE IN IT — a header key, a line number, a span. Scientist-readable. */
+  locator: string;
+  /** `DEC-41`'s level. 4 for every entry a companion can hold, checked server-side. */
+  placement_level: number;
+  /** The level's own words, from the server's `PLACEMENT_NAMES`. Never re-authored. */
+  placement_name: string;
+  scope: 'experiment' | 'run';
+  /** Set only when `scope` is `run`. */
+  run_id: string | null;
+  source_type: string;
+  /** Present ONLY when a stored named rule produced it. `null` means none was run. */
+  normalized_value: unknown;
+  unit: string | null;
+  /** Names the rule behind `normalized_value`. Required server-side whenever one ran. */
+  normalization_rule: string | null;
+  determinism: string;
+  profile_id: string | null;
+  profile_version: string | null;
+  /** How widely the SOURCE's statement applies. NOT the same claim as `scope`. */
+  reading_scope: string | null;
+  parser_id: string | null;
+  /** An instant the SOURCE states. Never a clock reading taken at build time. */
+  timestamp_utc: string | null;
+  /**
+   * Where the official schema's home for this CONCEPT is, per ISAAC's registry.
+   *
+   * **A POINTER TO THE REGISTRY, NEVER A DESTINATION FOR THE LITERAL BESIDE IT.** An
+   * entry at level 4 is precisely one whose information is NOT at that path. Rendering
+   * `raw_literal` as though it were this path's value is the single worst thing a
+   * surface can do with this type.
+   */
+  official_path: string | null;
+  /** Why this is in the companion at all, in the registry's own sentence. */
+  reason: string;
+  unresolved_questions: string[];
+  /** Always `false`. Typed as the literal, because it is derived and cannot be otherwise. */
+  is_official_field_value: false;
+}
+
+/**
+ * `GET /api/experiments/{id}/extended-context` — one bounded page plus the record's own
+ * totals. `CTX-004`.
+ *
+ * **READ `total`, NEVER `entries.length`.** The window bounds what is FETCHED, never what
+ * is CLAIMED. `total` is what the record holds, `matched` is what satisfied the filters,
+ * and `returned` is this page — only the last of the three describes the array.
+ */
+export interface ApiExtendedContextResponse {
+  entries: ApiExtendedContextEntry[];
+  /** How many entries the RECORD holds. Identical to `entry_count`, from one expression. */
+  total: number;
+  /** How many satisfied the filters, whatever this page returned. */
+  matched: number;
+  /** The length of `entries`. The only count here derived from the array. */
+  returned: number;
+  /** The limit actually used — a clamp is reported, never silent. */
+  limit: number;
+  offset: number;
+  has_more: boolean;
+  /** The companion's own full denial that any of this is official. Rendered verbatim. */
+  not_official: string;
+  /** `DEC-41`'s levels, served rather than transcribed. */
+  placement_hierarchy: Record<string, string>;
+  /**
+   * Whether a companion DOCUMENT exists — not whether it has readable content.
+   *
+   * A companion holding only entries this build cannot read is `present: true` with
+   * `entry_count: 0`, and the two must not be collapsed: that is exactly the case the
+   * server's "never discards" promise exists for.
+   */
+  present: boolean;
+  entry_count: number;
+  /**
+   * Stored rows the server could not read. Preserved in the record and COUNTED rather
+   * than rendered, because nothing can say what one contains without inventing it. A
+   * non-zero value means the record holds more than `entries` can ever show.
+   */
+  unreadable_entries: number;
+  concept_count: number;
+  run_count: number;
+  by_level: Record<string, number>;
+  generated_utc: string;
+  artifact_kind: string;
+  artifact_version: string;
+  open_domain_questions: string[];
 }
 
 export interface ApiDemoStep {

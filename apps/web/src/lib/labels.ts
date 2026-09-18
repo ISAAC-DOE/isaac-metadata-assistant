@@ -675,6 +675,35 @@ export const LABELS = {
   // different rows read as one undifferentiated list).
   recordIdentityEyebrow: 'Record Identity',
 
+  /*
+   * EXTENDED CONTEXT — the `DEC-41` level-4 companion, on the record screen. `CTX-004`.
+   *
+   * THE HEADING NAMES THE ARTIFACT AND NOT A JUDGEMENT. It is not "Extra Metadata",
+   * "Additional Fields" or "Unmapped Values": the first two imply fields, and the third
+   * implies something went wrong. Nothing here went wrong — the official ISAAC v1.05
+   * record simply has no field for this information, which is what level 4 means.
+   *
+   * `extendedContextSublabel` is the `.fg-sublabel` slot, which every collapsed section
+   * on this screen uses for the machine-side name of the thing (`assets`, and the draft
+   * blocks' own block keys). `level 4` is that name here: it is the level a scientist
+   * sees on a candidate in the import review, so the two surfaces say the same word.
+   */
+  extendedContextHeading: 'Extended Context',
+  extendedContextSublabel: 'level 4',
+  /*
+   * THE EMPTY STATE, AND IT MUST NOT READ AS AN ERROR OR A MISSING ARTIFACT.
+   *
+   * Almost every record has no extended context, because it arrives through historical
+   * import and through nothing else in this build. So this states a fact about the
+   * record and names no remedy, no absence of a file, and no action the reader should
+   * take. `routes.get_artifacts` deliberately keeps the companion out of its `stale`
+   * decision for this exact reason; this is that reasoning carried to the screen.
+   */
+  extendedContextEmpty:
+    'This record states no extended context. That is the ordinary case: extended ' +
+    'context is recorded when an import reads something the official ISAAC record has ' +
+    'no field for, and most records have nothing of the kind.',
+
   // Status chips
   chipVerified: 'Verified',
   chipConfirmed: 'Confirmed by You',

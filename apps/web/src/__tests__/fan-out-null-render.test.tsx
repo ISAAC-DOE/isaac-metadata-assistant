@@ -52,22 +52,77 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-/** Every rendered string that would betray an interpolated null. */
-const NULL_MARKERS = [
-  'null',
-  'undefined',
-  'NaN',
-  '[object Object]',
+/**
+ * Every rendered string that would betray an interpolated null.
+ *
+ * ***`NaN` IS MATCHED CASE-SENSITIVELY AND THE OTHERS ARE NOT — corrected 2026-09-18
+ * (`CTX-004`), because the case-insensitive form was a live FALSE POSITIVE on an
+ * ordinary English word this application uses in its own copy.*** Lowercasing `NaN`
+ * to `nan` makes it a substring of **"prove·nan·ce"**, and `BackendDown`'s Copy
+ * Diagnostics sentence says *"project memory provenance as text you can paste into a
+ * bug report"*. So any record screen that rendered that panel failed this assertion
+ * with the message *`rendered the literal "NaN"`* while rendering no such thing —
+ * which is worse than a miss: it sends a reader looking for an interpolation defect
+ * that does not exist. (Measured: the failure arrived the moment a newly-added
+ * sub-read had no fixture and the panel legitimately went to its API-down state.)
+ *
+ * **Case-sensitivity is not a weakening, and that is why it is the fix rather than an
+ * exemption.** A real interpolated `NaN` renders as the three characters `NaN` — that
+ * is what `String(NaN)` produces, and nothing in this application writes the token in
+ * any other casing. Lowercasing therefore bought no coverage at all and cost a whole
+ * class of English words. The other three stay case-insensitive because `null`,
+ * `undefined` and `[object Object]` really can arrive in either casing from a
+ * template literal, and none of them is a substring of a word a scientist reads.
+ *
+ * Each marker now carries HOW it is matched, so the next one added has to decide.
+ */
+const NULL_MARKERS: readonly { marker: string; caseSensitive: boolean }[] = [
+  { marker: 'null', caseSensitive: false },
+  { marker: 'undefined', caseSensitive: false },
+  { marker: 'NaN', caseSensitive: true },
+  { marker: '[object Object]', caseSensitive: false },
 ];
 
 function assertNoNullText(root: HTMLElement) {
   const text = root.textContent ?? '';
-  for (const marker of NULL_MARKERS) {
-    expect(text.toLowerCase(), `rendered the literal "${marker}"`).not.toContain(
-      marker.toLowerCase(),
-    );
+  for (const { marker, caseSensitive } of NULL_MARKERS) {
+    const haystack = caseSensitive ? text : text.toLowerCase();
+    const needle = caseSensitive ? marker : marker.toLowerCase();
+    expect(haystack, `rendered the literal "${marker}"`).not.toContain(needle);
   }
 }
+
+/**
+ * THE NEGATIVE CONTROL FOR THE CORRECTION ABOVE, because a guard made narrower has to
+ * prove it still catches what it is for. Without this, the case-sensitivity change
+ * would be indistinguishable from having deleted the `NaN` marker.
+ */
+describe('the null-marker guard itself', () => {
+  function textOnly(content: string): HTMLElement {
+    const node = document.createElement('div');
+    node.textContent = content;
+    return node;
+  }
+
+  it('still catches a REAL interpolated NaN', () => {
+    expect(() => assertNoNullText(textOnly('Exported · NaN'))).toThrow(/NaN/);
+  });
+
+  it('no longer fires on the word "provenance", which is the defect it had', () => {
+    // The exact sentence `BackendDown` renders, and the reason this file failed at all.
+    expect(() =>
+      assertNoNullText(
+        textOnly('copies this build’s version, route, viewport and project memory provenance'),
+      ),
+    ).not.toThrow();
+  });
+
+  it('still catches the other three in either casing', () => {
+    expect(() => assertNoNullText(textOnly('Exported · NULL'))).toThrow(/null/);
+    expect(() => assertNoNullText(textOnly('Exported · Undefined'))).toThrow(/undefined/);
+    expect(() => assertNoNullText(textOnly('[Object Object]'))).toThrow(/object Object/);
+  });
+});
 
 /**
  * The Evidence screen's bundle in one of two states, differing ONLY in whether the

@@ -756,6 +756,28 @@ def test_every_operation_has_a_summary_that_is_not_the_function_name(client):
     #
     #
     #
+    # ── 90 -> 91, 2026-09-18: `CTX-004`, ONE operation ─────────────────────────
+    # `GET /experiments/{experiment_id}/extended-context` (`CTX-004`), the
+    # READ surface over the `DEC-41` level-4 companion. READ-ONLY, and the only
+    # operation that slice adds: the companion is WRITTEN by historical import, never
+    # by a request of its own.
+    #
+    # WHY A ROUTE RATHER THAN A KEY ON THE DETAIL PAYLOAD. `GET .../artifacts` already
+    # served the companion and serves it only once a record is EXPORTED, so a record
+    # that had imported extended context and not yet exported had no read surface at
+    # all. Folding the entries into `_detail` instead would have put an up-to-1,000
+    # entry list into every record read, on a payload §11 records bounding twice.
+    #
+    # NO TABLE, NO MIGRATION, AND NO NEW STORAGE LOCATION — the companion already
+    # lived at `state["extended_context"]`, beside `draft` and outside it, for the
+    # reason `extended_context.STATE_KEY` gives. `db_write.OWNED_TABLES` is unchanged.
+    #
+    # THE TWO COUNTS THIS FILE HAS CONFLATED BEFORE: at this head the document has 81
+    # PATHS and 91 METHOD-OPERATIONS, and `checked` has always been the second. §11's
+    # standing instruction is to re-derive both and say which you mean rather than
+    # quoting either.
+    #
+    #
     # ── 89 -> 90, 2026-09-18: `ACT-004`, ONE operation ─────────────────────────
     # `GET /api/activity/summary` — the cross-experiment SUMMARY of the same
     # append-only history, which `DEC-44` authorizes in the same sentence that
@@ -778,8 +800,16 @@ def test_every_operation_has_a_summary_that_is_not_the_function_name(client):
     # `GET /api/experiments/{id}/activity` is not one: neither activity read is
     # exposed as a tool, so the agent surface's inventory is unmoved by this slice.
     #
+    # ── THE MERGE OF `ACT-004` AND `CTX-004`, AND WHY 90 WAS THE TRAP ──────────
+    # Both branches added exactly one operation and both therefore set this
+    # assertion to 90, each correct against its own base and each WRONG for the
+    # merge. Taking either side yields a number that looks measured, passes review,
+    # and fails only on the merge commit. Neither side was taken: both comment
+    # blocks above are kept because they document DIFFERENT operations, and the
+    # figure below was re-derived over `create_app().openapi()` on the merged tree.
+    #
     # MEASURED from `create_app().openapi()`, not derived from the line above it.
-    assert checked == 90, f"expected 90 documented operations, found {checked}"
+    assert checked == 91, f"expected 91 documented operations, found {checked}"
 
 
 def test_the_auto_summary_check_can_actually_fail(client):
@@ -1119,6 +1149,12 @@ EXPECTED_RESPONSE_CODES: dict[tuple[str, str], list[str]] = {
     # claim about the RECORD ("it has no such activity"); the honest answer is that no
     # such action, channel or object type exists.
     ("/api/experiments/{experiment_id}/activity", "get"): ["200", "401", "404", "422", "503"],
+    # `CTX-004`. The SAME five as `/activity` beside it, and that is a consequence of
+    # the route's shape rather than a copy: both are tutorial-scoped read-only reads
+    # over a record, so both declare the storage, auth and not-found responses, and
+    # both can be handed a query parameter FastAPI refuses (a negative `limit` or
+    # `offset` here). There is no `412` and no `428` because nothing is written.
+    ("/api/experiments/{experiment_id}/extended-context", "get"): ["200", "401", "404", "422", "503"],
     # The cross-experiment SUMMARY of that same history (`DEC-44`, ledger `ACT-004`).
     # THE SAME CODE SET AS THE PER-RECORD READ, and every member is there for the same
     # reason: no `412`/`428` because nothing is written, no `409` because there is

@@ -1392,6 +1392,28 @@ MAX_CANDIDATES_PER_SESSION = 4_000
 #:
 #: Over it, entries are dropped FROM THE TAIL and the number dropped is carried in
 #: :attr:`ArchiveReading.extended_context_dropped` — never trimmed silently.
+#:
+#: ***THAT SENTENCE WAS TRUE OF THE CEILING AND FALSE OF THE COUNTER, AND THE COUNTER IS
+#: NOW SPLIT RATHER THAN THE SENTENCE REWORDED — `CTX-004`, 2026-09-18.*** Until this
+#: change ``extended_context_dropped`` was incremented by TWO different causes: this tail
+#: cap, and the per-source ``(concept, source, literal)`` dedup in
+#: :func:`_extended_context_entries`. The attribute's own docstring said so correctly
+#: ("the per-source dedup and the tail cap"); this comment and that function's docstring
+#: both said "the tail", so the repository described one integer two incompatible ways and
+#: **no test pinned any of them**.
+#:
+#: It matters because the two facts have OPPOSITE significance to a scientist, and the
+#: disclosure `CTX-004` had to render could not be truthful over their sum. Hitting this
+#: ceiling means statements the archive made are **not in the record** and the reader's
+#: corpus is larger than the companion holds — actionable. The dedup means a literal
+#: repeated inside ONE file kept its first locator and lost the later ones — a SPEC
+#: acquisition names its motors once per scan, so a 22-scan file states the same value 22
+#: times, and thinning it destroys no statement. Reported as one number, a reader cannot
+#: tell whether anything was lost.
+#:
+#: So :attr:`ArchiveReading.extended_context_dropped` now means the tail cap ALONE, which
+#: is what this comment always claimed, and the dedup is
+#: :attr:`ArchiveReading.extended_context_thinned`.
 MAX_EXTENDED_CONTEXT_ENTRIES = 1_000
 
 #: Most manifest rows, unit rows or reading rows :func:`session_view` serves in
@@ -1587,10 +1609,32 @@ class ArchiveReading:
     #: their whole reason for existing is that the twelve level-4 concepts were read
     #: and then had nowhere to go. The candidate stream is UNCHANGED by this field.
     extended_context_entries: tuple[dict, ...] = ()
-    #: How many level-4 statements the per-source dedup and the tail cap dropped.
-    #: Carried so the list is never a trimmed one presented as whole — the same rule
-    #: :attr:`column_readings_dropped` follows.
+    #: How many level-4 statements the TAIL CAP dropped — ``MAX_EXTENDED_CONTEXT_ENTRIES``
+    #: and nothing else. Non-zero means statements this archive made are absent from the
+    #: companion, so the list is a trimmed one and must never be presented as whole.
+    #:
+    #: ~~"the per-source dedup and the tail cap"~~ — **NARROWED 2026-09-18 (`CTX-004`),
+    #: and the old wording is struck rather than edited because it was the ACCURATE
+    #: description of a counter two other comments described as the tail alone.** The two
+    #: causes are now separate fields; the argument for separating them is at
+    #: ``MAX_EXTENDED_CONTEXT_ENTRIES``. Narrowing was safe to do rather than merely
+    #: desirable: nothing read this field except :meth:`to_state`/:meth:`from_state` and
+    #: the constructor, and no test asserted over it — which is also how the conflation
+    #: survived.
     extended_context_dropped: int = 0
+    #: How many level-4 statements the per-source ``(concept, source, literal)`` dedup
+    #: thinned. **A different fact from :attr:`extended_context_dropped` and deliberately
+    #: not added to it.** Non-zero means a literal stated more than once INSIDE ONE source
+    #: kept its first locator and lost the later ones; no statement was lost and no
+    #: disagreement was settled, because two different sources are two different keys.
+    extended_context_thinned: int = 0
+    #: How many level-4 statements this BUILD could not place — ``check_placement`` or
+    #: ``ContextEntry``'s own construction refused them. **A third fact, and the one no
+    #: comment anywhere described before `CTX-004`.** It is not a bound and not a
+    #: duplicate: a larger ceiling and a re-import would both leave it unchanged. The
+    #: statements are still in the reader's evidence and in this reading's other counts;
+    #: what they are absent from is the companion.
+    extended_context_unplaceable: int = 0
     #: The naming profile the readers were run under, and its version. Recorded
     #: rather than assumed at a consumer, because `DEC-43`'s condition (ii) scopes
     #: the one nominal default in this programme to ONE profile id: a consumer that
@@ -1630,6 +1674,8 @@ class ArchiveReading:
             "shared_candidate_ids": list(self.shared_candidate_ids),
             "extended_context_entries": [dict(row) for row in self.extended_context_entries],
             "extended_context_dropped": self.extended_context_dropped,
+            "extended_context_thinned": self.extended_context_thinned,
+            "extended_context_unplaceable": self.extended_context_unplaceable,
             "profile_id": self.profile_id,
             "profile_version": self.profile_version,
             "by_concept": dict(self.by_concept),
@@ -1723,6 +1769,22 @@ class ArchiveReading:
             extended_context_dropped=state.get("extended_context_dropped")
             if isinstance(state.get("extended_context_dropped"), int)
             and not isinstance(state.get("extended_context_dropped"), bool)
+            else 0,
+            # A SESSION WRITTEN BEFORE THIS FIELD EXISTED HYDRATES TO 0, and 0 is the
+            # honest value rather than a lossy default: such a document's whole dropped
+            # count is in `extended_context_dropped`, where it was recorded under the
+            # union meaning. It cannot be split retroactively — the causes were never
+            # stored separately — and inventing a split here would be a guess (§5). A
+            # session is re-parsed rather than migrated, which `ArchiveReading.from_state`
+            # already relies on: an unreadable one "costs a re-parse and never a
+            # scientist's work".
+            extended_context_thinned=state.get("extended_context_thinned")
+            if isinstance(state.get("extended_context_thinned"), int)
+            and not isinstance(state.get("extended_context_thinned"), bool)
+            else 0,
+            extended_context_unplaceable=state.get("extended_context_unplaceable")
+            if isinstance(state.get("extended_context_unplaceable"), int)
+            and not isinstance(state.get("extended_context_unplaceable"), bool)
             else 0,
             profile_id=state.get("profile_id")
             if isinstance(state.get("profile_id"), str)
@@ -2244,7 +2306,12 @@ def read_archive(
     # a companion entry without inventing the determinism, the rule and the profile
     # it dropped. `evidence_by_source` holds the real `SourceEvidence`, so the
     # companion is built from the reading rather than from a projection of it.
-    context_entries, context_dropped = _extended_context_entries(evidence_by_source)
+    (
+        context_entries,
+        context_dropped,
+        context_thinned,
+        context_unplaceable,
+    ) = _extended_context_entries(evidence_by_source)
     reading = ArchiveReading(
         source_id=source.source_id,
         root_label=inventory.root_label,
@@ -2260,6 +2327,8 @@ def read_archive(
         shared_candidate_ids=tuple(shared_ids),
         extended_context_entries=context_entries,
         extended_context_dropped=context_dropped,
+        extended_context_thinned=context_thinned,
+        extended_context_unplaceable=context_unplaceable,
         # READ OFF THE PROFILE THAT WAS ACTUALLY USED, not declared. The filename
         # reader above is called without a ``profile_id``, so it runs under
         # ``profiles.DEFAULT_PROFILE_ID``; naming that constant here records which
@@ -2336,8 +2405,10 @@ def _archive_profile():
 
 def _extended_context_entries(
     evidence_by_source: Mapping[str, Sequence],
-) -> tuple[tuple[dict, ...], int]:
-    """`DEC-41` LEVEL-4 COMPANION ENTRIES FOR THIS ARCHIVE. ``(rows, dropped)``.
+) -> tuple[tuple[dict, ...], int, int, int]:
+    """`DEC-41` LEVEL-4 COMPANION ENTRIES FOR THIS ARCHIVE.
+
+    Returns ``(rows, dropped, thinned, unplaceable)`` — three counts, never one.
 
     **THE PRODUCER `CTX-002` LEFT UNBUILT.** `DEC-41` says a concept with no home at
     levels 1-3 lands in a structured ISAAC Extended Context companion; twelve of the
@@ -2375,6 +2446,21 @@ def _extended_context_entries(
 
     The tail is dropped at :data:`MAX_EXTENDED_CONTEXT_ENTRIES` and the count is
     returned, so the list is never a trimmed one presented as whole.
+
+    **THREE CAUSES ARE RETURNED SEPARATELY, AND THIS DOCSTRING USED TO REPORT ONLY THE
+    FIRST — `CTX-004`, 2026-09-18.** Until this change one integer, ``dropped``, was
+    incremented at three sites: the tail cap (what the paragraph above describes, and the
+    only one any comment mentioned), the per-source dedup two paragraphs above it, and the
+    ``except ValueError`` branch below for a statement this build cannot place at all. The
+    third was the one nothing anywhere described.
+
+    They are different facts with different significance — see
+    :data:`MAX_EXTENDED_CONTEXT_ENTRIES` for the argument — and a scientist-facing
+    disclosure over their sum cannot say which happened. ``dropped`` means statements are
+    absent because the archive exceeded a BOUND; ``thinned`` means a literal repeated
+    inside one source kept its first locator and lost the later ones, losing no statement;
+    ``unplaceable`` means this BUILD could not construct an entry. **They are never summed
+    here and must not be summed by a caller.**
     """
     from . import extended_context as ctx
     from .bl15 import mapping as mp
@@ -2382,6 +2468,8 @@ def _extended_context_entries(
     seen: set[tuple[str, str, str]] = set()
     rows: list[dict] = []
     dropped = 0
+    thinned = 0
+    unplaceable = 0
     for path in sorted(evidence_by_source):
         for item in evidence_by_source[path]:
             entry = mp.mapping_for(item.concept)
@@ -2389,7 +2477,11 @@ def _extended_context_entries(
                 continue
             key = (item.concept, item.source_path, item.raw_literal)
             if key in seen:
-                dropped += 1
+                # THINNED, NOT DROPPED. A duplicate reached before the ceiling and one
+                # reached after it are both counted here rather than there, because what
+                # happened to this statement is that an identical literal from the same
+                # source was already kept — the ceiling is not why it is absent.
+                thinned += 1
                 continue
             if len(rows) >= MAX_EXTENDED_CONTEXT_ENTRIES:
                 dropped += 1
@@ -2427,9 +2519,17 @@ def _extended_context_entries(
                 # over one statement would lose the other thousand. It is not lost
                 # either — the statement is still in the reader's evidence and in
                 # this reading's own counts.
-                dropped += 1
+                #
+                # UNPLACEABLE, AND THAT IS A THIRD FACT — `CTX-004`, 2026-09-18. This
+                # branch used to increment `dropped` too, so ONE integer carried the tail
+                # cap, the dedup AND this. It is the cause a reader would most want told
+                # apart from the other two: it means this build could not construct an
+                # entry for a statement the archive made, which is a property of the
+                # BUILD rather than of a bound, and no ceiling change or re-import would
+                # alter it.
+                unplaceable += 1
                 seen.discard(key)
-    return tuple(rows), dropped
+    return tuple(rows), dropped, thinned, unplaceable
 
 
 def _label_tokens_for(
@@ -3915,9 +4015,54 @@ def _corpus_review(session: "ImportSession") -> dict:
             # on distinct literals.
             "evidence_readings_dropped": reading.column_readings_dropped,
             "evidence_scope": sorted(REVIEW_COLUMN_CONCEPTS),
+            # `DEC-41` LEVEL 4, WITH ITS COSTS BESIDE IT — `CTX-004`.
+            #
+            # WHY IT IS HERE AT ALL. `ImportCorpusReview` already renders a candidate's
+            # `placement_name` verbatim, so a reader can see that a concept LANDS at
+            # level 4 — and then had no way to learn how much landed there, or what the
+            # reading declined to carry. `available` is the reading's own total; the
+            # three costs are the three reasons a statement the archive made is not
+            # among them.
+            #
+            # THREE COUNTS, NEVER SUMMED, because they mean different things to a
+            # reader: `dropped` is a BOUND (statements absent, a corpus larger than the
+            # companion holds), `thinned` is a repeated literal inside ONE source that
+            # kept its first locator (no statement lost), and `unplaceable` is this
+            # BUILD failing to construct an entry (no ceiling change would alter it).
+            # They were ONE integer until `CTX-004` measured the three sites — see
+            # `MAX_EXTENDED_CONTEXT_ENTRIES` for the full account.
+            #
+            # `ceiling` travels with them so a surface can say WHAT bound applied
+            # without transcribing the number, which is the rule `candidate_ceiling`
+            # two blocks away already follows.
+            #
+            # `not_official` IS SAID ON THE WIRE rather than left to a client, exactly
+            # as the import summary's own `extended_context` block says it: this is the
+            # one claim a surface must not get wrong about these entries.
+            "extended_context": {
+                "available": len(reading.extended_context_entries),
+                "dropped": reading.extended_context_dropped,
+                "thinned": reading.extended_context_thinned,
+                "unplaceable": reading.extended_context_unplaceable,
+                "ceiling": MAX_EXTENDED_CONTEXT_ENTRIES,
+                "not_official": _not_official_claim(),
+            },
             "mapping": _mapping_block(),
         }
     }
+
+
+def _not_official_claim() -> str:
+    """:data:`extended_context.NOT_OFFICIAL_CLAIM`, read rather than transcribed.
+
+    A local import for the reason every other one in this module is: it keeps the import
+    order flexible. Read rather than copied for the reason the whole companion exists —
+    a second copy of the artifact's own denial is a second thing that can be softened,
+    and this is the sentence that must not be.
+    """
+    from . import extended_context as ctx  # local: keeps import order flexible
+
+    return ctx.NOT_OFFICIAL_CLAIM
 
 
 def _mapping_block() -> dict:

@@ -57,6 +57,27 @@ export const BL15_COPY = {
   ceilingTitle: 'What Cannot Be Finished Here',
   ceilingLead:
     'Three requirements of the official schema that no source in this corpus can satisfy. This is stated up front because it does not change with review.',
+  /*
+   * `CTX-004` — the `DEC-41` level-4 block on the corpus review.
+   *
+   * IT NAMES THE LEVEL, and that is the point of the parenthetical rather than
+   * decoration: `MappingReview` directly above renders "Where this information
+   * lands: ISAAC Extended Context (level 4)" on each concept, so a reader who has
+   * just met that phrase meets the SAME two words again over the block that says how
+   * much landed there. Dropping "(level 4)" would break the only link between the two.
+   *
+   * IT IS TITLE CASE like every sibling in this object, and it deliberately does NOT
+   * say "additional metadata", "extra fields" or "other values": each of those would
+   * imply a field, and a level-4 entry is defined by the schema having none.
+   */
+  extendedContextTitle: 'Extended Context (Level 4)',
+  extendedContextLead:
+    'Statements this archive made that the official ISAAC record has no field for. ' +
+    'Each one keeps the source’s own words, which source they came from, and where ' +
+    'in it.',
+  extendedContextNoneLeftOut:
+    'Every level-4 statement this reading found is in the companion. Nothing was ' +
+    'left out.',
   evidenceTitle: 'Supporting sources',
   searchLabel: 'Search measurements',
   searchPlaceholder: 'Legacy number, sample, filename…',
