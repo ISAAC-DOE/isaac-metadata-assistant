@@ -22,11 +22,17 @@ import type { ApiActivityEvent, ApiActivityResponse } from '../lib/types';
  * method that could: `api.listActivity` has no sibling mutator because
  * `activity.py` exposes none. An event is recorded by the act it describes.
  *
- * `ACT-003b` ADDS NATIVE `<details>` DISCLOSURES AND NO WRITE. A `<summary>` IS a
- * button to `queryAllByRole('button')`, so the "no control that writes" test was
- * STRENGTHENED rather than loosened: it now asserts that every button in this panel
- * is a `<summary>` or the paging control, that none is a `submit`, and that `api`
- * still exposes exactly one activity method. Structure, not a promise.
+ * `ACT-003b` ADDS NATIVE `<details>` DISCLOSURES AND NO WRITE, and the test that
+ * says so was STRENGTHENED rather than left alone. MEASURED, not assumed:
+ * `<summary>` is NOT reported as a `button` by this environment's role mapping —
+ * the pre-existing `queryAllByRole('button') === 0` passes on a page holding two of
+ * them — so that number could not have seen a disclosure turn into a form control.
+ * The test now asserts over TAGS, which no role mapping can soften: on a row with a
+ * structured change there are ZERO `<button>` elements, ZERO
+ * `input`/`textarea`/`select`/`form` elements, and exactly two `<details>`, each
+ * with its own `<summary>`. `api` still exposes exactly one activity method.
+ * Structure, not a promise — and the description above is the assertion list the
+ * test body actually makes, not a summary of what it was meant to check.
  *
  * ── THE FOUR COUNTS ARE NEVER COLLAPSED ─────────────────────────────────────
  *
