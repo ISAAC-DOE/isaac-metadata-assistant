@@ -10276,7 +10276,7 @@
       },
       {
         "path": "apps/api/isaac_api/routes.py",
-        "sha256": "2fe64bc92139dbe9930159595cb23856032dd6c35ecbdf3e84fc157b1fe6096e"
+        "sha256": "d6d19a8830beb4ba2e6f9be1ed56cea20fd14840249eb0f53ff635dfff5f5409"
       },
       {
         "path": "apps/api/isaac_api/serialize.py",
@@ -10496,7 +10496,7 @@
       },
       {
         "path": "apps/web/src/components/icons.tsx",
-        "sha256": "7b200c11f00b9e35021b4c285c376241a8b7721028ab2f6cd8f0ccb2c9dc008b"
+        "sha256": "c1ade8d479aeb73a477427140531ba0b0d9769573e9bc85649e2ffd35c9806fc"
       },
       {
         "path": "apps/web/src/lib/adapt.ts",
@@ -10504,7 +10504,7 @@
       },
       {
         "path": "apps/web/src/lib/api.ts",
-        "sha256": "f1f3b53640d0af946e7d3723868aa105de9b1f1cdfe1989e24b2af7c521c2aa5"
+        "sha256": "bdb9c5cf8c39fb050944de7c04b7cd8c0aebb80d9c6195b6a49451c18fbbb892"
       },
       {
         "path": "apps/web/src/lib/assistant.ts",
@@ -10512,7 +10512,7 @@
       },
       {
         "path": "apps/web/src/lib/labels.ts",
-        "sha256": "74682b0add218a53b5f242f9ed0530802412b55d22bb70b302fdf8944a26891a"
+        "sha256": "16388c5a06331f4124de5d69e066eb16d99903959d2056a503ecd2b78d7a6a76"
       },
       {
         "path": "apps/web/src/lib/routes.ts",
@@ -10524,7 +10524,7 @@
       },
       {
         "path": "apps/web/src/lib/types.ts",
-        "sha256": "c9e551dcbc5894465433db5aa2f5ff85dbd34a06da9669be70a3916677a51956"
+        "sha256": "a63fa7c53aa66ba900f1f89f5ebce1c26bc8d47053b53450cd5459d998d8f893"
       },
       {
         "path": "apps/web/src/lib/useFetch.ts",
@@ -10572,7 +10572,7 @@
       },
       {
         "path": "apps/web/src/test/apiFixtures.ts",
-        "sha256": "5b56b0dd935a9cdd92ae3fd26bd2ec121e89d5ae78958315143f42776ba5b922"
+        "sha256": "6574e06a2a4d046ddef2eccf7c666958d16380d6bef0bce78a0bef00acaf2af8"
       },
       {
         "path": "apps/web/src/test/setup.ts",
@@ -11012,7 +11012,7 @@
       }
     ],
     "served_file_count": 200,
-    "served_manifest_fingerprint": "b56b531b8eebc0b5c525da081a7d33fb8f083a0444ebde48fe436d3a1ce3e29e"
+    "served_manifest_fingerprint": "609eb715de7a12d7d8ef3330b04dab3b7030d47fdfe686c5ed1152beec2a056b"
   },
   "overview": {
     "built_at_commit": "caab1d0a69c1733524bda5dde495623bc4b7bad1",

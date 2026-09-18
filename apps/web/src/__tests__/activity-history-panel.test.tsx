@@ -321,7 +321,26 @@ describe('the activity history panel', () => {
     expect(container.querySelectorAll('details')).toHaveLength(2);
     expect(container.querySelectorAll('details > summary')).toHaveLength(2);
     expect('listActivity' in api).toBe(true);
-    expect(Object.keys(api).filter((k) => /activity/i.test(k))).toEqual(['listActivity']);
+    /*
+     * WIDENED, NOT WEAKENED, 2026-09-18 (`ACT-004`). The list used to read
+     * `['listActivity']` and its SUBJECT — that `api` exposes no activity mutator
+     * at all — is unchanged. What changed is that a SECOND activity method now
+     * exists, `getActivitySummary`, the cross-experiment summary read; asserting
+     * the old single-element list would have failed for the right reason and been
+     * "fixed" by appending a name, which is how an inventory guard quietly stops
+     * being one.
+     *
+     * So the set is pinned AND every member is separately asserted to be a read:
+     * a future `recordActivity`, `reviseActivity` or `deleteActivity` fails BOTH
+     * halves, and a name that merely slips past the enumeration still fails the
+     * verb ban.
+     */
+    const activityMethods = Object.keys(api).filter((k) => /activity/i.test(k)).sort();
+    expect(activityMethods).toEqual(['getActivitySummary', 'listActivity']);
+    for (const name of activityMethods) {
+      expect(name).toMatch(/^(get|list)/);
+      expect(name).not.toMatch(/record|append|revise|replace|delete|write|save|update/i);
+    }
   });
 
   it('reports a failed read without claiming the history is empty', async () => {

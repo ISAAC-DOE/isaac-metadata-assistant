@@ -49,6 +49,7 @@ from isaac_records.portal_warnings import portal_warnings
 from . import __version__
 from . import activity
 from . import activity_history
+from . import activity_summary
 from . import artifact_link
 from . import assets
 from . import assistant_query
@@ -12805,6 +12806,132 @@ def list_activity(
                 "object_types": sorted(activity.ACTIVITY_OBJECT_TYPES),
             },
         )
+
+
+_ACTIVITY_SUMMARY_WINDOW_DESC = (
+    "How many days back the window reaches, counted from the instant this request "
+    "is served. The window is echoed in full as `window.since_utc` and "
+    "`window.computed_at_utc`, so a client labels the figure from the same payload "
+    "the figure came out of."
+)
+
+
+@router.get(
+    "/activity/summary",
+    tags=[TAG_EXPERIMENTS],
+    summary="Summarize Activity Across the Workspace",
+    description=(
+        "How much has been recorded across this workspace's records recently — a "
+        "**summary of the append-only activity history, never a substitute for "
+        "it**. Read-only.\n\n"
+        "`DEC-44` is explicit in both directions: a summary may be derived from "
+        "the history, and the history remains the source of truth. So every figure "
+        "here is a COUNT OF EVENTS. No event id, no `before`/`after` pair and no "
+        "act is reconstructable from this payload; each `changed_records` row "
+        "carries the `experiment_id` a reader follows to "
+        "`GET /api/experiments/{experiment_id}/activity`, which is where the acts "
+        "themselves live.\n\n"
+        "**THE WINDOW IS DECIDED HERE, AT REQUEST TIME, AND TRAVELS WITH THE "
+        "FIGURE.** \"This week\" depends on a clock and two clocks disagree, so "
+        "`window.since_utc` and `window.computed_at_utc` are served beside "
+        "`window.days`. The window is INCLUSIVE of its start and has no upper "
+        "bound — an event counts when its `recorded_utc` is at or after "
+        "`since_utc`. Clamping the top at \"now\" would create a silent third "
+        "bucket for an event timestamped in the future.\n\n"
+        "**EVERY TOTAL IS A TOTAL OVER `scope.experiments_summarized`, WHICH MAY "
+        "BE FEWER THAN THE WORKSPACE HOLDS.** Summarizing is O(workspace), so it "
+        "is bounded: `scope.experiment_limit` records are read, the most recently "
+        "created first (`scope.selection`), and `scope.truncated` is `true` when "
+        "the scope held more. A summary computed over a truncated set that read as "
+        "complete would be a false claim about how much work exists, so the "
+        "truncation is in band rather than implied.\n\n"
+        "`scope.hydration_complete` is `false` when a durably-stored record could "
+        "not be restored before this read, in which case the totals describe fewer "
+        "records than the workspace has and the response also carries the same "
+        "`incomplete` block `GET /api/experiments` serves. **A short summary is "
+        "evidence about this read, never an inventory.**\n\n"
+        "**`attribution` REPORTS EVENT COUNTS AND THE NAMES ACTUALLY RECORDED — "
+        "NEVER A NUMBER OF PEOPLE.** Every event in every deployment of this build "
+        "carries `actor: \"unattributed\"`: no trusted authentication boundary "
+        "exists, and a name read from a forwarded header would be a forgeable "
+        "claim rendered as a fact. So `attributed_actors` is an empty list here, "
+        "and there is deliberately no count of collaborators — `0` there would be "
+        "a claim about the people when the true statement is about the "
+        "deployment.\n\n"
+        "**Two kinds of unreadable are counted separately and neither is "
+        "dropped.** `totals.unreadable_entries` counts stored entries the model "
+        "could not read at all (preserved verbatim in the record, counted rather "
+        "than rendered, exactly as the per-record route reports them). "
+        "`totals.events_with_unreadable_timestamp` counts readable events whose "
+        "stored timestamp could not be parsed: they are inside "
+        "`events_all_time` and in NEITHER window bucket, because placing one "
+        "inside or outside the window would be a guess.\n\n"
+        "**EVERY BREAKDOWN IS WINDOW-SCOPED, AND `totals.events_all_time` IS THE "
+        "ONLY ALL-TIME FIGURE HERE.** `by_action`, `by_channel`, `by_object_type`, "
+        "their ranked slices and every `changed_records` row count all describe "
+        "events inside `window` and nothing outside it. A label rendered over any "
+        "of them therefore has to name the window: a breakdown summing to 12 "
+        "displayed under an all-time total of 5,000 reads as a description of the "
+        "5,000, which is a false claim assembled out of two true numbers.\n\n"
+        "`changed_records.total` is how many records changed in the window and is "
+        "independent of how many rows this response carries "
+        "(`changed_records.returned`). `actions_with_events` and "
+        "`channels_with_events` are the true numbers of distinct kinds seen, so a "
+        "client showing the first few never takes a count from a list; there is "
+        "deliberately no `object_types_with_events`, because no surface renders "
+        "that map and a count with no consumer is a figure waiting to go stale. "
+        "`actions`, `channels` and `object_types` are the server's own bounded "
+        "vocabularies, served rather than transcribed.\n\n"
+        "Nothing here mutates, validates, gates or classifies anything, and there "
+        "is no operation anywhere that edits or deletes an activity event."
+    ),
+    response_description=(
+        "One bounded, self-describing summary of the workspace's recorded "
+        "activity: the window it used, the records it covered, the counts over "
+        "exactly those records, and the busiest changed records with the ids "
+        "needed to reach their own histories."
+    ),
+    responses={**_R_STORAGE_UNAVAILABLE, **_R_UNAUTHORIZED, **_R_TUTORIAL_SCOPE},
+)
+def summarize_activity(
+    scope: TutorialScopeDep,
+    window_days: Annotated[
+        int,
+        Query(
+            ge=1,
+            le=activity_summary.WINDOW_DAYS_MAX,
+            description=_ACTIVITY_SUMMARY_WINDOW_DESC,
+        ),
+    ] = activity_summary.DEFAULT_WINDOW_DAYS,
+) -> dict:
+    """The cross-experiment activity summary. No write, no clock in the model.
+
+    ``now`` IS READ HERE AND PASSED IN, so :func:`activity_summary.summarize` stays
+    pure and its window boundary is testable. Nothing computes a boundary at import
+    time, which is the drift this arrangement exists to prevent.
+
+    ONE READ OF ONE SNAPSHOT. ``list_experiments_with_hydration`` is called once and
+    both the rows and the completeness answer come out of it, so the summary and its
+    own disclosure cannot describe two different reads — the hazard the reset
+    preflight records for building two rows from two reads.
+    """
+    experiments, hydration = ws.list_experiments_with_hydration(scope)
+    # ONE SOURCE FOR THE COMPLETENESS ANSWER. `scope.hydration_complete` and the
+    # `incomplete` block are the same fact at two levels of detail, and they are
+    # derived from this one expression so they cannot disagree: the block is the
+    # established shape `GET /api/experiments` already serves (absent when whole),
+    # and the boolean is what stops the summary's own scope block from overstating
+    # what it covered.
+    disclosure = _hydration_disclosure(hydration)
+    body = activity_summary.summarize(
+        experiments,
+        now=datetime.now(timezone.utc),
+        window_days=window_days,
+        hydration_complete=disclosure is None,
+    )
+    if disclosure is not None:
+        body["incomplete"] = disclosure
+    return body
 
 
 @router.post(

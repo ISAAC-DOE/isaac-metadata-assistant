@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import './activityHistory.css';
 import { api } from '../lib/api';
-import { LABELS } from '../lib/labels';
+import { LABELS, humanizeActivityToken as humanizeToken } from '../lib/labels';
 import type { ApiActivityEvent, ApiActivityResponse } from '../lib/types';
 
 /**
@@ -65,22 +65,45 @@ import type { ApiActivityEvent, ApiActivityResponse } from '../lib/types';
  * rather than picked silently.
  */
 
-/** The server's vocabularies arrive as snake_case tokens; this is the ONLY place
- *  they are turned into words, and it invents no vocabulary of its own.
+/* THE HUMANIZER MOVED TO `lib/labels.ts`, and this note is why rather than a
+ * silent import.
  *
- *  A token with no entry is HUMANIZED generically rather than dropped or shown
- *  raw — `Title Case` from its own segments, so a server that adds an action keeps
- *  working and a scientist still reads English. That mirrors the humanizer
- *  `assistant_query` already uses, and the reason is `CLAUDE.md` §11's measured
- *  rule: a bare internal identifier rendered at a scientist is a defect, and the
- *  fix is the words the token already contains — never a guess at what it meant. */
-function humanizeToken(token: string): string {
-  return token
-    .split('_')
-    .filter((part) => part.length > 0)
-    .map((part) => (part === 'qc' ? 'QC' : part.charAt(0).toUpperCase() + part.slice(1)))
-    .join(' ');
-}
+ * It was defined HERE, with a comment saying "this is the ONLY place they are
+ * turned into words" — true when it was written, and it stopped being true the
+ * moment a SECOND surface rendered the same server vocabularies (`ACT-004`'s
+ * activity summary on the Statistics Overview tab). Copying six lines would have
+ * made two functions that agree today and are free to disagree later, which is
+ * the defect this repository records as "one vocabulary, three copies": a rename
+ * strands every copy but the one the author was looking at.
+ *
+ * So there is still exactly ONE humanizer for these tokens, and it is now
+ * somewhere both surfaces can reach.
+ *
+ * ~~Its behaviour is unchanged — the `activity-history-panel` suite passes against
+ * it untouched, which is the check that matters for a move.~~ **FALSE, and
+ * corrected rather than deleted, because "behaviour is unchanged" is exactly the
+ * claim a future session would rely on when judging whether this move was safe.**
+ * The shared version added an initialism map, so a row on the `mcp` channel moved
+ * **"Mcp" -> "MCP"** on THIS panel as well as on the Statistics summary that
+ * prompted the map. The change is an improvement and is deliberate; the suite
+ * passing is true and was never evidence of no change, because no test named
+ * either spelling. What IS unchanged: every other token, and the fact that every
+ * output word is an input word — casing only, so no name is invented.
+ *
+ * ── THE WHOLE DELTA, MEASURED, AND IT REACHES `humanizeKeyName` BELOW ──────
+ *
+ * Both implementations were run over all 20 actions, all 10 object types, all 4
+ * channels and 7 plausible structured-value keys — 41 tokens. **3 differ, and all
+ * 3 are the `mcp` segment:** `mcp` -> "Mcp"/"MCP" (the channel, and a key of that
+ * name) and `mcp_tool` -> "Mcp Tool"/"MCP Tool". Nothing else moves.
+ *
+ * That last one is the part a future session meets HERE rather than on the
+ * Statistics summary: `humanizeKeyName` just below gates on `BARE_IDENTIFIER` and
+ * then calls this humanizer, so a KEY inside a stored structured value named `mcp`
+ * or `mcp_*` now renders with the initialism too. That is a change to the caller
+ * this file gained in the same week, it is deliberate, and it is casing-only — but
+ * it is a change, and this block exists because the previous sentence claiming
+ * otherwise was false. */
 
 /**
  * A BARE INTERNAL IDENTIFIER, AND NOTHING ELSE.
