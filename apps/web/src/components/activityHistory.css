@@ -80,19 +80,33 @@
   flex-wrap: wrap;
   align-items: baseline;
   gap: var(--space-sm);
+  /* See the note below: a flex container whose children cannot shrink propagates
+     their min-content width outward. */
+  min-width: 0;
 }
 
 .activity-action {
   font-size: var(--font-size-body);
   font-weight: var(--font-weight-bold);
   color: var(--text-heading);
+  overflow-wrap: anywhere;
+  min-width: 0;
 }
 
+/* `overflow-wrap: anywhere` ON EVERY HEAD SPAN, and `min-width: 0` on the row so a
+   flex child may actually shrink to its wrapped width. Without the pair, an
+   unbreakable token sets a min-content floor for the whole content column and clips
+   the WORKFLOW SPINE above — CI measured `scrollWidth 200 vs clientWidth 1` on
+   `span.spine-meta`, a sibling this panel never touches. A too-wide child clips its
+   neighbours rather than itself, which is why the failure named someone else's
+   selector. */
 .activity-object,
 .activity-channel,
 .activity-when {
   font-size: var(--font-size-meta);
   color: var(--text-muted);
+  overflow-wrap: anywhere;
+  min-width: 0;
 }
 
 .activity-field,

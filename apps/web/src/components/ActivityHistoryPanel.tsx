@@ -73,6 +73,38 @@ function describeSide(side: { present: boolean; value: unknown }): string {
   return JSON.stringify(value);
 }
 
+/**
+ * A timestamp a scientist reads, with the machine value kept where machines look.
+ *
+ * TWO DEFECTS IN ONE, both found by registering this surface for the responsive
+ * sweep (`ACT-003`'s own accepted round trip), and both mine:
+ *
+ *  1. LAYOUT. The raw `recorded_utc` is an unbreakable ~20-character token
+ *     (`2099-01-01T00:00:00Z`) in a `flex-wrap` row with no `overflow-wrap`, so it
+ *     sets a min-content floor that widened the content column and squeezed the
+ *     workflow spine's own flex children — CI reported `scrollWidth 200 vs
+ *     clientWidth 1` on `span.spine-meta`, a sibling ABOVE this panel. A too-wide
+ *     child clips its neighbours, not itself.
+ *  2. COPY. An ISO-8601 string with a `T` and a `Z` is a WIRE FORMAT. Rendering it
+ *     at a scientist is the same defect class as rendering `Q6` — `CLAUDE.md` §11's
+ *     rule — and it was hiding behind a real layout failure.
+ *
+ * `toLocaleString` is used with an explicit option set rather than a hand-rolled
+ * format, so this invents no date vocabulary; an unparseable value falls back to the
+ * stored string rather than to a guess or an empty cell.
+ */
+function readableWhen(iso: string): string {
+  const at = new Date(iso);
+  if (Number.isNaN(at.getTime())) return iso;
+  return at.toLocaleString(undefined, {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
 function EventRow({ event }: { event: ApiActivityEvent }) {
   const showsChange = event.before.present || event.after.present;
   return (
@@ -84,8 +116,10 @@ function EventRow({ event }: { event: ApiActivityEvent }) {
             shown plainly: a scientist can tell their own typing from an agent's
             write and from an archive import. */}
         <span className="activity-channel">{humanizeToken(event.channel)}</span>
+        {/* The machine value stays in `dateTime` — that attribute exists for it —
+            so nothing is lost by showing the readable form. */}
         <time className="activity-when" dateTime={event.recorded_utc}>
-          {event.recorded_utc}
+          {readableWhen(event.recorded_utc)}
         </time>
       </p>
       {event.field_path && <p className="activity-field">{event.field_path}</p>}
