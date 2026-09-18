@@ -71,7 +71,7 @@ import unicodedata
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterable
 
 from isaac_records.complete import apply_answers
 from isaac_records.draft_validator import validate_draft
@@ -81,9 +81,11 @@ from isaac_records.ids import is_record_id, new_record_id
 from isaac_records.models import derivation
 
 from . import activity as activity_module
+from . import extended_context as extended_context_module
 from . import notes as notes_module
 from . import proposals as proposals_module
 from .activity import ActivityEvent
+from .extended_context import ContextEntry, ExtendedContext
 from .notes import Note
 from .proposals import IngestionProposal
 
@@ -1871,6 +1873,36 @@ def _activity_state_payload(exp: "Experiment") -> list:
     return [event.to_state() for event in activity_module.sorted_events(exp.activity)] + list(
         exp.unreadable_activity
     )
+# --- the structured ISAAC Extended Context companion (DEC-41 level 4) ---------
+#
+# The companion lives inside the experiment's state document at
+# ``extended_context.STATE_KEY``, BESIDE ``draft`` and outside it, exactly where
+# ``proposals`` and ``notes`` sit and for the reason that module's own STATE_KEY
+# comment gives: the draft is what export reads, so a companion stored outside it
+# makes "level 4 never gates export" STRUCTURAL rather than asserted. NO DATABASE
+# TABLE AND NO MIGRATION IS ADDED — the state document is already upserted whole
+# into ``isaac_experiments.state``, so a new key inside it needs no DDL, and
+# ``db_write.OWNED_TABLES`` is UNCHANGED.
+
+
+def _extended_context_state_payload(exp: "Experiment") -> dict | None:
+    """What to store at ``extended_context.STATE_KEY``, or ``None`` for nothing.
+
+    ONE function, used by both :meth:`Experiment.to_state` and
+    :func:`_authoritative_signature`, so what is persisted and what is hashed cannot
+    drift apart — :func:`_note_state_payload`'s arrangement, for its reason. The
+    unreadable raw entries are inside the payload (``ExtendedContext.to_state``
+    writes them) and are therefore in BOTH: they are part of the document and must
+    survive a save, so they must also be part of the state whose change is detected.
+
+    ``None`` RATHER THAN AN EMPTY DOCUMENT, and that is the property that makes this
+    key free of a migration AND free of a spurious ``rev`` bump:
+    ``extended_context.state_payload`` answers ``None`` for an experiment with no
+    entries and none it could not read, so an experiment that has never had extended
+    context hashes and serialises byte-identically to one written before this key
+    existed.
+    """
+    return extended_context_module.state_payload(exp.extended_context)
 
 
 def _authoritative_signature(exp: "Experiment") -> str:
@@ -2040,6 +2072,59 @@ def _authoritative_signature(exp: "Experiment") -> str:
         # the staged events only on the branch that writes. So an event can never be
         # silently dropped by a save that did not happen, because a save that did not
         # happen never committed one.
+        # EXTENDED CONTEXT IS *INSIDE* THIS PAYLOAD, AND THE DECISION IS ARGUED
+        # HERE RATHER THAN ASSUMED, BECAUSE BOTH ANSWERS ARE DEFENSIBLE AND ONE OF
+        # THEM SILENTLY LOSES DATA.
+        #
+        # ``save_versioned`` WRITES NOTHING and returns ``False`` when this hash is
+        # unchanged. So a save whose only change is a companion entry would be a
+        # silent no-op if this key were absent — the route would answer 200, the
+        # entries would be set in memory, and they would never reach disk. That is
+        # exactly the argument ``folder`` rests on four keys up, and it is the
+        # mechanical half.
+        #
+        # THE CLASS ARGUMENT IS THE OTHER HALF, and it is why the ``activity``
+        # answer (OUTSIDE, with a staging mechanism) is the wrong precedent here. An
+        # activity event is ``answer_log``'s class: an audit trail of acts, appended
+        # by every write path, so including it would make every idempotent re-entry
+        # look like a change and would need staging at two dozen call sites. A
+        # companion ENTRY is not a trail of acts — it is CONTENT THE EXPERIMENT
+        # HOLDS, in the same class as a ``note`` and a ``proposal``: it is written
+        # only by an explicit producer, it is scientifically meaningful (it is the
+        # provenance-backed metadata the official record has no field for), and
+        # adding one changes what this experiment will publish in its companion
+        # artifact. Being inside also makes the ``If-Match`` contract hold: a second
+        # client holding the pre-import ETag is refused rather than silently
+        # overwriting an import's provenance.
+        #
+        # NO STAGING IS THEREFORE NEEDED, and that is the point of choosing inside:
+        # staging exists only to make an outside-the-signature key survive a no-op
+        # save, and a key that IS in the signature cannot be dropped by one.
+        #
+        # WHAT IT DOES *NOT* DO, which is the reason including it is safe and is the
+        # disclosure ``conflict_resolution``'s location has to make and this one
+        # does not: it does NOT reach ``submissions.content_signature``, which is
+        # computed from ``export_units()`` and the record's stored conflict
+        # decisions (both inside ``draft``) and never reads this key. So adding a
+        # companion entry bumps ``rev``, invalidates held ETags and emits an
+        # ``experiment`` change-feed event, while leaving an exported artifact
+        # `current` and a submitted revision still submitted — exactly as a rename
+        # or a folder move does. ``test_extended_context_wiring.py`` asserts that
+        # over the digest itself rather than arguing it.
+        #
+        # CHURN IS CONTROLLED BY THE PRODUCER, NOT BY EXCLUSION. Entry ids are
+        # derived from the statement each entry came from, so re-running an import
+        # over the same archive merges zero new entries and this hash does not move
+        # (see ``Experiment.add_extended_context_entries``, which is idempotent by
+        # ``entry_id``).
+        #
+        # An experiment written before this key existed hashes with
+        # ``"extended_context": None``, and so does the same experiment re-read from
+        # disk (``state_payload`` answers ``None`` for an empty companion), so the
+        # added key causes NO spurious rev bump on legacy state — the same property
+        # runs, notes and proposals each relied on, and pinned by the same kind of
+        # test.
+        "extended_context": _extended_context_state_payload(exp),
     }
     blob = json.dumps(payload, sort_keys=True, ensure_ascii=False)
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()
@@ -3486,6 +3571,33 @@ class Experiment:
     #: event describes a change that has not landed; writing one out would record an
     #: act that may never happen.
     _staged_activity: list["ActivityEvent"] = field(default_factory=list)
+    #: THE STRUCTURED ISAAC EXTENDED CONTEXT COMPANION — `DEC-41` level 4.
+    #:
+    #: ``None`` means *this experiment has no companion*, which is the state of every
+    #: record written before this key existed and of every record an import has
+    #: never touched. It is deliberately ``None`` rather than an empty
+    #: :class:`~isaac_api.extended_context.ExtendedContext`, because
+    #: ``extended_context.state_payload`` answers ``None`` for both and a single
+    #: representation of "nothing" is one fewer thing that can disagree.
+    #:
+    #: NOT part of the draft, and that is a boundary rather than a filing decision:
+    #: ``draft`` is what export reads, so a companion entry is inert to
+    #: ``export.transform``, absent from ``submissions.content_signature`` and absent
+    #: from every run's ``resolved_run_draft`` — structurally, because nothing that
+    #: exports looks here. ``src/isaac_records/``, ``schema/`` and
+    #: ``isaac_api.export`` are untouched by it.
+    #:
+    #: **AND IT *IS* PART OF** :func:`_authoritative_signature`, which is the same
+    #: choice notes and proposals made and the OPPOSITE of the one ``activity``
+    #: makes. The argument is at that function's ``extended_context`` note; the short
+    #: form is that ``save_versioned`` writes nothing when the signature is
+    #: unchanged, so a companion outside it would make every import's provenance a
+    #: silent no-op.
+    #:
+    #: WRITTEN ONLY BY :meth:`add_extended_context_entries`, which is idempotent by
+    #: ``entry_id`` and never removes an entry: a provenance artifact that could lose
+    #: an entry is worse than none.
+    extended_context: "ExtendedContext | None" = None
 
     def __post_init__(self) -> None:
         # Legacy-safe default: a pre-P27.2 state file (or a bare construction)
@@ -3572,7 +3684,7 @@ class Experiment:
     # -- persistence --
 
     def to_state(self) -> dict:
-        return {
+        state: dict = {
             "id": self.id,
             "title": self.title,
             "created_utc": self.created_utc,
@@ -3633,6 +3745,20 @@ class Experiment:
             # event describes a change that has not landed.
             activity_module.ACTIVITY_STATE_KEY: _activity_state_payload(self),
         }
+        # OMITTED ENTIRELY WHEN THERE IS NOTHING TO STORE, and that is the OPPOSITE
+        # of the ``folder`` rule two keys up — deliberately, and for a reason
+        # ``folder`` does not have. ``folder: ""`` is written always because "no
+        # folder" and "written by a build without folders" both hydrate to ``""``
+        # anyway, so the omission would buy nothing. Here the omission buys the one
+        # property this whole key rests on: **an experiment with no extended context
+        # serialises BYTE-IDENTICALLY to one written before the companion existed.**
+        # That is what makes "no migration is required" a fact about the bytes rather
+        # than a claim about the reader, and it is what
+        # ``test_extended_context_wiring.py`` asserts over the raw document.
+        payload = _extended_context_state_payload(self)
+        if payload is not None:
+            state[extended_context_module.STATE_KEY] = payload
+        return state
 
     def save(self) -> None:
         """Persist this experiment's state, durably when the deployment has a database.
@@ -4068,6 +4194,60 @@ class Experiment:
             )
         self.proposals.append(proposal)
         return proposal
+
+    def add_extended_context_entries(
+        self, entries: "Iterable[ContextEntry]", *, generated_utc: str = ""
+    ) -> int:
+        """Merge companion entries into this experiment IN MEMORY. Does not save.
+
+        Returns HOW MANY WERE ACTUALLY ADDED, which is what the caller needs in order
+        to decide whether a save is warranted — and returning a count rather than
+        ``None`` is what lets a re-run of an import be a genuine no-op instead of a
+        revision that says nothing changed.
+
+        **IDEMPOTENT BY ``entry_id``, AND THAT IS THE CHURN CONTROL THE SIGNATURE
+        DECISION DEPENDS ON.** Extended context is inside
+        :func:`_authoritative_signature`, so a producer that minted a fresh id per run
+        would make every re-import a write. An entry id already present is skipped
+        whole — not compared, not merged field-by-field, not overwritten: the stored
+        entry is the one an earlier import recorded, and a later reading of the same
+        statement has nothing to add that would not be a silent rewrite of
+        provenance.
+
+        **NOTHING IS EVER REMOVED OR REPLACED**, by design and by absence: there is no
+        ``remove_extended_context_entry`` and no ``replace_extended_context_entry``.
+        The entries a reader could not parse (``ExtendedContext.unreadable``) are
+        likewise carried through untouched.
+
+        ``generated_utc`` STAMPS THE COMPANION ONLY ON FIRST CREATION and is supplied
+        by the caller, because this module reads no clock and
+        :mod:`isaac_api.extended_context` reads none either. A later merge leaves the
+        original stamp alone — the companion's stamp says when it was first built, and
+        re-stamping it on every append would make an unchanged companion look freshly
+        derived.
+        """
+        existing = self.extended_context
+        known = (
+            {entry.entry_id for entry in existing.entries} if existing is not None else set()
+        )
+        fresh = [entry for entry in entries if entry.entry_id not in known]
+        if not fresh:
+            return 0
+        if existing is None:
+            self.extended_context = ExtendedContext(
+                experiment_id=self.id,
+                entries=tuple(fresh),
+                generated_utc=generated_utc,
+            )
+        else:
+            self.extended_context = ExtendedContext(
+                experiment_id=existing.experiment_id or self.id,
+                entries=existing.entries + tuple(fresh),
+                generated_utc=existing.generated_utc or generated_utc,
+                artifact_version=existing.artifact_version,
+                unreadable=existing.unreadable,
+            )
+        return len(fresh)
 
     def replace_proposal(self, proposal: "IngestionProposal") -> None:
         """Swap in a revised proposal IN MEMORY, by id. Does not save.
@@ -4991,6 +5171,27 @@ class Experiment:
         # them is the one thing `CLAUDE.md` §5 forbids outright.
         exp.activity, exp.unreadable_activity = _hydrate_activity(
             state.get(activity_module.ACTIVITY_STATE_KEY)
+        )
+        # NO MIGRATION IS REQUIRED FOR EXTENDED CONTEXT EITHER, for the reason stated
+        # above the ``runs`` line and restated for notes and proposals: the key is read
+        # with ``.get`` and a default, so a document written before the companion
+        # existed hydrates to ``None`` — and hashes with
+        # ``"extended_context": None``, so the added signature key causes no spurious
+        # rev bump on legacy state.
+        #
+        # ``hydrate`` NEVER RAISES AND NEVER DISCARDS: an entry this build cannot read
+        # is carried verbatim in ``ExtendedContext.unreadable`` and written back out by
+        # ``to_state``. §11's rule — a malformed PERSISTED value is READ, not refused,
+        # because the reader did nothing wrong — and it matters more here than usual,
+        # because the thing at stake is provenance nobody can reconstruct.
+        #
+        # ``None`` IS PRESERVED AS ``None`` rather than normalised to an empty
+        # companion, so a legacy document round-trips byte-identically.
+        stored_context = state.get(extended_context_module.STATE_KEY)
+        exp.extended_context = (
+            extended_context_module.hydrate(stored_context, experiment_id=exp.id)
+            if stored_context is not None
+            else None
         )
         return exp
 

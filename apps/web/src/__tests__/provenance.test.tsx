@@ -101,13 +101,24 @@ describe('the Python source can actually be read', () => {
   it('finds the constants, both tuples and both tables', () => {
     // Guards the guard: a shape change must fail loudly here rather than making
     // every parity assertion below vacuously true.
+    //
+    // 8 -> 9 ON 2026-09-17, and this literal firing is how the addition got
+    // reviewed rather than slipping through: `domain_guidance` joined `ORIGINS`
+    // with `DEC-43`, because no source in the corpus states the one value that
+    // decision supplies and every other origin would have claimed one. Kept as an
+    // exact length rather than relaxed — a `>= 8` here would make the parity
+    // assertions below able to pass over a client mirror missing a member.
     expect(backendConstants().size).toBeGreaterThanOrEqual(12);
-    expect(backendTuple('ORIGINS')).toHaveLength(8);
+    expect(backendTuple('ORIGINS')).toHaveLength(9);
     // 4 -> 5: the backend gained `resolved`, a conflict a person decided. MEASURED
     // by reading the tuple out of the Python source, which is what this whole file
     // does — the number is not maintained by hand on either side.
     expect(backendTuple('REVIEW_STATES')).toHaveLength(5);
-    expect(backendTuple('ORIGIN_PRECEDENCE')).toHaveLength(8);
+    // 8 -> 9 with `ORIGINS`, and the two lengths are asserted separately on purpose:
+    // a member added to the vocabulary and NOT to the precedence list would make
+    // `primaryOrigin` fall through it silently, which is the one way this model can
+    // lose a headline origin without any test rendering anything.
+    expect(backendTuple('ORIGIN_PRECEDENCE')).toHaveLength(9);
     expect(Object.keys(backendTable('SOURCE_TYPE_ORIGIN'))).toHaveLength(7);
     // 5 -> 6: the backend gained `connected_agent`, the machine-callable (agent)
     // channel — MCP-001 / CAP-006, and the first note source that maps to
@@ -121,7 +132,13 @@ describe('the Python source can actually be read', () => {
     // and no network call, so the honest claim is that a parser READ the words
     // rather than that a machine interpreted them. MEASURED by reading the table
     // out of the Python source, as everything in this file is.
-    expect(Object.keys(backendTable('NOTE_SOURCE_ORIGIN'))).toHaveLength(7);
+    // 7 -> 8: the backend gained `domain_guidance_nominal` (`DEC-43`), a value a
+    // named, dated domain decision supplied and NO source states. It maps to
+    // `domain_guidance`, NOT to `file` — the tempting answer, because the note is
+    // minted during a historical import — because `DEC-43`'s whole finding is that
+    // the corpus states no temperature anywhere, so `file` would assert an artifact
+    // that does not exist. MEASURED by reading the table out of the Python source.
+    expect(Object.keys(backendTable('NOTE_SOURCE_ORIGIN'))).toHaveLength(8);
   });
 });
 

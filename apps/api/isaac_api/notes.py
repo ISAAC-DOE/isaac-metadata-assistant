@@ -337,6 +337,42 @@ NOTE_SOURCES: frozenset[str] = frozenset(
         #: import surface stamps nobody, because no trusted authentication boundary
         #: exists in this build.
         "historical_source_line",
+        #: A VALUE SUPPLIED BY A NAMED, DATED DOMAIN DECISION RATHER THAN BY ANY
+        #: SOURCE — `DEC-43`, and today that decision covers exactly one value.
+        #:
+        #: IT IS AN EIGHTH MEMBER BECAUSE ALL SEVEN ABOVE ASSERT SOMETHING FALSE OF
+        #: IT, which is the same argument ``connected_agent`` and
+        #: ``historical_source_line`` each rest on rather than a new one — and here
+        #: the falsity is sharper than usual, because the whole point of `DEC-43` is
+        #: that **no source states the value at all**. ``typed_note`` would claim a
+        #: person typed it into this application. ``historical_source_line`` would
+        #: claim a parser read it out of a file; ``bl15.nominal``'s own module
+        #: docstring is explicit that expressing a nominal value as read evidence
+        #: "would require inventing" a source path and a locator — "the precise
+        #: fabrication §5 exists to stop". ``csv_column``,
+        #: ``file_listing_line`` and ``extraction_residue`` each name an artifact
+        #: this application read. ``transcript`` and ``connected_agent`` are a
+        #: different channel entirely. Choosing any of them would put a false claim
+        #: in the one field a reviewer uses to decide how much to trust what they are
+        #: reading — and the false claim would be *"something in the archive said
+        #: this"*, which is the exact misreading `DEC-43` condition (i) calls a
+        #: defect.
+        #:
+        #: WHAT IT SAYS: this content rests on a decision, and the decision is named
+        #: in it. A note carrying this source carries ``nominal.DISCLOSURE``
+        #: verbatim, which states that the value was NOT measured, that no source in
+        #: the corpus states it, which profile it is scoped to, and which decision
+        #: authorizes it.
+        #:
+        #: WHAT IT DOES NOT SAY. It does not say the value is correct — a scientist
+        #: still accepts or refuses it, which is why the content arrives as an OPEN
+        #: proposal and never as a value. It names NO actor: this build stamps
+        #: nobody, because no trusted authentication boundary exists in it. And it is
+        #: **not a licence for a second such default** — `DEC-43` condition (iii)
+        #: forbids one by analogy, and ``bl15.nominal.NOMINAL_DEFAULTS`` is a
+        #: one-entry tuple whose length a test asserts, so this member existing does
+        #: not make a second nominal value cheaper to add.
+        "domain_guidance_nominal",
     }
 )
 

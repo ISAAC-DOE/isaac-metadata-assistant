@@ -558,6 +558,15 @@ def test_artifacts_before_export_are_null(client):
     null payloads. Asserting the full dict (rather than relaxing to a subset check)
     is what makes a future additive key on this endpoint fail loudly and get
     reviewed, which is exactly how the P4 change surfaced here.
+
+    **AND IT SURFACED A SECOND ADDITIVE KEY THE SAME WAY, 2026-09-17: the `DEC-41`
+    level-4 companion (`CTX-002`).** `POST .../export` now also writes
+    ``records/<ULID>.context.json`` when a record holds extended context, and this
+    operation serves it. Both new members are NULL AND PRESENT here for the reason
+    every other member of this dict is: a client must not have to branch on a key's
+    PRESENCE to learn whether anything was exported. The equality is kept exact
+    rather than relaxed — this test working as designed is the reason the addition
+    was reviewed rather than noticed later.
     """
     exp_id = _seed_id(client)
     body = client.get(f"/api/experiments/{exp_id}/artifacts").json()
@@ -566,6 +575,8 @@ def test_artifacts_before_export_are_null(client):
         "sidecar": None,
         "record_filename": None,
         "sidecar_filename": None,
+        "extended_context": None,
+        "extended_context_filename": None,
         "artifact": {"state": "none", "reason": None},
     }
 

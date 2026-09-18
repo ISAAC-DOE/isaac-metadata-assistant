@@ -1376,6 +1376,24 @@ MAX_DISTINCT_COLUMN_READINGS = 4
 #: disclosed in :attr:`ArchiveReading.candidate_total` — never trimmed silently.
 MAX_CANDIDATES_PER_SESSION = 4_000
 
+#: Most `DEC-41` level-4 companion entries one archive reading contributes.
+#:
+#: **THE NUMBER IS NOT DERIVED FROM A CORPUS MEASUREMENT, AND SAYING SO IS PART OF
+#: THE BOUND.** No level-4 statement count over the real BL15-2 archive exists in
+#: this repository, and inventing one would be the kind of figure
+#: ``bl15.evidence.MAX_EVIDENCE_PER_SOURCE``'s own struck paragraph records paying
+#: for. What IS known and is what this is sized against: a companion entry
+#: serialises to roughly the size of one :class:`SemanticCandidate` statement, and
+#: it lands in the EXPERIMENT state document, which is rewritten whole on every
+#: save. So this is set at a quarter of :data:`MAX_CANDIDATES_PER_SESSION` —
+#: deliberately tighter than the candidate bound, because a candidate lives in a
+#: session document that a discard throws away and a companion entry lives in the
+#: record forever.
+#:
+#: Over it, entries are dropped FROM THE TAIL and the number dropped is carried in
+#: :attr:`ArchiveReading.extended_context_dropped` — never trimmed silently.
+MAX_EXTENDED_CONTEXT_ENTRIES = 1_000
+
 #: Most manifest rows, unit rows or reading rows :func:`session_view` serves in
 #: one response. The archive KEEPS all of them; this bounds the WINDOW.
 #:
@@ -1558,6 +1576,28 @@ class ArchiveReading:
     #: Candidate ids belonging to the import rather than to one measurement — the
     #: beamtime-scope context every unit INHERITS and none of them copies.
     shared_candidate_ids: tuple[str, ...] = ()
+    #: ``extended_context.ContextEntry.to_state()`` for every `DEC-41` LEVEL-4
+    #: statement this archive stated — the metadata the official ISAAC v1.05 record
+    #: has no field for. See :func:`_extended_context_entries` for what is included,
+    #: why the level is never chosen here, and why the dedup key carries the source
+    #: path.
+    #:
+    #: **IT IS NOT A CANDIDATE AND NEVER BECOMES ONE.** A candidate is a value
+    #: proposed at an official field path; these have no such path by definition, and
+    #: their whole reason for existing is that the twelve level-4 concepts were read
+    #: and then had nowhere to go. The candidate stream is UNCHANGED by this field.
+    extended_context_entries: tuple[dict, ...] = ()
+    #: How many level-4 statements the per-source dedup and the tail cap dropped.
+    #: Carried so the list is never a trimmed one presented as whole — the same rule
+    #: :attr:`column_readings_dropped` follows.
+    extended_context_dropped: int = 0
+    #: The naming profile the readers were run under, and its version. Recorded
+    #: rather than assumed at a consumer, because `DEC-43`'s condition (ii) scopes
+    #: the one nominal default in this programme to ONE profile id: a consumer that
+    #: hard-coded the profile would be asserting which convention was applied instead
+    #: of reading it.
+    profile_id: str = ""
+    profile_version: str = ""
     #: ``ReconstructionReport``'s OWN aggregates, served rather than recomputed
     #: by any client: a client-side recount is a second expression of one number.
     by_concept: Mapping[str, int] = field(default_factory=dict)
@@ -1588,6 +1628,10 @@ class ArchiveReading:
             "column_readings": [dict(row) for row in self.column_readings],
             "column_readings_dropped": self.column_readings_dropped,
             "shared_candidate_ids": list(self.shared_candidate_ids),
+            "extended_context_entries": [dict(row) for row in self.extended_context_entries],
+            "extended_context_dropped": self.extended_context_dropped,
+            "profile_id": self.profile_id,
+            "profile_version": self.profile_version,
             "by_concept": dict(self.by_concept),
             "by_mapping_status": dict(self.by_mapping_status),
             "unregistered_concepts": list(self.unregistered_concepts),
@@ -1666,6 +1710,26 @@ class ArchiveReading:
             )
             if isinstance(state.get("shared_candidate_ids"), list)
             else (),
+            # READ, NOT REFUSED, for the reason ``column_readings`` two keys up is:
+            # a malformed row in a document a reader did not write must not make
+            # the session unreadable to the person whose it is.
+            extended_context_entries=tuple(
+                dict(row)
+                for row in (state.get("extended_context_entries") or [])
+                if isinstance(row, Mapping)
+            )
+            if isinstance(state.get("extended_context_entries"), list)
+            else (),
+            extended_context_dropped=state.get("extended_context_dropped")
+            if isinstance(state.get("extended_context_dropped"), int)
+            and not isinstance(state.get("extended_context_dropped"), bool)
+            else 0,
+            profile_id=state.get("profile_id")
+            if isinstance(state.get("profile_id"), str)
+            else "",
+            profile_version=state.get("profile_version")
+            if isinstance(state.get("profile_version"), str)
+            else "",
             by_concept={
                 k: v
                 for k, v in (state.get("by_concept") or {}).items()
@@ -2174,6 +2238,13 @@ def read_archive(
         shared_ids.append(bounded_shared.candidate_id)
 
     column_readings, column_dropped = _column_readings(evidence_by_source)
+    # `DEC-41` LEVEL 4, PRODUCED HERE BECAUSE HERE IS WHERE THE EVIDENCE OBJECTS
+    # EXIST. A candidate carries only the three-field `EvidenceStatement` shape
+    # (`bl15.reconstruct.statement_for`), so a consumer downstream could not rebuild
+    # a companion entry without inventing the determinism, the rule and the profile
+    # it dropped. `evidence_by_source` holds the real `SourceEvidence`, so the
+    # companion is built from the reading rather than from a projection of it.
+    context_entries, context_dropped = _extended_context_entries(evidence_by_source)
     reading = ArchiveReading(
         source_id=source.source_id,
         root_label=inventory.root_label,
@@ -2187,6 +2258,15 @@ def read_archive(
         column_readings=column_readings,
         column_readings_dropped=column_dropped,
         shared_candidate_ids=tuple(shared_ids),
+        extended_context_entries=context_entries,
+        extended_context_dropped=context_dropped,
+        # READ OFF THE PROFILE THAT WAS ACTUALLY USED, not declared. The filename
+        # reader above is called without a ``profile_id``, so it runs under
+        # ``profiles.DEFAULT_PROFILE_ID``; naming that constant here records which
+        # convention was applied rather than asserting one. `DEC-43`'s condition (ii)
+        # is keyed on exactly this value.
+        profile_id=_archive_profile().profile_id,
+        profile_version=_archive_profile().profile_version,
         by_concept=dict(report.by_concept or {}),
         by_mapping_status=dict(report.by_mapping_status or {}),
         unregistered_concepts=tuple(report.unregistered_concepts),
@@ -2238,6 +2318,117 @@ def _column_readings(
                 continue
             literals.add(item.raw_literal)
             rows.append(item.to_state())
+    return tuple(rows), dropped
+
+
+def _archive_profile():
+    """The :class:`bl15.profiles.NamingProfile` the archive readers run under.
+
+    ONE expression of "which convention was applied", so the reading row and any
+    consumer that scopes a decision to a profile cannot disagree. ``read_filename``
+    is called below with no ``profile_id``, so its default is the answer; reading the
+    default here rather than transcribing the id keeps the two in step.
+    """
+    from .bl15 import profiles
+
+    return profiles.PROFILES[profiles.DEFAULT_PROFILE_ID]
+
+
+def _extended_context_entries(
+    evidence_by_source: Mapping[str, Sequence],
+) -> tuple[tuple[dict, ...], int]:
+    """`DEC-41` LEVEL-4 COMPANION ENTRIES FOR THIS ARCHIVE. ``(rows, dropped)``.
+
+    **THE PRODUCER `CTX-002` LEFT UNBUILT.** `DEC-41` says a concept with no home at
+    levels 1-3 lands in a structured ISAAC Extended Context companion; twelve of the
+    forty-five registry concepts are at level 4, none of them is proposable, and
+    until this function existed every statement about them was read, reported and
+    then had nowhere to go.
+
+    **THE LEVEL IS NEVER CHOSEN HERE.** Each row is built by
+    :func:`extended_context.entry_from_source_evidence`, which takes the placement
+    and the official path from the registry and has no ``level`` parameter at all —
+    so `DEC-41`'s first rule (*never skip a level to reach 4 when a real field
+    exists*) is unreachable through this path rather than merely checked in it. This
+    function's only judgement is WHICH statements to offer, and it makes that by
+    asking the registry for the level: a concept whose ``placement_level`` is 1, 2 or
+    3 is passed over, because its information belongs at that level and
+    ``check_placement`` would raise if it were recorded here.
+
+    **AN UNEXAMINED CONCEPT IS INCLUDED**, and that is deliberate rather than
+    permissive: ``mapping_for`` answering ``None`` means nobody has established a
+    home, which is exactly the state level 4 exists for, and
+    ``entry_from_source_evidence`` records it with the registry's own "kept as
+    evidence" reason.
+
+    **DEDUPLICATED ON ``(concept, source, literal)`` AND NOT ON ``(concept,
+    literal)``**, which is the whole safety argument and is
+    :func:`_column_readings`' argument transposed.
+    ``extended_context.build``'s own docstring says a companion must NOT collapse
+    sixteen files each recording one filter index, because that would destroy fifteen
+    locators. Keying on the source path preserves every one of those sixteen; what is
+    thinned is a literal repeated INSIDE ONE FILE — a SPEC acquisition names its
+    motors once per scan, so a 22-scan file states the same value 22 times at 22
+    locators inside one document. The FIRST occurrence keeps its locator; a
+    disagreement between two files can never be silently settled, because two
+    different sources are two different keys.
+
+    The tail is dropped at :data:`MAX_EXTENDED_CONTEXT_ENTRIES` and the count is
+    returned, so the list is never a trimmed one presented as whole.
+    """
+    from . import extended_context as ctx
+    from .bl15 import mapping as mp
+
+    seen: set[tuple[str, str, str]] = set()
+    rows: list[dict] = []
+    dropped = 0
+    for path in sorted(evidence_by_source):
+        for item in evidence_by_source[path]:
+            entry = mp.mapping_for(item.concept)
+            if entry is not None and entry.placement_level != mp.PLACEMENT_EXTENDED_CONTEXT:
+                continue
+            key = (item.concept, item.source_path, item.raw_literal)
+            if key in seen:
+                dropped += 1
+                continue
+            if len(rows) >= MAX_EXTENDED_CONTEXT_ENTRIES:
+                dropped += 1
+                continue
+            seen.add(key)
+            try:
+                rows.append(
+                    ctx.entry_from_source_evidence(
+                        item,
+                        # DETERMINISTIC, AND THE DETERMINISM IS LOAD-BEARING RATHER
+                        # THAN TIDY. ``extended_context`` is inside
+                        # ``workspace._authoritative_signature``, and
+                        # ``Experiment.add_extended_context_entries`` is idempotent by
+                        # ``entry_id`` — so a fresh ULID per import would make every
+                        # re-run of the same archive a new revision of the record. The
+                        # reader's own ``evidence_id`` is already derived from the
+                        # archive path and the locator, so re-reading the same archive
+                        # produces the same ids.
+                        entry_id=item.evidence_id
+                        or f"ctx::{item.source_path}::{item.locator}::{item.concept}",
+                        # EXPERIMENT-SCOPED HERE, ALWAYS. At read time no run exists —
+                        # runs are created later, by a scientist, on a record this
+                        # session does not yet name — so a run-scoped entry would have
+                        # no ``run_id`` to carry. The consumer binds run scope where it
+                        # can (see ``routes._extended_context_for_record``), and every
+                        # entry keeps the source path and locator that identify the
+                        # measurement regardless.
+                        scope=ctx.SCOPE_EXPERIMENT,
+                    ).to_state()
+                )
+            except ValueError:
+                # A statement this build cannot place is PASSED OVER, never
+                # recorded at a level it does not belong to, and never raised out
+                # of a parse: ``read_archive`` is a read, and a reading that 500ed
+                # over one statement would lose the other thousand. It is not lost
+                # either — the statement is still in the reader's evidence and in
+                # this reading's own counts.
+                dropped += 1
+                seen.discard(key)
     return tuple(rows), dropped
 
 

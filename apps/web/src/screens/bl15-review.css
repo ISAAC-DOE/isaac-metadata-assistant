@@ -645,6 +645,26 @@
   color: var(--text-muted);
 }
 
+/* The OPEN-QUESTION line, deliberately separated from `.bl15-concept-extra`.
+   Four other statements share that muted 11px treatment; this one reports that a
+   domain owner still owes an answer, which is the only one of the five a scientist
+   might act on. It borrows the shared metrics and overrides only weight and colour.
+   `--text-secondary` (#46515f) is 8.07:1 on `--surface` and 6.86:1 on
+   `--assist-tint`, both computed, and both BETTER than the `--text-muted` it
+   replaces — so this cannot add a `color-contrast` node to the a11y baseline. No
+   hue is introduced, which keeps it clear of the reserved-colour guard. */
+.bl15-concept-open {
+  margin-top: var(--space-xs);
+  font-size: var(--font-size-meta);
+  line-height: var(--line-height-normal);
+  color: var(--text-secondary);
+  max-width: 68ch;
+}
+
+.bl15-concept-open-label {
+  font-weight: var(--font-weight-bold);
+}
+
 /* ── what was left out ─────────────────────────────────────────────────── */
 
 .bl15-leftout {

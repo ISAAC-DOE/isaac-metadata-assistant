@@ -910,8 +910,35 @@ def test_the_transcript_route_is_a_second_note_producer(client):
     #
     # THE THREE PRODUCERLESS SOURCES ASSERTED ABOVE ARE UNCHANGED — the new member
     # is a fourth source WITH a producer, not one of those three gaining one.
-    assert routes_src.count("exp.capture_note(") == 3, (
-        "a fourth producer needs the prose updated — and the prose is the point: "
+    #
+    # ── 3 -> 4 ON 2026-09-17, AND THE TRIPWIRE DID ITS JOB ──────────────────────
+    #
+    # The FOURTH producer is `_mint_nominal_offer`, reached from
+    # `POST /api/imports/{id}/add-to-experiment` when the archive was read under the
+    # BL15-2 Angel profile and this batch created a run. It mints one note plus one
+    # OPEN proposal, in the same `record_lock` and the same `save_versioned` as the
+    # rest of the batch — the arrangement the second and third producers use.
+    #
+    # ITS `source` IS `domain_guidance_nominal`, THE EIGHTH `NOTE_SOURCES` MEMBER,
+    # added in the same change, and this is the paragraph the count exists to force.
+    # NONE of the seven that existed was true of it, and the falsity is sharper here
+    # than for the seventh member: `DEC-43`'s whole finding is that **no source in
+    # the corpus states a temperature anywhere**. So `historical_source_line` — the
+    # tempting answer, because this IS a historical import — would assert that a
+    # parser read the value out of a file, and `bl15.nominal`'s own module docstring
+    # refuses to express it as read evidence precisely because that would mean
+    # inventing a source path and a locator, *"the precise fabrication §5 exists to
+    # stop"*. `csv_column`, `file_listing_line` and `extraction_residue` each name an
+    # artifact this application read; `typed_note` claims a person typed it here;
+    # `transcript`/`connected_agent` are a different channel. Its origin is likewise
+    # its own (`provenance.ORIGIN_DOMAIN_GUIDANCE`) rather than `ORIGIN_FILE`, for
+    # the identical reason.
+    #
+    # THE NOTE IS NOT A VALUE. It carries `nominal.DISCLOSURE` verbatim, which states
+    # that 298 K was NOT measured; the number reaches a run only if a person accepts
+    # the proposal. `test_extended_context_wiring.py` walks that end to end.
+    assert routes_src.count("exp.capture_note(") == 4, (
+        "a fifth producer needs the prose updated — and the prose is the point: "
         "this count exists so a new note producer cannot land without somebody "
         "stating which `NOTE_SOURCES` member it claims and why that member is true "
         "of it"

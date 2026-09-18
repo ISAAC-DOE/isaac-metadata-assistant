@@ -60,6 +60,7 @@ from . import db_write
 from . import dependencies
 from . import conflict_resolution as cr
 from . import evidence_classify
+from . import extended_context
 from . import experiment_repository
 from . import historical_import as hist
 from . import identity as identity_module
@@ -17790,6 +17791,7 @@ def _write_record(exp: Experiment, result, unit=None, *, uploaded_by=None) -> di
     written_record = record_attribution.with_server_stamp(result.record, uploaded_by)
     atomic_write_text(record_path, json.dumps(written_record, indent=2) + "\n")
     atomic_write_text(sidecar_path, json.dumps(result.sidecar, indent=2) + "\n")
+    _write_extended_context_companion(exp, record_id, unit)
     # RETURNED so the response can report the bytes that reached the disk. Without it
     # the export operation described `result.record` — the unstamped truth-core output —
     # while `/artifacts`, read a moment later, reported the stamped document. An
@@ -17797,13 +17799,110 @@ def _write_record(exp: Experiment, result, unit=None, *, uploaded_by=None) -> di
     return written_record
 
 
+def _extended_context_for_record(exp: Experiment, unit=None):
+    """The companion entries that apply to ONE exported record, or ``None``.
+
+    ``None`` for an experiment with no companion AND for a record none of its entries
+    reach — which is what keeps the sibling file absent rather than present-and-empty.
+    An empty companion on disk would be a claim ("this record has extended context,
+    and it is nothing") that the absence of the file does not make.
+
+    **THE PROJECTION IS ``applying_to_run``, NOT ``for_run``**, and the two are
+    different claims — :class:`~isaac_api.extended_context.ExtendedContext` says so in
+    terms. One run's record must carry the beamtime-wide statements it INHERITS as
+    well as its own, because the record is what a reader opens; every entry still
+    carries its own ``scope``, so the inheritance stays visible and nothing is
+    flattened into looking as though it had been read on that acquisition.
+
+    ``unreadable`` IS CARRIED ONTO EVERY RECORD OF A FAN-OUT, and the duplication is
+    deliberate. Those rows are provenance nobody can interpret; there is no scope to
+    read off them (that is what makes them unreadable), so the only alternatives are
+    to duplicate them or to drop them from every record but one. Dropping loses
+    provenance for a filing reason, which is the thing this artifact exists not to do.
+    """
+    companion = exp.extended_context
+    if companion is None:
+        return None
+    run_id = getattr(unit, "run_id", None) if unit is not None else None
+    entries = (
+        companion.applying_to_run(run_id) if run_id else companion.entries
+    )
+    if not entries and not companion.unreadable:
+        return None
+    return extended_context.ExtendedContext(
+        experiment_id=companion.experiment_id or exp.id,
+        entries=entries,
+        generated_utc=companion.generated_utc,
+        artifact_version=companion.artifact_version,
+        unreadable=companion.unreadable,
+    )
+
+
+def _write_extended_context_companion(
+    exp: Experiment, record_id: str, unit=None
+) -> None:
+    """Write ``records/<ULID>.context.json`` beside the record and its sidecar.
+
+    `DEC-41` LEVEL 4, `CTX-002`. A SIBLING ARTIFACT, in the same architectural class
+    as the evidence sidecar (``CLAUDE.md`` §4), carrying the scientifically useful
+    metadata the official ISAAC v1.05 record has no field for.
+
+    **IT CANNOT GATE EXPORT, AND THAT IS STRUCTURAL RATHER THAN PROMISED.** This
+    function runs AFTER the record and the sidecar are on disk, on the success path
+    only; it reads ``exp.extended_context``, which lives outside ``draft``, so
+    ``export_draft``, ``export.transform``, ``build_sidecar`` and the official
+    validator cannot see it at all. **NOTHING IN ``src/isaac_records/``,
+    ``schema/``, ``isaac_api.export`` OR ``isaac_api.official`` IS TOUCHED** — a
+    record is exportable or not on the official schema alone, and a record with rich
+    extended context and an incomplete draft is refused exactly as it was before.
+
+    **AN EXPERIMENT WITH NO COMPANION WRITES NOTHING**, so its export is
+    byte-for-byte what it always was: no third file, no changed bytes in the two that
+    exist. That property is what makes this an addition rather than a mutation, and
+    ``test_extended_context_wiring.py`` asserts it over the directory listing and the
+    file digests rather than arguing it.
+
+    A FAILURE HERE DOES NOT FAIL THE EXPORT, for
+    :func:`_prune_orphan_artifacts`' reason: the record and the sidecar — the two
+    artifacts the official schema is about — are already written and the export
+    succeeded, so turning a companion write failure into a 500 would report a
+    successful export as a failure. It is logged path-free (P30.6).
+    """
+    companion = _extended_context_for_record(exp, unit)
+    if companion is None:
+        return
+    path = exp.records_dir / extended_context.companion_filename(record_id)
+    try:
+        atomic_write_text(
+            path, json.dumps(companion.companion_document(record_id), indent=2) + "\n"
+        )
+    except (OSError, TypeError, ValueError) as exc:  # pragma: no cover - defensive
+        _log.warning(
+            "extended context companion for record %s in experiment %s was not "
+            "written (%s); the official record and its sidecar are unaffected",
+            record_id,
+            exp.id,
+            type(exc).__name__,
+        )
+
+
 def _artifact_stem(name: str) -> str | None:
     """``<record-id>`` for one artifact filename, or ``None`` if it is not one.
 
     ONE definition, shared by the prune's candidate scan and its link-target scan, so
     the set of files it may delete and the set it reads to protect them cannot drift.
+
+    ``.context.json`` IS RECOGNISED, AND IT HAD TO BE. Without this clause the stem of
+    ``<ULID>.context.json`` is ``<ULID>.context``, which ``is_record_id`` refuses (it
+    is ``\\A[0-9A-Z]{26}\\Z`` and admits no dot) — so the prune would have treated
+    every companion as a file it does not recognise and left it in place FOREVER,
+    which is this application manufacturing a permanent orphan every time a run is
+    deleted after export. The ordering matters: ``.context.json`` is tested before the
+    bare ``.json`` branch for the same reason ``.evidence.json`` is.
     """
-    if name.endswith(".evidence.json"):
+    if name.endswith(extended_context.COMPANION_SUFFIX):
+        stem = name[: -len(extended_context.COMPANION_SUFFIX)]
+    elif name.endswith(".evidence.json"):
         stem = name[: -len(".evidence.json")]
     elif name.endswith(".json"):
         stem = name[: -len(".json")]
@@ -17846,6 +17945,14 @@ def _link_targets_of_surviving_records(exp: Experiment, keep_ids: set[str]) -> s
         if not path.is_file() or not path.name.endswith(".json"):
             continue
         if path.name.endswith(".evidence.json"):
+            continue
+        # THE COMPANION IS SKIPPED HERE TOO, for the sidecar's reason: this scan
+        # reads RECORDS to find their ``links[].target``, and a companion is not a
+        # record. Parsing one would be harmless today (it declares no ``links``) and
+        # would be a quiet lie about what this loop examines — and an unreadable one
+        # would raise ``_UnreadableSurvivor`` and disable the prune over a file that
+        # can never own a link.
+        if path.name.endswith(extended_context.COMPANION_SUFFIX):
             continue
         stem = _artifact_stem(path.name)
         if stem is None or stem not in keep_ids:
@@ -22550,6 +22657,11 @@ def get_artifacts(scope: TutorialScopeDep, experiment_id: ExperimentId):
             "sidecar": None,
             "record_filename": None,
             "sidecar_filename": None,
+            # `DEC-41` LEVEL 4. NULL AND PRESENT rather than absent, for the reason
+            # every other key in this block is: a client must not have to branch on a
+            # key's presence to learn whether anything was exported.
+            "extended_context": None,
+            "extended_context_filename": None,
             # Single-sourced: for a non-exported record this is
             # {"state": "none", "reason": None}.
             "artifact": dependencies.artifact_state(exp),
@@ -22576,9 +22688,31 @@ def get_artifacts(scope: TutorialScopeDep, experiment_id: ExperimentId):
         artifact = {"state": "stale", "reason": dependencies.MISSING_REASON}
     else:
         artifact = dependencies.artifact_state(exp)
+    # `DEC-41` LEVEL 4 — READ AND SERVED, AND DELIBERATELY NOT JUDGED.
+    #
+    # It is read off disk exactly as the record and the sidecar are, and then
+    # `artifact_state` is NOT consulted about it: an absent companion is the normal
+    # state of almost every record, so folding it into the `stale` decision three
+    # lines up would make every record without extended context report a missing
+    # artifact. That is the inverse of the sidecar's case, where absence beside an
+    # exported record IS a missing half — which is why the two are handled
+    # differently rather than by one rule.
+    context_path = exp.records_dir / extended_context.companion_filename(
+        str(exp.record_id)
+    )
     return {
         "record": record,
         "sidecar": sidecar,
+        "extended_context": _read_artifact_json(context_path),
+        # NAMED ONLY WHEN THE FILE IS THERE, which is the opposite of
+        # `record_filename`/`sidecar_filename` two keys down and is the honest
+        # asymmetry: those name what the export ALWAYS writes, so reporting the
+        # basename of an absent one still describes the export. A companion is
+        # written only when there is extended context, so a basename served for a
+        # record that has none would name a file the export never wrote.
+        "extended_context_filename": (
+            context_path.name if context_path.is_file() else None
+        ),
         # P30.6 — SAFE basename only, never the absolute server/mount path. Reported
         # even when the file is absent: it names what the export wrote (matching
         # `_detail.artifact_refs`, which also keys off `exported()` rather than
@@ -25621,6 +25755,213 @@ def _import_statement_filename(session, candidate, statement: Mapping) -> str:
     return named if isinstance(named, str) else ""
 
 
+#: The note source a `DEC-43` nominal offer is written under. Resolved at import
+#: time for ``_IMPORT_NOTE_SOURCE``'s reason: a member removed from
+#: ``notes.NOTE_SOURCES`` would otherwise turn every offer into a runtime refusal
+#: instead of failing the application's start.
+_NOMINAL_NOTE_SOURCE = "domain_guidance_nominal"
+
+if _NOMINAL_NOTE_SOURCE not in notes.NOTE_SOURCES:  # pragma: no cover - import-time
+    raise RuntimeError(
+        f"{_NOMINAL_NOTE_SOURCE!r} is not one of the note sources; a DEC-43 nominal "
+        "offer could be created and never written"
+    )
+
+
+def _mint_nominal_offer(
+    exp: Experiment,
+    run,
+    default,
+    *,
+    client_request_key: str,
+) -> JSONResponse | tuple[object | None, object, bool] | None:
+    """OFFER the `DEC-43` nominal value on ONE run, as a proposal. In memory only.
+
+    Returns ``None`` when there is nothing to offer, a typed refusal to hand back,
+    or ``(note, proposal, deduplicated)`` — :func:`_mint_import_candidate`'s shape,
+    because the caller treats the two identically.
+
+    **IT IS A PROPOSAL AND NOT A DIRECT WRITE, AND THAT IS THE DECISION `DEC-43`
+    CONDITION (iv) FORCES.** The condition's words are that the value is supplied
+    *"on that scientist's authority, not on the parser's"*. An
+    :class:`~isaac_api.proposals.IngestionProposal` is the ONE object in this
+    application that records a person taking authority for a value: it opens
+    ``open``, it is inert to export until somebody acts, acceptance goes through the
+    same run-field writer manual entry uses — which mints the
+    ``user_confirmation`` evidence that is the only human-act evidence type this
+    build produces — and refusing it is a recorded act rather than a deletion.
+    Writing 298 K straight into the draft would have put a number no source states
+    into ``export.transform``'s input with nothing but a comment between it and an
+    official record, and would have had to invent an evidence entry to satisfy §5.
+    Nobody would have taken authority for it.
+
+    **ALL FOUR CONDITIONS, EACH ENFORCED HERE RATHER THAN DESCRIBED:**
+
+    (i) THE QUALIFIER TRAVELS. ``rule`` is :data:`bl15.nominal.DISCLOSURE`
+        VERBATIM, and the note text is the same sentence, so every surface that
+        renders a proposal renders the disclosure beside the number — the proposal
+        model requires a non-blank ``rule`` and there is no path that stores one
+        without it. The structured provenance (``basis``, ``source_class``,
+        ``measured: False``, the profile, the decision ref) is in the note's own
+        text too. Nothing anywhere calls it measured.
+    (ii) BL15-2 ANGEL PROFILE ONLY, STRUCTURALLY. The caller obtains ``default``
+        from :func:`bl15.nominal.nominal_temperature_for`, a lookup in a
+        one-entry tuple keyed by profile id; every other profile — and ``None``,
+        and an unregistered id — answers ``None`` and this function is never
+        reached, so the field stays ABSENT and the record stays blocked exactly as
+        it did before `DEC-43`. This function does not take a profile id and
+        cannot re-decide it.
+    (iii) IT GENERALISES TO NOTHING. The target is read off
+        ``default.official_path``, and the only value the registry holds is the
+        temperature; there is no loop over required-but-absent fields here and no
+        parameter that could become one.
+    (iv) THE AUTHORITY IS A PERSON'S — see the first paragraph.
+
+    **AND IT IS NEVER OFFERED OVER A VALUE THAT IS ALREADY THERE.** A run whose
+    target already holds an envelope or an override is skipped: `DEC-43` supplies
+    the value a scientist WOULD have supplied, which is not a licence to shadow one
+    they DID supply. The check reads ``_proposal_target_state``, the same read the
+    acceptance precondition digests, so "already there" means the same thing in
+    both places.
+
+    EXACTLY-ONCE through ``client_request_key``, exactly as an import candidate is:
+    running the batch twice offers nothing a second time.
+    """
+    path = default.official_path
+    existing = proposals.find_by_client_request_key(
+        exp.sorted_proposals(), client_request_key
+    )
+    if existing is not None:
+        return (None, existing, True)
+
+    try:
+        state = _proposal_target_state(exp, run, path)
+    except (TypeError, ValueError, AttributeError):  # pragma: no cover
+        return None
+    if state["envelope"] is not None or state["override"] is not None:
+        # ALREADY ANSWERED, OR ALREADY OVERRIDDEN. Not an error and not reported as
+        # a refusal: there is simply nothing to offer.
+        return None
+
+    if len(exp.proposals) >= _MAX_PROPOSALS_PER_RECORD:
+        return _proposal_refusal(
+            "too_many_proposals",
+            (
+                "This record already holds the maximum number of proposals. "
+                "Nothing was written."
+            ),
+            max_per_record=_MAX_PROPOSALS_PER_RECORD,
+            total=len(exp.proposals),
+        )
+    capacity = _note_capacity_refusal(exp)
+    if capacity is not None:
+        return capacity
+
+    text = default.disclosure
+    too_big = _note_text_refusal(text, what="This domain-guidance disclosure")
+    if too_big is not None:  # pragma: no cover - the disclosure is a fixed sentence
+        return too_big
+    try:
+        note = exp.capture_note(
+            text=text,
+            source=_NOMINAL_NOTE_SOURCE,
+            run_id=run.id,
+            candidate_field_path=path,
+            candidate_rule=default.disclosure,
+        )
+    except notes.UnsupportedNote as refusal:  # pragma: no cover - fixed text
+        return _proposal_refusal("unsupported_note", str(refusal))
+
+    try:
+        digest = proposals.target_digest(state)
+    except (TypeError, ValueError) as refusal:  # pragma: no cover
+        return _proposal_refusal("unrepresentable_value", str(refusal))
+    try:
+        proposal = proposals.new_proposal(
+            proposal_id=new_record_id(),
+            experiment_id=exp.id,
+            note_id=note.id,
+            target_field_path=path,
+            proposed_value=default.value,
+            # THE DISCLOSURE, VERBATIM AND NOT PARAPHRASED. `DEC-43` condition (i)
+            # calls a surface that shows 298 K without the qualifier a DEFECT, and
+            # `rule` is the field every proposal surface already renders beside the
+            # value. `bl15.nominal.DISCLOSURE` exists to be rendered whole rather
+            # than restated, so this route states nothing of its own about the
+            # number.
+            rule=default.disclosure,
+            source=note.source,
+            proposed_utc=_now_iso(),
+            base_rev=exp.rev,
+            target_digest=digest,
+            # THE PROPOSER'S ACTOR SEAM STAYS UNSET, for the reason an import
+            # candidate's does: creating a proposal writes no scientific value, and
+            # no trusted authentication boundary exists in this build.
+            trust_basis=submissions.TRUST_BASIS_UNATTRIBUTED,
+            run_id=run.id,
+            client_request_key=client_request_key,
+        )
+    except proposals.UnsupportedProposal as refusal:  # pragma: no cover
+        return _proposal_refusal("unsupported_proposal", str(refusal))
+    exp.add_proposal(proposal)
+    return (note, proposal, False)
+
+
+def _import_extended_context(
+    reading, run_of_stem: Mapping[str, str]
+) -> tuple[list, int]:
+    """`DEC-41` level-4 entries from an archive reading, ready to merge onto a record.
+
+    Returns ``(entries, unreadable)``. The second number is stored rows this build
+    could not read; they are REPORTED and skipped rather than carried onto the
+    record, and that is the one place this differs from ``CLAUDE.md`` §11's
+    read-a-malformed-persisted-value rule — deliberately. §11's rule protects a
+    reader whose OWN record would otherwise vanish. An archive reading is DERIVED:
+    ``ArchiveReading.from_state``'s own docstring says an unreadable one "costs a
+    re-parse and never a scientist's work", so copying an uninterpretable row out of
+    a session document and into the record — where nothing can ever remove it — would
+    make a transient parse problem permanent.
+
+    **RUN SCOPE IS BOUND ONLY WHERE A RUN WAS CREATED FOR THAT MEASUREMENT'S OWN
+    ACQUISITION FILE**, and the narrowness is the point. The producer emits every
+    entry experiment-scoped because at read time no run exists. Here a run may exist,
+    and the join is on data both sides already carry — ``UnitReading.acquisition_path``
+    against the entry's own ``source`` — so a statement read out of an acquisition
+    file becomes run-scoped for the run made from that same file, and nothing else
+    moves. In particular a ``run_id`` the CALLER named for the whole batch is NOT
+    used: one run given for a whole import says which run the candidates are for, and
+    attaching a beamtime-wide reading to it would render a shared statement as though
+    it had been entered on that acquisition — the lie
+    ``bl15.reconstruct``'s shared-context handling exists to avoid.
+    """
+    ctx = extended_context
+
+    run_of_path: dict[str, str] = {
+        unit.acquisition_path: run_of_stem[unit.stem]
+        for unit in reading.units
+        if unit.acquisition_path and unit.stem in run_of_stem
+    }
+    entries: list = []
+    unreadable = 0
+    for row in reading.extended_context_entries:
+        try:
+            entry = ctx.ContextEntry.from_state(row)
+        except ctx.UnsupportedContextEntry:
+            unreadable += 1
+            continue
+        bound_run = run_of_path.get(entry.source)
+        if bound_run is not None:
+            try:
+                entry = dataclasses.replace(
+                    entry, scope=ctx.SCOPE_RUN, run_id=bound_run
+                )
+            except ValueError:  # pragma: no cover - re-validation of a read entry
+                unreadable += 1
+                continue
+        entries.append(entry)
+    return entries, unreadable
+
+
 def _mint_import_candidate(
     exp: Experiment,
     candidate,
@@ -26814,6 +27155,103 @@ def post_import_add_to_experiment(
                 }
             )
 
+        # ONE READ OF THE ARCHIVE READING, used by the two blocks below. Named
+        # rather than read twice so the profile the nominal offer is scoped to and
+        # the entries the companion is built from cannot come from two reads.
+        reading_for_nominal = session.archive_reading
+
+        # --- `DEC-43`: THE ONE NOMINAL VALUE, OFFERED AND NEVER WRITTEN -------
+        #
+        # THE RULE AND ITS FOUR FENCES ALREADY EXISTED IN `bl15.nominal`; what did
+        # not exist was an OFFER. Here is where one can honestly be made, because
+        # here is the only place that holds all three things it needs at once: the
+        # profile the readers actually ran under (`ArchiveReading.profile_id`, read
+        # rather than assumed), the runs this import just created, and a record lock.
+        #
+        # CONDITION (ii) IS A LOOKUP, NOT A BRANCH HERE. `nominal_temperature_for`
+        # answers `None` for every profile except the BL15-2 Angel one — including
+        # `None` itself and an unregistered id — so a non-matching profile leaves the
+        # field ABSENT and the record BLOCKED, which is the pre-`DEC-43` behaviour
+        # preserved for everybody else. This route contains no profile literal.
+        #
+        # ONLY ON RUNS THIS IMPORT CREATED, and never on a `run_id` the caller
+        # named. `context.temperature_K` is a per-acquisition condition; offering it
+        # on one run a caller happened to name for a whole batch would be this route
+        # choosing which measurement the assumption is about.
+        nominal_offers: list[dict] = []
+        nominal_default = None
+        if reading_for_nominal is not None:
+            from .bl15 import nominal as nominal_module
+
+            nominal_default = nominal_module.nominal_temperature_for(
+                reading_for_nominal.profile_id
+            )
+        if nominal_default is not None and created_runs:
+            for row in created_runs:
+                run_for_offer = exp.get_run(row["run_id"])
+                if run_for_offer is None:  # pragma: no cover - just created
+                    continue
+                offered = _mint_nominal_offer(
+                    exp,
+                    run_for_offer,
+                    nominal_default,
+                    client_request_key=(
+                        f"nominal:{nominal_default.decision_ref}:"
+                        f"{nominal_default.official_path}:{run_for_offer.id}"
+                    ),
+                )
+                if isinstance(offered, JSONResponse):
+                    # A CEILING ENDS THE WHOLE BATCH WITH NOTHING WRITTEN, exactly
+                    # as a candidate's does: every mint so far touched only the
+                    # loaded object and the single save below has not run.
+                    return offered
+                if offered is None:
+                    continue
+                _note, nominal_proposal, deduplicated = offered
+                if not deduplicated:
+                    wrote_something = True
+                nominal_offers.append(
+                    {
+                        "run_id": run_for_offer.id,
+                        "target_field_path": nominal_default.official_path,
+                        "proposal_id": nominal_proposal.proposal_id,
+                        "already_offered": deduplicated,
+                        # THE PROVENANCE, ON THE WIRE, BESIDE THE NUMBER. `DEC-43`
+                        # condition (i): a surface that shows 298 K without this is a
+                        # defect, so the response never carries the value alone.
+                        # `NominalValue.to_state` cannot emit it without `measured`.
+                        "nominal": nominal_default.to_state(),
+                    }
+                )
+
+        # --- `DEC-41` LEVEL 4: THE COMPANION, IN THIS SAME ONE WRITE ----------
+        #
+        # THE CANDIDATE STREAM IS UNTOUCHED BY THIS, and that is a deliberate
+        # choice rather than a convenience. A level-4 statement has no official
+        # field path by definition, so it can never be a candidate and never a
+        # proposal: there is nothing for a scientist to accept ONTO a field. It is
+        # provenance, in the same architectural class as the evidence sidecar. So
+        # nothing above this line changes, no `counts` key is added — that block is
+        # asserted as a WHOLE DICT by `test_historical_import_routes.py` precisely
+        # so a new count cannot appear unnoticed, and this is not a count of
+        # candidates — and the companion is reported under its own top-level key.
+        #
+        # INSIDE THE LOCK AND BEFORE THE SINGLE SAVE, so the record holds the whole
+        # batch or none of it: runs, notes, proposals and companion entries reach
+        # disk at ONE new revision.
+        context_added = 0
+        context_unreadable = 0
+        context_available = 0
+        reading = reading_for_nominal
+        if reading is not None and reading.extended_context_entries:
+            context_available = len(reading.extended_context_entries)
+            context_entries, context_unreadable = _import_extended_context(
+                reading, run_of_stem
+            )
+            context_added = exp.add_extended_context_entries(
+                context_entries, generated_utc=_now_iso()
+            )
+
         # A CREATED RUN IS A WRITE EVEN IF EVERY CANDIDATE WAS ALREADY SENT, and
         # this `or` is why: `wrote_something` tracked minted proposals alone, so
         # re-running a batch that had already sent every candidate would have
@@ -26821,7 +27259,17 @@ def post_import_add_to_experiment(
         # 200 with a `created_runs` list describing runs that do not exist. That
         # is the exact class of defect `CLAUDE.md` §11 records four times: a
         # surface reporting work it had not done.
-        if wrote_something or created_runs:
+        #
+        # `context_added` IS IN THIS DISJUNCTION FOR THE IDENTICAL REASON, and
+        # leaving it out would be the identical defect one layer along: extended
+        # context is inside `_authoritative_signature`, so the entries would be on
+        # the loaded object, the response would report them, and `save_versioned`
+        # would still write — but only because a proposal or a run happened to
+        # change too. A batch whose ONLY new content is companion provenance (every
+        # candidate already sent, no run asked for) would have reported entries that
+        # never reached disk. It is idempotent, so a re-run adds 0 and this stays a
+        # genuine no-op.
+        if wrote_something or created_runs or context_added:
             # ACT-002, CHANNEL `historical_import`, for the reason
             # `post_import_candidate_proposal` gives: `DEC-44` has a fourth channel so
             # that archive-derived material is distinguishable from a typed value, and
@@ -26929,6 +27377,35 @@ def post_import_add_to_experiment(
             "not_sent": len(not_sent),
             "runs_created": len(created_runs),
             "runs_already_present": len(runs_already_present),
+        },
+        # `DEC-43`, REPORTED UNDER ITS OWN KEY FOR THE REASON THE COMPANION IS:
+        # these are not candidates. A nominal default is not read from any source, so
+        # it is in no `by_concept` count, no candidate stream and no `counts` member.
+        # Empty for every profile without a nominal default — which is every profile
+        # but one — and empty when no run was created.
+        "nominal_offers": nominal_offers,
+        # `DEC-41` LEVEL 4, REPORTED UNDER ITS OWN KEY AND NOT INSIDE `counts`.
+        # `counts`' members all answer "what happened to a CANDIDATE"; a companion
+        # entry is not a candidate and never was one, so folding it in would make the
+        # sum identity that block's own test asserts stop meaning anything.
+        #
+        # `available` IS THE READING'S OWN TOTAL and `added` is what this request
+        # actually merged: on a re-run those differ (`added: 0`), which is the whole
+        # reason both are published. A client that showed only one of them could not
+        # tell "this import states nothing at level 4" from "this record already
+        # holds all of it".
+        "extended_context": {
+            "available": context_available,
+            "added": context_added,
+            "unreadable": context_unreadable,
+            "total_on_record": (
+                len(exp.extended_context.entries)
+                if exp.extended_context is not None
+                else 0
+            ),
+            # SAID ON THE WIRE RATHER THAN LEFT TO A CLIENT'S DOCUMENTATION, because
+            # this is the one claim a surface must not get wrong about these entries.
+            "not_official": extended_context.NOT_OFFICIAL_CLAIM,
         },
         "experiment_version": version,
     }

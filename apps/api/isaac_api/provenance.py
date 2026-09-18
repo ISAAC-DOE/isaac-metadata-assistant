@@ -124,6 +124,33 @@ ORIGIN_ASSISTANT = "assistant"
 #: about whether anybody has accepted the result.
 ORIGIN_DERIVED = "derived"
 
+#: SUPPLIED BY A NAMED, DATED DOMAIN DECISION, AND BY NO SOURCE — `DEC-43`.
+#:
+#: **THE ONE ORIGIN IN THIS VOCABULARY WHERE NOTHING WAS READ.** Every other
+#: produced origin answers *"where did this come from"* with an artifact, a
+#: transcript, a rule or a person at this keyboard. This one answers *"a decision
+#: says so, and no source in the corpus states it"* — which is why it cannot be any
+#: of them:
+#:
+#: * NOT :data:`ORIGIN_DERIVED`: a derivation computes a value FROM something. 298 K
+#:   is computed from nothing; ``bl15.nominal`` does not read, infer or derive it.
+#: * NOT :data:`ORIGIN_FILE`: no file states it. Claiming otherwise would be the
+#:   fabrication ``bl15.nominal``'s docstring refuses to commit.
+#: * NOT :data:`ORIGIN_MANUAL`: nobody typed the number into this application. A
+#:   scientist ACCEPTS it, which is a different act from authoring it.
+#: * NOT :data:`ORIGIN_EVIDENCE`: that arm says a citation demonstrably exists and
+#:   only its channel is unnameable. Here there is no citation, deliberately.
+#: * NOT :data:`ORIGIN_UNKNOWN`: nothing here is unknown. The basis, the source
+#:   class, the profile, the decision reference and a full disclosure sentence all
+#:   travel with the value.
+#:
+#: **REACHABLE, AND FROM EXACTLY ONE PRODUCER**: ``notes``' ``domain_guidance_nominal``
+#: member, written when the historical import offers the `DEC-43` nominal temperature
+#: for review. Nothing else in this build emits this origin, and
+#: ``test_extended_context_wiring.py`` pins that no pre-existing origin verdict moves
+#: because of it.
+ORIGIN_DOMAIN_GUIDANCE = "domain_guidance"
+
 #: A stored evidence entry backs this value, but this build cannot name the
 #: channel that produced it — the entry records a ``source_type`` outside
 #: :data:`SOURCE_TYPE_ORIGIN`, or records none at all.
@@ -152,6 +179,7 @@ ORIGINS: tuple[str, ...] = (
     ORIGIN_INHERITED,
     ORIGIN_ASSISTANT,
     ORIGIN_DERIVED,
+    ORIGIN_DOMAIN_GUIDANCE,
     ORIGIN_EVIDENCE,
     ORIGIN_UNKNOWN,
 )
@@ -267,6 +295,14 @@ NOTE_SOURCE_ORIGIN: dict[str, str] = {
     # UNLIKE the three unreachable members above, this one HAS a producer: the
     # candidate-to-proposal operation writes one such note per statement it cites.
     "historical_source_line": ORIGIN_FILE,
+    # A NAMED, DATED DOMAIN DECISION SUPPLIED THE VALUE AND NO SOURCE STATES IT —
+    # `DEC-43`. The first and only mapping to :data:`ORIGIN_DOMAIN_GUIDANCE`; read its
+    # docstring for why each of the other five candidate origins would be a false
+    # claim, and note in particular that ``ORIGIN_FILE`` — the answer for the four
+    # members above and the tempting one, because the note is minted during a
+    # historical IMPORT — would assert that something in the archive said it. Nothing
+    # did. That is the whole finding `DEC-43` rests on.
+    "domain_guidance_nominal": ORIGIN_DOMAIN_GUIDANCE,
 }
 
 #: THE ORDER :func:`primary_origin` READS, HIGHEST FIRST. Explicit, total, and
@@ -297,6 +333,26 @@ ORIGIN_PRECEDENCE: tuple[str, ...] = (
     ORIGIN_EVIDENCE,
     # Rule-backed and deterministic, but nobody has accepted the result.
     ORIGIN_DERIVED,
+    # NO SOURCE STATES THIS AT ALL — a decision does. Ranked here, above every
+    # origin that cites something, and the placement is argued rather than slotted
+    # in, BECAUSE THIS MODULE'S STATED PRINCIPLE DOES NOT CLEANLY SETTLE IT AND
+    # SAYING SO IS PART OF THE DECISION.
+    #
+    # Read as pure ACCOUNTABILITY the answer is ambiguous: a nominal value has a
+    # named person and a dated decision behind it, which is arguably MORE
+    # accountable than a derivation whose rule nobody signed. Read as the PURPOSE
+    # the principle serves — "the half a reader can check and the half they might
+    # otherwise miss" — it is unambiguous: the half a reader must never miss is
+    # that the number was NOT MEASURED, and an origin that can be masked by a
+    # reassuring neighbour is an origin that will be. `DEC-43` condition (i) makes
+    # a surface showing 298 K without that qualifier a DEFECT, so the headline is
+    # where the qualifier has to survive.
+    #
+    # It is placed BELOW `derived` rather than above it only because `derived`
+    # carries its rule text on the entry and can therefore be checked in place,
+    # which is the distinction this list already draws between `evidence` and
+    # `derived` two entries up.
+    ORIGIN_DOMAIN_GUIDANCE,
     # A human act, but machine-transcribed, and transcription is lossy in a way
     # reading a stored file is not.
     ORIGIN_VOICE,

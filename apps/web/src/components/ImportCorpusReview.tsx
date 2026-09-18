@@ -560,7 +560,36 @@ function ConflictView({ conflict, stem }: { conflict: Bl15Conflict; stem: string
  * inventing one is forbidden.
  */
 function MappingReview({ review }: { review: Bl15CorpusReview }) {
-  const { coverage, concepts } = review.mapping;
+  const { coverage, concepts, domain_questions: domainQuestions } = review.mapping;
+  /*
+   * `question_id` -> the SERVER's own `subject`, so an open question can be named
+   * rather than numbered.
+   *
+   * WHY THIS MAP EXISTS. The first version of the line below rendered
+   * `unresolved_questions` directly, which is `['Q6']` — so a scientist read
+   * "Still waiting on a domain answer: Q6." `Q6` is an internal packet number
+   * with no meaning outside this repository's own documents, and it is exactly the
+   * defect class `CLAUDE.md` §11 records at length and closed on 2026-09-14 for
+   * blocker keys: an internal identifier rendered to a scientist beside an
+   * already-correct human label.
+   *
+   * It is fixable here rather than on the server because the human text is ALREADY
+   * in this payload — `mapping.domain_questions` carries all twenty questions with
+   * a `subject` each. Nothing new is requested and nothing is re-authored: the
+   * subject is rendered verbatim, which is the discipline this component already
+   * follows for `reason` ("the registry's own sentence") and `placement_name`.
+   *
+   * The id is KEPT, in parentheses. It is the traceable handle into
+   * `docs/bl15-2-domain-questions-2026-09-16.md`, and dropping it would trade one
+   * kind of unreadability for another. Some subjects contain a dotted schema path
+   * (`context.environment member`); that is deliberate and stays — §11's `UX-014`
+   * rule is that a schema path is how a curator maps a field and is never removed.
+   */
+  const questionSubjects = new Map((domainQuestions ?? []).map((q) => [q.question_id, q.subject]));
+  const nameQuestion = (id: string) => {
+    const subject = questionSubjects.get(id);
+    return subject ? `${subject} (${id})` : id;
+  };
   return (
     <div className="bl15-block">
       <h4 className="bl15-block-title">{BL15_COPY.mappingTitle}</h4>
@@ -590,6 +619,49 @@ function MappingReview({ review }: { review: Bl15CorpusReview }) {
                       </p>
                       {/* The registry's own sentence, verbatim. */}
                       <p className="bl15-concept-reason">{c.reason}</p>
+                      {/* `DEC-41` — WHERE THE INFORMATION LANDS, which is a
+                          different question from whether a value may travel.
+                          Without this line a scientist reading `not_expressible`
+                          has no way to tell "the schema has no place for this" from
+                          "this is kept, in the companion" — and the second is what
+                          the hierarchy actually decided for all twelve of them.
+
+                          BOTH THE WORDS AND THE NUMBER, because a bare rank is
+                          something a reader has to look up. The words are the
+                          server's `placement_name`, rendered verbatim: no label is
+                          re-authored here, and nothing on this line is a schema path
+                          or a module path. */}
+                      {c.placement_name && (
+                        <p className="bl15-concept-extra">
+                          Where this information lands: {c.placement_name} (level{' '}
+                          {c.placement_level}).
+                        </p>
+                      )}
+                      {/* THE OPEN SUBSET, NEVER THE WHOLE LIST. Twelve of the twenty
+                          packet questions closed on 2026-09-17, so showing
+                          `domain_questions` here would tell a scientist to wait for
+                          an answer that has arrived. */}
+                      {c.unresolved_questions && c.unresolved_questions.length > 0 && (
+                        /* ITS OWN CLASS, not `bl15-concept-extra`, and the reason is
+                           hierarchy rather than decoration. Five statements shared that
+                           one 11px muted treatment, so the line that tells a scientist
+                           an answer is OUTSTANDING looked identical to "The schema
+                           allows: ...". In an Operate surface the most
+                           decision-relevant line must not be the least prominent.
+
+                           It differentiates by WEIGHT and a DARKER token, never by hue:
+                           `--text-secondary` is 8.07:1 on `--surface` against
+                           `--text-muted`'s 5.93:1, so this moves contrast in the
+                           direction that cannot add an a11y violation. A colour-coded
+                           treatment would also have risked the `P22C` guard, which bans
+                           a reserved green/red hue in an interaction-state rule. */
+                        <p className="bl15-concept-open">
+                          <span className="bl15-concept-open-label">
+                            Still waiting on a domain answer:
+                          </span>{' '}
+                          {c.unresolved_questions.map(nameQuestion).join('; ')}.
+                        </p>
+                      )}
                       {c.allowed_values.length > 0 && (
                         <p className="bl15-concept-extra">
                           The schema allows: {c.allowed_values.join(', ')}.

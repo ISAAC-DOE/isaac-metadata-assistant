@@ -35,6 +35,23 @@ export const PROVENANCE_ORIGINS = [
   'inherited',
   'assistant',
   'derived',
+  /*
+   * SUPPLIED BY A NAMED, DATED DOMAIN DECISION AND BY NO SOURCE — `DEC-43`.
+   *
+   * THE ONE ORIGIN HERE WHERE NOTHING WAS READ. Every other produced origin
+   * answers "where did this come from" with an artifact, a transcript, a rule or a
+   * person at this keyboard; this one answers "a decision says so, and no source in
+   * the corpus states it". `derived` would claim a computation FROM something,
+   * `file` would claim an artifact that does not exist, `manual` would claim
+   * somebody typed the number here, and `unknown` would claim nothing is recorded —
+   * when the basis, the profile, the decision reference and a full disclosure
+   * sentence all travel with the value.
+   *
+   * DECLARATION ORDER MIRRORS THE BACKEND TUPLE EXACTLY, and that is not tidiness:
+   * `provenance.test.tsx` reads `ORIGINS` out of the Python source and compares it
+   * element for element, so this position is pinned across the language boundary.
+   */
+  'domain_guidance',
   'evidence',
   'unknown',
 ] as const;
@@ -97,6 +114,18 @@ export const NOTE_SOURCE_ORIGIN: Readonly<Record<string, ProvenanceOrigin>> = {
    * READ them. And not `manual`: nobody typed it here.
    */
   historical_source_line: 'file',
+  /*
+   * A NAMED, DATED DOMAIN DECISION SUPPLIED THE VALUE AND NO SOURCE STATES IT —
+   * `DEC-43`, and today that decision covers exactly one value.
+   *
+   * NOT `file`, which is the tempting answer because the note is minted during a
+   * historical IMPORT: that would assert something in the archive said it, and
+   * `DEC-43`'s whole finding is that the corpus states no temperature ANYWHERE.
+   * The note carries the decision's own disclosure sentence, which says the value
+   * was NOT measured; it never carries a value, because the number reaches a run
+   * only if a person accepts the proposal it was offered as.
+   */
+  domain_guidance_nominal: 'domain_guidance',
 };
 
 /**
@@ -113,6 +142,11 @@ export const ORIGIN_PRECEDENCE: readonly ProvenanceOrigin[] = [
   'assistant',
   'evidence',
   'derived',
+  // NO SOURCE STATES THIS AT ALL — a decision does. Above every origin that cites
+  // something, and below `derived`, whose rule text is on the entry and can be read
+  // in place. The half a reader must never miss is that the number was NOT
+  // MEASURED, and an origin a reassuring neighbour can mask is one that will be.
+  'domain_guidance',
   'voice',
   'file',
   'manual',
@@ -164,6 +198,9 @@ export const ORIGIN_LABEL: Record<ProvenanceOrigin, string> = {
   assistant: 'From an Assistant',
   derived: 'Derived by a Rule',
   evidence: 'From Recorded Evidence',
+  // NOT "Assumed" on its own: the label has to survive being read alone on a chip,
+  // and "assumed" says nothing about who assumed it or on what basis.
+  domain_guidance: 'Domain Guidance, Not Measured',
   unknown: 'Origin Not Recorded',
 };
 
@@ -177,6 +214,8 @@ export const ORIGIN_MEANING: Record<ProvenanceOrigin, string> = {
   derived: 'Produced by a documented derivation rule. A rule is a mechanism, not an acceptance.',
   evidence:
     'A stored citation backs this, but it does not say what kind of source produced it.',
+  domain_guidance:
+    'No source states this. It was supplied by a named, dated domain decision and is NOT a measurement; the decision, the basis and the profile it applies to travel with the value.',
   unknown:
     'Nothing stored here says where the value came from. That is a statement about the record, not a guess.',
 };

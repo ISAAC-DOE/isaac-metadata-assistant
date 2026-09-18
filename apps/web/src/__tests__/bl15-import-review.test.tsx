@@ -406,12 +406,40 @@ describe('BL15 review · §7 five outcomes, never a progress bar', () => {
   it('renders all five statuses with the registry’s own counts', () => {
     renderReview();
     const cov = REVIEW.mapping.coverage;
-    // 2 + 4 + 14 + 24 + 1 = 45, measured from `mapping.coverage()`.
-    expect(cov.deterministic + cov.normalized).toBe(6);
-    expect(cov.needs_domain_review).toBe(14);
+    /*
+     * ── THESE NUMBERS MOVED ON 2026-09-17, AND THE MOVE WAS A CORRECTION OF THIS
+     *    FIXTURE RATHER THAN A CHANGE TO THE REGISTRY ───────────────────────────
+     *
+     * They read `2 + 4 + 14 + 24 + 1` and now read `1 + 4 + 15 + 24 + 1`. Nothing
+     * in `bl15/mapping.py` was touched by the change that updated them: the
+     * fixture was frozen at `b6f23e6a` and the registry moved afterwards in
+     * `57e06392` (a technique mapping that proposed a macro filename as the
+     * schema technique), `682d41ce` and `ad0d2596` — so `acquisition_method` left
+     * `deterministic` for `needs_domain_review` and this file has been asserting
+     * against a registry state the server no longer has.
+     *
+     * The fixture was refreshed from `historical_import._mapping_block()`
+     * VERBATIM, which is also what added `placement_level`, `placement_name`,
+     * `domain_questions` and `unresolved_questions` to every concept and the
+     * placement/question members to the block. `§1`'s premise is that this
+     * fixture IS the contract's shape; a stale one is worse than no fixture,
+     * because a green suite over it reads as agreement.
+     *
+     * The total is unchanged at 45 and is the one number a status move cannot
+     * touch, which is why it is asserted separately below.
+     */
+    expect(cov.deterministic + cov.normalized).toBe(5);
+    expect(cov.needs_domain_review).toBe(15);
     expect(cov.not_expressible).toBe(24);
     expect(cov.blocked_by_build).toBe(1);
     expect(cov.concepts_total).toBe(45);
+    expect(
+      cov.deterministic +
+        cov.normalized +
+        cov.needs_domain_review +
+        cov.not_expressible +
+        cov.blocked_by_build,
+    ).toBe(cov.concepts_total);
     for (const label of [
       'Taken as written',
       'Carried across by a named rule',
@@ -452,6 +480,107 @@ describe('BL15 review · §7 five outcomes, never a progress bar', () => {
     for (const c of REVIEW.mapping.concepts) {
       expect(container.textContent).toContain(c.reason);
     }
+  });
+
+  it('renders every concept’s DEC-41 placement, words and level', () => {
+    const { container } = renderReview();
+    const text = container.textContent ?? '';
+    /*
+     * A PLACEMENT IS NOT A STATUS, and that is the reason this is rendered at all.
+     * `status` says whether a value may TRAVEL toward a candidate; a placement says
+     * whether the information has a HOME. Without it a scientist reading "The schema
+     * has no field for it" over 24 concepts has no way to tell "this is discarded"
+     * from "this is kept, in the Extended Context companion" — and the second is
+     * what `DEC-41` actually decided for all twelve of the level-4 ones.
+     */
+    for (const c of REVIEW.mapping.concepts) {
+      expect(c.placement_level).toBeGreaterThanOrEqual(1);
+      expect(c.placement_level).toBeLessThanOrEqual(4);
+      expect(typeof c.placement_name).toBe('string');
+      // THE SERVER'S OWN WORDS, verbatim — no label is re-authored in the client.
+      expect(text).toContain(c.placement_name as string);
+    }
+    // ALL FOUR LEVELS ARE REPRESENTED by this registry, so the assertion above is
+    // not passing on one repeated value.
+    const levels = new Set(REVIEW.mapping.concepts.map((c) => c.placement_level));
+    expect([...levels].sort()).toEqual([1, 2, 3, 4]);
+    expect(text).toMatch(/structured ISAAC Extended Context companion/);
+  });
+
+  it('shows only the OPEN domain questions, never the closed ones', () => {
+    const { container } = renderReview();
+    const text = container.textContent ?? '';
+    /*
+     * Twelve of the twenty packet questions closed on 2026-09-17. A surface reading
+     * `domain_questions` rather than `unresolved_questions` would keep telling a
+     * scientist to wait for an answer that has already arrived — the defect
+     * `CTX-001` names, and the reason the server publishes both lists.
+     */
+    const open = new Set(REVIEW.mapping.open_domain_questions ?? []);
+    expect(open.size).toBeGreaterThan(0);
+    const closed = (REVIEW.mapping.domain_questions ?? [])
+      .filter((q) => !q.is_open)
+      .map((q) => q.question_id);
+    expect(closed.length).toBeGreaterThan(0);
+
+    /*
+     * QUERIED BY CLASS, NOT REGEXED OUT OF THE PAGE PROSE — and the previous version
+     * of this assertion is why.
+     *
+     * It read `text.matchAll(/Still waiting on a domain answer: ([^.]+)\./g)` and then
+     * split the capture on `,\s*` to recover bare ids. That worked only while the line
+     * rendered `Q6` and nothing else. It breaks on the humanized line two ways at once:
+     * the separator is now `; `, and `[^.]+` truncates at the FIRST dot — so `Q14`,
+     * whose subject is "is measurement.qc.status derivable from the notes?", would have
+     * been cut mid-path. A prose regex was load-bearing on copy that was always going
+     * to change.
+     *
+     * Reading `.bl15-concept-open` and pulling the id out of its parenthetical is
+     * stable under any rewording, and it lets the assertion get STRONGER rather than
+     * merely survive: the subject must be present, which is the guard that stops this
+     * line ever regressing to a bare internal number.
+     */
+    const byId = new Map((REVIEW.mapping.domain_questions ?? []).map((q) => [q.question_id, q]));
+    const lines = [...container.querySelectorAll('.bl15-concept-open')];
+    expect(lines.length).toBeGreaterThan(0);
+    for (const el of lines) {
+      const line = el.textContent ?? '';
+      const ids = [...line.matchAll(/\(([A-Z]\d+)\)/g)].map((m) => m[1]);
+      expect(ids.length).toBeGreaterThan(0);
+      for (const id of ids) {
+        expect(open.has(id)).toBe(true);
+        expect(closed).not.toContain(id);
+        // THE HUMANIZATION GUARD. `CLAUDE.md` §11 records this defect class at length
+        // and closed it on 2026-09-14 for blocker keys: an internal identifier
+        // rendered to a scientist beside an already-correct human label. `Q6` is a
+        // packet number with no meaning outside this repository's own documents, and
+        // the server already ships the text — so a line that shows the id ALONE is a
+        // defect, not a style choice.
+        const subject = byId.get(id)?.subject ?? '';
+        expect(subject.length).toBeGreaterThan(0);
+        expect(line).toContain(subject);
+      }
+    }
+    // And the id is KEPT, not replaced: it is the traceable handle into
+    // `docs/bl15-2-domain-questions-2026-09-16.md`.
+    expect(text).toMatch(/\([A-Z]\d+\)/);
+  });
+
+  it('renders no Python module path and no field:/block: address as a schema path', () => {
+    const { container } = renderReview();
+    const text = container.textContent ?? '';
+    /*
+     * `CLAUDE.md` §11's measured rule: a Python module path rendered to a scientist
+     * as though it were an official-schema path is a defect with a history here
+     * (`serialize.draft_to_groups` rendered eight times on one screen), and so is a
+     * `field:`/`block:` internal address. The placement lines added above are plain
+     * English by construction — they render `placement_name`, which is the
+     * registry's own words — and this asserts it rather than trusting it.
+     */
+    expect(text).not.toMatch(/\bfield:[a-z]/);
+    expect(text).not.toMatch(/\bblock:[a-z]/);
+    expect(text).not.toMatch(/\b[a-z_]+\.py\b/);
+    expect(text).not.toMatch(/\b(mapping|evidence|serialize|reconstruct)\.[a-z_]+\(/);
   });
 
   it('shows a normalized value beside its raw literal with the rule', () => {
