@@ -448,6 +448,20 @@ export const LABELS = {
   activityUnavailable:
     'This record\u2019s history could not be read just now. Nothing has been lost — reopen this view to try again.',
   activityEmpty: 'Nothing has been recorded on this record yet.',
+  /* THE COUNT NEEDS A NOUN. "3 of 200" is a bare fraction — three what? — and on an
+     Operate surface the reader is mid-task and should not have to infer it. */
+  activityShowing: 'Showing the most recent',
+  activityOf: 'of',
+  activityEntries: 'entries',
+  /* `ACT-003`'s dead end, closed. The server pages (`next_before_seq`), so a reader
+     told "50 of 200" must be able to reach the other 150. A count that names hidden
+     facts with no control to reach them is not a finished surface. */
+  activityShowOlder: 'Show Older Entries',
+  activityLoadingOlder: 'Reading older entries\u2026',
+  activityAllShown: 'That is the whole history for this record.',
+  /* The disclosure summary. The sentence behind it is unchanged and still honest —
+     it simply stops being permanent furniture for a reader who has met it once. */
+  activityWhyUnattributed: 'Why are entries not attributed to a person?',
   /* COUNTED, never rendered: saying what an unreadable entry contains would mean
      inventing it. Disclosed rather than silently dropped. */
   activityUnreadable: '\u00b7 entries this build could not read:',

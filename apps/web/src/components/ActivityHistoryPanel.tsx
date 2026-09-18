@@ -142,6 +142,29 @@ export function ActivityHistoryPanel({ experimentId }: { experimentId: string })
   const [state, setState] = useState<
     { status: 'loading' } | { status: 'error' } | { status: 'data'; body: ApiActivityResponse }
   >({ status: 'loading' });
+  /*
+   * PAGES ALREADY READ, oldest-appended. The server answers newest-first and hands
+   * back `next_before_seq`, so "older" is a cursor walk rather than an offset — the
+   * same shape the proposals list uses, and it cannot skip or duplicate an entry when
+   * a new act lands between two reads.
+   *
+   * WHY THIS EXISTS AT ALL: the first version rendered one page and reported
+   * "50 of 200", which named 150 facts a reader could not reach. A count that
+   * advertises hidden content with no control to reach it is a dead end, not a
+   * deliberate scope boundary — found by an Impeccable pass over this panel.
+   */
+  const [older, setOlder] = useState<ApiActivityEvent[]>([]);
+
+  const [cursor, setCursor] = useState<number | null>(null);
+  const [loadingOlder, setLoadingOlder] = useState(false);
+  /* Announced to screen readers, which otherwise hear NOTHING when a read finishes or
+     a page arrives — the panel's own status text is not a live region. The alternating
+     NBSP is `IngestionProposalsPanel.announce()`'s idiom: an identical string is not
+     re-announced, so the toggle forces it. */
+  const [announcement, setAnnouncement] = useState('');
+  const announce = useCallback((sentence: string) => {
+    setAnnouncement((prev) => (prev.endsWith('\u00a0') ? sentence : `${sentence}\u00a0`));
+  }, []);
   /* Guards a response from a PREVIOUS experiment id landing after a switch. The
      record screen unmounts this panel on a switch, so React would no-op the late
      setState anyway — this is hazard-class defence, and it is labelled as such
@@ -151,19 +174,73 @@ export function ActivityHistoryPanel({ experimentId }: { experimentId: string })
   const load = useCallback(() => {
     wanted.current = experimentId;
     setState({ status: 'loading' });
+    setOlder([]);
+    setCursor(null);
     api
       .listActivity(experimentId)
       .then((body) => {
         if (wanted.current !== experimentId) return;
         setState({ status: 'data', body });
+        setCursor(body.next_before_seq);
+        announce(
+          body.total === 0
+            ? LABELS.activityEmpty
+            : `${LABELS.activityShowing} ${body.returned} ${LABELS.activityOf} ${body.total} ${LABELS.activityEntries}.`,
+        );
       })
       .catch(() => {
         if (wanted.current !== experimentId) return;
         setState({ status: 'error' });
+        announce(LABELS.activityUnavailable);
       });
-  }, [experimentId]);
+  }, [experimentId, announce]);
+
+  /*
+   * ONE PAGE OLDER. Appends rather than replaces, so the reader never loses what they
+   * were looking at — and a failed page leaves the list exactly as it was, which is
+   * the destructive-silent-failure rule §11 records for the proposals and notes
+   * panels: a background failure must not destroy what is on screen.
+   */
+  const loadOlder = useCallback(() => {
+    if (cursor === null || loadingOlder) return;
+    setLoadingOlder(true);
+    api
+      .listActivity(experimentId, { beforeSeq: cursor })
+      .then((body) => {
+        if (wanted.current !== experimentId) return;
+        setOlder((prev) => [...prev, ...body.events]);
+        setCursor(body.next_before_seq);
+        setLoadingOlder(false);
+        announce(`${LABELS.activityShowing} ${body.returned} ${LABELS.activityEntries}.`);
+      })
+      .catch(() => {
+        if (wanted.current !== experimentId) return;
+        setLoadingOlder(false);
+        announce(LABELS.activityUnavailable);
+      });
+  }, [cursor, experimentId, loadingOlder, announce]);
 
   useEffect(load, [load]);
+
+  /*
+   * HOW MANY ROWS THE READER CAN SEE — counted from the rendered rows, deliberately.
+   *
+   * I FIRST WROTE THIS AS A SUM OF THE SERVER'S `returned` VALUES, with a comment
+   * citing §11's `pendingTotal` rule, and a negative control proved that guard was an
+   * EQUIVALENT MUTANT: swapping it back to array lengths failed no test, because in
+   * every fixture `returned` equals `events.length`.
+   *
+   * The mutant passing was informative rather than merely embarrassing — it showed the
+   * rule was MIS-APPLIED. §11's defect is taking the TOTAL from a fetched page, which
+   * understates outstanding work; that rule is honoured two lines below, where the
+   * total is `state.body.total` and never a length. But `shown` is a claim about WHAT
+   * IS ON SCREEN, so the rendered rows are its only honest source: a server `returned`
+   * that disagreed with the rows delivered would make this sentence describe a list
+   * the reader is not looking at.
+   *
+   * So: TOTAL from the server, always. SHOWN from the DOM's own content, always.
+   */
+  const shown = state.status === 'data' ? state.body.events.length + older.length : 0;
 
   return (
     <section className="activity-panel" aria-labelledby="activity-heading">
@@ -171,10 +248,27 @@ export function ActivityHistoryPanel({ experimentId }: { experimentId: string })
         {LABELS.activityTitle}
       </h2>
       <p className="activity-lead">{LABELS.activityLead}</p>
-      {/* THE ACTOR DISCLOSURE, ONCE AND IN WORDS. See the module docstring: this
-          is `ACT-003`'s "render `unattributed` honestly" requirement, discharged
-          as a sentence a scientist can read rather than as a token on every row. */}
-      <p className="activity-actor-note">{LABELS.activityActorUnattributed}</p>
+      {/* THE ACTOR DISCLOSURE, BEHIND A NATIVE `<details>` — the repo idiom
+          (`HelpPanel`, `AssistantPanel`, `FetchStates`, `SchemaBrowser`):
+          keyboard-operable with no ARIA and announced as a disclosure.
+          `ACT-003`'s requirement is that `unattributed` be rendered HONESTLY, and
+          the sentence behind this is UNCHANGED and still in the DOM — a closed
+          `<details>` is reachable by `querySelectorAll`, by find-in-page and by a
+          screen reader. What changed is that ~40 words of standing explanation
+          stop being permanent furniture for a reader who has met them once, which
+          is the owner's own direction: honest prose goes behind a collapsible
+          rather than being capped or deleted. The SUMMARY still states the fact,
+          so nothing is hidden behind a neutral label. */}
+      <details className="activity-actor-details">
+        <summary className="activity-actor-summary">{LABELS.activityWhyUnattributed}</summary>
+        <p className="activity-actor-note">{LABELS.activityActorUnattributed}</p>
+      </details>
+      {/* The only live region on this panel. Without it a screen-reader user hears
+          nothing when a read finishes or an older page arrives, because the status
+          text below is static. */}
+      <p className="sr-only" role="status" aria-live="polite">
+        {announcement}
+      </p>
 
       {state.status === 'loading' && <p className="activity-status">{LABELS.activityLoading}</p>}
       {state.status === 'error' && (
@@ -183,10 +277,15 @@ export function ActivityHistoryPanel({ experimentId }: { experimentId: string })
       {state.status === 'data' && (
         <>
           <p className="activity-counts">
-            {/* EVERY NUMBER HERE IS THE SERVER'S. None is `events.length`. */}
+            {/* THE TOTAL IS THE SERVER'S, ALWAYS — `state.body.total`, never a page
+                length, which is §11's `pendingTotal` rule. `shown` is the opposite and
+                deliberately so: it counts the rendered rows, because it describes what
+                the reader is looking at (see `shown`'s own note). A NOUN is attached,
+                because "50 of 200" is a bare fraction and a reader mid-task should not
+                have to infer what it counts. */}
             {state.body.total === 0
               ? LABELS.activityEmpty
-              : `${state.body.returned} of ${state.body.total}`}
+              : `${LABELS.activityShowing} ${shown} ${LABELS.activityOf} ${state.body.total} ${LABELS.activityEntries}.`}
             {state.body.unreadable_entries > 0 && (
               <span className="activity-unreadable">
                 {' '}
@@ -195,11 +294,27 @@ export function ActivityHistoryPanel({ experimentId }: { experimentId: string })
             )}
           </p>
           {state.body.total > 0 && (
-            <ol className="activity-list">
-              {state.body.events.map((e) => (
-                <EventRow key={e.id} event={e} />
-              ))}
-            </ol>
+            <>
+              <ol className="activity-list">
+                {[...state.body.events, ...older].map((e) => (
+                  <EventRow key={e.id} event={e} />
+                ))}
+              </ol>
+              {cursor !== null ? (
+                <button
+                  type="button"
+                  className="btn btn-secondary activity-older"
+                  onClick={loadOlder}
+                  disabled={loadingOlder}
+                >
+                  {loadingOlder ? LABELS.activityLoadingOlder : LABELS.activityShowOlder}
+                </button>
+              ) : (
+                /* Said explicitly rather than by the control simply vanishing: a
+                   missing button is ambiguous between "no more" and "broken". */
+                <p className="activity-counts">{LABELS.activityAllShown}</p>
+              )}
+            </>
           )}
         </>
       )}

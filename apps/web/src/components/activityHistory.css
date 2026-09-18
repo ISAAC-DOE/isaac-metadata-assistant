@@ -31,15 +31,38 @@
   max-width: 68ch;
 }
 
-/* The actor disclosure is the one sentence on this surface a reader must not skim
-   past, so it is set apart structurally rather than by hue. */
+/* The actor disclosure, now behind a native `<details>` (`HelpPanel`/`AssistantPanel`
+   idiom). The SUMMARY carries the question, so a closed disclosure still states what
+   it is about rather than hiding it behind a neutral label; the paragraph keeps its
+   set-apart treatment — structural, not hue — because it is the one paragraph here a
+   reader must not skim once opened. */
+.activity-actor-details {
+  font-size: var(--font-size-body);
+  color: var(--text-secondary);
+}
+
+.activity-actor-summary {
+  cursor: pointer;
+  font-size: var(--font-size-body);
+  font-weight: var(--font-weight-bold);
+  color: var(--text-heading);
+}
+
 .activity-actor-note {
+  margin-top: var(--space-xs);
   padding: var(--space-sm);
   /* `--space-2xs` as the stroke, the form `run-schema-mirror.css` already uses —
      a rung rather than a hand-authored `2px`, which `type-scale-and-spacing`
      refuses and was right to. */
   border-left: var(--space-2xs) solid var(--border-strong);
   background: var(--surface-subtle);
+}
+
+/* The paging control. `.btn .btn-secondary` (`styles/base.css:207`) already defines
+   default, hover, focus, active and disabled, so NO interaction state is reinvented
+   here and none is half-shipped — Operate mode's rule. Only placement is set. */
+.activity-older {
+  align-self: flex-start;
 }
 
 .activity-counts {

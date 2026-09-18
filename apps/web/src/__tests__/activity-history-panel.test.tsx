@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
-import { render, screen, within } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 
 import { ActivityHistoryPanel } from '../components/ActivityHistoryPanel';
 import { LABELS } from '../lib/labels';
@@ -74,10 +74,100 @@ describe('the activity history panel', () => {
      * three, and the panel must say 200 — not 3.
      */
     const three = [event({ id: 'a', seq: 3 }), event({ id: 'b', seq: 2 }), event({ id: 'c', seq: 1 })];
-    mount({ events: three, total: 200, matched: 200, returned: 3, highest_seq: 200 });
-    const counts = await screen.findByText(/of 200/);
-    expect(counts.textContent).toContain('3 of 200');
-    expect(counts.textContent).not.toMatch(/\b3 of 3\b/);
+    const { container } = mount({ events: three, total: 200, matched: 200, returned: 3, highest_seq: 200 });
+    /*
+     * SCOPED TO THE VISIBLE LINE. An unscoped `findByText(/of 200/)` now matches
+     * TWICE, because the `sr-only` announcer carries the same sentence on purpose —
+     * a screen-reader user otherwise hears nothing when a read finishes. Scoping is
+     * the fix rather than loosening the matcher, and the announcer gets its own
+     * assertion below so the duplication is pinned as intended rather than tolerated.
+     */
+    await screen.findAllByText(/of 200/);
+    const counts = container.querySelector('.activity-counts');
+    expect(counts?.textContent).toContain('3');
+    expect(counts?.textContent).toContain('200');
+    expect(counts?.textContent).not.toMatch(/\b3 of 3\b/);
+
+    // EXACTLY ONE live region on this panel, and it is the announcer — not a second
+    // one racing it, which is the defect `IngestionProposalsPanel` records.
+    const live = container.querySelectorAll('[aria-live]');
+    expect(live).toHaveLength(1);
+    expect(live[0].className).toContain('sr-only');
+    expect(live[0].textContent).toContain('200');
+  });
+
+  it('offers a way to reach the entries it says are hidden', async () => {
+    /*
+     * THE DEAD END THIS REFUSES, found by an Impeccable pass over this panel: the
+     * first version reported "50 of 200" and offered NO control, so 150 facts it
+     * named were unreachable. A count that advertises hidden content with no way to
+     * reach it is not a deliberate scope boundary, it is an unfinished surface.
+     */
+    const first = [event({ id: 'p1', seq: 200 })];
+    const second = [event({ id: 'p2', seq: 199, action: 'note_captured', object_type: 'note' })];
+    const spy = vi
+      .spyOn(api, 'listActivity')
+      .mockResolvedValueOnce(body({ events: first, total: 2, returned: 1, next_before_seq: 200 }))
+      .mockResolvedValueOnce(body({ events: second, total: 2, returned: 1, next_before_seq: null }));
+    const { container } = render(<ActivityHistoryPanel experimentId="demo" />);
+
+    const older = await screen.findByRole('button', { name: LABELS.activityShowOlder });
+    fireEvent.click(older);
+
+    // The older page is APPENDED — the reader never loses what they were looking at.
+    await screen.findByText('Note Captured');
+    expect(screen.getByText('Experiment Renamed')).toBeTruthy();
+    expect(container.querySelectorAll('.activity-row')).toHaveLength(2);
+
+    // The cursor walked: the second call asked for entries BEFORE the first page's tail.
+    expect(spy.mock.calls[1]?.[1]).toEqual({ beforeSeq: 200 });
+
+    // Exhausted, and SAID so — a vanished control is ambiguous between "no more"
+    // and "broken".
+    expect(await screen.findByText(LABELS.activityAllShown)).toBeTruthy();
+    expect(screen.queryByRole('button', { name: LABELS.activityShowOlder })).toBeNull();
+  });
+
+  it('keeps the actor disclosure in the DOM behind a native details, not deleted', async () => {
+    /*
+     * `ACT-003` requires `unattributed` be rendered HONESTLY. Moving the explanation
+     * behind a `<details>` must not weaken that: a closed native disclosure is still
+     * in the DOM, still found by find-in-page, and still reachable by a screen
+     * reader — which is exactly why the repo uses it rather than conditional
+     * rendering. The SUMMARY also states the question, so nothing hides behind a
+     * neutral label.
+     */
+    const { container } = mount();
+    await screen.findByText('Experiment Renamed');
+    const details = container.querySelector('details.activity-actor-details');
+    expect(details).toBeTruthy();
+    expect(details?.hasAttribute('open')).toBe(false);
+    expect(container.querySelector('.activity-actor-summary')?.textContent).toBe(
+      LABELS.activityWhyUnattributed,
+    );
+    // The sentence itself is PRESENT while collapsed — `querySelectorAll` reaches
+    // inside a closed `<details>`, which is the property this relies on.
+    expect(container.querySelector('.activity-actor-note')?.textContent).toBe(
+      LABELS.activityActorUnattributed,
+    );
+  });
+
+  it('a failed OLDER page leaves the list it already showed intact', async () => {
+    /*
+     * §11's destructive-silent-failure rule, which this repository has now fixed
+     * twice (`IngestionProposalsPanel`, `UnmappedNotesPanel`): a background failure
+     * must not destroy what is on screen. Before paging existed the case was
+     * unreachable here; it is reachable now.
+     */
+    vi.spyOn(api, 'listActivity')
+      .mockResolvedValueOnce(body({ events: [event({ id: 'keep', seq: 9 })], total: 5, returned: 1, next_before_seq: 9 }))
+      .mockRejectedValueOnce(new Error('down'));
+    const { container } = render(<ActivityHistoryPanel experimentId="demo" />);
+    fireEvent.click(await screen.findByRole('button', { name: LABELS.activityShowOlder }));
+    await screen.findByRole('button', { name: LABELS.activityShowOlder });
+    // The row is still there, and the panel did NOT fall back to an error state.
+    expect(container.querySelectorAll('.activity-row')).toHaveLength(1);
+    expect(screen.queryByText(LABELS.activityEmpty)).toBeNull();
   });
 
   it('says in WORDS that entries are unattributed, and says why', async () => {
@@ -137,8 +227,12 @@ describe('the activity history panel', () => {
   });
 
   it('says nothing has been recorded, rather than showing an empty list', async () => {
-    mount({ events: [], total: 0, matched: 0, returned: 0, highest_seq: 0 });
-    expect(await screen.findByText(LABELS.activityEmpty)).toBeTruthy();
+    const { container } = mount({ events: [], total: 0, matched: 0, returned: 0, highest_seq: 0 });
+    // Scoped: the announcer carries the same sentence on purpose (see the first test).
+    await screen.findAllByText(LABELS.activityEmpty);
+    expect(container.querySelector('.activity-counts')?.textContent).toContain(
+      LABELS.activityEmpty,
+    );
     expect(screen.queryByRole('list')).toBeNull();
   });
 
@@ -163,8 +257,12 @@ describe('the activity history panel', () => {
      * history merely failed to load is a false statement about the science.
      */
     vi.spyOn(api, 'listActivity').mockRejectedValue(new Error('down'));
-    render(<ActivityHistoryPanel experimentId="demo" />);
-    expect(await screen.findByText(LABELS.activityUnavailable)).toBeTruthy();
+    const { container } = render(<ActivityHistoryPanel experimentId="demo" />);
+    // Scoped: the announcer carries the same sentence on purpose.
+    await screen.findAllByText(LABELS.activityUnavailable);
+    expect(container.querySelector('.activity-status-error')?.textContent).toBe(
+      LABELS.activityUnavailable,
+    );
     expect(screen.queryByText(LABELS.activityEmpty)).toBeNull();
   });
 });
