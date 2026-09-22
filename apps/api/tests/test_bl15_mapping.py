@@ -108,9 +108,16 @@ def test_the_proposable_set_is_exactly_these_five_and_the_number_is_the_point():
         "potential_magnitude",
     ]
     cov = mp.coverage()
-    assert cov["concepts_total"] == 45
+    # 45 -> 47 ON 2026-09-22, and the proposable five did NOT move. The two concepts
+    # added that day — `temperature_statement` (a source's words about temperature, kept
+    # verbatim, never converted) and `contributor_statement` (a person a source names,
+    # kept as provenance) — are both `needs_domain_review` and neither is proposable, so
+    # the count that answers "what can reach a field today" is unchanged and the
+    # needs-review count rises by exactly two. Raising the total did not raise the
+    # honest number, which is the point of pinning both.
+    assert cov["concepts_total"] == 47
     assert cov["deterministic"] + cov["normalized"] == 5
-    assert cov["needs_domain_review"] == 15
+    assert cov["needs_domain_review"] == 17
     assert cov["not_expressible"] == 24
     assert cov["blocked_by_build"] == 1
 
@@ -343,7 +350,10 @@ def test_technique_is_DEFERRED_because_no_reader_emits_an_enum_member():
     # makes the old `deterministic` status impossible rather than merely unlucky.
     from isaac_api.bl15 import profiles
 
-    aliases = profiles.PROFILES["ssrl_bl152_angel"].acquisition_method_aliases
+    # THE HISTORICAL ID, DELIBERATELY: `ssrl_bl152_angel` was renamed to the convention
+    # it encodes on 2026-09-22 and must still resolve, so this lookup doubles as a check
+    # that the alias did not break a caller written before the rename.
+    aliases = profiles.profile_for("ssrl_bl152_angel").acquisition_method_aliases
     assert aliases, "the profile recognises no acquisition-method token at all"
     readings = {normalized for _token, normalized in aliases}
     assert readings.isdisjoint(set(enum)), (
@@ -378,7 +388,15 @@ def test_the_temperature_reason_names_the_specific_wrong_default():
     """
     reason = mp.TEMPERATURE_ABSENT_REASON
     assert "temperature" in reason.lower()
+    # STILL NAMES 298, and 2026-09-22 made that MORE important rather than less: the
+    # 298 K exception (DEC-43) was withdrawn that day, and the sentence now says both
+    # that 298 must not be defaulted in AND that no automatic offer of any number is
+    # made. A `temperature_statement` concept exists since the same day, and it maps a
+    # source's WORDS to the extended context — never a number to this field, which is
+    # why the reason below still belongs to no concept.
     assert "298" in reason
+    assert "must not be defaulted" in reason
+    assert "offers no value automatically" in reason
     assert "context.temperature_K" in reason
     assert mp.unmapped_concepts() == ()
     assert not any(
@@ -406,6 +424,10 @@ def test_to_state_is_complete_and_round_trips_as_json():
             "placement_name",
             "domain_questions",
             "unresolved_questions",
+            # ADDED 2026-09-22 for "Data Quality Notes" — the scientist-facing name the
+            # domain owner uses for the corpus's quality remarks. `None` for every
+            # concept whose own name reads well enough.
+            "scientist_label",
         }, concept
         json.dumps(state)
 

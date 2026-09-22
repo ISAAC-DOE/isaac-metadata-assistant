@@ -409,21 +409,51 @@ def test_a_filter_narrows_matched_and_leaves_total_alone(client):
 
 
 def test_an_unknown_filter_value_is_refused_rather_than_answered_as_empty(client):
-    """An empty list would be a claim about the RECORD. The honest answer is 422."""
+    """An empty list would be a claim about the RECORD. The honest answer is 422.
+
+    **CHANGED 2026-09-22, and the invariant is unchanged.** The three filters were bare
+    strings refused inside the handler with ``unknown_activity_filter``; they are now
+    ``Literal`` sets built from the activity vocabulary (which is what lets the history
+    be an MCP read — ``mcp.tools._query_schema`` refuses an unbounded string). So the
+    FRAMEWORK refuses first, with its own validation body. What this test pins is the
+    same thing it always pinned: an off-vocabulary value is refused with ``422``, not
+    answered as empty, and the admissible set travels with the refusal — now as
+    ``ctx.expected``, naming every member of the served vocabulary.
+    """
     exp_id = _create(client)
-    for key, value in (
-        ("action", "did_something"),
-        ("channel", "carrier-pigeon"),
-        ("object_type", "thingummy"),
+    served = _activity(client, exp_id)
+    for key, value, vocabulary in (
+        ("action", "did_something", served["actions"]),
+        ("channel", "carrier-pigeon", served["channels"]),
+        ("object_type", "thingummy", served["object_types"]),
     ):
         refused = client.get(
             f"/api/experiments/{exp_id}/activity", params={key: value}
         )
         assert refused.status_code == 422, (key, refused.text)
-        body = refused.json()
-        assert body["error"] == "unknown_activity_filter"
-        # The admissible sets travel with the refusal, so a client never guesses.
-        assert "actions" in body and "channels" in body and "object_types" in body
+        (problem,) = refused.json()["detail"]
+        assert problem["type"] == "literal_error"
+        assert problem["loc"] == ["query", key]
+        # The admissible set travels with the refusal, so a client never guesses —
+        # and it is the SAME set the successful response serves.
+        for member in vocabulary:
+            assert f"'{member}'" in problem["ctx"]["expected"], (key, member)
+
+
+def test_the_handlers_own_refusal_remains_as_defence_in_depth():
+    """The model still refuses an off-vocabulary filter itself, so the route's
+    ``unknown_activity_filter`` branch is not dead weight if a caller reaches the
+    filter without the framework (a direct call, or a future route forwarding a raw
+    string)."""
+    from isaac_api import activity_history
+
+    for key, value in (
+        ("action", "did_something"),
+        ("channel", "carrier-pigeon"),
+        ("object_type", "thingummy"),
+    ):
+        with pytest.raises(ValueError):
+            activity_history.filter_events([], **{key: value})
 
 
 def test_the_limit_is_clamped_rather_than_refused_and_the_clamp_is_observable(client):

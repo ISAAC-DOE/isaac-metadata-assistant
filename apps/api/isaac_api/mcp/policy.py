@@ -78,6 +78,7 @@ __all__ = [
     "Scope",
     "changes_query_parameters",
     "extended_context_query_parameters",
+    "activity_query_parameters",
     "forbidden_tool_reason",
     "note_capture_ceilings",
     "note_text_byte_ceiling",
@@ -444,6 +445,36 @@ CHANGES_QUERY_ALLOWLIST = frozenset({"cursor", "limit"})
 #: same one ``PENDING_QUERY_ALLOWLIST`` and ``PROPOSAL_LIST_QUERY_ALLOWLIST`` both give.
 EXTENDED_CONTEXT_QUERY_ALLOWLIST = frozenset({"limit", "offset", "run_id", "concept"})
 
+#: Activity-history query parameters this package is permitted to expose. **Added
+#: 2026-09-22** — ``docs/session-closure-2026-09-18.md`` §8 recorded that the Activity
+#: history was not an MCP read because four of its filters were unbounded strings and
+#: ``tools._query_schema`` raises at import on one. They are now CLOSED SETS on the route
+#: (`Literal`s built from ``activity.ACTIVITY_ACTIONS`` / ``ACTIVITY_CHANNELS`` /
+#: ``ACTIVITY_OBJECT_TYPES``) and `run_id` carries its bound on the route, so nothing was
+#: added to ``tools._DECLARED_STRING_BOUNDS``.
+#:
+#: WHAT WAS REVIEWED. `limit`, `since_seq` and `before_seq` carry no record content — a
+#: bound and two positions in a sequence the server mints. `newest_first` chooses between
+#: the two directions of one total order and returns the same rows. `action`, `channel`
+#: and `object_type` select on the server's OWN bounded vocabularies, which every response
+#: already serves in full, so naming one reveals nothing a caller has not been told.
+#: `run_id` is a value the agent already holds (``isaac_list_runs``), exactly the ground
+#: ``PENDING_QUERY_ALLOWLIST``'s own `run_id` was reviewed on. **None of them selects on
+#: a `before` or `after` value**, which is where an event's content lives — there is no
+#: free-text selector here and none is pre-approved.
+ACTIVITY_QUERY_ALLOWLIST = frozenset(
+    {
+        "limit",
+        "since_seq",
+        "before_seq",
+        "action",
+        "channel",
+        "object_type",
+        "run_id",
+        "newest_first",
+    }
+)
+
 
 @dataclass(frozen=True)
 class QueryParameter:
@@ -626,6 +657,14 @@ def extended_context_query_parameters() -> tuple[QueryParameter, ...]:
     return _query_parameters(
         get_extended_context, EXTENDED_CONTEXT_QUERY_ALLOWLIST, "extended-context"
     )
+
+
+def activity_query_parameters() -> tuple[QueryParameter, ...]:
+    """The activity route's own query parameters, gated by
+    :data:`ACTIVITY_QUERY_ALLOWLIST`. Same derivation rule as every set here."""
+    from ..routes import list_activity  # local: keeps import order flexible
+
+    return _query_parameters(list_activity, ACTIVITY_QUERY_ALLOWLIST, "activity")
 
 
 def proposal_target_field_paths() -> tuple[str, ...]:
@@ -871,6 +910,10 @@ def _changes_query_names() -> frozenset[str]:
 
 def _extended_context_query_names() -> frozenset[str]:
     return frozenset(p.name for p in extended_context_query_parameters())
+
+
+def _activity_query_names() -> frozenset[str]:
+    return frozenset(p.name for p in activity_query_parameters())
 
 
 # --------------------------------------------------------------------------
@@ -1227,6 +1270,20 @@ def _operations() -> tuple[Operation, ...]:
             ),
             query_parameters=_extended_context_query_names(),
         ),
+        Operation(
+            id="list_activity",
+            method="GET",
+            path_template="/api/experiments/{experiment_id}/activity",
+            scope=Scope.READ,
+            mutates=False,
+            # What the history IS, in the summary an agent reads first: an append-only
+            # record of acts, whose actor reads `unattributed` in this build.
+            summary=(
+                "A bounded page of the record's append-only activity history; every "
+                "actor reads unattributed in this build."
+            ),
+            query_parameters=_activity_query_names(),
+        ),
     )
 
 
@@ -1353,6 +1410,12 @@ PERMITTED_TOOL_NAMES = frozenset(
         # `test_mcp_boundaries`. It adds NO write: `tools.py`'s header property, that
         # every write touches DRAFT content only, is unchanged because this is not one.
         "isaac_get_extended_context",
+        # 2026-09-22, a reviewed widening of this set, and a READ. The activity history
+        # was durable, served over HTTP and reachable from no tool, because its filters
+        # were unbounded strings; they are closed sets on the route now. The name
+        # contains none of `FORBIDDEN_TOOL_TOKENS` -- checked by `forbidden_tool_reason`
+        # at import and asserted again over the registry by `test_mcp_boundaries`.
+        "isaac_list_activity",
     }
 )
 

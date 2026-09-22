@@ -937,8 +937,29 @@ def test_the_transcript_route_is_a_second_note_producer(client):
     # THE NOTE IS NOT A VALUE. It carries `nominal.DISCLOSURE` verbatim, which states
     # that 298 K was NOT measured; the number reaches a run only if a person accepts
     # the proposal. `test_extended_context_wiring.py` walks that end to end.
-    assert routes_src.count("exp.capture_note(") == 4, (
-        "a fifth producer needs the prose updated — and the prose is the point: "
+    #
+    # *(2026-09-22: `DEC-43` is SUPERSEDED. `_mint_nominal_offer` is kept but is now
+    # reached only when a REVIEWED, convention-naming nominal rule is enabled — none
+    # is — so in every default deployment this fourth producer mints nothing. The
+    # paragraph above is left as the record of why its source member exists.)*
+    #
+    # ── 4 -> 5 ON 2026-09-22 ────────────────────────────────────────────────────
+    #
+    # The FIFTH producer is the DATA QUALITY NOTE capture in
+    # `POST /api/imports/{id}/add-to-experiment`: every free-text `Notes` cell the
+    # archive's notes file binds to a measurement becomes one run note on that
+    # measurement's run, exactly once per acquisition and locator (a client request
+    # key), and it mints NO proposal — the domain owner's answer is that nobody knows
+    # what "QC" would mean here, so the words are kept and nothing is derived.
+    #
+    # ITS `source` IS `historical_source_line`, THE SEVENTH MEMBER, REUSED — and this
+    # time reuse is the true answer rather than the tempting one. The note carries a
+    # line a parser READ out of a historical source file, verbatim, with that file's
+    # path and the line's locator prefixed: exactly what the member claims. It is
+    # NOT `typed_note` (nobody typed it here) and NOT `domain_guidance_nominal`
+    # (there is a source, and a locator in it).
+    assert routes_src.count("exp.capture_note(") == 5, (
+        "a sixth producer needs the prose updated — and the prose is the point: "
         "this count exists so a new note producer cannot land without somebody "
         "stating which `NOTE_SOURCES` member it claims and why that member is true "
         "of it"

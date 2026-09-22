@@ -81,6 +81,7 @@ from isaac_records.ids import is_record_id, new_record_id
 from isaac_records.models import derivation
 
 from . import activity as activity_module
+from . import convention_rules as convention_rules_module
 from . import extended_context as extended_context_module
 from . import notes as notes_module
 from . import proposals as proposals_module
@@ -1905,6 +1906,54 @@ def _extended_context_state_payload(exp: "Experiment") -> dict | None:
     return extended_context_module.state_payload(exp.extended_context)
 
 
+#: Where the durable run-origin map lives in the state document. See
+#: :attr:`Experiment.historical_run_origins`.
+HISTORICAL_RUN_ORIGINS_KEY = "historical_run_origins"
+
+#: The keys an origin row may carry. Bounded so a persisted row cannot grow a document.
+_RUN_ORIGIN_KEYS = frozenset(
+    {
+        "acquisition_identity",
+        "archive_name",
+        "acquisition_path",
+        "content_sha256",
+        "stem",
+        "legacy_number",
+        "import_id",
+        "recorded_utc",
+    }
+)
+
+
+def _convention_rules_state_payload(exp: "Experiment") -> list | None:
+    """What to store at ``convention_rules``, or ``None``. ONE function for both uses."""
+    return convention_rules_module.state_payload(
+        exp.convention_rules, exp.unreadable_convention_rules
+    )
+
+
+def _hydrate_run_origins(raw: object) -> dict:
+    """``run_id -> origin row``. Never raises; a malformed row is READ, not refused.
+
+    A row that is not a mapping is dropped from the INDEX only — it names nothing this
+    build can match against — and a mapping keeps only the known keys with string or
+    integer values, so a crafted document cannot smuggle structure through it.
+    """
+    if not isinstance(raw, dict):
+        return {}
+    out: dict = {}
+    for run_id, row in raw.items():
+        if not isinstance(run_id, str) or not isinstance(row, dict):
+            continue
+        out[run_id] = {
+            key: value
+            for key, value in row.items()
+            if key in _RUN_ORIGIN_KEYS
+            and (isinstance(value, str) or (isinstance(value, int) and not isinstance(value, bool)))
+        }
+    return out
+
+
 def _authoritative_signature(exp: "Experiment") -> str:
     """Deterministic hash of the AUTHORITATIVE scientific state of an experiment.
 
@@ -2125,6 +2174,17 @@ def _authoritative_signature(exp: "Experiment") -> str:
         # runs, notes and proposals each relied on, and pinned by the same kind of
         # test.
         "extended_context": _extended_context_state_payload(exp),
+        # CONVENTION RULES AND RUN ORIGINS (2026-09-22) ARE INSIDE, for extended
+        # context's reason — content the experiment holds, written only by an explicit
+        # act, and a save whose only change is one of them must not be a silent no-op.
+        # Both hash as ``None`` when empty, so a legacy record's signature is unmoved.
+        # Neither reaches ``submissions.content_signature``, which is computed from
+        # export units and reads neither key.
+        "convention_rules": _convention_rules_state_payload(exp),
+        "historical_run_origins": (
+            {rid: exp.historical_run_origins[rid] for rid in sorted(exp.historical_run_origins)}
+            or None
+        ),
     }
     blob = json.dumps(payload, sort_keys=True, ensure_ascii=False)
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()
@@ -3598,6 +3658,27 @@ class Experiment:
     #: ``entry_id`` and never removes an entry: a provenance artifact that could lose
     #: an entry is worse than none.
     extended_context: "ExtendedContext | None" = None
+    #: REVIEWED, VERSIONED CONVENTION RULES this experiment holds —
+    #: :mod:`isaac_api.convention_rules`. Added 2026-09-22. What "learning" means here:
+    #: a scientist confirmed "these Runs are named under that convention", "this reading
+    #: resolves that conflict", or "this channel is that element's". Append-only: a
+    #: change is a new version superseding the old one, never an edit.
+    #:
+    #: IN :func:`_authoritative_signature`, for the reason extended context is — a rule
+    #: is content the experiment holds, and ``save_versioned`` writes nothing when the
+    #: signature is unchanged. OUT OF ``draft``, so structurally inert to export.
+    #: OMITTED from the document when empty, so a legacy record is byte-identical.
+    convention_rules: list = field(default_factory=list)
+    #: Raw rule entries this build could not read, carried verbatim and written back.
+    unreadable_convention_rules: list = field(default_factory=list)
+    #: ``run_id -> the acquisition it was created from`` — a DURABLE INTERNAL IDENTITY
+    #: (archive, archive path and content digest), added 2026-09-22 so two acquisitions
+    #: sharing a legacy number (``Q16``: the two `32` files) are never confused, and so
+    #: a re-run of an import finds the run a measurement already has by WHAT IT IS
+    #: rather than by the label it happens to carry. Provenance, not science: inert to
+    #: export, omitted when empty, inside the signature for the ``folder`` reason (a
+    #: save whose only change is a recorded origin must not be a silent no-op).
+    historical_run_origins: dict = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         # Legacy-safe default: a pre-P27.2 state file (or a bare construction)
@@ -3758,6 +3839,17 @@ class Experiment:
         payload = _extended_context_state_payload(self)
         if payload is not None:
             state[extended_context_module.STATE_KEY] = payload
+        # OMITTED WHEN EMPTY, for extended context's reason one key up: an experiment
+        # with no rules and no recorded origins serialises byte-identically to one
+        # written before either existed.
+        rules_payload = _convention_rules_state_payload(self)
+        if rules_payload is not None:
+            state[convention_rules_module.STATE_KEY] = rules_payload
+        if self.historical_run_origins:
+            state[HISTORICAL_RUN_ORIGINS_KEY] = {
+                rid: dict(self.historical_run_origins[rid])
+                for rid in sorted(self.historical_run_origins)
+            }
         return state
 
     def save(self) -> None:
@@ -4248,6 +4340,45 @@ class Experiment:
                 unreadable=existing.unreadable,
             )
         return len(fresh)
+
+    def add_convention_rule(self, rule) -> None:
+        """Append one reviewed rule IN MEMORY. Does not save. Never replaces one.
+
+        A rule that supersedes another is a NEW rule naming the old one; the old one
+        stays, and :func:`convention_rules.active_rules` derives which is in force. A
+        duplicate id is refused rather than appended — the caller has a bug.
+        """
+        if any(r.rule_id == rule.rule_id for r in self.convention_rules):
+            raise ValueError(f"rule id {rule.rule_id!r} already exists on this experiment")
+        self.convention_rules.append(rule)
+
+    def record_run_origin(self, run_id: str, origin: dict) -> bool:
+        """Record which acquisition a run was created from. Returns ``True`` if new.
+
+        IDEMPOTENT: an identical row changes nothing, so a re-run of an import is a
+        genuine no-op. A DIFFERENT row for a run that already has one is refused rather
+        than overwritten — a run's origin is a fact about how it was made, and a second
+        import claiming it was made from something else is a conflict, not an update.
+        """
+        clean = {k: v for k, v in origin.items() if k in _RUN_ORIGIN_KEYS}
+        existing = self.historical_run_origins.get(run_id)
+        if existing is not None:
+            if existing.get("acquisition_identity") != clean.get("acquisition_identity"):
+                raise ValueError(
+                    f"run {run_id!r} already records a different origin; not overwritten"
+                )
+            return False
+        self.historical_run_origins[run_id] = clean
+        return True
+
+    def run_for_acquisition(self, acquisition_identity: str):
+        """The run created from this acquisition, or ``None``. Matches by identity only."""
+        for run_id, origin in self.historical_run_origins.items():
+            if origin.get("acquisition_identity") == acquisition_identity:
+                run = self.get_run(run_id)
+                if run is not None:
+                    return run
+        return None
 
     def replace_proposal(self, proposal: "IngestionProposal") -> None:
         """Swap in a revised proposal IN MEMORY, by id. Does not save.
@@ -5192,6 +5323,17 @@ class Experiment:
             extended_context_module.hydrate(stored_context, experiment_id=exp.id)
             if stored_context is not None
             else None
+        )
+        # NO MIGRATION IS REQUIRED FOR CONVENTION RULES OR RUN ORIGINS EITHER (added
+        # 2026-09-22): both keys are read with ``.get`` and a default, an absent key
+        # hydrates to nothing, and neither is written back while empty — so a legacy
+        # document round-trips byte-identically and hashes as it always did.
+        (
+            exp.convention_rules,
+            exp.unreadable_convention_rules,
+        ) = convention_rules_module.hydrate(state.get(convention_rules_module.STATE_KEY))
+        exp.historical_run_origins = _hydrate_run_origins(
+            state.get(HISTORICAL_RUN_ORIGINS_KEY)
         )
         return exp
 

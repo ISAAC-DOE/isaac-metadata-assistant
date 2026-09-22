@@ -70,6 +70,7 @@ from .evidence import (
     CONCEPT_BEAMSIZE,
     CONCEPT_BEAMTIME_DATES,
     CONCEPT_BEAMTIME_PURPOSE,
+    CONCEPT_CONTRIBUTOR_STATEMENT,
     CONCEPT_ECHEM_PROCEDURE,
     CONCEPT_ELECTROLYTE_OR_MEDIUM,
     CONCEPT_ELEMENT,
@@ -85,6 +86,7 @@ from .evidence import (
     CONCEPT_SAMPLE_PREPARATION,
     CONCEPT_SPECTROMETER_CONFIG,
     CONCEPT_STEP_NUMBER,
+    CONCEPT_TEMPERATURE_STATEMENT,
     DETERMINISM_NORMALIZED,
     MAX_SOURCE_BYTES,
     SCOPE_BEAMTIME,
@@ -138,6 +140,13 @@ README_SECTIONS: tuple[tuple[str, str], ...] = (
     ("beamsize", CONCEPT_BEAMSIZE),
     ("spectrometer", CONCEPT_SPECTROMETER_CONFIG),
     ("monochromator", CONCEPT_MONOCHROMATOR_CALIBRATION),
+    # ADDED 2026-09-22. NEITHER LABEL OCCURS IN THE SUPPLIED ARCHIVE'S README (measured:
+    # zero lines), so both are forward-looking and exercised only by synthetic fixtures.
+    # A labelled temperature is kept VERBATIM and never converted; a labelled operator
+    # is provenance and never an actor or a parsing choice.
+    ("temperature", CONCEPT_TEMPERATURE_STATEMENT),
+    ("operator", CONCEPT_CONTRIBUTOR_STATEMENT),
+    ("contributor", CONCEPT_CONTRIBUTOR_STATEMENT),
 )
 
 
@@ -246,8 +255,40 @@ RULE_PREPARATION_SECTION = (
     "turning it into one would invent a schema the document does not have."
 )
 
+RULE_TEMPERATURE_STATEMENT = (
+    "bl15.notes.temperature_statement.v1: a line that says `room temperature`, carries "
+    "the standalone token `RT`, or is labelled `Temperature:` states something about "
+    "temperature. It is reported VERBATIM and NEVER converted to a number: which number "
+    "'room temperature' means is a convention (NTP-style 293.15 K or SATP-style 298.15 "
+    "K), and the domain owner declined on 2026-09-22 to have one chosen automatically. "
+    "Measured: zero such lines in the supplied archive's notes or readme."
+)
+RULE_CONTRIBUTOR_STATEMENT = (
+    "bl15.notes.contributor_statement.v1: a line labelled `Operator:`, `Measured by:`, "
+    "`Run by:`, `Performed by:`, `Prepared by:` or `Contributor(s):` names a person the "
+    "document says did the work. The name is read verbatim. Inside a `Sample N` "
+    "section it is scoped to that section, and the section's own file-number rows are "
+    "carried with it, so a reader can see WHICH acquisitions the document attributes to "
+    "whom without this reader inferring a range. PROVENANCE ONLY: it selects no naming "
+    "convention and is never an ISAAC identity. Measured: zero such lines in the "
+    "supplied archive."
+)
+RULE_DATA_QUALITY_NOTE = (
+    "bl15.notes.notes_column_data_quality_note.v1: in a `Step / File Number / E-chem "
+    "Procedure / Notes` table, the FOURTH cell of a row — the `Notes` cell — together "
+    "with any untabbed continuation lines directly beneath it, is the scientist's own "
+    "remark about that file. It is reported VERBATIM as a Data Quality Note, bound to "
+    "the row's file number in its locator. No phrase in it is classified and no "
+    "qc.status is derived from it — the domain owner's answer on 2026-09-22. Cell "
+    "position, not content, decides that a line is the Notes cell, so a Notes cell that "
+    "happens to hold a bare integer is not misread as the next row's step."
+)
+
 NORMALIZATION_RULES: frozenset[str] = frozenset(
     {
+        RULE_TEMPERATURE_STATEMENT,
+        RULE_CONTRIBUTOR_STATEMENT,
+        RULE_DATA_QUALITY_NOTE,
         RULE_README_SECTION,
         RULE_README_ELEMENT,
         RULE_BEAMTIME_DATES,
@@ -294,6 +335,38 @@ _FLOW = re.compile(
 )
 _FILTER_SETTING = re.compile(r"^Filter\s*=\s*(\d+)\s*$", re.IGNORECASE)
 _COMMENT = re.compile(r"^\s*#")
+_ROOM_TEMPERATURE = re.compile(r"\broom[\s-]+temperature\b", re.IGNORECASE)
+#: Case-SENSITIVE and bounded by non-alphanumerics, so `RT` inside a word never matches.
+_RT = re.compile(r"(?<![A-Za-z0-9])RT(?![A-Za-z0-9])")
+_TEMPERATURE_LABEL = re.compile(r"^temp(?:erature)?\s*[:=]\s*\S", re.IGNORECASE)
+_CONTRIBUTOR = re.compile(
+    r"^(operators?|measured by|run by|performed by|prepared by|contributors?)"
+    r"\s*[:=]\s*(.+?)\s*$",
+    re.IGNORECASE,
+)
+#: The locator grammar a Data Quality Note's file number is carried in. OWNED HERE, so
+#: a consumer parses it through :func:`file_number_of` and never by its own regex.
+_FILE_NUMBER_IN_LOCATOR = re.compile(r"\(file number (\d+)\)")
+
+
+def file_number_of(locator: str) -> int | None:
+    """The file number a Data Quality Note's locator names, or ``None``."""
+    match = _FILE_NUMBER_IN_LOCATOR.search(locator or "")
+    return int(match.group(1)) if match else None
+
+
+_TABLE_ROW_IN_LOCATOR = re.compile(r"\btable (-?\d+) row (\d+)\b")
+
+
+def table_row_of(locator: str) -> tuple[int, int] | None:
+    """``(table, row)`` a notes-table statement's locator names, or ``None``.
+
+    The locator grammar is this module's, so the JOIN between a row's File Number cell
+    and its other cells is done through this function rather than by a consumer's own
+    regex over a string it does not own.
+    """
+    match = _TABLE_ROW_IN_LOCATOR.search(locator or "")
+    return (int(match.group(1)), int(match.group(2))) if match else None
 
 
 def _to_number(text: str) -> float | int:
@@ -421,6 +494,16 @@ def read_beamtime_notes(
 
     **``.txt`` only.** The ``.docx`` and ``.pdf`` siblings are the same document
     and the same witness; see this module's own docstring.
+
+    **THREE ADDITIONS ON 2026-09-22**, each reading something the document says and
+    none of them deciding anything: the ``Notes`` cell of a file-number row is kept as a
+    Data Quality Note (:data:`RULE_DATA_QUALITY_NOTE`); a temperature statement is kept
+    verbatim (:data:`RULE_TEMPERATURE_STATEMENT`); a labelled contributor line is kept as
+    provenance with its section's file numbers (:data:`RULE_CONTRIBUTOR_STATEMENT`).
+    The step and file-number reading is UNCHANGED — the row tracking below only adds
+    knowledge of which cell of a row a line is, and a file-number row reads exactly as
+    it did (asserted over the real archive before and after: same step and file-number
+    counts).
     """
     oversized = _oversize(record, text, NOTES_PARSER_ID)
     if oversized is not None:
@@ -444,6 +527,64 @@ def read_beamtime_notes(
     in_table = False
     row_index = 0
     awaiting_purpose = False
+    #: WHICH CELL OF THE CURRENT FILE-NUMBER ROW the last tab-prefixed line was:
+    #: 2 after the Step and File Number cells, 3 after E-chem Procedure, 4 after Notes.
+    #: ``None`` outside a row whose alignment is known.
+    row_cell: int | None = None
+    row_file_number: int | None = None
+    #: The open Data Quality Note: ``(first line number, [lines])``.
+    pending_note: tuple[int, list[str]] | None = None
+    #: The current section's file numbers and its labelled contributor lines, emitted
+    #: together when the section ends so each contributor carries the rows it names.
+    section_file_numbers: list[int] = []
+    section_contributors: list[tuple[int, str, str, str]] = []
+
+    def flush_note() -> None:
+        nonlocal pending_note
+        if pending_note is None:
+            return
+        first, parts = pending_note
+        pending_note = None
+        body = "\n".join(part for part in parts if part)
+        if not body:
+            return
+        suffix = (
+            f" (file number {row_file_number})" if row_file_number is not None else ""
+        )
+        builder.add(
+            locator=(
+                f"line {first} table {table_index} row {row_index} "
+                f"column `Notes`{suffix}"
+            ),
+            raw_literal=body,
+            concept=CONCEPT_QUALITY_NOTE,
+            determinism=DETERMINISM_NORMALIZED,
+            normalized_value=None,
+            normalization_rule=RULE_DATA_QUALITY_NOTE,
+            scope=(
+                SCOPE_MEASUREMENT if row_file_number is not None else SCOPE_SAMPLE_GROUP
+            ),
+        )
+
+    def flush_contributors() -> None:
+        numbers = sorted(set(section_file_numbers))
+        for number, raw_line, label, name in section_contributors:
+            builder.add(
+                locator=f"line {number} (in `{sample_label}`) contributor",
+                raw_literal=raw_line,
+                concept=CONCEPT_CONTRIBUTOR_STATEMENT,
+                determinism=DETERMINISM_NORMALIZED,
+                normalized_value={
+                    "name": name,
+                    "label": label,
+                    "section": sample_label,
+                    "file_numbers": numbers,
+                },
+                normalization_rule=RULE_CONTRIBUTOR_STATEMENT,
+                scope=SCOPE_SAMPLE_GROUP,
+            )
+        section_contributors.clear()
+        section_file_numbers.clear()
 
     index = -1
     while index + 1 < len(lines):
@@ -452,7 +593,39 @@ def read_beamtime_notes(
         raw = lines[index]
         line = raw.strip()
         if not line:
+            # AN EMPTY CELL IS A CELL. A lone tab is how the DOCX flattening writes an
+            # empty cell, and it must advance the row position — the first version of
+            # this row tracking treated it as a blank line and then read the NEXT
+            # row's step as this row's Notes cell, the same class of misalignment the
+            # file-number adjacency rule below was written against.
+            if in_table and row_cell in (2, 3) and _TABLE_CELL.match(raw):
+                row_cell += 1
+                if row_cell == 4:
+                    flush_note()
+                continue
+            # A blank line closes a Notes cell: its continuation lines sit directly
+            # beneath it, and the next row is separated by blank lines.
+            flush_note()
             continue
+
+        # --- the Notes cell of a file-number row, decided by POSITION -------------
+        if in_table and row_cell == 3 and _TABLE_CELL.match(raw):
+            row_cell = 4
+            pending_note = (number, [line])
+            continue
+        if (
+            in_table
+            and row_cell == 4
+            and pending_note is not None
+            and not _TABLE_CELL.match(raw)
+            and not _SAMPLE_HEADING.match(line)
+        ):
+            pending_note[1].append(line)
+            continue
+        if pending_note is not None and (
+            _TABLE_CELL.match(raw) or _SAMPLE_HEADING.match(line)
+        ):
+            flush_note()
 
         where = f"line {number}" + (
             f" (in `{sample_label}`)" if sample_label else ""
@@ -507,7 +680,11 @@ def read_beamtime_notes(
 
         sample_match = _SAMPLE_HEADING.match(line)
         if sample_match:
+            flush_note()
+            flush_contributors()
             in_table = False
+            row_cell = None
+            row_file_number = None
             pending_step = None
             sample_label = line
             name, medium, parenthetical = (
@@ -549,6 +726,28 @@ def read_beamtime_notes(
                 unread.append((number, line))
             continue
 
+        contributor = _CONTRIBUTOR.match(line)
+        if contributor:
+            label, person = contributor.group(1), contributor.group(2)
+            if sample_label is None:
+                builder.add(
+                    locator=f"{where} contributor",
+                    raw_literal=line,
+                    concept=CONCEPT_CONTRIBUTOR_STATEMENT,
+                    determinism=DETERMINISM_NORMALIZED,
+                    normalized_value={
+                        "name": person,
+                        "label": label,
+                        "section": None,
+                        "file_numbers": [],
+                    },
+                    normalization_rule=RULE_CONTRIBUTOR_STATEMENT,
+                    scope=SCOPE_BEAMTIME,
+                )
+            else:
+                section_contributors.append((number, line, label, person))
+            continue
+
         if folded in PREPARATION_HEADINGS:
             builder.add(
                 locator=where,
@@ -569,11 +768,13 @@ def read_beamtime_notes(
             # (measured, lines 97 and 161), and their rows must not be read as
             # file numbers.
             in_table = False
+            row_cell = None
             table_index += 1
             continue
         if folded == TABLE_COLUMNS[1]:
             in_table = True
             row_index = 0
+            row_cell = None
             continue
         if folded in TABLE_COLUMNS[2:]:
             continue
@@ -589,6 +790,8 @@ def read_beamtime_notes(
             # lone tab, which a blank-line skip silently swallowed, and the
             # column alignment was destroyed from there on.
             row_index += 1
+            row_cell = None
+            row_file_number = None
             builder.add(
                 locator=(
                     f"line {number} table {table_index} row {row_index} "
@@ -619,6 +822,9 @@ def read_beamtime_notes(
                 )
                 continue
             index += 1
+            # THE ROW'S ALIGNMENT IS NOW KNOWN: Step and File Number are consumed, so
+            # the next tab-prefixed line is E-chem Procedure and the one after is Notes.
+            row_cell = 2
             if not _BARE_INTEGER.match(next_line):
                 builder.skip(
                     reason=SKIP_UNREADABLE_TABLE_ROW,
@@ -637,6 +843,8 @@ def read_beamtime_notes(
                     ),
                 )
                 continue
+            row_file_number = int(next_line)
+            section_file_numbers.append(row_file_number)
             builder.add(
                 locator=(
                     f"line {index + 1} table {table_index} row {row_index} "
@@ -652,6 +860,11 @@ def read_beamtime_notes(
                 measurement_stem=None,
             )
             continue
+
+        if in_table and row_cell == 2 and _TABLE_CELL.match(raw):
+            # The E-chem Procedure cell. Read by the claim checks below exactly as
+            # before; this only records WHERE in the row the reader is.
+            row_cell = 3
 
         claimed = False
 
@@ -739,9 +952,28 @@ def read_beamtime_notes(
             )
             claimed = True
 
+        if (
+            _TEMPERATURE_LABEL.match(line)
+            or _ROOM_TEMPERATURE.search(line)
+            or _RT.search(line)
+        ):
+            builder.add(
+                locator=f"{where} temperature statement",
+                raw_literal=line,
+                concept=CONCEPT_TEMPERATURE_STATEMENT,
+                determinism=DETERMINISM_NORMALIZED,
+                # NEVER A NUMBER. See RULE_TEMPERATURE_STATEMENT.
+                normalized_value=None,
+                normalization_rule=RULE_TEMPERATURE_STATEMENT,
+                scope=SCOPE_SAMPLE_GROUP if sample_label else SCOPE_BEAMTIME,
+            )
+            claimed = True
+
         if not claimed:
             unread.append((number, line))
 
+    flush_note()
+    flush_contributors()
     _report_unread(builder, unread)
     return builder.result()
 

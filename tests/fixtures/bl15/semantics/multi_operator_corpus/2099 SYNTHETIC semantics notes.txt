@@ -1,0 +1,81 @@
+﻿# SYNTHETIC FIXTURE -- NOT INSTRUMENT OUTPUT. Every value below is invented.
+SYNTHETIC semantics notes -- invented, no real beamtime, no real person.
+
+Beam January 1-2, 2099
+
+Main Scopes
+
+Invented study used only to exercise conventions, operators and conflicts.
+
+Measured at room temperature
+
+Sample 1 ZZ1 in acid
+Operator: Operator Alpha (synthetic)
+	Step
+	File Number
+	E-chem Procedure
+	Notes 
+	1
+	01
+
+	Sets the working potential to 0.1 V vs  reference after 500 cycles
+	discard first scan
+	2
+	02
+
+	Sets the working potential to 0.2 V vs  reference after 500 cycles
+	
+	3
+	03
+
+	Sets the working potential to 0.4 V vs  reference after 500 cycles
+	first 8 scans useful
+
+Sample 2 ZZ2 in base
+Operator: Operator Beta (synthetic)
+	Step
+	File Number
+	E-chem Procedure
+	Notes 
+	1
+	04
+
+	Sets the working potential to 0.8 V vs  reference
+	did not work
+	2
+	05
+
+	Sets the working potential to 0.8 V vs  reference after 500 cycles
+	too low in counts
+2 scans only
+
+Sample 3 ZZ3 in base
+Operator: Operator Alpha (synthetic)
+Operator: Operator Gamma (synthetic)
+	Step
+	File Number
+	E-chem Procedure
+	Notes 
+	1
+	06
+
+	Sets the working potential to 0.9 V vs  reference
+	
+	2
+	07
+
+	Sets the working potential to 1.0 V vs  reference
+	
+
+Sample 4 ZZ3 in base
+Operator: Operator Gamma (synthetic)
+	Step
+	File Number
+	E-chem Procedure
+	Notes 
+	1
+	08
+
+	Sets the working potential to 1.0 V vs  reference
+	3
+

@@ -796,9 +796,13 @@ def test_every_operation_has_a_summary_that_is_not_the_function_name(client):
     # already hydrated at `state["activity"]` and opens no connection of its own;
     # `db_write.OWNED_TABLES` is unchanged.
     #
-    # ALSO NOT AN MCP OPERATION, deliberately, and for the same reason
+    # ALSO NOT AN MCP OPERATION, deliberately~~, and for the same reason
     # `GET /api/experiments/{id}/activity` is not one: neither activity read is
-    # exposed as a tool, so the agent surface's inventory is unmoved by this slice.
+    # exposed as a tool~~, so the agent surface's inventory is unmoved by this slice.
+    # **Corrected 2026-09-22:** the PER-RECORD read `GET /api/experiments/{id}/activity`
+    # IS now an MCP read (`isaac_list_activity`), once its three filters became closed
+    # `Literal` sets. The workspace SUMMARY is still not a tool. The struck clause was
+    # true when written; it is kept so the change reads as a change.
     #
     # ── THE MERGE OF `ACT-004` AND `CTX-004`, AND WHY 90 WAS THE TRAP ──────────
     # Both branches added exactly one operation and both therefore set this
@@ -808,8 +812,26 @@ def test_every_operation_has_a_summary_that_is_not_the_function_name(client):
     # blocks above are kept because they document DIFFERENT operations, and the
     # figure below was re-derived over `create_app().openapi()` on the merged tree.
     #
+    #
+    # ── 91 -> 93, 2026-09-22: reviewed convention rules, TWO operations ─────────
+    # `POST /api/imports/{import_id}/rules` records one reviewed rule about how an
+    # import's sources are READ (which naming convention applies to which subset, a
+    # scientist's choice between disagreeing readings, which Vortex channel belongs
+    # to which element) and re-reads the import under it.
+    # `GET /api/experiments/{experiment_id}/convention-rules` reads the rules a
+    # record holds. NEITHER WRITES A SCIENTIFIC VALUE: every value a rule leads to
+    # still reaches a record only as a proposal whose acceptance keeps its
+    # trusted-actor gate.
+    #
+    # NO TABLE, NO MIGRATION, AND NO NEW STORAGE LOCATION CLASS — an `import`-scoped
+    # rule lives in the (non-durable) session file, and an `experiment`/`profile`
+    # rule at `state["convention_rules"]` beside `state["proposals"]`.
+    # `db_write.OWNED_TABLES` is unchanged.
+    #
+    # AT THIS HEAD: 83 PATHS AND 93 METHOD-OPERATIONS; `checked` is the second.
+    #
     # MEASURED from `create_app().openapi()`, not derived from the line above it.
-    assert checked == 91, f"expected 91 documented operations, found {checked}"
+    assert checked == 93, f"expected 93 documented operations, found {checked}"
 
 
 def test_the_auto_summary_check_can_actually_fail(client):
@@ -1155,6 +1177,9 @@ EXPECTED_RESPONSE_CODES: dict[tuple[str, str], list[str]] = {
     # both can be handed a query parameter FastAPI refuses (a negative `limit` or
     # `offset` here). There is no `412` and no `428` because nothing is written.
     ("/api/experiments/{experiment_id}/extended-context", "get"): ["200", "401", "404", "422", "503"],
+    # 2026-09-22. A READ over a record, so the same five as `/extended-context`: no
+    # `412`/`428` because nothing is written.
+    ("/api/experiments/{experiment_id}/convention-rules", "get"): ["200", "401", "404", "422", "503"],
     # The cross-experiment SUMMARY of that same history (`DEC-44`, ledger `ACT-004`).
     # THE SAME CODE SET AS THE PER-RECORD READ, and every member is there for the same
     # reason: no `412`/`428` because nothing is written, no `409` because there is
@@ -1306,6 +1331,11 @@ EXPECTED_RESPONSE_CODES: dict[tuple[str, str], list[str]] = {
     ): ["200", "400", "401", "404", "412", "422", "428", "503"],
     ("/api/imports/{import_id}/parse", "post"): ["200", "401", "404", "422", "503"],
     ("/api/imports/{import_id}/reconstruct", "post"): ["200", "401", "404", "422"],
+    # 2026-09-22. THE SAME CODES AS `add-to-experiment`: an `import`-scoped rule writes
+    # only the session, but an `experiment`/`profile`-scoped rule writes the RECORD
+    # under its `If-Match` (`428` omitted, `400` malformed, `412` stale), and the
+    # re-read may reach storage (`503`).
+    ("/api/imports/{import_id}/rules", "post"): ["200", "400", "401", "404", "412", "422", "428", "503"],
     ("/api/imports/{import_id}/sources", "post"): ["200", "401", "404", "422"],
     (
         "/api/imports/{import_id}/sources/{source_id}",

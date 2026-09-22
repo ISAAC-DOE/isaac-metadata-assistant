@@ -72,6 +72,13 @@
       "purpose": "Read the evidence supporting a record's field values."
     },
     {
+      "tool": "isaac_list_activity",
+      "title": "Read a record's activity history",
+      "scope": "isaac:read",
+      "mutates": false,
+      "purpose": "Read a bounded page of the record's append-only activity history, filtered by closed sets of action, channel and object type. Every actor reads unattributed in this build, and the history is a record of what this application did, never a verdict about the science."
+    },
+    {
       "tool": "isaac_list_experiments",
       "title": "List records",
       "scope": "isaac:read",

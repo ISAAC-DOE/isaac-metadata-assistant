@@ -708,6 +708,22 @@ def test_the_session_serves_the_shape_the_review_surface_consumes(session):
         # wire without reaching this set would be the exact failure it exists for.
         "extended_context",
         "mapping",
+        # 2026-09-22, added in the same change that adds them to the payload, for this
+        # test's own reason. `evidence_readings_thinned` is the dedup half that used
+        # to be counted into `evidence_readings_dropped` (which now means the
+        # distinct-literal cap alone); the rest are the historical-semantics blocks
+        # the Historical Import UI renders — which convention applied where, the
+        # temperature state (Not recorded unless a source said something, and never
+        # a number by default), Data Quality Notes, the HERFD selection summary, the
+        # people the sources name, and the rules that shaped the reading.
+        "evidence_readings_thinned",
+        "evidence_readings_cap_per_cell",
+        "profile_applicability",
+        "temperature",
+        "data_quality_notes",
+        "herfd_signal",
+        "beamtime_contributors",
+        "rules_applied",
     }
     # THE THREE COSTS ARE THREE, AND ARE NEVER A SUM. They were ONE server-side
     # integer until `CTX-004` measured the three sites that incremented it, while two
@@ -729,11 +745,12 @@ def test_the_session_serves_the_shape_the_review_surface_consumes(session):
     assert review["inventory"] == archive["inventory"]
     assert review["relationships"] == archive["relationships"]
 
-    # THE REGISTRY IS SERVED WHOLE — 45 entries, static and cheap — and REGENERATED
+    # THE REGISTRY IS SERVED WHOLE — ~~45~~ 47 entries since 2026-09-22 (the
+    # temperature and contributor statements), static and cheap — and REGENERATED
     # per call rather than cached, so a status correction cannot be published stale.
     mapping = review["mapping"]
-    assert len(mapping["concepts"]) == 45
-    assert mapping["coverage"]["concepts_total"] == 45
+    assert len(mapping["concepts"]) == 47
+    assert mapping["coverage"]["concepts_total"] == 47
     assert mapping["temperature_absent_reason"]
     assert mapping["assets_blocked_reason"]
     assert mapping["cycling_state_no_field_reason"]

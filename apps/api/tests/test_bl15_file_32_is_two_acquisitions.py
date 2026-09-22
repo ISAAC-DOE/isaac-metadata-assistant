@@ -137,20 +137,25 @@ def test_the_provenance_states_the_prohibition_rather_than_implying_it():
         assert phrase in explanation, phrase
 
 
-def test_the_open_question_is_named_so_nobody_re_derives_it():
-    """`Q16`, and it is still the domain owner's.
+def test_the_question_is_named_and_its_answer_is_that_nobody_knows():
+    """`Q16`: ~~still the domain owner's~~ — ANSWERED 2026-09-22 as "I do not know".
 
-    The narrowing is recorded (`DEC-46`); the question is not closed. A future session
-    reading the registry sees the question id on the concept that anchors it, which is
-    the legacy number itself.
+    INVERTED rather than deleted. It asserted the question was OPEN; the domain owner
+    has since replied that he does not recall whether the two acquisitions are two
+    conditions or a typo. That closes the QUESTION and makes the CONFLICT permanent —
+    which is the property this file exists for, and it is asserted more strongly now:
+    the disposition itself says nothing is ever chosen, and the question id stays on
+    the concept that anchors it, so a future session does not re-ask it.
     """
-    assert "Q16" in mp.open_domain_questions()
-    assert mp.DOMAIN_QUESTIONS["Q16"].is_open
-    note = mp.DOMAIN_QUESTIONS["Q16"].note
-    assert "NARROWED, NOT ANSWERED" in note
-    assert "Preferring either" in note
+    assert "Q16" not in mp.open_domain_questions()
+    question = mp.DOMAIN_QUESTIONS["Q16"]
+    assert question.disposition == mp.QUESTION_DOMAIN_OWNER_DOES_NOT_KNOW
+    note = question.note
+    assert "PERMANENTLY PRESERVED" in note
+    assert "neither is preferred" in note
+    assert "never the legacy number alone" in note
     entry = mp.mapping_for(ev.CONCEPT_LEGACY_NUMBER)
-    assert entry.unresolved_questions == ("Q16",)
+    assert entry.domain_questions == ("Q16",)
 
 
 def test_the_files_are_never_called_duplicates_of_each_other():

@@ -268,6 +268,7 @@ def _candidates_for_unit(
             },
         ),
         not_proposable_reason=RUN_CANDIDATE_NOT_PROPOSABLE,
+        distinct_sources=1,
     )
 
     yield from _candidates_from_evidence(
@@ -321,6 +322,9 @@ def _candidates_from_evidence(
 
         statements = tuple(statement_for(i).to_state() for i in group)
         ids = _ids_for(tuple(i.source_path for i in group), source_ids)
+        # DISTINCT FILES, not statements: sixteen scans stating one filter index are
+        # sixteen witnesses; one file read under two conventions is one.
+        witnesses = len({i.source_path for i in group})
 
         distinct = sorted({_reading_of(i) for i in group})
         if len(distinct) > 1:
@@ -356,6 +360,7 @@ def _candidates_from_evidence(
                     for value in distinct
                 ),
                 unresolved_reason=UNRESOLVED_SOURCES_DISAGREE,
+                distinct_sources=witnesses,
             )
             continue
 
@@ -378,6 +383,7 @@ def _candidates_from_evidence(
                 supporting_statements=statements,
                 target_field_path=entry.official_path if entry else None,
                 not_proposable_reason=reason,
+                distinct_sources=witnesses,
             )
             continue
 
@@ -394,6 +400,7 @@ def _candidates_from_evidence(
             supporting_statements=statements,
             target_field_path=entry.official_path,
             proposed_value=normalized,
+            distinct_sources=witnesses,
         )
 
 
@@ -434,6 +441,7 @@ def _candidate_from_conflict(
         ),
         unresolved_reason=UNRESOLVED_SOURCES_DISAGREE,
         not_proposable_reason=DISAGREEMENT_NOT_PROPOSABLE,
+        distinct_sources=len({r.source_path for r in conflict.readings}),
     )
 
 
@@ -542,4 +550,7 @@ def _candidate_state(candidate: SemanticCandidate) -> dict:
         "unresolved_reason": candidate.unresolved_reason,
         "not_proposable_reason": candidate.not_proposable_reason,
         "proposable": candidate.proposable,
+        "distinct_sources": candidate.distinct_sources,
+        "agreement": candidate.agreement,
+        "review_status": candidate.review_status,
     }

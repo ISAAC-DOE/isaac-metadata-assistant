@@ -54,6 +54,8 @@ from . import artifact_link
 from . import assets
 from . import assistant_query
 from . import change_feed as cf
+from . import capabilities
+from . import convention_rules
 from . import csv_ingest
 from . import db_provider
 from . import db_recon
@@ -1987,7 +1989,21 @@ def _mcp_disclosure() -> dict:
         "answers without credentials. **It is not a reachability claim:** whether "
         "anything can actually reach that path depends on how this service is "
         "exposed, which this process cannot observe. It is what makes a probe of "
-        "that path interpretable, not a substitute for one."
+        "that path interpretable, not a substitute for one.\n\n"
+        "It states, in `historical_file_ingestion` (`enabled`, `reason`), whether "
+        "this deployment may read scientist-supplied historical file bytes at all. "
+        "**Disabled in every shipped deployment** (`reason: governance_not_approved`): "
+        "enabling real bytes is an institutional data-governance decision, not an "
+        "application one. Enabling it never opens the upload route, which stays "
+        "refused; the only path it adds is a server-side staging directory an "
+        "operator populates, and no filesystem path is ever named here.\n\n"
+        "It states, in `proposal_acceptance` (`available`, `reason`), whether "
+        "accepting an ingestion proposal CAN succeed here, derived from the SAME "
+        "identity resolution the accept operation uses: in a deployment with no "
+        "trusted authentication boundary it reads `available: false` with the "
+        "`reason` the accept operation's `409` would carry, so a surface can say so "
+        "before a click that is certain to be refused. It weakens nothing — the "
+        "refusal itself is unchanged."
     ),
     response_description="The liveness banner.",
 )
@@ -2067,6 +2083,22 @@ def health() -> dict:
         # availability from configuration alone is the precise defect
         # `experiment_storage` was corrected for.
         "submission": submission_store.capability(),
+        # TWO MORE SIBLINGS (2026-09-22), each derived from configuration alone and
+        # opening nothing, for the reason every block above opens nothing.
+        #
+        # `historical_file_ingestion` is `EXT-13`'s switch, DISABLED by default; see
+        # `isaac_api.capabilities` for exactly what enabling it does and does not do.
+        #
+        # BOTH ARE SERVED AS TWO KEYS EACH, `{enabled, reason}` and
+        # `{available, reason}` — the shape the frontend builds against. Each is a
+        # PROJECTION of the full block `isaac_api.capabilities` computes, so the banner
+        # and the detail an import session serves cannot disagree.
+        "historical_file_ingestion": capabilities.health_historical_file_ingestion(),
+        # `proposal_acceptance` reports the accept operation's own trusted-actor gate
+        # IN ADVANCE, computed by the same resolution the route runs, so the two cannot
+        # disagree: `reason` is the code the `409` carries. It changes nothing about
+        # the `409`.
+        "proposal_acceptance": capabilities.health_proposal_acceptance(),
     }
 
 
@@ -12680,6 +12712,16 @@ def list_notes(
     return _notes_payload(exp, selected=selected)
 
 
+#: The three activity filter vocabularies as closed sets, built FROM the frozensets the
+#: model enforces — so the published enum, the framework's refusal and the tool schema
+#: are one list. Sorted so the OpenAPI document is byte-stable.
+_ACTIVITY_ACTION_FILTER = Literal[tuple(sorted(activity.ACTIVITY_ACTIONS))]  # type: ignore[valid-type]
+_ACTIVITY_CHANNEL_FILTER = Literal[tuple(sorted(activity.ACTIVITY_CHANNELS))]  # type: ignore[valid-type]
+_ACTIVITY_OBJECT_FILTER = Literal[tuple(sorted(activity.ACTIVITY_OBJECT_TYPES))]  # type: ignore[valid-type]
+#: A run id is a 26-character ULID; this is the bound the extended-context route and the
+#: MCP layer already publish for the same identifier.
+_ACTIVITY_RUN_FILTER_MAX = 128
+
 _ACTIVITY_LIMIT_DESC = (
     "How many events to return. Clamped to the server maximum rather than refused, "
     "and the effective value is echoed back as `limit`."
@@ -12759,13 +12801,29 @@ def list_activity(
     before_seq: Annotated[
         int | None, Query(ge=0, description=_ACTIVITY_BEFORE_DESC)
     ] = None,
-    action: Annotated[str | None, Query(description="Narrow to one action verb.")] = None,
-    channel: Annotated[str | None, Query(description="Narrow to one channel.")] = None,
+    # CLOSED SETS, DERIVED FROM THE ACTIVITY VOCABULARY (2026-09-22). These were bare
+    # strings refused inside the handler, and `mcp.tools._query_schema` RAISES at
+    # import on an unbounded non-enum string — which is what kept the history from
+    # being an MCP read (`docs/session-closure-2026-09-18.md` §8). A `Literal` built
+    # from the same frozensets the model enforces publishes the set on the wire, lets
+    # the framework refuse an off-vocabulary value, and gives the tool schema its
+    # enum with no second copy anywhere. `run_id` is bounded on the route rather than
+    # in the MCP layer's reviewed map, for `extended_context_query_parameters`' reason.
+    action: Annotated[
+        _ACTIVITY_ACTION_FILTER | None, Query(description="Narrow to one action verb.")
+    ] = None,
+    channel: Annotated[
+        _ACTIVITY_CHANNEL_FILTER | None, Query(description="Narrow to one channel.")
+    ] = None,
     object_type: Annotated[
-        str | None, Query(description="Narrow to one object type.")
+        _ACTIVITY_OBJECT_FILTER | None, Query(description="Narrow to one object type.")
     ] = None,
     run_id: Annotated[
-        str | None, Query(description="Narrow to one run's own activity.")
+        str | None,
+        Query(
+            max_length=_ACTIVITY_RUN_FILTER_MAX,
+            description="Narrow to one run's own activity.",
+        ),
     ] = None,
     newest_first: Annotated[
         bool, Query(description="Newest event first. Default true.")
@@ -12797,6 +12855,12 @@ def list_activity(
         #
         # The vocabularies are served in every successful response, so a client never
         # has to guess what is admissible.
+        #
+        # DEFENCE IN DEPTH SINCE 2026-09-22. The three filters are now `Literal` sets,
+        # so the FRAMEWORK refuses an off-vocabulary value with its own `422` (naming
+        # the allowed values in `ctx.expected`) before this function is entered. This
+        # branch stays because `activity_history.filter_events` still refuses on its
+        # own, and a refusal that became reachable again must not surface as a 500.
         return JSONResponse(
             status_code=422,
             content={
@@ -25585,6 +25649,11 @@ def list_import_sessions(scope: TutorialScopeDep) -> dict:
         ],
         "durability": hist.SESSION_DURABILITY_DISCLOSURE,
         "available_fixtures": list(hist.fixture_names()),
+        # 2026-09-22: the archives this build can walk (committed fixtures, plus staged
+        # archives ONLY while `historical_file_ingestion` is enabled by configuration)
+        # and that capability, computed by the same function `/api/health` uses.
+        "available_archives": list(hist.archive_names()),
+        "historical_file_ingestion": capabilities.historical_file_ingestion(),
     }
 
 
@@ -25855,7 +25924,18 @@ def post_import_parse(scope: TutorialScopeDep, import_id: ImportId):
         if missing is not None:
             return missing
         try:
-            hist.parse_session(session, now_utc=_now_iso())
+            # THE RULES IN FORCE (2026-09-22): this import's own, plus the target
+            # experiment's confirmed ones; other experiments' convention rules are
+            # carried as suggestions only. See `_reparse_with_rules`.
+            experiment_rules, rules_version = _experiment_rules_for(session, scope)
+            hist.parse_session(
+                session,
+                now_utc=_now_iso(),
+                experiment_rules=experiment_rules,
+                experiment_rules_version=rules_version,
+                reusable_rules=_reusable_rules_for(session, scope),
+            )
+            hist.annotate_reusable(session)
         except hist.UnsupportedImport as refusal:  # pragma: no cover - per-source
             # A per-source refusal becomes that source's `parse_state`; this arm
             # exists for a refusal the whole parse could raise, so one cannot
@@ -25928,6 +26008,443 @@ def post_import_reconstruct(scope: TutorialScopeDep, import_id: ImportId):
             return _import_refusal(refusal)
         hist.save_session(session, session_id=scope)
     return {"import": hist.session_view(session)}
+
+
+# --- 2026-09-22: reviewed, versioned convention rules ------------------------------
+#
+# WHAT THESE TWO OPERATIONS ARE. `POST /api/imports/{id}/rules` records ONE reviewed rule
+# — a profile binding, a conflict resolution or a channel assignment — at one of three
+# scopes (apply only here / this Experiment / this convention), and re-reads the import
+# under it. `GET /api/experiments/{id}/convention-rules` reads the rules a record holds.
+# Neither writes a scientific value, mints evidence or touches `draft`: a rule says how
+# to READ sources, and every value it leads to still reaches a record only as a proposal
+# whose acceptance keeps its trusted-actor gate. See `isaac_api.convention_rules`.
+
+_IMPORT_RULE_KEYS = frozenset(
+    {
+        "kind",
+        "scope",
+        "experiment_id",
+        "selector",
+        "body",
+        "supersedes",
+        "derived_from",
+        "source_examples",
+    }
+)
+
+#: Most OTHER experiments scanned for reusable convention-scoped rules on one parse. A
+#: bound on work, disclosed on the session (`rules.reusable_scan`), never a silent cut.
+_REUSABLE_SCAN_LIMIT = 200
+
+
+def _rule_refusal(exc) -> JSONResponse:
+    extra = dict(getattr(exc, "extra", {}) or {})
+    if isinstance(extra.get("key"), str):
+        extra["key"] = _echoable_key(extra["key"])
+    return JSONResponse(
+        status_code=422,
+        content=jsonable_encoder(
+            {"error": exc.error, "message": exc.message, **extra}
+        ),
+    )
+
+
+def _experiment_rules_for(session, scope: str | None) -> tuple[list, str | None]:
+    """The target experiment's ACTIVE rules and the version they were read at."""
+    target = getattr(session, "target_experiment_id", None)
+    if not target:
+        return [], None
+    exp = ws.load_experiment(target, session_id=scope)
+    if exp is None:
+        return [], None
+    return convention_rules.active_rules(exp.convention_rules), exp.version_token()
+
+
+def _reusable_rules_for(session, scope: str | None) -> list[dict]:
+    """Convention-scoped rules confirmed on OTHER experiments — SUGGESTIONS, never applied.
+
+    Bounded to :data:`_REUSABLE_SCAN_LIMIT` experiments, most recently created first.
+    Each suggestion names where it came from and whether its convention version is still
+    current; what it would MATCH in this import is computed after the parse by
+    :func:`historical_import.annotate_reusable`.
+    """
+    target = getattr(session, "target_experiment_id", None)
+    experiments, _hydration = ws.list_experiments_with_hydration(scope)
+    out: list[dict] = []
+    for exp in list(experiments)[-_REUSABLE_SCAN_LIMIT:]:
+        if exp.id == target:
+            continue
+        for rule in convention_rules.active_rules(exp.convention_rules):
+            if rule.scope != convention_rules.SCOPE_PROFILE:
+                continue
+            out.append(
+                {
+                    "rule": rule.to_state(),
+                    "from_experiment_id": exp.id,
+                    "from_experiment_title": exp.title,
+                    "applied_here": False,
+                    "how_to_reuse": (
+                        "Record a rule for this experiment with `derived_from` set to "
+                        "this rule's id. Until then it changes nothing here."
+                    ),
+                }
+            )
+    return out
+
+
+def _reparse_with_rules(session, scope: str | None) -> None:
+    """Re-read the session under the rules now in force. In memory; caller saves."""
+    experiment_rules, version = _experiment_rules_for(session, scope)
+    reusable = _reusable_rules_for(session, scope)
+    hist.parse_session(
+        session,
+        now_utc=_now_iso(),
+        experiment_rules=experiment_rules,
+        experiment_rules_version=version,
+        reusable_rules=reusable,
+    )
+    hist.annotate_reusable(session)
+    if session.parsed or session.archive_candidates:
+        try:
+            hist.reconstruct_session(session, now_utc=_now_iso())
+        except hist.UnsupportedImport:  # pragma: no cover - parse produced nothing
+            pass
+
+
+def _rule_target_problem(session, kind: str, body: Mapping) -> JSONResponse | None:
+    """A resolution must name a conflict or candidate THIS import has, and a reading of it.
+
+    A recurring (`conflict_kind`) resolution is checked only for shape here — it is a
+    rule about a KIND of conflict within its selector, and applies wherever exactly one
+    reading has the chosen role.
+    """
+    if kind != convention_rules.KIND_CONFLICT_RESOLUTION or not isinstance(body, Mapping):
+        return None
+    reading = session.archive_reading
+    conflict_id = body.get("conflict_id")
+    candidate_id = body.get("candidate_id")
+    chosen = body.get("chosen_value")
+    if isinstance(conflict_id, str) and conflict_id.strip():
+        found = None
+        if reading is not None:
+            rel = reading.relationships or {}
+            pools = [c for u in rel.get("units") or [] for c in u.get("conflicts") or []]
+            pools += list(rel.get("corpus_conflicts") or [])
+            found = next((c for c in pools if c.get("conflict_id") == conflict_id), None)
+        if found is None:
+            return JSONResponse(
+                status_code=422,
+                content={
+                    "error": "unknown_conflict",
+                    "message": (
+                        "This import holds no conflict with that id, so there is nothing "
+                        "for a resolution to resolve. Nothing was written."
+                    ),
+                },
+            )
+        values = [r.get("value") for r in found.get("readings") or []]
+        if chosen not in values:
+            return JSONResponse(
+                status_code=422,
+                content={
+                    "error": "not_a_reading",
+                    "message": (
+                        "`chosen_value` must be one of the readings the sources "
+                        "actually state. A resolution chooses BETWEEN readings; it "
+                        "never supplies a new one. Nothing was written."
+                    ),
+                    "readings": values,
+                },
+            )
+    if isinstance(candidate_id, str) and candidate_id.strip():
+        candidate = session.candidate(candidate_id)
+        if candidate is None or candidate.unresolved_reason is None:
+            return JSONResponse(
+                status_code=422,
+                content={
+                    "error": "unknown_disagreement",
+                    "message": (
+                        "This import holds no disagreeing candidate with that id. Only a "
+                        "candidate whose sources disagree can be resolved. Nothing was "
+                        "written."
+                    ),
+                },
+            )
+        values = [str(row.get("value")) for row in candidate.disagreement]
+        if chosen not in values:
+            return JSONResponse(
+                status_code=422,
+                content={
+                    "error": "not_a_reading",
+                    "message": (
+                        "`chosen_value` must be one of the disagreeing readings. Nothing "
+                        "was written."
+                    ),
+                    "readings": values,
+                },
+            )
+    return None
+
+
+@router.post(
+    "/imports/{import_id}/rules",
+    tags=[TAG_INGESTION],
+    summary="Record a Reviewed Convention Rule",
+    description=(
+        "Records ONE reviewed rule about how this import's sources are read, and "
+        "re-reads the import under it. **It writes no scientific value** — a rule says "
+        "how to READ sources, and every value it leads to still reaches a record only "
+        "as a proposal a person accepts, behind the same trusted-actor gate as every "
+        "acceptance.\n\n"
+        "`kind` is one of three. `profile_binding` says which registered naming "
+        "convention applies to a subset of sources (`selector`: legacy-number range, "
+        "sample-group numbers, stem prefixes, source types or named files) — a "
+        "convention is never selected by who ran a measurement. `conflict_resolution` "
+        "records a scientist's choice between readings the sources DISAGREE on: name a "
+        "`conflict_id` or a `candidate_id` with the `chosen_value` (which must be one "
+        "of the stated readings), or a `conflict_kind` with a `chosen_source_role` to "
+        "resolve that kind of conflict wherever exactly one reading has that role "
+        "within the selector. Two distinct acquisitions sharing one legacy number are "
+        "never resolved: they are preserved permanently. `signal_assignment` confirms "
+        "which Vortex channel belongs to which element (and edge), which is what makes "
+        "a dual-element Run's selection confirmable.\n\n"
+        "`scope` is one of three, and none is global. `import` — **apply only here** — "
+        "stores the rule in this session, exactly as durable as the session (not "
+        "durable). `experiment` — **use as a rule for this Experiment** — stores it on "
+        "the record named by `experiment_id`, as durable as that record, and requires "
+        "the RECORD's `If-Match` (omitted `428`, malformed `400`, stale `412`). "
+        "`profile` — **use as a rule for this convention** — is stored the same way "
+        "and, in any OTHER experiment's import, is offered as a reusable suggestion "
+        "with what it would match; it applies there only when a scientist records a "
+        "rule for that experiment with `derived_from` naming it. Nothing is promoted "
+        "across experiments silently.\n\n"
+        "A rule is never edited: `supersedes` names an active rule of the same kind "
+        "held in the same place, and the new rule is its next version. "
+        "`confirmed_by` reads `unattributed` in every deployment of this build — no "
+        "trusted authentication boundary exists, and a forwarded identity header is "
+        "never consulted. Any other body key is refused with `422` naming it."
+    ),
+    response_description="The recorded rule, and the import re-read under it.",
+    responses={
+        **_R_STORAGE_UNAVAILABLE,
+        **_R_UNAUTHORIZED,
+        **_R_IMPORT_NOT_FOUND,
+        **_R_PRECONDITION,
+    },
+)
+def post_import_rule(
+    scope: TutorialScopeDep,
+    import_id: ImportId,
+    response: Response,
+    body: dict = Body(
+        ...,
+        description=(
+            "`{\"kind\": \"profile_binding\"|\"conflict_resolution\"|"
+            "\"signal_assignment\", \"scope\": \"import\"|\"experiment\"|\"profile\", "
+            "\"experiment_id\": \"<required unless scope is import>\", \"selector\": "
+            "{...}, \"body\": {...}, \"supersedes\": \"<optional rule id>\", "
+            "\"derived_from\": \"<optional reusable rule id>\", \"source_examples\": "
+            "[...]}`. Any other key is refused with `422`."
+        ),
+    ),
+    if_match: str | None = Header(
+        default=None,
+        alias="If-Match",
+        description=(
+            "Required when `scope` is `experiment` or `profile`: the RECORD's current "
+            "`ETag`. Ignored for `import`, whose session has no validator."
+        ),
+    ),
+):
+    if not isinstance(body, dict):
+        return JSONResponse(
+            status_code=422,
+            content={"error": "invalid_body", "message": "The request body must be a JSON object."},
+        )
+    refused = _unknown_import_keys(body, _IMPORT_RULE_KEYS)
+    if refused is not None:
+        return refused
+    session, missing = _load_import_or_404(import_id, scope)
+    if missing is not None:
+        return missing
+    kind = body.get("kind")
+    rule_scope = body.get("scope")
+    problem = _rule_target_problem(session, kind, body.get("body") or {})
+    if problem is not None:
+        return problem
+    derived_from = body.get("derived_from")
+    if derived_from is not None:
+        known = {
+            (row.get("rule") or {}).get("rule_id") for row in session.reusable_rules
+        }
+        if derived_from not in known:
+            return JSONResponse(
+                status_code=422,
+                content={
+                    "error": "unknown_reusable_rule",
+                    "message": (
+                        "`derived_from` must name a reusable rule this import is "
+                        "offered. Nothing was written."
+                    ),
+                },
+            )
+
+    if rule_scope == convention_rules.SCOPE_IMPORT or rule_scope not in {
+        convention_rules.SCOPE_EXPERIMENT,
+        convention_rules.SCOPE_PROFILE,
+    }:
+        with hist.import_lock(import_id, session_id=scope):
+            session, missing = _load_import_or_404(import_id, scope)
+            if missing is not None:
+                return missing
+            try:
+                rule = convention_rules.new_rule(
+                    rule_id=new_record_id(),
+                    kind=kind,
+                    scope=rule_scope,
+                    body=body.get("body"),
+                    selector=body.get("selector"),
+                    confirmed_utc=_now_iso(),
+                    existing=session.rules,
+                    import_id=import_id,
+                    supersedes=body.get("supersedes"),
+                    derived_from=derived_from,
+                    source_examples=body.get("source_examples"),
+                )
+            except convention_rules.UnsupportedRule as refusal:
+                return _rule_refusal(refusal)
+            session.rules.append(rule)
+            _reparse_with_rules(session, scope)
+            hist.save_session(session, session_id=scope)
+        return {"rule": rule.to_state(), "import": hist.session_view(session)}
+
+    experiment_id = body.get("experiment_id")
+    if not isinstance(experiment_id, str) or not experiment_id.strip():
+        return JSONResponse(
+            status_code=422,
+            content={
+                "error": "missing_experiment_id",
+                "message": (
+                    "A rule for an Experiment or a convention is stored on a record, so "
+                    "`experiment_id` must name it. It is never chosen for you. Nothing "
+                    "was written."
+                ),
+            },
+        )
+    if ws.load_experiment(experiment_id, session_id=scope) is None:
+        return _not_found(experiment_id)
+    with ws.record_lock(experiment_id, session_id=scope):
+        exp = ws.load_experiment(experiment_id, session_id=scope)
+        if exp is None:
+            return _not_found(experiment_id)
+        precondition = _check_if_match(if_match, exp)
+        if precondition is not None:
+            return precondition
+        try:
+            rule = convention_rules.new_rule(
+                rule_id=new_record_id(),
+                kind=kind,
+                scope=rule_scope,
+                body=body.get("body"),
+                selector=body.get("selector"),
+                confirmed_utc=_now_iso(),
+                existing=exp.convention_rules,
+                experiment_id=exp.id,
+                supersedes=body.get("supersedes"),
+                derived_from=derived_from,
+                source_examples=body.get("source_examples"),
+            )
+        except convention_rules.UnsupportedRule as refusal:
+            return _rule_refusal(refusal)
+        exp.add_convention_rule(rule)
+        # ACT-002, CHANNEL `historical_import`: the rule was confirmed from an import,
+        # and `_api_channel()` would answer `web` and lose that.
+        exp.record_activity(
+            action=activity.ACTION_CONVENTION_RULE_RECORDED,
+            object_type=activity.OBJECT_CONVENTION_RULE,
+            object_id=rule.rule_id,
+            channel=activity.CHANNEL_HISTORICAL_IMPORT,
+            after={
+                "kind": rule.kind,
+                "scope": rule.scope,
+                "version": rule.version,
+                "supersedes": rule.supersedes,
+                "derived_from": rule.derived_from,
+            },
+            source_ref=import_id,
+        )
+        _changed, stale = _save_versioned(exp, if_match)
+        if stale is not None:
+            return stale
+        response.headers["ETag"] = exp.etag()
+        version = exp.version_token()
+    # THE SESSION IS WRITTEN AFTER THE RECORD AND OUTSIDE ITS LOCK — never both locks at
+    # once. If this half fails the rule is still on the record and the next parse reads
+    # it; nothing is lost.
+    with hist.import_lock(import_id, session_id=scope):
+        fresh = hist.load_session(import_id, session_id=scope)
+        if fresh is not None:
+            fresh.target_experiment_id = experiment_id
+            _reparse_with_rules(fresh, scope)
+            hist.save_session(fresh, session_id=scope)
+            session = fresh
+    return {
+        "rule": rule.to_state(),
+        "experiment_version": version,
+        "import": hist.session_view(session),
+    }
+
+
+@router.get(
+    "/experiments/{experiment_id}/convention-rules",
+    tags=[TAG_EXPERIMENTS],
+    summary="Read a Record's Convention Rules",
+    description=(
+        "The reviewed, versioned convention rules this record holds — how a scientist "
+        "confirmed its historical sources are read. Read-only.\n\n"
+        "**A rule is not a value and not evidence**: every entry carries "
+        "`is_official_field_value: false` and `is_evidence: false`, and nothing here "
+        "makes a record exportable or un-exportable. Every rule ever recorded is "
+        "returned, INCLUDING superseded ones — a rule is never edited or deleted, a "
+        "change is a new version — and `active` says which are in force. "
+        "`version_is_current` is `false` when the convention a binding names is "
+        "registered at a different version today; such a binding is reported as stale "
+        "where it would apply, never silently upgraded. `confirmed_by` reads "
+        "`unattributed` in every deployment of this build. `unreadable_entries` counts "
+        "stored rows this build could not read; they are preserved untouched and "
+        "counted rather than rendered."
+    ),
+    response_description="The record's convention rules and its current `ETag`.",
+    responses={**_R_STORAGE_UNAVAILABLE, **_R_UNAUTHORIZED, **_R_TUTORIAL_SCOPE},
+)
+def get_experiment_convention_rules(
+    scope: TutorialScopeDep, experiment_id: ExperimentId, response: Response
+):
+    exp = ws.load_experiment(experiment_id, session_id=scope)
+    if exp is None:
+        return _not_found(experiment_id)
+    response.headers["ETag"] = exp.etag()
+    active = {r.rule_id for r in convention_rules.active_rules(exp.convention_rules)}
+    rows = []
+    for rule in sorted(exp.convention_rules, key=lambda r: (r.confirmed_utc, r.rule_id)):
+        state = rule.to_state()
+        state["active"] = rule.rule_id in active
+        rows.append(state)
+    return {
+        "experiment_id": exp.id,
+        "rules": rows,
+        "total": len(rows),
+        "active_count": len(active),
+        "unreadable_entries": len(exp.unreadable_convention_rules),
+        "kinds": sorted(convention_rules.RULE_KINDS),
+        "scopes": sorted(convention_rules.RULE_SCOPES),
+        "durability": (
+            "Stored in this record's own document, exactly as durable as the record, "
+            "rather than in a table of their own; adding them needed no migration."
+        ),
+        "experiment_version": exp.version_token(),
+    }
 
 
 def _import_note_text(statement: Mapping, filename: str) -> str:
@@ -26019,7 +26536,18 @@ def _mint_nominal_offer(
     *,
     client_request_key: str,
 ) -> JSONResponse | tuple[object | None, object, bool] | None:
-    """OFFER the `DEC-43` nominal value on ONE run, as a proposal. In memory only.
+    """OFFER a REVIEWED RULE's nominal value on ONE run, as a proposal. In memory only.
+
+    ***`DEC-43` IS SUPERSEDED (2026-09-22), AND THIS FUNCTION IS NOW REACHED BY NOTHING IN
+    A SHIPPED BUILD.*** The domain owner withdrew the automatic 298 K: missing temperature
+    stays missing, with no automatic insert and no automatic proposal. This function
+    survives as the ONE path through which a reviewed convention rule
+    (``bl15.nominal.NominalRule``) that names its convention could offer a labelled
+    nominal value requiring a scientist's confirmation — and no such rule is enabled
+    (``bl15.nominal.REVIEWED_NOMINAL_RULES == ()``). The four conditions below were
+    written for `DEC-43` and every one of them still holds of a reviewed rule's offer:
+    the qualifier travels, it is scoped to one convention (now: one convention at one
+    version, per run), it generalises to no other path, and the authority is a person's.
 
     Returns ``None`` when there is nothing to offer, a typed refusal to hand back,
     or ``(note, proposal, deduplicated)`` — :func:`_mint_import_candidate`'s shape,
@@ -26149,6 +26677,35 @@ def _mint_nominal_offer(
         return _proposal_refusal("unsupported_proposal", str(refusal))
     exp.add_proposal(proposal)
     return (note, proposal, False)
+
+
+def _run_origin(unit, import_id: str, session) -> dict:
+    """The durable origin row for a run made from ``unit``. See ``historical_run_origins``."""
+    identity = unit.acquisition_identity or ""
+    digest = identity.rsplit("@", 1)[-1] if "@" in identity else ""
+    reading = session.archive_reading
+    return {
+        "acquisition_identity": identity,
+        "archive_name": reading.archive_name if reading is not None else "",
+        "acquisition_path": unit.acquisition_path,
+        "content_sha256": digest,
+        "stem": unit.stem,
+        "legacy_number": unit.legacy_number,
+        "import_id": import_id,
+        "recorded_utc": _now_iso(),
+    }
+
+
+def _dqn_request_key(import_id: str, unit, row: Mapping) -> str:
+    """A stable exactly-once key for one Data Quality Note on one acquisition.
+
+    Keyed on the ACQUISITION'S identity (never the legacy number, which two acquisitions
+    may share) and the remark's own locator, so the same remark from the same file is
+    the same key on every attempt.
+    """
+    basis = f"{unit.acquisition_identity}|{row.get('source_path')}|{row.get('locator')}"
+    digest = hashlib.sha256(basis.encode("utf-8")).hexdigest()[:32]
+    return f"import:{import_id}:dqn:{digest}"
 
 
 def _import_extended_context(
@@ -26790,8 +27347,19 @@ def post_import_candidate_proposal(
         "is reported under `sent` with `already_sent: true` and mints no second "
         "proposal; each measurement that already has a run on this record is reported "
         "under `runs_already_present` and no second run is made. The run key is the "
-        "label, which this import derives from the measurement itself, so it is the "
-        "same key twice for the same measurement.\n\n"
+        "measurement's durable acquisition identity — its archive path and content "
+        "digest, never the legacy file number alone, because two distinct "
+        "acquisitions can share one — recorded on the record the first time a run is "
+        "made from it. A run made before identities were recorded is matched by its "
+        "label only when that label is unambiguous; otherwise a new run is made "
+        "rather than guessing which was meant.\n\n"
+        "EVERY FREE-TEXT REMARK the beamtime notes make about a measurement's file is "
+        "kept as a note on that measurement's run — a Data Quality Note, verbatim, "
+        "with the file and row it came from — and no QC verdict is ever written or "
+        "proposed from it. NO TEMPERATURE IS INSERTED OR OFFERED: a source that "
+        "states none leaves the field missing, and `nominal_offers` is empty unless a "
+        "reviewed convention rule permits a labelled nominal value, which no shipped "
+        "convention does.\n\n"
         "CANDIDATES THIS IMPORT CANNOT PROPOSE ARE REPORTED, NEVER DROPPED. Each "
         "appears under `not_sent` with the reason the review surface already "
         "shows for it — sources that disagree, a structural candidate about "
@@ -27182,6 +27750,8 @@ def post_import_add_to_experiment(
         # assertion that fails if this is ever reimplemented as a client loop.
         run_of_stem: dict[str, str] = {}
         created_runs: list[dict] = []
+        #: How many runs gained a durable acquisition origin in this request.
+        origins_recorded = 0
         #: Measurements that already had a run on this record, so no second one was
         #: made. Reported rather than omitted: a batch that created nothing because
         #: everything was already there is a different outcome from a batch that
@@ -27228,17 +27798,52 @@ def post_import_add_to_experiment(
             # still binds into `run_of_stem`: the proposals of a re-run batch must
             # land on the run that measurement already has, which is exactly where
             # the deduplicated ones were going anyway.
+            # ~~KEYED ON THE LABEL~~ — CORRECTED 2026-09-22: A MEASUREMENT IS FOUND BY
+            # WHAT IT IS, NOT BY WHAT IT IS CALLED. The label leads with the legacy
+            # number, and the real archive carries TWO distinct acquisitions under
+            # legacy number 32 (`Q16`, which the domain owner cannot settle), so a
+            # label-keyed match could put one acquisition's proposals on the other's
+            # run. The key is now `acquisition_identity` — archive, archive path and
+            # the member's content digest — recorded durably on the record in
+            # `historical_run_origins` the first time a run is made from it.
+            #
+            # THE LABEL IS KEPT AS A FALLBACK ONLY FOR RUNS MADE BEFORE ORIGINS
+            # EXISTED, and only when it is UNAMBIGUOUS: the label must be unique among
+            # this import's measurements AND the run must carry no recorded origin.
+            # Anything else creates a new run rather than guessing which one was meant.
             existing_by_label = {run.label: run for run in exp.runs}
+            label_counts: dict[str, int] = {}
             for unit in units:
-                already = existing_by_label.get(unit.label)
+                label_counts[unit.label] = label_counts.get(unit.label, 0) + 1
+            for unit in units:
+                already = (
+                    exp.run_for_acquisition(unit.acquisition_identity)
+                    if unit.acquisition_identity
+                    else None
+                )
+                matched_by = "acquisition_identity" if already is not None else None
+                if already is None:
+                    fallback = existing_by_label.get(unit.label)
+                    if (
+                        fallback is not None
+                        and label_counts.get(unit.label) == 1
+                        and fallback.id not in exp.historical_run_origins
+                    ):
+                        already, matched_by = fallback, "label_before_origins_existed"
                 if already is not None:
                     run_of_stem[unit.stem] = already.id
+                    if unit.acquisition_identity and exp.record_run_origin(
+                        already.id, _run_origin(unit, import_id, session)
+                    ):
+                        origins_recorded += 1
                     runs_already_present.append(
                         {
                             "run_id": already.id,
                             "label": already.label,
                             "ordinal": already.ordinal,
                             "stem": unit.stem,
+                            "matched_by": matched_by,
+                            "acquisition_identity": unit.acquisition_identity,
                         }
                     )
                     continue
@@ -27267,6 +27872,10 @@ def post_import_add_to_experiment(
                 inherits = not exp.runs
                 run = exp.add_run(label=unit.label, draft=_seed_for_new_run(exp))
                 run_of_stem[unit.stem] = run.id
+                if unit.acquisition_identity and exp.record_run_origin(
+                    run.id, _run_origin(unit, import_id, session)
+                ):
+                    origins_recorded += 1
                 created_runs.append(
                     {
                         "run_id": run.id,
@@ -27275,6 +27884,10 @@ def post_import_add_to_experiment(
                         "stem": unit.stem,
                         "acquisition_path": unit.acquisition_path,
                         "legacy_number": unit.legacy_number,
+                        # THE DURABLE IDENTITY this run was made from — never the
+                        # legacy number alone (2026-09-22, `Q16`).
+                        "acquisition_identity": unit.acquisition_identity,
+                        "legacy_number_shared": unit.legacy_number_shared,
                         "scan_count": unit.scan_count,
                         "source_count": unit.source_count,
                         # AN ASSOCIATION CLAIM, DISCLOSED RATHER THAN SILENT. Added
@@ -27422,18 +28035,37 @@ def post_import_add_to_experiment(
         # named. `context.temperature_K` is a per-acquisition condition; offering it
         # on one run a caller happened to name for a whole batch would be this route
         # choosing which measurement the assumption is about.
+        # ~~`DEC-43`~~ — SUPERSEDED 2026-09-22. No convention this build registers has an
+        # enabled nominal rule, so `nominal_temperature_for` answers `None` for every
+        # run and this loop offers NOTHING: the temperature stays missing, with no
+        # automatic insert and no automatic proposal. The loop is KEPT because it is
+        # the one place a REVIEWED convention rule (`bl15.nominal.NominalRule`) could
+        # offer a labelled nominal value, requiring a scientist's confirmation.
+        #
+        # PER RUN, BY THE CONVENTION ITS OWN ACQUISITION WAS READ UNDER — not by one
+        # archive-wide profile — because a beamtime can mix conventions, and a rule is
+        # scoped to one convention at one version. An ambiguous reading (two
+        # conventions) gets no offer: a rule of one of them does not speak for the
+        # other.
         nominal_offers: list[dict] = []
-        nominal_default = None
-        if reading_for_nominal is not None:
-            from .bl15 import nominal as nominal_module
+        from .bl15 import nominal as nominal_module
 
-            nominal_default = nominal_module.nominal_temperature_for(
-                reading_for_nominal.profile_id
-            )
-        if nominal_default is not None and created_runs:
+        unit_profile: dict[str, str | None] = {}
+        if reading_for_nominal is not None:
+            for unit in reading_for_nominal.units:
+                profile_ids = (unit.applicability or {}).get("profile_ids") or [
+                    reading_for_nominal.profile_id
+                ]
+                unit_profile[unit.stem] = profile_ids[0] if len(profile_ids) == 1 else None
+        if created_runs:
             for row in created_runs:
                 run_for_offer = exp.get_run(row["run_id"])
                 if run_for_offer is None:  # pragma: no cover - just created
+                    continue
+                nominal_default = nominal_module.nominal_temperature_for(
+                    unit_profile.get(row["stem"])
+                )
+                if nominal_default is None:
                     continue
                 offered = _mint_nominal_offer(
                     exp,
@@ -27496,6 +28128,49 @@ def post_import_add_to_experiment(
                 context_entries, generated_utc=_now_iso()
             )
 
+        # --- DATA QUALITY NOTES (2026-09-22): the scientist's own remarks, kept ----
+        #
+        # Every Notes-cell remark bound to a measurement is captured as a RUN-SCOPED
+        # NOTE on the run made from that measurement — verbatim, with the file and row
+        # it came from — so the words survive the working area. NO qc.status IS
+        # WRITTEN OR PROPOSED: the domain owner does not know what "QC" would mean for
+        # these remarks (2026-09-22), and a note is exactly the object this build uses
+        # for content with no confident schema home. Exactly-once per remark through a
+        # client request key, so a re-run adds nothing. Only when this batch resolved
+        # a run per measurement (`create_runs`); a single named run is not assumed to
+        # be every measurement's.
+        dqn_available = 0
+        dqn_captured = 0
+        dqn_already = 0
+        if create_runs and reading_for_nominal is not None:
+            for unit in reading_for_nominal.units:
+                target_run = run_of_stem.get(unit.stem)
+                for row in unit.data_quality_notes:
+                    dqn_available += 1
+                    if target_run is None:
+                        continue
+                    key = _dqn_request_key(import_id, unit, row)
+                    if notes.find_by_client_request_key(exp.notes, key) is not None:
+                        dqn_already += 1
+                        continue
+                    text = (
+                        f"Data Quality Note — {row.get('source_path')} "
+                        f"({row.get('locator')}): {row.get('text')}"
+                    )
+                    too_big = _note_text_refusal(text, what="This Data Quality Note")
+                    if too_big is not None:
+                        return too_big
+                    capacity = _note_capacity_refusal(exp)
+                    if capacity is not None:
+                        return capacity
+                    exp.capture_note(
+                        text=text,
+                        source=_IMPORT_NOTE_SOURCE,
+                        run_id=target_run,
+                        client_request_key=key,
+                    )
+                    dqn_captured += 1
+
         # A CREATED RUN IS A WRITE EVEN IF EVERY CANDIDATE WAS ALREADY SENT, and
         # this `or` is why: `wrote_something` tracked minted proposals alone, so
         # re-running a batch that had already sent every candidate would have
@@ -27513,7 +28188,7 @@ def post_import_add_to_experiment(
         # candidate already sent, no run asked for) would have reported entries that
         # never reached disk. It is idempotent, so a re-run adds 0 and this stays a
         # genuine no-op.
-        if wrote_something or created_runs or context_added:
+        if wrote_something or created_runs or context_added or origins_recorded or dqn_captured:
             # ACT-002, CHANNEL `historical_import`, for the reason
             # `post_import_candidate_proposal` gives: `DEC-44` has a fourth channel so
             # that archive-derived material is distinguishable from a typed value, and
@@ -27638,6 +28313,16 @@ def post_import_add_to_experiment(
         # reason both are published. A client that showed only one of them could not
         # tell "this import states nothing at level 4" from "this record already
         # holds all of it".
+        # 2026-09-22. Reported under their own keys, never inside `counts`, for the
+        # reason the companion is: none of them is a candidate.
+        "data_quality_notes": {
+            "label": "Data Quality Notes",
+            "available": dqn_available,
+            "captured_as_run_notes": dqn_captured,
+            "already_present": dqn_already,
+            "writes_qc_status": False,
+        },
+        "run_origins_recorded": origins_recorded,
         "extended_context": {
             "available": context_available,
             "added": context_added,

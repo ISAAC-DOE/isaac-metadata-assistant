@@ -194,6 +194,7 @@ __all__ = [
     "ACTION_ASSET_REMOVED",
     "ACTION_ASSET_UPDATED",
     "ACTION_CONFLICT_DECISION_RECORDED",
+    "ACTION_CONVENTION_RULE_RECORDED",
     "ACTION_EXPERIMENT_MOVED",
     "ACTION_EXPERIMENT_RENAMED",
     "ACTION_FIELD_ANSWERED",
@@ -220,10 +221,12 @@ __all__ = [
     "CHANNEL_MCP",
     "CHANNEL_SYSTEM",
     "CHANNEL_WEB",
+    "CHANNELS_WITHOUT_A_WRITE_SITE",
     "IMMUTABLE_EVENT_FIELDS",
     "OBJECT_ARCHIVE",
     "OBJECT_ASSET",
     "OBJECT_CONFLICT",
+    "OBJECT_CONVENTION_RULE",
     "OBJECT_EXPERIMENT",
     "OBJECT_FIELD",
     "OBJECT_IMPORT",
@@ -290,6 +293,37 @@ CHANNEL_SYSTEM = "system"
 ACTIVITY_CHANNELS: frozenset[str] = frozenset(
     {CHANNEL_WEB, CHANNEL_MCP, CHANNEL_HISTORICAL_IMPORT, CHANNEL_SYSTEM}
 )
+
+#: CHANNELS IN THE VOCABULARY THAT NO WRITE SITE IN THIS BUILD RECORDS — and why.
+#:
+#: **``system`` IS HERE, MEASURED 2026-09-22, and this map is the answer to
+#: ``docs/session-closure-2026-09-18.md`` §8's residue** ("``CHANNEL_SYSTEM`` has no write
+#: site, so ``by_channel.system`` is permanently 0"). Two ways to close it were weighed:
+#:
+#: * RECORD A SYSTEM EVENT SOMEWHERE — rejected, because no legitimate one exists today.
+#:   The application-originated acts this build performs are creating a record (not
+#:   recorded — see "THREE ACTS THAT RECORD NOTHING" above), materialising a worked
+#:   example (``save()``, a brand-new document with nothing to record against) and the
+#:   workspace reset (it destroys the document the history lives in). Inventing an
+#:   event to give the zero company would put a false row in an audit log, which is the
+#:   one thing ``CHANNEL_SYSTEM``'s own comment forbids.
+#: * SAY THE ZERO IS STRUCTURAL — adopted. ``DEC-44`` enumerates four channels and that
+#:   decision is unchanged, so ``system`` stays in :data:`ACTIVITY_CHANNELS`; what
+#:   changes is that every served vocabulary now carries this map beside it, so a
+#:   surface can say *"no act in this build is recorded through this channel"* instead of
+#:   rendering a ``0`` that reads as a measurement of inactivity.
+#:
+#: ``test_activity_channel_guard.py`` fails if a write site starts recording one of these
+#: channels while it is still listed here, so the claim cannot go stale silently.
+CHANNELS_WITHOUT_A_WRITE_SITE: dict[str, str] = {
+    CHANNEL_SYSTEM: (
+        "Reserved for acts the application performs with no external caller. No write "
+        "path in this build records one — the application-originated acts it has "
+        "(creating a record, materialising a worked example, resetting the workspace) "
+        "either write a brand-new document or destroy the one the history lives in — so "
+        "a count of zero here is structural, not a measurement of inactivity."
+    ),
+}
 
 #: The process-wide ambient channel, or ``None`` when nothing established one.
 #:
@@ -445,6 +479,11 @@ ACTION_ASSET_UPDATED = "asset_updated"
 ACTION_ASSET_REMOVED = "asset_removed"
 ACTION_RECORD_EXPORTED = "record_exported"
 ACTION_ARCHIVE_ATTACHED = "archive_attached"
+#: A scientist confirmed a convention rule on this record (2026-09-22,
+#: :mod:`isaac_api.convention_rules`) — a profile binding, a conflict resolution or a
+#: channel assignment. The rule itself is content the record holds; this row records
+#: that the act happened, through which channel, and by whom (honestly: unattributed).
+ACTION_CONVENTION_RULE_RECORDED = "convention_rule_recorded"
 
 #: The bounded verb vocabulary. **NOT free text**, and the refusal is the reason:
 #: a history whose ``action`` a caller may spell freely cannot be grouped, counted
@@ -476,6 +515,7 @@ ACTIVITY_ACTIONS: frozenset[str] = frozenset(
         ACTION_ASSET_REMOVED,
         ACTION_RECORD_EXPORTED,
         ACTION_ARCHIVE_ATTACHED,
+        ACTION_CONVENTION_RULE_RECORDED,
     }
 )
 
@@ -489,6 +529,7 @@ OBJECT_ARCHIVE = "archive"
 OBJECT_IMPORT = "import"
 OBJECT_RECORD = "record"
 OBJECT_CONFLICT = "conflict"
+OBJECT_CONVENTION_RULE = "convention_rule"
 
 #: What kind of thing the act was performed ON. Bounded for
 #: :data:`ACTIVITY_ACTIONS`' reason.
@@ -504,6 +545,7 @@ ACTIVITY_OBJECT_TYPES: frozenset[str] = frozenset(
         OBJECT_IMPORT,
         OBJECT_RECORD,
         OBJECT_CONFLICT,
+        OBJECT_CONVENTION_RULE,
     }
 )
 

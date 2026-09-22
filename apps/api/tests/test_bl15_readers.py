@@ -481,14 +481,28 @@ def test_a_stem_with_nothing_recognisable_still_reports_every_token():
 
 
 def test_the_profile_registry_holds_exactly_the_one_measured_profile():
-    assert list(profiles.PROFILES) == ["ssrl_bl152_angel"]
-    profile = profiles.profile_for("ssrl_bl152_angel")
+    """ONE registered convention — renamed 2026-09-22 for the CONVENTION, not a person.
+
+    ~~``["ssrl_bl152_angel"]`` / "Angel-style historical naming profile v1"~~ — the id
+    and the display name were an architectural synonym for "every file Angel touched",
+    which the project owner corrected: a convention and the scientist who ran a Run are
+    separate concepts. The historical id MUST still resolve, to the same object, so
+    everything stamped with it before the rename still hydrates; that half is asserted
+    here too, because a rename that orphaned old evidence would be a data loss.
+    """
+    assert list(profiles.PROFILES) == ["ssrl_bl152_herfd_echem_naming"]
+    profile = profiles.profile_for("ssrl_bl152_herfd_echem_naming")
     assert profile is not None
     assert profile.profile_version == "1"
-    assert (
-        profile.display_name
-        == "SSRL BL15-2 — Angel-style historical naming profile v1"
+    assert profile.display_name.startswith(
+        "SSRL BL15-2 HERFD electrochemistry filename convention v1"
     )
+    assert "Angel" not in profile.display_name
+    # THE ALIAS, both ways it is reached.
+    assert profiles.profile_for("ssrl_bl152_angel") is profile
+    assert profiles.canonical_profile_id("ssrl_bl152_angel") == profile.profile_id
+    assert profile.aliases == ("ssrl_bl152_angel",)
+    assert profiles.SSRL_BL152_ANGEL_V1 is profiles.SSRL_BL152_HERFD_ECHEM_V1
 
 
 def test_the_profile_docstring_records_the_convention_verbatim():
@@ -2209,9 +2223,65 @@ def test_a_sample_heading_states_a_name_a_medium_and_sometimes_a_quality_note():
     names = _by_concept(result, CONCEPT_SAMPLE_NAME)
     assert [n.normalized_value for n in names] == ["ZZ1", "ZZ2", "ZZ3"]
     assert {n.scope for n in names} == {SCOPE_SAMPLE_GROUP}
-    quality = _one(result, CONCEPT_QUALITY_NOTE)
+    # ~~`_one(result, CONCEPT_QUALITY_NOTE)`~~ — there are now FOUR quality notes, not
+    # one: since 2026-09-22 every non-empty `Notes` cell of a file-number table is kept
+    # as a Data Quality Note too (see the test below). The heading qualifier is still
+    # exactly one of them, found by its locator.
+    heading = [
+        q
+        for q in _by_concept(result, CONCEPT_QUALITY_NOTE)
+        if q.locator.endswith("sample heading qualifier")
+    ]
+    assert len(heading) == 1
+    quality = heading[0]
     assert quality.raw_literal == "bad"
     assert quality.scope == SCOPE_SAMPLE_GROUP
+
+
+def test_every_notes_cell_is_kept_verbatim_as_a_data_quality_note():
+    """Angel, 2026-09-22: preserve free-text quality phrases; never derive qc.status.
+
+    Position decides a Notes cell, not content — and the file number rides in the
+    locator, read back through ``notes.file_number_of`` so no consumer parses the
+    locator with its own regex. A row whose File Number cell is empty (Sample 1 of the
+    fixture, as of the real document) keeps its note at sample-group scope with no
+    number, rather than borrowing a neighbour's.
+    """
+    result = _notes_result()
+    cells = [
+        q
+        for q in _by_concept(result, CONCEPT_QUALITY_NOTE)
+        if "column `Notes`" in q.locator
+    ]
+    by_literal = {q.raw_literal: q for q in cells}
+    assert set(by_literal) == {
+        "10 ohms resistance",
+        "200 ohm resistance seems large but it is working",
+        "After 1200mV CV",
+    }
+    assert notes.file_number_of(by_literal["After 1200mV CV"].locator) == 13
+    assert by_literal["After 1200mV CV"].scope == SCOPE_MEASUREMENT
+    assert notes.file_number_of(by_literal["10 ohms resistance"].locator) is None
+    assert by_literal["10 ohms resistance"].scope == SCOPE_SAMPLE_GROUP
+    for q in cells:
+        assert q.normalization_rule == notes.RULE_DATA_QUALITY_NOTE
+        # VERBATIM: nothing classified, nothing normalised.
+        assert q.normalized_value is None
+
+
+def test_the_file_number_reading_is_unchanged_by_the_notes_cell_tracking():
+    """The row tracking added 2026-09-22 must not move a single file number.
+
+    Asserted over the fixture here and measured over the REAL archive locally before and
+    after (41 file-number rows and 61 steps, identical sequence) — the real half is not
+    reproducible in CI, which has no corpus.
+    """
+    result = _notes_result()
+    rows = [r.normalized_value for r in _by_concept(result, CONCEPT_NOTE_FILE_NUMBER_ROW)]
+    assert rows == [11, 12, 13, 14]
+    steps = [s.normalized_value for s in _by_concept(result, CONCEPT_STEP_NUMBER)]
+    # Identical to the pre-change reader over this fixture (compared directly).
+    assert steps == [1, 2, 3, 1, 2, 3, 4]
 
 
 def test_a_sample_heading_with_no_name_and_no_medium_is_not_invented():

@@ -482,19 +482,27 @@ ARCHIVE_FIXTURES: Mapping[str, str] = {
 
 
 def archive_names() -> tuple[str, ...]:
-    """Every committed archive this build can walk, in name order.
+    """Every archive this build can walk, in name order.
 
     Filtered by EXISTENCE, exactly as :func:`fixture_names` is: a key whose path
     is not on disk is not offered, so a deployment whose image excluded the
     fixtures advertises nothing it cannot read.
+
+    **PLUS STAGED ARCHIVES, WHEN — AND ONLY WHEN — ``historical_file_ingestion`` IS
+    ENABLED BY CONFIGURATION** (added 2026-09-22; :mod:`isaac_api.capabilities`). A staged
+    name is namespaced ``staged:<name>`` so it can never collide with or shadow a
+    committed fixture, and the capability is disabled in every shipped deployment
+    (``EXT-13``), so in production this list is exactly the committed fixtures it
+    always was.
     """
-    return tuple(
-        sorted(
-            name
-            for name, relative in ARCHIVE_FIXTURES.items()
-            if (ARCHIVE_FIXTURE_ROOT / relative).exists()
-        )
+    from . import capabilities  # local: keeps import order flexible
+
+    committed = tuple(
+        name
+        for name, relative in ARCHIVE_FIXTURES.items()
+        if (ARCHIVE_FIXTURE_ROOT / relative).exists()
     )
+    return tuple(sorted(committed + capabilities.staged_archive_names()))
 
 
 def archive_root_for(name: str) -> Path:
@@ -512,7 +520,16 @@ def archive_root_for(name: str) -> Path:
             key=name if isinstance(name, str) else None,
             available=list(archive_names()),
         )
-    return ARCHIVE_FIXTURE_ROOT / ARCHIVE_FIXTURES[name]
+    if name in ARCHIVE_FIXTURES:
+        return ARCHIVE_FIXTURE_ROOT / ARCHIVE_FIXTURES[name]
+    from . import capabilities  # local: keeps import order flexible
+
+    # MEMBERSHIP ABOVE IS THE TRAVERSAL BOUNDARY: a staged name is only ever a direct,
+    # allowlisted child of the configured staging root, re-listed on every call.
+    staged = capabilities.resolve_staged(name)
+    if staged is None:  # pragma: no cover - membership was just checked
+        raise UnsupportedImport("unknown_archive", "That archive is no longer staged.")
+    return staged
 
 
 # --- parsers: the INTERFACE, and one fixture-format implementation ------------
@@ -858,6 +875,47 @@ class SemanticCandidate:
     #: ``bl15.evidence``'s own "a reader's evidence list can be a PARTIAL
     #: reading" note imposes one layer down.
     supporting_statement_total: int | None = None
+    #: How many DIFFERENT source files state this candidate's reading(s). Added
+    #: 2026-09-22 so :attr:`agreement` can say "sources agree" from a fact rather than
+    #: from the length of a window. ``None`` for a candidate built before it existed.
+    distinct_sources: int | None = None
+    #: The scientist-confirmed resolution rule this candidate carries, when one applies
+    #: (:mod:`isaac_api.convention_rules`). On a disagreeing candidate it marks the
+    #: disagreement RESOLVED — the competing readings stay, as source facts — and on the
+    #: derived candidate it names the rule the chosen value came from.
+    resolved_by_rule: str | None = None
+
+    # --- UI statuses, DERIVED (2026-09-22) ----------------------------------------
+
+    @property
+    def agreement(self) -> str:
+        """``sources_conflict`` | ``sources_agree`` | ``single_source``. Derived."""
+        if self.unresolved_reason is not None:
+            return "sources_conflict"
+        if self.distinct_sources is not None and self.distinct_sources >= 2:
+            return "sources_agree"
+        return "single_source"
+
+    @property
+    def review_status(self) -> str:
+        """What a scientist is asked to do about this candidate. Derived, never stored.
+
+        ``resolved`` — a confirmed resolution applies; ``sources_conflict`` — the
+        sources disagree and nothing is chosen; ``ready`` — a value can be sent to
+        review as a proposal; ``unmapped`` — no official field takes it here (kept as
+        evidence / extended context); ``needs_review`` — there is a field and something
+        other than a disagreement keeps the value from travelling (a domain question, a
+        build boundary, a structural candidate).
+        """
+        if self.resolved_by_rule is not None:
+            return "resolved"
+        if self.unresolved_reason is not None:
+            return "sources_conflict"
+        if self.proposable:
+            return "ready"
+        if self.kind == CANDIDATE_KIND_FIELD and self.target_field_path is None:
+            return "unmapped"
+        return "needs_review"
 
     @property
     def proposable(self) -> bool:
@@ -903,9 +961,13 @@ class SemanticCandidate:
             "unresolved_reason": self.unresolved_reason,
             "not_proposable_reason": self.not_proposable_reason,
             "supporting_statement_total": self.supporting_statement_total,
+            "distinct_sources": self.distinct_sources,
+            "resolved_by_rule": self.resolved_by_rule,
             # DERIVED, and serialised anyway. A client that recomputed it would be
             # a second expression of the rule, free to drift from this one.
             "proposable": self.proposable,
+            "agreement": self.agreement,
+            "review_status": self.review_status,
         }
 
     @classmethod
@@ -967,6 +1029,10 @@ class SemanticCandidate:
             if isinstance(state.get("supporting_statement_total"), int)
             and not isinstance(state.get("supporting_statement_total"), bool)
             and state.get("supporting_statement_total") >= 0
+            else None,
+            distinct_sources=_as_count(state.get("distinct_sources")),
+            resolved_by_rule=state.get("resolved_by_rule")
+            if isinstance(state.get("resolved_by_rule"), str)
             else None,
         )
 
@@ -1486,6 +1552,28 @@ class UnitReading:
     source_count: int = 0
     conflict_count: int = 0
     candidate_ids: tuple[str, ...] = ()
+    # --- added 2026-09-22 ------------------------------------------------------
+    #: A DURABLE INTERNAL IDENTITY for the acquisition this unit is built around:
+    #: ``<archive>:<archive path>@<member digest>``. **Never the legacy number** — two
+    #: distinct acquisitions carry legacy number 32 in the real archive (``Q16``, which
+    #: the domain owner cannot settle), so a run is matched to its measurement by WHAT
+    #: IT IS. The digest is the member digest the walk computes for deduplication; it is
+    #: never published as a manifest ``sha256``.
+    acquisition_identity: str = ""
+    #: Whether another unit in this archive carries the same legacy number.
+    legacy_number_shared: bool = False
+    #: Which naming convention the acquisition was read under, at what scope, on what
+    #: basis, and any ambiguity — :class:`bl15.applicability.Applicability`.
+    applicability: Mapping[str, Any] = field(default_factory=dict)
+    #: The per-Run HERFD primary-signal selection — :mod:`bl15.signals`. A suggestion
+    #: at most; it writes no field.
+    signal_selection: Mapping[str, Any] | None = None
+    #: The file's own Notes-cell remarks, verbatim — "Data Quality Notes". Never a QC
+    #: verdict.
+    data_quality_notes: tuple[dict, ...] = ()
+    #: People the sources NAME for this measurement — provenance, never a parsing rule
+    #: and never an actor.
+    contributors: tuple[dict, ...] = ()
 
     def to_state(self) -> dict:
         return {
@@ -1500,6 +1588,14 @@ class UnitReading:
             "source_count": self.source_count,
             "conflict_count": self.conflict_count,
             "candidate_ids": list(self.candidate_ids),
+            "acquisition_identity": self.acquisition_identity,
+            "legacy_number_shared": self.legacy_number_shared,
+            "applicability": dict(self.applicability),
+            "signal_selection": (
+                dict(self.signal_selection) if self.signal_selection is not None else None
+            ),
+            "data_quality_notes": [dict(n) for n in self.data_quality_notes],
+            "contributors": [dict(c) for c in self.contributors],
         }
 
     @classmethod
@@ -1537,7 +1633,36 @@ class UnitReading:
             )
             if isinstance(state.get("candidate_ids"), list)
             else (),
+            # READ, NOT REFUSED: a session written before 2026-09-22 has none of these
+            # and hydrates to their empty values — a re-parse recomputes them.
+            acquisition_identity=state.get("acquisition_identity")
+            if isinstance(state.get("acquisition_identity"), str)
+            else "",
+            legacy_number_shared=state.get("legacy_number_shared") is True,
+            applicability=dict(state.get("applicability"))
+            if isinstance(state.get("applicability"), Mapping)
+            else {},
+            signal_selection=dict(state.get("signal_selection"))
+            if isinstance(state.get("signal_selection"), Mapping)
+            else None,
+            data_quality_notes=tuple(
+                dict(n) for n in (state.get("data_quality_notes") or []) if isinstance(n, Mapping)
+            )
+            if isinstance(state.get("data_quality_notes"), list)
+            else (),
+            contributors=tuple(
+                dict(c) for c in (state.get("contributors") or []) if isinstance(c, Mapping)
+            )
+            if isinstance(state.get("contributors"), list)
+            else (),
         )
+
+
+def _mapping_rows(value: object) -> tuple[dict, ...]:
+    """A persisted list of objects, read tolerantly: non-objects are skipped."""
+    if not isinstance(value, list):
+        return ()
+    return tuple(dict(row) for row in value if isinstance(row, Mapping))
 
 
 def _as_count(value: object) -> int | None:
@@ -1595,6 +1720,18 @@ class ArchiveReading:
     #: list is never a trimmed one presented as whole — the same rule every other page
     #: here follows.
     column_readings_dropped: int = 0
+    #: How many readings the per-cell DEDUP thinned — a literal already kept for the
+    #: same measurement and concept. **A different fact from
+    #: :attr:`column_readings_dropped`, split 2026-09-22 exactly as `CTX-004` split the
+    #: extended-context counter:** thinned loses no distinct reading (corroboration was
+    #: trimmed), while dropped means a DIFFERENT literal was not kept because the cell
+    #: already held :data:`MAX_DISTINCT_COLUMN_READINGS` of them. ~~Until the split, both
+    #: were counted into one integer served as `evidence_readings_dropped` under a
+    #: comment describing the dedup half only~~ — ``docs/session-closure-2026-09-18.md``
+    #: §8 named it as residue. A session written before the split hydrates this to 0 and
+    #: keeps its union count in ``column_readings_dropped``; it cannot be split
+    #: retroactively and a re-parse recomputes both.
+    column_readings_thinned: int = 0
     #: Candidate ids belonging to the import rather than to one measurement — the
     #: beamtime-scope context every unit INHERITS and none of them copies.
     shared_candidate_ids: tuple[str, ...] = ()
@@ -1657,6 +1794,25 @@ class ArchiveReading:
     #: completeness claim.
     statements_read: int = 0
     statements_suppressed: int = 0
+    # --- added 2026-09-22 ------------------------------------------------------
+    #: Every convention binding in force for this reading — the build default plus any
+    #: rule-backed one — so a surface can show WHICH conventions applied WHERE.
+    bindings: tuple[dict, ...] = ()
+    #: ``profile id -> how many entries were read under it``, plus ``ambiguous``.
+    convention_counts: Mapping[str, int] = field(default_factory=dict)
+    #: The rule ids that shaped this reading (bindings, resolutions, assignments).
+    rules_applied: tuple[str, ...] = ()
+    #: Beamtime-scope element/edge statements the HERFD selector read, verbatim.
+    element_evidence: tuple[dict, ...] = ()
+    #: What any source said about temperature, VERBATIM. Empty is the normal state and
+    #: means the field is Not recorded; nothing here is ever a number.
+    temperature_statements: tuple[dict, ...] = ()
+    #: Data Quality Notes no measurement could be bound to (no file number in its row).
+    unbound_data_quality_notes: tuple[dict, ...] = ()
+    #: People named at beamtime scope — inherited by every measurement as provenance.
+    beamtime_contributors: tuple[dict, ...] = ()
+    #: The acquisition-system knowledge the selector used, with its basis.
+    acquisition_system: Mapping[str, Any] = field(default_factory=dict)
 
     def to_state(self) -> dict:
         return {
@@ -1671,6 +1827,7 @@ class ArchiveReading:
             "units": [u.to_state() for u in self.units],
             "column_readings": [dict(row) for row in self.column_readings],
             "column_readings_dropped": self.column_readings_dropped,
+            "column_readings_thinned": self.column_readings_thinned,
             "shared_candidate_ids": list(self.shared_candidate_ids),
             "extended_context_entries": [dict(row) for row in self.extended_context_entries],
             "extended_context_dropped": self.extended_context_dropped,
@@ -1685,6 +1842,14 @@ class ArchiveReading:
             "candidates_truncated": self.candidates_truncated,
             "statements_read": self.statements_read,
             "statements_suppressed": self.statements_suppressed,
+            "bindings": [dict(b) for b in self.bindings],
+            "convention_counts": dict(self.convention_counts),
+            "rules_applied": list(self.rules_applied),
+            "element_evidence": [dict(e) for e in self.element_evidence],
+            "temperature_statements": [dict(t) for t in self.temperature_statements],
+            "unbound_data_quality_notes": [dict(n) for n in self.unbound_data_quality_notes],
+            "beamtime_contributors": [dict(c) for c in self.beamtime_contributors],
+            "acquisition_system": dict(self.acquisition_system),
         }
 
     @classmethod
@@ -1817,6 +1982,27 @@ class ArchiveReading:
             candidates_truncated=state.get("candidates_truncated") is True,
             statements_read=_as_count(state.get("statements_read")) or 0,
             statements_suppressed=_as_count(state.get("statements_suppressed")) or 0,
+            column_readings_thinned=_as_count(state.get("column_readings_thinned")) or 0,
+            bindings=_mapping_rows(state.get("bindings")),
+            convention_counts={
+                k: v
+                for k, v in (state.get("convention_counts") or {}).items()
+                if isinstance(k, str) and _as_count(v) is not None
+            }
+            if isinstance(state.get("convention_counts"), Mapping)
+            else {},
+            rules_applied=tuple(
+                r for r in (state.get("rules_applied") or []) if isinstance(r, str)
+            )
+            if isinstance(state.get("rules_applied"), list)
+            else (),
+            element_evidence=_mapping_rows(state.get("element_evidence")),
+            temperature_statements=_mapping_rows(state.get("temperature_statements")),
+            unbound_data_quality_notes=_mapping_rows(state.get("unbound_data_quality_notes")),
+            beamtime_contributors=_mapping_rows(state.get("beamtime_contributors")),
+            acquisition_system=dict(state.get("acquisition_system"))
+            if isinstance(state.get("acquisition_system"), Mapping)
+            else {},
         )
 
     # -- derived ------------------------------------------------------------
@@ -2034,6 +2220,8 @@ def _suppressed_in(skipped: Sequence[Mapping]) -> int:
 
 def read_archive(
     source: SourceReference,
+    *,
+    rules: Sequence[Any] = (),
 ) -> tuple[ArchiveReading, tuple[SemanticCandidate, ...]]:
     """Walk, classify, read, relate and reconstruct ONE archive source.
 
@@ -2049,11 +2237,21 @@ def read_archive(
        own bytes where they are available and from the path otherwise — and
        reports which, because a path decision is a lead and not a fact.
     3. the reader its classification selects reads it, plus
-       ``bl15.filenames``, which reads the stem's tokens under a named profile
-       for EVERY entry.
+       ``bl15.filenames``, which reads the stem's tokens under the naming
+       convention(s) ``bl15.applicability`` says apply to THAT entry.
     4. ``bl15.relate`` attaches scans, macro declarations, processed products and
        note rows to the acquisition each belongs to, and names what disagrees.
     5. ``bl15.reconstruct`` turns evidence plus structure into candidates.
+    6. (2026-09-22) per measurement: the HERFD primary-signal selection
+       (``bl15.signals``), a recommendation for each conflict (``bl15.resolution``),
+       the Data Quality Notes and the named contributors — each a READING or a
+       SUGGESTION, none of them a value.
+
+    ``rules`` are :class:`~isaac_api.convention_rules.ConventionRule` objects in force
+    for this reading — the import's own apply-only-here rules and, when the import
+    targets an experiment, that experiment's confirmed rules. **Nothing in this
+    function selects a convention by who ran a measurement**: bindings select by the
+    source's name and classification only.
 
     **THE ONE THING THIS FUNCTION DECIDES that the layers below do not:** whether
     THIS BUILD has a write route for a candidate's target path. ``bl15.mapping``
@@ -2068,14 +2266,20 @@ def read_archive(
     the same constant — see :data:`CANDIDATE_NOT_PROPOSABLE_NO_WRITE_PATH`, whose
     wording says the limitation is this build's and never the schema's.
     """
+    from . import convention_rules as cr
+    from .bl15 import applicability as appl
     from .bl15 import archive, classify
     from .bl15 import evidence as ev
     from .bl15 import filenames, macros, reconstruct as rc, relate as R
+    from .bl15 import notes as notes_reader
+    from .bl15 import resolution as res
+    from .bl15 import signals as sig
 
     name = source.fixture_name or ""
     root = archive_root_for(name)
     inventory = _inventory_of(root, root_label=source.filename or name)
 
+    bindings = cr.bindings_from(rules)
     readers = _readers()
     classifications: dict[str, classify.Classification] = {}
     evidence_by_source: dict[str, list] = {}
@@ -2084,6 +2288,9 @@ def read_archive(
     internal_declarations: dict[str, str] = {}
     macro_declarations: dict[str, Sequence[str]] = {}
     note_file_numbers: dict[int, list[dict]] = {}
+    applicability_by_path: dict[str, Any] = {}
+    convention_counts: dict[str, int] = {}
+    scan_stats_by_stem: dict[str, list] = {}
     statements_read = 0
     statements_suppressed = 0
 
@@ -2093,22 +2300,44 @@ def read_archive(
         )
         verdict = classify.classify(entry, head_text=head)
         classifications[entry.archive_path] = verdict
-        manifest.append(
-            {
-                "archive_path": entry.archive_path,
-                "basename": entry.basename,
-                "extension": entry.extension,
-                "size_bytes": entry.size_bytes,
-                "parent_dir": entry.parent_dir,
-                "depth": entry.depth,
-                # THE MEMBER DIGEST. Computed inside this parse, for structural
-                # deduplication, and NEVER published as a manifest `sha256` —
-                # see this module's docstring for the corrected claim and the
-                # test that makes the distinction mechanical.
-                "content_sha256": entry.content_sha256,
-                **verdict.to_state(),
-            }
+        # WHICH CONVENTION(S) APPLY TO THIS ENTRY, by its own name and classification.
+        applies = appl.resolve(
+            bindings,
+            archive_path=entry.archive_path,
+            stem=filenames.stem_of(entry.basename),
+            source_type=verdict.source_type,
         )
+        applicability_by_path[entry.archive_path] = applies
+        for pid in applies.profile_ids:
+            convention_counts[pid] = convention_counts.get(pid, 0) + 1
+        if applies.ambiguous:
+            convention_counts["ambiguous"] = convention_counts.get("ambiguous", 0) + 1
+        row_manifest = {
+            "archive_path": entry.archive_path,
+            "basename": entry.basename,
+            "extension": entry.extension,
+            "size_bytes": entry.size_bytes,
+            "parent_dir": entry.parent_dir,
+            "depth": entry.depth,
+            # THE MEMBER DIGEST. Computed inside this parse, for structural
+            # deduplication, and NEVER published as a manifest `sha256` —
+            # see this module's docstring for the corrected claim and the
+            # test that makes the distinction mechanical.
+            "content_sha256": entry.content_sha256,
+            **verdict.to_state(),
+        }
+        # THE CONVENTION, per row, ONLY WHEN IT IS NOT THE PLAIN BUILD DEFAULT. A
+        # 1,192-row manifest carrying the same default binding on every row would add
+        # a quarter of a megabyte saying nothing; the absence of the key means "read
+        # under the build default", which `bindings` on the reading states once.
+        if applies.binding_ids != ("build-default",) or applies.ambiguous or applies.stale_bindings:
+            row_manifest["convention"] = {
+                "profile_ids": list(applies.profile_ids),
+                "binding_ids": list(applies.binding_ids),
+                "ambiguous": applies.ambiguous,
+                "stale_bindings": list(applies.stale_bindings),
+            }
+        manifest.append(row_manifest)
 
         items: list = []
         reader = readers.get(verdict.source_type)
@@ -2152,28 +2381,9 @@ def read_archive(
                         "partial": suppressed > 0,
                         # A WINDOW WITH ITS TOTAL BESIDE IT, never a trimmed
                         # list presented as a whole one — see
-                        # `MAX_SKIPPED_PER_SOURCE` for the measurement.
-                        #
-                        # THE CEILING DISCLOSURE IS PULLED TO THE FRONT, and this
-                        # is a fix rather than a nicety: `_emit.result()` APPENDS
-                        # that entry last, so the window dropped it on exactly the
-                        # sources that had most to report. Measured by independent
-                        # review with 6 prose skips plus a reached ceiling — the
-                        # five served entries were all prose and the ceiling
-                        # statement was gone, while `evidence.py` cites that entry
-                        # as the whole mitigation for the deliberate `alignment`
-                        # truncation ("names the exact line, header, motor and scan
-                        # where reading stopped"). `partial` and
-                        # `statements_suppressed` are read off the FULL list above,
-                        # so the quantity was always honest; what vanished was the
-                        # only thing saying WHERE.
-                        #
-                        # The remedy is the one this function already applies 50
-                        # lines below to the filename refusal, for the reason stated
-                        # there — "appending it would have put it past
-                        # `MAX_SKIPPED_PER_SOURCE` on exactly the sources that
-                        # already have the most to report" — and that argument was
-                        # simply not carried to the more load-bearing entry.
+                        # `MAX_SKIPPED_PER_SOURCE` for the measurement. The ceiling
+                        # disclosure is pulled to the FRONT; see
+                        # `_skips_ceiling_first`.
                         "skipped": _skips_ceiling_first(result.skipped),
                         "skipped_total": len(result.skipped),
                         "refused_reason": result.refused_reason,
@@ -2200,37 +2410,55 @@ def read_archive(
                     ev.SOURCE_TYPE_MOTOR_SNAPSHOT_MACRO,
                 }:
                     # THE MACRO'S DECLARED TARGETS, IN ORDER, read by `bl15`'s own
-                    # function rather than re-parsed here. Order is the block
-                    # index a scientist is shown, and 29 macros in the real corpus
-                    # declare more than one target (maximum 8) while 4 declare
-                    # none — which is exactly why one macro is neither one
-                    # measurement nor zero.
+                    # function rather than re-parsed here.
                     macro_declarations[entry.archive_path] = macros.newfile_targets(text)
+                if verdict.source_type == ev.SOURCE_TYPE_SCAN_EXPORT:
+                    # CHANNEL CONTENTS FOR THE HERFD SELECTOR, AGGREGATES ONLY: a total,
+                    # a non-zero count and an edge-step significance per candidate
+                    # channel. No row value is kept. Bucketed by the scan directory's
+                    # stem, the same join `relate` uses to attach the scan.
+                    parent = entry.parent_dir.rsplit("/", 1)[-1] if entry.parent_dir else ""
+                    if parent.endswith(R.SCAN_DIR_SUFFIX):
+                        scan_stats_by_stem.setdefault(
+                            parent[: -len(R.SCAN_DIR_SUFFIX)], []
+                        ).append(
+                            sig.scan_channel_stats(
+                                text,
+                                scan_path=entry.archive_path,
+                                channels=sig.BL152_VORTEX.candidate_channels,
+                            )
+                        )
 
         # THE FILENAME IS READ FOR EVERY ENTRY, whatever its classification and
-        # whether or not a reader ran. It is the only thing every source in this
-        # corpus has, and it is where the sample, medium, cycling state,
-        # potential and filter actually live.
-        tokens = filenames.read_filename(
-            entry,
-            source_type=verdict.source_type,
-            id_prefix=f"filename:{entry.archive_path}:",
-        )
-        items.extend(tokens.evidence)
-        if tokens.refused_reason is not None:
-            # PREPENDED, and the total is bumped with it. A filename refusal is
-            # the one skip on this row that is about the source's NAME rather
-            # than its contents, so it must survive the window — appending it
-            # would have put it past `MAX_SKIPPED_PER_SOURCE` on exactly the
-            # sources that already have the most to report.
-            row["skipped"] = [
-                {
-                    "reason": "filename_not_read",
-                    "locator": "filename",
-                    "detail": tokens.refused_reason,
-                }
-            ] + list(row["skipped"])[: MAX_SKIPPED_PER_SOURCE - 1]
-            row["skipped_total"] = row["skipped_total"] + 1
+        # whether or not a reader ran, under EACH convention that applies to it. One
+        # convention is the normal case and keeps the historical evidence-id prefix,
+        # so extended-context entry ids (derived from evidence ids) are stable across
+        # this change. Two conventions are an AMBIGUITY: each reading carries its own
+        # profile id, and any token they read differently becomes a disagreement.
+        for pid in applies.profile_ids:
+            prefix = (
+                f"filename:{entry.archive_path}:"
+                if len(applies.profile_ids) == 1
+                else f"filename:{pid}:{entry.archive_path}:"
+            )
+            tokens = filenames.read_filename(
+                entry,
+                profile_id=pid,
+                source_type=verdict.source_type,
+                id_prefix=prefix,
+            )
+            items.extend(tokens.evidence)
+            if tokens.refused_reason is not None:
+                # PREPENDED, and the total is bumped with it — see the note on the
+                # ceiling disclosure above for why it must survive the window.
+                row["skipped"] = [
+                    {
+                        "reason": "filename_not_read",
+                        "locator": "filename",
+                        "detail": tokens.refused_reason,
+                    }
+                ] + list(row["skipped"])[: MAX_SKIPPED_PER_SOURCE - 1]
+                row["skipped_total"] = row["skipped_total"] + 1
 
         row["statements_read"] = len(items)
         statements_read += len(items)
@@ -2258,11 +2486,25 @@ def read_archive(
         source_ids={path: source.source_id for path in evidence_by_source},
     )
 
+    # --- 2026-09-22: the per-measurement semantics -------------------------------
+    semantics = _archive_semantics(
+        relationships=relationships,
+        evidence_by_source=evidence_by_source,
+        applicability_by_path=applicability_by_path,
+        scan_stats_by_stem=scan_stats_by_stem,
+        entries_by_path={e.archive_path: e for e in inventory.entries},
+        archive_name=name,
+        rules=rules,
+    )
+
     writable = _writable_field_paths()
     candidates: list[SemanticCandidate] = []
     units: list[UnitReading] = []
     candidate_total = 0
     by_stem = relationships.by_stem()
+    resolutions = cr.resolutions_by_target(rules)
+    rules_applied: set[str] = set(semantics["rules_applied"])
+    rules_applied.update(b.rule_ref for b in bindings if b.rule_ref)
 
     for unit_candidates in report.units:
         unit = by_stem.get(unit_candidates.stem)
@@ -2271,8 +2513,14 @@ def read_archive(
             candidate_total += 1
             if len(candidates) + len(bounded) >= MAX_CANDIDATES_PER_SESSION:
                 continue
+            candidate, derived = _apply_resolution(candidate, resolutions)
+            if candidate.resolved_by_rule:
+                rules_applied.add(candidate.resolved_by_rule)
             bounded.append(_bound_candidate(candidate, writable))
+            if derived is not None and len(candidates) + len(bounded) < MAX_CANDIDATES_PER_SESSION:
+                bounded.append(_bound_candidate(derived, writable))
         label_tokens = _label_tokens_for(unit, evidence_by_source)
+        per_unit = semantics["units"].get(unit_candidates.stem, {})
         units.append(
             UnitReading(
                 stem=unit_candidates.stem,
@@ -2286,6 +2534,12 @@ def read_archive(
                 source_count=unit.source_count if unit else 0,
                 conflict_count=len(unit.conflicts) if unit else 0,
                 candidate_ids=tuple(c.candidate_id for c in bounded),
+                acquisition_identity=per_unit.get("acquisition_identity", ""),
+                legacy_number_shared=bool(per_unit.get("legacy_number_shared")),
+                applicability=per_unit.get("applicability", {}),
+                signal_selection=per_unit.get("signal_selection"),
+                data_quality_notes=tuple(per_unit.get("data_quality_notes", ())),
+                contributors=tuple(per_unit.get("contributors", ())),
             )
         )
         candidates.extend(bounded)
@@ -2295,11 +2549,18 @@ def read_archive(
         candidate_total += 1
         if len(candidates) >= MAX_CANDIDATES_PER_SESSION:
             continue
+        candidate, derived = _apply_resolution(candidate, resolutions)
+        if candidate.resolved_by_rule:
+            rules_applied.add(candidate.resolved_by_rule)
         bounded_shared = _bound_candidate(candidate, writable)
         candidates.append(bounded_shared)
         shared_ids.append(bounded_shared.candidate_id)
+        if derived is not None and len(candidates) < MAX_CANDIDATES_PER_SESSION:
+            bounded_derived = _bound_candidate(derived, writable)
+            candidates.append(bounded_derived)
+            shared_ids.append(bounded_derived.candidate_id)
 
-    column_readings, column_dropped = _column_readings(evidence_by_source)
+    column_readings, column_capped, column_thinned = _column_readings(evidence_by_source)
     # `DEC-41` LEVEL 4, PRODUCED HERE BECAUSE HERE IS WHERE THE EVIDENCE OBJECTS
     # EXIST. A candidate carries only the three-field `EvidenceStatement` shape
     # (`bl15.reconstruct.statement_for`), so a consumer downstream could not rebuild
@@ -2320,20 +2581,20 @@ def read_archive(
         inventory=inventory.to_state(),
         manifest=tuple(manifest),
         reading=tuple(reading_rows),
-        relationships=relationships.to_state(),
+        relationships=semantics["relationships_state"],
         units=tuple(units),
         column_readings=column_readings,
-        column_readings_dropped=column_dropped,
+        column_readings_dropped=column_capped,
+        column_readings_thinned=column_thinned,
         shared_candidate_ids=tuple(shared_ids),
         extended_context_entries=context_entries,
         extended_context_dropped=context_dropped,
         extended_context_thinned=context_thinned,
         extended_context_unplaceable=context_unplaceable,
-        # READ OFF THE PROFILE THAT WAS ACTUALLY USED, not declared. The filename
-        # reader above is called without a ``profile_id``, so it runs under
-        # ``profiles.DEFAULT_PROFILE_ID``; naming that constant here records which
-        # convention was applied rather than asserting one. `DEC-43`'s condition (ii)
-        # is keyed on exactly this value.
+        # THE BUILD-DEFAULT CONVENTION, named for back-compatibility: a consumer that
+        # predates per-source applicability reads this. Which convention actually
+        # applied to WHICH source is per unit (`UnitReading.applicability`) and per
+        # manifest row, and `convention_counts` says how many entries each read.
         profile_id=_archive_profile().profile_id,
         profile_version=_archive_profile().profile_version,
         by_concept=dict(report.by_concept or {}),
@@ -2343,14 +2604,344 @@ def read_archive(
         candidates_truncated=candidate_total > len(candidates),
         statements_read=statements_read,
         statements_suppressed=statements_suppressed,
+        bindings=tuple(b.to_state() for b in [appl.default_binding(), *bindings]),
+        convention_counts=dict(sorted(convention_counts.items())),
+        rules_applied=tuple(sorted(r for r in rules_applied if r)),
+        element_evidence=tuple(e.to_state() for e in semantics["beamtime_elements"]),
+        temperature_statements=tuple(semantics["temperature_statements"]),
+        unbound_data_quality_notes=tuple(semantics["unbound_data_quality_notes"]),
+        beamtime_contributors=tuple(semantics["beamtime_contributors"]),
+        acquisition_system=sig.BL152_VORTEX.to_state(),
     )
     return reading, tuple(candidates)
 
 
+def _apply_resolution(candidate: SemanticCandidate, resolutions: Mapping[str, Any]):
+    """``(candidate, derived or None)`` — a confirmed resolution applied to a disagreement.
+
+    THE DISAGREEMENT IS KEPT. The original candidate still carries every competing
+    reading and ``proposed_value: None``; it gains ``resolved_by_rule`` so its review
+    status reads *resolved*. The chosen value travels on a DERIVED candidate, id
+    ``<original>::resolved``, which is an ordinary field candidate: if this build has a
+    write route for its path it can be sent to review as a PROPOSAL — and acceptance
+    keeps its ``409 human_actor_required`` gate. A resolution naming a value no source
+    stated is not applied: the scientist resolves BETWEEN readings, they do not invent
+    a new one here.
+    """
+    rule = resolutions.get(candidate.candidate_id)
+    if rule is None or candidate.unresolved_reason is None:
+        return candidate, None
+    chosen = rule.body.get("chosen_value")
+    values = [str(row.get("value")) for row in candidate.disagreement]
+    if chosen not in values:
+        return candidate, None
+    marked = replace(candidate, resolved_by_rule=rule.rule_id)
+    derived = SemanticCandidate(
+        candidate_id=f"{candidate.candidate_id}::resolved",
+        kind=candidate.kind,
+        determinism=DETERMINISM_DETERMINISTIC,
+        rule=(
+            f"Scientist-confirmed resolution (rule {rule.rule_id}, v{rule.version}, "
+            f"confirmed {rule.confirmed_utc}, confirmed by {rule.confirmed_by}): "
+            f"`{chosen}` chosen from {len(values)} disagreeing readings, each kept as "
+            "a source fact. Sending it to review makes it a PROPOSAL; accepting that "
+            "proposal is a separate act with its own trusted-actor requirement."
+        ),
+        supporting_source_ids=candidate.supporting_source_ids,
+        supporting_statements=tuple(
+            s for s in candidate.supporting_statements if str(s.get("value")) == chosen
+        )
+        or candidate.supporting_statements,
+        target_field_path=candidate.target_field_path,
+        proposed_value=_resolved_value(candidate, chosen),
+        distinct_sources=candidate.distinct_sources,
+        resolved_by_rule=rule.rule_id,
+        not_proposable_reason=None
+        if candidate.kind == CANDIDATE_KIND_FIELD and candidate.target_field_path
+        else candidate.not_proposable_reason,
+    )
+    return marked, derived
+
+
+def _resolved_value(candidate: SemanticCandidate, chosen: str):
+    """The chosen reading as a VALUE: the normalised number when the reading carried one.
+
+    A disagreement row's ``value`` is the comparison string (``"0.85 V"``). When every
+    statement behind it normalised to one number, that number is the value — the same
+    rule a non-disagreeing candidate follows. Otherwise the literal chosen string.
+    """
+    match = re.fullmatch(r"(-?\d+(?:\.\d+)?)(?: \S+)?", chosen)
+    if match:
+        text = match.group(1)
+        return float(text) if "." in text else int(text)
+    return chosen
+
+
+def _archive_semantics(
+    *,
+    relationships,
+    evidence_by_source: Mapping[str, Sequence],
+    applicability_by_path: Mapping[str, Any],
+    scan_stats_by_stem: Mapping[str, Sequence],
+    entries_by_path: Mapping[str, Any],
+    archive_name: str,
+    rules: Sequence[Any],
+) -> dict:
+    """Per-measurement semantics added 2026-09-22. READINGS AND SUGGESTIONS ONLY.
+
+    Returns ``{"units": {stem: {...}}, "relationships_state": {...}, ...}``. Nothing
+    here writes, chooses between sources, or makes a value proposable: the HERFD
+    selection is labelled non-authoritative, a conflict recommendation is labelled
+    non-authoritative, and a Data Quality Note is a verbatim remark.
+    """
+    from . import convention_rules as cr
+    from .bl15 import evidence as ev
+    from .bl15 import filenames
+    from .bl15 import notes as notes_reader
+    from .bl15 import resolution as res
+    from .bl15 import signals as sig
+
+    # -- evidence gathered across the archive, once --------------------------------
+    beamtime_elements: list = []
+    filename_elements: dict[str, list] = {}
+    temperature_statements: list[dict] = []
+    notes_by_number: dict[int, list[dict]] = {}
+    quality_by_number: dict[int, list[dict]] = {}
+    unbound_quality: list[dict] = []
+    contributors_by_number: dict[int, list[dict]] = {}
+    beamtime_contributors: list[dict] = []
+    table_row_file: dict[tuple[str, int, int], int] = {}
+    procedure_rows: list[tuple[str, tuple[int, int], Any]] = []
+
+    for path in sorted(evidence_by_source):
+        for item in evidence_by_source[path]:
+            concept = item.concept
+            if concept == ev.CONCEPT_ELEMENT:
+                if item.source_type == ev.SOURCE_TYPE_SHARED_README:
+                    beamtime_elements.append(
+                        sig.ElementEvidence(
+                            element=str(item.normalized_value or item.raw_literal),
+                            source_path=item.source_path,
+                            locator=item.locator,
+                            role=sig.ELEMENT_ROLE_SHARED_README,
+                            rule=sig.RULE_README_ELEMENT,
+                        )
+                    )
+                elif item.parser_id == filenames.PARSER_ID and item.measurement_stem:
+                    filename_elements.setdefault(item.measurement_stem, []).append(
+                        sig.ElementEvidence(
+                            element=str(item.normalized_value or item.raw_literal),
+                            source_path=item.source_path,
+                            locator=item.locator,
+                            role=sig.ELEMENT_ROLE_FILENAME,
+                            rule=item.normalization_rule or "read from the filename",
+                        )
+                    )
+            elif concept == ev.CONCEPT_ACQUISITION_METHOD and "`def`" in item.locator:
+                found = sig.element_evidence_from_method_symbol(
+                    item.raw_literal, source_path=item.source_path, locator=item.locator
+                )
+                if found is not None:
+                    beamtime_elements.append(found)
+            elif concept == ev.CONCEPT_TEMPERATURE_STATEMENT:
+                temperature_statements.append(
+                    {
+                        "raw_literal": item.raw_literal,
+                        "source_path": item.source_path,
+                        "locator": item.locator,
+                        "scope": item.scope,
+                        # SAID ON THE WIRE: the words are never a number.
+                        "converted_to_a_number": False,
+                    }
+                )
+            elif concept == ev.CONCEPT_NOTE_FILE_NUMBER_ROW:
+                key = notes_reader.table_row_of(item.locator)
+                number = _legacy_int(item.raw_literal)
+                if key is not None and number is not None:
+                    table_row_file[(item.source_path, key[0], key[1])] = number
+            elif concept == ev.CONCEPT_ECHEM_PROCEDURE:
+                key = notes_reader.table_row_of(item.locator)
+                if key is not None:
+                    procedure_rows.append((item.source_path, key, item))
+            elif concept == ev.CONCEPT_QUALITY_NOTE:
+                number = notes_reader.file_number_of(item.locator)
+                row = {
+                    "text": item.raw_literal,
+                    "source_path": item.source_path,
+                    "locator": item.locator,
+                    "file_number": number,
+                    "label": "Data Quality Note",
+                    # NEVER A VERDICT — the domain owner's answer, 2026-09-22.
+                    "writes_qc_status": False,
+                }
+                if number is None:
+                    unbound_quality.append(row)
+                else:
+                    quality_by_number.setdefault(number, []).append(row)
+                    notes_by_number.setdefault(number, []).append(row)
+            elif concept == ev.CONCEPT_CONTRIBUTOR_STATEMENT:
+                value = item.normalized_value if isinstance(item.normalized_value, Mapping) else {}
+                person = {
+                    "name": value.get("name") or item.raw_literal,
+                    "label": value.get("label"),
+                    "section": value.get("section"),
+                    "source_path": item.source_path,
+                    "locator": item.locator,
+                    "role": "provenance",
+                    # NEVER AN ACTOR, and never a parsing input.
+                    "is_actor": False,
+                }
+                numbers = value.get("file_numbers") or []
+                if numbers:
+                    for number in numbers:
+                        if isinstance(number, int):
+                            contributors_by_number.setdefault(number, []).append(
+                                {**person, "basis": "named in the notes section that lists this file number"}
+                            )
+                else:
+                    beamtime_contributors.append(
+                        {**person, "basis": "named at beamtime scope; inherited by every measurement"}
+                    )
+    for path, key, item in procedure_rows:
+        number = table_row_file.get((path, key[0], key[1]))
+        if number is not None:
+            notes_by_number.setdefault(number, []).append(
+                {"text": item.raw_literal, "source_path": item.source_path, "locator": item.locator}
+            )
+
+    # -- per unit -------------------------------------------------------------------
+    legacy_counts: dict[int, int] = {}
+    for unit in relationships.units:
+        if unit.legacy_number is not None:
+            legacy_counts[unit.legacy_number] = legacy_counts.get(unit.legacy_number, 0) + 1
+
+    rules_applied: set[str] = set()
+    resolutions = cr.resolutions_by_target(rules)
+    per_unit: dict[str, dict] = {}
+    for unit in relationships.units:
+        entry = entries_by_path.get(unit.acquisition_path)
+        digest = getattr(entry, "content_sha256", "") if entry is not None else ""
+        shared = unit.legacy_number is not None and legacy_counts.get(unit.legacy_number, 0) > 1
+        applies = applicability_by_path.get(unit.acquisition_path)
+        channels = sig.summarize_channels(scan_stats_by_stem.get(unit.stem, ()))
+        elements = tuple(beamtime_elements) + tuple(filename_elements.get(unit.stem, ()))
+        assignments, rule_ref = cr.signal_assignments_for(
+            rules,
+            archive_path=unit.acquisition_path,
+            stem=unit.stem,
+            source_type=unit.source_type,
+        )
+        if rule_ref:
+            rules_applied.add(rule_ref)
+        selection = sig.select_primary_signal(
+            channels, elements, confirmed_assignments=assignments, rule_ref=rule_ref
+        )
+        quality = [
+            {**row, "legacy_number_shared": shared}
+            for row in quality_by_number.get(unit.legacy_number, ())
+        ] if unit.legacy_number is not None else []
+        people = [
+            {**row, "legacy_number_shared": shared}
+            for row in contributors_by_number.get(unit.legacy_number, ())
+        ] if unit.legacy_number is not None else []
+        people.extend(dict(row) for row in beamtime_contributors)
+        per_unit[unit.stem] = {
+            "acquisition_identity": f"{archive_name}:{unit.acquisition_path}@{digest}",
+            "legacy_number_shared": shared,
+            "applicability": applies.to_state() if applies is not None else {},
+            "signal_selection": selection.to_state(),
+            "data_quality_notes": quality,
+            "contributors": people,
+        }
+
+    # -- conflicts, annotated with their layers ----------------------------------------
+    rel_state = relationships.to_state()
+    units_list = list(relationships.units)
+
+    def annotated(conflict, unit):
+        recommendation = res.recommend(
+            conflict,
+            unit=unit,
+            units=units_list,
+            note_texts_by_number=notes_by_number,
+        )
+        rule = resolutions.get(res.conflict_id(conflict))
+        chosen = rule.body.get("chosen_value") if rule is not None else None
+        not_applied = "The chosen value is not one of this conflict's readings."
+        if rule is None and unit is not None:
+            # A RECURRING resolution: chosen by the MEANING of a source, within the
+            # rule's selector, and applied only where exactly one reading has that role.
+            rule = cr.recurring_resolution_for(
+                rules,
+                conflict_kind=conflict.kind,
+                archive_path=unit.acquisition_path,
+                stem=unit.stem,
+                source_type=unit.source_type,
+            )
+            if rule is not None:
+                role = rule.body.get("chosen_source_role")
+                matching = [r for r in conflict.readings if res.role_of(r) == role]
+                chosen = matching[0].value if len(matching) == 1 else None
+                not_applied = (
+                    f"This conflict has {len(matching)} reading(s) with the role "
+                    f"`{role}`, so the recurring rule cannot say which one it means."
+                )
+        resolution = None
+        if rule is not None:
+            valid = chosen is not None and chosen in {r.value for r in conflict.readings}
+            resolution = {
+                "rule_id": rule.rule_id,
+                "rule_version": rule.version,
+                "scope": rule.scope,
+                "recurring": bool(rule.body.get("conflict_kind")),
+                "chosen_value": chosen,
+                "chosen_source_role": rule.body.get("chosen_source_role"),
+                "confirmed_utc": rule.confirmed_utc,
+                "confirmed_by": rule.confirmed_by,
+                "confirmed_trust_basis": rule.confirmed_trust_basis,
+                "layer": res.LAYER_CONFIRMED_RESOLUTION,
+                "applied": valid,
+                "not_applied_reason": None if valid else not_applied,
+            }
+            if valid:
+                rules_applied.add(rule.rule_id)
+        return res.annotate_conflict(
+            conflict, recommendation, resolution if (resolution and resolution["applied"]) else None
+        ) | ({"unapplied_resolution": resolution} if resolution and not resolution["applied"] else {})
+
+    for unit_state, unit in zip(rel_state.get("units") or [], units_list):
+        unit_state["conflicts"] = [annotated(c, unit) for c in unit.conflicts]
+    rel_state["corpus_conflicts"] = [
+        annotated(c, None) for c in relationships.corpus_conflicts
+    ]
+    rel_state["conflict_model"] = {
+        "layers": [{"layer": key, "meaning": text} for key, text in res.LAYERS],
+        "source_roles": dict(res.ROLE_MEANINGS),
+        "source_hierarchy": None,
+        "policy": (
+            "No universal source hierarchy. Every source is preserved, the "
+            "disagreement is shown, and nothing is chosen; ISAAC may add a "
+            "non-authoritative recommendation; only a scientist-confirmed resolution "
+            "is authoritative, and for a record field it still goes forward as a "
+            "proposal."
+        ),
+    }
+
+    return {
+        "units": per_unit,
+        "relationships_state": rel_state,
+        "beamtime_elements": beamtime_elements,
+        "temperature_statements": temperature_statements,
+        "unbound_data_quality_notes": unbound_quality,
+        "beamtime_contributors": beamtime_contributors,
+        "rules_applied": sorted(rules_applied),
+    }
+
+
 def _column_readings(
     evidence_by_source: Mapping[str, Sequence],
-) -> tuple[tuple[dict, ...], int]:
-    """The review surface's five scientific columns, bounded. ``(rows, dropped)``.
+) -> tuple[tuple[dict, ...], int, int]:
+    """The review surface's five scientific columns, bounded. ``(rows, capped, thinned)``.
 
     **THE WHOLE EVIDENCE SET IS NOT PERSISTED AND MUST NOT BE** — measured at the real
     corpus's cardinality it is roughly 500,000 items. The review surface does not need it:
@@ -2366,13 +2957,22 @@ def _column_readings(
     feature exists to prevent. Keeping the FIRST reading of each distinct literal
     preserves the cell's verdict whatever the corpus does; only corroboration is thinned.
 
+    **TWO COUNTS, NEVER SUMMED — split 2026-09-22, exactly as `CTX-004` split the
+    extended-context counter.** ~~One integer counted both, served as
+    ``evidence_readings_dropped`` under a comment describing only the dedup~~
+    (``docs/session-closure-2026-09-18.md`` §8's residue). ``thinned`` is a repeated
+    literal (no distinct reading lost); ``capped`` is a DIFFERENT literal not kept because
+    the cell already holds :data:`MAX_DISTINCT_COLUMN_READINGS` — a disputed cell whose
+    further readings are not all shown. They mean opposite things to a reader.
+
     A beamtime-scope reading is excluded because it has no ``measurement_stem``, and the
     surface is explicit that folding one into a unit would invent a relationship
     ``relate`` declined to make.
     """
     seen: dict[tuple[str, str], set[str]] = {}
     rows: list[dict] = []
-    dropped = 0
+    capped = 0
+    thinned = 0
     for path in sorted(evidence_by_source):
         for item in evidence_by_source[path]:
             if item.concept not in REVIEW_COLUMN_CONCEPTS or not item.measurement_stem:
@@ -2380,14 +2980,14 @@ def _column_readings(
             key = (item.measurement_stem, item.concept)
             literals = seen.setdefault(key, set())
             if item.raw_literal in literals:
-                dropped += 1
+                thinned += 1
                 continue
             if len(literals) >= MAX_DISTINCT_COLUMN_READINGS:
-                dropped += 1
+                capped += 1
                 continue
             literals.add(item.raw_literal)
             rows.append(item.to_state())
-    return tuple(rows), dropped
+    return tuple(rows), capped, thinned
 
 
 def _archive_profile():
@@ -2729,6 +3329,24 @@ class ImportSession:
     #: ``reconstruction`` as well would put ~1,000 candidates in one document
     #: twice, and would let the two copies disagree about what was found.
     archive_candidates: list[SemanticCandidate] = field(default_factory=list)
+    # --- added 2026-09-22: reviewed convention rules --------------------------
+    #: APPLY-ONLY-HERE rules (:data:`convention_rules.SCOPE_IMPORT`). Exactly as durable
+    #: as this session — which is to say not durable, and every response says so.
+    rules: list = field(default_factory=list)
+    #: Raw rule entries this build could not read, kept verbatim.
+    unreadable_rules: list = field(default_factory=list)
+    #: The experiment this import is being applied to, once a scientist names one by
+    #: recording a rule for it. Its confirmed rules are read at parse time.
+    target_experiment_id: str | None = None
+    #: A SNAPSHOT of the target experiment's active rules as of the last parse, with
+    #: the experiment version they were read at — so a GET of this session can show
+    #: which confirmed rules shaped the reading without re-reading the experiment.
+    experiment_rules: list = field(default_factory=list)
+    experiment_rules_version: str | None = None
+    #: REUSABLE SUGGESTIONS: convention-scoped rules confirmed on OTHER experiments,
+    #: with what they would match here. Never applied until a scientist confirms one
+    #: for this experiment — a rule is never promoted across experiments silently.
+    reusable_rules: list = field(default_factory=list)
 
     # -- derived ------------------------------------------------------------
 
@@ -2882,6 +3500,11 @@ class ImportSession:
             ),
             "unmapped_keys": [dict(entry) for entry in self.unmapped_keys],
             "proposed": {cid: dict(row) for cid, row in sorted(self.proposed.items())},
+            "rules": [r.to_state() for r in self.rules] + list(self.unreadable_rules),
+            "target_experiment_id": self.target_experiment_id,
+            "experiment_rules": [dict(r) for r in self.experiment_rules],
+            "experiment_rules_version": self.experiment_rules_version,
+            "reusable_rules": [dict(r) for r in self.reusable_rules],
         }
 
     def _archive_candidate_ids(self) -> frozenset[str]:
@@ -2952,6 +3575,17 @@ class ImportSession:
                 candidates=reconstruction.candidates + tuple(archive_candidates),
             )
         session.reconstruction = reconstruction
+        # READ, NOT REFUSED (2026-09-22): a session written before rules existed has
+        # none of these keys and hydrates to no rules and no target.
+        from . import convention_rules as cr  # local: keeps import order flexible
+
+        session.rules, session.unreadable_rules = cr.hydrate(state.get("rules"))
+        target = state.get("target_experiment_id")
+        session.target_experiment_id = target if is_record_id(target) else None
+        session.experiment_rules = list(_mapping_rows(state.get("experiment_rules")))
+        version = state.get("experiment_rules_version")
+        session.experiment_rules_version = version if isinstance(version, str) else None
+        session.reusable_rules = list(_mapping_rows(state.get("reusable_rules")))
         return session
 
 
@@ -3350,10 +3984,13 @@ def add_source(
             or name,
             # REPO-RELATIVE, never absolute, for the fixture branch's reason: an
             # absolute path carries this machine's home directory into a stored
-            # document.
-            reference=ARCHIVE_FIXTURES[name],
+            # document. A STAGED archive records its namespaced name, never the
+            # staging directory's path, for the same reason.
+            reference=ARCHIVE_FIXTURES.get(name, name),
             parse_state=PARSE_STATE_UNPARSED,
-            provenance=_provenance(recorded_utc, kind),
+            provenance=_provenance(
+                recorded_utc, kind, staged=name not in ARCHIVE_FIXTURES
+            ),
             media_type=media,
             size_bytes=size,
             # **WHAT THE SCIENTIST SAID, AND NOTHING ELSE.** The parse computes a
@@ -3402,17 +4039,24 @@ def add_source(
 PROVENANCE_NO_ACTOR = "no_trusted_identity_established"
 
 
-def _provenance(recorded_utc: str, kind: str) -> dict:
-    return {
+def _provenance(recorded_utc: str, kind: str, *, staged: bool = False) -> dict:
+    out = {
         "recorded_utc": recorded_utc,
         "recorded_by": PROVENANCE_NO_ACTOR,
-        "recorded_how": _RECORDED_HOW[kind],
+        "recorded_how": _RECORDED_HOW_STAGED if staged else _RECORDED_HOW[kind],
         # TRUE FOR BOTH READ KINDS. An archive is read — that is its whole
         # purpose — and the provenance says so rather than leaving a reader to
         # infer it from the kind.
         "bytes_read_by_this_application": kind
         in {SOURCE_KIND_SYNTHETIC_FIXTURE, SOURCE_KIND_ARCHIVE},
     }
+    if staged:
+        # SAID, not implied, and present ONLY for a staged archive so every other
+        # provenance record is byte-identical to what it was: a staged archive is
+        # bytes an operator placed on the server under `historical_file_ingestion`,
+        # never a committed fixture.
+        out["staged"] = True
+    return out
 
 
 #: One sentence per kind, in ONE place. Previously a two-branch conditional
@@ -3427,6 +4071,15 @@ _RECORDED_HOW: Mapping[str, str] = {
         "a person chose this committed archive, and this build walked it"
     ),
 }
+
+
+#: A staged archive's provenance sentence. Reachable only while the capability is
+#: enabled by configuration, which no shipped deployment does (``EXT-13``).
+_RECORDED_HOW_STAGED = (
+    "a person chose an archive an operator placed in the server-side staging "
+    "directory (historical_file_ingestion, enabled by configuration), and this build "
+    "walked it"
+)
 
 
 def remove_source(session: ImportSession, source_id: object, *, now_utc: str) -> bool:
@@ -3463,7 +4116,14 @@ def remove_source(session: ImportSession, source_id: object, *, now_utc: str) ->
     return True
 
 
-def parse_session(session: ImportSession, *, now_utc: str) -> list[ParsedSource]:
+def parse_session(
+    session: ImportSession,
+    *,
+    now_utc: str,
+    experiment_rules: Sequence[Any] = (),
+    experiment_rules_version: str | None = None,
+    reusable_rules: Sequence[Mapping] = (),
+) -> list[ParsedSource]:
     """Apply every registered parser to every source that has one. In memory.
 
     A source with no registered parser is left with the parse state it already
@@ -3493,10 +4153,20 @@ def parse_session(session: ImportSession, *, now_utc: str) -> list[ParsedSource]
     rewritten: list[SourceReference] = []
     archive_reading: ArchiveReading | None = None
     archive_candidates: list[SemanticCandidate] = []
+    # THE RULES IN FORCE FOR THIS READING: this import's own apply-only-here rules,
+    # plus the target experiment's confirmed ones (read by the caller, which owns the
+    # experiment lock). Rules from OTHER experiments are never applied here — they are
+    # carried as reusable suggestions only.
+    from . import convention_rules as cr  # local: keeps import order flexible
+
+    in_force = cr.active_rules(list(session.rules) + list(experiment_rules))
+    session.experiment_rules = [r.to_state() for r in cr.active_rules(experiment_rules)]
+    session.experiment_rules_version = experiment_rules_version
+    session.reusable_rules = [dict(r) for r in reusable_rules]
     for source in session.sources:
         if source.kind == SOURCE_KIND_ARCHIVE:
             try:
-                archive_reading, minted = read_archive(source)
+                archive_reading, minted = read_archive(source, rules=in_force)
             except UnsupportedImport as refusal:
                 rewritten.append(
                     replace(
@@ -3563,6 +4233,70 @@ def parse_session(session: ImportSession, *, now_utc: str) -> list[ParsedSource]
     session.unmapped_keys = []
     session.updated_utc = now_utc
     return parsed
+
+
+def annotate_reusable(session: ImportSession) -> None:
+    """For each REUSABLE suggestion, what it would match here and where it would differ.
+
+    COMPARE, REUSE, SURFACE — the owner's "Experiment 2" flow — without APPLYING: a
+    suggestion from another experiment says which of this import's measurements its
+    selector reaches, and for each where today's reading differs from what the rule
+    would say. Nothing changes until a scientist records a rule here with
+    ``derived_from`` naming it. In memory; the caller saves.
+    """
+    from . import convention_rules as cr  # local: keeps import order flexible
+
+    reading = session.archive_reading
+    annotated: list[dict] = []
+    for row in session.reusable_rules:
+        row = dict(row)
+        try:
+            rule = cr.ConventionRule.from_state(row.get("rule"))
+        except (cr.UnsupportedRule, TypeError, ValueError):
+            row["matches"] = {"units": 0, "stems": []}
+            row["differences"] = []
+            row["difference_count"] = 0
+            row["unreadable"] = True
+            annotated.append(row)
+            continue
+        matched: list[UnitReading] = []
+        differences: list[str] = []
+        for unit in reading.units if reading is not None else ():
+            if not rule.selector.matches(
+                archive_path=unit.acquisition_path,
+                stem=unit.stem,
+                source_type=unit.source_type,
+            ):
+                continue
+            matched.append(unit)
+            if rule.kind == cr.KIND_PROFILE_BINDING:
+                current = (unit.applicability or {}).get("profile_ids") or []
+                if current != [rule.body.get("profile_id")]:
+                    differences.append(
+                        f"{unit.stem}: read under {', '.join(current) or 'nothing'}; the "
+                        f"rule would read it under {rule.body.get('profile_id')}"
+                    )
+            elif rule.kind == cr.KIND_SIGNAL_ASSIGNMENT:
+                selection = unit.signal_selection or {}
+                current = sorted(
+                    (a.get("channel"), a.get("element")) for a in selection.get("assignments") or []
+                )
+                wanted = sorted(
+                    (a.get("channel"), a.get("element")) for a in rule.body.get("assignments") or []
+                )
+                if current != wanted:
+                    differences.append(
+                        f"{unit.stem}: today {current or 'unresolved'}; the rule assigns {wanted}"
+                    )
+        row["matches"] = {
+            "units": len(matched),
+            "stems": [u.stem for u in matched[:5]],
+        }
+        row["differences"] = differences[:5]
+        row["difference_count"] = len(differences)
+        row["version_is_current"] = rule.version_is_current()
+        annotated.append(row)
+    session.reusable_rules = annotated
 
 
 def _skips_ceiling_first(
@@ -3908,6 +4642,17 @@ def session_view(session: ImportSession) -> dict:
         # for a bundle with no archive, which is an absence rather than zeroes.
         "corpus_digest": corpus_digest(session),
         "archive": _archive_view(session),
+        # --- added 2026-09-22 ----------------------------------------------------
+        # The registered naming CONVENTIONS a scientist can bind a subset of Runs to —
+        # each with its historical aliases, and none of them a person.
+        "profiles": _registered_profiles(),
+        # Reviewed, versioned rules: this import's apply-only-here rules, the target
+        # experiment's confirmed rules as of the last parse, and convention-scoped
+        # rules from other experiments offered as REUSABLE SUGGESTIONS (never applied
+        # until confirmed here). Durability is stated per group.
+        "rules": _rules_view(session),
+        # Two capabilities a surface reads BEFORE offering a control that would fail.
+        "capabilities": _capabilities_view(),
     }
 
 
@@ -4010,10 +4755,18 @@ def _corpus_review(session: "ImportSession") -> dict:
             "inventory": dict(reading.inventory),
             "relationships": dict(reading.relationships),
             "evidence": [dict(row) for row in reading.column_readings],
-            # A WINDOW WITH ITS COST BESIDE IT. Nonzero means corroborating readings were
-            # thinned; it can never mean a disputed cell was settled, because the cap is
-            # on distinct literals.
+            # A WINDOW WITH ITS COSTS BESIDE IT — TWO COUNTS, NEVER SUMMED (split
+            # 2026-09-22, as `CTX-004` split extended context). ~~One integer was served
+            # here under a comment describing only the dedup~~, while it also counted
+            # the distinct-literal cap. `evidence_readings_thinned`: a literal repeated
+            # for the same measurement and concept — corroboration trimmed, nothing
+            # lost. `evidence_readings_dropped` NOW MEANS THE CAP ALONE: a DIFFERENT
+            # literal not kept because the cell already holds the maximum — the cell is
+            # disputed either way, but not every competing reading is listed. Neither
+            # can ever settle a disputed cell, because the cap is on distinct literals.
             "evidence_readings_dropped": reading.column_readings_dropped,
+            "evidence_readings_thinned": reading.column_readings_thinned,
+            "evidence_readings_cap_per_cell": MAX_DISTINCT_COLUMN_READINGS,
             "evidence_scope": sorted(REVIEW_COLUMN_CONCEPTS),
             # `DEC-41` LEVEL 4, WITH ITS COSTS BESIDE IT — `CTX-004`.
             #
@@ -4048,8 +4801,124 @@ def _corpus_review(session: "ImportSession") -> dict:
                 "not_official": _not_official_claim(),
             },
             "mapping": _mapping_block(),
+            # --- added 2026-09-22 -----------------------------------------------
+            # WHICH convention applied WHERE. Per-unit detail is on each unit
+            # (`archive.units_page.rows[].applicability`); this is the summary.
+            "profile_applicability": {
+                "bindings": [dict(b) for b in reading.bindings],
+                "convention_counts": dict(reading.convention_counts),
+                "ambiguous_sources": int(reading.convention_counts.get("ambiguous", 0)),
+                "selected_by_operator": False,
+                "rule": (
+                    "A convention is selected by the source's own name and "
+                    "classification — facility, beamline, acquisition system, "
+                    "experiment, a subset of Runs, a source family or one source — "
+                    "and never by who ran a measurement. People named by the sources "
+                    "are provenance, listed per measurement."
+                ),
+            },
+            # TEMPERATURE: missing stays missing (2026-09-22). `status` is what a
+            # surface renders — `not_recorded` unless a source literally stated
+            # something, in which case the words are shown verbatim and still no
+            # number is written or offered by default.
+            "temperature": _temperature_view(reading),
+            "data_quality_notes": {
+                "label": "Data Quality Notes",
+                "bound_to_a_measurement": sum(
+                    len(u.data_quality_notes) for u in reading.units
+                ),
+                "unbound": [dict(n) for n in reading.unbound_data_quality_notes],
+                "writes_qc_status": False,
+                "policy": (
+                    "Every free-text Notes cell is kept verbatim and bound to its file "
+                    "number. No phrase is classified and qc.status is never written "
+                    "from these notes — the domain owner's answer, 2026-09-22."
+                ),
+            },
+            "herfd_signal": {
+                "acquisition_system": dict(reading.acquisition_system),
+                "element_evidence": [dict(e) for e in reading.element_evidence],
+                "by_status": _selection_counts(reading),
+                "writes_a_record_field": False,
+            },
+            "beamtime_contributors": [dict(c) for c in reading.beamtime_contributors],
+            "rules_applied": list(reading.rules_applied),
         }
     }
+
+
+def _registered_profiles() -> list[dict]:
+    from .bl15 import profiles  # local: keeps import order flexible
+
+    return profiles.registered_profiles()
+
+
+def _capabilities_view() -> dict:
+    """The two capability blocks, computed by the SAME functions ``/api/health`` uses."""
+    from . import capabilities  # local: keeps import order flexible
+
+    return {
+        "historical_file_ingestion": capabilities.historical_file_ingestion(),
+        "proposal_acceptance": capabilities.proposal_acceptance(),
+    }
+
+
+def _rules_view(session: "ImportSession") -> dict:
+    return {
+        "target_experiment_id": session.target_experiment_id,
+        "import": [r.to_state() for r in session.rules],
+        "import_durability": SESSION_DURABILITY_DISCLOSURE,
+        "import_unreadable": len(session.unreadable_rules),
+        "experiment": [dict(r) for r in session.experiment_rules],
+        "experiment_rules_as_of_version": session.experiment_rules_version,
+        "experiment_durability": (
+            "A rule for an Experiment is stored in that experiment's own record and is "
+            "exactly as durable as the record."
+        ),
+        "reusable_from_other_experiments": [dict(r) for r in session.reusable_rules],
+        "reuse_policy": (
+            "A convention-scoped rule confirmed on another experiment is shown here with "
+            "what it would match and where it would differ. It is NOT applied until a "
+            "scientist confirms it for this experiment; nothing is promoted across "
+            "experiments silently."
+        ),
+    }
+
+
+def _temperature_view(reading: "ArchiveReading") -> dict:
+    from .bl15 import mapping as mp  # local: keeps import order flexible
+    from .bl15 import nominal  # local: keeps import order flexible
+
+    used = {
+        pid
+        for unit in reading.units
+        for pid in (unit.applicability or {}).get("profile_ids", []) or []
+    } or {reading.profile_id}
+    offers = sorted(p for p in used if nominal.nominal_temperature_for(p) is not None)
+    return {
+        "official_path": nominal.NOMINAL_TEMPERATURE_PATH,
+        "status": "stated_in_source" if reading.temperature_statements else "not_recorded",
+        "display": (
+            "Temperature — stated in the sources (verbatim, not converted)"
+            if reading.temperature_statements
+            else "Temperature — Not recorded"
+        ),
+        "statements": [dict(t) for t in reading.temperature_statements],
+        "automatic_value": None,
+        "automatic_proposal": False,
+        "nominal_rule_enabled_for": offers,
+        "policy": mp.TEMPERATURE_ABSENT_REASON,
+        "superseded_decision": nominal.SUPERSEDED_DECISION,
+    }
+
+
+def _selection_counts(reading: "ArchiveReading") -> dict:
+    counts: dict[str, int] = {}
+    for unit in reading.units:
+        status = (unit.signal_selection or {}).get("status")
+        if isinstance(status, str):
+            counts[status] = counts.get(status, 0) + 1
+    return dict(sorted(counts.items()))
 
 
 def _not_official_claim() -> str:

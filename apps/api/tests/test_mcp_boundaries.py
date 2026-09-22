@@ -118,7 +118,12 @@ def test_the_registry_is_exactly_the_permitted_set_in_both_directions():
     # level-4 companion. It is the first widening of this set that adds no write and no
     # artifact kind at all: the companion already existed, was already durable and was
     # already served on the wire, and no tool could reach it.
-    assert len(PERMITTED_TOOL_NAMES) == 17
+    # 17 -> 18 on 2026-09-22 for `isaac_list_activity`, a READ over the append-only
+    # activity history. Like the one above it adds no write and no artifact kind; it
+    # became possible once the route's three filters were closed `Literal` sets, so
+    # the tool schema carries enums and `_query_schema`'s unbounded-string refusal
+    # is satisfied without widening its reviewed map.
+    assert len(PERMITTED_TOOL_NAMES) == 18
 
 
 def test_no_forbidden_capability_is_registered_under_any_name():

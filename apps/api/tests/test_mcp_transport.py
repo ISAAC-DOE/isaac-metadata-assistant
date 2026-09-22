@@ -482,7 +482,9 @@ def test_a_full_json_rpc_session_runs_over_http_and_exposes_exactly_the_registry
     # client over the wire. One of FIVE sites holding this same count — see
     # `test_ingestion_proposals.py`'s own correction for why that comment used to say
     # three, and for the two it missed.
-    assert len(listed) == 17
+    # 17 -> 18 (2026-09-22): `isaac_list_activity`, a READ over the activity history,
+    # likewise reaching a client over the wire.
+    assert len(listed) == 18
 
     body = structured(client, "isaac_list_experiments")
     assert body["status"] == 200
@@ -1036,7 +1038,10 @@ def test_the_read_grant_is_the_default_and_the_write_tools_are_absent(workspace)
     # it is asserted by presence rather than absence. A count alone could not tell a
     # read tool arriving in the read grant from a write tool leaking into it.
     assert "isaac_get_extended_context" in listed
-    assert len(listed) == 11
+    # 11 -> 12 (2026-09-22): `isaac_list_activity` costs READ too, so the default grant
+    # reaches it — asserted by presence, for the reason the line above gives.
+    assert "isaac_list_activity" in listed
+    assert len(listed) == 12
 
 
 def test_a_read_only_caller_is_refused_a_write_tool_with_403(workspace):

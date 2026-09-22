@@ -204,19 +204,33 @@ _ASSETS_BLOCKED_REASON_CORRECTION = "2026-09-16"
 #: states no temperature anywhere.** What moved is the AUTHORITY — see
 #: :mod:`bl15.nominal`, where the value, its nominal basis and its
 #: profile scope live, and where ``measured`` is a derived, always-``False`` property.
+#:
+#: ***SUPERSEDED 2026-09-22, AND THE 2026-09-17 SENTENCE IS KEPT BELOW, STRUCK, RATHER
+#: THAN DELETED.*** The domain owner (Angel), relayed by the project owner, reconsidered
+#: the 298 K exception: missing data stays missing, 293 K may be the commoner "room
+#: temperature", and published work / NIST should be checked. The check found both 293.15
+#: and 298.15 K are real conventions answering different questions
+#: (``docs/evidence/temperature-convention-research-2026-09-22.md``). The retired text
+#: read, in full: ~~"... ONE NARROW EXCEPTION, ADDED 2026-09-17: for the BL15-2
+#: Angel-style historical profile, and for no other profile, the project owner has
+#: adopted 298 K as a nominal room-temperature assumption (DEC-43). It is recorded as
+#: nominal, domain-supplied and NOT measured, on the scientist's authority rather than
+#: the parser's; under any other profile the field stays absent and the record stays
+#: blocked, exactly as described above."~~
 TEMPERATURE_ABSENT_REASON = (
     "context.temperature_K is required by the official schema whenever a context block "
     "is present, and this corpus states no temperature anywhere — not in the beamtime "
-    "README, not in the notes, not in any acquisition header. A candidate assembled "
-    "from these sources is therefore incomplete by the schema's own rule, and 298 must "
-    "not be defaulted into context.temperature_K by this application, because a "
-    "plausible number in a required field is a fabricated measurement that nothing "
-    "downstream can tell from a measured one. ONE NARROW EXCEPTION, ADDED 2026-09-17: "
-    "for the BL15-2 Angel-style historical profile, and for no other profile, the "
-    "project owner has adopted 298 K as a nominal room-temperature assumption "
-    "(DEC-43). It is recorded as nominal, domain-supplied and NOT measured, on the "
-    "scientist's authority rather than the parser's; under any other profile the field "
-    "stays absent and the record stays blocked, exactly as described above."
+    "README, not in the notes, not in any acquisition header. The field is therefore "
+    "left MISSING and shown as Not recorded: this application inserts no value and "
+    "offers no value automatically, because a plausible number in a required field is a "
+    "fabricated measurement that nothing downstream can tell from a measured one, and "
+    "298 must not be defaulted into context.temperature_K by this application. A source "
+    "that literally says 'room temperature' or 'RT' is kept verbatim in the extended "
+    "context and is never converted. A nominal number may be OFFERED only by a reviewed "
+    "convention rule that names its convention (NTP-style 293.15 K or SATP-style 298.15 "
+    "K), labels it nominal and inferred, and waits for a scientist to confirm it; no "
+    "such rule is enabled. The 2026-09-17 exception that supplied 298 K for one profile "
+    "(DEC-43) was withdrawn on 2026-09-22 by the domain owner's answer."
 )
 
 CYCLING_STATE_NO_FIELD_REASON = (
@@ -264,6 +278,32 @@ QUESTION_CLOSED_BY_PRODUCT_DECISION = "closed_by_product_decision"
 QUESTION_CLOSED_BY_EXISTING_RULE = "closed_by_existing_rule"
 QUESTION_OPEN_NEEDS_DOMAIN_OWNER = "open_needs_domain_owner"
 
+# --- added 2026-09-22, for Angel's reply to Q9/Q11/Q14/Q15/Q16 -------------------
+#
+# FIVE NEW WAYS TO BE CLOSED, because "closed_by_domain_owner" would have flattened five
+# genuinely different answers into one word. A reader weighing a closed question is owed
+# WHICH kind of closed it is: an answer that settles a mapping, an answer that settles a
+# mapping only per Run and only when evidence supports it, an answer that says "leave it
+# missing", a policy with an advisory layer, and "I do not know". Each is a real answer
+# and none of them makes a value proposable.
+
+#: The domain owner answered with a RULE whose outcome depends on each Run's evidence —
+#: Q11: the HERFD primary signal is selected per Run by :mod:`bl15.signals`, which
+#: suggests a channel only when the evidence supports one and otherwise leaves it
+#: unresolved for review.
+QUESTION_CONDITIONALLY_RESOLVED = "conditionally_resolved"
+#: The domain owner's answer is that, when a source does not state it, the field stays
+#: MISSING and the user updates it later — never guessed (Q9 when no basis is stated;
+#: Q14's QC verdict, whose free-text remarks are kept as Data Quality Notes instead).
+QUESTION_INTENTIONALLY_LEFT_MISSING = "intentionally_left_missing"
+#: A POLICY was adopted in place of a precedence rule: preserve every source, show the
+#: disagreement, choose nothing — plus a clearly labelled non-authoritative
+#: recommendation when independent evidence supports one (Q15, :mod:`bl15.resolution`).
+QUESTION_POLICY_ADOPTED = "policy_adopted_with_non_authoritative_recommendation"
+#: The domain owner does not know. The conflict is PERMANENTLY PRESERVED and nothing is
+#: ever chosen (Q16 — the two legacy-32 acquisitions).
+QUESTION_DOMAIN_OWNER_DOES_NOT_KNOW = "domain_owner_does_not_know_conflict_preserved"
+
 QUESTION_DISPOSITIONS: frozenset[str] = frozenset(
     {
         QUESTION_CLOSED_BY_DOMAIN_OWNER,
@@ -271,8 +311,22 @@ QUESTION_DISPOSITIONS: frozenset[str] = frozenset(
         QUESTION_CLOSED_BY_PRODUCT_DECISION,
         QUESTION_CLOSED_BY_EXISTING_RULE,
         QUESTION_OPEN_NEEDS_DOMAIN_OWNER,
+        QUESTION_CONDITIONALLY_RESOLVED,
+        QUESTION_INTENTIONALLY_LEFT_MISSING,
+        QUESTION_POLICY_ADOPTED,
+        QUESTION_DOMAIN_OWNER_DOES_NOT_KNOW,
     }
 )
+
+#: Where the 2026-09-22 answers came from, attached to every question they moved.
+#: An owner relay of a domain owner's words — the evidentiary class `DEC-47` records.
+ANGEL_2026_09_22 = (
+    "Angel (domain owner), relayed by the project owner on 2026-09-22. No transcript is "
+    "committed; only Krish can confirm the relay and only Angel the content."
+)
+
+#: The scientist-facing name for what the corpus calls quality remarks.
+DATA_QUALITY_NOTES_LABEL = "Data Quality Notes"
 
 
 @dataclass(frozen=True)
@@ -287,6 +341,9 @@ class DomainQuestion:
     #: What closed it, or what is still being asked. One sentence, no scientific value:
     #: the packet is the place that argues it, this is the place that records it.
     note: str
+    #: WHO answered it and how that reached this repository, when a person did. ``None``
+    #: for a question closed by a document, a product decision or an existing rule.
+    attribution: str | None = None
 
     def __post_init__(self) -> None:
         if self.disposition not in QUESTION_DISPOSITIONS:
@@ -312,6 +369,7 @@ class DomainQuestion:
             "disposition": self.disposition,
             "note": self.note,
             "is_open": self.is_open,
+            "attribution": self.attribution,
         }
 
 
@@ -357,28 +415,37 @@ _QUESTIONS: tuple[DomainQuestion, ...] = (
         "context.environment member",
         QUESTION_OPEN_NEEDS_DOMAIN_OWNER,
         "Partial. The dry / as-received acquisitions are stated as such. The member "
-        "for the electrochemical acquisitions is one word only Angel can say.",
+        "for the electrochemical acquisitions is one word only Angel can say. NOT "
+        "addressed by his 2026-09-22 reply, so still open — and per that reply's "
+        "general rule the field stays missing until he or a scientist supplies it.",
     ),
     DomainQuestion(
         "Q7",
         "context.electrochemistry.reaction member",
         QUESTION_OPEN_NEEDS_DOMAIN_OWNER,
         "Narrowed. The document names the reaction in prose and three enum members "
-        "remain compatible; choosing between them is a scientific call.",
+        "remain compatible; choosing between them is a scientific call. NOT addressed "
+        "by the 2026-09-22 reply; still open, and the field stays missing meanwhile.",
     ),
     DomainQuestion(
         "Q8",
         "cell_type per sample group",
         QUESTION_OPEN_NEEDS_DOMAIN_OWNER,
         "Partial. One sample family is explicitly a flow cell; the other family's "
-        "enum member is still Angel's.",
+        "enum member is still Angel's. NOT addressed by the 2026-09-22 reply; still "
+        "open, and the field stays missing meanwhile.",
     ),
     DomainQuestion(
         "Q9",
         "reference basis / rhe_basis",
-        QUESTION_OPEN_NEEDS_DOMAIN_OWNER,
-        "Partial, and the one the corpus most clearly cannot settle: one group names "
-        "RHE explicitly, the other names only a reference electrode.",
+        QUESTION_INTENTIONALLY_LEFT_MISSING,
+        "~~Partial, and the one the corpus most clearly cannot settle~~ — answered "
+        "2026-09-22 by the general rule: when a source does not state the basis (the "
+        "JK groups name only 'a reference electrode'), the basis is LEFT MISSING for "
+        "the user to update later and is never guessed. Where the notes name RHE "
+        "explicitly, that statement is preserved verbatim as evidence; no rhe_basis "
+        "member is written or proposed automatically for any group.",
+        attribution=ANGEL_2026_09_22,
     ),
     DomainQuestion(
         "Q10",
@@ -390,9 +457,15 @@ _QUESTIONS: tuple[DomainQuestion, ...] = (
     DomainQuestion(
         "Q11",
         "primary_signal channel",
-        QUESTION_OPEN_NEEDS_DOMAIN_OWNER,
-        "Narrowed. The document names the normalisation pairs it used, which rules "
-        "out most columns without identifying THE signal column.",
+        QUESTION_CONDITIONALLY_RESOLVED,
+        "Answered as a RULE, not a column (2026-09-22): vortDT is generally the HERFD "
+        "Vortex channel; in dual-element measurements vortDT and vortDT2 may belong to "
+        "different elements and one can be empty. So the primary signal is selected "
+        "PER RUN from evidence (bl15.signals): suggested, non-authoritatively, only "
+        "when exactly one channel carries live signal and one element is established; "
+        "otherwise left unresolved for review. The liveness thresholds are measured "
+        "from the archive and recorded with their basis.",
+        attribution=ANGEL_2026_09_22,
     ),
     DomainQuestion(
         "Q12",
@@ -413,26 +486,40 @@ _QUESTIONS: tuple[DomainQuestion, ...] = (
     DomainQuestion(
         "Q14",
         "is measurement.qc.status derivable from the notes?",
-        QUESTION_OPEN_NEEDS_DOMAIN_OWNER,
-        "The Notes column carries real quality judgements; whether they may drive a "
-        "QC state automatically is exactly the question, and 'no' is a complete "
-        "answer that leaves the field absent.",
+        QUESTION_INTENTIONALLY_LEFT_MISSING,
+        "Answered 2026-09-22: the domain owner does not know what 'QC' would mean "
+        "here, so qc.status is NEVER written from the notes. Every free-text Notes "
+        "cell ('did not work', 'discard first scan', 'first N scans useful', 'too "
+        "low in counts') is preserved verbatim as a Data Quality Note, bound to its "
+        "file number; the schema field is untouched.",
+        attribution=ANGEL_2026_09_22,
     ),
     DomainQuestion(
         "Q15",
         "source precedence when three sources disagree",
-        QUESTION_OPEN_NEEDS_DOMAIN_OWNER,
-        "Still Angel's. Note DEC-42 settles a document that disagrees with ITSELF "
-        "and is NOT the answer to this, which is about three different sources.",
+        QUESTION_POLICY_ADOPTED,
+        "Angel asked ISAAC to brainstorm it (2026-09-22). Policy adopted, with no "
+        "universal source hierarchy: a macro is planned intent, a header is what the "
+        "acquisition system recorded, a filename is a human label, the final notes "
+        "are retrospective interpretation. Every source is preserved, the "
+        "disagreement is shown and nothing is chosen; ISAAC may add a clearly "
+        "labelled NON-AUTHORITATIVE recommendation when independent evidence supports "
+        "one; only a scientist-confirmed resolution is authoritative, and for a "
+        "record field it still goes forward as a proposal. DEC-42 (a document "
+        "disagreeing with itself) is unchanged and separate.",
+        attribution=ANGEL_2026_09_22,
     ),
     DomainQuestion(
         "Q16",
         "legacy number 32 carried by two acquisitions",
-        QUESTION_OPEN_NEEDS_DOMAIN_OWNER,
-        "NARROWED, NOT ANSWERED (DEC-46). Whether the number was deliberately "
-        "reused, whether one file is superseded or mislabelled, and whether the "
-        "number is unique at all are all still Angel's. Preferring either "
-        "acquisition is forbidden meanwhile, including on the document's evidence.",
+        QUESTION_DOMAIN_OWNER_DOES_NOT_KNOW,
+        "Angel does not recall whether the two are two conditions or a typo "
+        "(2026-09-22). So the conflict is PERMANENTLY PRESERVED: both acquisitions "
+        "are kept with distinct durable identities (source path plus content digest, "
+        "never the legacy number alone), neither overwrites the other, and neither is "
+        "preferred or recommended. The final notes' support for one reading is shown "
+        "as evidence, not truth (DEC-46).",
+        attribution=ANGEL_2026_09_22,
     ),
     DomainQuestion(
         "Q17",
@@ -472,8 +559,11 @@ DOMAIN_QUESTIONS: dict[str, DomainQuestion] = {
 def open_domain_questions() -> tuple[str, ...]:
     """The question ids still waiting on a domain owner, sorted by number.
 
-    Eight as of 2026-09-17. Exposed as a function rather than a constant so a
-    disposition change moves it, and pinned by test so a change has to be deliberate.
+    ~~Eight as of 2026-09-17.~~ **Three as of 2026-09-22** — Q6, Q7 and Q8, which the
+    domain owner's reply that day did not address. The other five of the eight closed in
+    five different ways (see the dispositions added that day). Exposed as a function
+    rather than a constant so a disposition change moves it, and pinned by test so a
+    change has to be deliberate.
     """
     return tuple(
         sorted(
@@ -522,6 +612,11 @@ class ConceptMapping:
     #: packet says so itself. :func:`needs_review_without_a_question` names them rather
     #: than leaving a reader to subtract.
     domain_questions: tuple[str, ...] = ()
+    #: The name a SCIENTIST sees for this concept, when the registry's own name is a
+    #: code. ``None`` means the concept name reads well enough on its own. Added
+    #: 2026-09-22 for "Data Quality Notes" — the domain owner's words for what the
+    #: corpus calls quality remarks.
+    scientist_label: str | None = None
 
     def __post_init__(self) -> None:
         if self.status not in MAPPING_STATUSES:
@@ -639,6 +734,7 @@ class ConceptMapping:
             "placement_name": self.placement_name,
             "domain_questions": list(self.domain_questions),
             "unresolved_questions": list(self.unresolved_questions),
+            "scientist_label": self.scientist_label,
         }
 
 
@@ -734,7 +830,10 @@ _MAPPINGS: tuple[ConceptMapping, ...] = (
             "its offset is not. value_V is nullable, so 'no RHE value, and here is "
             "why' is a complete and valid statement. Which member applies to which "
             "sample group is a domain judgement, because only a scientist can say "
-            "whether a note naming RHE for one group covers its neighbours."
+            "whether a note naming RHE for one group covers its neighbours. SINCE "
+            "2026-09-22 the domain owner's answer governs the unstated case: when no "
+            "source states the basis it stays MISSING for the user to update, and no "
+            "member is chosen for them — not even not_reported."
         ),
         allowed_values=(
             "measured_direct",
@@ -996,7 +1095,12 @@ _MAPPINGS: tuple[ConceptMapping, ...] = (
         reason=(
             "A scan export names its columns, so the names are evidenced. The schema "
             "requires a role for each from a closed set, and assigning those roles is "
-            "a scientific reading of the detector set, not a transcription."
+            "a scientific reading of the detector set, not a transcription. FOR THE "
+            "HERFD PRIMARY SIGNAL SPECIFICALLY, the domain owner answered on 2026-09-22 "
+            "with a per-Run rule, so a selector SUGGESTS a channel when a Run's own "
+            "evidence supports exactly one — non-authoritatively, and writing no field, "
+            "because the series block this path belongs to needs values this build "
+            "does not carry."
         ),
         requires_siblings=(
             "measurement.series[].channels[].unit",
@@ -1071,15 +1175,18 @@ _MAPPINGS: tuple[ConceptMapping, ...] = (
         reason=(
             "The beamtime notes carry the scientist's own remarks about which "
             "acquisitions were poor, which sample misbehaved, and which were repeated. "
-            "The prose has a home. THE VERDICT DOES NOT FOLLOW FROM IT: qc.status is a "
-            "closed set of four, and reading a human's aside as 'compromised' or "
-            "'failed' is a scientific classification this repository may not perform. "
-            "A record already carries the stronger constraint that a status must have "
-            "evidence behind it."
+            "They are preserved VERBATIM as Data Quality Notes, each bound to its file "
+            "number. THE VERDICT DOES NOT FOLLOW FROM THEM, and since 2026-09-22 that "
+            "is the domain owner's answer rather than only this repository's caution: "
+            "he does not know what 'QC' would mean for these remarks, so qc.status is "
+            "never written from them — not as a value, not as a suggestion. qc.status "
+            "is a closed set of four, and a record already carries the stronger "
+            "constraint that a status must have evidence behind it."
         ),
         requires_siblings=("measurement.qc.status",),
         allowed_values=("valid", "compromised", "failed", "pending"),
             domain_questions=("Q10", "Q14"),
+        scientist_label=DATA_QUALITY_NOTES_LABEL,
     ),
     ConceptMapping(
         concept=ev.CONCEPT_SAMPLE_PREPARATION,
@@ -1248,6 +1355,47 @@ _MAPPINGS: tuple[ConceptMapping, ...] = (
             "and asserts nothing about the sample, so there is nothing for it to map "
             "to. It matters for relationship reconstruction, where it marks where one "
             "measurement ends and the next begins."
+        ),
+    ),
+    # ---- added 2026-09-22 -----------------------------------------------------
+    ConceptMapping(
+        concept=ev.CONCEPT_TEMPERATURE_STATEMENT,
+        status=STATUS_NEEDS_DOMAIN_REVIEW,
+        official_path=None,
+        reason=(
+            "What a source SAYS about temperature, in its own words — 'room "
+            "temperature', 'RT', a labelled Temperature line. The words have no home "
+            "in context.temperature_K, which holds a NUMBER, and turning them into one "
+            "is choosing a convention (NTP-style 293.15 K or SATP-style 298.15 K), "
+            "which the domain owner declined to have done automatically on "
+            "2026-09-22. So the statement is kept verbatim in the extended context and "
+            "the field stays missing; a nominal number may be OFFERED only by a "
+            "reviewed convention rule that names its convention and waits for a "
+            "scientist's confirmation, and none is enabled. The supplied archive "
+            "states no temperature anywhere, so no real file produces this concept."
+        ),
+        candidate_homes=("context.temperature_K",),
+    ),
+    ConceptMapping(
+        concept=ev.CONCEPT_CONTRIBUTOR_STATEMENT,
+        status=STATUS_NEEDS_DOMAIN_REVIEW,
+        official_path="attribution.contributors",
+        reason=(
+            "A person a source NAMES as having run, measured or prepared something. It "
+            "is PROVENANCE, recorded beside the readings it concerns and never used to "
+            "select how a file is read. The schema's contributors list takes a name "
+            "and a role, and whether a name typed in a historical note is the right "
+            "person for a record — and in which role — is a judgement about identity "
+            "this build cannot make: no trusted boundary exists, and uploaded_by is "
+            "server-stamped for exactly that reason. Kept as evidence; never proposed "
+            "automatically. The supplied archive carries no such labelled line."
+        ),
+        requires_siblings=(),
+        allowed_values=(
+            "data_owner",
+            "performed_measurement",
+            "performed_analysis",
+            "curated_record",
         ),
     ),
     # ---- structural and provenance-only: examined and deliberately refused --
