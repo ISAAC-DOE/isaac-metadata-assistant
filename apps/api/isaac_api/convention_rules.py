@@ -508,8 +508,19 @@ def new_rule(
     supersedes: object = None,
     derived_from: object = None,
     source_examples: object = None,
+    convention_id: str | None = None,
+    convention_version: str | None = None,
 ) -> ConventionRule:
     """Validate and mint one rule against the rules its holder ALREADY has.
+
+    ``convention_id`` / ``convention_version`` record WHICH naming convention a
+    ``conflict_resolution`` or ``signal_assignment`` rule was confirmed under (a
+    ``profile_binding`` names its convention in its body). **Required for the
+    ``profile`` scope** — added 2026-09-22 after an independent review found such rules
+    recorded no convention and were then offered to every experiment regardless of the
+    convention its sources follow, with a ``version_is_current`` that could never be
+    false. The caller derives it from the units the rule addresses; it is never chosen
+    for the scientist.
 
     ``supersedes`` must name an ACTIVE rule of the same kind held by the same holder —
     a new version replaces it, and the old one is kept, marked superseded by derivation
@@ -545,10 +556,27 @@ def new_rule(
                 "`supersedes` must name an active rule of the same kind held here.",
             )
         version = prior.version + 1
-    profile_id = normalised.get("profile_id") if kind == KIND_PROFILE_BINDING else None
-    profile_version = (
-        normalised.get("profile_version") if kind == KIND_PROFILE_BINDING else None
-    )
+    if kind == KIND_PROFILE_BINDING:
+        profile_id = normalised.get("profile_id")
+        profile_version = normalised.get("profile_version")
+    else:
+        profile_id = convention_id
+        profile_version = convention_version if convention_id else None
+        if scope == SCOPE_PROFILE and not profile_id:
+            raise UnsupportedRule(
+                "convention_not_determinable",
+                "A rule for a convention must name ONE convention, and the measurements "
+                "this rule addresses are not all read under one. Record it for this "
+                "import or this Experiment instead. Nothing was written.",
+            )
+        if profile_id is not None:
+            registered = prof.profile_for(profile_id)
+            if registered is None or registered.profile_version != profile_version:
+                raise UnsupportedRule(
+                    "profile_version_mismatch",
+                    "The convention this rule was confirmed under is not registered at "
+                    "that version.",
+                )
     return ConventionRule(
         rule_id=rule_id,
         kind=kind,

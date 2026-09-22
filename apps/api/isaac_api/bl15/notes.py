@@ -64,6 +64,7 @@ unable to see WHAT was passed over.
 from __future__ import annotations
 
 import re
+from collections.abc import Sequence
 
 from ._emit import EvidenceBuilder, oversize_reason, refusal
 from .evidence import (
@@ -487,6 +488,26 @@ def read_shared_readme(
 # --- the beamtime notes ------------------------------------------------------
 
 
+def _table_continues_after(lines: Sequence[str], index: int) -> bool:
+    """Whether a table ROW follows the untabbed block that starts at ``lines[index]``.
+
+    Skips the rest of the untabbed, non-heading block, then any blank lines, and
+    answers whether the next line is a tab-prefixed table cell. Read-only lookahead:
+    the caller's position does not move.
+    """
+    j = index + 1
+    while (
+        j < len(lines)
+        and lines[j].strip()
+        and not _TABLE_CELL.match(lines[j])
+        and not _SAMPLE_HEADING.match(lines[j].strip())
+    ):
+        j += 1
+    while j < len(lines) and not lines[j].strip():
+        j += 1
+    return j < len(lines) and bool(_TABLE_CELL.match(lines[j]))
+
+
 def read_beamtime_notes(
     record: SourceRecord, text: str, *, id_prefix: str = ""
 ) -> ReaderResult:
@@ -620,8 +641,19 @@ def read_beamtime_notes(
             and not _TABLE_CELL.match(raw)
             and not _SAMPLE_HEADING.match(line)
         ):
-            pending_note[1].append(line)
-            continue
+            # A CONTINUATION ONLY IF THE TABLE GOES ON (corrected 2026-09-22 after an
+            # independent review). An untabbed line directly under a Notes cell is
+            # that cell's second line when another ROW of the table follows it — the
+            # measured shape of every real multi-line cell (4 of 23, none in a last
+            # row). Under the LAST row the same shape is the prose that comes after
+            # the table, and absorbing it lost a temperature statement and an
+            # operator line into a remark. So look ahead: past the rest of this
+            # untabbed block and any blank lines, the next line must be a table cell.
+            if _table_continues_after(lines, index):
+                pending_note[1].append(line)
+                continue
+            flush_note()
+            row_cell = None
         if pending_note is not None and (
             _TABLE_CELL.match(raw) or _SAMPLE_HEADING.match(line)
         ):

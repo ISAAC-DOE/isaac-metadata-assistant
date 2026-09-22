@@ -12,9 +12,18 @@ convention and the person who ran a measurement are separate concepts, and parsi
 never keyed on the person.**
 
 So a profile is selected by a :class:`ProfileBinding` — a convention bound to a SCOPE
-(facility, beamline, acquisition system, experiment, a subset of Runs, a family of
-sources, one source) by a stated BASIS (the build's default, a choice made in this
-import, or a scientist-confirmed rule). The operator is recorded as PROVENANCE beside
+by a stated BASIS (the build's default, a choice made in this import, or a
+scientist-confirmed rule). The hierarchy has seven levels — facility, beamline,
+acquisition system, experiment, a family of sources, a subset of Runs, one source — and
+**IN THIS BUILD FIVE OF THEM ARE REACHABLE** (:data:`REACHABLE_SCOPES`, corrected
+2026-09-22 after an independent review found the seven claimed as available): the
+build's default binding sits at ``acquisition_system``, and a recorded rule's selector
+places it at ``experiment`` (no selector), ``source_family`` (source types),
+``run_subset`` (legacy range, group tokens or stem prefixes) or ``source`` (named
+files). No selector can express a facility or a beamline, because every source this
+build reads is from one; those two levels are kept as ordering constants so a binding
+from a future multi-facility reader slots in without renumbering, and nothing produces
+one today. The operator is recorded as PROVENANCE beside
 the reading (:mod:`bl15.notes` reads an explicit labelled contributor line; the
 historical-import layer carries it per measurement) and is consulted by nothing in this
 module. There is deliberately no ``operator`` field on a binding or a selector.
@@ -59,6 +68,7 @@ __all__ = [
     "BASIS_IMPORT_CHOICE",
     "BINDING_BASES",
     "ProfileBinding",
+    "REACHABLE_SCOPES",
     "SCOPES",
     "SCOPE_SPECIFICITY",
     "Selector",
@@ -86,6 +96,11 @@ SCOPE_SPECIFICITY: Mapping[str, int] = {
     SCOPE_SOURCE: 6,
 }
 SCOPES: frozenset[str] = frozenset(SCOPE_SPECIFICITY)
+#: The levels a binding can actually reach in THIS build: the default binding's level
+#: plus the four a recorded rule's selector can express. See the module docstring.
+REACHABLE_SCOPES: frozenset[str] = frozenset(
+    {SCOPE_ACQUISITION_SYSTEM, SCOPE_EXPERIMENT, SCOPE_SOURCE_FAMILY, SCOPE_RUN_SUBSET, SCOPE_SOURCE}
+)
 
 #: The build's own default: the only registered convention for this kind of archive,
 #: applied because nothing more specific matched. A LEAD, stated as one.

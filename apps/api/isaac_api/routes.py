@@ -2083,8 +2083,14 @@ def health() -> dict:
         # availability from configuration alone is the precise defect
         # `experiment_storage` was corrected for.
         "submission": submission_store.capability(),
-        # TWO MORE SIBLINGS (2026-09-22), each derived from configuration alone and
-        # opening nothing, for the reason every block above opens nothing.
+        # TWO MORE SIBLINGS (2026-09-22). ~~each derived from configuration alone and
+        # opening nothing~~ — corrected after an independent review: with staging
+        # enabled, `historical_file_ingestion` reads configuration plus ONE `stat` and
+        # one access check of the staging root. It never lists that directory here,
+        # never opens a file, and turns every `OSError` into `enabled: false` with a
+        # stable reason, so it cannot change this probe's status code (the first
+        # version listed the directory on every probe, and an unreadable root made
+        # the probe a 500). `proposal_acceptance` opens nothing at all.
         #
         # `historical_file_ingestion` is `EXT-13`'s switch, DISABLED by default; see
         # `isaac_api.capabilities` for exactly what enabling it does and does not do.
@@ -25928,12 +25934,14 @@ def post_import_parse(scope: TutorialScopeDep, import_id: ImportId):
             # experiment's confirmed ones; other experiments' convention rules are
             # carried as suggestions only. See `_reparse_with_rules`.
             experiment_rules, rules_version = _experiment_rules_for(session, scope)
+            reusable, reusable_scan = _reusable_rules_for(session, scope)
             hist.parse_session(
                 session,
                 now_utc=_now_iso(),
                 experiment_rules=experiment_rules,
                 experiment_rules_version=rules_version,
-                reusable_rules=_reusable_rules_for(session, scope),
+                reusable_rules=reusable,
+                reusable_scan=reusable_scan,
             )
             hist.annotate_reusable(session)
         except hist.UnsupportedImport as refusal:  # pragma: no cover - per-source
@@ -26061,18 +26069,30 @@ def _experiment_rules_for(session, scope: str | None) -> tuple[list, str | None]
     return convention_rules.active_rules(exp.convention_rules), exp.version_token()
 
 
-def _reusable_rules_for(session, scope: str | None) -> list[dict]:
-    """Convention-scoped rules confirmed on OTHER experiments — SUGGESTIONS, never applied.
+def _reusable_rules_for(session, scope: str | None) -> tuple[list[dict], dict]:
+    """``(suggestions, scan)`` — convention-scoped rules confirmed on OTHER experiments.
 
-    Bounded to :data:`_REUSABLE_SCAN_LIMIT` experiments, most recently created first.
-    Each suggestion names where it came from and whether its convention version is still
-    current; what it would MATCH in this import is computed after the parse by
-    :func:`historical_import.annotate_reusable`.
+    SUGGESTIONS, never applied. Bounded to :data:`_REUSABLE_SCAN_LIMIT` experiments, the
+    most recently created, and ``scan`` DISCLOSES that bound on the session as
+    ``rules.reusable_scan`` — how many experiments the workspace listed, how many were
+    scanned, whether the list was cut, and whether the listing itself was complete — so
+    a short list is never read as "no other experiment has a rule". (That disclosure was
+    promised by this module before it existed; added 2026-09-22 after an independent
+    review.) Each suggestion names where it came from and whether its convention version
+    is still current; what it would MATCH in this import — and whether it is offered at
+    all, given the conventions this import's sources follow — is decided after the parse
+    by :func:`historical_import.annotate_reusable`.
+
+    THE WHOLE WORKSPACE IS STILL LISTED, deliberately: the listing is also the hydration
+    pass that restores a durably-stored record whose working copy a restart discarded,
+    and scanning only the working copies on disk would silently skip exactly those.
     """
     target = getattr(session, "target_experiment_id", None)
-    experiments, _hydration = ws.list_experiments_with_hydration(scope)
+    experiments, hydration = ws.list_experiments_with_hydration(scope)
+    experiments = list(experiments)
+    scanned = experiments[-_REUSABLE_SCAN_LIMIT:]
     out: list[dict] = []
-    for exp in list(experiments)[-_REUSABLE_SCAN_LIMIT:]:
+    for exp in scanned:
         if exp.id == target:
             continue
         for rule in convention_rules.active_rules(exp.convention_rules):
@@ -26090,19 +26110,28 @@ def _reusable_rules_for(session, scope: str | None) -> list[dict]:
                     ),
                 }
             )
-    return out
+    scan = {
+        "experiments_listed": len(experiments),
+        "experiments_scanned": len(scanned),
+        "cap": _REUSABLE_SCAN_LIMIT,
+        "truncated": len(experiments) > _REUSABLE_SCAN_LIMIT,
+        "listing_complete": bool(hydration.complete),
+        "order": "most_recently_created",
+    }
+    return out, scan
 
 
 def _reparse_with_rules(session, scope: str | None) -> None:
     """Re-read the session under the rules now in force. In memory; caller saves."""
     experiment_rules, version = _experiment_rules_for(session, scope)
-    reusable = _reusable_rules_for(session, scope)
+    reusable, reusable_scan = _reusable_rules_for(session, scope)
     hist.parse_session(
         session,
         now_utc=_now_iso(),
         experiment_rules=experiment_rules,
         experiment_rules_version=version,
         reusable_rules=reusable,
+        reusable_scan=reusable_scan,
     )
     hist.annotate_reusable(session)
     if session.parsed or session.archive_candidates:
@@ -26110,6 +26139,101 @@ def _reparse_with_rules(session, scope: str | None) -> None:
             hist.reconstruct_session(session, now_utc=_now_iso())
         except hist.UnsupportedImport:  # pragma: no cover - parse produced nothing
             pass
+
+
+def _read_for_target(import_id: str, session, experiment_id: str, scope: str | None):
+    """``(session, reread)`` — the session as read under the TARGET record's rules ONLY.
+
+    **ADDED 2026-09-22 AFTER AN INDEPENDENT REVIEW REPRODUCED A LEAK.** Recording an
+    Experiment-scoped rule sets the session's target to that record, and the session is
+    then read under that record's rules. The two routes that mint proposals from a
+    session take the destination record from their BODY, so a session read under
+    record A's resolutions, bindings and channel assignments could mint proposals onto
+    record B — which had adopted none of them (probe: an open proposal on B citing A's
+    rule). A reviewed rule is scoped to the record it was confirmed on; nothing may
+    carry it to another silently.
+
+    So before minting, the session must have been read for THIS record: its target is
+    this record and the rules it was read under are exactly this record's active rules.
+    When it was not, it is RE-READ for this record — its own import-scoped rules plus
+    this record's, and never another record's — and saved, under the import lock and
+    never while the record lock is held. The caller then mints from what the
+    destination record's own rules produce, and the response says a re-read happened.
+    """
+    exp = ws.load_experiment(experiment_id, session_id=scope)
+    wanted = sorted(
+        rule.rule_id
+        for rule in convention_rules.active_rules(exp.convention_rules if exp else [])
+    )
+    read_under = sorted(
+        str((row or {}).get("rule_id")) for row in (session.experiment_rules or [])
+    )
+    target = getattr(session, "target_experiment_id", None)
+    if read_under == wanted and (target == experiment_id or (not target and not wanted)):
+        return session, False
+    with hist.import_lock(import_id, session_id=scope):
+        fresh = hist.load_session(import_id, session_id=scope)
+        if fresh is None:  # pragma: no cover - deleted between the two reads
+            return session, False
+        fresh.target_experiment_id = experiment_id
+        _reparse_with_rules(fresh, scope)
+        hist.save_session(fresh, session_id=scope)
+    return fresh, True
+
+
+def _rule_convention(session, kind, body, selector) -> tuple[str | None, str | None]:
+    """The ONE convention the measurements a resolution or channel rule addresses are
+    read under, as ``(profile_id, profile_version)``, else ``(None, None)``.
+
+    DERIVED, NEVER CHOSEN FOR THE SCIENTIST (2026-09-22): from the unit holding the
+    named candidate or conflict, or from the units a recurring rule's selector reaches.
+    When those units are read under more than one convention — or under none — there is
+    no single answer, and a ``profile``-scoped rule is refused rather than recorded
+    against a guess (``convention_not_determinable``).
+    """
+    from .bl15 import profiles as bl15_profiles  # local: keeps import order flexible
+    from .bl15.applicability import Selector
+
+    if kind == convention_rules.KIND_PROFILE_BINDING:
+        return None, None
+    reading = session.archive_reading
+    if reading is None:
+        return None, None
+    units = list(reading.units)
+    body = body if isinstance(body, Mapping) else {}
+    candidate_id = body.get("candidate_id")
+    conflict_id = body.get("conflict_id")
+    if isinstance(candidate_id, str) and candidate_id:
+        addressed = [u for u in units if candidate_id in u.candidate_ids]
+    elif isinstance(conflict_id, str) and conflict_id:
+        stems = {
+            row.get("stem")
+            for row in (reading.relationships or {}).get("units", [])
+            if any(c.get("conflict_id") == conflict_id for c in row.get("conflicts") or [])
+        }
+        addressed = [u for u in units if u.stem in stems]
+    else:
+        try:
+            chosen = Selector.from_state(selector)
+        except (TypeError, ValueError):
+            return None, None
+        addressed = [
+            u
+            for u in units
+            if chosen.matches(
+                archive_path=u.acquisition_path, stem=u.stem, source_type=u.source_type
+            )
+        ]
+    conventions = {
+        pid for u in addressed for pid in ((u.applicability or {}).get("profile_ids") or [])
+    }
+    if len(conventions) != 1:
+        return None, None
+    (profile_id,) = conventions
+    registered = bl15_profiles.profile_for(profile_id)
+    if registered is None:
+        return None, None
+    return registered.profile_id, registered.profile_version
 
 
 def _rule_target_problem(session, kind: str, body: Mapping) -> JSONResponse | None:
@@ -26273,6 +26397,9 @@ def post_import_rule(
     problem = _rule_target_problem(session, kind, body.get("body") or {})
     if problem is not None:
         return problem
+    convention_id, convention_version = _rule_convention(
+        session, kind, body.get("body"), body.get("selector")
+    )
     derived_from = body.get("derived_from")
     if derived_from is not None:
         known = {
@@ -26311,6 +26438,8 @@ def post_import_rule(
                     supersedes=body.get("supersedes"),
                     derived_from=derived_from,
                     source_examples=body.get("source_examples"),
+                    convention_id=convention_id,
+                    convention_version=convention_version,
                 )
             except convention_rules.UnsupportedRule as refusal:
                 return _rule_refusal(refusal)
@@ -26354,6 +26483,8 @@ def post_import_rule(
                 supersedes=body.get("supersedes"),
                 derived_from=derived_from,
                 source_examples=body.get("source_examples"),
+                convention_id=convention_id,
+                convention_version=convention_version,
             )
         except convention_rules.UnsupportedRule as refusal:
             return _rule_refusal(refusal)
@@ -26696,16 +26827,19 @@ def _run_origin(unit, import_id: str, session) -> dict:
     }
 
 
-def _dqn_request_key(import_id: str, unit, row: Mapping) -> str:
+def _dqn_request_key(unit, row: Mapping) -> str:
     """A stable exactly-once key for one Data Quality Note on one acquisition.
 
     Keyed on the ACQUISITION'S identity (never the legacy number, which two acquisitions
-    may share) and the remark's own locator, so the same remark from the same file is
-    the same key on every attempt.
+    may share), the source path and the remark's own locator — and on NOTHING about the
+    import session. **Corrected 2026-09-22 after an independent review:** the first
+    version prefixed the import id, so importing the same archive a second time (a new
+    session) minted every remark again (measured 6 -> 12). The same remark from the same
+    file about the same acquisition is now the same key however it arrives.
     """
     basis = f"{unit.acquisition_identity}|{row.get('source_path')}|{row.get('locator')}"
     digest = hashlib.sha256(basis.encode("utf-8")).hexdigest()[:32]
-    return f"import:{import_id}:dqn:{digest}"
+    return f"historical-dqn:{digest}"
 
 
 def _import_extended_context(
@@ -27142,6 +27276,34 @@ def post_import_candidate_proposal(
     # map.
     if ws.load_experiment(experiment_id, session_id=scope) is None:
         return _not_found(experiment_id)
+    # READ UNDER THE DESTINATION RECORD'S RULES ONLY (2026-09-22) — see
+    # `_read_for_target`. A candidate that only another record's rules produce (a
+    # `::resolved` value from A's resolution) does not exist in THIS record's reading
+    # and is refused as not found; one that does exist is re-checked, because a
+    # different rule set can change whether it is proposable.
+    session, reread_for_target = _read_for_target(import_id, session, experiment_id, scope)
+    if reread_for_target:
+        candidate = session.candidate(candidate_id)
+        if candidate is None:
+            return _import_candidate_not_found(import_id, candidate_id)
+        if candidate.unresolved_reason is not None or not candidate.proposable:
+            return JSONResponse(
+                status_code=422,
+                content={
+                    "error": (
+                        "candidate_unresolved"
+                        if candidate.unresolved_reason is not None
+                        else "candidate_not_proposable"
+                    ),
+                    "message": candidate.not_proposable_reason
+                    or hist.CANDIDATE_NOT_PROPOSABLE_DISAGREEMENT,
+                    "kind": candidate.kind,
+                    "target_field_path": candidate.target_field_path,
+                },
+            )
+        path = candidate.target_field_path
+        statement = candidate.supporting_statements[0]
+        filename = _import_statement_filename(session, candidate, statement)
 
     client_request_key = f"import:{import_id}:{candidate_id}"
 
@@ -27353,10 +27515,16 @@ def post_import_candidate_proposal(
         "made from it. A run made before identities were recorded is matched by its "
         "label only when that label is unambiguous; otherwise a new run is made "
         "rather than guessing which was meant.\n\n"
+        "THE IMPORT IS READ UNDER THIS RECORD'S RULES ONLY. A reviewed convention "
+        "rule confirmed on another record never shapes what is minted here: when the "
+        "import was last read for a different record, or under rules this record no "
+        "longer holds, it is re-read for this record first — its own import-scoped "
+        "rules plus this record's — and `reread_for_target` says so.\n\n"
         "EVERY FREE-TEXT REMARK the beamtime notes make about a measurement's file is "
         "kept as a note on that measurement's run — a Data Quality Note, verbatim, "
-        "with the file and row it came from — and no QC verdict is ever written or "
-        "proposed from it. NO TEMPERATURE IS INSERTED OR OFFERED: a source that "
+        "with the file and row it came from — exactly once per acquisition and row "
+        "however many times the archive is imported, and no QC verdict is ever "
+        "written or proposed from it. NO TEMPERATURE IS INSERTED OR OFFERED: a source that "
         "states none leaves the field missing, and `nominal_offers` is empty unless a "
         "reviewed convention rule permits a labelled nominal value, which no shipped "
         "convention does.\n\n"
@@ -27488,6 +27656,10 @@ def post_import_add_to_experiment(
         )
     if ws.load_experiment(experiment_id, session_id=scope) is None:
         return _not_found(experiment_id)
+    # READ UNDER THE DESTINATION RECORD'S RULES ONLY (2026-09-22) — see
+    # `_read_for_target`. Done before anything is partitioned, so every candidate below
+    # is one this record's own reviewed rules produce.
+    session, reread_for_target = _read_for_target(import_id, session, experiment_id, scope)
 
     # PARTITIONED BEFORE THE LOCK, because none of it touches the record. A
     # candidate's reason for being unsendable is a property of the candidate, and
@@ -28149,7 +28321,7 @@ def post_import_add_to_experiment(
                     dqn_available += 1
                     if target_run is None:
                         continue
-                    key = _dqn_request_key(import_id, unit, row)
+                    key = _dqn_request_key(unit, row)
                     if notes.find_by_client_request_key(exp.notes, key) is not None:
                         dqn_already += 1
                         continue
@@ -28157,6 +28329,17 @@ def post_import_add_to_experiment(
                         f"Data Quality Note — {row.get('source_path')} "
                         f"({row.get('locator')}): {row.get('text')}"
                     )
+                    # A SHARED LEGACY NUMBER IS DISCLOSED ON THE NOTE ITSELF (2026-09-22).
+                    # The remark is bound by file number, and when two acquisitions carry
+                    # that number (the Run-32 shape) it is attached to BOTH runs; a
+                    # reader of either note must learn it may describe the other.
+                    if unit.legacy_number_shared:
+                        text += (
+                            f" [Legacy file number {unit.legacy_number} is carried by "
+                            "more than one acquisition in this archive. This remark is "
+                            "bound by that number, so it is attached to each of them "
+                            "and may describe any one of them.]"
+                        )
                     too_big = _note_text_refusal(text, what="This Data Quality Note")
                     if too_big is not None:
                         return too_big
@@ -28323,6 +28506,7 @@ def post_import_add_to_experiment(
             "writes_qc_status": False,
         },
         "run_origins_recorded": origins_recorded,
+        "reread_for_target": reread_for_target,
         "extended_context": {
             "available": context_available,
             "added": context_added,

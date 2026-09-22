@@ -98,6 +98,8 @@ __all__ = [
 #: Versioned. A change to the decision table or to what a threshold means is a new id,
 #: so a selection recorded last month can be told apart from one made under a revised
 #: rule.
+#: *(v1 is the table as first MERGED: the ambiguous-channel `needs_review` row was added
+#: during review of the unmerged branch, before any selection had been recorded.)*
 SELECTOR_ID = "bl15.signals.herfd_primary_signal_selector.v1"
 
 # --- status vocabulary -------------------------------------------------------
@@ -131,6 +133,8 @@ REASON_ELEMENT_NOT_ESTABLISHED = "target_element_not_established"
 REASON_CONFLICTING_ELEMENTS = "conflicting_element_evidence"
 REASON_CONFIRMED_RULE = "confirmed_signal_assignment_rule"
 REASON_RULE_CONTRADICTED = "confirmed_rule_contradicted_by_channel_contents"
+#: A confirmed rule applies but a channel it names is AMBIGUOUS here — not applied.
+REASON_RULE_UNDECIDED = "confirmed_rule_channel_liveness_ambiguous"
 
 #: Channel classifications.
 LIVENESS_LIVE = "live"
@@ -695,12 +699,34 @@ def select_primary_signal(
         )
 
     if confirmed_assignments:
+        # APPLIED ONLY WHEN EVERY ASSIGNED CHANNEL IS LIVE (corrected 2026-09-22 after an
+        # independent review): the first version refused only EMPTY/ABSENT, so a rule
+        # was applied over a channel whose liveness this Run's evidence could not
+        # decide — and the reason below then claimed the channel "carries signal here".
+        # An AMBIGUOUS channel is not evidence that it carries signal, so a rule naming
+        # one is shown for review, never applied.
         contradicted = [
             a.channel
             for a in confirmed_assignments
             if by_name.get(a.channel) is None
             or by_name[a.channel].liveness in {LIVENESS_EMPTY, LIVENESS_ABSENT}
         ]
+        undecided = [
+            a.channel
+            for a in confirmed_assignments
+            if a.channel not in contradicted
+            and by_name[a.channel].liveness != LIVENESS_LIVE
+        ]
+        if undecided and not contradicted:
+            return result(
+                STATUS_NEEDS_REVIEW,
+                REASON_RULE_UNDECIDED,
+                "A confirmed signal-assignment rule applies to this Run, and whether the "
+                f"channel(s) it names ({', '.join(sorted(undecided))}) carry signal here "
+                "is ambiguous by this Run's own evidence. The rule is NOT applied; "
+                "review it.",
+                ref=rule_ref,
+            )
         if contradicted:
             return result(
                 STATUS_NEEDS_REVIEW,

@@ -2503,6 +2503,7 @@ def read_archive(
     candidate_total = 0
     by_stem = relationships.by_stem()
     resolutions = cr.resolutions_by_target(rules)
+    evidence_index = _evidence_index(evidence_by_source)
     rules_applied: set[str] = set(semantics["rules_applied"])
     rules_applied.update(b.rule_ref for b in bindings if b.rule_ref)
 
@@ -2513,7 +2514,7 @@ def read_archive(
             candidate_total += 1
             if len(candidates) + len(bounded) >= MAX_CANDIDATES_PER_SESSION:
                 continue
-            candidate, derived = _apply_resolution(candidate, resolutions)
+            candidate, derived = _apply_resolution(candidate, resolutions, evidence_index)
             if candidate.resolved_by_rule:
                 rules_applied.add(candidate.resolved_by_rule)
             bounded.append(_bound_candidate(candidate, writable))
@@ -2549,7 +2550,7 @@ def read_archive(
         candidate_total += 1
         if len(candidates) >= MAX_CANDIDATES_PER_SESSION:
             continue
-        candidate, derived = _apply_resolution(candidate, resolutions)
+        candidate, derived = _apply_resolution(candidate, resolutions, evidence_index)
         if candidate.resolved_by_rule:
             rules_applied.add(candidate.resolved_by_rule)
         bounded_shared = _bound_candidate(candidate, writable)
@@ -2616,18 +2617,51 @@ def read_archive(
     return reading, tuple(candidates)
 
 
-def _apply_resolution(candidate: SemanticCandidate, resolutions: Mapping[str, Any]):
+def _evidence_index(evidence_by_source: Mapping[str, Sequence[Any]]) -> dict:
+    """``(concept, statement locator) -> [SourceEvidence]`` — the way back from a
+    candidate's three-field supporting statement to the reading it was built from."""
+    from .bl15 import reconstruct as rc  # local: keeps import order flexible
+
+    index: dict[tuple[str, str], list] = {}
+    for items in evidence_by_source.values():
+        for item in items:
+            index.setdefault((item.concept, rc.statement_locator(item)), []).append(item)
+    return index
+
+
+def _apply_resolution(
+    candidate: SemanticCandidate,
+    resolutions: Mapping[str, Any],
+    evidence_index: Mapping[tuple[str, str], Sequence[Any]] | None = None,
+):
     """``(candidate, derived or None)`` — a confirmed resolution applied to a disagreement.
 
     THE DISAGREEMENT IS KEPT. The original candidate still carries every competing
     reading and ``proposed_value: None``; it gains ``resolved_by_rule`` so its review
     status reads *resolved*. The chosen value travels on a DERIVED candidate, id
-    ``<original>::resolved``, which is an ordinary field candidate: if this build has a
-    write route for its path it can be sent to review as a PROPOSAL — and acceptance
-    keeps its ``409 human_actor_required`` gate. A resolution naming a value no source
-    stated is not applied: the scientist resolves BETWEEN readings, they do not invent
-    a new one here.
+    ``<original>::resolved``. A resolution naming a value no source stated is not
+    applied: the scientist resolves BETWEEN readings, they do not invent a new one here.
+
+    THE DERIVED CANDIDATE IS EXACTLY WHAT AN AGREEING CANDIDATE WOULD BE — two
+    corrections made 2026-09-22 after an independent review, and together they are the
+    guarantee that a resolution opens NO route a value could not already take:
+
+    * **Its value** is :func:`bl15.reconstruct.value_of_reading` over the evidence that
+      states the chosen reading — the normalised value when that evidence carries one,
+      else the literal exactly as written. The first version regex-coerced the
+      comparison string, so ``'060'`` became ``60`` and ``'500 cycles'`` became ``500``.
+      When the evidence cannot be found, the chosen literal is kept unchanged.
+    * **Its proposability** is the MAPPING REGISTRY's, exactly as for an agreeing
+      candidate: a concept the registry does not let become a proposal (``sample_name``
+      -> ``sample.material.name``, ``acquisition_method`` -> ``system.technique``,
+      ``sample_preparation`` -> ``sample.material.provenance`` …) stays unsendable
+      after it is resolved. The first version cleared ``not_proposable_reason`` for any
+      field candidate with a path, so resolving a disagreement made those sendable.
+      Writability is then applied by :func:`_bound_candidate`, as for every candidate.
     """
+    from .bl15 import mapping as mp  # local: keeps import order flexible
+    from .bl15 import reconstruct as rc  # local: keeps import order flexible
+
     rule = resolutions.get(candidate.candidate_id)
     if rule is None or candidate.unresolved_reason is None:
         return candidate, None
@@ -2636,6 +2670,43 @@ def _apply_resolution(candidate: SemanticCandidate, resolutions: Mapping[str, An
     if chosen not in values:
         return candidate, None
     marked = replace(candidate, resolved_by_rule=rule.rule_id)
+
+    stating_items: list = []
+    stating_statements: list[dict] = []
+    for statement in candidate.supporting_statements:
+        key = (statement.get("key"), statement.get("locator"))
+        items = [
+            item
+            for item in (evidence_index or {}).get(key, ())
+            if rc.reading_of(item) == chosen
+        ]
+        if items:
+            stating_items.extend(items)
+            stating_statements.append(statement)
+    value = rc.value_of_reading(stating_items, chosen) if stating_items else None
+    if value is None:
+        value = chosen
+
+    concept = next(
+        (str(s.get("key")) for s in candidate.supporting_statements if s.get("key")),
+        candidate.candidate_id.rsplit("::", 1)[-1],
+    )
+    entry = mp.mapping_for(concept)
+    if candidate.kind != CANDIDATE_KIND_FIELD or not candidate.target_field_path:
+        not_proposable = (
+            candidate.not_proposable_reason or CANDIDATE_NOT_PROPOSABLE_DISAGREEMENT
+        )
+    elif entry is None:
+        not_proposable = (
+            "This reading has no entry in the mapping registry, so nothing here can say "
+            "whether the official schema has a place for it. Resolving which source is "
+            "right does not change that; it is kept as evidence."
+        )
+    elif not entry.proposable:
+        not_proposable = entry.reason
+    else:
+        not_proposable = None
+
     derived = SemanticCandidate(
         candidate_id=f"{candidate.candidate_id}::resolved",
         kind=candidate.kind,
@@ -2648,33 +2719,14 @@ def _apply_resolution(candidate: SemanticCandidate, resolutions: Mapping[str, An
             "proposal is a separate act with its own trusted-actor requirement."
         ),
         supporting_source_ids=candidate.supporting_source_ids,
-        supporting_statements=tuple(
-            s for s in candidate.supporting_statements if str(s.get("value")) == chosen
-        )
-        or candidate.supporting_statements,
+        supporting_statements=tuple(stating_statements) or candidate.supporting_statements,
         target_field_path=candidate.target_field_path,
-        proposed_value=_resolved_value(candidate, chosen),
+        proposed_value=value,
         distinct_sources=candidate.distinct_sources,
         resolved_by_rule=rule.rule_id,
-        not_proposable_reason=None
-        if candidate.kind == CANDIDATE_KIND_FIELD and candidate.target_field_path
-        else candidate.not_proposable_reason,
+        not_proposable_reason=not_proposable,
     )
     return marked, derived
-
-
-def _resolved_value(candidate: SemanticCandidate, chosen: str):
-    """The chosen reading as a VALUE: the normalised number when the reading carried one.
-
-    A disagreement row's ``value`` is the comparison string (``"0.85 V"``). When every
-    statement behind it normalised to one number, that number is the value — the same
-    rule a non-disagreeing candidate follows. Otherwise the literal chosen string.
-    """
-    match = re.fullmatch(r"(-?\d+(?:\.\d+)?)(?: \S+)?", chosen)
-    if match:
-        text = match.group(1)
-        return float(text) if "." in text else int(text)
-    return chosen
 
 
 def _archive_semantics(
@@ -3347,6 +3399,9 @@ class ImportSession:
     #: with what they would match here. Never applied until a scientist confirms one
     #: for this experiment — a rule is never promoted across experiments silently.
     reusable_rules: list = field(default_factory=list)
+    #: HOW THE REUSABLE SUGGESTIONS WERE GATHERED — the scan's bound and what it left
+    #: out, so a short list is never read as "no other experiment has a rule".
+    reusable_scan: dict = field(default_factory=dict)
 
     # -- derived ------------------------------------------------------------
 
@@ -3505,6 +3560,7 @@ class ImportSession:
             "experiment_rules": [dict(r) for r in self.experiment_rules],
             "experiment_rules_version": self.experiment_rules_version,
             "reusable_rules": [dict(r) for r in self.reusable_rules],
+            "reusable_scan": dict(self.reusable_scan),
         }
 
     def _archive_candidate_ids(self) -> frozenset[str]:
@@ -3586,6 +3642,8 @@ class ImportSession:
         version = state.get("experiment_rules_version")
         session.experiment_rules_version = version if isinstance(version, str) else None
         session.reusable_rules = list(_mapping_rows(state.get("reusable_rules")))
+        scan = state.get("reusable_scan")
+        session.reusable_scan = dict(scan) if isinstance(scan, Mapping) else {}
         return session
 
 
@@ -4123,6 +4181,7 @@ def parse_session(
     experiment_rules: Sequence[Any] = (),
     experiment_rules_version: str | None = None,
     reusable_rules: Sequence[Mapping] = (),
+    reusable_scan: Mapping | None = None,
 ) -> list[ParsedSource]:
     """Apply every registered parser to every source that has one. In memory.
 
@@ -4163,6 +4222,7 @@ def parse_session(
     session.experiment_rules = [r.to_state() for r in cr.active_rules(experiment_rules)]
     session.experiment_rules_version = experiment_rules_version
     session.reusable_rules = [dict(r) for r in reusable_rules]
+    session.reusable_scan = dict(reusable_scan or {})
     for source in session.sources:
         if source.kind == SOURCE_KIND_ARCHIVE:
             try:
@@ -4248,6 +4308,7 @@ def annotate_reusable(session: ImportSession) -> None:
 
     reading = session.archive_reading
     annotated: list[dict] = []
+    not_offered = 0
     for row in session.reusable_rules:
         row = dict(row)
         try:
@@ -4261,7 +4322,22 @@ def annotate_reusable(session: ImportSession) -> None:
             continue
         matched: list[UnitReading] = []
         differences: list[str] = []
-        for unit in reading.units if reading is not None else ():
+        # A RESOLUTION OR A CHANNEL ASSIGNMENT IS ABOUT SOURCES READ UNDER ONE
+        # CONVENTION (2026-09-22): it reaches only this import's measurements read under
+        # the convention it was confirmed under, and is not offered at all to an import
+        # with none. A binding is the exception — changing the convention is its point.
+        convention = rule.profile_id if rule.kind != cr.KIND_PROFILE_BINDING else None
+        units = list(reading.units) if reading is not None else []
+        if convention is not None and not any(
+            convention in ((u.applicability or {}).get("profile_ids") or []) for u in units
+        ):
+            not_offered += 1
+            continue
+        for unit in units:
+            if convention is not None and convention not in (
+                (unit.applicability or {}).get("profile_ids") or []
+            ):
+                continue
             if not rule.selector.matches(
                 archive_path=unit.acquisition_path,
                 stem=unit.stem,
@@ -4297,6 +4373,11 @@ def annotate_reusable(session: ImportSession) -> None:
         row["version_is_current"] = rule.version_is_current()
         annotated.append(row)
     session.reusable_rules = annotated
+    if session.reusable_scan:
+        session.reusable_scan = {
+            **session.reusable_scan,
+            "not_offered_other_convention": not_offered,
+        }
 
 
 def _skips_ceiling_first(
@@ -4876,6 +4957,7 @@ def _rules_view(session: "ImportSession") -> dict:
             "exactly as durable as the record."
         ),
         "reusable_from_other_experiments": [dict(r) for r in session.reusable_rules],
+        "reusable_scan": dict(session.reusable_scan),
         "reuse_policy": (
             "A convention-scoped rule confirmed on another experiment is shown here with "
             "what it would match and where it would differ. It is NOT applied until a "

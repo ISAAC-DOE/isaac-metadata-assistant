@@ -1932,26 +1932,46 @@ def _convention_rules_state_payload(exp: "Experiment") -> list | None:
     )
 
 
-def _hydrate_run_origins(raw: object) -> dict:
-    """``run_id -> origin row``. Never raises; a malformed row is READ, not refused.
+def _hydrate_run_origins(raw: object) -> tuple[dict, dict]:
+    """``(readable, unreadable)``. Never raises; a malformed row is READ, not refused.
 
-    A row that is not a mapping is dropped from the INDEX only — it names nothing this
-    build can match against — and a mapping keeps only the known keys with string or
-    integer values, so a crafted document cannot smuggle structure through it.
+    ``readable`` is ``run_id -> origin row`` for every row this build can match against:
+    a string key, a mapping, and a string ``acquisition_identity``. Such a row keeps only
+    the known keys with string or integer values, so a crafted document cannot smuggle
+    structure through it.
+
+    ``unreadable`` is every OTHER entry, KEPT VERBATIM and written back on the next save
+    — corrected 2026-09-22 after an independent review: the first version dropped them
+    from the index and the next save then deleted them from the document, which is the
+    exact loss ``convention_rules`` preserves unreadable entries to avoid. A row this
+    build cannot read is not a row it may throw away.
     """
     if not isinstance(raw, dict):
-        return {}
-    out: dict = {}
+        return {}, {}
+    readable: dict = {}
+    unreadable: dict = {}
     for run_id, row in raw.items():
-        if not isinstance(run_id, str) or not isinstance(row, dict):
+        if (
+            not isinstance(run_id, str)
+            or not isinstance(row, dict)
+            or not isinstance(row.get("acquisition_identity"), str)
+            or not row.get("acquisition_identity")
+        ):
+            unreadable[str(run_id)] = row
             continue
-        out[run_id] = {
+        readable[run_id] = {
             key: value
             for key, value in row.items()
             if key in _RUN_ORIGIN_KEYS
             and (isinstance(value, str) or (isinstance(value, int) and not isinstance(value, bool)))
         }
-    return out
+    return readable, unreadable
+
+
+def _run_origins_payload(exp: "Experiment") -> dict | None:
+    """What to store at ``historical_run_origins`` — readable AND unreadable — or ``None``."""
+    merged = {**exp.unreadable_run_origins, **exp.historical_run_origins}
+    return {rid: merged[rid] for rid in sorted(merged)} or None
 
 
 def _authoritative_signature(exp: "Experiment") -> str:
@@ -2181,10 +2201,7 @@ def _authoritative_signature(exp: "Experiment") -> str:
         # Neither reaches ``submissions.content_signature``, which is computed from
         # export units and reads neither key.
         "convention_rules": _convention_rules_state_payload(exp),
-        "historical_run_origins": (
-            {rid: exp.historical_run_origins[rid] for rid in sorted(exp.historical_run_origins)}
-            or None
-        ),
+        "historical_run_origins": _run_origins_payload(exp),
     }
     blob = json.dumps(payload, sort_keys=True, ensure_ascii=False)
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()
@@ -3679,6 +3696,8 @@ class Experiment:
     #: export, omitted when empty, inside the signature for the ``folder`` reason (a
     #: save whose only change is a recorded origin must not be a silent no-op).
     historical_run_origins: dict = field(default_factory=dict)
+    #: Origin entries this build could not read, carried verbatim and written back.
+    unreadable_run_origins: dict = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         # Legacy-safe default: a pre-P27.2 state file (or a bare construction)
@@ -3845,10 +3864,11 @@ class Experiment:
         rules_payload = _convention_rules_state_payload(self)
         if rules_payload is not None:
             state[convention_rules_module.STATE_KEY] = rules_payload
-        if self.historical_run_origins:
+        origins_payload = _run_origins_payload(self)
+        if origins_payload is not None:
             state[HISTORICAL_RUN_ORIGINS_KEY] = {
-                rid: dict(self.historical_run_origins[rid])
-                for rid in sorted(self.historical_run_origins)
+                rid: (dict(row) if isinstance(row, dict) else row)
+                for rid, row in origins_payload.items()
             }
         return state
 
@@ -4361,6 +4381,11 @@ class Experiment:
         import claiming it was made from something else is a conflict, not an update.
         """
         clean = {k: v for k, v in origin.items() if k in _RUN_ORIGIN_KEYS}
+        if run_id in self.unreadable_run_origins:
+            # A stored entry this build could not read already names this run. It is
+            # kept verbatim, and it is not overwritten by a row this build CAN read:
+            # what the unreadable one says is unknown, so replacing it would be a guess.
+            return False
         existing = self.historical_run_origins.get(run_id)
         if existing is not None:
             if existing.get("acquisition_identity") != clean.get("acquisition_identity"):
@@ -5332,9 +5357,10 @@ class Experiment:
             exp.convention_rules,
             exp.unreadable_convention_rules,
         ) = convention_rules_module.hydrate(state.get(convention_rules_module.STATE_KEY))
-        exp.historical_run_origins = _hydrate_run_origins(
-            state.get(HISTORICAL_RUN_ORIGINS_KEY)
-        )
+        (
+            exp.historical_run_origins,
+            exp.unreadable_run_origins,
+        ) = _hydrate_run_origins(state.get(HISTORICAL_RUN_ORIGINS_KEY))
         return exp
 
     # -- derived views --

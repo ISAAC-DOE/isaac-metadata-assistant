@@ -82,7 +82,7 @@ def statement_for(item: ev.SourceEvidence) -> EvidenceStatement:
     return EvidenceStatement(
         key=item.concept,
         value=item.raw_literal,
-        locator=f"{item.source_path} · {item.locator}",
+        locator=statement_locator(item),
     )
 
 
@@ -494,6 +494,31 @@ def _normalized_of(group: Sequence[ev.SourceEvidence]):
         if item.normalized_value is not None:
             return item.normalized_value
     return group[0].raw_literal
+
+
+def value_of_reading(items: Sequence[ev.SourceEvidence], reading: str):
+    """The value a candidate proposes when ``reading`` is the one CHOSEN among ``items``.
+
+    Exactly what an AGREEING candidate over the items that state that reading would
+    propose (:func:`_normalized_of` over them): the normalised value when one of them
+    carries it, else the literal as written. ``None`` when no item states the reading.
+    Added 2026-09-22 so a scientist-confirmed resolution proposes the SAME value the
+    sources would have produced had they agreed — never a number regex-coerced out of
+    the comparison string (``'060'`` stays ``'060'``; ``'500 cycles'`` stays itself).
+    """
+    stating = [item for item in items if _reading_of(item) == reading]
+    return _normalized_of(stating) if stating else None
+
+
+#: The public name of :func:`_reading_of` — what a disagreement row's ``value`` is.
+def reading_of(item: ev.SourceEvidence) -> str:
+    return _reading_of(item)
+
+
+def statement_locator(item: ev.SourceEvidence) -> str:
+    """The ``locator`` :func:`statement_for` gives ``item`` — the key that links a
+    supporting statement back to the evidence it was built from."""
+    return f"{item.source_path} · {item.locator}"
 
 
 def _sources_stating(group: Sequence[ev.SourceEvidence], reading: str) -> list[str]:

@@ -213,6 +213,69 @@ def test_the_guard_above_is_not_vacuous():
     )
 
 
+def _reserved_channel_constant_names() -> set[str]:
+    """The ``activity`` constant NAMES whose value is a channel no write site records."""
+    return {
+        name
+        for name in dir(activity)
+        if name.startswith("CHANNEL_")
+        and getattr(activity, name) in activity.CHANNELS_WITHOUT_A_WRITE_SITE
+    }
+
+
+def _reserved_channel_uses(tree: ast.AST, reserved: set[str]) -> list[int]:
+    """Line numbers where a reserved channel constant is RECORDED: as the ``channel=`` of a
+    ``record_activity`` call, or as the argument of ``ambient_channel`` (which sets the
+    channel a later write records under)."""
+    lines: list[int] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        name = func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", None)
+        values = []
+        if name == "record_activity":
+            values = [kw.value for kw in node.keywords if kw.arg == "channel"]
+        elif name == "ambient_channel":
+            values = list(node.args) + [kw.value for kw in node.keywords]
+        for value in values:
+            if isinstance(value, ast.Attribute) and value.attr in reserved:
+                lines.append(node.lineno)
+            elif isinstance(value, ast.Name) and value.id in reserved:
+                lines.append(node.lineno)
+    return lines
+
+
+def test_no_write_site_records_a_channel_listed_as_having_none():
+    """THE GUARD ``activity.CHANNELS_WITHOUT_A_WRITE_SITE`` POINTS AT (moved here
+    2026-09-22 after an independent review found the pointer named this file while the
+    guard lived elsewhere, as a string grep). Every module in the package is parsed, and
+    a ``record_activity(channel=...)`` or ``ambient_channel(...)`` naming a reserved
+    channel fails this — so a write site cannot start recording ``system`` while the
+    served vocabulary still says no act is recorded through it."""
+    reserved = _reserved_channel_constant_names()
+    assert "CHANNEL_SYSTEM" in reserved
+    package = ROUTES.parent
+    offenders = []
+    for path in sorted(package.rglob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for line in _reserved_channel_uses(tree, reserved):
+            offenders.append(f"{path.relative_to(package)}:{line}")
+    assert offenders == [], offenders
+
+
+def test_the_reserved_channel_guard_is_not_vacuous():
+    """NEGATIVE CONTROL: both recording shapes ARE detected, on a synthetic module."""
+    reserved = _reserved_channel_constant_names()
+    bad = ast.parse(
+        "exp.record_activity(action='x', channel=activity.CHANNEL_SYSTEM)\n"
+        "with activity.ambient_channel(activity.CHANNEL_SYSTEM):\n    pass\n"
+    )
+    assert _reserved_channel_uses(bad, reserved) == [1, 2]
+    fine = ast.parse("exp.record_activity(action='x', channel=activity.CHANNEL_WEB)\n")
+    assert _reserved_channel_uses(fine, reserved) == []
+
+
 def test_every_channel_constant_named_in_routes_is_in_the_bounded_set():
     """A ``CHANNEL_*`` attribute that does not exist would be an ``AttributeError`` at
     request time — in a write path, which is the worst place for one."""

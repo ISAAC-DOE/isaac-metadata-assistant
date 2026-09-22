@@ -1828,7 +1828,11 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
          makes both splits wrap-boundary behaviour rather than a stale column.
          Cause and provenance: the block above
          `settings-explorer@desktop-1280x800`. */
-      'settings-explorer@mobile-375x812': { darwin: 20, linux: 23 },
+      /* 2026-09-22, PR #278 (two new operations, 91 -> 93): linux 23 -> 24, TRANSCRIBED from CI job 106931691561
+         (`GREW ... rule "color-contrast" grew from 23 to 24`). darwin CARRIED FORWARD (already registered);
+         only width-390, width-320 and mobile-375x812 moved in that run — desktop, laptop, tablet and zoom-200 did
+         NOT, which is the wrap-boundary dependence this file records, so nothing else was predicted. */
+      'settings-explorer@mobile-375x812': { darwin: 20, linux: 24 },
       /* LINUX 61 -> 60, AN IMPROVEMENT, AND MEASURED ON BOTH PLATFORMS BECAUSE THIS
          FILE'S OWN R1b NOTE SAYS NOT TO ASSUME THEY MOVE TOGETHER. They did not: the
          same change moved linux DOWN one and darwin not at all.
@@ -2228,7 +2232,11 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
          while this one did, so the two narrow widths again did not behave alike;
          the asymmetry noted above is unchanged and still unexplained. Cause and
          provenance: the block above `settings-explorer@desktop-1280x800`. */
-      'settings-explorer@width-320': { darwin: 21, linux: 23 },
+      /* 2026-09-22, PR #278 (two new operations, 91 -> 93): linux 23 -> 24, TRANSCRIBED from CI job 106931691561
+         (`GREW ... rule "color-contrast" grew from 23 to 24`). darwin CARRIED FORWARD (already registered);
+         only width-390, width-320 and mobile-375x812 moved in that run — desktop, laptop, tablet and zoom-200 did
+         NOT, which is the wrap-boundary dependence this file records, so nothing else was predicted. */
+      'settings-explorer@width-320': { darwin: 21, linux: 24 },
       /* DISCARD OPERATION, 2026-08-27: linux 51 -> 52, COLLAPSING to a scalar.
          darwin was already 52 and a darwin run the same day still reads 52, so the
          pair no longer marks a measured difference and the guard rejects equal
@@ -2292,7 +2300,11 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
          obvious +1: the 2026-09-01 A/B probe read `@mobile-375x812` darwin 20 both WITH
          and WITHOUT a new operation, so darwin does not necessarily move per operation —
          it depends on the wrap boundary. Predicting 22 here would have been invention. */
-      'settings-explorer@width-390': { darwin: 21, linux: 23 },
+      /* 2026-09-22, PR #278 (two new operations, 91 -> 93): linux 23 -> 24, TRANSCRIBED from CI job 106931691561
+         (`GREW ... rule "color-contrast" grew from 23 to 24`). darwin CARRIED FORWARD (already registered);
+         only width-390, width-320 and mobile-375x812 moved in that run — desktop, laptop, tablet and zoom-200 did
+         NOT, which is the wrap-boundary dependence this file records, so nothing else was predicted. */
+      'settings-explorer@width-390': { darwin: 21, linux: 24 },
       /* SPLIT 2026-08-16, linux 15 -> 14. Same cause and same reasoning as
          `settings-about@width-320` above; ~~darwin carried forward unmeasured~~.
 
@@ -4476,7 +4488,8 @@ export const A11Y_BASELINE_TOTAL_NODES: Readonly<Record<BaselinePlatform, number
   // everywhere" is invention in both directions — it would have over-counted last
   // round and under-counted this one. Predicting cells remains forbidden; both
   // rounds were transcribed, and that is why both are right.
-  linux: 840,
+  // 2026-09-22, PR #278: 840 -> 843, the three +1 cells above, transcribed from CI job 106931691561.
+  linux: 843,
   // 2026-08-30, ROUND TWO — CI's linux figures for the merged tree: 2287 -> 2291.
   //
   //   desktop-1280x800   59 -> 60   (+1)      laptop-1024x768   59 -> 60   (+1)

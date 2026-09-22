@@ -54,7 +54,13 @@ The alias is lookup-only: nothing new is ever written under it.
 ### 1.2 Applicability: which convention reads which source
 
 `bl15/applicability.py`. A **binding** says a convention applies at one of seven levels,
-from least to most specific:
+from least to most specific — of which **five are reachable in this build**
+(`applicability.REACHABLE_SCOPES`): the build's default binding sits at
+`acquisition_system`, and a recorded rule's selector places it at `experiment` (no
+selector), `source_family` (source types), `run_subset` (legacy range, group tokens, stem
+prefixes) or `source` (named files). `facility` and `beamline` are ordering constants only:
+no selector can express them, because every source this build reads comes from one
+facility and one beamline. *(An earlier revision presented all seven as available.)*
 
 `facility` → `beamline` → `acquisition_system` → `experiment` → `source_family` →
 `run_subset` → `source`
@@ -153,6 +159,21 @@ route for its path it can be sent to review as a proposal, and **accepting that 
 keeps its trusted-actor gate**. A resolution must choose one of the stated readings; an
 invented value is refused (`422 not_a_reading`).
 
+**The derived candidate is exactly what an agreeing candidate would be** — two
+corrections made after an independent review, which together mean a resolution opens no
+route a value could not already take:
+
+* its **value** is the one the sources would have produced had they agreed on the chosen
+  reading (`bl15.reconstruct.value_of_reading`): the normalised value when the evidence
+  stating that reading carries one, else the literal **exactly as written**. The first
+  version regex-coerced the comparison string, so `'060'` became `60` and `'500 cycles'`
+  became `500`;
+* its **proposability** is the mapping registry's: a concept the registry does not let
+  become a proposal (`sample_name` → `sample.material.name`, `acquisition_method` →
+  `system.technique`, `sample_preparation` → `sample.material.provenance`, …) stays
+  unsendable after it is resolved. A resolved acquisition timestamp is proposed as the
+  literal the header states — the same value the pre-existing agreeing path sends.
+
 `DEC-42` (a document disagreeing with *itself*: sample-specific evidence wins) is a
 different rule and is unchanged.
 
@@ -184,6 +205,30 @@ what it *would* match (`matches.units`) and how many units it *would* change
 (`difference_count`), and `applied_here: false`. It applies there only when a scientist
 records a new rule for that experiment with `derived_from` naming it.
 
+**A convention-scoped resolution or channel assignment records its convention.** The
+convention is derived from the measurements the rule addresses (the candidate's or
+conflict's unit, or the units a recurring rule's selector reaches) and stored as the
+rule's `profile_id`/`profile_version`, so `version_is_current` means something. When
+those measurements are read under more than one convention, a `profile`-scoped rule is
+refused (`422 convention_not_determinable`). Elsewhere it is offered only to an import
+with measurements read under that convention, and matches only those; an import with
+none is not offered it at all, counted as `rules.reusable_scan.not_offered_other_convention`.
+*(Before a review found it, such rules recorded no convention and were offered to every
+experiment.)*
+
+**The suggestion scan is bounded and says so.** `rules.reusable_scan` carries
+`experiments_listed`, `experiments_scanned`, `cap` (200), `truncated`,
+`listing_complete` and `order` (`most_recently_created`), so a short list is never read
+as "no other experiment has a rule".
+
+**The destination record's rules only.** An import is always minted from a reading under
+the destination record's own rules: when add-to-experiment (or the single-candidate
+proposal operation) names a record the session was not last read for, or whose active
+rules have changed since, the session is re-read for that record first
+(`reread_for_target: true`), so a resolution, binding or channel assignment confirmed on
+record A can never shape a proposal minted on record B. *(A review reproduced exactly
+that leak before this was added.)*
+
 ### 3.3 Versions, supersession and attribution
 
 * A rule is **never edited or deleted.** `supersedes` names an active rule of the same kind
@@ -191,8 +236,14 @@ records a new rule for that experiment with `derived_from` naming it.
 * A binding is tied to the convention **version** it was reviewed against;
   `version_is_current` is false when that version is no longer registered, and the binding
   is then stale (§1.2).
-* `confirmed_by` is `unattributed` with `confirmed_trust_basis: null` in every deployment
-  of this build (the pairing is enforced), exactly as the activity history records actors.
+* `confirmed_by` is `unattributed` with `confirmed_trust_basis: "unattributed"` in every
+  deployment of this build, and the pairing is enforced: an unattributed actor with any other
+  basis, or a named actor with the unattributed basis, is refused (`actor_basis_mismatch`).
+  *(An earlier revision of this line said `null`; the wire has always carried the string, and
+  the string is right: it is the project's one sentinel for "no trusted actor" —
+  `activity.TRUST_BASIS_UNATTRIBUTED`, itself reused from `submissions` — carried by every
+  activity event's `actor_trust_basis` and every proposal's `trust_basis`. A rule is recorded
+  by the same kind of act, so it uses the same pair.)*
 * `is_official_field_value: false` and `is_evidence: false` on every rule.
 * Recording an `experiment`/`profile` rule appends one activity event —
   `convention_rule_recorded`, object type `convention_rule`, channel `historical_import`.
@@ -274,6 +325,7 @@ choice.
 | exactly one live | exactly one | **`proposed`** (non-authoritative) | `single_live_channel_and_established_element` |
 | a confirmed `signal_assignment` rule applies and every assigned channel is live | — | **`confirmed`** | `confirmed_signal_assignment_rule` |
 | a confirmed rule applies but an assigned channel is empty here | — | `needs_review` | `confirmed_rule_contradicted_by_channel_contents` |
+| a confirmed rule applies, no assigned channel is empty, but one is AMBIGUOUS here | — | `needs_review` | `confirmed_rule_channel_liveness_ambiguous` |
 
 A dual-element Run (both `vortDT` and `vortDT2` live) is `unresolved` until a scientist
 confirms a `signal_assignment` naming both channels with their elements; then it is
@@ -318,8 +370,18 @@ cell. A remark the reader cannot bind to a measurement is listed as unbound.
 
 On add-to-experiment, each bound note can be captured as a **run note** on the matching
 Run (source kind `historical_source_line`), exactly once per acquisition and locator
-(`client_request_key` derived from the acquisition identity, never the legacy number).
-Nothing classifies the words.
+however many times the archive is imported: the `client_request_key` is derived from the
+acquisition identity, the source path and the locator — never the legacy number, and
+never the import session. *(The first version included the import id, so a second import
+of the same archive captured every remark again; measured 6 → 12 before the fix.)* When a
+remark is bound by a legacy number that two acquisitions share (the Run-32 shape), it is
+attached to both runs and **each stored note says so**. Nothing classifies the words.
+
+**Where a Notes cell ends.** An untabbed line directly under a Notes cell is that cell's
+continuation only when another row of the table follows; under the LAST row it is the
+prose after the table and is read as itself (a temperature statement, an operator line…).
+Measured over the real notes before the change: 4 of 23 cells span lines, none in a last
+row.
 
 ---
 
@@ -353,8 +415,17 @@ Enabling is configuration only, and opens one path: set
 becomes an archive named `staged:<name>`; names are validated as a single path segment,
 so traversal is refused. The staging root's path is never served. A source added this way
 carries `provenance.staged: true`. No Dockerfile or workflow sets either variable (pinned).
-With the mode set but no root, the capability stays disabled with reason
-`staging_root_not_configured`.
+
+`reason` names what is wrong: `governance_not_approved` (the mode is not set),
+`staging_root_not_configured` (no root named), `staging_root_missing`,
+`staging_root_not_a_directory`, `staging_root_is_symlink`, or `staging_root_unreadable`.
+**`/api/health` reads configuration plus ONE `stat` and access check of the root** — it
+never lists the directory and never opens a file, and every `OSError` becomes
+`enabled: false` rather than an exception, so an unreadable root can never change the
+readiness probe's status. The detail block (`GET /api/imports`, each session's
+`capabilities`) additionally lists that one directory's entries by name; a listing that
+fails reports `staging_root_unreadable`. *(The first version listed the root on every
+health read, and a `chmod 000` root made the probe answer 500.)*
 
 ### 8.2 Proposal-acceptance preflight
 
@@ -410,14 +481,20 @@ All shapes below are additive unless marked **changed**.
   `400` malformed, `412` stale) and returns a new `ETag`.
 * Response: `{"rule": <rule>, "import": <session view>}` (+ `experiment_version` for
   record-stored rules).
-* `422` errors (each `{"error", "message", …}`): `unrecognized_field` (a body key the
-  route does not accept), `missing_experiment_id`, `unknown_reusable_rule`,
-  `unknown_disagreement`, `not_a_reading` (with `readings`), and the rule validator's own —
+* `422` errors (each `{"error", "message", …}`). From the route: `invalid_body` (not a
+  JSON object), `unrecognized_field` (a body key the route does not accept),
+  `missing_experiment_id`, `unknown_reusable_rule`, `unknown_conflict` (a `conflict_id`
+  this import does not hold), `unknown_disagreement` (a `candidate_id` that is not a
+  disagreeing candidate), `not_a_reading` (with `readings`). From the rule validator:
   `unknown_kind`, `unknown_scope`, `unknown_profile`, `profile_version_mismatch`,
-  `resolution_forbidden`, `resolution_target_required`, `unknown_source_role`,
+  `convention_not_determinable` (a `profile`-scoped resolution or channel rule whose
+  measurements are not all read under one convention), `resolution_forbidden`,
+  `resolution_target_required`, `unknown_source_role`, `unknown_acquisition_system`,
   `unknown_channel`, `invalid_element`, `invalid_edge`, `invalid_assignments`,
   `invalid_selector`, `unknown_rule` (a `supersedes` naming no active rule), and the
-  generic `missing_field` / `wrong_type` / `too_long` / `too_many_rules`.
+  generic `missing_field` / `wrong_type` / `too_long` / `too_many_rules`. *(An earlier
+  revision omitted `invalid_body`, `unknown_conflict` and `unknown_acquisition_system`;
+  `test_the_documented_rule_refusals_are_every_one_the_route_can_emit` now pins the list.)*
 
 **`GET /api/experiments/{experiment_id}/convention-rules`** — read-only.
 `{experiment_id, rules: [<rule> + {active}], total, active_count, unreadable_entries,
@@ -425,11 +502,13 @@ kinds, scopes, durability, experiment_version}`, with the record's `ETag`.
 
 A `<rule>` is `{rule_id, kind, scope, version, body, selector, experiment_id, import_id,
 profile_id, profile_version, supersedes, derived_from, confirmed_utc, confirmed_by
-("unattributed"), confirmed_trust_basis (null), source_examples, version_is_current,
+("unattributed"), confirmed_trust_basis ("unattributed"), source_examples, version_is_current,
 is_official_field_value (false), is_evidence (false)}`.
 
 ### 10.2 `GET /api/imports/{import_id}` — session view additions
 
+* `rules.reusable_scan` — `{experiments_listed, experiments_scanned, cap, truncated,
+  listing_complete, order, not_offered_other_convention}` (§3.2).
 * `profiles` — every registered convention (`profile_id`, `profile_version`,
   `display_name`, `aliases`, `measured_on`, `is_default`, `unexercised_recognizers`).
 * `rules` — `{target_experiment_id, import, import_durability, import_unreadable,
@@ -476,6 +555,8 @@ is_official_field_value (false), is_evidence (false)}`.
 * `data_quality_notes`: `{label, available, captured_as_run_notes, already_present,
   writes_qc_status: false}`.
 * `run_origins_recorded`: integer.
+* `reread_for_target`: boolean — the session was re-read under THIS record's rules before
+  anything was minted (§3.2).
 * `runs_already_present[]` gain `matched_by` (`acquisition_identity` |
   `label_before_origins_existed`) and `acquisition_identity`.
 * **Changed:** `nominal_offers` is `[]` by default (it carried a 298 K offer under

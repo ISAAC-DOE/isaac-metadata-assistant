@@ -2764,7 +2764,8 @@ def _tools() -> tuple[Tool, ...]:
             description=(
                 "One bounded page of the record's APPEND-ONLY activity history: what "
                 "was done, to which object and field, from what to what, when, and "
-                "through which channel (`web`, `mcp`, `historical_import`, `system`). "
+                "through which channel — `web`, `mcp` or `historical_import`. (`system` "
+                "is in the vocabulary, but no act in this build is recorded through it.) "
                 "Read-only; nothing here edits or deletes an event, and no operation "
                 "anywhere does.\n\n"
                 "**`actor` READS `unattributed` FOR EVERY EVENT IN THIS BUILD**, with "

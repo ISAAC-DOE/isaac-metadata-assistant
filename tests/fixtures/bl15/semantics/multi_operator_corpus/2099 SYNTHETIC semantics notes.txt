@@ -7,7 +7,7 @@ Main Scopes
 
 Invented study used only to exercise conventions, operators and conflicts.
 
-Measured at room temperature
+SYNTHETIC: held at room temperature throughout
 
 Sample 1 ZZ1 in acid
 Operator: Operator Alpha (synthetic)
@@ -18,18 +18,18 @@ Operator: Operator Alpha (synthetic)
 	1
 	01
 
-	Sets the working potential to 0.1 V vs  reference after 500 cycles
-	discard first scan
+	Sets the working potential to 0.1 V (SYNTHETIC) after 500 cycles
+	SYNTHETIC: skip the opening sweep
 	2
 	02
 
-	Sets the working potential to 0.2 V vs  reference after 500 cycles
+	Sets the working potential to 0.2 V (SYNTHETIC) after 500 cycles
 	
 	3
 	03
 
-	Sets the working potential to 0.4 V vs  reference after 500 cycles
-	first 8 scans useful
+	Sets the working potential to 0.4 V (SYNTHETIC) after 500 cycles
+	SYNTHETIC: only the early sweeps are usable
 
 Sample 2 ZZ2 in base
 Operator: Operator Beta (synthetic)
@@ -40,14 +40,14 @@ Operator: Operator Beta (synthetic)
 	1
 	04
 
-	Sets the working potential to 0.8 V vs  reference
-	did not work
+	Sets the working potential to 0.8 V (SYNTHETIC)
+	SYNTHETIC: scan aborted
+SYNTHETIC: rerun scheduled
 	2
 	05
 
-	Sets the working potential to 0.8 V vs  reference after 500 cycles
-	too low in counts
-2 scans only
+	Sets the working potential to 0.8 V (SYNTHETIC) after 500 cycles
+	SYNTHETIC: signal weak
 
 Sample 3 ZZ3 in base
 Operator: Operator Alpha (synthetic)
@@ -59,12 +59,12 @@ Operator: Operator Gamma (synthetic)
 	1
 	06
 
-	Sets the working potential to 0.9 V vs  reference
+	Sets the working potential to 0.9 V (SYNTHETIC)
 	
 	2
 	07
 
-	Sets the working potential to 1.0 V vs  reference
+	Sets the working potential to 1.0 V (SYNTHETIC)
 	
 
 Sample 4 ZZ3 in base
@@ -76,6 +76,7 @@ Operator: Operator Gamma (synthetic)
 	1
 	08
 
-	Sets the working potential to 1.0 V vs  reference
+	Sets the working potential to 1.0 V (SYNTHETIC)
 	3
+SYNTHETIC: end of the invented log
 

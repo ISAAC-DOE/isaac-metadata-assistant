@@ -313,8 +313,11 @@ ACTIVITY_CHANNELS: frozenset[str] = frozenset(
 #:   surface can say *"no act in this build is recorded through this channel"* instead of
 #:   rendering a ``0`` that reads as a measurement of inactivity.
 #:
-#: ``test_activity_channel_guard.py`` fails if a write site starts recording one of these
-#: channels while it is still listed here, so the claim cannot go stale silently.
+#: ``test_activity_channel_guard.py::test_no_write_site_records_a_channel_listed_as_having_none``
+#: parses every module of the package and fails if a ``record_activity(channel=...)`` or
+#: an ``ambient_channel(...)`` names one of these channels while it is still listed here,
+#: so the claim cannot go stale silently. *(Until a 2026-09-22 review this pointer named
+#: that file while no test in it checked this map.)*
 CHANNELS_WITHOUT_A_WRITE_SITE: dict[str, str] = {
     CHANNEL_SYSTEM: (
         "Reserved for acts the application performs with no external caller. No write "

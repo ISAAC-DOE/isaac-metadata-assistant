@@ -1,9 +1,18 @@
 """TWO CAPABILITY DECLARATIONS a surface reads BEFORE offering a control that would fail.
 
-Both are derived from CONFIGURATION ALONE and open nothing — no connection, no request,
-no file — for the reason every block on ``GET /api/health`` opens nothing: that
-operation is the container readiness probe, and nothing here may be able to change its
-result.
+~~Both are derived from CONFIGURATION ALONE and open nothing — no connection, no request,
+no file~~ — **corrected 2026-09-22 after an independent review**, because with staging
+enabled that was false: every health read listed the staging directory, and a root made
+unreadable (``chmod 000``) turned the readiness probe into a ``500``. What is true now:
+
+* ``/api/health`` reads CONFIGURATION plus ONE ``stat`` and one access check of the
+  staging root (:func:`staging_status`). It never lists the directory and never opens a
+  file, and every ``OSError`` becomes ``enabled: false`` with a stable reason — so
+  nothing here can change the probe's status code.
+* The detail block (``GET /api/imports`` and each import session) additionally LISTS
+  that ONE directory's direct entries by name. It never opens a file's contents either,
+  and a listing that fails is reported the same way (``staging_root_unreadable``).
+* The acceptance preflight opens nothing at all.
 
 1. ``historical_file_ingestion`` — ``EXT-13``
 =============================================
@@ -59,6 +68,7 @@ __all__ = [
     "proposal_acceptance",
     "staged_archive_names",
     "staged_archive_root",
+    "staging_status",
 ]
 
 #: The switch. Unset, empty or any value other than :data:`INGESTION_MODE_STAGING`
@@ -72,7 +82,24 @@ INGESTION_MODE_STAGING = "staging_directory"
 STAGING_ROOT_ENV = "ISAAC_HISTORICAL_STAGING_ROOT"
 
 REASON_GOVERNANCE_NOT_APPROVED = "governance_not_approved"
+#: The mode is set and no root is named.
 REASON_STAGING_ROOT_MISSING = "staging_root_not_configured"
+#: A root is named and each of these is what is actually wrong with it — reported by name
+#: rather than folded into "not configured", which would send an operator to the wrong fix.
+REASON_STAGING_ROOT_ABSENT = "staging_root_missing"
+REASON_STAGING_ROOT_NOT_A_DIRECTORY = "staging_root_not_a_directory"
+REASON_STAGING_ROOT_IS_SYMLINK = "staging_root_is_symlink"
+REASON_STAGING_ROOT_UNREADABLE = "staging_root_unreadable"
+INGESTION_REASONS: frozenset[str] = frozenset(
+    {
+        REASON_GOVERNANCE_NOT_APPROVED,
+        REASON_STAGING_ROOT_MISSING,
+        REASON_STAGING_ROOT_ABSENT,
+        REASON_STAGING_ROOT_NOT_A_DIRECTORY,
+        REASON_STAGING_ROOT_IS_SYMLINK,
+        REASON_STAGING_ROOT_UNREADABLE,
+    }
+)
 
 #: A staged archive name: a bare folder or ``.zip`` name, no separator, no dot-segment.
 #: Anchored ``\A``/``\Z`` for the reason ``historical_import._FIXTURE_NAME_RE`` is.
@@ -87,39 +114,72 @@ def _env(env: Mapping[str, str] | None) -> Mapping[str, str]:
     return os.environ if env is None else env
 
 
-def staged_archive_root(env: Mapping[str, str] | None = None) -> Path | None:
-    """The staging directory when ingestion is enabled AND the directory exists, else ``None``."""
+def staging_status(env: Mapping[str, str] | None = None) -> tuple[Path | None, str | None]:
+    """``(root, None)`` when staging is enabled and usable, else ``(None, reason)``.
+
+    CONFIGURATION PLUS ONE ``stat`` AND ONE ACCESS CHECK of the named root. It never lists
+    the directory and never opens a file, and it NEVER RAISES: an ``OSError`` anywhere is
+    ``staging_root_unreadable``. That is what lets ``/api/health`` — the readiness probe —
+    call it.
+    """
     values = _env(env)
     if (values.get(INGESTION_ENV) or "").strip() != INGESTION_MODE_STAGING:
-        return None
+        return None, REASON_GOVERNANCE_NOT_APPROVED
     raw = (values.get(STAGING_ROOT_ENV) or "").strip()
     if not raw:
-        return None
+        return None, REASON_STAGING_ROOT_MISSING
     root = Path(raw)
-    if not root.is_dir() or root.is_symlink():
-        return None
-    return root
+    try:
+        if root.is_symlink():
+            return None, REASON_STAGING_ROOT_IS_SYMLINK
+        if not root.exists():
+            return None, REASON_STAGING_ROOT_ABSENT
+        if not root.is_dir():
+            return None, REASON_STAGING_ROOT_NOT_A_DIRECTORY
+        if not os.access(root, os.R_OK | os.X_OK):
+            return None, REASON_STAGING_ROOT_UNREADABLE
+    except OSError:
+        return None, REASON_STAGING_ROOT_UNREADABLE
+    return root, None
+
+
+def staged_archive_root(env: Mapping[str, str] | None = None) -> Path | None:
+    """The staging directory when ingestion is enabled AND usable, else ``None``."""
+    return staging_status(env)[0]
+
+
+def _list_staged(root: Path) -> tuple[tuple[str, ...], str | None]:
+    """Names of the staged archives directly inside ``root`` — ONE directory, by name only.
+
+    ``(names, None)``, or ``((), "staging_root_unreadable")`` when listing fails. Never
+    opens a file's contents and never raises.
+    """
+    names: list[str] = []
+    try:
+        for child in sorted(root.iterdir()):
+            if child.is_symlink() or not _STAGED_NAME_RE.fullmatch(child.name):
+                continue
+            if child.is_dir() or (child.is_file() and child.suffix.lower() == ".zip"):
+                names.append(f"{STAGED_PREFIX}{child.name}")
+            if len(names) >= MAX_STAGED_ARCHIVES:
+                break
+    except OSError:
+        return (), REASON_STAGING_ROOT_UNREADABLE
+    return tuple(names), None
 
 
 def staged_archive_names(env: Mapping[str, str] | None = None) -> tuple[str, ...]:
     """``staged:<name>`` for every folder or ``.zip`` directly inside the staging root.
 
-    Empty when disabled. Only DIRECT children with an allowlisted name are offered, and
-    a symlink is never offered — the walk would refuse it anyway, and listing something
-    that will be refused is a control that promises work that cannot happen.
+    Empty when disabled or when the root cannot be listed. Only DIRECT children with an
+    allowlisted name are offered, and a symlink is never offered — the walk would refuse
+    it anyway, and listing something that will be refused is a control that promises
+    work that cannot happen.
     """
     root = staged_archive_root(env)
     if root is None:
         return ()
-    names: list[str] = []
-    for child in sorted(root.iterdir()):
-        if child.is_symlink() or not _STAGED_NAME_RE.fullmatch(child.name):
-            continue
-        if child.is_dir() or (child.is_file() and child.suffix.lower() == ".zip"):
-            names.append(f"{STAGED_PREFIX}{child.name}")
-        if len(names) >= MAX_STAGED_ARCHIVES:
-            break
-    return tuple(names)
+    return _list_staged(root)[0]
 
 
 def resolve_staged(name: str, env: Mapping[str, str] | None = None) -> Path | None:
@@ -132,17 +192,15 @@ def resolve_staged(name: str, env: Mapping[str, str] | None = None) -> Path | No
 
 
 def historical_file_ingestion(env: Mapping[str, str] | None = None) -> dict:
-    """The capability block. CONFIGURATION ONLY; never names a path."""
-    values = _env(env)
-    requested = (values.get(INGESTION_ENV) or "").strip() == INGESTION_MODE_STAGING
-    root = staged_archive_root(values)
+    """The capability block. CONFIGURATION, one ``stat``, and a listing of ONE directory
+    by name — never a file's contents, never a path, and never an exception."""
+    root, reason = staging_status(env)
+    names: tuple[str, ...] = ()
+    if root is not None:
+        names, listing_error = _list_staged(root)
+        if listing_error is not None:
+            root, reason = None, listing_error
     enabled = root is not None
-    if enabled:
-        reason = None
-    elif requested:
-        reason = REASON_STAGING_ROOT_MISSING
-    else:
-        reason = REASON_GOVERNANCE_NOT_APPROVED
     return {
         "enabled": enabled,
         "reason": reason,
@@ -151,7 +209,7 @@ def historical_file_ingestion(env: Mapping[str, str] | None = None) -> dict:
         # WHAT ENABLING DOES, stated in the block so no surface infers more.
         "uploads_route_open": False,
         "path_when_enabled": "server_side_staging_directory",
-        "staged_archive_count": len(staged_archive_names(values)) if enabled else 0,
+        "staged_archive_count": len(names) if enabled else 0,
         "staged_archive_limit": MAX_STAGED_ARCHIVES,
     }
 
@@ -212,9 +270,10 @@ def proposal_acceptance() -> dict:
 #
 # THE HEALTH BANNER CARRIES TWO KEYS PER CAPABILITY, AND ONLY TWO: the shape the
 # frontend builds against (`{enabled, reason}` and `{available, reason}`), agreed with
-# the orchestrator on 2026-09-22. They are PROJECTIONS of the full blocks above, never
-# a second computation, so the banner cannot disagree with the detail an import
-# session and `GET /api/imports` serve. The detail (the governance gate, that the
+# the orchestrator on 2026-09-22. Each comes from the SAME decision function as the
+# full block above, never a second description of it. The ingestion banner stops short
+# of the directory listing the detail block performs — see
+# `health_historical_file_ingestion`. The detail (the governance gate, that the
 # upload route stays closed, the verifier id, the typed error a click would receive)
 # lives there, not here: the banner answers without credentials and stays small.
 
@@ -223,9 +282,13 @@ HEALTH_ACCEPTANCE_KEYS: tuple[str, ...] = ("available", "reason")
 
 
 def health_historical_file_ingestion(env: Mapping[str, str] | None = None) -> dict:
-    """``{enabled, reason}`` — projected from :func:`historical_file_ingestion`."""
-    block = historical_file_ingestion(env)
-    return {key: block[key] for key in HEALTH_INGESTION_KEYS}
+    """``{enabled, reason}`` from :func:`staging_status` — the SAME decision the detail
+    block starts from, WITHOUT the directory listing (2026-09-22): the readiness probe
+    reads configuration and one ``stat``, nothing more, and cannot raise. The two can
+    differ only if the root passes its access check and its listing then fails, in
+    which case the detail block reports ``staging_root_unreadable``."""
+    root, reason = staging_status(env)
+    return {"enabled": root is not None, "reason": reason}
 
 
 def health_proposal_acceptance() -> dict:

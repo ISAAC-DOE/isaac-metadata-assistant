@@ -16,8 +16,15 @@ The corpus, by design:
   — a systematic rename, three in a row — and the notes' rows for them say "after 500";
 * legacy 05 is carried by TWO distinct acquisitions (the Run-32 shape);
 * 01-05 and 08 carry signal on ``vortDT`` only, 06 on ``vortDT2`` only, 07 on both;
-* the notes say "Measured at room temperature" and nothing numeric about temperature;
-* the notes' ``Notes`` cells carry free-text remarks ("discard first scan", …).
+* the notes say "SYNTHETIC: held at room temperature throughout" and nothing numeric;
+* the notes' ``Notes`` cells carry invented remarks, each marked SYNTHETIC — one of
+  them a multi-line cell in a row that is not last, and the last row of the last table
+  followed directly by a line of prose that is NOT part of the cell.
+
+**No sentence of the real archive is reproduced** (corrected 2026-09-22 after an
+independent review found two remark phrases that also occur in the private corpus;
+the procedure cells begin with the notes reader's own public recognition phrase and
+are otherwise invented).
 """
 
 from __future__ import annotations
@@ -689,7 +696,7 @@ def test_room_temperature_is_kept_verbatim_and_no_number_is_offered(client):
     temperature = view["corpus_review"]["temperature"]
     assert temperature["status"] == "stated_in_source"
     assert [t["raw_literal"] for t in temperature["statements"]] == [
-        "Measured at room temperature"
+        "SYNTHETIC: held at room temperature throughout"
     ]
     assert all(t["converted_to_a_number"] is False for t in temperature["statements"])
     assert temperature["automatic_value"] is None
@@ -703,7 +710,7 @@ def test_room_temperature_is_kept_verbatim_and_no_number_is_offered(client):
     assert body["nominal_offers"] == []
     exp = ws.load_experiment(eid)
     kept = [e for e in exp.extended_context.entries if e.concept == "temperature_statement"]
-    assert [e.raw_literal for e in kept] == ["Measured at room temperature"]
+    assert [e.raw_literal for e in kept] == ["SYNTHETIC: held at room temperature throughout"]
     assert kept[0].normalized_value is None
     assert kept[0].is_official_field_value is False
     for run in exp.runs:
@@ -844,7 +851,7 @@ def test_data_quality_notes_are_kept_verbatim_and_never_become_qc_status(client)
     view = _view(client, import_id)
     units = _units(view)
     assert [n["text"] for n in units[_stem(units, "01")]["data_quality_notes"]] == [
-        "discard first scan"
+        "SYNTHETIC: skip the opening sweep"
     ]
     assert [n["text"] for n in units[_stem(units, "08")]["data_quality_notes"]] == ["3"]
     for unit in units.values():
@@ -869,10 +876,13 @@ def test_data_quality_notes_are_kept_verbatim_and_never_become_qc_status(client)
     exp = ws.load_experiment(eid)
     assert not [p for p in exp.proposals if p.target_field_path.startswith("measurement.qc")]
     for run in exp.runs:
-        assert "qc" not in (run.draft.get("blocks") or {})
+        # `qc` is a RUN-LEVEL BLOCK at `draft["qc"]` (what `export.transform` reads).
+        # ~~`"qc" not in (run.draft.get("blocks") or {})`~~ checked a key no draft has and
+        # was vacuous — corrected 2026-09-22 after an independent review.
+        assert not run.draft.get("qc")
         assert not any(k.startswith("measurement.qc") for k in (run.draft.get("fields") or {}))
     texts = [n.text for n in exp.notes]
-    assert any("discard first scan" in t for t in texts)
+    assert any("SYNTHETIC: skip the opening sweep" in t for t in texts)
     again = client.post(
         f"/api/imports/{import_id}/add-to-experiment",
         json={"experiment_id": eid, "create_runs": True},
@@ -1025,14 +1035,10 @@ def test_the_activity_history_is_an_mcp_read_with_closed_filter_sets():
 
 
 def test_system_is_named_as_a_channel_no_write_site_records():
+    """The reservation is served; the guard that no write site records it lives in
+    ``test_activity_channel_guard.py`` (moved there 2026-09-22, where the pointer in
+    ``activity.py`` has always said it is)."""
     assert activity.CHANNEL_SYSTEM in activity.CHANNELS_WITHOUT_A_WRITE_SITE
-    package = REPO_ROOT / "apps" / "api" / "isaac_api"
-    for path in package.rglob("*.py"):
-        if path.name == "activity.py":
-            continue
-        text = path.read_text(encoding="utf-8")
-        assert "channel=activity.CHANNEL_SYSTEM" not in text, path
-        assert "channel=activity_module.CHANNEL_SYSTEM" not in text, path
 
 
 def test_the_activity_read_serves_the_reservation(client):
@@ -1065,3 +1071,564 @@ def test_the_column_reading_dedup_and_cap_are_counted_separately():
     assert len(rows) == hist.MAX_DISTINCT_COLUMN_READINGS
     assert thinned == 2
     assert capped == 1
+
+
+# =============================================================================
+# 14. INDEPENDENT-REVIEW FIXES (2026-09-22). Each test FAILED against the committed
+#     code before its fix (the polarity is stated in the report); the reviewer's
+#     probes are reused where they apply.
+# =============================================================================
+
+from collections import defaultdict  # noqa: E402
+from types import SimpleNamespace  # noqa: E402
+
+from isaac_api.bl15 import evidence as ev  # noqa: E402
+from isaac_api.bl15 import reconstruct as rc  # noqa: E402
+
+
+def _item(i, literal, concept="acquisition_timestamp", **extra):
+    return ev.SourceEvidence(
+        evidence_id=f"synthetic-{i}",
+        source_path=f"synthetic/file-{i}",
+        source_type=ev.SOURCE_TYPE_SCAN_EXPORT,
+        locator=f"line {i}",
+        raw_literal=literal,
+        concept=concept,
+        parser_id="synthetic",
+        measurement_stem="01_01_ZZ1",
+        **extra,
+    )
+
+
+def _disagreeing(items):
+    (candidate,) = rc._candidates_from_evidence(
+        items,
+        candidate_prefix="01_01_ZZ1",
+        source_ids={i.source_path: "src" for i in items},
+        by_concept=defaultdict(int),
+        by_status=defaultdict(int),
+        unregistered=set(),
+    )
+    assert candidate.unresolved_reason is not None
+    return candidate
+
+
+def _resolve(items, chosen):
+    candidate = _disagreeing(items)
+    rule = SimpleNamespace(
+        rule_id="R", version=1, confirmed_utc="2099-01-01T00:00:00Z",
+        confirmed_by=activity.ACTOR_UNATTRIBUTED, body={"chosen_value": chosen},
+    )
+    index = hist._evidence_index({"synthetic": items})
+    _marked, derived = hist._apply_resolution(candidate, {candidate.candidate_id: rule}, index)
+    return derived
+
+
+@pytest.mark.parametrize("literal", ["060", "10 A", "500 cycles", "2099 12"])
+def test_I3_a_resolved_literal_is_kept_exactly_as_written(literal):
+    """I-3: the first version regex-coerced the chosen reading (`'060'` -> 60,
+    `'500 cycles'` -> 500). A literal nothing normalised stays the literal."""
+    derived = _resolve([_item(1, literal), _item(2, "SYNTHETIC other")], literal)
+    assert derived.proposed_value == literal
+    assert isinstance(derived.proposed_value, str)
+
+
+def test_I3_a_resolved_normalised_reading_takes_the_evidences_own_value():
+    """…and a normalised reading takes `normalized_value` from the evidence that states
+    it — the value an agreeing candidate would propose — never a parse of the string."""
+    items = [
+        _item(1, "060mV", concept="potential_magnitude", determinism=ev.DETERMINISM_NORMALIZED,
+              normalized_value=0.06, unit="V", normalization_rule="synthetic-rule"),
+        _item(2, "0p1V", concept="potential_magnitude", determinism=ev.DETERMINISM_NORMALIZED,
+              normalized_value=0.1, unit="V", normalization_rule="synthetic-rule"),
+    ]
+    derived = _resolve(items, "0.06 V")
+    assert derived.proposed_value == 0.06
+    assert derived.proposed_value == rc.value_of_reading(items, "0.06 V")
+    # only the statement that states the chosen reading supports the derived value
+    assert [s["value"] for s in derived.supporting_statements] == ["060mV"]
+
+
+def test_I2_a_resolved_timestamp_is_the_literal_an_agreeing_candidate_would_send():
+    """I-2, timestamp half: resolution opens NO new route to `timestamps.*`. The value
+    is the ctime literal as stated, identical to what the pre-existing agreeing path
+    proposes for the same statement, and proposability is the registry's."""
+    stated = "Fri Jan 01 00:00:00 2100"
+    derived = _resolve([_item(1, stated), _item(2, "Sat Jan 02 00:00:00 2100")], stated)
+    (agreeing,) = rc._candidates_from_evidence(
+        [_item(1, stated)], candidate_prefix="01_01_ZZ1", source_ids={"synthetic/file-1": "src"},
+        by_concept=defaultdict(int), by_status=defaultdict(int), unregistered=set(),
+    )
+    assert derived.proposed_value == agreeing.proposed_value == stated
+    assert (derived.not_proposable_reason is None) is mp.mapping_for("acquisition_timestamp").proposable
+
+
+@pytest.mark.parametrize("concept", ["sample_name", "acquisition_method", "sample_preparation"])
+def test_I2_resolving_a_concept_the_registry_does_not_propose_keeps_it_unsendable(concept):
+    """I-2: the first version set `not_proposable_reason=None` for any field candidate
+    with a path, so a resolved `sample_name` / `acquisition_method` /
+    `sample_preparation` became sendable to `sample.material.name` /
+    `system.technique` / `sample.material.provenance`."""
+    entry = mp.mapping_for(concept)
+    assert entry.official_path and not entry.proposable
+    derived = _resolve(
+        [_item(1, "SYNTHETIC-A", concept=concept), _item(2, "SYNTHETIC-B", concept=concept)],
+        "SYNTHETIC-A",
+    )
+    assert derived.target_field_path == entry.official_path
+    assert derived.not_proposable_reason == entry.reason
+    assert derived.proposable is False
+
+
+def test_I2_over_http_a_resolved_sample_name_is_never_sent(client):
+    """The reviewer's probe 4, as a regression test: two test-only conventions read
+    unit 06's sample token differently; resolving it must not make it sendable."""
+    X = profiles.NamingProfile(
+        profile_id="synthetic_x", profile_version="1", display_name="X (test)",
+        description="SYNTHETIC", token_recognizers=(profiles.RECOGNIZER_SAMPLE_NAME,),
+        sample_code_pattern=r"^f[0-9]+$",
+    )
+    Y = profiles.NamingProfile(
+        profile_id="synthetic_y", profile_version="1", display_name="Y (test)",
+        description="SYNTHETIC", token_recognizers=(profiles.RECOGNIZER_SAMPLE_NAME,),
+        sample_code_pattern=r"^[A-Z]{2,}[0-9]+[A-Z]?$",
+    )
+    with profiles.registered_for_tests(X), profiles.registered_for_tests(Y):
+        import_id = _import(client)
+        for pid in ("synthetic_x", "synthetic_y"):
+            assert _rule(client, import_id, {
+                "kind": "profile_binding", "scope": "import", "selector": {"legacy_range": [6, 6]},
+                "body": {"profile_id": pid, "profile_version": "1"},
+            }).status_code == 200
+        view = _view(client, import_id)
+        target = next(
+            c for c in view["reconstruction"]["candidates"]
+            if c["candidate_id"].startswith("06_") and c["candidate_id"].endswith("::sample_name")
+            and c["unresolved_reason"]
+        )
+        resolved = _rule(client, import_id, {
+            "kind": "conflict_resolution", "scope": "import",
+            "body": {"candidate_id": target["candidate_id"],
+                     "chosen_value": target["disagreement"][0]["value"]},
+        })
+        assert resolved.status_code == 200, resolved.text
+        derived = next(
+            c for c in resolved.json()["import"]["reconstruction"]["candidates"]
+            if c["candidate_id"] == target["candidate_id"] + "::resolved"
+        )
+        assert derived["proposable"] is False
+        eid = _record(client)
+        sent = client.post(
+            f"/api/imports/{import_id}/add-to-experiment",
+            json={"experiment_id": eid, "create_runs": True},
+            headers={"If-Match": _etag(client, eid)},
+        ).json()
+        assert not [s for s in sent["sent"] if "sample_name" in s["candidate_id"]]
+
+
+def _timestamp_disagreement(view):
+    return next(
+        c for c in view["reconstruction"]["candidates"]
+        if c["unresolved_reason"] and c["target_field_path"] == "timestamps.acquired_start_utc"
+    )
+
+
+def test_I1_a_rule_confirmed_on_A_never_shapes_proposals_minted_on_B(client):
+    """I-1, the reviewer's probe 2 as a regression test. An Experiment-scoped resolution
+    on A made the session's reading A's; adding the SAME import to B minted a
+    `::resolved` proposal on B citing A's rule. Now B's batch re-reads the import under
+    B's rules only (`reread_for_target`) and nothing of A's reaches B."""
+    import_id = _import(client)
+    target = _timestamp_disagreement(_view(client, import_id))
+    eid_a, eid_b = _record(client, "A"), _record(client, "B")
+    on_a = _rule(client, import_id, {
+        "kind": "conflict_resolution", "scope": "experiment", "experiment_id": eid_a,
+        "body": {"candidate_id": target["candidate_id"],
+                 "chosen_value": target["disagreement"][0]["value"]},
+    }, eid=eid_a)
+    assert on_a.status_code == 200, on_a.text
+    a_rule = on_a.json()["rule"]["rule_id"]
+
+    to_b = client.post(
+        f"/api/imports/{import_id}/add-to-experiment",
+        json={"experiment_id": eid_b, "create_runs": True},
+        headers={"If-Match": _etag(client, eid_b)},
+    )
+    assert to_b.status_code == 200, to_b.text
+    body = to_b.json()
+    # THE LEAK, asserted first so the pre-fix failure is this line and not a missing key.
+    assert not [s for s in body["sent"] if s["candidate_id"].endswith("::resolved")]
+    assert body["reread_for_target"] is True
+    b = ws.load_experiment(eid_b)
+    assert b.convention_rules == []
+    assert not [p for p in b.proposals if a_rule in (p.rule or "")]
+    # the session now reads for B: A's derived candidate is gone from it
+    view = _view(client, import_id)
+    assert view["rules"]["target_experiment_id"] == eid_b
+    ids = {c["candidate_id"] for c in view["reconstruction"]["candidates"]}
+    assert target["candidate_id"] + "::resolved" not in ids
+
+    # …and adding to A again re-reads under A's rules, so A DOES get its own resolution.
+    to_a = client.post(
+        f"/api/imports/{import_id}/add-to-experiment",
+        json={"experiment_id": eid_a, "create_runs": True},
+        headers={"If-Match": _etag(client, eid_a)},
+    ).json()
+    assert to_a["reread_for_target"] is True
+    assert [s for s in to_a["sent"] if s["candidate_id"].endswith("::resolved")]
+
+
+def test_I1_the_single_candidate_route_refuses_another_records_resolution(client):
+    import_id = _import(client)
+    target = _timestamp_disagreement(_view(client, import_id))
+    eid_a, eid_b = _record(client, "A"), _record(client, "B")
+    assert _rule(client, import_id, {
+        "kind": "conflict_resolution", "scope": "experiment", "experiment_id": eid_a,
+        "body": {"candidate_id": target["candidate_id"],
+                 "chosen_value": target["disagreement"][0]["value"]},
+    }, eid=eid_a).status_code == 200
+    derived_id = target["candidate_id"] + "::resolved"
+    b = ws.load_experiment(eid_b)
+    run_b = client.post(
+        f"/api/experiments/{eid_b}/runs", json={"label": "SYNTHETIC run"},
+        headers={"If-Match": _etag(client, eid_b)},
+    )
+    assert run_b.status_code in (200, 201), run_b.text
+    refused = client.post(
+        f"/api/imports/{import_id}/candidates/{derived_id}/propose",
+        json={"experiment_id": eid_b, "run_id": run_b.json()["run"]["id"]},
+        headers={"If-Match": _etag(client, eid_b)},
+    )
+    assert refused.status_code == 404, refused.text
+    assert refused.json()["error"] == "import_candidate_not_found"
+    assert ws.load_experiment(eid_b).proposals == b.proposals
+
+
+def test_I5_importing_the_same_archive_twice_adds_no_data_quality_note_twice(client):
+    """I-5, the reviewer's probe 5: the key carried the import id, so a SECOND session of
+    the same archive minted every remark again (6 -> 12)."""
+    eid = _record(client)
+    first = second = None
+    for _ in range(2):
+        import_id = _import(client)
+        body = client.post(
+            f"/api/imports/{import_id}/add-to-experiment",
+            json={"experiment_id": eid, "create_runs": True},
+            headers={"If-Match": _etag(client, eid)},
+        ).json()
+        first, second = (body, None) if first is None else (first, body)
+    assert first["data_quality_notes"]["captured_as_run_notes"] > 0
+    assert second["data_quality_notes"]["captured_as_run_notes"] == 0
+    assert second["data_quality_notes"]["already_present"] == (
+        first["data_quality_notes"]["captured_as_run_notes"]
+    )
+    exp = ws.load_experiment(eid)
+    per_run = [(n.run_id, n.text) for n in exp.notes if n.text.startswith("Data Quality Note")]
+    assert len(per_run) == len(set(per_run)) == first["data_quality_notes"]["captured_as_run_notes"]
+
+
+def test_a_remark_bound_by_a_shared_legacy_number_says_so_on_both_runs(client):
+    """Minor finding: the Run-32 shape attaches one remark to BOTH acquisitions' runs,
+    and each stored note must disclose that the number is shared."""
+    import_id = _import(client)
+    eid = _record(client)
+    client.post(
+        f"/api/imports/{import_id}/add-to-experiment",
+        json={"experiment_id": eid, "create_runs": True},
+        headers={"If-Match": _etag(client, eid)},
+    )
+    exp = ws.load_experiment(eid)
+    fives = [n for n in exp.notes if "(file number 5)" in n.text]
+    assert len({n.run_id for n in fives}) == 2
+    for note in fives:
+        assert "Legacy file number 5 is carried by more than one acquisition" in note.text
+    ones = [n for n in exp.notes if "(file number 1)" in n.text]
+    assert ones and not any("carried by more than one acquisition" in n.text for n in ones)
+
+
+def test_I4_an_unreadable_staging_root_never_breaks_the_readiness_probe(
+    client, tmp_path, monkeypatch
+):
+    """I-4: with staging enabled, every `/api/health` listed the root, and a `chmod 000`
+    root made the readiness probe answer 500. Now the probe stats it and nothing else,
+    and every read reports `staging_root_unreadable` instead of raising."""
+    import os
+    import stat as stat_module
+
+    staging = tmp_path / "locked"
+    staging.mkdir()
+    (staging / "synthetic_staged").mkdir()
+    monkeypatch.setenv(capabilities.INGESTION_ENV, capabilities.INGESTION_MODE_STAGING)
+    monkeypatch.setenv(capabilities.STAGING_ROOT_ENV, str(staging))
+    staging.chmod(0)
+    try:
+        if os.access(staging, os.R_OK):  # pragma: no cover - running as root
+            pytest.skip("permissions are not enforced for this user")
+        health = client.get("/api/health")
+        assert health.status_code == 200, health.text
+        assert health.json()["historical_file_ingestion"] == {
+            "enabled": False,
+            "reason": capabilities.REASON_STAGING_ROOT_UNREADABLE,
+        }
+        listing = client.get("/api/imports")
+        assert listing.status_code == 200, listing.text
+        assert listing.json()["historical_file_ingestion"]["reason"] == (
+            capabilities.REASON_STAGING_ROOT_UNREADABLE
+        )
+        assert not [a for a in listing.json()["available_archives"] if a.startswith("staged:")]
+        assert str(staging) not in health.text + listing.text
+    finally:
+        staging.chmod(stat_module.S_IRWXU)
+
+
+def test_I4_a_listing_that_fails_after_the_access_check_is_reported_not_raised(
+    tmp_path, monkeypatch
+):
+    staging = tmp_path / "root"
+    staging.mkdir()
+    env = {
+        capabilities.INGESTION_ENV: capabilities.INGESTION_MODE_STAGING,
+        capabilities.STAGING_ROOT_ENV: str(staging),
+    }
+
+    def refuse(self):
+        raise PermissionError("synthetic")
+
+    monkeypatch.setattr(type(staging), "iterdir", refuse)
+    block = capabilities.historical_file_ingestion(env)
+    assert (block["enabled"], block["reason"]) == (False, capabilities.REASON_STAGING_ROOT_UNREADABLE)
+    assert capabilities.staged_archive_names(env) == ()
+
+
+def test_I4_each_way_a_named_root_can_be_wrong_has_its_own_reason(tmp_path):
+    base = {capabilities.INGESTION_ENV: capabilities.INGESTION_MODE_STAGING}
+    a_file = tmp_path / "a-file"
+    a_file.write_text("SYNTHETIC")
+    real = tmp_path / "real"
+    real.mkdir()
+    link = tmp_path / "link"
+    link.symlink_to(real, target_is_directory=True)
+    cases = {
+        "": capabilities.REASON_STAGING_ROOT_MISSING,
+        str(tmp_path / "absent"): capabilities.REASON_STAGING_ROOT_ABSENT,
+        str(a_file): capabilities.REASON_STAGING_ROOT_NOT_A_DIRECTORY,
+        str(link): capabilities.REASON_STAGING_ROOT_IS_SYMLINK,
+    }
+    for raw, reason in cases.items():
+        env = {**base, capabilities.STAGING_ROOT_ENV: raw}
+        assert capabilities.health_historical_file_ingestion(env) == {"enabled": False, "reason": reason}, raw
+        assert capabilities.historical_file_ingestion(env)["reason"] == reason, raw
+    ok = {**base, capabilities.STAGING_ROOT_ENV: str(real)}
+    assert capabilities.health_historical_file_ingestion(ok) == {"enabled": True, "reason": None}
+    assert capabilities.INGESTION_REASONS >= set(cases.values())
+
+
+def test_I4_the_readiness_probe_never_lists_the_staging_root(tmp_path, monkeypatch):
+    """Health reads configuration and one stat — it must not list the directory."""
+    staging = tmp_path / "root"
+    staging.mkdir()
+    env = {
+        capabilities.INGESTION_ENV: capabilities.INGESTION_MODE_STAGING,
+        capabilities.STAGING_ROOT_ENV: str(staging),
+    }
+    calls = []
+    original = type(staging).iterdir
+
+    def spy(self):
+        calls.append(self)
+        return original(self)
+
+    monkeypatch.setattr(type(staging), "iterdir", spy)
+    assert capabilities.health_historical_file_ingestion(env)["enabled"] is True
+    assert calls == []
+
+
+def test_the_activity_tool_does_not_say_events_arrive_through_the_reserved_channel():
+    """Minor finding: the tool listed `system` among the channels events arrive through,
+    while `CHANNELS_WITHOUT_A_WRITE_SITE` says no act is recorded through it."""
+    from isaac_api.mcp import tools
+
+    description = tools.TOOLS["isaac_list_activity"].description
+    first_paragraph = description.split("\n\n", 1)[0]
+    for channel in activity.CHANNELS_WITHOUT_A_WRITE_SITE:
+        assert f"`{channel}` is in the vocabulary, but no act in this build is recorded" in first_paragraph
+        assert f"`{channel}`)" not in first_paragraph
+
+
+def test_a_rules_trust_basis_is_the_projects_one_unattributed_sentinel(client, alk):
+    """Minor finding, resolved by aligning the DOC with the wire rather than the reverse:
+    a rule's `confirmed_trust_basis` is `activity.TRUST_BASIS_UNATTRIBUTED`, the value every
+    activity event's `actor_trust_basis` and every proposal's `trust_basis` carries."""
+    import_id = _import(client)
+    rule = _bind_alk(client, import_id)["rule"]
+    assert rule["confirmed_by"] == activity.ACTOR_UNATTRIBUTED
+    assert rule["confirmed_trust_basis"] == activity.TRUST_BASIS_UNATTRIBUTED
+    doc = (REPO_ROOT / "docs/historical-import-semantics-2026-09-22.md").read_text(encoding="utf-8")
+    assert "confirmed_trust_basis: \"unattributed\"" in doc
+    assert "confirmed_trust_basis (\"unattributed\")" in doc
+
+
+def test_an_unreadable_run_origin_entry_survives_a_save(client):
+    """Minor finding: `_hydrate_run_origins` dropped unreadable rows and the next save
+    deleted them from the document. They are now carried verbatim, as unreadable
+    convention rules are, and a readable row for another run is still usable."""
+    eid = _record(client)
+    exp = ws.load_experiment(eid)
+    state = exp.to_state()
+    readable = {"acquisition_identity": "synthetic:01@abc", "stem": "01_01_ZZ1"}
+    state[ws.HISTORICAL_RUN_ORIGINS_KEY] = {
+        "RUN-READABLE": readable,
+        "RUN-NOT-A-MAPPING": "SYNTHETIC garbage",
+        "RUN-NO-IDENTITY": {"stem": "02_01_ZZ1"},
+    }
+    hydrated = ws.Experiment.from_state(state)
+    assert hydrated.historical_run_origins == {"RUN-READABLE": readable}
+    assert set(hydrated.unreadable_run_origins) == {"RUN-NOT-A-MAPPING", "RUN-NO-IDENTITY"}
+    written = hydrated.to_state()[ws.HISTORICAL_RUN_ORIGINS_KEY]
+    assert written == state[ws.HISTORICAL_RUN_ORIGINS_KEY]
+    # a readable row is never written over an unreadable one for the same run
+    assert hydrated.record_run_origin("RUN-NO-IDENTITY", {"acquisition_identity": "x"}) is False
+    assert hydrated.to_state()[ws.HISTORICAL_RUN_ORIGINS_KEY]["RUN-NO-IDENTITY"] == {"stem": "02_01_ZZ1"}
+
+
+def test_a_confirmed_assignment_is_not_applied_over_an_ambiguous_channel():
+    """Minor finding: a confirmed rule was applied over a channel whose liveness the Run's
+    evidence could not decide, and the result then said the channel "carries signal"."""
+    assignments = (sig.ChannelAssignment("vortDT", "Zz", "L3", "rule"),)
+    selection = sig.select_primary_signal(
+        _channels(vortDT="ambiguous"), [ZZ], confirmed_assignments=assignments, rule_ref="r1"
+    )
+    assert selection.status == sig.STATUS_NEEDS_REVIEW
+    assert selection.reason_code == sig.REASON_RULE_UNDECIDED
+    assert selection.assignments == ()
+    live = sig.select_primary_signal(
+        _channels(vortDT="live"), [ZZ], confirmed_assignments=assignments, rule_ref="r1"
+    )
+    assert live.status == sig.STATUS_CONFIRMED
+
+
+def test_exactly_the_applicability_levels_this_build_can_reach_are_the_ones_it_claims():
+    """Minor finding: seven levels were presented as available and only five are reachable.
+    Derived here from every selector shape a rule can carry plus the default binding, and
+    compared EXACTLY — so making `facility` reachable without saying so fails this."""
+    shapes = [
+        {},
+        {"legacy_range": [1, 2]},
+        {"group_tokens": ["01"]},
+        {"stem_prefixes": ["01_"]},
+        {"source_types": [ev.SOURCE_TYPE_SCAN_EXPORT]},
+        {"source_paths": ["synthetic/file"]},
+    ]
+    reached = {appl.default_binding().scope}
+    for selector in shapes:
+        rule = cr.new_rule(
+            rule_id=f"R{len(reached)}{len(selector)}", kind=cr.KIND_PROFILE_BINDING,
+            scope=cr.SCOPE_IMPORT, body={"profile_id": DEFAULT, "profile_version": "1"},
+            selector=selector, confirmed_utc="2099-01-01T00:00:00Z", existing=[],
+            import_id="01TESTIMPORT00000000000000",
+        )
+        reached.add(rule.binding_scope)
+    assert reached == set(appl.REACHABLE_SCOPES)
+    assert appl.REACHABLE_SCOPES < appl.SCOPES
+    assert not appl.REACHABLE_SCOPES & {appl.SCOPE_FACILITY, appl.SCOPE_BEAMLINE}
+
+
+_RECURRING_RENAME = {
+    "kind": "conflict_resolution",
+    "selector": {"legacy_range": [1, 3]},
+    "body": {
+        "conflict_kind": "internal_declaration_vs_filename",
+        "chosen_source_role": "human_label",
+    },
+}
+
+
+def test_a_convention_scoped_resolution_records_its_convention_and_is_offered_only_where_it_applies(
+    client, alk
+):
+    """Minor finding: a `profile`-scoped resolution recorded no convention (`profile_id`
+    None, so `version_is_current` could never be false) and was offered to every
+    experiment regardless of the convention its sources follow."""
+    eid_a = _record(client, "A")
+    import_a = _import(client)
+    recorded = _rule(client, import_a, {**_RECURRING_RENAME, "scope": "profile",
+                                         "experiment_id": eid_a}, eid=eid_a)
+    assert recorded.status_code == 200, recorded.text
+    rule = recorded.json()["rule"]
+    default = profiles.PROFILES[DEFAULT]
+    assert (rule["profile_id"], rule["profile_version"]) == (default.profile_id, default.profile_version)
+
+    # OFFERED where the convention applies…
+    eid_b = _record(client, "B")
+    view_b = _view(client, _import(client))
+    offered = view_b["rules"]["reusable_from_other_experiments"]
+    assert [r["rule"]["rule_id"] for r in offered] == [rule["rule_id"]]
+    assert offered[0]["matches"]["units"] == 3
+
+    # …and NOT offered to an import whose sources are all read under another convention.
+    import_c = _import(client)
+    everything_alk = _rule(client, import_c, {
+        "kind": "profile_binding", "scope": "import", "selector": {},
+        "body": {"profile_id": ALK.profile_id, "profile_version": "1"},
+    })
+    assert everything_alk.status_code == 200, everything_alk.text
+    rules_c = everything_alk.json()["import"]["rules"]
+    assert rules_c["reusable_from_other_experiments"] == []
+    assert rules_c["reusable_scan"]["not_offered_other_convention"] == 1
+    del eid_b
+
+
+def test_a_convention_scoped_rule_over_two_conventions_is_refused(client, alk):
+    eid = _record(client)
+    import_id = _import(client)
+    _bind_alk(client, import_id)  # 06-08 under the test convention, 01-05 the default
+    refused = _rule(client, import_id, {
+        "kind": "signal_assignment", "scope": "profile", "experiment_id": eid,
+        "selector": {"legacy_range": [5, 6]},
+        "body": {"assignments": [{"channel": "vortDT", "element": "Zz", "edge": "L3"}]},
+    }, eid=eid)
+    assert refused.status_code == 422, refused.text
+    assert refused.json()["error"] == "convention_not_determinable"
+    assert ws.load_experiment(eid).convention_rules == []
+
+
+def test_the_reusable_rule_scan_discloses_its_bound(client):
+    """Minor finding: `rules.reusable_scan` was promised as the disclosure of the
+    200-experiment cap and did not exist."""
+    _record(client, "A")
+    _record(client, "B")
+    scan = _view(client, _import(client))["rules"]["reusable_scan"]
+    assert scan["experiments_listed"] == 2
+    assert scan["experiments_scanned"] == 2
+    assert scan["cap"] == 200 and scan["truncated"] is False
+    assert scan["listing_complete"] is True
+    assert scan["order"] == "most_recently_created"
+
+
+#: Raised only when a STORED rule is rehydrated or by invariants the route always
+#: satisfies (it always passes the holder's id and the unattributed actor pair) — not a
+#: refusal a caller of the route can meet.
+_NOT_ROUTE_REACHABLE = {
+    "invalid_entry", "invalid_version", "actor_basis_mismatch", "experiment_required",
+    "import_required",
+}
+
+
+def test_the_documented_rule_refusals_are_every_one_the_route_can_emit():
+    """Minor finding: doc §10.1's list omitted three codes. Derived from the source, so a
+    new refusal cannot ship undocumented."""
+    import isaac_api.routes as routes_module
+
+    routes_src = Path(routes_module.__file__).read_text(encoding="utf-8")
+    segment = routes_src[
+        routes_src.index("def _rule_target_problem(")
+        : routes_src.index("def get_experiment_convention_rules(")
+    ]
+    emitted = set(re.findall(r'"error": "([a-z_]+)"', segment))
+    rules_src = Path(cr.__file__).read_text(encoding="utf-8")
+    emitted |= set(re.findall(r'UnsupportedRule\(\s*"([a-z_]+)"', rules_src)) - _NOT_ROUTE_REACHABLE
+    doc = (REPO_ROOT / "docs/historical-import-semantics-2026-09-22.md").read_text(encoding="utf-8")
+    listed = doc[doc.index("* `422` errors"): doc.index("**`GET /api/experiments/{experiment_id}/convention-rules`**")]
+    missing = sorted(code for code in emitted if f"`{code}`" not in listed)
+    assert missing == [], missing
+    assert {"invalid_body", "unknown_conflict", "unknown_acquisition_system"} <= emitted

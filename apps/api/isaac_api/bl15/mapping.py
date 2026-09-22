@@ -489,8 +489,8 @@ _QUESTIONS: tuple[DomainQuestion, ...] = (
         QUESTION_INTENTIONALLY_LEFT_MISSING,
         "Answered 2026-09-22: the domain owner does not know what 'QC' would mean "
         "here, so qc.status is NEVER written from the notes. Every free-text Notes "
-        "cell ('did not work', 'discard first scan', 'first N scans useful', 'too "
-        "low in counts') is preserved verbatim as a Data Quality Note, bound to its "
+        "cell — a remark that a scan failed, that its counts were low, or which "
+        "scans to keep — is preserved verbatim as a Data Quality Note, bound to its "
         "file number; the schema field is untouched.",
         attribution=ANGEL_2026_09_22,
     ),

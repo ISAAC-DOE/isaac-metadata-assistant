@@ -2546,7 +2546,14 @@ describe('the Full Description rule over the REAL generated contract', () => {
     // `historical_file_ingestion` and `proposal_acceptance` capability paragraphs) and
     // `POST .../add-to-experiment` 5,257 -> 6,005 (run identity by acquisition, Data
     // Quality Notes as run notes, and no automatic temperature).
-    expect(total).toBe(174352);
+    //
+    // 174,352 -> 174,790 (+438), same day, in response to an independent review: ONE
+    // description changed, `POST .../add-to-experiment` 6,005 -> 6,443 — a new
+    // paragraph stating that an import is read under the destination record's rules
+    // only (`reread_for_target`), and a clause stating that a Data Quality Note is kept
+    // once per acquisition and row however many times the archive is imported. Measured
+    // by the same port, never apportioned.
+    expect(total).toBe(174790);
     // 104,045 -> 114,959 (+10,914): the four new operations, and NO existing
     // description changed — `test_contract_description_parity.py` proves that rather
     // than leaving it asserted here. RE-DERIVED from the served document and never
@@ -2865,7 +2872,10 @@ describe('the Full Description rule over the REAL generated contract', () => {
       // 335 -> 342 (+7), 2026-09-22: `POST .../rules` +3, `GET .../convention-rules`
       // +1, `GET /api/health` 5 -> 7, `POST .../add-to-experiment` 11 -> 12. Measured
       // with the characters, by the same port.
-      342,
+      //
+      // 342 -> 343 (+1), same day: `POST .../add-to-experiment` 12 -> 13, the new
+      // read-under-the-destination's-rules paragraph. Measured with the characters.
+      343,
     );
     // 211 -> 235 (+24): the four new operations carry a lead plus 24 post-lead
     // paragraphs between them. It is asserted separately from the character total
