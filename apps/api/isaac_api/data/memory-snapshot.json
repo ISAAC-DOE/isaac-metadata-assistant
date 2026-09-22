@@ -10492,11 +10492,11 @@
       },
       {
         "path": "apps/web/src/components/WorkflowSpine.tsx",
-        "sha256": "6fe35d0ed1f74c3136cad029f6196131b8bbfd993af1d890237b7b6a929c8a08"
+        "sha256": "f53db3ced5fe2db80d3d1ff617fa989129454143816f822e4997c4b2f153fdcf"
       },
       {
         "path": "apps/web/src/components/icons.tsx",
-        "sha256": "c1ade8d479aeb73a477427140531ba0b0d9769573e9bc85649e2ffd35c9806fc"
+        "sha256": "f0f3aa3ce8b968ce437b8b4bd372c782863a224cb651a42adc4272f68cb4a1eb"
       },
       {
         "path": "apps/web/src/lib/adapt.ts",
@@ -10512,11 +10512,11 @@
       },
       {
         "path": "apps/web/src/lib/labels.ts",
-        "sha256": "7024f3b3498bea30653370a3801edd9a093fd69a3c6d6d9aa0b8348de3415e56"
+        "sha256": "1cb83fb51069989e6271425ef2bb2a00944fe77c842e02610b2a045e60ecb4ca"
       },
       {
         "path": "apps/web/src/lib/routes.ts",
-        "sha256": "6bda62bab25a80d8f3c4e88561eb9aab4f29f5c50bda51a0326895352c6f227b"
+        "sha256": "a65f8b1d30dd2c227f0a95c1b9d056d42aa73bb42433591963df9b0ae8380ee5"
       },
       {
         "path": "apps/web/src/lib/status.ts",
@@ -10524,7 +10524,7 @@
       },
       {
         "path": "apps/web/src/lib/types.ts",
-        "sha256": "6c98e7882744b7d2c240cd7dc1935a18409b1f9a1d3b234e65a16697d29d1127"
+        "sha256": "bbc0098df51fb27099ae9bb63fd488e5246815a3bb9dd8416b42a90919a8e26e"
       },
       {
         "path": "apps/web/src/lib/useFetch.ts",
@@ -10564,7 +10564,7 @@
       },
       {
         "path": "apps/web/src/screens/RecordWorkbench.tsx",
-        "sha256": "74e88b16b1291ac5436f151a7e7f4cb624e397c293ec5bce58a3844d11ef6528"
+        "sha256": "855cdfa08d2b07d784568257149346d9c4f38bbf1b8fde742a7bd1807fe9db77"
       },
       {
         "path": "apps/web/src/screens/SettingsPage.tsx",
@@ -11012,7 +11012,7 @@
       }
     ],
     "served_file_count": 200,
-    "served_manifest_fingerprint": "c53ed3f0964a6b2255bc9fa0e59e67493a8c6051fbfcf363c435d9b001d1cd60"
+    "served_manifest_fingerprint": "1d3e85630e6845aac987f1bc380052f0724dd1651b3f36b70d4f4fd3fc5e053f"
   },
   "overview": {
     "built_at_commit": "caab1d0a69c1733524bda5dde495623bc4b7bad1",

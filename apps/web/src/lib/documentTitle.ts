@@ -41,7 +41,13 @@
 
 import { RECORD_WORKSPACES } from '../components/RecordWorkspaceNav';
 import { LABELS } from './labels';
-import { resolveRecordView, type RecordViewId } from './routes';
+import { CAPTURE_COPY } from './transcriptCaptureContent';
+import {
+  resolveCaptureMethod,
+  resolveRecordView,
+  type CaptureMethodId,
+  type RecordViewId,
+} from './routes';
 
 /**
  * The site name, and the ONE authored string in this module.
@@ -77,6 +83,32 @@ export function composeDocumentTitle(
 /** The workspace label, read from the one registry the sidebar renders from. */
 export function recordWorkspaceTitleSegment(view: RecordViewId): string {
   return RECORD_WORKSPACES.find((w) => w.id === view)?.label ?? view;
+}
+
+/**
+ * A focused capture task's name — the SAME string its Capture Home entry and its
+ * own heading read (`CAPTURE_COPY.intake*Title`), so the tab strip, the chooser and
+ * the page cannot disagree about what the task is called.
+ */
+export function captureMethodTitle(method: CaptureMethodId): string {
+  if (method === 'write') return CAPTURE_COPY.intakeWriteTitle;
+  if (method === 'voice') return CAPTURE_COPY.intakeVoiceTitle;
+  return CAPTURE_COPY.intakeFilesTitle;
+}
+
+/**
+ * The title segments for a record WORKSPACE address, before the record's name.
+ * A focused capture task leads with the task (`Write It Down · Capture`), because
+ * it is the segment that distinguishes this tab from Capture Home — WCAG G88's
+ * reason for putting the page name first. Shared by the route floor and the
+ * record screen's refinement, so the two cannot resolve an address differently.
+ */
+export function recordViewTitleSegments(search: string | URLSearchParams): string[] {
+  const view = resolveRecordView(search);
+  const workspace = recordWorkspaceTitleSegment(view);
+  if (view !== 'capture') return [workspace];
+  const method = resolveCaptureMethod(search);
+  return method === 'home' ? [workspace] : [captureMethodTitle(method), workspace];
 }
 
 /**
@@ -127,7 +159,7 @@ export function routeDocumentTitle(pathname: string, search: string): string | n
     // carrying only `?run=<id>` is titled `Runs`, both because that is the
     // workspace actually rendered. Getting this wrong would put a false claim
     // about the page in the one place a reader cannot see the page to check it.
-    return composeDocumentTitle([recordWorkspaceTitleSegment(resolveRecordView(search))]);
+    return composeDocumentTitle(recordViewTitleSegments(search));
   }
 
   switch (path) {

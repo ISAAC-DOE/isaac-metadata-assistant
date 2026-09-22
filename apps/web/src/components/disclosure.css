@@ -1,0 +1,70 @@
+/*
+ * Disclosure — see `Disclosure.tsx`. The row is the target: full width, a real
+ * hover, a focus ring, an expanded state. Tokens only.
+ */
+.disclosure {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-inner);
+  background: var(--surface);
+}
+.disclosure-heading {
+  margin: 0;
+  font: inherit;
+}
+.disclosure-trigger {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  width: 100%;
+  min-height: 40px;
+  padding: var(--space-sm) var(--space-md);
+  border: 0;
+  border-radius: var(--radius-inner);
+  background: transparent;
+  color: var(--text-primary);
+  font-size: var(--font-size-body);
+  font-weight: var(--font-weight-medium);
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.12s ease;
+}
+.disclosure-trigger:hover {
+  background: var(--border-faint);
+}
+.disclosure-trigger:active {
+  background: var(--action-tint);
+}
+.disclosure-trigger:focus-visible {
+  outline: 2px solid var(--action);
+  outline-offset: 2px;
+}
+.disclosure.is-open > .disclosure-trigger,
+.disclosure.is-open > .disclosure-heading > .disclosure-trigger {
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+}
+.disclosure-chevron {
+  flex: none;
+  color: var(--text-secondary);
+  transition: transform 0.16s ease;
+}
+.disclosure.is-open .disclosure-trigger .disclosure-chevron {
+  transform: rotate(90deg);
+}
+.disclosure-summary {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.disclosure-meta {
+  flex: none;
+  color: var(--text-secondary);
+  font-size: var(--font-size-meta);
+  font-weight: var(--font-weight-regular);
+}
+.disclosure-body {
+  padding: var(--space-md);
+  border-top: 1px solid var(--border-faint);
+}
+.disclosure-body[hidden] {
+  display: none;
+}

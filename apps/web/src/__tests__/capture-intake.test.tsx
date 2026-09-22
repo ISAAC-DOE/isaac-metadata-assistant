@@ -1,276 +1,186 @@
 /**
- * THE CAPTURE INTAKE CHOOSER — the three routes in, and what each may claim.
+ * CAPTURE HOME — the four ways in, and what each may claim.
  *
- * The owner asked for capture to come first, with a choice between bringing
- * files and recording by voice. Measured over HTTP, BOTH of those are externally
- * blocked in this build and the unnamed third is not:
+ * REWRITTEN 2026-09-22 (owner QA C1), and the rewrite INVERTS rather than drops
+ * what the old file pinned:
  *
- *     POST .../transcript       -> 200   typed/pasted text -> note -> proposals
- *     POST /api/transcription   -> 501   no_provider_configured
- *     POST /api/uploads         -> 403   unconditional
- *
- * So the honesty tests here are not decoration: a chooser is exactly the surface
- * where a false affordance costs a scientist the most, because they pick a route
- * and commit to it before discovering it does not work.
+ *  - ~~"writing and recording open the capture panel"~~ — the chooser no longer
+ *    expands a panel beneath itself (1,795px empty, 4,297px after Start Writing,
+ *    and Start Writing and Open Recorder opened the SAME panel). Each way in is
+ *    now a LINK to a focused view on this record (`?view=capture&method=…`), so it
+ *    is addressable, bookmarkable and reachable again with Back. Asserted below.
+ *  - The route that works in every deployment is still the ONE primary action,
+ *    and still first — unchanged, and still mutation-guarded.
+ *  - The honesty bans are unchanged in kind: Capture Home must never claim
+ *    transcription works, and the files route must never claim a file is uploaded
+ *    or read. What moved is the honest SENTENCE the ban could otherwise be
+ *    satisfied by deleting: the chooser now names the real voice alternative
+ *    ("type what was said") instead of the provider paragraph, which lives with
+ *    the local recorder (the capability seam's own report) and is pinned there.
+ *  - ~~The chooser and the panel, wired together (one primary control; open,
+ *    close, reopen)~~ — the pairing no longer exists on one screen. The
+ *    single-primary property is asserted over Capture Home itself; the focused
+ *    views' own behaviour is `capture-workspace.test.tsx`'s.
  */
 
-import { describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, within } from '@testing-library/react';
+import { describe, expect, it } from 'vitest';
+import { render, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
-import { useState } from 'react';
 import { CaptureIntake } from '../components/CaptureIntake';
-
-/** Any well-formed record id: the fourth intake card builds a link from it. */
-const FIXTURE_EXPERIMENT_ID = '01SYNTHTESTEXP000000000000';
-import { TranscriptCapturePanel } from '../components/TranscriptCapturePanel';
 import { CAPTURE_COPY } from '../lib/transcriptCaptureContent';
-import { ROUTES } from '../lib/routes';
+import type { ApiCaptureSummary } from '../lib/types';
 
-function renderIntake(
-  overrides: Partial<Parameters<typeof CaptureIntake>[0]> = {},
+const RECORD = '/record/01SYNTHTESTEXP000000000000';
+
+function renderHome(
+  captureSummary: ApiCaptureSummary | null = null,
+  search = '?view=capture',
 ) {
-  const onOpenCapture = vi.fn();
-  const onOpenRecorder = vi.fn();
-  const view = render(
+  return render(
     <MemoryRouter
+      initialEntries={[`${RECORD}${search}`]}
       future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
     >
-      {/* `experimentId` before the spread, so an override can still replace it —
-          the fourth intake route (2026-09-14) links to this record's own
-          `?view=runs`, so the component now requires the id. */}
-      <CaptureIntake
-        onOpenCapture={onOpenCapture}
-        onOpenRecorder={onOpenRecorder}
-        experimentId={FIXTURE_EXPERIMENT_ID}
-        {...overrides}
-      />
+      <CaptureIntake captureSummary={captureSummary} />
     </MemoryRouter>,
   );
-  return { ...view, onOpenCapture, onOpenRecorder };
 }
 
-const card = (route: string) =>
-  document.querySelector<HTMLElement>(
-    `.capture-intake-card[data-route="${route}"]`,
-  )!;
+const row = (route: string) =>
+  document.querySelector<HTMLElement>(`.capture-method[data-route="${route}"]`)!;
+const query = (href: string | null) => new URLSearchParams((href ?? '').split('?')[1] ?? '');
 
-describe("the intake chooser offers three routes", () => {
-  it("names all three, each with its own action", () => {
-    renderIntake();
+describe('Capture Home offers four ways in', () => {
+  it('names all four, each with ONE action of its own', () => {
+    renderHome();
     for (const [route, title] of [
-      ["write", CAPTURE_COPY.intakeWriteTitle],
-      ["voice", CAPTURE_COPY.intakeVoiceTitle],
-      ["files", CAPTURE_COPY.intakeFilesTitle],
+      ['write', CAPTURE_COPY.intakeWriteTitle],
+      ['voice', CAPTURE_COPY.intakeVoiceTitle],
+      ['files', CAPTURE_COPY.intakeFilesTitle],
+      ['runs', CAPTURE_COPY.intakeRunTitle],
     ] as const) {
-      const el = card(route);
-      expect(el, `no card for ${route}`).toBeTruthy();
-      expect(within(el).getByRole("heading", { level: 3 }).textContent).toBe(
-        title,
-      );
+      const el = row(route);
+      expect(el, `no row for ${route}`).toBeTruthy();
+      expect(within(el).getByRole('heading', { level: 3 }).textContent).toBe(title);
+      expect(within(el).getAllByRole('link'), `${route} has more than one action`).toHaveLength(1);
+      expect(within(el).queryAllByRole('button')).toHaveLength(0);
     }
   });
 
-  it("writing and recording open the capture panel; files LEAVES for Historical Import", () => {
-    const { onOpenCapture, onOpenRecorder } = renderIntake();
-
-    fireEvent.click(within(card("write")).getByRole("button"));
-    expect(onOpenCapture).toHaveBeenCalledTimes(1);
-
-    fireEvent.click(within(card("voice")).getByRole("button"));
-    expect(onOpenRecorder).toHaveBeenCalledTimes(1);
-
-    // A real link, because it leaves this record for a separately-routed
-    // destination — middle-clickable and bookmarkable, not a left-click button.
-    const link = within(card("files")).getByRole("link");
-    expect(link.getAttribute("href")).toBe(ROUTES.imports);
+  it('each way in is a LINK to its focused view on this record, not a panel toggle', () => {
+    renderHome();
+    for (const method of ['write', 'voice', 'files'] as const) {
+      const href = within(row(method)).getByRole('link').getAttribute('href');
+      expect(href?.startsWith(RECORD), href ?? '').toBe(true);
+      expect(query(href).get('view')).toBe('capture');
+      expect(query(href).get('method')).toBe(method);
+    }
+    // The fourth is the Runs workspace itself, which needs no method.
+    const runs = query(within(row('runs')).getByRole('link').getAttribute('href'));
+    expect(runs.get('view')).toBe('runs');
+    expect(runs.has('method')).toBe(false);
   });
 
-  it("MUTATION-GUARDED — the route that WORKS today is the one styled primary", () => {
-    /*
-     * The ordering claim. `write` is the only route that reaches a proposal in
-     * this build, so it must be the primary action; making the voice or files
-     * card primary would steer a scientist into a door that does not open.
-     */
-    renderIntake();
-    expect(within(card("write")).getByRole("button").className).toContain(
-      "btn-primary",
-    );
-    expect(within(card("voice")).getByRole("button").className).not.toContain(
-      "btn-primary",
-    );
-    expect(within(card("files")).getByRole("link").className).not.toContain(
-      "btn-primary",
-    );
+  it('keeps the rest of the address, and drops a stale proposal focus on the way in', () => {
+    renderHome(null, '?view=capture&run=RUNA&proposal=P1');
+    const write = query(within(row('write')).getByRole('link').getAttribute('href'));
+    expect(write.get('run')).toBe('RUNA');
+    // `view=capture&proposal=` resolves to Proposals, so carrying it would
+    // reopen Proposals instead of the task the reader chose.
+    expect(write.has('proposal')).toBe(false);
+  });
 
-    // ...and it is FIRST in the document, not merely styled.
-    const cards = Array.from(document.querySelectorAll(".capture-intake-card"));
-    expect(cards[0]!.getAttribute("data-route")).toBe("write");
+  it('MUTATION-GUARDED — the route that works in every deployment is the ONE primary action, and first', () => {
+    renderHome();
+    const primaries = Array.from(document.querySelectorAll('.btn-primary'));
+    expect(primaries).toHaveLength(1);
+    expect(row('write').contains(primaries[0]!)).toBe(true);
+    const rows = Array.from(document.querySelectorAll('.capture-method'));
+    expect(rows[0]!.getAttribute('data-route')).toBe('write');
   });
 });
 
-describe("what the chooser must NOT claim", () => {
-  it("MUTATION-GUARDED — never says transcription, speech-to-text or a model is available", () => {
-    /*
-     * THE CLAIM THAT WOULD COST THE MOST. `POST /api/transcription` answers
-     * `501 no_provider_configured` in every deployment, Dean deferred D1–D9, and
-     * `ai-integration-decision-packet.md` §6 bans a fake `Connected` state.
-     *
-     * Banned as CLAIM SHAPES rather than as words: the voice card has to be able
-     * to SAY "speech-to-text" in order to explain that it is off, so a bare
-     * substring ban would forbid the honest sentence — the polarity trap this
-     * repository has been caught by twice today.
-     */
-    renderIntake();
-    const text = document.querySelector(".capture-intake")!.textContent ?? "";
-    for (const claim of [
-      /transcri\w* (?:is|are) (?:on|enabled|available|ready|configured)/i,
-      /we (?:will )?transcribe/i,
-      /automatically transcrib/i,
-      /speech-to-text (?:is|will be) (?:on|enabled|available|ready)/i,
-      /(?:model|provider) (?:is )?connected/i,
-      /turns? your (?:voice|speech|audio) into text/i,
-    ]) {
-      expect(text, `the chooser claims: ${claim}`).not.toMatch(claim);
-    }
-
-    // ...and the HONEST statement is present, so the ban cannot be satisfied by
-    // deleting the explanation.
-    expect(text).toContain(CAPTURE_COPY.intakeVoiceLimit);
-    expect(text.toLowerCase()).toContain("not turned on in this deployment");
+describe('the one-line summary of what the record holds', () => {
+  it('states the server’s counts and links to the ONE review surface', () => {
+    renderHome({ notes_total: 3, proposals_open: 2, unreadable_entries: 0 });
+    const summary = document.querySelector('.capture-home-summary')!;
+    expect(summary.textContent).toContain('3 notes · 2 to review');
+    const review = within(summary as HTMLElement).getByRole('link');
+    expect(review).toHaveAccessibleName(/^Review/);
+    expect(query(review.getAttribute('href')).get('view')).toBe('proposals');
   });
 
-  it("POSITIVE CONTROL — those patterns catch the claims they forbid", () => {
-    // Six `not.toMatch` assertions passing is indistinguishable from six regexes
-    // that match nothing.
-    const MUST_CATCH: ReadonlyArray<readonly [RegExp, string]> = [
-      [
-        /transcri\w* (?:is|are) (?:on|enabled|available|ready|configured)/i,
-        "Transcription is available",
-      ],
-      [/we (?:will )?transcribe/i, "we transcribe it for you"],
-      [/automatically transcrib/i, "automatically transcribed"],
-      [
-        /speech-to-text (?:is|will be) (?:on|enabled|available|ready)/i,
-        "Speech-to-text is ready",
-      ],
-      [/(?:model|provider) (?:is )?connected/i, "provider connected"],
-      [
-        /turns? your (?:voice|speech|audio) into text/i,
-        "turns your voice into text",
-      ],
+  it('says NOTHING while the counts are unknown — never "0"', () => {
+    renderHome(null);
+    expect(document.querySelector('.capture-home-summary')).toBeNull();
+  });
+
+  it('offers no Review link when there is nothing to review', () => {
+    renderHome({ notes_total: 0, proposals_open: 0, unreadable_entries: 0 });
+    const summary = document.querySelector('.capture-home-summary')!;
+    expect(summary.textContent).toContain(CAPTURE_COPY.homeSummaryLabel);
+    expect(within(summary as HTMLElement).queryByRole('link')).toBeNull();
+  });
+});
+
+describe('what Capture Home must NOT claim', () => {
+  const CLAIMS = [
+    /transcri\w* (?:is|are) (?:on|enabled|available|ready|configured)/i,
+    /we (?:will )?transcribe/i,
+    /automatically transcrib/i,
+    /speech-to-text (?:is|will be) (?:on|enabled|available|ready)/i,
+    /(?:model|provider) (?:is )?connected/i,
+    /turns? your (?:voice|speech|audio) into text/i,
+    /\bconnected\b/i,
+  ];
+
+  it('MUTATION-GUARDED — never says transcription, speech-to-text or a connection is available', () => {
+    renderHome({ notes_total: 1, proposals_open: 1, unreadable_entries: 0 });
+    const text = document.querySelector('.capture-intake')!.textContent ?? '';
+    for (const claim of CLAIMS) {
+      expect(text, `Capture Home claims: ${claim}`).not.toMatch(claim);
+    }
+    // ...and the honest alternative is STATED, so the ban cannot be satisfied by
+    // deleting the voice line: recording here means typing what was said.
+    expect(text).toContain(CAPTURE_COPY.homeVoiceLine);
+    expect(text.toLowerCase()).toContain('type what was said');
+  });
+
+  it('POSITIVE CONTROL — those patterns catch the claims they forbid', () => {
+    const MUST_CATCH = [
+      'Transcription is available',
+      'we transcribe it for you',
+      'automatically transcribed',
+      'Speech-to-text is ready',
+      'provider connected',
+      'turns your voice into text',
+      'Your Claude app is connected',
     ];
-    for (const [pattern, phrasing] of MUST_CATCH) {
-      expect(
-        pattern.test(phrasing),
-        `${pattern} missed ${JSON.stringify(phrasing)}`,
-      ).toBe(true);
-    }
-    // And the shipped limit sentence is NOT caught — the honest wording survives.
-    for (const [pattern] of MUST_CATCH) {
-      expect(pattern.test(CAPTURE_COPY.intakeVoiceLimit), `${pattern}`).toBe(
-        false,
+    MUST_CATCH.forEach((phrasing, i) => {
+      expect(CLAIMS[i]!.test(phrasing), `${CLAIMS[i]} missed ${JSON.stringify(phrasing)}`).toBe(
+        true,
       );
+    });
+    // ...and none of the shipped voice copy trips them.
+    for (const claim of CLAIMS) {
+      expect(claim.test(CAPTURE_COPY.homeVoiceLine)).toBe(false);
+      expect(claim.test(CAPTURE_COPY.voiceLead)).toBe(false);
     }
   });
 
-  it("MUTATION-GUARDED — the files route never says files are uploaded or read", () => {
-    // `POST /api/uploads` is an unconditional 403 and Historical Import keeps a
-    // pointer, a checksum and notes WITHOUT reading bytes.
-    renderIntake();
-    const text = (
-      within(card("files")).getByRole("heading", { level: 3 }).parentElement
-        ?.textContent ?? ""
-    ).toLowerCase();
-    for (const banned of [
-      "upload",
-      "we read your files",
-      "we open",
-      "attach",
-    ]) {
-      expect(text, `the files card claims: ${banned}`).not.toContain(banned);
+  it('MUTATION-GUARDED — the files route never says files are uploaded or read', () => {
+    renderHome();
+    const text = (row('files').textContent ?? '').toLowerCase();
+    for (const banned of ['upload', 'we read your files', 'we open', 'attach']) {
+      expect(text, `the files row claims: ${banned}`).not.toContain(banned);
     }
-    expect(text).toContain("reference");
+    expect(text).toContain('reference');
   });
 
-  it('is not a workflow step: no tick, no lock, no aria-current="step"', () => {
-    // Being FIRST and being a STEP are different claims, and only the first was
-    // asked for. `workflow.py` keeps a state off the spine when no signal can
-    // decide it, and "finished capturing" is not decidable.
-    const { container } = renderIntake();
+  it('is not a workflow step: no tick, no lock, no aria-current="step", no disabled control', () => {
+    const { container } = renderHome({ notes_total: 0, proposals_open: 0, unreadable_entries: 0 });
     expect(container.querySelector('[aria-current="step"]')).toBeNull();
     expect(container.querySelector('[aria-disabled="true"]')).toBeNull();
-    for (const button of Array.from(container.querySelectorAll("button"))) {
-      expect(button.disabled, "a disabled control with no stated reason").toBe(
-        false,
-      );
-    }
-  });
-});
-
-/* ── the chooser DRIVING the panel, which is the part a unit of either misses ── */
-
-/** The real pair, wired as `RecordWorkbench` wires them. */
-function Wired() {
-  const [open, setOpen] = useState(false);
-  return (
-    <MemoryRouter
-      future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
-    >
-      <CaptureIntake
-        onOpenCapture={() => setOpen(true)}
-        onOpenRecorder={() => setOpen(true)}
-        experimentId={FIXTURE_EXPERIMENT_ID}
-      />
-      <TranscriptCapturePanel
-        experimentId="01TESTTESTTESTTESTTESTTEST"
-        open={open}
-        onOpenChange={setOpen}
-      />
-    </MemoryRouter>
-  );
-}
-
-describe("the chooser and the capture panel, wired together", () => {
-  it("MUTATION-GUARDED — exactly ONE primary control, because two was the defect", async () => {
-    /*
-     * SEEN IN A BROWSER BEFORE IT WAS FIXED. The first build of this rendered
-     * "Start Writing" and the panel's own "Capture Experiment Notes" ten pixels
-     * apart, both blue, both doing the same thing. `ExperimentsHome` had already
-     * argued against exactly this: "Two controls for one action is not a styling
-     * nit — it makes a reader stop and work out which one is the real one."
-     */
-    render(<Wired />);
-    expect(document.querySelectorAll(".btn-primary")).toHaveLength(1);
-    expect(
-      Array.from(document.querySelectorAll("button")).map((b) => b.textContent),
-      "the panel rendered its own entry while the chooser owns it",
-    ).not.toContain("Capture Experiment Notes");
-  });
-
-  it("opens on Start Writing, closes, and REOPENS — verified in a browser first", async () => {
-    // The reopen is why the panel takes a controlled `open` rather than a
-    // `defaultOpen`: a reader who closes it and presses Start Writing again
-    // expects it back, and `defaultOpen` only acts on mount.
-    render(<Wired />);
-    const start = () =>
-      Array.from(document.querySelectorAll("button")).find(
-        (b) => b.textContent === "Start Writing",
-      )!;
-    const close = () =>
-      Array.from(document.querySelectorAll("button")).find(
-        (b) => b.textContent === "Close Capture",
-      );
-
-    fireEvent.click(start());
-    expect(close(), "the panel did not open").toBeTruthy();
-
-    fireEvent.click(close()!);
-    expect(close(), "the panel did not close").toBeFalsy();
-
-    fireEvent.click(start());
-    expect(
-      close(),
-      "the panel did not REOPEN — this is the defaultOpen failure mode",
-    ).toBeTruthy();
+    expect(container.querySelectorAll('button:disabled')).toHaveLength(0);
   });
 });

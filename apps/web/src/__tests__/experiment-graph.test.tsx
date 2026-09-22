@@ -118,6 +118,15 @@ async function openGraph(bundle: ExperimentGraphBundle = experimentGraphBundle()
 const nodeButton = (view: RenderResult, name: string | RegExp) =>
   view.getByRole('button', { name });
 
+/** The workflow spine's row for one step, by its label. Throws until rendered. */
+function spineStep(view: RenderResult, label: string): HTMLElement {
+  const li = Array.from(view.container.querySelectorAll('li.spine-step')).find(
+    (el) => el.querySelector('.spine-label')?.textContent === label,
+  );
+  if (!li) throw new Error(`no spine step ${label}`);
+  return li as HTMLElement;
+}
+
 afterEach(() => {
   vi.unstubAllGlobals();
 });
@@ -127,8 +136,18 @@ describe('the graph lives inside the record, and is linkable', () => {
     stubFetchRoutes(routesFor(experimentGraphBundle()));
     const view = renderAt(`/record/${GRAPH_EXP_ID}`);
 
-    const fieldsTab = await view.findByRole('link', { name: 'Record Fields' });
-    expect(fieldsTab).toHaveAttribute('aria-current', 'page');
+    /*
+     * ~~`findByRole('link', { name: 'Record Fields' })` carrying
+     * `aria-current="page"`~~ — `Record Fields` left the rail on 2026-09-22
+     * (owner QA N2): it duplicated the spine's `Record Created` step, which links
+     * to the same screen. The field workbench is still the DEFAULT, and the spine
+     * row whose destination it is now carries the "you are here".
+     */
+    // `waitFor` around the ASSERTION: the loading skeleton renders the same row
+    // with no location, so finding the row alone would pass too early.
+    await waitFor(() =>
+      expect(spineStep(view, 'Record Created')).toHaveAttribute('aria-current', 'page'),
+    );
     /*
      * ~~expect(workspaceLink(view, 'Graph')).not.toHaveAttribute('aria-current')~~
      * — the Graph has no sidebar link to carry the attribute since 2026-09-13
@@ -153,9 +172,12 @@ describe('the graph lives inside the record, and is linkable', () => {
      * remaining workspaces must also not falsely claim to be the current page.
      */
     expect(view.queryByRole('link', { name: 'Graph' })).toBeNull();
-    for (const name of ['Record Fields', 'Runs', 'Experiment Data']) {
+    // 2026-09-22: the rail's destinations, and the spine row that reaches Record
+    // Fields — none of them may claim to be the page on screen.
+    for (const name of ['Capture', 'Proposals', 'Runs', 'Activity']) {
       expect(view.getByRole('link', { name })).not.toHaveAttribute('aria-current');
     }
+    expect(spineStep(view, 'Record Created')).not.toHaveAttribute('aria-current', 'page');
   });
 
   it('switching the view writes it to the URL, so the graph can be shared', async () => {
@@ -168,9 +190,9 @@ describe('the graph lives inside the record, and is linkable', () => {
   it('an unrecognised view falls back to the fields, never to a dead screen', async () => {
     stubFetchRoutes(routesFor(experimentGraphBundle()));
     const view = renderAt(`/record/${GRAPH_EXP_ID}?view=constellation`);
-    expect(await view.findByRole('link', { name: 'Record Fields' })).toHaveAttribute(
-      'aria-current',
-      'page',
+    // The fields are reached through the spine's `Record Created` step now (N2).
+    await waitFor(() =>
+      expect(spineStep(view, 'Record Created')).toHaveAttribute('aria-current', 'page'),
     );
   });
 

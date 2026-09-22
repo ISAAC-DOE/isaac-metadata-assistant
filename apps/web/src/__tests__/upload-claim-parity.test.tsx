@@ -806,7 +806,17 @@ describe('R1b §4 · the guard rejects the exact strings that shipped', () => {
  * the voice section (`mcpRoute*`). The ratchet caught the change, which is what
  * it is for — a copy addition to this panel must be a decision, not a drift.
  */
-const CAPTURE_COPY_KEY_COUNTS = { total: 101, strings: 97, functions: 4 };
+/*
+ * 141/135/6, from 101/97/4 on 2026-09-22 (owner QA C1–C5): +48 new, −8 retired
+ * (the old chooser's card paragraphs, now unused). New: Capture Home's
+ * one-line routes, the three focused views' leads, the Write view's privacy line,
+ * the Claude voice path's states, the Files bridge and the live-microphone notice.
+ * Every new string is INSIDE the ban below and passes it as written — none says an
+ * upload route or endpoint does not exist. The two new FUNCTIONS
+ * (`summaryCompact`, `claudeStarter`) build counts and an instruction naming the
+ * record; neither makes an upload or file-reading claim.
+ */
+const CAPTURE_COPY_KEY_COUNTS = { total: 141, strings: 135, functions: 6 };
 
 function captureVoiceAudioHandling(): string {
   return CAPTURE_COPY.voiceAudioHandling;

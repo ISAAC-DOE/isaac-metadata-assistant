@@ -481,9 +481,23 @@ export const LABELS = {
    * `design-handoff/05-design-system/casing-and-copy.md` Register 1, as every other
    * workspace label here is.
    */
-  workspaceCapture: 'Experiment Data',
+  /*
+   * ~~`Experiment Data`~~ — RENAMED `Capture`, 2026-09-22 (owner QA, N3). The
+   * reasoning above was right about the old `Capture & Proposals` name describing
+   * the system's seam; it stopped applying once proposals moved to their own
+   * destination (`workspaceProposals`). What remains here is exactly one act — the
+   * scientist choosing how to get this experiment in — and `Capture` names that act
+   * under the rail's own `Data Capture` group.
+   */
+  workspaceCapture: 'Capture',
   workspaceGraph: 'Graph',
   workspaceActivity: 'Activity',
+  /*
+   * PROPOSALS — the ONE focused review surface for what capture produced: the
+   * suggestions awaiting a person's judgement, and the notes no field could hold.
+   * A destination, never a step (DEC-14): nothing decides when review is finished.
+   */
+  workspaceProposals: 'Proposals',
 
   /* ── ACTIVITY HISTORY (`ACT-003`) ──────────────────────────────────────────
      Every string this surface renders, in one place, because the panel invents no

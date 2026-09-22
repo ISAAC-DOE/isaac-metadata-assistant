@@ -23,7 +23,7 @@
  * plays the same role. If this fix is disconnected, nothing else on this screen
  * re-reads the notes list on its behalf.
  *
- * So this file mounts the REAL `AppRoutes` at `/record/:id?view=capture` — the
+ * So this file mounts the REAL `AppRoutes` at `/record/:id?view=proposals` — the
  * workspace that mounts `UnmappedNotesPanel` — stubs `fetch` and nothing else, and
  * counts `GET …/notes` at the recorded URL.
  *
@@ -187,11 +187,12 @@ describe('the notes live refresh, wired through the real Record Workbench', () =
         return { body: feedPage(changes) };
       },
     } as never);
-    // `?view=capture` — the record screen's four workspaces are `?view=` deep
-    // links on one route, and `UnmappedNotesPanel` lives on `capture`. A bare
-    // `/record/<id>` opens Record Fields, where it is not mounted at all, so
-    // every count below would be a count of zero.
-    return renderAt(`/record/${ID}?view=capture`);
+    // ~~`?view=capture`~~ `?view=proposals` (2026-09-22) — the record screen's
+    // workspaces are `?view=` deep links on one route, and `UnmappedNotesPanel`
+    // moved from Capture to the focused Proposals view. A bare `/record/<id>`
+    // opens Record Fields, where it is not mounted at all, so every count below
+    // would be a count of zero.
+    return renderAt(`/record/${ID}?view=proposals`);
   }
 
   beforeEach(() => {

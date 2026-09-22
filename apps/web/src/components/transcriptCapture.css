@@ -901,7 +901,8 @@
  * the word and the mark's shape in any case.
  */
 @media (prefers-reduced-motion: reduce) {
-  .capture-section * {
+  .capture-section *,
+  .capture-mode * {
     transition: none !important;
     animation: none !important;
   }
@@ -930,115 +931,9 @@
   color: var(--text-secondary);
   max-width: 74ch;
 }
-/* `auto-fit` with a floor, so three cards sit side by side on a wide record
-   column and stack cleanly at narrow widths without a media query — the record
-   column is already responsive and a fixed 3-up would overflow it at 390px. */
-/*
- * ── FOUR CARDS MUST NOT LEAVE AN ORPHAN, AND `auto-fit` DID ─────────────────
- *
- * `repeat(auto-fit, minmax(15rem, 1fr))` was written for THREE routes in. A
- * fourth was added on 2026-09-14 (the owner: *"the runs should be a part of the
- * initial capture"*), and `auto-fit` packed as many 15rem tracks as fit — three
- * at this record screen's ~901px content width — dropping the fourth onto a row
- * of its own.
- *
- * MEASURED IN CHROMIUM before this change: cards 1-3 at `top: 354` height 323,
- * card 4 alone at `top: 689` height 226. A lone short card under a full row is
- * exactly the "everything is just put in here" texture this slice exists to fix,
- * and it is worse than the three-up it replaced.
- *
- * `auto-fit` CANNOT express "no orphans" — it fills by track width and knows
- * nothing about the item count, so any count that is not a multiple of the
- * computed column count strands a remainder. Four cards need an even split, so
- * the column count is stated rather than derived: 2x2 here, and 4-up only where
- * four 15rem tracks genuinely fit (4 x 15rem + 3 gaps = 63rem ~ 1008px of
- * CONTENT, which this screen's column does not have but a wider mount could).
- * TWO COLUMNS, FULL STOP -- and a 4-up rule was written, MEASURED, and removed.
- * I first added `@media (min-width: 1500px) { repeat(4, ...) }`. It fired on a
- * 1500px-wide window and produced **216px** cards, because the gate was the
- * VIEWPORT while the constraint is the CONTENT COLUMN: this screen's column stays
- * ~901px however wide the window gets (the rail and the assistant rail take the
- * rest), so four tracks in 901px is 216 each -- too narrow for a title, a
- * paragraph and a button, and narrower than the 292px the broken three-up gave.
- * A container query would express it honestly; two columns needs no query at all
- * and is balanced at every width this column actually reaches.
- *
- * `minmax(0, 1fr)` rather than `minmax(15rem, 1fr)`: the floor is what forced
- * the overflow decision, and with an explicit column count a 0 floor lets the
- * cards shrink to the column instead of pushing past it at narrow widths.
- */
-.capture-intake-grid {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: var(--space-md);
-}
-/* One column below the tablet break: two 15rem cards plus a gap need ~504px of
-   content, and the record column has less than that once the rail is stacked. */
-@media (max-width: 640px) {
-  .capture-intake-grid {
-    grid-template-columns: minmax(0, 1fr);
-  }
-}
-.capture-intake-card {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: var(--space-xs);
-  padding: var(--space-md);
-  border: 1px solid var(--border-faint);
-  border-radius: var(--radius-inner);
-  background: var(--surface);
-}
-/* The one route that reaches a proposal today reads as the primary choice. A
-   border weight and the action's own `btn-primary`, NOT a reserved hue:
-   `interaction-states.test.ts` forbids a pass/fail colour carrying a verdict,
-   and "this one works" is a fact about the build, not a verdict. */
-.capture-intake-card[data-route='write'] {
-  border-color: var(--border-strong);
-}
-.capture-intake-icon {
-  display: inline-flex;
-  color: var(--text-secondary);
-}
-.capture-intake-title {
-  margin: 0;
-  font-size: var(--font-size-heading-sm);
-  line-height: var(--line-height-snug);
-  font-weight: var(--font-weight-semibold);
-  color: var(--text-primary);
-}
-.capture-intake-available {
-  margin: 0;
-  font-size: var(--font-size-meta);
-  font-weight: var(--font-weight-medium);
-  color: var(--text-secondary);
-}
-.capture-intake-body {
-  margin: 0;
-  font-size: var(--font-size-body);
-  line-height: var(--line-height-relaxed);
-  color: var(--text-secondary);
-}
-/* The deferred-provider note. On the ADVISORY ramp, which this palette declares
-   as the soft, NON-GATING motif — a missing institutional decision is not a
-   failure of the record, and the reserved fail hue would say it was. */
-.capture-intake-limit {
-  margin: 0;
-  padding: var(--space-xs) var(--space-sm);
-  border-radius: var(--radius-inner);
-  background: var(--advisory-bg);
-  color: var(--advisory-text);
-  font-size: var(--font-size-meta);
-  line-height: var(--line-height-relaxed);
-}
-/* The action sits at the bottom of every card regardless of body length, so the
-   three read as one row of choices rather than three ragged blocks. */
-.capture-intake-card .btn {
-  margin-top: auto;
-}
+/* THE FOUR-CARD GRID THAT USED TO FOLLOW HERE IS GONE (2026-09-22, owner QA C1):
+   Capture Home is now one list of method rows, styled in `capture-workspace.css`.
+   `.capture-intake`, its heading and its intro above are still the page's frame. */
 
 /*
  * THE MCP ROUTE DRAWER — the path that can actually turn speech into text,

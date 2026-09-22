@@ -731,7 +731,9 @@ test.describe('R5 · the Run workspace', () => {
      * other destination leaves it identically, so the click moves to `Record
      * Fields` — the one workspace every record always has.
      */
-    await page.getByRole('link', { name: 'Record Fields' }).click();
+    // ~~`Record Fields`~~ — that row left the rail on 2026-09-22 (N2). Any other
+    // destination leaves Runs identically; `Activity` is a rail row every record has.
+    await page.getByRole('link', { name: 'Activity' }).click();
     // ATTACHED *AND* HIDDEN, and both halves are needed. Playwright reports a
     // non-existent element as hidden, so `toBeHidden()` alone passes whether the card
     // is hidden (the fixed behaviour) or unmounted (the defect) — it stopped

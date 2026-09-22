@@ -167,7 +167,8 @@ test('measure the change feed poller: cadence, pause, event cost and backoff', a
      `?view=` destinations, and the proposals panel lives on Experiment Data.
      A bare `/record/<id>` opens Record Fields, where it is not in the DOM at all,
      so the wait below would hang for its full timeout rather than fail. */
-  await page.goto(`/record/${TARGET}?view=capture`);
+  // 2026-09-22: the proposals panel moved from Capture to `?view=proposals`.
+  await page.goto(`/record/${TARGET}?view=proposals`);
   await expect(page.getByRole('heading', { name: 'Ingestion Proposals' })).toBeVisible({
     timeout: 180_000,
   });

@@ -83,6 +83,14 @@ import {
   // no trend and no health at all, the same reasoning that chose `BarChart3` for
   // the Statistics destination over a trend or gauge mark.
   History,
+  // 2026-09-22 — the shared state + navigation primitives. `Hourglass` is
+  // "Awaiting Judgment" (time passing, not a verdict); `Minus` is "Not
+  // Applicable"; `ArrowLeft` is the focused capture views' way back to Capture
+  // Home; `Mic` names the local recorder beside its text label.
+  Hourglass,
+  Minus,
+  ArrowLeft,
+  Mic,
   type LucideIcon,
 } from 'lucide-react';
 import type { SourceType } from '../lib/types';
@@ -252,5 +260,10 @@ export {
    */
   Inbox,
   History,
+  CornerRightUp,
+  Hourglass,
+  Minus,
+  ArrowLeft,
+  Mic,
 };
 export type { LucideIcon };

@@ -1,8 +1,13 @@
 import './workflow.css';
-import { Link } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import { Check, Pencil, Lock, TriangleAlert, CircleDashed } from './icons';
 import { LABELS } from '../lib/labels';
-import { ROUTES } from '../lib/routes';
+import {
+  RECORD_CAPTURE_METHOD_PARAM,
+  RECORD_VIEW_PARAM,
+  ROUTES,
+  resolveRecordView,
+} from '../lib/routes';
 import { TUTORIAL_ANCHORS } from '../lib/tutorialSteps';
 import { CANONICAL_STEPS } from '../lib/workflowSteps';
 import type { ApiWorkflow, ApiWorkflowStep } from '../lib/types';
@@ -35,6 +40,75 @@ function isNavigable(state: ApiWorkflowStep['state']): boolean {
   return state === 'completed' || state === 'current';
 }
 
+/**
+ * WHICH STEP'S DESTINATION IS THE PAGE ON SCREEN — read from the URL alone.
+ *
+ * ── WHY THIS EXISTS (owner QA 2026-09-22, N1) ──────────────────────────────
+ *
+ * The spine used to answer two questions with one visual. The server's `current`
+ * step (what the record needs next) was also the only highlighted row, so
+ * `Complete Metadata` stayed blue while the reader was on Runs, Capture, Activity
+ * — and even on `/export`, where the page on screen is Review Export Readiness.
+ * "How complete is this record?" and "where am I?" are different questions, and
+ * each row now answers both separately: a STATE (disc + word, from the server) and
+ * a LOCATION (the selected-page background + `aria-current="page"`, from here).
+ *
+ * DERIVED FROM THE URL, not threaded as a prop, for the reason the document-title
+ * floor gives: a screen that forgot to pass it would leave the spine claiming a
+ * location it is not on. `pathname` excludes the router `basename`, so this is the
+ * same on `/krish`.
+ *
+ * `review_export_readiness` and `export` share one route; the page there is titled
+ * Review Export Readiness (`LABELS.screenExport`), so that is the row it marks.
+ * Any record workspace other than Record Fields marks NO row: the rail's own
+ * destination list says where the reader is, and one "you are here" is the rule.
+ */
+export function locationStepFor(pathname: string, search: string): string | null {
+  const path = pathname.replace(/\/+$/, '');
+  if (/^\/record\/[^/]+\/complete$/.test(path)) return 'complete_metadata';
+  if (/^\/record\/[^/]+\/evidence$/.test(path)) return 'review_evidence';
+  if (/^\/record\/[^/]+\/export$/.test(path)) return 'review_export_readiness';
+  if (/^\/record\/[^/]+$/.test(path)) {
+    return resolveRecordView(search) === 'fields' ? 'load_record' : null;
+  }
+  return null;
+}
+
+/**
+ * `Record Created`'s destination, the Record Fields workspace — and, ON the record
+ * screen, the rest of the address comes along (2026-09-22).
+ *
+ * The rail's own `Record Fields` row copied the current query string, so a focused
+ * run (`?run=`) survived a trip to the fields and back. That row left the rail
+ * (N2) and this step is now the way there, so it keeps the same contract: on
+ * `/record/<id>` it copies the address, drops the capture task, and names
+ * `view=fields` explicitly (a bare `?run=` would otherwise resolve to Runs). From
+ * any other record screen it is the plain record address, as it always was.
+ */
+function fieldsHref(recordId: string, pathname: string, search: string): string {
+  if (!/^\/record\/[^/]+\/?$/.test(pathname)) return ROUTES.record(recordId);
+  const next = new URLSearchParams(search);
+  next.delete(RECORD_VIEW_PARAM);
+  next.delete(RECORD_CAPTURE_METHOD_PARAM);
+  if ([...next.keys()].length === 0) return ROUTES.record(recordId);
+  next.set(RECORD_VIEW_PARAM, 'fields');
+  return `${ROUTES.record(recordId)}?${next.toString()}`;
+}
+
+/**
+ * THE STATE WORD — the non-colour, non-shape half of a row's state, in the
+ * scientist's words. Rendered from the server's `state` verbatim; nothing is
+ * re-derived. `export` in `current` says `Ready`, because `derive_workflow` makes
+ * it current exactly when `review_export_readiness` is satisfied and the record is
+ * not yet exported — i.e. ready to export.
+ */
+export function stepStateWord(step: Pick<ApiWorkflowStep, 'id' | 'state'>): string {
+  if (step.state === 'completed') return 'Complete';
+  if (step.state === 'current') return step.id === 'export' ? 'Ready' : 'Current requirement';
+  if (step.state === 'reopened') return 'Needs review';
+  return 'Locked';
+}
+
 function Disc({ state }: { state: ApiWorkflowStep['state'] }) {
   return (
     <span className="spine-disc" aria-hidden="true">
@@ -50,14 +124,19 @@ function Disc({ state }: { state: ApiWorkflowStep['state'] }) {
  * The permanent canonical workflow spine (Record Created → Complete Metadata →
  * Review Evidence → Review Export Readiness → Export). Order and per-step state
  * are DERIVED by the backend and rendered here verbatim — the client never
- * re-derives completion. `current` is visually distinct and carries
- * aria-current="step"; `completed` steps stay green and link back to their
+ * re-derives completion. Each row carries TWO independent signals: its STATE
+ * (disc + state word, from the server) and whether it is the displayed PAGE
+ * (selected background + aria-current="page", from the URL — see
+ * `locationStepFor`). `current` keeps aria-current="step" when it is not also
+ * the displayed page; `completed` steps link back to their
  * surface; `reopened` (was-complete, now regressed) is distinct from a
  * never-started `blocked` step by both style and its reason text; blocked and
  * reopened steps are non-navigable and aria-disabled. Never color-only — every
  * state keeps its text label (and, when unsatisfied, a reason).
  */
 export function WorkflowSpine({ workflow, recordId }: WorkflowSpineProps) {
+  const { pathname, search } = useLocation();
+  const locationStep = recordId ? locationStepFor(pathname, search) : null;
   if (workflow === null) {
     // Loading skeleton: labels only, muted discs, nothing navigable, no counts.
     // The fixed order + labels come from `lib/workflowSteps.ts` (CANONICAL_STEPS),
@@ -126,11 +205,31 @@ export function WorkflowSpine({ workflow, recordId }: WorkflowSpineProps) {
               workflow.ordered_steps.indexOf(step);
           const route = STEP_ROUTE[step.id];
           const href =
-            recordId && route && isNavigable(step.state) ? route(recordId) : undefined;
+            recordId && route && isNavigable(step.state)
+              ? step.id === 'load_record'
+                ? fieldsHref(recordId, pathname, search)
+                : route(recordId)
+              : undefined;
           const disc = <Disc state={step.state} />;
+          const isLocation = step.id === locationStep;
+          /*
+           * `aria-current`: `page` on the row whose destination is on screen, and
+           * `step` on the server's current requirement when it is a DIFFERENT row.
+           * When they coincide, `page` wins and the visible state word still says
+           * "Current requirement", so neither fact is lost to a screen reader.
+           */
+          const ariaCurrent = isLocation ? 'page' : step.current ? 'step' : undefined;
           const text = (
             <span className="spine-text">
               <span className="spine-label">{step.label}</span>
+              {/* The state word. Visible on the vertical desktop spine; in the
+                  compact <=1024px stepper it is visually hidden (the disc's SHAPE
+                  carries the state there) and stays in the accessibility tree —
+                  the same `.spine-meta-compact-narrow` treatment, and therefore the
+                  same layout-sweep allowance, as a non-current reason. */}
+              <span className="spine-state spine-meta-compact-narrow">
+                {stepStateWord(step)}
+              </span>
               {/* The reason is shown for unsatisfied steps only, giving a
                * non-color signal that also distinguishes reopened from blocked.
                *
@@ -159,8 +258,8 @@ export function WorkflowSpine({ workflow, recordId }: WorkflowSpineProps) {
           return (
             <li
               key={step.id}
-              className={`spine-step ${step.state}`}
-              aria-current={step.current ? 'step' : undefined}
+              className={`spine-step ${step.state}${isLocation ? ' is-location' : ''}`}
+              aria-current={ariaCurrent}
               aria-disabled={isNavigable(step.state) ? undefined : true}
             >
               {href ? (

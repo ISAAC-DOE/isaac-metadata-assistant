@@ -380,12 +380,34 @@ export async function createExperimentThroughTheUi(page: Page, title: string): P
 export async function openWorkspace(
   page: Page,
   id: string,
-  view: 'fields' | 'runs' | 'capture' | 'graph'
+  view: WorkspaceView
 ): Promise<void> {
   await page.goto(`/record/${id}?view=${view}`);
+  await expectWorkspaceOpen(page, view, `the ${view} workspace did not open on /record/${id}`);
+}
+
+/**
+ * The record screen's switchable destinations. 2026-09-22 (owner QA N2/N3):
+ * `proposals` joined (the review surface the proposals list and the notes queue
+ * moved to), `capture` is Capture Home, and `fields` has no rail row — it is
+ * reached through the workflow spine's `Record Created` step, whose row carries
+ * `aria-current="page"` while Record Fields is open.
+ */
+type WorkspaceView = 'fields' | 'runs' | 'capture' | 'proposals';
+
+async function expectWorkspaceOpen(page: Page, view: WorkspaceView, message: string): Promise<void> {
+  if (view === 'fields') {
+    await expect(
+      page.locator('li.spine-step', { has: page.locator('.spine-label', { hasText: /^Record Created$/ }) }),
+      message
+    ).toHaveAttribute('aria-current', 'page');
+    return;
+  }
+  // `exact`: Capture Home's "Open Voice Capture" and "Review proposals and notes"
+  // links contain these labels as substrings.
   await expect(
-    page.getByRole('link', { name: WORKSPACE_LABEL[view] }),
-    `the ${view} workspace did not open on /record/${id}`
+    page.getByRole('link', { name: WORKSPACE_LABEL[view], exact: true }),
+    message
   ).toHaveAttribute('aria-current', 'page');
 }
 
@@ -398,23 +420,20 @@ export async function openWorkspace(
  * means the trusted suite exercises the switcher itself rather than only the URL
  * contract behind it.
  */
-export async function switchWorkspace(
-  page: Page,
-  view: 'fields' | 'runs' | 'capture' | 'graph'
-): Promise<void> {
-  await page.getByRole('link', { name: WORKSPACE_LABEL[view] }).click();
-  await expect(
-    page.getByRole('link', { name: WORKSPACE_LABEL[view] }),
-    `the sidebar did not mark ${view} as the open workspace`
-  ).toHaveAttribute('aria-current', 'page');
+export async function switchWorkspace(page: Page, view: WorkspaceView): Promise<void> {
+  if (view === 'fields') {
+    await page.getByRole('link', { name: /^Record Created/ }).click();
+  } else {
+    await page.getByRole('link', { name: WORKSPACE_LABEL[view], exact: true }).click();
+  }
+  await expectWorkspaceOpen(page, view, `the sidebar did not mark ${view} as the open workspace`);
 }
 
-/** The four sidebar labels, verbatim (`lib/labels.ts`). */
+/** The rail labels, verbatim (`lib/labels.ts`). `fields` has none — see above. */
 const WORKSPACE_LABEL = {
-  fields: 'Record Fields',
   runs: 'Runs',
-  capture: 'Experiment Data',
-  graph: 'Graph',
+  capture: 'Capture',
+  proposals: 'Proposals',
 } as const;
 
 /** Add one run THROUGH THE SCREEN, and wait for the count to actually grow.
@@ -470,9 +489,9 @@ export async function backToAllRuns(page: Page): Promise<void> {
  * is about may not exist on the page at all. The default is unchanged from what a
  * reader gets by typing the bare URL.
  */
-/** Navigate to the Review Record screen's Experiment Data workspace and wait
- *  for the proposals panel. */
-export async function openRecord(page: Page, id: string, view = 'capture'): Promise<void> {
+/** Navigate to the Review Record screen's Proposals view and wait for the
+ *  proposals panel. (~~`view = 'capture'`~~ — the panel moved there 2026-09-22.) */
+export async function openRecord(page: Page, id: string, view = 'proposals'): Promise<void> {
   await page.goto(`/record/${id}?view=${view}`);
   await expect(page.getByRole('heading', { name: 'Ingestion Proposals' })).toBeVisible();
 }

@@ -872,8 +872,8 @@ const STATES: readonly VisualState[] = [
     id: 'record-unmapped-notes',
     what: 'Record → Unmapped Notes — captured content with no confident schema home, kept rather than forced',
     async reach({ page, app }) {
-      // Second of the three panels on the Experiment Data workspace.
-      await app.gotoExample(`/record/${SEED.partial}?view=capture`);
+      // 2026-09-22: the notes queue moved from Capture to the focused Proposals view.
+      await app.gotoExample(`/record/${SEED.partial}?view=proposals`);
       await settled(page);
       const heading = page.getByRole('heading', { name: 'Unmapped Notes' }).first();
       await expect(heading).toBeVisible({ timeout: 20_000 });

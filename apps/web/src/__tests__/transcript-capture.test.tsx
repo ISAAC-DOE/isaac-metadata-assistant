@@ -3899,3 +3899,173 @@ describe('the elapsed indicator survives a throttled timer', () => {
     vi.useRealTimers();
   });
 });
+
+/* ── THE FOCUSED VIEWS' MODES (2026-09-22, owner QA C2/C3) ────────────────────
+ *
+ * The record screen now draws this ONE panel as the Write view (`mode="write"`)
+ * or inside the Voice view's "Record Locally Instead" disclosure
+ * (`mode="voice"`). Every test above drives the composite (no `mode`), which is
+ * unchanged. These pin what the modes add and — the part a mode could quietly
+ * lose — what they must keep: the privacy state in sight, every server fact the
+ * reading returned still reachable, and a live microphone never folded away.
+ */
+function renderMode(mode: 'write' | 'voice', extra: Record<string, unknown> = {}) {
+  return render(
+    <MemoryRouter
+      initialEntries={['/']}
+      future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+    >
+      <TranscriptCapturePanel
+        experimentId={EXP}
+        open
+        onOpenChange={() => {}}
+        mode={mode}
+        {...extra}
+      />
+    </MemoryRouter>,
+  );
+}
+
+describe('mode="write" — the focused Write view', () => {
+  it('shows the privacy line, the form and a closed guide — and no panel entry, no voice controls', async () => {
+    installRecorder(vi.fn(async () => ({ getTracks: () => [{ stop: vi.fn() }] })));
+    stubFetchRoutes(BASE_ROUTES as never);
+    renderMode('write');
+    expect(await screen.findByLabelText('Transcript')).toBeInTheDocument();
+    expect(screen.getByText(CAPTURE_COPY.writePrivacyLine)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: CAPTURE_COPY.entryOpen })).toBeNull();
+    expect(screen.queryByRole('button', { name: CAPTURE_COPY.entryClose })).toBeNull();
+    expect(screen.queryByRole('button', { name: CAPTURE_COPY.voiceRecord })).toBeNull();
+    const guide = screen.getByRole('button', { name: CAPTURE_COPY.writeGuideHeading });
+    expect(guide).toHaveAttribute('aria-expanded', 'false');
+    // The guide's content is disclosed, not deleted.
+    const body = document.getElementById(guide.getAttribute('aria-controls')!)!;
+    expect(body.textContent).toContain(CAPTURE_GUIDANCE_SENTENCE);
+  });
+
+  it('moves the field hints behind accessible "?" tips instead of printing them', async () => {
+    stubFetchRoutes(BASE_ROUTES as never);
+    renderMode('write');
+    await screen.findByLabelText(CAPTURE_COPY.runLabel);
+    // In the DOM (so the definition stays reachable) but not shown until asked.
+    expect(screen.getByText(CAPTURE_COPY.runHint)).not.toBeVisible();
+    const tip = screen.getByRole('button', { name: `About ${CAPTURE_COPY.runTipSubject}` });
+    fireEvent.click(tip);
+    expect(screen.getByText(CAPTURE_COPY.runHint)).toBeVisible();
+    // The consequence of finalizing with no run is NOT a tip: it stays at the
+    // point of action, beside Finalize, once there is text to finalize.
+    fireEvent.change(screen.getByLabelText('Transcript'), { target: { value: 'x' } });
+    expect(screen.getByText(CAPTURE_COPY.finalizePreflightNoRun)).toBeInTheDocument();
+  });
+
+  it('the result is compact: counts and two actions first, every server detail one press away', async () => {
+    stubFetchRoutes({
+      ...BASE_ROUTES,
+      [TRANSCRIPT]: {
+        body: reading({
+          review_required: [
+            { field_path: 'context.temperature_K', outcome: 'review_required', reason: 'two values' },
+          ],
+        }),
+      },
+    } as never);
+    const onReviewProposals = vi.fn();
+    renderMode('write', { onReviewProposals });
+    await typeAndFinalize();
+    expect(await screen.findByText(CAPTURE_COPY.summaryCompact(1, 1))).toBeInTheDocument();
+    // A contradiction to resolve is NEVER disclosed away (DEC-35).
+    expect(screen.getByText(CAPTURE_COPY.reviewHeading)).toBeVisible();
+    // The rest — notes, retention, the accept contract — is behind one disclosure.
+    const details = screen.getByRole('button', { name: CAPTURE_COPY.readingDetailsHeading });
+    const body = document.getElementById(details.getAttribute('aria-controls')!)!;
+    expect(body.hidden).toBe(true);
+    expect(body.textContent).toContain('The finalized transcript is stored with this record as notes.');
+    expect(body.textContent).toContain('This operation writes no field.');
+
+    fireEvent.click(screen.getByRole('button', { name: CAPTURE_COPY.reviewProposals(1) }));
+    expect(onReviewProposals).toHaveBeenCalledTimes(1);
+    // The announcement names the destination the button goes to, not "below".
+    const status = Array.from(document.querySelectorAll('[role="status"]')).map((el) => el.textContent);
+    expect(status.some((t) => /Review them in Proposals\./.test(t ?? ''))).toBe(true);
+    expect(status.some((t) => /below/.test(t ?? ''))).toBe(false);
+  });
+
+  it('shares its run choice with the caller both ways, and never picks one itself', async () => {
+    stubFetchRoutes(BASE_ROUTES as never);
+    const onSelectedRunChange = vi.fn();
+    const view = renderMode('write', { selectedRunId: '', onSelectedRunChange });
+    const select = (await screen.findByLabelText(CAPTURE_COPY.runLabel)) as HTMLSelectElement;
+    await waitFor(() => expect(select.options.length).toBeGreaterThan(1));
+    expect(select.value).toBe('');
+    fireEvent.change(select, { target: { value: 'run-1' } });
+    expect(onSelectedRunChange).toHaveBeenLastCalledWith('run-1');
+    const withShared = (selectedRunId: string) => (
+      <MemoryRouter initialEntries={['/']} future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+        <TranscriptCapturePanel
+          experimentId={EXP}
+          open
+          onOpenChange={() => {}}
+          mode="write"
+          selectedRunId={selectedRunId}
+          onSelectedRunChange={onSelectedRunChange}
+        />
+      </MemoryRouter>
+    );
+    // The caller echoes the choice back: nothing moves, nothing loops.
+    view.rerender(withShared('run-1'));
+    expect((screen.getByLabelText(CAPTURE_COPY.runLabel) as HTMLSelectElement).value).toBe('run-1');
+    // A choice made ELSEWHERE (the Record Map's picker clearing it) arrives here.
+    view.rerender(withShared(''));
+    expect((screen.getByLabelText(CAPTURE_COPY.runLabel) as HTMLSelectElement).value).toBe('');
+  });
+});
+
+describe('mode="voice" — the local recorder, secondary', () => {
+  it('is behind a closed "Record Locally Instead" disclosure, with the audio-handling claim inside it', async () => {
+    installRecorder(vi.fn(async () => ({ getTracks: () => [{ stop: vi.fn() }] })));
+    stubFetchRoutes(BASE_ROUTES as never);
+    renderMode('voice');
+    const toggle = await screen.findByRole('button', { name: /Record Locally Instead/ });
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    fireEvent.click(toggle);
+    expect(await screen.findByRole('button', { name: CAPTURE_COPY.voiceRecord })).toBeVisible();
+    expect(screen.getByText(CAPTURE_COPY.voiceAudioHandling)).toBeVisible();
+    // The Claude explanation is NOT repeated inside the recorder.
+    expect(document.querySelector('.capture-mcp-route')).toBeNull();
+  });
+
+  it('MUTATION-GUARDED — a live microphone cannot be folded out of sight', async () => {
+    const stop = vi.fn();
+    installRecorder(vi.fn(async () => ({ getTracks: () => [{ stop }] })));
+    stubFetchRoutes(BASE_ROUTES as never);
+    renderMode('voice');
+    const toggle = await screen.findByRole('button', { name: /Record Locally Instead/ });
+    fireEvent.click(toggle);
+    await act(async () => {
+      fireEvent.click(await screen.findByRole('button', { name: CAPTURE_COPY.voiceRecord }));
+    });
+    await screen.findByRole('button', { name: CAPTURE_COPY.voiceStop });
+    // The row states the live state, and a press does not collapse it.
+    expect(toggle.textContent).toContain(CAPTURE_COPY.voiceRecordingBadge);
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByRole('button', { name: CAPTURE_COPY.voiceStop })).toBeVisible();
+    // Stopping releases the microphone, exactly as in the composite.
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: CAPTURE_COPY.voiceStop }));
+    });
+    expect(stop).toHaveBeenCalled();
+  });
+
+  it('reports the recorder state to the caller, which keeps a live microphone visible elsewhere', async () => {
+    installRecorder(vi.fn(async () => ({ getTracks: () => [{ stop: vi.fn() }] })));
+    stubFetchRoutes(BASE_ROUTES as never);
+    const onVoiceStateChange = vi.fn();
+    renderMode('voice', { onVoiceStateChange });
+    fireEvent.click(await screen.findByRole('button', { name: /Record Locally Instead/ }));
+    await act(async () => {
+      fireEvent.click(await screen.findByRole('button', { name: CAPTURE_COPY.voiceRecord }));
+    });
+    await waitFor(() => expect(onVoiceStateChange).toHaveBeenLastCalledWith('recording'));
+  });
+});

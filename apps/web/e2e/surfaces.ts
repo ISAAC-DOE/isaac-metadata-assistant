@@ -232,11 +232,56 @@ export const SURFACES: readonly Surface[] = [
      * is not closed here; driving the disclosure remains its own slice, exactly as
      * that note says.
      */
+    /*
+     * 2026-09-22 (owner QA C1): this is now CAPTURE HOME only — the four ways in
+     * and a one-line summary. The notes queue and the proposals list it used to
+     * mount moved to `record-proposals` below, and the transcript form to
+     * `record-capture-write`; both are registered IN THE SAME CHANGE, for the
+     * `QA-018` reason `record-activity` records, so no panel leaves the sweep.
+     */
     id: 'record-capture',
-    name: 'Record Detail — Experiment Data',
+    name: 'Record Detail — Capture',
     path: `/record/${SEED.partial}?view=capture`,
     scope: 'example',
     ready: { role: 'heading', name: /How do you want to get this experiment in\?/i },
+  },
+  {
+    /*
+     * THE FOCUSED WRITE VIEW (2026-09-22, C2). It closes a gap the entry above
+     * recorded for as long as it existed: the transcript textarea and run select
+     * were NEVER scanned, because the scan did not press the panel's entry. Here
+     * the address itself opens them. New cells; only Linux CI can measure them.
+     */
+    id: 'record-capture-write',
+    name: 'Record Detail — Capture · Write It Down',
+    path: `/record/${SEED.partial}?view=capture&method=write`,
+    scope: 'example',
+    ready: { role: 'heading', name: 'Write It Down' },
+  },
+  {
+    /*
+     * THE FOCUSED VOICE VIEW (2026-09-22, C3): the Claude path read from
+     * `mcp.posture`, and the local recorder behind its disclosure (collapsed, so
+     * the recorder's own controls are scanned only once a reader opens it — the
+     * same bound the capture entry above always had).
+     */
+    id: 'record-capture-voice',
+    name: 'Record Detail — Capture · Record at the Instrument',
+    path: `/record/${SEED.partial}?view=capture&method=voice`,
+    scope: 'example',
+    ready: { role: 'heading', name: 'Record at the Instrument' },
+  },
+  {
+    /*
+     * THE FOCUSED PROPOSALS VIEW (2026-09-22, N3/P3) — the ingestion-proposals list
+     * and the unmapped-notes queue, which `record-capture` scanned until they moved
+     * here. Registered with the move so their coverage is continuous.
+     */
+    id: 'record-proposals',
+    name: 'Record Detail — Proposals',
+    path: `/record/${SEED.partial}?view=proposals`,
+    scope: 'example',
+    ready: { role: 'heading', name: 'Ingestion Proposals' },
   },
   {
     /*
