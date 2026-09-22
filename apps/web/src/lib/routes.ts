@@ -125,12 +125,52 @@ export const RECORD_VIEW_PARAM = 'view';
    submission and the capture group makes for itself. Appended last so no existing
    bookmark or test changes meaning, and `fields` remains what a bare
    `/record/<id>` resolves to. */
-export const RECORD_VIEW_IDS = ['fields', 'runs', 'capture', 'graph', 'activity'] as const;
+/* `proposals` JOINED 2026-09-22 (owner QA, N3/C1/P3): proposal review and the
+   unmapped-notes queue left Capture Home for ONE focused review surface. Appended
+   last for the same reason `activity` was — no existing bookmark changes meaning.
+   It is a DESTINATION, not a workflow step (DEC-14's argument, unchanged). */
+export const RECORD_VIEW_IDS = [
+  'fields',
+  'runs',
+  'capture',
+  'graph',
+  'activity',
+  'proposals',
+] as const;
 
 export type RecordViewId = (typeof RECORD_VIEW_IDS)[number];
 
 export function isRecordView(value: string | null | undefined): value is RecordViewId {
   return RECORD_VIEW_IDS.includes(value as RecordViewId);
+}
+
+/**
+ * WHICH CAPTURE TASK IS OPEN — `?view=capture&method=write`.
+ *
+ * Capture Home (`?view=capture`, no method) offers four ways in; three of them open
+ * a FOCUSED task view on this same record screen, addressed by this parameter so a
+ * task can be linked, bookmarked and reached again with Back. The fourth way in
+ * (enter the scan) is the Runs workspace and needs no method of its own.
+ *
+ * Same `?param=` convention as `view`/`run`/`compare`: read with
+ * `useSearchParams`, anything unrecognised falls back to Capture Home, so there
+ * is no dead route.
+ */
+export const RECORD_CAPTURE_METHOD_PARAM = 'method';
+
+export const CAPTURE_METHOD_IDS = ['write', 'voice', 'files'] as const;
+
+export type CaptureMethodId = (typeof CAPTURE_METHOD_IDS)[number];
+
+/** `home` is Capture Home — the chooser — and is what no/unknown `method` means. */
+export type CaptureView = CaptureMethodId | 'home';
+
+export function resolveCaptureMethod(search: string | URLSearchParams): CaptureView {
+  const params = typeof search === 'string' ? new URLSearchParams(search) : search;
+  const method = params.get(RECORD_CAPTURE_METHOD_PARAM);
+  return CAPTURE_METHOD_IDS.includes(method as CaptureMethodId)
+    ? (method as CaptureMethodId)
+    : 'home';
 }
 
 /**
@@ -280,6 +320,22 @@ export const RECORD_PROPOSAL_PARAM = 'proposal';
 export function resolveRecordView(search: string | URLSearchParams): RecordViewId {
   const params = typeof search === 'string' ? new URLSearchParams(search) : search;
   const requested = params.get(RECORD_VIEW_PARAM);
+  const hasProposalAddress = (params.get(RECORD_PROPOSAL_PARAM) ?? '') !== '';
+  /*
+   * RULE 0 (2026-09-22) — `?view=capture&proposal=<id>` IS A PROPOSAL LINK, and it
+   * opens the focused Proposals view.
+   *
+   * Proposal review used to live on the capture workspace, so every proposal link
+   * ever minted names `view=capture` — including the ones the MCP server mints
+   * (`apps/api/isaac_api/mcp/links.py::proposal_link`, pinned against
+   * `ROUTES.recordProposal` by `apps/api/tests/test_mcp_links.py`). Capture Home no
+   * longer mounts the proposals panel, so honouring the literal `view` would land a
+   * scientist on a chooser where the id is silently inert. A `method` means the
+   * reader chose a capture TASK, which wins over a stale proposal id on the URL.
+   */
+  if (requested === 'capture' && hasProposalAddress && !params.has(RECORD_CAPTURE_METHOD_PARAM)) {
+    return 'proposals';
+  }
   if (isRecordView(requested)) return requested;
   /*
    * AN EMPTY PARAMETER IS ABSENT, AND BOTH HALVES NOW AGREE ON THAT.
@@ -328,9 +384,12 @@ export function resolveRecordView(search: string | URLSearchParams): RecordViewI
    * `?proposal=` deep link would have RENDERED `Experiment Data` while the
    * page TITLE said `Record Fields`. Neither side of that merge conflict was
    * correct alone.
+   *
+   * ~~`return hasProposalAddress ? 'capture' : 'fields'`~~ — 2026-09-22: the
+   * panel moved to the focused `proposals` view, so that is where a bare
+   * `?proposal=` now resolves. The branch order above is unchanged.
    */
-  const hasProposalAddress = (params.get(RECORD_PROPOSAL_PARAM) ?? '') !== '';
-  return hasProposalAddress ? 'capture' : 'fields';
+  return hasProposalAddress ? 'proposals' : 'fields';
 }
 
 /**
@@ -460,8 +519,17 @@ export const ROUTES = {
    *  in another language, for instance — still opens the workspace that can honour
    *  it. The redundancy is deliberate: one half makes new links self-describing, the
    *  other serves every link this helper did not mint. */
+  /*  2026-09-22: the template is UNCHANGED — it is pinned byte-for-byte against the
+   *  MCP server's own mint (`apps/api/tests/test_mcp_links.py`) — and
+   *  `resolveRecordView`'s rule 0 opens it on the focused Proposals view, where
+   *  the panel now lives. */
   recordProposal: (id: string, proposalId: string) =>
     `/record/${id}?${RECORD_VIEW_PARAM}=capture&${RECORD_PROPOSAL_PARAM}=${encodeURIComponent(proposalId)}`,
+  /** A deep link to one focused capture task, e.g.
+   *  `/record/<id>?view=capture&method=write`. Whole-URL links use this; the
+   *  record screen's own controls copy the current query string instead. */
+  recordCapture: (id: string, method: CaptureMethodId) =>
+    `/record/${id}?${RECORD_VIEW_PARAM}=capture&${RECORD_CAPTURE_METHOD_PARAM}=${method}`,
   complete: (id: string) => `/record/${id}/complete`,
   evidence: (id: string) => `/record/${id}/evidence`,
   /** A deep link to ONE Evidence view, e.g. `/record/<id>/evidence?view=graph`.

@@ -38,7 +38,7 @@ import {
   runsPage,
   stubFetchRoutes,
 } from '../test/apiFixtures';
-import { RECORD_WORKSPACES, URL_ONLY } from '../components/RecordWorkspaceNav';
+import { RECORD_WORKSPACES, SPINE_REACHED, URL_ONLY } from '../components/RecordWorkspaceNav';
 import { RECORD_VIEW_IDS, ROUTES, type RecordViewId } from '../lib/routes';
 import { workspaceAgentPrompts, workspaceLabel } from '../screens/RecordWorkbench';
 import * as runAutosaveStore from '../lib/runAutosaveStore';
@@ -111,6 +111,17 @@ function railLinks(): HTMLElement[] {
 }
 const address = () => screen.getByTestId('address').textContent ?? '';
 
+/** The workflow spine's row for one step, by its label (2026-09-22: Record Fields
+ *  is reached through the spine's `Record Created` step, which carries the
+ *  displayed-page location while it is open). */
+function spineStep(label: string): HTMLElement {
+  const li = Array.from(document.querySelectorAll('li.spine-step')).find(
+    (el) => el.querySelector('.spine-label')?.textContent === label,
+  );
+  if (!li) throw new Error(`no spine step ${label}`);
+  return li as HTMLElement;
+}
+
 afterEach(() => {
   vi.unstubAllGlobals();
 });
@@ -118,7 +129,7 @@ afterEach(() => {
 describe('the record workspace list', () => {
   it('offers exactly the declared destinations across the rail, capture FIRST, in two NAMED landmarks', async () => {
     renderAt(`/record/${ID}`);
-    await screen.findByRole('link', { name: 'Record Fields' });
+    await screen.findByRole('link', { name: 'Activity' });
 
     const links = railLinks();
     /*
@@ -149,54 +160,42 @@ describe('the record workspace list', () => {
      * reasoning, including why `DEC-11`'s step 4 — deleting the visualization —
      * is REFUSED by its own dependency condition.
      */
-    expect(links.map((l) => l.getAttribute('aria-label') ?? l.textContent)).toEqual([
-      /*
-       * ORDER CHANGED 2026-09-14 -- `Runs` joined the `Data Capture` group and
-       * is rendered as a child row under the `Experiment Data` card, so it
-       * precedes `Record Fields` in DOM order. ~~['Experiment Data', 'Record
-       * Fields', 'Runs']~~
-       *
-       * Still THREE, and still derived from the route contract below: the guard
-       * is that no `?view=` id becomes unreachable, and `Runs` is as reachable
-       * as it was -- one group higher.
-       */
-      'Experiment Data',
+    /*
+     * *** 2026-09-22 (owner QA N2/N3) — the rail is three groups:
+     * `Data Capture` (Capture · Proposals · Runs), the spine, and `Workspaces`
+     * (Activity · Evidence Trail). ***
+     *
+     * ~~['Experiment Data', 'Runs', 'Record Fields', 'Activity']~~ — inverted in
+     * place, because this list IS the intended design. `Experiment Data` is now
+     * `Capture` (Capture Home); `Proposals` is the one focused review surface the
+     * notes queue and the proposal list moved to; and `Record Fields` left the
+     * rail because it duplicated the spine's `Record Created` step, which links to
+     * the same screen — it is `SPINE_REACHED`, still a first-class `?view=`.
+     */
+    const viewLinks = links.filter((l) => (l.getAttribute('href') ?? '').includes('view='));
+    expect(viewLinks.map((l) => l.getAttribute('aria-label') ?? l.textContent)).toEqual([
+      'Capture',
+      'Proposals',
       'Runs',
-      'Record Fields',
-      /*
-       * *** FOUR SINCE 2026-09-17 — `ACT-003` adds `Activity`. ***
-       *
-       * ~~['Experiment Data', 'Runs', 'Record Fields']~~ — extended in place,
-       * because this list IS the intended design and a future session reads it
-       * as such.
-       *
-       * IT IS IN THE SIDEBAR AND DELIBERATELY NOT `URL_ONLY`, which is the one
-       * decision worth arguing here. `graph` is URL-only by an explicit owner
-       * decision (`EVG-002`/`DEC-04`) that took it OUT of this list; treating a
-       * new destination as URL-only by default would borrow that decision
-       * without it having been made. And `ACT-003` asks for a SCIENTIST-FACING
-       * activity history — a destination reachable only by typing `?view=` is
-       * not scientist-facing in any sense that matters, because nobody can find
-       * it.
-       *
-       * It is LAST, after the three the owner shaped, so nothing about the
-       * existing order or the promoted `Data Capture` group moves.
-       */
       'Activity',
     ]);
     /*
-     * STILL DERIVED FROM THE ROUTE CONTRACT, and the guard's PURPOSE is
-     * unchanged: a fifth `?view=` id with no entry here would be a destination
-     * nothing can reach, which is the defect this assertion exists to name.
-     * What changed is that one id is now deliberately URL-only, so the identity
-     * is stated over the explicit exception rather than over the raw count — a
-     * NEW id still cannot silently become unreachable, because it would have to
-     * be added to `URL_ONLY` on purpose to escape this.
+     * STILL DERIVED FROM THE ROUTE CONTRACT: every `?view=` id is reachable by
+     * exactly one of the rail, the spine, or its address alone. A new id with no
+     * entry here would be a destination nothing can reach, and it would have to
+     * be added to `URL_ONLY` or `SPINE_REACHED` on purpose to escape this.
      */
-    expect(links).toHaveLength(RECORD_VIEW_IDS.length - URL_ONLY.length);
-    expect(
-      RECORD_VIEW_IDS.filter((id) => !URL_ONLY.includes(id)).length,
-    ).toBe(links.length);
+    expect(viewLinks).toHaveLength(
+      RECORD_VIEW_IDS.length - URL_ONLY.length - SPINE_REACHED.length,
+    );
+    for (const id of SPINE_REACHED) expect(URL_ONLY).not.toContain(id);
+    // …and the spine really does reach the one it claims to.
+    expect(spineStep('Record Created').querySelector('a')?.getAttribute('href')).toBe(
+      `/record/${ID}`,
+    );
+    // The Evidence Trail is a row of the Workspaces list now, not a card after it.
+    const trail = within(nav()).getByRole('link', { name: /^Evidence Trail/ });
+    expect(trail.getAttribute('href')).toBe(`/record/${ID}/evidence`);
 
     /*
      * CAPTURE IS FIRST IN THE RAIL, which is the ordering the owner asked for and
@@ -204,7 +203,7 @@ describe('the record workspace list', () => {
      * the array above — `railLinks()` builds that array in the order it wants, so
      * asserting its first element would be asserting the helper.
      */
-    const captureLink = within(captureNav()).getByRole('link', { name: 'Experiment Data' });
+    const captureLink = within(captureNav()).getByRole('link', { name: 'Capture' });
     const firstWorkspaceLink = within(nav()).getAllByRole('link')[0]!;
     expect(
       captureLink.compareDocumentPosition(firstWorkspaceLink) &
@@ -243,7 +242,7 @@ describe('the record workspace list', () => {
      * degrade at all, which is safer.
      */
     renderAt(`/record/${ID}?view=graph`);
-    await screen.findByRole('link', { name: 'Record Fields' });
+    await screen.findByRole('link', { name: 'Activity' });
 
     // Absent from the list...
     expect(
@@ -283,7 +282,7 @@ describe('the record workspace list', () => {
 
   it('switching is a PUSH: Back returns to the workspace the reader left', async () => {
     renderAt(`/record/${ID}`);
-    await screen.findByRole('link', { name: 'Record Fields' });
+    await screen.findByRole('link', { name: 'Activity' });
     expect(address()).toBe(`/record/${ID}`);
 
     fireEvent.click(screen.getByRole('link', { name: 'Runs' }));
@@ -295,7 +294,7 @@ describe('the record workspace list', () => {
      * The property under test is the PUSH, not the destination: any two
      * switches exercise it identically.
      */
-    fireEvent.click(screen.getByRole('link', { name: 'Experiment Data' }));
+    fireEvent.click(screen.getByRole('link', { name: 'Capture' }));
     await waitFor(() => expect(address()).toBe(`/record/${ID}?view=capture`));
 
     /* THE ASSERTION THAT WOULD HAVE FAILED BEFORE. The retired tab bar wrote the
@@ -348,12 +347,12 @@ describe('the record workspace list', () => {
 
   it('COPIES the rest of the query string rather than rebuilding the address', async () => {
     renderAt(`/record/${ID}?run=RUNAAA&at=field:sample.material.name`);
-    await screen.findByRole('link', { name: 'Record Fields' });
+    await screen.findByRole('link', { name: 'Activity' });
 
     /* ~~clicked `Graph`~~ — demoted out of the sidebar (`EVG-002`/`DEC-04`).
        The property is that the OTHER parameters are copied, which any
        destination exercises. */
-    fireEvent.click(screen.getByRole('link', { name: 'Experiment Data' }));
+    fireEvent.click(screen.getByRole('link', { name: 'Capture' }));
     await waitFor(() => {
       const url = new URLSearchParams(address().split('?')[1] ?? '');
       expect(url.get('view')).toBe('capture');
@@ -390,11 +389,9 @@ describe('the record workspace list', () => {
 
     it('does NOT override an explicit view — `?view=fields&run=` stays on the fields', async () => {
       renderAt(`/record/${ID}?view=fields&run=RUNAAA`);
+      // The fields' "you are here" is the spine's Record Created row now (N1/N2).
       await waitFor(() =>
-        expect(screen.getByRole('link', { name: 'Record Fields' })).toHaveAttribute(
-          'aria-current',
-          'page',
-        ),
+        expect(spineStep('Record Created')).toHaveAttribute('aria-current', 'page'),
       );
       /* THE STATE THIS PROTECTS: a run focus survives a trip to another workspace
          and back precisely because the two parameters are independent. A
@@ -406,10 +403,7 @@ describe('the record workspace list', () => {
     it('an empty ?run= is not a focus, and falls back to the fields', async () => {
       renderAt(`/record/${ID}?run=`);
       await waitFor(() =>
-        expect(screen.getByRole('link', { name: 'Record Fields' })).toHaveAttribute(
-          'aria-current',
-          'page',
-        ),
+        expect(spineStep('Record Created')).toHaveAttribute('aria-current', 'page'),
       );
     });
   });
@@ -441,7 +435,8 @@ describe('the record workspace list', () => {
     // ...and the reorder is real on the two workspaces that declare leads, so this
     // test cannot pass over a build where the whole mechanism was deleted.
     expect(workspaceAgentPrompts('runs')[0].intent).toBe('show_inferred_candidates');
-    expect(workspaceAgentPrompts('capture')[0].intent).toBe('review_evidence_conflicts');
+    // 2026-09-22: the judging moved to `proposals`, and its two leads with it.
+    expect(workspaceAgentPrompts('proposals')[0].intent).toBe('review_evidence_conflicts');
   });
 
   it('ROUTES.recordRun and recordCompare MINT the workspace, so new links are self-describing', () => {
@@ -531,7 +526,7 @@ describe('the record workspace list', () => {
  * `live-refresh-request-graph.test.tsx`, on `?view=runs`, where there is no list and
  * no "Showing the first N of M" sentence to fall back on.
  */
-const WORKSPACE_VIEWS = ['fields', 'runs', 'capture', 'graph'] as const;
+const WORKSPACE_VIEWS = ['fields', 'runs', 'capture', 'graph', 'proposals'] as const;
 
 /** How many open questions `bundleRoutes` serves. Read from the fixture rather
  *  than written down, so the assertions cannot drift from what is served. */
@@ -543,7 +538,7 @@ describe('the needs-you banner across the four workspaces', () => {
   it('is rendered on ALL FOUR — the compact form is never a hidden form', async () => {
     for (const view of WORKSPACE_VIEWS) {
       const v = renderAt(`/record/${ID}?view=${view}`);
-      await screen.findByRole('link', { name: 'Record Fields' });
+      await screen.findByRole('link', { name: 'Activity' });
       await waitFor(() => expect(banner(), `no banner on ${view}`).not.toBeNull());
       /* VISIBLE, not merely present. `hidden` is exactly the mechanism the
          workspace panels use, so "in the DOM" is not the claim to make here. */
@@ -582,7 +577,7 @@ describe('the needs-you banner across the four workspaces', () => {
     ).toBeGreaterThan(0);
     onFields.unmount();
 
-    for (const view of ['runs', 'capture', 'graph'] as const) {
+    for (const view of ['runs', 'capture', 'graph', 'proposals'] as const) {
       const v = renderAt(`/record/${ID}?view=${view}`);
       await screen.findByText(`${SEEDED_PENDING} Fields Need Your Confirmation`);
       expect(document.querySelectorAll('.needsyou-item'), `${view} itemised`).toHaveLength(0);
@@ -621,7 +616,7 @@ describe("UX-002 · the record screen's h1", () => {
 
   it('is VISIBLE — not the 1x1px sr-only heading it replaced', async () => {
     renderAt(`/record/${ID}`);
-    await screen.findByRole('link', { name: 'Record Fields' });
+    await screen.findByRole('link', { name: 'Activity' });
     const heading = h1();
     /* jsdom applies no layout, so this asserts the CLASS CONTRACT rather than a
        measured pixel: `.sr-only` is what clipped it to 1x1, and `screens.css`
@@ -633,7 +628,7 @@ describe("UX-002 · the record screen's h1", () => {
 
   it('names the RECORD, from the record\'s own data and no new authored string', async () => {
     renderAt(`/record/${ID}`);
-    await screen.findByRole('link', { name: 'Record Fields' });
+    await screen.findByRole('link', { name: 'Activity' });
     expect(h1().querySelector('.record-page-title-name')!.textContent).toBe(
       experimentDetail.title,
     );
@@ -643,7 +638,7 @@ describe("UX-002 · the record screen's h1", () => {
     const seen = new Map<RecordViewId, string>();
     for (const view of RECORD_VIEW_IDS) {
       const v = renderAt(`/record/${ID}?view=${view}`);
-      await screen.findByRole('link', { name: 'Record Fields' });
+      await screen.findByRole('link', { name: 'Activity' });
       const label = RECORD_WORKSPACES.find((w) => w.id === view)!.label;
       const name = h1().textContent ?? '';
 
@@ -671,7 +666,7 @@ describe("UX-002 · the record screen's h1", () => {
     // this change swapped the element that carries it, and promoting a hidden
     // heading to a visible one is exactly the edit that leaves two behind.
     renderAt(`/record/${ID}?view=capture`);
-    await screen.findByRole('link', { name: 'Record Fields' });
+    await screen.findByRole('link', { name: 'Activity' });
     expect(document.querySelectorAll('h1')).toHaveLength(1);
   });
 
@@ -697,19 +692,19 @@ describe('LIB-005 — reopen-and-continue: visiting a workspace remembers it', (
 
   it('a bare visit remembers `fields`', async () => {
     renderAt(`/record/${ID}`);
-    await screen.findByRole('link', { name: 'Record Fields' });
+    await screen.findByRole('link', { name: 'Activity' });
     expect(lastRecordView(ID)).toBe('fields');
   });
 
   it('a deep link into `runs` remembers `runs`', async () => {
     renderAt(`/record/${ID}?view=runs`);
-    await screen.findByRole('link', { name: 'Record Fields' });
+    await screen.findByRole('link', { name: 'Activity' });
     expect(lastRecordView(ID)).toBe('runs');
   });
 
   it('switching workspaces via the sidebar updates the remembered one', async () => {
     renderAt(`/record/${ID}`);
-    await screen.findByRole('link', { name: 'Record Fields' });
+    await screen.findByRole('link', { name: 'Activity' });
     expect(lastRecordView(ID)).toBe('fields');
 
     /* `screen`, not `within(nav())`: `Runs` joined the `Data Capture` group on
@@ -735,11 +730,11 @@ describe('LIB-005 — reopen-and-continue: visiting a workspace remembers it', (
         <AppRoutes />
       </MemoryRouter>,
     );
-    await screen.findByRole('link', { name: 'Record Fields' });
+    await screen.findByRole('link', { name: 'Activity' });
     expect(lastRecordView(OTHER_ID)).toBe('graph');
 
     renderAt(`/record/${ID}`);
-    await screen.findByRole('link', { name: 'Record Fields' });
+    await screen.findByRole('link', { name: 'Activity' });
     expect(lastRecordView(ID)).toBe('fields');
     expect(lastRecordView(OTHER_ID)).toBe('graph');
   });

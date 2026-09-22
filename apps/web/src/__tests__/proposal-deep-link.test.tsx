@@ -717,7 +717,10 @@ describe('the record screen resolves a bare ?proposal= to the workspace that can
     );
   }
 
-  it('opens Experiment Data, and the panel honours the id it was sent', async () => {
+  /* 2026-09-22: the panel moved from Capture to the focused Proposals view, and a
+     bare `?proposal=` resolves there now. The property — the id lands on the
+     surface that can honour it — is unchanged. */
+  it('opens Proposals, and the panel honours the id it was sent', async () => {
     renderAt(`/record/${EXP}?${RECORD_PROPOSAL_PARAM}=${LINKED}`);
 
     /* The panel is MOUNTED — which is the thing a bare `?proposal=` used not to
@@ -737,9 +740,21 @@ describe('the record screen resolves a bare ?proposal= to the workspace that can
     expect(screen.queryByRole('heading', { name: 'Ingestion Proposals' })).toBeNull();
   });
 
+  it('a link minted by ROUTES.recordProposal (`view=capture&proposal=`) opens Proposals too', async () => {
+    // Every proposal link ever minted — including the MCP server's own
+    // (`mcp/links.py::proposal_link`) — names `view=capture`. Capture Home no
+    // longer mounts the panel, so the address must reach the view that does.
+    renderAt(ROUTES.recordProposal(EXP, LINKED));
+    await screen.findByRole('heading', { name: 'Ingestion Proposals' });
+    await waitFor(() => expect(noticeText()).not.toBeNull());
+    expect(noticeText()).toContain(LINKED);
+  });
+
   it('no parameter still opens Record Fields', async () => {
     renderAt(`/record/${EXP}`);
-    await screen.findByRole('link', { name: 'Record Fields' });
+    /* ~~`findByRole('link', { name: 'Record Fields' })`~~ — that rail row left on
+       2026-09-22 (N2); the Record Fields workspace is what renders. */
+    await screen.findByRole('region', { name: 'Record Fields workspace' });
     expect(screen.queryByRole('heading', { name: 'Ingestion Proposals' })).toBeNull();
   });
 });

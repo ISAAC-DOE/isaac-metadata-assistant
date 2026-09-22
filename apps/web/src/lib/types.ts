@@ -2069,6 +2069,21 @@ export interface ApiHealthExperimentStorage {
   };
 }
 
+/**
+ * The `mcp` block on GET /api/health (`apps/api/isaac_api/mcp/deployment.py::
+ * disclosure`), declared for the ONE field this client reads: `posture`.
+ *
+ * Derived from CONFIGURATION alone — the handler opens no socket and verifies no
+ * credential — so it says how this PROCESS is configured and never that anything
+ * can reach it, and never that any agent is connected. `null` means the server
+ * could not determine it, which is a different fact from `unmounted`. Widened to
+ * `string` so an unrecognised future posture is something a client can ignore.
+ * Optional because a build predating the block, or a failed health read, has none.
+ */
+export interface ApiHealthMcp {
+  posture: string | null;
+}
+
 export interface ApiHealth {
   status: string;
   mode: string;
@@ -2076,6 +2091,7 @@ export interface ApiHealth {
   version: string;
   database?: ApiHealthDatabase;
   experiment_storage?: ApiHealthExperimentStorage;
+  mcp?: ApiHealthMcp;
 }
 
 // POST /api/demo/reset — the guarded example-workspace reset (DemoResetResponse in

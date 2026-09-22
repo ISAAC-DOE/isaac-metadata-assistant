@@ -384,8 +384,11 @@ async function bFinalizesATranscript(
    * experiment in?" first, and the panel renders nothing until a route is chosen.
    * So the click is on the page, and the region only exists afterwards.
    */
-  await bPage.getByRole('button', { name: 'Start Writing' }).click();
-  const capture = bPage.getByRole('region', { name: 'Transcript Capture' });
+  /* 2026-09-22 (owner QA C1/C2): "Start Writing" is a LINK on Capture Home to the
+     focused Write view, which draws the transcript form without the old panel's
+     region, so the form is addressed inside the capture workspace itself. */
+  await bPage.getByRole('link', { name: /Start Writing/ }).click();
+  const capture = bPage.locator('#record-workspace-capture');
   await capture.getByLabel('Run These Notes Describe').selectOption(runId);
   await capture.getByLabel('Transcript', { exact: true }).fill(text);
   await capture.getByRole('button', { name: 'Finalize and Read' }).click();
@@ -640,7 +643,7 @@ test.describe('two scientists, two real browsers, one record', () => {
 
       // ══ STEP 2 — A opens the review surface; it makes no recording claim ═════
       let seeded: ServerProposal | null = null;
-      await test.step('2 · A opens Experiment Data: one entry action, no recording claim', async () => {
+      await test.step('2 · A opens Capture Home, then the Proposals view: one entry action, no recording claim', async () => {
         /*
          * SEEDED FIRST, OVER HTTP, AND ONLY THIS ONE. It exists to prove the negative
          * control in step 4: a proposal that was ALREADY on the record when A's panel
@@ -669,89 +672,53 @@ test.describe('two scientists, two real browsers, one record', () => {
         await assertSameDocument(page, 'step 2: switching workspace did not reload the page');
 
         /*
-         * *** THIS PROPERTY MOVED; IT WAS NOT DROPPED. ***
+         * *** 2026-09-22 (owner QA C1): CAPTURE HOME IS THE CHOOSER ONLY. ***
          *
-         * It used to read: collapsed, the panel offers exactly ONE entry action and
-         * no second control beside it. The panel no longer renders AT ALL while the
-         * chooser owns the entry, so asserting over the panel here would pass
-         * vacuously on an empty region — the exact shape of vacuous guard this
-         * repository keeps catching. The property is therefore asserted where the
-         * entry now lives, and in the form that actually failed in a browser: the
-         * first build rendered "Start Writing" AND the panel's own "Capture
-         * Experiment Notes" ten pixels apart, both blue, both doing the same thing.
-         *
-         * So: exactly one PRIMARY control on the whole workspace, and the panel's own
-         * entry absent rather than merely hidden.
+         * The property this step pinned — ONE primary entry, and no second control
+         * doing the same thing — now holds on Capture Home, where each way in is a
+         * link to a focused view instead of a button expanding a panel beneath the
+         * chooser. So: exactly one primary among the four ways in, and no transcript
+         * form on the chooser at all (the old panel's region is gone, not hidden).
          */
         await expect(
-          page.getByRole('button', { name: 'Start Writing' }),
+          page.getByRole('link', { name: /Start Writing/ }),
           'step 2: the chooser offers the write route',
         ).toBeVisible();
-        /*
-         * SCOPED TO THE TWO ELEMENTS THE PROPERTY IS ABOUT, and the first version of
-         * this assertion was not — it counted `.btn-primary` page-wide and read 4,
-         * because the workflow spine, the notes queue and the proposals list each
-         * own a primary of their own and always did. A page-wide count would have
-         * had to be loosened to 4, which would then pass with the double CTA back
-         * (4 → 5 is invisible to `toBe(4)` only if you also update it, and nobody
-         * would know which of the five was the duplicate). Counting the chooser and
-         * the panel SEPARATELY names the defect exactly: it was one primary in each.
-         */
         expect(
-          await page.locator('.capture-intake .btn-primary:visible').count(),
+          await page.locator('.capture-methods .btn-primary:visible').count(),
           'step 2: the chooser offers exactly ONE primary route',
         ).toBe(1);
         await expect(
-          page.locator('.capture-section'),
-          'step 2: the panel renders NOTHING while the chooser owns the entry — ' +
-            'not an empty shell, which is what minted an aria-prohibited-attr node',
+          page.getByRole('textbox', { name: 'Transcript' }),
+          'step 2: Capture Home carries no transcript form',
         ).toHaveCount(0);
         await expect(
           page.getByRole('button', { name: 'Capture Experiment Notes' }),
-          'step 2: and so its own entry is absent, not merely hidden',
+          'step 2: and the old panel entry is absent, not merely hidden',
         ).toHaveCount(0);
 
-        await page.getByRole('button', { name: 'Start Writing' }).click();
-        const capture = page.getByRole('region', { name: 'Transcript Capture' });
         /*
-         * NO RECORDING CLAIM IN THE PANEL'S OWN INTRO. Unchanged in substance, and
-         * reworded because "while collapsed" stopped being true of this line the
-         * moment the chooser took the entry: the panel reached here is OPEN. The
-         * text being checked is the same text — `.capture-sub`, the panel's intro —
-         * and the reason is the same. Finalize posts TEXT, and turning a recording
-         * into text needs a transcription provider this build never ships
-         * configured, so an intro mentioning recording would present it as an
-         * equally finished path. That is the C1 correction
-         * `transcriptCaptureContent.ts` records making.
-         */
-        const introText = (await capture.locator('.capture-sub').textContent()) ?? '';
-        expect(introText.length, 'step 2: the panel intro says something').toBeGreaterThan(0);
-        for (const word of ['record', 'Record', 'audio', 'Audio', 'microphone', 'voice', 'Voice']) {
-          expect(
-            introText,
-            `step 2: the panel intro makes no recording claim — found ${JSON.stringify(word)}`,
-          ).not.toContain(word);
-        }
-
-        /*
-         * *** AND THE OTHER HALF OF THAT PROPERTY, WHICH THE CHOOSER NOW OWNS. ***
+         * *** THE HONEST HALF OF NAMING THE VOICE ROUTE, MOVED WITH IT. ***
          *
-         * The chooser DOES name recording — that is the point of offering the route
-         * the project owner asked for. What keeps it honest is that the voice card
-         * carries its limit ON the card, not behind a click: speech-to-text needs an
-         * approved transcription provider, and this build ships none, so
-         * `POST /api/transcription` answers 501 in every deployment. Naming the route
-         * without naming the limit would be exactly the "equally finished path"
-         * claim the check above exists to prevent — so the two assertions are two
-         * halves of one property and must travel together.
+         * The voice row names the route the owner asked for — and its ONE line says
+         * what recording here actually does: the words are typed. Speech-to-text needs
+         * an approved transcription provider this build never ships, so an unqualified
+         * "record" would present recording as a finished path to a proposal.
          */
-        const voiceCard = page.locator('[data-route="voice"]');
-        await expect(voiceCard, 'step 2: the chooser offers the voice route').toBeVisible();
-        const voiceText = (await voiceCard.textContent()) ?? '';
+        const voiceRow = page.locator('[data-route="voice"]');
+        await expect(voiceRow, 'step 2: the chooser offers the voice route').toBeVisible();
+        const voiceText = (await voiceRow.textContent()) ?? '';
         expect(
-          /transcription provider|not configured|no provider/i.test(voiceText),
-          `step 2: the voice route names its limit on the card — read ${JSON.stringify(voiceText)}`,
+          /type what was said/i.test(voiceText),
+          `step 2: the voice route states that recording here is typed from — read ${JSON.stringify(voiceText)}`,
         ).toBe(true);
+
+        // ...and A settles on the review surface the rest of this walk observes.
+        await switchWorkspace(page, 'proposals');
+        await expect(
+          page.getByRole('heading', { name: 'Ingestion Proposals' }),
+          'step 2: A is on the Proposals view',
+        ).toBeVisible();
       });
 
       // ══ STEP 3 — B, a SECOND BROWSER, mints proposals through the UI ═════════
@@ -760,8 +727,8 @@ test.describe('two scientists, two real browsers, one record', () => {
       await test.step('3 · B (a second browser) captures a transcript and proposes from a note', async () => {
         await bPage.goto(`/record/${id}?view=capture`);
         await expect(
-          bPage.getByRole('heading', { name: 'Ingestion Proposals' }),
-          'step 3: B is on the same record’s Experiment Data workspace',
+          bPage.getByRole('heading', { name: /How do you want to get this experiment in\?/ }),
+          'step 3: B is on the same record’s Capture Home',
         ).toBeVisible();
 
         mintedByTranscript = await bFinalizesATranscript(bPage, runTwo.id, TRANSCRIPT_TEXT);
@@ -1479,7 +1446,7 @@ test.describe('two scientists, two real browsers, one record', () => {
           'step 9: with run two’s accepted value',
         ).toContainText(envProposed);
 
-        await switchWorkspace(page, 'capture');
+        await switchWorkspace(page, 'proposals');
         await expect(
           cardInState(page, 'context.environment', 'Accepted'),
           'step 9: the accepted proposal survives',
@@ -1520,7 +1487,7 @@ test.describe('two scientists, two real browsers, one record', () => {
          * assertion the brief asks for is made about the control that actually exists,
          * and the absence of a "Submit" one is asserted too rather than assumed.
          */
-        await switchWorkspace(page, 'capture');
+        await switchWorkspace(page, 'proposals');
         const proposals = page.getByRole('region', { name: 'Ingestion Proposals' });
         /*
          * THE REGION IS ASSERTED PRESENT BEFORE ANYTHING IS COUNTED IN IT — ADDED
@@ -1661,7 +1628,13 @@ test.describe('two scientists, two real browsers, one record', () => {
          * the loop, so a Graph link silently returning to the sidebar would fail
          * here rather than pass unnoticed.
          */
-        for (const workspace of ['Record Fields', 'Runs', 'Experiment Data'] as const) {
+        /*
+         * 2026-09-22 (owner QA N2/N3): the rail's destinations are Capture, Proposals
+         * and Runs (Data Capture), then Activity. ~~Record Fields~~ has no rail row —
+         * it is the spine's `Record Created` step, walked through above — so the walk
+         * covers the three capture-group destinations, which own a workspace panel.
+         */
+        for (const workspace of ['Capture', 'Proposals', 'Runs'] as const) {
           await page.locator('body').click({ position: { x: 2, y: 2 } });
           await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
           await tabUntil(
@@ -1723,9 +1696,9 @@ test.describe('two scientists, two real browsers, one record', () => {
             `step 11: and the panel it landed in is the one ${workspace} opened`,
           ).toBe(
             {
-              'Record Fields': 'record-workspace-fields',
+              Capture: 'record-workspace-capture',
+              Proposals: 'record-workspace-proposals',
               Runs: 'record-workspace-runs',
-              'Experiment Data': 'record-workspace-capture',
             }[workspace],
           );
         }
@@ -1817,7 +1790,7 @@ test.describe('two scientists, two real browsers, one record', () => {
       const runs = await server.runs(id);
       expect(runs, 'one run is enough for a run-scoped proposal').toHaveLength(1);
 
-      await switchWorkspace(page, 'capture');
+      await switchWorkspace(page, 'proposals');
       await expect(
         page.getByRole('region', { name: 'Ingestion Proposals' }).locator('.proposals-empty'),
         'A’s review surface starts empty, so the arrival below is unambiguous',

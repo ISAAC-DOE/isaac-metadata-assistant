@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useId, useState } from 'react';
 
 import { api } from '../lib/api';
 import { RUN_FIELDS } from '../lib/runFields';
@@ -223,6 +223,11 @@ export function RunSchemaMirror({
 }) {
   const [schema, setSchema] = useState<SchemaNode | null>(null);
   const [failed, setFailed] = useState(false);
+  /* `useId`, not fixed ids (2026-09-22): the map is now mounted beside the Runs
+     editor AND beside the focused capture views, and a hidden-but-mounted
+     workspace keeps both in the DOM at once — a duplicate `id` would let
+     `aria-labelledby` resolve to the other pane's heading. */
+  const uid = useId();
 
   /*
    * THE SCHEMA IS THE ONLY THING THIS PANE FETCHES, and the run arrives as a
@@ -253,8 +258,8 @@ export function RunSchemaMirror({
 
   if (failed) {
     return (
-      <aside className="rsm" aria-labelledby="rsm-heading">
-        <h3 className="rsm-heading" id="rsm-heading">
+      <aside className="rsm" aria-labelledby={`${uid}-heading`}>
+        <h3 className="rsm-heading" id={`${uid}-heading`}>
           Record Map
         </h3>
         <p className="rsm-note">
@@ -267,8 +272,8 @@ export function RunSchemaMirror({
 
   if (schema === null) {
     return (
-      <aside className="rsm" aria-labelledby="rsm-heading">
-        <h3 className="rsm-heading" id="rsm-heading">
+      <aside className="rsm" aria-labelledby={`${uid}-heading`}>
+        <h3 className="rsm-heading" id={`${uid}-heading`}>
           Record Map
         </h3>
         <p className="rsm-note">Reading the official schema…</p>
@@ -316,9 +321,9 @@ export function RunSchemaMirror({
     row.editable ? () => focusField(row.path) : undefined;
 
   return (
-    <aside className="rsm" aria-labelledby="rsm-heading">
+    <aside className="rsm" aria-labelledby={`${uid}-heading`}>
       <div className="rsm-head">
-        <h3 className="rsm-heading" id="rsm-heading">
+        <h3 className="rsm-heading" id={`${uid}-heading`}>
           Record Map
         </h3>
         {/* WHICH RUN THIS DESCRIBES, stated rather than assumed. The pane reads
@@ -335,8 +340,8 @@ export function RunSchemaMirror({
       </p>
 
       {attention.length > 0 && (
-        <section className="rsm-group" aria-labelledby="rsm-attention">
-          <p className="rsm-group-title eyebrow" id="rsm-attention">
+        <section className="rsm-group" aria-labelledby={`${uid}-attention`}>
+          <p className="rsm-group-title eyebrow" id={`${uid}-attention`}>
             {LABELS.recordMapNeedsAttention} · {attention.length}
           </p>
           <ul className="rm-rows">
@@ -347,8 +352,8 @@ export function RunSchemaMirror({
         </section>
       )}
 
-      <section className="rsm-group" aria-labelledby="rsm-thisrun">
-        <p className="rsm-group-title eyebrow" id="rsm-thisrun">
+      <section className="rsm-group" aria-labelledby={`${uid}-thisrun`}>
+        <p className="rsm-group-title eyebrow" id={`${uid}-thisrun`}>
           {LABELS.recordMapThisRun} · {RUN_FIELDS.length} fields
         </p>
         <ul className="rm-rows">
@@ -358,8 +363,8 @@ export function RunSchemaMirror({
         </ul>
       </section>
 
-      <section className="rsm-group" aria-labelledby="rsm-inherited">
-        <p className="rsm-group-title eyebrow" id="rsm-inherited">
+      <section className="rsm-group" aria-labelledby={`${uid}-inherited`}>
+        <p className="rsm-group-title eyebrow" id={`${uid}-inherited`}>
           {LABELS.recordMapInherited}
         </p>
         <ul className="rm-rows">

@@ -56,90 +56,13 @@
 
 /* ---- the promoted capture destination ------------------------------------
  *
- * ONE ROW OF THE FOUR, RENDERED AS A CARD. It reuses `.evidence-trail-link`'s
- * exact card vocabulary from `screens/screens.css` — `--surface` on the
- * sidebar's `--surface-subtle`, a 1px `--border`, `--radius-inner` — because
- * that is the shipped idiom for "a weightier destination in this column", and
- * its active state reuses `.workspace-nav-item.active`'s tint + label colour.
- * NO NEW HUE, RADIUS, SHADOW OR CUSTOM PROPERTY; every value below is a token
- * this stylesheet's neighbours already paint.
- *
- * THE ONE THING IT ADDS IS A TYPE STEP, and that is the point rather than
- * decoration. The record screen was measured with ~90% of its text inside an
- * 11-13px band, so nothing told the eye what mattered; a 14px/600 label over an
- * 11.5px summary is two ranks where the rest of this column has one, which is
- * what makes the row read as a destination instead of a fourth list item.
- *
- * IT MUST NEVER GROW A STATE GLYPH. No disc, no tick, no lock, no connector —
- * see the component header. The spine one region up owns all of those, and the
- * difference in row shape is how a reader tells a gated pipeline from an
- * always-reachable destination without reading either.
+ * ~~ONE ROW OF THE FOUR, RENDERED AS A CARD~~ — RETIRED 2026-09-22 (owner QA N3).
+ * The Data Capture group is now three ordinary destination rows — Capture,
+ * Proposals, Runs — drawn exactly like the Workspaces rows, because they are the
+ * same kind of thing: ungated destinations. The card's type step existed to make
+ * one row read as weightier; the group's own position at the top of the rail now
+ * does that, and the counts moved to Capture Home and the Proposals badge.
  */
-.capture-nav-link {
-  display: block;
-  padding: 10px 12px;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-inner);
-  text-decoration: none;
-  transition: background 0.14s ease, border-color 0.14s ease;
-}
-
-.capture-nav-link:hover {
-  background: var(--border-faint);
-}
-
-/* Tint + border + label colour, exactly as `.workspace-nav-item.active` does
-   it. Never colour alone: `aria-current="page"` carries the state for anyone
-   who is not reading the tint. */
-.capture-nav-link.active {
-  background: var(--action-tint);
-  border-color: var(--action-selected-border);
-}
-
-.capture-nav-link:focus-visible {
-  outline: 2px solid var(--action);
-  outline-offset: 2px;
-}
-
-.capture-nav-label {
-  display: block;
-  font-size: 14px;
-  font-weight: 600;
-  letter-spacing: -0.005em;
-  color: var(--text-primary);
-}
-
-.capture-nav-link.active .capture-nav-label {
-  color: var(--action-hover);
-}
-
-/* The live counts, in `--text-tertiary`.
- *
- * ~~"5.34:1 on `--surface` and 4.78:1 on the `--action-tint`"~~ — THE SECOND
- * FIGURE WAS WRONG AND IS CORRECTED IN PLACE rather than replaced, because the
- * number a future palette change is weighed against is the whole point of
- * writing it down. Recomputed from the token values with the sRGB relative
- * luminance formula (`#626c77`, `tokens.css:212`):
- *
- *     on --surface      #ffffff   5.343:1
- *     on --action-tint  #e8f0f8   4.643:1   <- was published as 4.78
- *     on --border-faint #eef2f6   4.749:1   (the :hover ground)
- *
- * 4.78 reproduces under no input: `#eaf1fa`, the alternate named in
- * `--action-tint`'s own comment, gives 4.697. THE CONCLUSION IS UNCHANGED — the
- * line clears AA in every state this row can be in — but the HEADROOM on the
- * active state is 0.14, not 0.28, on a token A3 already pushed to its floor
- * (`tokens.css` header: #626c77 is the lightest value clearing 4.5:1 on all
- * nineteen measured grounds). A future nudge has half the margin the old
- * comment implied. Re-derive rather than trusting this block. */
-.capture-nav-summary {
-  display: block;
-  margin-top: 3px;
-  font-size: 11.5px;
-  font-weight: 500;
-  color: var(--text-tertiary);
-}
 
 .workspace-nav-list {
   list-style: none;
@@ -147,45 +70,14 @@
   padding: 0;
 }
 
-/*
- * THE CAPTURE GROUP'S CHILD ROWS -- `Runs`, beneath the `Experiment Data` card
- * (project owner, 2026-09-14: "the runs should be a part of the initial capture
- * and proposals").
- *
- * The indent is the ONLY new declaration. A child row is the same kind of thing
- * as a row in the workspace list -- an ungated destination -- so it keeps
- * `.workspace-nav-item` wholesale rather than growing a parallel look, and the
- * nesting is carried by position alone: no new hue, radius, shadow, border,
- * connector or custom property. A connector line in particular is deliberately
- * absent, because that is the workflow spine's vocabulary and this group
- * asserts no sequence between its members.
- */
-.capture-nav-children {
-  /*
-   * 8px, NOT 2px, and the 2px was a wrong borrowing rather than a wrong number.
-   *
-   * It was copied from `.workspace-nav-row + .workspace-nav-row`, which is the
-   * gap between two PEER ROWS of the same size. This gap sits between a 64.5px
-   * CARD and a 38px row, and the project owner read the result as a collision:
-   * "the gap between the experimental data and the runs thing is too small".
-   * Measured before: card bottom 182.6, row top 184.6 — 2px, against 16px from
-   * that row to the next group's eyebrow.
-   *
-   * 8px is the "within a group" rung this app already uses (the assistant header
-   * states the same pair: 8px inside a group, 12px between groups) and a rung of
-   * `spacing-layout.md`'s scale. The 16px to the next GROUP still reads as the
-   * larger break, so the hierarchy survives.
-   */
-  margin-top: 8px;
-  padding-left: 10px;
-}
-
 .workspace-nav-row + .workspace-nav-row {
   margin-top: 2px;
 }
 
 .workspace-nav-item {
-  display: block;
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
   width: 100%;
   padding: 8px 10px;
   border-radius: var(--radius-inner);
@@ -286,7 +178,34 @@
    * child row is still inside the `Data Capture` landmark, under its eyebrow,
    * directly beneath the card.
    */
-  .capture-nav-children {
-    padding-left: 0;
+}
+
+/*
+ * THE LABEL AND ITS COUNT (2026-09-22). The count is a FACT the server serves
+ * (`capture_summary.proposals_open`), drawn on the amber "awaiting judgement"
+ * motif — `--needsyou-text` on `--needsyou-bg` is a registered tinted pair at
+ * 4.68:1 — and it is never the only signal: the link's accessible description
+ * reads "<n> awaiting review".
+ */
+.workspace-nav-label {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.workspace-nav-count {
+  flex: none;
+  min-width: 20px;
+  padding: 0 var(--space-xs);
+  border: 1px solid var(--needsyou-border);
+  border-radius: var(--radius-pill);
+  background: var(--needsyou-bg);
+  color: var(--needsyou-text);
+  font-size: var(--font-size-meta);
+  font-weight: var(--font-weight-semibold);
+  line-height: var(--line-height-snug);
+  text-align: center;
+}
+@media (max-width: 1024px) {
+  .workspace-nav-label {
+    flex: 0 1 auto;
   }
 }

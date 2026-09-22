@@ -123,29 +123,12 @@
 .record-aside .spine {
   border-right: none;
 }
-.evidence-trail-link {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin: 8px 12px 16px;
-  padding: 10px 12px;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-inner);
-  color: var(--text-secondary);
-  font-size: 12.5px;
-  font-weight: var(--font-weight-medium);
-  cursor: pointer;
-  text-align: left;
-  transition: background 0.12s ease, box-shadow 0.12s ease;
-}
-.evidence-trail-link:hover {
-  background: var(--border-faint);
-}
-.evidence-trail-link:focus-visible {
-  outline: 2px solid var(--action);
-  outline-offset: 2px;
-}
+/*
+ * THE EVIDENCE TRAIL IS A ROW OF THE WORKSPACES LIST (2026-09-22, owner QA N3),
+ * not a card trailing after it. Its box, hover and focus ring are
+ * `.workspace-nav-item`'s (`record-workspaces.css`), so it is visibly the same
+ * kind of thing as the Activity row above it; only the label/count layout is here.
+ */
 .evidence-trail-link-label {
   flex: 1;
 }

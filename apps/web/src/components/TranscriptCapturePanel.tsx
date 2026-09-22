@@ -110,6 +110,9 @@ import type {
   ApiTranscriptCapture,
 } from '../lib/types';
 import { DiscardStaged } from './DiscardStaged';
+import { Disclosure } from './Disclosure';
+import { HelpTip } from './HelpTip';
+import { Mic } from './icons';
 import { DISCARD_COPY } from '../lib/discardContent';
 import './transcriptCapture.css';
 
@@ -123,7 +126,7 @@ import './transcriptCapture.css';
  *  in the file — and every such branch in this component — silently true while
  *  paused. Making it a seventh member means the compiler asks about it at each
  *  of those sites. */
-type VoiceState =
+export type VoiceState =
   | 'unsupported'
   | 'idle'
   | 'requesting-permission'
@@ -297,12 +300,45 @@ export interface TranscriptCapturePanelProps {
    */
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
+  /**
+   * WHICH FOCUSED VIEW THIS PANEL IS DRAWN FOR (2026-09-22). Omitted renders every
+   * section in one panel, as it always did; see the render section's header.
+   */
+  mode?: 'write' | 'voice';
+  /**
+   * Where "Review N Proposals" goes. The record screen moved proposal review to its
+   * own view, so it passes a navigation; without it the button falls back to
+   * scrolling to the proposals panel on the same screen, as it always has.
+   */
+  onReviewProposals?: () => void;
+  /**
+   * THE RUN SELECTION, shared with the caller (the Record Map beside the focused
+   * views). `selectedRunId` pushes a caller's choice in; `onSelectedRunChange`
+   * reports this panel's own. The never-chosen-for-you rule is unchanged: both
+   * start empty, and nothing here or in the caller picks a run on the reader's
+   * behalf.
+   */
+  selectedRunId?: string;
+  onSelectedRunChange?: (runId: string) => void;
+  /** Reports the recorder's state, so a caller can keep a live microphone visible
+   *  while this panel is on a view that is not showing. */
+  onVoiceStateChange?: (state: VoiceState) => void;
+  /** Called after a finalize the server accepted, so a caller can refresh what it
+   *  shows about the record (Capture Home's counts, the Proposals badge) now
+   *  rather than a poll later. It carries nothing: the caller re-reads. */
+  onCaptured?: () => void;
 }
 
 export function TranscriptCapturePanel({
   experimentId,
   open: controlledOpen,
   onOpenChange,
+  mode,
+  onReviewProposals,
+  selectedRunId,
+  onSelectedRunChange,
+  onVoiceStateChange,
+  onCaptured,
 }: TranscriptCapturePanelProps) {
   const ids = useId();
   const transcriptId = `${ids}-transcript`;
@@ -340,7 +376,9 @@ export function TranscriptCapturePanel({
   const [capabilities, setCapabilities] = useState<ApiProviderCapabilities | null>(null);
   const [runs, setRuns] = useState<ApiRunView[]>([]);
   const [experimentVersion, setExperimentVersion] = useState('');
-  const [selectedRun, setSelectedRun] = useState('');
+  /* Seeded from a shared selection when the caller has one, so the first report
+     below restates the caller's own value instead of overwriting it with ''. */
+  const [selectedRun, setSelectedRun] = useState(selectedRunId ?? '');
   const [text, setText] = useState('');
   const [reading, setReading] = useState<ApiTranscriptCapture | null>(null);
   const [busyKind, setBusyKind] = useState<BusyKind>(null);
@@ -392,6 +430,8 @@ export function TranscriptCapturePanel({
    * every exit; see the effect below for the enumeration.
    */
   const [playbackUrl, setPlaybackUrl] = useState<string | null>(null);
+  /** Whether the reader opened "Record Locally Instead" (voice mode only). */
+  const [localRecorderOpen, setLocalRecorderOpen] = useState(false);
 
   const recorderRef = useRef<MediaRecorder | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -862,6 +902,22 @@ export function TranscriptCapturePanel({
   useEffect(() => {
     if (!audioRecordingAvailable()) setVoice('unsupported');
   }, []);
+
+  /* ---- sharing the run selection and the recorder state with the caller ---- */
+
+  /* A caller's choice arrives here. Compared first, so the round trip through the
+     caller (this panel reports -> caller stores -> prop comes back) settles at once
+     rather than looping. `undefined` means the caller does not share a selection. */
+  useEffect(() => {
+    if (selectedRunId === undefined) return;
+    setSelectedRun((current) => (current === selectedRunId ? current : selectedRunId));
+  }, [selectedRunId]);
+  useEffect(() => {
+    onSelectedRunChange?.(selectedRun);
+  }, [selectedRun, onSelectedRunChange]);
+  useEffect(() => {
+    onVoiceStateChange?.(voice);
+  }, [voice, onVoiceStateChange]);
 
   /* ---- reads ------------------------------------------------------------- */
 
@@ -1479,8 +1535,13 @@ export function TranscriptCapturePanel({
       setAnnouncement(
         `Finalized. ${payload.capture.segments} segment(s) stored with this record, ` +
           `${readCount} value(s) read, ${storedCount} stored as proposal(s)` +
-          (storedCount > 0 ? '. Review them in Ingestion Proposals below.' : '.'),
+          (storedCount > 0
+            ? onReviewProposals !== undefined
+              ? '. Review them in Proposals.'
+              : '. Review them in Ingestion Proposals below.'
+            : '.'),
       );
+      onCaptured?.();
       await loadRuns();
     } catch (cause: unknown) {
       // `FALLBACK.finalize` reads "This transcript was NOT stored … Your text is
@@ -1513,6 +1574,14 @@ export function TranscriptCapturePanel({
    * proposals are stored regardless of whether this control can reach them.
    */
   function reviewProposals() {
+    /* THE RECORD SCREEN'S OWN DESTINATION, when it supplies one (2026-09-22):
+       proposal review moved to a focused view of its own, so there is no heading
+       on this screen to scroll to. The fallbacks below still serve any mount that
+       keeps the proposals panel beside this one. */
+    if (onReviewProposals !== undefined) {
+      onReviewProposals();
+      return;
+    }
     const heading = document.getElementById('ingestion-proposals-heading');
     if (heading !== null) {
       heading.scrollIntoView({ block: 'start' });
@@ -1657,6 +1726,1013 @@ export function TranscriptCapturePanel({
   if (entryOwnedElsewhere && !open) return null;
 
   /* ---- render ------------------------------------------------------------ */
+  /*
+   * THE BLOCKS ARE BUILT ONCE AND COMPOSED THREE WAYS (2026-09-22, owner QA C2/C3).
+   *
+   *   mode omitted  — every section in one panel, exactly as it always rendered.
+   *                   This is the composite the panel's own contract tests drive.
+   *   mode 'write'  — the focused Write view: one visible privacy line, the form,
+   *                   a compact result; the reading guide behind a disclosure.
+   *   mode 'voice'  — the local recorder, behind a "Record Locally Instead"
+   *                   disclosure: the voice view leads with the Claude path, which
+   *                   the record screen renders above this panel.
+   *
+   * ONE INSTANCE SERVES BOTH FOCUSED VIEWS. The record screen mounts this panel
+   * once and switches `mode`, so a transcript typed in one view is the same text
+   * in the other, and a recording started in the voice view keeps running (and
+   * keeps its guarantees) while the reader glances at another view. No state here
+   * depends on `mode`; only what is drawn does.
+   */
+  const announcer = (
+    <p className="sr-only" role="status" aria-live="polite" aria-atomic="true">
+      {announcement}
+    </p>
+  );
+
+  const errorBlock =
+    error !== null ? (
+            <p className="capture-error" role="alert">
+              {error}
+              {retryTag !== null && (
+                <>
+                  {' '}
+                  <button
+                    type="button"
+                    className={`${primaryClass(showErrorPrimary)} capture-error-retry`}
+                    onClick={retryAction}
+                  >
+                    {CAPTURE_COPY.tryAgain}
+                  </button>
+                </>
+              )}
+            </p>
+    ) : null;
+
+  const guidanceBlock =
+        guidanceOpen ? (
+          <div className="capture-guidance" id={guidanceId}>
+            <h3 className="capture-guidance-title">{CAPTURE_COPY.guidanceHeading}</h3>
+            <p className="capture-guidance-lead">{CAPTURE_GUIDANCE_SENTENCE}</p>
+            <p className="capture-guidance-label">For example, saying:</p>
+            <blockquote className="capture-guidance-example">
+              {CAPTURE_GUIDANCE_EXAMPLE.spoken}
+            </blockquote>
+            <p className="capture-guidance-label">is read as:</p>
+            <ul className="capture-guidance-list">
+              {CAPTURE_GUIDANCE_EXAMPLE.reads.map((line) => (
+                <li key={line}>{line}</li>
+              ))}
+            </ul>
+            <p className="capture-guidance-keeps">
+              The rest — “{CAPTURE_GUIDANCE_EXAMPLE.keeps}” — is stored with the record
+              as a note. Nothing you say is discarded.
+            </p>
+            <p className="capture-guidance-mechanism">{CAPTURE_COPY.guidanceMechanism}</p>
+            <p className="capture-guidance-storage">{CAPTURE_COPY.guidanceStorageNote}</p>
+            <button type="button" className="btn btn-secondary" onClick={dismissGuidance}>
+              {CAPTURE_COPY.guidanceDismiss}
+            </button>
+          </div>
+        ) : (
+          // No `aria-controls`: the element carrying `guidanceId` is UNMOUNTED in
+          // this branch, and pointing at an id that is not in the document is a
+          // dangling reference an assistive technology cannot follow. `aria-expanded`
+          // alone is correct and sufficient here.
+          <button
+            type="button"
+            className="capture-guidance-reopen"
+            aria-expanded={false}
+            onClick={() => setGuidanceOpen(true)}
+          >
+            {CAPTURE_COPY.guidanceReopen}
+          </button>
+        );
+
+  const voiceBlock = (
+        <div className="capture-voice">
+          {/* In the voice view the disclosure row already titles this section
+              ("Record Locally Instead", an h3); a second heading naming the same
+              thing would be read twice. */}
+          {mode === undefined && <h3 className="capture-subhead">{CAPTURE_COPY.voiceHeading}</h3>}
+          <p className="sr-only" role="status" aria-live="polite" aria-atomic="true">
+            {voiceLive}
+          </p>
+          {/*
+            THE SEAM STATUS IS OUTSIDE THE RECORDER BRANCH AND RENDERED ON BOTH
+            BRANCHES. A browser with no recorder — including every test environment
+            — must still say whether this deployment can transcribe at all, which is
+            a fact about the DEPLOYMENT, not about this browser.
+
+            `data-configured="unreported"` rather than `"false"`: the three states
+            are not the same claim, and a test that could not tell them apart would
+            let a regression rename one into the other.
+          */}
+          {transcription !== null ? (
+            <p className="capture-seam" data-configured={String(transcription.configured)}>
+              <span className="capture-seam-label">Transcription:</span>{' '}
+              {transcription.reason}
+            </p>
+          ) : (
+            <p className="capture-seam" data-configured="unreported">
+              {CAPTURE_COPY.voiceSeamUnreported}
+            </p>
+          )}
+          {voice === 'unsupported' ? (
+            <p className="capture-note">{CAPTURE_COPY.voiceUnsupported}</p>
+          ) : (
+            <>
+              <p className="capture-note">{CAPTURE_COPY.voiceAudioHandling}</p>
+              {/*
+                THE ROUTE THAT CAN PRODUCE TEXT, offered where the reader has just
+                been told this one cannot.
+
+                The project owner's point, 2026-09-14: recording that can never be
+                transcribed "becomes kind of useless", so the screen should say how
+                to get text — via a Claude app over MCP — rather than leave a
+                control whose only outcomes are playback and Discard.
+
+                COLLAPSED, because the owner asked for exactly that ("put it behind
+                a collapsible thing so it isnt just more word clutter again") and
+                because it is a procedure, not a status. And CONDITIONAL: the
+                precondition is the first line inside, since the MCP transport is
+                unmounted in every deployment and `CLAUDE.md` §15 forbids implying
+                the agent path exists. It points at Settings → Connect Your Agent
+                for the steps rather than restating them, so the two cannot drift.
+              */}
+              {mode === undefined && (
+            <details className="capture-mcp-route">
+                <summary className="capture-mcp-summary">
+                  {CAPTURE_COPY.mcpRouteHeading}
+                </summary>
+                <p className="capture-note">{CAPTURE_COPY.mcpRouteLead}</p>
+                <p className="capture-mcp-precondition">{CAPTURE_COPY.mcpRoutePrecondition}</p>
+                <p className="capture-guidance-label">{CAPTURE_COPY.mcpRouteSayLabel}</p>
+                <p className="capture-mcp-say">{CAPTURE_COPY.mcpRouteSayExample}</p>
+                <p className="capture-note">{CAPTURE_COPY.mcpRouteOutcome}</p>
+              </details>
+            )}
+              {/*
+                THE STATE BAR — ABOVE THE CONTROLS, NOT INSIDE THEM.
+                ====================================================
+
+                WHAT IT REPLACES, and why the old arrangement failed a scientist
+                standing at a beamline. `recording` differed from `idle` by a VERB
+                SWAP INSIDE THE SAME BLUE PILL ("Start Recording" -> "Stop
+                Recording") plus `Recording · 0:06` set in 12px `--text-muted`,
+                inline in the button row. Nothing was tinted, nothing was marked,
+                and the one number that matters was the smallest thing on the
+                panel. `held` was worse: the elapsed indicator was removed
+                entirely and the ONLY statement that audio was still in the tab
+                was an `sr-only` live region — so a screen-reader user was better
+                informed than a sighted one.
+
+                THE STATE IS NEVER CARRIED BY COLOUR ALONE, which is
+                `transcriptCapture.css`'s own standing rule. Three signals move
+                together and any one of them is sufficient: the WORD (`Recording`
+                / `Held`), the MARK's SHAPE (a disc while live, a square while
+                held), and the tint. A reader with no colour, or with
+                `prefers-reduced-motion` stopping the pulse, loses nothing.
+
+                `.capture-elapsed`'S TEXT IS A CONTRACT WITH A FENCED SPEC. It
+                must read `<state> · <m:ss>` with the time LAST —
+                `e2e/mutation/capture-microphone.spec.ts` asserts `Recording ·
+                0:01` (`:901`), matches `/Recording · (?!0:00)\d+:\d\d/` (`:774`)
+                and parses `/(\d+):(\d\d)\s*$/` off `innerText` (`:510`). The
+                separator is therefore a literal, and the element is NOT a flex
+                container — flex items can have `innerText` newlines inserted
+                between them. The size difference is carried by the two inner
+                spans, which changes no character of the text.
+              */}
+              {(voice === 'recording' || voice === 'paused' || voice === 'held') && (
+                <div className="capture-live" data-state={voice}>
+                  <span className="capture-live-mark" aria-hidden="true" />
+                  <p className="capture-elapsed">
+                    <span className="capture-elapsed-state">{STATE_BADGE[voice]}</span>
+                    {' · '}
+                    <span className="capture-elapsed-time">{formatElapsed(elapsedSec)}</span>
+                  </p>
+                </div>
+              )}
+              {/*
+                THE VISIBLE `paused` STATEMENT, in the same slot `held` uses for
+                `voiceHeldPersistent` and for the same reason: the state's most
+                consequential fact must not live only in an `sr-only` live region,
+                where a sighted reader never meets it. Here that fact is that the
+                MICROPHONE IS STILL OPEN — see `voicePausedPersistent`.
+              */}
+              {voice === 'paused' && (
+                <p className="capture-held-line">{CAPTURE_COPY.voicePausedPersistent}</p>
+              )}
+              {voice === 'held' && (
+                <>
+                  <p className="capture-held-line">{CAPTURE_COPY.voiceHeldPersistent}</p>
+                  {playbackUrl !== null && (
+                    <>
+                      {/*
+                        IN-TAB PLAYBACK. `controlsList` suppresses Chrome's
+                        default Download item — `voiceAudioHandling` promises the
+                        audio is "never written to disk", and a download would
+                        make that false — and `noremoteplayback`, reinforced by
+                        the `disableRemotePlayback` property below, stops the
+                        browser offering to cast it, which is audio leaving the
+                        tab by a channel no HTTP assertion watches.
+
+                        THE PROPERTY IS SET THROUGH THE REF because React 18 does
+                        not know `disableRemotePlayback` as a JSX prop and would
+                        warn rather than forward it. The callback is memoised
+                        (N-1) so it is not detached and re-attached on every
+                        render — an inline arrow makes React run it twice per
+                        commit for no reason.
+                      */}
+                      <audio
+                        className="capture-playback"
+                        src={playbackUrl}
+                        controls
+                        preload="metadata"
+                        controlsList="nodownload noplaybackrate noremoteplayback"
+                        aria-label={CAPTURE_COPY.voicePlaybackLabel}
+                        ref={adoptPlayer}
+                      />
+                      <p className="capture-note">{CAPTURE_COPY.voicePlaybackNote}</p>
+                    </>
+                  )}
+                </>
+              )}
+              <div className="capture-voice-controls">
+                {voice === 'idle' && (
+                  <button
+                    type="button"
+                    className={primaryClass(showVoicePrimary)}
+                    onClick={startRecording}
+                    disabled={formLocked}
+                  >
+                    {CAPTURE_COPY.voiceRecord}
+                  </button>
+                )}
+                {voice === 'requesting-permission' && (
+                  <button
+                    type="button"
+                    className={primaryClass(showVoicePrimary)}
+                    disabled
+                    aria-busy="true"
+                  >
+                    {CAPTURE_COPY.voiceRequesting}
+                  </button>
+                )}
+                {voice === 'recording' && (
+                  /*
+                    STOP MUST NOT LOOK LIKE START, and until 2026-09-10 it was the
+                    identical blue pill with a different verb — the only
+                    difference between "live" and "not live" on the whole panel.
+                    `capture-stop` repaints it on the alert ramp. `.btn-primary`
+                    STAYS IN THE CLASS LIST deliberately: it is still this state's
+                    one primary action, and the "exactly one primary per state"
+                    guard counts `.btn-primary` nodes.
+
+                    The elapsed indicator that used to sit beside it has moved
+                    into the state bar above — see that block's comment for the
+                    `.capture-elapsed` text contract.
+                  */
+                  <button
+                    type="button"
+                    className={`${primaryClass(showVoicePrimary)} capture-stop`}
+                    onClick={stopRecording}
+                    disabled={formLocked}
+                  >
+                    {CAPTURE_COPY.voiceStop}
+                  </button>
+                )}
+                {/*
+                  PAUSE IS SECONDARY AND ONLY EXISTS IF THE RECORDER CAN DO IT.
+
+                  Secondary, because Stop is still this state's one primary
+                  action — the exclusivity guard counts `.btn-primary` nodes and
+                  `recording` must keep exactly one. Rendered conditionally on
+                  `pauseSupported`, which was read off the constructed recorder
+                  (see that state's comment): absence is the truthful shape for
+                  a capability this browser does not have, and a disabled button
+                  would claim one that is merely unavailable right now.
+                */}
+                {voice === 'recording' && pauseSupported && (
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    onClick={pauseRecording}
+                    disabled={formLocked}
+                  >
+                    {CAPTURE_COPY.voicePause}
+                  </button>
+                )}
+                {voice === 'paused' && (
+                  <>
+                    <button
+                      type="button"
+                      className={primaryClass(showVoicePrimary)}
+                      onClick={resumeRecording}
+                      disabled={formLocked}
+                    >
+                      {CAPTURE_COPY.voiceResume}
+                    </button>
+                    {/*
+                      STOP KEEPS `capture-stop` WHILE PAUSED, and keeps the alert
+                      ramp with it. The ramp is on the CONTROL, not on the state:
+                      it is the same act — close the device, end the take — and
+                      the reason `.capture-stop` exists is that it must never be
+                      mistaken for Start. The bar two elements above is amber and
+                      says `Paused`, so nothing here says a recording is live.
+                      `transcriptCapture.css` already anticipated Stop rendering
+                      `btn btn-secondary capture-stop`; this is the second state
+                      in which it does.
+                    */}
+                    <button
+                      type="button"
+                      className={`${primaryClass(false)} capture-stop`}
+                      onClick={stopRecording}
+                      disabled={formLocked}
+                    >
+                      {CAPTURE_COPY.voiceStop}
+                    </button>
+                  </>
+                )}
+                {voice === 'held' && (
+                  <>
+                    <button
+                      type="button"
+                      className={primaryClass(showVoicePrimary)}
+                      onClick={focusTranscript}
+                      disabled={formLocked}
+                    >
+                      {CAPTURE_COPY.voiceTypeWhatWasSaid}
+                    </button>
+                    {/*
+                      DISARMED ONCE IT HAS REFUSED — 2026-09-10. This operation
+                      cannot succeed in any deployment (`501
+                      no_provider_configured`, and Dean's D4/D6/D8/D9 are
+                      DEFERRED), yet it used to return to its enabled resting
+                      state after refusing, so the same wall could be summoned
+                      forever. `refusal` is cleared by Start Recording, Discard
+                      Audio and a record change, so a NEW recording arms it again
+                      — the seam stays discoverable, it simply stops offering a
+                      second identical refusal for the same audio.
+
+                      NOT disabled from the start, though `capabilities` already
+                      reports the seam unconfigured: pressing it once is how a
+                      reader learns what is missing, and the refusal card is that
+                      answer. Focus has already moved to the transcript box by
+                      the time this disables, so nothing is trapped on it.
+
+                      KNOWN CONFLICT, NAMED RATHER THAN LEFT TO CI:
+                      `e2e/mutation/capture-microphone.spec.ts:909` asserts this
+                      button is still ENABLED right after the click, as a
+                      synchronisation barrier before reading its probe. That line
+                      will fail and needs to wait on `.capture-refusal` instead —
+                      a stricter barrier anyway, since it waits for the response
+                      rather than for a button state. That file was outside this
+                      slice's edit scope.
+                    */}
+                    <button
+                      type="button"
+                      className="btn btn-secondary capture-transcribe"
+                      onClick={requestTranscript}
+                      disabled={formLocked || busyKind !== null || refusal !== null}
+                    >
+                      {CAPTURE_COPY.voiceTranscribe}
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-secondary"
+                      onClick={discardAudio}
+                      disabled={formLocked}
+                    >
+                      {CAPTURE_COPY.voiceDiscard}
+                    </button>
+                  </>
+                )}
+                {voice === 'permission-denied' && (
+                  <>
+                    <button
+                      type="button"
+                      className={primaryClass(showVoicePrimary)}
+                      onClick={focusTranscript}
+                      disabled={formLocked}
+                    >
+                      {CAPTURE_COPY.voiceTypeWhatWasSaid}
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-secondary"
+                      onClick={startRecording}
+                      disabled={formLocked}
+                    >
+                      {CAPTURE_COPY.voiceTryAgain}
+                    </button>
+                  </>
+                )}
+              </div>
+              {/*
+                I8, INDEPENDENT REVIEW OF PR-D — PLAIN TEXT, NOT A SECOND LIVE
+                REGION. `role="alert"` carries an IMPLICIT `aria-live="assertive"`,
+                so this used to announce the same sentence `voiceLive` (above) had
+                already announced — twice, from two regions, for one event. The
+                sentence is now said ONCE, through the ordinary status region, and
+                this paragraph is plain, persistent, readable content: a sighted
+                reader still sees it immediately, and a screen-reader user reaches
+                it by navigating the page, exactly as they would any other text.
+              */}
+              {voice === 'permission-denied' && (
+                <p className="capture-note capture-note-warn">
+                  {voiceDenialCopy(voiceDenialReason ?? 'unknown')}
+                </p>
+              )}
+              {/*
+                THE REFUSAL, LED IN THE SCIENTIST'S REGISTER AND COMPLETE BEHIND
+                A DISCLOSURE.
+                ====================================================================
+
+                WHAT SHIPPED BEFORE: `refusal.message` verbatim as the first and
+                largest thing — "This build cannot transcribe speech: no provider
+                is configured for the transcription seam. Missing: an approved
+                transcription provider (decision D9), an institutional credential
+                for it (decision D4), approved egress for speech leaving SLAC
+                (decisions D6, D8). These are institutional decisions recorded in
+                docs/ai-integration-decision-packet.md; …" — a governance
+                changelog handed to somebody mid-experiment.
+
+                NOTHING IS WITHHELD AND NOTHING IS PARAPHRASED. The server's full
+                message, its `missing` list and its `decision_reference` are all
+                still here, character for character, inside `<details>`. Only the
+                ORDER changed: a reader now meets one sentence about what they
+                can do, and reaches the decision record in one press if they want
+                it. The disclosure is `open={false}` by default and is a native
+                `<details>`, so it is keyboard-reachable and announced as a
+                disclosure without a line of script.
+
+                `role="alert"` STAYS ON THE CONTAINER, so the lead is announced.
+                The `<details>` body is inside it but is not separately live — a
+                disclosure that announced its own contents on open would say the
+                whole governance paragraph twice.
+              */}
+              {refusal !== null && (
+                <div className="capture-refusal" role="alert">
+                  <p className="capture-refusal-message">{voiceRefusalLead(refusal.reason)}</p>
+                  <p className="capture-note">{CAPTURE_COPY.voiceAfterRefusal}</p>
+                  <details className="capture-refusal-why">
+                    <summary>{CAPTURE_COPY.voiceRefusalWhy}</summary>
+                    <p className="capture-note">{CAPTURE_COPY.voiceRefusalDetailIntro}</p>
+                    <p className="capture-refusal-server">{refusal.message}</p>
+                    <p className="capture-guidance-label">Missing:</p>
+                    <ul className="capture-guidance-list">
+                      {refusal.missing.map((item) => (
+                        <li key={item}>{item}</li>
+                      ))}
+                    </ul>
+                    <p className="capture-note">
+                      Recorded in <code>{refusal.decision_reference}</code>.
+                    </p>
+                  </details>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+  );
+
+  /*
+    ---- run + transcript ----
+
+    I3a, INDEPENDENT REVIEW OF PR-D — A REAL `<form>`, SO THE IN-FLIGHT GUARD
+    INSIDE `finalize()` IS WHAT A TEST (AND A REAL DOUBLE-SUBMIT) EXERCISES.
+    `fireEvent.click` on a `disabled` button never dispatches in a browser or
+    in jsdom, so a test driving the button alone can only ever prove the
+    DISABLED ATTRIBUTE stops a second submit — not the `busyKind !== null`
+    guard at the top of `finalize()` itself. `fireEvent.submit(form)` calls
+    `onSubmit` directly, bypassing the button's disabled state exactly as a
+    stray double Enter-press or a re-entrant call would, which is what makes
+    the guard the thing under test. The button's own `disabled` attribute is
+    UNCHANGED and still the first line of defence for an ordinary click.
+  */
+  const formBlock = (
+        <form
+          className="capture-form"
+          onSubmit={(event) => {
+            event.preventDefault();
+            void finalize();
+          }}
+        >
+          {runs.length === 0 ? (
+            <>
+              {/*
+                m3, INDEPENDENT REVIEW OF PR-D — NOT A `<label htmlFor>` HERE. The
+                select this label named does not exist in the empty-run state, so
+                `htmlFor={runId}` pointed at an id nothing on screen carried — a
+                dangling reference an assistive technology cannot follow. Plain
+                text, same visual class, no association to break.
+              */}
+              <p className="capture-label">{CAPTURE_COPY.runLabel}</p>
+              <p className="capture-run-empty" id={`${runId}-hint`}>
+                {CAPTURE_COPY.runEmptyPrefix}{' '}
+                {/*
+                  m2, INDEPENDENT REVIEW OF PR-D — A REAL BUTTON, TOKEN-STYLED. This
+                  used to be link-styled text on `--text-link`/`--text-body`, which
+                  this design system does not declare as buttons ever use — see
+                  `transcriptCapture.css`. It is now `.btn.btn-secondary`, the same
+                  idiom every other secondary control on this panel uses, sized
+                  down to sit inline in the sentence.
+                */}
+                <button
+                  type="button"
+                  className="btn btn-secondary capture-run-empty-create"
+                  onClick={createRun}
+                  disabled={formLocked || busyKind !== null}
+                >
+                  {CAPTURE_COPY.runCreate}
+                </button>
+                {CAPTURE_COPY.runEmptySuffix}
+              </p>
+            </>
+          ) : (
+            <>
+              <span className="capture-label-row">
+                <label className="capture-label" htmlFor={runId}>
+                  {CAPTURE_COPY.runLabel}
+                </label>
+                {mode !== undefined && (
+                  /* The tip's subject is NOT the field label: a trigger named "About
+                   Run These Notes Describe" would itself match a lookup of the
+                   select by its label (Playwright's `getByLabel` matches a
+                   substring of `aria-label`), and two controls answering to one
+                   field's name is ambiguous to a screen reader too. */
+                <HelpTip subject={CAPTURE_COPY.runTipSubject}>
+                    <p>{CAPTURE_COPY.runHint}</p>
+                  </HelpTip>
+                )}
+              </span>
+              <select
+                id={runId}
+                ref={runSelectRef}
+                className="capture-control"
+                value={selectedRun}
+                aria-describedby={
+                  mode === undefined ? `${runId}-hint ${runId}-target` : undefined
+                }
+                disabled={formLocked}
+                onChange={(event) => setSelectedRun(event.target.value)}
+              >
+                <option value="">{CAPTURE_COPY.runPlaceholder}</option>
+                {runs.map((run) => (
+                  <option key={run.id} value={run.id}>
+                    {run.label}
+                  </option>
+                ))}
+              </select>
+              {mode === undefined && (
+                <p className="capture-hint" id={`${runId}-hint`}>
+                  {CAPTURE_COPY.runHint}
+                </p>
+              )}
+            </>
+          )}
+          {/* In a focused task view the select already shows the chosen run, and the
+              no-run consequence is stated at the point of action (the pre-flight
+              beside Finalize), so this line is the composite view's only. */}
+          {mode === undefined && (
+            <p className="capture-hint" id={`${runId}-target`}>
+              {selectedRunLabel !== null
+                ? CAPTURE_COPY.runTargetsRun(selectedRunLabel)
+                : CAPTURE_COPY.runTargetsNone}
+            </p>
+          )}
+
+          <span className="capture-label-row">
+            <label className="capture-label" htmlFor={transcriptId}>
+              {CAPTURE_COPY.transcriptLabel}
+            </label>
+            {mode !== undefined && (
+              <HelpTip subject={CAPTURE_COPY.transcriptTipSubject}>
+                <p>{CAPTURE_COPY.transcriptHint}</p>
+                <p>{CAPTURE_COPY.finalizeHint}</p>
+              </HelpTip>
+            )}
+          </span>
+          <textarea
+            id={transcriptId}
+            ref={transcriptRef}
+            className="capture-control capture-textarea"
+            rows={6}
+            value={text}
+            aria-describedby={mode === undefined ? `${transcriptId}-hint` : undefined}
+            disabled={formLocked}
+            onChange={(event) => setText(event.target.value)}
+          />
+          {mode === undefined && (
+            <p className="capture-hint" id={`${transcriptId}-hint`}>
+              {CAPTURE_COPY.transcriptHint} {CAPTURE_COPY.finalizeHint}
+            </p>
+          )}
+          {/*
+            THE PRE-FLIGHT, AND FINALIZE STAYS ENABLED.
+            ==========================================
+
+            Finalizing with no run selected used to run straight into a summary
+            card reading "Nothing was proposed from this transcript." — a dead
+            end discovered only after the write. It is not an error: every word
+            is stored as notes, which is worth doing, and the run selector's
+            never-default discipline is correct and stays. So the button stays
+            enabled and the consequence is stated at the point of action instead.
+
+            M-3: GATED ON THERE BEING TEXT. It used to render the moment the
+            panel opened, warning about a press that was not yet possible —
+            Finalize is `disabled` while `text.trim() === ''`. A warning that
+            precedes the action it describes is noise on first open, and noise
+            is what a reader learns to skip. It now appears exactly when the
+            button it describes becomes pressable, and the `aria-describedby`
+            is bound on the same condition so it never points at a missing id.
+
+            MEASURED, not assumed: `read_transcript` inserts a
+            `run_target_required` clarification when `selected_run is None`,
+            which makes `settled` False, which skips the candidate loop whole
+            (`if not settled: continue`) — so ZERO candidates, hence zero
+            proposals, independent of what the transcript says. See
+            `runHint`'s comment in `transcriptCaptureContent.ts` for the
+            per-path scope measurement behind the copy this replaced.
+          */}
+          {selectedRun === '' && text.trim() !== '' && (
+            <p className="capture-preflight" id={`${transcriptId}-preflight`}>
+              {CAPTURE_COPY.finalizePreflightNoRun}
+            </p>
+          )}
+          <button
+            type="submit"
+            className={primaryClass(showFinalizePrimary)}
+            disabled={busyKind !== null || text.trim() === ''}
+            aria-busy={busyKind === 'finalize'}
+            aria-describedby={
+              selectedRun === '' && text.trim() !== '' ? `${transcriptId}-preflight` : undefined
+            }
+          >
+            {busyKind === 'finalize' ? 'Reading…' : CAPTURE_COPY.finalize}
+          </button>
+          {/* BELOW Finalize, quiet and right-aligned: this is the destructive-of-typing
+              branch and must never sit where the primary action is expected. Closing the
+              panel still keeps the text — that behaviour is deliberate (see the reset
+              effect above) and this control is the explicit act it was missing, not a
+              reason to make closing destructive. */}
+          <DiscardStaged
+            staged={hasStagedCapture && !formLocked}
+            copy={discardCopy}
+            onDiscard={discardStagedCapture}
+            onAnnounce={setAnnouncement}
+            onFocusAfterDiscard={() => transcriptRef.current?.focus()}
+          />
+        </form>
+  );
+
+  const legacyReadingBlock =
+    reading !== null && !formLocked ? (
+          <div className="capture-reading">
+            <h3 className="capture-subhead">{CAPTURE_COPY.summaryHeading}</h3>
+            {reading.candidates.length === 0 ? (
+              <p className="capture-note">{CAPTURE_COPY.candidatesEmpty}</p>
+            ) : (
+              <>
+                <p className="capture-summary-line">
+                  {CAPTURE_COPY.summaryStored(proposalsStored, notesStored)}
+                </p>
+                {unproposableCount > 0 && (
+                  <>
+                    <p className="capture-note">
+                      {CAPTURE_COPY.summaryUnproposable(unproposableCount)}
+                    </p>
+                    {/* m4: h4 — a SUBSECTION of "What This Reading Stored" (h3)
+                        above, not a sibling of it. */}
+                    <h4 className="capture-subhead">{CAPTURE_COPY.unproposableHeading}</h4>
+                    <ul className="capture-outcomes">
+                      {reading.unproposable.map((entry) => (
+                        <li key={`${entry.field_path}-${entry.candidate_index}`}>
+                          <strong>{entry.field_path}</strong> — {entry.message}
+                        </li>
+                      ))}
+                    </ul>
+                  </>
+                )}
+              </>
+            )}
+            {/*
+              CAPTURE ANOTHER NOTE STAYS OFFERED EVEN WHEN NOTHING WAS PROPOSED —
+              it was nested inside the `candidates.length > 0` branch above and was
+              therefore UNREACHABLE on an all-prose reading (every word stored as a
+              note, nothing recognised as a value): a scientist who dictated a note
+              with no extractable value had no way back to a fresh box short of
+              closing and reopening the whole panel. Found taking this slice's own
+              screenshots. `reviewProposals` alone stays conditional — there is
+              nothing to review when nothing was proposed.
+            */}
+            <div className="capture-reading-actions">
+              {proposalsStored > 0 && (
+                <button
+                  type="button"
+                  className={primaryClass(showReadingPrimary)}
+                  onClick={reviewProposals}
+                >
+                  {CAPTURE_COPY.reviewProposals(proposalsStored)}
+                </button>
+              )}
+              <button
+                type="button"
+                className={primaryClass(showReadingPrimary && proposalsStored === 0)}
+                onClick={captureAnother}
+              >
+                {CAPTURE_COPY.captureAnother}
+              </button>
+            </div>
+
+            {reading.review_required.length > 0 && (
+              <>
+                <h4 className="capture-subhead">{CAPTURE_COPY.reviewHeading}</h4>
+                <ul className="capture-outcomes">
+                  {reading.review_required.map((entry) => (
+                    <li key={entry.field_path} data-outcome={entry.outcome}>
+                      <span className="capture-outcome-tag">Needs review</span>{' '}
+                      <strong>{entry.field_path}</strong> — {entry.reason}
+                    </li>
+                  ))}
+                </ul>
+              </>
+            )}
+
+            {reading.clarifications.length > 0 && (
+              <>
+                <h4 className="capture-subhead">{CAPTURE_COPY.clarificationsHeading}</h4>
+                <ul className="capture-outcomes">
+                  {reading.clarifications.map((entry, index) => (
+                    <li key={`${entry.kind}-${index}`} data-outcome={entry.outcome}>
+                      <span className="capture-outcome-tag">Question</span> {entry.question}
+                      {entry.quote !== null && (
+                        <span className="capture-outcome-quote"> “{entry.quote}”</span>
+                      )}
+                      {entry.options.length > 0 && (
+                        <ul className="capture-outcome-options">
+                          {entry.options.map((option) => (
+                            <li key={option.run_id}>{option.label}</li>
+                          ))}
+                        </ul>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              </>
+            )}
+
+            {reading.abstentions.length > 0 && (
+              <>
+                <h4 className="capture-subhead">{CAPTURE_COPY.abstentionsHeading}</h4>
+                <ul className="capture-outcomes">
+                  {reading.abstentions.map((entry, index) => (
+                    <li key={`${entry.kind}-${index}`} data-outcome={entry.outcome}>
+                      <span className="capture-outcome-tag">Not proposed</span>{' '}
+                      <span className="capture-outcome-quote">“{entry.quote}”</span> —{' '}
+                      {entry.reason}
+                    </li>
+                  ))}
+                </ul>
+              </>
+            )}
+
+            <h4 className="capture-subhead">{CAPTURE_COPY.notesHeading}</h4>
+            <p className="capture-note">{CAPTURE_COPY.notesNote}</p>
+            <ul className="capture-stored">
+              {reading.notes.map((note) => (
+                <li key={note.id}>{note.text}</li>
+              ))}
+            </ul>
+
+            <h4 className="capture-subhead">{CAPTURE_COPY.retentionHeading}</h4>
+            <p className="capture-note">{reading.capture.retention.description}</p>
+            <p className="capture-note">{reading.capture.retention.raw_audio.reason}</p>
+            <ul className="capture-outcomes">
+              {reading.capture.retention.not_implemented.map((entry) => (
+                <li key={entry.state}>
+                  <span className="capture-outcome-tag">Not offered</span>{' '}
+                  <strong>{entry.state}</strong> — {entry.reason}
+                </li>
+              ))}
+            </ul>
+            <p className="capture-note">
+              {/* THE SERVER'S OWN SENTENCE AND THE SERVER'S OWN ROUTE. Neither the
+                  method nor the path is transcribed here — a second copy in this
+                  bundle would be free to drift from the operation that enforces it. */}
+              {reading.accept_contract.message} Accepting one happens through{' '}
+              <code>
+                {reading.accept_contract.method} {reading.accept_contract.path}
+              </code>
+              , which is what the Ingestion Proposals surface calls.
+            </p>
+          </div>
+    ) : null;
+
+  /*
+   * THE COMPACT RESULT for the focused views: what was stored, the two next
+   * actions, and — still visible — anything the reader has to decide (a
+   * contradiction, a question the reader will not answer for them). Everything
+   * else the server returned is kept, verbatim, behind one disclosure.
+   */
+  const compactReadingBlock =
+    reading !== null && !formLocked ? (
+      <div className="capture-reading capture-reading-compact">
+        <h3 className="capture-subhead">{CAPTURE_COPY.summaryHeading}</h3>
+        <p className="capture-summary-line">
+          {reading.candidates.length === 0
+            ? CAPTURE_COPY.candidatesEmpty
+            : CAPTURE_COPY.summaryCompact(notesStored, proposalsStored)}
+        </p>
+        {unproposableCount > 0 && (
+          <p className="capture-note">{CAPTURE_COPY.summaryUnproposable(unproposableCount)}</p>
+        )}
+        <div className="capture-reading-actions">
+          {proposalsStored > 0 && (
+            <button
+              type="button"
+              className={primaryClass(showReadingPrimary)}
+              onClick={reviewProposals}
+            >
+              {CAPTURE_COPY.reviewProposals(proposalsStored)}
+            </button>
+          )}
+          <button
+            type="button"
+            className={primaryClass(showReadingPrimary && proposalsStored === 0)}
+            onClick={captureAnother}
+          >
+            {CAPTURE_COPY.captureAnother}
+          </button>
+        </div>
+        {reading.review_required.length > 0 && (
+          <>
+            <h4 className="capture-subhead">{CAPTURE_COPY.reviewHeading}</h4>
+            <ul className="capture-outcomes">
+              {reading.review_required.map((entry) => (
+                <li key={entry.field_path} data-outcome={entry.outcome}>
+                  <span className="capture-outcome-tag">Needs review</span>{' '}
+                  <strong>{entry.field_path}</strong> — {entry.reason}
+                </li>
+              ))}
+            </ul>
+          </>
+        )}
+        {reading.clarifications.length > 0 && (
+          <>
+            <h4 className="capture-subhead">{CAPTURE_COPY.clarificationsHeading}</h4>
+            <ul className="capture-outcomes">
+              {reading.clarifications.map((entry, index) => (
+                <li key={`${entry.kind}-${index}`} data-outcome={entry.outcome}>
+                  <span className="capture-outcome-tag">Question</span> {entry.question}
+                  {entry.quote !== null && (
+                    <span className="capture-outcome-quote"> “{entry.quote}”</span>
+                  )}
+                  {entry.options.length > 0 && (
+                    <ul className="capture-outcome-options">
+                      {entry.options.map((option) => (
+                        <li key={option.run_id}>{option.label}</li>
+                      ))}
+                    </ul>
+                  )}
+                </li>
+              ))}
+            </ul>
+          </>
+        )}
+        <Disclosure summary={CAPTURE_COPY.readingDetailsHeading} className="capture-reading-details">
+          {unproposableCount > 0 && (
+            <>
+              <h4 className="capture-subhead">{CAPTURE_COPY.unproposableHeading}</h4>
+              <ul className="capture-outcomes">
+                {reading.unproposable.map((entry) => (
+                  <li key={`${entry.field_path}-${entry.candidate_index}`}>
+                    <strong>{entry.field_path}</strong> — {entry.message}
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
+          {reading.abstentions.length > 0 && (
+            <>
+              <h4 className="capture-subhead">{CAPTURE_COPY.abstentionsHeading}</h4>
+              <ul className="capture-outcomes">
+                {reading.abstentions.map((entry, index) => (
+                  <li key={`${entry.kind}-${index}`} data-outcome={entry.outcome}>
+                    <span className="capture-outcome-tag">Not proposed</span>{' '}
+                    <span className="capture-outcome-quote">“{entry.quote}”</span> —{' '}
+                    {entry.reason}
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
+          <h4 className="capture-subhead">{CAPTURE_COPY.notesHeading}</h4>
+          <p className="capture-note">{CAPTURE_COPY.notesNote}</p>
+          <ul className="capture-stored">
+            {reading.notes.map((note) => (
+              <li key={note.id}>{note.text}</li>
+            ))}
+          </ul>
+          <h4 className="capture-subhead">{CAPTURE_COPY.retentionHeading}</h4>
+          <p className="capture-note">{reading.capture.retention.description}</p>
+          <p className="capture-note">{reading.capture.retention.raw_audio.reason}</p>
+          <ul className="capture-outcomes">
+            {reading.capture.retention.not_implemented.map((entry) => (
+              <li key={entry.state}>
+                <span className="capture-outcome-tag">Not offered</span>{' '}
+                <strong>{entry.state}</strong> — {entry.reason}
+              </li>
+            ))}
+          </ul>
+          <p className="capture-note">
+            {reading.accept_contract.message} Accepting one happens through{' '}
+            <code>
+              {reading.accept_contract.method} {reading.accept_contract.path}
+            </code>
+            , which is what the Proposals view calls.
+          </p>
+        </Disclosure>
+      </div>
+    ) : null;
+
+  if (mode === 'write') {
+    return (
+      <div className="capture-mode" data-mode="write">
+        {announcer}
+        {errorBlock}
+        {/* THE ONE PRIVACY LINE THAT STAYS VISIBLE (DEC-35: a privacy state is never
+            disclosed away). True of this path: finalize posts text to this ISAAC
+            server only, where `transcript_capture.py` reads it with fixed rules and
+            stores every segment as a note; no provider is called. */}
+        <p className="capture-privacy">{CAPTURE_COPY.writePrivacyLine}</p>
+        {formBlock}
+        {compactReadingBlock}
+        <Disclosure summary={CAPTURE_COPY.writeGuideHeading} className="capture-guide">
+          <p className="capture-guidance-lead">{CAPTURE_GUIDANCE_SENTENCE}</p>
+          <p className="capture-guidance-label">For example, saying:</p>
+          <blockquote className="capture-guidance-example">
+            {CAPTURE_GUIDANCE_EXAMPLE.spoken}
+          </blockquote>
+          <p className="capture-guidance-label">is read as:</p>
+          <ul className="capture-guidance-list">
+            {CAPTURE_GUIDANCE_EXAMPLE.reads.map((line) => (
+              <li key={line}>{line}</li>
+            ))}
+          </ul>
+          <p className="capture-guidance-keeps">
+            The rest — “{CAPTURE_GUIDANCE_EXAMPLE.keeps}” — is stored with the record as a
+            note. Nothing you say is discarded.
+          </p>
+          <p className="capture-guidance-mechanism">{CAPTURE_COPY.guidanceMechanism}</p>
+        </Disclosure>
+      </div>
+    );
+  }
+
+  if (mode === 'voice') {
+    /*
+     * THE LOCAL RECORDER CANNOT BE FOLDED AWAY WHILE IT IS IN USE. A collapsed
+     * disclosure hiding a live microphone would hide a privacy state (DEC-35), so
+     * while a recording is being requested, running, paused or held the section is
+     * held open and its row states why. At rest it opens and closes normally.
+     */
+    const recorderBusy =
+      voice === 'requesting-permission' ||
+      voice === 'recording' ||
+      voice === 'paused' ||
+      voice === 'held';
+    return (
+      <div className="capture-mode" data-mode="voice">
+        {announcer}
+        {errorBlock}
+        <Disclosure
+          summary={
+            <span className="capture-local-summary">
+              <Mic size={15} strokeWidth={2} aria-hidden="true" />
+              {CAPTURE_COPY.localRecorderHeading}
+            </span>
+          }
+          meta={
+            voice === 'recording' || voice === 'paused' || voice === 'held'
+              ? STATE_BADGE[voice]
+              : undefined
+          }
+          open={localRecorderOpen || recorderBusy}
+          onOpenChange={(next) => {
+            if (!recorderBusy) setLocalRecorderOpen(next);
+          }}
+          headingLevel={3}
+          className="capture-local"
+        >
+          {voiceBlock}
+          {formBlock}
+          {compactReadingBlock}
+        </Disclosure>
+      </div>
+    );
+  }
 
   return (
     <section className="capture-section" aria-labelledby={`${ids}-heading`}>
@@ -1696,749 +2772,12 @@ export function TranscriptCapturePanel({
 
       {!open ? null : (
       <div id={`${ids}-body`}>
-      <p className="sr-only" role="status" aria-live="polite" aria-atomic="true">
-        {announcement}
-      </p>
-
-      {error !== null && (
-        <p className="capture-error" role="alert">
-          {error}
-          {retryTag !== null && (
-            <>
-              {' '}
-              <button
-                type="button"
-                className={`${primaryClass(showErrorPrimary)} capture-error-retry`}
-                onClick={retryAction}
-              >
-                {CAPTURE_COPY.tryAgain}
-              </button>
-            </>
-          )}
-        </p>
-      )}
-
-      {guidanceOpen ? (
-        <div className="capture-guidance" id={guidanceId}>
-          <h3 className="capture-guidance-title">{CAPTURE_COPY.guidanceHeading}</h3>
-          <p className="capture-guidance-lead">{CAPTURE_GUIDANCE_SENTENCE}</p>
-          <p className="capture-guidance-label">For example, saying:</p>
-          <blockquote className="capture-guidance-example">
-            {CAPTURE_GUIDANCE_EXAMPLE.spoken}
-          </blockquote>
-          <p className="capture-guidance-label">is read as:</p>
-          <ul className="capture-guidance-list">
-            {CAPTURE_GUIDANCE_EXAMPLE.reads.map((line) => (
-              <li key={line}>{line}</li>
-            ))}
-          </ul>
-          <p className="capture-guidance-keeps">
-            The rest — “{CAPTURE_GUIDANCE_EXAMPLE.keeps}” — is stored with the record
-            as a note. Nothing you say is discarded.
-          </p>
-          <p className="capture-guidance-mechanism">{CAPTURE_COPY.guidanceMechanism}</p>
-          <p className="capture-guidance-storage">{CAPTURE_COPY.guidanceStorageNote}</p>
-          <button type="button" className="btn btn-secondary" onClick={dismissGuidance}>
-            {CAPTURE_COPY.guidanceDismiss}
-          </button>
-        </div>
-      ) : (
-        // No `aria-controls`: the element carrying `guidanceId` is UNMOUNTED in
-        // this branch, and pointing at an id that is not in the document is a
-        // dangling reference an assistive technology cannot follow. `aria-expanded`
-        // alone is correct and sufficient here.
-        <button
-          type="button"
-          className="capture-guidance-reopen"
-          aria-expanded={false}
-          onClick={() => setGuidanceOpen(true)}
-        >
-          {CAPTURE_COPY.guidanceReopen}
-        </button>
-      )}
-
-      {/* ---- voice ---- */}
-      <div className="capture-voice">
-        <h3 className="capture-subhead">{CAPTURE_COPY.voiceHeading}</h3>
-        <p className="sr-only" role="status" aria-live="polite" aria-atomic="true">
-          {voiceLive}
-        </p>
-        {/*
-          THE SEAM STATUS IS OUTSIDE THE RECORDER BRANCH AND RENDERED ON BOTH
-          BRANCHES. A browser with no recorder — including every test environment
-          — must still say whether this deployment can transcribe at all, which is
-          a fact about the DEPLOYMENT, not about this browser.
-
-          `data-configured="unreported"` rather than `"false"`: the three states
-          are not the same claim, and a test that could not tell them apart would
-          let a regression rename one into the other.
-        */}
-        {transcription !== null ? (
-          <p className="capture-seam" data-configured={String(transcription.configured)}>
-            <span className="capture-seam-label">Transcription:</span>{' '}
-            {transcription.reason}
-          </p>
-        ) : (
-          <p className="capture-seam" data-configured="unreported">
-            {CAPTURE_COPY.voiceSeamUnreported}
-          </p>
-        )}
-        {voice === 'unsupported' ? (
-          <p className="capture-note">{CAPTURE_COPY.voiceUnsupported}</p>
-        ) : (
-          <>
-            <p className="capture-note">{CAPTURE_COPY.voiceAudioHandling}</p>
-            {/*
-              THE ROUTE THAT CAN PRODUCE TEXT, offered where the reader has just
-              been told this one cannot.
-
-              The project owner's point, 2026-09-14: recording that can never be
-              transcribed "becomes kind of useless", so the screen should say how
-              to get text — via a Claude app over MCP — rather than leave a
-              control whose only outcomes are playback and Discard.
-
-              COLLAPSED, because the owner asked for exactly that ("put it behind
-              a collapsible thing so it isnt just more word clutter again") and
-              because it is a procedure, not a status. And CONDITIONAL: the
-              precondition is the first line inside, since the MCP transport is
-              unmounted in every deployment and `CLAUDE.md` §15 forbids implying
-              the agent path exists. It points at Settings → Connect Your Agent
-              for the steps rather than restating them, so the two cannot drift.
-            */}
-            <details className="capture-mcp-route">
-              <summary className="capture-mcp-summary">
-                {CAPTURE_COPY.mcpRouteHeading}
-              </summary>
-              <p className="capture-note">{CAPTURE_COPY.mcpRouteLead}</p>
-              <p className="capture-mcp-precondition">{CAPTURE_COPY.mcpRoutePrecondition}</p>
-              <p className="capture-guidance-label">{CAPTURE_COPY.mcpRouteSayLabel}</p>
-              <p className="capture-mcp-say">{CAPTURE_COPY.mcpRouteSayExample}</p>
-              <p className="capture-note">{CAPTURE_COPY.mcpRouteOutcome}</p>
-            </details>
-            {/*
-              THE STATE BAR — ABOVE THE CONTROLS, NOT INSIDE THEM.
-              ====================================================
-
-              WHAT IT REPLACES, and why the old arrangement failed a scientist
-              standing at a beamline. `recording` differed from `idle` by a VERB
-              SWAP INSIDE THE SAME BLUE PILL ("Start Recording" -> "Stop
-              Recording") plus `Recording · 0:06` set in 12px `--text-muted`,
-              inline in the button row. Nothing was tinted, nothing was marked,
-              and the one number that matters was the smallest thing on the
-              panel. `held` was worse: the elapsed indicator was removed
-              entirely and the ONLY statement that audio was still in the tab
-              was an `sr-only` live region — so a screen-reader user was better
-              informed than a sighted one.
-
-              THE STATE IS NEVER CARRIED BY COLOUR ALONE, which is
-              `transcriptCapture.css`'s own standing rule. Three signals move
-              together and any one of them is sufficient: the WORD (`Recording`
-              / `Held`), the MARK's SHAPE (a disc while live, a square while
-              held), and the tint. A reader with no colour, or with
-              `prefers-reduced-motion` stopping the pulse, loses nothing.
-
-              `.capture-elapsed`'S TEXT IS A CONTRACT WITH A FENCED SPEC. It
-              must read `<state> · <m:ss>` with the time LAST —
-              `e2e/mutation/capture-microphone.spec.ts` asserts `Recording ·
-              0:01` (`:901`), matches `/Recording · (?!0:00)\d+:\d\d/` (`:774`)
-              and parses `/(\d+):(\d\d)\s*$/` off `innerText` (`:510`). The
-              separator is therefore a literal, and the element is NOT a flex
-              container — flex items can have `innerText` newlines inserted
-              between them. The size difference is carried by the two inner
-              spans, which changes no character of the text.
-            */}
-            {(voice === 'recording' || voice === 'paused' || voice === 'held') && (
-              <div className="capture-live" data-state={voice}>
-                <span className="capture-live-mark" aria-hidden="true" />
-                <p className="capture-elapsed">
-                  <span className="capture-elapsed-state">{STATE_BADGE[voice]}</span>
-                  {' · '}
-                  <span className="capture-elapsed-time">{formatElapsed(elapsedSec)}</span>
-                </p>
-              </div>
-            )}
-            {/*
-              THE VISIBLE `paused` STATEMENT, in the same slot `held` uses for
-              `voiceHeldPersistent` and for the same reason: the state's most
-              consequential fact must not live only in an `sr-only` live region,
-              where a sighted reader never meets it. Here that fact is that the
-              MICROPHONE IS STILL OPEN — see `voicePausedPersistent`.
-            */}
-            {voice === 'paused' && (
-              <p className="capture-held-line">{CAPTURE_COPY.voicePausedPersistent}</p>
-            )}
-            {voice === 'held' && (
-              <>
-                <p className="capture-held-line">{CAPTURE_COPY.voiceHeldPersistent}</p>
-                {playbackUrl !== null && (
-                  <>
-                    {/*
-                      IN-TAB PLAYBACK. `controlsList` suppresses Chrome's
-                      default Download item — `voiceAudioHandling` promises the
-                      audio is "never written to disk", and a download would
-                      make that false — and `noremoteplayback`, reinforced by
-                      the `disableRemotePlayback` property below, stops the
-                      browser offering to cast it, which is audio leaving the
-                      tab by a channel no HTTP assertion watches.
-
-                      THE PROPERTY IS SET THROUGH THE REF because React 18 does
-                      not know `disableRemotePlayback` as a JSX prop and would
-                      warn rather than forward it. The callback is memoised
-                      (N-1) so it is not detached and re-attached on every
-                      render — an inline arrow makes React run it twice per
-                      commit for no reason.
-                    */}
-                    <audio
-                      className="capture-playback"
-                      src={playbackUrl}
-                      controls
-                      preload="metadata"
-                      controlsList="nodownload noplaybackrate noremoteplayback"
-                      aria-label={CAPTURE_COPY.voicePlaybackLabel}
-                      ref={adoptPlayer}
-                    />
-                    <p className="capture-note">{CAPTURE_COPY.voicePlaybackNote}</p>
-                  </>
-                )}
-              </>
-            )}
-            <div className="capture-voice-controls">
-              {voice === 'idle' && (
-                <button
-                  type="button"
-                  className={primaryClass(showVoicePrimary)}
-                  onClick={startRecording}
-                  disabled={formLocked}
-                >
-                  {CAPTURE_COPY.voiceRecord}
-                </button>
-              )}
-              {voice === 'requesting-permission' && (
-                <button
-                  type="button"
-                  className={primaryClass(showVoicePrimary)}
-                  disabled
-                  aria-busy="true"
-                >
-                  {CAPTURE_COPY.voiceRequesting}
-                </button>
-              )}
-              {voice === 'recording' && (
-                /*
-                  STOP MUST NOT LOOK LIKE START, and until 2026-09-10 it was the
-                  identical blue pill with a different verb — the only
-                  difference between "live" and "not live" on the whole panel.
-                  `capture-stop` repaints it on the alert ramp. `.btn-primary`
-                  STAYS IN THE CLASS LIST deliberately: it is still this state's
-                  one primary action, and the "exactly one primary per state"
-                  guard counts `.btn-primary` nodes.
-
-                  The elapsed indicator that used to sit beside it has moved
-                  into the state bar above — see that block's comment for the
-                  `.capture-elapsed` text contract.
-                */
-                <button
-                  type="button"
-                  className={`${primaryClass(showVoicePrimary)} capture-stop`}
-                  onClick={stopRecording}
-                  disabled={formLocked}
-                >
-                  {CAPTURE_COPY.voiceStop}
-                </button>
-              )}
-              {/*
-                PAUSE IS SECONDARY AND ONLY EXISTS IF THE RECORDER CAN DO IT.
-
-                Secondary, because Stop is still this state's one primary
-                action — the exclusivity guard counts `.btn-primary` nodes and
-                `recording` must keep exactly one. Rendered conditionally on
-                `pauseSupported`, which was read off the constructed recorder
-                (see that state's comment): absence is the truthful shape for
-                a capability this browser does not have, and a disabled button
-                would claim one that is merely unavailable right now.
-              */}
-              {voice === 'recording' && pauseSupported && (
-                <button
-                  type="button"
-                  className="btn btn-secondary"
-                  onClick={pauseRecording}
-                  disabled={formLocked}
-                >
-                  {CAPTURE_COPY.voicePause}
-                </button>
-              )}
-              {voice === 'paused' && (
-                <>
-                  <button
-                    type="button"
-                    className={primaryClass(showVoicePrimary)}
-                    onClick={resumeRecording}
-                    disabled={formLocked}
-                  >
-                    {CAPTURE_COPY.voiceResume}
-                  </button>
-                  {/*
-                    STOP KEEPS `capture-stop` WHILE PAUSED, and keeps the alert
-                    ramp with it. The ramp is on the CONTROL, not on the state:
-                    it is the same act — close the device, end the take — and
-                    the reason `.capture-stop` exists is that it must never be
-                    mistaken for Start. The bar two elements above is amber and
-                    says `Paused`, so nothing here says a recording is live.
-                    `transcriptCapture.css` already anticipated Stop rendering
-                    `btn btn-secondary capture-stop`; this is the second state
-                    in which it does.
-                  */}
-                  <button
-                    type="button"
-                    className={`${primaryClass(false)} capture-stop`}
-                    onClick={stopRecording}
-                    disabled={formLocked}
-                  >
-                    {CAPTURE_COPY.voiceStop}
-                  </button>
-                </>
-              )}
-              {voice === 'held' && (
-                <>
-                  <button
-                    type="button"
-                    className={primaryClass(showVoicePrimary)}
-                    onClick={focusTranscript}
-                    disabled={formLocked}
-                  >
-                    {CAPTURE_COPY.voiceTypeWhatWasSaid}
-                  </button>
-                  {/*
-                    DISARMED ONCE IT HAS REFUSED — 2026-09-10. This operation
-                    cannot succeed in any deployment (`501
-                    no_provider_configured`, and Dean's D4/D6/D8/D9 are
-                    DEFERRED), yet it used to return to its enabled resting
-                    state after refusing, so the same wall could be summoned
-                    forever. `refusal` is cleared by Start Recording, Discard
-                    Audio and a record change, so a NEW recording arms it again
-                    — the seam stays discoverable, it simply stops offering a
-                    second identical refusal for the same audio.
-
-                    NOT disabled from the start, though `capabilities` already
-                    reports the seam unconfigured: pressing it once is how a
-                    reader learns what is missing, and the refusal card is that
-                    answer. Focus has already moved to the transcript box by
-                    the time this disables, so nothing is trapped on it.
-
-                    KNOWN CONFLICT, NAMED RATHER THAN LEFT TO CI:
-                    `e2e/mutation/capture-microphone.spec.ts:909` asserts this
-                    button is still ENABLED right after the click, as a
-                    synchronisation barrier before reading its probe. That line
-                    will fail and needs to wait on `.capture-refusal` instead —
-                    a stricter barrier anyway, since it waits for the response
-                    rather than for a button state. That file was outside this
-                    slice's edit scope.
-                  */}
-                  <button
-                    type="button"
-                    className="btn btn-secondary capture-transcribe"
-                    onClick={requestTranscript}
-                    disabled={formLocked || busyKind !== null || refusal !== null}
-                  >
-                    {CAPTURE_COPY.voiceTranscribe}
-                  </button>
-                  <button
-                    type="button"
-                    className="btn btn-secondary"
-                    onClick={discardAudio}
-                    disabled={formLocked}
-                  >
-                    {CAPTURE_COPY.voiceDiscard}
-                  </button>
-                </>
-              )}
-              {voice === 'permission-denied' && (
-                <>
-                  <button
-                    type="button"
-                    className={primaryClass(showVoicePrimary)}
-                    onClick={focusTranscript}
-                    disabled={formLocked}
-                  >
-                    {CAPTURE_COPY.voiceTypeWhatWasSaid}
-                  </button>
-                  <button
-                    type="button"
-                    className="btn btn-secondary"
-                    onClick={startRecording}
-                    disabled={formLocked}
-                  >
-                    {CAPTURE_COPY.voiceTryAgain}
-                  </button>
-                </>
-              )}
-            </div>
-            {/*
-              I8, INDEPENDENT REVIEW OF PR-D — PLAIN TEXT, NOT A SECOND LIVE
-              REGION. `role="alert"` carries an IMPLICIT `aria-live="assertive"`,
-              so this used to announce the same sentence `voiceLive` (above) had
-              already announced — twice, from two regions, for one event. The
-              sentence is now said ONCE, through the ordinary status region, and
-              this paragraph is plain, persistent, readable content: a sighted
-              reader still sees it immediately, and a screen-reader user reaches
-              it by navigating the page, exactly as they would any other text.
-            */}
-            {voice === 'permission-denied' && (
-              <p className="capture-note capture-note-warn">
-                {voiceDenialCopy(voiceDenialReason ?? 'unknown')}
-              </p>
-            )}
-            {/*
-              THE REFUSAL, LED IN THE SCIENTIST'S REGISTER AND COMPLETE BEHIND
-              A DISCLOSURE.
-              ====================================================================
-
-              WHAT SHIPPED BEFORE: `refusal.message` verbatim as the first and
-              largest thing — "This build cannot transcribe speech: no provider
-              is configured for the transcription seam. Missing: an approved
-              transcription provider (decision D9), an institutional credential
-              for it (decision D4), approved egress for speech leaving SLAC
-              (decisions D6, D8). These are institutional decisions recorded in
-              docs/ai-integration-decision-packet.md; …" — a governance
-              changelog handed to somebody mid-experiment.
-
-              NOTHING IS WITHHELD AND NOTHING IS PARAPHRASED. The server's full
-              message, its `missing` list and its `decision_reference` are all
-              still here, character for character, inside `<details>`. Only the
-              ORDER changed: a reader now meets one sentence about what they
-              can do, and reaches the decision record in one press if they want
-              it. The disclosure is `open={false}` by default and is a native
-              `<details>`, so it is keyboard-reachable and announced as a
-              disclosure without a line of script.
-
-              `role="alert"` STAYS ON THE CONTAINER, so the lead is announced.
-              The `<details>` body is inside it but is not separately live — a
-              disclosure that announced its own contents on open would say the
-              whole governance paragraph twice.
-            */}
-            {refusal !== null && (
-              <div className="capture-refusal" role="alert">
-                <p className="capture-refusal-message">{voiceRefusalLead(refusal.reason)}</p>
-                <p className="capture-note">{CAPTURE_COPY.voiceAfterRefusal}</p>
-                <details className="capture-refusal-why">
-                  <summary>{CAPTURE_COPY.voiceRefusalWhy}</summary>
-                  <p className="capture-note">{CAPTURE_COPY.voiceRefusalDetailIntro}</p>
-                  <p className="capture-refusal-server">{refusal.message}</p>
-                  <p className="capture-guidance-label">Missing:</p>
-                  <ul className="capture-guidance-list">
-                    {refusal.missing.map((item) => (
-                      <li key={item}>{item}</li>
-                    ))}
-                  </ul>
-                  <p className="capture-note">
-                    Recorded in <code>{refusal.decision_reference}</code>.
-                  </p>
-                </details>
-              </div>
-            )}
-          </>
-        )}
-      </div>
-
-      {/*
-        ---- run + transcript ----
-
-        I3a, INDEPENDENT REVIEW OF PR-D — A REAL `<form>`, SO THE IN-FLIGHT GUARD
-        INSIDE `finalize()` IS WHAT A TEST (AND A REAL DOUBLE-SUBMIT) EXERCISES.
-        `fireEvent.click` on a `disabled` button never dispatches in a browser or
-        in jsdom, so a test driving the button alone can only ever prove the
-        DISABLED ATTRIBUTE stops a second submit — not the `busyKind !== null`
-        guard at the top of `finalize()` itself. `fireEvent.submit(form)` calls
-        `onSubmit` directly, bypassing the button's disabled state exactly as a
-        stray double Enter-press or a re-entrant call would, which is what makes
-        the guard the thing under test. The button's own `disabled` attribute is
-        UNCHANGED and still the first line of defence for an ordinary click.
-      */}
-      <form
-        className="capture-form"
-        onSubmit={(event) => {
-          event.preventDefault();
-          void finalize();
-        }}
-      >
-        {runs.length === 0 ? (
-          <>
-            {/*
-              m3, INDEPENDENT REVIEW OF PR-D — NOT A `<label htmlFor>` HERE. The
-              select this label named does not exist in the empty-run state, so
-              `htmlFor={runId}` pointed at an id nothing on screen carried — a
-              dangling reference an assistive technology cannot follow. Plain
-              text, same visual class, no association to break.
-            */}
-            <p className="capture-label">{CAPTURE_COPY.runLabel}</p>
-            <p className="capture-run-empty" id={`${runId}-hint`}>
-              {CAPTURE_COPY.runEmptyPrefix}{' '}
-              {/*
-                m2, INDEPENDENT REVIEW OF PR-D — A REAL BUTTON, TOKEN-STYLED. This
-                used to be link-styled text on `--text-link`/`--text-body`, which
-                this design system does not declare as buttons ever use — see
-                `transcriptCapture.css`. It is now `.btn.btn-secondary`, the same
-                idiom every other secondary control on this panel uses, sized
-                down to sit inline in the sentence.
-              */}
-              <button
-                type="button"
-                className="btn btn-secondary capture-run-empty-create"
-                onClick={createRun}
-                disabled={formLocked || busyKind !== null}
-              >
-                {CAPTURE_COPY.runCreate}
-              </button>
-              {CAPTURE_COPY.runEmptySuffix}
-            </p>
-          </>
-        ) : (
-          <>
-            <label className="capture-label" htmlFor={runId}>
-              {CAPTURE_COPY.runLabel}
-            </label>
-            <select
-              id={runId}
-              ref={runSelectRef}
-              className="capture-control"
-              value={selectedRun}
-              aria-describedby={`${runId}-hint ${runId}-target`}
-              disabled={formLocked}
-              onChange={(event) => setSelectedRun(event.target.value)}
-            >
-              <option value="">{CAPTURE_COPY.runPlaceholder}</option>
-              {runs.map((run) => (
-                <option key={run.id} value={run.id}>
-                  {run.label}
-                </option>
-              ))}
-            </select>
-            <p className="capture-hint" id={`${runId}-hint`}>
-              {CAPTURE_COPY.runHint}
-            </p>
-          </>
-        )}
-        <p className="capture-hint" id={`${runId}-target`}>
-          {selectedRunLabel !== null
-            ? CAPTURE_COPY.runTargetsRun(selectedRunLabel)
-            : CAPTURE_COPY.runTargetsNone}
-        </p>
-
-        <label className="capture-label" htmlFor={transcriptId}>
-          {CAPTURE_COPY.transcriptLabel}
-        </label>
-        <textarea
-          id={transcriptId}
-          ref={transcriptRef}
-          className="capture-control capture-textarea"
-          rows={6}
-          value={text}
-          aria-describedby={`${transcriptId}-hint`}
-          disabled={formLocked}
-          onChange={(event) => setText(event.target.value)}
-        />
-        <p className="capture-hint" id={`${transcriptId}-hint`}>
-          {CAPTURE_COPY.transcriptHint} {CAPTURE_COPY.finalizeHint}
-        </p>
-        {/*
-          THE PRE-FLIGHT, AND FINALIZE STAYS ENABLED.
-          ==========================================
-
-          Finalizing with no run selected used to run straight into a summary
-          card reading "Nothing was proposed from this transcript." — a dead
-          end discovered only after the write. It is not an error: every word
-          is stored as notes, which is worth doing, and the run selector's
-          never-default discipline is correct and stays. So the button stays
-          enabled and the consequence is stated at the point of action instead.
-
-          M-3: GATED ON THERE BEING TEXT. It used to render the moment the
-          panel opened, warning about a press that was not yet possible —
-          Finalize is `disabled` while `text.trim() === ''`. A warning that
-          precedes the action it describes is noise on first open, and noise
-          is what a reader learns to skip. It now appears exactly when the
-          button it describes becomes pressable, and the `aria-describedby`
-          is bound on the same condition so it never points at a missing id.
-
-          MEASURED, not assumed: `read_transcript` inserts a
-          `run_target_required` clarification when `selected_run is None`,
-          which makes `settled` False, which skips the candidate loop whole
-          (`if not settled: continue`) — so ZERO candidates, hence zero
-          proposals, independent of what the transcript says. See
-          `runHint`'s comment in `transcriptCaptureContent.ts` for the
-          per-path scope measurement behind the copy this replaced.
-        */}
-        {selectedRun === '' && text.trim() !== '' && (
-          <p className="capture-preflight" id={`${transcriptId}-preflight`}>
-            {CAPTURE_COPY.finalizePreflightNoRun}
-          </p>
-        )}
-        <button
-          type="submit"
-          className={primaryClass(showFinalizePrimary)}
-          disabled={busyKind !== null || text.trim() === ''}
-          aria-busy={busyKind === 'finalize'}
-          aria-describedby={
-            selectedRun === '' && text.trim() !== '' ? `${transcriptId}-preflight` : undefined
-          }
-        >
-          {busyKind === 'finalize' ? 'Reading…' : CAPTURE_COPY.finalize}
-        </button>
-        {/* BELOW Finalize, quiet and right-aligned: this is the destructive-of-typing
-            branch and must never sit where the primary action is expected. Closing the
-            panel still keeps the text — that behaviour is deliberate (see the reset
-            effect above) and this control is the explicit act it was missing, not a
-            reason to make closing destructive. */}
-        <DiscardStaged
-          staged={hasStagedCapture && !formLocked}
-          copy={discardCopy}
-          onDiscard={discardStagedCapture}
-          onAnnounce={setAnnouncement}
-          onFocusAfterDiscard={() => transcriptRef.current?.focus()}
-        />
-      </form>
-
-      {/* ---- proposals-ready: a compact summary, not the old inline candidate list ---- */}
-      {reading !== null && !formLocked && (
-        <div className="capture-reading">
-          <h3 className="capture-subhead">{CAPTURE_COPY.summaryHeading}</h3>
-          {reading.candidates.length === 0 ? (
-            <p className="capture-note">{CAPTURE_COPY.candidatesEmpty}</p>
-          ) : (
-            <>
-              <p className="capture-summary-line">
-                {CAPTURE_COPY.summaryStored(proposalsStored, notesStored)}
-              </p>
-              {unproposableCount > 0 && (
-                <>
-                  <p className="capture-note">
-                    {CAPTURE_COPY.summaryUnproposable(unproposableCount)}
-                  </p>
-                  {/* m4: h4 — a SUBSECTION of "What This Reading Stored" (h3)
-                      above, not a sibling of it. */}
-                  <h4 className="capture-subhead">{CAPTURE_COPY.unproposableHeading}</h4>
-                  <ul className="capture-outcomes">
-                    {reading.unproposable.map((entry) => (
-                      <li key={`${entry.field_path}-${entry.candidate_index}`}>
-                        <strong>{entry.field_path}</strong> — {entry.message}
-                      </li>
-                    ))}
-                  </ul>
-                </>
-              )}
-            </>
-          )}
-          {/*
-            CAPTURE ANOTHER NOTE STAYS OFFERED EVEN WHEN NOTHING WAS PROPOSED —
-            it was nested inside the `candidates.length > 0` branch above and was
-            therefore UNREACHABLE on an all-prose reading (every word stored as a
-            note, nothing recognised as a value): a scientist who dictated a note
-            with no extractable value had no way back to a fresh box short of
-            closing and reopening the whole panel. Found taking this slice's own
-            screenshots. `reviewProposals` alone stays conditional — there is
-            nothing to review when nothing was proposed.
-          */}
-          <div className="capture-reading-actions">
-            {proposalsStored > 0 && (
-              <button
-                type="button"
-                className={primaryClass(showReadingPrimary)}
-                onClick={reviewProposals}
-              >
-                {CAPTURE_COPY.reviewProposals(proposalsStored)}
-              </button>
-            )}
-            <button
-              type="button"
-              className={primaryClass(showReadingPrimary && proposalsStored === 0)}
-              onClick={captureAnother}
-            >
-              {CAPTURE_COPY.captureAnother}
-            </button>
-          </div>
-
-          {reading.review_required.length > 0 && (
-            <>
-              <h4 className="capture-subhead">{CAPTURE_COPY.reviewHeading}</h4>
-              <ul className="capture-outcomes">
-                {reading.review_required.map((entry) => (
-                  <li key={entry.field_path} data-outcome={entry.outcome}>
-                    <span className="capture-outcome-tag">Needs review</span>{' '}
-                    <strong>{entry.field_path}</strong> — {entry.reason}
-                  </li>
-                ))}
-              </ul>
-            </>
-          )}
-
-          {reading.clarifications.length > 0 && (
-            <>
-              <h4 className="capture-subhead">{CAPTURE_COPY.clarificationsHeading}</h4>
-              <ul className="capture-outcomes">
-                {reading.clarifications.map((entry, index) => (
-                  <li key={`${entry.kind}-${index}`} data-outcome={entry.outcome}>
-                    <span className="capture-outcome-tag">Question</span> {entry.question}
-                    {entry.quote !== null && (
-                      <span className="capture-outcome-quote"> “{entry.quote}”</span>
-                    )}
-                    {entry.options.length > 0 && (
-                      <ul className="capture-outcome-options">
-                        {entry.options.map((option) => (
-                          <li key={option.run_id}>{option.label}</li>
-                        ))}
-                      </ul>
-                    )}
-                  </li>
-                ))}
-              </ul>
-            </>
-          )}
-
-          {reading.abstentions.length > 0 && (
-            <>
-              <h4 className="capture-subhead">{CAPTURE_COPY.abstentionsHeading}</h4>
-              <ul className="capture-outcomes">
-                {reading.abstentions.map((entry, index) => (
-                  <li key={`${entry.kind}-${index}`} data-outcome={entry.outcome}>
-                    <span className="capture-outcome-tag">Not proposed</span>{' '}
-                    <span className="capture-outcome-quote">“{entry.quote}”</span> —{' '}
-                    {entry.reason}
-                  </li>
-                ))}
-              </ul>
-            </>
-          )}
-
-          <h4 className="capture-subhead">{CAPTURE_COPY.notesHeading}</h4>
-          <p className="capture-note">{CAPTURE_COPY.notesNote}</p>
-          <ul className="capture-stored">
-            {reading.notes.map((note) => (
-              <li key={note.id}>{note.text}</li>
-            ))}
-          </ul>
-
-          <h4 className="capture-subhead">{CAPTURE_COPY.retentionHeading}</h4>
-          <p className="capture-note">{reading.capture.retention.description}</p>
-          <p className="capture-note">{reading.capture.retention.raw_audio.reason}</p>
-          <ul className="capture-outcomes">
-            {reading.capture.retention.not_implemented.map((entry) => (
-              <li key={entry.state}>
-                <span className="capture-outcome-tag">Not offered</span>{' '}
-                <strong>{entry.state}</strong> — {entry.reason}
-              </li>
-            ))}
-          </ul>
-          <p className="capture-note">
-            {/* THE SERVER'S OWN SENTENCE AND THE SERVER'S OWN ROUTE. Neither the
-                method nor the path is transcribed here — a second copy in this
-                bundle would be free to drift from the operation that enforces it. */}
-            {reading.accept_contract.message} Accepting one happens through{' '}
-            <code>
-              {reading.accept_contract.method} {reading.accept_contract.path}
-            </code>
-            , which is what the Ingestion Proposals surface calls.
-          </p>
-        </div>
-      )}
+      {announcer}
+      {errorBlock}
+      {guidanceBlock}
+      {voiceBlock}
+      {formBlock}
+      {legacyReadingBlock}
       </div>
       )}
     </section>

@@ -225,6 +225,38 @@ describe('the record screen', () => {
   });
 });
 
+/* ── §3b · a record that is not there (owner QA 2026-09-22, N4) ───────────── */
+
+describe('a record that does not exist', () => {
+  it('is titled by the state on screen, not as a workspace — and the skeleton spine settles away', async () => {
+    const MISSING = 'NOPE123';
+    const routes = Object.fromEntries(
+      Object.keys(bundleRoutes(MISSING)).map((key) => [
+        key,
+        key.includes(`/experiments/${MISSING}`)
+          ? { status: 404, body: { error: 'experiment_not_found' }, contentType: 'application/json' }
+          : bundleRoutes(MISSING)[key],
+      ]),
+    );
+    stubFetchRoutes(routes as never);
+    render(
+      <MemoryRouter
+        initialEntries={[`/record/${MISSING}`]}
+        future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+      >
+        <AppRoutes />
+      </MemoryRouter>,
+    );
+    await screen.findByRole('heading', { name: 'Record Not Found' });
+    // ~~"Record Fields · ISAAC Metadata Assistant"~~ — a false claim about a page
+    // showing no fields at all.
+    await waitFor(() => expect(document.title).toBe(`Record Not Found · ${APP_TITLE}`));
+    // The loading skeleton is gone once absence is known: no workflow is coming.
+    expect(document.querySelector('.spine-step.skeleton')).toBeNull();
+    expect(screen.queryByRole('navigation', { name: 'Workflow pipeline' })).toBeNull();
+  });
+});
+
 /* ── §4 · the measured trap ─────────────────────────────────────────────── */
 
 describe('a navigation that changes only a non-view parameter', () => {
@@ -408,10 +440,14 @@ describe('§7 resolveRecordView treats an empty parameter as absent', () => {
    * Small but real: a link carrying a valueless `?compare=` opened Runs with
    * nothing selected, and out-ranked a `?proposal=` that did name something.
    */
+  /* 2026-09-22: a bare `?proposal=` now resolves to `proposals` — the focused
+     review view the proposals panel moved to — where it used to resolve to
+     `capture`. The property under test (an EMPTY run address is absent, so the
+     proposal decides) is unchanged; only the destination's name moved. */
   it('an empty compare is ignored, exactly as an empty run already was', () => {
-    expect(resolveRecordView('?run=&proposal=X')).toBe('capture');
+    expect(resolveRecordView('?run=&proposal=X')).toBe('proposals');
     // The defect: this used to be 'runs'.
-    expect(resolveRecordView('?compare=&proposal=X')).toBe('capture');
+    expect(resolveRecordView('?compare=&proposal=X')).toBe('proposals');
     expect(resolveRecordView('?compare=')).toBe('fields');
     expect(resolveRecordView('?run=')).toBe('fields');
   });
@@ -426,10 +462,34 @@ describe('§7 resolveRecordView treats an empty parameter as absent', () => {
 
   it('the title floor agrees, because it is the same function', () => {
     expect(routeDocumentTitle('/record/demo', '?compare=&proposal=X')).toBe(
-      `${recordWorkspaceTitleSegment('capture')} · ${APP_TITLE}`,
+      `${recordWorkspaceTitleSegment('proposals')} · ${APP_TITLE}`,
     );
     expect(routeDocumentTitle('/record/demo', '?compare=A')).toBe(
       `${recordWorkspaceTitleSegment('runs')} · ${APP_TITLE}`,
     );
+  });
+});
+
+describe('§8 the focused capture views and the proposal destination (2026-09-22)', () => {
+  it('titles a focused capture task by the task first, then Capture', () => {
+    expect(routeDocumentTitle('/record/demo', '?view=capture&method=write')).toBe(
+      `Write It Down · ${recordWorkspaceTitleSegment('capture')} · ${APP_TITLE}`,
+    );
+    expect(routeDocumentTitle('/record/demo', '?view=capture&method=voice')).toBe(
+      `Record at the Instrument · ${recordWorkspaceTitleSegment('capture')} · ${APP_TITLE}`,
+    );
+    // An unrecognised method is Capture Home, never a dead title.
+    expect(routeDocumentTitle('/record/demo', '?view=capture&method=nope')).toBe(
+      `${recordWorkspaceTitleSegment('capture')} · ${APP_TITLE}`,
+    );
+  });
+
+  it('every proposal link ever minted (`view=capture&proposal=`) opens Proposals', () => {
+    expect(resolveRecordView('?view=capture&proposal=P1')).toBe('proposals');
+    // ...unless the reader chose a capture TASK, which wins over a stale id.
+    expect(resolveRecordView('?view=capture&method=write&proposal=P1')).toBe('capture');
+    // An empty proposal id is absent, so Capture Home stays Capture Home.
+    expect(resolveRecordView('?view=capture&proposal=')).toBe('capture');
+    expect(resolveRecordView('?view=proposals')).toBe('proposals');
   });
 });

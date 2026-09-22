@@ -1995,7 +1995,7 @@ function RunsBrowser({
                     been sent anywhere. Leaving this run now — including switching to
                     a different run, reloading, paging, searching or filtering the
                     runs list — loses it, and it cannot be recovered. Switching to
-                    this record&rsquo;s other workspaces — Record Fields, Experiment Data, Graph — keeps it.
+                    this record&rsquo;s other workspaces — Capture, Proposals, Record Fields — keeps it.
                   </p>
                   <div className="runs-leave-confirm-actions">
                     <button

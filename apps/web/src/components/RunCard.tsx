@@ -828,7 +828,7 @@ export function RunCard({
           autosave.status === 'conflict') && (
         <p className="run-card-session-note">
           Changes this tab has not finished saving live in this browser tab only. Switching
-          to this record’s other workspaces — Record Fields, Experiment Data, Graph
+          to this record’s other workspaces — Capture, Proposals, Record Fields
           — and back keeps them. If you close the browser tab or reload, anything still
           unsent is lost — and anything already sent may or may not have been saved.
         </p>
@@ -849,7 +849,7 @@ export function RunCard({
       {!compact && heldInvalid && (
         <p className="run-card-session-note">
           Text this screen could not read has not been sent anywhere, and is held in this
-          card only. Switching to this record’s other workspaces — Record Fields, Experiment Data, Graph — and back keeps it; leaving this run, paging, searching or
+          card only. Switching to this record’s other workspaces — Capture, Proposals, Record Fields — and back keeps it; leaving this run, paging, searching or
           filtering the runs list, or reloading the page, does not.
         </p>
       )}

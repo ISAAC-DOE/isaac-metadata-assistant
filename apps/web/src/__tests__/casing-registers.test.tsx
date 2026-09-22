@@ -748,8 +748,22 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-/** The record's four workspaces, which between them mount every briefed component. */
-const WORKSPACES = ['fields', 'runs', 'capture', 'graph'] as const;
+/** The record's workspaces, which between them mount every briefed component.
+ *
+ *  2026-09-22: `proposals` JOINED, because the notes queue and the proposals list
+ *  moved there from Capture (so "Capture a note" in `RENDER_ALLOWLIST` renders
+ *  there now), and the two focused capture views that render label slots of their
+ *  own — the Write form and the Voice view's Claude + local-recorder sections —
+ *  are swept too, addressed by their `?method=`. */
+const WORKSPACES = [
+  'fields',
+  'runs',
+  'capture',
+  'graph',
+  'proposals',
+  'capture&method=write',
+  'capture&method=voice',
+] as const;
 
 /** Render a workspace and open every collapsed group, as a reader would. */
 async function openedWorkspace(view: (typeof WORKSPACES)[number]) {

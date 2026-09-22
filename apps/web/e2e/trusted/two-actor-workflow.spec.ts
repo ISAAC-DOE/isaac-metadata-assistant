@@ -362,12 +362,13 @@ test.describe('two scientists, one record, end to end', () => {
     // ── STEP 5 — A opens the proposal-review surface, and it is EMPTY ─────────
     /*
      * AND THIS IS NOW A REAL "OPENS", which the step name always claimed. The
-     * proposal-review surface is the Experiment Data workspace; it used to be
+     * proposal-review surface is the Proposals view (2026-09-22; it was the
+     * Experiment Data workspace before that); it used to be
      * further down the same column, so the step asserted a heading it had not
      * navigated to. A opens it here and STAYS here for steps 6-17 — the live-arrival
      * assertion in step 7 depends on no navigation happening after this point.
      */
-    await switchWorkspace(page, 'capture');
+    await switchWorkspace(page, 'proposals');
     const proposals = page.getByRole('region', { name: 'Ingestion Proposals' });
     await expect(
       page.getByRole('heading', { name: 'Ingestion Proposals' }),
@@ -964,7 +965,7 @@ test.describe('two scientists, one record, end to end', () => {
      * THE RUNS ARE READ ON THEIR OWN WORKSPACE, AND THE COUNT IS ASSERTED AS VISIBLE
      * RATHER THAN AS PRESENT.
      *
-     * The reload lands on `?view=capture`, where `RunsSection` is not mounted — so
+     * The reload lands on `?view=proposals`, where `RunsSection` is not mounted — so
      * this assertion has to switch. It is also strengthened while it moves:
      * `toHaveCount` counts the DOM and would pass over two hidden cards, which is
      * exactly the state a reader would experience as the runs having vanished. Each

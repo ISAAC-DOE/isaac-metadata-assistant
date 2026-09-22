@@ -42,3 +42,28 @@ export function useHealth(): ApiHealth | undefined {
   }, []);
   return health;
 }
+
+/**
+ * The same shared read, with the one extra fact a surface needs when a MISSING
+ * block must not be mistaken for a not-yet-arrived one: whether the read has
+ * SETTLED. `useHealth` returns `undefined` both while loading and after a failure;
+ * a caller that renders "this deployment has not reported X" must wait for
+ * `settled` first, or it would say so during the first few hundred milliseconds of
+ * every visit.
+ */
+export function useHealthState(): { settled: boolean; health: ApiHealth | undefined } {
+  const [state, setState] = useState<{ settled: boolean; health: ApiHealth | undefined }>({
+    settled: false,
+    health: undefined,
+  });
+  useEffect(() => {
+    let alive = true;
+    primeHealth().then((h) => {
+      if (alive) setState({ settled: true, health: h });
+    });
+    return () => {
+      alive = false;
+    };
+  }, []);
+  return state;
+}

@@ -227,6 +227,13 @@ export const HIDDEN_TEXT_ALLOWANCES: readonly OverflowAllowance[] = [
       // why: it would record a deliberate allowance the other workspaces already
       // hold as though it were DEBT.
       'record-activity',
+      // 2026-09-22 — the three focused views registered with the capture redesign.
+      // The spine renders on every record workspace, and its STATE WORD
+      // (`.spine-state`, `WorkflowSpine.tsx`) carries this same class for the same
+      // reason: visually hidden in the compact stepper, kept for screen readers.
+      'record-capture-write',
+      'record-capture-voice',
+      'record-proposals',
       'guided-completion',
       'evidence',
       'evidence-graph',

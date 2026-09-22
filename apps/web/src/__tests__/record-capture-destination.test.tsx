@@ -102,12 +102,16 @@ function renderAt(path: string, extra: Record<string, unknown> = {}) {
 }
 
 const nav = () => screen.getByRole('navigation', { name: 'Record workspaces' });
-const captureLink = () => screen.getByRole('link', { name: 'Experiment Data' });
+const captureNav = () => screen.getByRole('navigation', { name: 'Data Capture' });
+const captureLink = () => within(captureNav()).getByRole('link', { name: 'Capture' });
+const proposalsLink = () => within(captureNav()).getByRole('link', { name: 'Proposals' });
+/** The rail is rendered only once the record has loaded. */
+const loaded = () => screen.findByRole('link', { name: 'Activity' });
 
-/** The summary line as a screen reader would reach it — through the link's own
- *  description, never by hunting for text that happens to sit nearby. */
-function describedText(): string | null {
-  const id = captureLink().getAttribute('aria-describedby');
+/** The Proposals badge as a screen reader reaches it — the link's own
+ *  description, never text that happens to sit nearby. */
+function proposalsDescription(): string | null {
+  const id = proposalsLink().getAttribute('aria-describedby');
   if (id === null) return null;
   return document.getElementById(id)?.textContent ?? null;
 }
@@ -116,131 +120,64 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe('the promoted capture destination', () => {
+/*
+ * ── REWRITTEN 2026-09-22 (owner QA N3), INVERTED RATHER THAN DROPPED ────────
+ *
+ * The promoted `Experiment Data` CARD, with its note/proposal counts as the link's
+ * description, is gone. The group is three ordinary destination rows — Capture
+ * (Capture Home), Proposals (the one focused review surface) and Runs — and the
+ * counts moved to where they are USED:
+ *
+ *   · the open-proposal count is a badge on the Proposals row (the thing it counts
+ *     is behind that row), described to a screen reader as "<n> awaiting review";
+ *   · the whole summary line — notes, open proposals, unreadable entries — is on
+ *     Capture Home, pinned by `capture-intake.test.tsx` and below.
+ *
+ * Every property the old file pinned survives in its new place: the group is a
+ * named landmark above the spine and the workspaces; a count is the SERVER'S
+ * total from the record payload and no list is read for it; an unknown total
+ * renders NOTHING rather than "0"; the count is withheld on the one destination
+ * whose panels state their own; and neither row carries completion state.
+ */
+describe('the Data Capture group', () => {
   it('is its own NAMED landmark, above the workspaces list AND above the workflow spine', async () => {
-    /*
-     * *** THE LANDMARK SPLIT, 2026-09-13 (project owner). ***
-     *
-     * ~~"still inside the one nav landmark"~~ — capture now has its OWN named
-     * `navigation` so the record rail can render it ABOVE the workflow spine.
-     * The owner's reason: this is where a scientist's own work starts, and it was
-     * reaching them third, below the pipeline.
-     *
-     * TWO landmarks is the cost, and it is paid deliberately. Keeping one would
-     * have meant moving the whole workspace list above the spine too, burying the
-     * thing a reader orients by. What makes two acceptable is that both are
-     * NAMED — asserted below, because an unnamed second `navigation` is the
-     * defect this would otherwise introduce.
-     *
-     * The ordering assertions are strengthened rather than relaxed: this now pins
-     * capture above the SPINE as well, which is the actual request and which the
-     * old within-one-nav assertion could not express.
-     */
     renderAt(`/record/${ID}`);
-    await screen.findByRole('link', { name: 'Record Fields' });
-
-    const captureNav = screen.getByRole('navigation', { name: 'Data Capture' });
-    const workspacesEyebrow = within(nav()).getByText('Workspaces');
-    const spine = screen.getByRole('navigation', { name: /workflow/i });
-
-    /* ABOVE, asserted as document order rather than by reading the JSX: the
-       whole point of the change is where a reader's eye lands first. */
+    await loaded();
+    const group = captureNav();
     expect(
-      captureNav.compareDocumentPosition(workspacesEyebrow) &
-        Node.DOCUMENT_POSITION_FOLLOWING,
-      'capture must precede the workspaces list',
-    ).toBeTruthy();
-    expect(
-      captureNav.compareDocumentPosition(spine) & Node.DOCUMENT_POSITION_FOLLOWING,
-      'capture must precede the workflow spine — being FIRST is the request',
-    ).toBeTruthy();
-    expect(captureNav.contains(captureLink())).toBe(true);
-
-    /* Both landmarks named, which is what makes more than one legitimate. */
-    for (const landmark of screen.getAllByRole('navigation')) {
-      const name =
-        landmark.getAttribute('aria-label') ?? landmark.getAttribute('aria-labelledby') ?? '';
-      expect(name.trim(), 'an unnamed navigation landmark in the record rail').not.toBe('');
-    }
-
-    /* AND IT APPEARS EXACTLY ONCE. Promoting it is a rendering split, not a
-       second list: a build that forgot to filter `capture` out of the list
-       below would show the destination twice with two different shapes. */
-    expect(screen.getAllByRole('link', { name: 'Experiment Data' })).toHaveLength(1);
-    /* THE RAIL'S FULL SET, now spanning BOTH landmarks — capture first, in its
-       own, then the workspace list. Reading only `nav()` would silently stop
-       covering capture the moment it moved out, which is exactly what happened
-       here and is why the assertion is over the union.
-
-       ~~[... 'Runs', 'Graph']~~ — the Graph left this list on 2026-09-13
-       (`EVG-002`/`DEC-04`). `?view=graph` still opens it; see
-       `RecordWorkspaceNav`'s `URL_ONLY`. */
-    expect([
-      ...within(captureNav)
+      within(group)
         .getAllByRole('link')
         .map((l) => l.getAttribute('aria-label') ?? l.textContent),
-      ...within(nav())
-        .getAllByRole('link')
-        .map((l) => l.getAttribute('aria-label') ?? l.textContent),
-    ]).toEqual([
-      /*
-       * ORDER CHANGED 2026-09-14: `Runs` JOINED THE CAPTURE GROUP, so it is now
-       * the second link in the capture landmark rather than the last in the
-       * workspace list. ~~['Experiment Data', 'Record Fields', 'Runs']~~
-       *
-       * The owner's words: "the runs should be a part of the initial capture and
-       * proposals". The assertion's PURPOSE is unchanged and is why it is
-       * updated rather than loosened -- it is the union over BOTH landmarks
-       * precisely so a destination that MOVES between them stays covered, which
-       * is the case it was written for and is now the case that happened.
-       */
-      'Experiment Data',
-      'Runs',
-      'Record Fields',
-      /*
-       * `Activity` JOINED THE WORKSPACE LANDMARK, 2026-09-17 (`ACT-003`), which
-       * is why this union grew rather than moved. The assertion's PURPOSE is
-       * unchanged and is exactly why it is extended instead of loosened: it is
-       * the union over BOTH landmarks so that a destination appearing in, or
-       * moving between, them stays covered. A new destination in the workspace
-       * landmark is precisely the case it was written for.
-       *
-       * Nothing about the CAPTURE landmark changed — `Experiment Data` and
-       * `Runs` are still its two links, still first, still above the spine.
-       */
-      'Activity',
-    ]);
+    ).toEqual(['Capture', 'Proposals', 'Runs']);
+    const spine = screen.getByRole('navigation', { name: 'Workflow pipeline' });
+    expect(group.compareDocumentPosition(spine) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(group.compareDocumentPosition(nav()) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
-  it('routes to ?view=capture, the destination that already exists', async () => {
-    renderAt(`/record/${ID}?run=RUNAAA`);
-    await screen.findByRole('link', { name: 'Record Fields' });
-
-    const href = captureLink().getAttribute('href') ?? '';
-    const query = new URLSearchParams(href.split('?')[1] ?? '');
+  it('Capture routes to Capture Home, copying the address and dropping a task or proposal focus', async () => {
+    renderAt(`/record/${ID}?view=capture&method=write&run=RUNAAA&proposal=P1`);
+    await loaded();
+    const query = new URLSearchParams((captureLink().getAttribute('href') ?? '').split('?')[1]);
     expect(query.get('view')).toBe('capture');
-    // ...and the rest of the address is COPIED, not rebuilt — the same contract
-    // the three rows below it keep.
     expect(query.get('run')).toBe('RUNAAA');
+    // `method` would reopen the task; `view=capture&proposal=` would open Proposals.
+    expect(query.has('method')).toBe(false);
+    expect(query.has('proposal')).toBe(false);
   });
 
-  it('marks itself with aria-current="page" when it is the open workspace', async () => {
-    renderAt(`/record/${ID}?view=capture`);
+  it('marks Capture with aria-current="page" on Capture Home AND on its focused views', async () => {
+    renderAt(`/record/${ID}?view=capture&method=voice`);
     await waitFor(() => expect(captureLink()).toHaveAttribute('aria-current', 'page'));
+    expect(proposalsLink()).not.toHaveAttribute('aria-current');
   });
 
-  it('states the RECORD PAYLOAD’S counts, and reads no list to get them', async () => {
+  it('the Proposals badge states the RECORD PAYLOAD’S open count, and reads no list to get it', async () => {
     const calls = stubFetchRoutes({
       ...bundleRoutes(ID),
       [`GET ${BASE}`]: { body: { ...captureDetail({ notes_total: 3, proposals_open: 2 }), id: ID } },
       [`GET ${BASE}/runs`]: { body: runsPage([runFixture({ id: 'RUNAAA', label: 'Run 1' })]) },
-      /*
-       * THE LIST ROUTES ARE STUBBED TO DISAGREE, DELIBERATELY. If this row ever
-       * goes back to reading a list — a `.length`, or even the list's own honest
-       * `total` — it renders "9 notes · 7 to review" and fails here. A fixture
-       * where the two agree could not tell the two implementations apart, which
-       * is the whole reason these bodies are wrong on purpose.
-       */
+      // The list routes DISAGREE with the payload, so a badge that went back to
+      // reading them fails here rather than passing on agreeing fixtures.
       [`GET ${BASE}/notes`]: { body: notesPage([noteFixture()], { total: 9 }) },
       [`GET ${BASE}/proposals`]: {
         body: proposalsWindow({
@@ -259,16 +196,8 @@ describe('the promoted capture destination', () => {
         <AppRoutes />
       </MemoryRouter>,
     );
-
-    await screen.findByRole('link', { name: 'Record Fields' });
-    await waitFor(() => expect(describedText()).toBe('3 notes · 2 to review'));
-
-    /*
-     * AND NOT ONE REQUEST WAS SPENT ON IT. This is the point of the change and
-     * it is asserted rather than described: on a NON-capture workspace the
-     * capture panels are not mounted, so neither list is read at all. The old
-     * hook made exactly two requests here on every record load.
-     */
+    await loaded();
+    await waitFor(() => expect(proposalsDescription()).toBe('2 awaiting review'));
     const listReads = calls.filter((c) => {
       const path = c.replace(/\?.*$/, '');
       return path === `GET ${BASE}/notes` || path === `GET ${BASE}/proposals`;
@@ -276,181 +205,110 @@ describe('the promoted capture destination', () => {
     expect(listReads).toEqual([]);
   });
 
-  it('says “No notes or proposals” only when every total is zero', async () => {
+  it('shows NO badge when nothing is open — never a "0"', async () => {
     // `bundleRoutes` serves a detail whose `capture_summary` is three zeroes.
     renderAt(`/record/${ID}?view=fields`);
-    await screen.findByRole('link', { name: 'Record Fields' });
-    await waitFor(() => expect(describedText()).toBe('No notes or proposals'));
+    await loaded();
+    expect(proposalsLink().getAttribute('aria-describedby')).toBeNull();
+    expect(proposalsLink().textContent).toBe('Proposals');
   });
 
-  it('states nothing while the CAPTURE workspace is the open one, and still reads no list for it', async () => {
-    /*
-     * THE RULE: the summary describes a destination the reader is not in.
-     *
-     * ── THE GATE HAD TWO REASONS AND NOW HAS ONE, WHICH IS WHY THIS TEST WAS
-     *    REWRITTEN RATHER THAN DELETED ────────────────────────────────────────
-     *
-     * The COST reason is gone. The counts arrive on the bundle, so switching the
-     * line off saves no request and switching it on spends none — and this test
-     * asserts that directly below, because a gate justified by a saving that no
-     * longer exists is a gate a future reader will remove for the wrong reason.
-     *
-     * The CONSISTENCY reason holds and is now the whole argument. On this one
-     * workspace `UnmappedNotesPanel` and `IngestionProposalsPanel` are on screen
-     * reading their own lists, and they update the instant a person dismisses a
-     * note or rejects a proposal. The bundle's copy moves only when the bundle
-     * refetches — a change-feed poll away. So a sidebar line here would restate,
-     * less precisely and for a few seconds wrongly, a number the panel beside it
-     * has already corrected. Absence is not a loss: the panels state their own.
-     */
+  it('says NOTHING AT ALL while the counts are unknown — never "0"', async () => {
+    renderAt(`/record/${ID}?view=fields`, {
+      [`GET ${BASE}`]: { body: detailWithoutCaptureSummary(ID) },
+    });
+    await loaded();
+    expect(proposalsLink().getAttribute('aria-describedby')).toBeNull();
+    expect(proposalsLink().textContent).toBe('Proposals');
+  });
+
+  it('withholds the badge on the Proposals view, whose panels state their own counts', async () => {
     const calls = stubFetchRoutes({
       ...bundleRoutes(ID),
-      [`GET ${BASE}`]: { body: { ...captureDetail({ notes_total: 3 }), id: ID } },
+      [`GET ${BASE}`]: { body: { ...captureDetail({ notes_total: 3, proposals_open: 2 }), id: ID } },
       [`GET ${BASE}/runs`]: { body: runsPage([runFixture({ id: 'RUNAAA', label: 'Run 1' })]) },
       [`GET ${BASE}/notes`]: { body: notesPage([noteFixture()], { total: 3 }) },
     } as never);
     render(
       <MemoryRouter
-        initialEntries={[`/record/${ID}?view=capture`]}
+        initialEntries={[`/record/${ID}?view=proposals`]}
         future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
       >
         <AppRoutes />
       </MemoryRouter>,
     );
-    await screen.findByRole('link', { name: 'Record Fields' });
-    await waitFor(() => expect(captureLink()).toHaveAttribute('aria-current', 'page'));
-
-    // The capture PANEL reads the notes, exactly once. The sidebar reads nothing
-    // — not here, and (see the test above) not on any other workspace either.
+    await loaded();
+    await waitFor(() => expect(proposalsLink()).toHaveAttribute('aria-current', 'page'));
+    // The PANELS read their lists, exactly once each.
     await waitFor(() =>
       expect(calls.filter((c) => c.replace(/\?.*$/, '') === `GET ${BASE}/notes`)).toHaveLength(1),
     );
-    expect(captureLink().getAttribute('aria-describedby')).toBeNull();
-    expect(captureLink().textContent).toBe('Experiment Data');
-
-    /*
-     * AND THE NUMBER WAS AVAILABLE THE WHOLE TIME. The bundle carried
-     * `notes_total: 3`, so this is a rendering decision and not a missing read —
-     * which is precisely what makes it a decision a future session may revisit
-     * without any server work.
-     */
-    expect(describedText()).toBeNull();
+    expect(proposalsLink().getAttribute('aria-describedby')).toBeNull();
+    expect(proposalsLink().textContent).toBe('Proposals');
   });
 
-  it('says NOTHING AT ALL while the counts are unknown — never “0”', async () => {
-    /*
-     * THE DISTINCTION THIS PINS. "No notes or proposals" is a claim about the
-     * record; absence is a claim about this client's knowledge. A read that
-     * failed must produce the second, and a surface that printed a zero — or
-     * kept the previous record's numbers — would be asserting the first.
-     */
-    renderAt(`/record/${ID}?view=fields`, {
-      /*
-       * THE "UNKNOWN" CASE MOVED WITH THE DATA. It used to be a failed
-       * `GET .../notes`; the counts no longer come from there, and a failed
-       * detail read takes the whole screen to its backend-down state rather than
-       * to a record with an unknown count. What remains reachable, and is what
-       * this now serves, is an API build that does not send the block at all.
-       */
-      [`GET ${BASE}`]: { body: detailWithoutCaptureSummary(ID) },
-    });
-    await screen.findByRole('link', { name: 'Record Fields' });
-
-    // Give the failed read time to land and any summary to appear.
-    await waitFor(() => expect(screen.queryByText('No notes or proposals')).toBeNull());
-    expect(captureLink().getAttribute('aria-describedby')).toBeNull();
-    expect(captureLink().textContent).toBe('Experiment Data');
-  });
-
-  it('discloses stored entries neither list could read, rather than understating the record', async () => {
-    renderAt(`/record/${ID}?view=fields`, {
+  it('Capture Home discloses stored entries neither list could read, rather than understating the record', async () => {
+    renderAt(`/record/${ID}?view=capture`, {
       // The SERVER sums the two kinds (`routes._capture_summary`); the client
       // renders the sum. Nothing here adds two numbers together.
       [`GET ${BASE}`]: {
         body: { ...captureDetail({ notes_total: 1, unreadable_entries: 2 }), id: ID },
       },
     });
-    await screen.findByRole('link', { name: 'Record Fields' });
-    await waitFor(() => expect(describedText()).toBe('1 note · 2 unreadable entries'));
+    await loaded();
+    await waitFor(() =>
+      expect(document.querySelector('.capture-home-summary')?.textContent ?? '').toContain(
+        '1 note · 2 unreadable entries',
+      ),
+    );
   });
 
-  /*
-   * BOTH STATES, AND THE SECOND ONE IS NOT PADDING.
-   *
-   * The first version of this test ran only on `?view=fields`, where the row is
-   * NOT the open workspace — so `aria-current` is absent whatever the code
-   * says. Mutating the component to render `aria-current="step"` left it GREEN:
-   * the assertion was true by construction, which is the defect this repository
-   * has caught itself shipping repeatedly. `step` can only appear on the ACTIVE
-   * row, so the active render is the one that can see it.
-   */
   it.each([
     ['inactive', 'fields'],
     ['ACTIVE', 'capture'],
-  ])('carries NO completion state while %s — no tick, no lock, no reason, no step', async (
+    ['ACTIVE', 'proposals'],
+  ])('carries NO completion state while %s (%s) — no tick, no lock, no reason, no step', async (
     _name,
     view,
   ) => {
     renderAt(`/record/${ID}?view=${view}`, {
-      [`GET ${BASE}`]: { body: { ...captureDetail({ notes_total: 3 }), id: ID } },
+      [`GET ${BASE}`]: { body: { ...captureDetail({ notes_total: 3, proposals_open: 1 }), id: ID } },
     });
-    await screen.findByRole('link', { name: 'Record Fields' });
-    await waitFor(() =>
-      expect(captureLink().getAttribute('aria-current')).toBe(
-        view === 'capture' ? 'page' : null,
-      ),
-    );
-
-    const link = captureLink();
-    /*
-     * THE ANTI-GOALS, ONE BY ONE. Each is something the spine one region up
-     * legitimately does, and none of them may ever appear here: this row is
-     * always reachable, in any record state, and the record's own signals
-     * cannot decide when capture is "done".
-     */
-    expect(link.getAttribute('aria-current')).not.toBe('step');
-    expect(link.getAttribute('aria-disabled')).toBeNull();
-    expect(link.className).not.toMatch(/completed|blocked|reopened|current\b/);
-    // No state glyph — a tick or a lock would claim a verdict in a picture.
-    expect(link.querySelector('svg')).toBeNull();
-    expect(link.querySelector('.spine-disc')).toBeNull();
-    // No gating sentence. The spine renders "Complete 'X' first." on a blocked
-    // step; this destination is never blocked, so it never earns one.
-    expect(link.textContent).not.toMatch(/first\./);
-    // ...and the row is still a real link, so it is reachable by keyboard and
-    // by the browser's own affordances rather than being an inert card.
-    expect(link.tagName).toBe('A');
-    expect(link.getAttribute('href')).toBeTruthy();
+    await loaded();
+    for (const link of within(captureNav()).getAllByRole('link')) {
+      expect(link.getAttribute('aria-current')).not.toBe('step');
+      expect(link.getAttribute('aria-disabled')).toBeNull();
+      expect(link.className).not.toMatch(/completed|blocked|reopened|current\b/);
+      // No state glyph — a tick or a lock would claim a verdict in a picture.
+      expect(link.querySelector('svg')).toBeNull();
+      expect(link.querySelector('.spine-disc')).toBeNull();
+      expect(link.textContent).not.toMatch(/first\./);
+      expect(link.tagName).toBe('A');
+      expect(link.getAttribute('href')).toBeTruthy();
+    }
   });
 
   it('does not enter the workflow spine, which still derives exactly its five steps', async () => {
     renderAt(`/record/${ID}?view=capture`);
     const spine = await screen.findByRole('navigation', { name: 'Workflow pipeline' });
-    const labels = within(spine)
-      .getAllByRole('listitem')
-      .map((li) => (li.textContent ?? '').trim());
+    await loaded();
+    const labels = Array.from(spine.querySelectorAll('.spine-label')).map(
+      (el) => (el.textContent ?? '').trim(),
+    );
     expect(labels).toHaveLength(5);
-    expect(labels.some((l) => /Capture/.test(l))).toBe(false);
-    // The capture destination lives in the OTHER landmark, not this one.
+    expect(labels.some((l) => /Capture|Proposal/.test(l))).toBe(false);
     expect(spine.contains(captureLink())).toBe(false);
+    expect(spine.contains(proposalsLink())).toBe(false);
   });
 
-  it('keeps the link’s accessible NAME the destination, with the counts as its DESCRIPTION', async () => {
+  it('keeps the Proposals link’s accessible NAME the destination, with the count as its DESCRIPTION', async () => {
     renderAt(`/record/${ID}?view=fields`, {
-      [`GET ${BASE}`]: { body: { ...captureDetail({ notes_total: 4 }), id: ID } },
+      [`GET ${BASE}`]: { body: { ...captureDetail({ proposals_open: 4 }), id: ID } },
     });
-    await screen.findByRole('link', { name: 'Record Fields' });
-    await waitFor(() => expect(describedText()).toBe('4 notes'));
-
-    /*
-     * WHY THIS IS PINNED. Left to its content the link's name would be
-     * "Experiment Data 4 notes" — a name that changes whenever a colleague
-     * captures a note. A reader navigating by link name would find the
-     * destination renamed under them, and every `getByRole('link', { name })`
-     * in this suite would be querying a moving target.
-     */
-    expect(captureLink().getAttribute('aria-label')).toBe('Experiment Data');
-    expect(screen.queryByRole('link', { name: /4 notes/ })).toBeNull();
+    await loaded();
+    await waitFor(() => expect(proposalsDescription()).toBe('4 awaiting review'));
+    expect(proposalsLink().getAttribute('aria-label')).toBe('Proposals');
+    expect(screen.queryByRole('link', { name: /awaiting review/ })).toBeNull();
   });
 });
 

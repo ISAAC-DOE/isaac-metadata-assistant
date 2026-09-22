@@ -475,15 +475,16 @@ const elapsed = (page: Page) => page.locator('.capture-elapsed');
  */
 async function openCapture(page: Page, id: string, permissionDelayMs = 0) {
   await page.addInitScript(installMicProbe, permissionDelayMs);
-  await page.goto(`/record/${id}?view=capture`);
   /*
-   * "Open Recorder", not the panel's own entry: the capture workspace now leads
-   * with the `CaptureIntake` chooser, and the panel renders nothing until a route
-   * is chosen. This is the semantically right door for this file — it is the one a
-   * scientist who means to record actually presses — and it lands in the same
-   * place, because the chooser opens one panel by whichever route was taken.
+   * 2026-09-22 (owner QA C3): the recorder lives on the focused Voice view
+   * (`?method=voice`), SECONDARY to the Claude path, behind a "Record Locally
+   * Instead" disclosure. That disclosure is the door a scientist who means to
+   * record in this browser actually presses, so this file presses it. ~~"Open
+   * Recorder" on the chooser~~ — the chooser now links to the view instead of
+   * expanding a panel beneath itself.
    */
-  const entry = page.getByRole('button', { name: 'Open Recorder' });
+  await page.goto(`/record/${id}?view=capture&method=voice`);
+  const entry = page.getByRole('button', { name: /Record Locally Instead/ });
   await expect(entry).toBeVisible();
   await entry.click();
   // The voice controls only render once the panel body is open AND the browser
@@ -617,9 +618,17 @@ test('already recording: leaving a record in-app releases the microphone', async
    * a `querySelector` re-run, or a `MutationObserver` whose callback batches a
    * removal and a re-insertion together, would silently accept.
    */
+  /* 2026-09-22: in the focused Voice view the panel's root is
+     `.capture-mode[data-mode="voice"]` (the composite's `.capture-section` is
+     not rendered there). The handle must be NON-NULL, or the `isConnected` check
+     below would fail on a null rather than measure the element. */
   const sectionBefore = await page.evaluateHandle(() =>
-    document.querySelector('.capture-section'),
+    document.querySelector('.capture-mode[data-mode="voice"], .capture-section'),
   );
+  expect(
+    await sectionBefore.evaluate((node) => node !== null),
+    'the capture panel root was not found before the switch',
+  ).toBe(true);
 
   await switchRecordThroughTheSearchPalette(page, OTHER_RECORD_TITLE, SEED.ready);
 

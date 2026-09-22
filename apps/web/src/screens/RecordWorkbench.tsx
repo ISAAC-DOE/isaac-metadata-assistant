@@ -1,23 +1,24 @@
 import './screens.css';
 import '../components/evidence.css';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Navigate, useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { Link, Navigate, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { AppShell } from '../components/AppShell';
 import { TopBar } from '../components/TopBar';
 import { WorkflowSpine } from '../components/WorkflowSpine';
-import { RECORD_WORKSPACES } from '../components/RecordWorkspaceNav';
+import { RECORD_WORKSPACES, railDestination } from '../components/RecordWorkspaceNav';
 import { ActivityHistoryPanel } from '../components/ActivityHistoryPanel';
 import { RecordRail } from '../components/RecordRail';
 import { StatusBar } from '../components/StatusBar';
 import { FieldGroup } from '../components/FieldGroup';
 import { RecordInfoPanel, RecordLinksPanel } from '../components/RecordInfoPanel';
-import { CaptureIntake } from '../components/CaptureIntake';
+import { CaptureWorkspace } from '../components/CaptureWorkspace';
+import { CaptureRecordMap } from '../components/CaptureRecordMap';
 import { RenameExperimentPanel } from '../components/RenameExperimentPanel';
 import { MoveExperimentPanel } from '../components/MoveExperimentPanel';
 import { RecordDescriptionPanel } from '../components/RecordDescriptionPanel';
 import { RunsSection } from '../components/RunsSection';
 import { RunSchemaMirror } from '../components/RunSchemaMirror';
-import { TranscriptCapturePanel } from '../components/TranscriptCapturePanel';
+import type { VoiceState } from '../components/TranscriptCapturePanel';
 import { UnmappedNotesPanel } from '../components/UnmappedNotesPanel';
 import { IngestionProposalsPanel } from '../components/IngestionProposalsPanel';
 import { AssetReferencesPanel } from '../components/AssetReferencesPanel';
@@ -31,12 +32,20 @@ import { LiveSyncNote } from '../components/LiveSyncNote';
 import { RecordActivityNote } from '../components/RecordActivityNote';
 import { needsCanonicalRefetch, type RecordChangeSummary } from '../lib/recordChanges';
 import { WorkflowProgressBanner } from '../components/WorkflowProgressBanner';
-import { LoadingPanel, BackendDown } from '../components/FetchStates';
-import { CircleAlert } from '../components/icons';
+import { LoadingPanel, BackendDown, downCopy } from '../components/FetchStates';
+import { CircleAlert, Mic } from '../components/icons';
 import { ExperimentGraphPanel } from './graph/ExperimentGraphPanel';
 import { LABELS } from '../lib/labels';
-import { ROUTES, resolveRecordView, type RecordViewId } from '../lib/routes';
-import { api } from '../lib/api';
+import {
+  RECORD_CAPTURE_METHOD_PARAM,
+  ROUTES,
+  resolveCaptureMethod,
+  resolveRecordView,
+  type RecordViewId,
+} from '../lib/routes';
+import { api, isHostedBuild } from '../lib/api';
+import { recordViewTitleSegments } from '../lib/documentTitle';
+import { CAPTURE_COPY } from '../lib/transcriptCaptureContent';
 import { useDocumentTitle } from '../lib/useDocumentTitle';
 import { useFetch } from '../lib/useFetch';
 import { useRecordSession } from '../lib/useRecordSession';
@@ -382,6 +391,19 @@ export function RecordWorkbench() {
   });
   const degraded = session.syncDegraded;
 
+  /*
+   * N4 (owner QA 2026-09-22) — A RECORD THAT COULD NOT BE LOADED IS NOT TITLED
+   * AS ONE OF ITS WORKSPACES. The route floor titles `/record/<id>` from the URL
+   * alone ("Record Fields · …"), which is a false statement about a page showing
+   * "Record Not Found". Once the read has settled in an error, the title names
+   * the state actually on screen — the SAME title `BackendDown` renders, from the
+   * same `downCopy`, so the tab and the panel cannot disagree.
+   */
+  const workspaceScope = useWorkspaceScope();
+  const downTitle =
+    bundle.status === 'error' ? downCopy(bundle.error, isHostedBuild, workspaceScope).title : null;
+  useDocumentTitle(downTitle === null ? null : [downTitle]);
+
   // P29.4b — after a confirmed proposal write, recompute the shared record state
   // (manual fields, workflow, evidence, export readiness) and refetch the bundle
   // so the manual UI reflects the new value.
@@ -408,7 +430,13 @@ export function RecordWorkbench() {
       <AppShell
         variant="record"
         topBar={<TopBar variant="record" title={LABELS.screenReview} />}
-        sidebar={<WorkflowSpine workflow={null} recordId={id} />}
+        /* The skeleton spine is a LOADING shape. Once the read has settled in an
+           error there is no workflow to show and none is coming, so the sidebar is
+           omitted rather than left as a permanent placeholder beside a settled
+           "Record Not Found" (N4). */
+        sidebar={
+          bundle.status === 'loading' ? <WorkflowSpine workflow={null} recordId={id} /> : undefined
+        }
         mainPad="pad"
       >
         <h1 className="sr-only">{LABELS.screenReview}</h1>
@@ -481,8 +509,12 @@ const WORKSPACE_PROMPT_LEADS: Record<RecordViewId, readonly AgentPrompt['intent'
   // A reader here is deciding what a run still owes and what the system thinks it
   // could infer.
   runs: ['show_inferred_candidates', 'explain_step_blocker'],
+  /* 2026-09-22 — the capture workspace is now Capture Home and its task views,
+     where a reader is choosing how to get data in rather than judging it; the
+     judging moved to `proposals`, and so did these two leads. */
+  capture: [],
   // A reader here is judging candidates against what the record already holds.
-  capture: ['review_evidence_conflicts', 'show_inferred_candidates'],
+  proposals: ['review_evidence_conflicts', 'show_inferred_candidates'],
   /*
    * DELIBERATELY EMPTY, and stated rather than filled in for symmetry. The graph
    * is a view of the record as a whole, so the question a reader arrives with is
@@ -574,6 +606,7 @@ function LoadedWorkbench({
   refreshFailed: boolean;
 }) {
   const navigate = useNavigate();
+  const location = useLocation();
   const { detail, pending, pendingTotal, validate, audit, warnings, evidence, graph } = bundle;
 
   /*
@@ -622,6 +655,9 @@ function LoadedWorkbench({
    * frontend tests, `proposal-deep-link.test.tsx` included, pass unchanged.
    */
   const activeView: RecordViewId = resolveRecordView(searchParams);
+  /* Which capture task is open (`?method=`), meaningful only on `capture`:
+     Capture Home, or one of its focused views. */
+  const captureView = resolveCaptureMethod(searchParams);
 
   /*
    * LIB-005 — REOPEN-AND-CONTINUE. Remember, per browser and per record, which
@@ -657,7 +693,7 @@ function LoadedWorkbench({
    * bar apply, so the tab strip, the heading and the breadcrumb cannot disagree
    * about what the record is called.
    */
-  useDocumentTitle([workspaceLabel(activeView), stripLifecycleSuffix(detail.title)]);
+  useDocumentTitle([...recordViewTitleSegments(searchParams), stripLifecycleSuffix(detail.title)]);
 
   /*
    * THE CAPTURE DESTINATION'S COUNTS, for the promoted sidebar row.
@@ -698,7 +734,10 @@ function LoadedWorkbench({
    * wrongly — a number the panel beside it has already corrected. Absent is not a
    * degradation there: the panels state their own counts in more detail.
    */
-  const captureSummary = activeView === 'capture' ? null : (detail.capture_summary ?? null);
+  /* 2026-09-22 — the two self-updating panels now live on `proposals`, so that is
+     the one destination where the sidebar's count is withheld; Capture Home shows
+     no panel beside it and states the bundle's own counts. */
+  const captureSummary = activeView === 'proposals' ? null : (detail.capture_summary ?? null);
 
   /*
    * THE SWITCH FLUSHES THE RUNS' HELD EDITS. It used to get that for free: the
@@ -776,6 +815,7 @@ function LoadedWorkbench({
     fields: activeView === 'fields',
     runs: activeView === 'runs',
     capture: activeView === 'capture',
+    proposals: activeView === 'proposals',
   });
   /*
    * `activity` JOINS `graph` AS CONDITIONAL, and for the same reason stated above:
@@ -847,12 +887,73 @@ function LoadedWorkbench({
   // segments carry the live server result as a note; the reserved PASS/FAIL chip
   // appears only for real (post-export) validation.
   /*
-   * THE CAPTURE PANEL'S OPEN STATE LIVES HERE so the intake chooser above it can
-   * open it. It starts CLOSED, exactly as the panel's own default was — the
-   * chooser is what a reader meets first now, and the panel opens on the route
-   * they pick. See `CaptureIntake` for why the three routes are what they are.
+   * ~~THE CAPTURE PANEL'S OPEN STATE LIVES HERE so the intake chooser can open it~~
+   * — RETIRED 2026-09-22. The chooser no longer expands a panel beneath itself;
+   * each way in is a focused view addressed by `?method=` (`CaptureWorkspace`).
+   *
+   * THE CAPTURE RUN — the ONE run selection shared by the transcript form and the
+   * Record Map beside every focused capture view and the Proposals view. It starts
+   * EMPTY and nothing here fills it: a run is never chosen for the reader.
    */
-  const [captureOpen, setCaptureOpen] = useState(false);
+  const [captureRunId, setCaptureRunId] = useState('');
+  /* The recorder's state, reported by the one transcript panel, so a live
+     microphone stays visible from any view that is not showing the recorder. */
+  const [voiceState, setVoiceState] = useState<VoiceState>('idle');
+  /*
+   * WHEN THE RECORD MAP RE-READS — and the budget is the point, not an afterthought.
+   *
+   * A run ENTRY advancing on the change feed always re-reads (that is a field the
+   * map shows changing). A RECORD-ONLY version bump re-reads only while a run is
+   * CHOSEN: a proposal filed or decided moves the record's rev, and with no run on
+   * the map there is nothing on it that bump could have changed — re-reading the
+   * run list then would be a request `two-actor-workflow.spec.ts` step 11 exists to
+   * refuse ("exactly TWO runs reads … and nothing else").
+   *
+   * The run position is kept as a HIGH-WATER MARK: `runActivity` returns to null
+   * once the Runs list catches up, and keying on the raw value would re-read a
+   * second time on that return.
+   */
+  const mapRunRevRef = useRef(-1);
+  if (runActivity !== null && runActivity.runRev > mapRunRevRef.current) {
+    mapRunRevRef.current = runActivity.runRev;
+  }
+  const mapRefreshKey =
+    captureRunId === ''
+      ? `run:${mapRunRevRef.current}`
+      : `run:${mapRunRevRef.current}|record:${detail.version}`;
+
+  /*
+   * MOVING FOCUS AFTER A CROSS-VIEW ACTION. "Review N Proposals" and "Open Asset
+   * References" leave the view they were pressed on; focus follows to the
+   * destination's own heading or control rather than being dropped on `<body>`.
+   * Held in a ref and consumed once the destination is the view on screen.
+   */
+  const pendingFocus = useRef<'proposals' | 'assets' | null>(null);
+  useEffect(() => {
+    const want = pendingFocus.current;
+    if (want === null) return;
+    const target =
+      want === 'proposals' && activeView === 'proposals'
+        ? document.getElementById('ingestion-proposals-heading')
+        : want === 'assets' && activeView === 'fields'
+          ? document.querySelector<HTMLElement>('[aria-controls="asset-references-body"]')
+          : null;
+    if (target === null) return;
+    pendingFocus.current = null;
+    if (typeof target.scrollIntoView === 'function') target.scrollIntoView({ block: 'start' });
+    target.focus();
+  }, [activeView]);
+  const openProposals = useCallback(() => {
+    pendingFocus.current = 'proposals';
+    navigate({ search: railDestination(location.search, 'proposals') });
+  }, [navigate, location.search]);
+  const openAssets = useCallback(() => {
+    pendingFocus.current = 'assets';
+    navigate({ search: railDestination(location.search, 'fields') });
+  }, [navigate, location.search]);
+  const recorderLiveElsewhere =
+    (voiceState === 'recording' || voiceState === 'paused') &&
+    !(activeView === 'capture' && captureView === 'voice');
 
   const validationLive = validate.dry_run ? 'pending' : toValidationResult(validate);
   const validationNote = validate.dry_run
@@ -1012,6 +1113,32 @@ function LoadedWorkbench({
         pendingTotal={pendingTotal}
         onReviewAnswer={() => navigate(ROUTES.complete(id))}
       />
+
+      {/* A LIVE MICROPHONE IS NEVER LEFT OUT OF SIGHT (DEC-35 keeps privacy state
+          visible). The recorder keeps running while the reader looks at another
+          view — that is deliberate, and the panel's own header says why — so on
+          any view that is not showing it, this says the microphone is on and
+          offers the way back. */}
+      {recorderLiveElsewhere && (
+        <div className="capture-live-elsewhere" role="status">
+          <span className="capture-live-elsewhere-text">
+            <Mic size={15} strokeWidth={2.2} aria-hidden="true" />
+            {voiceState === 'paused' ? CAPTURE_COPY.pausedElsewhere : CAPTURE_COPY.recordingElsewhere}
+          </span>
+          <Link
+            className="btn btn-secondary"
+            to={{
+              search: (() => {
+                const next = new URLSearchParams(railDestination(location.search, 'capture'));
+                next.set(RECORD_CAPTURE_METHOD_PARAM, 'voice');
+                return `?${next.toString()}`;
+              })(),
+            }}
+          >
+            {CAPTURE_COPY.returnToRecorder}
+          </Link>
+        </div>
+      )}
 
       {activeView === 'graph' && (
         <section
@@ -1373,33 +1500,64 @@ function LoadedWorkbench({
             `apps/web/e2e/mutation/proposals.spec.ts`.
           */}
           {/*
-        THE CHOOSER IS FIRST, AND IT IS WHY CAPTURE MOVED TO THE TOP OF THE RAIL
-        (project owner, 2026-09-13): 'this is where scientists can make a choice
-        whether they want to upload files that they have from their own
-        experiments, or if they want to use the voice assistant thing'.
+            2026-09-22 (owner QA C1–C5): Capture Home and its focused task views.
+            ~~The chooser, the transcript panel, the notes queue and the proposals
+            list, all inline~~ — the chooser now opens each way in as a focused
+            view (`?method=`), and review moved to its own destination below.
+          */}
+          <CaptureWorkspace
+            experimentId={id}
+            experimentTitle={stripLifecycleSuffix(detail.title)}
+            captureView={captureView}
+            captureSummary={detail.capture_summary ?? null}
+            mapRefreshKey={mapRefreshKey}
+            captureRunId={captureRunId}
+            onCaptureRunChange={setCaptureRunId}
+            onVoiceStateChange={setVoiceState}
+            onReviewProposals={openProposals}
+            onOpenAssets={openAssets}
+            /* The silent refetch + record-session recompute, never `bundle.reload`
+               (which would blank this screen to its loading state mid-result). */
+            onCaptured={onAgentRefresh}
+          />
+        </section>
+      )}
 
-        Before this, the workspace opened on ONE collapsed button and a reader
-        had to press it to find out what was inside — while the file route lived
-        on a different top-level destination and the recorder was three controls
-        deep. The chooser names all three routes up front and sends each to the
-        ONE surface that owns it, so nothing is reimplemented.
+      {/* ── PROPOSALS — the ONE focused review surface for what capture produced ──
+          The suggestions awaiting a person's judgement, and the notes no field
+          could hold, with the Record Map for the chosen run beside them.
 
-        IT DOES NOT REPLACE THE PANEL, it routes into it: `captureOpen` is
-        lifted here so 'Start Writing' and 'Open Recorder' both open the panel
-        below rather than opening a second copy of it.
-      */}
-      <CaptureIntake
-        onOpenCapture={() => setCaptureOpen(true)}
-        onOpenRecorder={() => setCaptureOpen(true)}
-        experimentId={id}
-      />
-      <TranscriptCapturePanel
-        experimentId={id}
-        open={captureOpen}
-        onOpenChange={setCaptureOpen}
-      />
-          <UnmappedNotesPanel experimentId={id} activity={notesActivity} />
-          <IngestionProposalsPanel experimentId={id} activity={proposalActivity} />
+          PROPOSALS FIRST, THEN NOTES. On Capture this read note-then-proposal,
+          which is the order things are MADE in; this is a review surface, and
+          what awaits a decision leads. Every proposal still names the note it was
+          read from, and the verbatim words survive every review outcome.
+
+          `proposalActivity` / `notesActivity` refresh these two lists silently
+          when they move elsewhere — see those props' notes above. */}
+      {mounted.current.proposals && (
+        <section
+          id={workspacePanelId('proposals')}
+          className="record-view-panel"
+          aria-label={workspaceRegionName('proposals')}
+          tabIndex={-1}
+          hidden={activeView !== 'proposals'}
+        >
+          <div className="capture-task">
+            <div className="capture-split">
+              <div className="capture-task-main">
+                <IngestionProposalsPanel experimentId={id} activity={proposalActivity} />
+                <UnmappedNotesPanel experimentId={id} activity={notesActivity} />
+              </div>
+              <div className="capture-task-aside">
+                <CaptureRecordMap
+                  experimentId={id}
+                  runId={captureRunId}
+                  onRunChange={setCaptureRunId}
+                  refreshKey={mapRefreshKey}
+                />
+              </div>
+            </div>
+          </div>
         </section>
       )}
     </AppShell>

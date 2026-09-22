@@ -62,6 +62,26 @@
 .spine-step.reopened {
   background: var(--advisory-bg);
 }
+/*
+ * THE DISPLAYED PAGE (2026-09-22, owner QA N1) — the ONE "you are here" fill in
+ * this rail, and the same one `.workspace-nav-item.active` uses, because it means
+ * the same thing: this row's destination is the page on screen.
+ *
+ * The paragraph above removed the fill from `.current` so one fill would mean one
+ * thing. That was right and was not enough: with no row ever marked as the page,
+ * the current step's blue disc and blue label were the only highlight left, and a
+ * reader still took "the record needs this next" for "you are here" — on Runs, on
+ * Capture, and on `/export`. So the page gets the fill, and the current step's
+ * label drops the action colour (below): the disc + the words "Current
+ * requirement" carry its state, and nothing about it looks selected.
+ *
+ * Declared AFTER `.reopened` so a reopened step that is also the page shows the
+ * page fill; its triangle disc and "Needs review" word keep its state visible.
+ * Never colour alone: `aria-current="page"` carries the same fact.
+ */
+.spine-step.is-location {
+  background: var(--action-tint);
+}
 /* The disc + text flex row. Rendered as either a <span> (locked/unreached
  * steps) or the <a> itself (reached steps) — same box, same layout, either
  * way — so the connector line and row alignment never move. */
@@ -83,12 +103,12 @@
   cursor: pointer;
   transition: background 0.12s ease, box-shadow 0.12s ease;
 }
-.spine-step:not(.current) .spine-step-link:hover {
+/* Hover is a SEPARATE, subtler treatment from the selected page: a neutral wash
+ * on any other row, and a ring (not a second fill) on the page row itself. */
+.spine-step:not(.is-location) .spine-step-link:hover {
   background: var(--border-faint);
 }
-/* The current step is already tinted — hover adds a ring instead of a flat
- * background swap so the current/hover states stay visually distinct. */
-.spine-step.current .spine-step-link:hover {
+.spine-step.is-location .spine-step-link:hover {
   box-shadow: inset 0 0 0 1px var(--action-selected-border);
 }
 .spine-step-link:active {
@@ -152,9 +172,15 @@
   font-weight: 500;
   color: var(--text-secondary);
 }
+/* The current requirement reads as emphasis, not as selection — see
+ * `.spine-step.is-location` above for why the action colour moved to the page. */
 .spine-step.current .spine-label {
-  color: var(--action-hover);
+  color: var(--text-primary);
   font-weight: 600;
+}
+.spine-step.is-location .spine-label {
+  color: var(--action-hover);
+  font-weight: var(--font-weight-semibold);
 }
 .spine-step.reopened .spine-label {
   color: var(--advisory-text);
@@ -173,6 +199,23 @@
   font-size: 11px;
   color: var(--text-tertiary);
   line-height: 1.4;
+}
+/* THE STATE WORD — Complete / Current requirement / Needs review / Locked /
+ * Ready. `font-size` is a literal because `palette-contrast.test.ts` reads a
+ * numeric size out of every rule painting --text-tertiary. */
+.spine-state {
+  display: block;
+  font-size: 11px;
+  line-height: var(--line-height-snug);
+  color: var(--text-tertiary);
+}
+.spine-step.current .spine-state {
+  color: var(--text-secondary);
+  font-weight: var(--font-weight-medium);
+}
+.spine-step.reopened .spine-state {
+  color: var(--advisory-text);
+  font-weight: var(--font-weight-medium);
 }
 
 /* ---- Responsive (P33 S6 · RESP-1, extended PR-E) — additive, narrow widths

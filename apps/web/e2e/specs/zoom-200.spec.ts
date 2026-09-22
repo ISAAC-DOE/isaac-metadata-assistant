@@ -113,6 +113,16 @@ test('@zoom no two-dimensional scrolling at the 200% layout-equivalent width (NB
   // WIDTH rather than under the browser's zoom command. Nothing here may be
   // cited as WCAG 1.4.10 conformance, and nothing here replaces the human
   // browser-zoom gate.
+  //
+  // THE BUDGET SCALES WITH THE SURFACE COUNT (2026-09-22). This one test opens
+  // every scanned surface in sequence under the project-wide 60 s test timeout.
+  // Measured on `main` at 0a12f7ae it took 58.8 s — 1.2 s of headroom — so the
+  // three capture surfaces added that day pushed it past the limit, and it
+  // failed by timing out mid-open (surfacing as a `toBeVisible` on whichever
+  // surface it had reached), not by finding horizontal scroll. A fixed budget
+  // for a loop over a growing list is a timeout waiting to happen; 5 s per
+  // surface is ~3x the measured per-surface cost, with 60 s kept as the floor.
+  test.setTimeout(Math.max(60_000, SURFACES.length * 5_000));
   const failures: string[] = [];
   for (const surface of SURFACES) {
     await app.open(surface);
