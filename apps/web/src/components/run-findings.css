@@ -84,8 +84,29 @@
   min-width: 0;
 }
 
-/* The state chip is the shared `SemanticStatus` (icon + word + tint); its look
-   is not restyled here, so the three states read the same as everywhere else. */
+/* The per-run verdict — a NEUTRAL chip, icon + word; only the FAIL word takes the
+   fail text colour. The filled pass/fail treatment stays reserved for VerdictCard.
+   Shared by Validate & Review (`RunVerdictChip`). */
+.run-verdict {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+  flex: none;
+  padding: var(--space-xs) var(--space-sm);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-token);
+  background: var(--surface-subtle);
+  color: var(--text-slate);
+  font-size: var(--font-size-meta);
+  font-weight: var(--font-weight-semibold);
+  line-height: 1;
+}
+.run-verdict-fail {
+  color: var(--fail-text);
+}
+.run-verdict-unavailable {
+  color: var(--text-secondary);
+}
 .run-finding-state {
   flex: none;
 }

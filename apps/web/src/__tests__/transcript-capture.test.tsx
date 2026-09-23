@@ -2210,6 +2210,36 @@ describe('the run selector empty state', () => {
     expect(screen.getByRole('button', { name: CAPTURE_COPY.runCreate })).toBeInTheDocument();
   });
 
+  it('PR #277 REVIEW: after Create a Run, focus lands on the run selector that replaced the button — never on <body>', async () => {
+    /*
+     * AN OUTCOME PIN, NOT A MUTATION GUARD — stated so nobody reads it as more.
+     * In jsdom React has already committed the selector by the time the old
+     * synchronous `runSelectRef.current?.focus()` ran, so reverting the fix
+     * leaves this green (measured: the ref was an HTMLSelectElement at call
+     * time). The DISCRIMINATING evidence is a real browser (Chromium, 1280×900,
+     * a fresh zero-run record, Capture → Write): the old code left
+     * `document.activeElement` on <body> at +0/+100/+500/+1500 ms with the
+     * pressed button's focusout and no further focusin; the fix focuses the
+     * selector ~45 ms after the click. See the PR #277 review-fix report.
+     */
+    let created = false;
+    stubFetchRoutes({
+      ...BASE_ROUTES,
+      [RUNS]: { body: () => (created ? runsPage : noRunsPage) },
+      [`POST /api/experiments/${EXP}/runs`]: {
+        body: () => {
+          created = true;
+          return { run: RUN, experiment_version: 'g1.5' };
+        },
+      },
+    } as never);
+    await renderPanel();
+    fireEvent.click(await screen.findByRole('button', { name: CAPTURE_COPY.runCreate }));
+    const select = await screen.findByLabelText(CAPTURE_COPY.runLabel);
+    await waitFor(() => expect(select).toHaveFocus());
+    expect((select as HTMLSelectElement).value).toBe('run-1');
+  });
+
   it('the run selector renders normally, with no permanent Create a Run button, once a run exists', async () => {
     stubFetchRoutes(BASE_ROUTES as never);
     await renderPanel();
@@ -2357,25 +2387,49 @@ describe('accessibility', () => {
     expect(within(item as HTMLElement).getByText('Not proposed')).toBeInTheDocument();
   });
 
-  it('finalizing announces BOTH numbers — read and stored — pointing at Proposals below', async () => {
+  it('finalizing announces BOTH numbers — read and stored — pointing at Proposals below, in real singulars', async () => {
     /*
      * I7, INDEPENDENT REVIEW OF PR-D: the announcement used to name only what
      * was STORED, dropping the READ count the build this replaces always
      * said. `reading()`'s fixture carries one candidate and one stored
-     * proposal, so "1 value(s) read" and "1 stored as proposal(s)" are the
+     * proposal, so "1 value read" and "1 stored as a proposal" are the
      * same number here — the negative-count test below is what actually
      * proves the two are tracked separately rather than one being echoed as
      * the other.
+     *
+     * INVERTED, PR #277 REVIEW (minor): this used to PIN the "(s)" placeholder
+     * ("1 segment(s) … 1 value(s) … 1 stored as proposal(s)"). It now pins the
+     * real singular, and asserts the placeholder is gone.
      */
     stubFetchRoutes({ ...BASE_ROUTES, [TRANSCRIPT]: { body: reading() } } as never);
     const { container } = await renderPanel();
     await typeAndFinalize();
     await screen.findByText(CAPTURE_COPY.summaryStored(1, 1));
     const status = container.querySelector('[role="status"]');
-    expect(status?.textContent).toMatch(/1 segment\(s\) stored with this record/);
-    expect(status?.textContent).toMatch(/1 value\(s\) read/);
-    expect(status?.textContent).toMatch(/1 stored as proposal\(s\)/);
+    expect(status?.textContent).toMatch(/1 segment stored with this record/);
+    expect(status?.textContent).toMatch(/1 value read/);
+    expect(status?.textContent).toMatch(/1 stored as a proposal/);
     expect(status?.textContent).toMatch(/Review them in Ingestion Proposals below/);
+    expect(status?.textContent).not.toMatch(/\(s\)/);
+  });
+
+  it('PR #277 REVIEW: the announcement pluralizes every count — "2 segments … 2 values … 2 stored as proposals"', async () => {
+    const two = reading({
+      capture: { ...(reading().capture as Record<string, unknown>), segments: 2 },
+      candidates: [candidate(), candidate({ field_path: 'context.pressure_Pa', proposed_value: 5 })],
+      proposals: [mintedFor(0), mintedFor(1)],
+    });
+    stubFetchRoutes({ ...BASE_ROUTES, [TRANSCRIPT]: { body: two } } as never);
+    const { container } = await renderPanel();
+    await typeAndFinalize();
+    await waitFor(() =>
+      expect(container.querySelector('[role="status"]')?.textContent).toMatch(/^Finalized\./),
+    );
+    const status = container.querySelector('[role="status"]');
+    expect(status?.textContent).toMatch(/2 segments stored with this record/);
+    expect(status?.textContent).toMatch(/2 values read/);
+    expect(status?.textContent).toMatch(/2 stored as proposals/);
+    expect(status?.textContent).not.toMatch(/\(s\)/);
   });
 
   it('MUTATION-GUARDED: the read and stored counts differ when a candidate could not be stored, and the announcement says both', async () => {
@@ -2396,11 +2450,63 @@ describe('accessibility', () => {
     await typeAndFinalize();
     await screen.findByText(/already holds the maximum number of proposals/);
     const status = container.querySelector('[role="status"]');
-    expect(status?.textContent).toMatch(/1 value\(s\) read/);
-    expect(status?.textContent).toMatch(/0 stored as proposal\(s\)/);
+    // Placeholder pins inverted to real plurals (PR #277 review, minor).
+    expect(status?.textContent).toMatch(/1 value read/);
+    expect(status?.textContent).toMatch(/0 stored as proposals/);
     // NOTHING was stored — the announcement must not direct a reader to an
     // empty Ingestion Proposals destination.
     expect(status?.textContent).not.toMatch(/Review them in Ingestion Proposals below/);
+  });
+});
+
+describe('PR #277 review (pre-existing): Finalize twice used to mint duplicates', () => {
+  it('MUTATION-GUARDED: after a successful reading, Finalize is disabled — with its reason as the accessible description — and a second press sends nothing', async () => {
+    const calls = stubFetchRoutes({ ...BASE_ROUTES, [TRANSCRIPT]: { body: reading() } } as never);
+    await renderPanel();
+    await typeAndFinalize();
+    await screen.findByText(CAPTURE_COPY.summaryStored(1, 1));
+    const finalizeButton = screen.getByRole('button', { name: CAPTURE_COPY.finalize });
+    expect(finalizeButton).toBeDisabled();
+    expect(finalizeButton).toHaveAccessibleDescription(CAPTURE_COPY.finalizeAlreadyRead);
+    expect(screen.getByText(CAPTURE_COPY.finalizeAlreadyRead)).toBeVisible();
+    fireEvent.click(finalizeButton);
+    fireEvent.submit(finalizeButton.closest('form') as HTMLFormElement);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(calls.filter((key) => key === TRANSCRIPT)).toHaveLength(1);
+  });
+
+  it('editing the text re-enables Finalize (there is something new to read)', async () => {
+    stubFetchRoutes({ ...BASE_ROUTES, [TRANSCRIPT]: { body: reading() } } as never);
+    await renderPanel();
+    await typeAndFinalize();
+    await screen.findByText(CAPTURE_COPY.summaryStored(1, 1));
+    fireEvent.change(screen.getByLabelText('Transcript'), {
+      target: { value: 'Temperature was 300 K. Pressure was 5 Pa.' },
+    });
+    const finalizeButton = screen.getByRole('button', { name: CAPTURE_COPY.finalize });
+    expect(finalizeButton).toBeEnabled();
+    expect(screen.queryByText(CAPTURE_COPY.finalizeAlreadyRead)).not.toBeInTheDocument();
+  });
+
+  it('a FAILED finalize never locks the button — Retry is never blocked', async () => {
+    stubFetchRoutes({
+      ...BASE_ROUTES,
+      [TRANSCRIPT]: { status: 500, body: { detail: 'boom' } },
+    } as never);
+    await renderPanel();
+    await typeAndFinalize();
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: CAPTURE_COPY.finalize })).toBeEnabled(),
+    );
+    expect(screen.queryByText(CAPTURE_COPY.finalizeAlreadyRead)).not.toBeInTheDocument();
+  });
+
+  it('focus moves to the result heading after a successful finalize, never to <body>', async () => {
+    stubFetchRoutes({ ...BASE_ROUTES, [TRANSCRIPT]: { body: reading() } } as never);
+    await renderPanel();
+    await typeAndFinalize();
+    const heading = await screen.findByRole('heading', { name: CAPTURE_COPY.summaryHeading });
+    await waitFor(() => expect(heading).toHaveFocus());
   });
 });
 

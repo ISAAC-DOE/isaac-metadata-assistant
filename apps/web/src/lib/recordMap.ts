@@ -89,11 +89,90 @@ export function recordMapBlockLabel(block: string): string {
  * "System & Instrument · Site". A presentation of the path, never a claim about
  * what the field means — the path itself stays one `?` away.
  */
+/*
+ * THREE CORRECTIONS (review #277, I-9), each a presentation of the path and never a
+ * claim about meaning:
+ *  - a SINGLE-segment path is a block, so it reads as the block's own name —
+ *    `context` is "Environment & Context", not "Context";
+ *  - an INDEXED path keeps its index rather than naming the array's element by a
+ *    number alone — `tags.0` reads "Tags · 0";
+ *  - a GENERIC last word (`status`, `name`, `value` …) is prefixed with the segment
+ *    it belongs to, and known acronyms keep their case — `measurement.qc.status`
+ *    reads "Measurement · QC Status", not "Measurement · Status".
+ */
+const PATH_ACRONYMS: Readonly<Record<string, string>> = {
+  qc: 'QC',
+  utc: 'UTC',
+  uri: 'URI',
+  url: 'URL',
+  id: 'ID',
+  sha256: 'SHA-256',
+  xanes: 'XANES',
+  xas: 'XAS',
+};
+const GENERIC_LAST_SEGMENTS = new Set([
+  'status',
+  'name',
+  'value',
+  'values',
+  'id',
+  'type',
+  'kind',
+  'unit',
+  'units',
+  'basis',
+  'label',
+  'role',
+]);
+
+function humanizeSegment(segment: string): string {
+  return segment
+    .split('_')
+    .filter((word) => word !== '')
+    .map((word) => {
+      const acronym = PATH_ACRONYMS[word.toLowerCase()];
+      if (acronym !== undefined) return acronym;
+      return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
+    })
+    .join(' ');
+}
+
+function blockName(block: string): string {
+  return block in RECORD_MAP_BLOCK_LABEL ? recordMapBlockLabel(block) : humanizeSegment(block);
+}
+
 export function fieldPathLabel(path: string): string {
-  const parts = path.split('.');
-  const last = (parts[parts.length - 1] ?? path).replace(/_/g, ' ').trim();
-  const titled = last.replace(/\w\S*/g, (w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase());
-  return parts.length > 1 ? `${recordMapBlockLabel(parts[0])} · ${titled}` : titled;
+  const parts = path.split('.').filter((part) => part !== '');
+  if (parts.length === 0) return path;
+  const block = parts[0];
+  if (parts.length === 1) return blockName(block);
+  const rest = parts.slice(1);
+  const isIndex = (segment: string) => /^\d+$/.test(segment);
+  let nameAt = -1;
+  for (let i = rest.length - 1; i >= 0; i -= 1) {
+    if (!isIndex(rest[i])) {
+      nameAt = i;
+      break;
+    }
+  }
+  if (nameAt === -1) return `${blockName(block)} · ${rest.join(' · ')}`;
+  let name = humanizeSegment(rest[nameAt]);
+  if (GENERIC_LAST_SEGMENTS.has(rest[nameAt].toLowerCase())) {
+    let parentAt = -1;
+    for (let i = nameAt - 1; i >= 0; i -= 1) {
+      if (!isIndex(rest[i])) {
+        parentAt = i;
+        break;
+      }
+    }
+    if (parentAt !== -1 && rest[parentAt] !== block) {
+      name = `${humanizeSegment(rest[parentAt])} ${name}`;
+    }
+  }
+  const trailingIndex = rest.slice(nameAt + 1).filter(isIndex);
+  return trailingIndex.length > 0
+    ? `${blockName(block)} · ${name} · ${trailingIndex.join(' · ')}`
+    : `${blockName(block)} · ${name}`;
 }
 
 export interface RecordMapRow {

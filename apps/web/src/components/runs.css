@@ -41,6 +41,7 @@
 
 .runs-toolbar {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 12px;
   margin-bottom: 12px;
@@ -72,7 +73,23 @@
   display: flex;
   align-items: center;
   gap: 8px;
+  /* ONE GROUP THAT DOES NOT BREAK APART (review #277, I-6): Back, Previous and Next
+     stay on one line and the count line wraps under the group instead. Only a
+     genuinely narrow Runs column lets the group itself wrap. */
+  flex-wrap: nowrap;
+}
+.runs-focus-nav > .btn {
+  white-space: nowrap;
+}
+/* The leave confirmation renders INSIDE the group and needs its own line
+   (`.runs-leave-confirm`'s `flex-basis: 100%`), so the group wraps while it is open. */
+.runs-focus-nav:has(> .runs-leave-confirm) {
   flex-wrap: wrap;
+}
+@container runs (max-width: 380px) {
+  .runs-focus-nav {
+    flex-wrap: wrap;
+  }
 }
 
 /*
@@ -159,25 +176,45 @@
  * spare width. They wrap as whole controls when the column is narrow — measured
  * with the assistant rail expanded at 1280 (main ≈ 725px) they stay on one row.
  */
+/*
+ * ONE ROW, NOT WRAPPING (review #277, I-6). A flex row wrapped wherever the column
+ * happened to end, so at 1440/1510 with the rail open the Export select dropped
+ * onto a line of its own. It is now a GRID — the search takes the spare width, the
+ * two selects stay compact — and it rearranges only under a real narrow threshold,
+ * measured on the Runs column itself (container `runs`), not on the viewport: under
+ * 440px the search takes a row and the two selects sit side by side beneath it.
+ */
+.runs-section {
+  container-type: inline-size;
+  container-name: runs;
+}
 .runs-controls {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-end;
+  display: grid;
+  grid-template-columns: minmax(10rem, 1fr) minmax(8.5rem, 11rem) minmax(8.5rem, 11rem);
+  align-items: end;
   gap: var(--space-md);
   margin-bottom: var(--space-md);
 }
-.runs-control-search {
-  flex: 2 1 16rem;
-}
-/* THE TWO FILTERS SHARE A ROW (owner QA R1). When the column is too narrow for all
-   three — the Runs column beside the Record Map is ~400px with the Assistant rail
-   open — the search takes a row and the two selects sit side by side under it on
-   one baseline, rather than one select wrapping alone. */
-.runs-control:not(.runs-control-search) {
-  flex: 1 1 9rem;
+/* "Clear search and filters", when present, takes its own row under the controls. */
+.runs-controls > .btn {
+  grid-column: 1 / -1;
+  justify-self: start;
 }
 .runs-control > .run-input {
   width: 100%;
+  /* `.run-input` caps at 320px for the run-field editor; in this grid the cap left
+     the search short of its own column, so a wide Runs section (1024px, the rail
+     collapsed at 1440+) showed a ~260px hole between the search and the two
+     selects. The grid column already bounds it. (PR #277 review, item 6.) */
+  max-width: none;
+}
+@container runs (max-width: 440px) {
+  .runs-controls {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+  .runs-control-search {
+    grid-column: 1 / -1;
+  }
 }
 .runs-control-label-row {
   display: flex;

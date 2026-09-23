@@ -23,11 +23,12 @@ import { MemoryRouter, useLocation } from 'react-router-dom';
 import { AppRoutes } from '../App';
 import { __resetHealthCache } from '../lib/useHealth';
 import { __resetRunAutosaveStore } from '../lib/runAutosaveStore';
-import { claudeVoiceState } from '../components/ClaudeVoicePath';
+import { ClaudeVoicePath, claudeVoiceState } from '../components/ClaudeVoicePath';
 import { CAPTURE_COPY } from '../lib/transcriptCaptureContent';
 import {
   bundleRoutes,
   healthSynthetic,
+  proposalsEmpty,
   runFixture,
   runsPage,
   stubFetchRoutes,
@@ -161,7 +162,7 @@ describe('Write and Voice are ONE transcript panel', () => {
 });
 
 describe('the Voice view leads with Claude, read from the deployment', () => {
-  it('an unmounted agent interface says "not enabled yet" and routes to Connect Your Agent', async () => {
+  it('an unmounted agent interface says it is not accepted here and routes to Connect Your Agent', async () => {
     renderAt('?view=capture&method=voice', {}, 'unmounted');
     const main = within(await loadedCapture());
     expect(await main.findByText(CAPTURE_COPY.claudeUnmounted)).toBeTruthy();
@@ -172,15 +173,32 @@ describe('the Voice view leads with Claude, read from the deployment', () => {
     expect(local).toHaveAttribute('aria-expanded', 'false');
   });
 
-  it('MUTATION-GUARDED — never renders the word "Connected", in any posture', async () => {
+  it('MUTATION-GUARDED — never renders the word "Connected", in any posture, INCLUDING ready', async () => {
+    /*
+     * Review #277 (minor): the first version of this test rendered through the
+     * screen, where no endpoint is ever published, so the READY branch — the only
+     * one that could plausibly say "Connected" — was never rendered and the guard
+     * was vacuous for it. An address is now INJECTED, so `oauth-mounted` and
+     * `remote-ready` really render the ready state, and it is asserted that they did.
+     */
     for (const posture of ['unmounted', 'local-only', 'oauth-mounted', 'remote-ready']) {
       __resetHealthCache();
-      const view = renderAt('?view=capture&method=voice', {}, posture);
-      await within(await loadedCapture()).findByRole('heading', { name: /Claude/ });
-      await waitFor(() =>
-        expect(within(capturePanel()).queryByText(CAPTURE_COPY.claudeChecking)).toBeNull(),
+      stubFetchRoutes({ 'GET /api/health': { body: { ...healthSynthetic, mcp: { posture } } } });
+      const view = render(
+        <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+          <ClaudeVoicePath
+            experimentId={ID}
+            experimentTitle="Synthetic record"
+            runLabel={null}
+            endpoint="https://example.invalid/mcp"
+          />
+        </MemoryRouter>,
       );
-      const claude = capturePanel().querySelector('.claude-voice')!;
+      await waitFor(() => expect(screen.queryByText(CAPTURE_COPY.claudeChecking)).toBeNull());
+      const claude = document.querySelector('.claude-voice')!;
+      const ready = posture === 'oauth-mounted' || posture === 'remote-ready';
+      // The ready branch really rendered where it should — so the ban below bites.
+      expect(claude.textContent?.includes(CAPTURE_COPY.claudeReadyHeading), posture).toBe(ready);
       expect(claude.textContent ?? '', posture).not.toMatch(/\bconnected\b/i);
       view.unmount();
       vi.unstubAllGlobals();
@@ -265,5 +283,140 @@ describe('each focused view has its own title', () => {
   ])('%s', async (search, lead) => {
     renderAt(search);
     await waitFor(() => expect(document.title.startsWith(`${lead} · `)).toBe(true));
+  });
+});
+
+
+/* ── review #277, I-3: ONE run choice per view, inside the card it drives ──────── */
+
+const RUN_B = runFixture({ id: 'RUNBBB', label: 'Run 2', ordinal: 2, version: 'rb.0' });
+
+function openProposal(id: string, runId: string | null) {
+  return {
+    proposal_id: id,
+    experiment_id: ID,
+    note_id: `N-${id}`,
+    run_id: runId,
+    target_field_path: runId === null ? 'system.technique' : 'context.temperature_K',
+    proposed_value: 300,
+    rule: 'synthetic rule',
+    source: 'transcript',
+    proposed_utc: '2026-09-01T10:00:00Z',
+    base_rev: 1,
+    target_digest: 'd',
+    start_char: null,
+    end_char: null,
+    client_request_key: null,
+    state: 'open',
+    subject: null,
+    trust_basis: 'unattributed',
+    accepted_value: null,
+    accepted_from: null,
+    applied_via: null,
+    applied_run_id: null,
+    applied_rev: null,
+    applied_target_digest: null,
+    history: [],
+    status: 'ingestion_proposal',
+    verified: false,
+    is_evidence: false,
+    is_field_value: false,
+    applied: false,
+    current_target_digest: 'd',
+    target_stale: false,
+    still_current: null,
+    excerpt: null,
+    attributed: false,
+    accepted_by: null,
+  };
+}
+
+function proposalsBody(list: ReturnType<typeof openProposal>[]) {
+  return { ...proposalsEmpty, proposals: list, total: list.length, returned: list.length };
+}
+
+const runSelects = (root: HTMLElement) =>
+  Array.from(root.querySelectorAll('select')).filter((el) =>
+    Array.from(el.options).some((o) => o.textContent === CAPTURE_COPY.runPlaceholder),
+  );
+
+describe('one run choice per view (review #277, I-3)', () => {
+  it('Write shows ONE run select — the form’s — and no map picker', async () => {
+    renderAt('?view=capture&method=write');
+    const panel = await loadedCapture();
+    await within(panel).findByLabelText(CAPTURE_COPY.runLabel);
+    await waitFor(() => expect(panel.querySelector('.capture-map .rsm, .capture-map aside')).not.toBeNull());
+    expect(runSelects(panel)).toHaveLength(1);
+    expect(panel.querySelector('.capture-map-run')).toBeNull();
+  });
+
+  it('Voice with the local recorder open shows ONE run select as well', async () => {
+    renderAt('?view=capture&method=voice');
+    const panel = await loadedCapture();
+    fireEvent.click(await within(panel).findByRole('button', { name: /Record Locally Instead/ }));
+    await within(panel).findByLabelText(CAPTURE_COPY.runLabel);
+    expect(runSelects(panel)).toHaveLength(1);
+    expect(panel.querySelector('.capture-map-run')).toBeNull();
+  });
+
+  it('Files, where no transcript form shows, puts the picker INSIDE the Record Map card', async () => {
+    renderAt('?view=capture&method=files');
+    const panel = await loadedCapture();
+    const picker = await waitFor(() => {
+      const el = panel.querySelector('.capture-map-run');
+      if (el === null) throw new Error('no map picker');
+      return el as HTMLElement;
+    });
+    // In the card's own header, not a detached page-level select above it.
+    expect(picker.closest('aside.rsm')).not.toBeNull();
+    expect(picker.closest('.rsm-head')).not.toBeNull();
+  });
+});
+
+describe('the Proposals map is pointed at the proposals’ run only when unambiguous', () => {
+  const proposalsPanel = () =>
+    waitFor(() => {
+      const el = document.querySelector('#record-workspace-proposals') as HTMLElement | null;
+      if (el === null || el.hidden) throw new Error('no proposals workspace');
+      return el;
+    });
+  const mapSelect = (panel: HTMLElement) =>
+    panel.querySelector('.capture-map-run select') as HTMLSelectElement | null;
+
+  it('every open proposal names Run 1 → the map opens on Run 1', async () => {
+    renderAt('?view=proposals', {
+      [`GET ${BASE}/runs`]: { body: runsPage([RUN, RUN_B]) },
+      [`GET ${BASE}/proposals`]: {
+        body: proposalsBody([openProposal('P1', 'RUNAAA'), openProposal('P2', 'RUNAAA')]),
+      },
+    });
+    const panel = await proposalsPanel();
+    await waitFor(() => expect(mapSelect(panel)?.value).toBe('RUNAAA'));
+  });
+
+  it('proposals that name DIFFERENT runs → nothing is chosen ("Choose a run" stays)', async () => {
+    renderAt('?view=proposals', {
+      [`GET ${BASE}/runs`]: { body: runsPage([RUN, RUN_B]) },
+      [`GET ${BASE}/proposals`]: {
+        body: proposalsBody([openProposal('P1', 'RUNAAA'), openProposal('P2', 'RUNBBB')]),
+      },
+    });
+    const panel = await proposalsPanel();
+    await waitFor(() => expect(mapSelect(panel)).not.toBeNull());
+    await within(panel).findAllByRole('article');
+    expect(mapSelect(panel)!.value).toBe('');
+  });
+
+  it('a record-scoped proposal among them → nothing is chosen either', async () => {
+    renderAt('?view=proposals', {
+      [`GET ${BASE}/runs`]: { body: runsPage([RUN, RUN_B]) },
+      [`GET ${BASE}/proposals`]: {
+        body: proposalsBody([openProposal('P1', 'RUNAAA'), openProposal('P2', null)]),
+      },
+    });
+    const panel = await proposalsPanel();
+    await waitFor(() => expect(mapSelect(panel)).not.toBeNull());
+    await within(panel).findAllByRole('article');
+    expect(mapSelect(panel)!.value).toBe('');
   });
 });

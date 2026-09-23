@@ -842,9 +842,8 @@ describe('a proposal is never presented as the field value', () => {
     renderPanel();
 
     await screen.findByText('Proposed value');
-    expect(
-      screen.getByText(/It is not the field’s value and not evidence for it\./),
-    ).toBeTruthy();
+    // VISIBLE on the card (review #277, I-8), not merely present in the DOM.
+    expect(screen.getByText(/not the field’s value, and not evidence for it\./)).toBeVisible();
     // The DEFECT this catches: a heading that presents the suggestion as current.
     expect(screen.queryByText(/^Current value$/)).toBeNull();
     expect(screen.queryByText(/The record holds/)).toBeNull();
@@ -1170,7 +1169,9 @@ describe('the three-valued derived reads', () => {
     renderPanel();
 
     // `is_field_value` is false for an ACCEPTED proposal too, and the card says so.
-    await screen.findByText(/It is not the field’s value and not evidence for it\./);
+    expect(
+      await screen.findByText(/not the field’s value, and not evidence for it\./),
+    ).toBeVisible();
     expect(screen.getByText('Value that was written')).toBeTruthy();
     expect(screen.getByText(/the record still held what this acceptance wrote/)).toBeTruthy();
   });
@@ -2653,8 +2654,9 @@ describe('run labels for the scope line (F1/F2, independent review of PR-D, post
     });
     renderPanel();
 
-    const cardOne = await screen.findByRole('article', { name: /sample\.material\.name/ });
-    const cardTwo = await screen.findByRole('article', { name: /context\.temperature_K/ });
+    // Cards are named by the field in words since review #277 (I-5).
+    const cardOne = await screen.findByRole('article', { name: /Sample · Material Name/ });
+    const cardTwo = await screen.findByRole('article', { name: /Proposal for Temperature/ });
 
     // Both cards' scope lines read the label alone until the run-label fetch
     // resolves. Waiting for the disambiguation to appear on EITHER is the
@@ -2706,8 +2708,9 @@ describe('run labels for the scope line (F1/F2, independent review of PR-D, post
     });
     renderPanel();
 
-    const cardOne = await screen.findByRole('article', { name: /sample\.material\.name/ });
-    const cardTwo = await screen.findByRole('article', { name: /context\.temperature_K/ });
+    // Cards are named by the field in words since review #277 (I-5).
+    const cardOne = await screen.findByRole('article', { name: /Sample · Material Name/ });
+    const cardTwo = await screen.findByRole('article', { name: /Proposal for Temperature/ });
 
     await waitFor(() => {
       expect(within(cardOne).getByText('On run Run 1')).toBeInTheDocument();
@@ -2783,8 +2786,12 @@ describe('the acceptance preflight', () => {
     // ONE notice for the panel, not one per card.
     expect(screen.getAllByText('Acceptance unavailable on this deployment')).toHaveLength(1);
     expect(screen.getByText('Trusted scientist identity has not been enabled yet.')).toBeTruthy();
-    const lock = document.querySelector('.proposals-lock') as HTMLElement;
+    // Described by the ONE-LINE sentence (review #277, minor) — not the whole notice,
+    // which would also read out its Why? and Reload controls.
+    const lock = document.querySelector('.proposals-lock-line') as HTMLElement;
     expect(lock.id).not.toBe('');
+    expect(lock.textContent).toContain('Acceptance unavailable on this deployment');
+    expect(lock.textContent).not.toContain('Reload');
     for (const accept of accepts) {
       // LOCKED, and the reason is announced WITH the control.
       expect((accept as HTMLButtonElement).disabled).toBe(true);
@@ -2831,6 +2838,31 @@ describe('the acceptance preflight', () => {
     expect(screen.getByText('maintenance_window')).toBeTruthy();
   });
 
+  it('a changed target beside a LOCKED Accept never says Accept is still offered (review #277, I-1)', async () => {
+    stubFetchRoutes({
+      [LIST]: { body: page([proposalFixture({ target_stale: true })]) },
+    });
+    renderWith({ available: false, reason: 'no_verifier_configured' });
+    const accept = await screen.findByRole('button', { name: 'Accept as Proposed' });
+    expect((accept as HTMLButtonElement).disabled).toBe(true);
+    const target = document.querySelector('.proposal-target-state') as HTMLElement;
+    expect(target.textContent).toMatch(/had CHANGED since this proposal was made/);
+    // The sentence that exists to reconcile a live Accept with a stale target must
+    // not stand beside an Accept that cannot be pressed.
+    expect(target.textContent).not.toMatch(/Accept is still offered/);
+  });
+
+  it('POLARITY: with Accept live, the changed-target sentence still explains why it is offered', async () => {
+    stubFetchRoutes({
+      [LIST]: { body: page([proposalFixture({ target_stale: true })]) },
+    });
+    renderWith(undefined);
+    await screen.findByRole('button', { name: 'Accept as Proposed' });
+    expect(document.querySelector('.proposal-target-state')?.textContent).toMatch(
+      /Accept is still offered/,
+    );
+  });
+
   it('shows no notice when nothing in the window could be accepted anyway', async () => {
     stubFetchRoutes({ [LIST]: { body: page([proposalFixture({ state: 'rejected' })]) } });
     renderWith({ available: false, reason: 'no_verifier_configured' });
@@ -2855,6 +2887,149 @@ describe('the acceptance preflight', () => {
     // The server-derived account is behind Why?, verbatim — still the whole claim.
     expect(alert.textContent).toMatch(/retrying will not change it/);
     expect(within(alert).getByRole('button', { name: 'Why?' })).toBeTruthy();
-    expect(within(alert).getByRole('button', { name: 'Reload This Section' })).toBeTruthy();
+    // INVERTED, PR #277 review (minor): this pinned "Reload This Section" beside the
+    // preflight notice's "Reload" — two labels for one act. Both notices now say
+    // "Reload", and the old label is asserted gone from this one.
+    expect(within(alert).getByRole('button', { name: 'Reload' })).toBeTruthy();
+    expect(within(alert).queryByRole('button', { name: 'Reload This Section' })).toBeNull();
+    // PR #277 review (pre-existing): focus moves to the refusal, not <body>.
+    await waitFor(() => expect(alert).toHaveFocus());
+  });
+});
+
+// --- 13. no developer vocabulary in what a reader sees or hears (review #277, I-5) ---
+
+describe('a card speaks the scientist’s words, and keeps the raw values reachable', () => {
+  it('the accessible name names the FIELD, never its official path', async () => {
+    stubFetchRoutes({ [LIST]: { body: page([proposalFixture()]) } });
+    renderPanel();
+    const card = await screen.findByRole('article', {
+      name: 'Proposal for Sample · Material Name — Awaiting your judgment',
+    });
+    expect(card.getAttribute('aria-label')).not.toContain('sample.material.name');
+    // The official path is still one `?` away, in the DOM.
+    expect(card.querySelector('.proposal-path')?.textContent).toBe('sample.material.name');
+  });
+
+  it('the proposed time is a person’s date, with the exact ISO instant as title and datetime', async () => {
+    stubFetchRoutes({ [LIST]: { body: page([proposalFixture()]) } });
+    renderPanel();
+    await screen.findByText('Proposed value');
+    const time = document.querySelector('.proposal-when time') as HTMLTimeElement;
+    expect(time.getAttribute('datetime')).toBe('2026-09-01T10:00:00Z');
+    expect(time.getAttribute('title')).toBe('2026-09-01T10:00:00Z');
+    expect(time.textContent).toMatch(/^Sep 1(, 2026)?, \d{1,2}:\d{2} (AM|PM)$/);
+    expect(document.querySelector('.proposal-when')?.textContent).not.toContain('T10:00:00Z');
+  });
+
+  it('a live announcement names the field in words', async () => {
+    stubFetchRoutes({
+      [LIST]: { body: page([proposalFixture()]) },
+      [`POST /api/experiments/${EXP}/proposals/P1/review`]: {
+        body: { proposal: proposalFixture({ state: 'rejected' }), experiment_version: '1.8' },
+      },
+    });
+    renderPanel();
+    fireEvent.click(await screen.findByRole('button', { name: 'Reject…' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm Reject' }));
+    await waitFor(() =>
+      expect(screen.getByRole('status').textContent).toMatch(
+        /The proposal for Sample · Material Name was rejected/,
+      ),
+    );
+    expect(screen.getByRole('status').textContent).not.toContain('sample.material.name');
+  });
+});
+
+describe('what a proposal IS stays visible on the card (review #277, I-8)', () => {
+  it('the "not the field’s value, not evidence" line is VISIBLE, not behind Why', async () => {
+    stubFetchRoutes({ [LIST]: { body: page([proposalFixture()]) } });
+    renderPanel();
+    await screen.findByText('Proposed value');
+    const nature = document.querySelector('.proposal-nature') as HTMLElement;
+    expect(nature).toBeVisible();
+    expect(nature.textContent).toMatch(/not the field’s value, and not evidence for it/);
+    // …and it is not inside the collapsed provenance disclosure.
+    expect(nature.closest('.proposal-why')).toBeNull();
+  });
+
+  it('it holds in every state, including accepted', async () => {
+    stubFetchRoutes({ [LIST]: { body: page([proposalFixture({ state: 'accepted' })]) } });
+    renderPanel();
+    await screen.findByText('Proposed value');
+    expect(document.querySelector('.proposal-nature')).toBeVisible();
+  });
+});
+
+// --- 14. focus after a review act (review #277, pre-existing) ---------------------
+
+describe('focus after a review act never falls to <body> (review #277, pre-existing)', () => {
+  const P2 = () =>
+    proposalFixture({ proposal_id: 'P2', note_id: 'N2', target_field_path: 'context.temperature_K' });
+  const reviewed = (over: Partial<ApiProposal>) => ({
+    proposal: proposalFixture(over),
+    experiment_version: '1.8',
+  });
+
+  it('MUTATION-GUARDED: after Confirm Reject, focus lands on the reviewed card, whose name now carries its new state', async () => {
+    let decided = false;
+    stubFetchRoutes({
+      [LIST]: {
+        body: () =>
+          page(decided ? [proposalFixture({ state: 'rejected' }), P2()] : [proposalFixture(), P2()]),
+      },
+      [`POST /api/experiments/${EXP}/proposals/P1/review`]: {
+        body: () => {
+          decided = true;
+          return reviewed({ state: 'rejected' });
+        },
+      },
+    });
+    renderPanel();
+    const first = (await screen.findAllByRole('button', { name: 'Reject…' }))[0];
+    fireEvent.click(first);
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm Reject' }));
+    const card = await screen.findByRole('article', { name: /— Rejected — kept on the record$/ });
+    await waitFor(() => expect(card).toHaveFocus());
+  });
+
+  it('when the reviewed card leaves the window, focus moves to the card that FOLLOWED it', async () => {
+    let decided = false;
+    stubFetchRoutes({
+      [LIST]: { body: () => page(decided ? [P2()] : [proposalFixture(), P2()]) },
+      [`POST /api/experiments/${EXP}/proposals/P1/review`]: {
+        body: () => {
+          decided = true;
+          return reviewed({ state: 'rejected' });
+        },
+      },
+    });
+    renderPanel();
+    fireEvent.click((await screen.findAllByRole('button', { name: 'Reject…' }))[0]);
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm Reject' }));
+    await waitFor(() => expect(screen.getAllByRole('article')).toHaveLength(1));
+    const remaining = screen.getByRole('article');
+    await waitFor(() => expect(remaining).toHaveFocus());
+    expect(remaining.getAttribute('aria-label')).toMatch(/Temperature/);
+  });
+
+  it('when no card is left, focus moves to the panel heading', async () => {
+    let decided = false;
+    stubFetchRoutes({
+      [LIST]: { body: () => page(decided ? [] : [proposalFixture()]) },
+      [`POST /api/experiments/${EXP}/proposals/P1/review`]: {
+        body: () => {
+          decided = true;
+          return reviewed({ state: 'rejected' });
+        },
+      },
+    });
+    renderPanel();
+    fireEvent.click(await screen.findByRole('button', { name: 'Reject…' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm Reject' }));
+    await waitFor(() => expect(screen.queryAllByRole('article')).toHaveLength(0));
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: 'Ingestion Proposals' })).toHaveFocus(),
+    );
   });
 });

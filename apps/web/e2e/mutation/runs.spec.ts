@@ -390,7 +390,12 @@ test.describe('R5 · the Run workspace', () => {
     await clickAddRun(page, 2);
     const second = nthRow(page, 1);
     await expect(saveStatus(second)).toHaveText('');
-    await expect(conditions(second)).toContainText('No conditions recorded yet');
+    // PR #277 review (minor): the compact row no longer repeats "No conditions
+    // recorded yet" beside its own "Nothing Recorded" chip and "0 of 5" count — so
+    // "nothing is claimed" is asserted as the chip saying so and NO conditions line
+    // being drawn at all (a stronger claim than the old sentence's presence).
+    await expect(second.getByText('Nothing Recorded', { exact: true })).toBeVisible();
+    await expect(conditions(second)).toHaveCount(0);
     const secondOpened = await openNthRun(page, 1);
     await expect(progress(secondOpened)).toHaveText(/^\s*0 of \d+\s+run fields recorded\s*$/);
   });

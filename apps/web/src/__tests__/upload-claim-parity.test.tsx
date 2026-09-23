@@ -816,7 +816,15 @@ describe('R1b §4 · the guard rejects the exact strings that shipped', () => {
  * (`summaryCompact`, `claudeStarter`) build counts and an instruction naming the
  * record; neither makes an upload or file-reading claim.
  */
-const CAPTURE_COPY_KEY_COUNTS = { total: 141, strings: 135, functions: 6 };
+/*
+ * 143/137/6, from 141/135/6 on 2026-09-22 (PR #277 review): +2 strings.
+ * `homeVoiceLineWithClaude` — Capture Home's voice line is now posture-conditional,
+ * and names the Claude app ONLY when this deployment's Claude path is ready (the
+ * plain `homeVoiceLine` no longer advertises it); `finalizeAlreadyRead` — the
+ * reason Finalize is disabled after a successful reading. Both are INSIDE the ban
+ * and pass it as written: neither says an upload route or endpoint does not exist.
+ */
+const CAPTURE_COPY_KEY_COUNTS = { total: 143, strings: 137, functions: 6 };
 
 function captureVoiceAudioHandling(): string {
   return CAPTURE_COPY.voiceAudioHandling;

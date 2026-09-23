@@ -160,6 +160,8 @@ import { SemanticStatus, type SemanticState } from './SemanticStatus';
 import { findingFieldLabel } from './BlockerItems';
 import { ChevronDown, ChevronRight, Lock } from './icons';
 import { noteSourceLabel } from '../lib/noteSource';
+import { formatWhen } from '../lib/labels';
+import { focusWhenPresent } from '../lib/focusHandoff';
 import type { ApiHealthProposalAcceptance } from '../lib/types';
 import './ingestionProposals.css';
 
@@ -226,7 +228,9 @@ function refusalList(err: unknown, key: string): string[] {
  * unrecognised member of the served `states` list as a real, reachable case.
  */
 const STATE_LABELS: Readonly<Record<string, string>> = {
-  open: 'Awaiting your judgement',
+  /* ONE SPELLING, "judgment", on the chip, the filter, the announcements and the
+     accessible name (review #277, minor). */
+  open: 'Awaiting your judgment',
   accepted: 'Accepted — a value was written',
   rejected: 'Rejected — kept on the record',
   superseded: 'Superseded — kept on the record',
@@ -291,14 +295,23 @@ function acceptanceLockLine(reason: string | null): string {
  */
 function AcceptanceNotice({
   id,
+  lineId,
   title,
   line,
   children,
   onReload,
   reloadLabel,
   role,
+  containerRef,
 }: {
+  /** When set, the notice is a programmatic focus destination (`tabIndex=-1`) —
+      used by the 409 refusal, which is where focus goes when the pressed Accept
+      went disabled under the reader (PR #277 review). */
+  containerRef?: React.Ref<HTMLDivElement>;
   id?: string;
+  /** Id on the one-line sentence — what a locked Accept is DESCRIBED by (not the
+      whole notice, which would read the Why? and Reload controls as well). */
+  lineId?: string;
   title: string;
   line: string;
   children: React.ReactNode;
@@ -314,8 +327,14 @@ function AcceptanceNotice({
   const whyId = useId();
   const Chevron = whyOpen ? ChevronDown : ChevronRight;
   return (
-    <div className="proposals-lock" role={role} id={id}>
-      <p className="proposals-lock-line">
+    <div
+      className="proposals-lock"
+      role={role}
+      id={id}
+      ref={containerRef}
+      tabIndex={containerRef !== undefined ? -1 : undefined}
+    >
+      <p className="proposals-lock-line" id={lineId}>
         <Lock size={15} strokeWidth={2.2} aria-hidden="true" className="proposals-lock-icon" />
         <span className="proposals-lock-title">{title}</span>
         <span className="proposals-lock-text">{line}</span>
@@ -344,7 +363,7 @@ function AcceptanceNotice({
 
 /** Filter-option wording. Same fallback rule as `stateLabel`. */
 const FILTER_LABELS: Readonly<Record<string, string>> = {
-  open: 'Awaiting judgement',
+  open: 'Awaiting judgment',
   accepted: 'Accepted',
   rejected: 'Rejected',
   superseded: 'Superseded',
@@ -363,10 +382,10 @@ const ACTION_LABELS: Readonly<Record<ApiProposalReviewAction, string>> = {
 const ACTION_MEANINGS: Readonly<Record<'reject' | 'supersede' | 'withdraw', string>> = {
   reject: 'Reject records that the VALUE is wrong. Nothing is removed.',
   supersede:
-    'Supersede records that a later judgement replaces this one. Nothing is removed, and ' +
+    'Supersede records that a later judgment replaces this one. Nothing is removed, and ' +
     'nothing here creates the replacement.',
   withdraw:
-    'Withdraw records that the proposal should not have been made — a judgement about the ' +
+    'Withdraw records that the proposal should not have been made — a judgment about the ' +
     'proposal, not about the value. Nothing is removed.',
 };
 
@@ -547,7 +566,11 @@ const DEEP_LINK_FOUND_NOTE = 'This link names the proposal outlined below.';
  * nothing new to the DOM. It is a schema address, never a value.
  */
 function deepLinkFoundAnnouncement(fieldPath: string): string {
-  return `The proposal this link names is shown below \u2014 ${fieldPath}.`;
+  // The field in WORDS, not its official path (review #277, I-5): a screen reader
+  // should hear "Temperature", not "context dot temperature underscore K".
+  return `The proposal this link names is shown below \u2014 ${
+    findingFieldLabel(fieldPath) ?? fieldPath
+  }.`;
 }
 
 const DEEP_LINK_ABSENT_NOTE =
@@ -604,7 +627,7 @@ function reviewRefusalCopy(err: unknown, action: ApiProposalReviewAction): strin
   if (code === 'proposal_stale') {
     return (
       'What this record holds at that field path has changed since this proposal was ' +
-      'made, so accepting it now would write a judgement about content that is no ' +
+      'made, so accepting it now would write a judgment about content that is no ' +
       'longer there. Nothing was written. The proposal is still here: withdraw it, ' +
       'supersede it, or make a new one against the value that is there now.'
     );
@@ -627,7 +650,7 @@ function reviewRefusalCopy(err: unknown, action: ApiProposalReviewAction): strin
   if (code === 'proposal_not_open') {
     return (
       'This proposal has already been reviewed, so a second act on it was refused and ' +
-      'nothing was written. Every recorded judgement stays exactly as it was made; a ' +
+      'nothing was written. Every recorded judgment stays exactly as it was made; a ' +
       'later view is a new proposal, with its own history.'
     );
   }
@@ -732,13 +755,30 @@ type ListState =
   | { status: 'error'; error: ApiError }
   | { status: 'data'; loaded: ApiProposalsResponse };
 
+/** What `onOpenProposals` reports — see the prop. */
+export interface OpenProposalsSummary {
+  whole: boolean;
+  open: { proposalId: string; runId: string | null; noteId: string }[];
+}
+
 export function IngestionProposalsPanel({
   experimentId,
   activity,
   acceptance,
   onReloadAcceptance,
+  onOpenProposals,
 }: {
   experimentId: string;
+  /**
+   * The OPEN proposals in the loaded window — id, run (`null` when record-scoped) and
+   * the note each cites — plus whether that window is the WHOLE list (no filter, no
+   * further page). The screen uses it twice (review #277): to point the Proposals
+   * view's Record Map at the one run the proposals are about, only when the window
+   * is whole and exactly one run is named (I-3); and to tell Unmapped Notes which
+   * notes already have an open proposal (a positive fact, so a partial window is
+   * enough).
+   */
+  onOpenProposals?: (summary: OpenProposalsSummary) => void;
   /**
    * `GET /api/health`'s `proposal_acceptance`, passed down by the screen that
    * already holds the shared health read — or `undefined` when the block is absent
@@ -793,6 +833,7 @@ export function IngestionProposalsPanel({
         activity={activity ?? null}
         acceptance={acceptance}
         onReloadAcceptance={onReloadAcceptance}
+        onOpenProposals={onOpenProposals}
       />
     </section>
   );
@@ -803,11 +844,13 @@ function ProposalsBrowser({
   activity,
   acceptance,
   onReloadAcceptance,
+  onOpenProposals,
 }: {
   experimentId: string;
   activity: RecordChangeSummary | null;
   acceptance?: ApiHealthProposalAcceptance;
   onReloadAcceptance?: () => unknown;
+  onOpenProposals?: (summary: OpenProposalsSummary) => void;
 }) {
   /** The server said, before any click, that accepting cannot succeed here. */
   const acceptLocked = acceptance?.available === false;
@@ -872,6 +915,27 @@ function ProposalsBrowser({
   const [reloadNonce, setReloadNonce] = useState(0);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [refusal, setRefusal] = useState<string | null>(null);
+  /*
+   * PR #277 REVIEW (pre-existing) — FOCUS AFTER A REVIEW ACT USED TO FALL TO
+   * <body>. Every act disables the card's controls while it is in flight (the
+   * pressed button goes disabled and the browser blurs it), and then either the
+   * editor holding the confirm button closes or — under the default `Awaiting
+   * judgment` filter — the whole card leaves the list. Nothing put focus back.
+   *
+   * ON SUCCESS: once the refreshed window lands, focus goes to the reviewed card
+   * if it is still shown (its accessible name now carries the new state), else
+   * the card that FOLLOWED it, else the one before it, else the panel heading.
+   * ON REFUSAL: focus goes to the refusal notice, which is where the reason and
+   * the recovery control are.
+   */
+  const renderedIdsRef = useRef<string[]>([]);
+  const pendingReviewFocusRef = useRef<{
+    order: string[];
+    from: ApiProposalsResponse | null;
+  } | null>(null);
+  const [reviewFocus, setReviewFocus] = useState<{ id: string; nonce: number } | null>(null);
+  const refusalRef = useRef<HTMLDivElement | null>(null);
+  const [refusalNonce, setRefusalNonce] = useState(0);
   /** The server's code for `refusal`, so a `human_actor_required` renders in the
       same compact form as the health preflight (owner QA P2). */
   const [refusalKind, setRefusalKind] = useState<string | undefined>(undefined);
@@ -926,6 +990,21 @@ function ProposalsBrowser({
    */
   const [cursor, setCursor] = useState<string | null>(null);
   const [back, setBack] = useState<(string | null)[]>([]);
+  /* Report the OPEN proposals in this window, and whether it is the whole list —
+     "all open proposals name one run" is not knowable from a page. */
+  useEffect(() => {
+    if (onOpenProposals === undefined || list.status !== 'data') return;
+    onOpenProposals({
+      whole: filter === 'all' && cursor === null && !list.loaded.has_more,
+      open: list.loaded.proposals
+        .filter((proposal) => proposal.state === 'open')
+        .map((proposal) => ({
+          proposalId: proposal.proposal_id,
+          runId: proposal.run_id,
+          noteId: proposal.note_id,
+        })),
+    });
+  }, [list, filter, cursor, onOpenProposals]);
 
   /** Discards an out-of-order response rather than letting it overwrite a newer one. */
   const generationRef = useRef(0);
@@ -1204,6 +1283,18 @@ function ProposalsBrowser({
             cursor !== loadedViewRef.current.cursor;
           const sentence = viewChanged ? VIEW_CHANGE_REFRESH_ERROR : BACKGROUND_REFRESH_ERROR;
           setBackgroundRefreshError(sentence);
+          // A post-review focus waiting on this read must not wait forever: the
+          // window on screen is unchanged, so the reviewed card is still there.
+          {
+            const pendingFocus = pendingReviewFocusRef.current;
+            if (pendingFocus !== null) {
+              pendingReviewFocusRef.current = null;
+              setReviewFocus((prev) => ({
+                id: pendingFocus.order[0],
+                nonce: (prev?.nonce ?? 0) + 1,
+              }));
+            }
+          }
           /*
            * M2, INDEPENDENT REVIEW. The SAME sentence twice in a row (e.g. two
            * failed "Try Again" attempts) is a byte-identical announcement, which
@@ -1403,10 +1494,22 @@ function ProposalsBrowser({
         // would meet a 412 this component's own bookkeeping manufactured.
         setVersion(written.experiment_version);
         announce(announced);
+        {
+          const ids = renderedIdsRef.current;
+          const at = ids.indexOf(proposal.proposal_id);
+          pendingReviewFocusRef.current = {
+            order:
+              at < 0
+                ? [proposal.proposal_id]
+                : [proposal.proposal_id, ...ids.slice(at + 1), ...ids.slice(0, at).reverse()],
+            from: lastLoadedRef.current,
+          };
+        }
         reload(true);
       } catch (err: unknown) {
         setRefusal(recoverFromStale(err, action));
         setRefusalKind(refusalCode(err));
+        setRefusalNonce((n) => n + 1);
         setAnnouncement('');
         /*
          * RETHROWN, so a caller can tell "recorded" from "refused". The editors that
@@ -1431,6 +1534,29 @@ function ProposalsBrowser({
   const lastLoadedRef = useRef<ApiProposalsResponse | null>(null);
   if (list.status === 'data') lastLoadedRef.current = list.loaded;
   const loaded = list.status === 'data' ? list.loaded : lastLoadedRef.current;
+  if (list.status === 'data') {
+    renderedIdsRef.current = list.loaded.proposals.map((entry) => entry.proposal_id);
+  }
+
+  /* Resolve a pending post-review focus once a NEW window has landed — see
+     `pendingReviewFocusRef`. */
+  useEffect(() => {
+    const pending = pendingReviewFocusRef.current;
+    if (pending === null || list.status !== 'data' || list.loaded === pending.from) return;
+    pendingReviewFocusRef.current = null;
+    const present = new Set(list.loaded.proposals.map((entry) => entry.proposal_id));
+    const destination = pending.order.find((id) => present.has(id));
+    if (destination !== undefined) {
+      setReviewFocus((prev) => ({ id: destination, nonce: (prev?.nonce ?? 0) + 1 }));
+      return;
+    }
+    return focusWhenPresent(() => document.getElementById('ingestion-proposals-heading'));
+  }, [list]);
+
+  useEffect(() => {
+    if (refusalNonce === 0) return;
+    return focusWhenPresent(() => refusalRef.current);
+  }, [refusalNonce]);
 
   /*
    * WHAT THE LOADED WINDOW SAYS ABOUT THE DEEP-LINKED ID.
@@ -1867,6 +1993,7 @@ function ProposalsBrowser({
         list.loaded.proposals.some((proposal) => proposal.state === 'open') && (
           <AcceptanceNotice
             id={lockNoticeId}
+            lineId={`${lockNoticeId}-line`}
             role="note"
             title="Acceptance unavailable on this deployment"
             line={acceptanceLockLine(acceptance?.reason ?? null)}
@@ -1899,9 +2026,12 @@ function ProposalsBrowser({
            account verbatim behind `Why?`. `role="alert"` as before. */
         <AcceptanceNotice
           role="alert"
+          containerRef={refusalRef}
           title="Acceptance refused on this deployment"
           line="Nothing was written — trusted scientist identity has not been enabled."
-          reloadLabel="Reload This Section"
+          /* ONE reload label for both notices (PR #277 review, minor) — this one
+             said "Reload This Section" beside the preflight notice's "Reload". */
+          reloadLabel="Reload"
           onReload={() => {
             void onReloadAcceptance?.();
             reload(true);
@@ -1911,7 +2041,7 @@ function ProposalsBrowser({
         </AcceptanceNotice>
       ) : (
         refusal && (
-          <div className="proposals-error" role="alert">
+          <div className="proposals-error" role="alert" ref={refusalRef} tabIndex={-1}>
             <span className="proposals-error-text">{refusal}</span>
             {/* SILENT — the loud reload would unmount every card and destroy the
                 corrected value the reader was offered this control to recover. */}
@@ -2017,8 +2147,13 @@ function ProposalsBrowser({
                      * not producing.
                      */
                     linked={deepLinkedId !== null && proposal.proposal_id === deepLinkedId}
+                    focusNonce={
+                      reviewFocus !== null && reviewFocus.id === proposal.proposal_id
+                        ? reviewFocus.nonce
+                        : 0
+                    }
                     busy={busyId === proposal.proposal_id || version === null}
-                    acceptLockedBy={acceptLocked ? lockNoticeId : null}
+                    acceptLockedBy={acceptLocked ? `${lockNoticeId}-line` : null}
                     onReview={review}
                   />
                 </li>
@@ -2199,6 +2334,7 @@ function ProposalCard({
   runLabels,
   duplicateRunLabels,
   linked,
+  focusNonce = 0,
   busy,
   acceptLockedBy,
   onReview,
@@ -2218,6 +2354,12 @@ function ProposalCard({
    * the card shows, offers or writes.
    */
   linked: boolean;
+  /**
+   * Bumped by the panel to hand focus to THIS card after a review act (PR #277
+   * review) — `0` means "not a focus destination". A nonce rather than a flag so
+   * two consecutive hand-offs to the same card each take effect.
+   */
+  focusNonce?: number;
   busy: boolean;
   /**
    * The id of the panel's acceptance notice when the server said `available:
@@ -2302,6 +2444,10 @@ function ProposalCard({
     if (typeof el.scrollIntoView === 'function') el.scrollIntoView({ block: 'center' });
     el.focus();
   }, [linked]);
+  useEffect(() => {
+    if (focusNonce === 0) return;
+    return focusWhenPresent(() => cardRef.current);
+  }, [focusNonce]);
 
   const editorId = useId();
   const moreId = useId();
@@ -2365,8 +2511,8 @@ function ProposalCard({
          exactly the linked card and a test asserting its absence asserts the
          attribute's absence rather than a string. */
       data-linked-proposal={linked ? 'true' : undefined}
-      tabIndex={linked ? -1 : undefined}
-      aria-label={`Proposal for ${proposal.target_field_path} — ${stateLabel(proposal.state)}`}
+      tabIndex={linked || focusNonce > 0 ? -1 : undefined}
+      aria-label={`Proposal for ${fieldLabel} — ${stateLabel(proposal.state)}`}
     >
       {/*
         THE HEADER (owner QA P1, 2026-09-22): the state chip, the FIELD in human
@@ -2425,7 +2571,14 @@ function ProposalCard({
             </span>
           );
         })()}
-        <span className="proposal-when">Proposed {proposal.proposed_utc}</span>
+        {/* A person's date on the card; the exact ISO instant in `title` and the
+            `<time>` element's machine value (review #277, I-5). */}
+        <span className="proposal-when">
+          Proposed{' '}
+          <time dateTime={proposal.proposed_utc} title={proposal.proposed_utc}>
+            {formatWhen(proposal.proposed_utc) ?? proposal.proposed_utc}
+          </time>
+        </span>
         </span>
       </header>
 
@@ -2434,6 +2587,16 @@ function ProposalCard({
           that the proposal does not carry. */}
       <div className="proposal-value">
         <h3 className="proposal-value-label">Proposed value</h3>
+        {/*
+          THE CLAIM THIS CARD MUST NOT LET A READER MISS — so it is VISIBLE, on the
+          card, one compact line under the label (review #277, I-8). It holds in every
+          state including `accepted`, because `is_field_value` is false there too: the
+          proposal stays a suggestion, and what a written value is lives in the
+          acceptance record below.
+        */}
+        <p className="proposal-nature">
+          A suggestion &mdash; not the field&rsquo;s value, and not evidence for it.
+        </p>
         <pre className="proposal-value-body">{renderValue(proposal.proposed_value)}</pre>
       </div>
 
@@ -2457,7 +2620,7 @@ function ProposalCard({
           (DEC-35: a conflict and an uncertainty stay visible). Only the reassuring
           "unchanged" sentence goes behind the disclosure below. */}
       {proposal.target_stale !== false && (
-        <TargetState proposal={proposal} acceptOffered={canAccept || canEditAccept} />
+        <TargetState proposal={proposal} acceptOffered={(canAccept || canEditAccept) && !locked} />
       )}
 
       {proposal.state === 'accepted' && <AcceptanceRecord proposal={proposal} />}
@@ -2489,7 +2652,7 @@ function ProposalCard({
                   run(
                     'accept',
                     { acceptedFrom: 'candidate' },
-                    `The proposed value for ${proposal.target_field_path} was accepted as it ` +
+                    `The proposed value for ${fieldLabel} was accepted as it ` +
                       'stands and written to the record.',
                   )
                 }
@@ -2687,7 +2850,7 @@ function ProposalCard({
                     void run(
                       'accept',
                       { acceptedFrom: 'edited', value: parsed },
-                      `The corrected value for ${proposal.target_field_path} was accepted ` +
+                      `The corrected value for ${fieldLabel} was accepted ` +
                         'and written to the record.',
                       () => {
                         setEditor(null);
@@ -2737,7 +2900,7 @@ function ProposalCard({
                     void run(
                       action,
                       { reason },
-                      `The proposal for ${proposal.target_field_path} was ${
+                      `The proposal for ${fieldLabel} was ${
                         action === 'reject'
                           ? 'rejected'
                           : action === 'supersede'
@@ -2771,20 +2934,14 @@ function ProposalCard({
       {/*
         WHY THIS WAS PROPOSED — the provenance, one click away (owner QA P1,
         2026-09-22). Everything that used to be stacked as prose on every card is
-        here, verbatim and still in the DOM: what a proposal is, the rule, the note
-        it came from, the reassuring "unchanged" target sentence (a changed or
-        unreadable target stays on the card above), the on-demand read of what the
-        record holds, what leaving it alone means, and the history.
+        here, verbatim and still in the DOM: the rule, the note it came from, the
+        reassuring "unchanged" target sentence (a changed or unreadable target stays
+        on the card above), the on-demand read of what the record holds, what
+        leaving it alone means, and the history. What a proposal IS — not the
+        field's value, not evidence — is NOT in here: it stays visible on the card
+        (review #277, I-8).
       */}
       <Disclosure summary="Why This Was Proposed" className="proposal-why">
-      {/* THE CLAIM THIS CARD MUST NOT LET A READER MISS, made in every state
-          including `accepted` — because `is_field_value` is false there too. The
-          "Proposed value" label and the state chip carry it on the card itself. */}
-      <p className="proposal-nature">
-        A suggestion about this field. It is not the field&rsquo;s value and not evidence
-        for it.
-      </p>
-
       <p className="proposal-rule">
         <span className="proposal-rule-label">Rule that produced it: </span>
         {proposal.rule}
@@ -2796,7 +2953,7 @@ function ProposalCard({
       </p>
 
       {proposal.target_stale === false && (
-        <TargetState proposal={proposal} acceptOffered={canAccept || canEditAccept} />
+        <TargetState proposal={proposal} acceptOffered={(canAccept || canEditAccept) && !locked} />
       )}
 
       <CurrentValue experimentId={experimentId} proposal={proposal} />
@@ -2806,12 +2963,12 @@ function ProposalCard({
               be inferred. There is no "defer" act in this contract, and inventing one
               would be a state the record cannot store. */
           <p className="proposal-pending-note">
-            Leaving this proposal alone leaves it awaiting judgement. There is no
+            Leaving this proposal alone leaves it awaiting judgment. There is no
             &ldquo;decide later&rdquo; act to record — taking no action is that.
           </p>
       ) : (
         <p className="proposal-closed-note">
-          This proposal has been reviewed. Every recorded judgement stays exactly as it
+          This proposal has been reviewed. Every recorded judgment stays exactly as it
           was made, so it cannot be reviewed again — a later view is a new proposal.
         </p>
       )}

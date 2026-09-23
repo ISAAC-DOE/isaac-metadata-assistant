@@ -1045,7 +1045,14 @@ describe('worked-example session — scope handling', () => {
     // The honest backend state, not a blank record and not a fabricated one — and now
     // with the RIGHT account of it: this id is a worked-example id, worked-example
     // records live only in a temporary workspace, and THIS TAB is not in one.
-    await waitFor(() => expect(view.getByText('Worked Example Not Open')).toBeInTheDocument());
+    // By HEADING since PR #277's review: the breadcrumb now names the same state (it
+    // said "Review Record" above this panel), so the bare text occurs twice.
+    await waitFor(() =>
+      expect(view.getByRole('heading', { name: 'Worked Example Not Open' })).toBeInTheDocument(),
+    );
+    expect(view.container.querySelector('.record-title')?.textContent).toBe(
+      'Worked Example Not Open',
+    );
     const shown = view.container.textContent ?? '';
     expect(shown).toMatch(/one of the five built-in worked-example records/i);
     // The panel is honest that the workspace is UNREACHABLE FROM HERE — no weaker than

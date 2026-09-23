@@ -63,6 +63,7 @@ import {
   expect,
   openRecord,
   proposalCard,
+  proposalCardInState,
   test,
   type ServerApi,
 } from './fixtures';
@@ -277,7 +278,7 @@ test.describe('a run-scoped ingestion proposal, reviewed in a browser', () => {
     // The card's own accessible name carries its state, so waiting for the name to
     // change is waiting for the screen to have caught up — not for a fixed delay.
     await expect(
-      page.getByRole('article', { name: new RegExp(`^Proposal for ${target.path.replace(/\./g, '\\.')} — Accepted`) })
+      proposalCardInState(page, target.path, 'Accepted')
     ).toBeVisible();
 
     // INDEPENDENT VERIFICATION, over HTTP, of what the click did.

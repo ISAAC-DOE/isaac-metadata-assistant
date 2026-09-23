@@ -10400,7 +10400,7 @@
       },
       {
         "path": "apps/web/src/components/AdvisoryChip.tsx",
-        "sha256": "5e655ee1a61cd538fdea99f6473cb09ad8b3362622aa9529ed051c13dede45bc"
+        "sha256": "a005d7ca4497bee628b209620b263b84a5c400be9eca1ef790c4adcd1a6e239d"
       },
       {
         "path": "apps/web/src/components/AppShell.tsx",
@@ -10512,7 +10512,7 @@
       },
       {
         "path": "apps/web/src/lib/labels.ts",
-        "sha256": "98e581f315135fd13ff1e753e9495b7a56fe3fab2da37bdedaecfa558ff4c704"
+        "sha256": "18f0521e97990cf11eaa61c7ab6a6b3d667857644e77005f70aeec9c1655b200"
       },
       {
         "path": "apps/web/src/lib/routes.ts",
@@ -10544,7 +10544,7 @@
       },
       {
         "path": "apps/web/src/screens/ExportReadiness.tsx",
-        "sha256": "22f8f4590d2af500e9f880ef327dd295a5b16ef749a45b02d933459e52610078"
+        "sha256": "a0ce24a550157356bcb3fc7032eee3c225607d17bffbb0a3341e279d84729e06"
       },
       {
         "path": "apps/web/src/screens/GovernancePage.tsx",
@@ -10552,7 +10552,7 @@
       },
       {
         "path": "apps/web/src/screens/GuidedCompletion.tsx",
-        "sha256": "5f955c35e378cc97c3763cd2c8a0dddcf2f4cd967ee798727d0f93afe5afb1ed"
+        "sha256": "bd21d718e238c73b6ba795a9c3f48e204de181905914a05d83b235a73af13f73"
       },
       {
         "path": "apps/web/src/screens/LoadMaterials.tsx",
@@ -10564,7 +10564,7 @@
       },
       {
         "path": "apps/web/src/screens/RecordWorkbench.tsx",
-        "sha256": "04e1fcc628b2bce39f270d4bcc4d2e793e8c59cba316ceb4110c5bb0a0be30e0"
+        "sha256": "3fb94cd73e72291a3f649d77466a1110d75f85b63ce22587517488f4b886353c"
       },
       {
         "path": "apps/web/src/screens/SettingsPage.tsx",
@@ -11012,7 +11012,7 @@
       }
     ],
     "served_file_count": 200,
-    "served_manifest_fingerprint": "f1c63ecc7174ce1d3394387a4e94175153ce038e0dd6c676e7d11aa3a8a38aa3"
+    "served_manifest_fingerprint": "8b18ac49fc90e6caffe1cc10028eb79e7a9fd576f7640988bc3d874033419c30"
   },
   "overview": {
     "built_at_commit": "caab1d0a69c1733524bda5dde495623bc4b7bad1",

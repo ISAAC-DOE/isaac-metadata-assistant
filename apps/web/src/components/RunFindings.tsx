@@ -3,7 +3,7 @@ import { useId } from 'react';
 import { BlockerItems } from './BlockerItems';
 import { Disclosure } from './Disclosure';
 import { HelpTip } from './HelpTip';
-import { SemanticStatus, type SemanticState } from './SemanticStatus';
+import { Check, CircleHelp, TriangleAlert } from './icons';
 import { count, isValidationUnavailable } from '../lib/assistantPaths';
 import {
   officialCheckedDocument,
@@ -99,14 +99,35 @@ const STATE_WORD: Record<RunFindingState, string> = {
   unavailable: 'No verdict',
 };
 
-/* The shared state vocabulary (2026-09-22): icon + word + tint, never colour
-   alone. Success is the verified teal, NOT the reserved pass green — this is a
-   per-run finding list, not the official verdict `VerdictCard` owns. */
-const STATE_SEMANTIC: Record<RunFindingState, SemanticState> = {
-  pass: 'ready',
-  fail: 'invalid',
-  unavailable: 'unavailable',
-};
+/*
+ * THE PER-RUN VERDICT IS A NEUTRAL CHIP WITH AN ICON AND A WORD (review #277, minor).
+ * Phase 2 painted it with `SemanticStatus`'s tinted success/danger fills — the
+ * vocabulary that primitive's own note keeps away from an official verdict, whose
+ * filled pass/fail treatment belongs to `VerdictCard` alone. The repo's established
+ * per-run treatment is restored instead: a neutral chip, the state carried by an icon
+ * and a word, and only the FAIL word in the fail text colour.
+ */
+const STATE_ICON = {
+  pass: Check,
+  fail: TriangleAlert,
+  unavailable: CircleHelp,
+} as const;
+
+export function RunVerdictChip({
+  state,
+  className,
+}: {
+  state: RunFindingState;
+  className?: string;
+}) {
+  const Icon = STATE_ICON[state];
+  return (
+    <span className={`run-verdict run-verdict-${state}${className ? ` ${className}` : ''}`}>
+      <Icon size={12} strokeWidth={2.2} aria-hidden="true" />
+      <span>{STATE_WORD[state]}</span>
+    </span>
+  );
+}
 
 /**
  * How many run findings are DRAWN. See the long note in the component for why the
@@ -276,10 +297,8 @@ export function RunFindings({
               */}
               <div className="run-finding-head">
                 <span className="run-finding-label">{label}</span>
-                <SemanticStatus
-                  state={STATE_SEMANTIC[state]}
-                  label={STATE_WORD[state]}
-                  size="sm"
+                <RunVerdictChip
+                  state={state}
                   className={`run-finding-state run-finding-state-${state}`}
                 />
                 {state !== 'pass' && run.errors.length > 0 && (

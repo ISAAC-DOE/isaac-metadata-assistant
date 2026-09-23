@@ -48,8 +48,15 @@ export function RunSection({
   title,
   summary,
   defaultOpen = true,
+  address,
   children,
 }: {
+  /**
+   * A `data-address` a link can scroll to (`RECORD_ADDRESS_PARAM`) — the Conditions
+   * section is the destination of a validation finding about a PARENT of the
+   * run-level fields (review #277, I-9).
+   */
+  address?: string;
   title: string;
   /**
    * A short, GROUNDED line about what is inside — a count of something the caller
@@ -64,7 +71,7 @@ export function RunSection({
   const [open, setOpen] = useState(defaultOpen);
   const Chevron = open ? ChevronDown : ChevronRight;
   return (
-    <section className="run-section" data-open={open}>
+    <section className="run-section" data-open={open} data-address={address}>
       <h4 className="run-section-heading">
         <button
           type="button"

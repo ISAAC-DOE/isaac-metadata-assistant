@@ -198,7 +198,7 @@
  * never absent, and it is rendered in every state including `accepted`.
  */
 .proposal-nature {
-  margin: 0 0 8px;
+  margin: 0 0 var(--space-xs);
   font-size: 12px;
   line-height: 1.5;
   color: var(--text-tertiary);

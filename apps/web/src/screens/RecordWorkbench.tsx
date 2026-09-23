@@ -20,7 +20,7 @@ import { RunsSection } from '../components/RunsSection';
 import { RunSchemaMirror } from '../components/RunSchemaMirror';
 import type { VoiceState } from '../components/TranscriptCapturePanel';
 import { UnmappedNotesPanel } from '../components/UnmappedNotesPanel';
-import { IngestionProposalsPanel } from '../components/IngestionProposalsPanel';
+import { IngestionProposalsPanel, type OpenProposalsSummary } from '../components/IngestionProposalsPanel';
 import { AssetReferencesPanel } from '../components/AssetReferencesPanel';
 import { ExtendedContextPanel } from '../components/ExtendedContextPanel';
 import { ValidateReview } from '../components/ValidateReview';
@@ -32,21 +32,23 @@ import { LiveSyncNote } from '../components/LiveSyncNote';
 import { RecordActivityNote } from '../components/RecordActivityNote';
 import { needsCanonicalRefetch, type RecordChangeSummary } from '../lib/recordChanges';
 import { WorkflowProgressBanner } from '../components/WorkflowProgressBanner';
-import { LoadingPanel, BackendDown, downCopy } from '../components/FetchStates';
+import { LoadingPanel, BackendDown } from '../components/FetchStates';
 import { CircleAlert, Mic } from '../components/icons';
 import { ExperimentGraphPanel } from './graph/ExperimentGraphPanel';
 import { LABELS } from '../lib/labels';
 import {
+  RECORD_ADDRESS_PARAM,
   RECORD_CAPTURE_METHOD_PARAM,
   ROUTES,
   resolveCaptureMethod,
   resolveRecordView,
   type RecordViewId,
 } from '../lib/routes';
-import { api, isHostedBuild } from '../lib/api';
+import { api } from '../lib/api';
 import { recordViewTitleSegments } from '../lib/documentTitle';
 import { CAPTURE_COPY } from '../lib/transcriptCaptureContent';
 import { useDocumentTitle } from '../lib/useDocumentTitle';
+import { useSettledErrorTitle } from '../lib/useSettledErrorTitle';
 import { useFetch } from '../lib/useFetch';
 import { useRecordSession } from '../lib/useRecordSession';
 import { refetchHealth, useHealthState } from '../lib/useHealth';
@@ -401,10 +403,7 @@ export function RecordWorkbench() {
    * the state actually on screen — the SAME title `BackendDown` renders, from the
    * same `downCopy`, so the tab and the panel cannot disagree.
    */
-  const workspaceScope = useWorkspaceScope();
-  const downTitle =
-    bundle.status === 'error' ? downCopy(bundle.error, isHostedBuild, workspaceScope).title : null;
-  useDocumentTitle(downTitle === null ? null : [downTitle]);
+  const settled = useSettledErrorTitle(bundle.status === 'error' ? bundle.error : null);
 
   // P29.4b — after a confirmed proposal write, recompute the shared record state
   // (manual fields, workflow, evidence, export readiness) and refetch the bundle
@@ -431,7 +430,16 @@ export function RecordWorkbench() {
     return (
       <AppShell
         variant="record"
-        topBar={<TopBar variant="record" title={LABELS.screenReview} />}
+        /* PR #277 REVIEW: the breadcrumb said "Review Record" above "Record Not
+           Found". When the API has said the record is NOT THERE, the breadcrumb
+           names that state instead (see `useSettledErrorTitle`); any other error
+           keeps the screen's name, since the record may well exist. */
+        topBar={
+          <TopBar
+            variant="record"
+            title={settled.recordAbsent && settled.title !== null ? settled.title : LABELS.screenReview}
+          />
+        }
         /* The skeleton spine is a LOADING shape. Once the read has settled in an
            error there is no workflow to show and none is coming, so the sidebar is
            omitted rather than left as a permanent placeholder beside a settled
@@ -903,6 +911,48 @@ function LoadedWorkbench({
    * EMPTY and nothing here fills it: a run is never chosen for the reader.
    */
   const [captureRunId, setCaptureRunId] = useState('');
+  /*
+   * THE PROPOSALS VIEW'S MAP RUN — its OWN selection, deliberately not the capture
+   * run above (review #277, I-3). It may be PRESELECTED, and only in one case: every
+   * OPEN proposal in a window that is the whole list names the SAME single run. When
+   * they differ, or one is record-scoped, nothing is chosen ("Choose a run" stays),
+   * because picking one would be a guess. It is separate so a preselection here can
+   * never become the run a transcript is filed against on Write — that choice is
+   * never made for the reader. Once the reader picks (or a preselection happened),
+   * nothing overrides it again on this visit.
+   */
+  const [proposalsMapRunId, setProposalsMapRunId] = useState('');
+  const proposalsMapSettled = useRef(false);
+  const chooseProposalsMapRun = useCallback((runId: string) => {
+    proposalsMapSettled.current = true;
+    setProposalsMapRunId(runId);
+  }, []);
+  /* Which notes already have an OPEN proposal citing them, and which one — so
+     Unmapped Notes shows "Proposal open" instead of offering to propose again. */
+  const [noteOpenProposals, setNoteOpenProposals] = useState<ReadonlyMap<string, string>>(
+    () => new Map(),
+  );
+  const onOpenProposals = useCallback((summary: OpenProposalsSummary) => {
+    const byNote = new Map<string, string>();
+    for (const open of summary.open) if (!byNote.has(open.noteId)) byNote.set(open.noteId, open.proposalId);
+    setNoteOpenProposals((prev) => {
+      if (prev.size === byNote.size && [...byNote].every(([k, v]) => prev.get(k) === v)) return prev;
+      return byNote;
+    });
+    if (proposalsMapSettled.current || !summary.whole || summary.open.length === 0) return;
+    const only = summary.open[0].runId;
+    if (only === null || summary.open.some((open) => open.runId !== only)) return;
+    proposalsMapSettled.current = true;
+    setProposalsMapRunId(only);
+  }, []);
+  /* The runs the Proposals view's Record Map read — reused for run LABELS on the notes
+     beside it, so naming a note's run costs no request of its own. */
+  const [proposalsViewRunLabels, setProposalsViewRunLabels] = useState<
+    ReadonlyMap<string, string>
+  >(() => new Map());
+  const onProposalsMapRuns = useCallback((runs: readonly ApiRunView[]) => {
+    setProposalsViewRunLabels(new Map(runs.map((run) => [run.id, run.label])));
+  }, []);
   /* The recorder's state, reported by the one transcript panel, so a live
      microphone stays visible from any view that is not showing the recorder. */
   const [voiceState, setVoiceState] = useState<VoiceState>('idle');
@@ -967,10 +1017,45 @@ function LoadedWorkbench({
     pendingFocus.current = 'proposals';
     navigate({ search: railDestination(location.search, 'proposals') });
   }, [navigate, location.search]);
+  /* Bumped by "Open Asset References": the panel expands on arrival rather than
+     landing the reader on a collapsed header (review #277, minor). */
+  const [assetsOpenSignal, setAssetsOpenSignal] = useState(0);
   const openAssets = useCallback(() => {
     pendingFocus.current = 'assets';
+    setAssetsOpenSignal((n) => n + 1);
     navigate({ search: railDestination(location.search, 'fields') });
   }, [navigate, location.search]);
+
+  /*
+   * A LINK TO A RECORD FIELDS SECTION — `?view=fields&at=block:<name>`, minted by a
+   * validation finding under that block (review #277, I-9). The section is EXPANDED,
+   * brought into view and marked, and focus moves to its header so a keyboard
+   * reader arrives where the link said. A name the view does not render finds no
+   * target and changes nothing, like every other `at=` address.
+   */
+  const blockAddress = activeView === 'fields' ? searchParams.get(RECORD_ADDRESS_PARAM) : null;
+  const linkedBlock =
+    blockAddress !== null && blockAddress.startsWith('block:') ? blockAddress.slice(6) : null;
+  useEffect(() => {
+    if (linkedBlock === null || linkedBlock === '') return;
+    setToggles((prev) => (prev[linkedBlock] ? prev : { ...prev, [linkedBlock]: true }));
+    let marked: Element | null = null;
+    const cancel = focusWhenPresent(
+      () => {
+        const section = document.querySelector(
+          `section[data-draft-block="${CSS.escape(linkedBlock)}"]`,
+        );
+        if (section === null) return null;
+        marked = section;
+        section.setAttribute('data-linked-address', 'true');
+        return section.querySelector<HTMLElement>('.fg-header');
+      },
+    );
+    return () => {
+      cancel();
+      marked?.removeAttribute('data-linked-address');
+    };
+  }, [linkedBlock]);
   const recorderLiveElsewhere =
     (voiceState === 'recording' || voiceState === 'paused') &&
     !(activeView === 'capture' && captureView === 'voice');
@@ -1376,7 +1461,11 @@ function LoadedWorkbench({
             list and is absent until that read resolves — never optimistic, never a
             number this screen guessed.
           */}
-          <AssetReferencesPanel experimentId={id} collapsedByDefault />
+          <AssetReferencesPanel
+            experimentId={id}
+            collapsedByDefault
+            openSignal={assetsOpenSignal}
+          />
         </section>
       )}
 
@@ -1570,14 +1659,21 @@ function LoadedWorkbench({
                   activity={proposalActivity}
                   acceptance={health?.proposal_acceptance}
                   onReloadAcceptance={refetchHealth}
+                  onOpenProposals={onOpenProposals}
                 />
-                <UnmappedNotesPanel experimentId={id} activity={notesActivity} />
+                <UnmappedNotesPanel
+                  experimentId={id}
+                  activity={notesActivity}
+                  runLabels={proposalsViewRunLabels}
+                  openProposalsByNote={noteOpenProposals}
+                />
               </div>
               <div className="capture-task-aside">
                 <CaptureRecordMap
                   experimentId={id}
-                  runId={captureRunId}
-                  onRunChange={setCaptureRunId}
+                  runId={proposalsMapRunId}
+                  onRunChange={chooseProposalsMapRun}
+                  onRunsLoaded={onProposalsMapRuns}
                   refreshKey={mapRefreshKey}
                 />
               </div>

@@ -103,3 +103,43 @@ describe('refetchHealth', () => {
     await waitFor(() => expect(screen.getByTestId('probe').textContent).toBe('absent'));
   });
 });
+
+describe('a re-read that answers BEFORE the first read (PR #277 review, minor)', () => {
+  it('MUTATION-GUARDED: the late first read does not overwrite the newer answer', async () => {
+    let releaseFirst: (() => void) | null = null;
+    let reads = 0;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        reads += 1;
+        const body =
+          reads === 1
+            ? { ...healthSynthetic, proposal_acceptance: { available: false, reason: 'no_verifier_configured' } }
+            : { ...healthSynthetic, proposal_acceptance: { available: true, reason: null } };
+        if (reads === 1) {
+          // Hold the FIRST read open until the re-read has answered.
+          await new Promise<void>((resolve) => {
+            releaseFirst = resolve;
+          });
+        }
+        return new Response(JSON.stringify(body), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }),
+    );
+    render(<Probe />);
+    expect(screen.getByTestId('probe').textContent).toBe('loading');
+    await act(async () => {
+      await refetchHealth();
+    });
+    await waitFor(() => expect(screen.getByTestId('probe').textContent).toBe('available'));
+    // Now the stale first read lands.
+    await act(async () => {
+      (releaseFirst as unknown as () => void)();
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    });
+    expect(screen.getByTestId('probe').textContent).toBe('available');
+    expect(reads).toBe(2);
+  });
+});

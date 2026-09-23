@@ -1,4 +1,4 @@
-import { useEffect, useId, useState } from 'react';
+import { useEffect, useId, useState, type ReactNode } from 'react';
 
 import { api } from '../lib/api';
 import { RUN_LIST_LIMIT_MAX } from '../lib/runPaging';
@@ -40,9 +40,12 @@ export function CaptureRecordMap({
   runId,
   onRunChange,
   onRunResolved,
+  onRunsLoaded,
   refreshKey,
   picker = true,
 }: {
+  /** The run list this map read, for a sibling that needs run LABELS (no extra request). */
+  onRunsLoaded?: (runs: readonly ApiRunView[]) => void;
   experimentId: string;
   /** The chosen run id, or `''` for none. */
   runId: string;
@@ -70,7 +73,9 @@ export function CaptureRecordMap({
     api
       .listRuns(experimentId, { limit: RUN_LIST_LIMIT_MAX })
       .then((body) => {
-        if (!cancelled) setRuns(body.runs);
+        if (cancelled) return;
+        setRuns(body.runs);
+        onRunsLoaded?.(body.runs);
       })
       .catch(() => {
         if (!cancelled) setFailed(true);
@@ -107,34 +112,41 @@ export function CaptureRecordMap({
   }, [selected, onRunResolved]);
   const options = runs ?? [];
   const showPicker = picker && runs !== null && runs.length > 0;
+  /*
+   * THE PICKER LIVES IN THE CARD'S OWN HEADER (review #277, I-3). It used to be a
+   * page-level select above the card, so a view with the transcript form showed
+   * TWO run choices. It is now inside the Record Map it drives, and the caller
+   * turns it off wherever the transcript form (which carries its own run choice)
+   * is on screen.
+   */
+  const pickerNode = showPicker ? (
+    <span className="capture-map-run">
+      <label className="capture-label" htmlFor={selectId}>
+        {CAPTURE_COPY.mapRunLabel}
+      </label>
+      <select
+        id={selectId}
+        className="capture-control"
+        value={runId}
+        onChange={(event) => onRunChange(event.target.value)}
+      >
+        <option value="">{CAPTURE_COPY.runPlaceholder}</option>
+        {options.map((run) => (
+          <option key={run.id} value={run.id}>
+            {run.label}
+          </option>
+        ))}
+        {selected !== null && listed === null && (
+          <option value={selected.id}>{selected.label}</option>
+        )}
+      </select>
+    </span>
+  ) : undefined;
 
   return (
     <div className="capture-map">
-      {showPicker && (
-        <div className="capture-map-run">
-          <label className="capture-label" htmlFor={selectId}>
-            {CAPTURE_COPY.mapRunLabel}
-          </label>
-          <select
-            id={selectId}
-            className="capture-control"
-            value={runId}
-            onChange={(event) => onRunChange(event.target.value)}
-          >
-            <option value="">{CAPTURE_COPY.runPlaceholder}</option>
-            {options.map((run) => (
-              <option key={run.id} value={run.id}>
-                {run.label}
-              </option>
-            ))}
-            {selected !== null && listed === null && (
-              <option value={selected.id}>{selected.label}</option>
-            )}
-          </select>
-        </div>
-      )}
       {selected !== null ? (
-        <RunSchemaMirror run={selected} />
+        <RunSchemaMirror run={selected} headerControl={pickerNode} />
       ) : (
         <MapPlaceholder
           text={
@@ -147,19 +159,31 @@ export function CaptureRecordMap({
                   : CAPTURE_COPY.mapChooseRun
           }
           onRetry={failed ? () => setAttempt((n) => n + 1) : undefined}
+          headerControl={pickerNode}
         />
       )}
     </div>
   );
 }
 
-function MapPlaceholder({ text, onRetry }: { text: string; onRetry?: () => void }) {
+function MapPlaceholder({
+  text,
+  onRetry,
+  headerControl,
+}: {
+  text: string;
+  onRetry?: () => void;
+  headerControl?: ReactNode;
+}) {
   const headingId = useId();
   return (
     <aside className="rsm rsm-placeholder" aria-labelledby={headingId}>
-      <h3 className="rsm-heading" id={headingId}>
-        Record Map
-      </h3>
+      <div className="rsm-head">
+        <h3 className="rsm-heading" id={headingId}>
+          Record Map
+        </h3>
+        {headerControl}
+      </div>
       <p className="rsm-note">{text}</p>
       {onRetry && (
         <button type="button" className="btn btn-secondary" onClick={onRetry}>

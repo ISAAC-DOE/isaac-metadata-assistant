@@ -13,7 +13,7 @@
  *
  * **That is no longer true, and this file is the consequence.** PR #228 made
  * `TranscriptCapturePanel`'s *Finalize and Read* mint durable proposals server-side,
- * and PR #231 added `UnmappedNotesPanel`'s *Propose a value from this note*. There
+ * and PR #231 added `UnmappedNotesPanel`'s *Propose a Value From This Note*. There
  * are now TWO surfaces a person can click to produce a proposal, so Scientist B can
  * be a **second browser context driving the real UI** rather than an HTTP client.
  *
@@ -100,6 +100,7 @@ import {
   openRun,
   openWorkspace,
   proposalCard,
+  proposalCardInState,
   switchWorkspace,
   test,
   type ServerApi,
@@ -238,11 +239,10 @@ async function proposalById(
   return found;
 }
 
-/** A proposal card addressed by path AND state — the card's own accessible name. */
+/** A proposal card addressed by path AND state — the card's own accessible name,
+ *  which names the field in words since review #277 (`proposalCardInState`). */
 function cardInState(page: Page, path: string, stateLabel: string) {
-  return page.getByRole('article', {
-    name: new RegExp(`^Proposal for ${path.replace(/\./g, '\\.')} — ${stateLabel}`),
-  });
+  return proposalCardInState(page, path, stateLabel);
 }
 
 /** The mark planted on A's `window` in step 1. */
@@ -849,7 +849,7 @@ test.describe('two scientists, two real browsers, one record', () => {
           noteCard,
           'step 3: its card is on B’s screen once B reloads — see the finding above',
         ).toBeVisible();
-        await noteCard.getByRole('button', { name: /^Propose a value from this note$/i }).click();
+        await noteCard.getByRole('button', { name: /^Propose a Value From This Note$/i }).click();
         await noteCard.getByLabel('Field this value is for').selectOption('context.environment');
         await noteCard.getByLabel('Run this value is about').selectOption(runTwo.id);
         await noteCard.getByLabel('Environment', { exact: true }).selectOption(envProposed);
@@ -1119,7 +1119,7 @@ test.describe('two scientists, two real browsers, one record', () => {
         );
         const proposalCountBefore = (await server.proposals(id)).proposals.length;
 
-        const card = cardInState(page, TRANSCRIPT_TARGETS.atmosphere.path, 'Awaiting your judgement');
+        const card = cardInState(page, TRANSCRIPT_TARGETS.atmosphere.path, 'Awaiting your judgment');
         await expect(card, 'step 6: the atmosphere card is open for judgement').toBeVisible();
         await card.getByRole('button', { name: 'More Actions' }).click();
         await card.getByRole('button', { name: 'Correct the Value, Then Accept' }).click();
@@ -1174,7 +1174,7 @@ test.describe('two scientists, two real browsers, one record', () => {
         // ---- and a rejection writes NOTHING -----------------------------------
         const runOneBeforeReject = await server.runBody(id, runOne.id);
         const runTwoBeforeReject = await server.runBody(id, runTwo.id);
-        const seededCard = cardInState(page, 'sample.material.formula', 'Awaiting your judgement');
+        const seededCard = cardInState(page, 'sample.material.formula', 'Awaiting your judgment');
         await seededCard.getByRole('button', { name: 'Reject…' }).click();
         await seededCard.getByLabel('Reason (optional)').fill(REJECT_REASON);
         await seededCard.getByRole('button', { name: 'Confirm Reject' }).click();
@@ -1229,7 +1229,7 @@ test.describe('two scientists, two real browsers, one record', () => {
 
         // ---- A, who has still not reloaded, tries to accept -------------------
         await assertSameDocument(page, 'step 7: A’s page is still the document from step 1');
-        const card = cardInState(page, TRANSCRIPT_TARGETS.temperature.path, 'Awaiting your judgement');
+        const card = cardInState(page, TRANSCRIPT_TARGETS.temperature.path, 'Awaiting your judgment');
         await expect(
           card.locator('.proposal-target-state'),
           'step 7: the card tells the reader the value moved',
@@ -1280,7 +1280,7 @@ test.describe('two scientists, two real browsers, one record', () => {
             'on the SAME run, and this proposal is still fresh',
         ).toBe(false);
 
-        const card = cardInState(page, 'context.environment', 'Awaiting your judgement');
+        const card = cardInState(page, 'context.environment', 'Awaiting your judgment');
         await expect(card, 'step 8: the note-proposal is open for judgement').toBeVisible({
           timeout: DISCOVERY_DEADLINE,
         });
@@ -1472,7 +1472,7 @@ test.describe('two scientists, two real browsers, one record', () => {
           'step 9: and so does the rejected one — a rejection is KEPT, not deleted',
         ).toBeVisible();
         await expect(
-          cardInState(page, TRANSCRIPT_TARGETS.temperature.path, 'Awaiting your judgement'),
+          cardInState(page, TRANSCRIPT_TARGETS.temperature.path, 'Awaiting your judgment'),
           'step 9: and the refused one is still open, exactly as the refusal said',
         ).toBeVisible();
 

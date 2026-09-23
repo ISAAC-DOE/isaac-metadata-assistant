@@ -52,7 +52,7 @@ const RUNS = `GET /api/experiments/${EXP}/runs`;
 const NOTICE = '.notes-background-refresh-notice';
 
 /** `GET .../proposals`'s served capability vocabulary — the two sets PR-D's
- *  "Propose a value from this note" form reads and never transcribes. */
+ *  "Propose a Value From This Note" form reads and never transcribes. */
 function proposalsCapabilities(over: Partial<Record<string, unknown>> = {}) {
   return {
     proposals: [],
@@ -1236,7 +1236,7 @@ describe('the value hint is per path, not on average', () => {
   });
 });
 
-// --- 10. "Propose a value from this note" (PR-D) -------------------------------
+// --- 10. "Propose a Value From This Note" (PR-D) -------------------------------
 
 describe('propose a value from this note', () => {
   it('happy path: a record-scoped path needs no run, and the write is exactly-once by construction', async () => {
@@ -1254,7 +1254,7 @@ describe('propose a value from this note', () => {
     renderPanel();
 
     fireEvent.click(
-      await screen.findByRole('button', { name: 'Propose a value from this note' }),
+      await screen.findByRole('button', { name: 'Propose a Value From This Note' }),
     );
     const fieldSelect = (await screen.findByLabelText(
       'Field this value is for',
@@ -1301,7 +1301,7 @@ describe('propose a value from this note', () => {
     renderPanel();
 
     fireEvent.click(
-      await screen.findByRole('button', { name: 'Propose a value from this note' }),
+      await screen.findByRole('button', { name: 'Propose a Value From This Note' }),
     );
     fireEvent.change(await screen.findByLabelText('Field this value is for'), {
       target: { value: 'context.environment' },
@@ -1338,7 +1338,7 @@ describe('propose a value from this note', () => {
     renderPanel();
 
     fireEvent.click(
-      await screen.findByRole('button', { name: 'Propose a value from this note' }),
+      await screen.findByRole('button', { name: 'Propose a Value From This Note' }),
     );
     fireEvent.change(await screen.findByLabelText('Field this value is for'), {
       target: { value: 'context.environment' },
@@ -1360,7 +1360,7 @@ describe('propose a value from this note', () => {
     renderPanel();
 
     fireEvent.click(
-      await screen.findByRole('button', { name: 'Propose a value from this note' }),
+      await screen.findByRole('button', { name: 'Propose a Value From This Note' }),
     );
     fireEvent.change(await screen.findByLabelText('Field this value is for'), {
       target: { value: 'context.environment' },
@@ -1378,7 +1378,7 @@ describe('propose a value from this note', () => {
 
     await screen.findByText(noteFixture().text);
     expect(
-      screen.queryByRole('button', { name: 'Propose a value from this note' }),
+      screen.queryByRole('button', { name: 'Propose a Value From This Note' }),
     ).toBeNull();
     expect(
       await screen.findByText(/this build accepts no proposal target yet/),
@@ -1394,7 +1394,7 @@ describe('propose a value from this note', () => {
 
     await screen.findByText(noteFixture().text);
     expect(
-      screen.queryByRole('button', { name: 'Propose a value from this note' }),
+      screen.queryByRole('button', { name: 'Propose a Value From This Note' }),
     ).toBeNull();
     expect(
       await screen.findByText(/the set of proposable fields could not be read/),
@@ -1435,7 +1435,7 @@ describe('propose a value from this note', () => {
     renderPanel();
 
     fireEvent.click(
-      await screen.findByRole('button', { name: 'Propose a value from this note' }),
+      await screen.findByRole('button', { name: 'Propose a Value From This Note' }),
     );
     fireEvent.change(await screen.findByLabelText('Field this value is for'), {
       target: { value: 'system.technique' },
@@ -1451,7 +1451,7 @@ describe('propose a value from this note', () => {
     // `deduplicated: true`, and the panel says so rather than claiming a second
     // create.
     fireEvent.click(
-      await screen.findByRole('button', { name: 'Propose a value from this note' }),
+      await screen.findByRole('button', { name: 'Propose a Value From This Note' }),
     );
     fireEvent.change(await screen.findByLabelText('Field this value is for'), {
       target: { value: 'system.technique' },
@@ -1475,7 +1475,7 @@ describe('propose a value from this note', () => {
     // Now change the value and submit again — a genuinely different value
     // must mint a genuinely different key, never the one above.
     fireEvent.click(
-      await screen.findByRole('button', { name: 'Propose a value from this note' }),
+      await screen.findByRole('button', { name: 'Propose a Value From This Note' }),
     );
     fireEvent.change(await screen.findByLabelText('Field this value is for'), {
       target: { value: 'system.technique' },
@@ -1517,7 +1517,7 @@ describe('propose a value from this note', () => {
     renderPanel();
 
     fireEvent.click(
-      await screen.findByRole('button', { name: 'Propose a value from this note' }),
+      await screen.findByRole('button', { name: 'Propose a Value From This Note' }),
     );
     fireEvent.change(await screen.findByLabelText('Field this value is for'), {
       target: { value: 'system.technique' },
@@ -1542,7 +1542,7 @@ describe('propose a value from this note', () => {
     renderPanel();
 
     fireEvent.click(
-      await screen.findByRole('button', { name: 'Propose a value from this note' }),
+      await screen.findByRole('button', { name: 'Propose a Value From This Note' }),
     );
     fireEvent.change(await screen.findByLabelText('Field this value is for'), {
       target: { value: 'system.technique' },
@@ -1573,14 +1573,14 @@ describe('propose a value from this note', () => {
 
     const openClose = async () => {
       fireEvent.click(
-        await screen.findByRole('button', { name: 'Propose a value from this note' }),
+        await screen.findByRole('button', { name: 'Propose a Value From This Note' }),
       );
       fireEvent.change(await screen.findByLabelText('Field this value is for'), {
         target: { value: 'context.environment' },
       });
       await screen.findByLabelText('Run this value is about');
       fireEvent.click(
-        screen.getByRole('button', { name: 'Propose a value from this note' }),
+        screen.getByRole('button', { name: 'Propose a Value From This Note' }),
       );
     };
     await openClose();
@@ -2264,5 +2264,71 @@ describe('a Show-filter change that fails', () => {
       }),
     ).toBeNull();
     view.unmount();
+  });
+});
+
+// --- review #277: no developer vocabulary, and a note's open proposal is shown ----
+
+describe('a note reads in the scientist’s words', () => {
+  function renderWith(props: {
+    runLabels?: ReadonlyMap<string, string>;
+    openProposalsByNote?: ReadonlyMap<string, string>;
+  }) {
+    return render(
+      <MemoryRouter
+        initialEntries={['/record/demo?view=proposals']}
+        future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+      >
+        <UnmappedNotesPanel experimentId={EXP} {...props} />
+      </MemoryRouter>,
+    );
+  }
+
+  it('names its run by LABEL, with the run id kept as the title', async () => {
+    stubFetchRoutes({ [NOTES]: { body: notesPage([noteFixture({ run_id: 'RUNAAA' })]) } });
+    renderWith({ runLabels: new Map([['RUNAAA', 'Run 1']]) });
+    await screen.findByText(noteFixture().text);
+    const run = document.querySelector('.note-run') as HTMLElement;
+    expect(run.textContent).toBe('Run 1');
+    expect(run.getAttribute('title')).toBe('RUNAAA');
+  });
+
+  it('shows the capture time as a person’s date, with the ISO instant as title', async () => {
+    stubFetchRoutes({ [NOTES]: { body: notesPage([noteFixture()]) } });
+    renderWith({});
+    await screen.findByText(noteFixture().text);
+    const time = document.querySelector('.note-captured') as HTMLTimeElement;
+    expect(time.getAttribute('datetime')).toBe('2099-04-02T09:12:00Z');
+    expect(time.getAttribute('title')).toBe('2099-04-02T09:12:00Z');
+    expect(time.textContent).toMatch(/^Apr 2, 2099, \d{1,2}:\d{2} (AM|PM)$/);
+  });
+
+  it('a note with an OPEN proposal says so and opens it, instead of offering to propose again', async () => {
+    stubFetchRoutes({
+      [NOTES]: { body: notesPage([noteFixture()]) },
+      [PROPOSALS]: { body: proposalsCapabilities() },
+    });
+    renderWith({ openProposalsByNote: new Map([[noteFixture().id as string, 'P-OPEN']]) });
+    await screen.findByText(noteFixture().text);
+    const view = await screen.findByRole('link', { name: 'Proposal Open · View' });
+    expect(view.getAttribute('href')).toContain('proposal=P-OPEN');
+    // Not the primary propose act any more — but still reachable, one click further.
+    expect(screen.queryByRole('button', { name: 'Propose a Value From This Note' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'More Actions' }));
+    expect(screen.getByRole('button', { name: 'Propose a Value From This Note' })).toBeTruthy();
+    // The note is still listed — never hidden.
+    expect(screen.getByText(noteFixture().text)).toBeTruthy();
+  });
+
+  it('POLARITY: without an open proposal, proposing is the primary act', async () => {
+    stubFetchRoutes({
+      [NOTES]: { body: notesPage([noteFixture()]) },
+      [PROPOSALS]: { body: proposalsCapabilities() },
+    });
+    renderWith({ openProposalsByNote: new Map() });
+    expect(
+      await screen.findByRole('button', { name: 'Propose a Value From This Note' }),
+    ).toBeTruthy();
+    expect(screen.queryByRole('link', { name: 'Proposal Open · View' })).toBeNull();
   });
 });

@@ -980,6 +980,11 @@ describe('two runs on one screen', () => {
     expect(within(a).getByText('Run 1')).toBeInTheDocument();
     expect((within(a).getByLabelText('Temperature (K)') as HTMLInputElement).value).toBe('300');
     expect((within(a).getByLabelText('Environment') as HTMLSelectElement).value).toBe('in_situ');
+    // PR #277 review (minor): the option READS "In situ" while its value — what is
+    // stored — stays the raw schema token.
+    expect(
+      (within(a).getByLabelText('Environment') as HTMLSelectElement).selectedOptions[0].textContent,
+    ).toBe('In situ');
     expect(within(a).getByRole('status').textContent).toBe('');
     // And only ONE write ever happened, for Run 2 — reopening Run 1 issued no
     // PATCH of its own.

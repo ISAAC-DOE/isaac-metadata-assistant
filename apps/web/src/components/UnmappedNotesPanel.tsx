@@ -46,7 +46,7 @@
  * which is re-read from each write's own response rather than from the record bundle
  * — the same rule `RunsSection` follows for creating a run.
  *
- * PR-D (2026-09-03) ADDED A FIFTH ACT: "Propose a value from this note". It is the
+ * PR-D (2026-09-03) ADDED A FIFTH ACT: "Propose a Value From This Note". It is the
  * named caller `api.createProposal`'s own doc comment said was next — see
  * `lib/api.ts`'s `createProposal`, and `docs/ingestion-proposal-contract.md` §11.2,
  * both corrected in the same change to say so. It is a PEER of the other four, per
@@ -58,12 +58,15 @@
  * proposal is what changed.
  */
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { Link, useLocation } from 'react-router-dom';
 
 import { api, ApiError } from '../lib/api';
 import { mutationFailureCopy, staleWriteCurrentVersion } from '../lib/mutationErrors';
 import { markSelfMintedProposals } from '../lib/selfMintedProposals';
 import { noteSourceLabel } from '../lib/noteSource';
-import { RUN_FIELDS, type RunFieldSpec } from '../lib/runFields';
+import { formatWhen } from '../lib/labels';
+import { RECORD_PROPOSAL_PARAM } from '../lib/routes';
+import { RUN_FIELDS, enumOptionLabel, type RunFieldSpec } from '../lib/runFields';
 /*
  * MOVED OUT, NOT REWRITTEN (2026-09-15). `HUMAN_PROPOSED_RULE`, `stableValueDigest`
  * and this form's value parsing used to be declared in this file. A SECOND surface
@@ -224,7 +227,7 @@ type ListState =
   | { status: 'data'; loaded: ApiNotesResponse };
 
 /**
- * "Propose a value from this note"'s two capability reads, both SERVED, never
+ * "Propose a Value From This Note"'s two capability reads, both SERVED, never
  * transcribed here — `GET .../proposals` reports the paths this build can target
  * and which of them are record-scoped; `null` means the read failed, which is a
  * different fact from "nothing is proposable" (`targetFieldPaths: []`) and is
@@ -264,9 +267,22 @@ type ProposalCapabilities = {
 export function UnmappedNotesPanel({
   experimentId,
   activity,
+  runLabels,
+  openProposalsByNote,
 }: {
   experimentId: string;
   activity?: RecordChangeSummary | null;
+  /**
+   * Run id → label, from the run list the screen already read (review #277, I-5): a
+   * note names its run by LABEL. An id this map lacks is shown as-is, never guessed.
+   */
+  runLabels?: ReadonlyMap<string, string>;
+  /**
+   * Note id → the id of an OPEN proposal citing it. Such a note shows "Proposal
+   * Open" with a way to view it instead of a primary "propose" action — proposing
+   * again is still possible, one click further (review #277, pre-existing).
+   */
+  openProposalsByNote?: ReadonlyMap<string, string>;
 }) {
   return (
     <section className="notes-section" aria-labelledby="unmapped-notes-heading">
@@ -288,7 +304,13 @@ export function UnmappedNotesPanel({
       </div>
       {/* Keyed on the record so switching records rebuilds this panel's state
           rather than showing one record's notes under another's heading. */}
-      <NotesBrowser key={experimentId} experimentId={experimentId} activity={activity ?? null} />
+      <NotesBrowser
+        key={experimentId}
+        experimentId={experimentId}
+        activity={activity ?? null}
+        runLabels={runLabels}
+        openProposalsByNote={openProposalsByNote}
+      />
     </section>
   );
 }
@@ -296,9 +318,13 @@ export function UnmappedNotesPanel({
 function NotesBrowser({
   experimentId,
   activity,
+  runLabels,
+  openProposalsByNote,
 }: {
   experimentId: string;
   activity: RecordChangeSummary | null;
+  runLabels?: ReadonlyMap<string, string>;
+  openProposalsByNote?: ReadonlyMap<string, string>;
 }) {
   const [list, setList] = useState<ListState>({ status: 'loading' });
   const [filter, setFilter] = useState<'all' | ApiNoteState>('all');
@@ -1002,6 +1028,8 @@ function NotesBrowser({
               <li key={note.id}>
                 <NoteCard
                   note={note}
+                  runLabel={note.run_id !== null ? runLabels?.get(note.run_id) : undefined}
+                  openProposalId={openProposalsByNote?.get(note.id)}
                   mappablePaths={list.loaded.mappable_field_paths}
                   valueWritablePaths={list.loaded.value_writable_field_paths}
                   // `?? []` because this key is newer than the others: a server that
@@ -1268,6 +1296,8 @@ export function valueWriteHint(
 
 function NoteCard({
   note,
+  runLabel,
+  openProposalId,
   mappablePaths,
   valueWritablePaths,
   recordWritablePaths,
@@ -1279,6 +1309,10 @@ function NoteCard({
   onPropose,
 }: {
   note: ApiNote;
+  /** The label of the run this note names, when the screen has read it. */
+  runLabel?: string;
+  /** An OPEN proposal citing this note, when one is in the proposals window. */
+  openProposalId?: string;
   mappablePaths: string[];
   /**
    * The SERVER's per-path answer to "may a value then be entered here?", served
@@ -1325,7 +1359,7 @@ function NoteCard({
   const [editText, setEditText] = useState(note.display_text);
   const [reason, setReason] = useState('');
 
-  /* ---- "Propose a value from this note" form state ------------------------ */
+  /* ---- "Propose a Value From This Note" form state ------------------------ */
   const [proposeFieldPath, setProposeFieldPath] = useState('');
   const [proposeRunId, setProposeRunId] = useState('');
   const [proposeValueText, setProposeValueText] = useState('');
@@ -1469,7 +1503,7 @@ function NoteCard({
     }
   };
 
-  /* ---- "Propose a value from this note" — derived state and its one write ---- */
+  /* ---- "Propose a Value From This Note" — derived state and its one write ---- */
 
   /** Absent, with a reason, rather than disabled — the same rule `DiscardStaged`
    *  and every other absent-when-inapplicable control in this app follows. */
@@ -1533,11 +1567,12 @@ function NoteCard({
     }
   };
 
+  const mapIsPrimary = openProposalId === undefined && !canPropose;
   const mapButton = (
     <button
       ref={mapRef}
       type="button"
-      className={canPropose ? 'btn btn-secondary' : 'btn btn-primary'}
+      className={mapIsPrimary ? 'btn btn-primary' : 'btn btn-secondary'}
       disabled={busy}
       aria-expanded={open === 'map'}
       aria-controls={open === 'map' ? pathId : undefined}
@@ -1556,7 +1591,7 @@ function NoteCard({
     <button
       ref={proposeRef}
       type="button"
-      className="btn btn-primary"
+      className={openProposalId === undefined ? 'btn btn-primary' : 'btn btn-secondary'}
       disabled={busy}
       aria-expanded={open === 'propose'}
       aria-controls={open === 'propose' ? proposeId : undefined}
@@ -1567,9 +1602,34 @@ function NoteCard({
         setOpen(open === 'propose' ? null : 'propose');
       }}
     >
-      Propose a value from this note
+      Propose a Value From This Note
     </button>
   ) : null;
+  /*
+   * THIS NOTE ALREADY HAS AN OPEN PROPOSAL (review #277, pre-existing finding): the
+   * primary slot says so and opens it, instead of offering to propose again as if
+   * nothing had come of the note. Proposing again stays possible under More Actions
+   * (a second field from the same words is legitimate; the same value is
+   * de-duplicated by the server).
+   */
+  const location = useLocation();
+  const viewProposal =
+    openProposalId !== undefined
+      ? (() => {
+          const next = new URLSearchParams(location.search);
+          next.set(RECORD_PROPOSAL_PARAM, openProposalId);
+          return (
+            <Link className="btn btn-secondary note-proposal-open" to={{ search: `?${next.toString()}` }}>
+              Proposal Open · View
+            </Link>
+          );
+        })()
+      : null;
+  const primaryAct = viewProposal ?? (canPropose ? proposeButton : mapButton);
+  /** Which form the PRIMARY act opens (none when the primary is the "view" link). */
+  const primaryForm: 'propose' | 'map' | null =
+    viewProposal !== null ? null : canPropose ? 'propose' : 'map';
+  const formInsideMore = open !== null && open !== primaryForm;
 
   return (
     <article className="note-card" data-state={note.state} data-note-id={note.id}>
@@ -1578,8 +1638,16 @@ function NoteCard({
           {STATE_LABELS[note.state]}
         </span>
         <span className="note-source">{sourceLabel(note.source)}</span>
-        <span className="note-captured mono">{note.captured_utc}</span>
-        {note.run_id && <span className="note-run">Run {note.run_id}</span>}
+        {/* A person's date and the run's LABEL (review #277, I-5); the ISO instant
+            and the run id stay reachable as titles and the `<time>` value. */}
+        <time className="note-captured" dateTime={note.captured_utc} title={note.captured_utc}>
+          {formatWhen(note.captured_utc) ?? note.captured_utc}
+        </time>
+        {note.run_id && (
+          <span className="note-run" title={note.run_id}>
+            {runLabel ?? note.run_id}
+          </span>
+        )}
       </div>
 
       <p className="note-text" id={bodyId}>
@@ -1634,21 +1702,21 @@ function NoteCard({
         sit moved.
       */}
       <div className="note-actions">
-        {canPropose ? proposeButton : mapButton}
+        {primaryAct}
         <button
           type="button"
           className="btn btn-secondary"
           aria-expanded={moreOpen}
           aria-controls={moreOpen ? moreId : undefined}
-          aria-describedby={moreOpen && open !== null ? `${moreId}-collapse-reason` : undefined}
+          aria-describedby={moreOpen && formInsideMore ? `${moreId}-collapse-reason` : undefined}
           /* A form opened from inside the group keeps it open — collapsing would
              hide the control focus returns to. The reason is said, not implied. */
-          disabled={moreOpen && open !== null && open !== (canPropose ? 'propose' : 'map')}
+          disabled={moreOpen && formInsideMore}
           onClick={() => setMoreOpen((current) => !current)}
         >
           {moreOpen ? 'Fewer Actions' : 'More Actions'}
         </button>
-        {moreOpen && open !== null && open !== (canPropose ? 'propose' : 'map') && (
+        {moreOpen && formInsideMore && (
           <span className="note-more-collapse-reason" id={`${moreId}-collapse-reason`}>
             Close the open form below first.
           </span>
@@ -1656,7 +1724,8 @@ function NoteCard({
       </div>
       {moreOpen && (
         <div className="note-actions note-actions-more" id={moreId} role="group" aria-label="More actions">
-          {canPropose && mapButton}
+          {viewProposal !== null && proposeButton}
+          {(viewProposal !== null || canPropose) && mapButton}
           <button
             ref={editRef}
             type="button"
@@ -1959,7 +2028,7 @@ function NoteCard({
                   <option value="">Choose a value…</option>
                   {proposeFieldSpec.options?.map((option) => (
                     <option key={option} value={option}>
-                      {option}
+                      {enumOptionLabel(option)}
                     </option>
                   ))}
                 </select>

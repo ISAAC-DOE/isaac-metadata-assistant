@@ -243,11 +243,22 @@ export function sha256Problem(value: string): string {
 export function AssetReferencesPanel({
   experimentId,
   collapsedByDefault = false,
+  openSignal = 0,
 }: {
   experimentId: string;
   collapsedByDefault?: boolean;
+  /**
+   * Bumped by a control elsewhere that sends the reader HERE ("Open Asset
+   * References"): each change expands the panel, so they land on its contents rather
+   * than a collapsed header (review #277, minor). `0` — the initial value — does
+   * nothing, so the default stays collapsed.
+   */
+  openSignal?: number;
 }) {
   const [expanded, setExpanded] = useState(!collapsedByDefault);
+  useEffect(() => {
+    if (openSignal > 0) setExpanded(true);
+  }, [openSignal]);
   const [count, setCount] = useState<number | null>(null);
 
   const description = (
@@ -281,7 +292,7 @@ export function AssetReferencesPanel({
 
   const Chevron = expanded ? ChevronDown : ChevronRight;
   return (
-    <section className="field-group assets-collapsible" aria-label="Asset References (assets)">
+    <section className="field-group assets-collapsible" aria-label="Asset References">
       {/* `h2 > button[aria-expanded][aria-controls]`, the accordion shape
           `RunCard` already documents — a real heading landmark, not a div with
           an onClick. `h2` and not `h3` because the sections above it in this

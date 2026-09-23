@@ -1727,6 +1727,27 @@ export function formatInstant(when: Date): string {
   );
 }
 
+/**
+ * A SERVER TIMESTAMP, SHOWN AS A PERSON READS ONE — "Sep 22, 6:34 PM" (review #277,
+ * I-5). The ISO string stays the machine value: callers put it in `title` and in a
+ * `<time dateTime>`, so a curator can still read (and copy) the exact instant.
+ *
+ * The reader's own wall clock, in this app's fixed month-name style (the same rule
+ * `formatInstant` records for not using locale formatting); the year is added only
+ * when it is not the current one. `null` for a string `Date` cannot read — the
+ * caller then shows the raw value rather than inventing a date.
+ */
+export function formatWhen(iso: string, now: Date = new Date()): string | null {
+  const when = new Date(iso);
+  if (Number.isNaN(when.getTime())) return null;
+  const hours24 = when.getHours();
+  const hour12 = hours24 % 12 === 0 ? 12 : hours24 % 12;
+  const minutes = String(when.getMinutes()).padStart(2, '0');
+  const meridiem = hours24 < 12 ? 'AM' : 'PM';
+  const year = when.getFullYear() === now.getFullYear() ? '' : `, ${when.getFullYear()}`;
+  return `${SHORT_MONTHS[when.getMonth()]} ${when.getDate()}${year}, ${hour12}:${minutes} ${meridiem}`;
+}
+
 export function formatCreatedDate(isoDate: string): FormattedDate | undefined {
   const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(isoDate);
   if (!m) return undefined;

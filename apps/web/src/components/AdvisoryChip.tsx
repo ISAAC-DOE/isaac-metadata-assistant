@@ -1,5 +1,7 @@
 import './signals.css';
 import { TriangleAlert } from './icons';
+import { HelpTip } from './HelpTip';
+import { advisoryTitle } from '../lib/advisoryTitles';
 import type { AdvisoryResult } from '../lib/types';
 
 interface AdvisoryChipProps {
@@ -34,9 +36,18 @@ export function AdvisoryChip({ advisory, explain }: AdvisoryChipProps) {
         <>
           {advisory.warnings.map((w) => (
             <div key={w.code}>
+              {/* The plain sentence leads; the code and the server's own message are
+                  one `?` away (review #277, I-7). */}
               <div className="advisory-code">
-                <span className="code mono">[{w.code}]</span>
-                <span>{w.message}</span>
+                <span className="advisory-item-title">
+                  {advisoryTitle(w.code)}
+                  <HelpTip subject="Advisory" label="Advisory Details">
+                    <span>
+                      Code: <code className="code mono">[{w.code}]</code>
+                    </span>
+                    <span>{w.message}</span>
+                  </HelpTip>
+                </span>
               </div>
             </div>
           ))}

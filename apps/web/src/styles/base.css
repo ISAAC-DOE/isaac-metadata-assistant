@@ -196,8 +196,9 @@ a:hover {
      `--text-quaternary`. 2.25:1 on this fill, and it stays: WCAG 1.4.3 exempts
      an inactive control, and `cursor: not-allowed` plus the `:disabled` state
      is exactly what the exception describes. An inactive control is now the
-     only CLASS of use that value is entitled to — two sites in this file, both
-     enumerated in `palette-contrast.test.ts`'s exemption allow-list. */
+     only CLASS of use that value is entitled to — three sites in this file
+     (two until PR #277 gave `.btn-secondary:disabled` a rule), all enumerated
+     in `palette-contrast.test.ts`'s exemption allow-list. */
   color: var(--text-inactive);
   cursor: not-allowed;
   box-shadow: none;
@@ -232,6 +233,26 @@ a:hover {
   background: var(--screen-base);
   border-color: var(--text-secondary);
 }
+/*
+ * DISABLED SECONDARY — PR #277 REVIEW (pre-existing). There was no rule, so a
+ * disabled secondary button painted exactly like an enabled one (the author
+ * colour beats the user-agent's disabled grey) and still took the hover
+ * treatment above: the only signal it could not be pressed was that nothing
+ * happened. Now it is visibly inactive, on the same tokens and the same WCAG
+ * 1.4.3 inactive-control basis as `.btn-action:disabled` — enumerated as the
+ * third `--text-inactive` site in `palette-contrast.test.ts`.
+ *
+ * AFTER `:hover`/`:active`, deliberately: all three selectors are (0,2,0), so
+ * source order decides, and a disabled button must not light up on hover. The
+ * border stays `--border-strong` (the resting border), so the control keeps its
+ * outline and its footprint; only fill, ink and cursor change.
+ */
+.btn-secondary:disabled {
+  background: var(--border-faint);
+  border-color: var(--border-strong);
+  color: var(--text-inactive);
+  cursor: not-allowed;
+}
 
 /* Restrained destructive — the Reset Demo trigger. Fail accent on text/border
  * only in the RESTING state, transparent fill: signals danger without shouting a
@@ -264,7 +285,7 @@ a:hover {
 }
 .btn-danger-quiet:disabled {
   background: transparent;
-  /* `--text-inactive`, not the informational ink: the second of the two sites
+  /* `--text-inactive`, not the informational ink: one of the three sites
      entitled to a sub-AA value, on the same 1.4.3 inactive-control exception
      `.btn-action:disabled` above is taken under. */
   color: var(--text-inactive);

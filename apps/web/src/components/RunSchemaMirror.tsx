@@ -1,4 +1,4 @@
-import { useEffect, useId, useState } from 'react';
+import { useEffect, useId, useState, type ReactNode } from 'react';
 
 import { api } from '../lib/api';
 import { RUN_FIELDS } from '../lib/runFields';
@@ -291,8 +291,15 @@ function Row({
 export function RunSchemaMirror({
   run,
   check,
+  headerControl,
 }: {
   run: ApiRunView | null;
+  /**
+   * A control that REPLACES the run name in the card's own header — the run picker
+   * on the Proposals and Files views (review #277, I-3: one run choice per view, and
+   * it lives inside the card it drives, not as a detached page-level select).
+   */
+  headerControl?: ReactNode;
   /**
    * The last Check Run result for THIS run, or `null`/omitted when the reader
    * has not run one. Used for one thing only — marking a row `Needs Review` —
@@ -339,9 +346,12 @@ export function RunSchemaMirror({
   if (failed) {
     return (
       <aside className="rsm" aria-labelledby={`${uid}-heading`}>
-        <h3 className="rsm-heading" id={`${uid}-heading`}>
-          Record Map
-        </h3>
+        <div className="rsm-head">
+          <h3 className="rsm-heading" id={`${uid}-heading`}>
+            Record Map
+          </h3>
+          {headerControl}
+        </div>
         <p className="rsm-note">
           The schema could not be read, so nothing is shown rather than a structure
           from memory.
@@ -353,9 +363,12 @@ export function RunSchemaMirror({
   if (schema === null) {
     return (
       <aside className="rsm" aria-labelledby={`${uid}-heading`}>
-        <h3 className="rsm-heading" id={`${uid}-heading`}>
-          Record Map
-        </h3>
+        <div className="rsm-head">
+          <h3 className="rsm-heading" id={`${uid}-heading`}>
+            Record Map
+          </h3>
+          {headerControl}
+        </div>
         <p className="rsm-note">Reading the official schema…</p>
       </aside>
     );
@@ -418,7 +431,9 @@ export function RunSchemaMirror({
         {/* WHICH RUN THIS DESCRIBES, stated rather than assumed. The pane reads
             one run; leaving it unnamed beside a list of several was how a reader
             could take it for the record's own state. */}
-        <p className="rsm-subject">{run === null ? 'No run loaded yet' : run.label}</p>
+        {headerControl ?? (
+          <p className="rsm-subject">{run === null ? 'No run loaded yet' : run.label}</p>
+        )}
       </div>
 
       {attention.length > 0 && (

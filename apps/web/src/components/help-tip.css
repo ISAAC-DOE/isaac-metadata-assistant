@@ -5,6 +5,9 @@
 .helptip {
   display: inline-flex;
   vertical-align: middle;
+  /* Room for the trigger's focus ring (2px offset) so it never overlaps the last
+     letter of the label beside it (review #277, minor). */
+  margin-inline-start: var(--space-2xs);
 }
 .helptip-trigger {
   display: inline-flex;
@@ -39,7 +42,9 @@
 .helptip-panel {
   display: block;
   position: fixed;
-  z-index: 40;
+  /* Above the floating Assistant pill (45), its backdrop (46) and the drawer (47)
+     so an open tip is never painted under the control that floats over content. */
+  z-index: 48;
   padding: var(--space-sm) var(--space-md);
   background: var(--surface);
   border: 1px solid var(--border-strong);
@@ -54,6 +59,13 @@
 }
 .helptip-panel[hidden] {
   display: none;
+}
+.helptip-panel:focus {
+  outline: none;
+}
+.helptip-panel:focus-visible {
+  outline: 2px solid var(--action);
+  outline-offset: 2px;
 }
 .helptip-panel p {
   margin: 0;

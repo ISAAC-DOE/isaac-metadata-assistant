@@ -749,6 +749,20 @@ describe('the evidence-support axis is a third thing, and says which', () => {
     expect(panel.textContent).toContain('record-level draft');
   });
 
+  it('PR #277 review: the scope and the no-verdict claim are ONE visible line; the account is one disclosure away', async () => {
+    await renderClassified(CLASSIFIED);
+    const panel = document.querySelector('.vr-attention') as HTMLElement;
+    const line = panel.querySelector(':scope > .vr-attention-note') as HTMLElement;
+    expect(line).toBeVisible();
+    expect(line.textContent).toContain('Record-level fields only');
+    expect(line.textContent).toContain('It decides nothing about validity');
+    expect(line.textContent).not.toContain('record-level draft');
+    const trigger = within(panel).getByRole('button', { name: 'What this reviews' });
+    expect(trigger).toHaveAttribute('aria-expanded', 'false');
+    fireEvent.click(trigger);
+    expect(within(panel).getByText(/classifies the record-level draft/)).toBeVisible();
+  });
+
   it('“Blocks export” appears only where the server gates export', async () => {
     await renderClassified(CLASSIFIED);
     // The one run passed, and the attention block carries conflicts + gaps. If

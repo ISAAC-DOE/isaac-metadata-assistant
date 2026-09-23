@@ -260,6 +260,10 @@
   max-width: 72ch;
   overflow-wrap: anywhere;
 }
+/* The scope account behind one disclosure (PR #277 review). */
+.vr-attention-scope {
+  margin-top: var(--space-xs);
+}
 .vr-attention-counts {
   margin-top: 6px;
   font-size: 12px;

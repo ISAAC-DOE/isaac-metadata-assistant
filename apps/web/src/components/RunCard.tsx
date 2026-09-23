@@ -121,6 +121,7 @@ import {
 } from '../lib/runDatetime';
 import {
   RUN_FIELDS,
+  enumOptionLabel,
   envelopeText,
   parseRunField,
   runConditionsSummary,
@@ -163,7 +164,11 @@ function RunFillStatus({ filled }: { filled: number }) {
   const total = RUN_FIELDS.length;
   if (filled >= total) return <SemanticStatus state="complete" label="All Recorded" size="sm" />;
   if (filled === 0) return <SemanticStatus state="missing" label="Nothing Recorded" size="sm" />;
-  return <SemanticStatus state="missing" label={`${total - filled} Missing`} size="sm" />;
+  /* PR #277 REVIEW (minor) — ONE STATUS PLUS THE COUNT. This chip used to read
+     "3 Missing" beside "2 of 5 recorded": the same number twice, once from each
+     end. The chip now carries the STATE and the count beside it carries the
+     numbers. */
+  return <SemanticStatus state="missing" label="Partly Recorded" size="sm" />;
 }
 
 export function RunCard({
@@ -639,9 +644,11 @@ export function RunCard({
                 </span>
               </span>
             </span>
-            <span className="run-card-conditions">
-              {conditions ?? <span className="run-card-conditions-empty">No conditions recorded yet</span>}
-            </span>
+            {/* PR #277 REVIEW (minor): withheld when nothing is recorded. The row used
+                to say so THREE times — "Nothing Recorded", "0 of 5 recorded" and "No
+                conditions recorded yet". The chip and the count already say it; this
+                line is for the conditions a run HOLDS. */}
+            {conditions !== null && <span className="run-card-conditions">{conditions}</span>}
             {/* Never colour alone: the word is the signal, the palette reinforces
                 it. Withheld entirely when this run overrides nothing — a "0
                 overridden" chip on every row would be noise, not information. */}
@@ -946,6 +953,7 @@ export function RunCard({
             never be offered. Pinned by `run-relevance.test.tsx`.
           */}
           <RunSection
+            address="section:run-conditions"
             title="Conditions for this run"
             /*
               A COUNT OF THINGS ENUMERATED, WITH ITS SCOPE ATTACHED. `filled` counts
@@ -1069,7 +1077,7 @@ export function RunCard({
                           <option value="">Not set</option>
                           {spec.options?.map((option) => (
                             <option key={option} value={option}>
-                              {option}
+                              {enumOptionLabel(option)}
                             </option>
                           ))}
                         </select>

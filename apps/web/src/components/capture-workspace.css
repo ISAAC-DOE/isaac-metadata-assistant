@@ -220,9 +220,13 @@
   gap: var(--space-sm);
 }
 .capture-map-run {
-  display: flex;
+  /* In the Record Map card's header, where the run name would otherwise sit. */
+  display: inline-flex;
   align-items: center;
-  gap: var(--space-sm);
+  gap: var(--space-xs);
+  margin-left: auto;
+  min-width: 0;
+  max-width: 100%;
 }
 .capture-map-run .capture-label {
   margin-top: 0;

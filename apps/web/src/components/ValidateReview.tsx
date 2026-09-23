@@ -3,9 +3,8 @@ import { useId, useState } from 'react';
 import { BlockerItems } from './BlockerItems';
 import { Disclosure } from './Disclosure';
 import { HelpTip } from './HelpTip';
-import { SemanticStatus, type SemanticState } from './SemanticStatus';
 import { FindingList } from './RunFindingList';
-import { runFindingState, type RunFindingState } from './RunFindings';
+import { RunVerdictChip, runFindingState, type RunFindingState } from './RunFindings';
 import { count } from '../lib/assistantPaths';
 import {
   officialCheckedDocument,
@@ -140,20 +139,8 @@ import type {
  * "0 open questions"). No percentage, no readiness score, no completion figure.
  */
 
-/** The state word for each of the three states. Never colour alone. */
-const STATE_WORD: Record<RunFindingState, string> = {
-  pass: 'Passed',
-  fail: 'Failed',
-  unavailable: 'No verdict',
-};
-
-/** The shared status chip for each state — icon + word, never colour alone. The
-    word is still `STATE_WORD`'s, so "No verdict" is never relabelled "Unavailable". */
-const STATE_SEMANTIC: Record<RunFindingState, SemanticState> = {
-  pass: 'ready',
-  fail: 'invalid',
-  unavailable: 'unavailable',
-};
+/* The state WORD and its chip are `RunFindings`' `RunVerdictChip` — one neutral
+   verdict chip for the two surfaces that render this payload (review #277, minor). */
 
 /**
  * The clause each state contributes to the section tally.
@@ -672,12 +659,7 @@ function UnitGroup({
       <div className="vr-unit-headrow">
         <h3 className="vr-unit-head">
           {/* Icon + word: the state is never carried by colour alone. */}
-          <SemanticStatus
-            state={STATE_SEMANTIC[state]}
-            label={STATE_WORD[state]}
-            size="sm"
-            className={`vr-state vr-state-${state}`}
-          />
+          <RunVerdictChip state={state} className={`vr-state vr-state-${state}`} />
           <span className="vr-unit-label">{unit.label}</span>
         </h3>
         {/* The run and record ids are identifiers a curator may need and a
@@ -1032,14 +1014,26 @@ function AttentionBlock({ attention }: { attention: Attention }) {
         own — each run's own document is. Calling that "the whole record's review"
         claimed coverage of material this axis never read.
       */}
+      {/*
+        PR #277 REVIEW (minor) — ONE LINE, THEN THE ACCOUNT. The paragraph ran to five
+        sentences before the counts. The two claims a reader must not miss stay
+        VISIBLE (DEC-35: scope and "decides nothing" are exactly the caveats that may
+        not be disclosed away): what it covers, and that it is no verdict. The full
+        account of WHICH document is classified is one disclosure away, verbatim.
+      */}
       <p className="vr-attention-note">
-        This reviews a different document, not one run&rsquo;s: the server classifies the
-        record-level draft, which on a record with runs holds the experiment-level fields
-        only — no measurement, no links, no run content — and is never exported on its own.
-        There is no per-run breakdown, so none is shown. It decides nothing about validity:
-        it neither blocks export nor is it one of the advisory notes above. These are yours
-        to judge.
+        Record-level fields only, not one run&rsquo;s. It decides nothing about validity and
+        neither blocks export nor is advisory — yours to judge.
       </p>
+      <Disclosure summary="What this reviews" className="vr-attention-scope">
+        <p className="vr-attention-note">
+          This reviews a different document from the run results above: the server
+          classifies the record-level draft, which on a record with runs holds the
+          experiment-level fields only — no measurement, no links, no run content — and is
+          never exported on its own. There is no per-run breakdown, so none is shown. It is
+          not one of the advisory notes above either.
+        </p>
+      </Disclosure>
       <p className="vr-attention-counts">
         {total === 0
           ? 'Nothing on this axis needs attention: 0 conflicts, 0 gaps, 0 unreadable entries.'

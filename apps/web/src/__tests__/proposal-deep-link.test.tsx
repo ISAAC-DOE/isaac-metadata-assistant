@@ -50,6 +50,8 @@ import {
   stubFetchRoutes,
 } from '../test/apiFixtures';
 import { RECORD_PROPOSAL_PARAM, ROUTES } from '../lib/routes';
+// Cards and announcements name the field in WORDS since review #277 (I-5).
+import { fieldLabel } from '../lib/fieldLabels';
 import type { RecordChangeSummary } from '../lib/recordChanges';
 import type { ApiProposal, ApiProposalsResponse } from '../lib/types';
 
@@ -253,15 +255,15 @@ describe('a deep link that names a proposal IN the loaded window', () => {
       },
     });
     renderPanel(`?${RECORD_PROPOSAL_PARAM}=${LINKED}`);
-    await screen.findByLabelText(`Proposal for ${LINKED_PATH} — Awaiting your judgement`);
+    await screen.findByLabelText(`Proposal for ${fieldLabel(LINKED_PATH)} — Awaiting your judgment`);
 
     await waitFor(() => expect(markedCards()).toHaveLength(1));
     expect(markedCards()[0].getAttribute('aria-label')).toBe(
-      `Proposal for ${LINKED_PATH} — Awaiting your judgement`,
+      `Proposal for ${fieldLabel(LINKED_PATH)} — Awaiting your judgment`,
     );
     /* The OTHER card must carry the attribute at all, not merely carry it as
        `"false"` — the stylesheet and this assertion both key on presence. */
-    const other = screen.getByLabelText(`Proposal for ${OTHER_PATH} — Awaiting your judgement`);
+    const other = screen.getByLabelText(`Proposal for ${fieldLabel(OTHER_PATH)} — Awaiting your judgment`);
     expect(other.hasAttribute('data-linked-proposal')).toBe(false);
   });
 
@@ -275,11 +277,11 @@ describe('a deep link that names a proposal IN the loaded window', () => {
       },
     });
     renderPanel(`?${RECORD_PROPOSAL_PARAM}=${LINKED}`);
-    await screen.findByLabelText(`Proposal for ${LINKED_PATH} — Awaiting your judgement`);
+    await screen.findByLabelText(`Proposal for ${fieldLabel(LINKED_PATH)} — Awaiting your judgment`);
 
     await waitFor(() =>
       expect(document.activeElement?.getAttribute('aria-label')).toBe(
-        `Proposal for ${LINKED_PATH} — Awaiting your judgement`,
+        `Proposal for ${fieldLabel(LINKED_PATH)} — Awaiting your judgment`,
       ),
     );
   });
@@ -295,7 +297,7 @@ describe('a deep link that names a proposal IN the loaded window', () => {
 
     await waitFor(() =>
       expect(statusText()).toContain(
-        `The proposal this link names is shown below — ${LINKED_PATH}.`,
+        `The proposal this link names is shown below — ${fieldLabel(LINKED_PATH)}.`,
       ),
     );
     /*
@@ -354,7 +356,7 @@ describe('a deep link that names a proposal IN the loaded window', () => {
       },
     });
     const view = renderPanel(`?${RECORD_PROPOSAL_PARAM}=${LINKED}`, null);
-    await screen.findByLabelText(`Proposal for ${LINKED_PATH} — Awaiting your judgement`);
+    await screen.findByLabelText(`Proposal for ${fieldLabel(LINKED_PATH)} — Awaiting your judgment`);
     await waitFor(() => expect(markedCards()).toHaveLength(1));
 
     /*

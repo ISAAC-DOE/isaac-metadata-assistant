@@ -103,6 +103,8 @@ import {
   markCaptureGuidanceSeen,
 } from '../lib/transcriptCapturePreference';
 import { markSelfMintedProposals } from '../lib/selfMintedProposals';
+import { count } from '../lib/assistantPaths';
+import { focusWhenPresent } from '../lib/focusHandoff';
 import type {
   ApiProviderCapabilities,
   ApiProviderRefusal,
@@ -381,6 +383,19 @@ export function TranscriptCapturePanel({
   const [selectedRun, setSelectedRun] = useState(selectedRunId ?? '');
   const [text, setText] = useState('');
   const [reading, setReading] = useState<ApiTranscriptCapture | null>(null);
+  /*
+   * PR #277 REVIEW (pre-existing) — the exact text the last SUCCESSFUL
+   * finalize stored. While the box still holds exactly that text, Finalize is
+   * disabled: pressing it again would store every segment a second time and
+   * mint a duplicate proposal per value. Any edit re-enables it (the reader has
+   * something new to read); Capture Another Note and a record reset clear it.
+   * A FAILED finalize never sets it, so Retry is never blocked.
+   */
+  const [finalizedText, setFinalizedText] = useState<string | null>(null);
+  const alreadyRead = finalizedText !== null && text === finalizedText;
+  /** The result summary's heading, focused after a successful finalize so focus
+   *  does not fall to <body> when the reading card replaces the busy state. */
+  const readingHeadingRef = useRef<HTMLHeadingElement | null>(null);
   const [busyKind, setBusyKind] = useState<BusyKind>(null);
   const [error, setError] = useState<string | null>(null);
   /** WHICH action last failed. `null` when nothing has. See `RetryTag` above —
@@ -1036,6 +1051,7 @@ export function TranscriptCapturePanel({
     dropAudio();
 
     setReading(null);
+    setFinalizedText(null);
     setSelectedRun('');
     setText('');
     setError(null);
@@ -1475,7 +1491,8 @@ export function TranscriptCapturePanel({
   /* ---- finalize ---------------------------------------------------------- */
 
   async function finalize() {
-    if (busyKind !== null || text.trim() === '') return;
+    if (busyKind !== null || text.trim() === '' || alreadyRead) return;
+    const submittedText = text;
     setBusyKind('finalize');
     setError(null);
     setRetryTag(null);
@@ -1498,7 +1515,7 @@ export function TranscriptCapturePanel({
     try {
       const payload = await api.captureTranscript(experimentId, {
         experimentVersion,
-        text,
+        text: submittedText,
         ...(selectedRun ? { runId: selectedRun } : {}),
       });
       // SAME-TAB COURTESY, NOT A SERVER FACT. So `IngestionProposalsPanel`'s
@@ -1518,6 +1535,7 @@ export function TranscriptCapturePanel({
       );
       if (!isSameRecord()) return;
       setReading(payload);
+      setFinalizedText(submittedText);
       setExperimentVersion(payload.experiment_version);
       /*
        * I7, INDEPENDENT REVIEW OF PR-D — BOTH NUMBERS, AS THE BUILD THIS
@@ -1532,9 +1550,12 @@ export function TranscriptCapturePanel({
        */
       const storedCount = payload.proposals.length;
       const readCount = payload.candidates.length;
+      // PR #277 REVIEW (minor): real plurals, never a "(s)" placeholder — the
+      // same `count()` the assistant composer uses.
       setAnnouncement(
-        `Finalized. ${payload.capture.segments} segment(s) stored with this record, ` +
-          `${readCount} value(s) read, ${storedCount} stored as proposal(s)` +
+        `Finalized. ${count(payload.capture.segments, 'segment')} stored with this record, ` +
+          `${count(readCount, 'value')} read, ${storedCount} stored as ` +
+          `${storedCount === 1 ? 'a proposal' : 'proposals'}` +
           (storedCount > 0
             ? onReviewProposals !== undefined
               ? '. Review them in Proposals.'
@@ -1542,6 +1563,12 @@ export function TranscriptCapturePanel({
             : '.'),
       );
       onCaptured?.();
+      // PR #277 REVIEW (pre-existing) — FOCUS USED TO FALL TO <body>: the
+      // pressed button becomes disabled (above) and the busy state it sat in is
+      // replaced by the result card. Move focus to that card's heading, which is
+      // what the reader needs next. `focusWhenPresent` retries across the
+      // frames the card takes to commit.
+      focusWhenPresent(() => readingHeadingRef.current);
       await loadRuns();
     } catch (cause: unknown) {
       // `FALLBACK.finalize` reads "This transcript was NOT stored … Your text is
@@ -1608,6 +1635,7 @@ export function TranscriptCapturePanel({
    *  the record — this only clears what is on screen). */
   function captureAnother() {
     setReading(null);
+    setFinalizedText(null);
     setText('');
     setAnnouncement('Ready for another note.');
     transcriptRef.current?.focus();
@@ -1633,7 +1661,16 @@ export function TranscriptCapturePanel({
       setExperimentVersion(created.experiment_version);
       await loadRuns();
       setSelectedRun(created.run.id);
-      runSelectRef.current?.focus();
+      /*
+       * PR #277 REVIEW (pre-existing) — FOCUS USED TO FALL TO <body>. This was
+       * `runSelectRef.current?.focus()` called synchronously, but on the only
+       * path that offers Create a Run (zero runs) the selector DOES NOT EXIST
+       * yet: it replaces the "Create a Run" empty state on the commit these
+       * updates schedule. So the ref was null, the pressed button unmounted,
+       * and focus dropped to <body>. Retry across frames until the selector is
+       * there.
+       */
+      focusWhenPresent(() => runSelectRef.current);
       setAnnouncement(`Created ${created.run.label}. It is now selected.`);
     } catch (cause: unknown) {
       if (!isSameRecord()) return;
@@ -2263,7 +2300,7 @@ export function TranscriptCapturePanel({
                    substring of `aria-label`), and two controls answering to one
                    field's name is ambiguous to a screen reader too. */
                 <HelpTip subject={CAPTURE_COPY.runTipSubject}>
-                    <p>{CAPTURE_COPY.runHint}</p>
+                    <span>{CAPTURE_COPY.runHint}</span>
                   </HelpTip>
                 )}
               </span>
@@ -2309,8 +2346,8 @@ export function TranscriptCapturePanel({
             </label>
             {mode !== undefined && (
               <HelpTip subject={CAPTURE_COPY.transcriptTipSubject}>
-                <p>{CAPTURE_COPY.transcriptHint}</p>
-                <p>{CAPTURE_COPY.finalizeHint}</p>
+                <span>{CAPTURE_COPY.transcriptHint}</span>
+                <span>{CAPTURE_COPY.finalizeHint}</span>
               </HelpTip>
             )}
           </span>
@@ -2364,14 +2401,23 @@ export function TranscriptCapturePanel({
           <button
             type="submit"
             className={primaryClass(showFinalizePrimary)}
-            disabled={busyKind !== null || text.trim() === ''}
+            disabled={busyKind !== null || text.trim() === '' || alreadyRead}
             aria-busy={busyKind === 'finalize'}
             aria-describedby={
-              selectedRun === '' && text.trim() !== '' ? `${transcriptId}-preflight` : undefined
+              alreadyRead
+                ? `${transcriptId}-already-read`
+                : selectedRun === '' && text.trim() !== ''
+                  ? `${transcriptId}-preflight`
+                  : undefined
             }
           >
             {busyKind === 'finalize' ? 'Reading…' : CAPTURE_COPY.finalize}
           </button>
+          {alreadyRead && (
+            <p className="capture-preflight" id={`${transcriptId}-already-read`}>
+              {CAPTURE_COPY.finalizeAlreadyRead}
+            </p>
+          )}
           {/* BELOW Finalize, quiet and right-aligned: this is the destructive-of-typing
               branch and must never sit where the primary action is expected. Closing the
               panel still keeps the text — that behaviour is deliberate (see the reset
@@ -2390,7 +2436,9 @@ export function TranscriptCapturePanel({
   const legacyReadingBlock =
     reading !== null && !formLocked ? (
           <div className="capture-reading">
-            <h3 className="capture-subhead">{CAPTURE_COPY.summaryHeading}</h3>
+            <h3 className="capture-subhead" ref={readingHeadingRef} tabIndex={-1}>
+              {CAPTURE_COPY.summaryHeading}
+            </h3>
             {reading.candidates.length === 0 ? (
               <p className="capture-note">{CAPTURE_COPY.candidatesEmpty}</p>
             ) : (
@@ -2539,7 +2587,9 @@ export function TranscriptCapturePanel({
   const compactReadingBlock =
     reading !== null && !formLocked ? (
       <div className="capture-reading capture-reading-compact">
-        <h3 className="capture-subhead">{CAPTURE_COPY.summaryHeading}</h3>
+        <h3 className="capture-subhead" ref={readingHeadingRef} tabIndex={-1}>
+          {CAPTURE_COPY.summaryHeading}
+        </h3>
         <p className="capture-summary-line">
           {reading.candidates.length === 0
             ? CAPTURE_COPY.candidatesEmpty

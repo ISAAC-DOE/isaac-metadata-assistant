@@ -78,6 +78,7 @@ import {
   switchWorkspace,
   expect,
   proposalCard,
+  proposalCardInState,
   test,
   type ServerApi,
 } from './fixtures';
@@ -223,11 +224,10 @@ async function deriveRunTarget(
   );
 }
 
-/** A proposal card addressed by path AND state — the card's own accessible name. */
+/** A proposal card addressed by path AND state — the card's own accessible name,
+ *  which names the field in words since review #277 (`proposalCardInState`). */
 function cardInState(page: Page, path: string, stateLabel: string) {
-  return page.getByRole('article', {
-    name: new RegExp(`^Proposal for ${path.replace(/\./g, '\\.')} — ${stateLabel}`),
-  });
+  return proposalCardInState(page, path, stateLabel);
 }
 
 /**
@@ -810,7 +810,7 @@ test.describe('two scientists, one record, end to end', () => {
       Number.isFinite(revBeforeAccept),
       'step 14: the record version token must carry a numeric rev for step 17 to have a floor'
     ).toBe(true);
-    const liveRunCard = cardInState(page, runTarget.path, 'Awaiting your judgement');
+    const liveRunCard = cardInState(page, runTarget.path, 'Awaiting your judgment');
     await expect(liveRunCard, 'step 14: the open card is the one A acts on').toBeVisible({
       timeout: DISCOVERY_DEADLINE,
     });

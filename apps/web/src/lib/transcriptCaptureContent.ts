@@ -340,7 +340,9 @@ export const CAPTURE_COPY = {
    * a definition that already exists somewhere else.
    */
   intakeRunTitle: 'Enter the Scan Directly',
-  intakeRunAction: 'Add Run',
+  /* It goes to the Runs view, where "Add Run" is the button that creates one — so it
+     is named for where it goes, not for an act it does not perform (review #277). */
+  intakeRunAction: 'Go to Runs',
 
   intakeWriteTitle: 'Write It Down',
   intakeWriteAction: 'Start Writing',
@@ -645,6 +647,16 @@ export const CAPTURE_COPY = {
    */
   finalizePreflightNoRun:
     'No run selected — this will be stored as notes only, and will propose nothing.',
+  /*
+   * PR #277 REVIEW (pre-existing) — FINALIZE TWICE MINTED DUPLICATES. After a
+   * successful reading the text stayed in the box and Finalize stayed enabled,
+   * so a second press stored every segment again and minted a second proposal
+   * per value. The button is now disabled until the text changes, and this
+   * line — the button's accessible description while it is — says why and what
+   * to do, rather than leaving a greyed control to be guessed at.
+   */
+  finalizeAlreadyRead:
+    'This text has already been read and stored. Edit it to read it again, or choose Capture Another Note.',
   /** NEW — the `processing` state's own announcement, distinct from a generic busy. */
   processingLive: 'Reading transcript…',
 
@@ -694,7 +706,18 @@ export const CAPTURE_COPY = {
    */
   homeIntro: 'Choose a way in. You can use more than one on the same record.',
   homeWriteLine: 'Type or paste your notes. ISAAC proposes values for you to review.',
-  homeVoiceLine: 'Dictate through your Claude app, or record here and type what was said.',
+  /*
+   * WHAT IS TRUE TODAY (review #277, I-4; decision packet §9 — "build nothing that
+   * implies any of it exists"). The Claude half used to lead this line on every
+   * deployment, including ones whose agent interface is not mounted — which is all
+   * of them. It is now offered only where the deployment reports a reachable Claude
+   * connection AND publishes an address (`homeVoiceLineWithClaude`, read by
+   * `CaptureIntake` through `claudeVoiceState`); everywhere else the line states
+   * the one voice route that exists.
+   */
+  homeVoiceLine: 'Record here and type what was said.',
+  homeVoiceLineWithClaude:
+    'Dictate through your Claude app, or record here and type what was said.',
   homeFilesLine: 'Reference files you already have — where each one lives, and its checksum.',
   homeRunLine: 'Type the conditions you set — one run per set of measurement conditions.',
   homeVoiceAction: 'Open Voice Capture',
@@ -736,7 +759,8 @@ export const CAPTURE_COPY = {
      code that no deployment of this build reaches. ── */
   claudeHeading: 'Use Claude for Voice Capture',
   claudeChecking: 'Checking how this deployment accepts Claude…',
-  claudeUnmounted: 'This ISAAC deployment has not enabled its remote Claude connection yet.',
+  /* No future promise ("…yet"): what is true today, and nothing implied beyond it. */
+  claudeUnmounted: 'This ISAAC deployment does not accept a remote Claude connection.',
   claudeLocalOnly:
     'This ISAAC deployment accepts agent connections only from its own machine, so a Claude app elsewhere cannot reach it.',
   claudeNoAddress:
