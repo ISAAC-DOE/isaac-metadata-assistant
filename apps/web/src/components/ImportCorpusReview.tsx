@@ -33,7 +33,7 @@ import {
   type Bl15MeasurementUnit,
   type Bl15SourceEvidence,
 } from '../lib/bl15Review';
-import { IMPORT_STAGE_COPY } from '../lib/historicalImportContent';
+import { IMPORT_STAGE_COPY, archiveLabel } from '../lib/historicalImportContent';
 import {
   BASIS_LABELS,
   BUCKET_ORDER,
@@ -107,7 +107,10 @@ export function CorpusReadOverview({
   return (
     <section className="bl15" aria-labelledby="bl15-heading">
       <h4 className="bl15-heading" id="bl15-heading">
-        {review.inventory.root_label}
+        {archiveLabel(review.inventory.root_label)}{' '}
+        <HelpTip subject={`the archive ${archiveLabel(review.inventory.root_label)}`}>
+          Its id: <code>{review.inventory.root_label}</code>
+        </HelpTip>
       </h4>
 
       {/* The archive walk stopping early makes every count below a FLOOR rather
@@ -927,11 +930,11 @@ function MappingReview({ review }: { review: Bl15CorpusReview }) {
                       </p>
                       {/* The registry's own sentence, verbatim. */}
                       <p className="bl15-concept-reason">{c.reason}</p>
+                      {/* The placement's NAME, and not its decision-record level: "(level 4)"
+                          is `DEC-41`'s numbering, a raw token to a scientist, and the name
+                          already says where the information goes (review of #279). */}
                       {c.placement_name && (
-                        <p className="bl15-concept-extra">
-                          Where this information lands: {c.placement_name} (level{' '}
-                          {c.placement_level}).
-                        </p>
+                        <p className="bl15-concept-extra">Where this information lands: {c.placement_name}.</p>
                       )}
                       {c.unresolved_questions && c.unresolved_questions.length > 0 && (
                         <p className="bl15-concept-open">

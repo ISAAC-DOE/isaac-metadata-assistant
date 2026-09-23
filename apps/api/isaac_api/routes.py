@@ -25508,13 +25508,10 @@ _MAX_RUNS_PER_IMPORT_BATCH = 200
 #: that from the classification, and the unit is fully assembled either way —
 #: with its scans, its macros and its conflicts — so nothing is discarded. A
 #: scientist who disagrees changes the classification, which is a separate act.
-_IMPORT_CANDIDATE_UNIT_IS_NOT_A_RUN = (
-    "This value belongs to a measurement this import does not offer as a Run — "
-    "an alignment scan or a reference standard rather than a sample "
-    "measurement. Its reading is kept and nothing is discarded; there is simply "
-    "no run for it to be proposed against. Change the measurement's "
-    "classification if you disagree."
-)
+#: ONE wording: since 2026-09-23 such a value is marked not proposable when the import
+#: is read (`hist.CANDIDATE_NOT_PROPOSABLE_NOT_A_RUN`), so the batch meets it only as a
+#: not-proposable candidate; this alias keeps the batch's own guard saying the same.
+_IMPORT_CANDIDATE_UNIT_IS_NOT_A_RUN = hist.CANDIDATE_NOT_PROPOSABLE_NOT_A_RUN
 
 #: Why a beamtime-scope candidate is not sent when this batch is creating runs:
 #: it belongs to the whole import rather than to any one measurement, and the
@@ -27565,8 +27562,8 @@ def post_import_candidate_proposal(
         "WHAT A CANDIDATE RUN FROM A HISTORICAL ARCHIVE CANNOT BE is stated "
         "rather than discovered: it cannot be export-ready. "
         "`GET /api/imports/{import_id}` lists the measured reasons under "
-        "`corpus_digest.cannot_be_export_ready` — a required temperature no "
-        "source in such a corpus supplies as a number, a required descriptor no historical "
+        "`corpus_digest.cannot_be_export_ready` — a required temperature this build "
+        "takes from no source, a required descriptor no historical "
         "source provides, and a required file digest this build never computes. "
         "No progress indicator here can fill, and none is offered."
     ),
@@ -27666,33 +27663,11 @@ def post_import_add_to_experiment(
     # it is the reason the review surface ALREADY shows for it — read off the
     # candidate rather than re-derived here, so the batch's explanation and the
     # screen's cannot disagree.
-    sendable = []
-    not_sent: list[dict] = []
-    for candidate in hist.candidates_of(session):
-        if candidate.unresolved_reason is not None:
-            not_sent.append(
-                {
-                    "candidate_id": candidate.candidate_id,
-                    "target_field_path": candidate.target_field_path,
-                    "kind": candidate.kind,
-                    "error": "candidate_unresolved",
-                    "reason": candidate.not_proposable_reason
-                    or hist.CANDIDATE_NOT_PROPOSABLE_DISAGREEMENT,
-                }
-            )
-        elif not candidate.proposable:
-            not_sent.append(
-                {
-                    "candidate_id": candidate.candidate_id,
-                    "target_field_path": candidate.target_field_path,
-                    "kind": candidate.kind,
-                    "error": "candidate_not_proposable",
-                    "reason": candidate.not_proposable_reason
-                    or hist.CANDIDATE_NOT_PROPOSABLE_NO_EXPERIMENT_CREATION,
-                }
-            )
-        else:
-            sendable.append(candidate)
+    #
+    # (2026-09-23) `hist.batch_partition` is the ONE partition: the session view's
+    # `send_plan` publishes it before anything is sent, so the Add stage's prediction and
+    # this report are the same categorisation by construction.
+    sendable, not_sent = hist.batch_partition(session)
 
     total_candidates = len(sendable) + len(not_sent)
     if not sendable:

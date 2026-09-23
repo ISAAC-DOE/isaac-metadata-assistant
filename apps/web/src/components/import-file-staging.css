@@ -191,9 +191,7 @@
   color: var(--text-secondary);
 }
 
-.ifs-explain > summary { cursor: pointer; }
-
-.ifs-explain > p {
+.ifs-explain .disclosure-body > p {
   margin: var(--space-2xs) 0 0;
   max-width: 74ch;
 }

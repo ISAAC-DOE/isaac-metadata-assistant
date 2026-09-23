@@ -141,6 +141,24 @@ def stem_and_index(basename: str) -> tuple[str | None, int | None]:
     return match.group("stem"), int(match.group("index"))
 
 
+def own_scan_number(lines: list[str]) -> str | None:
+    """The SPEC scan number a per-scan export states on its own ``#S`` line.
+
+    ``None`` unless exactly one ``#S`` line carries a number. Written without leading
+    zeros, as the acquisition file's ``#S`` numbers are compared.
+    """
+    numbers = set()
+    for line in lines:
+        if line.startswith("#S") and not line[2:3].isalnum():
+            match = _SCAN_HEADER.match(line[2:].strip())
+            if match:
+                numbers.add(match.group(1))
+    if len(numbers) != 1:
+        return None
+    (number,) = numbers
+    return str(int(number)) if number.isdigit() else None
+
+
 def read_scan_export(
     record: SourceRecord, text: str, *, id_prefix: str = ""
 ) -> ReaderResult:
@@ -183,11 +201,16 @@ def read_scan_export(
     )
 
     stem, index = stem_and_index(record.basename)
-    if index is not None:
-        # EVERY statement in a scan export is about ONE scan — the one its basename
-        # numbers. Stamped once here (`EvidenceBuilder.scan`), without leading zeros,
-        # so `_001` and a SPEC file's `#S 1` name the same scan.
-        builder.scan = str(int(index))
+    # EVERY statement in a scan export is about ONE scan — the one the file ITSELF
+    # names on its own `#S` line, which is the acquisition file's SPEC scan number.
+    # Stamped once here (`EvidenceBuilder.scan`, `bl15.mapping.RULE_CARDINALITY` v2).
+    #
+    # NOT THE BASENAME INDEX, and that is a correction (2026-09-23): v1 took `_001` to
+    # be `#S 1`, which nothing establishes — a SPEC file reopened and appended can hold
+    # `#S 6` for the scan exported as `_001`. A file stating more than one `#S`, or none
+    # that is a number, names no single scan, so its statements stay unestablished and
+    # are compared with every reading of the measurement.
+    builder.scan = own_scan_number(lines)
     if stem is None:
         builder.skip(
             reason=SKIP_NO_SCAN_INDEX,

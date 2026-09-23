@@ -3,7 +3,6 @@ import type {
   ApiImportSession,
   ApiImportSignalSelection,
   ApiImportUnitRow,
-  ApiImportUnsentCandidate,
 } from './types';
 import type { Bl15Conflict, Bl15Reading } from './bl15Review';
 import type { SemanticState } from '../components/SemanticStatus';
@@ -222,7 +221,9 @@ export function summaryItems(session: ApiImportSession): SummaryItem[] {
   out.push({ id: 'conflicts', value: conflicts, label: conflicts === 1 ? 'conflict' : 'conflicts' });
   if (session.reconstruction !== null) {
     out.push({ id: 'needs-review', value: counts.needsReview, label: 'need review' });
-    out.push({ id: 'ready', value: counts.ready, label: 'ready to send' });
+    // WHAT CAN STILL GO FORWARD: the batch's own sendable set, less what this import has
+    // already sent — so the header drops after a send instead of repeating the old count.
+    out.push({ id: 'ready', value: readyToSend(session).length, label: 'ready to send' });
   }
   return out;
 }
@@ -479,43 +480,168 @@ export function liveChannels(selection: ApiImportSignalSelection): string[] {
  * WHY A CANDIDATE WAS NOT SENT, IN WORDS — the server's `error` code named for a
  * scientist. The server's own sentence stays available beside it.
  */
-export const NOT_SENT_REASONS: Readonly<Record<string, string>> = {
-  candidate_unresolved: 'Sources disagree — decide in Conflicts first',
-  candidate_not_proposable: 'Nowhere to write it in this build',
-  target_requires_a_run: 'Needs a run to belong to',
+/**
+ * WHY A CANDIDATE IS NOT SENT — ONE CATEGORISATION, before and after (2026-09-23).
+ *
+ * The Add stage used to predict with one rule ("Nowhere to write it: 37") and report
+ * with another (89 under the same words). Both now run THIS function over the same four
+ * facts — the batch's error code, the candidate's kind, its target field and its reason —
+ * whether the facts come from the published `send_plan` or from the batch's `not_sent`
+ * rows. A structural finding is never counted as a conflict to decide: it is not a value.
+ */
+export type UnsentCategory =
+  | 'field_conflict'
+  | 'structural'
+  | 'measurement'
+  | 'experiment'
+  | 'not_a_run'
+  | 'whole_import'
+  | 'local_time'
+  | 'no_field'
+  | 'no_write_route'
+  | 'needs_decision'
+  | 'needs_a_run'
+  | 'other';
+
+export const UNSENT_CATEGORY_ORDER: readonly UnsentCategory[] = [
+  'field_conflict',
+  'needs_decision',
+  'whole_import',
+  'needs_a_run',
+  'not_a_run',
+  'local_time',
+  'no_write_route',
+  'no_field',
+  'measurement',
+  'experiment',
+  'structural',
+  'other',
+];
+
+export const UNSENT_CATEGORY_LABELS: Readonly<Record<UnsentCategory, string>> = {
+  field_conflict: 'Field values whose sources disagree — decide them in Conflicts first',
+  /*
+   * THREE SETS, THREE NAMES (review of #279, I4). The Conflicts stage counts FINDINGS
+   * about which measurement a file is — including corpus-wide ones (a legacy number used
+   * twice) that no candidate stands for. The rows below count CANDIDATES, so they must not
+   * reuse those words: "8 findings" here beside "5 findings" there was two sets under one
+   * name. A measurement is not a disagreement either, so it has its own row.
+   */
+  structural: "Disagreements about one measurement's identity — decided in Conflicts, never sent as values",
+  measurement: 'Measurements this import found — not values (the Runs you create come from them)',
+  experiment: 'The experiment this import describes — not a value',
+  not_a_run: 'Values of a measurement that is not a Run (an alignment scan or a standard)',
+  whole_import: 'Stated for the whole import — send each to the run you mean, from Review',
+  local_time: 'Local times with no time zone — never sent to a UTC field',
+  no_field: 'No field in the official schema takes them — kept as evidence',
+  no_write_route: 'Official fields this build has no write route for',
+  needs_decision: 'Need a decision before they can go forward',
+  needs_a_run: 'Need a run to belong to',
+  other: 'Could not be sent',
 };
 
-export function notSentReason(row: Pick<ApiImportUnsentCandidate, 'error'>): string {
-  return NOT_SENT_REASONS[row.error] ?? 'Could not be sent';
+/*
+ * The server's own sentences a reason is recognised by. Each is a constant in
+ * `historical_import.py` (named beside it) and is compared by its opening words, so a
+ * reworded tail does not silently move a candidate between categories.
+ */
+const REASON_PREFIXES: readonly [UnsentCategory, string][] = [
+  // CANDIDATE_NOT_PROPOSABLE_NOT_A_RUN
+  ['not_a_run', 'This value belongs to a measurement this import does not offer as a Run'],
+  // CANDIDATE_NOT_PROPOSABLE_LOCAL_TIME
+  ['local_time', "This time is written in the instrument's local clock"],
+  // CANDIDATE_NOT_PROPOSABLE_NO_WRITE_PATH
+  ['no_write_route', 'This IS an official ISAAC field, and no write operation'],
+];
+
+export interface UnsentFacts {
+  error: string;
+  kind: string;
+  target_field_path: string | null;
+  reason: string | null;
 }
 
-/** Group a batch's unsent rows by reason, in a stable order. */
-export function groupNotSent(rows: readonly ApiImportUnsentCandidate[]): { reason: string; rows: ApiImportUnsentCandidate[] }[] {
-  const out = new Map<string, ApiImportUnsentCandidate[]>();
+export function unsentCategory(facts: UnsentFacts): UnsentCategory {
+  if (facts.kind !== 'field') {
+    if (facts.error === 'candidate_unresolved') return 'structural';
+    return facts.kind === 'experiment' ? 'experiment' : 'measurement';
+  }
+  if (facts.error === 'candidate_unresolved') return 'field_conflict';
+  if (facts.error === 'no_run_for_this_candidate') return 'whole_import';
+  if (facts.error === 'target_requires_a_run') return 'needs_a_run';
+  if (facts.error === 'candidate_not_proposable') {
+    for (const [category, prefix] of REASON_PREFIXES) {
+      if (facts.reason?.startsWith(prefix)) return category;
+    }
+    if (facts.target_field_path === null) return 'no_field';
+    return 'needs_decision';
+  }
+  return 'other';
+}
+
+/** Group rows by category, in the fixed order. */
+export function groupUnsent<T extends UnsentFacts>(rows: readonly T[]): { category: UnsentCategory; label: string; rows: T[] }[] {
+  const out = new Map<UnsentCategory, T[]>();
   for (const row of rows) {
-    const reason = notSentReason(row);
-    const list = out.get(reason);
+    const category = unsentCategory(row);
+    const list = out.get(category);
     if (list) list.push(row);
-    else out.set(reason, [row]);
+    else out.set(category, [row]);
   }
-  return [...out.entries()].map(([reason, list]) => ({ reason, rows: list }));
+  return UNSENT_CATEGORY_ORDER.filter((c) => out.has(c)).map((category) => ({
+    category,
+    label: UNSENT_CATEGORY_LABELS[category],
+    rows: out.get(category)!,
+  }));
 }
 
-/** What the batch WOULD not send, grouped the same way, before anything is sent. */
-export function wouldNotSend(candidates: readonly ApiImportCandidate[]): { reason: string; count: number }[] {
-  const out = new Map<string, number>();
-  for (const c of candidates) {
-    if (c.proposable) continue;
-    const reason = c.unresolved_reason
-      ? NOT_SENT_REASONS.candidate_unresolved
-      : c.kind !== 'field'
-        ? 'A run or experiment, not a value'
-        : c.target_field_path === null
-          ? 'No field in the official schema'
-          : 'Nowhere to write it in this build';
-    out.set(reason, (out.get(reason) ?? 0) + 1);
+/**
+ * The batch's plan for THIS session, as rows the categorisation reads — from the
+ * published `send_plan` (the batch's own partition) and each candidate's own facts.
+ * `alreadySent` are the candidates this import already sent (the session remembers
+ * them in `proposed`), and are neither "can be sent" nor "will not be sent".
+ */
+export function planFor(session: ApiImportSession, createRuns: boolean) {
+  const candidates = session.reconstruction?.candidates ?? [];
+  const byId = new Map(candidates.map((c) => [c.candidate_id, c]));
+  const plan = session.send_plan;
+  const sent = session.proposed ?? {};
+  const sendable = plan
+    ? plan.sendable
+    : candidates.filter((c) => c.proposable).map((c) => c.candidate_id);
+  const noRun = new Set(createRuns && plan ? plan.no_run_when_creating_runs : []);
+  const notSentEntries: [string, string][] = plan
+    ? Object.entries(plan.not_sent)
+    : candidates
+        .filter((c) => !c.proposable)
+        .map((c) => [c.candidate_id, c.unresolved_reason ? 'candidate_unresolved' : 'candidate_not_proposable']);
+  const unsent: (UnsentFacts & { candidate_id: string })[] = [];
+  for (const [id, error] of notSentEntries) {
+    const c = byId.get(id);
+    if (!c) continue;
+    unsent.push({
+      candidate_id: id,
+      error,
+      kind: c.kind,
+      target_field_path: c.target_field_path,
+      reason: c.not_proposable_reason,
+    });
   }
-  return [...out.entries()].map(([reason, count]) => ({ reason, count }));
+  for (const id of noRun) {
+    const c = byId.get(id);
+    if (!c || sent[id]) continue;
+    unsent.push({ candidate_id: id, error: 'no_run_for_this_candidate', kind: c.kind, target_field_path: c.target_field_path, reason: null });
+  }
+  return {
+    willSend: sendable.filter((id) => !sent[id] && !noRun.has(id)),
+    alreadySent: sendable.filter((id) => Boolean(sent[id])),
+    unsent,
+  };
+}
+
+/** Candidates that can go forward and have not been sent yet — the "ready to send" count. */
+export function readyToSend(session: ApiImportSession): string[] {
+  return planFor(session, false).willSend;
 }
 
 export const MATCHED_BY_LABELS: Readonly<Record<string, string>> = {

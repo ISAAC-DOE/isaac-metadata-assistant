@@ -250,6 +250,11 @@ def read_spec_acquisition(
     declared_stem: str | None = None
     motor_names: dict[int, list[str]] = {}
     scan_label: str | None = None
+    # A SCAN NUMBER THIS FILE USES TWICE NAMES NO SINGLE SCAN. A SPEC file reopened
+    # after a restart can number its scans from 1 again, so `#S 1` would name two
+    # scans at once; statements under a repeated number are left unestablished
+    # (`bl15.mapping.RULE_CARDINALITY` v2) and compared with every reading.
+    ambiguous_scans = _repeated_scan_numbers(lines)
     row_count = 0
     row_first_line: int | None = None
     row_cap_hit = False
@@ -399,7 +404,9 @@ def read_spec_acquisition(
             # THE SCAN THIS FILE IS NOW INSIDE, stamped on every scan-scope statement
             # that follows (`EvidenceBuilder.scan`). A numeric `#S` label is written
             # without leading zeros so it matches a scan export's `_001` index.
-            builder.scan = str(int(scan_number)) if scan_number.isdigit() else scan_number
+            builder.scan = (
+                None if scan_number in ambiguous_scans else _scan_id(scan_number)
+            )
             if command:
                 builder.add(
                     locator=f"line {number} header #S ({scan_label})",
@@ -517,6 +524,24 @@ def gscan_grid(command: str) -> str | None:
     if not grid_fields:
         return None
     return " ".join(grid_fields)
+
+
+def _scan_id(number: str) -> str | None:
+    """A SPEC scan number as it is compared: without leading zeros; ``None`` if not one."""
+    return str(int(number)) if number.isdigit() else None
+
+
+def _repeated_scan_numbers(lines: list[str]) -> set[str]:
+    """Every ``#S`` number that appears more than once in this file."""
+    seen: set[str] = set()
+    repeated: set[str] = set()
+    for line in lines:
+        if line.startswith("#S") and not line[2:3].isalnum():
+            match = _SCAN_HEADER.match(line[2:].strip())
+            if match:
+                number = match.group(1)
+                (repeated if number in seen else seen).add(number)
+    return repeated
 
 
 def _read_positions(

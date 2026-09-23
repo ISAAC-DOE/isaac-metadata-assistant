@@ -232,38 +232,8 @@
   max-width: 760px;
 }
 
-.hi-how-it-works > summary {
-  display: flex;
-  align-items: center;
-  gap: var(--space-xs);
-  font-size: var(--font-size-body);
-  font-weight: var(--font-weight-medium);
-  color: var(--action);
-  cursor: pointer;
-  list-style: none;
-  width: fit-content;
-}
-.hi-how-it-works > summary::-webkit-details-marker {
-  display: none;
-}
-.hi-how-it-works > summary::before {
-  content: '▸';
-  display: inline-block;
-  font-size: 10px;
-  color: var(--text-tertiary);
-  transition: transform 0.12s ease;
-}
-.hi-how-it-works[open] > summary::before {
-  transform: rotate(90deg);
-}
-.hi-how-it-works > summary:focus-visible {
-  outline: 2px solid var(--action);
-  outline-offset: 2px;
-  border-radius: var(--radius-token);
-}
-.hi-how-it-works[open] > summary {
-  margin-bottom: var(--space-md);
-}
+/* The shared `Disclosure` since 2026-09-23 — its own chevron, focus ring and
+   states. Only the width cap above is this screen's. */
 /* The stepper and the durability note sit inside the disclosure at their
    own existing measures — nothing about `.hi-steps-wrap` or `.hi-note`
    changes when their parent is a `<details>` rather than a plain `<div>`. */
@@ -1629,6 +1599,19 @@
 .hi-conflict-state {
   font-size: var(--font-size-meta);
   color: var(--text-secondary);
+  /* "Resolved by a rule you recorded: 03_02_…" is one long token at 320px. */
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.hi-conflict-kind-state {
+  margin: var(--space-2xs) 0 0;
+  font-size: var(--font-size-meta);
+  color: var(--text-secondary);
+}
+
+.hi-conflict-group-head > .hi-conflict-kind-state {
+  grid-column: 1;
 }
 
 /* The review is a quiet link-like control, not a box inside a box. */

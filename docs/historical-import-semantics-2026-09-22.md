@@ -179,7 +179,20 @@ different rule and is unchanged.
 
 ---
 
-### 2.1 Per-scan variation is not a conflict — `bl15.mapping.cardinality.v1`
+### 2.1 Per-scan variation is not a conflict — `bl15.mapping.cardinality.v2`
+
+> **v2, 2026-09-23, after an independent review.** v1 kept a measurement-level reading
+> (a macro's plan, a file-level header) in a group of its own, so a plan and the header's
+> recording of the SAME, only scan read as variation; and it took a scan export's `_00N`
+> file index to be SPEC scan `N`, which nothing establishes. v2: every measurement-level
+> reading is compared with every scan's (for `acquisition_target`, on the stem alone); a
+> scan is established only by the source's own `#S` line (a SPEC number used twice in one
+> file, or an export naming no single scan, stays unestablished and is compared with
+> everything); a per-scan concept varies only across two or more established scans; and
+> `counting_time`, `scan_command`, `energy_grid` and `emission_energy` are back to one
+> value per measurement until the domain owner answers **Q21** in
+> `docs/bl15-2-domain-questions-2026-09-16.md`. The v1 text below is kept as the record
+> of what v1 did; the table and counts are v2's.
 
 **Added after a measurement, the same day.** On the synthetic multi-operator corpus the
 reconstruction reported **43** field disagreements, and **36 were not disagreements**:
@@ -195,13 +208,15 @@ served as `mapping.concepts[].cardinality`), stated per concept and never inferr
 | cardinality | compared only within | concepts |
 |---|---|---|
 | `per_measurement` (default) | the whole measurement | every concept not listed below — including `filter` and `acquisition_timestamp`, on purpose |
-| `per_scan` | the same scan | `acquisition_target`, `counting_time`, `scan_command`, `energy_grid`, `emission_energy` |
+| `per_scan` | the same scan (established by the source's own `#S`) | `acquisition_target` — v1 also listed `counting_time`, `scan_command`, `energy_grid`, `emission_energy`; v2 reverted them |
 | `per_scan_item` | the same column or motor of the same scan | `detector_column`, `motor_position` |
 | `per_source` | the same token of the same file | `unknown_token` |
 
 The scan and item come from the readers as structured fields (`SourceEvidence.scan`,
-`.item` — `#S N` in a SPEC file, the `_00N` index of a scan export, a `#L` column
-position, a `#P` motor name, a filename token position), never from parsing a locator.
+`.item` — the SPEC scan number on the source's own `#S` line, in the acquisition file
+and in each scan export alike; a `#L` column position, a `#P` motor name, a filename
+token position), never from parsing a locator. ~~the `_00N` index of a scan export~~ —
+v1; withdrawn in v2.
 
 * Values that differ **across** scans are kept as `reconstruction.candidates[].variation`
   — one row per scan/item/file: `{scan, item, source, value, source_ids, locators}` —
@@ -221,9 +236,34 @@ position, a `#P` motor name, a filename token position), never from parsing a lo
   the macro file's OWN name token (`runsynth`), which says nothing about that
   measurement (101 → 100 candidates).
 
-Result: multi-operator **43 → 7** field conflicts (6 `filter`, 1 `acquisition_timestamp`;
-36 now vary by scan); mini **12 → 0** (12 vary by scan). The structural conflicts
-(`bl15.relate`) are unchanged: 10 and 5.
+Result (re-measured under v2, 2026-09-23 — identical to v1 on these two corpora, which
+state no macro plan for any of the reverted quantities): multi-operator **43 → 7** field
+conflicts (6 `filter`, 1 `acquisition_timestamp`; 36 now vary by scan); mini **12 → 0**
+(12 vary by scan). The structural conflicts (`bl15.relate`) are unchanged: 10 and 5.
+
+### 2.2 One field, one proposal; no local time in a UTC field (2026-09-23)
+
+`acquisition_timestamp` (the SPEC `#D` line) and `acquisition_epoch` (the `#E` line) both
+target `timestamps.acquired_start_utc`, and each was proposed — two open proposals for one
+field, never compared. Now (`bl15.reconstruct._reconcile_same_field`, also applied after a
+resolution): proposable readings of one field that agree (for a `*_utc` field, the same
+instant) become ONE proposal and the rest stay as witnesses; readings that disagree become
+one conflict on the first. And a time that names no zone is never proposed into a `*_utc`
+field (`hist.CANDIDATE_NOT_PROPOSABLE_LOCAL_TIME`, in the reconstruction and in
+`_bound_candidate`, so a resolved candidate cannot either): the `#D` ctime string is the
+instrument's local clock. The epoch-derived UTC instant stays proposable — it is a named,
+deterministic conversion. Ready-to-send counts drop accordingly: mini 10 → 4, multi-operator
+17 → 9 (the `#D` values, and — see §2.3 — the alignment scan's epoch).
+
+### 2.3 The Add stage predicts what the batch does (2026-09-23)
+
+A run-owned value read from a measurement that is not a Run (an alignment scan, a standard)
+is marked not proposable when the import is read
+(`hist.CANDIDATE_NOT_PROPOSABLE_NOT_A_RUN`), so it is never counted "ready". The session
+view publishes `send_plan` — `{sendable, not_sent: {id: error}, no_run_when_creating_runs}`
+— computed by `hist.batch_partition`, the SAME function `POST …/add-to-experiment`
+partitions with, so the Add stage's prediction and the batch's report are one
+categorisation (`test_import_send_plan.py` holds it as a property over both corpora).
 
 ## 3. Reviewed convention rules — learning without silent promotion
 

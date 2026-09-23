@@ -487,7 +487,12 @@ describe('every count describes the record', () => {
     expect(document.querySelectorAll('.extctx-entry')).toHaveLength(TOTAL);
     // …and the control is GONE rather than permanently offered.
     expect(screen.queryByRole('button', { name: 'Show more' })).toBeNull();
-  });
+  },
+  // 15 s, not vitest's 5 s default (2026-09-23): this test renders 300 entries across
+  // server-clamped pages, and each entry now carries a HelpTip and a run-label lookup.
+  // Measured 2.36 s alone and 6.2 s inside a full parallel run. It asserts
+  // REACHABILITY, not speed, so a longer budget hides no defect.
+  15_000);
 
   it('the control disappears at the end rather than staying permanently dead', async () => {
     // MUTATION-GUARDED against the specific symptom: `has_more` stayed true forever

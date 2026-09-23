@@ -22,6 +22,7 @@ import { useFetch } from '../lib/useFetch';
 import { useProposalDestinations, type ProposalDestinations } from '../lib/importDestinations';
 import {
   IMPORT_COPY,
+  archiveLabel,
   IMPORT_STAGE_COPY,
   PARSE_STATE_LABELS,
   SOURCE_KIND_LABELS,
@@ -35,14 +36,15 @@ import {
   conflictCount,
   conflictViews,
   defaultStage,
-  groupNotSent,
+  groupUnsent,
   IMPORT_STAGES,
   MATCHED_BY_LABELS,
   plural,
   STAGE_WORKFLOW_STEP,
   stageReached,
   summaryItems,
-  wouldNotSend,
+  planFor,
+  readyToSend,
   type ImportStageId,
 } from '../lib/importStages';
 import type {
@@ -352,6 +354,9 @@ function ImportList({
                   onClick={() => onOpen(row.import_id)}
                 >
                   {IMPORT_COPY.actionOpen}
+                  {/* WHICH import, for a screen reader: a list of identical "Open"
+                      buttons names none of them (independent review, 2026-09-23). */}
+                  <span className="sr-only"> {row.label || 'Unnamed import'}</span>
                 </button>
               </li>
             ))}
@@ -381,8 +386,9 @@ function ImportList({
         `.hi-lead` above, so it did not need this disclosure at all.
       */}
       <div className="hi-section hi-landing-col">
-        <details className="hi-how-it-works">
-          <summary>How Historical Import works</summary>
+        {/* The shared `Disclosure` since 2026-09-23 (it was a native `<details>` with
+            an 11px triangle); collapsed by default exactly as before. */}
+        <Disclosure className="hi-how-it-works" summary="How Historical Import works">
           <WorkflowStrip steps={data.workflow} furthest={null} />
           {/* THE SERVER'S OWN SENTENCE about what a session is and is not. Same
               string, same `role="note"`, same server source as before — only
@@ -391,7 +397,7 @@ function ImportList({
           <p className="hi-note" role="note">
             {data.durability}
           </p>
-        </details>
+        </Disclosure>
       </div>
     </>
   );
@@ -543,6 +549,9 @@ function ImportSessionView({
   const destinations = useProposalDestinations();
   /* The stage on screen, kept for `act`: see "PINNED" below. */
   const activeRef = useRef<ImportStageId | null>(null);
+  const [announcement, setAnnouncement] = useState('');
+  const pendingFocus = useRef<string | null>(null);
+  const [focusTick, setFocusTick] = useState(0);
 
   /*
    * THE RELOAD IS SILENT, which it was not until 2026-09-22 — and the stage flow is
@@ -568,6 +577,13 @@ function ImportSessionView({
         await run();
         session.reloadSilent();
         if (next) setStage(next);
+        /* SAID AND FOCUSED (independent review, 2026-09-23): an act's result is
+           announced in the stage's one polite region, and focus moves to what the act
+           produced — its report or the stage heading — instead of being dropped when
+           the control that had it re-renders away. */
+        setAnnouncement(announcementFor(name));
+        pendingFocus.current = name.startsWith('add-whole') ? '.hi-addwhole-result .hi-block-title' : '.hi-stage-title';
+        setFocusTick((n) => n + 1);
       } catch (err) {
         setError(err instanceof ApiError ? err : new ApiError(String(err)));
       } finally {
@@ -584,6 +600,20 @@ function ImportSessionView({
    * stores. Reconstructing it would be composing a report rather than relaying one.
    */
   const [addedResult, setAddedResult] = useState<ApiImportAddedToExperiment | null>(null);
+
+  /* Focus lands after the re-render that shows the act's result; until the target is
+     on screen (a report renders a moment later), the request waits. */
+  useEffect(() => {
+    const selector = pendingFocus.current;
+    if (!selector) return;
+    const panel = document.querySelector('[role="tabpanel"]:not([hidden])');
+    const target = panel?.querySelector<HTMLElement>(selector);
+    if (target) {
+      target.focus();
+      pendingFocus.current = null;
+    }
+  });
+  void focusTick;
 
   if (session.status === 'loading') {
     // Same reason as the list's, above.
@@ -647,6 +677,9 @@ function ImportSessionView({
 
       <div className="hi-section hi-stages-card">
         <StageTabs session={data} active={active} onSelect={setStage} />
+        <p className="sr-only" role="status" aria-live="polite">
+          {announcement}
+        </p>
         {IMPORT_STAGES.map((id) => (
           <div
             key={id}
@@ -786,7 +819,7 @@ function StageTabs({
         : plural(candidates.length, 'candidate', 'candidates'),
     conflicts: conflicts === 0 ? 'none' : plural(conflicts, 'open', 'open'),
     review: `${counts.needsReview.toLocaleString('en-US')} need review`,
-    add: unbuilt('add') ? STAGE.stateLabels.notBuilt : `${counts.ready.toLocaleString('en-US')} ready`,
+    add: unbuilt('add') ? STAGE.stateLabels.notBuilt : `${readyToSend(session).length.toLocaleString('en-US')} ready`,
   };
 
   const refs = useRef<Map<ImportStageId, HTMLButtonElement>>(new Map());
@@ -855,13 +888,33 @@ function StageTabs({
   );
 }
 
+/** What an act says in the stage's polite region when it succeeds. */
+function announcementFor(name: string): string {
+  if (name === 'add-archive') return 'Archive added to the source bundle.';
+  if (name === 'add-fixture') return 'Example source added to the source bundle.';
+  if (name === 'add-reference' || name === 'record-staged-file') return 'Recorded as a source.';
+  if (name.startsWith('remove:')) return 'Source removed.';
+  if (name === 'parse') return 'Sources read.';
+  if (name === 'reconstruct') return 'Candidates reconstructed. Showing Runs & Candidates.';
+  if (name.startsWith('add-whole') && !name.endsWith(':create')) return 'Sent to the record. The report is below.';
+  if (name.startsWith('resolve') || name.startsWith('rule:') || name.startsWith('adopt:') || name.startsWith('signal:')) {
+    return 'Choice recorded. The import was read again under it.';
+  }
+  if (name.startsWith('propose:')) return 'Sent to the record as a proposal.';
+  if (name.includes('create')) return 'Record created.';
+  return 'Done.';
+}
+
 /** A stage's one heading, one sentence, and the `?` holding the rest. */
 function StageHead({ stage, lead }: { stage: ImportStageId; lead?: string }) {
   const copy = STAGE[stage];
   return (
     <div className="hi-stage-head">
       <div className="hi-stage-title-row">
-        <h3 className="hi-stage-title">{copy.title}</h3>
+        {/* Focusable by script only, so an act can land the reader here. */}
+        <h3 className="hi-stage-title" tabIndex={-1}>
+          {copy.title}
+        </h3>
         <HelpTip subject={copy.title}>{copy.help}</HelpTip>
       </div>
       <p className="hi-stage-lead">{lead ?? ('lead' in copy ? copy.lead : '')}</p>
@@ -962,7 +1015,7 @@ function SourceBundleStage({
               <select className="hi-input" value={archive} onChange={(event) => setArchive(event.target.value)}>
                 {data.available_archives.map((name) => (
                   <option key={name} value={name}>
-                    {name.startsWith('staged:') ? `${name.slice('staged:'.length)} (staged on the server)` : name}
+                    {name.startsWith('staged:') ? `${archiveLabel(name)} (staged on the server)` : archiveLabel(name)}
                   </option>
                 ))}
               </select>
@@ -1118,8 +1171,28 @@ function SourceRow({
   return (
     <tr>
       <td>
-        <span className="hi-filename">{source.filename}</span>
-        <span className="hi-reference">{source.reference}</span>
+        {/* An ARCHIVE is named in words; its id and where it was read from are one press
+            away, because a staged archive's reference IS its id (`staged:<name>`) and
+            printing it beside the name put the raw token straight back (review of #279). */}
+        {source.kind === 'archive' ? (
+          <span className="hi-filename">
+            {archiveLabel(source.filename)}{' '}
+            <HelpTip subject={`the archive ${archiveLabel(source.filename)}`}>
+              Its id: <code>{source.filename}</code>
+              {source.reference !== source.filename && (
+                <>
+                  {' '}
+                  · read from <code>{source.reference}</code>
+                </>
+              )}
+            </HelpTip>
+          </span>
+        ) : (
+          <>
+            <span className="hi-filename">{source.filename}</span>
+            <span className="hi-reference">{source.reference}</span>
+          </>
+        )}
         {source.sha256 !== null && <span className="hi-sub">checksum recorded · not verified</span>}
       </td>
       <td>{SOURCE_KIND_LABELS[source.kind] ?? source.kind}</td>
@@ -1135,7 +1208,7 @@ function SourceRow({
           className="btn btn-secondary"
           disabled={busy !== null}
           onClick={onRemove}
-          aria-label={`${IMPORT_COPY.actionRemoveSource} ${source.filename}`}
+          aria-label={`${IMPORT_COPY.actionRemoveSource} ${source.kind === 'archive' ? archiveLabel(source.filename) : source.filename}`}
         >
           {IMPORT_COPY.actionRemoveSource}
         </button>
@@ -1307,7 +1380,11 @@ function RunsStage({
       )}
 
       {reconstruction === null && !archive ? (
-        <p className="hi-body hi-empty-inline">{IMPORT_COPY.emptyCandidatesBody}</p>
+        <p className="hi-body hi-empty-inline">
+          {data.source_counts.parsed > 0 || data.corpus_review
+            ? IMPORT_COPY.emptyCandidatesReadBody
+            : IMPORT_COPY.emptyCandidatesBody}
+        </p>
       ) : archive && data.corpus_review && data.archive ? (
         <ArchiveRuns
           review={data.corpus_review}
@@ -1396,9 +1473,19 @@ function ConflictsStage({
   /* PER-SCAN VARIATION IS NOT A CONFLICT, and a reader who remembers seeing more
      "conflicts" before is told where those values went — neutrally, with a count. */
   const varying = (data.reconstruction?.candidates ?? []).filter((c) => c.agreement === 'varies').length;
+  /* THE TWO SETS THIS STAGE HOLDS, NAMED (2026-09-23): the tab's number is their sum;
+     Review counts only the field values; Add counts only what it cannot send. */
+  const structural = views.filter((v) => v.kind === 'structural').length;
+  const field = views.length - structural;
   return (
     <>
       <StageHead stage="conflicts" />
+      {views.length > 0 && (
+        <p className="hi-counts">
+          {plural(structural, 'finding', 'findings')} about which measurement a file is ·{' '}
+          {plural(field, 'field value', 'field values')} whose sources disagree
+        </p>
+      )}
       {varying > 0 && (
         <p className="hi-varies-note">
           <SemanticStatus state="notApplicable" label={STAGE.stateLabels.variesByScan} size="sm" />{' '}
@@ -1437,6 +1524,7 @@ function ReviewStage({
   const filenameOf = useFilenameOf(data);
   const counts = bucketCounts(fields);
   const buckets = BUCKET_ORDER.filter((b) => counts[b] > 0);
+  const sentReady = fields.filter((c) => candidateBucket(c) === 'ready' && data.proposed[c.candidate_id]).length;
   /* WHICH MEASUREMENT, for an archive: the unit that lists the candidate, named by its
      legacy number and label — the handle the Runs stage already uses. */
   const contextOf = new Map<string, string>();
@@ -1449,17 +1537,32 @@ function ReviewStage({
     <>
       <StageHead stage="review" />
       {data.reconstruction === null ? (
-        <p className="hi-body hi-empty-inline">{IMPORT_COPY.emptyCandidatesBody}</p>
+        <p className="hi-body hi-empty-inline">
+          {data.source_counts.parsed > 0 || data.corpus_review
+            ? IMPORT_COPY.emptyCandidatesReadBody
+            : IMPORT_COPY.emptyCandidatesBody}
+        </p>
       ) : (
         <>
           <div className="hi-review-counts">
-            {buckets.map((b) => (
+            {buckets.map((b) => {
+              /* "Ready to Send" counts what can STILL go forward: a candidate this import
+                 already sent is counted as sent, beside it, not as ready again. */
+              const n = b === 'ready' ? counts.ready - sentReady : counts[b];
+              return n > 0 ? (
+                <SemanticStatus
+                  key={b}
+                  state={BUCKET_STATE[b]}
+                  label={`${n.toLocaleString('en-US')} ${STAGE.bucketTitles[b]}`}
+                />
+              ) : null;
+            })}
+            {sentReady > 0 && (
               <SemanticStatus
-                key={b}
-                state={BUCKET_STATE[b]}
-                label={`${counts[b].toLocaleString('en-US')} ${STAGE.bucketTitles[b]}`}
+                state="complete"
+                label={`${sentReady.toLocaleString('en-US')} ${STAGE.stateLabels.sent}`}
               />
-            ))}
+            )}
             {/* What sending does, one press away rather than a paragraph above the list. */}
             <HelpTip subject={STAGE.bucketTitles.ready}>{IMPORT_COPY.reviewLead}</HelpTip>
           </div>
@@ -1756,9 +1859,18 @@ function AddStage({
   const [runId, setRunId] = useState('');
   const archive = Boolean(data.archive);
   const [createRuns, setCreateRuns] = useState(archive);
-  const candidates = data.reconstruction?.candidates ?? [];
-  const sendable = candidates.filter((c) => c.proposable);
-  const blocked = wouldNotSend(candidates);
+  /* ONE PLAN, the batch's own partition (`send_plan`) — so what this stage says will
+     happen is what the report then says did (2026-09-23). */
+  const plan = planFor(data, archive && createRuns);
+  const sendable = plan.willSend;
+  const blocked = groupUnsent(plan.unsent);
+  const blockedTotal = plan.unsent.length;
+  const sentTo = new Map<string, number>();
+  for (const id of plan.alreadySent) {
+    const target = data.proposed[id]?.experiment_id;
+    if (target) sentTo.set(target, (sentTo.get(target) ?? 0) + 1);
+  }
+  const titleOf = (id: string) => destinations.rows?.find((r) => r.id === id)?.title ?? 'a record';
   const key = `add-whole:${importId}`;
   const step = data.workflow.find((s) => s.id === 'add_to_experiments');
   const acceptance = data.capabilities?.proposal_acceptance;
@@ -1779,16 +1891,30 @@ function AddStage({
             <h4 className="hi-block-title">{STAGE.addSummaryTitle}</h4>
             <p className="hi-counts">
               {plural(sendable.length, 'candidate can', 'candidates can')} be sent
-              {blocked.length > 0
-                ? ` · ${blocked.reduce((n, b) => n + b.count, 0).toLocaleString('en-US')} will not be`
+              {blockedTotal > 0 ? ` · ${blockedTotal.toLocaleString('en-US')} will not be` : ''}
+              {plan.alreadySent.length > 0
+                ? ` · ${plan.alreadySent.length.toLocaleString('en-US')} already sent`
                 : ''}
             </p>
+            {/* WHAT THIS IMPORT ALREADY SENT survives a reload: the session remembers
+                each send (`proposed`), even though the last report is not kept. */}
+            {sentTo.size > 0 && (
+              <ul className="hi-add-blocked">
+                {[...sentTo.entries()].map(([id, count]) => (
+                  <li key={id}>
+                    <span className="hi-add-blocked-count">{count.toLocaleString('en-US')}</span> already
+                    sent to{' '}
+                    <Link to={ROUTES.recordView(id, 'proposals')}>{titleOf(id)}</Link>
+                  </li>
+                ))}
+              </ul>
+            )}
             {blocked.length > 0 && (
               <ul className="hi-add-blocked">
-                {blocked.map((row) => (
-                  <li key={row.reason}>
-                    <span className="hi-add-blocked-count">{row.count.toLocaleString('en-US')}</span>{' '}
-                    {row.reason}
+                {blocked.map((group) => (
+                  <li key={group.category}>
+                    <span className="hi-add-blocked-count">{group.rows.length.toLocaleString('en-US')}</span>{' '}
+                    {group.label}
                   </li>
                 ))}
               </ul>
@@ -1797,8 +1923,9 @@ function AddStage({
 
           {sendable.length === 0 ? (
             <p className="hi-body hi-empty-inline">
-              Nothing in this import can be sent yet. Resolve its conflicts, or read and
-              reconstruct its sources first.
+              {plan.alreadySent.length > 0
+                ? 'Everything this import can send has been sent.'
+                : 'Nothing in this import can be sent yet. Resolve its field conflicts, or read and reconstruct its sources first.'}
             </p>
           ) : sendable.length === 1 ? (
             /* ONE CANDIDATE: this panel and that candidate's own form would do the
@@ -1889,10 +2016,12 @@ function AddResult({
   /** The server's own `proposal_acceptance` capability says no reviewer can be identified. */
   acceptanceUnavailable: boolean;
 }) {
-  const groups = groupNotSent(result.not_sent);
+  const groups = groupUnsent(result.not_sent);
   return (
     <div className="hi-addwhole-result">
-      <h4 className="hi-block-title">{IMPORT_COPY.addWholeResultTitle}</h4>
+      <h4 className="hi-block-title" tabIndex={-1}>
+        {IMPORT_COPY.addWholeResultTitle}
+      </h4>
       {/* EVERY NUMBER FROM `counts`, AND ALL OF THEM. */}
       <p className="hi-counts">
         {result.counts.sent} sent · {result.counts.already_sent} already there ·{' '}
@@ -1964,10 +2093,10 @@ function AddResult({
       {groups.length > 0 && (
         <ul className="hi-addwhole-unsent">
           {groups.map((group) => (
-            <li key={group.reason}>
+            <li key={group.category}>
               <Disclosure
                 className="hi-disclosure"
-                summary={group.reason}
+                summary={group.label}
                 meta={String(group.rows.length)}
               >
                 <ul className="hi-addwhole-sent">

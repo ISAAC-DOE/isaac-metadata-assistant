@@ -46,7 +46,9 @@ MINI = "bl15_synthetic_mini_corpus"
 
 
 def test_the_cardinality_rule_is_named_versioned_and_stated_per_concept():
-    assert mp.RULE_CARDINALITY.startswith("bl15.mapping.cardinality.v1:")
+    # v2 (2026-09-23): the meaning changed — scans are established only by a source's
+    # own `#S`, and every measurement-level reading is compared with every scan's.
+    assert mp.RULE_CARDINALITY.startswith("bl15.mapping.cardinality.v2:")
     assert set(mp.CONCEPT_CARDINALITY.values()) <= mp.CARDINALITIES
     for concept in mp.CONCEPT_CARDINALITY:
         assert concept in ev.CONCEPTS, concept
@@ -57,6 +59,19 @@ def test_the_cardinality_rule_is_named_versioned_and_stated_per_concept():
     # ANYTHING NOT DECLARED IS ONE VALUE PER MEASUREMENT — the conservative default,
     # because comparing everything is what can never hide a disagreement.
     assert mp.cardinality_for(ev.CONCEPT_SAMPLE_NAME) == mp.CARDINALITY_PER_MEASUREMENT
+
+
+def test_four_scan_stated_quantities_were_reverted_to_per_measurement_pending_Q21():
+    """v1 declared them per scan; a macro's planned value and the header's recorded
+    value for the SAME, only scan then read as variation. Reverted until the domain
+    owner answers which acquisition quantities vary per scan (Q21)."""
+    for concept in (
+        ev.CONCEPT_COUNTING_TIME,
+        ev.CONCEPT_SCAN_COMMAND,
+        ev.CONCEPT_ENERGY_GRID,
+        ev.CONCEPT_EMISSION_ENERGY,
+    ):
+        assert mp.cardinality_for(concept) == mp.CARDINALITY_PER_MEASUREMENT, concept
 
 
 def test_two_scan_carried_concepts_stay_per_measurement_on_purpose():
@@ -212,6 +227,158 @@ def test_variation_survives_the_round_trip_and_is_windowed_with_a_true_total():
     assert again.variation == bounded.variation
     assert again.variation_total == bounded.variation_total
     assert again.agreement == "varies"
+
+
+# --- v2: what an independent review measured v1 getting wrong (2026-09-23) --------
+
+
+def test_MUTATION_a_macro_plan_against_the_headers_recording_of_the_only_scan_conflicts():
+    """The review's probe: macro plans 9175 eV, the only scan's header records 9180 eV.
+    v1 called that variation. MUTATION (run): v1's grouping — measurement-level readings
+    in a group of their own — together with `emission_energy` restored to `per_scan`
+    turns this red. Each change alone is caught elsewhere: the revert by the test above,
+    the grouping by the three comparison tests below (all three went red)."""
+    items = [
+        _item(ev.CONCEPT_EMISSION_ENERGY, "9175", path="run01.mac", scope=ev.SCOPE_MEASUREMENT,
+              normalized=9175.0, source_type=ev.SOURCE_TYPE_MACRO),
+        _item(ev.CONCEPT_EMISSION_ENERGY, "9180.0", path=SPEC, scan="1", normalized=9180.0,
+              source_type=ev.SOURCE_TYPE_SPEC_ACQUISITION),
+    ]
+    candidate = _candidates(items)[ev.CONCEPT_EMISSION_ENERGY]
+    assert candidate.unresolved_reason == hist.UNRESOLVED_SOURCES_DISAGREE
+    assert candidate.variation == ()
+
+
+def test_MUTATION_a_measurement_level_target_is_compared_with_every_scans_stem():
+    """For a per-scan concept a measurement-level reading is compared with EVERY scan
+    reading — for `acquisition_target` on the stem alone. A macro declaring another
+    stem is a conflict; a macro declaring this one is not."""
+    target = ev.CONCEPT_ACQUISITION_TARGET
+    scans = [
+        _item(target, "ZZ_unit_001.dat", path=S1, scan="1", normalized={"measurement_stem": "ZZ_unit", "scan_index": 1}),
+        _item(target, "ZZ_unit_002.dat", path=S2, scan="2", normalized={"measurement_stem": "ZZ_unit", "scan_index": 2}),
+    ]
+    other = _item(target, "ZZ_other", path="run01.mac", scope=ev.SCOPE_MEASUREMENT, source_type=ev.SOURCE_TYPE_MACRO)
+    disputed = _candidates([other, *scans])[target]
+    assert disputed.unresolved_reason == hist.UNRESOLVED_SOURCES_DISAGREE
+    assert "ZZ_other" in [row["value"] for row in disputed.disagreement]
+    same = _item(target, "ZZ_unit", path="run01.mac", scope=ev.SCOPE_MEASUREMENT, source_type=ev.SOURCE_TYPE_MACRO)
+    varies = _candidates([same, *scans])[target]
+    assert varies.unresolved_reason is None
+    assert varies.agreement == "varies"
+    # The macro's reading is kept, as the measurement's row, beside each scan's.
+    assert [r["scan"] for r in varies.variation] == [None, "1", "2"]
+
+
+def test_MUTATION_a_file_level_column_that_disagrees_with_a_scans_column_conflicts():
+    col = ev.CONCEPT_DETECTOR_COLUMN
+    items = [
+        _item(col, "I0", path=SPEC, item="column 1", scope=ev.SCOPE_MEASUREMENT,
+              source_type=ev.SOURCE_TYPE_SPEC_ACQUISITION),
+        _item(col, "vortDT", path=S1, scan="1", item="column 1"),
+    ]
+    candidate = _candidates(items)[col]
+    assert candidate.unresolved_reason == hist.UNRESOLVED_SOURCES_DISAGREE
+
+
+def test_MUTATION_a_reading_whose_scan_is_not_established_is_never_variation():
+    """A scan export that names no single scan (`scan` None) cannot be a different
+    scan from the SPEC file's scan 1 — it is compared as the same measurement, and
+    differing is a conflict, not variation."""
+    col = ev.CONCEPT_DETECTOR_COLUMN
+    items = [
+        _item(col, "vortDT", path=SPEC, scan="1", item="column 2", source_type=ev.SOURCE_TYPE_SPEC_ACQUISITION),
+        _item(col, "vortDT2", path=S1, scan=None, item="column 2"),
+    ]
+    candidate = _candidates(items)[col]
+    assert candidate.unresolved_reason == hist.UNRESOLVED_SOURCES_DISAGREE
+    assert candidate.variation == ()
+
+
+def test_one_scan_never_differs_from_scan_to_scan():
+    target = ev.CONCEPT_ACQUISITION_TARGET
+    one = [
+        _item(target, "ZZ_unit", path="run01.mac", scope=ev.SCOPE_MEASUREMENT, source_type=ev.SOURCE_TYPE_MACRO),
+        _item(target, "ZZ_unit_001.dat", path=S1, scan="1", normalized={"measurement_stem": "ZZ_unit", "scan_index": 1}),
+    ]
+    candidate = _candidates(one)[target]
+    assert candidate.unresolved_reason is None
+    # The stems agree and only ONE scan exists: agreement, not variation.
+    assert candidate.variation == ()
+    assert "scan to scan" not in candidate.rule
+    # A concept a scan states several of, over ONE scan, says "several" — never
+    # "differs from scan to scan".
+    col = ev.CONCEPT_DETECTOR_COLUMN
+    columns = _candidates([
+        _item(col, "I0", path=S1, scan="1", item="column 0"),
+        _item(col, "vortDT", path=S1, scan="1", item="column 1"),
+    ])[col]
+    assert columns.agreement == "varies"
+    assert columns.variation_basis == mp.CARDINALITY_PER_SCAN_ITEM
+    assert "several values" in columns.rule
+    assert "scan to scan" not in columns.rule
+
+
+def _export(tmp_path, name, body):
+    import hashlib
+
+    from isaac_api.bl15 import scans as scan_reader
+    from isaac_api.bl15.inventory import SourceRecord
+
+    data = body.encode()
+    record = SourceRecord(
+        archive_path=f"ZZ_dir/{name}",
+        basename=name,
+        extension="dat",
+        size_bytes=len(data),
+        content_sha256=hashlib.sha256(data).hexdigest(),
+        parent_dir="ZZ_dir",
+        depth=1,
+    )
+    return scan_reader.read_scan_export(record, body).evidence
+
+
+def test_a_scan_exports_scan_is_its_own_S_line_never_its_file_index(tmp_path):
+    """The review's case: a SPEC file reopened and appended can export `#S 6` as
+    `_001`. The export's statements are about SPEC scan 6, not scan 1."""
+    evidence = _export(
+        tmp_path,
+        "ZZ_unit_001.dat",
+        "#S 6 gscan 1000 1100 5 0.5\n#T 0.5  (Seconds)\n#L synenergy I0\n1000 1\n",
+    )
+    assert {e.scan for e in evidence if e.scope == ev.SCOPE_SCAN} == {"6"}
+
+
+def test_an_export_naming_no_single_scan_leaves_its_scan_unestablished(tmp_path):
+    evidence = _export(
+        tmp_path,
+        "ZZ_unit_001.dat",
+        "#S 1 gscan 1000 1100 5 0.5\n#S 2 gscan 1000 1100 5 0.5\n#L synenergy I0\n1000 1\n",
+    )
+    assert {e.scan for e in evidence} == {None}
+
+
+def test_a_repeated_SPEC_scan_number_is_left_unestablished():
+    import hashlib
+
+    from isaac_api.bl15 import spec as spec_reader
+    from isaac_api.bl15.inventory import SourceRecord
+
+    body = (
+        "#F ZZ_unit\n#E 1\n#D Fri Jan 01 00:00:00 2100\n"
+        "#S 1 gscan 1000 1100 5 0.5\n#T 0.5  (Seconds)\n#L synenergy I0\n1000 1\n\n"
+        "#S 1 gscan 1000 1100 5 0.5\n#T 1.0  (Seconds)\n#L synenergy I0\n1000 1\n\n"
+        "#S 2 gscan 1000 1100 5 0.5\n#T 1.0  (Seconds)\n#L synenergy I0\n1000 1\n"
+    )
+    data = body.encode()
+    record = SourceRecord(
+        archive_path="ZZ_unit", basename="ZZ_unit", extension="", size_bytes=len(data),
+        content_sha256=hashlib.sha256(data).hexdigest(), parent_dir="", depth=0,
+    )
+    evidence = spec_reader.read_spec_acquisition(record, body).evidence
+    times = [(e.scan, e.raw_literal) for e in evidence if e.concept == ev.CONCEPT_COUNTING_TIME]
+    # `#S 1` appears twice, so neither is scan 1; `#S 2` is.
+    assert times == [(None, "0.5  (Seconds)"), (None, "1.0  (Seconds)"), ("2", "1.0  (Seconds)")]
 
 
 # --- the real synthetic corpora, end to end ----------------------------------------

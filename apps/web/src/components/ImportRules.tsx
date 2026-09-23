@@ -112,17 +112,31 @@ export function ImportRules({
   );
 }
 
+/**
+ * Which sources a rule applies to, in words. THE SERVER'S OWN SENTENCE FIRST
+ * (`selector.description`); otherwise read from the selector — and an EMPTY list is not
+ * a selector (2026-09-23: `Array.isArray([])` is true, so an every-source rule read
+ * "sample group ·").
+ */
+export function selectorText(selector: Record<string, unknown>): string {
+  if (typeof selector.description === 'string' && selector.description.trim()) {
+    return selector.description;
+  }
+  const list = (value: unknown): string[] =>
+    Array.isArray(value) ? value.filter((v): v is string => typeof v === 'string' && v.length > 0) : [];
+  const range = Array.isArray(selector.legacy_range) && selector.legacy_range.length === 2
+    ? (selector.legacy_range as number[])
+    : null;
+  const groups = list(selector.group_tokens);
+  const paths = list(selector.source_paths);
+  if (range) return range[0] === range[1] ? `legacy number ${range[0]}` : `legacy numbers ${range[0]}–${range[1]}`;
+  if (groups.length > 0) return `sample group ${groups.join(', ')}`;
+  if (paths.length > 0) return `${paths.length} named source${paths.length === 1 ? '' : 's'}`;
+  return 'every source';
+}
+
 function RuleSummary({ rule, conventionName }: { rule: ApiConventionRule; conventionName: string }) {
-  const selector = rule.selector ?? {};
-  const range = Array.isArray(selector.legacy_range) ? (selector.legacy_range as number[]) : null;
-  const groups = Array.isArray(selector.group_tokens) ? (selector.group_tokens as string[]) : null;
-  const where = range
-    ? `runs ${range[0]}–${range[1]}`
-    : groups
-      ? `sample group ${groups.join(', ')}`
-      : Array.isArray(selector.source_paths)
-        ? `${(selector.source_paths as string[]).length} named source(s)`
-        : 'every source';
+  const where = selectorText(rule.selector ?? {});
   const what =
     rule.kind === 'profile_binding'
       ? `${conventionName || String(rule.body.profile_id ?? '')}`

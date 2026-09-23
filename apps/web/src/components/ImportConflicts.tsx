@@ -1,5 +1,6 @@
 import { useId, useMemo, useState } from 'react';
 import { Disclosure } from './Disclosure';
+import { HelpTip } from './HelpTip';
 import { SemanticStatus } from './SemanticStatus';
 import { api } from '../lib/api';
 import { conflictKindLabel } from '../lib/bl15ReviewContent';
@@ -136,9 +137,16 @@ function ConflictKind({
   const shared = explanations.length === 1 ? explanations[0] : null;
   const title = kind === FIELD_KIND ? COPY.conflicts.fieldKindTitle : conflictKindLabel(kind);
   const meaning = kind === FIELD_KIND ? COPY.conflicts.fieldKindMeaning : shared;
+  /* ONE LINE ON THE SURFACE, THE REST ONE PRESS AWAY (independent review, 2026-09-23):
+     the first sentence of the server's own explanation stays visible, verbatim; the
+     remainder is behind the `?`, still in the DOM. */
+  const [lead, rest] = splitFirstSentence(meaning ?? '');
   const extra = list.length - CONFLICTS_SHOWN_PER_KIND;
   const open = list.filter((c) => !isResolved(c)).length;
+  const forbidden = list.every((c) => c.forbidden);
   const groupable = kind !== FIELD_KIND && groupRuleChoices(list) !== null;
+  /* OPEN FIRST, resolved after — so the first five rows are the ones still waiting. */
+  const ordered = [...list.filter((c) => !isResolved(c)), ...list.filter((c) => isResolved(c))];
 
   return (
     <section className="hi-conflict-group" aria-labelledby={titleId}>
@@ -152,8 +160,26 @@ function ConflictKind({
             </span>
           )}
         </h4>
-        {/* THE MEANING, VERBATIM AND ALWAYS VISIBLE — once per kind. */}
-        {meaning && <p className="hi-conflict-explanation">{meaning}</p>}
+        {/* THE MEANING, VERBATIM — its first sentence always visible, once per kind. */}
+        {lead && (
+          <p className="hi-conflict-explanation">
+            {lead}
+            {rest && (
+              <>
+                {' '}
+                <HelpTip subject={`this kind of conflict: ${title}`}>{rest}</HelpTip>
+              </>
+            )}
+          </p>
+        )}
+        {/* WHAT HAS BEEN CHOSEN, said once for the kind rather than on every row. */}
+        {open > 0 && (
+          <p className="hi-conflict-kind-state">
+            {forbidden
+              ? COPY.resolve.forbidden
+              : `${open} open — ${COPY.conflicts.noValue.replace(/\.$/, '')} for ${open === 1 ? 'it' : 'any of them'}.`}
+          </p>
+        )}
         {groupable && (
           <Disclosure className="hi-conflict-review hi-group-rule" summary={COPY.resolve.groupTitle}>
             <GroupRuleForm
@@ -168,7 +194,7 @@ function ConflictKind({
         )}
       </div>
       <ul className="hi-conflict-list" id={listId}>
-        {list.map((conflict, index) => (
+        {ordered.map((conflict, index) => (
           <ConflictRow
             key={conflict.key}
             conflict={conflict}
@@ -246,20 +272,29 @@ function ConflictRow({
             </li>
           ))}
         </ul>
-        <span className="hi-conflict-state">
-          {conflict.forbidden
-            ? COPY.resolve.forbidden
-            : resolved
-              ? `Resolved by a rule you recorded${chosen ? `: ${chosen}` : ''}. Every reading is still kept.`
-              : COPY.conflicts.noValue}
-        </span>
+        {/* The open state is said once, on the kind; a row says so only when it differs. */}
+        {resolved && (
+          <span className="hi-conflict-state">
+            {`Resolved by a rule you recorded${chosen ? `: ${chosen}` : ''}. Every reading is still kept.`}
+          </span>
+        )}
         {/* Which acquisition, so a long list of rows can be told apart. */}
         {conflict.subject && <span className="hi-conflict-subject">{conflict.subject}</span>}
       </div>
       {showExplanation && conflict.explanation && (
         <p className="hi-conflict-explanation">{conflict.explanation}</p>
       )}
-      <Disclosure className="hi-conflict-review" summary={COPY.conflicts.review}>
+      <Disclosure
+        className="hi-conflict-review"
+        summary={
+          <>
+            {COPY.conflicts.review}
+            {/* Each "Review Sources" names WHICH conflict for a screen reader, since a
+                list holds many; the visible words stay the start of the name. */}
+            {conflict.subject && <span className="sr-only"> — {conflict.subject}</span>}
+          </>
+        }
+      >
         <ol className="hi-layers">
           <li className="hi-layer">
             <h5 className="hi-layer-title">{COPY.layers.sourceFact}</h5>
@@ -481,6 +516,14 @@ function ResolveForm({
  * — a single conflict is resolved on its own row, and two acquisitions sharing a
  * legacy number are never resolved at all.
  */
+/** `[first sentence, the rest]` of a server explanation, split at the first ". ". */
+export function splitFirstSentence(text: string): [string, string] {
+  const trimmed = text.trim();
+  const at = trimmed.search(/[.!?](\s|$)/);
+  if (at < 0 || at === trimmed.length - 1) return [trimmed, ''];
+  return [trimmed.slice(0, at + 1), trimmed.slice(at + 1).trim()];
+}
+
 export function groupRuleChoices(
   list: readonly ConflictView[],
 ): { roles: string[]; groups: { token: string; count: number }[] } | null {

@@ -371,6 +371,16 @@ describe('BL15 review · §5 the table renders the server’s own counts', () =>
       ['filter', [{ raw_literal: '35' }, { raw_literal: '10' }]],
     ]) as never;
     expect(cellFor(differ, 'filter').state).toBe('disputed');
+    // COMPARED ON THE READING, as the server compares (2026-09-23): `filter10` and `10`
+    // both normalise to 10, so they agree — the server says Sources Agree, and a cell
+    // saying "2 sources disagree" beside it contradicted the server.
+    const sameReading = new Map([
+      ['filter', [
+        { raw_literal: 'filter10', normalized_value: 10, unit: null },
+        { raw_literal: '10', normalized_value: 10, unit: null },
+      ]],
+    ]) as never;
+    expect(cellFor(sameReading, 'filter').state).toBe('read');
   });
 });
 
@@ -431,12 +441,13 @@ describe('BL15 review · §6 conflicts are unmissable and never adjudicated', ()
   it('shows no chosen winner and states that nothing was resolved', () => {
     const { container } = renderReview();
     const text = (container.textContent ?? '').toLowerCase();
-    // Every open conflict says, in the brief's own words, that nothing was chosen.
-    const conflicts = [...container.querySelectorAll('.hi-conflict')];
-    expect(conflicts.length).toBeGreaterThan(0);
-    for (const c of conflicts) {
-      expect(c.querySelector('.hi-conflict-state')?.textContent).toMatch(
-        /No value has been selected\.|nothing will be chosen/,
+    // Every kind with open conflicts says, in the brief's own words, that nothing was
+    // chosen — ONCE for the kind (2026-09-23), not repeated on every row.
+    const kinds = [...container.querySelectorAll('.hi-conflict-group')];
+    expect(kinds.length).toBeGreaterThan(0);
+    for (const kind of kinds) {
+      expect(kind.querySelector('.hi-conflict-kind-state')?.textContent).toMatch(
+        /No value has been selected|nothing will be chosen/,
       );
     }
     expect(text).not.toContain('most likely');
@@ -581,6 +592,9 @@ describe('BL15 review · §7 five outcomes, never a progress bar', () => {
     const levels = new Set(REVIEW.mapping.concepts.map((c) => c.placement_level));
     expect([...levels].sort()).toEqual([1, 2, 3, 4]);
     expect(text).toMatch(/structured ISAAC Extended Context companion/);
+    // The decision record's LEVEL NUMBER is not shown: it is `DEC-41`'s numbering, a raw
+    // token to a scientist, and the name already says where the information lands.
+    expect(text).not.toMatch(/\(level \d\)/);
   });
 
   it('shows only the OPEN domain questions, never the closed ones', () => {
@@ -897,9 +911,13 @@ describe('BL15 review · §12 every summary is a topic, never a claim', () => {
     // Kept referenced so a rename of either title is still caught here.
     expect(BL15_COPY.ceilingTitle.length).toBeGreaterThan(0);
     expect(BL15_MAPPING_STATUSES.length).toBe(5);
-    const seen = [...container.querySelectorAll('.disclosure-summary')].map((s) =>
-      (s.textContent ?? '').replace(/\s+/g, ' ').trim(),
-    );
+    // The summary's VISIBLE words: a screen-reader-only suffix (which conflict a
+    // "Review Sources" opens, 2026-09-23) names the subject, not a claim.
+    const seen = [...container.querySelectorAll('.disclosure-summary')].map((s) => {
+      const clone = s.cloneNode(true) as HTMLElement;
+      clone.querySelectorAll('.sr-only').forEach((n) => n.remove());
+      return (clone.textContent ?? '').replace(/\s+/g, ' ').trim();
+    });
     expect(seen.length).toBeGreaterThan(0);
     const norm = (t: string) => t.replace(/\s+/g, ' ').trim();
     const allowedNorm = new Set([...allowed].map(norm));

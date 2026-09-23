@@ -76,7 +76,24 @@ export const PARSE_STATE_LABELS: Readonly<Record<string, string>> = {
 export const SOURCE_KIND_LABELS: Readonly<Record<string, string>> = {
   reference: 'Reference',
   synthetic_fixture: 'Example source',
+  archive: 'Archive',
 };
+
+/**
+ * An archive's id as a reader names it — `bl15_synthetic_mini_corpus` becomes
+ * "BL15 synthetic mini corpus" (2026-09-23). The exact id stays one press away behind a
+ * `?`, because it is what an operator types and what the server logs.
+ */
+export function archiveLabel(id: string): string {
+  const bare = id.startsWith('staged:') ? id.slice('staged:'.length) : id;
+  const words = bare
+    .split(/[_\s]+/)
+    .filter(Boolean)
+    .map((w) => (/^[a-z]+\d+$/i.test(w) ? w.toUpperCase() : w.toLowerCase()));
+  if (words.length === 0) return id;
+  const text = words.join(' ');
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}
 
 export const IMPORT_COPY = {
   /** The eyebrow above the page title. Names the goal, not the mechanism. */
@@ -227,6 +244,12 @@ export const IMPORT_COPY = {
   emptyCandidatesBody:
     'Nothing has been reconstructed yet. Read the sources first — a reference on its ' +
     'own carries nothing for a reconstruction to work from.',
+  /* When the sources HAVE been read and only the reconstruction is missing, the line
+     above would tell a reader to do what they already did (independent review,
+     2026-09-23). */
+  emptyCandidatesReadBody:
+    'The sources have been read, and nothing has been reconstructed from them yet. ' +
+    'Reconstruct the candidates in Runs & Candidates.',
 
   /** Actions. Plain verbs, no progress language for work that does not happen. */
   actionStart: 'Start an Import',
@@ -407,6 +430,7 @@ export const IMPORT_STAGE_COPY = {
     ambiguous: 'Ambiguous',
     stale: 'Stale Rule',
     suggested: 'Suggested',
+    sent: 'Sent',
     variesByScan: 'Varies by Scan',
     severalPerScan: 'Several per Scan',
     variesByFile: 'Varies by File',
@@ -429,7 +453,10 @@ export const IMPORT_STAGE_COPY = {
   },
   bucketTitles: {
     ready: 'Ready to Send',
-    conflict: 'Sources Conflict',
+    /* NAMED FOR THE SET IT COUNTS (2026-09-23): field values whose sources disagree —
+       distinct from the Conflicts tab's count, which also holds the findings about which
+       measurement a file is, and from what the Add stage cannot send. */
+    conflict: 'Field Values in Conflict',
     needsReview: 'Needs Review',
     resolved: 'Resolved',
     unmapped: 'Unmapped',
@@ -461,7 +488,7 @@ export const IMPORT_STAGE_COPY = {
   allCounts: 'All counts, and where each came from',
   mapping: 'What the official schema can take',
   ceiling: 'What cannot be finished here',
-  extended: 'Extended context (level 4)',
+  extended: 'Kept in the extended context',
   leftOut: 'What this import left out',
   layers: {
     sourceFact: 'Source Facts',

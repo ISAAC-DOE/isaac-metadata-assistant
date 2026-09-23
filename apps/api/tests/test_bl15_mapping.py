@@ -410,6 +410,11 @@ def test_the_temperature_reason_names_the_specific_wrong_default():
     assert "states no temperature anywhere" not in reason
     assert "verbatim" in reason and "never converted" in reason
     assert "Not recorded" in reason
+    # 2026-09-23: nor the universal claim that replaced it, which a labelled number
+    # (`Temperature: 298 K`) falsifies. The claim is about THIS BUILD: it converts none.
+    assert "No source here supplies that number" not in reason
+    assert "converts no source statement into context.temperature_K" in reason
+    assert "including a labelled number" in reason
     assert mp.unmapped_concepts() == ()
     assert not any(
         reason == m.reason for m in mp.MAPPINGS.values()

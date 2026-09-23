@@ -1,5 +1,6 @@
 import { useCallback, useId, useRef, useState } from 'react';
 
+import { Disclosure } from './Disclosure';
 import { FileText, Plus, X } from './icons';
 import './import-file-staging.css';
 
@@ -360,8 +361,9 @@ export function ImportFileStaging({ onRecord, busy = false }: ImportFileStagingP
           this panel and an uploader, and a reader who does not understand it
           would misread every row above.
         */
-        <details className="ifs-explain">
-          <summary>What recording a file does</summary>
+        /* The shared `Disclosure`, not a native `<details>` with an 11px triangle
+           (independent review, 2026-09-23) — same words, same place. */
+        <Disclosure className="ifs-explain" summary="What recording a file does">
           <p>
             It adds the file&rsquo;s name, size, type and — if you computed one — its checksum to
             this import&rsquo;s source list. <strong>The ISAAC server never receives the
@@ -370,7 +372,7 @@ export function ImportFileStaging({ onRecord, busy = false }: ImportFileStagingP
             your browser by reading the file you chose — the server does not recompute it and
             does not confirm it.
           </p>
-        </details>
+        </Disclosure>
       )}
     </div>
   );

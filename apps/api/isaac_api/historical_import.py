@@ -173,6 +173,7 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass, field, replace
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Protocol, Sequence
 
@@ -834,6 +835,71 @@ CANDIDATE_NOT_PROPOSABLE_NO_WRITE_PATH = (
     "from. THIS IS A LIMITATION OF THIS BUILD AND NOT A STATEMENT ABOUT THE "
     "OFFICIAL ISAAC SCHEMA, which defines this field."
 )
+
+#: Why a time with NO ZONE is never proposed into a ``*_utc`` field (2026-09-23).
+#:
+#: A SPEC ``#D`` line — ``Fri Jan 01 00:00:00 2099`` — is the instrument's local clock
+#: and names no zone. Proposing it verbatim into ``timestamps.acquired_start_utc``
+#: would assert a UTC instant nothing states; converting it would guess the zone. It is
+#: kept as evidence. A reading that carries its zone (the epoch line, converted to UTC
+#: by a named rule) is proposable as before.
+CANDIDATE_NOT_PROPOSABLE_LOCAL_TIME = (
+    "This time is written in the instrument's local clock and names no time zone, so "
+    "it cannot go into a UTC field without guessing the zone. It is kept as evidence. "
+    "Where the file also states the instant as an epoch, that UTC value is the one "
+    "offered."
+)
+
+
+#: Why a run-owned value read from a measurement that is NOT offered as a Run is not
+#: proposable (2026-09-23). It was proposable, so the Add stage said "11 can be sent" and
+#: the batch then sent 9: an alignment scan's epoch and timestamp have no run to belong
+#: to, and never will. Stated once, here, and quoted by the batch route.
+CANDIDATE_NOT_PROPOSABLE_NOT_A_RUN = (
+    "This value belongs to a measurement this import does not offer as a Run — "
+    "an alignment scan or a reference standard rather than a sample "
+    "measurement. Its reading is kept and nothing is discarded; there is simply "
+    "no run for it to be proposed against. Change the measurement's "
+    "classification if you disagree."
+)
+
+
+def _target_scope(path: str | None) -> str | None:
+    """``record`` | ``run`` | ``None`` — which writer applies a value at ``path``.
+
+    Read from ``routes``, the one derivation the proposal routes use, rather than
+    transcribed.
+    """
+    if not path:
+        return None
+    from . import routes
+
+    writer = routes._proposal_writer_for(path)
+    return routes._PROPOSAL_WRITER_SCOPE.get(writer) if writer else None
+
+
+def _no_run_for(candidate: "SemanticCandidate") -> "SemanticCandidate":
+    """A run-owned value of a measurement that is not a Run: shown, never sendable."""
+    if candidate.proposable and _target_scope(candidate.target_field_path) == "run":
+        return replace(candidate, not_proposable_reason=CANDIDATE_NOT_PROPOSABLE_NOT_A_RUN)
+    return candidate
+
+
+def is_zoned_utc_value(path: str | None, value: Any) -> bool:
+    """Whether ``value`` may be proposed at ``path`` as far as TIME ZONES go.
+
+    Any path not ending ``_utc`` is unaffected. A ``*_utc`` path takes only an ISO-8601
+    instant that states its own offset (``Z`` or ``±hh:mm``).
+    """
+    if not path or not path.endswith("_utc"):
+        return True
+    if not isinstance(value, str):
+        return False
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    return parsed.tzinfo is not None
 
 
 @dataclass(frozen=True)
@@ -2564,6 +2630,12 @@ def read_archive(
             bounded.append(_bound_candidate(candidate, writable))
             if derived is not None and len(candidates) + len(bounded) < MAX_CANDIDATES_PER_SESSION:
                 bounded.append(_bound_candidate(derived, writable))
+        # (2026-09-23) A value of a measurement that is not a Run has no run to go to,
+        # so it is not "ready"; and readings that target ONE field are compared again
+        # AFTER resolutions, since a confirmed resolution is itself a reading of it.
+        if unit is not None and not unit.run_candidate:
+            bounded = [_no_run_for(c) for c in bounded]
+        bounded = rc._reconcile_same_field(bounded)
         label_tokens = _label_tokens_for(unit, evidence_by_source)
         per_unit = semantics["units"].get(unit_candidates.stem, {})
         units.append(
@@ -3305,6 +3377,19 @@ def _bound_candidate(
         and candidate.target_field_path not in writable
     ):
         reason = CANDIDATE_NOT_PROPOSABLE_NO_WRITE_PATH
+    # THE ZONE GUARD, applied here as well as in the reconstruction so a DERIVED
+    # candidate (a confirmed resolution) or any provider's candidate cannot carry a
+    # zone-less time into a UTC field either.
+    if (
+        reason is None
+        and candidate.unresolved_reason is None
+        and candidate.kind == CANDIDATE_KIND_FIELD
+        and not is_zoned_utc_value(candidate.target_field_path, candidate.proposed_value)
+    ):
+        reason = CANDIDATE_NOT_PROPOSABLE_LOCAL_TIME
+        # …and it carries no value, exactly like the reconstruction's own zone-less
+        # candidate, so a resolved one and an agreeing one never differ.
+        candidate = replace(candidate, proposed_value=None)
     variation = candidate.variation
     variation_total = candidate.variation_total
     if len(variation) > MAX_VARIATION_ROWS:
@@ -4774,6 +4859,9 @@ def session_view(session: ImportSession) -> dict:
         # for a bundle with no archive, which is an absence rather than zeroes.
         "corpus_digest": corpus_digest(session),
         "archive": _archive_view(session),
+        # (2026-09-23) What the batch will do with each candidate, from the batch's
+        # own partition — so the Add stage predicts exactly what it then reports.
+        "send_plan": send_plan(session),
         # --- added 2026-09-22 ----------------------------------------------------
         # The registered naming CONVENTIONS a scientist can bind a subset of Runs to —
         # each with its historical aliases, and none of them a person.
@@ -5151,6 +5239,76 @@ def session_summary(session: ImportSession) -> dict:
             else False
         ),
         "proposed_count": len(session.proposed),
+    }
+
+
+def batch_partition(session: "ImportSession") -> tuple[list[SemanticCandidate], list[dict]]:
+    """``(sendable, not_sent)`` — how ``POST …/add-to-experiment`` splits this import.
+
+    ONE function, used by the batch route AND by the session view's ``send_plan``, so
+    what the Add stage says will happen and what then happens are one categorisation
+    (2026-09-23 — the stage said "11 can be sent" and the batch sent 9). Each unsent
+    row carries the reason the review surface already shows for the candidate.
+    """
+    sendable: list[SemanticCandidate] = []
+    not_sent: list[dict] = []
+    for candidate in candidates_of(session):
+        if candidate.unresolved_reason is not None:
+            not_sent.append(
+                {
+                    "candidate_id": candidate.candidate_id,
+                    "target_field_path": candidate.target_field_path,
+                    "kind": candidate.kind,
+                    "error": "candidate_unresolved",
+                    "reason": candidate.not_proposable_reason
+                    or CANDIDATE_NOT_PROPOSABLE_DISAGREEMENT,
+                }
+            )
+        elif not candidate.proposable:
+            not_sent.append(
+                {
+                    "candidate_id": candidate.candidate_id,
+                    "target_field_path": candidate.target_field_path,
+                    "kind": candidate.kind,
+                    "error": "candidate_not_proposable",
+                    "reason": candidate.not_proposable_reason
+                    or CANDIDATE_NOT_PROPOSABLE_NO_EXPERIMENT_CREATION,
+                }
+            )
+        else:
+            sendable.append(candidate)
+    return sendable, not_sent
+
+
+def has_no_run_when_creating_runs(session: "ImportSession", candidate: SemanticCandidate) -> bool:
+    """Whether a SENDABLE candidate would find no run when the batch creates runs.
+
+    A value written on a run needs the run of the measurement it was read from; a
+    beamtime-scope value belongs to no measurement. (A value of a measurement that is not
+    a Run is already not proposable — `CANDIDATE_NOT_PROPOSABLE_NOT_A_RUN`.)
+    """
+    reading = session.archive_reading
+    if reading is None or _target_scope(candidate.target_field_path) != "run":
+        return False
+    unit = reading.unit_of_candidate(candidate.candidate_id)
+    return unit is None or not unit.run_candidate
+
+
+def send_plan(session: "ImportSession") -> dict:
+    """What the batch WILL do with each candidate, published before anything is sent.
+
+    ``sendable`` and ``not_sent`` (candidate id -> the batch's own error code) come from
+    :func:`batch_partition` itself; ``no_run_when_creating_runs`` lists the sendable
+    candidates the batch reports as ``no_run_for_this_candidate`` when it creates runs.
+    Reasons are not repeated here — each candidate already carries its own.
+    """
+    sendable, not_sent = batch_partition(session)
+    return {
+        "sendable": [c.candidate_id for c in sendable],
+        "not_sent": {row["candidate_id"]: row["error"] for row in not_sent},
+        "no_run_when_creating_runs": [
+            c.candidate_id for c in sendable if has_no_run_when_creating_runs(session, c)
+        ],
     }
 
 

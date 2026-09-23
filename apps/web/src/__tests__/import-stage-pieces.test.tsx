@@ -31,7 +31,7 @@ import { join } from 'node:path';
 
 import { CONFLICTS_SHOWN_PER_KIND, ImportConflicts, groupRuleChoices } from '../components/ImportConflicts';
 import { CorpusReadOverview } from '../components/ImportCorpusReview';
-import { ImportRules, SignalSelection } from '../components/ImportRules';
+import { ImportRules, SignalSelection, selectorText } from '../components/ImportRules';
 import { ImportCandidateRow } from '../components/ImportCandidateRow';
 import { api } from '../lib/api';
 import { IMPORT_STAGE_COPY as C } from '../lib/historicalImportContent';
@@ -41,7 +41,10 @@ import {
   defaultStage,
   signalState,
   summaryItems,
-  wouldNotSend,
+  groupUnsent,
+  planFor,
+  unsentCategory,
+  UNSENT_CATEGORY_LABELS,
   type ConflictView,
 } from '../lib/importStages';
 import { normalizedText, type Bl15CorpusReview } from '../lib/bl15Review';
@@ -121,7 +124,11 @@ describe('§1 · a conflict is shown source by source, in four distinct layers',
     const chip = container.querySelector('.hi-conflict .semantic-status')!;
     expect(chip.textContent).toContain(C.stateLabels.conflict);
     expect(chip.querySelector('svg')).not.toBeNull();
-    expect(container.querySelector('.hi-conflict-state')?.textContent).toBe(C.conflicts.noValue);
+    // Nothing chosen — said ONCE for the kind (2026-09-23), not on every row.
+    expect(container.querySelector('.hi-conflict-kind-state')?.textContent).toBe(
+      '1 open — No value has been selected for it.',
+    );
+    expect(container.querySelector('li.hi-conflict .hi-conflict-state')).toBeNull();
   });
 
   it('keeps the four layers separate and labelled', () => {
@@ -161,9 +168,10 @@ describe('§1 · a conflict is shown source by source, in four distinct layers',
     expect(layer.textContent).toContain('A FAKE reason the evidence points one way.');
     const supports = [...layer.querySelectorAll('.hi-layer-supports li')];
     expect(supports.map((li) => li.className)).toEqual(['', 'is-not-counted']);
-    // A suggestion is not a resolution: the confirmed layer still says nothing was chosen,
-    // and the row still reads as an open conflict.
-    expect(container.querySelector('.hi-conflict-state')?.textContent).toBe(C.conflicts.noValue);
+    // A suggestion is not a resolution: the kind still says nothing was chosen, and the
+    // row still reads as an open conflict.
+    expect(container.querySelector('.hi-conflict-kind-state')?.textContent).toContain('No value has been selected');
+    expect(container.querySelector('li.hi-conflict .semantic-status')?.textContent).toContain(C.stateLabels.conflict);
   });
 
   it('MUTATION-GUARDED: two acquisitions sharing a legacy number get NO resolution control', () => {
@@ -333,6 +341,33 @@ describe('§2b · conflicts are grouped by kind, and a long kind shows five then
     expect(visible()).toHaveLength(CONFLICTS_SHOWN_PER_KIND);
   });
 
+  it('puts OPEN conflicts first, so the first five are the ones still waiting', () => {
+    const resolved = many(3, { resolution: { chosen_value: 'x', rule_id: 'R', applied: true } as never });
+    const open = many(4, { topic: 'internal_declaration_vs_filename' }).map((c, i) => ({
+      ...c,
+      key: `open-${i}`,
+      subject: `OPEN_${i}`,
+    }));
+    const { container } = renderConflicts([...resolved, ...open]);
+    const visible = [...container.querySelectorAll<HTMLLIElement>('li.hi-conflict')].filter((r) => !r.hidden);
+    expect(visible.slice(0, 4).map((r) => r.querySelector('.hi-conflict-subject')?.textContent)).toEqual([
+      'OPEN_0', 'OPEN_1', 'OPEN_2', 'OPEN_3',
+    ]);
+  });
+
+  it('shows the meaning’s first sentence on the surface and keeps the rest behind the `?`', () => {
+    const { container } = renderConflicts(many(2, { explanation: 'First FAKE sentence. Second FAKE sentence, kept.' }));
+    const meaning = container.querySelector('.hi-conflict-group-head .hi-conflict-explanation')!;
+    expect(meaning.firstChild?.textContent).toBe('First FAKE sentence.');
+    expect(meaning.querySelector('.helptip-panel')?.textContent).toBe('Second FAKE sentence, kept.');
+  });
+
+  it('names WHICH conflict each "Review Sources" opens, beginning with the visible words', () => {
+    renderConflicts(many(2));
+    const names = screen.getAllByRole('button', { name: new RegExp(`^${C.conflicts.review}`) }).map((b) => b.textContent);
+    expect(names).toEqual([`${C.conflicts.review} — FAKE_stem_00`, `${C.conflicts.review} — FAKE_stem_01`]);
+  });
+
   it('a kind with five or fewer has no Show more at all', () => {
     renderConflicts(many(5));
     expect(screen.queryByRole('button', { name: /^Show \d+ more$/ })).toBeNull();
@@ -382,7 +417,7 @@ describe('§2c · a whole sample group is resolved at the kind, by the kind of s
 
   it('the per-row form no longer offers the recurring option — it lives at the kind', () => {
     const { container } = renderConflicts(many(3));
-    fireEvent.click(within(container.querySelector('li.hi-conflict') as HTMLElement).getByRole('button', { name: C.conflicts.review }));
+    fireEvent.click(within(container.querySelector('li.hi-conflict') as HTMLElement).getByRole('button', { name: new RegExp(`^${C.conflicts.review}`) }));
     const row = container.querySelector('li.hi-conflict') as HTMLElement;
     expect(within(row).queryAllByRole('checkbox')).toEqual([]);
   });
@@ -651,6 +686,13 @@ describe('§6 · reading rules are attributed honestly and adopted only on purpo
     });
   });
 
+  it('says which sources a rule applies to — the server’s sentence, and never "sample group ·" for none', () => {
+    expect(selectorText({ description: 'legacy numbers 3-5' })).toBe('legacy numbers 3-5');
+    // An every-source rule serialises its lists EMPTY; `Array.isArray([])` is true.
+    expect(selectorText({ group_tokens: [], source_paths: [], legacy_range: null })).toBe('every source');
+    expect(selectorText({ group_tokens: ['03'] })).toBe('sample group 03');
+  });
+
   it('with ONE registered convention there is nothing to switch to, and it says so', () => {
     render(<ImportRules rules={rulesView()} profiles={PROFILES} importId="IMPZZ" busy={null} onAct={runAct} destinations={DEST} />);
     expect(screen.getByText(C.bindingOne)).toBeTruthy();
@@ -825,12 +867,67 @@ describe('§8 · statuses come from the server, and agreement is never inferred'
   });
 
   it('says in human words why the rest will not be sent — never a raw error code', () => {
-    const rows = wouldNotSend([
-      candidate({ proposable: false, unresolved_reason: 'sources_disagree' }),
-      candidate({ candidate_id: 'C3', proposable: false, not_proposable_reason: 'x' }),
+    const groups = groupUnsent([
+      { error: 'candidate_unresolved', kind: 'field', target_field_path: 'x.y', reason: null },
+      { error: 'candidate_not_proposable', kind: 'field', target_field_path: null, reason: 'x' },
     ]);
-    expect(rows.length).toBeGreaterThan(0);
-    for (const row of rows) expect(row.reason).not.toMatch(/_/);
+    expect(groups.length).toBe(2);
+    for (const group of groups) expect(group.label).not.toMatch(/_/);
+  });
+
+  it('ONE categorisation: a structural finding is never a conflict to decide', () => {
+    // The review measured "4 Sources disagree — decide in Conflicts first", three of them
+    // structural findings that can never be sent. A structural candidate is its own
+    // category, whatever its error code.
+    expect(unsentCategory({ error: 'candidate_unresolved', kind: 'run', target_field_path: null, reason: null })).toBe('structural');
+    expect(unsentCategory({ error: 'candidate_unresolved', kind: 'field', target_field_path: 'a.b', reason: null })).toBe('field_conflict');
+    // A MEASUREMENT IS NOT A DISAGREEMENT (review of #279, I4): the Add stage used to count
+    // five measurements and three identity disagreements as "8 findings about which
+    // measurement a file is", beside the Conflicts stage's "5 findings" — two sets, one name.
+    expect(unsentCategory({ error: 'candidate_not_proposable', kind: 'run', target_field_path: null, reason: 'x' })).toBe('measurement');
+    expect(unsentCategory({ error: 'candidate_not_proposable', kind: 'experiment', target_field_path: null, reason: 'x' })).toBe('experiment');
+    // …and none of the three candidate rows reuses the Conflicts stage's words for its findings.
+    for (const c of ['structural', 'measurement', 'experiment'] as const) {
+      expect(UNSENT_CATEGORY_LABELS[c]).not.toMatch(/findings about which measurement/i);
+    }
+    // The server's own sentences place a not-proposable value.
+    expect(
+      unsentCategory({
+        error: 'candidate_not_proposable', kind: 'field', target_field_path: 'timestamps.acquired_start_utc',
+        reason: "This time is written in the instrument's local clock and names no time zone, so it cannot go into a UTC field without guessing the zone.",
+      }),
+    ).toBe('local_time');
+    expect(
+      unsentCategory({
+        error: 'candidate_not_proposable', kind: 'field', target_field_path: 'timestamps.acquired_start_utc',
+        reason: 'This value belongs to a measurement this import does not offer as a Run — an alignment scan.',
+      }),
+    ).toBe('not_a_run');
+    expect(unsentCategory({ error: 'no_run_for_this_candidate', kind: 'field', target_field_path: 'a.b', reason: null })).toBe('whole_import');
+  });
+
+  it('the plan predicts from the batch’s own partition, and never counts a sent value again', () => {
+    const session = {
+      reconstruction: {
+        candidates: [
+          candidate({ candidate_id: 'A' }),
+          candidate({ candidate_id: 'B' }),
+          candidate({ candidate_id: 'C' }),
+          candidate({ candidate_id: 'D', kind: 'run', proposable: false, unresolved_reason: 'sources_disagree' } as never),
+        ],
+      },
+      send_plan: { sendable: ['A', 'B', 'C'], not_sent: { D: 'candidate_unresolved' }, no_run_when_creating_runs: ['C'] },
+      proposed: { A: { experiment_id: 'E1', proposal_id: 'P', note_id: 'N', proposed_utc: 't' } },
+    } as unknown as ApiImportSession;
+    const creating = planFor(session, true);
+    expect(creating.willSend).toEqual(['B']);
+    expect(creating.alreadySent).toEqual(['A']);
+    expect(creating.unsent.map((r) => [r.candidate_id, unsentCategory(r)])).toEqual([
+      ['D', 'structural'],
+      ['C', 'whole_import'],
+    ]);
+    // Into one chosen run, C has a run to go to.
+    expect(planFor(session, false).willSend).toEqual(['B', 'C']);
   });
 
   it('conflictViews marks the duplicate-legacy-number conflict forbidden even without a server flag', () => {

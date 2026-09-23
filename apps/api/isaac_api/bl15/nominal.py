@@ -85,8 +85,9 @@ SOURCE_CLASS = "reviewed convention rule; applied only on a scientist's confirma
 
 #: The decision this module used to implement, recorded so an auditor can find it.
 SUPERSEDED_DECISION = (
-    "DEC-43 (2026-09-17: 298 K as a nominal room temperature for the BL15-2 "
-    "Angel-style profile) — SUPERSEDED 2026-09-22 by the domain owner's answer, "
+    "DEC-43 (2026-09-17: 298 K as a nominal room temperature for the SSRL BL15-2 HERFD "
+    "electrochemistry filename convention) — SUPERSEDED 2026-09-22 by the domain "
+    "owner's answer, "
     "relayed by the project owner: missing temperature stays missing; no automatic "
     "insert and no automatic proposal."
 )

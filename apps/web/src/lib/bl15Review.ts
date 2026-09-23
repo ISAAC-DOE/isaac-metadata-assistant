@@ -557,6 +557,14 @@ export type Bl15Cell =
  * same thing corroborate rather than disagree, and calling that a dispute would put
  * a warning on the corpus's best-evidenced values.
  */
+/** What two readings are compared on — the server's `bl15.reconstruct._reading_of`. */
+export function readingOf(e: Pick<Bl15SourceEvidence, 'normalized_value' | 'unit' | 'raw_literal'>): string {
+  if (e.normalized_value !== null && e.normalized_value !== undefined) {
+    return `${normalizedText(e.normalized_value)}${e.unit ? ` ${e.unit}` : ''}`;
+  }
+  return e.raw_literal;
+}
+
 export function cellFor(
   byConcept: Map<string, Bl15SourceEvidence[]> | undefined,
   column: Bl15ColumnId,
@@ -565,7 +573,11 @@ export function cellFor(
   for (const concept of BL15_COLUMN_CONCEPTS[column]) {
     const hits = byConcept.get(concept);
     if (!hits || hits.length === 0) continue;
-    const distinct = new Set(hits.map((h) => h.raw_literal));
+    /* COMPARED ON THE READING, exactly as the server compares (`reconstruct._reading_of`):
+       the normalised value with its unit when a named rule produced one, else the
+       literal. Comparing raw literals called `filter10` and `10` "2 sources disagree"
+       beside a server verdict of Sources Agree (independent review, 2026-09-23). */
+    const distinct = new Set(hits.map(readingOf));
     if (hits.length > 1 && distinct.size > 1) return { state: 'disputed', evidence: hits };
     return { state: 'read', evidence: hits[0] };
   }

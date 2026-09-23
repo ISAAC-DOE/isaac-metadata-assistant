@@ -684,6 +684,38 @@ describe('§2 · every one of the nine things a scientist must see is on the scr
     expect(screen.getByText('Reference')).toBeTruthy();
   });
 
+  it('an ARCHIVE is named in words — its raw id and where it was read from sit behind the `?`', async () => {
+    /*
+     * The review of #279 measured `staged:multi_operator_corpus` printed beside the
+     * archive's human name: a staged archive's reference IS its id, so the reference line
+     * put the raw token straight back, and the Remove button was named by it too.
+     */
+    const archive: ApiImportSource = {
+      ...FIXTURE_SOURCE,
+      source_id: '01SRCARCH0000000000000001',
+      kind: 'archive',
+      filename: 'staged:FAKE_multi_corpus',
+      reference: 'staged:FAKE_multi_corpus',
+      fixture_name: null,
+    };
+    stub({ list: listResponse(), detail: session({ sources: [archive] }), experiments: { experiments: [] } });
+    renderScreen();
+    fireEvent.click(await screen.findByRole('button', { name: IMPORT_COPY.actionStart }));
+    await sessionOpen();
+    const panel = goTo('Source Bundle');
+    expect(within(panel).getByText(/Fake multi corpus/)).toBeTruthy();
+    // Every text node carrying the raw id is inside the help tip's hidden panel.
+    const walker = document.createTreeWalker(panel, NodeFilter.SHOW_TEXT);
+    let raw = 0;
+    for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+      if (!(n.textContent ?? '').includes('staged:')) continue;
+      raw += 1;
+      expect(n.parentElement?.closest('[hidden]'), `raw id shown: ${n.textContent}`).not.toBeNull();
+    }
+    expect(raw).toBeGreaterThan(0);
+    expect(within(panel).getByRole('button', { name: `${IMPORT_COPY.actionRemoveSource} Fake multi corpus` })).toBeTruthy();
+  });
+
   it('what was read, and what was NOT — per entry, never in a banner', async () => {
     await openSession();
     expect(screen.getByText('Read')).toBeTruthy();
@@ -1788,5 +1820,47 @@ describe('§14 · per-scan variation is not counted or shown as a conflict', () 
     expect(note.textContent).toContain(IMPORT_STAGE_COPY.stateLabels.variesByScan);
     expect(note.textContent).toContain('1 value');
     expect(note.textContent).toContain('not conflicts');
+  });
+});
+
+describe('§15 · an act is announced and lands focus on what it produced', () => {
+  it('Add This Import: the report heading takes focus and the stage says it was sent', async () => {
+    await openWithTwoSendable();
+    await chooseRecordAndAdd();
+    const heading = await screen.findByRole('heading', { name: IMPORT_COPY.addWholeResultTitle });
+    await waitFor(() => expect(document.activeElement).toBe(heading));
+    const status = [...document.querySelectorAll('.hi-stages-card > [role="status"]')];
+    expect(status).toHaveLength(1);
+    expect(status[0].textContent).toBe('Sent to the record. The report is below.');
+  });
+
+  it('Reconstruct: moves to Runs & Candidates, focuses its heading and says so', async () => {
+    stub({ list: listResponse(), detail: session({ reconstruction: null, furthest_step: 'parse' }) });
+    const base = globalThis.fetch as unknown as (...a: unknown[]) => Promise<Response>;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(typeof input === 'string' ? input : (input as Request).url ?? input);
+        if (url.endsWith('/reconstruct')) {
+          return new Response(JSON.stringify({ import: session() }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          });
+        }
+        return base(input, init);
+      }),
+    );
+    renderScreen();
+    fireEvent.click(await screen.findByRole('button', { name: IMPORT_COPY.actionStart }));
+    await sessionOpen();
+    goTo(IMPORT_STAGE_COPY.runs.title);
+    fireEvent.click(screen.getByRole('button', { name: IMPORT_COPY.actionReconstruct }));
+    await waitFor(() =>
+      expect(document.querySelector('.hi-stages-card > [role="status"]')?.textContent).toBe(
+        'Candidates reconstructed. Showing Runs & Candidates.',
+      ),
+    );
+    const heading = screen.getByRole('heading', { name: IMPORT_STAGE_COPY.runs.title, level: 3 });
+    await waitFor(() => expect(document.activeElement).toBe(heading));
   });
 });

@@ -4367,6 +4367,15 @@ export interface ApiImportCandidate {
   variation_scans?: number | null;
 }
 
+/** `hist.send_plan` — the batch's partition, published before anything is sent. */
+export interface ApiImportSendPlan {
+  sendable: string[];
+  /** candidate id -> the batch's own error code for it. */
+  not_sent: Record<string, string>;
+  /** Sendable ids the batch reports as `no_run_for_this_candidate` when it creates runs. */
+  no_run_when_creating_runs: string[];
+}
+
 /** One scan's (or item's, or file token's) own reading of a varying concept. */
 export interface ApiImportVariationRow {
   scan: string | null;
@@ -4499,6 +4508,12 @@ export interface ApiImportSession {
   profiles?: ApiImportProfile[];
   /** The reviewed reading rules in force, and the suggestions from other records. */
   rules?: ApiImportRulesView;
+  /**
+   * 2026-09-23 — what the batch will do with each candidate, computed by the SAME
+   * partition `POST …/add-to-experiment` uses (`hist.batch_partition`), so the Add stage
+   * predicts exactly what it then reports.
+   */
+  send_plan?: ApiImportSendPlan;
   /** The two capability blocks, computed by the same functions `/api/health` uses. */
   capabilities?: {
     historical_file_ingestion: ApiIngestionCapability;

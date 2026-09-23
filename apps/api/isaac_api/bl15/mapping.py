@@ -228,12 +228,19 @@ _ASSETS_BLOCKED_REASON_CORRECTION = "2026-09-16"
 #: it. The export BLOCKING is unchanged and is what the sentence now states: whatever a
 #: source says about temperature, in words or on a labelled line, is kept verbatim and
 #: never converted, so nothing here supplies ``context.temperature_K``.
+#:
+#: ***CORRECTED AGAIN 2026-09-23, after an independent review.*** The 2026-09-22 wording
+#: said "No source here supplies that number: a corpus either states no temperature at
+#: all, or states one only as words" — a universal claim, false for a labelled number
+#: (``notes._TEMPERATURE_LABEL`` matches ``Temperature: 298 K``). The true statement is
+#: about THIS BUILD, not the sources: it converts none of them.
 TEMPERATURE_ABSENT_REASON = (
     "context.temperature_K is required by the official schema whenever a context block "
-    "is present, and it takes a number in kelvin. No source here supplies that number: "
-    "a corpus either states no temperature at all, or states one only as words — "
-    "'room temperature', 'RT', a labelled Temperature: line — which is kept verbatim "
-    "in the extended context and never converted. The field is therefore left MISSING "
+    "is present, and it takes a number in kelvin. This build converts no source "
+    "statement into context.temperature_K: whatever a source says about temperature — "
+    "'room temperature', 'RT', or a labelled Temperature: line, including a labelled "
+    "number — is kept verbatim in the extended context and never converted. The field "
+    "is therefore left MISSING "
     "and shown as Not recorded, or as the source's own words where it has some: this "
     "application inserts no value and offers no value automatically, because a "
     "plausible number in a required field is a fabricated measurement that nothing "
@@ -1501,28 +1508,38 @@ CARDINALITIES: frozenset[str] = frozenset(
 )
 
 RULE_CARDINALITY = (
-    "bl15.mapping.cardinality.v1: a concept's readings are compared at the level its "
-    "cardinality names — a per-scan concept only with readings about the same scan, a "
-    "per-scan-item concept only with the same column or motor of the same scan, a "
-    "per-source concept only with the same token of the same file. Values that differ across scans are kept "
-    "as one reading per scan, never reported as a disagreement; two sources that "
-    "disagree about the same scan, or any disagreement about a per-measurement concept, "
-    "is still a conflict. Nothing is chosen and nothing is dropped."
+    "bl15.mapping.cardinality.v2: a concept's readings are compared at the level its "
+    "cardinality names. Two readings about DIFFERENT scans may differ only when each "
+    "source itself states which scan it is about — the SPEC scan number on its own #S "
+    "line; a scan export's file index is never taken as one. A per-scan-item concept is "
+    "compared within the same column or motor of the same scan, a per-source concept "
+    "within the same token of the same file. Every statement about the whole "
+    "measurement, or whose scan is not established, is compared with every reading of "
+    "the same item, so a plan that disagrees with a recording is a conflict. Values that "
+    "differ across two or more established scans are kept as one reading per scan; any "
+    "other difference is a conflict. Nothing is chosen and nothing is dropped."
 )
 
 #: THE DECLARED CARDINALITIES, each with the reason it is not the default.
 #:
 #: * ``acquisition_target`` — a scan export's basename names ITS OWN scan index, so it
-#:   differs by construction; a macro's declared target is one per measurement and is
-#:   compared among the measurement-level readings.
-#: * ``counting_time``, ``scan_command``, ``energy_grid``, ``emission_energy`` — set for
-#:   each scan, and legitimately different from one scan to the next.
+#:   differs by construction; a macro's declared target is compared with every scan's
+#:   on the measurement stem alone.
 #: * ``detector_column`` — a `#L` line lists SEVERAL columns; each column position is
 #:   its own item.
 #: * ``motor_position`` — a `#P` line gives SEVERAL motors; each motor is its own item.
 #: * ``unknown_token`` — an unrecognised piece of ONE file's own name, at one token
 #:   position; two files' pieces, or two positions of one name, are different facts,
 #:   not two accounts of one.
+#:
+#: REVERTED TO PER-MEASUREMENT IN v2 (2026-09-23): ``counting_time``,
+#: ``scan_command``, ``energy_grid`` and ``emission_energy``. v1 declared them per scan,
+#: and an independent review measured the cost: a macro's planned counting time or
+#: emission energy and the header's recorded value for the SAME, only scan read as
+#: variation. The domain answers so far treat counting time and emission energy as read
+#: "for a measurement", so they are compared as one value until the domain owner says
+#: which acquisition quantities are expected to vary per scan — asked as Q21 in
+#: ``docs/bl15-2-domain-questions-2026-09-16.md``.
 #:
 #: DELIBERATELY NOT HERE, though some of their readings are stated per scan:
 #: ``filter`` (a condition of the measurement — a scan header's filter motor disagreeing
@@ -1531,10 +1548,6 @@ RULE_CARDINALITY = (
 #: run, and choosing between scans' dates is a decision, not a reading).
 CONCEPT_CARDINALITY: dict[str, str] = {
     ev.CONCEPT_ACQUISITION_TARGET: CARDINALITY_PER_SCAN,
-    ev.CONCEPT_COUNTING_TIME: CARDINALITY_PER_SCAN,
-    ev.CONCEPT_SCAN_COMMAND: CARDINALITY_PER_SCAN,
-    ev.CONCEPT_ENERGY_GRID: CARDINALITY_PER_SCAN,
-    ev.CONCEPT_EMISSION_ENERGY: CARDINALITY_PER_SCAN,
     ev.CONCEPT_DETECTOR_COLUMN: CARDINALITY_PER_SCAN_ITEM,
     ev.CONCEPT_MOTOR_POSITION: CARDINALITY_PER_SCAN_ITEM,
     ev.CONCEPT_UNKNOWN_TOKEN: CARDINALITY_PER_SOURCE,
