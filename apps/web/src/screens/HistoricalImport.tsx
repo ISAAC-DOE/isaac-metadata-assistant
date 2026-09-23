@@ -570,19 +570,32 @@ function ImportSessionView({
        * are unless it names where to go next.
        */
       setStage((current) => current ?? activeRef.current);
+      /*
+       * WHERE THE READER WAS WHEN THEY PRESSED IT (2026-09-23 — main's CI went red on
+       * #280). An act can take seconds, and a reader may open another stage while it
+       * runs; the import-session a11y spec does exactly that, opening Conflicts right
+       * after pressing Reconstruct. The act used to apply its `next` regardless, so
+       * the response landing took the reader off the tab they had just chosen. Now an
+       * act moves the reader — and takes focus — ONLY if they are still on the stage
+       * where it started. It is still announced either way, without claiming a move.
+       */
+      const startedOn = activeRef.current;
       setBusy(name);
       setError(null);
       try {
         await run();
         session.reloadSilent();
-        if (next) setStage(next);
+        const stayed = activeRef.current === startedOn;
+        if (next && stayed) setStage(next);
         /* SAID AND FOCUSED (independent review, 2026-09-23): an act's result is
            announced in the stage's one polite region, and focus moves to what the act
            produced — its report or the stage heading — instead of being dropped when
-           the control that had it re-renders away. */
-        setAnnouncement(announcementFor(name));
-        pendingFocus.current = name.startsWith('add-whole') ? '.hi-addwhole-result .hi-block-title' : '.hi-stage-title';
-        setFocusTick((n) => n + 1);
+           the control that had it re-renders away. Never to a stage the reader left. */
+        setAnnouncement(announcementFor(name, stayed));
+        if (stayed) {
+          pendingFocus.current = name.startsWith('add-whole') ? '.hi-addwhole-result .hi-block-title' : '.hi-stage-title';
+          setFocusTick((n) => n + 1);
+        }
       } catch (err) {
         setError(err instanceof ApiError ? err : new ApiError(String(err)));
       } finally {
@@ -888,14 +901,23 @@ function StageTabs({
 }
 
 /** What an act says in the stage's polite region when it succeeds. */
-function announcementFor(name: string): string {
+/**
+ * The act's one polite sentence. `stayed` is false when the reader opened another stage
+ * while it ran: the act then moved nothing, so the sentence names no stage it "shows"
+ * and points at no report "below" (2026-09-23).
+ */
+function announcementFor(name: string, stayed = true): string {
   if (name === 'add-archive') return 'Archive added to the source bundle.';
   if (name === 'add-fixture') return 'Example source added to the source bundle.';
   if (name === 'add-reference' || name === 'record-staged-file') return 'Recorded as a source.';
   if (name.startsWith('remove:')) return 'Source removed.';
   if (name === 'parse') return 'Sources read.';
-  if (name === 'reconstruct') return 'Candidates reconstructed. Showing Runs & Candidates.';
-  if (name.startsWith('add-whole') && !name.endsWith(':create')) return 'Sent to the record. The report is below.';
+  if (name === 'reconstruct') {
+    return stayed ? 'Candidates reconstructed. Showing Runs & Candidates.' : 'Candidates reconstructed.';
+  }
+  if (name.startsWith('add-whole') && !name.endsWith(':create')) {
+    return stayed ? 'Sent to the record. The report is below.' : 'Sent to the record. The report is in Add to Experiment.';
+  }
   if (name.startsWith('resolve') || name.startsWith('rule:') || name.startsWith('adopt:') || name.startsWith('signal:')) {
     return 'Choice recorded. The import was read again under it.';
   }

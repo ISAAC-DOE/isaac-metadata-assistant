@@ -1914,4 +1914,84 @@ describe('§15 · an act is announced and lands focus on what it produced', () =
     const heading = screen.getByRole('heading', { name: IMPORT_STAGE_COPY.runs.title, level: 3 });
     await waitFor(() => expect(document.activeElement).toBe(heading));
   });
+
+  /*
+   * THE STAGE RACE (main CI red on #280, 2026-09-23). `imports-session-a11y.spec.ts`
+   * pressed Reconstruct and then opened Conflicts while the request was still in flight;
+   * when the response landed the act's `next` ('runs') took the reader off the tab they
+   * had just chosen, and the spec waited 15 s for Conflicts to be selected. A scientist
+   * switching tabs during a slow action got the same yank. An act now moves the reader,
+   * and takes focus, ONLY if they are still on the stage where they pressed it.
+   */
+  function stubDeferredReconstruct(): () => void {
+    stub({ list: listResponse(), detail: session({ reconstruction: null, furthest_step: 'parse' }) });
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const base = globalThis.fetch as unknown as (...a: unknown[]) => Promise<Response>;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(typeof input === 'string' ? input : (input as Request).url ?? input);
+        if (url.endsWith('/reconstruct')) {
+          await gate;
+          return new Response(JSON.stringify({ import: session() }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          });
+        }
+        return base(input, init);
+      }),
+    );
+    return release;
+  }
+
+  const tabFor = (title: string) => screen.getByRole('tab', { name: new RegExp(title.replace(/[&?]/g, '.')) });
+
+  it('a reader who switches tabs while an act is in flight STAYS where they went, and keeps focus', async () => {
+    const release = stubDeferredReconstruct();
+    renderScreen();
+    fireEvent.click(await screen.findByRole('button', { name: IMPORT_COPY.actionStart }));
+    await sessionOpen();
+    goTo(IMPORT_STAGE_COPY.runs.title);
+    fireEvent.click(screen.getByRole('button', { name: IMPORT_COPY.actionReconstruct }));
+    // The request is in flight; the reader moves on, by keyboard focus and a press.
+    const conflicts = tabFor(IMPORT_STAGE_COPY.conflicts.title);
+    conflicts.focus();
+    fireEvent.click(conflicts);
+    expect(conflicts.getAttribute('aria-selected')).toBe('true');
+
+    release();
+    // The act finished: its busy label is gone from the (hidden, mounted) Runs stage.
+    await waitFor(() => expect(screen.queryByText('Reconstructing…')).toBeNull());
+    expect(tabFor(IMPORT_STAGE_COPY.conflicts.title).getAttribute('aria-selected')).toBe('true');
+    expect(tabFor(IMPORT_STAGE_COPY.runs.title).getAttribute('aria-selected')).toBe('false');
+    // Focus was not pulled to a stage heading the reader has left.
+    expect(document.activeElement).toBe(tabFor(IMPORT_STAGE_COPY.conflicts.title));
+    // Still ANNOUNCED — but without claiming a move that did not happen.
+    await waitFor(() =>
+      expect(document.querySelector('.hi-stages-card > [role="status"]')?.textContent).toBe(
+        'Candidates reconstructed.',
+      ),
+    );
+  });
+
+  it('a reader who does NOT switch still lands on the act\'s next stage, with its heading focused', async () => {
+    const release = stubDeferredReconstruct();
+    renderScreen();
+    fireEvent.click(await screen.findByRole('button', { name: IMPORT_COPY.actionStart }));
+    await sessionOpen();
+    goTo(IMPORT_STAGE_COPY.runs.title);
+    fireEvent.click(screen.getByRole('button', { name: IMPORT_COPY.actionReconstruct }));
+    release();
+    await waitFor(() =>
+      expect(document.querySelector('.hi-stages-card > [role="status"]')?.textContent).toBe(
+        'Candidates reconstructed. Showing Runs & Candidates.',
+      ),
+    );
+    expect(tabFor(IMPORT_STAGE_COPY.runs.title).getAttribute('aria-selected')).toBe('true');
+    const heading = screen.getByRole('heading', { name: IMPORT_STAGE_COPY.runs.title, level: 3 });
+    await waitFor(() => expect(document.activeElement).toBe(heading));
+  });
 });

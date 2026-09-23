@@ -19,7 +19,8 @@ local collapsed-rail screenshots had understated.
 | #278 | Historical semantics: conventions independent of operators, reviewed rule reuse, Angel's 2026-09-22 answers, the named app-side residue | `f2838ba9` | `v0.0.260` → `f2838ba9`; **observed live on hosted** |
 | #277 | Record redesign: focused Capture area, state-vs-location spine, readable Record Map, decision-first proposals and validation, acceptance preflight | `50d3cdd6` | `v0.0.261` → `50d3cdd6`; **observed live on hosted** — Capture Home, the compact acceptance notice and the Record Map rendered on the owner's own record, rail expanded |
 | #279 | Historical Import: six focused stages, conflicts source by source, per-scan variation ≠ conflict | `ea3f08d1` | `v0.0.262` → `ea3f08d1` |
-| (this PR) | This record, decision register §B7, the ledger header + entry, a `CLAUDE.md` §11 pointer, the reproduced issue inventory | — | — |
+| #280 | This record, decision register §B7, the ledger header + entry, a `CLAUDE.md` §11 pointer, the reproduced issue inventory; the restore-pass serialization and the primary-read precedence fix | `82d35a46` | **none — `main`'s CI went red on this merge and the release gate REFUSED to tag it** (see below) |
+| #281 | An action that finishes never yanks the reader off a stage they just chose | resolve from `git log` | resolve with `git rev-list -n1 <tag>` — ships everything in #280 too |
 
 ## Owner complaint → outcome
 
@@ -167,3 +168,18 @@ vacuous (the file it pre-created was refused before the fallback was ever reache
 primary `404` is "Record Not Found" whatever else failed, and — the reverse race, which was worse —
 a primary `503` is never mislabelled "Record Not Found" because a secondary read answered `404`
 first. 9 tests; five failed on the old code.
+
+
+## `main` went red once, and the gate held
+
+`main`'s CI failed at `82d35a46` (#280's merge) — every check had passed on #280's exact head —
+and the release gate printed `release gate REFUSED for 82d35a46…`, so **no image was built from a
+red commit**. The failing step was the mutation spec `imports-session-a11y`: it clicked
+**Reconstruct**, then the **Conflicts** tab while the request was in flight, and when the response
+landed `act()` ran `setStage('runs')` over the reader's choice. Timing-dependent (it had passed on
+#279's and #280's own CI) and a **real product race** — a scientist switching stages during a slow
+action was yanked back. Fixed in #281: an act applies its `next` stage and its focus move only if
+the reader has not moved since it started; a deterministic test with a deferred request fails on
+the old code and under either guard's removal (mutation-checked by the orchestrator). **The lesson
+this repository already records applied once more: a green head proves the head; only `main`'s own
+run proves the merge — and here even the merge was identical, so what differed was only timing.**
