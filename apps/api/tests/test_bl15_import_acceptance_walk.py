@@ -432,6 +432,11 @@ def test_no_progress_indicator_can_ever_fill_and_the_digest_says_why(client):
         hist.EXPORT_BLOCKED_NO_DESCRIPTORS,
         mp.ASSETS_BLOCKED_REASON,
     ]
+    # AND IT IS TRUE OF A CORPUS THAT STATES A TEMPERATURE IN WORDS. Inverted
+    # 2026-09-22: the first blocker used to claim "this corpus states no temperature
+    # anywhere" for every archive. It still blocks — a words-only statement cannot
+    # satisfy `context.temperature_K` — and it no longer denies the statement.
+    assert "states no temperature anywhere" not in served[0]
 
 
 # --- PROOF 1: `.dat` files do not become Runs ---------------------------------

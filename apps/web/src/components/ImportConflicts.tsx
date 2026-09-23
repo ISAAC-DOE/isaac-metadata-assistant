@@ -7,6 +7,7 @@ import { IMPORT_STAGE_COPY } from '../lib/historicalImportContent';
 import {
   CHOOSABLE_ROLES,
   isResolved,
+  readingLabel,
   roleLabel,
   type ConflictView,
 } from '../lib/importStages';
@@ -42,6 +43,9 @@ const COPY = IMPORT_STAGE_COPY;
  * record only as a proposal. Two acquisitions sharing one legacy number are never
  * resolved — the server forbids it and this surface offers no control for it.
  */
+/** How many conflicts of one kind show before `Show N more`. */
+export const CONFLICTS_SHOWN_PER_KIND = 5;
+
 export function ImportConflicts({
   conflicts,
   importId,
@@ -58,13 +62,16 @@ export function ImportConflicts({
   const groups = useMemo(() => {
     const out = new Map<string, ConflictView[]>();
     for (const c of conflicts) {
-      const key = c.kind === 'field' ? '__field__' : c.topic;
+      const key = c.kind === 'field' ? FIELD_KIND : c.topic;
       const list = out.get(key);
       if (list) list.push(c);
       else out.set(key, [c]);
     }
     return [...out.entries()];
   }, [conflicts]);
+  /* ONE polite announcement region for the whole stage, permanently mounted, so a
+     `Show N more` press is announced without a live region per kind. */
+  const [announcement, setAnnouncement] = useState('');
 
   if (conflicts.length === 0) {
     return <p className="hi-body hi-empty-inline">{COPY.conflicts.none}</p>;
@@ -72,57 +79,144 @@ export function ImportConflicts({
 
   return (
     <div className="hi-conflict-groups">
-      {groups.map(([key, list]) => {
-        const explanations = [...new Set(list.map((c) => c.explanation).filter(Boolean))];
-        const shared = explanations.length === 1 ? explanations[0] : null;
-        const title = key === '__field__' ? COPY.stateLabels.conflict : conflictKindLabel(key);
-        return (
-          <section className="hi-conflict-group" key={key}>
-            <h4 className="hi-conflict-group-title">
-              {title}
-              <span className="hi-count">{list.length}</span>
-            </h4>
-            {/* THE SERVER'S EXPLANATION, VERBATIM AND VISIBLE — once per kind when
-                every conflict of the kind carries the same sentence, rather than
-                repeated under each. */}
-            {shared && <p className="hi-conflict-explanation">{shared}</p>}
-            <ul className="hi-conflict-list">
-              {list.map((conflict) => (
-                <ConflictRow
-                  key={conflict.key}
-                  conflict={conflict}
-                  showExplanation={shared === null}
-                  sameKindInGroup={
-                    conflict.groupToken === null
-                      ? 1
-                      : list.filter((c) => c.groupToken === conflict.groupToken).length
-                  }
-                  importId={importId}
-                  busy={busy}
-                  onAct={onAct}
-                  destinations={destinations}
-                />
-              ))}
-            </ul>
-          </section>
-        );
-      })}
+      {groups.map(([key, list]) => (
+        <ConflictKind
+          key={key}
+          kind={key}
+          list={list}
+          importId={importId}
+          busy={busy}
+          onAct={onAct}
+          destinations={destinations}
+          announce={setAnnouncement}
+        />
+      ))}
+      <p className="sr-only" role="status" aria-live="polite">
+        {announcement}
+      </p>
     </div>
+  );
+}
+
+const FIELD_KIND = '__field__';
+
+/**
+ * ONE KIND OF CONFLICT (orchestrator decision, 2026-09-22, for a 53-conflict import).
+ *
+ * The header is ALWAYS visible and carries what a reader must not miss: what kind of
+ * disagreement this is, HOW MANY there are, and what it means — the server's own
+ * explanation, verbatim (a field disagreement has none, so its meaning is this
+ * surface's one sentence). The first five conflicts follow; the rest are one press
+ * away behind `Show N more`, a real button whose name carries the count. Every
+ * conflict stays in the DOM and counted: hiding a ROW is not hiding the uncertainty,
+ * because the header has already stated it. The action that resolves a whole sample
+ * group at once lives here, at the kind, because that is what it acts on.
+ */
+function ConflictKind({
+  kind,
+  list,
+  importId,
+  busy,
+  onAct,
+  destinations,
+  announce,
+}: {
+  kind: string;
+  list: ConflictView[];
+  importId: string;
+  busy: string | null;
+  onAct: ActFn;
+  destinations: ProposalDestinations;
+  announce: (text: string) => void;
+}) {
+  const [all, setAll] = useState(false);
+  const titleId = useId();
+  const listId = useId();
+  const explanations = [...new Set(list.map((c) => c.explanation).filter(Boolean))] as string[];
+  const shared = explanations.length === 1 ? explanations[0] : null;
+  const title = kind === FIELD_KIND ? COPY.conflicts.fieldKindTitle : conflictKindLabel(kind);
+  const meaning = kind === FIELD_KIND ? COPY.conflicts.fieldKindMeaning : shared;
+  const extra = list.length - CONFLICTS_SHOWN_PER_KIND;
+  const open = list.filter((c) => !isResolved(c)).length;
+  const groupable = kind !== FIELD_KIND && groupRuleChoices(list) !== null;
+
+  return (
+    <section className="hi-conflict-group" aria-labelledby={titleId}>
+      <div className="hi-conflict-group-head">
+        <h4 className="hi-conflict-group-title" id={titleId}>
+          {title}
+          <span className="hi-count">{list.length}</span>
+          {open !== list.length && (
+            <span className="hi-sub">
+              {open} open · {list.length - open} resolved
+            </span>
+          )}
+        </h4>
+        {/* THE MEANING, VERBATIM AND ALWAYS VISIBLE — once per kind. */}
+        {meaning && <p className="hi-conflict-explanation">{meaning}</p>}
+        {groupable && (
+          <Disclosure className="hi-conflict-review hi-group-rule" summary={COPY.resolve.groupTitle}>
+            <GroupRuleForm
+              kind={kind}
+              list={list}
+              importId={importId}
+              busy={busy}
+              onAct={onAct}
+              destinations={destinations}
+            />
+          </Disclosure>
+        )}
+      </div>
+      <ul className="hi-conflict-list" id={listId}>
+        {list.map((conflict, index) => (
+          <ConflictRow
+            key={conflict.key}
+            conflict={conflict}
+            hidden={!all && index >= CONFLICTS_SHOWN_PER_KIND}
+            showExplanation={kind !== FIELD_KIND && shared === null}
+            importId={importId}
+            busy={busy}
+            onAct={onAct}
+            destinations={destinations}
+          />
+        ))}
+      </ul>
+      {extra > 0 && (
+        <button
+          type="button"
+          className="btn btn-ghost hi-show-more"
+          aria-expanded={all}
+          aria-controls={listId}
+          aria-describedby={titleId}
+          onClick={() => {
+            const next = !all;
+            setAll(next);
+            announce(
+              next
+                ? `${extra} more shown — all ${list.length} of this kind.`
+                : `Showing the first ${CONFLICTS_SHOWN_PER_KIND} of ${list.length}.`,
+            );
+          }}
+        >
+          {all ? `Show the first ${CONFLICTS_SHOWN_PER_KIND} only` : `Show ${extra} more`}
+        </button>
+      )}
+    </section>
   );
 }
 
 function ConflictRow({
   conflict,
+  hidden,
   showExplanation,
-  sameKindInGroup,
   importId,
   busy,
   onAct,
   destinations,
 }: {
   conflict: ConflictView;
+  hidden: boolean;
   showExplanation: boolean;
-  sameKindInGroup: number;
   importId: string;
   busy: string | null;
   onAct: ActFn;
@@ -131,7 +225,7 @@ function ConflictRow({
   const resolved = isResolved(conflict);
   const chosen = resolved ? String(conflict.resolution?.chosen_value ?? '') : '';
   return (
-    <li className={`hi-conflict${resolved ? ' is-resolved' : ''}`}>
+    <li className={`hi-conflict${resolved ? ' is-resolved' : ''}`} hidden={hidden}>
       {/* ONE LINE, AS THE BRIEF WROTE IT: the state, each source's reading, and what
           was chosen — `× Sources Conflict · Filename … · Header … · No value has been
           selected.` Every reading stays on the surface; only the locators, the
@@ -142,10 +236,12 @@ function ConflictRow({
         ) : (
           <SemanticStatus state="conflict" label={COPY.stateLabels.conflict} size="sm" />
         )}
+        {/* A field disagreement names WHICH field, since one kind holds them all. */}
+        {conflict.kind === 'field' && <span className="hi-conflict-topic">{conflict.topic}</span>}
         <ul className="hi-conflict-line">
           {conflict.readings.map((reading, index) => (
             <li key={index} className="hi-conflict-reading">
-              <span className="hi-conflict-role">{roleLabel(reading.role, reading.sourceType)}</span>{' '}
+              <span className="hi-conflict-role">{readingLabel(reading)}</span>{' '}
               <span className="hi-conflict-value">{conflict.distinct?.[index] ?? reading.value}</span>
             </li>
           ))}
@@ -157,24 +253,20 @@ function ConflictRow({
               ? `Resolved by a rule you recorded${chosen ? `: ${chosen}` : ''}. Every reading is still kept.`
               : COPY.conflicts.noValue}
         </span>
+        {/* Which acquisition, so a long list of rows can be told apart. */}
+        {conflict.subject && <span className="hi-conflict-subject">{conflict.subject}</span>}
       </div>
       {showExplanation && conflict.explanation && (
         <p className="hi-conflict-explanation">{conflict.explanation}</p>
       )}
-      {/* The file the conflict is ABOUT rides on the review control, so each of a
-          long list of `Review Sources` buttons has a name that says which one. */}
-      <Disclosure
-        className="hi-conflict-review"
-        summary={COPY.conflicts.review}
-        meta={conflict.subject ? <span className="hi-conflict-subject">{conflict.subject}</span> : undefined}
-      >
+      <Disclosure className="hi-conflict-review" summary={COPY.conflicts.review}>
         <ol className="hi-layers">
           <li className="hi-layer">
             <h5 className="hi-layer-title">{COPY.layers.sourceFact}</h5>
             <ul className="hi-layer-facts">
               {conflict.readings.map((reading, index) => (
                 <li key={index}>
-                  <span className="hi-conflict-role">{roleLabel(reading.role, reading.sourceType)}</span>{' '}
+                  <span className="hi-conflict-role">{readingLabel(reading)}</span>{' '}
                   <span className="hi-layer-value">{reading.value}</span>
                   <span className="hi-sub">
                     {reading.sources.map((s) => `${s.path} · ${s.locator}`).join('; ')}
@@ -213,7 +305,6 @@ function ConflictRow({
             ) : (
               <ResolveForm
                 conflict={conflict}
-                sameKindInGroup={sameKindInGroup}
                 importId={importId}
                 busy={busy}
                 onAct={onAct}
@@ -255,76 +346,24 @@ function Suggestion({ conflict }: { conflict: ConflictView }) {
 
 type Scope = 'import' | 'experiment' | 'profile';
 
-function ResolveForm({
-  conflict,
-  sameKindInGroup,
-  importId,
-  busy,
-  onAct,
+/** The three scopes, in the owner's words, and the record picker a stored rule needs. */
+function ScopeFields({
+  name,
+  scope,
+  setScope,
+  experimentId,
+  setExperimentId,
   destinations,
 }: {
-  conflict: ConflictView;
-  sameKindInGroup: number;
-  importId: string;
-  busy: string | null;
-  onAct: ActFn;
+  name: string;
+  scope: Scope;
+  setScope: (scope: Scope) => void;
+  experimentId: string;
+  setExperimentId: (id: string) => void;
   destinations: ProposalDestinations;
 }) {
-  const name = useId();
-  const [choice, setChoice] = useState<number | null>(null);
-  const [scope, setScope] = useState<Scope>('import');
-  const [experimentId, setExperimentId] = useState('');
-  const [recurring, setRecurring] = useState(false);
-  const key = `resolve:${conflict.key}`;
-  const chosen = choice === null ? null : conflict.readings[choice];
-  const canRecur =
-    conflict.kind === 'structural' &&
-    sameKindInGroup > 1 &&
-    conflict.groupToken !== null &&
-    chosen !== null &&
-    chosen !== undefined &&
-    chosen.role !== null &&
-    CHOOSABLE_ROLES.has(chosen.role);
-  const needsRecord = scope !== 'import';
-
   return (
-    <form
-      className="hi-resolve"
-      onSubmit={(event) => {
-        event.preventDefault();
-        if (chosen === null || chosen === undefined || conflict.target === null) return;
-        void onAct(key, async () => {
-          const version = needsRecord ? (await api.getExperiment(experimentId)).version : undefined;
-          const recur = canRecur && recurring;
-          await api.recordImportRule(importId, {
-            kind: 'conflict_resolution',
-            scope,
-            ...(needsRecord ? { experimentId, experimentVersion: version } : {}),
-            ...(recur ? { selector: { group_tokens: [conflict.groupToken] } } : {}),
-            body: recur
-              ? { conflict_kind: conflict.topic, chosen_source_role: chosen.role }
-              : { ...conflict.target, chosen_value: chosen.value },
-          });
-        });
-      }}
-    >
-      <fieldset className="hi-resolve-group">
-        <legend className="hi-field-label">{COPY.resolve.choose}</legend>
-        {conflict.readings.map((reading, index) => (
-          <label key={index} className="hi-choice">
-            <input
-              type="radio"
-              name={`${name}-reading`}
-              checked={choice === index}
-              onChange={() => setChoice(index)}
-            />
-            <span>
-              <span className="hi-conflict-role">{roleLabel(reading.role, reading.sourceType)}</span>{' '}
-              {reading.value}
-            </span>
-          </label>
-        ))}
-      </fieldset>
+    <>
       <fieldset className="hi-resolve-group">
         <legend className="hi-field-label">{COPY.resolve.scope}</legend>
         {(['import', 'experiment', 'profile'] as Scope[]).map((option) => (
@@ -339,21 +378,207 @@ function ResolveForm({
           </label>
         ))}
       </fieldset>
-      {needsRecord && (
+      {scope !== 'import' && (
         <ExperimentPicker value={experimentId} onChange={setExperimentId} destinations={destinations} />
       )}
-      {canRecur && (
-        <label className="hi-choice">
-          <input type="checkbox" checked={recurring} onChange={(e) => setRecurring(e.target.checked)} />
-          <span>{COPY.resolve.recurring}</span>
-        </label>
-      )}
+    </>
+  );
+}
+
+/** Record a rule: read the record's version first when it is stored on one. */
+async function recordConflictRule(
+  importId: string,
+  scope: Scope,
+  experimentId: string,
+  rule: { selector?: Record<string, unknown>; body: Record<string, unknown> },
+) {
+  const stored = scope !== 'import';
+  const version = stored ? (await api.getExperiment(experimentId)).version : undefined;
+  await api.recordImportRule(importId, {
+    kind: 'conflict_resolution',
+    scope,
+    ...(stored ? { experimentId, experimentVersion: version } : {}),
+    ...(rule.selector ? { selector: rule.selector } : {}),
+    body: rule.body,
+  });
+}
+
+function ResolveForm({
+  conflict,
+  importId,
+  busy,
+  onAct,
+  destinations,
+}: {
+  conflict: ConflictView;
+  importId: string;
+  busy: string | null;
+  onAct: ActFn;
+  destinations: ProposalDestinations;
+}) {
+  const name = useId();
+  const [choice, setChoice] = useState<number | null>(null);
+  const [scope, setScope] = useState<Scope>('import');
+  const [experimentId, setExperimentId] = useState('');
+  const key = `resolve:${conflict.key}`;
+  const chosen = choice === null ? null : conflict.readings[choice];
+
+  return (
+    <form
+      className="hi-resolve"
+      onSubmit={(event) => {
+        event.preventDefault();
+        if (chosen === null || chosen === undefined || conflict.target === null) return;
+        const target = conflict.target;
+        void onAct(key, () =>
+          recordConflictRule(importId, scope, experimentId, {
+            body: { ...target, chosen_value: chosen.value },
+          }),
+        );
+      }}
+    >
+      <fieldset className="hi-resolve-group">
+        <legend className="hi-field-label">{COPY.resolve.choose}</legend>
+        {conflict.readings.map((reading, index) => (
+          <label key={index} className="hi-choice">
+            <input
+              type="radio"
+              name={`${name}-reading`}
+              checked={choice === index}
+              onChange={() => setChoice(index)}
+            />
+            <span>
+              <span className="hi-conflict-role">{readingLabel(reading)}</span>{' '}
+              {reading.value}
+            </span>
+          </label>
+        ))}
+      </fieldset>
+      <ScopeFields
+        name={name}
+        scope={scope}
+        setScope={setScope}
+        experimentId={experimentId}
+        setExperimentId={setExperimentId}
+        destinations={destinations}
+      />
       <button
         type="submit"
         className="btn btn-secondary"
-        disabled={busy !== null || chosen === null || (needsRecord && !experimentId)}
+        disabled={busy !== null || chosen === null || (scope !== 'import' && !experimentId)}
       >
         {busy === key ? 'Recording…' : COPY.resolve.submit}
+      </button>
+    </form>
+  );
+}
+
+/**
+ * What a whole-sample-group resolution can choose between, derived from the kind's
+ * own conflicts: the source KINDS (roles) that appear among their readings and that
+ * the server accepts as a choice, and the sample groups holding MORE THAN ONE
+ * conflict of this kind that can be resolved. `null` when there is nothing to choose
+ * — a single conflict is resolved on its own row, and two acquisitions sharing a
+ * legacy number are never resolved at all.
+ */
+export function groupRuleChoices(
+  list: readonly ConflictView[],
+): { roles: string[]; groups: { token: string; count: number }[] } | null {
+  const eligible = list.filter(
+    (c) => c.kind === 'structural' && c.resolvable && !c.forbidden && !isResolved(c) && c.groupToken !== null,
+  );
+  const counts = new Map<string, number>();
+  for (const c of eligible) counts.set(c.groupToken as string, (counts.get(c.groupToken as string) ?? 0) + 1);
+  const groups = [...counts.entries()]
+    .filter(([, count]) => count > 1)
+    .map(([token, count]) => ({ token, count }))
+    .sort((a, b) => a.token.localeCompare(b.token));
+  const roles = [
+    ...new Set(
+      eligible.flatMap((c) => c.readings.map((r) => r.role)).filter((r): r is string => r !== null && CHOOSABLE_ROLES.has(r)),
+    ),
+  ];
+  if (groups.length === 0 || roles.length < 2) return null;
+  return { roles, groups };
+}
+
+/**
+ * RESOLVE EVERY CONFLICT OF THIS KIND IN ONE SAMPLE GROUP — by the KIND of source
+ * that is right ("for sample 03, the file's name is the correction"), never by a
+ * value. The server applies it only where exactly one reading has that role, and
+ * keeps every reading.
+ */
+function GroupRuleForm({
+  kind,
+  list,
+  importId,
+  busy,
+  onAct,
+  destinations,
+}: {
+  kind: string;
+  list: ConflictView[];
+  importId: string;
+  busy: string | null;
+  onAct: ActFn;
+  destinations: ProposalDestinations;
+}) {
+  const choices = groupRuleChoices(list);
+  const name = useId();
+  const [role, setRole] = useState<string | null>(null);
+  const [group, setGroup] = useState(choices?.groups[0]?.token ?? '');
+  const [scope, setScope] = useState<Scope>('import');
+  const [experimentId, setExperimentId] = useState('');
+  const key = `resolve-group:${kind}`;
+  if (choices === null) return null;
+  return (
+    <form
+      className="hi-resolve"
+      onSubmit={(event) => {
+        event.preventDefault();
+        if (role === null || !group) return;
+        void onAct(key, () =>
+          recordConflictRule(importId, scope, experimentId, {
+            selector: { group_tokens: [group] },
+            body: { conflict_kind: kind, chosen_source_role: role },
+          }),
+        );
+      }}
+    >
+      <p className="hi-sub">{COPY.resolve.groupLead}</p>
+      <label className="hi-field">
+        <span className="hi-field-label">{COPY.resolve.groupWhich}</span>
+        <select className="hi-input" value={group} onChange={(e) => setGroup(e.target.value)}>
+          {choices.groups.map((g) => (
+            <option key={g.token} value={g.token}>
+              Sample {g.token} ({g.count} conflicts)
+            </option>
+          ))}
+        </select>
+      </label>
+      <fieldset className="hi-resolve-group">
+        <legend className="hi-field-label">{COPY.resolve.groupRole}</legend>
+        {choices.roles.map((r) => (
+          <label key={r} className="hi-choice">
+            <input type="radio" name={`${name}-role`} checked={role === r} onChange={() => setRole(r)} />
+            <span>{roleLabel(r, null)}</span>
+          </label>
+        ))}
+      </fieldset>
+      <ScopeFields
+        name={name}
+        scope={scope}
+        setScope={setScope}
+        experimentId={experimentId}
+        setExperimentId={setExperimentId}
+        destinations={destinations}
+      />
+      <button
+        type="submit"
+        className="btn btn-secondary"
+        disabled={busy !== null || role === null || !group || (scope !== 'import' && !experimentId)}
+      >
+        {busy === key ? 'Recording…' : COPY.resolve.groupSubmit}
       </button>
     </form>
   );

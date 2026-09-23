@@ -379,6 +379,9 @@ export const IMPORT_STAGE_COPY = {
     none: 'No source disagrees with another in this import.',
     noValue: 'No value has been selected.',
     review: 'Review Sources',
+    fieldKindTitle: 'A field with more than one stated value',
+    fieldKindMeaning:
+      'Two or more files state a different value for the same field. Every value is kept, with the file that states it, and nothing is chosen.',
   },
   review: {
     title: 'Review',
@@ -404,6 +407,25 @@ export const IMPORT_STAGE_COPY = {
     ambiguous: 'Ambiguous',
     stale: 'Stale Rule',
     suggested: 'Suggested',
+    variesByScan: 'Varies by Scan',
+    severalPerScan: 'Several per Scan',
+    variesByFile: 'Varies by File',
+  },
+  /*
+   * PER-SCAN VARIATION (2026-09-22, `bl15.mapping.RULE_CARDINALITY`). Neither agreement
+   * nor conflict: each scan has its own value, as the concept is expected to, and every
+   * scan's reading is kept.
+   */
+  variation: {
+    eachScan: 'Each scan’s reading',
+    eachItem: 'Each reading, scan by scan',
+    eachFile: 'Each file’s reading',
+    why: 'This value is expected to differ from scan to scan, so different scans stating different values is not a disagreement. Two sources that disagree about the same scan would be a conflict.',
+    whyItem:
+      'A scan states several of these — one per column or motor — so different values are different items, not a disagreement. Two sources that disagree about the same item of the same scan would be a conflict.',
+    whyFile: 'Each file names its own pieces, so different files stating different values is not a disagreement.',
+    conflictsNote:
+      'are stated once per scan, column, motor or file, as they are expected to be, and are not conflicts. Each reading is kept under Runs & Candidates.',
   },
   bucketTitles: {
     ready: 'Ready to Send',
@@ -454,7 +476,12 @@ export const IMPORT_STAGE_COPY = {
   resolve: {
     choose: 'Which reading is right?',
     scope: 'Apply it',
-    recurring: 'Also apply to every conflict of this kind in this sample group',
+    groupTitle: 'Resolve a Whole Sample Group',
+    groupLead:
+      'Choose which kind of source is right for every conflict of this kind in one sample group. It applies only where exactly one reading comes from that kind of source, and every reading is kept.',
+    groupWhich: 'Which sample group?',
+    groupRole: 'Which kind of source is right?',
+    groupSubmit: 'Record This Choice for the Group',
     submit: 'Record This Choice',
     forbidden:
       'Both acquisitions are kept, and nothing will be chosen: nobody can say which one is right.',

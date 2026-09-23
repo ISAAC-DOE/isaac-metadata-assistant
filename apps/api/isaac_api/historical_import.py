@@ -884,14 +884,37 @@ class SemanticCandidate:
     #: disagreement RESOLVED — the competing readings stay, as source facts — and on the
     #: derived candidate it names the rule the chosen value came from.
     resolved_by_rule: str | None = None
+    #: READINGS THAT LEGITIMATELY DIFFER — one row per scan (or per item of a scan, or
+    #: per file) for a concept whose cardinality says so
+    #: (``bl15.mapping.RULE_CARDINALITY``). Each row is
+    #: ``{scan, item, source, value, source_ids, locators}``. Added 2026-09-22 so values
+    #: that differ from scan to scan are preserved as what they are instead of being
+    #: reported as a disagreement. Empty when the readings agree, and on every
+    #: candidate carrying a disagreement: a VARIATION and a CONFLICT are different facts
+    #: and one candidate is never both.
+    variation: tuple[dict, ...] = ()
+    #: The cardinality the variation is keyed by — ``per_scan``, ``per_scan_item`` or
+    #: ``per_source``. ``None`` with no variation.
+    variation_basis: str | None = None
+    #: How many rows the variation ACTUALLY has when :attr:`variation` is a window
+    #: (:data:`MAX_VARIATION_ROWS`). ``None`` means the list is complete.
+    variation_total: int | None = None
+    #: How many distinct scans (or, for ``per_source``, files) the variation spans.
+    variation_scans: int | None = None
 
     # --- UI statuses, DERIVED (2026-09-22) ----------------------------------------
 
     @property
     def agreement(self) -> str:
-        """``sources_conflict`` | ``sources_agree`` | ``single_source``. Derived."""
+        """``sources_conflict`` | ``varies`` | ``sources_agree`` | ``single_source``.
+
+        ``varies`` (2026-09-22): the readings differ from scan to scan (or file to
+        file) as the concept's cardinality expects — neither agreement nor conflict.
+        """
         if self.unresolved_reason is not None:
             return "sources_conflict"
+        if self.variation:
+            return "varies"
         if self.distinct_sources is not None and self.distinct_sources >= 2:
             return "sources_agree"
         return "single_source"
@@ -963,6 +986,10 @@ class SemanticCandidate:
             "supporting_statement_total": self.supporting_statement_total,
             "distinct_sources": self.distinct_sources,
             "resolved_by_rule": self.resolved_by_rule,
+            "variation": [dict(v) for v in self.variation],
+            "variation_basis": self.variation_basis,
+            "variation_total": self.variation_total,
+            "variation_scans": self.variation_scans,
             # DERIVED, and serialised anyway. A client that recomputed it would be
             # a second expression of the rule, free to drift from this one.
             "proposable": self.proposable,
@@ -1034,6 +1061,16 @@ class SemanticCandidate:
             resolved_by_rule=state.get("resolved_by_rule")
             if isinstance(state.get("resolved_by_rule"), str)
             else None,
+            variation=tuple(
+                dict(v) for v in (state.get("variation") or []) if isinstance(v, Mapping)
+            )
+            if isinstance(state.get("variation"), list)
+            else (),
+            variation_basis=state.get("variation_basis")
+            if isinstance(state.get("variation_basis"), str)
+            else None,
+            variation_total=_as_count(state.get("variation_total")),
+            variation_scans=_as_count(state.get("variation_scans")),
         )
 
 
@@ -1383,6 +1420,13 @@ ARCHIVE_PERSISTENCE_DECISION = (
 #: is each one" into "here are some of them", which is the one thing this whole
 #: feature exists not to do.
 MAX_STATEMENTS_PER_CANDIDATE = 5
+
+#: Most per-scan VARIATION rows one candidate stores. Over it the list is a window and
+#: ``variation_total`` states the true count. Unlike a disagreement, a variation MAY be
+#: windowed: it is not "the sources disagree, here is each one" — it is "each scan has
+#: its own value", and a 14-scan acquisition with 172 motors would otherwise carry 2,408
+#: rows on one candidate. The first rows plus a true total say what it is.
+MAX_VARIATION_ROWS = 24
 
 #: Most ``skipped`` entries ONE source's reading row stores. Over it the list is
 #: a window and the row's ``skipped_total`` states the true count.
@@ -3261,11 +3305,18 @@ def _bound_candidate(
         and candidate.target_field_path not in writable
     ):
         reason = CANDIDATE_NOT_PROPOSABLE_NO_WRITE_PATH
+    variation = candidate.variation
+    variation_total = candidate.variation_total
+    if len(variation) > MAX_VARIATION_ROWS:
+        variation_total = len(variation)
+        variation = variation[:MAX_VARIATION_ROWS]
     return replace(
         candidate,
         supporting_statements=windowed,
         supporting_statement_total=total if total > len(windowed) else None,
         not_proposable_reason=reason,
+        variation=variation,
+        variation_total=variation_total,
     )
 
 
@@ -4967,24 +5018,6 @@ def _rules_view(session: "ImportSession") -> dict:
     }
 
 
-#: The policy served beside a temperature a source DOES state in words. The absence
-#: constant (`bl15.mapping.TEMPERATURE_ABSENT_REASON`) opens "this corpus states no
-#: temperature anywhere", which is false for such a corpus — and it was served beside
-#: the very statement it denies until the Historical Import UI slice (2026-09-22)
-#: rendered the two together. Everything else it says still holds, so it is said here
-#: without the absence claim.
-TEMPERATURE_STATED_POLICY = (
-    "context.temperature_K is required by the official schema whenever a context block "
-    "is present, and it takes a number in kelvin. A source here states a temperature "
-    "only in words; that statement is kept verbatim in the extended context and is "
-    "never converted, so the field is left MISSING: this application inserts no value "
-    "and offers no value automatically, and 298 must not be defaulted into "
-    "context.temperature_K by this application. A nominal number may be OFFERED only "
-    "by a reviewed convention rule that names its convention, labels it nominal and "
-    "inferred, and waits for a scientist to confirm it."
-)
-
-
 def _temperature_view(reading: "ArchiveReading") -> dict:
     from .bl15 import mapping as mp  # local: keeps import order flexible
     from .bl15 import nominal  # local: keeps import order flexible
@@ -5007,11 +5040,11 @@ def _temperature_view(reading: "ArchiveReading") -> dict:
         "automatic_value": None,
         "automatic_proposal": False,
         "nominal_rule_enabled_for": offers,
-        "policy": (
-            TEMPERATURE_STATED_POLICY
-            if reading.temperature_statements
-            else mp.TEMPERATURE_ABSENT_REASON
-        ),
+        # ONE SENTENCE FOR BOTH CASES. It was briefly a second, "stated" wording here,
+        # because the registry's sentence denied a statement in words; that sentence is
+        # now true of both a corpus that states none and one that states one in words
+        # (`bl15.mapping.TEMPERATURE_ABSENT_REASON`), so there is one wording per fact.
+        "policy": mp.TEMPERATURE_ABSENT_REASON,
         "superseded_decision": nominal.SUPERSEDED_DECISION,
     }
 

@@ -23,6 +23,7 @@ import {
   cellFor,
   conceptsWithStatus,
   corpusDigest,
+  normalizedText,
   readingsByStem,
   unattachedByType,
   unitState,
@@ -401,7 +402,7 @@ export function ArchiveRuns({
       for (const e of list)
         if (
           e.raw_literal.toLowerCase().includes(needle) ||
-          String(e.normalized_value ?? '').toLowerCase().includes(needle)
+          normalizedText(e.normalized_value).toLowerCase().includes(needle)
         )
           return true;
     return false;
@@ -780,7 +781,7 @@ function CellView({ cell }: { cell: Bl15Cell }) {
   }
   const e = cell.evidence;
   const normalized = e.normalized_value;
-  const shown = normalized === null || normalized === undefined ? e.raw_literal : String(normalized);
+  const shown = normalized === null || normalized === undefined ? e.raw_literal : normalizedText(normalized);
   const differs = shown !== e.raw_literal;
   return (
     <span className="bl15-value">
@@ -861,15 +862,10 @@ function ExtendedContextReview({
  * sentence this component authors.
  */
 function Ceiling({ review }: { review: Bl15CorpusReview }) {
-  const { assets_blocked_reason: assets } = review.mapping;
-  /* THE REGISTRY'S TEMPERATURE SENTENCE OPENS "this corpus states no temperature
-     anywhere". Where a source DOES state one in words, the temperature view's own
-     policy is served instead — the same rule without the absence claim — so this
-     block never contradicts the statement shown under Temperature. */
-  const temp =
-    review.temperature?.status === 'stated_in_source'
-      ? review.temperature.policy
-      : review.mapping.temperature_absent_reason;
+  /* The registry's own temperature sentence, verbatim. It is true both of a corpus
+     that states no temperature and of one that states one only in words (corrected
+     server-side 2026-09-22), so it needs no second wording here. */
+  const { temperature_absent_reason: temp, assets_blocked_reason: assets } = review.mapping;
   return (
     <div className="bl15-block">
       <p className="bl15-lead">{BL15_COPY.ceilingLead}</p>
@@ -1067,7 +1063,7 @@ export function Bl15EvidenceDrawer({
                       <span className="bl15-evidence-says">
                         says <strong>{e.raw_literal}</strong>
                         {e.normalized_value !== null && e.normalized_value !== undefined
-                          ? ` · ${BL15_COPY.normalizedLabel} ${String(e.normalized_value)}${e.unit ? ` ${e.unit}` : ''}`
+                          ? ` · ${BL15_COPY.normalizedLabel} ${normalizedText(e.normalized_value)}${e.unit ? ` ${e.unit}` : ''}`
                           : ''}
                       </span>
                       <span className="bl15-evidence-where">

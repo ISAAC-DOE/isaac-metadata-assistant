@@ -1393,9 +1393,18 @@ function ConflictsStage({
   destinations: ProposalDestinations;
 }) {
   const views = conflictViews(data);
+  /* PER-SCAN VARIATION IS NOT A CONFLICT, and a reader who remembers seeing more
+     "conflicts" before is told where those values went — neutrally, with a count. */
+  const varying = (data.reconstruction?.candidates ?? []).filter((c) => c.agreement === 'varies').length;
   return (
     <>
       <StageHead stage="conflicts" />
+      {varying > 0 && (
+        <p className="hi-varies-note">
+          <SemanticStatus state="notApplicable" label={STAGE.stateLabels.variesByScan} size="sm" />{' '}
+          {plural(varying, 'value', 'values')} {STAGE.variation.conflictsNote}
+        </p>
+      )}
       <ImportConflicts
         conflicts={views}
         importId={importId}

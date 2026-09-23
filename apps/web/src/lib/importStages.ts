@@ -202,7 +202,10 @@ const plural = (n: number, one: string, many: string) => `${n.toLocaleString('en
  */
 export function summaryItems(session: ApiImportSession): SummaryItem[] {
   const candidates = session.reconstruction?.candidates ?? [];
-  const counts = bucketCounts(candidates);
+  /* "Need review" and "ready to send" are counted over FIELD candidates, exactly as the
+     Review stage and its tab count them — a structural candidate ("a measurement
+     exists") is never sent, so counting it here made the header disagree with the tab. */
+  const counts = bucketCounts(candidates.filter((c) => c.kind === 'field'));
   const conflicts = conflictCount(session);
   const out: SummaryItem[] = [];
   const digest = session.corpus_digest;
@@ -281,6 +284,21 @@ export function roleLabel(role: string | null, sourceType: string | null): strin
 }
 
 /** The roles a recurring resolution may choose by (server: `_CHOOSABLE_ROLES`). */
+/**
+ * The name a READING goes by on a conflict row. A structural reading has a source
+ * ROLE (Filename, Header, Macro…); a field disagreement's readings have none, and
+ * "Source · Source · Source" told a reader nothing — so those are named by the file
+ * that states them, its base name only (the full path is in Source Facts).
+ */
+export function readingLabel(reading: Pick<ConflictReading, 'role' | 'sourceType' | 'sources'>): string {
+  if (reading.role !== null && SOURCE_ROLE_LABELS[reading.role]) return SOURCE_ROLE_LABELS[reading.role];
+  if (reading.role === null && reading.sourceType === null) {
+    const path = reading.sources[0]?.path;
+    if (path) return path.split('/').filter(Boolean).pop() ?? path;
+  }
+  return roleLabel(reading.role, reading.sourceType);
+}
+
 export const CHOOSABLE_ROLES: ReadonlySet<string> = new Set([
   'human_label',
   'instrument_header',

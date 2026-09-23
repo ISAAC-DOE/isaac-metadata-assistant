@@ -183,6 +183,11 @@ def read_scan_export(
     )
 
     stem, index = stem_and_index(record.basename)
+    if index is not None:
+        # EVERY statement in a scan export is about ONE scan — the one its basename
+        # numbers. Stamped once here (`EvidenceBuilder.scan`), without leading zeros,
+        # so `_001` and a SPEC file's `#S 1` name the same scan.
+        builder.scan = str(int(index))
     if stem is None:
         builder.skip(
             reason=SKIP_NO_SCAN_INDEX,
@@ -323,6 +328,7 @@ def read_scan_export(
                     normalization_rule=RULE_KEYED_POSITION,
                     scope=SCOPE_SCAN,
                     measurement_stem=stem,
+                    item=name,
                 )
             continue
 
@@ -339,6 +345,7 @@ def read_scan_export(
                     concept=CONCEPT_DETECTOR_COLUMN,
                     scope=SCOPE_SCAN,
                     measurement_stem=stem,
+                    item=f"column {position}",
                 )
             continue
 

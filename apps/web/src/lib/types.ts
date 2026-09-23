@@ -4332,9 +4332,38 @@ export interface ApiImportCandidate {
   /** The confirmed rule that resolved this disagreement, when one did. */
   resolved_by_rule?: string | null;
   supporting_statement_total?: number | null;
+  /**
+   * 2026-09-22 — readings that LEGITIMATELY DIFFER, one row per scan (or item of a
+   * scan, or token of a file), for a concept whose registry cardinality says so
+   * (`bl15.mapping.RULE_CARDINALITY`). Never present beside a disagreement: a
+   * variation and a conflict are different facts. `agreement` is `varies` exactly
+   * when this is non-empty.
+   */
+  variation?: ApiImportVariationRow[];
+  variation_basis?: 'per_scan' | 'per_scan_item' | 'per_source' | null;
+  /** The true row count when `variation` is a window. */
+  variation_total?: number | null;
+  /** How many distinct scans (or files, for `per_source`) the variation spans. */
+  variation_scans?: number | null;
 }
 
-export type ApiImportAgreement = 'sources_agree' | 'single_source' | 'sources_conflict' | 'no_source';
+/** One scan's (or item's, or file token's) own reading of a varying concept. */
+export interface ApiImportVariationRow {
+  scan: string | null;
+  item: string | null;
+  source: string | null;
+  value: string;
+  source_ids: string[];
+  locators: string[];
+}
+
+export type ApiImportAgreement =
+  | 'sources_agree'
+  | 'single_source'
+  | 'sources_conflict'
+  /** 2026-09-22 — the value differs from scan to scan, as the concept expects. */
+  | 'varies'
+  | 'no_source';
 export type ApiImportReviewStatus =
   | 'ready'
   | 'needs_review'

@@ -179,6 +179,52 @@ different rule and is unchanged.
 
 ---
 
+### 2.1 Per-scan variation is not a conflict — `bl15.mapping.cardinality.v1`
+
+**Added after a measurement, the same day.** On the synthetic multi-operator corpus the
+reconstruction reported **43** field disagreements, and **36 were not disagreements**:
+each scan export names its own scan index (`acquisition_target`), a `#L` line lists
+several detector columns (`detector_column`), a `#P` line gives several motors
+(`motor_position`), and each file's name carries its own tokens (`unknown_token`). On the
+mini corpus all **12** were of that kind. `acquisition_target` also reached the screen
+as a Python dict repr.
+
+Every concept now has a **cardinality** in the registry (`bl15.mapping.CONCEPT_CARDINALITY`,
+served as `mapping.concepts[].cardinality`), stated per concept and never inferred:
+
+| cardinality | compared only within | concepts |
+|---|---|---|
+| `per_measurement` (default) | the whole measurement | every concept not listed below — including `filter` and `acquisition_timestamp`, on purpose |
+| `per_scan` | the same scan | `acquisition_target`, `counting_time`, `scan_command`, `energy_grid`, `emission_energy` |
+| `per_scan_item` | the same column or motor of the same scan | `detector_column`, `motor_position` |
+| `per_source` | the same token of the same file | `unknown_token` |
+
+The scan and item come from the readers as structured fields (`SourceEvidence.scan`,
+`.item` — `#S N` in a SPEC file, the `_00N` index of a scan export, a `#L` column
+position, a `#P` motor name, a filename token position), never from parsing a locator.
+
+* Values that differ **across** scans are kept as `reconstruction.candidates[].variation`
+  — one row per scan/item/file: `{scan, item, source, value, source_ids, locators}` —
+  with `variation_basis`, `variation_scans` and, when windowed at 24 rows,
+  `variation_total`. `agreement` is `varies`; `review_status` is what the mapping says
+  (never `sources_conflict`).
+* Two sources disagreeing about the **same** scan (or item), or any disagreement about a
+  per-measurement concept, is still a conflict, and its `disagreement` rows carry only the
+  disputed readings.
+* `filter` stays per-measurement: a scan header's `filter` motor disagreeing with the
+  filename's filter index is a real question. `acquisition_timestamp` stays
+  per-measurement: it feeds `timestamps.acquired_start_utc`, one value per run.
+* **A macro's statement about another measurement is not this measurement's evidence**
+  (`bl15.reconstruct._evidence_for_unit`): a nine-block macro gave every unit it declared
+  all nine declared targets. A statement naming no measurement still applies. One mini
+  candidate disappears as a result — `…_again::unknown_token`, whose only reading was
+  the macro file's OWN name token (`runsynth`), which says nothing about that
+  measurement (101 → 100 candidates).
+
+Result: multi-operator **43 → 7** field conflicts (6 `filter`, 1 `acquisition_timestamp`;
+36 now vary by scan); mini **12 → 0** (12 vary by scan). The structural conflicts
+(`bl15.relate`) are unchanged: 10 and 5.
+
 ## 3. Reviewed convention rules — learning without silent promotion
 
 `isaac_api/convention_rules.py`. A rule records **how to read sources**, never a value.
@@ -536,6 +582,10 @@ is_official_field_value (false), is_evidence (false)}`.
   `source_hierarchy: null`.
 * `reconstruction.candidates[]` gain `distinct_sources`, `agreement`, `review_status`
   and `resolved_by_rule`; a resolved disagreement adds `<candidate_id>::resolved`.
+  They also gain `variation`, `variation_basis`, `variation_total` and
+  `variation_scans`, and `agreement` gains `varies` (§2.1).
+* `corpus_review.evidence[]` gains `scan` and `item`; `mapping.concepts[]` gains
+  `cardinality` (§2.1).
 * `corpus_review` gains `profile_applicability` (`bindings`, `convention_counts`,
   `ambiguous_sources`, `selected_by_operator: false`, `rule`), `temperature` (`status`:
   `not_recorded` | `stated_in_source`, `statements[]` with `raw_literal` and

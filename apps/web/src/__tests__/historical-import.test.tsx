@@ -738,9 +738,11 @@ describe('§2 · every one of the nine things a scientist must see is on the scr
   it('where sources DISAGREE — every competing value, with who asserts it', async () => {
     await openSession();
     const panel = goTo(IMPORT_STAGE_COPY.conflicts.title);
+    // The kind's header names it and counts it; each row carries the shared status.
     expect(
-      within(panel).getByRole('heading', { name: new RegExp(IMPORT_STAGE_COPY.stateLabels.conflict) }),
+      within(panel).getByRole('heading', { name: new RegExp(IMPORT_STAGE_COPY.conflicts.fieldKindTitle) }),
     ).toBeTruthy();
+    expect(within(panel).getAllByText(IMPORT_STAGE_COPY.stateLabels.conflict).length).toBeGreaterThan(0);
     // Every competing value, WITH the file that asserts it, in the Source Facts layer.
     const facts = [...panel.querySelectorAll('.hi-layer-facts > li')].map((li) => li.textContent ?? '');
     expect(facts.some((t) => t.includes('SYNTHETIC-CuO-FAKE-001') && t.includes('SYNTHETIC-bundle-a.txt'))).toBe(true);
@@ -1619,6 +1621,10 @@ describe('§12 · one stage in focus, reached by real tabs', () => {
     );
     // Two sources, one read, four candidates, one conflict (the disagreement), one ready.
     expect(pairs).toMatchObject({ sources: '2', read: '1', candidates: '4', conflicts: '1', ready: '1' });
+    // "Need review" is the Review tab's own number: FIELD candidates only, so the header
+    // and the tab can never disagree (the structural candidate is never sent).
+    const reviewTab = screen.getByRole('tab', { name: new RegExp(IMPORT_STAGE_COPY.review.title) });
+    expect(reviewTab.textContent).toContain(`${pairs['needs-review']} need review`);
   });
 
   it('every stage is ONE heading and ONE sentence on the surface, the rest behind a `?`', async () => {
@@ -1739,5 +1745,48 @@ describe('§13 · what the batch send reports, and where review happens', () => 
     expect(
       within(goTo(IMPORT_STAGE_COPY.add.title)).queryByRole('checkbox', { name: IMPORT_STAGE_COPY.createRuns }),
     ).toBeNull();
+  });
+});
+
+describe('§14 · per-scan variation is not counted or shown as a conflict', () => {
+  const VARIES: ApiImportCandidate = {
+    ...NO_WRITE_PATH,
+    candidate_id: '01CANDV0000000000000000009',
+    target_field_path: null,
+    proposed_value: null,
+    not_proposable_reason: 'FAKE registry reason.',
+    agreement: 'varies',
+    review_status: 'unmapped',
+    variation_basis: 'per_scan',
+    variation_scans: 2,
+    variation: [
+      { scan: '1', item: null, source: null, value: 'ZZ_unit · scan 1', source_ids: ['S1'], locators: ['l1'] },
+      { scan: '2', item: null, source: null, value: 'ZZ_unit · scan 2', source_ids: ['S2'], locators: ['l2'] },
+    ],
+  };
+
+  it('the Conflicts stage counts only real conflicts, and says where the variation went', async () => {
+    stub({
+      list: listResponse(),
+      detail: session({
+        reconstruction: {
+          ...session().reconstruction!,
+          candidates: [SENDABLE, DISAGREEING, NO_WRITE_PATH, STRUCTURAL, VARIES],
+        },
+      }),
+    });
+    renderScreen();
+    fireEvent.click(await screen.findByRole('button', { name: IMPORT_COPY.actionStart }));
+    await sessionOpen();
+    // ONE conflict — the disagreement — in the tab, the summary and the stage.
+    expect(screen.getByRole('tab', { name: new RegExp(IMPORT_STAGE_COPY.conflicts.title) }).textContent).toContain('1 open');
+    const conflictsCount = document.querySelector('.hi-summary-item[data-id="conflicts"] dd');
+    expect(conflictsCount?.textContent).toBe('1');
+    const panel = goTo(IMPORT_STAGE_COPY.conflicts.title);
+    expect(panel.querySelectorAll('li.hi-conflict')).toHaveLength(1);
+    const note = panel.querySelector('.hi-varies-note')!;
+    expect(note.textContent).toContain(IMPORT_STAGE_COPY.stateLabels.variesByScan);
+    expect(note.textContent).toContain('1 value');
+    expect(note.textContent).toContain('not conflicts');
   });
 });

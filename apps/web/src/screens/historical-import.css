@@ -1166,13 +1166,19 @@
   border-top-left-radius: var(--radius-card);
 }
 
+/*
+ * COMPACT ENOUGH THAT NO NAME WRAPS AT 1280. Measured before: at a 1280 window the
+ * six tabs are ~157px each, and 12px of side padding plus an 8px gap wrapped "What
+ * ISAAC Read", "Runs & Candidates" and "Add to Experiment" onto two lines. The visible
+ * name is still the whole accessible name — nothing is abbreviated or hidden.
+ */
 .hi-stage-tab {
   display: flex;
   align-items: flex-start;
-  gap: var(--space-sm);
+  gap: var(--space-xs);
   min-width: 0;
   margin-bottom: -1px;
-  padding: var(--space-sm) var(--space-md);
+  padding: var(--space-sm);
   border: 0;
   border-bottom: 2px solid transparent;
   background: transparent;
@@ -1203,8 +1209,8 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 20px;
-  height: 20px;
+  width: 18px;
+  height: 18px;
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-pill);
   font-size: var(--font-size-meta);
@@ -1428,6 +1434,11 @@
   padding: var(--space-2xs) 0;
 }
 
+.hi-cand-reading-where {
+  font-weight: var(--font-weight-regular);
+  color: var(--text-muted);
+}
+
 .hi-cand-reading-value {
   font-weight: var(--font-weight-medium);
   color: var(--text-primary);
@@ -1456,13 +1467,33 @@
   display: flex;
   flex-direction: column;
   gap: var(--space-lg);
+  container-type: inline-size;
+}
+
+/*
+ * THE KIND'S HEADER: title and count, the meaning in the server's own words, and — for
+ * a kind a whole sample group can be resolved in — that action, as a quiet control at
+ * the right. A grid rather than a stack, so the action does not cost a line of its own.
+ */
+.hi-conflict-group-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  column-gap: var(--space-md);
+  align-items: baseline;
+  margin-bottom: var(--space-xs);
+}
+
+.hi-conflict-group-head > .hi-conflict-group-title,
+.hi-conflict-group-head > .hi-conflict-explanation {
+  grid-column: 1;
 }
 
 .hi-conflict-group-title {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: var(--space-xs);
-  margin: 0 0 var(--space-2xs);
+  margin: 0;
   font-size: var(--font-size-heading-sm);
   font-weight: var(--font-weight-semibold);
   color: var(--text-heading);
@@ -1479,48 +1510,78 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* The meaning spans the group, so a three-sentence explanation reads in two lines
+   rather than three narrow ones beside an empty gutter. */
 .hi-conflict-explanation {
-  max-width: var(--hi-prose);
-  margin: var(--space-xs) 0 0;
+  margin: var(--space-2xs) 0 0;
   font-size: var(--font-size-meta);
   line-height: var(--line-height-relaxed);
   color: var(--text-secondary);
 }
 
-.hi-conflict-group > .hi-conflict-explanation {
-  margin: 0 0 var(--space-sm);
-}
-
 .hi-conflict-list {
   display: flex;
   flex-direction: column;
-  gap: var(--space-sm);
   margin: 0;
   padding: 0;
   list-style: none;
 }
 
-/* A list of rules between rows rather than a stack of cards: 53 bordered boxes
-   read as 53 separate things, and each carried its own inner box. */
+/*
+ * ONE ROW PER CONFLICT: the line on the left, `Review Sources` at the right of the
+ * same line, and what it opens spanning the full width underneath. The review's
+ * wrapper is `display: contents` so its trigger and its body can take separate grid
+ * cells; it is a plain `div` with no role, so nothing leaves the accessibility tree.
+ */
 .hi-conflict {
-  padding: var(--space-sm) 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  column-gap: var(--space-md);
+  align-items: start;
+  padding: var(--space-xs) 0;
   border-top: 1px solid var(--border-faint);
 }
 
-.hi-conflict:first-child {
-  border-top: 0;
-  padding-top: 0;
+.hi-conflict[hidden] {
+  display: none;
+}
+
+.hi-conflict > .hi-conflict-main,
+.hi-conflict > .hi-conflict-explanation {
+  grid-column: 1;
+}
+
+.hi-conflict > .hi-conflict-review {
+  display: contents;
+}
+
+.hi-conflict > .hi-conflict-review > .disclosure-trigger,
+.hi-conflict-group-head > .hi-conflict-review > .disclosure-trigger {
+  grid-column: 2;
+  grid-row: 1;
+}
+
+.hi-conflict > .hi-conflict-review > .disclosure-body,
+.hi-conflict-group-head > .hi-conflict-review > .disclosure-body {
+  grid-column: 1 / -1;
+}
+
+.hi-conflict-group-head > .hi-conflict-review {
+  display: contents;
 }
 
 .hi-conflict-main {
   display: flex;
   flex-wrap: wrap;
-  align-items: baseline;
+  align-items: center;
   gap: var(--space-2xs) var(--space-md);
+  min-height: 32px;
 }
 
-.hi-conflict-main > .semantic-status {
-  align-self: center;
+.hi-conflict-topic {
+  font-size: var(--font-size-body);
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-strong);
 }
 
 .hi-conflict-subject {
@@ -1550,10 +1611,13 @@
   min-width: 0;
 }
 
+/* A field reading is named by its FILE, a single long word — it must break. */
 .hi-conflict-role {
+  min-width: 0;
   font-size: var(--font-size-meta);
   font-weight: var(--font-weight-medium);
   color: var(--text-muted);
+  overflow-wrap: anywhere;
 }
 
 .hi-conflict-value {
@@ -1567,9 +1631,8 @@
   color: var(--text-secondary);
 }
 
-/* The review is a quiet control under the line, not a box inside a box. */
+/* The review is a quiet link-like control, not a box inside a box. */
 .hi-conflict-review {
-  margin-top: var(--space-2xs);
   border: 0;
   background: transparent;
 }
@@ -1578,24 +1641,41 @@
   width: auto;
   max-width: 100%;
   min-height: 32px;
-  margin-left: calc(-1 * var(--space-xs));
   padding: var(--space-2xs) var(--space-xs);
   color: var(--action);
   font-size: var(--font-size-meta);
+  white-space: nowrap;
 }
 
 .hi-conflict-review > .disclosure-trigger > .disclosure-summary {
   flex: none;
 }
 
-.hi-conflict-review > .disclosure-trigger > .disclosure-meta {
-  flex: 0 1 auto;
-  min-width: 0;
+.hi-conflict-review > .disclosure-body {
+  padding: var(--space-sm) 0 var(--space-sm) var(--space-md);
+  border-top: 0;
 }
 
-.hi-conflict-review > .disclosure-body {
-  padding: var(--space-sm) 0 var(--space-xs) var(--space-md);
-  border-top: 0;
+/* `Show N more` sits under the first rows, aligned with them, never a card of its own. */
+.hi-show-more {
+  margin-top: var(--space-2xs);
+  color: var(--action);
+}
+
+/* NARROW: one column — the review control drops under its line instead of squeezing it. */
+@container (max-width: 36rem) {
+  .hi-conflict,
+  .hi-conflict-group-head {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .hi-conflict > .hi-conflict-review > .disclosure-trigger,
+  .hi-conflict-group-head > .hi-conflict-review > .disclosure-trigger {
+    grid-column: 1;
+    grid-row: auto;
+    justify-self: start;
+    margin-left: calc(-1 * var(--space-xs));
+  }
 }
 
 /* THE FOUR LAYERS, visibly distinct: a rule down the left of each, dashed for the
@@ -1823,4 +1903,17 @@
 .hi-stage-panel .hi-value {
   min-width: 0;
   overflow-wrap: anywhere;
+}
+
+/* The neutral note on the Conflicts stage: how many values vary by scan, and where
+   they are — so a variation is never mistaken for a conflict, and never hidden. */
+.hi-varies-note {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-xs);
+  max-width: var(--hi-prose);
+  margin: 0 0 var(--space-md);
+  font-size: var(--font-size-meta);
+  color: var(--text-secondary);
 }

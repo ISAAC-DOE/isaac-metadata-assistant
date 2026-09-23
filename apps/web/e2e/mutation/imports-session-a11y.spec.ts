@@ -112,8 +112,9 @@ async function openStage(page: Page, title: string) {
 }
 
 /**
- * Open every disclosure in the stage in focus — the shared `Disclosure`, and each
- * measurement's legacy-cell toggle — so axe scans what they hold. Nested ones
+ * Open every disclosure in the stage in focus — the shared `Disclosure`, each
+ * measurement's legacy-cell toggle, and each conflict kind's `Show N more` (the rows
+ * past the first five are `hidden` until it is pressed) — so axe scans what they hold. Nested ones
  * appear only once their parent is open, hence the bounded rounds. Returns how many
  * it opened, so a caller can assert the stage was not vacuous.
  */
@@ -125,7 +126,7 @@ async function openEverything(page: Page): Promise<number> {
       if (!panel) return 0;
       const closed = [
         ...panel.querySelectorAll<HTMLButtonElement>(
-          'button.disclosure-trigger[aria-expanded="false"], button.bl15-unit-toggle[aria-expanded="false"]',
+          'button.hi-show-more[aria-expanded="false"], button.disclosure-trigger[aria-expanded="false"], button.bl15-unit-toggle[aria-expanded="false"]',
         ),
       ];
       closed.forEach((b) => b.click());
@@ -284,7 +285,16 @@ test.describe('the import session state, which the read-only sweep cannot reach'
 
     await openStage(page, 'Conflicts');
     await expect(page.locator('.hi-conflict').first()).toBeVisible();
+    // EVERY KIND IS COUNTED ON THE SURFACE with everything collapsed: a header with
+    // its count is visible for each kind before anything is opened.
+    const heads = page.locator('.hi-conflict-group-head');
+    expect(await heads.count()).toBeGreaterThan(0);
+    for (let i = 0; i < (await heads.count()); i++) {
+      await expect(heads.nth(i).locator('.hi-count')).toBeVisible();
+    }
     expect(await openEverything(page)).toBeGreaterThan(0);
+    // After opening everything, no conflict row is left hidden behind Show more.
+    await expect(page.locator('[role="tabpanel"]:not([hidden]) li.hi-conflict[hidden]')).toHaveCount(0);
     await expectClean(page, 'Conflicts — every conflict’s four layers open');
 
     for (const stage of ['Review', 'Add to Experiment']) {

@@ -31,6 +31,7 @@ from .evidence import (
     DETERMINISM_READ,
     MAX_EVIDENCE_PER_SOURCE,
     SCOPE_MEASUREMENT,
+    SCOPE_SCAN,
     ReaderResult,
     SourceEvidence,
 )
@@ -62,6 +63,11 @@ class EvidenceBuilder:
         self.max_items = max_items
         self.profile_id = profile_id
         self.profile_version = profile_version
+        #: The scan the reader is currently inside, when it can tell. Stamped onto
+        #: every SCAN-scope statement that does not name one itself, so a reader
+        #: that walks a file scan by scan sets it once per scan rather than at every
+        #: call site. A statement at any other scope never carries it.
+        self.scan: str | None = None
         self._items: list[SourceEvidence] = []
         self._skipped: list[dict] = []
         self._suppressed = 0
@@ -82,6 +88,8 @@ class EvidenceBuilder:
         normalization_rule: str | None = None,
         timestamp_utc: str | None = None,
         measurement_stem: str | None = None,
+        scan: str | None = None,
+        item: str | None = None,
     ) -> bool:
         """Append one statement. ``False`` means the ceiling refused it.
 
@@ -111,6 +119,8 @@ class EvidenceBuilder:
                 profile_version=self.profile_version,
                 timestamp_utc=timestamp_utc,
                 measurement_stem=measurement_stem,
+                scan=scan if scan is not None else (self.scan if scope == SCOPE_SCAN else None),
+                item=item,
             )
         )
         return True

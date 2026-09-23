@@ -55,6 +55,30 @@ export function ImportCandidateRow({
   const sources = sourceCount(candidate);
   const labels = IMPORT_STAGE_COPY.stateLabels;
   const agree = candidate.agreement === 'sources_agree';
+  /* VARIES BY SCAN (2026-09-22): neither agreement nor conflict — each scan (or file)
+     keeps its own reading, as the concept's registry cardinality expects. */
+  const variation = candidate.agreement === 'varies' ? candidate.variation ?? [] : [];
+  const basis = candidate.variation_basis ?? 'per_scan';
+  const byFile = basis === 'per_source';
+  const spans = candidate.variation_scans ?? null;
+  const readings = candidate.variation_total ?? variation.length;
+  const variesLabel = byFile ? labels.variesByFile : basis === 'per_scan_item' ? labels.severalPerScan : labels.variesByScan;
+  const scansText = spans !== null ? `${spans} ${spans === 1 ? 'scan' : 'scans'}` : '';
+  const variesSummary = byFile
+    ? 'different in each file'
+    : basis === 'per_scan_item'
+      ? `${readings} ${readings === 1 ? 'value' : 'values'}${scansText ? ` across ${scansText}` : ''}`
+      : `one per scan${scansText ? ` · ${scansText}` : ''}`;
+  const variesWhy = byFile
+    ? IMPORT_STAGE_COPY.variation.whyFile
+    : basis === 'per_scan_item'
+      ? IMPORT_STAGE_COPY.variation.whyItem
+      : IMPORT_STAGE_COPY.variation.why;
+  const variesEach = byFile
+    ? IMPORT_STAGE_COPY.variation.eachFile
+    : basis === 'per_scan_item'
+      ? IMPORT_STAGE_COPY.variation.eachItem
+      : IMPORT_STAGE_COPY.variation.eachScan;
 
   return (
     <li className="hi-cand">
@@ -64,14 +88,19 @@ export function ImportCandidateRow({
           <span className="hi-cand-summary">
             <span className="hi-cand-name">{label}</span>
             {context && <span className="hi-cand-context">{context}</span>}
-            <span className={value === null ? 'hi-cand-value hi-cand-none' : 'hi-cand-value'}>
-              {value ?? IMPORT_STAGE_COPY.conflicts.noValue}
-            </span>
+            {variation.length > 0 ? (
+              <span className="hi-cand-value hi-cand-none">{variesSummary}</span>
+            ) : (
+              <span className={value === null ? 'hi-cand-value hi-cand-none' : 'hi-cand-value'}>
+                {value ?? IMPORT_STAGE_COPY.conflicts.noValue}
+              </span>
+            )}
           </span>
         }
         meta={
           <span className="hi-cand-meta">
             <SemanticStatus state={BUCKET_STATE[bucket]} label={labels[bucket]} size="sm" />
+            {variation.length > 0 && <SemanticStatus state="notApplicable" label={variesLabel} size="sm" />}
             {agree && bucket !== 'conflict' && (
               <SemanticStatus state="sourcesAgree" label={labels.sourcesAgree} size="sm" />
             )}
@@ -95,6 +124,41 @@ export function ImportCandidateRow({
               </>
             )}
           </div>
+
+          {variation.length > 0 && (
+            <div className="hi-cand-variation">
+              <p className="hi-sub">{variesWhy}</p>
+              <Disclosure className="hi-cand-rule" summary={variesEach} meta={String(readings)}>
+                <ul className="hi-cand-readings">
+                  {variation.map((row, index) => (
+                    <li key={index}>
+                      <span className="hi-cand-reading-value">
+                        <span className="hi-cand-reading-where">
+                          {[
+                            row.scan !== null
+                              ? `Scan ${row.scan}`
+                              : row.source !== null
+                                ? (row.source.split('/').pop() ?? row.source)
+                                : 'The measurement',
+                            row.item,
+                          ]
+                            .filter(Boolean)
+                            .join(' · ')}
+                        </span>{' '}
+                        {row.value}
+                      </span>
+                      <span className="hi-sub">{row.locators.join('; ')}</span>
+                    </li>
+                  ))}
+                </ul>
+                {typeof candidate.variation_total === 'number' && candidate.variation_total > variation.length && (
+                  <p className="hi-sub">
+                    {variation.length} of {candidate.variation_total} readings shown.
+                  </p>
+                )}
+              </Disclosure>
+            </div>
+          )}
 
           {candidate.disagreement.length > 0 && (
             <ul className="hi-cand-readings">

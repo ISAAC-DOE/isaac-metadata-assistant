@@ -57,6 +57,15 @@ RUN_CANDIDATE_NOT_PROPOSABLE = (
     "whether it becomes a Run."
 )
 
+#: Why a candidate whose readings VARY by scan has no single value to propose. None of
+#: the concepts the cardinality rule currently declares has a proposable mapping, so
+#: this is a guard rather than a sentence anyone reads today — and a record field takes
+#: ONE value, so a per-scan list must never be proposed as though it were one.
+VARIES_NOT_PROPOSABLE = (
+    "This value differs from scan to scan, as it is expected to, so there is no single "
+    "value to propose. Each scan's reading is kept."
+)
+
 #: Why a candidate carrying a disagreement has no value.
 DISAGREEMENT_NOT_PROPOSABLE = (
     "Two or more sources disagree about this. Nothing here picks a winner, so there is "
@@ -229,13 +238,31 @@ def _evidence_for_unit(
     paths.extend(sorted({block.macro_path for block in unit.declared_by}))
     paths.extend(unit.processed_products)
 
+    # A MACRO FILE DECLARES SEVERAL MEASUREMENTS, one `newfile` block each, so a
+    # statement one of its blocks makes about ANOTHER measurement is that measurement's
+    # evidence, not this one's. Added 2026-09-22 after measuring the consequence: every
+    # unit declared by one nine-block macro received all nine declared targets, and the
+    # reconstruction reported them as nine sources disagreeing about which measurement
+    # this is. A statement naming no measurement (file-level) still applies.
+    declared: dict[str, set[str]] = defaultdict(set)
+    for block in unit.declared_by:
+        declared[block.macro_path].add(block.declared_target)
+
     seen: set[str] = set()
     out: list[ev.SourceEvidence] = []
     for path in paths:
         if path in seen:
             continue
         seen.add(path)
-        out.extend(evidence_by_source.get(path, ()))
+        targets = declared.get(path)
+        for item in evidence_by_source.get(path, ()):
+            if (
+                targets is not None
+                and item.measurement_stem is not None
+                and item.measurement_stem not in targets
+            ):
+                continue
+            out.append(item)
     return out
 
 
@@ -326,8 +353,20 @@ def _candidates_from_evidence(
         # sixteen witnesses; one file read under two conventions is one.
         witnesses = len({i.source_path for i in group})
 
-        distinct = sorted({_reading_of(i) for i in group})
-        if len(distinct) > 1:
+        # COMPARED AT THE CONCEPT'S OWN CARDINALITY (`mp.RULE_CARDINALITY`, 2026-09-22).
+        # A per-measurement concept is one comparison over every reading, exactly as
+        # before. A per-scan concept is compared only within each scan (and item, and
+        # file) — so scans that simply differ are not reported as sources disagreeing.
+        cardinality = mp.cardinality_for(concept)
+        keyed = _comparison_groups(group, cardinality)
+        disputed = [
+            member
+            for members in keyed.values()
+            if len({_reading_of(i) for i in members}) > 1
+            for member in members
+        ]
+        if disputed:
+            distinct = sorted({_reading_of(i) for i in disputed})
             yield SemanticCandidate(
                 candidate_id=f"{candidate_prefix}::{concept}",
                 kind=CANDIDATE_KIND_FIELD,
@@ -335,6 +374,12 @@ def _candidates_from_evidence(
                 rule=(
                     f"{len(group)} source(s) state {concept.replace('_', ' ')}, and they "
                     "do not agree."
+                    if cardinality == mp.CARDINALITY_PER_MEASUREMENT
+                    else (
+                        f"{len(group)} source(s) state {concept.replace('_', ' ')}, and "
+                        f"two or more disagree about the {_SAME[cardinality]} "
+                        f"({mp.RULE_CARDINALITY.split(':', 1)[0]})."
+                    )
                 ),
                 supporting_source_ids=ids,
                 supporting_statements=statements,
@@ -351,16 +396,53 @@ def _candidates_from_evidence(
                 # disagreed: the shape is only reachable when two sources state
                 # different literals for one concept, which the fixture corpus does
                 # and the unit tests asserted only on the server side.
+                #
+                # (2026-09-22) ONLY THE DISPUTED READINGS are competing sides: for a
+                # per-scan concept, another scan's different value is that scan's own
+                # reading, not a third side of this dispute.
                 disagreement=tuple(
                     {
                         "value": value,
-                        "source_ids": _sources_stating(group, value),
-                        "locators": _locators_stating(group, value),
+                        "source_ids": _sources_stating(disputed, value),
+                        "locators": _locators_stating(disputed, value),
                     }
                     for value in distinct
                 ),
                 unresolved_reason=UNRESOLVED_SOURCES_DISAGREE,
                 distinct_sources=witnesses,
+            )
+            continue
+
+        # THE READINGS AGREE WITHIN EVERY COMPARISON GROUP. If they still differ across
+        # groups, that is the concept's expected per-scan variation: kept, row by row.
+        variation: tuple[dict, ...] = ()
+        if len({_reading_of(i) for i in group}) > 1:
+            variation = tuple(
+                _variation_row(key, members, source_ids)
+                for key, members in sorted(keyed.items(), key=lambda kv: _key_order(kv[0]))
+            )
+        varied = {
+            "variation": variation,
+            "variation_basis": cardinality if variation else None,
+            "variation_scans": (
+                len({row["source"] if cardinality == mp.CARDINALITY_PER_SOURCE else row["scan"] for row in variation})
+                if variation
+                else None
+            ),
+        }
+
+        if variation and entry is not None and entry.proposable:
+            yield SemanticCandidate(
+                candidate_id=f"{candidate_prefix}::{concept}",
+                kind=CANDIDATE_KIND_FIELD,
+                determinism=DETERMINISM_DETERMINISTIC,
+                rule=_variation_rule(concept, group, cardinality),
+                supporting_source_ids=ids,
+                supporting_statements=statements,
+                target_field_path=entry.official_path,
+                not_proposable_reason=VARIES_NOT_PROPOSABLE,
+                distinct_sources=witnesses,
+                **varied,
             )
             continue
 
@@ -378,12 +460,17 @@ def _candidates_from_evidence(
                 candidate_id=f"{candidate_prefix}::{concept}",
                 kind=CANDIDATE_KIND_FIELD,
                 determinism=DETERMINISM_DETERMINISTIC,
-                rule=_rule_for(concept, group),
+                rule=(
+                    _variation_rule(concept, group, cardinality)
+                    if variation
+                    else _rule_for(concept, group)
+                ),
                 supporting_source_ids=ids,
                 supporting_statements=statements,
                 target_field_path=entry.official_path if entry else None,
                 not_proposable_reason=reason,
                 distinct_sources=witnesses,
+                **varied,
             )
             continue
 
@@ -484,8 +571,107 @@ def _reading_of(item: ev.SourceEvidence) -> str:
     manufacture disagreements out of the corpus's two unit conventions.
     """
     if item.normalized_value is not None:
-        return f"{item.normalized_value}{f' {item.unit}' if item.unit else ''}"
+        return f"{_text_of(item.normalized_value)}{f' {item.unit}' if item.unit else ''}"
     return item.raw_literal
+
+
+def _text_of(value) -> str:
+    """A normalised value as the text a scientist reads — NEVER a Python repr.
+
+    Corrected 2026-09-22: a scan export's ``acquisition_target`` normalises to
+    ``{"measurement_stem": …, "scan_index": 1}``, and formatting that with an f-string
+    put ``{'measurement_stem': '01_01_…', 'scan_index': 1}`` on the screen. A mapping is
+    written from its fields; the measurement-and-scan pair is written the way the rest
+    of the review names a scan.
+    """
+    if isinstance(value, Mapping):
+        if set(value) == {"measurement_stem", "scan_index"}:
+            return f"{value['measurement_stem']} · scan {value['scan_index']}"
+        return "; ".join(f"{str(k).replace('_', ' ')} {_text_of(v)}" for k, v in sorted(value.items()))
+    if isinstance(value, (list, tuple)):
+        return ", ".join(_text_of(v) for v in value)
+    return str(value)
+
+
+#: What a per-scan disagreement is ABOUT, in the rule sentence.
+_SAME = {
+    mp.CARDINALITY_PER_SCAN: "same scan",
+    mp.CARDINALITY_PER_SCAN_ITEM: "same scan and item",
+    mp.CARDINALITY_PER_SOURCE: "same token of the same file",
+}
+
+
+def _comparison_groups(
+    group: Sequence[ev.SourceEvidence], cardinality: str
+) -> dict[tuple, list[ev.SourceEvidence]]:
+    """The readings that must agree, keyed by what they are about. See
+    :data:`bl15.mapping.RULE_CARDINALITY`.
+
+    * ``per_measurement`` — one group: every reading is compared with every other.
+    * ``per_scan`` — a reading ABOUT ONE SCAN (``scope == scan`` with the scan the
+      source numbers it by) is grouped with the other readings about that scan; any
+      other reading (a macro's declared target, a file-level header) is grouped with
+      the measurement-level readings.
+    * ``per_scan_item`` — as ``per_scan``, and further by the item within the scan.
+    * ``per_source`` — by the file the reading came from.
+    """
+    out: dict[tuple, list[ev.SourceEvidence]] = defaultdict(list)
+    for item in group:
+        out[_comparison_key(item, cardinality)].append(item)
+    return dict(out)
+
+
+def _comparison_key(item: ev.SourceEvidence, cardinality: str) -> tuple:
+    if cardinality == mp.CARDINALITY_PER_SOURCE:
+        return ("source", item.source_path, item.item)
+    if cardinality in (mp.CARDINALITY_PER_SCAN, mp.CARDINALITY_PER_SCAN_ITEM):
+        about_a_scan = item.scope == ev.SCOPE_SCAN and item.scan is not None
+        scan = ("scan", item.scan) if about_a_scan else ("measurement", None)
+        if cardinality == mp.CARDINALITY_PER_SCAN_ITEM:
+            return (*scan, item.item)
+        return (*scan, None)
+    return ("measurement", None, None)
+
+
+def _key_order(key: tuple) -> tuple:
+    """Measurement-level first, then scans in their NUMERIC order, then items."""
+    if key[0] == "source":
+        return (2, 0, str(key[1]), str(key[2] or ""))
+    kind, scan, item = key
+    number = int(scan) if isinstance(scan, str) and scan.isdigit() else -1
+    return (0 if kind == "measurement" else 1, number, str(scan or ""), str(item or ""))
+
+
+def _variation_row(
+    key: tuple, members: Sequence[ev.SourceEvidence], source_ids: Mapping[str, str]
+) -> dict:
+    """ONE scan's (or item's, or file's) reading. Every member agrees — a group that
+    did not would have been a disagreement."""
+    value = _reading_of(members[0])
+    if key[0] == "source":
+        scan, item, source = None, key[2], key[1]
+    else:
+        scan, item, source = key[1], key[2], None
+    return {
+        "scan": scan,
+        "item": item,
+        "source": source,
+        "value": value,
+        "source_ids": list(_ids_for(tuple(m.source_path for m in members), source_ids)),
+        "locators": [statement_locator(m) for m in members],
+    }
+
+
+def _variation_rule(concept: str, group: Sequence[ev.SourceEvidence], cardinality: str) -> str:
+    """The warrant for a varying candidate: what was read, and why it is not a conflict."""
+    across = "file to file" if cardinality == mp.CARDINALITY_PER_SOURCE else "scan to scan"
+    count = len(group)
+    return (
+        f"Read from {count} source{'s' if count != 1 else ''}. The value differs from "
+        f"{across}, which is expected for {concept.replace('_', ' ')} "
+        f"({mp.RULE_CARDINALITY.split(':', 1)[0]}): each keeps its own reading, and no two "
+        f"sources disagree about the {_SAME[cardinality]}."
+    )
 
 
 def _normalized_of(group: Sequence[ev.SourceEvidence]):

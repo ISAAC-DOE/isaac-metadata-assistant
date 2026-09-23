@@ -315,6 +315,18 @@ class SourceEvidence:
     #: from the source alone. Relationship reconstruction lives in
     #: ``bl15.relate``; this is only what the file itself names.
     measurement_stem: str | None = None
+    #: WHICH SCAN of the measurement this statement is about, as the source itself
+    #: numbers it — ``#S 3`` in a SPEC acquisition, the ``_003`` index in a scan
+    #: export's basename — and ``None`` for anything not stated about one scan.
+    #: Added 2026-09-22 so a value that is EXPECTED to differ from scan to scan is
+    #: compared only with other statements about the same scan
+    #: (``bl15.mapping.RULE_CARDINALITY``), instead of being reported as a
+    #: disagreement between scans that were simply different.
+    scan: str | None = None
+    #: WHICH ITEM within that scan, for a concept a scan states several of — a
+    #: detector column's position (``column 2``) or a motor's name. ``None`` for a
+    #: concept with one value per scan. Same date, same reason.
+    item: str | None = None
 
     def __post_init__(self) -> None:
         if self.concept not in CONCEPTS:
@@ -359,6 +371,8 @@ class SourceEvidence:
             "profile_version": self.profile_version,
             "timestamp_utc": self.timestamp_utc,
             "measurement_stem": self.measurement_stem,
+            "scan": self.scan,
+            "item": self.item,
         }
 
 

@@ -396,6 +396,10 @@ def read_spec_acquisition(
             scan_number = scan_match.group(1) if scan_match else payload.strip()
             command = scan_match.group(2).strip() if scan_match else ""
             scan_label = f"scan {scan_number}"
+            # THE SCAN THIS FILE IS NOW INSIDE, stamped on every scan-scope statement
+            # that follows (`EvidenceBuilder.scan`). A numeric `#S` label is written
+            # without leading zeros so it matches a scan export's `_001` index.
+            builder.scan = str(int(scan_number)) if scan_number.isdigit() else scan_number
             if command:
                 builder.add(
                     locator=f"line {number} header #S ({scan_label})",
@@ -470,6 +474,7 @@ def read_spec_acquisition(
                     concept=CONCEPT_DETECTOR_COLUMN,
                     scope=SCOPE_SCAN if scan_label else SCOPE_MEASUREMENT,
                     measurement_stem=declared_stem,
+                    item=f"column {position}",
                 )
             continue
 
@@ -567,4 +572,5 @@ def _read_positions(
             normalization_rule=RULE_O_P_PAIRING,
             scope=SCOPE_SCAN if scan_label else SCOPE_MEASUREMENT,
             measurement_stem=declared_stem,
+            item=name,
         )

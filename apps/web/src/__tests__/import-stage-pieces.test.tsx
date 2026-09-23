@@ -29,7 +29,7 @@ import { MemoryRouter } from 'react-router-dom';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { ImportConflicts } from '../components/ImportConflicts';
+import { CONFLICTS_SHOWN_PER_KIND, ImportConflicts, groupRuleChoices } from '../components/ImportConflicts';
 import { CorpusReadOverview } from '../components/ImportCorpusReview';
 import { ImportRules, SignalSelection } from '../components/ImportRules';
 import { ImportCandidateRow } from '../components/ImportCandidateRow';
@@ -44,7 +44,7 @@ import {
   wouldNotSend,
   type ConflictView,
 } from '../lib/importStages';
-import type { Bl15CorpusReview } from '../lib/bl15Review';
+import { normalizedText, type Bl15CorpusReview } from '../lib/bl15Review';
 import type {
   ApiConventionRule,
   ApiImportCandidate,
@@ -270,6 +270,151 @@ describe('§2 · recording a resolution chooses between readings, at a scope the
   });
 });
 
+/* ── §2b conflicts at scale ──────────────────────────────────────────────── */
+
+/** `n` conflicts of one kind, in sample group `group`. */
+const many = (n: number, overrides: Partial<ConflictView> = {}, group = '03') =>
+  Array.from({ length: n }, (_, i) =>
+    view({
+      key: `cf-${overrides.topic ?? 'k'}-${i}`,
+      subject: `FAKE_stem_${String(i).padStart(2, '0')}`,
+      target: { conflict_id: `cf-${i}` },
+      groupToken: group,
+      ...overrides,
+    }),
+  );
+
+describe('§2b · conflicts are grouped by kind, and a long kind shows five then "Show N more"', () => {
+  it('every kind states its count and meaning with everything collapsed', () => {
+    const conflicts = [
+      ...many(12),
+      ...many(2, { topic: 'acquired_never_declared', explanation: 'A SECOND FAKE meaning.' }),
+    ];
+    const { container } = renderConflicts(conflicts);
+    const heads = [...container.querySelectorAll('.hi-conflict-group-head')];
+    expect(heads).toHaveLength(2);
+    expect(heads[0].querySelector('.hi-count')?.textContent).toBe('12');
+    expect(heads[1].querySelector('.hi-count')?.textContent).toBe('2');
+    // The meaning is on the surface, never behind the review or the Show more.
+    for (const head of heads) {
+      const meaning = head.querySelector('.hi-conflict-explanation')!;
+      expect(meaning.textContent?.length).toBeGreaterThan(0);
+      expect(meaning.closest('[hidden]')).toBeNull();
+    }
+  });
+
+  it('MUTATION-GUARDED: shows exactly the first five, and Show N more reveals exactly the rest', () => {
+    /**
+     * MUTATION: `hidden={!all && index >= CONFLICTS_SHOWN_PER_KIND - 1}` (an
+     * off-by-one) makes this RED on the "exactly five" count.
+     */
+    const { container } = renderConflicts(many(12));
+    const rows = () => [...container.querySelectorAll<HTMLLIElement>('li.hi-conflict')];
+    const visible = () => rows().filter((r) => !r.hidden);
+    expect(rows()).toHaveLength(12);
+    expect(visible()).toHaveLength(CONFLICTS_SHOWN_PER_KIND);
+    // The FIRST five, in order.
+    expect(visible().map((r) => r.querySelector('.hi-conflict-subject')?.textContent)).toEqual(
+      ['00', '01', '02', '03', '04'].map((n) => `FAKE_stem_${n}`),
+    );
+    const more = screen.getByRole('button', { name: 'Show 7 more' });
+    expect(more.getAttribute('aria-expanded')).toBe('false');
+    // It names the list it controls and is described by the kind it belongs to.
+    expect(document.getElementById(more.getAttribute('aria-controls')!)?.tagName).toBe('UL');
+    expect(document.getElementById(more.getAttribute('aria-describedby')!)?.textContent).toContain('12');
+    fireEvent.click(more);
+    expect(visible()).toHaveLength(12);
+    expect(more.getAttribute('aria-expanded')).toBe('true');
+    // Announced to a screen reader, in the ONE status region the stage keeps.
+    const status = container.querySelectorAll('[role="status"]');
+    expect(status).toHaveLength(1);
+    expect(status[0].textContent).toBe('7 more shown — all 12 of this kind.');
+    fireEvent.click(more);
+    expect(visible()).toHaveLength(CONFLICTS_SHOWN_PER_KIND);
+  });
+
+  it('a kind with five or fewer has no Show more at all', () => {
+    renderConflicts(many(5));
+    expect(screen.queryByRole('button', { name: /^Show \d+ more$/ })).toBeNull();
+  });
+
+  it('Run 32 is still offered no resolution control, alone or among many', () => {
+    const { container } = renderConflicts([
+      ...many(7),
+      view({ key: 'cf-32', topic: 'duplicate_legacy_number', subject: 'legacy 32', forbidden: true, groupToken: null }),
+    ]);
+    const group = [...container.querySelectorAll('.hi-conflict-group')].find((g) =>
+      g.textContent?.includes('Two files claim the same legacy number'),
+    ) as HTMLElement;
+    expect(within(group).queryAllByRole('radio', { hidden: true })).toEqual([]);
+    expect(within(group).queryByRole('button', { name: C.resolve.groupTitle, hidden: true })).toBeNull();
+    expect(within(group).queryByRole('button', { name: C.resolve.submit, hidden: true })).toBeNull();
+  });
+});
+
+describe('§2c · a whole sample group is resolved at the kind, by the kind of source', () => {
+  it('is offered only where a group holds more than one open, resolvable conflict of the kind', () => {
+    expect(groupRuleChoices(many(1))).toBeNull();
+    expect(groupRuleChoices(many(2, { groupToken: null }))).toBeNull();
+    expect(groupRuleChoices(many(3, { forbidden: true }))).toBeNull();
+    expect(groupRuleChoices(many(3, { resolvable: false }))).toBeNull();
+    expect(groupRuleChoices([...many(2, {}, '03'), ...many(1, {}, '04')])).toEqual({
+      roles: ['human_label', 'instrument_header'],
+      groups: [{ token: '03', count: 2 }],
+    });
+  });
+
+  it('records ONE rule for the group — the kind and the chosen role, never a value', async () => {
+    const record = vi.spyOn(api, 'recordImportRule').mockResolvedValue({} as never);
+    renderConflicts(many(3));
+    fireEvent.click(screen.getByRole('button', { name: C.resolve.groupTitle }));
+    expect(screen.getByRole('combobox', { name: C.resolve.groupWhich })).toHaveValue('03');
+    fireEvent.click(screen.getByRole('radio', { name: 'Header' }));
+    fireEvent.click(screen.getByRole('button', { name: C.resolve.groupSubmit }));
+    await waitFor(() => expect(record).toHaveBeenCalledTimes(1));
+    expect(record.mock.calls[0][1]).toEqual({
+      kind: 'conflict_resolution',
+      scope: 'import',
+      selector: { group_tokens: ['03'] },
+      body: { conflict_kind: 'internal_declaration_vs_filename', chosen_source_role: 'instrument_header' },
+    });
+  });
+
+  it('the per-row form no longer offers the recurring option — it lives at the kind', () => {
+    const { container } = renderConflicts(many(3));
+    fireEvent.click(within(container.querySelector('li.hi-conflict') as HTMLElement).getByRole('button', { name: C.conflicts.review }));
+    const row = container.querySelector('li.hi-conflict') as HTMLElement;
+    expect(within(row).queryAllByRole('checkbox')).toEqual([]);
+  });
+});
+
+describe('§2d · a field disagreement names the field, and each source by its file', () => {
+  it('shows the field and the file behind each reading, not "Source · Source"', () => {
+    const { container } = renderConflicts([
+      view({
+        key: 'field-1',
+        kind: 'field',
+        topic: 'Filter',
+        explanation: null,
+        readings: [
+          { value: '10', role: null, roleMeaning: null, sourceType: null, sources: [{ path: 'FAKE_dir/FAKE_001.dat', locator: 'l1' }] },
+          { value: '35', role: null, roleMeaning: null, sourceType: null, sources: [{ path: 'FAKE_notes.txt', locator: 'l2' }] },
+        ],
+        distinct: null,
+        target: { candidate_id: 'c1' },
+        groupToken: null,
+      }),
+    ]);
+    expect(container.querySelector('.hi-conflict-topic')?.textContent).toBe('Filter');
+    const line = [...container.querySelectorAll('.hi-conflict-line > li')].map((li) => li.textContent?.replace(/\s+/g, ' ').trim());
+    expect(line).toEqual(['FAKE_001.dat 10', 'FAKE_notes.txt 35']);
+    expect(container.querySelector('.hi-conflict-group-title')?.textContent).toContain(C.conflicts.fieldKindTitle);
+    expect(container.querySelector('.hi-conflict-group-head .hi-conflict-explanation')?.textContent).toBe(
+      C.conflicts.fieldKindMeaning,
+    );
+  });
+});
+
 /* ── §3–§5 what ISAAC read ───────────────────────────────────────────────── */
 
 /**
@@ -328,7 +473,7 @@ describe('§3 · temperature is Not Recorded, or the source’s own words', () =
           temperature: {
             status: 'stated_in_source',
             statements: [{ raw_literal: 'room temp-ish (FAKE)', source_path: 'FAKE/notes.txt' }],
-            policy: 'A FAKE stated-case policy: kept verbatim, never converted.',
+            policy: BASE_REVIEW.mapping.temperature_absent_reason,
           },
         } as never)}
         profiles={PROFILES}
@@ -338,16 +483,28 @@ describe('§3 · temperature is Not Recorded, or the source’s own words', () =
     expect(container.querySelector('q.bl15-quote')?.textContent).toBe('room temp-ish (FAKE)');
     expect(container.textContent).toContain(C.temperatureStated);
     /*
-     * NOWHERE on the surface — including "What cannot be finished here", which
-     * quotes the registry — does the registry's "states no temperature anywhere"
-     * sentence appear beside a temperature a source states. MUTATION: rendering
-     * `mapping.temperature_absent_reason` unconditionally in the ceiling makes this
-     * RED (measured: it did, before the ceiling read the temperature view).
+     * NOWHERE on the surface does a sentence deny the statement shown above it.
+     * The registry's blocker used to open "this corpus states no temperature
+     * anywhere" for every archive; it was corrected at its source (the server's
+     * `bl15.mapping.TEMPERATURE_ABSENT_REASON`, pinned in `test_bl15_mapping.py`),
+     * and the fixture carries the corrected sentence, which "What cannot be
+     * finished here" quotes verbatim. The sentence still names the temperature
+     * as a blocker — a statement in words cannot fill `context.temperature_K`.
      */
-    expect(BASE_REVIEW.mapping.temperature_absent_reason).toContain('states no temperature anywhere');
+    expect(BASE_REVIEW.mapping.temperature_absent_reason).not.toContain('states no temperature anywhere');
+    expect(BASE_REVIEW.mapping.temperature_absent_reason).toContain('context.temperature_K');
     expect(container.textContent).not.toContain('states no temperature anywhere');
-    expect(container.textContent).toContain('A FAKE stated-case policy: kept verbatim, never converted.');
-    expect(container.textContent).not.toMatch(/\b298\b|\bK\b\s*$/);
+    expect(container.textContent).toContain(BASE_REVIEW.mapping.temperature_absent_reason);
+    /*
+     * No NUMBER is offered for it. "298" does appear on this surface, and must: it is
+     * inside the registry's own sentence forbidding it as a default. What is checked is
+     * that it never appears as a VALUE — in the quoted statement, or as a control.
+     */
+    const temperature = [...container.querySelectorAll('.bl15-fact')].find((f) =>
+      f.textContent?.includes(C.temperatureTitle),
+    )!;
+    for (const q of temperature.querySelectorAll('q')) expect(q.textContent).not.toMatch(/\d/);
+    expect(temperature.querySelectorAll('input, select')).toHaveLength(0);
   });
 });
 
@@ -704,5 +861,90 @@ describe('§8 · statuses come from the server, and agreement is never inferred'
     } as unknown as ApiImportSession);
     expect(views).toHaveLength(1);
     expect(views[0].forbidden).toBe(true);
+  });
+});
+
+/* ── §9 per-scan variation is neither agreement nor conflict ─────────────── */
+
+describe('§9 · a value that differs by scan reads "Varies by Scan" — never a conflict', () => {
+  const varying = candidate({
+    candidate_id: 'ZZ_unit::detector_column',
+    target_field_path: 'measurement.series[].channels[].name',
+    proposed_value: null,
+    proposable: false,
+    not_proposable_reason: 'FAKE registry reason.',
+    agreement: 'varies',
+    review_status: 'needs_review',
+    variation_basis: 'per_scan_item',
+    variation_scans: 2,
+    variation_total: 30,
+    variation: [
+      { scan: '1', item: 'column 0', source: null, value: 'I0', source_ids: ['S1'], locators: ['FAKE_001.dat · line 6'] },
+      { scan: '2', item: 'column 0', source: null, value: 'I0b', source_ids: ['S2'], locators: ['FAKE_002.dat · line 6'] },
+    ],
+  } as never);
+
+  it('shows a neutral Varies by Scan state, no conflict state, and the scan count', () => {
+    const { container } = render(
+      <MemoryRouter>
+        <ul>
+          <ImportCandidateRow candidate={varying} filenameOf={(id) => id} />
+        </ul>
+      </MemoryRouter>,
+    );
+    const meta = container.querySelector('.hi-cand-meta')!;
+    // Several detector columns per scan: "Several per Scan", not "Varies by Scan" — the
+    // columns differ from each other, not necessarily from scan to scan.
+    expect(meta.textContent).toContain(C.stateLabels.severalPerScan);
+    expect(meta.textContent).not.toContain(C.stateLabels.conflict);
+    expect(meta.textContent).not.toContain(C.stateLabels.sourcesAgree);
+    // Neutral tone, icon + word — never the conflict tone.
+    const chip = [...meta.querySelectorAll('.semantic-status')].find((c) => c.textContent?.includes(C.stateLabels.severalPerScan))!;
+    expect(chip.getAttribute('data-tone')).toBe('neutral');
+    expect(chip.querySelector('svg')).not.toBeNull();
+    expect(container.querySelector('.hi-cand-summary')?.textContent).toContain('30 values across 2 scans');
+    // It is NOT offered the "No value has been selected." of an open conflict.
+    expect(container.textContent).not.toContain(C.conflicts.noValue);
+  });
+
+  it('keeps every scan’s reading one press away, with where each came from and the true total', () => {
+    const { container } = render(
+      <MemoryRouter>
+        <ul>
+          <ImportCandidateRow candidate={varying} filenameOf={(id) => id} />
+        </ul>
+      </MemoryRouter>,
+    );
+    const rows = [...container.querySelectorAll('.hi-cand-variation .hi-cand-readings > li')].map((li) =>
+      li.textContent?.replace(/\s+/g, ' ').trim(),
+    );
+    expect(rows).toEqual([
+      'Scan 1 · column 0 I0FAKE_001.dat · line 6',
+      'Scan 2 · column 0 I0bFAKE_002.dat · line 6',
+    ]);
+    expect(container.textContent).toContain('2 of 30 readings shown.');
+    expect(container.textContent).toContain(C.variation.whyItem);
+  });
+
+  it('a per-scan value reads "Varies by Scan", one per scan', () => {
+    const perScan = { ...varying, variation_basis: 'per_scan', variation_total: null } as never;
+    const { container } = render(
+      <MemoryRouter>
+        <ul>
+          <ImportCandidateRow candidate={perScan} filenameOf={(id) => id} />
+        </ul>
+      </MemoryRouter>,
+    );
+    expect(container.querySelector('.hi-cand-meta')?.textContent).toContain(C.stateLabels.variesByScan);
+    expect(container.querySelector('.hi-cand-summary')?.textContent).toContain('one per scan · 2 scans');
+    expect(container.textContent).toContain(C.variation.why);
+  });
+
+  it('writes a structured value as text, never [object Object] or a Python repr', () => {
+    expect(normalizedText({ measurement_stem: 'ZZ_unit', scan_index: 1 })).toBe('ZZ_unit · scan 1');
+    expect(normalizedText({ b: 2, a_b: 'x' })).toBe('a b x; b 2');
+    expect(normalizedText([1, 2])).toBe('1, 2');
+    expect(normalizedText(0.06)).toBe('0.06');
+    expect(normalizedText(null)).toBe('');
   });
 });

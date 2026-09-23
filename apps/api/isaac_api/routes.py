@@ -27566,7 +27566,7 @@ def post_import_candidate_proposal(
         "rather than discovered: it cannot be export-ready. "
         "`GET /api/imports/{import_id}` lists the measured reasons under "
         "`corpus_digest.cannot_be_export_ready` — a required temperature no "
-        "source in such a corpus states, a required descriptor no historical "
+        "source in such a corpus supplies as a number, a required descriptor no historical "
         "source provides, and a required file digest this build never computes. "
         "No progress indicator here can fill, and none is offered."
     ),

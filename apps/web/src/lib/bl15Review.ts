@@ -249,6 +249,32 @@ export interface Bl15SourceEvidence {
   profile_version: string | null;
   timestamp_utc: string | null;
   measurement_stem: string | null;
+  /** 2026-09-22 — which scan this statement is about, as the source numbers it. */
+  scan?: string | null;
+  /** 2026-09-22 — which item within the scan (a column position, a motor, a token). */
+  item?: string | null;
+}
+
+/**
+ * A normalised value as the text a scientist reads — never `[object Object]`.
+ *
+ * Mirrors the server's own `bl15.reconstruct._text_of`: a scan export's
+ * `acquisition_target` normalises to `{measurement_stem, scan_index}` and is written
+ * `stem · scan N`, the way the review names a scan; any other object is written from
+ * its fields; a list is joined.
+ */
+export function normalizedText(value: unknown): string {
+  if (value === null || value === undefined) return '';
+  if (Array.isArray(value)) return value.map(normalizedText).join(', ');
+  if (typeof value === 'object') {
+    const record = value as Record<string, unknown>;
+    const keys = Object.keys(record).sort();
+    if (keys.length === 2 && keys[0] === 'measurement_stem' && keys[1] === 'scan_index') {
+      return `${normalizedText(record.measurement_stem)} · scan ${normalizedText(record.scan_index)}`;
+    }
+    return keys.map((k) => `${k.replace(/_/g, ' ')} ${normalizedText(record[k])}`).join('; ');
+  }
+  return String(value);
 }
 
 /** `mapping.ConceptMapping.to_state`. */
@@ -296,6 +322,8 @@ export interface Bl15ConceptMapping {
    * wait for an answer that has already arrived.
    */
   unresolved_questions?: string[];
+  /** 2026-09-22 — how many values the concept is expected to have (`RULE_CARDINALITY`). */
+  cardinality?: 'per_measurement' | 'per_scan' | 'per_scan_item' | 'per_source';
 }
 
 /**

@@ -708,6 +708,15 @@ def test_room_temperature_is_kept_verbatim_and_no_number_is_offered(client):
     assert "states no temperature anywhere" not in temperature["policy"]
     assert "verbatim" in temperature["policy"]
     assert "298" in temperature["policy"] and "must not be defaulted" in temperature["policy"]
+    # THE SAME FACT, EVERYWHERE IT IS SERVED (2026-09-22): the registry's blocker
+    # sentence and the digest's export blockers used to deny this corpus's statement
+    # too. They still name the temperature as a blocker — a words-only statement
+    # cannot satisfy `context.temperature_K` — and no longer claim it was never stated.
+    blockers = view["corpus_digest"]["cannot_be_export_ready"]
+    assert len(blockers) == 3
+    assert "context.temperature_K" in blockers[0]
+    assert "states no temperature anywhere" not in blockers[0]
+    assert view["corpus_review"]["mapping"]["temperature_absent_reason"] == blockers[0]
 
     eid = _record(client)
     body = client.post(

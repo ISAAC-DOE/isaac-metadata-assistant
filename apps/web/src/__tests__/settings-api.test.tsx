@@ -2553,7 +2553,14 @@ describe('the Full Description rule over the REAL generated contract', () => {
     // only (`reread_for_target`), and a clause stating that a Data Quality Note is kept
     // once per acquisition and row however many times the archive is imported. Measured
     // by the same port, never apportioned.
-    expect(total).toBe(174790);
+    //
+    // 174,790 -> 174,804 (+14), 2026-09-22, the Historical Import UI follow-up: ONE
+    // description changed, `POST .../add-to-experiment`, where "a required temperature
+    // no source in such a corpus states" became "... supplies as a number". The old
+    // clause was false for a corpus whose notes state a temperature in words — the
+    // same false claim corrected in `bl15.mapping.TEMPERATURE_ABSENT_REASON` — while the
+    // blocking it describes is unchanged. Measured by this assertion, not apportioned.
+    expect(total).toBe(174804);
     // 104,045 -> 114,959 (+10,914): the four new operations, and NO existing
     // description changed — `test_contract_description_parity.py` proves that rather
     // than leaving it asserted here. RE-DERIVED from the served document and never
