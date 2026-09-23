@@ -2,7 +2,7 @@
  * `lib/selfMintedProposals.ts` — the same-tab, in-memory courtesy that stops
  * `IngestionProposalsPanel`'s arrival note firing for a proposal THIS tab just
  * minted via `TranscriptCapturePanel`'s finalize or `UnmappedNotesPanel`'s
- * "Propose a value from this note". m7, independent review of PR-D.
+ * "Propose a Value From This Note". m7, independent review of PR-D.
  *
  * WHAT WOULD FAIL BEFORE THE BEHAVIOUR THESE TESTS DEFEND:
  *

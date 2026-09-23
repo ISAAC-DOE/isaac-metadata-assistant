@@ -84,28 +84,31 @@
   min-width: 0;
 }
 
-.run-finding-state {
+/* The per-run verdict — a NEUTRAL chip, icon + word; only the FAIL word takes the
+   fail text colour. The filled pass/fail treatment stays reserved for VerdictCard.
+   Shared by Validate & Review (`RunVerdictChip`). */
+.run-verdict {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
+  gap: var(--space-xs);
   flex: none;
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-  padding: 2px 8px;
-  border-radius: var(--radius-token, 6px);
+  padding: var(--space-xs) var(--space-sm);
   border: 1px solid var(--border);
+  border-radius: var(--radius-token);
   background: var(--surface-subtle);
   color: var(--text-slate);
+  font-size: var(--font-size-meta);
+  font-weight: var(--font-weight-semibold);
+  line-height: 1;
 }
-/* Text colour only, and only on the FAIL word — the filled green/red verdict
-   treatment stays reserved for VerdictCard. */
-.run-finding-state-fail {
+.run-verdict-fail {
   color: var(--fail-text);
-  border-color: var(--border);
 }
-.run-finding-state-unavailable {
-  color: var(--text-tertiary);
+.run-verdict-unavailable {
+  color: var(--text-secondary);
+}
+.run-finding-state {
+  flex: none;
 }
 
 .run-finding-label {
@@ -117,10 +120,14 @@
 }
 
 .run-finding-ids {
-  margin-top: 5px;
   font-size: 11px;
-  color: var(--text-tertiary);
   overflow-wrap: anywhere;
+}
+/* The per-run counts on the verdict line. Plain text beside the state word —
+   never a second state chip. */
+.run-finding-count {
+  font-size: var(--font-size-body);
+  color: var(--text-secondary);
 }
 
 .run-finding-subject {
@@ -145,8 +152,6 @@
   list-style: none;
   display: flex;
   flex-direction: column;
-  gap: 5px;
-  font-size: 11.5px;
   line-height: 1.5;
   color: var(--text-secondary);
 }
@@ -161,10 +166,11 @@
    state above it so the two can never be read as one signal. */
 .run-finding-advisory {
   margin-top: 10px;
-  padding: 8px 10px;
-  border: 1px solid var(--advisory-border);
-  border-radius: var(--radius-inner, 10px);
+}
+.run-finding-advisory .disclosure-body {
   background: var(--advisory-bg);
+  border-bottom-left-radius: var(--radius-inner);
+  border-bottom-right-radius: var(--radius-inner);
 }
 .run-finding-advisory-caption {
   font-size: 11px;

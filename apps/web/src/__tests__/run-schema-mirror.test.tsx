@@ -347,3 +347,60 @@ describe('only a row with a real destination is pressable', () => {
     expect(block.querySelector('[tabindex]')).toBeNull();
   });
 });
+
+// --- owner QA R3 (2026-09-22): scientist words first, the path one `?` away -----
+
+describe('the record map speaks the scientist’s words and keeps the path one `?` away', () => {
+  it('names each shared block in human words, never its lowercase key', async () => {
+    stub();
+    render(<RunSchemaMirror run={runFixture({})} />);
+    await waitFor(() => expect(screen.getByText('measurement')).toBeTruthy());
+    // The shared-block rows lead with the human label …
+    const labels = Array.from(document.querySelectorAll('.rm-row-label')).map((el) =>
+      (el.textContent ?? '').trim(),
+    );
+    expect(labels).toContain('Sample');
+    expect(labels).toContain('Environment');
+    // … and no visible row label is a raw key.
+    for (const raw of ['sample', 'measurement', 'descriptors', 'context', 'timestamps']) {
+      expect(labels).not.toContain(raw);
+    }
+  });
+
+  it('keeps every official path behind the row’s `?`, never removed', async () => {
+    stub();
+    render(<RunSchemaMirror run={runFixture({})} />);
+    await waitFor(() => expect(screen.getByText('measurement')).toBeTruthy());
+    const row = fieldRow('context.temperature_K');
+    const path = row.querySelector('.rm-row-path') as HTMLElement;
+    // In the DOM (so a curator's search still finds it) but not on the row until asked.
+    expect(path).not.toBeNull();
+    expect(path.closest('.helptip-panel')).not.toBeNull();
+    expect((path.closest('.helptip-panel') as HTMLElement).hidden).toBe(true);
+    const trigger = row.querySelector('.helptip-trigger') as HTMLButtonElement;
+    expect(trigger.getAttribute('aria-label')).toBe('Official Field Details');
+    // Described by the row's own label, so forty tips are not forty identical names.
+    const describedBy = trigger.getAttribute('aria-describedby');
+    expect(describedBy).not.toBeNull();
+    expect(document.getElementById(describedBy!)?.textContent).toBe('Temperature');
+    fireEvent.click(trigger);
+    expect((path.closest('.helptip-panel') as HTMLElement).hidden).toBe(false);
+  });
+
+  it('Not Shown Here is a neutral state WITH its reason, one `?` away', async () => {
+    stub();
+    render(<RunSchemaMirror run={runFixture({})} />);
+    await waitFor(() => expect(screen.getByText('measurement')).toBeTruthy());
+    const sampleRow = Array.from(document.querySelectorAll('.rm-row')).find(
+      (el) => (el.querySelector('.rm-row-label')?.textContent ?? '').trim() === 'Sample',
+    ) as HTMLElement;
+    expect(sampleRow).toBeTruthy();
+    const chip = sampleRow.querySelector('.semantic-status') as HTMLElement;
+    expect(chip.textContent?.trim()).toBe('Not Shown Here');
+    expect(chip.getAttribute('data-tone')).toBe('neutral');
+    // The reason is stated, not implied — and it points where the block is entered.
+    const reason = sampleRow.querySelector('.rm-row-reason') as HTMLElement;
+    expect(reason.textContent).toMatch(/not shown here rather than guessed/);
+    expect(reason.textContent).toMatch(/Record Fields/);
+  });
+});

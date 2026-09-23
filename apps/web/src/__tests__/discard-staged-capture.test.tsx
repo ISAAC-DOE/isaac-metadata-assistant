@@ -687,7 +687,10 @@ describe('the note capture box', () => {
         <UnmappedNotesPanel experimentId={EXP} />
       </MemoryRouter>,
     );
-    return (await screen.findByLabelText('Capture a note')) as HTMLTextAreaElement;
+    // The composer is behind "Add a Note" since owner QA P3 (2026-09-22) — opened
+    // first, so the discard control inside it is reachable by role.
+    fireEvent.click(await screen.findByRole('button', { name: /^Add a Note/ }));
+    return (await screen.findByLabelText('Capture a Note')) as HTMLTextAreaElement;
   }
 
   it('offers nothing while the box is empty', async () => {
@@ -702,9 +705,9 @@ describe('the note capture box', () => {
 
     discardVia(COPY);
 
-    expect((screen.getByLabelText('Capture a note') as HTMLTextAreaElement).value).toBe('');
+    expect((screen.getByLabelText('Capture a Note') as HTMLTextAreaElement).value).toBe('');
     expect(methodsSince(before)).toEqual([]);
-    expect(document.activeElement).toBe(screen.getByLabelText('Capture a note'));
+    expect(document.activeElement).toBe(screen.getByLabelText('Capture a Note'));
   });
 
   it('announces through the PANEL’s one act-announcement region, not a second one', async () => {

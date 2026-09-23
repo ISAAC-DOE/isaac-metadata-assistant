@@ -74,7 +74,7 @@
  * the server holds and the retry can actually succeed.
  */
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { ApiError, api } from '../lib/api';
 import { CornerDownRight, Pencil, RotateCcw, TriangleAlert } from './icons';
 import {
@@ -86,6 +86,8 @@ import {
   type OverrideRow,
 } from '../lib/runOverrides';
 import { mutationFailureCopy } from '../lib/mutationErrors';
+import { fieldPathLabel } from '../lib/recordMap';
+import { HelpTip } from './HelpTip';
 import type { ApiRunView } from '../lib/types';
 
 /** The outcome of the last write, for the panel's one live region. */
@@ -181,6 +183,8 @@ export function RunInheritedPanel({
   const controls = useRef(new Map<string, HTMLElement>());
   const [focusRequest, setFocusRequest] = useState<readonly string[] | null>(null);
   const sectionRef = useRef<HTMLElement | null>(null);
+  /* Ids for each row's label, which its `?` is described by. */
+  const rowIdBase = useId();
   const bindControl = (key: string) => (el: HTMLElement | null) => {
     if (el === null) controls.current.delete(key);
     else controls.current.set(key, el);
@@ -412,12 +416,18 @@ export function RunInheritedPanel({
       tabIndex={-1}
       ref={sectionRef}
     >
-      <p className="run-inherited-eyebrow">Inherited from the record</p>
-      <p className="run-inherited-note">
-        These values are entered once on the record and read live by every run that does
-        not override them — nothing is copied into a run, so changing one on the record
-        changes it here too. A run may hold its own value at one of these addresses
-        instead; that is an override, and it is recorded on this run alone.
+      {/* The eyebrow, and the inheritance rule behind its `?` (owner QA R2): what
+          the list IS stays visible; how inheritance works is one press away. */}
+      <p className="run-inherited-eyebrow">
+        Inherited from the record{' '}
+        <HelpTip subject="Inherited Values">
+          <span className="run-inherited-note">
+            These values are entered once on the record and read live by every run that
+            does not override them — nothing is copied into a run, so changing one on the
+            record changes it here too. A run may hold its own value at one of these
+            addresses instead; that is an override, and it is recorded on this run alone.
+          </span>
+        </HelpTip>
       </p>
       <ul className="run-inherited-list">
         {rows.map((row) => (
@@ -428,7 +438,20 @@ export function RunInheritedPanel({
             data-address={row.address}
           >
             <div className="run-inherited-head">
-              <span className="run-inherited-path">{row.path}</span>
+              <span className="run-inherited-path">
+                <span className="run-inherited-label" id={`${rowIdBase}-${row.address}`}>
+                  {fieldPathLabel(row.path)}
+                </span>
+                <HelpTip
+                  subject={fieldPathLabel(row.path)}
+                  label="Official Field Details"
+                  describedBy={`${rowIdBase}-${row.address}`}
+                >
+                  <span>
+                    Official field: <code className="run-inherited-path-code">{row.path}</code>
+                  </span>
+                </HelpTip>
+              </span>
               <span className="run-inherited-value">
                 {row.text ?? (
                   <span className="run-inherited-novalue">

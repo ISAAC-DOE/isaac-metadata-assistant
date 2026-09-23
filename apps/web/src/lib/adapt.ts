@@ -265,7 +265,7 @@ function blockOf(g: ApiDraftGroup): string {
  * `recordIdentity.createdUtcOnDraft` has always used, so the two readers cannot disagree
  * about what "the draft carries a value here" means.
  */
-function isRecorded(field: DraftField): boolean {
+export function isRecorded(field: DraftField): boolean {
   if (field.present === false) return false;
   return field.status !== 'missing' && field.status !== 'rejected';
 }
@@ -312,6 +312,37 @@ function summarize(fields: DraftField[], needsYouCount: number): string {
     return `${recorded.length} of ${n} recorded · ${detail}`;
   }
   return `${n} field${n === 1 ? '' : 's'} · ${detail}`;
+}
+
+/**
+ * THE COLLAPSED SECTION'S STATUS, AS A STATE AND A COUNT (owner QA F2, 2026-09-22).
+ *
+ * The prose tail (`13 fields · none recorded yet`) became a count and ONE status,
+ * computed from the same two facts {@link summarize} reads — how many rows need the
+ * reader, and how many the record holds — so the two cannot disagree. The order is
+ * `summarize`'s, and for its reason: a row awaiting confirmation is the one thing a
+ * collapsed section must never hide, so it wins over every count.
+ *
+ * NO COMPLETION IS INVENTED. `All Recorded` needs every row recorded — a section
+ * with one row left reads `1 Remaining`, never "complete" — and it says RECORDED,
+ * not verified or valid: a recorded row may be inferred by a stored rule, and
+ * validity is the export gate's to decide, not this header's. The unrecorded
+ * states are neutral on purpose: an empty optional field is not a blocker, and the
+ * amber tone is reserved for the rows that are.
+ */
+export function fieldGroupStatus(
+  fields: readonly DraftField[],
+  needsYouCount: number,
+): { state: 'needsReview' | 'missing' | 'complete'; label: string } {
+  if (needsYouCount > 0) {
+    return { state: 'needsReview', label: `${needsYouCount} Need${needsYouCount === 1 ? 's' : ''} You` };
+  }
+  const recorded = fields.filter(isRecorded).length;
+  if (recorded === 0) return { state: 'missing', label: 'Missing' };
+  if (recorded < fields.length) {
+    return { state: 'missing', label: `${fields.length - recorded} Remaining` };
+  }
+  return { state: 'complete', label: 'All Recorded' };
 }
 
 /**

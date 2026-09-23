@@ -1,16 +1,19 @@
-import { useEffect, useId, useState } from 'react';
+import { useEffect, useId, useState, type ReactNode } from 'react';
 
 import { api } from '../lib/api';
 import { RUN_FIELDS } from '../lib/runFields';
 import {
   RECORD_MAP_STATE_LABEL,
   blockRows,
+  recordMapBlockLabel,
   runFieldRows,
   type RecordMapCheck,
   type RecordMapRow,
   type RecordMapState,
 } from '../lib/recordMap';
-import { Check, CircleAlert, CircleDashed, CornerDownRight, EyeOff } from './icons';
+import { Disclosure } from './Disclosure';
+import { HelpTip } from './HelpTip';
+import { SemanticStatus, type SemanticState } from './SemanticStatus';
 import { LABELS } from '../lib/labels';
 import type { ApiRunCheckResponse, ApiRunView } from '../lib/types';
 import './run-schema-mirror.css';
@@ -98,6 +101,56 @@ interface SchemaNode {
   properties?: Record<string, SchemaNode>;
   required?: string[];
   description?: string;
+  type?: string | string[];
+  format?: string;
+  enum?: unknown[];
+}
+
+/** The schema node at a dotted path, or `undefined`. */
+function nodeAt(schema: SchemaNode, path: string): SchemaNode | undefined {
+  let node: SchemaNode | undefined = schema;
+  for (const part of path.split('.')) node = node?.properties?.[part];
+  return node;
+}
+
+/** The first sentence of a schema description, or `null`. */
+function firstSentence(text: string | undefined): string | null {
+  if (typeof text !== 'string' || text.trim() === '') return null;
+  const m = /^(.+?[.!?])(\s|$)/.exec(text.trim());
+  return (m ? m[1] : text.trim()).trim();
+}
+
+/**
+ * WHAT A ROW'S `?` SAYS — only what the vendored schema, `RUN_FIELDS` or this
+ * pane's own reading rules support. Nothing here is a scientific definition
+ * this client wrote: a type, a format, an enum, a unit already in the path's
+ * name, or the schema's own description sentence.
+ */
+function fieldFacts(schema: SchemaNode, row: RecordMapRow): string[] {
+  const node = nodeAt(schema, row.path);
+  const facts: string[] = [];
+  if (Array.isArray(node?.enum) && node!.enum!.length > 0) {
+    facts.push(`One of the schema's values: ${node!.enum!.map(String).join(', ')}.`);
+  } else if (node?.format === 'date-time') {
+    facts.push('A date and time, stored in UTC.');
+  } else if (row.unit !== undefined) {
+    facts.push(`A number, stored in ${row.unit === 'K' ? 'kelvin' : row.unit}.`);
+  } else if (node?.type === 'string') {
+    facts.push('Free text — the schema defines no vocabulary for it.');
+  }
+  const described = firstSentence(node?.description);
+  if (described !== null) facts.push(described);
+  return facts;
+}
+
+/** Where a block this pane cannot see is actually entered — the honest pointer
+ *  a `Not Shown Here` row owes its reader. */
+function notShownReason(block: string): string {
+  const where =
+    block === 'measurement' || block === 'descriptors'
+      ? 'Complete Metadata, where the spectrum, QC verdict and descriptors are answered'
+      : 'Record Fields';
+  return `The run list this map reads does not carry this block, so its state is not shown here rather than guessed. See ${where}.`;
 }
 
 function blockFields(node: SchemaNode | undefined): { name: string; required: boolean }[] {
@@ -107,20 +160,17 @@ function blockFields(node: SchemaNode | undefined): { name: string; required: bo
 }
 
 /*
- * A SHAPE PER STATE, BESIDE THE WORD — never the colour on its own.
- *
- * `CornerDownRight` for `inherited` is this app's existing inheritance idiom
- * (`icons.tsx` already maps it to `inferred`/`evCandidate`); `EyeOff` for
- * `notShown` is the same glyph the evidence chips use for "could not be read",
- * which is precisely what that state means here. None of the five is a verdict
- * mark: `Check` says a value is present, not that it is right.
+ * ONE STATE VOCABULARY (2026-09-22): each map state is drawn by the shared
+ * `SemanticStatus` — icon + word + tint, never colour alone. `filled` keeps its
+ * own word: a key being present is not a verdict that it is right, and official
+ * validation is the only thing on this screen that issues one.
  */
-const STATE_ICON: Record<RecordMapState, typeof Check> = {
-  filled: Check,
-  inherited: CornerDownRight,
-  needsReview: CircleAlert,
-  missing: CircleDashed,
-  notShown: EyeOff,
+const STATE_SEMANTIC: Record<RecordMapState, SemanticState> = {
+  filled: 'complete',
+  inherited: 'inherited',
+  needsReview: 'needsReview',
+  missing: 'missing',
+  notShown: 'notShownHere',
 };
 
 /**
@@ -147,33 +197,45 @@ function currentCheck(
 }
 
 function StateBadge({ state }: { state: RecordMapState }) {
-  const Icon = STATE_ICON[state];
   return (
-    <span className={`rm-state rm-state-${state}`}>
-      <Icon size={13} strokeWidth={2.2} aria-hidden="true" />
-      {RECORD_MAP_STATE_LABEL[state]}
-    </span>
+    <SemanticStatus
+      state={STATE_SEMANTIC[state]}
+      label={RECORD_MAP_STATE_LABEL[state]}
+      size="sm"
+      className="rm-state"
+    />
   );
 }
 
 /**
- * One row.
+ * One row: the human label, its state and — where one is honestly held — the
+ * run's own value. The official path and what the schema says about it are
+ * behind the row's `?`, never removed (`UX-014`'s rule: it is how a curator maps
+ * a field to the official document).
  *
- * A row is a `<button>` ONLY when `onOpen` is supplied, which the caller does
- * only for the five paths the run editor renders an input for. Everything else
- * is a plain `<div>`: not focusable, no pointer cursor, no hover lift. A row
- * that looks pressable and is not is the defect this split exists to avoid.
+ * THE ROW'S PRESSABLE PART is a `<button>` ONLY when `onOpen` is supplied, which
+ * the caller does only for the five paths the run editor renders an input for.
+ * The `?` sits BESIDE that button, never inside it: a button inside a button is
+ * invalid and unreachable by keyboard.
  */
-function Row({ row, onOpen }: { row: RecordMapRow; onOpen?: () => void }) {
+function Row({
+  row,
+  onOpen,
+  facts,
+}: {
+  row: RecordMapRow;
+  onOpen?: () => void;
+  facts: string[];
+}) {
+  const labelId = useId();
   const body = (
     <>
       <span className="rm-row-head">
-        <span className="rm-row-label">{row.label}</span>
+        <span className="rm-row-label" id={labelId}>
+          {row.label}
+        </span>
         <StateBadge state={row.state} />
       </span>
-      {/* THE PATH IS NEVER REMOVED, only demoted — `UX-014`'s rule, and it is
-          how a curator maps a field to the official document. */}
-      <code className="mono rm-row-path">{row.path}</code>
       {row.value !== null && (
         <span className="rm-row-value">
           {row.value}
@@ -185,25 +247,43 @@ function Row({ row, onOpen }: { row: RecordMapRow; onOpen?: () => void }) {
       {row.reviewNote !== null && <span className="rm-row-note">{row.reviewNote}</span>}
     </>
   );
-  if (onOpen === undefined) {
-    return (
-      <li className="rm-row" data-state={row.state}>
-        <div className="rm-row-inner">{body}</div>
-      </li>
-    );
-  }
+  const tip = (
+    <HelpTip
+      subject={row.label}
+      label={row.path.includes('.') ? 'Official Field Details' : 'Official Block Details'}
+      describedBy={labelId}
+    >
+      {/* Spans, drawn as blocks by the panel: the tip is a `<span>` so it is valid
+          anywhere, and a `<p>` inside it would not be. */}
+      <span>
+        Official {row.path.includes('.') ? 'field' : 'block'}:{' '}
+        <code className="mono rm-row-path">{row.path}</code>
+      </span>
+      {facts.map((fact) => (
+        <span key={fact}>{fact}</span>
+      ))}
+      {row.state === 'notShown' && <span className="rm-row-reason">{notShownReason(row.path)}</span>}
+    </HelpTip>
+  );
   return (
-    <li className="rm-row rm-row-actionable" data-state={row.state}>
-      <button
-        type="button"
-        className="rm-row-inner rm-row-button"
-        /* The accessible name states the ACT, ahead of the visible text it
-           then repeats — the same convention the compact run row uses. */
-        aria-label={`Edit ${row.label}`}
-        onClick={onOpen}
-      >
-        {body}
-      </button>
+    <li className={`rm-row${onOpen ? ' rm-row-actionable' : ''}`} data-state={row.state}>
+      <div className="rm-row-inner">
+        {onOpen === undefined ? (
+          <div className="rm-row-main">{body}</div>
+        ) : (
+          <button
+            type="button"
+            className="rm-row-main rm-row-button"
+            /* The accessible name states the ACT, ahead of the visible text it
+               then repeats — the same convention the compact run row uses. */
+            aria-label={`Edit ${row.label}`}
+            onClick={onOpen}
+          >
+            {body}
+          </button>
+        )}
+        {tip}
+      </div>
     </li>
   );
 }
@@ -211,8 +291,15 @@ function Row({ row, onOpen }: { row: RecordMapRow; onOpen?: () => void }) {
 export function RunSchemaMirror({
   run,
   check,
+  headerControl,
 }: {
   run: ApiRunView | null;
+  /**
+   * A control that REPLACES the run name in the card's own header — the run picker
+   * on the Proposals and Files views (review #277, I-3: one run choice per view, and
+   * it lives inside the card it drives, not as a detached page-level select).
+   */
+  headerControl?: ReactNode;
   /**
    * The last Check Run result for THIS run, or `null`/omitted when the reader
    * has not run one. Used for one thing only — marking a row `Needs Review` —
@@ -259,9 +346,12 @@ export function RunSchemaMirror({
   if (failed) {
     return (
       <aside className="rsm" aria-labelledby={`${uid}-heading`}>
-        <h3 className="rsm-heading" id={`${uid}-heading`}>
-          Record Map
-        </h3>
+        <div className="rsm-head">
+          <h3 className="rsm-heading" id={`${uid}-heading`}>
+            Record Map
+          </h3>
+          {headerControl}
+        </div>
         <p className="rsm-note">
           The schema could not be read, so nothing is shown rather than a structure
           from memory.
@@ -273,9 +363,12 @@ export function RunSchemaMirror({
   if (schema === null) {
     return (
       <aside className="rsm" aria-labelledby={`${uid}-heading`}>
-        <h3 className="rsm-heading" id={`${uid}-heading`}>
-          Record Map
-        </h3>
+        <div className="rsm-head">
+          <h3 className="rsm-heading" id={`${uid}-heading`}>
+            Record Map
+          </h3>
+          {headerControl}
+        </div>
         <p className="rsm-note">Reading the official schema…</p>
       </aside>
     );
@@ -326,18 +419,22 @@ export function RunSchemaMirror({
         <h3 className="rsm-heading" id={`${uid}-heading`}>
           Record Map
         </h3>
+        {/* What this pane reads and what it does not do — reference material a
+            reader consults once, so it is behind the heading's `?`. */}
+        <HelpTip subject="the Record Map">
+          <span className="rsm-note">
+            Read live from the vendored ISAAC v1.05 schema — the same document the
+            official validator checks against. This pane reports what the run carries;
+            it runs no validation of its own.
+          </span>
+        </HelpTip>
         {/* WHICH RUN THIS DESCRIBES, stated rather than assumed. The pane reads
             one run; leaving it unnamed beside a list of several was how a reader
             could take it for the record's own state. */}
-        <p className="rsm-subject">
-          {run === null ? 'No run loaded yet' : run.label}
-        </p>
+        {headerControl ?? (
+          <p className="rsm-subject">{run === null ? 'No run loaded yet' : run.label}</p>
+        )}
       </div>
-      <p className="rsm-note">
-        Read live from the vendored ISAAC v1.05 schema — the same document{' '}
-        <code className="mono">isaac validate --official</code> checks against. This pane
-        reports what the run carries; it runs no validation of its own.
-      </p>
 
       {attention.length > 0 && (
         <section className="rsm-group" aria-labelledby={`${uid}-attention`}>
@@ -346,7 +443,12 @@ export function RunSchemaMirror({
           </p>
           <ul className="rm-rows">
             {attention.map((row) => (
-              <Row key={row.path} row={row} onOpen={editable(row)} />
+              <Row
+                key={row.path}
+                row={row}
+                onOpen={editable(row)}
+                facts={fieldFacts(schema, row)}
+              />
             ))}
           </ul>
         </section>
@@ -358,7 +460,7 @@ export function RunSchemaMirror({
         </p>
         <ul className="rm-rows">
           {fieldRows.map((row) => (
-            <Row key={row.path} row={row} onOpen={editable(row)} />
+            <Row key={row.path} row={row} onOpen={editable(row)} facts={fieldFacts(schema, row)} />
           ))}
         </ul>
       </section>
@@ -369,70 +471,64 @@ export function RunSchemaMirror({
         </p>
         <ul className="rm-rows">
           {recordBlocks.map((row) => (
-            <Row key={row.path} row={row} />
+            <Row key={row.path} row={row} facts={fieldFacts(schema, row)} />
           ))}
         </ul>
       </section>
 
       {/*
         THE EXHAUSTIVE STRUCTURE, AND THE DISCLOSURE, BEHIND ONE DISCLOSURE
-        CONTROL.
+        CONTROL — now the shared whole-row `Disclosure` (owner QA F4) rather than
+        an 11px triangle. Its body is `hidden`, not unmounted, so every guard in
+        this repository that reads the DOM still reaches the text inside.
 
-        Neither is deleted and neither is softened. What changed is that the
-        block-by-block leaf listing — which is reference material a reader
-        consults, not state they scan — no longer sits between them and the
-        state above, and the draft-grouping paragraph no longer opens as nine
-        lines of grey prose under a wall of identical cards.
-
-        A native `<details>`: no JS, keyboard-operable by default, and its
-        contents are reachable by `querySelectorAll` (and therefore by every
-        guard in this repository that reads the DOM) whether it is open or shut.
+        This is the pane's TECHNICAL listing, so the schema's own block and field
+        names are shown here beside the human name — it is the place a curator
+        comes to map the two.
       */}
-      <details className="rsm-more">
-        <summary className="rsm-more-summary">Show full official schema</summary>
-        <div className="rsm-more-body">
-          <p className="rsm-note">
-            Every block the official schema declares, with its own field names. A field
-            marked <code className="mono">*</code> is required by the schema.
-          </p>
-          {[
-            { title: 'Filled per run', blocks: RUN_BLOCKS, rows: runBlocks },
-            { title: 'Shared by the record', blocks: RECORD_BLOCKS, rows: recordBlocks },
-          ].map(({ title, rows }) => (
-            <div className="rsm-group" key={title}>
-              <p className="rsm-group-title eyebrow">{title}</p>
-              <ul className="rsm-blocks">
-                {rows.map((row) => {
-                  const fields = blockFields(schema.properties?.[row.path]);
-                  return (
-                    <li className="rsm-block" key={row.path} data-state={row.state}>
-                      <div className="rsm-block-head">
-                        <code className="mono rsm-path">{row.path}</code>
-                        <StateBadge state={row.state} />
-                      </div>
-                      {fields.length > 0 && (
-                        <p className="rsm-fields">
-                          {fields.map((f) => (f.required ? `${f.name}*` : f.name)).join(' · ')}
-                        </p>
-                      )}
-                    </li>
-                  );
-                })}
-              </ul>
-            </div>
-          ))}
-          <p className="rsm-draft">
-            <strong>Draft grouping.</strong> &ldquo;Not Shown Here&rdquo; means this pane
-            cannot see that block from the run list it reads — the spectrum, QC verdict and
-            descriptors are answered through Complete Metadata, and this view does not
-            claim a state it did not check. The schema structure above is exact. Which
-            blocks belong to a run rather than to the whole experiment is a scientific
-            decision still to be confirmed, so this split is a starting point for that
-            conversation — not a rule the product enforces. Nothing here gates export or
-            claims a record is complete; official validation decides that.
-          </p>
-        </div>
-      </details>
+      <Disclosure summary="Show full official schema" className="rsm-more">
+        <p className="rsm-note">
+          Every block the official schema declares, with its own field names. A field
+          marked <code className="mono">*</code> is required by the schema.
+        </p>
+        {[
+          { title: 'Filled per run', rows: runBlocks },
+          { title: 'Shared by the record', rows: recordBlocks },
+        ].map(({ title, rows }) => (
+          <div className="rsm-group" key={title}>
+            <p className="rsm-group-title eyebrow">{title}</p>
+            <ul className="rsm-blocks">
+              {rows.map((row) => {
+                const fields = blockFields(schema.properties?.[row.path]);
+                return (
+                  <li className="rsm-block" key={row.path} data-state={row.state}>
+                    <div className="rsm-block-head">
+                      <span className="rsm-block-name">{recordMapBlockLabel(row.path)}</span>
+                      <code className="mono rsm-path">{row.path}</code>
+                      <StateBadge state={row.state} />
+                    </div>
+                    {fields.length > 0 && (
+                      <p className="rsm-fields">
+                        {fields.map((f) => (f.required ? `${f.name}*` : f.name)).join(' · ')}
+                      </p>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        ))}
+        <p className="rsm-draft">
+          <strong>Draft grouping.</strong> &ldquo;Not Shown Here&rdquo; means this pane
+          cannot see that block from the run list it reads — the spectrum, QC verdict and
+          descriptors are answered through Complete Metadata, and this view does not
+          claim a state it did not check. The schema structure above is exact. Which
+          blocks belong to a run rather than to the whole experiment is a scientific
+          decision still to be confirmed, so this split is a starting point for that
+          conversation — not a rule the product enforces. Nothing here gates export or
+          claims a record is complete; official validation decides that.
+        </p>
+      </Disclosure>
     </aside>
   );
 }

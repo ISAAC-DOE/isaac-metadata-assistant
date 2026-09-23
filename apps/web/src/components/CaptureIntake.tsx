@@ -3,6 +3,9 @@ import { Link, useLocation } from 'react-router-dom';
 import { AudioWaveform, ChevronRight, FileText, FolderIcon, SlidersHorizontal, type LucideIcon } from './icons';
 import { captureSummaryLine, railDestination } from './RecordWorkspaceNav';
 import { CAPTURE_COPY } from '../lib/transcriptCaptureContent';
+import { MCP_ENDPOINT } from '../lib/mcpConnectContent';
+import { useHealthState } from '../lib/useHealth';
+import { claudeVoiceState } from './ClaudeVoicePath';
 import { RECORD_CAPTURE_METHOD_PARAM, type CaptureMethodId } from '../lib/routes';
 import type { ApiCaptureSummary } from '../lib/types';
 
@@ -88,11 +91,18 @@ export interface CaptureIntakeProps {
    * known — which renders no summary line at all, never a zero.
    */
   captureSummary: ApiCaptureSummary | null;
+  /** The published agent address; injectable so the "ready" branch is testable. */
+  claudeEndpoint?: string | null;
 }
 
-export function CaptureIntake({ captureSummary }: CaptureIntakeProps) {
+export function CaptureIntake({ captureSummary, claudeEndpoint = MCP_ENDPOINT }: CaptureIntakeProps) {
   const headingId = useId();
   const location = useLocation();
+  /* The voice row offers Claude dictation ONLY where the deployment says a Claude
+     connection can reach it (review #277, I-4). `claudeVoiceState` is the same
+     derivation the Voice view uses, so the two surfaces cannot disagree. */
+  const { settled, health } = useHealthState();
+  const claudeReady = claudeVoiceState(settled, health, claudeEndpoint).kind === 'ready';
   const summaryLine = captureSummaryLine(captureSummary);
   const hasSomethingToReview =
     captureSummary !== null &&
@@ -117,7 +127,11 @@ export function CaptureIntake({ captureSummary }: CaptureIntakeProps) {
               </span>
               <div className="capture-method-text">
                 <h3 className="capture-method-title">{method.title}</h3>
-                <p className="capture-method-line">{method.line}</p>
+                <p className="capture-method-line">
+                  {method.route === 'voice' && claudeReady
+                    ? CAPTURE_COPY.homeVoiceLineWithClaude
+                    : method.line}
+                </p>
               </div>
               {/* Writing is the one route that reaches a proposal in every
                   deployment, so it is the one primary action on the page. */}

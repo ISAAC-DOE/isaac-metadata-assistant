@@ -52,7 +52,7 @@ const RUNS = `GET /api/experiments/${EXP}/runs`;
 const NOTICE = '.notes-background-refresh-notice';
 
 /** `GET .../proposals`'s served capability vocabulary — the two sets PR-D's
- *  "Propose a value from this note" form reads and never transcribes. */
+ *  "Propose a Value From This Note" form reads and never transcribes. */
 function proposalsCapabilities(over: Partial<Record<string, unknown>> = {}) {
   return {
     proposals: [],
@@ -89,6 +89,29 @@ function renderPanel(activity: RecordChangeSummary | null = null) {
       <UnmappedNotesPanel experimentId={EXP} activity={activity} />
     </MemoryRouter>,
   );
+}
+
+/**
+ * OWNER QA P3 (2026-09-22): a note's secondary acts — Map to a field (when Propose
+ * is the primary), Edit wording, Keep as note, Dismiss — sit behind "More Actions",
+ * and the composer behind "Add a Note". These reach the act a test names, exactly
+ * as a reader would: the act itself, its label and its behaviour are unchanged.
+ */
+async function noteAct(name: string): Promise<HTMLElement> {
+  await screen.findAllByRole('button', { name: /^(More|Fewer) Actions$/ });
+  const direct = screen.queryAllByRole('button', { name });
+  if (direct.length > 0) return direct[0];
+  for (const toggle of screen.queryAllByRole('button', { name: 'More Actions' })) {
+    fireEvent.click(toggle);
+  }
+  return (await screen.findAllByRole('button', { name }))[0];
+}
+
+/** Open the composer ("Add a Note") and return its box. */
+async function openComposer(): Promise<HTMLTextAreaElement> {
+  const toggle = await screen.findByRole('button', { name: /^Add a Note/ });
+  if (toggle.getAttribute('aria-expanded') === 'false') fireEvent.click(toggle);
+  return (await screen.findByLabelText('Capture a Note')) as HTMLTextAreaElement;
 }
 
 /** A `recordMoved` summary at the given position — the shape `useRecordSession`
@@ -222,7 +245,7 @@ describe('dismissal is a state, not a deletion', () => {
     });
     renderPanel();
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Dismiss' }));
+    fireEvent.click(await noteAct('Dismiss'));
     fireEvent.click(await screen.findByRole('button', { name: 'Dismiss This Note' }));
 
     await screen.findByText('Dismissed — kept on the record');
@@ -242,7 +265,7 @@ describe('dismissal is a state, not a deletion', () => {
     });
     renderPanel();
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Dismiss' }));
+    fireEvent.click(await noteAct('Dismiss'));
     fireEvent.click(await screen.findByRole('button', { name: 'Dismiss This Note' }));
     await screen.findByRole('status');
 
@@ -265,7 +288,7 @@ describe('no guessed schema target', () => {
     });
     renderPanel();
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Map to a field' }));
+    fireEvent.click(await noteAct('Map to a field'));
     const select = (await screen.findByLabelText(
       'Field this note belongs to',
     )) as HTMLSelectElement;
@@ -324,7 +347,7 @@ describe('no guessed schema target', () => {
     });
     renderPanel();
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Map to a field' }));
+    fireEvent.click(await noteAct('Map to a field'));
     expect(screen.getByText(/It does not write a value/)).toBeTruthy();
 
     fireEvent.change(screen.getByLabelText('Field this note belongs to'), {
@@ -368,7 +391,7 @@ describe('the verbatim capture', () => {
     stubFetchRoutes({ [NOTES]: { body: notesEmpty } });
     renderPanel();
 
-    await screen.findByLabelText('Capture a note');
+    await screen.findByLabelText('Capture a Note');
     const hint = screen.getByText(/Stored word for word/);
     expect(hint.textContent).toContain('not a field value and not evidence');
     expect(hint.textContent).toContain('will not appear in an exported record');
@@ -384,7 +407,7 @@ describe('the verbatim capture', () => {
     });
     renderPanel();
 
-    const box = await screen.findByLabelText('Capture a note');
+    const box = await openComposer();
     fireEvent.change(box, { target: { value: '  leading and trailing  ' } });
     fireEvent.click(screen.getByRole('button', { name: 'Capture Note' }));
 
@@ -402,6 +425,9 @@ describe('keep as note', () => {
     renderPanel();
 
     await screen.findByText(noteFixture().text);
+    // Behind "More Actions" since owner QA P3 (2026-09-22), all four still peers
+    // once it is open — none is demoted to a fallback inside another control.
+    await noteAct('Keep as note');
     for (const name of ['Map to a field', 'Edit wording', 'Keep as note', 'Dismiss']) {
       expect(screen.getByRole('button', { name })).toBeTruthy();
     }
@@ -433,7 +459,7 @@ describe('keep as note', () => {
     });
     renderPanel();
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Keep as note' }));
+    fireEvent.click(await noteAct('Keep as note'));
     await screen.findByText('Kept as a note');
 
     expect(posts()[0].body.action).toBe('keep');
@@ -459,7 +485,7 @@ describe('the record is the one validator', () => {
     });
     renderPanel();
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Keep as note' }));
+    fireEvent.click(await noteAct('Keep as note'));
     await screen.findByRole('status');
 
     // `notesPage` reports the fixture version; the client must quote it.
@@ -505,6 +531,9 @@ describe('the record is the one validator', () => {
     });
     renderPanel();
 
+    // Both cards' "More Actions" opened first (owner QA P3) — `noteAct` opens every
+    // closed group, so both Keep buttons are reachable.
+    await noteAct('Keep as note');
     const keeps = await screen.findAllByRole('button', { name: 'Keep as note' });
     fireEvent.click(keeps[0]);
     await screen.findByRole('status');
@@ -528,7 +557,7 @@ describe('the record is the one validator', () => {
     });
     renderPanel();
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Keep as note' }));
+    fireEvent.click(await noteAct('Keep as note'));
 
     const alert = await screen.findByRole('alert');
     expect(alert.textContent).toBeTruthy();
@@ -635,7 +664,7 @@ describe('a review that was refused keeps the scientist’s input', () => {
     });
     renderPanel();
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Edit wording' }));
+    fireEvent.click(await noteAct('Edit wording'));
     const box = screen.getByLabelText('Corrected wording') as HTMLTextAreaElement;
     fireEvent.change(box, { target: { value: 'three corrected paragraphs' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save Wording' }));
@@ -658,7 +687,7 @@ describe('a review that was refused keeps the scientist’s input', () => {
     });
     renderPanel();
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Dismiss' }));
+    fireEvent.click(await noteAct('Dismiss'));
     const box = screen.getByLabelText('Why (optional)') as HTMLInputElement;
     fireEvent.change(box, { target: { value: 'duplicated by the run-level remark' } });
     fireEvent.click(screen.getByRole('button', { name: 'Dismiss This Note' }));
@@ -678,7 +707,7 @@ describe('a review that was refused keeps the scientist’s input', () => {
     });
     renderPanel();
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Map to a field' }));
+    fireEvent.click(await noteAct('Map to a field'));
     fireEvent.change(screen.getByLabelText('Field this note belongs to'), {
       target: { value: 'context.environment' },
     });
@@ -699,7 +728,7 @@ describe('a review that was refused keeps the scientist’s input', () => {
     });
     renderPanel();
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Dismiss' }));
+    fireEvent.click(await noteAct('Dismiss'));
     fireEvent.click(screen.getByRole('button', { name: 'Dismiss This Note' }));
 
     await screen.findByRole('status');
@@ -722,7 +751,7 @@ describe('focus returns to the control that opened the form', () => {
     stubFetchRoutes({ [NOTES]: { body: notesPage([noteFixture()]) } });
     renderPanel();
 
-    const trigger = await screen.findByRole('button', { name: 'Dismiss' });
+    const trigger = await noteAct('Dismiss');
     fireEvent.click(trigger);
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
 
@@ -743,7 +772,7 @@ describe('focus returns to the control that opened the form', () => {
     });
     renderPanel();
 
-    const trigger = await screen.findByRole('button', { name: 'Map to a field' });
+    const trigger = await noteAct('Map to a field');
     fireEvent.click(trigger);
     fireEvent.change(screen.getByLabelText('Field this note belongs to'), {
       target: { value: 'context.environment' },
@@ -785,7 +814,7 @@ describe('the field list says it is a subset', () => {
     });
     renderPanel();
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Map to a field' }));
+    fireEvent.click(await noteAct('Map to a field'));
     const hint = await screen.findByText(/not every field in the ISAAC schema/);
     expect(hint.textContent).toContain('the set this version can map a note to');
     // It must not let a missing path be read as a missing schema field…
@@ -828,7 +857,7 @@ describe('accessibility', () => {
     stubFetchRoutes({ [NOTES]: { body: notesPage([noteFixture()]) } });
     renderPanel();
 
-    const map = await screen.findByRole('button', { name: 'Map to a field' });
+    const map = await noteAct('Map to a field');
     expect(map.getAttribute('aria-expanded')).toBe('false');
     fireEvent.click(map);
     expect(map.getAttribute('aria-expanded')).toBe('true');
@@ -909,7 +938,7 @@ describe('a refused review is recoverable, and no gesture destroys what was type
     });
     renderPanel();
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Dismiss' }));
+    fireEvent.click(await noteAct('Dismiss'));
     fireEvent.change(screen.getByLabelText('Why (optional)'), {
       target: { value: 'superseded by the run remark' },
     });
@@ -937,7 +966,7 @@ describe('a refused review is recoverable, and no gesture destroys what was type
     });
     renderPanel();
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Dismiss' }));
+    fireEvent.click(await noteAct('Dismiss'));
     fireEvent.click(screen.getByRole('button', { name: 'Dismiss This Note' }));
     const banner = await screen.findByRole('alert');
     expect(banner.textContent ?? '').toMatch(/could not be recorded/);
@@ -951,7 +980,7 @@ describe('a refused review is recoverable, and no gesture destroys what was type
     });
     renderPanel();
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Edit wording' }));
+    fireEvent.click(await noteAct('Edit wording'));
     fireEvent.change(screen.getByLabelText('Corrected wording'), {
       target: { value: 'three corrected paragraphs' },
     });
@@ -970,7 +999,7 @@ describe('a refused review is recoverable, and no gesture destroys what was type
     stubFetchRoutes({ [NOTES]: { body: notesPage([noteFixture()]) } });
     renderPanel();
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Edit wording' }));
+    fireEvent.click(await noteAct('Edit wording'));
     fireEvent.change(screen.getByLabelText('Corrected wording'), {
       target: { value: 'realigned after scan 3, not before it' },
     });
@@ -990,7 +1019,7 @@ describe('a refused review is recoverable, and no gesture destroys what was type
     stubFetchRoutes({ [NOTES]: { body: notesPage([noteFixture()]) } });
     renderPanel();
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Edit wording' }));
+    fireEvent.click(await noteAct('Edit wording'));
     fireEvent.change(screen.getByLabelText('Corrected wording'), {
       target: { value: 'abandoned' },
     });
@@ -1025,7 +1054,7 @@ describe('a refused review is recoverable, and no gesture destroys what was type
     });
     renderPanel();
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Edit wording' }));
+    fireEvent.click(await noteAct('Edit wording'));
     fireEvent.change(screen.getByLabelText('Corrected wording'), {
       target: { value: revised },
     });
@@ -1062,7 +1091,7 @@ describe('the value hint is per path, not on average', () => {
   async function openMap() {
     stubFetchRoutes({ [NOTES]: { body: notesPage([noteFixture()], MIXED) } });
     renderPanel();
-    fireEvent.click(await screen.findByRole('button', { name: 'Map to a field' }));
+    fireEvent.click(await noteAct('Map to a field'));
     return (await screen.findByLabelText('Field this note belongs to')) as HTMLSelectElement;
   }
 
@@ -1133,7 +1162,7 @@ describe('the value hint is per path, not on average', () => {
   async function openMapWith(over: Record<string, string[]>) {
     stubFetchRoutes({ [NOTES]: { body: notesPage([noteFixture()], over) } });
     renderPanel();
-    fireEvent.click(await screen.findByRole('button', { name: 'Map to a field' }));
+    fireEvent.click(await noteAct('Map to a field'));
     return (await screen.findByLabelText('Field this note belongs to')) as HTMLSelectElement;
   }
 
@@ -1195,7 +1224,7 @@ describe('the value hint is per path, not on average', () => {
       },
     });
     renderPanel();
-    fireEvent.click(await screen.findByRole('button', { name: 'Map to a field' }));
+    fireEvent.click(await noteAct('Map to a field'));
     const select = (await screen.findByLabelText(
       'Field this note belongs to',
     )) as HTMLSelectElement;
@@ -1207,7 +1236,7 @@ describe('the value hint is per path, not on average', () => {
   });
 });
 
-// --- 10. "Propose a value from this note" (PR-D) -------------------------------
+// --- 10. "Propose a Value From This Note" (PR-D) -------------------------------
 
 describe('propose a value from this note', () => {
   it('happy path: a record-scoped path needs no run, and the write is exactly-once by construction', async () => {
@@ -1225,7 +1254,7 @@ describe('propose a value from this note', () => {
     renderPanel();
 
     fireEvent.click(
-      await screen.findByRole('button', { name: 'Propose a value from this note' }),
+      await screen.findByRole('button', { name: 'Propose a Value From This Note' }),
     );
     const fieldSelect = (await screen.findByLabelText(
       'Field this value is for',
@@ -1272,7 +1301,7 @@ describe('propose a value from this note', () => {
     renderPanel();
 
     fireEvent.click(
-      await screen.findByRole('button', { name: 'Propose a value from this note' }),
+      await screen.findByRole('button', { name: 'Propose a Value From This Note' }),
     );
     fireEvent.change(await screen.findByLabelText('Field this value is for'), {
       target: { value: 'context.environment' },
@@ -1309,7 +1338,7 @@ describe('propose a value from this note', () => {
     renderPanel();
 
     fireEvent.click(
-      await screen.findByRole('button', { name: 'Propose a value from this note' }),
+      await screen.findByRole('button', { name: 'Propose a Value From This Note' }),
     );
     fireEvent.change(await screen.findByLabelText('Field this value is for'), {
       target: { value: 'context.environment' },
@@ -1331,7 +1360,7 @@ describe('propose a value from this note', () => {
     renderPanel();
 
     fireEvent.click(
-      await screen.findByRole('button', { name: 'Propose a value from this note' }),
+      await screen.findByRole('button', { name: 'Propose a Value From This Note' }),
     );
     fireEvent.change(await screen.findByLabelText('Field this value is for'), {
       target: { value: 'context.environment' },
@@ -1349,7 +1378,7 @@ describe('propose a value from this note', () => {
 
     await screen.findByText(noteFixture().text);
     expect(
-      screen.queryByRole('button', { name: 'Propose a value from this note' }),
+      screen.queryByRole('button', { name: 'Propose a Value From This Note' }),
     ).toBeNull();
     expect(
       await screen.findByText(/this build accepts no proposal target yet/),
@@ -1365,7 +1394,7 @@ describe('propose a value from this note', () => {
 
     await screen.findByText(noteFixture().text);
     expect(
-      screen.queryByRole('button', { name: 'Propose a value from this note' }),
+      screen.queryByRole('button', { name: 'Propose a Value From This Note' }),
     ).toBeNull();
     expect(
       await screen.findByText(/the set of proposable fields could not be read/),
@@ -1406,7 +1435,7 @@ describe('propose a value from this note', () => {
     renderPanel();
 
     fireEvent.click(
-      await screen.findByRole('button', { name: 'Propose a value from this note' }),
+      await screen.findByRole('button', { name: 'Propose a Value From This Note' }),
     );
     fireEvent.change(await screen.findByLabelText('Field this value is for'), {
       target: { value: 'system.technique' },
@@ -1422,7 +1451,7 @@ describe('propose a value from this note', () => {
     // `deduplicated: true`, and the panel says so rather than claiming a second
     // create.
     fireEvent.click(
-      await screen.findByRole('button', { name: 'Propose a value from this note' }),
+      await screen.findByRole('button', { name: 'Propose a Value From This Note' }),
     );
     fireEvent.change(await screen.findByLabelText('Field this value is for'), {
       target: { value: 'system.technique' },
@@ -1446,7 +1475,7 @@ describe('propose a value from this note', () => {
     // Now change the value and submit again — a genuinely different value
     // must mint a genuinely different key, never the one above.
     fireEvent.click(
-      await screen.findByRole('button', { name: 'Propose a value from this note' }),
+      await screen.findByRole('button', { name: 'Propose a Value From This Note' }),
     );
     fireEvent.change(await screen.findByLabelText('Field this value is for'), {
       target: { value: 'system.technique' },
@@ -1488,7 +1517,7 @@ describe('propose a value from this note', () => {
     renderPanel();
 
     fireEvent.click(
-      await screen.findByRole('button', { name: 'Propose a value from this note' }),
+      await screen.findByRole('button', { name: 'Propose a Value From This Note' }),
     );
     fireEvent.change(await screen.findByLabelText('Field this value is for'), {
       target: { value: 'system.technique' },
@@ -1513,7 +1542,7 @@ describe('propose a value from this note', () => {
     renderPanel();
 
     fireEvent.click(
-      await screen.findByRole('button', { name: 'Propose a value from this note' }),
+      await screen.findByRole('button', { name: 'Propose a Value From This Note' }),
     );
     fireEvent.change(await screen.findByLabelText('Field this value is for'), {
       target: { value: 'system.technique' },
@@ -1544,14 +1573,14 @@ describe('propose a value from this note', () => {
 
     const openClose = async () => {
       fireEvent.click(
-        await screen.findByRole('button', { name: 'Propose a value from this note' }),
+        await screen.findByRole('button', { name: 'Propose a Value From This Note' }),
       );
       fireEvent.change(await screen.findByLabelText('Field this value is for'), {
         target: { value: 'context.environment' },
       });
       await screen.findByLabelText('Run this value is about');
       fireEvent.click(
-        screen.getByRole('button', { name: 'Propose a value from this note' }),
+        screen.getByRole('button', { name: 'Propose a Value From This Note' }),
       );
     };
     await openClose();
@@ -1626,7 +1655,7 @@ describe('F-1: a change-feed record-moved entry refreshes the notes list', () =>
     // A scientist is mid-way through typing an unrelated note when the arrival
     // happens — this is the exact promise `CLAUDE.md` §11 records this repository
     // breaking three times: an input must survive a background refresh.
-    fireEvent.change(screen.getByLabelText('Capture a note'), {
+    fireEvent.change(screen.getByLabelText('Capture a Note'), {
       target: { value: 'half-typed note about the beam' },
     });
 
@@ -1647,7 +1676,7 @@ describe('F-1: a change-feed record-moved entry refreshes the notes list', () =>
 
     // AND THE LIVE VALUE OF THE REAL TEXTAREA IS UNTOUCHED.
     expect(
-      (screen.getByLabelText('Capture a note') as HTMLTextAreaElement).value,
+      (screen.getByLabelText('Capture a Note') as HTMLTextAreaElement).value,
     ).toBe('half-typed note about the beam');
     view.unmount();
   });
@@ -1764,7 +1793,7 @@ describe('F-1: a change-feed record-moved entry refreshes the notes list', () =>
   it('NEGATIVE CONTROL: the same assertion fails when the panel is unmounted', async () => {
     stubFetchRoutes({ [NOTES]: { body: notesPage([noteFixture()]) } });
     const view = renderPanel(null);
-    fireEvent.change(await screen.findByLabelText('Capture a note'), {
+    fireEvent.change(await screen.findByLabelText('Capture a Note'), {
       target: { value: 'half-typed note about the beam' },
     });
 
@@ -1775,7 +1804,7 @@ describe('F-1: a change-feed record-moved entry refreshes the notes list', () =>
     // The box is not even on screen with its old value — this is what the positive
     // test above would look like on a build that blanked the panel to refresh.
     expect(
-      (screen.getByLabelText('Capture a note') as HTMLTextAreaElement).value,
+      (screen.getByLabelText('Capture a Note') as HTMLTextAreaElement).value,
     ).toBe('');
   });
 
@@ -1805,12 +1834,12 @@ describe('F-1: a change-feed record-moved entry refreshes the notes list', () =>
     const view = renderPanel(null);
     await screen.findByText(noteFixture().text);
 
-    // Unsaved input in TWO places: the always-visible composer, and an open
-    // per-note form.
-    fireEvent.change(screen.getByLabelText('Capture a note'), {
+    // Unsaved input in TWO places: the composer (behind "Add a Note" since owner QA
+    // P3), and an open per-note form (behind "More Actions").
+    fireEvent.change(await openComposer(), {
       target: { value: 'half-typed note about the beam' },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Edit wording' }));
+    fireEvent.click(await noteAct('Edit wording'));
     fireEvent.change(screen.getByLabelText('Corrected wording'), {
       target: { value: 'a half-written rewrite, not yet saved' },
     });
@@ -1831,7 +1860,7 @@ describe('F-1: a change-feed record-moved entry refreshes the notes list', () =>
     // by `BackendDown`), and both unsaved inputs survive verbatim.
     expect(screen.getByText(noteFixture().text)).toBeTruthy();
     expect(
-      (screen.getByLabelText('Capture a note') as HTMLTextAreaElement).value,
+      (screen.getByLabelText('Capture a Note') as HTMLTextAreaElement).value,
     ).toBe('half-typed note about the beam');
     expect(
       (screen.getByLabelText('Corrected wording') as HTMLTextAreaElement).value,
@@ -1872,7 +1901,9 @@ describe('F-1: a change-feed record-moved entry refreshes the notes list', () =>
     // is disabled instead), so the meaningful absence is the note's OWN text, not
     // the composer's presence.
     expect(screen.queryByText(noteFixture().text)).toBeNull();
-    fireEvent.change(screen.getByLabelText('Capture a note'), { target: { value: 'x' } });
+    // The composer is behind "Add a Note" (owner QA P3) and that toggle renders
+    // here too — so the box is still reachable while the list is down.
+    fireEvent.change(await openComposer(), { target: { value: 'x' } });
     expect(screen.getByRole('button', { name: 'Capture Note' })).toBeDisabled();
   });
 });
@@ -2066,7 +2097,7 @@ describe('a Show-filter change that fails', () => {
     await screen.findByText(/Show filter could not be applied/, { selector: NOTICE });
 
     // Something typed, to prove the retry is silent and destroys nothing.
-    fireEvent.change(screen.getByLabelText('Capture a note'), {
+    fireEvent.change(screen.getByLabelText('Capture a Note'), {
       target: { value: 'half-typed note about the beam' },
     });
 
@@ -2079,7 +2110,7 @@ describe('a Show-filter change that fails', () => {
       expect(screen.queryByText(/Show filter could not be applied/, { selector: NOTICE })).toBeNull(),
     );
     expect(
-      (screen.getByLabelText('Capture a note') as HTMLTextAreaElement).value,
+      (screen.getByLabelText('Capture a Note') as HTMLTextAreaElement).value,
     ).toBe('half-typed note about the beam');
   });
 
@@ -2233,5 +2264,71 @@ describe('a Show-filter change that fails', () => {
       }),
     ).toBeNull();
     view.unmount();
+  });
+});
+
+// --- review #277: no developer vocabulary, and a note's open proposal is shown ----
+
+describe('a note reads in the scientist’s words', () => {
+  function renderWith(props: {
+    runLabels?: ReadonlyMap<string, string>;
+    openProposalsByNote?: ReadonlyMap<string, string>;
+  }) {
+    return render(
+      <MemoryRouter
+        initialEntries={['/record/demo?view=proposals']}
+        future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+      >
+        <UnmappedNotesPanel experimentId={EXP} {...props} />
+      </MemoryRouter>,
+    );
+  }
+
+  it('names its run by LABEL, with the run id kept as the title', async () => {
+    stubFetchRoutes({ [NOTES]: { body: notesPage([noteFixture({ run_id: 'RUNAAA' })]) } });
+    renderWith({ runLabels: new Map([['RUNAAA', 'Run 1']]) });
+    await screen.findByText(noteFixture().text);
+    const run = document.querySelector('.note-run') as HTMLElement;
+    expect(run.textContent).toBe('Run 1');
+    expect(run.getAttribute('title')).toBe('RUNAAA');
+  });
+
+  it('shows the capture time as a person’s date, with the ISO instant as title', async () => {
+    stubFetchRoutes({ [NOTES]: { body: notesPage([noteFixture()]) } });
+    renderWith({});
+    await screen.findByText(noteFixture().text);
+    const time = document.querySelector('.note-captured') as HTMLTimeElement;
+    expect(time.getAttribute('datetime')).toBe('2099-04-02T09:12:00Z');
+    expect(time.getAttribute('title')).toBe('2099-04-02T09:12:00Z');
+    expect(time.textContent).toMatch(/^Apr 2, 2099, \d{1,2}:\d{2} (AM|PM)$/);
+  });
+
+  it('a note with an OPEN proposal says so and opens it, instead of offering to propose again', async () => {
+    stubFetchRoutes({
+      [NOTES]: { body: notesPage([noteFixture()]) },
+      [PROPOSALS]: { body: proposalsCapabilities() },
+    });
+    renderWith({ openProposalsByNote: new Map([[noteFixture().id as string, 'P-OPEN']]) });
+    await screen.findByText(noteFixture().text);
+    const view = await screen.findByRole('link', { name: 'Proposal Open · View' });
+    expect(view.getAttribute('href')).toContain('proposal=P-OPEN');
+    // Not the primary propose act any more — but still reachable, one click further.
+    expect(screen.queryByRole('button', { name: 'Propose a Value From This Note' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'More Actions' }));
+    expect(screen.getByRole('button', { name: 'Propose a Value From This Note' })).toBeTruthy();
+    // The note is still listed — never hidden.
+    expect(screen.getByText(noteFixture().text)).toBeTruthy();
+  });
+
+  it('POLARITY: without an open proposal, proposing is the primary act', async () => {
+    stubFetchRoutes({
+      [NOTES]: { body: notesPage([noteFixture()]) },
+      [PROPOSALS]: { body: proposalsCapabilities() },
+    });
+    renderWith({ openProposalsByNote: new Map() });
+    expect(
+      await screen.findByRole('button', { name: 'Propose a Value From This Note' }),
+    ).toBeTruthy();
+    expect(screen.queryByRole('link', { name: 'Proposal Open · View' })).toBeNull();
   });
 });

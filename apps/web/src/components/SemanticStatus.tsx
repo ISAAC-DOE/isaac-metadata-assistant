@@ -88,6 +88,7 @@ export function SemanticStatus({
   state,
   label,
   size = 'md',
+  className,
 }: {
   state: SemanticState;
   /**
@@ -97,12 +98,14 @@ export function SemanticStatus({
    */
   label?: string;
   size?: 'sm' | 'md';
+  /** An extra class for a caller's existing hooks (layout, or a test selector). */
+  className?: string;
 }) {
   const meta = SEMANTIC_STATUS[state];
   const Icon = meta.icon;
   return (
     <span
-      className={`chip semantic-status semantic-status-${size}`}
+      className={`chip semantic-status semantic-status-${size}${className ? ` ${className}` : ''}`}
       data-tone={meta.tone}
       data-state={state}
     >

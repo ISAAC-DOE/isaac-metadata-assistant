@@ -13,7 +13,7 @@
  *
  * **That is no longer true, and this file is the consequence.** PR #228 made
  * `TranscriptCapturePanel`'s *Finalize and Read* mint durable proposals server-side,
- * and PR #231 added `UnmappedNotesPanel`'s *Propose a value from this note*. There
+ * and PR #231 added `UnmappedNotesPanel`'s *Propose a Value From This Note*. There
  * are now TWO surfaces a person can click to produce a proposal, so Scientist B can
  * be a **second browser context driving the real UI** rather than an HTTP client.
  *
@@ -100,6 +100,7 @@ import {
   openRun,
   openWorkspace,
   proposalCard,
+  proposalCardInState,
   switchWorkspace,
   test,
   type ServerApi,
@@ -238,11 +239,10 @@ async function proposalById(
   return found;
 }
 
-/** A proposal card addressed by path AND state — the card's own accessible name. */
+/** A proposal card addressed by path AND state — the card's own accessible name,
+ *  which names the field in words since review #277 (`proposalCardInState`). */
 function cardInState(page: Page, path: string, stateLabel: string) {
-  return page.getByRole('article', {
-    name: new RegExp(`^Proposal for ${path.replace(/\./g, '\\.')} — ${stateLabel}`),
-  });
+  return proposalCardInState(page, path, stateLabel);
 }
 
 /** The mark planted on A's `window` in step 1. */
@@ -448,7 +448,10 @@ test.describe('two scientists, two real browsers, one record', () => {
         const technique = techniqueOptions[0];
 
         const recordPanel = page.getByRole('region', {
-          name: 'Record Description (record-level values)',
+          // The region is named for its heading alone since owner QA F1 (2026-09-22) —
+      // the machine-side qualifier no longer reaches a screen reader.
+      name: 'Record Description',
+      exact: true,
         });
         await recordPanel.getByRole('button', { name: /^Record Description/ }).click();
 
@@ -771,12 +774,21 @@ test.describe('two scientists, two real browsers, one record', () => {
 
         // ---- "Review N Proposals" MOVES FOCUS ---------------------------------
         await bPage.getByRole('button', { name: `Review ${mintedByTranscript} Proposals` }).click();
-        const focused = await activeElement(bPage);
-        expect(
-          focused.id,
-          'step 3: the review control moved focus to the proposals heading rather than ' +
-            'only scrolling — a scroll is invisible to a keyboard reader',
-        ).toBe('ingestion-proposals-heading');
+        /*
+         * POLLED, NOT SAMPLED ONCE (2026-09-22). The hand-off lands after the view
+         * switch commits — the navigation runs in a React transition and the first
+         * visit MOUNTS the Proposals workspace — so a sample taken the instant the
+         * click resolves reads the button that was pressed. Measured locally: the
+         * button at +0 ms, the heading from ~15 ms. CI failed the one-shot read on
+         * both attempts. The claim is unchanged: focus ARRIVES at the heading.
+         */
+        await expect
+          .poll(async () => (await activeElement(bPage)).id, {
+            message:
+              'step 3: the review control moved focus to the proposals heading rather than ' +
+              'only scrolling — a scroll is invisible to a keyboard reader',
+          })
+          .toBe('ingestion-proposals-heading');
 
         // ---- and B proposes from a stored NOTE, at a different target ---------
         const notes = await serverNotes(request, id);
@@ -837,7 +849,7 @@ test.describe('two scientists, two real browsers, one record', () => {
           noteCard,
           'step 3: its card is on B’s screen once B reloads — see the finding above',
         ).toBeVisible();
-        await noteCard.getByRole('button', { name: /^Propose a value from this note$/i }).click();
+        await noteCard.getByRole('button', { name: /^Propose a Value From This Note$/i }).click();
         await noteCard.getByLabel('Field this value is for').selectOption('context.environment');
         await noteCard.getByLabel('Run this value is about').selectOption(runTwo.id);
         await noteCard.getByLabel('Environment', { exact: true }).selectOption(envProposed);
@@ -1026,6 +1038,8 @@ test.describe('two scientists, two real browsers, one record', () => {
           await runFieldValue(server, id, runTwo.id, TRANSCRIPT_TARGETS.temperature.path),
           'step 5: the server holds nothing at the temperature target yet',
         ).toBeUndefined();
+        // Behind "Why This Was Proposed" since owner QA P1 (2026-09-22).
+        await card.getByRole('button', { name: 'Why This Was Proposed' }).click();
         await card.getByRole('button', { name: 'Show What the Record Holds Now' }).click();
         await expect(
           card.locator('.proposal-current-absent'),
@@ -1052,6 +1066,8 @@ test.describe('two scientists, two real browsers, one record', () => {
           'step 5: the note-proposal names run two as well',
         ).toHaveText(`On run ${runTwo.label}`);
         await expect(envCard.locator('.proposal-value-body').first()).toContainText(envProposed);
+        // Behind "Why This Was Proposed" since owner QA P1 (2026-09-22).
+        await envCard.getByRole('button', { name: 'Why This Was Proposed' }).click();
         await envCard.getByRole('button', { name: 'Show What the Record Holds Now' }).click();
         const envCurrent = envCard.locator('.proposal-current-body .proposal-value-body');
         await expect(envCurrent, 'step 5: the current value is RUN TWO’s').toContainText(envTwo);
@@ -1103,7 +1119,7 @@ test.describe('two scientists, two real browsers, one record', () => {
         );
         const proposalCountBefore = (await server.proposals(id)).proposals.length;
 
-        const card = cardInState(page, TRANSCRIPT_TARGETS.atmosphere.path, 'Awaiting your judgement');
+        const card = cardInState(page, TRANSCRIPT_TARGETS.atmosphere.path, 'Awaiting your judgment');
         await expect(card, 'step 6: the atmosphere card is open for judgement').toBeVisible();
         await card.getByRole('button', { name: 'More Actions' }).click();
         await card.getByRole('button', { name: 'Correct the Value, Then Accept' }).click();
@@ -1158,7 +1174,7 @@ test.describe('two scientists, two real browsers, one record', () => {
         // ---- and a rejection writes NOTHING -----------------------------------
         const runOneBeforeReject = await server.runBody(id, runOne.id);
         const runTwoBeforeReject = await server.runBody(id, runTwo.id);
-        const seededCard = cardInState(page, 'sample.material.formula', 'Awaiting your judgement');
+        const seededCard = cardInState(page, 'sample.material.formula', 'Awaiting your judgment');
         await seededCard.getByRole('button', { name: 'Reject…' }).click();
         await seededCard.getByLabel('Reason (optional)').fill(REJECT_REASON);
         await seededCard.getByRole('button', { name: 'Confirm Reject' }).click();
@@ -1213,7 +1229,7 @@ test.describe('two scientists, two real browsers, one record', () => {
 
         // ---- A, who has still not reloaded, tries to accept -------------------
         await assertSameDocument(page, 'step 7: A’s page is still the document from step 1');
-        const card = cardInState(page, TRANSCRIPT_TARGETS.temperature.path, 'Awaiting your judgement');
+        const card = cardInState(page, TRANSCRIPT_TARGETS.temperature.path, 'Awaiting your judgment');
         await expect(
           card.locator('.proposal-target-state'),
           'step 7: the card tells the reader the value moved',
@@ -1264,7 +1280,7 @@ test.describe('two scientists, two real browsers, one record', () => {
             'on the SAME run, and this proposal is still fresh',
         ).toBe(false);
 
-        const card = cardInState(page, 'context.environment', 'Awaiting your judgement');
+        const card = cardInState(page, 'context.environment', 'Awaiting your judgment');
         await expect(card, 'step 8: the note-proposal is open for judgement').toBeVisible({
           timeout: DISCOVERY_DEADLINE,
         });
@@ -1456,7 +1472,7 @@ test.describe('two scientists, two real browsers, one record', () => {
           'step 9: and so does the rejected one — a rejection is KEPT, not deleted',
         ).toBeVisible();
         await expect(
-          cardInState(page, TRANSCRIPT_TARGETS.temperature.path, 'Awaiting your judgement'),
+          cardInState(page, TRANSCRIPT_TARGETS.temperature.path, 'Awaiting your judgment'),
           'step 9: and the refused one is still open, exactly as the refusal said',
         ).toBeVisible();
 

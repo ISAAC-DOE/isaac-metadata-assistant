@@ -1,4 +1,6 @@
 import './fields.css';
+import { useId } from 'react';
+import { HelpTip } from './HelpTip';
 import { StatusChip } from './StatusChip';
 import { EvidenceRow } from './EvidenceRow';
 import { FieldCaptureControl, canEnterOnRecord, captureHint } from './FieldCaptureControl';
@@ -53,12 +55,25 @@ export function FieldRow({ field, capture }: FieldRowProps) {
      `captureHint`'s own note on the export stamp. Nothing else about the copy varies by
      path; the rest is composed from the served facts. */
   const hint = captureHint(field.capture, offering, field.path);
+  const labelId = useId();
 
   return (
     <div className="field-row" data-present={field.present === false ? 'false' : undefined}>
+      {/* The human label leads; the official path is one `?` away (owner QA F1,
+          2026-09-22) — never removed, because it is how a curator maps a field
+          (`UX-014`). The tip is named generically and DESCRIBED by the label, so
+          a page of rows does not offer forty controls all called "About …". */}
       <div className="field-label-col">
-        <div className="field-label">{field.label}</div>
-        <div className="field-path">{field.path}</div>
+        <div className="field-label-row">
+          <div className="field-label" id={labelId}>
+            {field.label}
+          </div>
+          <HelpTip subject={field.label} label="Official Field Details" describedBy={labelId}>
+            <span>
+              Official field: <code className="field-path">{field.path}</code>
+            </span>
+          </HelpTip>
+        </div>
       </div>
 
       <div className="field-value-col">

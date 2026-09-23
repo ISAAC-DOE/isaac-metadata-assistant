@@ -65,6 +65,7 @@ import { LABELS } from '../lib/labels';
 import { mutationFailureCopy, staleWriteCurrentVersion } from '../lib/mutationErrors';
 import { markSelfMintedProposals } from '../lib/selfMintedProposals';
 import { RUNS_PAGE_SIZE } from '../lib/runPaging';
+import { enumOptionLabel } from '../lib/runFields';
 import {
   HUMAN_PROPOSED_RULE,
   parseProposedValue,
@@ -84,7 +85,7 @@ import type { ApiNote, ApiProposalCreated, ApiRunView } from '../lib/types';
 export const NEW_PROPOSAL_EFFECT_CLAIM =
   'Storing this writes no field. Every field on this record, and on every run, is ' +
   'left byte-for-byte unchanged: a proposal is a suggestion awaiting a person’s ' +
-  'judgement, it is not a value, not evidence and not a confirmation, and it is ' +
+  'judgment, it is not a value, not evidence and not a confirmation, and it is ' +
   'inert to export.';
 
 /**
@@ -667,7 +668,7 @@ export function NewProposalForm({
                 <option value="">Choose a value&hellip;</option>
                 {spec.options?.map((option) => (
                   <option key={option} value={option}>
-                    {option}
+                    {enumOptionLabel(option)}
                   </option>
                 ))}
               </select>

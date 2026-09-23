@@ -38,19 +38,58 @@
   background: none;
   border: 0;
   text-align: left;
+  cursor: pointer;
+  transition: background 0.12s ease;
 }
 .fg-header:hover { background: var(--surface-subtle); }
-.fg-chevron { color: var(--text-quaternary); flex: none; }
+/* THE WHOLE ROW IS THE TARGET (owner QA F4): a visible focus ring drawn inside the
+   card (the card clips overflow), and the chevron in a colour a reader can see. */
+.fg-header:focus-visible {
+  outline: 2px solid var(--action);
+  outline-offset: -2px;
+}
+.fg-header[aria-expanded='true'] .fg-chevron { color: var(--text-primary); }
+.fg-chevron { color: var(--text-secondary); flex: none; }
+
+/*
+ * THE HEADER ROW — the toggle, then the `?` for the official block key beside it
+ * (not inside it: a control inside a button is invalid). The toggle keeps the full
+ * remaining width, so the row is still one wide target.
+ */
+.fg-headrow {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+.fg-headrow > .fg-heading {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.fg-headrow > .helptip {
+  flex: none;
+  margin-right: var(--space-sm);
+}
+/* The count and the one status, right-aligned where the prose tail was. */
+.fg-status-group {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-xs) var(--space-sm);
+}
+.fg-count {
+  font-size: var(--font-size-meta);
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
 .fg-block {
   font-size: 13px;
   font-weight: 600;
   color: var(--text-strong);
 }
-.fg-sublabel {
-  font-family: var(--font-mono);
-  font-size: 11px;
-  color: var(--text-quaternary);
-}
+/* ~~`.fg-sublabel`~~ — RETIRED 2026-09-22 (owner QA F1): no section header shows a
+   lowercase machine-side key any more; the official block key is behind the
+   header row's `?`. */
 .fg-summary {
   margin-left: auto;
   font-size: 12px;
@@ -71,10 +110,21 @@
   width: 190px;
   flex: none;
 }
+.field-label-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2xs);
+  min-width: 0;
+}
+.field-label-row > .helptip {
+  flex: none;
+}
 .field-label {
   font-size: 13.5px;
   font-weight: 600;
   color: var(--text-primary);
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 /* `--text-muted`, NOT `--text-quaternary`, and this slice is the reason the choice
    is forced rather than optional. `.field-path` renders once per `.field-row`, in the
@@ -90,13 +140,10 @@
    the record screen readable. `--text-muted` #5b6570 is **5.93:1** — the same narrow
    remedy, and the same token, that closed the `.section-tab` item on 2026-08-27.
 
-   `.fg-sublabel` above keeps `--text-quaternary` DELIBERATELY: it renders on the
-   collapsed header, which was always visible and always scanned, so its count is
-   already in the baseline and changing it would move cells this slice did not touch.
-   That is the app-wide `--text-tertiary`/`--text-quaternary` palette question (A3),
-   which is a design decision and not this slice's to take. */
+   ~~`.fg-sublabel` above keeps `--text-quaternary` DELIBERATELY~~ — moot since
+   2026-09-22: the sublabel is gone from every header (owner QA F1), and the path
+   now sits inside the `?` panel. */
 .field-path {
-  margin-top: 3px;
   font-family: var(--font-mono);
   font-size: 11px;
   color: var(--text-muted);

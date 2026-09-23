@@ -27,7 +27,43 @@
 }
 
 .revhist-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
   margin-bottom: 10px;
+}
+
+/* ONE status line: the record's lifecycle label, then what the server said about
+   its history and this deployment. The cards are behind `Submission Details`. */
+.revhist-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-xs) var(--space-sm);
+  margin: 0 0 var(--space-sm);
+  font-size: var(--font-size-body);
+  line-height: var(--line-height-normal);
+  color: var(--text-secondary);
+}
+.revhist-status-text {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+/* Inside the disclosure the cards are sections of ONE box, not boxes in a box:
+   a hairline between them, no second border. The two server-fact notes keep
+   their subtle ground so they still read as notes. */
+.revhist-details .revhist-card {
+  margin-top: var(--space-md);
+  padding: var(--space-md) 0 0;
+  border: 0;
+  border-top: 1px solid var(--border-faint);
+  border-radius: 0;
+  background: transparent;
+}
+.revhist-details .disclosure-body > :first-child {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: 0;
 }
 
 .revhist-title {
@@ -38,11 +74,7 @@
 }
 
 .revhist-sub {
-  margin: 4px 0 0;
-  font-size: 12px;
-  line-height: 1.5;
-  color: var(--text-muted);
-  max-width: 68ch;
+  display: block;
 }
 
 /* --- cards ---------------------------------------------------------------- */

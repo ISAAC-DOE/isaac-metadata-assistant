@@ -257,6 +257,59 @@ describe('a record that does not exist', () => {
   });
 });
 
+/* ── §3c · the same, on every record screen (PR #277 review, pre-existing) ── */
+
+describe('a missing record, on each record screen that can be addressed directly', () => {
+  /** Every request 404s the way the API answers for an id that is not there. */
+  function stubAll404() {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        async () =>
+          new Response(JSON.stringify({ error: 'experiment_not_found' }), {
+            status: 404,
+            headers: { 'content-type': 'application/json' },
+          }),
+      ),
+    );
+  }
+
+  it.each([
+    ['/record/NOPE123', LABELS.screenReview],
+    ['/record/NOPE123/export', LABELS.screenExport],
+    ['/record/NOPE123/complete', LABELS.screenComplete],
+  ])(
+    '%s: the tab and the breadcrumb name the state on screen; no rail and no link to the missing record',
+    async (path, screenLabel) => {
+      stubAll404();
+      render(
+        <MemoryRouter
+          initialEntries={[path]}
+          future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+        >
+          <AppRoutes />
+        </MemoryRouter>,
+      );
+      await screen.findByRole('heading', { name: 'Record Not Found', level: 2 });
+      await waitFor(() => expect(document.title).toBe(`Record Not Found · ${APP_TITLE}`));
+      // The sr-only h1 keeps naming the screen that was ASKED for; the state is the
+      // panel's own h2, the tab title and the breadcrumb.
+      expect(screen.getByRole('heading', { level: 1 }).textContent).toBe(screenLabel);
+      // The breadcrumb leaf names the state — never the screen's own name, and
+      // never a link back to a record that does not exist.
+      const crumb = document.querySelector('.record-title');
+      expect(crumb?.textContent).toBe('Record Not Found');
+      expect(document.querySelector('a.record-title-link')).toBeNull();
+      // No rail: no live workspace links and no skeleton spine beside a settled
+      // absence.
+      expect(document.querySelector('.record-aside')).toBeNull();
+      expect(document.querySelector('.spine-step.skeleton')).toBeNull();
+      expect(screen.queryByRole('link', { name: /^Capture/ })).toBeNull();
+      expect(screen.queryByRole('link', { name: /^Proposals/ })).toBeNull();
+    },
+  );
+});
+
 /* ── §4 · the measured trap ─────────────────────────────────────────────── */
 
 describe('a navigation that changes only a non-view parameter', () => {

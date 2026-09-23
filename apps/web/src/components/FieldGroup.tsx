@@ -1,8 +1,10 @@
 import './fields.css';
 import { useId } from 'react';
 import { ChevronDown, ChevronRight } from './icons';
-import { StatusChip } from './StatusChip';
+import { HelpTip } from './HelpTip';
+import { SemanticStatus } from './SemanticStatus';
 import { FieldRow } from './FieldRow';
+import { fieldGroupStatus } from '../lib/adapt';
 import type { FieldGroupData } from '../lib/types';
 
 interface FieldGroupProps {
@@ -57,11 +59,17 @@ export function FieldGroup({
      already follow here: this body is rendered conditionally, so pointing at its
      id while collapsed would name an element that does not exist. */
   const bodyId = useId();
+  const titleId = useId();
+  const status = fieldGroupStatus(group.fields, group.needsYouCount);
+  const total = group.fields.length;
   return (
     <section
       className="field-group"
       data-draft-block={group.block}
-      aria-label={`${group.humanLabel} (${group.block})`}
+      /* The human heading only (owner QA F1). The official block key used to be in
+         the region's name too, so a screen reader announced "System & Instrument
+         (system)"; it is one `?` away now, beside the header. */
+      aria-label={group.humanLabel}
     >
       {/*
         A REAL HEADING LANDMARK, closing a MEASURED accessibility gap rather than a
@@ -81,28 +89,43 @@ export function FieldGroup({
         The `<h2>` is a transparent wrapper (`.fg-heading` resets margin and type),
         so nothing about the header's appearance changes.
       */}
-      <h2 className="fg-heading">
-        <button
-          type="button"
-          className="fg-header"
-          aria-expanded={expanded}
-          aria-controls={expanded ? bodyId : undefined}
-          onClick={onToggle}
-        >
-          <Chevron className="fg-chevron" size={16} strokeWidth={2} aria-hidden="true" />
-          <span className="fg-block">{group.humanLabel}</span>
-          <span className="fg-sublabel">{group.block}</span>
-          {expanded ? (
-            <span className="fg-summary">{group.summary}</span>
-          ) : group.needsYouCount > 0 ? (
-            <span className="fg-summary" style={{ display: 'inline-flex' }}>
-              <StatusChip kind="needsYou" label={`${group.needsYouCount} Needs You`} />
+      {/*
+        THE HEADER ROW (owner QA F1/F2, 2026-09-22): the human heading, then a
+        count and ONE status — `fieldGroupStatus`, computed from the rows below —
+        where a lowercase block key and a prose tail used to be. The block key is
+        in the `?` BESIDE the toggle, never inside it: a button inside a button is
+        invalid, and inside the `h2` its name would join the heading's. The tip is
+        named generically and described by the heading, so two sections never
+        offer two controls with one name.
+      */}
+      <div className="fg-headrow">
+        <h2 className="fg-heading">
+          <button
+            type="button"
+            className="fg-header"
+            aria-expanded={expanded}
+            aria-controls={expanded ? bodyId : undefined}
+            onClick={onToggle}
+          >
+            <Chevron className="fg-chevron" size={16} strokeWidth={2} aria-hidden="true" />
+            <span className="fg-block" id={titleId}>
+              {group.humanLabel}
             </span>
-          ) : (
-            <span className="fg-summary">{group.summary}</span>
-          )}
-        </button>
-      </h2>
+            <span className="fg-summary fg-status-group">
+              <span className="fg-count">
+                {total} field{total === 1 ? '' : 's'}
+              </span>
+              <SemanticStatus state={status.state} label={status.label} size="sm" />
+            </span>
+          </button>
+        </h2>
+        <HelpTip subject={group.humanLabel} label="Official Block Details" describedBy={titleId}>
+          <span>
+            Official block: <code>{group.block}</code>
+          </span>
+          <span>Each field inside names its own official path in its own details.</span>
+        </HelpTip>
+      </div>
 
       {expanded && (
         <div className="fg-body" id={bodyId}>

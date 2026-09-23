@@ -183,7 +183,7 @@ export function RecordDescriptionPanel({ experimentId }: { experimentId: string 
   const Chevron = expanded ? ChevronDown : ChevronRight;
 
   return (
-    <section className="field-group" aria-label="Record Description (record-level values)">
+    <section className="field-group" aria-label="Record Description">
       {/* A REAL HEADING LANDMARK — see `FieldGroup`'s own note for the measurement.
           `h2` at the level of this workspace's other sections, so the outline under
           the screen's single `h1` stays contiguous. A transparent wrapper: `.fg-heading`
@@ -198,10 +198,11 @@ export function RecordDescriptionPanel({ experimentId }: { experimentId: string 
         >
           <Chevron className="fg-chevron" size={16} strokeWidth={2} aria-hidden="true" />
           <span className="fg-block">Record Description</span>
-          <span className="record-section-key">record-level</span>
-          <span className="record-section-summary">
-            Technique, facility, sample, contributors and tags — every run inherits these
-          </span>
+          {/* One short phrase where a lowercase key (`record-level`) and a
+              sentence-long tail sat (owner QA F1/F2, 2026-09-22). What the section
+              holds is listed inside it; the one fact worth reading before opening
+              it is that every run inherits these values. */}
+          <span className="record-section-summary">Shared by every run</span>
         </button>
       </h2>
       {expanded && (

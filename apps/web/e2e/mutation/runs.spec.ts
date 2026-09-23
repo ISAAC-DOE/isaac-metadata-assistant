@@ -380,7 +380,7 @@ test.describe('R5 · the Run workspace', () => {
      */
     const opened = await openNthRun(page, 0);
     await expect(progress(opened)).toHaveText(
-      /^\s*\d+ of \d+\s+run fields on this screen\s*$/,
+      /^\s*\d+ of \d+\s+run fields recorded\s*$/,
     );
     await backToAllRuns(page);
 
@@ -390,9 +390,14 @@ test.describe('R5 · the Run workspace', () => {
     await clickAddRun(page, 2);
     const second = nthRow(page, 1);
     await expect(saveStatus(second)).toHaveText('');
-    await expect(conditions(second)).toContainText('No conditions recorded yet');
+    // PR #277 review (minor): the compact row no longer repeats "No conditions
+    // recorded yet" beside its own "Nothing Recorded" chip and "0 of 5" count — so
+    // "nothing is claimed" is asserted as the chip saying so and NO conditions line
+    // being drawn at all (a stronger claim than the old sentence's presence).
+    await expect(second.getByText('Nothing Recorded', { exact: true })).toBeVisible();
+    await expect(conditions(second)).toHaveCount(0);
     const secondOpened = await openNthRun(page, 1);
-    await expect(progress(secondOpened)).toHaveText(/^\s*0 of \d+\s+run fields on this screen\s*$/);
+    await expect(progress(secondOpened)).toHaveText(/^\s*0 of \d+\s+run fields recorded\s*$/);
   });
 
   test('a typed value says Saved only AFTER the server acknowledges, and survives a reload', async ({
@@ -433,7 +438,7 @@ test.describe('R5 · the Run workspace', () => {
        the count was `1 of N` when a run started empty. What this test is about is that
        the typed value reached the server and is rendered, which the next line asserts;
        the count is checked only for the shape it has always had. */
-    await expect(progress(card)).toHaveText(/^\s*\d+ of \d+\s+run fields on this screen\s*$/);
+    await expect(progress(card)).toHaveText(/^\s*\d+ of \d+\s+run fields recorded\s*$/);
     await expect(conditions(card)).toContainText('277.15 K');
 
     // The denominator is the number of controls the card actually renders — asserted
@@ -459,7 +464,7 @@ test.describe('R5 · the Run workspace', () => {
     const reloaded = openRun(page);
     await expect(reloaded).toBeVisible();
     await expect(conditions(reloaded)).toContainText('277.15 K');
-    await expect(progress(reloaded)).toHaveText(/^\s*\d+ of \d+\s+run fields on this screen\s*$/);
+    await expect(progress(reloaded)).toHaveText(/^\s*\d+ of \d+\s+run fields recorded\s*$/);
     // And the value is in the box, not merely in the summary line.
     await expect(fieldControl(reloaded, 'context.temperature_K')).toHaveValue('277.15');
   });

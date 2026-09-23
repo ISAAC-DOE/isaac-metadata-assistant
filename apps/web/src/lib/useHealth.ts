@@ -17,10 +17,33 @@ import type { ApiHealth } from './types';
 
 let cached: Promise<ApiHealth | undefined> | null = null;
 
+/**
+ * Consumers of `useHealthState` that want to hear about a DELIBERATE re-read
+ * (`refetchHealth`). The cache is still one promise for the session; this only
+ * lets a reader who pressed "Reload" see the new answer everywhere at once.
+ */
+const listeners = new Set<(health: ApiHealth | undefined) => void>();
+
 /** The shared, memoized health fetch. Resolves to `undefined` on any failure. */
 function primeHealth(): Promise<ApiHealth | undefined> {
   if (!cached) cached = api.health().catch(() => undefined);
   return cached;
+}
+
+/**
+ * RE-READ the health, on a person's request (a "Reload" beside a capability the
+ * server reported unavailable). Replaces the cached promise and tells every
+ * `useHealthState` consumer the new answer. Never throws — a failed re-read
+ * resolves to `undefined`, exactly as the first read does.
+ */
+export function refetchHealth(): Promise<ApiHealth | undefined> {
+  const next = api.health().catch(() => undefined);
+  cached = next;
+  void next.then((health) => {
+    if (cached !== next) return;
+    for (const listener of listeners) listener(health);
+  });
+  return next;
 }
 
 /** Test seam: drop the module-level cache so a test can prove a fresh fetch. */
@@ -33,8 +56,10 @@ export function useHealth(): ApiHealth | undefined {
   const [health, setHealth] = useState<ApiHealth | undefined>(undefined);
   useEffect(() => {
     let alive = true;
-    primeHealth().then((h) => {
-      if (alive) setHealth(h);
+    const initial = primeHealth();
+    initial.then((h) => {
+      // Same guard as `useHealthState`: a read a `refetchHealth` replaced is stale.
+      if (alive && cached === initial) setHealth(h);
     });
     return () => {
       alive = false;
@@ -58,11 +83,26 @@ export function useHealthState(): { settled: boolean; health: ApiHealth | undefi
   });
   useEffect(() => {
     let alive = true;
-    primeHealth().then((h) => {
-      if (alive) setState({ settled: true, health: h });
+    /*
+     * PR #277 REVIEW (minor) — A DELIBERATE RE-READ MUST WIN OVER A STALE FIRST
+     * READ. The first read and a `refetchHealth` are two independent requests; if
+     * the re-read answered FIRST (the listener below applies it) and the first read
+     * answered AFTER, this `.then` used to overwrite the new answer with the old
+     * one — so a "Reload" that found acceptance enabled could be silently undone.
+     * The first read is applied only while it is still the CURRENT read: once a
+     * re-read has replaced `cached`, the listener owns delivery.
+     */
+    const initial = primeHealth();
+    initial.then((h) => {
+      if (alive && cached === initial) setState({ settled: true, health: h });
     });
+    const listener = (h: ApiHealth | undefined) => {
+      if (alive) setState({ settled: true, health: h });
+    };
+    listeners.add(listener);
     return () => {
       alive = false;
+      listeners.delete(listener);
     };
   }, []);
   return state;

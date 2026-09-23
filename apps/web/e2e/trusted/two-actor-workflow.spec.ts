@@ -78,6 +78,7 @@ import {
   switchWorkspace,
   expect,
   proposalCard,
+  proposalCardInState,
   test,
   type ServerApi,
 } from './fixtures';
@@ -223,11 +224,10 @@ async function deriveRunTarget(
   );
 }
 
-/** A proposal card addressed by path AND state — the card's own accessible name. */
+/** A proposal card addressed by path AND state — the card's own accessible name,
+ *  which names the field in words since review #277 (`proposalCardInState`). */
 function cardInState(page: Page, path: string, stateLabel: string) {
-  return page.getByRole('article', {
-    name: new RegExp(`^Proposal for ${path.replace(/\./g, '\\.')} — ${stateLabel}`),
-  });
+  return proposalCardInState(page, path, stateLabel);
 }
 
 /**
@@ -296,7 +296,10 @@ test.describe('two scientists, one record, end to end', () => {
      * no exported artifact and (a moment ago) no runs still offers it.
      */
     const recordPanel = page.getByRole('region', {
-      name: 'Record Description (record-level values)',
+      // The region is named for its heading alone since owner QA F1 (2026-09-22) —
+      // the machine-side qualifier no longer reaches a screen reader.
+      name: 'Record Description',
+      exact: true,
     });
     await recordPanel.getByRole('button', { name: /^Record Description/ }).click();
     // A closed enum renders a `<select>`, and that is a schema fact rather than a
@@ -475,6 +478,8 @@ test.describe('two scientists, one record, end to end', () => {
     );
     // NOTHING IS READ UNTIL A PERSON ASKS — one current-value read per card on mount
     // would be N requests for a question nobody asked.
+    // Behind "Why This Was Proposed" since owner QA P1 (2026-09-22).
+    await recordCard.getByRole('button', { name: 'Why This Was Proposed' }).click();
     await recordCard.getByRole('button', { name: 'Show What the Record Holds Now' }).click();
     const recordCurrent = recordCard.locator('.proposal-current-body .proposal-value-body');
     await expect(recordCurrent, 'step 8: the CURRENT value is what A entered').toContainText(
@@ -660,6 +665,8 @@ test.describe('two scientists, one record, end to end', () => {
     ).toBe(1);
 
     // ── STEP 12 — three distinct values, and the label says whose ─────────────
+    // Behind "Why This Was Proposed" since owner QA P1 (2026-09-22).
+    await runCard.getByRole('button', { name: 'Why This Was Proposed' }).click();
     await runCard.getByRole('button', { name: 'Show What the Record Holds Now' }).click();
     const runCurrentLabel = runCard.locator('.proposal-current-label');
     const runCurrent = runCard.locator('.proposal-current-body .proposal-value-body');
@@ -803,7 +810,7 @@ test.describe('two scientists, one record, end to end', () => {
       Number.isFinite(revBeforeAccept),
       'step 14: the record version token must carry a numeric rev for step 17 to have a floor'
     ).toBe(true);
-    const liveRunCard = cardInState(page, runTarget.path, 'Awaiting your judgement');
+    const liveRunCard = cardInState(page, runTarget.path, 'Awaiting your judgment');
     await expect(liveRunCard, 'step 14: the open card is the one A acts on').toBeVisible({
       timeout: DISCOVERY_DEADLINE,
     });

@@ -10,7 +10,7 @@ import { fireEvent, render, screen } from '@testing-library/react';
 import { useState } from 'react';
 
 import { SEMANTIC_STATUS, SemanticStatus, type SemanticState } from '../components/SemanticStatus';
-import { HelpTip } from '../components/HelpTip';
+import { HelpTip, placeHelpTip } from '../components/HelpTip';
 import { Disclosure } from '../components/Disclosure';
 
 const cssFiles = import.meta.glob('../components/{semantic-status,help-tip,disclosure}.css', {
@@ -125,6 +125,66 @@ describe('HelpTip', () => {
     expect(trigger).toHaveAttribute('aria-expanded', 'true');
     fireEvent.pointerDown(screen.getByRole('button', { name: 'elsewhere' }));
     expect(trigger).toHaveAttribute('aria-expanded', 'false');
+  });
+
+  /* ── review #277, I-2: flip, clamp, z-order, focus-leave ─────────────────── */
+
+  it('opens BELOW the trigger when the panel fits there', () => {
+    const p = placeHelpTip({ top: 100, bottom: 124, left: 100, width: 24 }, 80, { width: 390, height: 844 });
+    expect(p.placement).toBe('below');
+    expect(p.top).toBe(130);
+  });
+
+  it('FLIPS ABOVE when it would pass the bottom edge (the 390px fold case)', () => {
+    // A trigger near the bottom of an 844px viewport, a 120px panel: below would end
+    // at 900 > 836, so it goes above the trigger instead.
+    const p = placeHelpTip({ top: 770, bottom: 794, left: 40, width: 24 }, 120, { width: 390, height: 844 });
+    expect(p.placement).toBe('above');
+    expect(p.top).toBe(770 - 6 - 120);
+    expect(p.top + 120).toBeLessThanOrEqual(844 - 8);
+  });
+
+  it('CLAMPS inside the viewport when neither side holds it whole, never above the top', () => {
+    const p = placeHelpTip({ top: 60, bottom: 84, left: 10, width: 24 }, 400, { width: 320, height: 420 });
+    // Below would end at 490 > 412 and above would start at -346, so it is pulled up
+    // just far enough to end on the bottom limit: 412 - 400 = 12, never above 8.
+    expect(p.top).toBe(12);
+    // Horizontally: 8px inside both edges at 320px.
+    expect(p.left).toBeGreaterThanOrEqual(8);
+    expect(p.left + p.width).toBeLessThanOrEqual(320 - 8);
+  });
+
+  it('clamps horizontally at the right edge', () => {
+    const p = placeHelpTip({ top: 100, bottom: 124, left: 370, width: 24 }, 60, { width: 390, height: 844 });
+    expect(p.left + p.width).toBeLessThanOrEqual(390 - 8);
+  });
+
+  it('closes when focus LEAVES the trigger and panel, not when it moves between them', () => {
+    render(
+      <>
+        <HelpTip subject="Run">
+          <span>definition</span>
+        </HelpTip>
+        <button type="button">next control</button>
+      </>,
+    );
+    const trigger = screen.getByRole('button', { name: 'About Run' });
+    const panel = document.getElementById(trigger.getAttribute('aria-controls')!)!;
+    fireEvent.click(trigger);
+    // Trigger → panel: still open (a press inside the panel moves focus there).
+    fireEvent.blur(trigger, { relatedTarget: panel });
+    expect(trigger).toHaveAttribute('aria-expanded', 'true');
+    // Panel → the next control (a Tab away): closed, so it cannot cover the next label.
+    fireEvent.blur(panel, { relatedTarget: screen.getByRole('button', { name: 'next control' }) });
+    expect(trigger).toHaveAttribute('aria-expanded', 'false');
+  });
+
+  it('paints above the floating Assistant pill', () => {
+    const src = css('help-tip');
+    const z = /\.helptip-panel\s*\{[^}]*z-index:\s*(\d+)/.exec(src);
+    expect(z).not.toBeNull();
+    // `.assistant-drawer-trigger` is 45, its backdrop 46, the drawer 47.
+    expect(Number(z![1])).toBeGreaterThan(47);
   });
 
   it('draws a visible focus ring and no verdict hue in any interaction state', () => {

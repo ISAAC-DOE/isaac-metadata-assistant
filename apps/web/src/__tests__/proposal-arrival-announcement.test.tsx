@@ -34,6 +34,7 @@ import { markSelfMintedProposals } from '../lib/selfMintedProposals';
 import { PROPOSAL_RECORD_SCOPED_TARGET_PATHS, PROPOSAL_TARGET_PATHS, stubFetchRoutes } from '../test/apiFixtures';
 import type { RecordChangeSummary } from '../lib/recordChanges';
 import type { ApiProposal, ApiProposalsResponse } from '../lib/types';
+import { fieldLabel } from '../lib/fieldLabels';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -428,7 +429,7 @@ describe('an arrival is NOT announced', () => {
 
     // The ACT is announced (the panel's existing behaviour)…
     await waitFor(() =>
-      expect(statusText()).toContain(`The proposal for ${RUN_PATH} was rejected and kept on the record.`),
+      expect(statusText()).toContain(`The proposal for ${fieldLabel(RUN_PATH)} was rejected and kept on the record.`),
     );
     // …and it is announced ALONE — no arrival note, and the sentence never
     // mentions an arrival, despite `by_state.open` having risen in that same
@@ -536,7 +537,7 @@ describe('an arrival is NOT announced', () => {
 
   /*
    * PR-D — OWN-ACT SUPPRESSION. A proposal `TranscriptCapturePanel`'s finalize or
-   * `UnmappedNotesPanel`'s "Propose a value from this note" just minted, on the
+   * `UnmappedNotesPanel`'s "Propose a Value From This Note" just minted, on the
    * SAME screen, must not read as a colleague's arrival — see
    * `lib/selfMintedProposals.ts` for exactly what this local, same-tab mechanism
    * can and cannot know (it says nothing about a second tab or a colleague's

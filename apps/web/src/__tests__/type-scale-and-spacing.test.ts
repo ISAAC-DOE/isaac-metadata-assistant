@@ -309,7 +309,16 @@ const CEILING = {
   fontSize: 1043,
   fontWeight: 282,
   lineHeight: 421,
-  spacing: 2400,
+  /*
+   * ~~spacing: 2400~~ -> 2368, LOWERED 2026-09-22 in the same change that removed
+   * the literals (owner QA phase 2): the record-screen redesign replaced hand-set
+   * padding/margin/gap in the run findings, validate-review, blocker, field-group,
+   * revision-history and proposal-card rules with `--space-*` rungs, and deleted
+   * rules whose elements are gone (`.vr-errors`' gap, `.run-finding-state`'s chip
+   * padding, `.guided-path`'s chip padding, `.field-path`'s margin). Read from this
+   * file's own counter's failure message, as the note above requires.
+   */
+  spacing: 2368,
   /**
    * font-size declarations BELOW the 11px floor: 9.5px ×1, 10px ×14, 10.5px ×84.
    *

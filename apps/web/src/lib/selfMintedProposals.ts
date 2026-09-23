@@ -5,7 +5,7 @@
  * COLLEAGUE's change appearing unprompted — see its own header. Without this, it
  * fires identically for a proposal THIS reader just minted a moment ago, on the
  * SAME screen, via `TranscriptCapturePanel`'s finalize or `UnmappedNotesPanel`'s
- * "Propose a value from this note": the change feed reports both the same way.
+ * "Propose a Value From This Note": the change feed reports both the same way.
  *
  * WHY THE SERVER CANNOT ANSWER THIS. `RecordChangeSummary`'s own header states the
  * change feed's field set precisely: a proposal entry carries exactly `{kind,

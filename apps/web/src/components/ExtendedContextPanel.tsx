@@ -119,6 +119,7 @@ import { LABELS } from '../lib/labels';
 import type { ApiExtendedContextEntry, ApiExtendedContextResponse } from '../lib/types';
 import { BackendDown, LoadingPanel } from './FetchStates';
 import { ChevronDown, ChevronRight } from './icons';
+import { HelpTip } from './HelpTip';
 // The collapsed mount reuses `FieldGroup`'s shell (`.field-group` / `.fg-header` /
 // `.fg-body`), as `AssetReferencesPanel` does, rather than inventing a second
 // disclosure idiom for this one workspace.
@@ -394,7 +395,7 @@ export function ExtendedContextPanel({
   return (
     <section
       className="field-group extctx-collapsible"
-      aria-label={`${LABELS.extendedContextHeading} (${LABELS.extendedContextSublabel})`}
+      aria-label={LABELS.extendedContextHeading}
     >
       {/* `h2 > button[aria-expanded][aria-controls]`, the accordion shape `RunCard`
           documents and `AssetReferencesPanel` follows — a real heading landmark, not
@@ -410,7 +411,6 @@ export function ExtendedContextPanel({
         >
           <Chevron className="fg-chevron" size={16} strokeWidth={2} aria-hidden="true" />
           <span className="fg-block">{LABELS.extendedContextHeading}</span>
-          <span className="fg-sublabel">{LABELS.extendedContextSublabel}</span>
           <span className="fg-summary">
             {total === null
               ? ''
@@ -488,7 +488,18 @@ function Loaded({
    * identical from here.
    */
   if (!loaded.present) {
-    return <p className="extctx-empty">{LABELS.extendedContextEmpty}</p>;
+    /* ONE LINE, AND THE EXPLANATION ONE `?` AWAY (owner QA F3, 2026-09-22). The
+       full sentence used to be the whole empty state, three lines flush against the
+       card edge. It is still rendered — verbatim, inside the tip — because it is
+       what stops an empty panel reading as a missing file. */
+    return (
+      <p className="extctx-empty">
+        {LABELS.extendedContextEmptyShort}{' '}
+        <HelpTip subject={LABELS.extendedContextHeading} label="Why This Is Empty">
+          <span>{LABELS.extendedContextEmpty}</span>
+        </HelpTip>
+      </p>
+    );
   }
 
   /*

@@ -558,7 +558,11 @@ describe('the needs-you banner across the four workspaces', () => {
       /* The refusal sentence survives the fold. Without it the compact form is a
          number and a button, and a scientist meeting "6 Fields Need Your
          Confirmation" with no explanation reads it as an error. */
-      expect(screen.getByText(/values the system refuses to guess/), view).toBeInTheDocument();
+      /* Case-insensitive since owner QA G (2026-09-22): the one-line form on the
+         other workspaces opens the clause with a capital. What is asserted is
+         unchanged — the refusal clause and "not a failure" survive the fold. */
+      expect(screen.getByText(/values the system refuses to guess/i), view).toBeInTheDocument();
+      expect(screen.getByText(/expected, not a failure/), view).toBeInTheDocument();
       v.unmount();
     }
   });
@@ -737,5 +741,34 @@ describe('LIB-005 — reopen-and-continue: visiting a workspace remembers it', (
     await screen.findByRole('link', { name: 'Activity' });
     expect(lastRecordView(ID)).toBe('fields');
     expect(lastRecordView(OTHER_ID)).toBe('graph');
+  });
+});
+
+/* ── review #277, I-9: a finding's "Go to Section" lands on an OPEN section ────── */
+
+describe('a link to a Record Fields section (`at=block:<name>`)', () => {
+  it('expands that section, marks it, and moves focus to its header', async () => {
+    renderAt(`/record/${ID}?view=fields&at=block:sample`);
+    await waitFor(() => {
+      const section = document.querySelector('section[data-draft-block="sample"]');
+      if (section === null) throw new Error('no sample section');
+      expect(section.querySelector('.fg-header')?.getAttribute('aria-expanded')).toBe('true');
+      expect(section.getAttribute('data-linked-address')).toBe('true');
+    });
+    await waitFor(() =>
+      expect(
+        (document.activeElement as HTMLElement | null)?.closest('section[data-draft-block="sample"]'),
+      ).not.toBeNull(),
+    );
+    // Only the linked section opened — the others keep their collapsed default.
+    const system = document.querySelector('section[data-draft-block="system"] .fg-header');
+    expect(system?.getAttribute('aria-expanded')).toBe('false');
+  });
+
+  it('a block the view does not render changes nothing', async () => {
+    renderAt(`/record/${ID}?view=fields&at=block:nonexistent`);
+    await screen.findByRole('link', { name: 'Activity' });
+    await waitFor(() => expect(document.querySelectorAll('.fg-header').length).toBeGreaterThan(0));
+    expect(document.querySelector('[data-linked-address]')).toBeNull();
   });
 });

@@ -63,6 +63,7 @@ import {
   expect,
   openRecord,
   proposalCard,
+  proposalCardInState,
   test,
   type ServerApi,
 } from './fixtures';
@@ -237,6 +238,8 @@ test.describe('a run-scoped ingestion proposal, reviewed in a browser', () => {
     // NOTHING IS READ UNTIL A PERSON ASKS. The panel fetches the current value only
     // on this click — one read per card on mount would be N requests for a question
     // nobody asked.
+    // Behind "Why This Was Proposed" since owner QA P1 (2026-09-22).
+    await card.getByRole('button', { name: 'Why This Was Proposed' }).click();
     await card.getByRole('button', { name: 'Show What the Record Holds Now' }).click();
 
     const label = card.locator('.proposal-current-label');
@@ -275,7 +278,7 @@ test.describe('a run-scoped ingestion proposal, reviewed in a browser', () => {
     // The card's own accessible name carries its state, so waiting for the name to
     // change is waiting for the screen to have caught up — not for a fixed delay.
     await expect(
-      page.getByRole('article', { name: new RegExp(`^Proposal for ${target.path.replace(/\./g, '\\.')} — Accepted`) })
+      proposalCardInState(page, target.path, 'Accepted')
     ).toBeVisible();
 
     // INDEPENDENT VERIFICATION, over HTTP, of what the click did.

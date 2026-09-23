@@ -144,7 +144,10 @@ export function CaptureWorkspace({
                 onRunChange={onCaptureRunChange}
                 onRunResolved={setSelectedRun}
                 refreshKey={mapRefreshKey}
-                picker={captureView !== 'write'}
+                /* ONE run choice per view (review #277, I-3): the transcript form —
+                   on Write, and on Voice where the local recorder shares the same
+                   form — carries its own run select, so the map's is off there. */
+                picker={captureView === 'files'}
               />
             )}
           </div>

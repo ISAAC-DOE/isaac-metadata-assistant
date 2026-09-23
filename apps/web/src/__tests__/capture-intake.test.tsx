@@ -23,12 +23,14 @@
  *    views' own behaviour is `capture-workspace.test.tsx`'s.
  */
 
-import { describe, expect, it } from 'vitest';
-import { render, within } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { render, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { CaptureIntake } from '../components/CaptureIntake';
 import { CAPTURE_COPY } from '../lib/transcriptCaptureContent';
 import type { ApiCaptureSummary } from '../lib/types';
+import { __resetHealthCache } from '../lib/useHealth';
+import { healthSynthetic, stubFetchRoutes } from '../test/apiFixtures';
 
 const RECORD = '/record/01SYNTHTESTEXP000000000000';
 
@@ -182,5 +184,46 @@ describe('what Capture Home must NOT claim', () => {
     expect(container.querySelector('[aria-current="step"]')).toBeNull();
     expect(container.querySelector('[aria-disabled="true"]')).toBeNull();
     expect(container.querySelectorAll('button:disabled')).toHaveLength(0);
+  });
+});
+
+/* ── review #277, I-4: Claude dictation is offered only where it exists ────────── */
+
+describe('the voice row states what is true on THIS deployment', () => {
+  beforeEach(() => __resetHealthCache());
+  afterEach(() => vi.unstubAllGlobals());
+
+  function renderWith(posture: string, endpoint: string | null) {
+    stubFetchRoutes({ 'GET /api/health': { body: { ...healthSynthetic, mcp: { posture } } } });
+    return render(
+      <MemoryRouter
+        initialEntries={[`${RECORD}?view=capture`]}
+        future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+      >
+        <CaptureIntake captureSummary={null} claudeEndpoint={endpoint} />
+      </MemoryRouter>,
+    );
+  }
+  const voiceLine = () => row('voice').querySelector('.capture-method-line')?.textContent ?? '';
+
+  it('an unmounted agent interface: the line offers NO Claude dictation', async () => {
+    renderWith('unmounted', 'https://example.invalid/mcp');
+    // Wait for the health read to settle, then assert the settled copy.
+    await waitFor(() => expect(voiceLine()).toBe(CAPTURE_COPY.homeVoiceLine));
+    expect(voiceLine()).not.toMatch(/claude|dictate/i);
+  });
+
+  it('a reachable posture WITHOUT a published address still offers none', async () => {
+    renderWith('oauth-mounted', null);
+    await waitFor(() => expect(voiceLine()).toBe(CAPTURE_COPY.homeVoiceLine));
+  });
+
+  it('POLARITY: only a reachable posture WITH an address offers Claude dictation', async () => {
+    renderWith('oauth-mounted', 'https://example.invalid/mcp');
+    await waitFor(() => expect(voiceLine()).toBe(CAPTURE_COPY.homeVoiceLineWithClaude));
+  });
+
+  it('the unmounted sentence makes no future promise', () => {
+    expect(CAPTURE_COPY.claudeUnmounted).not.toMatch(/\byet\b/i);
   });
 });

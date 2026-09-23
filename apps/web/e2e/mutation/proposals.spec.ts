@@ -98,6 +98,7 @@ import { expect, test } from './fixtures';
 import { mutationSessionId } from './fixtures';
 import { MUT_API_BASE, MUT_WORKSPACE, SEED } from './env';
 import { TUTORIAL_SESSION_HEADER } from '../worked-example';
+import { fieldLabel } from '../../src/lib/fieldLabels';
 
 // ---------------------------------------------------------------------------
 // Reaching the server directly — SETUP and INDEPENDENT VERIFICATION only.
@@ -265,6 +266,32 @@ async function editTargetBehindTheUi(
  * suite against a fixture-verifier backend would make them false without any product
  * defect existing. Failing here, with this message, is the honest outcome.
  */
+/**
+ * Make THIS PAGE's `/api/health` report `proposal_acceptance: {available: true}`.
+ *
+ * WHY A TEST MAY DO THIS, stated because it looks like faking the premise. Since #278
+ * this backend serves `available: false` (no verifier is configured), and the panel
+ * then LOCKS Accept and its correction path before any click — which is the product
+ * working. Two tests below are about something ELSE: that the server's own 409
+ * reaches the reader truthfully, and that an unsaved correction survives a refresh.
+ * Both need the Accept controls live, i.e. the panel as it behaves on a server that
+ * has not reported the block or has a verifier. Only the HEALTH read is changed —
+ * every write still goes to the real backend, which still refuses.
+ */
+async function reportAcceptanceAvailable(page: Page): Promise<void> {
+  await page.route(
+    (url) => /\/api\/health$/.test(url.pathname),
+    async (route) => {
+      const response = await route.fetch();
+      const body = (await response.json()) as Record<string, unknown>;
+      await route.fulfill({
+        response,
+        json: { ...body, proposal_acceptance: { available: true, reason: null } },
+      });
+    }
+  );
+}
+
 async function assertNoAttributableActor(api: APIRequestContext): Promise<void> {
   const res = await api.get(`${MUT_API_BASE}/health`);
   expect(res.ok(), `GET /health -> ${res.status()}`).toBeTruthy();
@@ -382,10 +409,13 @@ test('a stored proposal reaches the screen, and the panel really read the server
 
   // The state the scientist is being asked to act on.
   await expect(card).toHaveAttribute('data-state', 'open');
+  // Named by the field in WORDS, not its official path (review #277, I-5) — and the
+  // official path is still reachable, one `?` away, inside the card.
   await expect(card).toHaveAttribute(
     'aria-label',
-    'Proposal for system.technique — Awaiting your judgement'
+    `Proposal for ${fieldLabel('system.technique')} — Awaiting your judgment`
   );
+  await expect(card.locator('.proposal-path')).toHaveText('system.technique');
 
   // The count line is the SERVER's arithmetic, not a length of what is on screen.
   const after = await serverList(request, id);
@@ -437,8 +467,10 @@ test('the proposed value and what the record holds are separate, labelled reads'
   // The proposed value, labelled as proposed, and never as the record's.
   await expect(card.locator('.proposal-value-label')).toHaveText('Proposed value');
   await expect(card.locator('.proposal-value-body')).toHaveText('XAS');
+  // VISIBLE on the card, not tucked behind a disclosure (review #277, I-8).
+  await expect(card.locator('.proposal-nature')).toBeVisible();
   await expect(card.locator('.proposal-nature')).toContainText(
-    'It is not the field’s value and not evidence for it.'
+    'not the field’s value, and not evidence for it.'
   );
 
   /*
@@ -447,6 +479,8 @@ test('the proposed value and what the record holds are separate, labelled reads'
    * is no current value on the card at all.
    */
   await expect(card.locator('.proposal-current-label')).toHaveCount(0);
+  // Behind "Why This Was Proposed" since owner QA P1 (2026-09-22).
+  await card.getByRole('button', { name: 'Why This Was Proposed' }).click();
   await card.getByRole('button', { name: 'Show What the Record Holds Now' }).click();
 
   await expect(card.locator('.proposal-current-label')).toHaveText(
@@ -495,7 +529,13 @@ test('source, rule, time and the derived excerpt are shown, and the excerpt is n
   await expect(card.locator('.proposal-rule')).toContainText(rule);
   await expect(card.locator('.proposal-origin')).toContainText('typed_note');
   await expect(card.locator('.proposal-origin')).toContainText(noteId);
-  await expect(card.locator('.proposal-when')).toHaveText(`Proposed ${proposal.proposed_utc}`);
+  // A person's date on the card (review #277, I-5), and the exact ISO instant still
+  // reachable as the `<time>` element's machine value and title.
+  await expect(card.locator('.proposal-when')).toHaveText(
+    /^Proposed [A-Z][a-z]{2} \d{1,2}(, \d{4})?, \d{1,2}:\d{2} (AM|PM)$/
+  );
+  await expect(card.locator('.proposal-when time')).toHaveAttribute('datetime', proposal.proposed_utc);
+  await expect(card.locator('.proposal-when time')).toHaveAttribute('title', proposal.proposed_utc);
   await expect(card.locator('.proposal-excerpt')).toHaveText('XRF');
 
   /*
@@ -657,7 +697,7 @@ test('a proposal left alone stays open — there is no defer act, and inaction r
 
   // The panel says what taking no action means, rather than leaving it to be inferred.
   await expect(card.locator('.proposal-pending-note')).toContainText(
-    'Leaving this proposal alone leaves it awaiting judgement.'
+    'Leaving this proposal alone leaves it awaiting judgment.'
   );
 
   /*
@@ -744,10 +784,12 @@ test('a rejected proposal stays readable with its history, and the note behind i
   await expect(card).toBeVisible();
   await expect(card).toHaveAttribute('data-state', 'rejected');
   await expect(card.locator('.proposal-closed-note')).toContainText(
-    'Every recorded judgement stays exactly as it was made'
+    'Every recorded judgment stays exactly as it was made'
   );
 
   // The history is READABLE, both acts, in order, with the reason.
+  // Behind "Why This Was Proposed" since owner QA P1 (2026-09-22).
+  await card.getByRole('button', { name: 'Why This Was Proposed' }).click();
   await card.getByRole('button', { name: 'Show history (2 acts)' }).click();
   const acts = card.locator('.proposal-history-list li');
   await expect(acts).toHaveCount(2);
@@ -897,6 +939,12 @@ test('an unsaved correction survives a background change-feed refresh', async ({
   page.on('request', (r) => {
     if (r.method() === 'GET' && /\/proposals(\?|$)/.test(r.url())) listReads.push(Date.now());
   });
+
+  // The correction editor is an ACCEPTANCE path, so it is locked on this backend's own
+  // health (`available: false`). This test's subject — an unsaved correction
+  // surviving a background refresh — is independent of the lock, so the health read
+  // is reported as available here. See `reportAcceptanceAvailable`.
+  await reportAcceptanceAvailable(page);
 
   const id = SEED.exported;
   const noteId = await captureNote(request, id, 'A reading a scientist is midway through correcting.');
@@ -1054,12 +1102,59 @@ test('accepting is refused truthfully, and nothing is written', async ({ page, r
   const card = cardFor(page, noteId);
 
   /*
-   * THE ACCEPT CONTROL IS OFFERED. That is deliberate and is not a defect: the panel
-   * withholds Accept only for conditions that are PERMANENT for a proposal, and
-   * "this deployment establishes no actor" is not observable from the list payload.
-   * A build that hid the control would be asserting a limitation it cannot see.
+   * ~~THE ACCEPT CONTROL IS OFFERED … "this deployment establishes no actor" is not
+   * observable from the list payload.~~ — SUPERSEDED (review #277). It is observable
+   * now, from `/api/health`'s `proposal_acceptance`, and this backend reports
+   * `available: false`. So the FIRST thing a reader meets is the PROACTIVE state: one
+   * compact notice, and Accept locked with that notice's sentence as its accessible
+   * description — before anything is sent.
    */
-  const accept = card.getByRole('button', { name: 'Accept as Proposed', exact: true });
+  const lockNotice = page.locator('.proposals-lock[role="note"]');
+  await expect(lockNotice).toBeVisible();
+  await expect(lockNotice).toContainText('Acceptance unavailable on this deployment');
+  const lockedAccept = card.getByRole('button', { name: 'Accept as Proposed', exact: true });
+  await expect(lockedAccept).toBeDisabled();
+  const describedBy = await lockedAccept.getAttribute('aria-describedby');
+  expect(describedBy, 'a locked Accept must say why').toBeTruthy();
+  await expect(page.locator(`[id="${describedBy}"]`)).toContainText(
+    'Acceptance unavailable on this deployment'
+  );
+  // Nothing was written by merely showing the lock.
+  expect(await draftValue(request, id, 'system.technique')).toEqual(heldBefore);
+  expect((await detail(request, id)).rev).toBe(revBefore);
+
+  /*
+   * THE SERVER'S OWN REFUSAL IS STILL PROVED, TWICE. First over HTTP, with no UI in
+   * between: the real route answers `409 human_actor_required`.
+   */
+  const { version: versionForApi } = await detail(request, id);
+  const direct = await request.post(
+    `${MUT_API_BASE}/experiments/${id}/proposals/${created.proposal_id}/review`,
+    {
+      headers: {
+        ...scoped(),
+        'content-type': 'application/json',
+        'If-Match': `"${versionForApi}"`,
+      },
+      data: { action: 'accept', accepted_from: 'candidate', confirmed_by_user: true },
+    }
+  );
+  expect(direct.status(), 'the review route answered something other than a refusal').toBe(409);
+  expect((await direct.json()).error).toBe('human_actor_required');
+  expect(await draftValue(request, id, 'system.technique'), 'the direct refusal wrote').toEqual(
+    heldBefore
+  );
+
+  /*
+   * Then through the SCREEN: with the health read reporting acceptance available (the
+   * panel as it behaves where the block is absent), Accept is live, the click reaches
+   * the real backend, and the refusal it gets back is rendered in the same compact
+   * form as the lock.
+   */
+  await reportAcceptanceAvailable(page);
+  await page.reload();
+  const liveCard = cardFor(page, noteId);
+  const accept = liveCard.getByRole('button', { name: 'Accept as Proposed', exact: true });
   await expect(accept).toBeEnabled();
 
   // Capture the server's own answer, so the assertion below is about what the SERVER
@@ -1074,11 +1169,26 @@ test('accepting is refused truthfully, and nothing is written', async ({ page, r
 
   // THE REFUSAL REACHES THE SCIENTIST, and it says the two things that matter: nothing
   // was written, and retrying will not help.
-  const banner = page.locator('.proposals-error[role="alert"]');
+  //
+  // Since owner QA P2 (2026-09-22) it arrives in the compact acceptance notice: the
+  // visible line says nothing was written and why; the server-derived account is one
+  // `Why?` away — opened here, so what is asserted is what a reader can reach.
+  const banner = page.locator('.proposals-lock[role="alert"]');
   await expect(banner).toBeVisible();
-  await expect(banner).toContainText('NOTHING WAS WRITTEN');
-  await expect(banner).toContainText('retrying will not change it');
-  await expect(banner).toContainText(
+  await expect(banner).toContainText('Acceptance refused on this deployment');
+  await expect(banner).toContainText('Nothing was written');
+  // PR #277 REVIEW (pre-existing): the pressed Accept went disabled while the
+  // request was in flight, so focus used to fall to <body> and stay there. It now
+  // lands on the refusal itself, in a real browser.
+  await expect(banner).toBeFocused();
+  // ONE reload label for both acceptance notices (PR #277 review, minor).
+  await expect(banner.getByRole('button', { name: 'Reload', exact: true })).toBeVisible();
+  await banner.getByRole('button', { name: 'Why?' }).click();
+  const why = banner.locator('.proposals-lock-why-body');
+  await expect(why).toBeVisible();
+  await expect(why).toContainText('NOTHING WAS WRITTEN');
+  await expect(why).toContainText('retrying will not change it');
+  await expect(why).toContainText(
     'Rejecting, superseding and withdrawing need no actor and still work.'
   );
 

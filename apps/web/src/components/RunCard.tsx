@@ -101,6 +101,8 @@
 import './runs.css';
 import { useEffect, useId, useRef, useState, type RefObject } from 'react';
 import { StatusChip } from './StatusChip';
+import { SemanticStatus } from './SemanticStatus';
+import { HelpTip } from './HelpTip';
 import { RunInheritedPanel } from './RunInheritedPanel';
 import { RunRenameForm } from './RunRenameForm';
 import { RunSection } from './RunSection';
@@ -119,6 +121,7 @@ import {
 } from '../lib/runDatetime';
 import {
   RUN_FIELDS,
+  enumOptionLabel,
   envelopeText,
   parseRunField,
   runConditionsSummary,
@@ -149,6 +152,24 @@ type CheckState =
   | { status: 'busy' }
   | { status: 'data'; data: ApiRunCheckResponse }
   | { status: 'error'; message: string };
+
+/**
+ * A RUN'S STATE ON THE LIST, from its own five fields and nothing else.
+ *
+ * Deliberately NOT "Complete": five of five run fields is not a valid record
+ * (most of a record is inherited, and only official validation decides), so the
+ * full state says what it measures — every run field is recorded.
+ */
+function RunFillStatus({ filled }: { filled: number }) {
+  const total = RUN_FIELDS.length;
+  if (filled >= total) return <SemanticStatus state="complete" label="All Recorded" size="sm" />;
+  if (filled === 0) return <SemanticStatus state="missing" label="Nothing Recorded" size="sm" />;
+  /* PR #277 REVIEW (minor) — ONE STATUS PLUS THE COUNT. This chip used to read
+     "3 Missing" beside "2 of 5 recorded": the same number twice, once from each
+     end. The chip now carries the STATE and the count beside it carries the
+     numbers. */
+  return <SemanticStatus state="missing" label="Partly Recorded" size="sm" />;
+}
 
 export function RunCard({
   experimentId,
@@ -600,20 +621,34 @@ export function RunCard({
           >
             <span className="sr-only">Open </span>
             <ChevronRight className="run-card-chevron" size={16} strokeWidth={2} aria-hidden="true" />
-            <span className="run-card-name">{run.label}</span>
-            <span className="run-card-ordinal">#{run.ordinal}</span>
-            <span className="run-card-conditions">
-              {conditions ?? <span className="run-card-conditions-empty">No conditions recorded yet</span>}
+            {/*
+              2026-09-22 (owner QA R1) — ONE LINE OF IDENTITY, ONE OF DETAIL.
+              Line 1: the run's name · its state · how much of it is recorded.
+              Line 2: the conditions it holds. ~~`#{ordinal}`~~ is gone from sight
+              — the label already names the run and the number repeated it — and
+              stays in the accessible name, where it still disambiguates two runs
+              a scientist named alike.
+            */}
+            <span className="run-card-line">
+              <span className="run-card-name">{run.label}</span>
+              <span className="sr-only"> (run {run.ordinal})</span>
+              <RunFillStatus filled={filled} />
+              {/* The count keeps its scope: "5 of 5" alone would read as a
+                  completion claim a run's own fields are not entitled to make,
+                  so the words "run fields" are part of it for a screen reader and
+                  the denominator is always shown. */}
+              <span className="run-card-progress">
+                {filled} of {RUN_FIELDS.length}{' '}
+                <span className="run-card-progress-scope">
+                  <span className="sr-only">run fields </span>recorded
+                </span>
+              </span>
             </span>
-            {/* Same disclosure the full editor's header carries, and the same
-                reason: "5 of 5" on its own would read as a completion claim a
-                run's own fields are not entitled to make. See the full note on
-                `.run-card-progress-scope` a few lines below, in the non-compact
-                branch — the text is identical, so it is written once. */}
-            <span className="run-card-progress">
-              {filled} of {RUN_FIELDS.length}{' '}
-              <span className="run-card-progress-scope">run fields on this screen</span>
-            </span>
+            {/* PR #277 REVIEW (minor): withheld when nothing is recorded. The row used
+                to say so THREE times — "Nothing Recorded", "0 of 5 recorded" and "No
+                conditions recorded yet". The chip and the count already say it; this
+                line is for the conditions a run HOLDS. */}
+            {conditions !== null && <span className="run-card-conditions">{conditions}</span>}
             {/* Never colour alone: the word is the signal, the palette reinforces
                 it. Withheld entirely when this run overrides nothing — a "0
                 overridden" chip on every row would be noise, not information. */}
@@ -678,7 +713,9 @@ export function RunCard({
             */}
             <span className="run-card-progress">
               {filled} of {RUN_FIELDS.length}{' '}
-              <span className="run-card-progress-scope">run fields on this screen</span>
+              <span className="run-card-progress-scope">
+                <span className="sr-only">run fields </span>recorded
+              </span>
             </span>
             <CheckSummaryChip check={check} />
             {/*
@@ -886,10 +923,19 @@ export function RunCard({
             inherited section's own disclosure below rather than denied here.
           */}
           {filled === 0 && tally.shown === 0 && tally.withheld === 0 && (
+            /* ONE LINE, THE FULL ACCOUNT ONE `?` AWAY (owner QA R2). The scoped
+               sentence is unchanged and still in the DOM — it is the claim
+               `run-relevance.test.tsx` checks is scoped to what this card shows. */
             <p className="run-section-note">
-              This run holds none of its own values yet, and the record carries nothing at the
-              record-level field addresses this card shows. The fields below are the ones this
-              run can hold; everything else on the record is entered on the record.
+              Nothing recorded on this run yet.{' '}
+              <HelpTip subject="An Empty Run">
+                <span>
+                  This run holds none of its own values yet, and the record carries nothing
+                  at the record-level field addresses this card shows. The fields below are
+                  the ones this run can hold; everything else on the record is entered on
+                  the record.
+                </span>
+              </HelpTip>
             </p>
           )}
 
@@ -907,6 +953,7 @@ export function RunCard({
             never be offered. Pinned by `run-relevance.test.tsx`.
           */}
           <RunSection
+            address="section:run-conditions"
             title="Conditions for this run"
             /*
               A COUNT OF THINGS ENUMERATED, WITH ITS SCOPE ATTACHED. `filled` counts
@@ -916,7 +963,9 @@ export function RunCard({
               needs far more than these five, most of them entered on the record — the
               same disclosure the collapsed header carries, for the same reason.
             */
-            summary={`${filled} of ${RUN_FIELDS.length} recorded — the run-level fields on this screen`}
+            /* The title already says whose fields these are; the count stays a count of
+               what is listed below (owner QA R2 — the old tail wrapped to two lines). */
+            summary={`${filled} of ${RUN_FIELDS.length} recorded`}
           >
             <div className="run-fields">
               {RUN_FIELDS.map((spec) => {
@@ -966,11 +1015,49 @@ export function RunCard({
                     .filter(Boolean)
                     .join(' ') || undefined;
                 return (
-                  <div className="run-field" key={spec.path}>
-                    <label className="run-field-label" htmlFor={fieldId}>
-                      {spec.label}
-                      {spec.unit ? <span className="run-field-unit"> ({spec.unit})</span> : null}
-                    </label>
+                  <div
+                    className="run-field"
+                    key={spec.path}
+                    /* The address a `Go to Field` link (a validation blocker, a
+                       Compare Runs cell) scrolls to — `RECORD_ADDRESS_PARAM`. The
+                       same attribute `RunInheritedPanel` publishes for its rows,
+                       so `RunsSection`'s one effect serves both halves. */
+                    data-address={`field:${spec.path}`}
+                  >
+                    {/*
+                      THE HUMAN LABEL, AND ITS `?` (owner QA R2, 2026-09-22). The
+                      official path used to sit visibly under every control; it is
+                      now behind the label's `?`, with what the field holds — never
+                      removed (`UX-014`: it is how a curator maps a field). The
+                      tip is named generically and DESCRIBED by the label, so its
+                      name never answers to the field's own ("Temperature").
+                    */}
+                    <div className="run-field-label-row">
+                      <label className="run-field-label" htmlFor={fieldId} id={`${fieldId}-label`}>
+                        {spec.label}
+                        {spec.unit ? <span className="run-field-unit"> ({spec.unit})</span> : null}
+                      </label>
+                      <HelpTip
+                        subject={spec.label}
+                        label="Official Field Details"
+                        describedBy={`${fieldId}-label`}
+                      >
+                        <span>
+                          Official field: <code className="run-field-path">{spec.path}</code>
+                        </span>
+                        {isDatetime ? (
+                          <span className="run-field-hint" id={hintId}>
+                            {RUN_DATETIME_ZONE_HINT}
+                          </span>
+                        ) : (
+                          spec.hint && (
+                            <span className="run-field-hint" id={hintId}>
+                              {spec.hint}
+                            </span>
+                          )
+                        )}
+                      </HelpTip>
+                    </div>
                     <div className="run-field-control">
                       {spec.kind === 'enum' ? (
                         <select
@@ -990,7 +1077,7 @@ export function RunCard({
                           <option value="">Not set</option>
                           {spec.options?.map((option) => (
                             <option key={option} value={option}>
-                              {option}
+                              {enumOptionLabel(option)}
                             </option>
                           ))}
                         </select>
@@ -1047,7 +1134,6 @@ export function RunCard({
                           onChange={(e) => onFieldChange(spec, e.target.value)}
                         />
                       )}
-                      <span className="run-field-path">{spec.path}</span>
                       {/*
                         WHAT IS ACTUALLY STORED, in both spellings, so a reader
                         never has to trust that the picker and the record agree
@@ -1061,17 +1147,6 @@ export function RunCard({
                           {' · stored as '}
                           <code className="mono">{value}</code>
                         </span>
-                      )}
-                      {isDatetime ? (
-                        <span className="run-field-hint" id={hintId}>
-                          {RUN_DATETIME_ZONE_HINT}
-                        </span>
-                      ) : (
-                        spec.hint && (
-                          <span className="run-field-hint" id={hintId}>
-                            {spec.hint}
-                          </span>
-                        )
                       )}
                       {/*
                         THE TEXT PATH, NEXT TO THE PICKER AND NOT INSTEAD OF IT.
@@ -1469,39 +1544,34 @@ function inheritedSummary(tally: InheritedTally): string {
  * None of the three says anything about whether the run is complete, valid or ready.
  */
 function InheritedEmpty({ tally }: { tally: InheritedTally }) {
-  if (tally.withheld > 0) {
-    return (
-      <>
-        <p className="run-section-empty">
-          The record carries {tally.withheld} value
-          {tally.withheld === 1 ? '' : 's'} at an address this run inherits that this list cannot
-          show in one line. Nothing is hidden from the record itself — open the record to read it.
-        </p>
-        <InheritedBlocksNote tally={tally} />
-      </>
-    );
-  }
-  if (tally.resolved === 0) {
-    return (
-      <>
-        <p className="run-section-empty">
-          The record carries no values at the record-level field addresses this list shows, so
-          there is nothing in this list yet. Record-level values are entered on the record, and
-          every run reads them live.
-        </p>
-        <InheritedBlocksNote tally={tally} />
-      </>
-    );
-  }
+  /*
+   * ONE SHORT LINE, THE REST BEHIND `?` (owner QA R2, 2026-09-22). Each branch's
+   * full sentence is unchanged and still in the DOM, inside the tip — including
+   * the one fact a reader must not have to infer: that nothing failed to load.
+   */
+  const [line, detail] =
+    tally.withheld > 0
+      ? [
+          `${tally.withheld} inherited value${tally.withheld === 1 ? '' : 's'} not shown here.`,
+          `The record carries ${tally.withheld} value${tally.withheld === 1 ? '' : 's'} at an address this run inherits that this list cannot show in one line. Nothing is hidden from the record itself — open the record to read it.`,
+        ]
+      : tally.resolved === 0
+        ? [
+            'No record-level values yet.',
+            'The record carries no values at the record-level field addresses this list shows, so there is nothing in this list yet. Record-level values are entered on the record, and every run reads them live.',
+          ]
+        : [
+            'No inherited values recorded.',
+            `This run resolves ${tally.resolved} record-level field address${tally.resolved === 1 ? '' : 'es'} and none of them holds a value — neither the record nor this run carries anything at those. Nothing here failed to load.`,
+          ];
   return (
-    <>
-      <p className="run-section-empty">
-        This run resolves {tally.resolved} record-level field address
-        {tally.resolved === 1 ? '' : 'es'} and none of them holds a value — neither the record nor
-        this run carries anything at those. Nothing here failed to load.
-      </p>
-      <InheritedBlocksNote tally={tally} />
-    </>
+    <p className="run-section-empty">
+      {line}{' '}
+      <HelpTip subject="Inherited Values">
+        <span>{detail}</span>
+        <InheritedBlocksNote tally={tally} />
+      </HelpTip>
+    </p>
   );
 }
 
@@ -1522,12 +1592,13 @@ function InheritedEmpty({ tally }: { tally: InheritedTally }) {
 function InheritedBlocksNote({ tally }: { tally: InheritedTally }) {
   if (tally.blocks.length === 0) return null;
   const plural = tally.blocks.length !== 1;
+  /* A `<span>`: it is rendered inside a `?` tip that sits in a sentence. */
   return (
-    <p className="run-section-empty">
+    <span className="run-section-empty">
       This run also resolves {tally.blocks.length} whole-block address{plural ? 'es' : ''} that
       this list does not show — {tally.blocks.join(', ')}. A block is an object or a list, and
       this surface has no honest one-line rendering for one.
-    </p>
+    </span>
   );
 }
 

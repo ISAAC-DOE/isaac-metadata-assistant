@@ -25,6 +25,7 @@
 
 import { test as base, expect, type APIRequestContext, type Page } from '@playwright/test';
 import { TRUSTED_API_BASE } from './env';
+import { fieldLabel } from '../../src/lib/fieldLabels';
 
 export { expect };
 
@@ -496,7 +497,24 @@ export async function openRecord(page: Page, id: string, view = 'proposals'): Pr
   await expect(page.getByRole('heading', { name: 'Ingestion Proposals' })).toBeVisible();
 }
 
+/**
+ * The accessible name a proposal card carries for `path` — the field in WORDS, the
+ * same `fieldLabel` the card renders (review #277, I-5: no official path in
+ * screen-reader output). Exported so every spec addresses a card one way.
+ */
+export function proposalCardName(path: string): string {
+  return `Proposal for ${fieldLabel(path) ?? path}`;
+}
+const escapeRe = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
 /** The one proposal card on the screen, addressed by its own accessible name. */
 export function proposalCard(page: Page, path: string) {
-  return page.getByRole('article', { name: new RegExp(`^Proposal for ${path.replace(/\./g, '\\.')} — `) });
+  return page.getByRole('article', { name: new RegExp(`^${escapeRe(proposalCardName(path))} — `) });
+}
+
+/** A proposal card addressed by path AND state. */
+export function proposalCardInState(page: Page, path: string, stateLabel: string) {
+  return page.getByRole('article', {
+    name: new RegExp(`^${escapeRe(proposalCardName(path))} — ${escapeRe(stateLabel)}`),
+  });
 }

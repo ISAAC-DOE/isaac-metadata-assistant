@@ -25,32 +25,29 @@
   min-width: 0;
 }
 
-@media (min-width: 1280px) {
+/*
+ * ~~STICKY AND INTERNALLY SCROLLED~~ — the internal scroller is GONE (2026-09-22,
+ * owner QA R3): its bottom edge cut "Show full official schema" and the `tags`
+ * row mid-glyph. With each path and the long notes behind the row's `?`, the map
+ * is short enough to stick without scrolling inside itself; on a viewport too
+ * short to hold it, it simply scrolls with the page (the `min-height` gate).
+ */
+@media (min-width: 1280px) and (min-height: 820px) {
   .rsm {
     position: sticky;
-    /* Clear of the app chrome above, in the same token grid as the gap the
-       split itself uses. */
     top: var(--space-lg);
-    /* THE CAP IS A MAXIMUM, NOT A HEIGHT. The pane is as tall as its content
-       until the content passes the viewport, so a short map is a short card
-       rather than a mostly-empty column with a scrollbar. */
-    max-height: calc(100vh - var(--space-xl));
-    overflow-y: auto;
-    /* `auto` on the CONTAINER and nothing inside it is `flex: 1 1 auto` with a
-       zeroed minimum — the shape that once starved a clamped popover's list to
-       `clientHeight: 0`. Every child here is in normal flow, so a cap that is
-       smaller than the content overflows into this one scrollport and is
-       reachable, rather than being absorbed by one child. */
   }
 }
 
 .rsm-head {
   display: flex;
   flex-wrap: wrap;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: var(--space-sm);
+  align-items: center;
+  gap: var(--space-xs);
   margin-bottom: var(--space-sm);
+}
+.rsm-head .rsm-subject {
+  margin-left: auto;
 }
 .rsm-heading {
   margin: 0;
@@ -98,15 +95,31 @@
 }
 
 .rm-row-inner {
-  display: grid;
-  gap: var(--space-2xs);
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-xs);
   width: 100%;
-  padding: var(--space-sm);
   border: 1px solid var(--border-faint);
   border-radius: var(--radius-inner);
   background: var(--surface-subtle);
-  text-align: left;
   min-width: 0;
+}
+/* The label/state/value column. As a `<button>` it is the row's press target;
+   the `?` is a sibling on the right, never nested inside it. */
+.rm-row-main {
+  flex: 1 1 auto;
+  display: grid;
+  gap: var(--space-2xs);
+  min-width: 0;
+  padding: var(--space-sm);
+  border: 0;
+  border-radius: var(--radius-inner);
+  background: transparent;
+  text-align: left;
+}
+.rm-row-inner > .helptip {
+  flex: none;
+  margin: var(--space-xs) var(--space-xs) 0 0;
 }
 
 /* A ROW IS PRESSABLE ONLY WHERE AN INPUT EXISTS FOR IT. The cursor, the hover
@@ -119,19 +132,23 @@
   cursor: pointer;
 }
 .rm-row-button:hover {
-  border-color: var(--action-selected-border);
   background: var(--action-tint);
 }
 .rm-row-button:focus-visible {
-  outline: 2px solid var(--ring-active);
+  outline: 2px solid var(--action);
   outline-offset: 2px;
 }
 
 .rm-row-head {
+  /* STACKED, EVERY ROW (owner QA R3). As a wrapping row, a long label ("Acquisition
+     start", "System & Instrument") pushed its state chip onto a line of its own
+     while short labels kept theirs inline, so the pane read as two layouts at once;
+     squeezing both onto one line broke labels mid-word. Name, then state, in every
+     row, reads as one list. */
   display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: var(--space-sm);
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-2xs);
   min-width: 0;
 }
 
@@ -143,28 +160,14 @@
   overflow-wrap: anywhere;
 }
 
-/* NEVER COLOUR ALONE, and here never colour at all: every state wears the same
-   ink and is told apart by its glyph and its word. Reserved pass/fail hues are
-   deliberately absent — "Filled" is not a verdict, and official validation is
-   the only thing on this screen that issues one. */
+/* The state is the shared `SemanticStatus` (icon + word + tint, never colour
+   alone); only its placement is set here. Reserved pass/fail hues stay absent —
+   "Filled" is not a verdict. */
 .rm-state {
-  margin-left: auto;
   flex: none;
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-2xs);
-  padding: 0 var(--space-xs);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-pill);
-  font-size: var(--font-size-meta);
-  font-weight: var(--font-weight-medium);
-  color: var(--text-slate);
-  white-space: nowrap;
 }
 
 .rm-row-path {
-  font-size: var(--font-size-meta);
-  color: var(--text-muted);
   overflow-wrap: anywhere;
 }
 
@@ -193,21 +196,6 @@
 
 .rsm-more {
   margin-top: var(--space-md);
-  border-top: 1px solid var(--border-faint);
-  padding-top: var(--space-sm);
-}
-.rsm-more-summary {
-  cursor: pointer;
-  font-size: var(--font-size-meta);
-  font-weight: var(--font-weight-medium);
-  color: var(--text-strong);
-}
-.rsm-more-summary:focus-visible {
-  outline: 2px solid var(--ring-active);
-  outline-offset: 2px;
-}
-.rsm-more-body {
-  margin-top: var(--space-sm);
 }
 
 .rsm-blocks {
@@ -231,6 +219,12 @@
   align-items: baseline;
   justify-content: space-between;
   gap: var(--space-sm);
+}
+.rsm-block-name {
+  flex: 1 1 auto;
+  font-size: var(--font-size-body);
+  font-weight: var(--font-weight-medium);
+  color: var(--text-heading);
 }
 .rsm-path {
   font-size: var(--font-size-meta);
