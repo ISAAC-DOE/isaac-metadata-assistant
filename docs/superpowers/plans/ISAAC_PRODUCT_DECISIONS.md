@@ -3,7 +3,7 @@
 **Canonical, multi-session.** One row per decision. Update this file in the same PR as any slice
 that changes a row. Never restate a decision elsewhere — link to its ID.
 
-**Created:** 2026-09-12 · **Last updated:** 2026-09-12 (**REVISION APPLIED** — implementation authorized)
+**Created:** 2026-09-12 · **Last updated:** 2026-09-23 (§B7 added — hosted-QA redesign and Angel's 2026-09-22 answers)
 
 > ## REVISION 2026-09-12 — IMPLEMENTATION AUTHORIZED
 > Krish approved moving from planning into implementation. The planning gate is **CLEARED**.
@@ -279,6 +279,51 @@ hierarchy that ends in "put it in the record anyway". So, explicitly:
 - **The extended-context companion is an ASSISTANT artifact**, exactly as the evidence sidecar is,
   *"unless mentors approve it as an official ISAAC convention"* (`CLAUDE.md` §4). It is not an
   ISAAC standard and this repository must not describe it as one.
+
+## B7. Decisions taken by the 2026-09-22 owner direction — hosted-QA redesign and Angel's BL15 answers
+
+**Sixteen decisions, `DEC-52`…`DEC-67`. Two supersede earlier rows — `DEC-43` (by `DEC-63`) and
+the "Angel-style" profile framing behind `DEC-47`'s implementation (by `DEC-60`) — and are recorded
+as supersessions rather than folded in.**
+
+**Provenance, per row.** `DEC-52`…`DEC-61` are **owner instructions relayed in-session** (the
+2026-09-22 direction, which cites Krish's hosted QA of build `0a12f7ae9010`). `DEC-62`…`DEC-66` are
+**domain-owner (Angel) answers relayed by the project owner**, dated 2026-09-22. `DEC-67` is an
+**engineering decision taken by the orchestrator** inside `DEC-65`'s conflict model, on measured
+evidence, and narrowed after an independent review. Same evidentiary class as `B3`–`B6` for the
+relayed rows: no transcript backs them, authorship witnesses nothing, and **only Krish can confirm
+the instruction was given — and for the domain rows, only Angel can confirm the content.** The
+screenshots the direction cites **did not arrive** with the message; every UI finding was instead
+reproduced locally from `main` at `0a12f7ae`, then confirmed read-only on hosted, and is listed in
+[`docs/evidence/owner-qa-issue-inventory-2026-09-22.md`](../../evidence/owner-qa-issue-inventory-2026-09-22.md).
+
+| ID | Decision | Status | Source | Reasoning and boundary |
+|---|---|---|---|---|
+| **DEC-52** | **Capture is a focused Experiment section, and Runs live under Capture.** The Experiment sidebar reads `DATA CAPTURE` (Capture · Proposals · Runs) / `WORKFLOW` (five server-derived steps) / `WORKSPACES` (Activity · Evidence Trail). `Record Fields` is **removed** from workspace navigation; its route stays and is reached through the `Record Created` step. | CONFIRMED 2026-09-22 | owner | Extends `DEC-14` (Capture is a destination, never a step) and `DEC-51` (Activity inside the Experiment). Two labels reaching one place was the defect. |
+| **DEC-53** | **Each capture method opens a focused task view**, never an inline expansion beneath four cards. | CONFIRMED 2026-09-22 | owner | Measured before: 1795 px empty, 4297 px after `Start Writing`; `Start Writing` and `Open Recorder` opened the same inline panel. |
+| **DEC-54** | **Focused capture views pair the task with a live Record Map** (task left, sticky map right, stacked when narrow). | CONFIRMED 2026-09-22 | owner | Reuses `DEC-29`'s Record Map; never the full schema wall by default. |
+| **DEC-55** | **Voice Capture's primary production path is Claude → ISAAC MCP**, rendered from real capability state (`mcp.posture`); the local MediaRecorder is a **secondary** "Record locally instead" path. | CONFIRMED 2026-09-22 | owner | `DEC-10`'s native recorder is retained, not deleted; its role narrows to fallback. **No fake `Connected`** (T6): "Connected" renders only if ISAAC can verify a connection. |
+| **DEC-56** | **Normal scientist views hide raw schema paths by default**; the path lives behind accessible `?` help or advanced detail. | CONFIRMED 2026-09-22 | owner | Exceptions: developer/settings surfaces, copyable API references, evidence where the exact path is the point. `UX-014`'s rule that a path is never *removed* stands — it is *relocated*. |
+| **DEC-57** | **Semantic states use one shared icon + text + colour primitive** (success/warning/danger/info/neutral), never colour alone. | CONFIRMED 2026-09-22 | owner | "Sources Agree" renders only where source evidence says they agree. |
+| **DEC-58** | **Workflow rows carry two independent signals: completion STATE and current LOCATION.** | CONFIRMED 2026-09-22 | owner | Measured before: `Complete Metadata` drew as current on Runs, Capture, Activity and `/export`. |
+| **DEC-59** | **Proposal acceptance is preflighted from capability state**; when success is known impossible the Accept action is locked with a compact reason. | CONFIRMED 2026-09-22 | owner | `409 human_actor_required` is **unchanged** and still handled; no actor is faked (`EXT-01`). |
+| **DEC-60** | **Parsing/convention profiles are independent of scientist/operator identity.** One Experiment may use several convention profiles and several operators; a profile applies at facility, beamline, acquisition system, Experiment, Run subset, source family or source; the operator is **provenance**. | CONFIRMED 2026-09-22 | owner | **Supersedes the "Angel-style" framing** of `ssrl_bl152_angel` as an architectural unit; the id survives as a historical alias. `DEC-47`'s *vocabulary* is unchanged. |
+| **DEC-61** | **Historical "learning" means reviewed, versioned convention reuse** — scoped (only here / this Experiment / profile), never silently promoted, stored migration-free. | CONFIRMED 2026-09-22 | owner | Not model retraining. Actor recorded honestly `unattributed` until `EXT-01` (`DEC-50`). |
+| **DEC-62** | **Missing scientific facts remain empty by default.** A suggestion requires an explicit, reviewed rule. | CONFIRMED 2026-09-22 | **Angel** (relayed) | Restates T5 with the domain owner's own reasoning. |
+| **DEC-63** | **`DEC-43` (nominal 298 K for the BL15-2 profile) is SUPERSEDED.** No automatic insert and no automatic proposal. A literal "room temperature" is preserved verbatim; a numeric nominal may be *offered* only by a reviewed profile rule that names its convention, labelled nominal, confirmed by the scientist, never labelled measured. | CONFIRMED 2026-09-22 — **SUPERSEDES `DEC-43`** | **Angel** + targeted research | Research: `docs/evidence/temperature-convention-research-2026-09-22.md` — 298.15 K (SATP) and 293.15 K (NTP / dictionary "room temperature") are both real conventions answering different questions; neither is evidence of an unrecorded temperature. |
+| **DEC-64** | **The HERFD primary signal is selected per Run from evidence.** `vortDT` is common, not universal; dual-element channel→element mapping is representable; ambiguity stays unresolved for review. | CONFIRMED 2026-09-22 | **Angel** | Resolves `Q11` conditionally. Any threshold is measured, tested and reviewable. |
+| **DEC-65** | **Run 32 remains unresolved; historical source conflicts have no universal precedence.** Source fact · normalized reading · suggested resolution (non-authoritative) · scientist-confirmed resolution are distinct, and only the last is authoritative. | CONFIRMED 2026-09-22 | **Angel** (does not know; asked ISAAC to brainstorm) | `Q16` becomes "domain owner does not know → permanently preserved conflict"; `Q15` becomes a policy. A confirmed resolution of a record field still goes forward as a proposal behind the actor gate. |
+| **DEC-66** | **Free-text quality phrases are Data Quality Notes and never become `qc.status` automatically.** | CONFIRMED 2026-09-22 | **Angel** (did not know what "QC" meant in the question) | `Q14` → intentionally left missing pending explicit domain rules. The schema field is untouched. |
+| **DEC-67** | **A value expected once per scan item (a detector column, a motor, a file-name token, a scan's own target) that differs across ESTABLISHED scans is VARIATION, not a conflict.** A measurement-level reading (e.g. a macro's planned value) is ALWAYS compared with each scan-level reading of the same concept, and readings whose scan correspondence is not established are compared as one measurement — so a planned-vs-recorded disagreement is always a conflict. Named and versioned (`bl15.mapping.cardinality.v2`). `emission_energy`, `energy_grid`, `counting_time` and `scan_command` stay **per-measurement until Angel says otherwise**. | CONFIRMED 2026-09-23 — engineering decision inside `DEC-65`, **narrowed after the final independent review** found v1 could hide a planned-vs-recorded disagreement (C1) | measured: on the synthetic multi-operator corpus v1 turned 36 of 43 field "conflicts" into variation; the review then showed v1 also silenced a genuine one-scan disagreement, so v2 restores the comparison and reverts four concepts pending the domain owner | **Never suppresses a genuine disagreement** (mutation-tested: measurement-vs-scan, one scan two sources, unverified scan correspondence). Which acquisition quantities are legitimately per-scan, and whether the real corpus's `acquisition_timestamp` / `sample_position` conflicts are genuine, are **Angel's**; they stay surfaced as conflicts meanwhile. Evidence: `docs/evidence/bl15-real-regression-2026-09-22.md`. |
+
+### What `DEC-52`…`DEC-67` do NOT change
+- **The truth plane is untouched.** Official validation, export gating, provenance, actor trust,
+  immutable submitted snapshots, no-guessing and no agent final Submit are unchanged.
+- **No new table, no migration, no operator act** (`DEC-49` precedent).
+- **`Q6`, `Q7`, `Q8` remain Angel's** — his reply did not address them — and **`Q21`** (which acquisition quantities are legitimately per-scan) is new.
+- **No production provider, MCP endpoint, identity boundary or real-byte ingestion is enabled.**
+  `EXT-01`, `EXT-02`, `EXT-13` are unchanged; the new `historical_file_ingestion` capability
+  defaults to **disabled**.
 
 ## C. Open — external owners
 

@@ -23,6 +23,7 @@ import { LABELS } from '../lib/labels';
 import { api } from '../lib/api';
 import { compose } from '../lib/assistantComposer';
 import { useFetch } from '../lib/useFetch';
+import { useSettledErrorTitle } from '../lib/useSettledErrorTitle';
 import { useRecordSession } from '../lib/useRecordSession';
 import { useWorkspaceScope, useWorkspaceScopeChanged } from '../lib/workspaceScope';
 import { RUNS_PAGE_SIZE } from '../lib/runPaging';
@@ -88,13 +89,26 @@ export function EvidenceExplorer() {
   // opened in. See `lib/workspaceScope.ts`: a scope change destroys the record the
   // trail is about, so the trail describes nothing and must not stay on screen.
   const scopeChanged = useWorkspaceScopeChanged();
+  /* The same settled-error treatment as the other record screens
+     (`useSettledErrorTitle`): once the record read has said the record is absent, the
+     tab and the breadcrumb name that state instead of this screen, and the breadcrumb
+     does not link to a record that does not exist. */
+  const settled = useSettledErrorTitle(bundle.status === 'error' ? bundle.error : null);
   if (scopeChanged) return <Navigate to={ROUTES.experiments} replace />;
 
   if (bundle.status !== 'data') {
     return (
       <AppShell
         variant="record"
-        topBar={<TopBar variant="record" title={LABELS.screenEvidence} recordId={id} />}
+        topBar={
+          <TopBar
+            variant="record"
+            title={
+              settled.recordAbsent && settled.title !== null ? settled.title : LABELS.screenEvidence
+            }
+            recordId={settled.recordAbsent ? undefined : id}
+          />
+        }
         mainPad="pad"
       >
         <h1 className="sr-only">{LABELS.screenEvidence}</h1>

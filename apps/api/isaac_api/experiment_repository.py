@@ -2620,8 +2620,11 @@ class PostgresOrdinaryStore:
                     # `runs` key this method substituted.
                     state = dict(state)
                     state["runs"] = resolved
-            ws.atomic_write_text(state_path, json.dumps(state, indent=2) + "\n")
-            restored += 1
+            # A RESTORE CREATES, IT NEVER REPLACES (2026-09-23). If another writer
+            # produced this working copy since the check above, theirs stands and it
+            # is not counted as this pass's restore — see `ws.restore_working_copy`.
+            if ws.restore_working_copy(state_path, json.dumps(state, indent=2) + "\n"):
+                restored += 1
         if classified:
             # ONLY A PASS THAT CLASSIFIED SOMETHING PUBLISHES A DISTRIBUTION. See
             # `_last_run_authority` for why an all-zero overwrite on every warm

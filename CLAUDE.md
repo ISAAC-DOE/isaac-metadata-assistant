@@ -2045,6 +2045,36 @@ Current state:
   behind an Authentik edge this environment cannot authenticate to, so the honest status is
   `HOSTED QA PENDING (Krish)`.
 
+- **Session of 2026-09-22/23 — the owner's hosted QA of `0a12f7ae`, turned into the product.**
+  PRs #278 (`f2838ba9`, `v0.0.260`, observed live on hosted), #277 (`50d3cdd6`, `v0.0.261`),
+  #279 (`ea3f08d1`, `v0.0.262`). Closure record: [`docs/session-closure-2026-09-22.md`](docs/session-closure-2026-09-22.md);
+  decisions `DEC-52`…`DEC-67` in `ISAAC_PRODUCT_DECISIONS.md` §B7. What a future session must
+  not re-derive or silently reverse:
+  - **The record screen's navigation is `DATA CAPTURE` (Capture · Proposals · Runs) /
+    `WORKFLOW` / `WORKSPACES` (Activity · Evidence Trail).** `Record Fields` left the rail; it is
+    reached through `Record Created`. Capture methods open focused views
+    (`?view=capture&method=write|voice|files`, `?view=proposals`) beside a live Record Map. The
+    workflow spine shows completion STATE and current LOCATION independently.
+  - **Voice leads with Claude/MCP from real `mcp.posture`; there is no `Connected` state.** The
+    local recorder is secondary ("Record Locally Instead") with every mic-release guarantee.
+  - **Accept is preflighted** from `/api/health` → `proposal_acceptance` (same verifier resolution
+    as the accept route); `409 human_actor_required` is unchanged. `historical_file_ingestion`
+    is an explicit capability, **disabled by default**; enabling it is configuration (`EXT-13`).
+  - **Parsing conventions are independent of people** (`ssrl_bl152_angel` is now the alias of
+    `ssrl_bl152_herfd_echem_naming`); "learning" is reviewed, scoped, versioned rule reuse stored
+    on the experiment document (no table).
+  - **`DEC-43`'s 298 K is superseded** — no automatic temperature, ever; a nominal only via a
+    reviewed rule naming its convention, and none is enabled.
+  - **`bl15.mapping.cardinality.v2`:** across-scan difference of a per-scan-item value is
+    variation, not conflict — but a measurement-level (planned) reading is ALWAYS compared with
+    scan-level (recorded) readings, and unestablished scan correspondence compares as one
+    measurement. `emission_energy`, `energy_grid`, `counting_time`, `scan_command` stay
+    per-measurement pending Angel (Q21). **v1 hid a genuine one-scan disagreement; do not
+    "simplify" back to it.**
+  - **Still open, and not app-side:** `EXT-01`, `EXT-02`, `EXT-13`, `G2`/`G3` (Hao); migrations
+    unapplied (operator); `Q6`/`Q7`/`Q8`/`Q21` (Angel); authenticated hosted final eyes, true
+    200% zoom, real-microphone check (Krish).
+
 - Current repository status is summarized in README.md and docs/mentor-brief.md; see git history for the exact commit state.
 - Start any further phase (beyond the completed Phase 36 / Phase 36R slices) only after explicit user approval.
 

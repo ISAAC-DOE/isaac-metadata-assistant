@@ -17,7 +17,7 @@ import { LoadingPanel, BackendDown } from '../components/FetchStates';
 import { Check, CircleHelp, Pencil } from '../components/icons';
 import { LABELS } from '../lib/labels';
 import { ROUTES } from '../lib/routes';
-import { api, ApiError } from '../lib/api';
+import { api, ApiError, primaryReadWins } from '../lib/api';
 import { isUnstorableFieldValue } from '../lib/mutationErrors';
 import { compose } from '../lib/assistantComposer';
 import { useFetch } from '../lib/useFetch';
@@ -139,10 +139,14 @@ export function GuidedCompletion() {
          absent only when the server answered without a `pending_page` block, which by
          contract means the response was complete — so `pending.length` IS the total
          there, and nothing is invented to fill the gap. */
-      Promise.all([
-        api.getExperiment(id),
-        api.getPendingPage(id, { limit: PENDING_PAGE }),
-      ]).then(([detail, first]) => ({
+      /* The record read decides what a failure means — see `primaryReadWins`. */
+      (() => {
+        const primary = api.getExperiment(id);
+        return primaryReadWins(
+          primary,
+          Promise.all([primary, api.getPendingPage(id, { limit: PENDING_PAGE })]),
+        );
+      })().then(([detail, first]) => ({
         detail,
         pending: first.pending,
         pendingTotal: first.page ? first.page.total : first.pending.length,

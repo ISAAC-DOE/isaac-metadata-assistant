@@ -8,6 +8,46 @@ the repository — never from remembered chat context.
 ## SESSION HEADER
 
 ```
+*** 2026-09-22/23, OWNER HOSTED-QA REDESIGN + ANGEL'S BL15 ANSWERS — RE-DERIVED FROM
+    COMMANDS. Everything below this block is a SUPERSEDED reading, kept unedited. ***
+
+RE-DERIVED AT RUN OPEN, every line from a command:
+  main = origin/main   = 0a12f7ae   (PR #276's merge), release v0.0.259
+  ahead/behind         = 0 / 0 ; tree clean ; stashes empty ; open PRs NONE
+  hosted /krish/api/health commit = 0a12f7ae… (observed read-only in the owner's
+                         authenticated Chrome — the owner's QA was against this build)
+
+ORCHESTRATOR: Opus 5.5 (claude-opus-5-5[1m]) — DEC-17's disclosed fallback (Fable 5.1
+  not available in this session); orchestrator-only discipline kept (the orchestrator
+  wrote test/e2e/doc edits and evidence only; all production code came from agents).
+AGENTS: 4 of DEC-18's 5 used — 2 implementers (frontend; backend -> later also the
+  Historical Import UI), 2 independent reviewers (one per backend PR; one reused for #277
+  and the final integrated pass). One slot left unspent. No nested spawning. Two agents
+  each disclosed a denied/read-only git command they should not have run; nothing moved.
+
+WHAT MERGED — full account with every figure's command in docs/session-closure-2026-09-22.md:
+  #278 f2838ba9 v0.0.260  historical semantics: conventions independent of operators,
+                          reviewed rule reuse, Angel's 2026-09-22 answers, residue
+                          (OBSERVED LIVE ON HOSTED, read-only)
+  #277 50d3cdd6 v0.0.261  record redesign: focused Capture area, state-vs-location spine,
+                          readable Record Map, decision-first proposals/validation,
+                          acceptance preflight
+  #279 `ea3f08d1` `v0.0.262`  Historical Import: six focused stages, conflicts source by
+                          source, per-scan variation != conflict (cardinality.v2)
+  Each tag resolved with `git rev-list -n1 <tag>`, not read off a workflow log.
+
+truth path            = UNTOUCHED (schema/, src/isaac_records/*, db_write, migrations:
+                        `git diff --stat` over them empty on every PR)
+migrations            = re-verified unchanged: six 0003-0005 digests match their packets;
+                        nothing applied anywhere; no database connection opened by an agent
+real data             = the owner-supplied BL15-2 archive read LOCALLY, aggregate counts
+                        only, through a disabled-by-default staging path on a throwaway
+                        backend; nothing left the machine (docs/evidence/bl15-real-regression-2026-09-22.md)
+```
+
+*** THE SUPERSEDED BLOCKS FOLLOW, unedited. ***
+
+```
 *** 2026-09-18, FINAL UNBLOCKED-COMPLETION RUN — RE-DERIVED FROM COMMANDS, NOT FROM A
     HANDOFF. Everything below this block is a SUPERSEDED reading, kept unedited, per
     this file's own rule that a superseded header read as a correction is safe and one
@@ -5654,3 +5694,38 @@ before they are answered.
   with its own review.
 - **No app-side work was assigned to Hao**, and no secret value is requested anywhere in either
   document.
+
+---
+
+## SESSION 2026-09-22/23 — THE OWNER'S HOSTED QA, TURNED INTO THE PRODUCT
+
+**Full account: [`docs/session-closure-2026-09-22.md`](../../session-closure-2026-09-22.md).** Decisions
+`DEC-52`…`DEC-67` are in `ISAAC_PRODUCT_DECISIONS.md` §B7; the reproduced issue inventory is
+[`docs/evidence/owner-qa-issue-inventory-2026-09-22.md`](../../evidence/owner-qa-issue-inventory-2026-09-22.md);
+the real-corpus regression is [`docs/evidence/bl15-real-regression-2026-09-22.md`](../../evidence/bl15-real-regression-2026-09-22.md).
+
+### Task rows closed this session
+
+| Task | Status |
+|---|---|
+| Residue: `historical_file_ingestion` explicit capability (closure 2026-09-18 §14.1) | **COMPLETE** (#278) — disabled by default; configuration-only staging path; `POST /api/uploads` stays 403 |
+| Residue: Activity as an MCP read (§14.2) | **COMPLETE** (#278) — `isaac_list_activity`, closed-enum filters, read scope only |
+| Residue: `CHANNEL_SYSTEM` (§14.3) | **COMPLETE** (#278) — disclosed as write-site-free; AST guard in `test_activity_channel_guard.py` |
+| Residue: `_column_readings` dedup/cap conflation (§14.3) | **COMPLETE** (#278) — `evidence_readings_thinned` vs `evidence_readings_dropped` |
+| Residue: missing-record page title + perpetual skeleton (§14.3) | **COMPLETE** (#277) — incl. `/export` and `/complete` |
+| `CTX-003` (DEC-43 nominal 298 K) | **SUPERSEDED** by `DEC-63` — no automatic temperature; reviewed-rule path exists, none enabled |
+| `DOM-001` (File 32 both acquisitions) | **COMPLETE** (#278) — acquisition identity = archive + path + content sha256; real corpus: legacy 32 on 2 Runs |
+| Owner QA N1–N4, C1–C5, R1–R4, F1–F4, P1–P3, V1, H1 | **COMPLETE** (#277, #279) |
+
+### What a next session should NOT re-derive
+
+- **`bl15.mapping.cardinality.v2` is the conflict rule**, and v1 is withdrawn because it hid a
+  genuine one-scan planned-vs-recorded disagreement (final review C1). Four quantities stay
+  per-measurement pending Angel (`Q21`).
+- **The acceptance preflight is a capability**, not a UI guess: `/api/health` →
+  `proposal_acceptance`, derived from the accept route's own verifier resolution.
+- **Focus hand-offs in the capture panel are commit-driven** (an effect on the render that
+  mounts the target), not frame-polled; `focusWhenPresent` remains for child-rendered
+  destinations with a 60-frame AND 3 s floor.
+- **The owner uses the Assistant rail expanded.** Any layout judgement taken with it collapsed
+  understates density by ~300 px of main column.

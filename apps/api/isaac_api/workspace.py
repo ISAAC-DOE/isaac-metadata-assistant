@@ -302,6 +302,48 @@ def atomic_write_text(path: Path, text: str) -> None:
                 pass
 
 
+def restore_working_copy(path: Path, text: str) -> bool:
+    """Create ``path`` holding ``text`` ONLY IF IT DOES NOT EXIST. Returns whether it did.
+
+    THE RESTORE'S OWN WRITE (2026-09-23), and it differs from :func:`atomic_write_text`
+    in one property: a restore CREATES a working copy and never REPLACES one. The
+    hydration pass checks for the file and then writes it, and a working copy can appear
+    in between — ``Experiment.save`` persists the row BEFORE it writes the file, so a
+    pass can read a just-created record's row, find no file, and race the creator's own
+    write (or a save right after it). Replacing there could put an older stored document
+    over a newer local one. So the bytes are written to a uniquely-named staging file in
+    the same directory — THROUGH :func:`atomic_write_text`, so it is the same crash-safe
+    write, and a full disk fails exactly where it always did — and then HARD-LINKED into
+    place, which fails with ``FileExistsError`` rather than overwriting. Another writer
+    having produced the file (the identical document, or a newer one) is therefore not
+    an error: it is ``False``, and the pass does not count it as a restore of its own.
+
+    A filesystem without hard links falls back to the replace the restore always used,
+    after one more existence check, so no deployment loses the ability to restore.
+    The staging file is removed on every path.
+    """
+    if path.exists():
+        return False
+    staging = path.with_name(f".{path.name}.restore-{secrets.token_hex(8)}.tmp")
+    try:
+        atomic_write_text(staging, text)
+        try:
+            os.link(staging, path)
+        except FileExistsError:
+            return False
+        except OSError:
+            # No hard links on this filesystem: keep today's behaviour, checked once more.
+            if path.exists():
+                return False
+            os.replace(staging, path)
+        return True
+    finally:
+        try:
+            staging.unlink()
+        except FileNotFoundError:
+            pass
+
+
 def load_demo_answers() -> dict:
     """The committed synthetic completion answers (SIMULATED human input)."""
     return json.loads(ANSWERS_PATH.read_text(encoding="utf-8"))
@@ -6346,8 +6388,9 @@ class HydrationOutcome:
         )
 
 
-def _hydrate_ordinary_scope() -> HydrationOutcome:
-    """Restore any durably-stored ordinary record whose directory is missing.
+def _run_hydration_pass() -> HydrationOutcome:
+    """ONE hydration pass: restore any durably-stored ordinary record whose directory
+    is missing. Callers use :func:`_hydrate_ordinary_scope`, which serialises passes.
 
     Returns a :class:`HydrationOutcome`: how many directories were written, and
     whether the pass finished.
@@ -6446,6 +6489,70 @@ def _hydrate_ordinary_scope() -> HydrationOutcome:
         return HydrationOutcome(reason=HYDRATION_RESTORE_FAILED, error=exc)
 
 
+#: ONE HYDRATION PASS AT A TIME IN THIS PROCESS (2026-09-23). See
+#: :func:`_hydrate_ordinary_scope`. Re-entrant only so that a pass which ever reached a
+#: read of its own could not deadlock itself; nothing does today.
+_hydration_lock = threading.RLock()
+#: How many passes have STARTED — incremented, under the lock, before a pass issues
+#: anything. A plain integer read is atomic, which is all an arriving request needs.
+_hydration_passes_started = 0
+#: ``(pass number, outcome)`` of the most recent pass to FINISH, or ``None``.
+_last_hydration: tuple[int, HydrationOutcome] | None = None
+
+
+def _hydrate_ordinary_scope() -> HydrationOutcome:
+    """Restore any durably-stored ordinary record whose directory is missing — ONE PASS
+    AT A TIME PER PROCESS, AND A BURST SHARES IT. What a pass does, and every outcome it
+    can have, is :func:`_run_hydration_pass`; this is the only entry point.
+
+    WHY (2026-09-23). The record screen fires about eight per-record reads at once. Every
+    one that missed its working copy used to run its OWN pass — its own connection and
+    its own ``SELECT`` of every stored experiment, all concurrently. Observed read-only on
+    the hosted deployment: eight concurrent reads of an id that does not exist answered
+    seven ``404``s and one ``503`` (the same read alone answered ``404``), and the page
+    showed "HTTP 503". A failed pass is a ``503`` BY DESIGN and must stay one; what was
+    wrong was giving one burst eight independent chances to fail. It also restored a
+    missing record once per concurrent read instead of once.
+
+    THE RULE: a request notes how many passes had STARTED when it arrived, then takes the
+    lock. If the last pass to finish STARTED AFTER that, its answer is this request's
+    answer — its ``SELECT`` read the table after this request arrived, which is exactly
+    what running a pass here would have done — so the request returns it instead of
+    redoing the work. Otherwise it runs a pass of its own. So a burst runs at most two
+    passes, never two at once, and opens one connection at a time.
+
+    AN ANSWER FROM A PASS THAT STARTED BEFORE THE REQUEST ARRIVED IS NEVER REUSED: that
+    pass may have read the table before a row this request is asking about was committed
+    (by another replica, say), and reusing it would answer a false ``404``.
+
+    A FAILED OUTCOME IS SHARED TOO, deliberately. Two reasons, and the second decides it.
+    A failure observed by a pass that started after this request arrived IS the state the
+    store was in, just as a success is. And re-running a pass per waiter behind the lock
+    would queue connect timeouts one after another during a real outage — ten seconds
+    each — holding request threads until the pool ran dry and even the readiness probe
+    could not be served. Shared, an outage costs a burst at most two attempts. A pass
+    that raised a ``BaseException`` (a cancellation) finishes nothing and is not shared.
+
+    A REQUEST THAT TAKES ANOTHER PASS'S ANSWER RESTORED NOTHING ITSELF, so it reports
+    ``restored=0``; no caller reads the count as an answer about a record (see
+    :func:`load_experiment` — the answer is the file, never the count). Per-process
+    only, which matches the deployment (single-process uvicorn, no ``--workers``) and
+    every other lock in this module; replicas have separate ``emptyDir``s, so there is
+    nothing across processes to serialise.
+    """
+    global _hydration_passes_started, _last_hydration
+    arrived_after = _hydration_passes_started
+    with _hydration_lock:
+        last = _last_hydration
+        if last is not None and last[0] > arrived_after:
+            return dataclasses.replace(last[1], restored=0)
+        _hydration_passes_started += 1
+        number = _hydration_passes_started
+        outcome = _run_hydration_pass()
+        _last_hydration = (number, outcome)
+        return outcome
+
+
 def _hydrate_ordinary_scope_or_raise() -> int:
     """:func:`_hydrate_ordinary_scope`, except that AN INCOMPLETE PASS PROPAGATES.
 
@@ -6455,8 +6562,10 @@ def _hydrate_ordinary_scope_or_raise() -> int:
     RAISES :class:`~isaac_api.experiment_repository.StorageUnavailable` on EITHER
     incomplete outcome, and the two are raised differently on purpose.
 
-    ``store_unavailable`` re-raises the store's OWN exception, so the ``503`` body
-    keeps ``STORAGE_READ_FAILED_MESSAGE`` — "that database could not be read".
+    ``store_unavailable`` raises the store's own exception CLASS AND MESSAGE — a fresh
+    instance chained from the original, because since 2026-09-23 one outcome can be
+    shared by every request that waited on the same pass — so the ``503`` body keeps
+    ``STORAGE_READ_FAILED_MESSAGE`` — "that database could not be read".
 
     ``restore_failed`` raises a NEW ``StorageUnavailable`` carrying
     ``STORAGE_RESTORE_FAILED_MESSAGE``, chained from the original. It must not
@@ -6486,7 +6595,11 @@ def _hydrate_ordinary_scope_or_raise() -> int:
     """
     outcome = _hydrate_ordinary_scope()
     if outcome.reason == HYDRATION_STORE_UNAVAILABLE and outcome.error is not None:
-        raise outcome.error
+        # A FRESH INSTANCE, same fixed message, chained: the outcome may be shared by
+        # every request that waited on the same pass (see `_hydrate_ordinary_scope`),
+        # and one exception object raised from several threads at once would have its
+        # traceback rewritten under each of them.
+        raise type(outcome.error)(*outcome.error.args) from outcome.error
     if outcome.reason is not None:
         from .experiment_repository import (  # noqa: PLC0415 - cycle
             STORAGE_RESTORE_FAILED_MESSAGE,
