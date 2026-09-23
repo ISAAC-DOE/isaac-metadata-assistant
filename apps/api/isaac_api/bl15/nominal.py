@@ -1,219 +1,332 @@
-"""`DEC-43` — THE ONE VALUE IN THIS PROGRAMME SUPPLIED WITHOUT A SOURCE, AND ITS FENCE.
+"""NOMINAL VALUES — offered ONLY by a reviewed convention rule, and NONE is enabled.
 
-WHAT IT IS
-==========
+WHAT CHANGED ON 2026-09-22, AND WHY THIS MODULE WAS NOT DELETED
+===============================================================
 
-``context.temperature_K = 298``, for the **BL15-2 Angel-style historical profile only**,
-recorded as a nominal room-temperature assumption.
+This module used to supply ``context.temperature_K = 298`` for the BL15-2 "Angel-style"
+profile, under ``DEC-43`` (2026-09-17). **``DEC-43`` IS SUPERSEDED.** On 2026-09-22 the
+domain owner (Angel), relayed by the project owner, reconsidered it: leaving missing
+data empty may be safest, 293 K may be the more common reading of "room temperature",
+and published work / NIST should be checked. The check was made
+(``docs/evidence/temperature-convention-research-2026-09-22.md``) and found that **both
+293.15 K and 298.15 K are real conventions answering different questions** — neither is
+evidence of what an unrecorded experiment's temperature was.
 
-**THE CORPUS STATES NO TEMPERATURE ANYWHERE** — not in the beamtime README, not in the
-notes, not in any acquisition header. That measurement is unchanged and is the reason
-``mapping.TEMPERATURE_ABSENT_REASON`` exists and stays exactly as it is. What `DEC-43`
-changes is not the measurement but the AUTHORITY: **298 is supplied on the scientist's
-authority, not on the parser's.** The project owner adopted it as domain guidance for
-this one profile. No reader inferred it, nothing computed it, and no source is cited for
-it, because there is none.
+~~298 K is supplied on the scientist's authority for the BL15-2 Angel profile.~~ —
+**withdrawn**, and struck rather than deleted because "this profile supplies 298" is
+exactly the claim a future session would otherwise rebuild. The binding rule now is:
+
+1. **The corpus states no temperature -> ``context.temperature_K`` stays MISSING.** A
+   surface shows *Temperature — Not recorded*. There is no automatic insert and **no
+   automatic proposal**. Measured default: ``nominal_offers`` is ``[]`` for every
+   profile this build registers.
+2. **A source that literally says "room temperature" / "RT" is preserved VERBATIM** —
+   as a ``temperature_statement`` in the Extended Context companion — and is never
+   converted to a number.
+3. **A numeric nominal value may be OFFERED only by a :class:`NominalRule`** that (i) a
+   reviewer attached to one convention profile at one version, (ii) names WHICH
+   convention it adopts (:data:`CONVENTION_NTP_STYLE` or :data:`CONVENTION_SATP_STYLE`,
+   each cited), (iii) is labelled nominal / inferred on the wire, (iv) reaches a record
+   only as a PROPOSAL a scientist confirms, and (v) is never labelled measured.
+4. **No such rule is enabled by default.** :data:`REVIEWED_NOMINAL_RULES` is EMPTY, and
+   ``test_bl15_nominal.py`` fails if a production rule appears without that test being
+   changed deliberately. The only way to enable one in this repository today is the
+   test-only seam :func:`reviewed_rule_registered_for_tests`.
 
 WHY THIS IS NOT A HOLE IN ``CLAUDE.md`` §5
 ==========================================
 
-§5 forbids *inventing or guessing* a scientific value, and it is otherwise **untouched**.
-`DEC-43` is a named, dated, profile-scoped exception whose four conditions are what keep
-it from generalising, and all four are enforced here rather than described:
-
-1. **The provenance says it is NOT MEASURED.** :attr:`NominalValue.measured` is a
-   derived, always-``False`` property, and :meth:`NominalValue.to_state` cannot emit an
-   entry without it. *A record that shows 298 K without that qualifier is a defect, not
-   a rounding* — `DEC-43`'s own words.
-2. **BL15-2 Angel profile only, structurally.** :func:`nominal_temperature_for` is a
-   lookup in :data:`NOMINAL_DEFAULTS`, keyed by profile id. Any other profile gets
-   ``None``: the field stays **absent** and the record stays blocked, which is the
-   pre-`DEC-43` behaviour preserved for everybody else.
-3. **It does not generalize to any other required-but-absent field.**
-   :data:`NOMINAL_DEFAULTS` holds exactly ONE entry and
-   ``test_bl15_nominal.py`` fails if a second appears. Adding one by analogy with this
-   one is what `DEC-43` condition (iii) forbids; adding one needs its own decision, its
-   own date and its own review, not a tuple append.
-4. **The authority is named in the artifact.** :data:`SOURCE_CLASS` says
-   *domain guidance / project-owner adopted*, so a reader is never left inferring that
-   something in the archive said it.
-
-NEVER DESCRIBE IT AS MEASURED
-=============================
-
-Not in code, not in copy, not in a serialization, not in a test name. The word this
-module uses for it is **nominal**, and :data:`BASIS` is the sentence that travels with
-the number wherever it goes.
-
-IT IS NOT A CORPUS CONCEPT, AND THAT IS WHY IT IS NOT IN ``bl15.evidence``
-=========================================================================
-
-``SourceEvidence`` answers *"where did ISAAC get this?"* and requires a source path, a
-locator and a concept from :data:`bl15.evidence.CONCEPTS`. **A nominal value has no
-source and no locator**, so expressing it as read evidence would require inventing
-both — the precise fabrication §5 exists to stop. So :class:`NominalValue` is its own
-type with its own provenance vocabulary, no ``concept``, and no place in the 45-concept
-count.
+§5 forbids inventing a scientific value. A rule here cannot put a value anywhere: it can
+only OFFER one, as an open proposal whose ``rule`` is the rule's own disclosure, and a
+person accepting that proposal is the act that supplies it — recorded with the
+``user_confirmation`` evidence that is this build's only human-act evidence type, behind
+the ``409 human_actor_required`` gate every acceptance has. The number never travels
+without its convention, its citation and ``measured: false``.
 
 Pure data. No I/O, no clock, no environment read.
 """
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 from dataclasses import dataclass
+from typing import Iterator
 
 from . import profiles
 
 __all__ = [
     "BASIS",
-    "NOMINAL_DEFAULTS",
-    "NOMINAL_TEMPERATURE_K",
+    "CONVENTIONS",
+    "CONVENTION_NTP_STYLE",
+    "CONVENTION_SATP_STYLE",
+    "DETERMINISM",
     "NOMINAL_TEMPERATURE_PATH",
+    "NominalConvention",
+    "NominalRule",
     "NominalValue",
+    "REVIEWED_NOMINAL_RULES",
     "SOURCE_CLASS",
+    "SUPERSEDED_DECISION",
     "nominal_temperature_for",
     "profiles_with_a_nominal_default",
+    "reviewed_rule_registered_for_tests",
 ]
 
-
-#: The official path the value is for. Level 1 in `DEC-41`'s hierarchy: the schema has a
-#: real field, so nothing about this goes near the extended-context companion.
+#: The official path a nominal temperature would be offered for. Level 1 in `DEC-41`'s
+#: hierarchy: the schema has a real numeric field.
 NOMINAL_TEMPERATURE_PATH = "context.temperature_K"
 
-#: 298 K. Room temperature, as a scientist would state it.
-NOMINAL_TEMPERATURE_K = 298
+#: What a nominal value IS, carried with every number.
+BASIS = "nominal — inferred by a reviewed convention rule, NOT measured"
+#: How it was arrived at, in the determinism vocabulary the review surface already uses.
+DETERMINISM = "inferred"
+#: Where the authority comes from: a reviewed rule, and a person's confirmation.
+SOURCE_CLASS = "reviewed convention rule; applied only on a scientist's confirmation"
 
-#: `DEC-43`'s own words for what this is. Carried with the number, always.
-BASIS = "nominal room temperature"
-
-#: Where the authority comes from — and it is a person, not a file. Stated so no reader
-#: can conclude that something in the archive said it.
-SOURCE_CLASS = "domain guidance / project-owner adopted"
-
-#: The decision that authorizes it, so an auditor has one thing to look up.
-DECISION_REF = "DEC-43"
-
-#: Said in full, once, so it can be rendered verbatim rather than paraphrased.
-DISCLOSURE = (
-    "298 K is a nominal room-temperature assumption adopted for the BL15-2 "
-    "Angel-style historical profile. It was NOT measured and no source in the corpus "
-    "states a temperature: the value is supplied on the scientist's authority as "
-    "domain guidance (DEC-43), not derived, inferred or computed by this application. "
-    "It applies to this profile only; any other profile leaves the field absent."
+#: The decision this module used to implement, recorded so an auditor can find it.
+SUPERSEDED_DECISION = (
+    "DEC-43 (2026-09-17: 298 K as a nominal room temperature for the BL15-2 "
+    "Angel-style profile) — SUPERSEDED 2026-09-22 by the domain owner's answer, "
+    "relayed by the project owner: missing temperature stays missing; no automatic "
+    "insert and no automatic proposal."
 )
+
+_RESEARCH_NOTE = "docs/evidence/temperature-convention-research-2026-09-22.md"
+
+
+@dataclass(frozen=True)
+class NominalConvention:
+    """A named room-temperature convention, with the authority behind the number.
+
+    **A convention is not a measurement and not a default.** It is the answer to "IF a
+    scientist wants a nominal number here, which convention does it follow?" — and the
+    two below answer different questions, which is exactly why a rule must name one.
+    """
+
+    convention_id: str
+    label: str
+    value: float
+    unit: str
+    authority: str
+    retrieval_note: str
+
+    def to_state(self) -> dict:
+        return {
+            "convention_id": self.convention_id,
+            "label": self.label,
+            "value": self.value,
+            "unit": self.unit,
+            "authority": self.authority,
+            "retrieval_note": self.retrieval_note,
+            "research_note": _RESEARCH_NOTE,
+        }
+
+
+CONVENTION_NTP_STYLE = NominalConvention(
+    convention_id="ntp_style_293_15_K",
+    label="NTP-style normal temperature (20 °C)",
+    value=293.15,
+    unit="K",
+    authority=(
+        "NIST usage of normal temperature and pressure (20 °C, 101.325 kPa); ISO 1's "
+        "20 °C reference temperature for dimensional metrology."
+    ),
+    retrieval_note=(
+        "Secondary sources only in the 2026-09-22 check; no NIST primary page was "
+        "retrieved. See the research note."
+    ),
+)
+
+CONVENTION_SATP_STYLE = NominalConvention(
+    convention_id="satp_style_298_15_K",
+    label="SATP-style standard ambient temperature (25 °C)",
+    value=298.15,
+    unit="K",
+    authority=(
+        "IUPAC standard ambient temperature and pressure (25 °C, 100 kPa) — a "
+        "thermodynamic REFERENCE STATE for tabulating data, not a statement about any "
+        "laboratory's temperature."
+    ),
+    retrieval_note=(
+        "Secondary sources only in the 2026-09-22 check. See the research note."
+    ),
+)
+
+CONVENTIONS: dict[str, NominalConvention] = {
+    c.convention_id: c for c in (CONVENTION_NTP_STYLE, CONVENTION_SATP_STYLE)
+}
+
+
+@dataclass(frozen=True)
+class NominalRule:
+    """A REVIEWED rule permitting a nominal value to be OFFERED under one convention.
+
+    Scoped to ONE convention profile at ONE version, like every convention rule; a rule
+    reviewed against version 1 of a profile is not a rule about version 2.
+    """
+
+    rule_id: str
+    rule_version: str
+    profile_id: str
+    profile_version: str
+    official_path: str
+    convention: NominalConvention
+    #: Who reviewed it and on what basis — a sentence, because this build has no
+    #: trusted identity to put here and must not pretend otherwise.
+    reviewed_basis: str
+
+    def __post_init__(self) -> None:
+        if self.official_path != NOMINAL_TEMPERATURE_PATH:
+            raise ValueError(
+                "a nominal rule may only be written for context.temperature_K; a second "
+                "path needs its own decision, not a rule entry"
+            )
+        profile = profiles.profile_for(self.profile_id)
+        if profile is None:
+            raise ValueError(f"{self.profile_id!r} is not a registered convention profile")
+        if not self.reviewed_basis.strip():
+            raise ValueError("a nominal rule must say who reviewed it and why")
+        if self.convention.convention_id not in CONVENTIONS:
+            raise ValueError("a nominal rule must adopt one of the named conventions")
+
+    @property
+    def disclosure(self) -> str:
+        """The sentence that travels with the number, verbatim, wherever it goes."""
+        c = self.convention
+        return (
+            f"{c.value:g} {c.unit} is a NOMINAL value under the {c.label} convention, "
+            f"offered by reviewed rule {self.rule_id} (v{self.rule_version}) for "
+            f"convention profile {self.profile_id} v{self.profile_version}. It was NOT "
+            "measured and no source in the corpus states it; it becomes the record's "
+            "value only if a scientist confirms it. Convention authority: "
+            f"{c.authority}"
+        )
+
+    def to_state(self) -> dict:
+        return {
+            "rule_id": self.rule_id,
+            "rule_version": self.rule_version,
+            "profile_id": self.profile_id,
+            "profile_version": self.profile_version,
+            "official_path": self.official_path,
+            "convention": self.convention.to_state(),
+            "reviewed_basis": self.reviewed_basis,
+        }
 
 
 @dataclass(frozen=True)
 class NominalValue:
-    """A value supplied by domain guidance, with the provenance that says so.
+    """A value a reviewed rule OFFERS, with the provenance that says so.
 
-    Every field exists to keep the number from ever travelling bare. There is
-    deliberately **no** ``raw_literal``, ``source`` or ``locator``: inventing any of the
-    three is what would turn this from an acknowledged assumption into a fabricated
+    There is deliberately **no** ``raw_literal``, ``source`` or ``locator``: inventing
+    any of the three would turn an acknowledged convention into a fabricated
     measurement.
     """
 
     official_path: str
-    value: int | float
+    value: float
     unit: str
-    basis: str
-    source_class: str
-    profile_id: str
-    profile_version: str
-    decision_ref: str
-    disclosure: str
-
-    def __post_init__(self) -> None:
-        if not self.basis or not self.source_class:
-            raise ValueError(
-                "a nominal value must carry both a basis and a source class: DEC-43 "
-                "condition (i) makes the qualifier mandatory, not optional"
-            )
-        if profiles.profile_for(self.profile_id) is None:
-            raise ValueError(
-                f"{self.profile_id!r} is not a registered naming profile, so a nominal "
-                "default cannot be scoped to it"
-            )
+    rule: NominalRule
 
     @property
     def measured(self) -> bool:
-        """**Always ``False``.** Derived so it cannot be persisted any other way.
-
-        A stored boolean could be written ``True`` by a careless caller, and the number
-        would then travel claiming to be a measurement — `DEC-43` condition (i)'s named
-        defect. ``ConceptMapping.proposable`` and
-        ``extended_context.ContextEntry.is_official_field_value`` use the same
-        discipline for the same reason.
-        """
+        """**Always ``False``.** Derived, so it cannot be persisted any other way."""
         return False
 
-    def to_state(self) -> dict:
-        """The wire shape. ``measured`` and ``basis`` are **always** present.
+    @property
+    def requires_confirmation(self) -> bool:
+        """**Always ``True``.** It is offered as a proposal and nothing else."""
+        return True
 
-        There is no code path that serializes the value without the qualifier, which is
-        what condition (i) requires: *a record that shows 298 K without it is a defect*.
-        """
+    @property
+    def disclosure(self) -> str:
+        return self.rule.disclosure
+
+    @property
+    def profile_id(self) -> str:
+        return self.rule.profile_id
+
+    @property
+    def decision_ref(self) -> str:
+        return self.rule.rule_id
+
+    def to_state(self) -> dict:
+        """The wire shape. ``measured``, ``basis`` and the convention are ALWAYS present."""
         return {
             "official_path": self.official_path,
             "value": self.value,
             "unit": self.unit,
-            "basis": self.basis,
-            "source_class": self.source_class,
+            "basis": BASIS,
+            "determinism": DETERMINISM,
+            "source_class": SOURCE_CLASS,
             "measured": self.measured,
-            "profile_id": self.profile_id,
-            "profile_version": self.profile_version,
-            "decision_ref": self.decision_ref,
+            "requires_confirmation": self.requires_confirmation,
+            "convention": self.rule.convention.to_state(),
+            "rule": self.rule.to_state(),
+            "profile_id": self.rule.profile_id,
+            "profile_version": self.rule.profile_version,
+            "decision_ref": self.rule.rule_id,
             "disclosure": self.disclosure,
+            "superseded_decision": SUPERSEDED_DECISION,
         }
 
 
-#: **EXACTLY ONE ENTRY, AND THE COUNT IS THE FENCE.**
-#:
-#: `DEC-43` condition (iii): *"it does not generalize to any other required-but-absent
-#: field … no second such default may be added by analogy with this one."* A tuple makes
-#: that mechanically checkable — ``test_bl15_nominal.py`` asserts the length, the path
-#: and the profile, so a second default cannot arrive as a quiet append. It can still
-#: arrive; it just has to arrive through a failing test and a decision.
-NOMINAL_DEFAULTS: tuple[NominalValue, ...] = (
-    NominalValue(
-        official_path=NOMINAL_TEMPERATURE_PATH,
-        value=NOMINAL_TEMPERATURE_K,
-        unit="K",
-        basis=BASIS,
-        source_class=SOURCE_CLASS,
-        profile_id=profiles.SSRL_BL152_ANGEL_V1.profile_id,
-        profile_version=profiles.SSRL_BL152_ANGEL_V1.profile_version,
-        decision_ref=DECISION_REF,
-        disclosure=DISCLOSURE,
-    ),
-)
+#: **EMPTY, AND THE EMPTINESS IS THE POLICY.** No reviewed nominal rule is enabled in
+#: this build. A production rule arrives here only through a failing test and a
+#: recorded decision; tests use :func:`reviewed_rule_registered_for_tests`.
+REVIEWED_NOMINAL_RULES: tuple[NominalRule, ...] = ()
+
+#: The live registry: :data:`REVIEWED_NOMINAL_RULES` plus anything a test registered.
+_ACTIVE: list[NominalRule] = list(REVIEWED_NOMINAL_RULES)
+
+
+@contextmanager
+def reviewed_rule_registered_for_tests(rule: NominalRule) -> Iterator[NominalRule]:
+    """TEST-ONLY SEAM: enable one reviewed rule for the duration of a block.
+
+    No production module calls this, and ``test_bl15_nominal.py`` greps the application
+    package to keep it that way. It exists so the reviewed-rule PATH — offer, label,
+    confirmation — is exercised end to end without a production rule existing.
+    """
+    _ACTIVE.append(rule)
+    try:
+        yield rule
+    finally:
+        _ACTIVE.remove(rule)
 
 
 def profiles_with_a_nominal_default() -> tuple[str, ...]:
-    """Profile ids that have any nominal default at all, sorted. One today."""
-    return tuple(sorted({d.profile_id for d in NOMINAL_DEFAULTS}))
+    """Profile ids that have ANY enabled nominal rule, sorted. ``()`` by default."""
+    return tuple(sorted({r.profile_id for r in _ACTIVE}))
 
 
 def nominal_temperature_for(profile_id: str | None) -> NominalValue | None:
-    """The nominal temperature for this profile, or ``None``.
+    """The nominal temperature a reviewed rule offers for this profile, or ``None``.
 
-    ``None`` is the answer for **every** profile except the BL15-2 Angel one, including
-    ``None`` itself and an unregistered id — `DEC-43` condition (ii). A caller that gets
-    ``None`` must leave ``context.temperature_K`` **absent** and let the record stay
-    blocked, which is exactly what ``mapping.TEMPERATURE_ABSENT_REASON`` describes and
-    what every other profile keeps doing.
+    ``None`` for EVERY profile in this build unless a test enabled a rule — including
+    the BL15-2 convention that ``DEC-43`` used to cover, ``None`` itself and an
+    unregistered id. A caller that gets ``None`` leaves ``context.temperature_K`` absent,
+    offers nothing, and lets the record stay blocked.
 
-    There is no ``default=`` parameter and there will not be one: a parameter that let a
-    caller supply a fallback would move the decision from this module to the call site,
-    and the whole point of `DEC-43` is that the decision is made once, dated, and
-    scoped.
+    Alias-aware: the historical id ``ssrl_bl152_angel`` resolves to the convention it
+    now names, so a session persisted before the rename asks the same question.
     """
     if not profile_id:
         return None
-    for default in NOMINAL_DEFAULTS:
+    canonical = profiles.canonical_profile_id(profile_id)
+    profile = profiles.profile_for(canonical)
+    if profile is None:
+        return None
+    for rule in _ACTIVE:
         if (
-            default.profile_id == profile_id
-            and default.official_path == NOMINAL_TEMPERATURE_PATH
+            profiles.canonical_profile_id(rule.profile_id) == canonical
+            and rule.profile_version == profile.profile_version
+            and rule.official_path == NOMINAL_TEMPERATURE_PATH
         ):
-            return default
+            return NominalValue(
+                official_path=rule.official_path,
+                value=rule.convention.value,
+                unit=rule.convention.unit,
+                rule=rule,
+            )
     return None

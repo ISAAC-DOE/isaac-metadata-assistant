@@ -257,7 +257,11 @@ def test_tools_list_is_filtered_by_the_callers_scopes(reader, writer):
     # that vanished, not one that arrived in the wrong grant.
     assert "isaac_get_extended_context" in read_only
     assert "isaac_get_extended_context" in both
-    assert len(both) == 14
+    # 14 -> 15 (2026-09-22): `isaac_list_activity` costs READ too, so BOTH callers hold
+    # it — asserted by name for the same reason.
+    assert "isaac_list_activity" in read_only
+    assert "isaac_list_activity" in both
+    assert len(both) == 15
 
 
 def test_every_descriptor_states_the_scope_a_call_will_cost(app, session_id):

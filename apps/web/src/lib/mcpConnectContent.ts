@@ -530,6 +530,20 @@ export const MCP_CAPABILITIES_ALLOWED: readonly McpCapability[] = [
       'Read the scientifically useful statements an import found that the official ISAAC record has no field for — each with the source’s own words, which source they came from, and where in it. None of them is a field value, none was validated against the official schema, and none affects whether a record can be exported, so an agent can quote them as "a source said this" and never as "the record says this". The list arrives one window at a time and reports how many the record actually holds. Reads only.',
     tools: ['isaac_get_extended_context'],
   },
+  {
+    /*
+     * 2026-09-22 (backend historical-semantics slice). ADDED BECAUSE THE BACKEND
+     * PERMITS THE TOOL and `connect-your-agent.test.tsx` requires this list to cover
+     * every permitted tool exactly. The row says "unattributed" in the scientist's
+     * sentence for the reason the extended-context row says "not a field value": the
+     * thing a person is deciding to hand an agent is a history that names nobody.
+     */
+    id: 'read-activity',
+    action: 'Read what has been done to a record',
+    detail:
+      'Read a record’s append-only history of acts — what was changed, from what to what, when, and through which channel. Every entry names nobody: this deployment cannot establish who is calling, so each act reads as unattributed rather than guessing a person. An entry is not a field value and not evidence, and a few acts (creating, discarding and resetting a record) are never recorded, so an absence proves nothing. Reads only.',
+    tools: ['isaac_list_activity'],
+  },
 ];
 
 /**

@@ -363,14 +363,25 @@ def test_nothing_is_deduplicated():
 
 
 def test_an_open_question_travels_with_the_companion():
-    item = a_reading(
-        concept=ev.CONCEPT_LEGACY_NUMBER, raw="32", normalized=32, rule=None
-    )
+    """~~The legacy number's Q16~~ -> the dry state's Q6.
+
+    Q16 CLOSED on 2026-09-22 — the domain owner does not know, so the conflict is
+    preserved permanently — which means the legacy number no longer carries an OPEN
+    question and this property needs a concept that does. The property is unchanged:
+    an open question travels with the companion entry.
+    """
+    item = a_reading(concept=ev.CONCEPT_DRY_STATE, raw="dry", normalized="dry", rule=None)
     entry = xc.entry_from_source_evidence(item, entry_id="e3")
-    assert entry.unresolved_questions == ("Q16",)
+    assert entry.unresolved_questions == ("Q6",)
     context = xc.build(experiment_id="exp", entries=[entry], generated_utc=NOW)
-    assert context.open_questions() == ("Q16",)
-    assert context.companion_document(RECORD_ID)["open_domain_questions"] == ["Q16"]
+    assert context.open_questions() == ("Q6",)
+    assert context.companion_document(RECORD_ID)["open_domain_questions"] == ["Q6"]
+    # and a closed question does NOT travel as open
+    closed = xc.entry_from_source_evidence(
+        a_reading(concept=ev.CONCEPT_LEGACY_NUMBER, raw="32", normalized=32, rule=None),
+        entry_id="e4",
+    )
+    assert closed.unresolved_questions == ()
 
 
 # --- versioned, and durable without a migration -----------------------------

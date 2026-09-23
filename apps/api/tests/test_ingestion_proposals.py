@@ -1977,7 +1977,13 @@ def test_DEC7_no_mcp_operation_or_tool_reaches_the_proposal_REVIEW_route():
     # that pins the same property a different way.
     #
     # 16 -> 17: `CTX-004`'s `isaac_get_extended_context`, a READ.
-    assert len(policy.PERMITTED_TOOL_NAMES) == 17
+    # 17 -> 18 (2026-09-22): `isaac_list_activity`, a READ. The same five sites swept
+    # in the same change — `test_mcp_boundaries.py`, `test_mcp_transport.py`,
+    # `test_an_agent_can_finish_a_run.py`, this file, and the set equality in
+    # `test_assistant_artifact_companion.py` (whose manifest now declares it) — plus
+    # the frontend's `MCP_CAPABILITIES_ALLOWED`, which `connect-your-agent.test.tsx`
+    # requires to cover every permitted tool.
+    assert len(policy.PERMITTED_TOOL_NAMES) == 18
 
 
 # --- DEC-8: still_current is derived, never stored ----------------------------

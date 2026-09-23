@@ -481,14 +481,28 @@ def test_a_stem_with_nothing_recognisable_still_reports_every_token():
 
 
 def test_the_profile_registry_holds_exactly_the_one_measured_profile():
-    assert list(profiles.PROFILES) == ["ssrl_bl152_angel"]
-    profile = profiles.profile_for("ssrl_bl152_angel")
+    """ONE registered convention — renamed 2026-09-22 for the CONVENTION, not a person.
+
+    ~~``["ssrl_bl152_angel"]`` / "Angel-style historical naming profile v1"~~ — the id
+    and the display name were an architectural synonym for "every file Angel touched",
+    which the project owner corrected: a convention and the scientist who ran a Run are
+    separate concepts. The historical id MUST still resolve, to the same object, so
+    everything stamped with it before the rename still hydrates; that half is asserted
+    here too, because a rename that orphaned old evidence would be a data loss.
+    """
+    assert list(profiles.PROFILES) == ["ssrl_bl152_herfd_echem_naming"]
+    profile = profiles.profile_for("ssrl_bl152_herfd_echem_naming")
     assert profile is not None
     assert profile.profile_version == "1"
-    assert (
-        profile.display_name
-        == "SSRL BL15-2 — Angel-style historical naming profile v1"
+    assert profile.display_name.startswith(
+        "SSRL BL15-2 HERFD electrochemistry filename convention v1"
     )
+    assert "Angel" not in profile.display_name
+    # THE ALIAS, both ways it is reached.
+    assert profiles.profile_for("ssrl_bl152_angel") is profile
+    assert profiles.canonical_profile_id("ssrl_bl152_angel") == profile.profile_id
+    assert profile.aliases == ("ssrl_bl152_angel",)
+    assert profiles.SSRL_BL152_ANGEL_V1 is profiles.SSRL_BL152_HERFD_ECHEM_V1
 
 
 def test_the_profile_docstring_records_the_convention_verbatim():
@@ -2209,9 +2223,126 @@ def test_a_sample_heading_states_a_name_a_medium_and_sometimes_a_quality_note():
     names = _by_concept(result, CONCEPT_SAMPLE_NAME)
     assert [n.normalized_value for n in names] == ["ZZ1", "ZZ2", "ZZ3"]
     assert {n.scope for n in names} == {SCOPE_SAMPLE_GROUP}
-    quality = _one(result, CONCEPT_QUALITY_NOTE)
+    # ~~`_one(result, CONCEPT_QUALITY_NOTE)`~~ — there are now FOUR quality notes, not
+    # one: since 2026-09-22 every non-empty `Notes` cell of a file-number table is kept
+    # as a Data Quality Note too (see the test below). The heading qualifier is still
+    # exactly one of them, found by its locator.
+    heading = [
+        q
+        for q in _by_concept(result, CONCEPT_QUALITY_NOTE)
+        if q.locator.endswith("sample heading qualifier")
+    ]
+    assert len(heading) == 1
+    quality = heading[0]
     assert quality.raw_literal == "bad"
     assert quality.scope == SCOPE_SAMPLE_GROUP
+
+
+def test_every_notes_cell_is_kept_verbatim_as_a_data_quality_note():
+    """Angel, 2026-09-22: preserve free-text quality phrases; never derive qc.status.
+
+    Position decides a Notes cell, not content — and the file number rides in the
+    locator, read back through ``notes.file_number_of`` so no consumer parses the
+    locator with its own regex. A row whose File Number cell is empty (Sample 1 of the
+    fixture, as of the real document) keeps its note at sample-group scope with no
+    number, rather than borrowing a neighbour's.
+    """
+    result = _notes_result()
+    cells = [
+        q
+        for q in _by_concept(result, CONCEPT_QUALITY_NOTE)
+        if "column `Notes`" in q.locator
+    ]
+    # IDENTIFIED BY POSITION, NEVER BY QUOTING THE CELL (corrected 2026-09-22 after an
+    # independent review): the first version of this test repeated two of this
+    # fixture's cell texts verbatim, and a count-only check found both also occur in
+    # the private archive. A test must not re-commit a phrase, so the cells are named
+    # here by their file number and table instead, and compared to the fixture's own
+    # bytes rather than to a literal.
+    fixture_text = (FIXTURES / "notes" / "beamtime-notes.txt").read_text(encoding="utf-8-sig")
+    assert len(cells) == 3
+    numbered = [q for q in cells if notes.file_number_of(q.locator) is not None]
+    unnumbered = [q for q in cells if notes.file_number_of(q.locator) is None]
+    assert [notes.file_number_of(q.locator) for q in numbered] == [11, 13]
+    assert {q.scope for q in numbered} == {SCOPE_MEASUREMENT}
+    # The empty-File-Number table keeps its note at sample-group scope, with no
+    # borrowed number.
+    assert len(unnumbered) == 1
+    assert {q.scope for q in unnumbered} == {SCOPE_SAMPLE_GROUP}
+    for q in cells:
+        assert q.normalization_rule == notes.RULE_DATA_QUALITY_NOTE
+        # VERBATIM: nothing classified, nothing normalised — every cell's text is a
+        # line of the fixture exactly as written.
+        assert q.normalized_value is None
+        assert f"\t{q.raw_literal}" in fixture_text, q.locator
+
+
+_LAST_ROW_THEN_PROSE = (
+    "SYNTHETIC notes for the last-row regression test\n\n"
+    "Sample 1 ZZ1 in acid\n"
+    "\tStep\n\tFile Number\n\tE-chem Procedure\n\tNotes \n"
+    # ROW 1 carries a MULTI-LINE cell: the untabbed line is its second line, because
+    # row 2 follows.
+    "\t1\n\t01\n\n\tSets the working potential to 0.1 V (SYNTHETIC)\n"
+    "\tSYNTHETIC: first remark line\nSYNTHETIC: second remark line\n"
+    # ROW 2 is the LAST row, followed DIRECTLY by prose: those lines are not the cell.
+    "\t2\n\t02\n\n\tSets the working potential to 0.2 V (SYNTHETIC)\n"
+    "\tSYNTHETIC: last-row remark\n"
+    "SYNTHETIC: kept at room temperature\n"
+    "Operator: Operator Delta (synthetic)\n"
+    "\n"
+    "Sample 2 ZZ2 in base\n"
+)
+
+
+def test_a_last_row_notes_cell_ends_where_the_table_ends():
+    """Review finding (2026-09-22): prose after a table's LAST row was absorbed.
+
+    Under the last row, an untabbed line is not the cell's continuation — no row
+    follows it — so the temperature statement and the operator line below it must be
+    read as themselves, not folded into the remark. Polarity measured: against the
+    pre-fix reader the last-row note absorbed both lines and neither statement was
+    emitted.
+    """
+    record = _synthetic_record("synthetic-notes.txt", body=_LAST_ROW_THEN_PROSE)
+    result = notes.read_beamtime_notes(record, _LAST_ROW_THEN_PROSE)
+    cells = {
+        notes.file_number_of(q.locator): q.raw_literal
+        for q in _by_concept(result, CONCEPT_QUALITY_NOTE)
+        if "column `Notes`" in q.locator
+    }
+    assert cells[2] == "SYNTHETIC: last-row remark"
+    temperature = _by_concept(result, "temperature_statement")
+    assert [t.raw_literal for t in temperature] == ["SYNTHETIC: kept at room temperature"]
+    people = _by_concept(result, "contributor_statement")
+    assert [p.normalized_value["name"] for p in people] == ["Operator Delta (synthetic)"]
+
+
+def test_a_multi_line_notes_cell_in_a_row_that_is_not_last_keeps_both_lines():
+    """The other polarity: a real multi-line cell (a row follows) is still one cell."""
+    record = _synthetic_record("synthetic-notes.txt", body=_LAST_ROW_THEN_PROSE)
+    result = notes.read_beamtime_notes(record, _LAST_ROW_THEN_PROSE)
+    cells = {
+        notes.file_number_of(q.locator): q.raw_literal
+        for q in _by_concept(result, CONCEPT_QUALITY_NOTE)
+        if "column `Notes`" in q.locator
+    }
+    assert cells[1] == "SYNTHETIC: first remark line\nSYNTHETIC: second remark line"
+
+
+def test_the_file_number_reading_is_unchanged_by_the_notes_cell_tracking():
+    """The row tracking added 2026-09-22 must not move a single file number.
+
+    Asserted over the fixture here and measured over the REAL archive locally before and
+    after (41 file-number rows and 61 steps, identical sequence) — the real half is not
+    reproducible in CI, which has no corpus.
+    """
+    result = _notes_result()
+    rows = [r.normalized_value for r in _by_concept(result, CONCEPT_NOTE_FILE_NUMBER_ROW)]
+    assert rows == [11, 12, 13, 14]
+    steps = [s.normalized_value for s in _by_concept(result, CONCEPT_STEP_NUMBER)]
+    # Identical to the pre-change reader over this fixture (compared directly).
+    assert steps == [1, 2, 3, 1, 2, 3, 4]
 
 
 def test_a_sample_heading_with_no_name_and_no_medium_is_not_invented():

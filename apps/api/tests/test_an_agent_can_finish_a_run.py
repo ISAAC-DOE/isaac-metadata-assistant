@@ -516,14 +516,19 @@ def test_this_slice_added_no_tool(client, agent):
     assertion two lines down — that every registered name is a permitted name — is what
     actually keeps the set closed. Saying so here is the visible act the docstring asks
     for.
+
+    ***17 -> 18 on 2026-09-22, AND AGAIN THE SUBJECT IS UNCHANGED.*** `isaac_list_activity`
+    is a READ over the append-only activity history — no draft content, no run write —
+    and it is asserted read-only by name below, beside the extended-context read.
     """
-    assert len(PERMITTED_TOOL_NAMES) == 17, sorted(PERMITTED_TOOL_NAMES)
+    assert len(PERMITTED_TOOL_NAMES) == 18, sorted(PERMITTED_TOOL_NAMES)
     # THE ADDED TOOL IS A READ, asserted rather than asserted-by-count: a bare count
     # moving from 16 to 17 is equally consistent with a run-level write having been
     # added, which is the one outcome this test exists to make loud.
     from isaac_api.mcp.tools import TOOLS as _TOOLS
 
     assert _TOOLS["isaac_get_extended_context"].read_only is True
+    assert _TOOLS["isaac_list_activity"].read_only is True
     assert set(TOOLS) == set(PERMITTED_TOOL_NAMES)
     # The pair that closes §5A is present, and nothing new joined them.
     assert {"isaac_list_questions", "isaac_answer_questions"} <= set(TOOLS)

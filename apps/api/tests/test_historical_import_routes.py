@@ -292,7 +292,11 @@ def test_no_upload_operation_exists_and_the_upload_route_is_untouched(client):
     # 10 since 2026-09-15 — `HIST-005` added `POST .../add-to-experiment`, which
     # is JSON-only like every other one, so the property this test exists for is
     # unchanged and the count is the thing that moved.
-    assert len(import_ops) == 10
+    # 10 -> 11 on 2026-09-22: `POST .../rules` records a reviewed convention rule. It
+    # is JSON-only too, so the property is again unchanged — and enabling
+    # `historical_file_ingestion` never opens the upload route either (asserted below
+    # with the capability ON, in `test_historical_semantics.py`).
+    assert len(import_ops) == 11
     for path, method, op in import_ops:
         content = ((op.get("requestBody") or {}).get("content") or {})
         assert set(content) <= {"application/json"}, f"{method} {path}: {list(content)}"

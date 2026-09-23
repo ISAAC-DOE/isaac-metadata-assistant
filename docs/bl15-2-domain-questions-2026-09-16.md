@@ -35,6 +35,72 @@ the enumerated form above is both.)*
 
 ---
 
+# RECONCILED 2026-09-22 — ANGEL ANSWERED FIVE MORE, AND WITHDREW `DEC-43`'S 298 K
+
+**Read this section first; the 2026-09-17 reconciliation below is preserved unedited as the
+state it described.** Of that section's eight remaining Angel questions, **five now have a
+disposition and three (Q6, Q7, Q8) are still open.** None of the five closed by writing a
+value: each closed with a *rule about what happens when a source is silent or sources
+disagree*, and the build now implements each rule.
+
+| source | what it is | what a reader can verify |
+|---|---|---|
+| **Angel, relayed by the project owner 2026-09-22** | domain-owner answers A–F, below | **nothing in-repo.** An owner relay of a domain owner's words — the evidentiary class `DEC-47` records. No transcript is committed; only Krish can confirm the relay, and only Angel the content. Every registry row it moved carries this attribution (`bl15/mapping.py`'s `ANGEL_2026_09_22`) |
+| **Temperature-convention research, 2026-09-22** | the check Angel asked for ("look at published work / NIST") | [`docs/evidence/temperature-convention-research-2026-09-22.md`](evidence/temperature-convention-research-2026-09-22.md) — secondary sources, retrieval disclosed in the note itself |
+
+## The six answers, as the build now implements them
+
+| | Angel's answer (paraphrased) | What the build does |
+|---|---|---|
+| **A** | Missing data stays missing; the user updates it later. | Nothing is defaulted, derived or proposed for an unstated field. This is the rule that closes Q9 and the QC half of Q14. |
+| **B** | Do not assume 298 K; "room temperature" could be 293 K; check the literature. | **`DEC-43` is SUPERSEDED** (struck, not deleted, in `bl15/nominal.py`, the mapping registry and the decision register). No temperature is inserted or proposed automatically. The words "room temperature"/"RT" are kept **verbatim** as a new `temperature_statement` concept at placement level 4 and never converted to a number. A numeric **nominal** value may only come from a reviewed, versioned profile rule that names its convention (NTP-style 293.15 K or SATP-style 298.15 K), labelled nominal/inferred, never measured, and requiring confirmation. **No such rule is enabled.** |
+| **C** | `vortDT` is generally the HERFD Vortex channel; in dual-element work `vortDT`/`vortDT2` may belong to different elements and one can be empty. | **Q11 → conditionally resolved.** A per-Run, evidence-based selector (`bl15/signals.py`) suggests a primary channel only when exactly one candidate channel carries live signal and one element is established; otherwise it leaves the Run unresolved and says why. The domain note is never a tie-breaker. The liveness thresholds are measured and recorded with their basis. A dual-element mapping is representable and can be confirmed as a reviewed rule. The selection never writes a record field. |
+| **D** | Does not recall whether the two File-32 acquisitions are two conditions or a typo. | **Q16 → domain owner does not know; conflict permanently preserved.** Both acquisitions keep distinct durable identities (source path + content digest, never the legacy number alone), become distinct Runs, and are re-found by identity on a re-run even if their labels collide. A resolution choosing one is **refused** (`resolution_forbidden`). The notes' support for one reading is shown as evidence, not truth. |
+| **E** | Asked ISAAC to brainstorm source precedence. | **Q15 → policy adopted, with a non-authoritative recommendation.** No universal hierarchy. Every disagreement carries four layers — *Source fact · Normalized reading · Suggested resolution · Scientist-confirmed resolution*. ISAAC may suggest a resolution only from independent evidence (a repeated pattern across ≥3 contiguous units, the final notes, the neighbouring sequence), labelled non-authoritative; a macro and a header that agree count once. A scientist's confirmation is recorded as a reviewed rule; for a record field it still goes forward as a **proposal**, whose acceptance keeps its `409 human_actor_required` gate. |
+| **F** | Does not know what "QC" would mean here. | **Q14 → intentionally left missing.** `measurement.qc.status` is never written from notes. Every free-text `Notes` cell is kept verbatim as a **Data Quality Note** bound to its file number, and can be captured as a run note; nothing parses it. |
+
+## Question-by-question, for the five that moved
+
+| Q | Was (2026-09-17) | Now (2026-09-22) |
+|---|---|---|
+| **Q9** | PARTIAL — still needs Angel for the JK samples | **INTENTIONALLY LEFT MISSING** (answer A). Where a source names RHE it is preserved verbatim as evidence; no `rhe_basis` member is written or proposed for any group |
+| **Q11** | NARROWED — still needs Angel | **CONDITIONALLY RESOLVED** (answer C) — a per-Run selector, not a fixed column |
+| **Q14** | STILL NEEDS ANGEL | **INTENTIONALLY LEFT MISSING** (answer F) — Data Quality Notes instead of a QC verdict |
+| **Q15** | STILL NEEDS ANGEL | **POLICY ADOPTED WITH A NON-AUTHORITATIVE RECOMMENDATION** (answer E). `DEC-42` (a document disagreeing with itself) is unchanged and separate |
+| **Q16** | NARROWED — still needs Angel | **DOMAIN OWNER DOES NOT KNOW — CONFLICT PERMANENTLY PRESERVED** (answer D) |
+
+**Still open, and NOT addressed by the 2026-09-22 reply: Q6 (environment member), Q7
+(reaction member), Q8 (JK cell type).** Per answer A, each field stays missing until Angel or
+a scientist supplies it. Silence on them is not assent.
+
+## Counts — re-measured, not reduced
+
+The registry grew rather than shrank, because answers B and the operator correction each
+introduced a concept that had been folded into another one:
+
+| | 2026-09-17 | 2026-09-22 |
+|---|---:|---:|
+| concepts in the registry (`bl15/mapping.py`) | 45 | **47** (`temperature_statement`, `contributor_statement` added) |
+| `needs_domain_review` rows | 15 | **17** — the two new concepts are placement questions nobody has answered, so they are counted, not hidden |
+| open domain questions | 8 | **3** (Q6, Q7, Q8) |
+
+A closed question does **not** move its registry row to `deterministic`: none of the five
+answers made a value derivable. Re-derive with `apps/api/tests/test_bl15_mapping.py` and
+`test_bl15_placement_hierarchy.py`, which pin these figures.
+
+## The operator is provenance, not a convention
+
+A correction the owner made alongside Angel's answers: the profile formerly called
+`ssrl_bl152_angel` described a **filename convention**, not a person. It is now
+`ssrl_bl152_herfd_echem_naming` ("SSRL BL15-2 HERFD electrochemistry filename convention
+v1"), with `ssrl_bl152_angel` kept as an alias so persisted sessions still resolve. People a
+notes file names on a labelled line (`Operator:`, `Measured by:`, `Run by:`, `Performed by:`,
+`Prepared by:`, `Contributor(s):` — rule `bl15.notes.contributor_statement.v1`) are recorded as
+**provenance** on the units their section covers — never as the basis for choosing how to read a file. The full model is
+[`docs/historical-import-semantics-2026-09-22.md`](historical-import-semantics-2026-09-22.md).
+
+---
+
 # RECONCILED 2026-09-17 — 12 OF THE 20 QUESTIONS BELOW ARE CLOSED
 
 **Read this section instead of §1 for what is still being asked.** §1 is preserved

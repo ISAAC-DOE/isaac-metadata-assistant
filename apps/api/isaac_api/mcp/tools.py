@@ -75,6 +75,7 @@ from .policy import (
     OPERATIONS,
     PERMITTED_TOOL_NAMES,
     Scope,
+    activity_query_parameters,
     changes_query_parameters,
     extended_context_query_parameters,
     forbidden_tool_reason,
@@ -871,6 +872,24 @@ async def _get_extended_context(
     return _settle("get_extended_context", result)
 
 
+async def _list_activity(ctx: ToolContext, args: Mapping[str, Any]) -> ToolOutcome:
+    """One page of the record's append-only activity history. Forwards; adds nothing.
+
+    The route's payload is returned unmodified for ``_get_extended_context``'s reason:
+    it already carries ``actor: unattributed`` with its trust basis on every event, the
+    ``{present, value}`` envelopes, the record's true ``total`` and ``matched``, the
+    served vocabularies and which channels no write site records. A projection here
+    would be one more place those could be dropped.
+    """
+    query = {k: v for k, v in args.items() if k != "experiment_id"}
+    result = await ctx.client.call(
+        "list_activity",
+        path_params={"experiment_id": args["experiment_id"]},
+        query=query,
+    )
+    return _settle("list_activity", result)
+
+
 async def _get_changes(ctx: ToolContext, args: Mapping[str, Any]) -> ToolOutcome:
     query = {k: v for k, v in args.items() if k != "experiment_id"}
     result = await ctx.client.call(
@@ -1282,6 +1301,15 @@ def _extended_context_schema() -> dict:
     two ways to satisfy the same check.
     """
     return _query_schema("get_extended_context", extended_context_query_parameters())
+
+
+def _activity_schema() -> dict:
+    """``isaac_list_activity``'s schema, with the filters the ROUTE actually has.
+
+    Three filters are closed sets on the route (their enum travels into the schema) and
+    `run_id` carries its route bound, so ``_query_schema`` needs no reviewed-map entry.
+    """
+    return _query_schema("list_activity", activity_query_parameters())
 
 
 def _tools() -> tuple[Tool, ...]:
@@ -2727,6 +2755,47 @@ def _tools() -> tuple[Tool, ...]:
             operation_ids=("get_extended_context",),
             input_schema=_extended_context_schema(),
             handler=_get_extended_context,
+            read_only=True,
+            idempotent=True,
+        ),
+        Tool(
+            name="isaac_list_activity",
+            title="Read a record's activity history",
+            description=(
+                "One bounded page of the record's APPEND-ONLY activity history: what "
+                "was done, to which object and field, from what to what, when, and "
+                "through which channel — `web`, `mcp` or `historical_import`. (`system` "
+                "is in the vocabulary, but no act in this build is recorded through it.) "
+                "Read-only; nothing here edits or deletes an event, and no operation "
+                "anywhere does.\n\n"
+                "**`actor` READS `unattributed` FOR EVERY EVENT IN THIS BUILD**, with "
+                "`actor_trust_basis: unattributed` beside it. No trusted authentication "
+                "boundary exists, so no event can truthfully name a person. Never report "
+                "an event as having been performed by anyone, and never infer a person "
+                "from a channel: `web` means the application's HTTP API, not a person in "
+                "a browser.\n\n"
+                "**`before` AND `after` ARE ENVELOPES** — `{present, value}`. "
+                "`present: false` means there was no value; `present: true` with a null "
+                "`value` means the value was null. Read `present` before `value`, or you "
+                "will report a created value as a change to null.\n\n"
+                "**An event is not a field value and not evidence** (`is_field_value: "
+                "false`, `is_evidence: false`). Do not answer a question about a "
+                "record's content from its history.\n\n"
+                "**Three acts are never recorded** — creating a record, discarding one, "
+                "and resetting the workspace — so do not conclude from an absence that "
+                "nothing happened. `channels_without_a_write_site` names the channels no "
+                "act in this build is recorded through, so a zero there is structural.\n\n"
+                "`total` is how many events the record HOLDS and `matched` how many "
+                "satisfied your filters; `returned` is this page alone. `action`, "
+                "`channel` and `object_type` accept only the server's own vocabularies, "
+                "which every response serves. Page with `before_seq` (newest first) or "
+                "`since_seq` (oldest first) using the continuation the response hands "
+                "back."
+            ),
+            scope=Scope.READ,
+            operation_ids=("list_activity",),
+            input_schema=_activity_schema(),
+            handler=_list_activity,
             read_only=True,
             idempotent=True,
         ),

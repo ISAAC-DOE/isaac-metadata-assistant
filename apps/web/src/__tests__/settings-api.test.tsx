@@ -1147,7 +1147,7 @@ describe('the Full Description rule over the REAL generated contract', () => {
    * rule recognises, NOT by widening the list. This is the THIRD recorded
    * instance of that miss, and the second the test caught rather than a human.
    */
-  it('describes the contract it claims to: 91 operations, MEASURED on the merged tree', () => {
+  it('describes the contract it claims to: 93 operations, MEASURED on the merged tree', () => {
     // FOUR slices have now raised this from 52 for real, different additions — the
     // asset slice, the transcript slice, run removal, and the two CONFLICT
     // RESOLUTION operations. Both sides of this merge conflict carried a number
@@ -1870,7 +1870,12 @@ describe('the Full Description rule over the REAL generated contract', () => {
     // re-run on the MERGED tree and transcribed from this test's own failure
     // output, and both operation-log comments above are kept because they document
     // different operations.
-    expect(REAL_CONTRACT_DESCRIPTIONS).toHaveLength(91);
+    //
+    // 91 -> 93, 2026-09-22: reviewed convention rules, TWO new operations —
+    // `POST /api/imports/{import_id}/rules` and
+    // `GET /api/experiments/{experiment_id}/convention-rules`. The TITLE above is
+    // edited in the same change, per this block's standing instruction.
+    expect(REAL_CONTRACT_DESCRIPTIONS).toHaveLength(93);
     // 84,501 -> 84,584 (+83): the assistant seam's own description was corrected, in
     // ONE operation and with the paragraph count unchanged. It read "so every request
     // is answered `501`" while the paragraph two below it documented the `422` — a
@@ -2532,7 +2537,23 @@ describe('the Full Description rule over the REAL generated contract', () => {
     // 169,521 was made while resolving it; the measured value is 169,525. Neither is what
     // the tree measures, because ACT's own figure moved twice on its branch after
     // that prediction was formed.
-    expect(total).toBe(169525);
+    //
+    // 169,525 -> 174,352 (+4,827), 2026-09-22. RE-MEASURED by the `splitPurpose` rule
+    // transcribed into Python over the transcribed array (the port reproduces the
+    // pre-change 169,525 / 335 exactly, which is its check), never apportioned. Per
+    // operation: the two new ones, `POST .../rules` 2,248 and `GET .../convention-rules`
+    // 876; and two re-transcribed, `GET /api/health` 3,947 -> 4,902 (the
+    // `historical_file_ingestion` and `proposal_acceptance` capability paragraphs) and
+    // `POST .../add-to-experiment` 5,257 -> 6,005 (run identity by acquisition, Data
+    // Quality Notes as run notes, and no automatic temperature).
+    //
+    // 174,352 -> 174,790 (+438), same day, in response to an independent review: ONE
+    // description changed, `POST .../add-to-experiment` 6,005 -> 6,443 — a new
+    // paragraph stating that an import is read under the destination record's rules
+    // only (`reread_for_target`), and a clause stating that a Data Quality Note is kept
+    // once per acquisition and row however many times the archive is imported. Measured
+    // by the same port, never apportioned.
+    expect(total).toBe(174790);
     // 104,045 -> 114,959 (+10,914): the four new operations, and NO existing
     // description changed — `test_contract_description_parity.py` proves that rather
     // than leaving it asserted here. RE-DERIVED from the served document and never
@@ -2847,7 +2868,14 @@ describe('the Full Description rule over the REAL generated contract', () => {
       // pre-merge deltas and is not what the tree measures — ACT's own count moved
       // 329 -> 330 after that prediction, which is exactly why this block says to
       // re-run rather than apportion.
-      335,
+      //
+      // 335 -> 342 (+7), 2026-09-22: `POST .../rules` +3, `GET .../convention-rules`
+      // +1, `GET /api/health` 5 -> 7, `POST .../add-to-experiment` 11 -> 12. Measured
+      // with the characters, by the same port.
+      //
+      // 342 -> 343 (+1), same day: `POST .../add-to-experiment` 12 -> 13, the new
+      // read-under-the-destination's-rules paragraph. Measured with the characters.
+      343,
     );
     // 211 -> 235 (+24): the four new operations carry a lead plus 24 post-lead
     // paragraphs between them. It is asserted separately from the character total

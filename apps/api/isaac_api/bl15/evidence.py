@@ -93,6 +93,24 @@ CONCEPT_ECHEM_PROCEDURE = "echem_procedure"
 CONCEPT_NOTE_FILE_NUMBER_ROW = "note_file_number_row"
 CONCEPT_QUALITY_NOTE = "quality_note"
 
+#: What a source says about TEMPERATURE, verbatim — "room temperature", "RT", a labelled
+#: `Temperature:` line. **ADDED 2026-09-22 and NEVER CONVERTED TO A NUMBER.** The domain
+#: owner's answer that day (relayed by the project owner) is that a source literally
+#: saying "room temperature" is preserved as it was written; turning it into 293.15 K or
+#: 298.15 K is choosing a convention, which only a reviewed rule may OFFER
+#: (:mod:`bl15.nominal`). Measured: the supplied archive states no temperature anywhere,
+#: so no real file produces this concept — it exists so that one that does is kept.
+CONCEPT_TEMPERATURE_STATEMENT = "temperature_statement"
+
+#: A person a source NAMES as having run, measured or prepared something — an explicit
+#: labelled line such as `Operator: <name>`. **ADDED 2026-09-22 as PROVENANCE, and never
+#: an actor.** It is the source's words about who did the work, recorded separately from
+#: every parsing decision: no naming convention is ever selected by it
+#: (:mod:`bl15.applicability`), and it is never an ISAAC identity — the record's
+#: `uploaded_by` is server-stamped from a trusted boundary this build does not have.
+#: Measured: the supplied archive carries no such labelled line.
+CONCEPT_CONTRIBUTOR_STATEMENT = "contributor_statement"
+
 #: A token a reader SAW and could not name. **It is a first-class concept, not a
 #: failure.** ``HIST-004``'s banned pattern is "Upload -> Spinner -> Mysterious
 #: JSON", and silently dropping the third of a filename a profile does not
@@ -146,6 +164,8 @@ CONCEPTS: frozenset[str] = frozenset(
         CONCEPT_ECHEM_PROCEDURE,
         CONCEPT_NOTE_FILE_NUMBER_ROW,
         CONCEPT_QUALITY_NOTE,
+        CONCEPT_TEMPERATURE_STATEMENT,
+        CONCEPT_CONTRIBUTOR_STATEMENT,
         CONCEPT_UNKNOWN_TOKEN,
     }
 )
