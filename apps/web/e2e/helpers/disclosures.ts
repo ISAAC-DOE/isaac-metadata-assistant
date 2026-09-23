@@ -160,8 +160,9 @@ export const PROSE_DISCLOSURES: Readonly<Record<string, number>> = Object.freeze
 export const FIELD_GROUP_SURFACES: ReadonlySet<string> = new Set(['record-detail']);
 
 /**
- * How many `details.bl15-digest-row` / `.bl15-disclosure` / `.bl15-unit-disclosure`
- * each surface mounts — the BL15-2 large-corpus review (`BL15R-012`).
+ * How many BL15-2 large-corpus review disclosures each surface mounts (`BL15R-012`)
+ * — since 2026-09-22 the shared `Disclosure` triggers inside `.bl15` / `.bl15-runs`
+ * and each measurement's `button.bl15-unit-toggle` (they were `details.bl15-*`).
  *
  * ── DECLARED AT ZERO, AND THE REASON CHANGED 2026-09-16 ───────────────────
  *
@@ -338,8 +339,15 @@ export async function openUnreachableDisclosures(page: Page, surfaceId: string):
    * prose disclosures above; see `BL15_REVIEW_DISCLOSURES` for why the declared
    * count is 0 today and why it is written down anyway.
    */
+  /*
+   * RE-POINTED 2026-09-22 (owner QA H1): the review's `<details>` became the shared
+   * `Disclosure` (a button with `aria-expanded`) and each measurement's toggle a
+   * real button in its legacy cell. Counting the retired `details.bl15-*` classes
+   * would have kept this at 0 FOREVER, whatever a surface mounted — a guard that
+   * cannot fail. These are the review's own disclosures as they now render.
+   */
   const bl15 = page.locator(
-    'details.bl15-digest-row, details.bl15-disclosure, details.bl15-unit-disclosure'
+    '.bl15 .disclosure-trigger, .bl15-runs .disclosure-trigger, button.bl15-unit-toggle'
   );
   const expectedBl15 = BL15_REVIEW_DISCLOSURES[surfaceId] ?? 0;
   const bl15Count = await bl15.count();
@@ -353,8 +361,8 @@ export async function openUnreachableDisclosures(page: Page, surfaceId: string):
   ).toBe(expectedBl15);
   for (let i = 0; i < bl15Count; i++) {
     const one = bl15.nth(i);
-    await one.locator('> summary').click();
-    await expect(one).toHaveAttribute('open', '');
+    if ((await one.getAttribute('aria-expanded')) === 'false') await one.click();
+    await expect(one).toHaveAttribute('aria-expanded', 'true');
   }
 
   /*

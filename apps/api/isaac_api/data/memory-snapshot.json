@@ -10504,7 +10504,7 @@
       },
       {
         "path": "apps/web/src/lib/api.ts",
-        "sha256": "10323c6105c840de603a99cd23ef11f9a804096431945eb791db1b8e2fb4570f"
+        "sha256": "82c2e5de5f722bf95ee15df8a820010e350896a673f766ed5c5465e468703fab"
       },
       {
         "path": "apps/web/src/lib/assistant.ts",
@@ -10524,7 +10524,7 @@
       },
       {
         "path": "apps/web/src/lib/types.ts",
-        "sha256": "bbc0098df51fb27099ae9bb63fd488e5246815a3bb9dd8416b42a90919a8e26e"
+        "sha256": "b846b9134924c207977a7f0f365a91a74d47733f960812d106d6a9935efa8229"
       },
       {
         "path": "apps/web/src/lib/useFetch.ts",
@@ -11012,7 +11012,7 @@
       }
     ],
     "served_file_count": 200,
-    "served_manifest_fingerprint": "7f1a0a98840dff1560eb67050395e80cfe05d7033a37b1787a531b1f13ba5e0b"
+    "served_manifest_fingerprint": "cf504247f91c77031de1fa4d0528132a5cf57dd39e0284032d232790bc6e245e"
   },
   "overview": {
     "built_at_commit": "caab1d0a69c1733524bda5dde495623bc4b7bad1",

@@ -338,3 +338,171 @@ export const IMPORT_COPY = {
 } as const;
 
 export type ImportCopyKey = keyof typeof IMPORT_COPY;
+
+/**
+ * THE STAGE FLOW'S OWN WORDS (owner QA H1, 2026-09-22).
+ *
+ * An opened import used to render every stage's explanation at once. The owner's
+ * brief: one stage in focus, each with at most ONE short heading and ONE short
+ * sentence visible, and every longer explanation behind a `HelpTip` or a
+ * `Disclosure`. So each stage carries exactly a `title`, a one-sentence `lead` and a
+ * `help` definition — and nothing in `help` is a blocking error, an uncertainty, a
+ * consequence or a conflict (DEC-35): those stay on the surface.
+ *
+ * The stage names are the OWNER's, and they are deliberately not the server's
+ * workflow step labels: the server's six steps describe what the backend DOES (Parse,
+ * Reconstruct), and these describe what a scientist is LOOKING AT. Each stage maps to
+ * one server step for "how far has this session got" (`importStages.ts`).
+ */
+export const IMPORT_STAGE_COPY = {
+  stagesLabel: 'Import stages',
+  sources: {
+    title: 'Source Bundle',
+    lead: 'The files this import reads from. Adding one changes no record.',
+    help: 'A source is either a file ISAAC ships and can read, an archive it walks, or a pointer to a file it does not open.',
+  },
+  read: {
+    title: 'What ISAAC Read',
+    lead: 'What each source said, and what it passed over. No record changes.',
+    help: 'Reading applies every reader this build has to every source that has one. A line it could not read is listed with the reason rather than dropped.',
+  },
+  runs: {
+    title: 'Runs & Candidates',
+    leadArchive: 'Each measurement ISAAC found, grouped by sample. Open one to see its values and where each came from.',
+    leadFixture: 'What the sources add up to. Open a candidate to see the sources behind it.',
+    help: 'A candidate is a suggestion, not a value. It becomes a value only when someone accepts its proposal on a record.',
+  },
+  conflicts: {
+    title: 'Conflicts',
+    lead: 'Where sources disagree. Every reading is kept, and nothing is chosen until you decide.',
+    help: 'There is no ranking of sources. A macro is the plan, a header is what the instrument recorded, a filename is a human label, and the notes are a later reading.',
+    none: 'No source disagrees with another in this import.',
+    noValue: 'No value has been selected.',
+    review: 'Review Sources',
+  },
+  review: {
+    title: 'Review',
+    lead: 'What can go forward now, and what still needs a decision.',
+    help: 'Only candidates marked Ready to Send can become proposals. The others say why they cannot.',
+  },
+  add: {
+    title: 'Add to Experiment',
+    lead: 'Send every ready candidate to one record as open proposals. No value is written.',
+    help: 'Each sent candidate becomes an open proposal on the record, with a note carrying the source’s own words.',
+  },
+  stateLabels: {
+    ready: 'Ready to Send',
+    needsReview: 'Needs Review',
+    conflict: 'Sources Conflict',
+    unmapped: 'Unmapped',
+    resolved: 'Resolved',
+    sourcesAgree: 'Sources Agree',
+    notRecorded: 'Not Recorded',
+    stated: 'Stated in a Source',
+    notBuilt: 'Not Built',
+    reached: 'Reached',
+    ambiguous: 'Ambiguous',
+    stale: 'Stale Rule',
+    suggested: 'Suggested',
+  },
+  bucketTitles: {
+    ready: 'Ready to Send',
+    conflict: 'Sources Conflict',
+    needsReview: 'Needs Review',
+    resolved: 'Resolved',
+    unmapped: 'Unmapped',
+  },
+  summaryTitle: 'At a Glance',
+  statementsTitle: 'What It Said',
+  skippedTitle: 'Passed Over',
+  sourcesColumn: {
+    file: 'File',
+    kind: 'Kind',
+    read: 'Read?',
+    actions: 'Actions',
+  },
+  moreSources: 'What counts as a source',
+  conventionsTitle: 'Naming Conventions',
+  conventionsHelp:
+    'A convention says what a filename token means. It is chosen by the source’s own name and never by who ran a measurement.',
+  temperatureTitle: 'Temperature',
+  temperatureStated: 'Kept exactly as written — never converted to a number, and no number is offered.',
+  temperatureWhy: 'Why no temperature is filled in',
+  peopleTitle: 'People Named in the Notes',
+  peopleHelp:
+    'Recorded as provenance only. A person is never the reason a file is read one way or another, and is never the actor of anything in ISAAC.',
+  signalTitle: 'HERFD Signal',
+  signalHelp:
+    'Per run, ISAAC suggests a primary channel only when exactly one carries live signal and one element is established. A suggestion is never a decision.',
+  qualityTitle: 'Data Quality Notes',
+  qualityNote: 'Kept word for word. Never read as a QC verdict.',
+  allCounts: 'All counts, and where each came from',
+  mapping: 'What the official schema can take',
+  ceiling: 'What cannot be finished here',
+  extended: 'Extended context (level 4)',
+  leftOut: 'What this import left out',
+  layers: {
+    sourceFact: 'Source Facts',
+    normalized: 'Normalized Reading',
+    suggested: 'Suggested Resolution',
+    confirmed: 'Scientist-Confirmed Resolution',
+    nonAuthoritative: 'Not authoritative',
+    normalizedNone: 'None — these readings are compared exactly as written.',
+    noSuggestion: 'No suggestion — the evidence does not point one way.',
+    notYet: 'Not resolved yet.',
+  },
+  resolve: {
+    choose: 'Which reading is right?',
+    scope: 'Apply it',
+    recurring: 'Also apply to every conflict of this kind in this sample group',
+    submit: 'Record This Choice',
+    forbidden:
+      'Both acquisitions are kept, and nothing will be chosen: nobody can say which one is right.',
+    fixtureOnly:
+      'This build records a choice between readings for archive imports only. Enter the value on the record yourself.',
+  },
+  rulesTitle: 'Reading Rules',
+  rulesHelp:
+    'A rule records how to read sources — never a value. Rules are versioned, never edited, and applied only where you choose.',
+  rulesNone: 'No reading rule has been recorded for this import.',
+  suggestionsTitle: 'Suggested From Other Experiments',
+  adopt: 'Adopt for This Experiment',
+  confirmedBy: 'Confirmed by',
+  unattributed: 'Unattributed',
+  /* The owner's own three phrases (QA H1). A rule for an Experiment or a convention
+     is stored on the Experiment chosen just below, so "this" is that one. */
+  scopeOptions: {
+    import: 'Apply only here',
+    experiment: 'Use as a rule for this Experiment',
+    profile: 'Use as a rule for this convention',
+  },
+  whichExperiment: 'Which experiment?',
+  bindingTitle: 'Read Some Runs With Another Convention',
+  bindingOne: 'One naming convention is registered in this build, so there is nothing to switch to.',
+  bindingSubmit: 'Record This Convention',
+  signalConfirm: 'Confirm This Channel',
+  signalAssign: 'Record Channel Assignment',
+  addSummaryTitle: 'What Will Be Sent',
+  addResultTitle: 'What Happened',
+  createRuns: 'Make one run per measurement',
+  openProposals: 'Open Proposals on This Record',
+  acceptanceNote:
+    'Accepting a proposal needs a reviewer this deployment can identify, and it cannot identify one yet. The proposals stay open on the record until it can.',
+  runsPresent: 'Measurements that already had a run',
+  runsCreated: 'Runs created',
+  dqnCaptured: 'Data Quality Notes kept as run notes',
+  reread: 'This import was re-read under this record’s own reading rules first.',
+  searchLabel: 'Search measurements',
+  whereFrom: 'Where each value came from',
+  sharedLegacy: 'Shares its legacy number with another acquisition — both are kept, and neither is preferred.',
+  discardTitle: 'This Working Area',
+  fields: {
+    convention: 'Convention',
+    fromRun: 'From run',
+    toRun: 'To run',
+    element: 'Element',
+    edge: 'Edge',
+    record: 'Which record?',
+    run: 'Which run?',
+  },
+} as const;

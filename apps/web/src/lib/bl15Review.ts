@@ -63,6 +63,36 @@ export interface Bl15Reading {
   locator: string;
   value: string;
   source_type: string;
+  /**
+   * 2026-09-22 (`bl15/resolution.py`) — what KIND of claim this source makes:
+   * `planned_acquisition` (a macro), `instrument_header`, `human_label` (a
+   * filename), `retrospective_note`, `absence_of_a_source` or `other_source`. A
+   * role is a description, never a rank: there is no source hierarchy.
+   */
+  source_role?: string;
+  source_role_meaning?: string;
+  layer?: string;
+}
+
+/** One piece of independent evidence bearing on which reading is right. */
+export interface Bl15Support {
+  value: string | null;
+  kind: string;
+  sentence: string;
+  source_path: string;
+  locator: string;
+  /** `false` for a note explaining why something does NOT count as support. */
+  counts: boolean;
+}
+
+/** ISAAC's suggestion for one conflict, or why it has none. NEVER authoritative. */
+export interface Bl15Recommendation {
+  status: 'suggested' | 'none' | 'forbidden';
+  value: string | null;
+  why: string;
+  supports: Bl15Support[];
+  authority: 'non_authoritative';
+  layer?: string;
 }
 
 /**
@@ -83,6 +113,13 @@ export interface Bl15Conflict {
   readings: Bl15Reading[];
   unresolved_reason: string;
   explanation: string;
+  /** 2026-09-22 — the stable handle a resolution rule names (`<kind>:<subject>`). */
+  conflict_id?: string;
+  /** The suggested-resolution layer. Absent from payloads written before it existed. */
+  recommendation?: Bl15Recommendation | null;
+  /** The scientist-confirmed layer, when a rule resolved it. */
+  resolution?: Record<string, unknown> | null;
+  review_status?: 'needs_review' | 'sources_conflict' | 'resolved' | string;
 }
 
 /** `relate.MacroBlock` — a macro declaring it is about to write a measurement. */
@@ -163,6 +200,13 @@ export interface Bl15Relationships {
   inputs_present: string[];
   unit_count: number;
   conflict_count: number;
+  /** The four layers and the source roles, stated by the server; `source_hierarchy` is null. */
+  conflict_model?: {
+    layers: { layer: string; meaning: string }[];
+    source_roles: Record<string, string>;
+    source_hierarchy: null;
+    policy: string;
+  };
 }
 
 /**
@@ -331,10 +375,47 @@ export interface Bl15ExtendedContext {
   not_official: string;
 }
 
+/** What a source says about temperature — words, never a number. */
+export interface Bl15TemperatureView {
+  official_path: string;
+  status: 'not_recorded' | 'stated_in_source';
+  display: string;
+  statements: { raw_literal: string; source_path?: string; locator?: string; converted_to_a_number: false }[];
+  automatic_value: null;
+  automatic_proposal: false;
+  nominal_rule_enabled_for: string[];
+  policy: string;
+  superseded_decision?: string;
+}
+
 export interface Bl15CorpusReview {
   inventory: Bl15ArchiveInventory;
   relationships: Bl15Relationships;
   evidence: Bl15SourceEvidence[];
+  /* ── 2026-09-22, all optional: payloads written before them still read ── */
+  profile_applicability?: {
+    bindings: Record<string, unknown>[];
+    convention_counts: Record<string, number>;
+    ambiguous_sources: number;
+    selected_by_operator: false;
+    rule: string;
+  };
+  temperature?: Bl15TemperatureView;
+  data_quality_notes?: {
+    label: string;
+    bound_to_a_measurement: number;
+    unbound: { text: string; source_path: string; locator: string }[];
+    writes_qc_status: false;
+    policy: string;
+  };
+  herfd_signal?: {
+    acquisition_system: { system_id: string; display_name: string; candidate_channels: string[]; basis: string; domain_note: string };
+    element_evidence: { element: string; edge: string | null; source_path: string; locator: string; role: string; rule: string }[];
+    by_status: Record<string, number>;
+    writes_a_record_field: false;
+  };
+  beamtime_contributors?: { name: string; label: string | null; source_path: string; locator: string }[];
+  rules_applied?: string[];
   /** `DEC-41` level 4 and its three costs. See {@link Bl15ExtendedContext}. */
   extended_context?: Bl15ExtendedContext;
   mapping: {

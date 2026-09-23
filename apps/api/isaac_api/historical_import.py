@@ -4967,6 +4967,24 @@ def _rules_view(session: "ImportSession") -> dict:
     }
 
 
+#: The policy served beside a temperature a source DOES state in words. The absence
+#: constant (`bl15.mapping.TEMPERATURE_ABSENT_REASON`) opens "this corpus states no
+#: temperature anywhere", which is false for such a corpus — and it was served beside
+#: the very statement it denies until the Historical Import UI slice (2026-09-22)
+#: rendered the two together. Everything else it says still holds, so it is said here
+#: without the absence claim.
+TEMPERATURE_STATED_POLICY = (
+    "context.temperature_K is required by the official schema whenever a context block "
+    "is present, and it takes a number in kelvin. A source here states a temperature "
+    "only in words; that statement is kept verbatim in the extended context and is "
+    "never converted, so the field is left MISSING: this application inserts no value "
+    "and offers no value automatically, and 298 must not be defaulted into "
+    "context.temperature_K by this application. A nominal number may be OFFERED only "
+    "by a reviewed convention rule that names its convention, labels it nominal and "
+    "inferred, and waits for a scientist to confirm it."
+)
+
+
 def _temperature_view(reading: "ArchiveReading") -> dict:
     from .bl15 import mapping as mp  # local: keeps import order flexible
     from .bl15 import nominal  # local: keeps import order flexible
@@ -4989,7 +5007,11 @@ def _temperature_view(reading: "ArchiveReading") -> dict:
         "automatic_value": None,
         "automatic_proposal": False,
         "nominal_rule_enabled_for": offers,
-        "policy": mp.TEMPERATURE_ABSENT_REASON,
+        "policy": (
+            TEMPERATURE_STATED_POLICY
+            if reading.temperature_statements
+            else mp.TEMPERATURE_ABSENT_REASON
+        ),
         "superseded_decision": nominal.SUPERSEDED_DECISION,
     }
 

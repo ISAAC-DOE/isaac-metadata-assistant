@@ -700,6 +700,14 @@ def test_room_temperature_is_kept_verbatim_and_no_number_is_offered(client):
     ]
     assert all(t["converted_to_a_number"] is False for t in temperature["statements"])
     assert temperature["automatic_value"] is None
+    # THE POLICY MUST NOT CONTRADICT THE STATEMENT SERVED BESIDE IT. It used to be
+    # `TEMPERATURE_ABSENT_REASON` unconditionally, which opens "this corpus states no
+    # temperature anywhere" — false for this corpus, whose notes state one in words.
+    # Found by the Historical Import UI slice (2026-09-22), which would have rendered
+    # the two side by side.
+    assert "states no temperature anywhere" not in temperature["policy"]
+    assert "verbatim" in temperature["policy"]
+    assert "298" in temperature["policy"] and "must not be defaulted" in temperature["policy"]
 
     eid = _record(client)
     body = client.post(

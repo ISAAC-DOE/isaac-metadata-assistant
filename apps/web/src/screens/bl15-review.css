@@ -57,21 +57,6 @@
   background: var(--surface-subtle);
 }
 
-.bl15-block-alert {
-  border-color: var(--advisory-border);
-  background: var(--advisory-bg);
-}
-
-.bl15-block-title {
-  margin: 0;
-  display: flex;
-  align-items: center;
-  gap: var(--space-xs);
-  font-size: var(--font-size-body);
-  font-weight: var(--font-weight-bold);
-  color: var(--text-heading);
-}
-
 .bl15-lead,
 .bl15-note {
   margin-top: var(--space-xs);
@@ -132,29 +117,6 @@
   gap: var(--space-xs);
 }
 
-.bl15-digest-row > summary {
-  display: list-item;
-  list-style-position: inside;
-  cursor: pointer;
-  padding: var(--space-xs) var(--space-sm);
-  border: 1px solid var(--border-faint);
-  border-radius: var(--radius-inner);
-  background: var(--surface);
-}
-
-.bl15-digest-row > summary::marker {
-  color: var(--text-muted);
-}
-
-.bl15-digest-row > summary:hover .bl15-digest-label {
-  color: var(--action);
-}
-
-.bl15-digest-row > summary:focus-visible {
-  outline: 2px solid var(--action);
-  outline-offset: 2px;
-}
-
 .bl15-digest-value {
   font-size: var(--font-size-body);
   font-weight: var(--font-weight-bold);
@@ -177,34 +139,6 @@
 }
 
 /* ── shared disclosure, same shape as Data & Privacy ───────────────────── */
-
-.bl15-disclosure > summary {
-  display: list-item;
-  list-style-position: inside;
-  cursor: pointer;
-  border-radius: var(--radius-inner);
-}
-
-.bl15-disclosure > summary::marker {
-  color: var(--text-muted);
-}
-
-/* A block-level heading inside a `<summary>` would drop below the marker's line
-   box. `<h4>`/`<h5>` as a first `<summary>`'s child is the spec's own allowance. */
-.bl15-disclosure > summary > h4,
-.bl15-disclosure > summary > h5 {
-  display: inline;
-}
-
-.bl15-disclosure > summary:hover > h4,
-.bl15-disclosure > summary:hover > h5 {
-  color: var(--action);
-}
-
-.bl15-disclosure > summary:focus-visible {
-  outline: 2px solid var(--action);
-  outline-offset: 2px;
-}
 
 /* ── the ceiling ────────────────────────────────────────────────────────── */
 
@@ -471,41 +405,7 @@
   border-bottom: 1px solid var(--border-faint);
 }
 
-.bl15-unit-disclosure > summary {
-  display: list-item;
-  list-style-position: inside;
-  cursor: pointer;
-  font-size: var(--font-size-meta);
-  color: var(--action);
-}
-
-.bl15-unit-disclosure > summary::marker {
-  color: var(--text-muted);
-}
-
-.bl15-unit-disclosure > summary:focus-visible {
-  outline: 2px solid var(--action);
-  outline-offset: 2px;
-}
-
-.bl15-unit-summary {
-  overflow-wrap: anywhere;
-}
-
 /* ── conflicts ──────────────────────────────────────────────────────────── */
-
-.bl15-conflict-kind {
-  margin-top: var(--space-sm);
-}
-
-.bl15-conflict-kind-title {
-  margin: 0;
-  display: flex;
-  align-items: center;
-  font-size: var(--font-size-meta);
-  font-weight: var(--font-weight-bold);
-  color: var(--text-heading);
-}
 
 .bl15-conflict-list,
 .bl15-readings,
@@ -523,86 +423,7 @@
   gap: var(--space-sm);
 }
 
-.bl15-conflict {
-  padding: var(--space-sm);
-  border: 1px solid var(--border-faint);
-  border-radius: var(--radius-inner);
-  background: var(--surface);
-}
-
-.bl15-conflict-subject {
-  margin: 0;
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: var(--space-sm);
-}
-
-.bl15-conflict-label {
-  font-size: var(--font-size-meta);
-  font-weight: var(--font-weight-bold);
-  color: var(--text-heading);
-  overflow-wrap: anywhere;
-}
-
-.bl15-conflict-stem {
-  font-size: var(--font-size-meta);
-  color: var(--text-muted);
-  overflow-wrap: anywhere;
-}
-
-.bl15-conflict-explanation {
-  margin-top: var(--space-xs);
-  font-size: var(--font-size-meta);
-  line-height: var(--line-height-normal);
-  color: var(--text-secondary);
-  max-width: 68ch;
-}
-
-/* EVERY reading gets a row. Three or more is the corpus's most instructive case,
-   so nothing here is sized or styled for exactly two. */
-.bl15-readings > li {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: var(--space-sm);
-  padding: var(--space-xs) var(--space-sm);
-  border-left: 2px solid var(--border-strong);
-  background: var(--surface-subtle);
-}
-
-.bl15-reading-value {
-  font-size: var(--font-size-meta);
-  font-weight: var(--font-weight-bold);
-  color: var(--text-heading);
-  overflow-wrap: anywhere;
-}
-
-.bl15-reading-source {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-sm);
-  font-size: var(--font-size-meta);
-  color: var(--text-muted);
-  overflow-wrap: anywhere;
-}
-
-.bl15-conflict-unresolved {
-  margin-top: var(--space-xs);
-  font-size: var(--font-size-meta);
-  color: var(--text-muted);
-}
-
 /* ── mapping review ────────────────────────────────────────────────────── */
-
-.bl15-status-title {
-  margin: 0;
-  display: inline-flex;
-  align-items: center;
-  font-size: var(--font-size-meta);
-  font-weight: var(--font-weight-bold);
-  color: var(--text-heading);
-}
 
 .bl15-concepts > li {
   padding: var(--space-sm);
@@ -661,7 +482,7 @@
   max-width: 68ch;
 }
 
-.bl15-concept-open-label {
+.bl15-concept-open-lead {
   font-weight: var(--font-weight-bold);
 }
 
@@ -759,4 +580,264 @@
   font-size: var(--font-size-meta);
   color: var(--text-muted);
   overflow-wrap: anywhere;
+}
+
+/* ══ STAGE PIECES (owner QA H1, 2026-09-22) ═════════════════════════════════ */
+
+.bl15-highlights {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-sm) var(--space-xl);
+  margin: 0;
+  padding: 0;
+}
+
+.bl15-highlight {
+  display: flex;
+  flex-direction: column-reverse;
+  gap: var(--space-2xs);
+  min-width: 0;
+  max-width: 12rem;
+}
+
+.bl15-highlight dt {
+  font-size: var(--font-size-meta);
+  line-height: var(--line-height-normal);
+  color: var(--text-muted);
+}
+
+.bl15-highlight dd {
+  margin: 0;
+  font-size: var(--font-size-heading-md);
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-heading);
+  font-variant-numeric: tabular-nums;
+}
+
+.bl15-digest > li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-2xs) var(--space-sm);
+}
+
+.bl15-reference {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+
+.bl15-fact {
+  padding-top: var(--space-sm);
+  border-top: 1px solid var(--border-faint);
+}
+
+.bl15-fact-title {
+  margin: 0;
+  font-size: var(--font-size-body);
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-strong);
+}
+
+.bl15-fact-body {
+  margin: var(--space-2xs) 0 0;
+  font-size: var(--font-size-body);
+  line-height: var(--line-height-relaxed);
+  color: var(--text-secondary);
+}
+
+.bl15-fact-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2xs);
+  margin: var(--space-2xs) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.bl15-fact-list > li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-2xs) var(--space-sm);
+}
+
+.bl15-fact-strong {
+  font-weight: var(--font-weight-medium);
+  color: var(--text-primary);
+}
+
+.bl15-quote {
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+
+.bl15-group-convention {
+  margin: 0 0 var(--space-xs);
+  font-size: var(--font-size-meta);
+  color: var(--text-secondary);
+}
+
+.bl15-runs {
+  container-type: inline-size;
+}
+
+/*
+ * `position: relative` MAKES THE TABLE THE CONTAINING BLOCK of its own `.sr-only`
+ * spans. Without it those absolutely-positioned spans took the viewport as their
+ * containing block, escaped the table's own horizontal scroll, and widened the
+ * whole PAGE at 820px (measured: document 971px wide in an 820px window, with no
+ * visible element past the edge).
+ */
+.bl15-runs .bl15-table {
+  position: relative;
+}
+
+/* THE LEGACY CELL IS THE TOGGLE: a real button, the number set in the action ink
+   so the row reads as openable without an 11px triangle. */
+.bl15-unit-toggle {
+  min-width: 0;
+  white-space: normal;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-2xs);
+  width: 100%;
+  padding: var(--space-2xs) var(--space-xs);
+  border: 0;
+  border-radius: var(--radius-token);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.bl15-unit-toggle:hover {
+  background: var(--border-faint);
+}
+
+.bl15-unit-toggle:focus-visible {
+  outline: 2px solid var(--action);
+  outline-offset: 1px;
+}
+
+.bl15-unit-toggle[aria-expanded='true'] {
+  background: var(--action-tint);
+}
+
+.bl15-legacy-number {
+  color: var(--action);
+}
+
+.bl15-unit-toggle .bl15-stem {
+  max-width: 100%;
+}
+
+.bl15-evidence-row[hidden] {
+  display: none;
+}
+
+.bl15-run {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  padding: var(--space-sm) 0 var(--space-md);
+}
+
+.bl15-run-line,
+.bl15-run-flag {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-xs);
+  margin: 0;
+  font-size: var(--font-size-meta);
+  color: var(--text-secondary);
+}
+
+.bl15-run-key {
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-strong);
+}
+
+.bl15-evidence-rule {
+  display: block;
+  font-size: var(--font-size-meta);
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+
+/*
+ * NARROW: THE TABLE BECOMES A LIST OF CARDS instead of scrolling sideways, because an
+ * opened measurement spans every column and a sideways-scrolling detail cannot be
+ * read. Each cell carries its column name in `data-label`, so nothing loses its
+ * heading; the header row stays for assistive technology only.
+ */
+@container (max-width: 50rem) {
+  .bl15-runs .bl15-table,
+  .bl15-runs .bl15-table tbody,
+  .bl15-runs .bl15-table tr,
+  .bl15-runs .bl15-table th,
+  .bl15-runs .bl15-table td {
+    display: block;
+    width: auto;
+  }
+
+  .bl15-runs .bl15-table {
+    overflow-x: visible;
+  }
+
+  .bl15-runs .bl15-table thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
+  .bl15-runs .bl15-table tr.bl15-row {
+    padding: var(--space-xs) 0;
+    border-bottom: 1px solid var(--border-faint);
+  }
+
+  .bl15-runs .bl15-table tr.bl15-row > td,
+  .bl15-runs .bl15-table tr.bl15-row > th {
+    display: flex;
+    gap: var(--space-sm);
+    padding: var(--space-2xs) 0;
+    border-bottom: 0;
+    text-align: left;
+  }
+
+  .bl15-runs .bl15-table tr.bl15-row > th {
+    display: block;
+  }
+
+  .bl15-runs .bl15-table tr.bl15-row > td::before {
+    content: attr(data-label);
+    flex: 0 0 6rem;
+    color: var(--text-muted);
+  }
+
+  .bl15-runs .bl15-table .bl15-evidence-row > td {
+    padding: 0;
+  }
+
+  /* The stacked `display: block` above out-ranks `[hidden]`; a closed run's
+     detail row must stay closed at every width. */
+  .bl15-runs .bl15-table tr[hidden] {
+    display: none;
+  }
+}
+
+/* The search box keeps a readable width instead of shrinking to its placeholder's
+   first word beside the filter chips. */
+.bl15-runs .bl15-field {
+  flex: 0 1 16rem;
+}
+
+.bl15-runs .bl15-input {
+  width: 100%;
 }

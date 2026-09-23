@@ -878,7 +878,8 @@
 
 .hi-form {
   flex: 1 1 18rem;
-  min-width: 16rem;
+  /* `min()`: a 16rem floor is wider than a 320px phone's stage panel. */
+  min-width: min(16rem, 100%);
 }
 
 /*
@@ -948,12 +949,6 @@
 
 /* --- parse output ---------------------------------------------------------- */
 
-.hi-parsed {
-  margin-top: var(--space-md);
-  padding-top: var(--space-sm);
-  border-top: 1px solid var(--border-faint);
-}
-
 .hi-statements,
 .hi-skipped,
 .hi-support,
@@ -1020,69 +1015,11 @@
   border-top: 1px solid var(--border-faint);
 }
 
-.hi-candidate {
-  border: 1px solid var(--border);
-  border-radius: var(--radius-inner);
-  background: var(--surface);
-  padding: var(--space-sm);
-  margin: var(--space-xs) 0;
-  max-width: var(--content-max);
-}
-
-.hi-candidate-head {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: var(--space-xs);
-}
-
 .hi-candidate-target {
   font-family: var(--font-mono);
   font-size: var(--font-size-meta);
   color: var(--text-strong);
   overflow-wrap: anywhere;
-}
-
-/*
- * READ versus INFERRED. Two neutral chips, and neither is a verdict: an inferred
- * candidate is not WORSE than a read one, it is differently warranted, and a
- * reader has to be able to tell which without being told which to prefer.
- * `--inferred-*` is the existing tinted pair for exactly this distinction in the
- * draft's own field rows, reused rather than a new colour.
- */
-.hi-determinism {
-  font-size: var(--font-size-meta);
-  font-weight: var(--font-weight-medium);
-  border-radius: var(--radius-pill);
-  padding: var(--space-2xs) var(--space-xs);
-  white-space: nowrap;
-}
-
-.hi-determinism-deterministic {
-  color: var(--confirmed-text);
-  background: var(--confirmed-bg);
-  border: 1px solid var(--confirmed-border);
-}
-
-.hi-determinism-inferred {
-  color: var(--inferred-text);
-  background: var(--inferred-bg);
-  border: 1px solid var(--inferred-border);
-}
-
-.hi-candidate-value {
-  font-size: var(--font-size-body);
-  font-weight: var(--font-weight-medium);
-  color: var(--text-primary);
-  margin: var(--space-2xs) 0;
-  overflow-wrap: anywhere;
-}
-
-.hi-candidate-none {
-  font-weight: var(--font-weight-regular);
-  color: var(--text-muted);
-  font-style: italic;
 }
 
 .hi-rule {
@@ -1099,77 +1036,6 @@
   margin-top: var(--space-sm);
   padding-top: var(--space-sm);
   border-top: 1px solid var(--border-hair);
-}
-
-/*
- * THE "WHAT COUNTS AS A SOURCE" DRAWER. Reference prose, collapsed — the one
- * sentence that changes what a reader does stays on the page above it.
- */
-.hi-more {
-  margin-top: var(--space-sm);
-  max-width: var(--hi-prose);
-}
-.hi-more-summary {
-  cursor: pointer;
-  width: fit-content;
-  font-size: var(--font-size-meta);
-  color: var(--action);
-}
-.hi-more-summary:focus-visible {
-  outline: 2px solid var(--action);
-  outline-offset: 2px;
-  border-radius: var(--radius-inner);
-}
-
-/*
- * `Add an external reference instead` — the demoted source path (`DEC-33`).
- *
- * It is a `<details>` and not a hidden panel: the owner's direction moves the
- * reference form BEHIND the file picker, not away. A reference is still the only
- * way to describe a file that has to stay where it is — on an instrument
- * machine, in group storage — which a browser picker cannot express at all,
- * because a browser does not disclose a local path.
- *
- * Capped at the app's own `readable` measure for the reason the disclosure above
- * it is: the forms inside are narrow, and an uncapped 1166px host would strand
- * the same gutter `e2e/specs/wide-prose.spec.ts` now measures.
- */
-.hi-reference-fallback {
-  max-width: 760px;
-  margin-top: var(--space-sm);
-}
-
-.hi-reference-fallback > summary {
-  display: flex;
-  align-items: center;
-  gap: var(--space-xs);
-  /* `var(--font-size-body)` — which IS 13px, the same value the sibling rule
-     above writes as a literal. My first attempt reached for
-     `--font-size-meta` and that is **11px**: it would have silently shrunk
-     this control by 2px to satisfy a ratchet. Tokenizing must preserve the
-     rendered value or it is not tokenizing, it is redesigning by accident. */
-  font-size: var(--font-size-body);
-  font-weight: var(--font-weight-medium);
-  color: var(--action);
-  cursor: pointer;
-  list-style: none;
-  width: fit-content;
-}
-
-.hi-reference-fallback > summary::-webkit-details-marker {
-  display: none;
-}
-
-.hi-reference-fallback > summary::before {
-  content: '▸';
-  display: inline-block;
-  font-size: 10px;
-  color: var(--text-tertiary);
-  transition: transform 0.12s ease;
-}
-
-.hi-reference-fallback[open] > summary::before {
-  transform: rotate(90deg);
 }
 
 /* --------------------------------------------------------------------------
@@ -1193,13 +1059,6 @@
   margin-top: var(--space-sm);
   padding-top: var(--space-sm);
   border-top: 1px solid var(--border-faint);
-}
-
-.hi-addwhole-result-title {
-  margin: 0 0 var(--space-2xs);
-  font-size: var(--font-size-body);
-  font-weight: var(--font-weight-semibold);
-  color: var(--text-primary);
 }
 
 .hi-addwhole-sent,
@@ -1228,4 +1087,740 @@
   flex: 1 1 100%;
   min-width: 0;
   color: var(--text-secondary);
+}
+
+/* ══ THE STAGE FLOW (owner QA H1, 2026-09-22) ══════════════════════════════
+ *
+ * An opened import is a summary, six stage tabs, and one stage in focus. Every
+ * value here is a token: the type ladder's four rungs, the spacing rungs, the
+ * surface/border/text families, and `--action` for the one interactive accent.
+ * No new hue: state is carried by `SemanticStatus` (icon + word + tint), never by
+ * colour on its own.
+ */
+
+.hi-session-head .hi-section-head {
+  margin-bottom: var(--space-md);
+}
+
+/* THE COUNTS FIRST — number above, label below, in the page's own ink. */
+.hi-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-sm) var(--space-xl);
+  margin: 0 0 var(--space-md);
+  padding: 0;
+}
+
+.hi-summary-item {
+  display: flex;
+  flex-direction: column-reverse;
+  gap: var(--space-2xs);
+  min-width: 0;
+}
+
+.hi-summary-item dt {
+  font-size: var(--font-size-meta);
+  color: var(--text-muted);
+}
+
+.hi-summary-item dd {
+  margin: 0;
+  font-size: var(--font-size-heading-lg);
+  font-weight: var(--font-weight-semibold);
+  line-height: var(--line-height-tight);
+  color: var(--text-heading);
+  font-variant-numeric: tabular-nums;
+}
+
+.hi-durability {
+  margin: 0;
+}
+
+/*
+ * The stages card: tabs across its top edge, the stage in focus below.
+ *
+ * NO `overflow: hidden` HERE, deliberately. It was the obvious way to round the tab
+ * strip's corners, and at 390px it silently CUT OFF the long file names and locators
+ * it contained — a clipped value reads as a complete one. The strip rounds its own
+ * top corners instead, so anything too wide shows up as overflow, where the
+ * narrow-width checks can see it.
+ */
+.hi-stages-card {
+  padding: 0;
+}
+
+/*
+ * SIX TABS THAT WRAP RATHER THAN SCROLL. `auto-fit` over a 9.5rem floor gives six
+ * across on a desktop card, three by two at tablet width and two or one column on a
+ * phone — every stage stays visible and reachable, and nothing overflows the page.
+ */
+.hi-stages {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(9.5rem, 1fr));
+  border-bottom: 1px solid var(--border);
+  border-radius: var(--radius-card) var(--radius-card) 0 0;
+  background: var(--surface-subtle);
+}
+
+.hi-stage-tab:first-child {
+  border-top-left-radius: var(--radius-card);
+}
+
+.hi-stage-tab {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-sm);
+  min-width: 0;
+  margin-bottom: -1px;
+  padding: var(--space-sm) var(--space-md);
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.12s ease;
+}
+
+.hi-stage-tab:hover {
+  background: var(--border-faint);
+}
+
+.hi-stage-tab[aria-selected='true'] {
+  border-bottom-color: var(--action);
+  background: var(--surface);
+  color: var(--text-heading);
+}
+
+.hi-stage-tab:focus-visible {
+  outline: 2px solid var(--action);
+  outline-offset: -2px;
+}
+
+.hi-stage-index {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-pill);
+  font-size: var(--font-size-meta);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-secondary);
+  background: var(--surface);
+}
+
+.hi-stage-tab.is-reached .hi-stage-index {
+  border-color: var(--action);
+  color: var(--action);
+}
+
+.hi-stage-tab[aria-selected='true'] .hi-stage-index {
+  border-color: var(--action);
+  background: var(--action);
+  color: var(--surface);
+}
+
+.hi-stage-text {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2xs);
+  min-width: 0;
+}
+
+.hi-stage-name {
+  font-size: var(--font-size-body);
+  font-weight: var(--font-weight-medium);
+}
+
+.hi-stage-meta {
+  font-size: var(--font-size-meta);
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.hi-stage-panel {
+  padding: var(--space-lg);
+  /* Inherited by every block in the stage: a schema path, a rule name or a file
+     name inside a sentence breaks at the edge instead of widening the page. */
+  overflow-wrap: break-word;
+}
+
+.hi-stage-panel[hidden] {
+  display: none;
+}
+
+.hi-stage-panel > :last-child {
+  margin-bottom: 0;
+}
+
+.hi-stage-next {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: var(--space-xl);
+  padding-top: var(--space-md);
+  border-top: 1px solid var(--border-faint);
+}
+
+/* ONE heading, ONE sentence, and the `?` beside the heading. */
+.hi-stage-head {
+  margin: 0 0 var(--space-md);
+}
+
+.hi-stage-title-row,
+.hi-stage-sub-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-xs);
+}
+
+.hi-stage-title {
+  margin: 0;
+  font-size: var(--font-size-heading-md);
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-heading);
+}
+
+.hi-stage-lead {
+  max-width: var(--hi-prose);
+  margin: var(--space-2xs) 0 0;
+  font-size: var(--font-size-body);
+  line-height: var(--line-height-relaxed);
+  color: var(--text-secondary);
+}
+
+.hi-stage-action {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-sm) var(--space-md);
+  margin: 0 0 var(--space-md);
+}
+
+.hi-stage-action .hi-counts {
+  margin: 0;
+}
+
+.hi-block-title {
+  margin: 0 0 var(--space-xs);
+  font-size: var(--font-size-heading-sm);
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-heading);
+}
+
+.hi-block-subtitle {
+  margin: var(--space-md) 0 var(--space-xs);
+  font-size: var(--font-size-body);
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-strong);
+}
+
+.hi-disclosure {
+  max-width: var(--content-max);
+  margin-top: var(--space-md);
+}
+
+.hi-disclosure + .hi-disclosure {
+  margin-top: var(--space-sm);
+}
+
+.hi-parsed-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  margin: var(--space-md) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* ── candidate rows ──────────────────────────────────────────────────────── */
+
+.hi-cands {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  margin: var(--space-sm) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* The row's name, value and state WRAP at narrow widths instead of pushing the
+   meta out of the card — the shared disclosure keeps its meta on one line. */
+.hi-cand-row > .disclosure-trigger {
+  flex-wrap: wrap;
+  row-gap: var(--space-2xs);
+}
+
+.hi-cand-row > .disclosure-trigger > .disclosure-meta {
+  flex: 0 1 auto;
+}
+
+.hi-cand-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-2xs) var(--space-md);
+  min-width: 0;
+}
+
+.hi-cand-name {
+  font-weight: var(--font-weight-medium);
+  color: var(--text-strong);
+}
+
+.hi-cand-context {
+  font-size: var(--font-size-meta);
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+
+.hi-cand-value {
+  font-weight: var(--font-weight-regular);
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+
+.hi-cand-none {
+  color: var(--text-muted);
+}
+
+.hi-cand-meta {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-xs);
+}
+
+.hi-cand-count {
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.hi-cand-detail > * + * {
+  margin-top: var(--space-sm);
+}
+
+.hi-cand-facts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2xs);
+  margin: 0;
+  font-size: var(--font-size-meta);
+  color: var(--text-secondary);
+}
+
+.hi-cand-readings {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: var(--font-size-meta);
+}
+
+.hi-cand-readings li {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2xs);
+  padding: var(--space-2xs) 0;
+}
+
+.hi-cand-reading-value {
+  font-weight: var(--font-weight-medium);
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+
+.hi-bucket {
+  max-width: var(--content-max);
+  margin-top: var(--space-sm);
+}
+
+.hi-review-counts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-xs);
+  margin: 0 0 var(--space-md);
+}
+
+.hi-new-destination {
+  margin: 0 0 var(--space-sm);
+}
+
+/* ── conflicts ───────────────────────────────────────────────────────────── */
+
+.hi-conflict-groups {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-lg);
+}
+
+.hi-conflict-group-title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  margin: 0 0 var(--space-2xs);
+  font-size: var(--font-size-heading-sm);
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-heading);
+}
+
+.hi-count {
+  padding: 0 var(--space-xs);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  background: var(--surface-subtle);
+  font-size: var(--font-size-meta);
+  font-weight: var(--font-weight-medium);
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.hi-conflict-explanation {
+  max-width: var(--hi-prose);
+  margin: var(--space-xs) 0 0;
+  font-size: var(--font-size-meta);
+  line-height: var(--line-height-relaxed);
+  color: var(--text-secondary);
+}
+
+.hi-conflict-group > .hi-conflict-explanation {
+  margin: 0 0 var(--space-sm);
+}
+
+.hi-conflict-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* A list of rules between rows rather than a stack of cards: 53 bordered boxes
+   read as 53 separate things, and each carried its own inner box. */
+.hi-conflict {
+  padding: var(--space-sm) 0;
+  border-top: 1px solid var(--border-faint);
+}
+
+.hi-conflict:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.hi-conflict-main {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-2xs) var(--space-md);
+}
+
+.hi-conflict-main > .semantic-status {
+  align-self: center;
+}
+
+.hi-conflict-subject {
+  font-family: var(--font-mono);
+  font-size: var(--font-size-meta);
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+
+/* SOURCE BY SOURCE: the role in muted type, the value strong. */
+.hi-conflict-line {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2xs) var(--space-md);
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: var(--font-size-body);
+}
+
+.hi-conflict-reading {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-xs);
+  min-width: 0;
+}
+
+.hi-conflict-role {
+  font-size: var(--font-size-meta);
+  font-weight: var(--font-weight-medium);
+  color: var(--text-muted);
+}
+
+.hi-conflict-value {
+  font-weight: var(--font-weight-medium);
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+
+.hi-conflict-state {
+  font-size: var(--font-size-meta);
+  color: var(--text-secondary);
+}
+
+/* The review is a quiet control under the line, not a box inside a box. */
+.hi-conflict-review {
+  margin-top: var(--space-2xs);
+  border: 0;
+  background: transparent;
+}
+
+.hi-conflict-review > .disclosure-trigger {
+  width: auto;
+  max-width: 100%;
+  min-height: 32px;
+  margin-left: calc(-1 * var(--space-xs));
+  padding: var(--space-2xs) var(--space-xs);
+  color: var(--action);
+  font-size: var(--font-size-meta);
+}
+
+.hi-conflict-review > .disclosure-trigger > .disclosure-summary {
+  flex: none;
+}
+
+.hi-conflict-review > .disclosure-trigger > .disclosure-meta {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+.hi-conflict-review > .disclosure-body {
+  padding: var(--space-sm) 0 var(--space-xs) var(--space-md);
+  border-top: 0;
+}
+
+/* THE FOUR LAYERS, visibly distinct: a rule down the left of each, dashed for the
+   one layer that is only a suggestion. */
+.hi-layers {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.hi-layer {
+  padding-left: var(--space-md);
+  border-left: 2px solid var(--border-strong);
+}
+
+.hi-layer-suggested {
+  border-left-style: dashed;
+}
+
+.hi-layer-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-xs);
+  margin: 0 0 var(--space-2xs);
+  font-size: var(--font-size-body);
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-strong);
+}
+
+.hi-layer-flag {
+  padding: 0 var(--space-xs);
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-pill);
+  font-size: var(--font-size-meta);
+  font-weight: var(--font-weight-medium);
+  color: var(--text-secondary);
+}
+
+.hi-layer-facts,
+.hi-layer-supports {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: var(--font-size-meta);
+}
+
+.hi-layer-supports li {
+  max-width: var(--hi-prose);
+  line-height: var(--line-height-relaxed);
+  color: var(--text-secondary);
+}
+
+.hi-layer-supports li.is-not-counted {
+  color: var(--text-muted);
+}
+
+.hi-layer-value {
+  font-weight: var(--font-weight-medium);
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+
+/* ── forms inside a stage ────────────────────────────────────────────────── */
+
+.hi-resolve {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-sm);
+  margin-top: var(--space-xs);
+}
+
+.hi-resolve-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2xs);
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.hi-choice {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-xs);
+  font-size: var(--font-size-body);
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+
+/* The action blue, never the viewer's OS accent: a crimson radio would read as a
+   verdict, and choosing a reading is not one (`native-control-accent.test.ts`). */
+.hi-choice input[type='radio'],
+.hi-choice input[type='checkbox'] {
+  flex: none;
+  margin-top: var(--space-2xs);
+  accent-color: var(--action);
+}
+
+.hi-inline-fields {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-sm);
+}
+
+.hi-inline-fields .hi-field {
+  margin: 0;
+}
+
+.hi-input-short {
+  width: auto;
+  min-width: 5rem;
+}
+
+.hi-signal-channel {
+  padding-bottom: var(--space-xs);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-meta);
+  color: var(--text-strong);
+}
+
+.hi-signal-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-xs);
+  margin: 0;
+  font-size: var(--font-size-body);
+  color: var(--text-primary);
+}
+
+/* ── reading rules ───────────────────────────────────────────────────────── */
+
+.hi-rules {
+  max-width: var(--content-max);
+  margin-top: var(--space-lg);
+  padding-top: var(--space-md);
+  border-top: 1px solid var(--border-faint);
+}
+
+.hi-rule-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  margin: var(--space-xs) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.hi-rule {
+  padding: var(--space-sm) var(--space-md);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-inner);
+}
+
+.hi-rule-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-2xs) var(--space-sm);
+  margin: 0;
+}
+
+.hi-rule-kind {
+  font-size: var(--font-size-meta);
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-strong);
+}
+
+.hi-rule-what {
+  font-weight: var(--font-weight-medium);
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+
+.hi-rule-adopt {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-sm);
+  margin-top: var(--space-xs);
+}
+
+.hi-rule-adopt .hi-field {
+  margin: 0;
+}
+
+/* ── add to experiment ───────────────────────────────────────────────────── */
+
+.hi-add-summary {
+  margin: 0 0 var(--space-md);
+}
+
+.hi-add-blocked {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2xs);
+  margin: var(--space-xs) 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: var(--font-size-meta);
+  color: var(--text-secondary);
+}
+
+.hi-add-blocked-count {
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-strong);
+  font-variant-numeric: tabular-nums;
+}
+
+/* LONG TOKENS WRAP. File names, locators and raw paths are single unbroken words;
+   at 320px they must break rather than run out of the card. */
+.hi-stage-panel code,
+.hi-stage-panel .hi-filename,
+.hi-stage-panel .hi-locator,
+.hi-stage-panel .hi-value {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }

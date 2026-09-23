@@ -33,14 +33,31 @@
  * MUTATION-CHECKED: a test whose docstring carries a `MUTATION:` line was verified
  * by breaking the component in the way the test claims to catch, confirming it went
  * RED, and reverting. One without the line does not claim it.
+ *
+ * ── RE-POINTED 2026-09-22 (owner QA H1), NOT WEAKENED ──────────────────────
+ *
+ * The review used to be ONE component rendering everything at once. It is now three
+ * stage pieces — `CorpusReadOverview` (What ISAAC Read), `ArchiveRuns` (Runs &
+ * Candidates) and `ImportConflicts` (Conflicts) — and this suite renders all three
+ * together, so every invariant below is asserted over the same whole surface it was
+ * before. The `<details>` it used to query became the shared `Disclosure`, whose body
+ * is in the DOM while shut (`hidden`, not unmounted), so "in the DOM even while
+ * closed" still holds and is still asserted. Where a test's selector moved, its
+ * assertion did not get weaker; §6's "no winner" test got STRONGER — it now also
+ * refuses the internal token `sources_disagree`, which the old surface printed.
  */
 
 import { describe, it, expect } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { ImportCorpusReview } from '../components/ImportCorpusReview';
+import { ArchiveRuns, CorpusReadOverview } from '../components/ImportCorpusReview';
+import { ImportConflicts } from '../components/ImportConflicts';
+import { IMPORT_STAGE_COPY } from '../lib/historicalImportContent';
+import { conflictViews } from '../lib/importStages';
+import type { ApiImportSession } from '../lib/types';
 import {
   BL15_COPY,
   BL15_STATUS_LABELS,
@@ -60,8 +77,39 @@ const REVIEW = JSON.parse(
   readFileSync(join(__dirname, 'fixtures', 'bl15-corpus-review.json'), 'utf8'),
 ) as Bl15CorpusReview;
 
+const DESTINATIONS = { rows: [], failed: false, reload: async () => {} };
+const noAct = async () => {};
+
+/** The three stage pieces that together are the review, rendered as one surface. */
 const renderReview = (review: Bl15CorpusReview = REVIEW) =>
-  render(<ImportCorpusReview review={review} />);
+  render(
+    <MemoryRouter>
+      <CorpusReadOverview review={review} profiles={[]} units={[]} />
+      <ArchiveRuns
+        review={review}
+        units={[]}
+        profiles={[]}
+        candidatesById={new Map()}
+        filenameOf={(id) => id}
+        importId="imp-test"
+        busy={null}
+        onAct={noAct}
+        destinations={DESTINATIONS}
+      />
+      <ImportConflicts
+        conflicts={conflictViews({
+          corpus_review: review,
+          sources: [],
+          reconstruction: null,
+          archive: null,
+        } as unknown as ApiImportSession)}
+        importId="imp-test"
+        busy={null}
+        onAct={noAct}
+        destinations={DESTINATIONS}
+      />
+    </MemoryRouter>,
+  );
 
 /* ── §1 · the fixture is the contract's own shape ────────────────────────── */
 
@@ -165,13 +213,24 @@ describe('BL15 review · §2 the digest is derived, never literal', () => {
     for (const row of digest) expect(row.derivedFrom.length).toBeGreaterThan(0);
   });
 
-  it('renders the digest as collapsed rows, each disclosing its expression', () => {
+  it('shows the headline counts, and keeps every row with its expression one press away', () => {
     const { container } = renderReview();
-    const rows = container.querySelectorAll('details.bl15-digest-row');
-    expect(rows.length).toBe(corpusDigest(REVIEW).length);
-    rows.forEach((d) => expect((d as HTMLDetailsElement).open).toBe(false));
-    // The expression is in the DOM even while shut — `querySelectorAll` reaches
-    // inside a closed `<details>`, which is what lets a reader check the number.
+    // THE COUNTS FIRST (owner QA H1): six headline numbers on the surface, each the
+    // digest's own value — never a second computation.
+    const digest = corpusDigest(REVIEW);
+    const highlights = [...container.querySelectorAll('.bl15-highlights .bl15-highlight')];
+    expect(highlights.length).toBeGreaterThan(0);
+    for (const h of highlights) {
+      const row = digest.find((r) => r.label === h.querySelector('dt')?.textContent)!;
+      expect(row).toBeDefined();
+      expect(h.querySelector('dd')?.textContent).toBe(row.value.toLocaleString('en-US'));
+    }
+    // EVERY row, with its expression, behind one closed disclosure.
+    const rows = container.querySelectorAll('.bl15-digest > li');
+    expect(rows.length).toBe(digest.length);
+    expect(rows[0].closest('.disclosure-body')?.hasAttribute('hidden')).toBe(true);
+    // The expression is in the DOM even while shut — the shared `Disclosure` hides
+    // its body rather than unmounting it, which is what lets a reader check the number.
     expect(container.textContent).toContain('relationships.unit_count');
     expect(container.textContent).toContain('inventory.entry_count');
   });
@@ -196,7 +255,7 @@ describe('BL15 review · §3 the banned pattern, one layer down', () => {
     const { container } = renderReview();
     // `HIST-004` bans `Upload -> Spinner -> Mysterious JSON`; a 1,192-row table is
     // its sibling. Nothing here approaches the source count in rows.
-    const rows = container.querySelectorAll('tbody tr');
+    const rows = container.querySelectorAll('tbody tr.bl15-row');
     expect(rows.length).toBeLessThan(REVIEW.inventory.entry_count);
     // And the absence is STATED rather than implied by a missing link, because
     // `ArchiveInventory.to_state()` omits `entries` entirely.
@@ -290,7 +349,7 @@ describe('BL15 review · §5 the table renders the server’s own counts', () =>
     // Its own category, stated. `RUN_CANDIDATE_SOURCE_TYPES` is exactly
     // `{spec_acquisition}`, and excluding these units entirely would orphan
     // 242 of 908 real scans — so they are shown, and shown as what they are.
-    expect(row.textContent).toContain('Alignment or standard');
+    expect(row.textContent).toContain('Alignment or Standard');
     expect(row.className).toContain('bl15-row-reference');
   });
 
@@ -333,19 +392,21 @@ describe('BL15 review · §6 conflicts are unmissable and never adjudicated', ()
      * `acquired_never_declared`. So the assertion read 2 against 3 and looked
      * like a component defect when the component was right.
      */
-    const kindBlock = [...container.querySelectorAll('.bl15-conflict-kind')].find((el) =>
-      (el.querySelector('.bl15-conflict-kind-title')?.textContent ?? '').includes(
+    const kindBlock = [...container.querySelectorAll('.hi-conflict-group')].find((el) =>
+      (el.querySelector('.hi-conflict-group-title')?.textContent ?? '').includes(
         'header disagrees with its name',
       ),
     )!;
     expect(kindBlock).toBeDefined();
-    const block = [...kindBlock.querySelectorAll('.bl15-conflict')].find((el) =>
+    const block = [...kindBlock.querySelectorAll('.hi-conflict')].find((el) =>
       (el.textContent ?? '').includes(three.subject),
     )!;
     // A surface built for exactly two would be wrong about the corpus's most
-    // instructive case — `Conflict`'s own docstring says so.
-    const readings = block.querySelectorAll('.bl15-readings > li');
-    expect(readings.length).toBe(three.readings.length);
+    // instructive case — `Conflict`'s own docstring says so. BOTH the one-line,
+    // source-by-source summary and the Source Facts layer carry every reading.
+    expect(block.querySelectorAll('.hi-conflict-line > li').length).toBe(three.readings.length);
+    const facts = block.querySelectorAll('.hi-layer-facts > li');
+    expect(facts.length).toBe(three.readings.length);
     for (const r of three.readings) {
       expect(block.textContent).toContain(r.value);
       expect(block.textContent).toContain(r.source_path);
@@ -370,13 +431,27 @@ describe('BL15 review · §6 conflicts are unmissable and never adjudicated', ()
   it('shows no chosen winner and states that nothing was resolved', () => {
     const { container } = renderReview();
     const text = (container.textContent ?? '').toLowerCase();
-    expect(text).toContain('no source is preferred here');
+    // Every open conflict says, in the brief's own words, that nothing was chosen.
+    const conflicts = [...container.querySelectorAll('.hi-conflict')];
+    expect(conflicts.length).toBeGreaterThan(0);
+    for (const c of conflicts) {
+      expect(c.querySelector('.hi-conflict-state')?.textContent).toMatch(
+        /No value has been selected\.|nothing will be chosen/,
+      );
+    }
     expect(text).not.toContain('most likely');
     expect(text).not.toContain('best match');
     expect(text).not.toContain('recommended value');
     expect(text).not.toContain('we chose');
-    // `unresolved_reason` is always `sources_disagree` and is surfaced as such.
-    expect(container.textContent).toContain('sources_disagree');
+    /*
+     * INVERTED 2026-09-22, and stronger rather than weaker. This used to REQUIRE the
+     * literal `sources_disagree` on screen — the server's `unresolved_reason` token,
+     * shown raw to a scientist. Owner QA H1 is that internal tokens are not shown by
+     * default; the state is carried by the shared `Sources Conflict` status instead,
+     * and the requirement that nothing was resolved is asserted above, per conflict.
+     */
+    expect(container.textContent).not.toContain('sources_disagree');
+    expect(container.textContent).toContain(IMPORT_STAGE_COPY.stateLabels.conflict);
   });
 
   it('groups conflicts by kind and counts each group', () => {
@@ -390,8 +465,9 @@ describe('BL15 review · §6 conflicts are unmissable and never adjudicated', ()
   });
 
   it('MUTATION: rendering only the first two readings fails', () => {
-    // MUTATION: `ConflictView` changed to `conflict.readings.slice(0, 2).map(...)`
-    // — went RED on the three-readings test above (3 expected, 2 rendered).
+    // MUTATION (re-run 2026-09-22 against `ImportConflicts`): `conflict.readings`
+    // sliced to two in the one-line summary — went RED on the three-readings test
+    // above (3 expected, 2 rendered).
     const three = [
       ...REVIEW.relationships.units.flatMap((u) => u.conflicts),
       ...REVIEW.relationships.corpus_conflicts,
@@ -697,7 +773,7 @@ describe('BL15 review · §10 search and filter over the real scale', () => {
   it('filters to conflicts only, and the count follows', () => {
     const { container } = renderReview();
     const before = container.querySelectorAll('tbody tr.bl15-row').length;
-    fireEvent.click(screen.getByRole('radio', { name: 'Sources disagree' }));
+    fireEvent.click(screen.getByRole('radio', { name: 'Sources Conflict' }));
     const after = [...container.querySelectorAll('tbody tr.bl15-row')];
     expect(after.length).toBeLessThan(before);
     expect(after.length).toBeGreaterThan(0);
@@ -706,7 +782,7 @@ describe('BL15 review · §10 search and filter over the real scale', () => {
 
   it('separates alignment and standards into their own category', () => {
     const { container } = renderReview();
-    fireEvent.click(screen.getByRole('radio', { name: 'Alignment or standard' }));
+    fireEvent.click(screen.getByRole('radio', { name: 'Alignment or Standard' }));
     const rows = [...container.querySelectorAll('tbody tr.bl15-row')];
     expect(rows.length).toBe(REVIEW.relationships.units.filter((u) => !u.run_candidate).length);
     for (const row of rows) expect(row.className).toContain('bl15-row-reference');
@@ -804,18 +880,24 @@ describe('BL15 review · §12 every summary is a topic, never a claim', () => {
    */
   it('draws every summary from a closed set of this component’s own labels', () => {
     const { container } = renderReview();
+    const C = IMPORT_STAGE_COPY;
+    // The disclosure SUMMARY only — its `meta` (a count, or the file a conflict is
+    // about) is a separate span and is not a claim either.
     const allowed = new Set<string>([
-      ...corpusDigest(REVIEW).map((r) => `${r.value.toLocaleString('en-US')}${r.label}`),
-      ...Object.values(BL15_STATUS_LABELS).map(
-        (l) => `${l}${REVIEW.mapping.coverage[
-          BL15_MAPPING_STATUSES.find((s) => BL15_STATUS_LABELS[s] === l)!
-        ]} of ${REVIEW.mapping.coverage.concepts_total}`,
-      ),
-      BL15_COPY.ceilingTitle,
-      BL15_COPY.leftOutTitle,
-      ...REVIEW.relationships.units.map((u) => u.stem),
+      C.allCounts,
+      C.mapping,
+      C.ceiling,
+      C.extended,
+      C.leftOut,
+      C.temperatureWhy,
+      C.whereFrom,
+      C.conflicts.review,
+      ...Object.values(BL15_STATUS_LABELS),
     ]);
-    const seen = [...container.querySelectorAll('summary')].map((s) =>
+    // Kept referenced so a rename of either title is still caught here.
+    expect(BL15_COPY.ceilingTitle.length).toBeGreaterThan(0);
+    expect(BL15_MAPPING_STATUSES.length).toBe(5);
+    const seen = [...container.querySelectorAll('.disclosure-summary')].map((s) =>
       (s.textContent ?? '').replace(/\s+/g, ' ').trim(),
     );
     expect(seen.length).toBeGreaterThan(0);
@@ -826,7 +908,7 @@ describe('BL15 review · §12 every summary is a topic, never a claim', () => {
 
   it('never promotes a scope-carrying server sentence into a summary', () => {
     const { container } = renderReview();
-    const summaries = [...container.querySelectorAll('summary')].map((s) => s.textContent ?? '');
+    const summaries = [...container.querySelectorAll('.disclosure-trigger')].map((s) => s.textContent ?? '');
     const scopeCarrying = [
       ...REVIEW.mapping.concepts.map((c) => c.reason),
       ...REVIEW.relationships.units.flatMap((u) => u.conflicts.map((c) => c.explanation)),
@@ -845,12 +927,17 @@ describe('BL15 review · §12 every summary is a topic, never a claim', () => {
     // A conflict a reader cannot see is a conflict they will not act on, and the
     // brief's requirement is that conflicts are unmissable. So the explanations
     // are not behind a shut drawer, unlike the digest expressions.
-    const shut = [...container.querySelectorAll('details')].filter(
-      (d) => !(d as HTMLDetailsElement).open,
-    );
+    const shut = [...container.querySelectorAll('.disclosure-body[hidden]')];
+    expect(shut.length).toBeGreaterThan(0);
     const hidden = shut.map((d) => d.textContent ?? '').join(' ');
-    for (const c of REVIEW.relationships.units.flatMap((u) => u.conflicts)) {
+    const all = [
+      ...REVIEW.relationships.units.flatMap((u) => u.conflicts),
+      ...REVIEW.relationships.corpus_conflicts,
+    ];
+    for (const c of all) {
       expect(hidden).not.toContain(c.explanation);
+      // AND it is on the surface — absent from a closed drawer is not enough.
+      expect(container.textContent).toContain(c.explanation);
     }
   });
 });

@@ -390,7 +390,8 @@ test.describe('wide viewports: prose does not strand a wide empty gutter @respon
 
       // Start one through the real UI — there is no static path to a session.
       await page.getByRole('button', { name: /Start an Import/i }).click();
-      await expect(page.getByRole('heading', { name: 'Sources' })).toBeVisible({
+      // The stage in focus on a new session is Source Bundle (owner QA H1, 2026-09-22).
+      await expect(page.getByRole('heading', { name: 'Source Bundle' })).toBeVisible({
         timeout: 20_000,
       });
 
