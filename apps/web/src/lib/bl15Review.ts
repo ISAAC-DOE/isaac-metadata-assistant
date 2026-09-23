@@ -63,6 +63,36 @@ export interface Bl15Reading {
   locator: string;
   value: string;
   source_type: string;
+  /**
+   * 2026-09-22 (`bl15/resolution.py`) — what KIND of claim this source makes:
+   * `planned_acquisition` (a macro), `instrument_header`, `human_label` (a
+   * filename), `retrospective_note`, `absence_of_a_source` or `other_source`. A
+   * role is a description, never a rank: there is no source hierarchy.
+   */
+  source_role?: string;
+  source_role_meaning?: string;
+  layer?: string;
+}
+
+/** One piece of independent evidence bearing on which reading is right. */
+export interface Bl15Support {
+  value: string | null;
+  kind: string;
+  sentence: string;
+  source_path: string;
+  locator: string;
+  /** `false` for a note explaining why something does NOT count as support. */
+  counts: boolean;
+}
+
+/** ISAAC's suggestion for one conflict, or why it has none. NEVER authoritative. */
+export interface Bl15Recommendation {
+  status: 'suggested' | 'none' | 'forbidden';
+  value: string | null;
+  why: string;
+  supports: Bl15Support[];
+  authority: 'non_authoritative';
+  layer?: string;
 }
 
 /**
@@ -83,6 +113,13 @@ export interface Bl15Conflict {
   readings: Bl15Reading[];
   unresolved_reason: string;
   explanation: string;
+  /** 2026-09-22 — the stable handle a resolution rule names (`<kind>:<subject>`). */
+  conflict_id?: string;
+  /** The suggested-resolution layer. Absent from payloads written before it existed. */
+  recommendation?: Bl15Recommendation | null;
+  /** The scientist-confirmed layer, when a rule resolved it. */
+  resolution?: Record<string, unknown> | null;
+  review_status?: 'needs_review' | 'sources_conflict' | 'resolved' | string;
 }
 
 /** `relate.MacroBlock` — a macro declaring it is about to write a measurement. */
@@ -163,6 +200,13 @@ export interface Bl15Relationships {
   inputs_present: string[];
   unit_count: number;
   conflict_count: number;
+  /** The four layers and the source roles, stated by the server; `source_hierarchy` is null. */
+  conflict_model?: {
+    layers: { layer: string; meaning: string }[];
+    source_roles: Record<string, string>;
+    source_hierarchy: null;
+    policy: string;
+  };
 }
 
 /**
@@ -205,6 +249,32 @@ export interface Bl15SourceEvidence {
   profile_version: string | null;
   timestamp_utc: string | null;
   measurement_stem: string | null;
+  /** 2026-09-22 — which scan this statement is about, as the source numbers it. */
+  scan?: string | null;
+  /** 2026-09-22 — which item within the scan (a column position, a motor, a token). */
+  item?: string | null;
+}
+
+/**
+ * A normalised value as the text a scientist reads — never `[object Object]`.
+ *
+ * Mirrors the server's own `bl15.reconstruct._text_of`: a scan export's
+ * `acquisition_target` normalises to `{measurement_stem, scan_index}` and is written
+ * `stem · scan N`, the way the review names a scan; any other object is written from
+ * its fields; a list is joined.
+ */
+export function normalizedText(value: unknown): string {
+  if (value === null || value === undefined) return '';
+  if (Array.isArray(value)) return value.map(normalizedText).join(', ');
+  if (typeof value === 'object') {
+    const record = value as Record<string, unknown>;
+    const keys = Object.keys(record).sort();
+    if (keys.length === 2 && keys[0] === 'measurement_stem' && keys[1] === 'scan_index') {
+      return `${normalizedText(record.measurement_stem)} · scan ${normalizedText(record.scan_index)}`;
+    }
+    return keys.map((k) => `${k.replace(/_/g, ' ')} ${normalizedText(record[k])}`).join('; ');
+  }
+  return String(value);
 }
 
 /** `mapping.ConceptMapping.to_state`. */
@@ -252,6 +322,8 @@ export interface Bl15ConceptMapping {
    * wait for an answer that has already arrived.
    */
   unresolved_questions?: string[];
+  /** 2026-09-22 — how many values the concept is expected to have (`RULE_CARDINALITY`). */
+  cardinality?: 'per_measurement' | 'per_scan' | 'per_scan_item' | 'per_source';
 }
 
 /**
@@ -331,10 +403,47 @@ export interface Bl15ExtendedContext {
   not_official: string;
 }
 
+/** What a source says about temperature — words, never a number. */
+export interface Bl15TemperatureView {
+  official_path: string;
+  status: 'not_recorded' | 'stated_in_source';
+  display: string;
+  statements: { raw_literal: string; source_path?: string; locator?: string; converted_to_a_number: false }[];
+  automatic_value: null;
+  automatic_proposal: false;
+  nominal_rule_enabled_for: string[];
+  policy: string;
+  superseded_decision?: string;
+}
+
 export interface Bl15CorpusReview {
   inventory: Bl15ArchiveInventory;
   relationships: Bl15Relationships;
   evidence: Bl15SourceEvidence[];
+  /* ── 2026-09-22, all optional: payloads written before them still read ── */
+  profile_applicability?: {
+    bindings: Record<string, unknown>[];
+    convention_counts: Record<string, number>;
+    ambiguous_sources: number;
+    selected_by_operator: false;
+    rule: string;
+  };
+  temperature?: Bl15TemperatureView;
+  data_quality_notes?: {
+    label: string;
+    bound_to_a_measurement: number;
+    unbound: { text: string; source_path: string; locator: string }[];
+    writes_qc_status: false;
+    policy: string;
+  };
+  herfd_signal?: {
+    acquisition_system: { system_id: string; display_name: string; candidate_channels: string[]; basis: string; domain_note: string };
+    element_evidence: { element: string; edge: string | null; source_path: string; locator: string; role: string; rule: string }[];
+    by_status: Record<string, number>;
+    writes_a_record_field: false;
+  };
+  beamtime_contributors?: { name: string; label: string | null; source_path: string; locator: string }[];
+  rules_applied?: string[];
   /** `DEC-41` level 4 and its three costs. See {@link Bl15ExtendedContext}. */
   extended_context?: Bl15ExtendedContext;
   mapping: {
@@ -448,6 +557,14 @@ export type Bl15Cell =
  * same thing corroborate rather than disagree, and calling that a dispute would put
  * a warning on the corpus's best-evidenced values.
  */
+/** What two readings are compared on — the server's `bl15.reconstruct._reading_of`. */
+export function readingOf(e: Pick<Bl15SourceEvidence, 'normalized_value' | 'unit' | 'raw_literal'>): string {
+  if (e.normalized_value !== null && e.normalized_value !== undefined) {
+    return `${normalizedText(e.normalized_value)}${e.unit ? ` ${e.unit}` : ''}`;
+  }
+  return e.raw_literal;
+}
+
 export function cellFor(
   byConcept: Map<string, Bl15SourceEvidence[]> | undefined,
   column: Bl15ColumnId,
@@ -456,7 +573,11 @@ export function cellFor(
   for (const concept of BL15_COLUMN_CONCEPTS[column]) {
     const hits = byConcept.get(concept);
     if (!hits || hits.length === 0) continue;
-    const distinct = new Set(hits.map((h) => h.raw_literal));
+    /* COMPARED ON THE READING, exactly as the server compares (`reconstruct._reading_of`):
+       the normalised value with its unit when a named rule produced one, else the
+       literal. Comparing raw literals called `filter10` and `10` "2 sources disagree"
+       beside a server verdict of Sources Agree (independent review, 2026-09-23). */
+    const distinct = new Set(hits.map(readingOf));
     if (hits.length > 1 && distinct.size > 1) return { state: 'disputed', evidence: hits };
     return { state: 'read', evidence: hits[0] };
   }

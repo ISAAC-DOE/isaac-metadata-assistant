@@ -808,6 +808,10 @@ def read_filename(
                 unit=item.unit,
                 normalization_rule=item.normalization_rule,
                 measurement_stem=text,
+                # WHICH TOKEN of this name (2026-09-22): a name has several, so two
+                # unrecognised tokens of one file are two items, not two accounts of
+                # one (`bl15.mapping.RULE_CARDINALITY`).
+                item=f"token {index}",
             )
 
     return builder.result()

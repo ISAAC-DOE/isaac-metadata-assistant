@@ -32,6 +32,12 @@
  * not what this does: the populated table, the per-entry "Read?" disclosure and
  * the candidate list are the parts of this screen with the most structure, and
  * they are exactly the parts jsdom cannot judge.
+ *
+ * SINCE 2026-09-22 (owner QA H1) THE SESSION IS SIX STAGE TABS WITH ONE PANEL SHOWN,
+ * and a candidate is a collapsed row. axe skips a `hidden` subtree and a closed
+ * disclosure's body, so this spec VISITS every stage and OPENS every disclosure in
+ * it before scanning — otherwise the cleaner-looking stage flow would have quietly
+ * removed most of the screen from every scan.
  */
 import type { Page } from '@playwright/test';
 import { formatViolation, scan } from '../helpers/axe';
@@ -89,8 +95,51 @@ async function expectClean(page: Page, step: string) {
   ).toBe('');
 }
 
+/**
+ * Put a stage in focus by pressing its tab, and wait until its panel is the one shown.
+ *
+ * ADDED 2026-09-22 (owner QA H1). The session became six stage tabs with ONE panel
+ * shown; the other five stay mounted but `hidden`, and axe does not scan a hidden
+ * subtree. So every stage is scanned by visiting it — a scan that never left the
+ * default stage would pass while five-sixths of the screen went unexamined.
+ */
+async function openStage(page: Page, title: string) {
+  const tab = page.getByRole('tab', { name: new RegExp(title.replace(/[&?]/g, '.')) });
+  await tab.click();
+  await expect(tab).toHaveAttribute('aria-selected', 'true');
+  const panelId = await tab.getAttribute('aria-controls');
+  await expect(page.locator(`[id="${panelId}"]`)).toBeVisible();
+}
+
+/**
+ * Open every disclosure in the stage in focus — the shared `Disclosure`, each
+ * measurement's legacy-cell toggle, and each conflict kind's `Show N more` (the rows
+ * past the first five are `hidden` until it is pressed) — so axe scans what they hold. Nested ones
+ * appear only once their parent is open, hence the bounded rounds. Returns how many
+ * it opened, so a caller can assert the stage was not vacuous.
+ */
+async function openEverything(page: Page): Promise<number> {
+  let total = 0;
+  for (let round = 0; round < 4; round++) {
+    const opened = await page.evaluate(() => {
+      const panel = document.querySelector('[role="tabpanel"]:not([hidden])');
+      if (!panel) return 0;
+      const closed = [
+        ...panel.querySelectorAll<HTMLButtonElement>(
+          'button.hi-show-more[aria-expanded="false"], button.disclosure-trigger[aria-expanded="false"], button.bl15-unit-toggle[aria-expanded="false"]',
+        ),
+      ];
+      closed.forEach((b) => b.click());
+      return closed.length;
+    });
+    total += opened;
+    if (opened === 0) break;
+  }
+  return total;
+}
+
 test.describe('the import session state, which the read-only sweep cannot reach', () => {
-  test('an open import session carries no axe violation', async ({ page }) => {
+  test('an open import session carries no axe violation, at every stage', async ({ page }) => {
     await page.goto('/imports');
 
     // The list's own `<h2>`, not the page `<h1>` — the `<h1>` renders outside the
@@ -105,57 +154,59 @@ test.describe('the import session state, which the read-only sweep cannot reach'
     /*
      * A REAL SESSION ON A REAL BACKEND. `Back to imports` only exists in the
      * session view, so waiting on it proves the POST landed and the view
-     * switched — rather than proving a spinner rendered.
+     * switched — rather than proving a spinner rendered. A new session opens on
+     * the Source Bundle stage.
      */
     await expect(page.getByRole('button', { name: 'Back to imports' })).toBeVisible();
-
-    await expectClean(page, 'Sources, empty');
+    await expect(page.getByRole('heading', { name: 'Source Bundle' })).toBeVisible();
+    await expectClean(page, 'Source Bundle, empty');
 
     /*
-     * ── AND ON THROUGH THE WORKFLOW ────────────────────────────────────────
+     * ── AND ON THROUGH THE STAGES ─────────────────────────────────────────
      *
      * Each step is reached by pressing the control a reader would press, and
      * each is waited on by something only the NEXT state renders — never by a
      * timeout, and never by a spinner, which would let the scan measure a
      * skeleton and report it as the step.
      */
-    await page.getByRole('button', { name: 'Add an Example Source' }).click();
+    await page.getByRole('button', { name: 'Add an Example Source', exact: true }).click();
     // The table only exists once a source is in the bundle.
     await expect(page.getByRole('table')).toBeVisible();
-    await expectClean(page, 'Sources, one entry in the table');
+    await openEverything(page);
+    await expectClean(page, 'Source Bundle, one entry in the table, every disclosure open');
 
+    await openStage(page, 'What ISAAC Read');
     await page.getByRole('button', { name: 'Read the Sources' }).click();
-    await expect(page.getByRole('button', { name: 'Reconstruct Candidates' })).toBeEnabled();
-    await expectClean(page, 'after the sources are read');
+    // A parsed source's own row exists only after the read.
+    await expect(page.locator('.hi-parsed-list > li').first()).toBeVisible();
+    expect(await openEverything(page), 'the read stage opened nothing — nothing was read').toBeGreaterThan(0);
+    await expectClean(page, 'What ISAAC Read, after the sources are read, every disclosure open');
 
     /*
-     * ── THE WAIT THAT WAS VACUOUS, AND HOW IT WAS CAUGHT ──────────────────
+     * ── THE WAIT THAT WAS VACUOUS ONCE, KEPT HONEST ───────────────────────
      *
-     * The first version waited on `heading /Candidates/i`. That matched
-     * **"Reconstruct Candidates"** — the step's own heading, present BEFORE the
-     * click — so the wait was satisfied instantly and this scan measured the
-     * PREVIOUS state while claiming to measure the reconstruction. Found by a
-     * throwaway probe that printed every heading at every step, not by a
-     * failing test: the suite was green with the vacuous wait in place.
-     *
-     * The three headings below appear ONLY after reconstruction, and the
-     * negative control asserts the first one is absent beforehand — so if a
-     * future change makes it render early, this goes red instead of quietly
-     * measuring the wrong thing again.
+     * The first version of this spec waited on a heading present BEFORE the
+     * click, so it measured the previous state. `Candidate values` renders only
+     * after reconstruction, and the negative control asserts it is absent
+     * beforehand — so if it ever renders early this goes red instead of quietly
+     * measuring the wrong thing.
      */
+    await openStage(page, 'Runs & Candidates');
     await expect(
-      page.getByRole('heading', { name: 'Ready for your review' }),
+      page.getByRole('heading', { name: 'Candidate values' }),
       'the post-reconstruction heading is already present BEFORE reconstructing, so the ' +
         'wait below would be satisfied by the previous state — pick a different marker',
     ).toHaveCount(0);
-
     await page.getByRole('button', { name: 'Reconstruct Candidates' }).click();
-    await expect(page.getByRole('heading', { name: 'Ready for your review' })).toBeVisible();
-    // All three outcome groups render together, and each is a different shape:
-    // accepted candidates, ones with no schema home, and unrecognised text.
-    await expect(page.getByRole('heading', { name: 'Read, with nowhere to write' })).toBeVisible();
-    await expect(page.getByRole('heading', { name: 'Read, but not recognised' })).toBeVisible();
-    await expectClean(page, 'after candidates are reconstructed');
+    await expect(page.getByRole('heading', { name: 'Candidate values' })).toBeVisible();
+    expect(await openEverything(page)).toBeGreaterThan(0);
+    await expectClean(page, 'Runs & Candidates, after reconstruction, every candidate open');
+
+    for (const stage of ['Conflicts', 'Review', 'Add to Experiment']) {
+      await openStage(page, stage);
+      await openEverything(page);
+      await expectClean(page, `${stage}, every disclosure open`);
+    }
   });
 
   test('VACUITY GUARD — the scan actually examined the session, not an empty page', async ({
@@ -178,103 +229,116 @@ test.describe('the import session state, which the read-only sweep cannot reach'
       results.incomplete.reduce((n, r) => n + r.nodes.length, 0);
     expect(examined, 'axe examined almost nothing — the scan is not seeing the session').toBeGreaterThan(50);
 
-    // And the Sources step really is what is on screen.
-    await expect(page.getByRole('heading', { name: /Sources/i }).first()).toBeVisible();
+    // And the stage flow really is what is on screen: six tabs, one panel shown.
+    await expect(page.getByRole('tab')).toHaveCount(6);
+    await expect(page.locator('[role="tabpanel"]:visible')).toHaveCount(1);
+    await expect(page.getByRole('heading', { name: 'Source Bundle' })).toBeVisible();
   });
 
   /*
    * ── THE CORPUS REVIEW, WHICH NOTHING REACHED UNTIL 2026-09-16 ─────────────
    *
-   * The test above walks a session built from an EXAMPLE SOURCE, and that is the
-   * only kind the screen offered. The corpus review renders only for a session
-   * holding an ARCHIVE, so it was unreachable — and independent review found the
-   * two halves had been built against different shapes and never joined at all.
-   *
-   * The chain had three broken links and each looked like the others' fault:
-   * `grep -rn corpus_review apps/api/` returned zero (the route emitted nothing),
-   * the client type did not declare the member, and no control created an archive
-   * source even though the server had always served `available_archives`. Fixing
-   * any one alone would have left the surface as unreachable as before.
-   *
-   * This is the test that fails if any link breaks again, and it is in the MUTATION
-   * suite for the reason `surfaces.ts` gives: reaching a session needs a POST the
-   * read-only config forbids.
+   * The test above walks a session built from an EXAMPLE SOURCE. The corpus review
+   * renders only for a session holding an ARCHIVE. This is the test that fails if
+   * any link in that chain breaks again, and it is in the MUTATION suite for the
+   * reason `surfaces.ts` gives: reaching a session needs a POST the read-only
+   * config forbids. Since 2026-09-22 it scans EVERY stage of the archive session —
+   * the overview, the measurements table with every measurement opened, every
+   * conflict's four layers, Review and Add — because each is a different shape.
    */
-  test('an archive session renders the corpus review, axe-clean', async ({ page }) => {
+  test('an archive session renders the corpus review, axe-clean at every stage', async ({ page }) => {
     await page.goto('/imports');
     await expect(page.getByRole('heading', { name: 'Imports', level: 2 })).toBeVisible();
     await page.getByRole('button', { name: 'Start an Import' }).click();
     await expect(page.getByRole('button', { name: 'Back to imports' })).toBeVisible();
 
-    // NEGATIVE CONTROL FIRST: the review must not be on screen before an archive
-    // exists, or the scan below would prove nothing about the archive at all.
-    await expect(page.getByRole('heading', { name: /What this archive contains/i })).toHaveCount(
-      0,
-    );
+    // NEGATIVE CONTROL FIRST: the review must not exist before an archive does, or
+    // the scans below would prove nothing about the archive at all.
+    await expect(page.locator('.bl15-highlights')).toHaveCount(0);
 
-    await page.getByRole('button', { name: 'Add an Archive' }).click();
+    await page.getByRole('button', { name: 'Add an Archive', exact: true }).click();
     await expect(page.getByRole('table')).toBeVisible();
     await expectClean(page, 'an archive in the bundle, before reading');
 
+    await openStage(page, 'What ISAAC Read');
     await page.getByRole('button', { name: 'Read the Sources' }).click();
-    await expect(page.getByRole('button', { name: 'Reconstruct Candidates' })).toBeEnabled();
-
     /*
-     * THE REVIEW APPEARS AT THE READ, not at the reconstruction: `corpus_review`
-     * is served as soon as an archive reading exists. Waited on by a heading only
-     * it renders — never a timeout, and never a spinner.
+     * THE REVIEW APPEARS AT THE READ, not at the reconstruction: `corpus_review` is
+     * served as soon as an archive reading exists. Waited on by the headline counts,
+     * which only it renders.
      */
-    const digest = page.getByRole('heading', { name: /What this archive contains/i });
-    await expect(digest).toBeVisible();
-    await expectClean(page, 'the corpus review, after the archive is read');
+    await expect(page.locator('.bl15-highlights')).toBeVisible();
+    expect(await openEverything(page)).toBeGreaterThan(0);
+    await expectClean(page, 'What ISAAC Read — the corpus overview, every disclosure open');
+
+    await openStage(page, 'Runs & Candidates');
+    await expect(page.locator('.bl15-runs table').first()).toBeVisible();
+    expect(await openEverything(page), 'no measurement opened — the table is empty').toBeGreaterThan(0);
+    await expectClean(page, 'Runs & Candidates — every measurement and candidate open');
 
     /*
-     * ── AND A PRODUCT FACT THIS TEST ESTABLISHED, worth stating ──────────────
-     *
-     * `Ready for your review` is the FIXTURE path's heading, rendered from
-     * `data.reconstruction` — the provider's reconstruction over `parsed`. An
-     * archive has none of that: `read_archive` runs the whole chain at the READ,
-     * so its candidates are already in `corpus_review` and `parsed` stays empty.
-     * Asserting that heading here would be asserting the wrong surface, and it is
-     * how this test first failed.
-     *
-     * Pressing the control is still exercised, because a bundle may hold an
-     * archive AND example sources, and it must not take the review away.
+     * Pressing Reconstruct is still exercised: a bundle may hold an archive AND
+     * example sources, and it must not take the review away.
      */
     await page.getByRole('button', { name: 'Reconstruct Candidates' }).click();
-    await expect(digest).toBeVisible();
-    await expectClean(page, 'the corpus review, after reconstruction is pressed');
+    await expect(page.locator('.bl15-runs table').first()).toBeVisible();
+
+    await openStage(page, 'Conflicts');
+    await expect(page.locator('.hi-conflict').first()).toBeVisible();
+    // EVERY KIND IS COUNTED ON THE SURFACE with everything collapsed: a header with
+    // its count is visible for each kind before anything is opened.
+    const heads = page.locator('.hi-conflict-group-head');
+    expect(await heads.count()).toBeGreaterThan(0);
+    for (let i = 0; i < (await heads.count()); i++) {
+      await expect(heads.nth(i).locator('.hi-count')).toBeVisible();
+    }
+    expect(await openEverything(page)).toBeGreaterThan(0);
+    // After opening everything, no conflict row is left hidden behind Show more.
+    await expect(page.locator('[role="tabpanel"]:not([hidden]) li.hi-conflict[hidden]')).toHaveCount(0);
+    await expectClean(page, 'Conflicts — every conflict’s four layers open');
+
+    for (const stage of ['Review', 'Add to Experiment']) {
+      await openStage(page, stage);
+      await openEverything(page);
+      await expectClean(page, `${stage} (archive), every disclosure open`);
+    }
   });
 
   test('VACUITY GUARD — the corpus review scan examined a real archive reading', async ({
     page,
   }) => {
     /*
-     * The sibling guard above exists because a scan of an empty page is clean. This
-     * one exists because a scan of a review rendered from an EMPTY archive would be
-     * clean too, and would pass while proving nothing about the thing this feature
-     * is for. So it asserts the digest carries measured counts, not zeros.
+     * A review rendered from an EMPTY archive would scan clean too, and would pass
+     * while proving nothing about the thing this feature is for. So it asserts the
+     * headline counts are measured, not zeros.
      */
     await page.goto('/imports');
     await page.getByRole('button', { name: 'Start an Import' }).click();
     await expect(page.getByRole('button', { name: 'Back to imports' })).toBeVisible();
-    await page.getByRole('button', { name: 'Add an Archive' }).click();
+    await page.getByRole('button', { name: 'Add an Archive', exact: true }).click();
+    await openStage(page, 'What ISAAC Read');
     await page.getByRole('button', { name: 'Read the Sources' }).click();
-    await expect(page.getByRole('heading', { name: /What this archive contains/i })).toBeVisible();
+    await expect(page.locator('.bl15-highlights')).toBeVisible();
 
-    // The digest rows are the feature's own numbers. At least one must be nonzero,
-    // or the walk found nothing and the clean scan above is vacuous.
-    const body = await page.locator('body').innerText();
-    const numbers = [...body.matchAll(/\b(\d+)\b/g)].map((m) => Number(m[1]));
+    const values = (await page.locator('.bl15-highlight dd').allInnerTexts()).map((t) =>
+      Number(t.replace(/,/g, '')),
+    );
     expect(
-      numbers.some((n) => n > 1),
-      'no count on the corpus review exceeds 1, so the archive walk found nothing ' +
-        'and the axe scan above examined an empty review',
+      values.some((n) => n > 1),
+      'no headline count exceeds 1, so the archive walk found nothing and the axe scans ' +
+        'above examined an empty review',
     ).toBe(true);
 
-    // And the measurement units really are fewer than the files walked — the whole
-    // point of the feature, and a review showing one unit per file would be the
-    // banned 1,192-row table under another name.
-    await expect(page.getByText(/Measurements reconstructed/i)).toBeVisible();
+    // And there are FEWER measurements than files walked — the whole point of the
+    // feature; one unit per file would be the banned 1,192-row table renamed.
+    const byLabel = Object.fromEntries(
+      await page.locator('.bl15-highlight').evaluateAll((els) =>
+        els.map((el) => [el.querySelector('dt')?.textContent ?? '', Number((el.querySelector('dd')?.textContent ?? '0').replace(/,/g, ''))]),
+      ),
+    ) as Record<string, number>;
+    const sources = Object.entries(byLabel).find(([k]) => /source|file/i.test(k))?.[1] ?? 0;
+    const measurements = Object.entries(byLabel).find(([k]) => /measurement/i.test(k))?.[1] ?? 0;
+    expect(measurements).toBeGreaterThan(0);
+    expect(measurements).toBeLessThan(sources);
   });
 });

@@ -217,20 +217,39 @@ _ASSETS_BLOCKED_REASON_CORRECTION = "2026-09-16"
 #: nominal, domain-supplied and NOT measured, on the scientist's authority rather than
 #: the parser's; under any other profile the field stays absent and the record stays
 #: blocked, exactly as described above."~~
+#:
+#: ***CORRECTED 2026-09-22 — TRUE FOR EVERY ARCHIVE, NOT ONLY THE SUPPLIED ONE.*** The
+#: sentence used to open "this corpus states no temperature anywhere — not in the
+#: beamtime README, not in the notes, not in any acquisition header". That was measured
+#: of the supplied archive and it is still true of it, but this constant is served for
+#: EVERY archive (as ``mapping.temperature_absent_reason`` and as the first of
+#: ``corpus_digest.cannot_be_export_ready``), including one whose notes say "held at
+#: room temperature throughout" — for which it denied the very statement shown beside
+#: it. The export BLOCKING is unchanged and is what the sentence now states: whatever a
+#: source says about temperature, in words or on a labelled line, is kept verbatim and
+#: never converted, so nothing here supplies ``context.temperature_K``.
+#:
+#: ***CORRECTED AGAIN 2026-09-23, after an independent review.*** The 2026-09-22 wording
+#: said "No source here supplies that number: a corpus either states no temperature at
+#: all, or states one only as words" — a universal claim, false for a labelled number
+#: (``notes._TEMPERATURE_LABEL`` matches ``Temperature: 298 K``). The true statement is
+#: about THIS BUILD, not the sources: it converts none of them.
 TEMPERATURE_ABSENT_REASON = (
     "context.temperature_K is required by the official schema whenever a context block "
-    "is present, and this corpus states no temperature anywhere — not in the beamtime "
-    "README, not in the notes, not in any acquisition header. The field is therefore "
-    "left MISSING and shown as Not recorded: this application inserts no value and "
-    "offers no value automatically, because a plausible number in a required field is a "
-    "fabricated measurement that nothing downstream can tell from a measured one, and "
-    "298 must not be defaulted into context.temperature_K by this application. A source "
-    "that literally says 'room temperature' or 'RT' is kept verbatim in the extended "
-    "context and is never converted. A nominal number may be OFFERED only by a reviewed "
-    "convention rule that names its convention (NTP-style 293.15 K or SATP-style 298.15 "
-    "K), labels it nominal and inferred, and waits for a scientist to confirm it; no "
-    "such rule is enabled. The 2026-09-17 exception that supplied 298 K for one profile "
-    "(DEC-43) was withdrawn on 2026-09-22 by the domain owner's answer."
+    "is present, and it takes a number in kelvin. This build converts no source "
+    "statement into context.temperature_K: whatever a source says about temperature — "
+    "'room temperature', 'RT', or a labelled Temperature: line, including a labelled "
+    "number — is kept verbatim in the extended context and never converted. The field "
+    "is therefore left MISSING "
+    "and shown as Not recorded, or as the source's own words where it has some: this "
+    "application inserts no value and offers no value automatically, because a "
+    "plausible number in a required field is a fabricated measurement that nothing "
+    "downstream can tell from a measured one, and 298 must not be defaulted into "
+    "context.temperature_K by this application. A nominal number may be OFFERED only "
+    "by a reviewed convention rule that names its convention (NTP-style 293.15 K or "
+    "SATP-style 298.15 K), labels it nominal and inferred, and waits for a scientist to "
+    "confirm it; no such rule is enabled. The 2026-09-17 exception that supplied 298 K "
+    "for one profile (DEC-43) was withdrawn on 2026-09-22 by the domain owner's answer."
 )
 
 CYCLING_STATE_NO_FIELD_REASON = (
@@ -735,6 +754,9 @@ class ConceptMapping:
             "domain_questions": list(self.domain_questions),
             "unresolved_questions": list(self.unresolved_questions),
             "scientist_label": self.scientist_label,
+            # 2026-09-22 — how many values the concept is expected to have, so a
+            # surface can say "varies by scan" from the registry rather than guess it.
+            "cardinality": cardinality_for(self.concept),
         }
 
 
@@ -1453,6 +1475,89 @@ _MAPPINGS: tuple[ConceptMapping, ...] = (
 )
 
 MAPPINGS: dict[str, ConceptMapping] = {m.concept: m for m in _MAPPINGS}
+
+# --- cardinality: how many values a concept is EXPECTED to have -----------------
+#
+# ADDED 2026-09-22, AFTER A MEASUREMENT: on the synthetic multi-operator corpus, 36 of
+# the 43 "field disagreements" the reconstruction reported were not disagreements. Each
+# scan export names its own scan index, a `#L` line lists several detector columns, a
+# `#P` line gives several motors' positions, and each scan file's name carries its own
+# index token — so comparing every reading of those concepts against every other
+# reported "the sources disagree" about scans that were simply different. The rule
+# below is stated PER CONCEPT and never inferred from the data: a concept this table
+# does not name is one value per measurement, which is the conservative default because
+# comparing everything is the one choice that can never hide a disagreement.
+
+#: One value per measurement: every reading is compared with every other. The default.
+CARDINALITY_PER_MEASUREMENT = "per_measurement"
+#: One value per SCAN: a reading is compared only with readings about the same scan.
+CARDINALITY_PER_SCAN = "per_scan"
+#: Several values per scan, one per ITEM (a detector column, a motor): a reading is
+#: compared only with readings about the same item of the same scan.
+CARDINALITY_PER_SCAN_ITEM = "per_scan_item"
+#: Values per FILE, one per item of it (a name's token position): a reading is compared
+#: only with readings about the same item of the same file.
+CARDINALITY_PER_SOURCE = "per_source"
+CARDINALITIES: frozenset[str] = frozenset(
+    {
+        CARDINALITY_PER_MEASUREMENT,
+        CARDINALITY_PER_SCAN,
+        CARDINALITY_PER_SCAN_ITEM,
+        CARDINALITY_PER_SOURCE,
+    }
+)
+
+RULE_CARDINALITY = (
+    "bl15.mapping.cardinality.v2: a concept's readings are compared at the level its "
+    "cardinality names. Two readings about DIFFERENT scans may differ only when each "
+    "source itself states which scan it is about — the SPEC scan number on its own #S "
+    "line; a scan export's file index is never taken as one. A per-scan-item concept is "
+    "compared within the same column or motor of the same scan, a per-source concept "
+    "within the same token of the same file. Every statement about the whole "
+    "measurement, or whose scan is not established, is compared with every reading of "
+    "the same item, so a plan that disagrees with a recording is a conflict. Values that "
+    "differ across two or more established scans are kept as one reading per scan; any "
+    "other difference is a conflict. Nothing is chosen and nothing is dropped."
+)
+
+#: THE DECLARED CARDINALITIES, each with the reason it is not the default.
+#:
+#: * ``acquisition_target`` — a scan export's basename names ITS OWN scan index, so it
+#:   differs by construction; a macro's declared target is compared with every scan's
+#:   on the measurement stem alone.
+#: * ``detector_column`` — a `#L` line lists SEVERAL columns; each column position is
+#:   its own item.
+#: * ``motor_position`` — a `#P` line gives SEVERAL motors; each motor is its own item.
+#: * ``unknown_token`` — an unrecognised piece of ONE file's own name, at one token
+#:   position; two files' pieces, or two positions of one name, are different facts,
+#:   not two accounts of one.
+#:
+#: REVERTED TO PER-MEASUREMENT IN v2 (2026-09-23): ``counting_time``,
+#: ``scan_command``, ``energy_grid`` and ``emission_energy``. v1 declared them per scan,
+#: and an independent review measured the cost: a macro's planned counting time or
+#: emission energy and the header's recorded value for the SAME, only scan read as
+#: variation. The domain answers so far treat counting time and emission energy as read
+#: "for a measurement", so they are compared as one value until the domain owner says
+#: which acquisition quantities are expected to vary per scan — asked as Q21 in
+#: ``docs/bl15-2-domain-questions-2026-09-16.md``.
+#:
+#: DELIBERATELY NOT HERE, though some of their readings are stated per scan:
+#: ``filter`` (a condition of the measurement — a scan header's filter motor disagreeing
+#: with the filename's filter index is a real question for a scientist) and
+#: ``acquisition_timestamp`` (it feeds ``timestamps.acquired_start_utc``, one value per
+#: run, and choosing between scans' dates is a decision, not a reading).
+CONCEPT_CARDINALITY: dict[str, str] = {
+    ev.CONCEPT_ACQUISITION_TARGET: CARDINALITY_PER_SCAN,
+    ev.CONCEPT_DETECTOR_COLUMN: CARDINALITY_PER_SCAN_ITEM,
+    ev.CONCEPT_MOTOR_POSITION: CARDINALITY_PER_SCAN_ITEM,
+    ev.CONCEPT_UNKNOWN_TOKEN: CARDINALITY_PER_SOURCE,
+}
+
+
+def cardinality_for(concept: str) -> str:
+    """How many values ``concept`` is expected to have — see :data:`RULE_CARDINALITY`."""
+    return CONCEPT_CARDINALITY.get(concept, CARDINALITY_PER_MEASUREMENT)
+
 
 
 def mapping_for(concept: str) -> ConceptMapping | None:

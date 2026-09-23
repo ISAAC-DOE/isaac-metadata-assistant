@@ -5,9 +5,12 @@
 .helptip {
   display: inline-flex;
   vertical-align: middle;
-  /* Room for the trigger's focus ring (2px offset) so it never overlaps the last
-     letter of the label beside it (review #277, minor). */
-  margin-inline-start: var(--space-2xs);
+  /* Room for the trigger's focus ring so it never overlaps the last letter of the
+     label beside it. The ring reaches 4px outside the trigger (2px outline + 2px
+     offset), so the old 2px margin left it exactly ON the glyph edge — measured
+     clearance 0px beside "Atmosphere" (final review of #279, P4). 6px leaves 2px
+     of clear space. */
+  margin-inline-start: calc(var(--space-xs) + var(--space-2xs));
 }
 .helptip-trigger {
   display: inline-flex;

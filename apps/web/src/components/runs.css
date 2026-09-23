@@ -472,7 +472,14 @@
   font-size: 13.5px;
   font-weight: 650;
   color: var(--text-primary);
-  flex: none;
+  /* WRAP, NEVER CLIP (final review, P2). This was `flex: none`, so a long imported
+     label ("Legacy 3 · 02 · SYN2 · base · after1500Cycles…") could not shrink and
+     ran out of the card at 390/320 — measured scrollWidth 521 — cutting off the
+     very token that told two "Legacy 3" runs apart. It may shrink to its line and
+     break anywhere, since a label can be one unbroken token. */
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 /*

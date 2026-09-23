@@ -1,25 +1,51 @@
 import './screens.css';
 import './historical-import.css';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { AppShell } from '../components/AppShell';
 import { TopBar } from '../components/TopBar';
 import { LeftNav } from '../components/LeftNav';
 import { BackendDown, LoadingPanel } from '../components/FetchStates';
-import { CircleAlert, Inbox, Plus, TriangleAlert } from '../components/icons';
+import { Inbox, Plus, TriangleAlert } from '../components/icons';
 import { ImportFileStaging } from '../components/ImportFileStaging';
-import { ImportCorpusReview } from '../components/ImportCorpusReview';
+import { ArchiveRuns, CorpusReadOverview } from '../components/ImportCorpusReview';
+import { ImportCandidateRow } from '../components/ImportCandidateRow';
+import { ImportConflicts } from '../components/ImportConflicts';
+import { ImportRules } from '../components/ImportRules';
+import { Disclosure } from '../components/Disclosure';
+import { HelpTip } from '../components/HelpTip';
+import { SemanticStatus } from '../components/SemanticStatus';
 import { LABELS } from '../lib/labels';
-import { stripLifecycleSuffix } from '../lib/adapt';
 import { ROUTES } from '../lib/routes';
 import { api, ApiError } from '../lib/api';
 import { useFetch } from '../lib/useFetch';
+import { useProposalDestinations, type ProposalDestinations } from '../lib/importDestinations';
 import {
-  DETERMINISM_LABELS,
   IMPORT_COPY,
+  archiveLabel,
+  IMPORT_STAGE_COPY,
   PARSE_STATE_LABELS,
   SOURCE_KIND_LABELS,
 } from '../lib/historicalImportContent';
+import {
+  candidateLabel,
+  candidateReview,
+  conflictCount,
+  conflictViews,
+  defaultStage,
+  groupUnsent,
+  IMPORT_STAGES,
+  MATCHED_BY_LABELS,
+  plural,
+  STAGE_WORKFLOW_STEP,
+  stageReached,
+  summaryItems,
+  planFor,
+  REVIEW_BUCKET_ORDER,
+  REVIEW_BUCKET_STATE,
+  reviewCounts,
+  type ImportStageId,
+} from '../lib/importStages';
 import type {
   ApiImportAddedToExperiment,
   ApiImportCandidate,
@@ -327,6 +353,9 @@ function ImportList({
                   onClick={() => onOpen(row.import_id)}
                 >
                   {IMPORT_COPY.actionOpen}
+                  {/* WHICH import, for a screen reader: a list of identical "Open"
+                      buttons names none of them (independent review, 2026-09-23). */}
+                  <span className="sr-only"> {row.label || 'Unnamed import'}</span>
                 </button>
               </li>
             ))}
@@ -356,8 +385,9 @@ function ImportList({
         `.hi-lead` above, so it did not need this disclosure at all.
       */}
       <div className="hi-section hi-landing-col">
-        <details className="hi-how-it-works">
-          <summary>How Historical Import works</summary>
+        {/* The shared `Disclosure` since 2026-09-23 (it was a native `<details>` with
+            an 11px triangle); collapsed by default exactly as before. */}
+        <Disclosure className="hi-how-it-works" summary="How Historical Import works">
           <WorkflowStrip steps={data.workflow} furthest={null} />
           {/* THE SERVER'S OWN SENTENCE about what a session is and is not. Same
               string, same `role="note"`, same server source as before — only
@@ -366,7 +396,7 @@ function ImportList({
           <p className="hi-note" role="note">
             {data.durability}
           </p>
-        </details>
+        </Disclosure>
       </div>
     </>
   );
@@ -470,9 +500,40 @@ function WorkflowStrip({
 }
 
 /* --------------------------------------------------------------------------
- * One session.
+ * One session — SIX STAGES, ONE IN FOCUS (owner QA H1, 2026-09-22).
  * -------------------------------------------------------------------------- */
 
+type ActFn = (name: string, run: () => Promise<unknown>) => Promise<void>;
+type ActWithNext = (name: string, run: () => Promise<unknown>, next?: ImportStageId) => Promise<void>;
+
+const STAGE = IMPORT_STAGE_COPY;
+
+/**
+ * AN OPENED IMPORT, AS A FOCUSED STAGE FLOW.
+ *
+ * ── WHAT THIS REPLACED ──────────────────────────────────────────────────────
+ *
+ * Every stage used to render at once, one card after another: the sources, what
+ * was read, the whole corpus review, every candidate as a full card, and the batch
+ * send. Measured at 1440px on the synthetic five-measurement archive: 43,994 px of
+ * page, each of 101 candidates headed by a raw schema path and carrying its
+ * normalisation rule in full, with internal tokens (`sources_disagree`,
+ * `deterministic_fake`) on the surface.
+ *
+ * ── WHAT IT IS NOW ─────────────────────────────────────────────────────────
+ *
+ *  1. THE SUMMARY FIRST — the counts a reader decides from, before any detail.
+ *  2. SIX STAGES AS TABS — Source Bundle · What ISAAC Read · Runs & Candidates ·
+ *     Conflicts · Review · Add to Experiment — the owner's names, one in focus.
+ *     Each shows ONE heading and ONE sentence; its explanation is behind a `?`.
+ *  3. EVERY STAGE STAYS MOUNTED, the inactive ones `hidden`, so a half-typed form
+ *     survives a trip to another stage and every guard that reads the DOM still
+ *     reaches the text (the record screen's workspaces follow the same rule).
+ *
+ * The tabs are a real ARIA tablist: arrow keys move between them, Home/End jump,
+ * and each panel is labelled by its tab. `aria-current="step"` still marks how far
+ * the session has got — a fact the SERVER derives — on the stage that owns that step.
+ */
 function ImportSessionView({
   importId,
   onClose,
@@ -483,14 +544,45 @@ function ImportSessionView({
   const session = useFetch(() => api.getImport(importId), [importId]);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<ApiError | null>(null);
+  const [stage, setStage] = useState<ImportStageId | null>(null);
+  const destinations = useProposalDestinations();
+  /* The stage on screen, kept for `act`: see "PINNED" below. */
+  const activeRef = useRef<ImportStageId | null>(null);
+  const [announcement, setAnnouncement] = useState('');
+  const pendingFocus = useRef<string | null>(null);
+  const [focusTick, setFocusTick] = useState(0);
 
-  const act = useCallback(
-    async (name: string, run: () => Promise<unknown>) => {
+  /*
+   * THE RELOAD IS SILENT, which it was not until 2026-09-22 — and the stage flow is
+   * why it has to be. A full reload put this component into `loading` and unmounted
+   * every stage, so an open measurement, a half-chosen resolution or the stage in
+   * focus were all lost on every act. `reloadSilent` re-reads the session and
+   * replaces the data in place; a failed re-read is disclosed beside the stages
+   * rather than swapping the page for a spinner.
+   */
+  const act: ActWithNext = useCallback(
+    async (name, run, next) => {
+      /*
+       * PINNED. Until a reader picks a stage, the one shown is DERIVED from the
+       * session — so without this, adding the first source re-derived it and swept
+       * the reader from Source Bundle to What ISAAC Read mid-task, table and all
+       * (caught by the import-session a11y spec). An act keeps the reader where they
+       * are unless it names where to go next.
+       */
+      setStage((current) => current ?? activeRef.current);
       setBusy(name);
       setError(null);
       try {
         await run();
-        session.reload();
+        session.reloadSilent();
+        if (next) setStage(next);
+        /* SAID AND FOCUSED (independent review, 2026-09-23): an act's result is
+           announced in the stage's one polite region, and focus moves to what the act
+           produced — its report or the stage heading — instead of being dropped when
+           the control that had it re-renders away. */
+        setAnnouncement(announcementFor(name));
+        pendingFocus.current = name.startsWith('add-whole') ? '.hi-addwhole-result .hi-block-title' : '.hi-stage-title';
+        setFocusTick((n) => n + 1);
       } catch (err) {
         setError(err instanceof ApiError ? err : new ApiError(String(err)));
       } finally {
@@ -501,31 +593,26 @@ function ImportSessionView({
   );
 
   /*
-   * HIST-005's REPORT LIVES HERE, NOT IN THE PANEL THAT RENDERS IT, and that is
-   * a fix rather than a preference — measured in a real browser before it was
-   * moved.
-   *
-   * `act` calls `session.reload()`, which puts this component into `loading` and
-   * returns the `LoadingPanel` below. That early return UNMOUNTS this component's
-   * whole subtree, so state held inside `AddWholeImportPanel` is destroyed on the
-   * very reload the successful send triggers: the batch wrote two proposals, the
-   * server answered with its counts, and the panel came back with an empty
-   * report. Measured — 2 proposals and 2 notes on the record, `furthest_step`
-   * advanced, and NOTHING on screen to say so.
-   *
-   * IT CANNOT BE RE-DERIVED FROM THE RELOADED SESSION, which is why the per-
-   * candidate card does not have this problem and this panel cannot copy its
-   * approach: a card's confirmation is `session.proposed[candidate_id]`, a fact
-   * the session carries, whereas the batch's report includes the server's counts
-   * and its REASON per candidate it would not send — statements about one request
-   * that the session never stores. Reconstructing them here would be composing a
-   * report rather than relaying one.
-   *
-   * This component survives its own `loading` branch; only its children are
-   * unmounted by it. That is the whole reason the state moved up exactly one
-   * level and no further.
+   * HIST-005's REPORT LIVES HERE, above the stages, because it cannot be re-derived
+   * from the reloaded session: it is the server's statement about ONE request — its
+   * counts and its reason per candidate it would not send — which the session never
+   * stores. Reconstructing it would be composing a report rather than relaying one.
    */
   const [addedResult, setAddedResult] = useState<ApiImportAddedToExperiment | null>(null);
+
+  /* Focus lands after the re-render that shows the act's result; until the target is
+     on screen (a report renders a moment later), the request waits. */
+  useEffect(() => {
+    const selector = pendingFocus.current;
+    if (!selector) return;
+    const panel = document.querySelector('[role="tabpanel"]:not([hidden])');
+    const target = panel?.querySelector<HTMLElement>(selector);
+    if (target) {
+      target.focus();
+      pendingFocus.current = null;
+    }
+  });
+  void focusTick;
 
   if (session.status === 'loading') {
     // Same reason as the list's, above.
@@ -547,30 +634,19 @@ function ImportSessionView({
   }
 
   const data: ApiImportSession = session.data.import;
+  const active: ImportStageId = stage ?? defaultStage(data);
+  activeRef.current = active;
+  const summary = summaryItems(data);
 
   return (
     <>
       {/*
-        THE SESSION HEADER.
-
-        WHAT CHANGED, AND IT IS ORDER AS MUCH AS STYLE. `Back to imports` used to
-        be the FIRST child, above the session's own name, so the block opened with
-        a way out rather than with what a reader had opened. The title now leads
-        and the control sits on its own baseline to the right of it
-        (`.hi-section-head`), which is the arrangement every other detail surface
-        in this app uses.
-
-        THE EYEBROW IS NEW and is the cheapest honest way to say what this block
-        is: the `<h1>` says `Historical Import` and this `<h2>` says the session's
-        label, so without it two headings of different sizes sat above each other
-        with nothing naming the relationship. `.eyebrow` is `base.css`'s shared
-        mono/uppercase/.09em idiom — `typography.md:55`, "Eyebrow (section) | Mono
-        | 11px / uppercase | letter-spacing .09em".
-
-        `Import Session` claims nothing: it is the word the server's own durability
-        sentence, rendered two lines below, already uses for this thing.
+        THE SESSION HEADER: what this is, a way out, and the counts a reader
+        decides from. `Import Session` is the word the server's own durability
+        sentence uses for this thing; the durability sentence itself stays visible
+        (a working area a restart can end is a consequence, not a definition).
       */}
-      <div className="hi-section">
+      <div className="hi-section hi-session-head">
         <span className="eyebrow hi-session-eyebrow">Import Session</span>
         <div className="hi-section-head">
           <h2 className="hi-section-title">{data.label || 'Unnamed import'}</h2>
@@ -578,72 +654,114 @@ function ImportSessionView({
             Back to imports
           </button>
         </div>
-        <WorkflowStrip steps={data.workflow} furthest={data.furthest_step} />
-        <p className="hi-note" role="note">
+        <dl className="hi-summary" aria-label={STAGE.summaryTitle}>
+          {summary.map((item) => (
+            <div className="hi-summary-item" key={item.id} data-id={item.id}>
+              <dt>{item.label}</dt>
+              <dd>{item.value.toLocaleString('en-US')}</dd>
+            </div>
+          ))}
+        </dl>
+        <p className="hi-note hi-durability" role="note">
           {data.durability}
         </p>
-        {error !== null && <Refusal error={error} />}
+        {session.refreshFailed && (
+          <p className="hi-warn" role="note">
+            <TriangleAlert size={14} strokeWidth={2.1} aria-hidden="true" />
+            The last change was saved, and this view could not be refreshed. Reopen the
+            import to see its current state.
+          </p>
+        )}
+      </div>
+
+      <div className="hi-section hi-stages-card">
+        <StageTabs session={data} active={active} onSelect={setStage} />
+        <p className="sr-only" role="status" aria-live="polite">
+          {announcement}
+        </p>
+        {IMPORT_STAGES.map((id) => (
+          <div
+            key={id}
+            role="tabpanel"
+            id={panelId(importId, id)}
+            aria-labelledby={tabId(importId, id)}
+            className="hi-stage-panel"
+            hidden={id !== active}
+          >
+            {id === active && error !== null && <Refusal error={error} />}
+            {id === 'sources' && (
+              <SourceBundleStage data={data} busy={busy} onAct={act} importId={importId} />
+            )}
+            {id === 'read' && <ReadStage data={data} busy={busy} onAct={act} importId={importId} />}
+            {id === 'runs' && (
+              <RunsStage
+                data={data}
+                busy={busy}
+                onAct={act}
+                importId={importId}
+                destinations={destinations}
+              />
+            )}
+            {id === 'conflicts' && (
+              <ConflictsStage
+                data={data}
+                busy={busy}
+                onAct={act}
+                importId={importId}
+                destinations={destinations}
+              />
+            )}
+            {id === 'review' && (
+              <ReviewStage
+                data={data}
+                busy={busy}
+                onAct={act}
+                importId={importId}
+                destinations={destinations}
+              />
+            )}
+            {id === 'add' && (
+              <AddStage
+                data={data}
+                busy={busy}
+                onAct={act}
+                importId={importId}
+                destinations={destinations}
+                result={addedResult}
+                onResult={setAddedResult}
+                onGoTo={setStage}
+              />
+            )}
+            {/* THE WAY ON. A tab strip alone leaves a first-time reader to guess that
+                reading happens one tab over; this names the next stage and moves
+                focus to its tab, so a keyboard reader lands where they asked to go. */}
+            {IMPORT_STAGES.indexOf(id) < IMPORT_STAGES.length - 1 && (
+              <div className="hi-stage-next">
+                <button
+                  type="button"
+                  className="btn btn-ghost"
+                  onClick={() => {
+                    const next = IMPORT_STAGES[IMPORT_STAGES.indexOf(id) + 1]!;
+                    setStage(next);
+                    window.setTimeout(() => document.getElementById(tabId(importId, next))?.focus(), 0);
+                  }}
+                >
+                  Next: {STAGE[IMPORT_STAGES[IMPORT_STAGES.indexOf(id) + 1]!].title}
+                </button>
+              </div>
+            )}
+          </div>
+        ))}
       </div>
 
       {/*
-        THE LARGE-CORPUS REVIEW — `BL15R-012`.
-
-        RENDERED ONLY WHEN THE SERVER SENDS ONE, and absent — not empty, not
-        disabled, not a placeholder — otherwise. No route emits `corpus_review`
-        when this session holds an archive. ~~No route emits `corpus_review`: the
-        archive source kind is a separate slice's step 1, and
-        `historical_import.SOURCE_KINDS` holds only `reference` and
-        `synthetic_fixture`.~~ — BOTH HALVES OF THAT WERE FALSE AND BOTH ARE NOW
-        CLOSED. The kind shipped in `6cdb2279` on this branch, and the route emits
-        `corpus_review` since the two halves were joined — they had been built
-        against different shapes and simply never met, which independent review
-        found. `ai-integration-decision-packet.md` §9's rule is
-        "build nothing that implies any of it exists", so a session without an
-        archive shows nothing here at all.
-
-        It sits ABOVE `SourcesSection` because it is the digest: `HIST-004` bans
-        `Upload -> Spinner -> Mysterious JSON`, and for a 1,192-file archive the
-        per-source list is the "mysterious" part. The scientist reads what the
-        archive contains, then drills in.
-      */}
-      {data.corpus_review && (
-        <div className="hi-section">
-          <ImportCorpusReview review={data.corpus_review} />
-        </div>
-      )}
-
-      <SourcesSection
-        data={data}
-        busy={busy}
-        onAct={act}
-        importId={importId}
-      />
-
-      <ParseSection data={data} busy={busy} onAct={act} importId={importId} />
-
-      <CandidatesSection
-        data={data}
-        busy={busy}
-        onAct={act}
-        importId={importId}
-        addedResult={addedResult}
-        onAdded={setAddedResult}
-      />
-
-      {/*
         THE SAME RULE AS `New Import`: the section is titled by its subject and the
-        button keeps the verb. This heading was `IMPORT_COPY.actionDiscard`
-        ("Discard This Import") — the exact label of the `btn-danger` three lines
-        below it — so the destructive act's name appeared twice and the section
-        read as a second button.
-
-        `This Working Area` is the server's own words for what a session is
-        (`IMPORT_COPY.discardNote`: "Discarding removes this working area"), so the
-        title borrows the vocabulary the disclosure beneath it already uses rather
-        than introducing a fourth noun for the same thing.
+        button keeps the verb. `This Working Area` is the server's own words for
+        what a session is (`IMPORT_COPY.discardNote`). The consequence stays in the
+        open beside the destructive button, never behind a disclosure.
       */}
-      <div className="hi-section">
-        <h3 className="hi-section-title">This Working Area</h3>
+      <div className="hi-section hi-discard">
+        <h3 className="hi-section-title">{STAGE.discardTitle}</h3>
         <p className="hi-note">{IMPORT_COPY.discardNote}</p>
         <button
           type="button"
@@ -663,13 +781,151 @@ function ImportSessionView({
   );
 }
 
+const tabId = (importId: string, stage: ImportStageId) => `hi-tab-${importId}-${stage}`;
+const panelId = (importId: string, stage: ImportStageId) => `hi-panel-${importId}-${stage}`;
+
+/**
+ * THE SIX STAGES, AS A TABLIST. The meta beside each name is a count read off the
+ * session; the stage that owns the server's furthest step carries
+ * `aria-current="step"`; the one step the server may declare unbuilt says so.
+ */
+function StageTabs({
+  session,
+  active,
+  onSelect,
+}: {
+  session: ApiImportSession;
+  active: ImportStageId;
+  onSelect: (stage: ImportStageId) => void;
+}) {
+  const candidates = session.reconstruction?.candidates ?? [];
+  const counts = reviewCounts(session);
+  const conflicts = conflictCount(session);
+  const measurements = session.corpus_digest?.measurement_units;
+  const furthestStage = IMPORT_STAGES.filter((s) => STAGE_WORKFLOW_STEP[s] === session.furthest_step)[0];
+  const unbuilt = (s: ImportStageId) =>
+    session.workflow.find((step) => step.id === STAGE_WORKFLOW_STEP[s])?.built === false;
+
+  const meta: Record<ImportStageId, string> = {
+    sources: plural(session.sources.length, 'source', 'sources'),
+    read:
+      session.corpus_digest
+        ? plural(session.corpus_digest.statements_read, 'statement', 'statements')
+        : `${session.source_counts.parsed} of ${session.source_counts.total} read`,
+    runs:
+      measurements !== undefined && measurements !== null
+        ? plural(measurements, 'measurement', 'measurements')
+        : plural(candidates.length, 'candidate', 'candidates'),
+    conflicts: conflicts === 0 ? 'none' : plural(conflicts, 'open', 'open'),
+    review: `${counts.needsReview.toLocaleString('en-US')} need review`,
+    add: unbuilt('add') ? STAGE.stateLabels.notBuilt : `${counts.ready.toLocaleString('en-US')} ready`,
+  };
+
+  const refs = useRef<Map<ImportStageId, HTMLButtonElement>>(new Map());
+  const move = (from: ImportStageId, delta: number | 'first' | 'last') => {
+    const i = IMPORT_STAGES.indexOf(from);
+    const next =
+      delta === 'first'
+        ? IMPORT_STAGES[0]
+        : delta === 'last'
+          ? IMPORT_STAGES[IMPORT_STAGES.length - 1]
+          : IMPORT_STAGES[(i + delta + IMPORT_STAGES.length) % IMPORT_STAGES.length];
+    if (next === undefined) return;
+    onSelect(next);
+    refs.current.get(next)?.focus();
+  };
+
+  return (
+    <div className="hi-stages" role="tablist" aria-label={STAGE.stagesLabel}>
+      {IMPORT_STAGES.map((id, index) => {
+        const selected = id === active;
+        return (
+          <button
+            key={id}
+            ref={(el) => {
+              if (el) refs.current.set(id, el);
+              else refs.current.delete(id);
+            }}
+            type="button"
+            role="tab"
+            id={tabId(session.import_id, id)}
+            aria-controls={panelId(session.import_id, id)}
+            aria-selected={selected}
+            aria-current={id === furthestStage ? 'step' : undefined}
+            tabIndex={selected ? 0 : -1}
+            className={`hi-stage-tab${stageReached(session, id) ? ' is-reached' : ''}${
+              id === 'conflicts' && conflicts > 0 ? ' has-conflicts' : ''
+            }`}
+            onClick={() => onSelect(id)}
+            onKeyDown={(event) => {
+              if (event.key === 'ArrowRight' || event.key === 'ArrowDown') {
+                event.preventDefault();
+                move(id, 1);
+              } else if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') {
+                event.preventDefault();
+                move(id, -1);
+              } else if (event.key === 'Home') {
+                event.preventDefault();
+                move(id, 'first');
+              } else if (event.key === 'End') {
+                event.preventDefault();
+                move(id, 'last');
+              }
+            }}
+          >
+            <span className="hi-stage-index" aria-hidden="true">
+              {index + 1}
+            </span>
+            <span className="hi-stage-text">
+              <span className="hi-stage-name">{STAGE[id].title}</span>
+              <span className="hi-stage-meta">{meta[id]}</span>
+            </span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+/** What an act says in the stage's polite region when it succeeds. */
+function announcementFor(name: string): string {
+  if (name === 'add-archive') return 'Archive added to the source bundle.';
+  if (name === 'add-fixture') return 'Example source added to the source bundle.';
+  if (name === 'add-reference' || name === 'record-staged-file') return 'Recorded as a source.';
+  if (name.startsWith('remove:')) return 'Source removed.';
+  if (name === 'parse') return 'Sources read.';
+  if (name === 'reconstruct') return 'Candidates reconstructed. Showing Runs & Candidates.';
+  if (name.startsWith('add-whole') && !name.endsWith(':create')) return 'Sent to the record. The report is below.';
+  if (name.startsWith('resolve') || name.startsWith('rule:') || name.startsWith('adopt:') || name.startsWith('signal:')) {
+    return 'Choice recorded. The import was read again under it.';
+  }
+  if (name.startsWith('propose:')) return 'Sent to the record as a proposal.';
+  if (name.includes('create')) return 'Record created.';
+  return 'Done.';
+}
+
+/** A stage's one heading, one sentence, and the `?` holding the rest. */
+function StageHead({ stage, lead }: { stage: ImportStageId; lead?: string }) {
+  const copy = STAGE[stage];
+  return (
+    <div className="hi-stage-head">
+      <div className="hi-stage-title-row">
+        {/* Focusable by script only, so an act can land the reader here. */}
+        <h3 className="hi-stage-title" tabIndex={-1}>
+          {copy.title}
+        </h3>
+        <HelpTip subject={copy.title}>{copy.help}</HelpTip>
+      </div>
+      <p className="hi-stage-lead">{lead ?? ('lead' in copy ? copy.lead : '')}</p>
+    </div>
+  );
+}
+
 /* --------------------------------------------------------------------------
- * Sources.
+ * Stage 1 — Source Bundle.
  * -------------------------------------------------------------------------- */
 
-type ActFn = (name: string, run: () => Promise<unknown>) => Promise<void>;
-
-function SourcesSection({
+function SourceBundleStage({
   data,
   busy,
   onAct,
@@ -677,7 +933,7 @@ function SourcesSection({
 }: {
   data: ApiImportSession;
   busy: string | null;
-  onAct: ActFn;
+  onAct: ActWithNext;
   importId: string;
 }) {
   const [filename, setFilename] = useState('');
@@ -687,33 +943,8 @@ function SourcesSection({
   const [archive, setArchive] = useState(data.available_archives[0] ?? '');
 
   return (
-    <div className="hi-section">
-      {/* `Sources` is already a subject, not a verb, so this heading needed no
-          change — and `e2e/mutation/imports-session-a11y.spec.ts:147` gates on
-          `heading /Sources/i`, so it must keep matching. */}
-      <h3 className="hi-section-title">Sources</h3>
-      {/*
-        ONE LEAD VISIBLE, THE REST COLLAPSED. *"once again there is too much word
-        clutter, put the question mark tooltip icons that users can click instead
-        if they are curious"* — project owner, 2026-09-14.
-
-        `sourcesLead` stays on the page because it is the one sentence that
-        changes what a reader DOES here: a source is a pointer, and this workflow
-        does not open the file it names. The other two explain the example
-        sources and which layout is read — true, load-bearing for anyone
-        auditing the claim, and read once.
-
-        A native `<details>` rather than a tooltip icon: the content is two
-        paragraphs, not a phrase, and a hover tooltip is unreachable by keyboard
-        and by touch. It keeps the text in the DOM and the accessibility tree, so
-        `historical-import.test.tsx`'s copy assertions still reach it.
-      */}
-      <p className="hi-body">{IMPORT_COPY.sourcesLead}</p>
-      <details className="hi-more">
-        <summary className="hi-more-summary">What counts as a source here</summary>
-        <p className="hi-body">{IMPORT_COPY.fixturesLead}</p>
-        <p className="hi-note">{IMPORT_COPY.formatsNote}</p>
-      </details>
+    <>
+      <StageHead stage="sources" />
 
       {data.sources.length === 0 ? (
         <p className="hi-body hi-empty-inline">{IMPORT_COPY.emptySourcesBody}</p>
@@ -724,12 +955,11 @@ function SourcesSection({
           </caption>
           <thead>
             <tr>
-              <th scope="col">File</th>
-              <th scope="col">Kind</th>
-              <th scope="col">Where it is</th>
-              <th scope="col">Read?</th>
+              <th scope="col">{STAGE.sourcesColumn.file}</th>
+              <th scope="col">{STAGE.sourcesColumn.kind}</th>
+              <th scope="col">{STAGE.sourcesColumn.read}</th>
               <th scope="col">
-                <span className="sr-only">Actions</span>
+                <span className="sr-only">{STAGE.sourcesColumn.actions}</span>
               </th>
             </tr>
           </thead>
@@ -761,79 +991,81 @@ function SourcesSection({
       )}
 
       {/*
-        ── THE FILE PICKER, AND THE RECORDED DECLINE IT REVERSES ─────────────
-        *"for the historical import, there is no area or button to actually upload
-        the files"* — project owner, 2026-09-14. ~~Correct observation, and the
-        answer is a refusal rather than a gap.~~
-
-        *** REVERSED 2026-09-15 BY THE PROJECT OWNER (`DEC-33`), AND THE DECLINE
-        BELOW IS KEPT IN FULL BECAUSE IT WAS RIGHT ABOUT THE RISK. He did not
-        overrule its argument; he ANSWERED it, and supplied the mitigation it
-        asked for: a staged file must read `Local only — not sent to ISAAC`. His
-        instruction was explicit — *"Do not merely delete the guards. Reconcile
-        them."* ***
-
-        WHAT MAKES THE REVERSAL HONEST RATHER THAN A LOOSENING — and it is a
-        measurement, not an argument. `POST /api/imports/{id}/sources` ALREADY
-        accepts `kind: "reference"` with `filename`, `reference`, `media_type`,
-        `size_bytes` and `sha256`; it stores them verbatim, FETCHES NOTHING, and
-        records the entry as `parse_state: "no_content_path"`. A browser hands
-        over `File.name`, `File.size` and `File.type` as part of the SELECTION —
-        no read is involved. Proved over HTTP on 2026-09-15: an entry sent that
-        way lands with the real filename, the real size, a genuine digest and
-        `no_content_path`. So this adds no route, no capability and no
-        governance change. `POST /api/uploads` is still an unconditional 403 and
-        nothing here calls it.
-
-        THE PANEL CANNOT SEND A BYTE BY CONSTRUCTION, which is stronger than a
-        promise in a comment: `ImportFileStaging` takes `onRecord` as a prop and
-        therefore cannot import the API client. Asserted structurally AND
-        behaviourally in `import-file-staging.test.tsx`.
-
-        ~~I BUILT A MULTI-FILE PICKER AND REVERTED IT. It read no bytes — only
-        `File.name`, which a browser hands over with the selection — and it would
-        have turned "type twelve filenames" into one act. Two committed guards
-        refused it, and both are right:
-
-          * `historical-import.test.tsx` §1 asserts this screen renders NO
-            `input[type="file"]`, declares no `type="file"` in its source, and
-            has no `onDrop`, `FormData` or `multipart`. Its stated subject is
-            "the destination cannot accept bytes and does not say it can".
-          * `upload-claim-parity.test.tsx` asserts that EXACTLY TWO non-test
-            files in `apps/web/src` declare a file input, and names both — so a
-            third anywhere fails, whatever it does.
-
-        THE REASONING THAT BEATS THE FEATURE REQUEST: `POST /api/uploads` answers
-        an unconditional 403 and real-data ingestion is out of scope (`CLAUDE.md`
-        §15). A "Choose Files…" button is an upload affordance whatever it does
-        underneath — a scientist who picked twelve files would reasonably believe
-        twelve files had been uploaded. Recording their names while they believe
-        that is worse than asking them to type, because it is a false impression
-        the product created on purpose.
-
-        So this section keeps the reference form, and the honest mechanism is
-        made obvious instead: a reference is a POINTER a later build can follow.~~
-
-        THE ONE SENTENCE OF THE DECLINE THAT STILL GOVERNS: *"a scientist who
-        picked twelve files would reasonably believe twelve files had been
-        uploaded."* That is why the disclosure is on every ROW and in the drop
-        zone itself, visible rather than in a tooltip — a privacy state is one of
-        the things the copy rule keeps out in the open — and why the checksum,
-        the only thing here that reads a file, is opt-in per file and says so
-        before it runs.
+        THE ACTIONS, IN THE ORDER A READER REACHES FOR THEM. The two kinds this build
+        actually READS — an archive and an example source — first, side by side;
+        then staging a file from this computer (browser-local, its privacy statement
+        on every row and in the drop zone itself); then, behind a disclosure, a
+        pointer to a file that must stay where it is.
       */}
+      <div className="hi-forms">
+        {data.available_archives.length > 0 && (
+          <form
+            className="hi-form"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void onAct('add-archive', () =>
+                api.addImportSource(importId, { kind: 'archive', archiveName: archive }),
+              );
+            }}
+          >
+            <h4 className="hi-group-title">{IMPORT_COPY.actionAddArchive}</h4>
+            <label className="hi-field">
+              <span className="hi-field-label">Which archive</span>
+              <select className="hi-input" value={archive} onChange={(event) => setArchive(event.target.value)}>
+                {data.available_archives.map((name) => (
+                  <option key={name} value={name}>
+                    {name.startsWith('staged:') ? `${archiveLabel(name)} (staged on the server)` : archiveLabel(name)}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <button type="submit" className="btn btn-secondary" disabled={busy !== null || !archive}>
+              {IMPORT_COPY.actionAddArchive}
+            </button>
+            <HelpTip subject="reading an archive">{IMPORT_COPY.addArchiveNote}</HelpTip>
+          </form>
+        )}
+
+        {data.available_fixtures.length > 0 && (
+          <form
+            className="hi-form"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void onAct('add-fixture', () =>
+                api.addImportSource(importId, { kind: 'synthetic_fixture', fixtureName: fixture }),
+              );
+            }}
+          >
+            <h4 className="hi-group-title">{IMPORT_COPY.actionAddFixture}</h4>
+            <label className="hi-field">
+              <span className="hi-field-label">Which example source</span>
+              <select className="hi-input" value={fixture} onChange={(event) => setFixture(event.target.value)}>
+                {data.available_fixtures.map((name) => (
+                  <option key={name} value={name}>
+                    {name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <button type="submit" className="btn btn-secondary" disabled={busy !== null || !fixture}>
+              {IMPORT_COPY.actionAddFixture}
+            </button>
+          </form>
+        )}
+      </div>
+
+      {/* THE FILE PICKER. `ImportFileStaging` takes `onRecord` as a prop and so
+          cannot import the API client: it cannot send a byte by construction. What
+          reaches ISAAC is a file's name, size, type and — only if asked — a
+          checksum computed in this tab. `POST /api/uploads` stays an unconditional
+          403 and nothing here calls it, whatever `historical_file_ingestion` says:
+          that capability opens a server-side staging directory, never this route. */}
       <ImportFileStaging
         busy={busy !== null}
         onRecord={async (input) => {
-          /*
-           * THE API CALL IS DELIBERATELY NOT ROUTED THROUGH `onAct`, and the
-           * reason is where the failure lands. `onAct` catches and puts the
-           * refusal in this SECTION's banner — correct for a single form, wrong
-           * for a list, because a reader with four staged files would see one
-           * banner and no indication of WHICH row the server refused. So the
-           * call is made directly, its rejection propagates to the row that
-           * caused it, and `onAct` is used afterwards only for its reload.
-           */
+          /* NOT routed through `onAct`: a refusal must land on the ROW that caused
+             it, not in one banner for a list. `onAct` is used afterwards only for
+             its reload. */
           await api.addImportSource(importId, {
             kind: 'reference',
             filename: input.filename,
@@ -846,20 +1078,12 @@ function SourcesSection({
         }}
       />
 
-      {/* `Record a reference` IS NOW SECONDARY, per `DEC-33`, and is deliberately
-          NOT removed. It is the only way to describe a file that must stay where
-          it is — external storage, a large raw dataset, a path on an instrument
-          machine — which a browser file picker cannot express at all, because a
-          browser does not disclose a local path. So it moves behind a disclosure
-          and keeps every field it had. */}
-      <details className="hi-reference-fallback">
-        <summary>Add an external reference instead</summary>
+      <Disclosure className="hi-disclosure" summary="Add an external reference instead">
         <p className="hi-note">
-          For a file that has to stay where it is — on an instrument machine, in
-          group storage, or anywhere ISAAC cannot be pointed at. You describe
-          where it is; nothing is fetched.
+          For a file that has to stay where it is — on an instrument machine, in group
+          storage, or anywhere ISAAC cannot be pointed at. You describe where it is;
+          nothing is fetched.
         </p>
-      <div className="hi-forms">
         <form
           className="hi-form"
           onSubmit={(event) => {
@@ -877,25 +1101,6 @@ function SourcesSection({
             });
           }}
         >
-          {/*
-              THESE TWO GROUP HEADINGS DO ECHO THEIR OWN BUTTONS, AND THEY ARE
-              LEFT THAT WAY DELIBERATELY. I applied the section rule here first —
-              subject-titled `Reference` and `Example Source`, buttons keeping the
-              verbs — and MEASURED it into a worse defect: `Reference` and
-              `Example source` are already the SOURCE_KIND labels rendered in the
-              Kind column of the table 30 lines above
-              (`historicalImportContent.ts:76-79`), so the screen then used one
-              word for two different things — a group of controls, and a value in
-              a column. `historical-import.test.tsx:516`
-              (`getByText('Reference')`) failed on exactly that ambiguity, which
-              is the guard working rather than an obstacle.
-
-              The echo is also weaker here than it was on the `<h2>`s: this is a
-              `<form>` whose heading acts as a legend and whose `btn-secondary`
-              confirms it, not a section title standing over a `btn-primary`. The
-              four places the rule DID apply are the ones where a section title
-              repeated the screen's primary action.
-          */}
           <h4 className="hi-group-title">{IMPORT_COPY.actionAddReference}</h4>
           <label className="hi-field">
             <span className="hi-field-label">File name</span>
@@ -941,105 +1146,14 @@ function SourcesSection({
             {IMPORT_COPY.actionAddReference}
           </button>
         </form>
-      </div>
-      </details>
+      </Disclosure>
 
-      {/* THE EXAMPLE SOURCE STAYS OUT IN THE OPEN and is deliberately NOT inside
-          the external-reference disclosure: it is the one source kind this build
-          actually READS, so it is the only way to exercise parse and
-          reconstruction end to end. Burying it under "add an external reference
-          instead" would hide the only entry that can produce a candidate. */}
-      <div className="hi-forms">
-
-        {/* THE ARCHIVE, AND IT IS THE ONLY CONTROL THAT REACHES THE CORPUS REVIEW.
-            Added 2026-09-16, and it is the last link of the chain: the server has
-            served `available_archives` and emitted `corpus_review` for a session
-            holding an archive — but NO CONTROL CREATED ONE, so a scientist could not
-            reach the review however complete the rest was. The payload and the
-            surface met; the user could not get to either.
-
-            Out in the open beside the example source rather than behind the
-            external-reference disclosure, for the same reason that one is: these are
-            the two kinds this build actually READS, and burying the one that walks a
-            whole corpus would hide the entry the feature exists for. */}
-        {data.available_archives.length > 0 && (
-          <form
-            className="hi-form"
-            onSubmit={(event) => {
-              event.preventDefault();
-              void onAct('add-archive', () =>
-                api.addImportSource(importId, {
-                  kind: 'archive',
-                  archiveName: archive,
-                }),
-              );
-            }}
-          >
-            <h4 className="hi-group-title">{IMPORT_COPY.actionAddArchive}</h4>
-            <label className="hi-field">
-              <span className="hi-field-label">Which archive</span>
-              <select
-                className="hi-input"
-                value={archive}
-                onChange={(event) => setArchive(event.target.value)}
-              >
-                {data.available_archives.map((name) => (
-                  <option key={name} value={name}>
-                    {name}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <p className="hi-note">{IMPORT_COPY.addArchiveNote}</p>
-            <button
-              type="submit"
-              className="btn btn-secondary"
-              disabled={busy !== null || !archive}
-            >
-              {IMPORT_COPY.actionAddArchive}
-            </button>
-          </form>
-        )}
-
-        {data.available_fixtures.length > 0 && (
-          <form
-            className="hi-form"
-            onSubmit={(event) => {
-              event.preventDefault();
-              void onAct('add-fixture', () =>
-                api.addImportSource(importId, {
-                  kind: 'synthetic_fixture',
-                  fixtureName: fixture,
-                }),
-              );
-            }}
-          >
-            <h4 className="hi-group-title">{IMPORT_COPY.actionAddFixture}</h4>
-            <label className="hi-field">
-              <span className="hi-field-label">Which example source</span>
-              <select
-                className="hi-input"
-                value={fixture}
-                onChange={(event) => setFixture(event.target.value)}
-              >
-                {data.available_fixtures.map((name) => (
-                  <option key={name} value={name}>
-                    {name}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <button
-              type="submit"
-              className="btn btn-secondary"
-              disabled={busy !== null || !fixture}
-            >
-              {IMPORT_COPY.actionAddFixture}
-            </button>
-          </form>
-        )}
-      </div>
-    </div>
+      <Disclosure className="hi-disclosure" summary={STAGE.moreSources}>
+        <p className="hi-body">{IMPORT_COPY.sourcesLead}</p>
+        <p className="hi-body">{IMPORT_COPY.fixturesLead}</p>
+        <p className="hi-note">{IMPORT_COPY.formatsNote}</p>
+      </Disclosure>
+    </>
   );
 }
 
@@ -1056,24 +1170,36 @@ function SourceRow({
   return (
     <tr>
       <td>
-        <span className="hi-filename">{source.filename}</span>
-        {source.sha256 !== null && (
-          <span className="hi-sub">checksum recorded · not verified</span>
+        {/* An ARCHIVE is named in words; its id and where it was read from are one press
+            away, because a staged archive's reference IS its id (`staged:<name>`) and
+            printing it beside the name put the raw token straight back (review of #279). */}
+        {source.kind === 'archive' ? (
+          <span className="hi-filename">
+            {archiveLabel(source.filename)}{' '}
+            <HelpTip subject={`the archive ${archiveLabel(source.filename)}`}>
+              Its id: <code>{source.filename}</code>
+              {source.reference !== source.filename && (
+                <>
+                  {' '}
+                  · read from <code>{source.reference}</code>
+                </>
+              )}
+            </HelpTip>
+          </span>
+        ) : (
+          <>
+            <span className="hi-filename">{source.filename}</span>
+            <span className="hi-reference">{source.reference}</span>
+          </>
         )}
+        {source.sha256 !== null && <span className="hi-sub">checksum recorded · not verified</span>}
       </td>
       <td>{SOURCE_KIND_LABELS[source.kind] ?? source.kind}</td>
       <td>
-        <span className="hi-reference">{source.reference}</span>
-      </td>
-      <td>
         <span className={`hi-parse hi-parse-${source.parse_state}`}>{state}</span>
-        {/* THE REASON, PER ENTRY. This is the whole answer to "what parsed and
-            what did not" and it is deliberately here rather than in a banner:
-            an example source IS read and a reference is not, so one sentence covering
-            both would be false for half the manifest. */}
-        {source.parse_detail !== null && (
-          <span className="hi-sub">{source.parse_detail}</span>
-        )}
+        {/* THE REASON, PER ENTRY — an example source IS read and a reference is
+            not, so one sentence covering both would be false for half the bundle. */}
+        {source.parse_detail !== null && <span className="hi-sub">{source.parse_detail}</span>}
       </td>
       <td>
         <button
@@ -1081,7 +1207,7 @@ function SourceRow({
           className="btn btn-secondary"
           disabled={busy !== null}
           onClick={onRemove}
-          aria-label={`${IMPORT_COPY.actionRemoveSource} ${source.filename}`}
+          aria-label={`${IMPORT_COPY.actionRemoveSource} ${source.kind === 'archive' ? archiveLabel(source.filename) : source.filename}`}
         >
           {IMPORT_COPY.actionRemoveSource}
         </button>
@@ -1091,10 +1217,10 @@ function SourceRow({
 }
 
 /* --------------------------------------------------------------------------
- * Parse.
+ * Stage 2 — What ISAAC Read.
  * -------------------------------------------------------------------------- */
 
-function ParseSection({
+function ReadStage({
   data,
   busy,
   onAct,
@@ -1102,268 +1228,220 @@ function ParseSection({
 }: {
   data: ApiImportSession;
   busy: string | null;
-  onAct: ActFn;
+  onAct: ActWithNext;
   importId: string;
 }) {
   const counts = data.source_counts;
   return (
-    <div className="hi-section">
-      {/* WAS `Read the Sources` — the exact label of `IMPORT_COPY.actionParse`,
-          the primary button six lines below. Third instance of the duplicated-verb
-          defect; the section is now titled by what it reports and the button keeps
-          the verb. */}
-      <h3 className="hi-section-title">What Was Read</h3>
-      <p className="hi-body">{IMPORT_COPY.parseLead}</p>
-      <p className="hi-counts">
-        {counts.total} source{counts.total === 1 ? '' : 's'} · {counts.parsed} read ·{' '}
-        {counts.no_content_path} held as a pointer · {counts.failed} could not be read ·{' '}
-        {counts.parsable_by_this_build} readable by this build
-      </p>
-      <button
-        type="button"
-        className="btn btn-primary"
-        disabled={busy !== null || counts.parsable_by_this_build === 0}
-        onClick={() => onAct('parse', () => api.parseImport(importId))}
-      >
-        {busy === 'parse' ? 'Reading…' : IMPORT_COPY.actionParse}
-      </button>
-      {/* THE CONTROL IS DISABLED ONLY WHEN THERE IS GENUINELY NOTHING TO READ,
-          and the sentence beside it says which — never a bare disabled button,
-          which leaves a reader guessing whether the feature is broken. */}
+    <>
+      <StageHead stage="read" />
+      <div className="hi-stage-action">
+        <button
+          type="button"
+          className="btn btn-primary"
+          disabled={busy !== null || counts.parsable_by_this_build === 0}
+          onClick={() => onAct('parse', () => api.parseImport(importId), 'read')}
+        >
+          {busy === 'parse' ? 'Reading…' : IMPORT_COPY.actionParse}
+        </button>
+        <p className="hi-counts">
+          {counts.total} source{counts.total === 1 ? '' : 's'} · {counts.parsed} read ·{' '}
+          {counts.no_content_path} held as a pointer · {counts.failed} could not be read ·{' '}
+          {counts.parsable_by_this_build} readable by this build
+        </p>
+      </div>
+      {/* NEVER A BARE DISABLED BUTTON: the sentence beside it says why. */}
       {counts.parsable_by_this_build === 0 && (
         <p className="hi-note">
-          Nothing in this bundle can be read by this build yet. Add an example source, or
-          keep the references — they are stored either way.
+          Nothing in this bundle can be read by this build yet. Add an example source or an
+          archive, or keep the references — they are stored either way.
         </p>
       )}
 
-      {data.parsed.map((parsed) => (
-        <div key={parsed.source_id} className="hi-parsed">
-          <h4 className="hi-group-title">{parsed.filename}</h4>
-          <p className="hi-sub">
-            {parsed.statements.length} statement
-            {parsed.statements.length === 1 ? '' : 's'} read ·{' '}
-            {parsed.skipped.length} line{parsed.skipped.length === 1 ? '' : 's'} not
-            understood
-          </p>
-          {parsed.statements.length > 0 && (
-            <ul className="hi-statements">
-              {parsed.statements.map((statement, index) => (
-                <li key={`${statement.key}-${index}`}>
-                  <code className="hi-key">{statement.key}</code>
-                  <span className="hi-value">{statement.value}</span>
-                  <span className="hi-locator">{statement.locator}</span>
-                </li>
-              ))}
-            </ul>
-          )}
-          {/* WHAT IT PASSED OVER, LISTED. The other half of the report, and the
-              half that stops this being `Mysterious JSON`. */}
-          {parsed.skipped.length > 0 && (
-            <ul className="hi-skipped">
-              {parsed.skipped.map((entry, index) => (
-                <li key={index}>
-                  <span className="hi-locator">{String(entry.locator ?? '')}</span>
-                  <span>{String(entry.message ?? entry.reason ?? '')}</span>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-      ))}
-    </div>
+      {data.corpus_review && (
+        <CorpusReadOverview
+          review={data.corpus_review}
+          profiles={data.profiles ?? []}
+          units={data.archive?.units_page.rows ?? []}
+        />
+      )}
+
+      {data.parsed.length > 0 && (
+        <ul className="hi-parsed-list">
+          {data.parsed.map((parsed) => (
+            <li key={parsed.source_id}>
+              <Disclosure
+                className="hi-parsed"
+                summary={<span className="hi-filename">{parsed.filename}</span>}
+                meta={`${plural(parsed.statements.length, 'statement', 'statements')} read · ${plural(
+                  parsed.skipped.length,
+                  'line',
+                  'lines',
+                )} passed over`}
+              >
+                {parsed.statements.length > 0 && (
+                  <>
+                    <h4 className="hi-block-title">{STAGE.statementsTitle}</h4>
+                    <ul className="hi-statements">
+                      {parsed.statements.map((statement, index) => (
+                        <li key={`${statement.key}-${index}`}>
+                          <code className="hi-key">{statement.key}</code>
+                          <span className="hi-value">{statement.value}</span>
+                          <span className="hi-locator">{statement.locator}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </>
+                )}
+                {/* WHAT IT PASSED OVER, LISTED — the half that stops this being
+                    `Mysterious JSON`. */}
+                {parsed.skipped.length > 0 && (
+                  <>
+                    <h4 className="hi-block-title">{STAGE.skippedTitle}</h4>
+                    <ul className="hi-skipped">
+                      {parsed.skipped.map((entry, index) => (
+                        <li key={index}>
+                          <span className="hi-locator">{String(entry.locator ?? '')}</span>
+                          <span>{String(entry.message ?? entry.reason ?? '')}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </>
+                )}
+              </Disclosure>
+            </li>
+          ))}
+        </ul>
+      )}
+    </>
   );
 }
 
 /* --------------------------------------------------------------------------
- * Candidates, and sending one to review.
+ * Stage 3 — Runs & Candidates.
  * -------------------------------------------------------------------------- */
 
-function CandidatesSection({
+/** A record's title from the destinations the screen already loaded, if it is among them. */
+function recordTitle(destinations: ProposalDestinations, id: string): string | undefined {
+  return destinations.rows?.find((r) => r.id === id)?.title;
+}
+
+function useFilenameOf(data: ApiImportSession) {
+  return useCallback(
+    (sourceId: string) => data.sources.find((s) => s.source_id === sourceId)?.filename ?? sourceId,
+    [data.sources],
+  );
+}
+
+function RunsStage({
   data,
   busy,
   onAct,
   importId,
-  addedResult,
-  onAdded,
+  destinations,
 }: {
   data: ApiImportSession;
   busy: string | null;
-  onAct: ActFn;
+  onAct: ActWithNext;
   importId: string;
-  /** HIST-005's report, owned above the reload boundary. See `ImportSessionView`. */
-  addedResult: ApiImportAddedToExperiment | null;
-  onAdded: (result: ApiImportAddedToExperiment) => void;
+  destinations: ProposalDestinations;
 }) {
   const reconstruction = data.reconstruction;
   const candidates = reconstruction?.candidates ?? [];
-  const structural = candidates.filter((c) => c.kind !== 'field');
-  const disagreeing = candidates.filter((c) => c.kind === 'field' && c.unresolved_reason);
-  const blocked = candidates.filter(
-    (c) => c.kind === 'field' && !c.unresolved_reason && !c.proposable,
-  );
-  const sendable = candidates.filter((c) => c.proposable);
+  const candidatesById = new Map(candidates.map((c) => [c.candidate_id, c]));
+  const filenameOf = useFilenameOf(data);
+  const archive = Boolean(data.corpus_review && data.archive);
+  const structural = candidates.filter((c) => c.kind !== 'field' && !c.unresolved_reason);
+  const fields = candidates.filter((c) => c.kind === 'field');
+  /* The session's one review categorisation — a sent candidate reads Sent in this stage too. */
+  const runsReview = candidateReview(data);
 
   return (
-    <div className="hi-section">
-      {/* WAS `Reconstruct Candidates` — the exact label of
-          `IMPORT_COPY.actionReconstruct` below it. Fourth and last instance.
-
-          `Candidates` is the subject. Note that
-          `e2e/mutation/imports-session-a11y.spec.ts:99-106` records that waiting
-          on `heading /Candidates/i` matches a heading present BEFORE
-          reconstruction; that warning is unchanged and still correct — this
-          heading, like the old one, renders from first paint. */}
-      <h3 className="hi-section-title">Candidates</h3>
-      <p className="hi-body">{IMPORT_COPY.reconstructLead}</p>
-      <p className="hi-note">{IMPORT_COPY.profileNote}</p>
-      <button
-        type="button"
-        className="btn btn-primary"
-        /* AN ARCHIVE HAS SOMETHING TO RECONSTRUCT FROM even though `parsed` is
-           empty: `read_archive` runs the whole chain at the READ, so the candidates
-           already exist and this gate was dead-ending the only path to them. The
-           control is kept rather than hidden, because a bundle may hold an archive
-           AND example sources, and the provider's reconstruction over the latter is
-           real work this button is the only way to do. */
-        disabled={
-          busy !== null || (data.parsed.length === 0 && !data.corpus_review)
-        }
-        onClick={() => onAct('reconstruct', () => api.reconstructImport(importId))}
-      >
-        {busy === 'reconstruct' ? 'Reconstructing…' : IMPORT_COPY.actionReconstruct}
-      </button>
-
-      {/* THE SAME RULE THE PARSE CONTROL ALREADY OBEYS, APPLIED HERE — it was
-          the one disabled primary button on this screen with no reason beside
-          it, so a reader met a dead control and had to guess whether the
-          feature was broken, unavailable or simply not ready yet.
-
-          IT NAMES THE PRECONDITION AND THE NEXT ACT, not the internal state:
-          the button is gated on `data.parsed.length === 0`, and what a reader
-          can DO about that is read a source. Saying "no parsed sources" would
-          restate the predicate back at them.
-
-          AND IT SAYS WHAT RECONSTRUCTION IS, because this is the one place the
-          distinction bites: it is deterministic, in this build. No model is
-          called, so a reader waiting for "the AI" to become available is
-          waiting for something that is not the blocker. `§15` forbids implying
-          a capability exists; it equally forbids implying one is missing when
-          the real precondition is one click away. */}
-      {data.parsed.length === 0 && (
+    <>
+      <StageHead stage="runs" lead={archive ? STAGE.runs.leadArchive : STAGE.runs.leadFixture} />
+      <div className="hi-stage-action">
+        <button
+          type="button"
+          className="btn btn-primary"
+          /* AN ARCHIVE HAS SOMETHING TO RECONSTRUCT FROM even though `parsed` is empty:
+             the whole chain runs at the READ, so the candidates already exist. */
+          disabled={busy !== null || (data.parsed.length === 0 && !data.corpus_review)}
+          onClick={() => onAct('reconstruct', () => api.reconstructImport(importId), 'runs')}
+        >
+          {busy === 'reconstruct' ? 'Reconstructing…' : IMPORT_COPY.actionReconstruct}
+        </button>
+        {reconstruction !== null && (
+          <p className="hi-counts">
+            {plural(candidates.length, 'candidate', 'candidates')} · nothing was applied
+          </p>
+        )}
+      </div>
+      {/* THE PRECONDITION AND THE NEXT ACT, never the internal state. */}
+      {data.parsed.length === 0 && !data.corpus_review && (
         <p className="hi-note">
           Nothing has been read yet, so there is nothing to reconstruct from. Read a source
-          above first. Reconstruction is deterministic in this build — it reads the
-          statements already parsed and calls no model.
+          first. Reconstruction is deterministic in this build — it reads the statements
+          already parsed and calls no model.
         </p>
       )}
 
-      {reconstruction === null ? (
-        <p className="hi-body hi-empty-inline">{IMPORT_COPY.emptyCandidatesBody}</p>
+      {reconstruction === null && !archive ? (
+        <p className="hi-body hi-empty-inline">
+          {data.source_counts.parsed > 0 || data.corpus_review
+            ? IMPORT_COPY.emptyCandidatesReadBody
+            : IMPORT_COPY.emptyCandidatesBody}
+        </p>
+      ) : archive && data.corpus_review && data.archive ? (
+        <ArchiveRuns
+          review={data.corpus_review}
+          units={data.archive.units_page.rows}
+          profiles={data.profiles ?? []}
+          candidatesById={candidatesById}
+          filenameOf={filenameOf}
+          importId={importId}
+          busy={busy}
+          onAct={onAct}
+          destinations={destinations}
+          candidateReview={runsReview}
+        />
       ) : (
         <>
-          <p className="hi-counts">
-            {candidates.length} candidate{candidates.length === 1 ? '' : 's'} ·{' '}
-            {sendable.length} can be sent to review · {disagreeing.length} where sources
-            disagree · {blocked.length} with nowhere to write · {structural.length}{' '}
-            structural
-          </p>
-          {/* THE PROVIDER, NAMED, and its `applied` constant rendered from the
-              response rather than asserted here. */}
-          <p className="hi-sub">
-            Reconstructed by {reconstruction.provider_id} ·{' '}
-            {reconstruction.applied ? 'applied' : 'nothing was applied'}
-          </p>
-
-          {/* HIST-005 — the workflow's sixth step, as ONE control.
-
-              SHOWN ONLY WHEN MORE THAN ONE CANDIDATE CAN BE SENT. With exactly
-              one, this panel and that candidate's own form would do the same
-              thing by different routes, and two controls for one act is what
-              makes a reader wonder which is the real one. The step is still
-              completable in that case — sending the one candidate finishes it,
-              and `furthest_step` says so. */}
-          {sendable.length > 1 && (
-            <AddWholeImportPanel
-              session={data}
-              sendable={sendable}
-              busy={busy}
-              onAct={onAct}
-              importId={importId}
-              result={addedResult}
-              onResult={onAdded}
-            />
-          )}
-
-          {sendable.length > 0 && (
-            <section className="hi-group">
-              <h4 className="hi-group-title">Ready for your review</h4>
-              <p className="hi-body">{IMPORT_COPY.reviewLead}</p>
-              {sendable.map((candidate) => (
-                <CandidateCard
-                  key={candidate.candidate_id}
-                  candidate={candidate}
-                  session={data}
-                  busy={busy}
-                  onAct={onAct}
-                  importId={importId}
-                />
-              ))}
-            </section>
-          )}
-
-          {disagreeing.length > 0 && (
-            <section className="hi-group">
-              <h4 className="hi-group-title">Sources disagree</h4>
-              <p className="hi-body">{IMPORT_COPY.disagreementNote}</p>
-              {disagreeing.map((candidate) => (
-                <CandidateCard
-                  key={candidate.candidate_id}
-                  candidate={candidate}
-                  session={data}
-                  busy={busy}
-                  onAct={onAct}
-                  importId={importId}
-                />
-              ))}
-            </section>
-          )}
-
-          {blocked.length > 0 && (
-            <section className="hi-group">
-              <h4 className="hi-group-title">Read, with nowhere to write</h4>
-              {blocked.map((candidate) => (
-                <CandidateCard
-                  key={candidate.candidate_id}
-                  candidate={candidate}
-                  session={data}
-                  busy={busy}
-                  onAct={onAct}
-                  importId={importId}
-                />
-              ))}
-            </section>
-          )}
-
           {structural.length > 0 && (
             <section className="hi-group">
-              <h4 className="hi-group-title">What this looks like</h4>
-              {structural.map((candidate) => (
-                <CandidateCard
-                  key={candidate.candidate_id}
-                  candidate={candidate}
-                  session={data}
-                  busy={busy}
-                  onAct={onAct}
-                  importId={importId}
-                />
-              ))}
+              <h4 className="hi-block-title">What this looks like</h4>
+              <ul className="hi-cands">
+                {structural.map((c) => (
+                  <ImportCandidateRow key={c.candidate_id} candidate={c} filenameOf={filenameOf} />
+                ))}
+              </ul>
             </section>
           )}
-
-          {data.unmapped_keys.length > 0 && (
+          {fields.length > 0 && (
             <section className="hi-group">
-              <h4 className="hi-group-title">Read, but not recognised</h4>
+              <h4 className="hi-block-title">Candidate values</h4>
+              <ul className="hi-cands">
+                {fields.map((c) => {
+                  const already = runsReview.sentOf(c.candidate_id);
+                  return (
+                    <ImportCandidateRow
+                      key={c.candidate_id}
+                      candidate={c}
+                      filenameOf={filenameOf}
+                      bucket={runsReview.bucketOf(c)}
+                      already={already}
+                      alreadyTitle={already ? recordTitle(destinations, already.experiment_id) : undefined}
+                    />
+                  );
+                })}
+              </ul>
+            </section>
+          )}
+          {data.unmapped_keys.length > 0 && (
+            <Disclosure
+              className="hi-disclosure"
+              summary="Read, but not recognised"
+              meta={String(data.unmapped_keys.length)}
+            >
               <p className="hi-body">
                 These were read out of a source and are not official ISAAC field paths, so
                 nothing was proposed for them. They are listed rather than guessed at.
@@ -1377,103 +1455,353 @@ function CandidatesSection({
                   </li>
                 ))}
               </ul>
-            </section>
+            </Disclosure>
           )}
+          {/* NO BEAMLINE CONVENTION IS APPLIED TO AN EXAMPLE SOURCE — true here, and
+              false for an archive, which is why this is shown only without one. */}
+          <Disclosure className="hi-disclosure" summary="How reconstruction works">
+            <p className="hi-body">{IMPORT_COPY.reconstructLead}</p>
+            <p className="hi-note">{IMPORT_COPY.profileNote}</p>
+          </Disclosure>
         </>
       )}
-    </div>
+    </>
+  );
+}
+
+/* --------------------------------------------------------------------------
+ * Stage 4 — Conflicts.
+ * -------------------------------------------------------------------------- */
+
+function ConflictsStage({
+  data,
+  busy,
+  onAct,
+  importId,
+  destinations,
+}: {
+  data: ApiImportSession;
+  busy: string | null;
+  onAct: ActWithNext;
+  importId: string;
+  destinations: ProposalDestinations;
+}) {
+  const views = conflictViews(data);
+  /* PER-SCAN VARIATION IS NOT A CONFLICT, and a reader who remembers seeing more
+     "conflicts" before is told where those values went — neutrally, with a count. */
+  const varying = (data.reconstruction?.candidates ?? []).filter((c) => c.agreement === 'varies').length;
+  /* THE TWO SETS THIS STAGE HOLDS, NAMED (2026-09-23): the tab's number is their sum;
+     Review counts only the field values; Add counts only what it cannot send. */
+  const structural = views.filter((v) => v.kind === 'structural').length;
+  const field = views.length - structural;
+  return (
+    <>
+      <StageHead stage="conflicts" />
+      {views.length > 0 && (
+        <p className="hi-counts">
+          {plural(structural, 'finding', 'findings')} about which measurement a file is ·{' '}
+          {plural(field, 'field value', 'field values')} whose sources disagree
+        </p>
+      )}
+      {varying > 0 && (
+        <p className="hi-varies-note">
+          <SemanticStatus state="notApplicable" label={STAGE.stateLabels.variesByScan} size="sm" />{' '}
+          {plural(varying, 'value', 'values')} {STAGE.variation.conflictsNote}
+        </p>
+      )}
+      <ImportConflicts
+        conflicts={views}
+        importId={importId}
+        busy={busy}
+        onAct={onAct as ActFn}
+        destinations={destinations}
+      />
+    </>
+  );
+}
+
+/* --------------------------------------------------------------------------
+ * Stage 5 — Review.
+ * -------------------------------------------------------------------------- */
+
+function ReviewStage({
+  data,
+  busy,
+  onAct,
+  importId,
+  destinations,
+}: {
+  data: ApiImportSession;
+  busy: string | null;
+  onAct: ActWithNext;
+  importId: string;
+  destinations: ProposalDestinations;
+}) {
+  const fields = (data.reconstruction?.candidates ?? []).filter((c) => c.kind === 'field');
+  const filenameOf = useFilenameOf(data);
+  /* ONE CATEGORISATION (2026-09-23): a candidate this import already sent is SENT — its own
+     group and chip — never "Ready to Send" again, exactly as the header and the Add stage
+     count it. `review` is built on the same plan they read. */
+  const review = candidateReview(data);
+  const counts = reviewCounts(data);
+  const buckets = REVIEW_BUCKET_ORDER.filter((b) => counts[b] > 0);
+  const titleOf = (id: string) => recordTitle(destinations, id);
+  /* WHICH MEASUREMENT, for an archive: the unit that lists the candidate, named by its
+     legacy number and label — the handle the Runs stage already uses. */
+  const contextOf = new Map<string, string>();
+  for (const row of data.archive?.units_page.rows ?? []) {
+    const handle = row.legacy_number !== null ? `#${row.legacy_number} · ${row.label}` : row.label;
+    for (const id of row.candidate_ids) contextOf.set(id, handle);
+  }
+
+  return (
+    <>
+      <StageHead stage="review" />
+      {data.reconstruction === null ? (
+        <p className="hi-body hi-empty-inline">
+          {data.source_counts.parsed > 0 || data.corpus_review
+            ? IMPORT_COPY.emptyCandidatesReadBody
+            : IMPORT_COPY.emptyCandidatesBody}
+        </p>
+      ) : (
+        <>
+          <div className="hi-review-counts">
+            {buckets.map((b) => (
+              <SemanticStatus
+                key={b}
+                state={REVIEW_BUCKET_STATE[b]}
+                label={`${counts[b].toLocaleString('en-US')} ${STAGE.bucketTitles[b]}`}
+              />
+            ))}
+            {/* What sending does, one press away rather than a paragraph above the list. */}
+            <HelpTip subject={STAGE.bucketTitles.ready}>{IMPORT_COPY.reviewLead}</HelpTip>
+          </div>
+          {buckets.map((b) => (
+            <Disclosure
+              key={b}
+              className="hi-bucket"
+              headingLevel={4}
+              defaultOpen={b === 'ready'}
+              summary={STAGE.bucketTitles[b]}
+              meta={counts[b].toLocaleString('en-US')}
+            >
+              <ul className="hi-cands">
+                {fields
+                  .filter((c) => review.bucketOf(c) === b)
+                  .map((candidate) => {
+                    const already = review.sentOf(candidate.candidate_id);
+                    return (
+                      <ImportCandidateRow
+                        key={candidate.candidate_id}
+                        candidate={candidate}
+                        filenameOf={filenameOf}
+                        already={already}
+                        alreadyTitle={already ? titleOf(already.experiment_id) : undefined}
+                        bucket={b}
+                        context={contextOf.get(candidate.candidate_id)}
+                      >
+                        <CandidateSendForm
+                          candidate={candidate}
+                          session={data}
+                          busy={busy}
+                          onAct={onAct}
+                          importId={importId}
+                          destinations={destinations}
+                        />
+                      </ImportCandidateRow>
+                    );
+                  })}
+              </ul>
+            </Disclosure>
+          ))}
+        </>
+      )}
+      {data.archive && (
+        <ImportRules
+          rules={data.rules}
+          profiles={data.profiles ?? []}
+          importId={importId}
+          busy={busy}
+          onAct={onAct as ActFn}
+          destinations={destinations}
+        />
+      )}
+    </>
   );
 }
 
 /**
- * THE RECORDS THIS IMPORT CAN BE SENT TO, and a way to make a new one.
- *
- * ── WHAT WAS WRONG ─────────────────────────────────────────────────────────
- *
- * Sending a candidate to an experiment has always worked — `POST
- * /api/imports/{id}/candidates/{cid}/propose` — but the form asked for it by
- * typing the record's **ULID** into a free-text box ("the record's id"). Nobody
- * knows a ULID, so a path that existed was effectively invisible. The project
- * owner read the screen as having no way to land an import at all: *"there
- * should also be an intuitive way for users to add it into a current experiment
- * or make a new experiment from it because at the end of the day the import is
- * so that users can upload files and stuff from their previous experiment and
- * it can be mapped to the isaac schema"*.
- *
- * ── WHAT THIS DOES, AND WHAT IT REFUSES TO DO ──────────────────────────────
- *
- * It lists the workspace's experiments so one can be CHOSEN, and it can create a
- * new one named after the import. It does NOT map anything by itself: a chosen
- * candidate still becomes an ingestion PROPOSAL on that record, reviewed there,
- * exactly as before. Creating a record here writes a title and nothing else —
- * no field is inferred from the import, which is the same no-guessing rule the
- * rest of this screen follows.
- *
- * A failed list is reported, not swallowed: an empty picker with no explanation
- * would read as "you have no experiments", which is a different claim.
+ * THE PER-CANDIDATE SEND. A record chosen from a list (never a typed ULID), the
+ * record's own version read immediately before the write, and a run only when one
+ * is named — never invented.
  */
-function useProposalDestinations() {
-  const [rows, setRows] = useState<{ id: string; title: string }[] | null>(null);
-  const [failed, setFailed] = useState(false);
+function CandidateSendForm({
+  candidate,
+  session,
+  busy,
+  onAct,
+  importId,
+  destinations,
+}: {
+  candidate: ApiImportCandidate;
+  session: ApiImportSession;
+  busy: string | null;
+  onAct: ActWithNext;
+  importId: string;
+  destinations: ProposalDestinations;
+}) {
+  const [experimentId, setExperimentId] = useState('');
+  const [runId, setRunId] = useState('');
+  const key = `propose:${candidate.candidate_id}`;
+  return (
+    <form
+      className="hi-send"
+      onSubmit={(event) => {
+        event.preventDefault();
+        void onAct(key, async () => {
+          const detail = await api.getExperiment(experimentId);
+          await api.proposeImportCandidate(importId, candidate.candidate_id, {
+            experimentId,
+            // THE RECORD'S OWN VERSION, read immediately before the write.
+            experimentVersion: detail.version,
+            ...(runId.trim() ? { runId: runId.trim() } : {}),
+          });
+          setRunId('');
+        });
+      }}
+    >
+      <RecordPicker
+        label="Send it to which record?"
+        value={experimentId}
+        onChange={setExperimentId}
+        destinations={destinations}
+      />
+      <NewDestinationButton
+        session={session}
+        busy={busy}
+        onAct={onAct}
+        actKey={`create:${candidate.candidate_id}`}
+        reloadDestinations={destinations.reload}
+        onCreated={setExperimentId}
+      />
+      <RunPicker
+        experimentId={experimentId}
+        value={runId}
+        onChange={setRunId}
+        label="Which run? (required for a value a run owns)"
+      />
+      <button type="submit" className="btn btn-secondary" disabled={busy !== null || !experimentId.trim()}>
+        {busy === key ? 'Sending…' : IMPORT_COPY.actionPropose}
+      </button>
+    </form>
+  );
+}
 
-  const reload = useCallback(async () => {
-    try {
-      const list = await api.listExperiments();
-      setRows(
-        (list.experiments ?? []).map((e) => ({
-          id: e.id,
-          title: stripLifecycleSuffix(e.title) || e.id,
-        })),
-      );
-      setFailed(false);
-    } catch {
-      setRows(null);
-      setFailed(true);
-    }
-  }, []);
-
-  useEffect(() => {
-    void reload();
-  }, [reload]);
-
-  return { rows, failed, reload };
+function RecordPicker({
+  label,
+  value,
+  onChange,
+  destinations,
+}: {
+  label: string;
+  value: string;
+  onChange: (id: string) => void;
+  destinations: ProposalDestinations;
+}) {
+  return (
+    <label className="hi-field">
+      <span className="hi-field-label">{label}</span>
+      {destinations.failed ? (
+        /* A FAILED READ IS NOT A BLOCKED WRITE: the id field stays, with the reason. */
+        <>
+          <input
+            className="hi-input"
+            type="text"
+            required
+            value={value}
+            onChange={(event) => onChange(event.target.value)}
+            placeholder="the record's id"
+          />
+          <span className="hi-note">The list of records could not be read, so this asks for the id instead.</span>
+        </>
+      ) : destinations.rows === null ? (
+        <span className="hi-note">Reading your records…</span>
+      ) : destinations.rows.length === 0 ? (
+        <span className="hi-note">
+          This workspace holds no records yet. Create one below and it becomes the destination.
+        </span>
+      ) : (
+        <select className="hi-input" required value={value} onChange={(event) => onChange(event.target.value)}>
+          <option value="">Choose a record…</option>
+          {destinations.rows.map((row) => (
+            <option key={row.id} value={row.id}>
+              {row.title}
+            </option>
+          ))}
+        </select>
+      )}
+    </label>
+  );
 }
 
 /**
- * `HIST-005` — add every proposable candidate of one import to one record.
- *
- * ONE REQUEST, AND THE REASON IS NOT CONVENIENCE. A client loop over the
- * per-candidate operation would be N writes, each with its own `If-Match`, each
- * able to fail alone; a closed tab or a `412` partway through would leave the
- * record holding part of an import with nothing able to say which part. The
- * server writes every note and every proposal in one record lock and one save.
- *
- * IT REPORTS WHAT THE SERVER SAID, NEVER WHAT WAS ASKED FOR. The result block
- * below renders `counts`, `sent[].already_sent` and the server's own `reason`
- * per unsent candidate — not "sent N candidates" computed from the list that was
- * submitted. `CLAUDE.md` §11 records four surfaces that published a number
- * nothing had derived, and one of them was a count of proposals.
+ * A run CHOSEN FROM THE RECORD'S OWN RUNS, never a typed id — and only when the
+ * record has any. Blank means "no run", which is correct for every value the record
+ * itself owns.
  */
+function RunPicker({
+  experimentId,
+  value,
+  onChange,
+  label,
+}: {
+  experimentId: string;
+  value: string;
+  onChange: (id: string) => void;
+  label: string;
+}) {
+  const [runs, setRuns] = useState<{ id: string; label: string }[] | null>(null);
+  useEffect(() => {
+    let alive = true;
+    setRuns(null);
+    onChange('');
+    if (!experimentId.trim()) return;
+    api
+      .listRuns(experimentId)
+      .then((res) => {
+        if (!alive) return;
+        setRuns((res.runs ?? []).map((r) => ({ id: r.id, label: r.label || r.id })));
+      })
+      .catch(() => {
+        if (alive) setRuns([]);
+      });
+    return () => {
+      alive = false;
+    };
+    // `onChange` is a state setter; re-running on it would clear a choice on render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [experimentId]);
+  if (!experimentId.trim() || runs === null || runs.length === 0) return null;
+  return (
+    <label className="hi-field">
+      <span className="hi-field-label">{label}</span>
+      <select className="hi-input" value={value} onChange={(event) => onChange(event.target.value)}>
+        <option value="">No run — a value the record owns</option>
+        {runs.map((run) => (
+          <option key={run.id} value={run.id}>
+            {run.label}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
 /**
- * The one control on this screen that CREATES the destination.
- *
- * ONE COMPONENT, TWO CALL SITES, AND THAT IS NOT TIDINESS. `HIST-005`'s panel
- * needs it for the same reason a candidate card does — a workspace with no
- * records has nowhere to send anything — and writing it twice put a second copy
- * of the label "New record from this import" in this file. That immediately
- * tripped `product-facing-language.test.tsx`'s P1 guard, whose exemption for this
- * screen is deliberately ONE STRING, ONE OCCURRENCE, "which is what makes this
- * an act rather than a widening".
- *
- * Widening the exemption to two would have satisfied the test and defeated its
- * purpose. Extracting the control satisfies it for the REASON it exists: there
- * is one creation affordance on this screen, expressed once, and a reader who
- * meets it in either place meets the same button.
- *
- * IT CREATES A TITLE AND NOTHING ELSE. No field is carried over from the import,
- * because no candidate has been reviewed yet — and it calls the same
- * `POST /api/experiments` My Experiments calls, so no second creation path
- * exists.
+ * The one control on this screen that CREATES the destination. ONE component, used
+ * from every send form, so there is one creation affordance expressed once (the P1
+ * exemption for its label is one string, one occurrence). It creates a TITLE and
+ * nothing else — no field is carried over, because nothing has been reviewed yet.
  */
 function NewDestinationButton({
   session,
@@ -1485,21 +1813,9 @@ function NewDestinationButton({
 }: {
   session: ApiImportSession;
   busy: string | null;
-  onAct: ActFn;
-  /** Distinct per call site, so one site's spinner is never the other's. */
+  onAct: ActWithNext;
   actKey: string;
-  /**
-   * THE CALLER'S `reload`, NOT THIS COMPONENT'S OWN.
-   *
-   * The first version of this component called `useProposalDestinations()`
-   * itself, which is a DIFFERENT instance from the one whose rows the caller's
-   * `<select>` renders. Creating a record would then have refreshed a list
-   * nobody displays, while the caller's `<option>` list still lacked the new id
-   * — so `onCreated` would set a value matching no option and the picker would
-   * read blank. Before the extraction the button and the select shared one hook
-   * because they shared one component; passing the reload down is what preserves
-   * that, and it is why this prop exists rather than being inferred.
-   */
+  /** THE CALLER'S `reload`, so the new record appears in the SAME picker that submits. */
   reloadDestinations: () => Promise<void>;
   onCreated: (experimentId: string) => void;
 }) {
@@ -1510,9 +1826,7 @@ function NewDestinationButton({
       disabled={busy !== null}
       onClick={() => {
         void onAct(actKey, async () => {
-          const created = await api.createExperiment({
-            title: session.label || 'Imported experiment',
-          });
+          const created = await api.createExperiment({ title: session.label || 'Imported experiment' });
           await reloadDestinations();
           onCreated(created.id);
         });
@@ -1523,390 +1837,305 @@ function NewDestinationButton({
   );
 }
 
-function AddWholeImportPanel({
-  session,
-  sendable,
+/* --------------------------------------------------------------------------
+ * Stage 6 — Add to Experiment (`HIST-005`).
+ * -------------------------------------------------------------------------- */
+
+/**
+ * ADD EVERY READY CANDIDATE TO ONE RECORD, IN ONE REQUEST — and say beforehand what
+ * will and will not go, in words.
+ *
+ * ONE request because a client loop would be N writes that could each fail alone,
+ * leaving a record holding part of an import with nothing able to say which part.
+ * The report renders what the SERVER said — every count, the reason per candidate it
+ * would not send, `already_sent`, and how each measurement's run was found — never
+ * what was asked for.
+ */
+function AddStage({
+  data,
   busy,
   onAct,
   importId,
+  destinations,
   result,
   onResult,
+  onGoTo,
 }: {
-  session: ApiImportSession;
-  sendable: ApiImportCandidate[];
+  data: ApiImportSession;
   busy: string | null;
-  onAct: ActFn;
+  onAct: ActWithNext;
   importId: string;
-  /** OWNED ABOVE THE RELOAD BOUNDARY — see `ImportSessionView` for why. */
+  destinations: ProposalDestinations;
   result: ApiImportAddedToExperiment | null;
   onResult: (result: ApiImportAddedToExperiment) => void;
+  onGoTo: (stage: ImportStageId) => void;
 }) {
   const [experimentId, setExperimentId] = useState('');
   const [runId, setRunId] = useState('');
-  const destinations = useProposalDestinations();
+  const archive = Boolean(data.archive);
+  const [createRuns, setCreateRuns] = useState(archive);
+  /* ONE PLAN, the batch's own partition (`send_plan`) — so what this stage says will
+     happen is what the report then says did (2026-09-23). */
+  const plan = planFor(data, archive && createRuns);
+  const sendable = plan.willSend;
+  const blocked = groupUnsent(plan.unsent);
+  const blockedTotal = plan.unsent.length;
+  const sentTo = new Map<string, number>();
+  for (const id of plan.alreadySent) {
+    const target = data.proposed[id]?.experiment_id;
+    if (target) sentTo.set(target, (sentTo.get(target) ?? 0) + 1);
+  }
+  const titleOf = (id: string) => recordTitle(destinations, id) ?? 'a record';
   const key = `add-whole:${importId}`;
-
-  /* THE HEADING IS THE SERVER'S OWN LABEL FOR ITS LAST STEP, not a literal.
-     `WORKFLOW_STEPS` is ordered and this panel IS that step, so taking the last
-     row's label means the panel and the stepper above it cannot come to call the
-     same step two different things. Falls back only if the list is empty, which
-     would itself be a server that answered nothing. */
-  const stepLabel =
-    session.workflow[session.workflow.length - 1]?.label ?? IMPORT_COPY.actionAddWhole;
+  const step = data.workflow.find((s) => s.id === 'add_to_experiments');
+  const acceptance = data.capabilities?.proposal_acceptance;
 
   return (
-    <section className="hi-group hi-addwhole">
-      <h4 className="hi-group-title">{stepLabel}</h4>
-      <p className="hi-body">{IMPORT_COPY.addWholeLead}</p>
-      <p className="hi-counts">
-        {sendable.length} candidate{sendable.length === 1 ? '' : 's'} can be sent
-      </p>
-      <form
-        className="hi-send"
-        onSubmit={(event) => {
-          event.preventDefault();
-          void onAct(key, async () => {
-            const detail = await api.getExperiment(experimentId);
-            const added = await api.addImportToExperiment(importId, {
-              experimentId,
-              // THE RECORD'S OWN VERSION, read immediately before the write. An
-              // import session serves none, and sending a blank would be a 428
-              // reported to the reader as a server disagreement.
-              experimentVersion: detail.version,
-              ...(runId.trim() ? { runId: runId.trim() } : {}),
-            });
-            onResult(added);
-            setRunId('');
-          });
-        }}
-      >
-        <label className="hi-field">
-          <span className="hi-field-label">Which record?</span>
-          {destinations.failed ? (
-            /* A FAILED READ IS NOT A BLOCKED WRITE — the per-candidate form's
-               reasoning, unchanged: the id field stays, with the reason it is
-               being asked for. */
-            <>
-              <input
-                className="hi-input"
-                type="text"
-                required
-                value={experimentId}
-                onChange={(event) => setExperimentId(event.target.value)}
-                placeholder="the record's id"
-              />
-              <span className="hi-note">
-                The list of records could not be read, so this asks for the id instead.
-              </span>
-            </>
-          ) : destinations.rows === null ? (
-            <span className="hi-note">Reading your records…</span>
-          ) : destinations.rows.length === 0 ? (
-            <span className="hi-note">
-              This workspace holds no records yet. Create one below and it becomes the
-              destination.
-            </span>
-          ) : (
-            <select
-              className="hi-input"
-              required
-              value={experimentId}
-              onChange={(event) => setExperimentId(event.target.value)}
-            >
-              <option value="">Choose a record…</option>
-              {destinations.rows.map((row) => (
-                <option key={row.id} value={row.id}>
-                  {row.title}
-                </option>
-              ))}
-            </select>
-          )}
-        </label>
-        <NewDestinationButton
-          session={session}
-          busy={busy}
-          onAct={onAct}
-          actKey={`${key}:create`}
-          reloadDestinations={destinations.reload}
-          onCreated={setExperimentId}
-        />
-        <label className="hi-field">
-          <span className="hi-field-label">Which run? (for the values a run owns)</span>
-          <input
-            className="hi-input"
-            type="text"
-            value={runId}
-            onChange={(event) => setRunId(event.target.value)}
-            placeholder="leave blank if no value here belongs to a run"
-          />
-          <span className="hi-note">{IMPORT_COPY.addWholeRunNote}</span>
-        </label>
-        <button
-          type="submit"
-          className="btn btn-secondary"
-          disabled={busy !== null || !experimentId.trim()}
-        >
-          {busy === key ? 'Sending…' : IMPORT_COPY.actionAddWhole}
-        </button>
-      </form>
+    <>
+      <StageHead stage="add" />
 
-      {result !== null && (
-        <div className="hi-addwhole-result">
-          <h5 className="hi-addwhole-result-title">{IMPORT_COPY.addWholeResultTitle}</h5>
-          {/* EVERY NUMBER FROM `counts`, AND ALL OF THEM. Showing only the ones
-              that went well would report less than the server said. */}
-          <p className="hi-counts">
-            {result.counts.sent} sent · {result.counts.already_sent} already there ·{' '}
-            {result.counts.not_sent} could not be sent · {result.counts.candidates}{' '}
-            candidate{result.counts.candidates === 1 ? '' : 's'} in this import
-          </p>
-          {result.counts.sent === 0 && result.counts.already_sent > 0 && (
-            <p className="hi-sent" role="note">
-              {IMPORT_COPY.addWholeNothingNew}
+      {step && !step.built && step.disclosure !== null ? (
+        /* THE UNBUILT STEP OFFERS NO CONTROL — not a disabled one. The server's own
+           sentence says why. */
+        <p className="hi-steps-disclosure" id={`hi-step-note-${step.id}`}>
+          <span className="hi-steps-disclosure-subject">{step.label}:</span> {step.disclosure}
+        </p>
+      ) : (
+        <>
+          <div className="hi-add-summary">
+            <h4 className="hi-block-title">{STAGE.addSummaryTitle}</h4>
+            <p className="hi-counts">
+              {plural(sendable.length, 'candidate can', 'candidates can')} be sent
+              {blockedTotal > 0 ? ` · ${blockedTotal.toLocaleString('en-US')} will not be` : ''}
+              {plan.alreadySent.length > 0
+                ? ` · ${plan.alreadySent.length.toLocaleString('en-US')} already sent`
+                : ''}
             </p>
+            {/* WHAT THIS IMPORT ALREADY SENT survives a reload: the session remembers
+                each send (`proposed`), even though the last report is not kept. */}
+            {sentTo.size > 0 && (
+              <ul className="hi-add-blocked">
+                {[...sentTo.entries()].map(([id, count]) => (
+                  <li key={id}>
+                    <span className="hi-add-blocked-count">{count.toLocaleString('en-US')}</span> already
+                    sent to{' '}
+                    <Link to={ROUTES.recordView(id, 'proposals')}>{titleOf(id)}</Link>
+                  </li>
+                ))}
+              </ul>
+            )}
+            {blocked.length > 0 && (
+              <ul className="hi-add-blocked">
+                {blocked.map((group) => (
+                  <li key={group.category}>
+                    <span className="hi-add-blocked-count">{group.rows.length.toLocaleString('en-US')}</span>{' '}
+                    {group.label}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+
+          {sendable.length === 0 ? (
+            <p className="hi-body hi-empty-inline">
+              {plan.alreadySent.length > 0
+                ? 'Everything this import can send has been sent.'
+                : 'Nothing in this import can be sent yet. Resolve its field conflicts, or read and reconstruct its sources first.'}
+            </p>
+          ) : sendable.length === 1 ? (
+            /* ONE CANDIDATE: this panel and that candidate's own form would do the
+               same thing by two routes, so the one route is offered. */
+            <p className="hi-body">
+              One candidate can be sent. Send it from its row in Review.{' '}
+              <button type="button" className="btn btn-ghost" onClick={() => onGoTo('review')}>
+                {STAGE.review.title}
+              </button>
+            </p>
+          ) : (
+            <form
+              className="hi-send hi-addwhole"
+              onSubmit={(event) => {
+                event.preventDefault();
+                void onAct(key, async () => {
+                  const detail = await api.getExperiment(experimentId);
+                  const added = await api.addImportToExperiment(importId, {
+                    experimentId,
+                    // THE RECORD'S OWN VERSION, read immediately before the write.
+                    experimentVersion: detail.version,
+                    ...(!createRuns && runId.trim() ? { runId: runId.trim() } : {}),
+                    ...(createRuns ? { createRuns: true } : {}),
+                  });
+                  onResult(added);
+                  setRunId('');
+                });
+              }}
+            >
+              <h4 className="hi-block-title">{IMPORT_COPY.actionAddWhole}</h4>
+              <RecordPicker
+                label="Which record?"
+                value={experimentId}
+                onChange={setExperimentId}
+                destinations={destinations}
+              />
+              <NewDestinationButton
+                session={data}
+                busy={busy}
+                onAct={onAct}
+                actKey={`${key}:create`}
+                reloadDestinations={destinations.reload}
+                onCreated={setExperimentId}
+              />
+              {archive && (
+                <label className="hi-choice">
+                  <input
+                    type="checkbox"
+                    checked={createRuns}
+                    onChange={(event) => setCreateRuns(event.target.checked)}
+                  />
+                  <span>{STAGE.createRuns}</span>
+                </label>
+              )}
+              {!createRuns && (
+                <RunPicker
+                  experimentId={experimentId}
+                  value={runId}
+                  onChange={setRunId}
+                  label="Which run? (for the values a run owns)"
+                />
+              )}
+              <p className="hi-note">{IMPORT_COPY.addWholeRunNote}</p>
+              <button
+                type="submit"
+                className="btn btn-primary"
+                disabled={busy !== null || !experimentId.trim()}
+              >
+                {busy === key ? 'Sending…' : IMPORT_COPY.actionAddWhole}
+              </button>
+            </form>
           )}
-          {result.sent.length > 0 && (
-            <ul className="hi-addwhole-sent">
-              {result.sent.map((row) => (
-                <li key={row.candidate_id}>
-                  <span className="hi-candidate-target">
-                    {row.target_field_path ?? row.candidate_id}
-                  </span>
-                  {/* THE SERVER'S OWN `already_sent`, never inferred from
-                      whether this reader clicked twice. */}
-                  <span className="hi-sub">
-                    {row.already_sent ? 'already there' : 'sent'}
-                    {row.run_id !== null ? ' · on the run you named' : ''}
-                  </span>
-                  <Link to={ROUTES.recordProposal(result.experiment_id, row.proposal_id)}>
-                    Open it on that record
-                  </Link>
-                </li>
-              ))}
-            </ul>
+
+          {result !== null && (
+            <AddResult result={result} acceptanceUnavailable={acceptance?.available === false} />
           )}
-          {result.not_sent.length > 0 && (
-            <ul className="hi-addwhole-unsent">
-              {result.not_sent.map((row) => (
-                <li key={row.candidate_id}>
-                  <span className="hi-candidate-target">
-                    {row.target_field_path ?? `A candidate ${row.kind}`}
-                  </span>
-                  {/* WHY NOT, IN THE SERVER'S WORDS — the same sentence the
-                      candidate's own card shows, so a reader who scrolls down
-                      does not meet a second, differently-worded explanation. */}
-                  <span className="hi-blocked-reason">{row.reason}</span>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
+        </>
       )}
-    </section>
+    </>
   );
 }
 
-function CandidateCard({
-  candidate,
-  session,
-  busy,
-  onAct,
-  importId,
+function AddResult({
+  result,
+  acceptanceUnavailable,
 }: {
-  candidate: ApiImportCandidate;
-  session: ApiImportSession;
-  busy: string | null;
-  onAct: ActFn;
-  importId: string;
+  result: ApiImportAddedToExperiment;
+  /** The server's own `proposal_acceptance` capability says no reviewer can be identified. */
+  acceptanceUnavailable: boolean;
 }) {
-  const [experimentId, setExperimentId] = useState('');
-  const [runId, setRunId] = useState('');
-  const destinations = useProposalDestinations();
-  const already = session.proposed[candidate.candidate_id];
-  const filenameOf = (sourceId: string) =>
-    session.sources.find((s) => s.source_id === sourceId)?.filename ?? sourceId;
-
+  const groups = groupUnsent(result.not_sent);
   return (
-    <article className="hi-candidate">
-      <header className="hi-candidate-head">
-        <span className="hi-candidate-target">
-          {candidate.target_field_path ?? `A candidate ${candidate.kind}`}
-        </span>
-        {/* WHAT WAS READ VERSUS WHAT WAS INFERRED — one of the nine things
-            `HIST-004` requires a scientist to be able to see, and the badge is
-            derived from the server's own `determinism` rather than guessed from
-            the shape of the rule. */}
-        <span className={`hi-determinism hi-determinism-${candidate.determinism}`}>
-          {DETERMINISM_LABELS[candidate.determinism] ?? candidate.determinism}
-        </span>
-      </header>
-
-      {candidate.proposed_value !== null && candidate.proposed_value !== undefined ? (
-        <p className="hi-candidate-value">{String(candidate.proposed_value)}</p>
-      ) : (
-        <p className="hi-candidate-value hi-candidate-none">No value was chosen</p>
-      )}
-
-      {/* THE WARRANT, VERBATIM. The reconstruction's own sentence, never a
-          paraphrase — it names the key and the line the value was read from, or
-          the stored rule that inferred it, and both are what a reviewer needs. */}
-      <p className="hi-rule">{candidate.rule}</p>
-
-      {/* WHICH SOURCES SUPPORT IT. Named by FILENAME, because a source id means
-          nothing to a scientist. */}
-      {candidate.supporting_statements.length > 0 && (
-        <ul className="hi-support">
-          {candidate.supporting_statements.map((statement, index) => (
-            <li key={index}>
-              <span className="hi-filename">{filenameOf(statement.source_id)}</span>
-              <span className="hi-locator">{statement.locator}</span>
-              <code className="hi-key">{statement.key}</code>
-              <span className="hi-value">{statement.value}</span>
-            </li>
-          ))}
-        </ul>
-      )}
-
-      {/* WHERE SOURCES DISAGREE — every competing value, with who says it. */}
-      {candidate.disagreement.length > 0 && (
-        <ul className="hi-disagreement">
-          {candidate.disagreement.map((row, index) => (
-            <li key={index}>
-              <span className="hi-value">{row.value}</span>
-              <span className="hi-sub">
-                from {row.source_ids.map(filenameOf).join(', ')} ·{' '}
-                {row.locators.join(', ')}
-              </span>
-            </li>
-          ))}
-        </ul>
-      )}
-
-      {already !== undefined ? (
+    <div className="hi-addwhole-result">
+      <h4 className="hi-block-title" tabIndex={-1}>
+        {IMPORT_COPY.addWholeResultTitle}
+      </h4>
+      {/* EVERY NUMBER FROM `counts`, AND ALL OF THEM. */}
+      <p className="hi-counts">
+        {result.counts.sent} sent · {result.counts.already_sent} already there ·{' '}
+        {result.counts.not_sent} could not be sent · {result.counts.candidates} candidate
+        {result.counts.candidates === 1 ? '' : 's'} in this import
+        {typeof result.counts.runs_created === 'number' ? ` · ${result.counts.runs_created} runs created` : ''}
+      </p>
+      {result.counts.sent === 0 && result.counts.already_sent > 0 && (
         <p className="hi-sent" role="note">
-          {IMPORT_COPY.proposedNote}{' '}
-          <Link to={ROUTES.recordProposal(already.experiment_id, already.proposal_id)}>
-            Open it on that record
-          </Link>
-        </p>
-      ) : candidate.proposable ? (
-        <form
-          className="hi-send"
-          onSubmit={(event) => {
-            event.preventDefault();
-            void onAct(`propose:${candidate.candidate_id}`, async () => {
-              const detail = await api.getExperiment(experimentId);
-              await api.proposeImportCandidate(importId, candidate.candidate_id, {
-                experimentId,
-                // THE RECORD'S OWN VERSION, read immediately before the write.
-                // An import session serves none, and sending a blank would be a
-                // 428 reported as a server disagreement.
-                experimentVersion: detail.version,
-                ...(runId.trim() ? { runId: runId.trim() } : {}),
-              });
-              setRunId('');
-            });
-          }}
-        >
-          {/*
-            A PICKER, NOT A TYPED ULID. See `useProposalDestinations` for why:
-            this field used to ask a scientist to type "the record's id".
-          */}
-          <label className="hi-field">
-            <span className="hi-field-label">Send it to which record?</span>
-            {destinations.failed ? (
-              /*
-                A LIST THAT COULD NOT BE READ FALLS BACK TO THE FIELD, rather
-                than removing the only way to send. A scientist who has the id —
-                from a URL, from a colleague — can still act, and the note says
-                why they are being asked for one. Removing the control here would
-                turn a failed READ into a blocked WRITE, which is a bigger claim
-                than the failure supports.
-              */
-              <>
-                <input
-                  className="hi-input"
-                  type="text"
-                  required
-                  value={experimentId}
-                  onChange={(event) => setExperimentId(event.target.value)}
-                  placeholder="the record's id"
-                />
-                <span className="hi-note">
-                  The list of records could not be read, so this asks for the id instead.
-                </span>
-              </>
-            ) : destinations.rows === null ? (
-              <span className="hi-note">Reading your records…</span>
-            ) : destinations.rows.length === 0 ? (
-              <span className="hi-note">
-                This workspace holds no records yet. Create one below and it becomes the
-                destination.
-              </span>
-            ) : (
-              <select
-                className="hi-input"
-                required
-                value={experimentId}
-                onChange={(event) => setExperimentId(event.target.value)}
-              >
-                <option value="">Choose a record…</option>
-                {destinations.rows.map((row) => (
-                  <option key={row.id} value={row.id}>
-                    {row.title}
-                  </option>
-                ))}
-              </select>
-            )}
-          </label>
-          {/*
-            …or make the destination. The title is the import's own label, so the
-            new record is recognisable; NOTHING else is carried over, because
-            nothing in the import has been reviewed yet.
-          */}
-          <NewDestinationButton
-            session={session}
-            busy={busy}
-            onAct={onAct}
-            actKey={`create:${candidate.candidate_id}`}
-            reloadDestinations={destinations.reload}
-            onCreated={setExperimentId}
-          />
-          <label className="hi-field">
-            <span className="hi-field-label">
-              Which run? (required for a value a run owns)
-            </span>
-            <input
-              className="hi-input"
-              type="text"
-              value={runId}
-              onChange={(event) => setRunId(event.target.value)}
-              placeholder="leave blank for a value the record owns"
-            />
-          </label>
-          <button
-            type="submit"
-            className="btn btn-secondary"
-            disabled={busy !== null || !experimentId.trim()}
-          >
-            {busy === `propose:${candidate.candidate_id}`
-              ? 'Sending…'
-              : IMPORT_COPY.actionPropose}
-          </button>
-        </form>
-      ) : (
-        /* WHY IT CANNOT BE SENT, IN THE SERVER'S OWN WORDS, and with no control
-           at all rather than a disabled one. The server's sentence is preferred
-           to anything composed here because it is the one that will actually be
-           enforced — and for the no-write-path case it carries the clause that
-           the limitation is THIS BUILD's and not a statement about the official
-           ISAAC schema. */
-        <p className="hi-blocked" role="note">
-          <CircleAlert size={14} strokeWidth={2.1} aria-hidden="true" />
-          {candidate.not_proposable_reason ?? IMPORT_COPY.notProposableFallback}
+          {IMPORT_COPY.addWholeNothingNew}
         </p>
       )}
-    </article>
+      {result.reread_for_target && <p className="hi-note">{STAGE.reread}</p>}
+      {result.data_quality_notes && result.data_quality_notes.available > 0 && (
+        <p className="hi-note">
+          {STAGE.dqnCaptured}: {result.data_quality_notes.captured_as_run_notes} new ·{' '}
+          {result.data_quality_notes.already_present} already there. Never read as a QC verdict.
+        </p>
+      )}
+      <p>
+        <Link className="btn btn-secondary" to={ROUTES.recordView(result.experiment_id, 'proposals')}>
+          {STAGE.openProposals}
+        </Link>
+      </p>
+      {/* SAID WHERE THE READER GOES TO REVIEW, and only when the server says so:
+          accepting needs an identified reviewer this deployment cannot yet provide. */}
+      {acceptanceUnavailable && <p className="hi-note">{STAGE.acceptanceNote}</p>}
+      {result.runs_already_present && result.runs_already_present.length > 0 && (
+        <Disclosure
+          className="hi-disclosure"
+          summary={STAGE.runsPresent}
+          meta={String(result.runs_already_present.length)}
+        >
+          <ul className="hi-addwhole-sent">
+            {result.runs_already_present.map((row) => (
+              <li key={`${row.run_id}-${row.stem}`}>
+                <span className="hi-candidate-target">{row.label}</span>
+                <span className="hi-sub">{MATCHED_BY_LABELS[row.matched_by] ?? row.matched_by}</span>
+              </li>
+            ))}
+          </ul>
+        </Disclosure>
+      )}
+      {result.sent.length > 0 && (
+        <Disclosure className="hi-disclosure" summary="Sent candidates" meta={String(result.sent.length)}>
+          <ul className="hi-addwhole-sent">
+            {result.sent.map((row) => (
+              <li key={row.candidate_id}>
+                <span className="hi-candidate-target">
+                  {candidateLabel({
+                    candidate_id: row.candidate_id,
+                    kind: 'field',
+                    target_field_path: row.target_field_path,
+                  } as ApiImportCandidate)}
+                </span>
+                {/* THE SERVER'S OWN `already_sent`, never inferred from a second click. */}
+                <span className="hi-sub">
+                  {row.already_sent ? 'already there' : 'sent'}
+                  {row.run_id !== null ? ' · on a run' : ''}
+                </span>
+                <Link to={ROUTES.recordProposal(result.experiment_id, row.proposal_id)}>
+                  Open it on that record
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </Disclosure>
+      )}
+      {groups.length > 0 && (
+        <ul className="hi-addwhole-unsent">
+          {groups.map((group) => (
+            <li key={group.category}>
+              <Disclosure
+                className="hi-disclosure"
+                summary={group.label}
+                meta={String(group.rows.length)}
+              >
+                <ul className="hi-addwhole-sent">
+                  {group.rows.map((row) => (
+                    <li key={row.candidate_id}>
+                      <span className="hi-candidate-target">
+                        {candidateLabel({
+                          candidate_id: row.candidate_id,
+                          kind: row.kind as ApiImportCandidate['kind'],
+                          target_field_path: row.target_field_path,
+                        } as ApiImportCandidate)}
+                      </span>
+                      {/* WHY NOT, IN THE SERVER'S WORDS — the sentence the candidate's
+                          own row shows. */}
+                      <span className="hi-blocked-reason">{row.reason}</span>
+                    </li>
+                  ))}
+                </ul>
+              </Disclosure>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
   );
 }
 
@@ -1917,10 +2146,9 @@ function CandidateCard({
 /**
  * A refusal, rendered with the SERVER's own reason where there is one.
  *
- * `BackendDown` is used only for a server that did not answer. A typed refusal —
- * a malformed checksum, a fixture that is not on the allowlist, a candidate whose
- * sources disagree — is the server answering CORRECTLY, and reporting it as
- * "Backend Not Running" is the defect `LoadMaterials` records for its own 409s.
+ * `BackendDown` is used only for a server that did not answer. A typed refusal is
+ * the server answering CORRECTLY, and reporting it as "Backend Not Running" is the
+ * defect `LoadMaterials` records for its own 409s.
  */
 function Refusal({ error }: { error: ApiError }) {
   if (error.unreachable || error.htmlIntercept) {

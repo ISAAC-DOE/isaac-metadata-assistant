@@ -377,10 +377,13 @@ def test_shared_reasons_have_exactly_one_home():
 def test_the_temperature_reason_names_the_specific_wrong_default():
     """`TEMPERATURE_ABSENT_REASON` belongs to NO concept, deliberately.
 
-    The corpus has no temperature concept because no source states a temperature — so
+    No concept maps a temperature to ``context.temperature_K``: a source either states
+    none, or states one in words that this build keeps verbatim and never converts — so
     there is nothing to map, and the constant exists for the RECONSTRUCTION to cite when
     it reports why a candidate cannot be export-complete. It is asserted here so it has
-    one home rather than being re-worded at the call site.
+    one home rather than being re-worded at the call site. (Corrected 2026-09-22: this
+    used to say "because no source states a temperature", which the temperature
+    statement concept added that day made false.)
 
     It must name **298** explicitly. A reason that only said "do not guess" invites the
     guess anyway, because room temperature is the obvious one and a plausible number in
@@ -398,6 +401,20 @@ def test_the_temperature_reason_names_the_specific_wrong_default():
     assert "must not be defaulted" in reason
     assert "offers no value automatically" in reason
     assert "context.temperature_K" in reason
+    # INVERTED 2026-09-22. This sentence used to open "this corpus states no
+    # temperature anywhere" — and it is served for EVERY archive, including one whose
+    # notes say "held at room temperature throughout". That made it false for exactly
+    # the corpus it is most needed for. It must now be true in both cases: a corpus
+    # that states none, and one that states one only in words (or as a labelled line
+    # this build keeps verbatim and never converts). The blocking itself is unchanged.
+    assert "states no temperature anywhere" not in reason
+    assert "verbatim" in reason and "never converted" in reason
+    assert "Not recorded" in reason
+    # 2026-09-23: nor the universal claim that replaced it, which a labelled number
+    # (`Temperature: 298 K`) falsifies. The claim is about THIS BUILD: it converts none.
+    assert "No source here supplies that number" not in reason
+    assert "converts no source statement into context.temperature_K" in reason
+    assert "including a labelled number" in reason
     assert mp.unmapped_concepts() == ()
     assert not any(
         reason == m.reason for m in mp.MAPPINGS.values()
@@ -428,6 +445,10 @@ def test_to_state_is_complete_and_round_trips_as_json():
             # domain owner uses for the corpus's quality remarks. `None` for every
             # concept whose own name reads well enough.
             "scientist_label",
+            # ADDED 2026-09-22 — how many values the concept is expected to have
+            # (`mp.RULE_CARDINALITY`), so a surface can say "varies by scan" from the
+            # registry instead of calling per-scan variation a disagreement.
+            "cardinality",
         }, concept
         json.dumps(state)
 

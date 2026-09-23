@@ -24,6 +24,27 @@
      against the card edge (owner QA F3). */
   padding: var(--space-md) var(--space-lg);
 }
+/* THE COLLAPSE MUST ACTUALLY HIDE (final review of #279). The `display: flex` above
+   beats the user-agent `[hidden] { display: none }`, so the "collapsed" panel showed
+   its whole body — 38 cards, 6,391 px, under a header reading aria-expanded="false".
+   `display` is restored here for the hidden state only. */
+.extctx-body[hidden] {
+  display: none;
+}
+
+/* CONCEPT GROUPS — summary first, drill down second. Each is a shared `Disclosure`;
+   only the spacing between them and inside an open one is set here. */
+.extctx-groups {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.extctx-group-disclosure .disclosure-body {
+  padding: var(--space-sm);
+}
 
 .extctx-lead,
 .extctx-empty {
@@ -82,10 +103,26 @@
   background: var(--surface);
 }
 
-.extctx-concept {
-  font-size: var(--font-size-body);
-  font-weight: var(--font-weight-semibold);
-  color: var(--text-heading);
+/* The literal and its `?` (the concept key and the registry's reason). */
+.extctx-head {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-xs);
+  min-width: 0;
+}
+.extctx-head > .extctx-literal {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* The registry's sentence inside the entry's tip, set apart from the key above it. */
+.extctx-reason {
+  color: var(--text-secondary);
+}
+
+/* A run id shown BESIDE a label only when two runs share that label. */
+.extctx-run-id {
+  color: var(--text-muted);
 }
 
 /* THE LITERAL IS MONOSPACE AND WRAPS RATHER THAN TRUNCATES. A truncated literal is
@@ -111,6 +148,11 @@
 }
 
 .extctx-provenance dt {
+  display: inline-flex;
+  align-items: center;
+  /* A label never breaks inside itself ("Where in / it" at 390); its value wraps. */
+  flex: none;
+  white-space: nowrap;
   font-weight: var(--font-weight-medium);
 }
 
@@ -129,15 +171,11 @@
   min-width: 0;
 }
 
+/* The raw entry sits in the shared `Disclosure` (final review of #279, P1) — the
+   native `<details>` triangle was the one disclosure on the record screen that did
+   not look like the others. Only its type size is set here. */
 .extctx-details {
   font-size: var(--font-size-meta);
-  color: var(--text-secondary);
-}
-
-.extctx-summary {
-  cursor: pointer;
-  font-size: var(--font-size-meta);
-  font-weight: var(--font-weight-medium);
   color: var(--text-secondary);
 }
 
@@ -145,7 +183,7 @@
    Activity panel shipped raw JSON as its primary reading and it was fixed; this
    panel must not reintroduce it. */
 .extctx-raw {
-  margin: var(--space-xs) 0 0;
+  margin: 0;
   padding: var(--space-sm);
   background: var(--surface-subtle);
   border-radius: var(--radius-token);

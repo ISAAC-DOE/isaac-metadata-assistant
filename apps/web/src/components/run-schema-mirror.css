@@ -62,6 +62,10 @@
   margin: 0;
   font-size: var(--font-size-meta);
   color: var(--text-secondary);
+  /* A long run label wraps inside the header rather than running out of the card
+     (final review, P2 — the same rule as `.run-card-name`). */
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 .rsm-note {
   margin: 0 0 var(--space-sm);

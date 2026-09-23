@@ -113,21 +113,25 @@ ROLE_ABSENCE = "absence_of_a_source"
 ROLE_OTHER = "other_source"
 
 #: Angel's framing, 2026-09-22, as the sentence a scientist reads beside each reading.
+#: Each role's meaning, in plain words — served to a scientist beside every reading.
+#: (2026-09-23: the first wording shouted — "HUMAN LABEL", "RETROSPECTIVE" — and quoted
+#: raw header syntax like `#F`; an independent review asked for plain words.)
 ROLE_MEANINGS: Mapping[str, str] = {
     ROLE_PLANNED_ACQUISITION: (
-        "A macro: the PLANNED or intended acquisition, written before it ran."
+        "A macro: the acquisition that was planned, written before it ran."
     ),
     ROLE_INSTRUMENT_HEADER: (
-        "An instrument header: what the acquisition system RECORDED at the time. "
-        "At BL15-2 the `#F` line is written from the macro's `newfile` target, so it "
-        "records the plan, not an independent observation of the sample."
+        "An instrument header: what the acquisition system recorded at the time. "
+        "At BL15-2 the file-name line of the header is written from the macro's "
+        "new-file target, so it records the plan, not an independent observation of "
+        "the sample."
     ),
     ROLE_HUMAN_LABEL: (
-        "A filename: a HUMAN LABEL — possibly corrected after acquisition, possibly "
-        "mistyped."
+        "A filename: a label a person gave it — possibly corrected after acquisition, "
+        "possibly mistyped."
     ),
     ROLE_RETROSPECTIVE_NOTE: (
-        "The final beamtime notes: a RETROSPECTIVE human interpretation or correction."
+        "The final beamtime notes: a person's later interpretation or correction."
     ),
     ROLE_ABSENCE: "Not a statement — the absence of one (no source says this).",
     ROLE_OTHER: "Another source; its meaning is not characterised here.",

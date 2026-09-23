@@ -93,6 +93,47 @@ def workspace(tmp_path, monkeypatch):
     return ws
 
 
+#: A COPY of the multi-operator corpus in which unit 04's times state their zone.
+#:
+#: Added 2026-09-23. The committed corpus's `#D` lines are the instrument's local clock
+#: with no zone, and since the zone guard (`hist.CANDIDATE_NOT_PROPOSABLE_LOCAL_TIME`)
+#: such a time is never proposed into `timestamps.acquired_start_utc` — resolved or not.
+#: The tests below are about what a RESOLUTION does once it can travel, so they need a
+#: disagreement whose readings are proposable: unit 04's `#D` lines rewritten as ISO
+#: instants with an offset (scan 2 still a day later), and its `#E` epoch line removed so
+#: the same-field comparison with the epoch does not enter the property under test.
+ARCHIVE_ZONED = "bl15_synthetic_semantics_corpus_zoned"
+
+
+@pytest.fixture()
+def zoned(workspace, tmp_path, monkeypatch):
+    source = Path(SEMANTICS)
+    if not source.is_absolute():
+        source = hist.ARCHIVE_FIXTURE_ROOT / SEMANTICS
+    copy = tmp_path / "zoned_corpus"
+    shutil.copytree(source, copy)
+    stem = "04_02_ZZ2_base_after500Cycling_filter20_800mV"
+    spec = copy / stem
+    spec.write_text(
+        "\n".join(
+            line
+            for line in spec.read_text().replace(
+                "#D Fri Jan 01 00:00:00 2100", "#D 2100-01-01T00:00:00+00:00"
+            ).splitlines()
+            if not line.startswith("#E")
+        )
+        + "\n"
+    )
+    for export, instant in (("001", "2100-01-01T00:00:00+00:00"), ("002", "2100-01-02T00:00:00+00:00")):
+        path = copy / f"{stem}_dir" / f"{stem}_{export}.dat"
+        lines = path.read_text().splitlines()
+        path.write_text(
+            "\n".join(f"#D {instant}" if line.startswith("#D") else line for line in lines) + "\n"
+        )
+    monkeypatch.setitem(hist.ARCHIVE_FIXTURES, ARCHIVE_ZONED, str(copy))
+    return ARCHIVE_ZONED
+
+
 @pytest.fixture()
 def alk():
     with profiles.registered_for_tests(ALK):
@@ -390,10 +431,11 @@ def test_evidence_pointing_both_ways_yields_no_recommendation():
     assert rec.value is None
 
 
-def test_a_confirmed_resolution_goes_forward_as_a_proposal_only(client):
+def test_a_confirmed_resolution_goes_forward_as_a_proposal_only(client, zoned):
     """A scientist resolves a FIELD disagreement; the value becomes a PROPOSAL whose
-    acceptance keeps its `409 human_actor_required` gate in the default configuration."""
-    import_id = _import(client)
+    acceptance keeps its `409 human_actor_required` gate in the default configuration.
+    (On the zoned copy of the corpus — see `zoned`.)"""
+    import_id = _import(client, zoned)
     view = _view(client, import_id)
     # The fixture's unit 04 states two different acquisition dates (its second scan's
     # `#D` differs): a real field-level disagreement at a writable path.
@@ -700,6 +742,23 @@ def test_room_temperature_is_kept_verbatim_and_no_number_is_offered(client):
     ]
     assert all(t["converted_to_a_number"] is False for t in temperature["statements"])
     assert temperature["automatic_value"] is None
+    # THE POLICY MUST NOT CONTRADICT THE STATEMENT SERVED BESIDE IT. It used to be
+    # `TEMPERATURE_ABSENT_REASON` unconditionally, which opens "this corpus states no
+    # temperature anywhere" — false for this corpus, whose notes state one in words.
+    # Found by the Historical Import UI slice (2026-09-22), which would have rendered
+    # the two side by side.
+    assert "states no temperature anywhere" not in temperature["policy"]
+    assert "verbatim" in temperature["policy"]
+    assert "298" in temperature["policy"] and "must not be defaulted" in temperature["policy"]
+    # THE SAME FACT, EVERYWHERE IT IS SERVED (2026-09-22): the registry's blocker
+    # sentence and the digest's export blockers used to deny this corpus's statement
+    # too. They still name the temperature as a blocker — a words-only statement
+    # cannot satisfy `context.temperature_K` — and no longer claim it was never stated.
+    blockers = view["corpus_digest"]["cannot_be_export_ready"]
+    assert len(blockers) == 3
+    assert "context.temperature_K" in blockers[0]
+    assert "states no temperature anywhere" not in blockers[0]
+    assert view["corpus_review"]["mapping"]["temperature_absent_reason"] == blockers[0]
 
     eid = _record(client)
     body = client.post(
@@ -1151,16 +1210,35 @@ def test_I3_a_resolved_normalised_reading_takes_the_evidences_own_value():
 
 def test_I2_a_resolved_timestamp_is_the_literal_an_agreeing_candidate_would_send():
     """I-2, timestamp half: resolution opens NO new route to `timestamps.*`. The value
-    is the ctime literal as stated, identical to what the pre-existing agreeing path
-    proposes for the same statement, and proposability is the registry's."""
-    stated = "Fri Jan 01 00:00:00 2100"
-    derived = _resolve([_item(1, stated), _item(2, "Sat Jan 02 00:00:00 2100")], stated)
+    is the literal as stated, identical to what the pre-existing agreeing path proposes
+    for the same statement, and proposability is the registry's — for a time that
+    states its zone."""
+    stated = "2100-01-01T00:00:00+00:00"
+    derived = _resolve([_item(1, stated), _item(2, "2100-01-02T00:00:00+00:00")], stated)
     (agreeing,) = rc._candidates_from_evidence(
         [_item(1, stated)], candidate_prefix="01_01_ZZ1", source_ids={"synthetic/file-1": "src"},
         by_concept=defaultdict(int), by_status=defaultdict(int), unregistered=set(),
     )
+    derived = hist._bound_candidate(derived, frozenset({"timestamps.acquired_start_utc"}))
     assert derived.proposed_value == agreeing.proposed_value == stated
     assert (derived.not_proposable_reason is None) is mp.mapping_for("acquisition_timestamp").proposable
+
+
+def test_I2_a_zone_less_time_is_never_proposed_into_a_UTC_field_resolved_or_not():
+    """2026-09-23: a SPEC `#D` line is the instrument's local clock with no zone. The
+    agreeing candidate and a resolved one BOTH refuse it, with one reason and no value —
+    so resolving a disagreement still opens no route the agreeing path lacks."""
+    stated = "Fri Jan 01 00:00:00 2100"
+    derived = _resolve([_item(1, stated), _item(2, "Sat Jan 02 00:00:00 2100")], stated)
+    derived = hist._bound_candidate(derived, frozenset({"timestamps.acquired_start_utc"}))
+    (agreeing,) = rc._candidates_from_evidence(
+        [_item(1, stated)], candidate_prefix="01_01_ZZ1", source_ids={"synthetic/file-1": "src"},
+        by_concept=defaultdict(int), by_status=defaultdict(int), unregistered=set(),
+    )
+    for candidate in (derived, agreeing):
+        assert candidate.proposed_value is None
+        assert candidate.proposable is False
+        assert candidate.not_proposable_reason == hist.CANDIDATE_NOT_PROPOSABLE_LOCAL_TIME
 
 
 @pytest.mark.parametrize("concept", ["sample_name", "acquisition_method", "sample_preparation"])
@@ -1233,12 +1311,12 @@ def _timestamp_disagreement(view):
     )
 
 
-def test_I1_a_rule_confirmed_on_A_never_shapes_proposals_minted_on_B(client):
+def test_I1_a_rule_confirmed_on_A_never_shapes_proposals_minted_on_B(client, zoned):
     """I-1, the reviewer's probe 2 as a regression test. An Experiment-scoped resolution
     on A made the session's reading A's; adding the SAME import to B minted a
     `::resolved` proposal on B citing A's rule. Now B's batch re-reads the import under
-    B's rules only (`reread_for_target`) and nothing of A's reaches B."""
-    import_id = _import(client)
+    B's rules only (`reread_for_target`) and nothing of A's reaches B. (Zoned copy.)"""
+    import_id = _import(client, zoned)
     target = _timestamp_disagreement(_view(client, import_id))
     eid_a, eid_b = _record(client, "A"), _record(client, "B")
     on_a = _rule(client, import_id, {
@@ -1278,8 +1356,8 @@ def test_I1_a_rule_confirmed_on_A_never_shapes_proposals_minted_on_B(client):
     assert [s for s in to_a["sent"] if s["candidate_id"].endswith("::resolved")]
 
 
-def test_I1_the_single_candidate_route_refuses_another_records_resolution(client):
-    import_id = _import(client)
+def test_I1_the_single_candidate_route_refuses_another_records_resolution(client, zoned):
+    import_id = _import(client, zoned)
     target = _timestamp_disagreement(_view(client, import_id))
     eid_a, eid_b = _record(client, "A"), _record(client, "B")
     assert _rule(client, import_id, {

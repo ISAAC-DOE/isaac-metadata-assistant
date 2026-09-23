@@ -168,7 +168,9 @@ test('@responsive the /imports strip is SIX circle nodes on a connecting line, n
    */
   await page.setViewportSize({ width: 1280, height: 812 });
   await app.goto('/imports');
-  await page.locator('details.hi-how-it-works > summary').click();
+  // The shared `Disclosure` since 2026-09-23 (it was a native `<details>`): its trigger
+  // is a button carrying `aria-expanded`.
+  await page.getByRole('button', { name: 'How Historical Import works' }).click();
   await expect(page.locator('.hi-steps > .hi-step').first()).toBeVisible();
 
   const steps = await page.evaluate(() =>

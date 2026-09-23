@@ -35,6 +35,30 @@ the enumerated form above is both.)*
 
 ---
 
+# ADDED 2026-09-23 — ONE NEW QUESTION, Q21, AND IT IS OPEN
+
+**Q21. Which acquisition quantities are expected to VARY from scan to scan within one
+measurement, and which are one value for the whole measurement?** The build must decide,
+for every concept a scan states, whether two scans stating different values is normal (each
+scan keeps its own reading) or a disagreement a scientist must resolve. Candidates:
+counting time (`#T`), emission energy, the energy grid of a `gscan`, the `#S` scan command,
+detector column names (`#L`), motor positions (`#P`), and the acquisition timestamp (`#D`).
+
+*→ A list, per quantity: "varies per scan" or "one per measurement". **Until it is answered
+the build treats every one of them as one per measurement except four it can justify
+structurally** — each scan export's own file index (`acquisition_target`), the several
+columns a `#L` line lists (`detector_column`), the several motors a `#P` line lists
+(`motor_position`), and the tokens of a file's name (`unknown_token`)* — `bl15.mapping.
+RULE_CARDINALITY` v2. *The first version also declared counting time, emission energy, the
+energy grid and the scan command per scan; an independent review on 2026-09-23 measured
+that a macro's planned value and the header's recorded value for the SAME, only scan then
+read as variation instead of a conflict, and those four were reverted pending this answer.*
+
+*(Numbered in THIS packet's sequence, Q1–Q20 before it. The Dean packets use their own
+numbering, and their `Q21` is a different question.)*
+
+---
+
 # RECONCILED 2026-09-22 — ANGEL ANSWERED FIVE MORE, AND WITHDREW `DEC-43`'S 298 K
 
 **Read this section first; the 2026-09-17 reconciliation below is preserved unedited as the

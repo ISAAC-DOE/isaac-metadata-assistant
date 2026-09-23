@@ -29,6 +29,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
   document.body.innerHTML = '';
 });
 
@@ -89,7 +90,9 @@ describe('focusWhenPresent', () => {
   it('gives up after its bound, and says so, rather than looping', () => {
     const done = vi.fn();
     // One immediate attempt plus up to 5 frames: the fifth retry is the last.
-    focusWhenPresent(() => document.getElementById('dest'), done, 5);
+    // `minMs` 0 isolates the FRAME bound (since 2026-09-23 the hand-off also waits
+    // out a time floor — pinned by its own test below).
+    focusWhenPresent(() => document.getElementById('dest'), done, 5, 0);
     tick(4);
     expect(done).not.toHaveBeenCalled();
     tick(1);
@@ -109,5 +112,39 @@ describe('focusWhenPresent', () => {
     tick(3);
     expect(document.activeElement).toBe(document.body);
     expect(done).not.toHaveBeenCalled();
+  });
+
+  it('STALLED COMMIT (2026-09-23): frames spent but the time floor not reached — it keeps waiting, and lands', () => {
+    let now = 1000;
+    vi.spyOn(performance, 'now').mockImplementation(() => now);
+    const done = vi.fn();
+    focusWhenPresent(() => document.getElementById('dest'), done, 5, 3000);
+    // Every frame of the budget runs while the destination still has not rendered —
+    // the full-parallel-run failure, where frames ran and the commit had not.
+    tick(20);
+    now += 1000;
+    tick(5);
+    expect(done).not.toHaveBeenCalled();
+    // The commit finally lands, inside the time floor, and the hand-off still takes it.
+    document.body.appendChild(heading());
+    tick(1);
+    expect(document.activeElement?.id).toBe('dest');
+    expect(done).toHaveBeenCalledWith(true);
+  });
+
+  it('and once BOTH bounds have passed it gives up, so nothing fires later', () => {
+    let now = 1000;
+    vi.spyOn(performance, 'now').mockImplementation(() => now);
+    const done = vi.fn();
+    focusWhenPresent(() => document.getElementById('dest'), done, 5, 3000);
+    tick(10);
+    expect(done).not.toHaveBeenCalled();
+    now += 3000;
+    tick(1);
+    expect(done).toHaveBeenCalledWith(false);
+    expect(frames).toHaveLength(0);
+    document.body.appendChild(heading());
+    tick(3);
+    expect(document.activeElement).toBe(document.body);
   });
 });

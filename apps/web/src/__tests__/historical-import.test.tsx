@@ -11,6 +11,17 @@
  *   §4  one `<h1>`, one name, one vocabulary — and it is the server's
  *   §5  a candidate that cannot be sent says why, in the server's own words
  *   §6  `UX-016`: a scientist with zero experiments can discover this destination
+ *   §12 the stage flow (owner QA H1, 2026-09-22): one stage in focus, real tabs
+ *
+ * ── THE SESSION IS NOW SIX STAGES, ONE IN FOCUS (owner QA H1, 2026-09-22) ──
+ *
+ * The session used to render every section at once. It is now a tablist —
+ * Source Bundle, What ISAAC Read, Runs & Candidates, Conflicts, Review, Add to
+ * Experiment — with every panel MOUNTED and all but one `hidden`, and a candidate
+ * is a collapsed row rather than an always-open card. So a test that reads by TEXT
+ * still reaches every panel (text queries ignore `hidden`), and a test that needs a
+ * CONTROL first opens the stage and the row a scientist would open. Nothing below
+ * was relaxed to fit: where a query moved, the assertion it guards did not.
  *
  * MUTATION-CHECKED: a test whose docstring carries a `MUTATION:` line was
  * verified by breaking the component in the way the test claims to catch,
@@ -40,7 +51,7 @@ import { LeftNav } from '../components/LeftNav';
 import { LABELS } from '../lib/labels';
 import { ROUTES, ROUTE_PATTERNS } from '../lib/routes';
 import { routeDocumentTitle } from '../lib/documentTitle';
-import { IMPORT_COPY } from '../lib/historicalImportContent';
+import { IMPORT_COPY, IMPORT_STAGE_COPY } from '../lib/historicalImportContent';
 import type {
   ApiImportCandidate,
   ApiImportListResponse,
@@ -441,7 +452,40 @@ async function openSession() {
   });
   renderScreen();
   fireEvent.click(await screen.findByRole('button', { name: IMPORT_COPY.actionStart }));
-  await screen.findByRole('heading', { name: 'Sources' });
+  await screen.findByRole('tablist', { name: IMPORT_STAGE_COPY.stagesLabel });
+}
+
+/** Wait for an opened session's stage tabs — the session view is mounted. */
+async function sessionOpen() {
+  await screen.findByRole('tablist', { name: IMPORT_STAGE_COPY.stagesLabel });
+}
+
+/** Put one stage in focus by pressing its tab, and return its panel. */
+function goTo(title: string): HTMLElement {
+  const tab = screen.getByRole('tab', { name: new RegExp(title.replace(/[&?]/g, '.')) });
+  fireEvent.click(tab);
+  const panel = document.getElementById(tab.getAttribute('aria-controls') ?? '');
+  expect(panel, `no panel for the ${title} stage`).not.toBeNull();
+  expect(panel!.hidden).toBe(false);
+  return panel as HTMLElement;
+}
+
+/**
+ * The candidate row for one official path, in the stage in focus, OPENED — the way
+ * a scientist reaches its sources and its send control. Opens the bucket holding it
+ * first when that bucket is collapsed.
+ */
+function openCandidate(panel: HTMLElement, needle: string): HTMLElement {
+  const row = [...panel.querySelectorAll<HTMLElement>('li.hi-cand')].find((li) =>
+    (li.textContent ?? '').includes(needle),
+  );
+  expect(row, `no candidate row mentioning ${needle}`).toBeTruthy();
+  const bucket = row!.closest('.hi-bucket');
+  const bucketTrigger = bucket?.querySelector(':scope > .disclosure-heading > .disclosure-trigger, :scope > .disclosure-trigger');
+  if (bucketTrigger && bucketTrigger.getAttribute('aria-expanded') === 'false') fireEvent.click(bucketTrigger);
+  const trigger = row!.querySelector(':scope > .hi-cand-row > .disclosure-trigger')!;
+  if (trigger.getAttribute('aria-expanded') === 'false') fireEvent.click(trigger);
+  return row as HTMLElement;
 }
 
 /* --------------------------------------------------------------------------
@@ -504,6 +548,11 @@ describe('§1 · the file picker exists and cannot send a byte', () => {
     expect(claim).not.toBeNull();
     expect(claim!.textContent).toMatch(/not sent to ISAAC/i);
     expect(claim!.closest('details')).toBeNull();
+    // Nor behind the shared `Disclosure`: it sits in the Source Bundle stage itself,
+    // beside the picker, and is on screen whenever that stage is.
+    expect(claim!.closest('.disclosure-body')).toBeNull();
+    const panel = goTo(IMPORT_STAGE_COPY.sources.title);
+    expect(panel.contains(claim)).toBe(true);
   });
 
   it('declares no upload machinery in its own source, and calls no upload route', () => {
@@ -635,6 +684,38 @@ describe('§2 · every one of the nine things a scientist must see is on the scr
     expect(screen.getByText('Reference')).toBeTruthy();
   });
 
+  it('an ARCHIVE is named in words — its raw id and where it was read from sit behind the `?`', async () => {
+    /*
+     * The review of #279 measured `staged:multi_operator_corpus` printed beside the
+     * archive's human name: a staged archive's reference IS its id, so the reference line
+     * put the raw token straight back, and the Remove button was named by it too.
+     */
+    const archive: ApiImportSource = {
+      ...FIXTURE_SOURCE,
+      source_id: '01SRCARCH0000000000000001',
+      kind: 'archive',
+      filename: 'staged:FAKE_multi_corpus',
+      reference: 'staged:FAKE_multi_corpus',
+      fixture_name: null,
+    };
+    stub({ list: listResponse(), detail: session({ sources: [archive] }), experiments: { experiments: [] } });
+    renderScreen();
+    fireEvent.click(await screen.findByRole('button', { name: IMPORT_COPY.actionStart }));
+    await sessionOpen();
+    const panel = goTo('Source Bundle');
+    expect(within(panel).getByText(/Fake multi corpus/)).toBeTruthy();
+    // Every text node carrying the raw id is inside the help tip's hidden panel.
+    const walker = document.createTreeWalker(panel, NodeFilter.SHOW_TEXT);
+    let raw = 0;
+    for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+      if (!(n.textContent ?? '').includes('staged:')) continue;
+      raw += 1;
+      expect(n.parentElement?.closest('[hidden]'), `raw id shown: ${n.textContent}`).not.toBeNull();
+    }
+    expect(raw).toBeGreaterThan(0);
+    expect(within(panel).getByRole('button', { name: `${IMPORT_COPY.actionRemoveSource} Fake multi corpus` })).toBeTruthy();
+  });
+
   it('what was read, and what was NOT — per entry, never in a banner', async () => {
     await openSession();
     expect(screen.getByText('Read')).toBeTruthy();
@@ -664,19 +745,18 @@ describe('§2 · every one of the nine things a scientist must see is on the scr
 
   it('what candidate experiments and runs it thinks exist', async () => {
     await openSession();
-    expect(screen.getByText('A candidate experiment')).toBeTruthy();
+    // A human name rather than the server's `kind`, and the value it suggests.
+    expect(screen.getByText('Candidate experiment')).toBeTruthy();
     expect(screen.getByText('SYNTHETIC-bundle')).toBeTruthy();
   });
 
   it('which sources support each candidate, by FILENAME and not by id', async () => {
     await openSession();
-    const card = screen.getByText('system.technique', { selector: '.hi-candidate-target' })
-      .closest('article');
-    expect(card).toBeTruthy();
-    const support = within(card as HTMLElement);
+    const card = openCandidate(goTo(IMPORT_STAGE_COPY.review.title), 'system.technique');
+    const support = within(card);
     expect(support.getByText('SYNTHETIC-bundle-a.txt')).toBeTruthy();
     // The id is NOT what a scientist is shown.
-    expect((card as HTMLElement).textContent).not.toContain(FIXTURE_SOURCE.source_id);
+    expect(card.textContent).not.toContain(FIXTURE_SOURCE.source_id);
   });
 
   it('what was READ versus what was INFERRED', async () => {
@@ -689,9 +769,16 @@ describe('§2 · every one of the nine things a scientist must see is on the scr
 
   it('where sources DISAGREE — every competing value, with who asserts it', async () => {
     await openSession();
-    expect(screen.getByRole('heading', { name: 'Sources disagree' })).toBeTruthy();
-    expect(screen.getByText('SYNTHETIC-CuO-FAKE-001')).toBeTruthy();
-    expect(screen.getByText('SYNTHETIC-CuO-FAKE-002')).toBeTruthy();
+    const panel = goTo(IMPORT_STAGE_COPY.conflicts.title);
+    // The kind's header names it and counts it; each row carries the shared status.
+    expect(
+      within(panel).getByRole('heading', { name: new RegExp(IMPORT_STAGE_COPY.conflicts.fieldKindTitle) }),
+    ).toBeTruthy();
+    expect(within(panel).getAllByText(IMPORT_STAGE_COPY.stateLabels.conflict).length).toBeGreaterThan(0);
+    // Every competing value, WITH the file that asserts it, in the Source Facts layer.
+    const facts = [...panel.querySelectorAll('.hi-layer-facts > li')].map((li) => li.textContent ?? '');
+    expect(facts.some((t) => t.includes('SYNTHETIC-CuO-FAKE-001') && t.includes('SYNTHETIC-bundle-a.txt'))).toBe(true);
+    expect(facts.some((t) => t.includes('SYNTHETIC-CuO-FAKE-002'))).toBe(true);
   });
 
   it('what is UNRESOLVED: a disagreement shows no chosen value', async () => {
@@ -701,16 +788,15 @@ describe('§2 · every one of the nine things a scientist must see is on the scr
      * nothing was chosen.
      */
     await openSession();
-    const card = screen
-      .getByText('sample.material.name', { selector: '.hi-candidate-target' })
-      .closest('article') as HTMLElement;
-    expect(within(card).getByText('No value was chosen')).toBeTruthy();
+    const card = openCandidate(goTo(IMPORT_STAGE_COPY.review.title), 'sample.material.name');
+    expect(within(card).getByText(IMPORT_STAGE_COPY.conflicts.noValue)).toBeTruthy();
     expect(card.textContent).not.toContain('null');
   });
 
   it('what was read but not RECOGNISED, listed rather than guessed at', async () => {
     await openSession();
-    expect(screen.getByRole('heading', { name: 'Read, but not recognised' })).toBeTruthy();
+    const panel = goTo(IMPORT_STAGE_COPY.runs.title);
+    expect(within(panel).getByRole('button', { name: /Read, but not recognised/ })).toBeTruthy();
     // Appears in the parse output AND in the unmapped list, deliberately: a
     // reader has to be able to see both that it was read and that it was not
     // placed.
@@ -744,7 +830,7 @@ describe('§3 · a step the SERVER declares unbuilt says so, and offers nothing'
     });
     renderScreen();
     fireEvent.click(await screen.findByRole('button', { name: IMPORT_COPY.actionStart }));
-    await screen.findByRole('heading', { name: 'Sources' });
+    await sessionOpen();
   }
 
   it('renders the server’s own disclosure beside the step', async () => {
@@ -760,11 +846,22 @@ describe('§3 · a step the SERVER declares unbuilt says so, and offers nothing'
      * implies any of it exists" forbids.
      */
     await openWithAnUnbuiltStep();
-    const steps = screen.getByRole('list', { name: 'Historical import workflow' });
-    expect(within(steps).queryAllByRole('button')).toEqual([]);
-    expect(within(steps).queryAllByRole('link')).toEqual([]);
-    // The step is still NAMED — hiding it would be the other failure.
-    expect(within(steps).getByText('Add to Experiments')).toBeTruthy();
+    /*
+     * RE-POINTED 2026-09-22: the session's six steps are now stage TABS, and a tab
+     * is navigation rather than the act. What must stay true is unchanged — the
+     * unbuilt stage offers NO control for the act, not a disabled one — so it is
+     * asserted over the stage's own panel, where the act would be.
+     */
+    const panel = goTo(IMPORT_STAGE_COPY.add.title);
+    const acts = within(panel)
+      .queryAllByRole('button')
+      .filter((b) => !b.classList.contains('helptip-trigger'));
+    expect(acts).toEqual([]);
+    expect(within(panel).queryAllByRole('link')).toEqual([]);
+    expect(within(panel).queryAllByRole('combobox')).toEqual([]);
+    // The step is still NAMED, and its tab says it is not built.
+    const tab = screen.getByRole('tab', { name: new RegExp(IMPORT_STAGE_COPY.add.title) });
+    expect(tab.textContent).toContain(IMPORT_STAGE_COPY.stateLabels.notBuilt);
   });
 
   it('this build declares NO unbuilt step, so no disclosure is rendered', async () => {
@@ -776,16 +873,16 @@ describe('§3 · a step the SERVER declares unbuilt says so, and offers nothing'
      */
     await openSession();
     expect(screen.queryByText(/Not built in this build/)).toBeNull();
-    const steps = screen.getByRole('list', { name: 'Historical import workflow' });
-    expect(within(steps).getByText('Add to Experiments')).toBeTruthy();
-    expect(steps.querySelectorAll('.unbuilt')).toHaveLength(0);
+    const tab = screen.getByRole('tab', { name: new RegExp(IMPORT_STAGE_COPY.add.title) });
+    expect(tab.textContent).not.toContain(IMPORT_STAGE_COPY.stateLabels.notBuilt);
+    expect(document.querySelectorAll('.unbuilt')).toHaveLength(0);
   });
 
   it('marks only the step the session has reached, wherever that is', async () => {
     stub({ list: listResponse(), detail: session({ furthest_step: 'review' }) });
     renderScreen();
     fireEvent.click(await screen.findByRole('button', { name: IMPORT_COPY.actionStart }));
-    await screen.findByRole('heading', { name: 'Sources' });
+    await sessionOpen();
     const current = document.querySelectorAll('[aria-current="step"]');
     expect(current).toHaveLength(1);
     expect(current[0].textContent).toContain('Review');
@@ -803,10 +900,11 @@ describe('§3 · a step the SERVER declares unbuilt says so, and offers nothing'
     });
     renderScreen();
     fireEvent.click(await screen.findByRole('button', { name: IMPORT_COPY.actionStart }));
-    await screen.findByRole('heading', { name: 'Sources' });
+    await sessionOpen();
     const current = document.querySelectorAll('[aria-current="step"]');
     expect(current).toHaveLength(1);
-    expect(current[0].textContent).toContain('Add to Experiments');
+    expect(current[0].textContent).toContain(IMPORT_STAGE_COPY.add.title);
+    expect(current[0].getAttribute('role')).toBe('tab');
   });
 });
 
@@ -868,9 +966,7 @@ describe('§4 · one `<h1>`, one name for the destination, and the server’s wo
 describe('§5 · a candidate that cannot be sent says why, and offers no control', () => {
   it('a disagreement offers no send control', async () => {
     await openSession();
-    const card = screen
-      .getByText('sample.material.name', { selector: '.hi-candidate-target' })
-      .closest('article') as HTMLElement;
+    const card = openCandidate(goTo(IMPORT_STAGE_COPY.review.title), 'sample.material.name');
     expect(within(card).queryByRole('button', { name: IMPORT_COPY.actionPropose })).toBeNull();
     expect(within(card).getByText(/deciding between them is yours/i)).toBeTruthy();
   });
@@ -887,9 +983,7 @@ describe('§5 · a candidate that cannot be sent says why, and offers no control
      * makes this RED.
      */
     await openSession();
-    const card = screen
-      .getByText('system.configuration.detector_model', { selector: '.hi-candidate-target' })
-      .closest('article') as HTMLElement;
+    const card = openCandidate(goTo(IMPORT_STAGE_COPY.review.title), 'system.configuration.detector_model');
     expect(card.textContent).toContain('LIMITATION OF THIS BUILD');
     expect(card.textContent).toContain('NOT A STATEMENT ABOUT THE OFFICIAL ISAAC SCHEMA');
     expect(within(card).queryByRole('button', { name: IMPORT_COPY.actionPropose })).toBeNull();
@@ -897,9 +991,9 @@ describe('§5 · a candidate that cannot be sent says why, and offers no control
 
   it('a structural candidate names the missing capability rather than implying it', async () => {
     await openSession();
-    const card = screen
-      .getByText('A candidate experiment', { selector: '.hi-candidate-target' })
-      .closest('article') as HTMLElement;
+    // A structural candidate is shown in Runs & Candidates ("What this looks like");
+    // Review lists only the field candidates a proposal can carry.
+    const card = openCandidate(goTo(IMPORT_STAGE_COPY.runs.title), 'SYNTHETIC-bundle');
     expect(card.textContent).toContain('creates an experiment or a run from an import');
     expect(within(card).queryByRole('button', { name: IMPORT_COPY.actionPropose })).toBeNull();
   });
@@ -908,9 +1002,7 @@ describe('§5 · a candidate that cannot be sent says why, and offers no control
     /* Without this, every assertion above could pass on a screen that renders no
      * send control at all. */
     await openSession();
-    const card = screen
-      .getByText('system.technique', { selector: '.hi-candidate-target' })
-      .closest('article') as HTMLElement;
+    const card = openCandidate(goTo(IMPORT_STAGE_COPY.review.title), 'system.technique');
     expect(within(card).getByRole('button', { name: IMPORT_COPY.actionPropose })).toBeTruthy();
   });
 
@@ -921,9 +1013,7 @@ describe('§5 · a candidate that cannot be sent says why, and offers no control
      * reported to the reader as a server disagreement.
      */
     await openSession();
-    const card = screen
-      .getByText('system.technique', { selector: '.hi-candidate-target' })
-      .closest('article') as HTMLElement;
+    const card = openCandidate(goTo(IMPORT_STAGE_COPY.review.title), 'system.technique');
     /*
      * A PICKER SINCE 2026-09-14, not a typed ULID. This used to
      * `getByPlaceholderText("the record's id")` and type the id in — which is
@@ -974,12 +1064,64 @@ describe('§5 · a candidate that cannot be sent says why, and offers no control
     });
     renderScreen();
     fireEvent.click(await screen.findByRole('button', { name: IMPORT_COPY.actionStart }));
-    await screen.findByRole('heading', { name: 'Sources' });
+    await sessionOpen();
+    const row = openCandidate(goTo(IMPORT_STAGE_COPY.review.title), 'system.technique');
     const link = screen.getByRole('link', { name: 'Open it on that record' });
     expect(link.getAttribute('href')).toContain('proposal=01PROPOSAL0000000000000001');
-    // NEVER "applied": it is an open proposal awaiting review.
-    expect(screen.getByText(/awaiting review/)).toBeTruthy();
+    // NEVER "applied": it is an open proposal awaiting review. Scoped to the Review row:
+    // the Runs stage (mounted, hidden) now says the same of the same candidate.
+    expect(within(row).getByText(/awaiting review/)).toBeTruthy();
     expect(document.body.textContent).not.toContain('applied to that record');
+  });
+
+  it('after a send, Review shows 0 Ready and the sent candidate as SENT, with the record it went to', async () => {
+    /*
+     * The orchestrator's browser pass of #279: after Add to Experiment the header said
+     * "4 Sent" and the Add stage "0 can be sent · 4 already sent", while Review still
+     * listed the same four under "Ready to Send · 4", each chipped "Ready to Send". A
+     * sent candidate is SENT everywhere — one categorisation (`reviewBucketOf`, built on
+     * the same plan the Add stage and the header read).
+     */
+    stub({
+      list: listResponse(),
+      detail: session({
+        proposed: {
+          [SENDABLE.candidate_id]: {
+            experiment_id: '01RECORD00000000000000001',
+            proposal_id: '01PROPOSAL0000000000000001',
+            note_id: '01NOTE00000000000000000001',
+            proposed_utc: '2099-01-01T00:00:09Z',
+          },
+        },
+      }),
+      experiments: {
+        experiments: [{ id: '01RECORD00000000000000001', title: 'Cu K-edge campaign, 2019' }],
+      },
+    });
+    renderScreen();
+    fireEvent.click(await screen.findByRole('button', { name: IMPORT_COPY.actionStart }));
+    await sessionOpen();
+    const panel = goTo(IMPORT_STAGE_COPY.review.title);
+    const ready = IMPORT_STAGE_COPY.bucketTitles.ready;
+
+    // 0 Ready: no chip, no group, and the header agrees.
+    expect(panel.querySelector('.hi-review-counts')?.textContent ?? '').not.toContain(ready);
+    const groups = [...panel.querySelectorAll('.hi-bucket')].map(
+      (g) => g.querySelector('.disclosure-summary')?.textContent,
+    );
+    expect(groups).not.toContain(ready);
+    expect(groups).toContain('Sent');
+    expect(document.querySelector('.hi-summary-item[data-id="ready"] dd')?.textContent).toBe('0');
+
+    // The row reads Sent — never Ready to Send — and names the record it went to.
+    const row = openCandidate(panel, 'system.technique');
+    expect(within(row).getAllByText('Sent').length).toBeGreaterThan(0);
+    expect(within(row).queryByText(IMPORT_STAGE_COPY.stateLabels.ready)).toBeNull();
+    await waitFor(() =>
+      expect(within(row).getByRole('link', { name: /Cu K-edge campaign, 2019/ }).getAttribute('href')).toContain(
+        'proposal=01PROPOSAL0000000000000001',
+      ),
+    );
   });
 });
 
@@ -1220,7 +1362,7 @@ async function openWithTwoSendable(added: unknown = addedResponse()) {
   });
   renderScreen();
   fireEvent.click(await screen.findByRole('button', { name: IMPORT_COPY.actionStart }));
-  await screen.findByRole('heading', { name: 'Sources' });
+  await sessionOpen();
 }
 
 /**
@@ -1235,6 +1377,7 @@ async function openWithTwoSendable(added: unknown = addedResponse()) {
  * `COMBOS 4` with the panel present and its button found.
  */
 async function chooseRecordAndAdd() {
+  goTo(IMPORT_STAGE_COPY.add.title);
   const panel = document.querySelector('.hi-addwhole') as HTMLElement;
   expect(panel).not.toBeNull();
   fireEvent.change(within(panel).getByRole('combobox'), {
@@ -1248,13 +1391,16 @@ async function chooseRecordAndAdd() {
 describe('§10 · adding a whole import to one record', () => {
   it('offers the step as ONE control when more than one candidate can be sent', async () => {
     await openWithTwoSendable();
-    expect(
-      screen.getByRole('button', { name: IMPORT_COPY.actionAddWhole }),
-    ).toBeTruthy();
-    // ITS HEADING IS THE SERVER'S OWN LABEL for its last step, so the panel and
-    // the stepper above it cannot call one step two things.
-    const headings = screen.getAllByRole('heading', { name: 'Add to Experiments' });
-    expect(headings.length).toBeGreaterThan(0);
+    const panel = goTo(IMPORT_STAGE_COPY.add.title);
+    expect(within(panel).getAllByRole('button', { name: IMPORT_COPY.actionAddWhole })).toHaveLength(1);
+    /*
+     * ONE NAME FOR THE STAGE. Re-pointed 2026-09-22: the stepper this used to be
+     * checked against is now the stage tab, and the tab and the stage's heading read
+     * the SAME constant — so the panel and the control that opens it cannot call one
+     * step two things.
+     */
+    expect(within(panel).getByRole('heading', { name: IMPORT_STAGE_COPY.add.title })).toBeTruthy();
+    expect(screen.getByRole('tab', { name: new RegExp(IMPORT_STAGE_COPY.add.title) })).toBeTruthy();
   });
 
   it('does NOT offer it when exactly one candidate can be sent', async () => {
@@ -1265,6 +1411,7 @@ describe('§10 · adding a whole import to one record', () => {
      * finishes it, and the server's `furthest_step` says so.
      */
     await openSession();
+    goTo(IMPORT_STAGE_COPY.add.title);
     expect(screen.queryByRole('button', { name: IMPORT_COPY.actionAddWhole })).toBeNull();
   });
 
@@ -1359,10 +1506,10 @@ describe('§10 · adding a whole import to one record', () => {
        surface may contradict it. Scoped to this panel rather than the document:
        the word "applied" legitimately appears elsewhere on the screen, in the
        reconstruction line that reports `nothing was applied`. */
-    const panel = document.querySelector('.hi-addwhole') as HTMLElement;
-    expect(panel).not.toBeNull();
+    // The whole Add stage — its lead, the form and the report — since 2026-09-22.
+    const panel = goTo(IMPORT_STAGE_COPY.add.title);
     const text = panel.textContent ?? '';
-    expect(text).toContain('no value is written');
+    expect(text).toMatch(/no value is written/i);
     for (const forbidden of [/\bapplied to\b/i, /\bwritten to the record\b/i, /\bsaved\b/i]) {
       expect(text).not.toMatch(forbidden);
     }
@@ -1378,7 +1525,7 @@ describe('§10 · adding a whole import to one record', () => {
      * rule would otherwise expect this form to refuse the same thing.
      */
     await openWithTwoSendable();
-    expect(screen.getByText(IMPORT_COPY.addWholeRunNote)).toBeTruthy();
+    expect(within(goTo(IMPORT_STAGE_COPY.add.title)).getByText(IMPORT_COPY.addWholeRunNote)).toBeTruthy();
   });
 
   it('links each sent candidate to its proposal on that record', async () => {
@@ -1386,8 +1533,9 @@ describe('§10 · adding a whole import to one record', () => {
     await chooseRecordAndAdd();
     await screen.findByText(IMPORT_COPY.addWholeResultTitle);
 
+    fireEvent.click(screen.getByRole('button', { name: /Sent candidates/ }));
     const links = within(
-      document.querySelector('.hi-addwhole-sent') as HTMLElement,
+      document.querySelector('.hi-addwhole-result .hi-addwhole-sent') as HTMLElement,
     ).getAllByRole('link');
     expect(links).toHaveLength(2);
     expect(links[0].getAttribute('href')).toContain('01PROPOSAL0000000000000001');
@@ -1455,7 +1603,8 @@ describe('§11 · creating the destination, from either form', () => {
 
     renderScreen();
     fireEvent.click(await screen.findByRole('button', { name: IMPORT_COPY.actionStart }));
-    await screen.findByRole('heading', { name: 'Sources' });
+    await sessionOpen();
+    goTo(IMPORT_STAGE_COPY.add.title);
 
     const panel = document.querySelector('.hi-addwhole') as HTMLElement;
     expect(panel).not.toBeNull();
@@ -1477,6 +1626,7 @@ describe('§11 · creating the destination, from either form', () => {
 
   it('titles the new record from the import and carries no field over', async () => {
     await openWithTwoSendable();
+    goTo(IMPORT_STAGE_COPY.add.title);
     const panel = document.querySelector('.hi-addwhole') as HTMLElement;
     fireEvent.click(
       within(panel).getByRole('button', { name: 'New record from this import' }),
@@ -1493,5 +1643,275 @@ describe('§11 · creating the destination, from either form', () => {
     // value over would write an unreviewed one — which is the whole thing this
     // surface refuses to do.
     expect(body).toEqual({ title: 'A fictional 2099 CuO bundle' });
+  });
+});
+
+/* --------------------------------------------------------------------------
+ * §12 the stage flow (owner QA H1, 2026-09-22)
+ * -------------------------------------------------------------------------- */
+
+describe('§12 · one stage in focus, reached by real tabs', () => {
+  it('shows six stage tabs and exactly ONE panel, the one the session has reached', async () => {
+    await openSession();
+    const tabs = screen.getAllByRole('tab');
+    expect(tabs.map((t) => t.querySelector('.hi-stage-name')?.textContent)).toEqual([
+      IMPORT_STAGE_COPY.sources.title,
+      IMPORT_STAGE_COPY.read.title,
+      IMPORT_STAGE_COPY.runs.title,
+      IMPORT_STAGE_COPY.conflicts.title,
+      IMPORT_STAGE_COPY.review.title,
+      IMPORT_STAGE_COPY.add.title,
+    ]);
+    const panels = document.querySelectorAll('[role="tabpanel"]');
+    expect(panels).toHaveLength(6);
+    expect([...panels].filter((p) => !(p as HTMLElement).hidden)).toHaveLength(1);
+    // A reconstructed session opens on its candidates, not on an empty first step.
+    expect(screen.getByRole('tab', { selected: true }).textContent).toContain(IMPORT_STAGE_COPY.runs.title);
+  });
+
+  it('MUTATION-GUARDED: arrow keys, Home and End move the stage AND the focus', async () => {
+    /**
+     * MUTATION: dropping `refs.current.get(next)?.focus()` from `move` makes this RED
+     * — the selection moves and a keyboard reader is left on a tab that is no longer
+     * the selected one.
+     */
+    await openSession();
+    const selected = () => screen.getByRole('tab', { selected: true });
+    selected().focus();
+    fireEvent.keyDown(selected(), { key: 'ArrowRight' });
+    expect(selected().textContent).toContain(IMPORT_STAGE_COPY.conflicts.title);
+    expect(document.activeElement).toBe(selected());
+    fireEvent.keyDown(selected(), { key: 'End' });
+    expect(selected().textContent).toContain(IMPORT_STAGE_COPY.add.title);
+    fireEvent.keyDown(selected(), { key: 'ArrowRight' });
+    expect(selected().textContent).toContain(IMPORT_STAGE_COPY.sources.title);
+    fireEvent.keyDown(selected(), { key: 'Home' });
+    expect(selected().textContent).toContain(IMPORT_STAGE_COPY.sources.title);
+    expect(document.activeElement).toBe(selected());
+    // Roving tabindex: only the selected tab is in the tab order.
+    expect(screen.getAllByRole('tab').filter((t) => t.tabIndex === 0)).toHaveLength(1);
+  });
+
+  it('puts the counts first, every one read off the payload', async () => {
+    await openSession();
+    const summary = document.querySelector('dl.hi-summary')!;
+    expect(summary.getAttribute('aria-label')).toBe(IMPORT_STAGE_COPY.summaryTitle);
+    const pairs = Object.fromEntries(
+      [...summary.querySelectorAll('.hi-summary-item')].map((item) => [
+        item.getAttribute('data-id'),
+        item.querySelector('dd')?.textContent,
+      ]),
+    );
+    // Two sources, one read, four candidates, one conflict (the disagreement), one ready.
+    expect(pairs).toMatchObject({ sources: '2', read: '1', candidates: '4', conflicts: '1', ready: '1' });
+    // "Need review" is the Review tab's own number: FIELD candidates only, so the header
+    // and the tab can never disagree (the structural candidate is never sent).
+    const reviewTab = screen.getByRole('tab', { name: new RegExp(IMPORT_STAGE_COPY.review.title) });
+    expect(reviewTab.textContent).toContain(`${pairs['needs-review']} need review`);
+  });
+
+  it('every stage is ONE heading and ONE sentence on the surface, the rest behind a `?`', async () => {
+    await openSession();
+    for (const id of ['sources', 'read', 'runs', 'conflicts', 'review', 'add'] as const) {
+      const panel = goTo(IMPORT_STAGE_COPY[id].title);
+      const head = panel.querySelector('.hi-stage-head')!;
+      expect(head.querySelectorAll('h3')).toHaveLength(1);
+      expect(head.querySelectorAll('p.hi-stage-lead')).toHaveLength(1);
+      // The explanation is kept, one press away.
+      expect(head.querySelector('.helptip-panel')?.textContent).toBe(IMPORT_STAGE_COPY[id].help);
+    }
+  });
+
+  it('MUTATION-GUARDED: an act keeps the reader on the stage they are on', async () => {
+    /**
+     * MUTATION: deleting the `setStage((current) => current ?? activeRef.current)`
+     * pin in `act` makes this RED. Found in a real browser first: adding the first
+     * source re-derived the stage and swept the reader to What ISAAC Read, table and
+     * all, while they were still assembling the bundle.
+     */
+    const empty = session({ sources: [], parsed: [], unmapped_keys: [], reconstruction: null, furthest_step: 'new_import' });
+    const withSource = session({ sources: [FIXTURE_SOURCE], parsed: [], unmapped_keys: [], reconstruction: null, furthest_step: 'sources' });
+    let added = false;
+    stub({ list: listResponse(), detail: empty });
+    const base = globalThis.fetch as unknown as (...a: unknown[]) => Promise<Response>;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(typeof input === 'string' ? input : (input as Request).url ?? input);
+        const method = (init?.method ?? 'GET').toUpperCase();
+        const json = (payload: unknown) =>
+          new Response(JSON.stringify(payload), { status: 200, headers: { 'Content-Type': 'application/json' } });
+        if (/\/api\/imports\/[^/]+\/sources$/.test(url) && method === 'POST') {
+          added = true;
+          return json({ import: withSource });
+        }
+        if (/\/api\/imports\/[^/]+$/.test(url) && method === 'GET') return json({ import: added ? withSource : empty });
+        return base(input, init);
+      }),
+    );
+    renderScreen();
+    fireEvent.click(await screen.findByRole('button', { name: IMPORT_COPY.actionStart }));
+    await sessionOpen();
+    expect(screen.getByRole('tab', { selected: true }).textContent).toContain(IMPORT_STAGE_COPY.sources.title);
+    fireEvent.click(screen.getByRole('button', { name: IMPORT_COPY.actionAddFixture }));
+    await waitFor(() => expect(added).toBe(true));
+    await waitFor(() => expect(document.querySelector('table')).not.toBeNull());
+    expect(screen.getByRole('tab', { selected: true }).textContent).toContain(IMPORT_STAGE_COPY.sources.title);
+  });
+
+  it('names the next stage at the foot of each one, and lands focus on its tab', async () => {
+    await openSession();
+    const panel = goTo(IMPORT_STAGE_COPY.sources.title);
+    const next = within(panel).getByRole('button', { name: `Next: ${IMPORT_STAGE_COPY.read.title}` });
+    fireEvent.click(next);
+    expect(screen.getByRole('tab', { selected: true }).textContent).toContain(IMPORT_STAGE_COPY.read.title);
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('tab', { selected: true })));
+    // The last stage offers no "next".
+    expect(within(goTo(IMPORT_STAGE_COPY.add.title)).queryByRole('button', { name: /^Next:/ })).toBeNull();
+  });
+});
+
+describe('§13 · what the batch send reports, and where review happens', () => {
+  const REPORT = {
+    counts: { candidates: 5, sent: 2, already_sent: 0, not_sent: 1, runs_created: 1 },
+    runs_already_present: [
+      { run_id: 'R1', label: '#3 FAKE', stem: 'FAKE_03', matched_by: 'acquisition_identity' },
+      { run_id: 'R2', label: '#4 FAKE', stem: 'FAKE_04', matched_by: 'label_before_origins_existed' },
+    ],
+  };
+
+  it('links to the record’s proposals and names HOW each existing run was found', async () => {
+    await openWithTwoSendable(addedResponse(REPORT));
+    await chooseRecordAndAdd();
+    await screen.findByText(IMPORT_COPY.addWholeResultTitle);
+    const link = screen.getByRole('link', { name: IMPORT_STAGE_COPY.openProposals });
+    expect(link.getAttribute('href')).toBe(ROUTES.recordView('01RECORD00000000000000001', 'proposals'));
+    expect(screen.getByText(/1 runs created/)).toBeTruthy();
+    // `matched_by` in words, never the token.
+    expect(screen.getByText('found by the file’s own identity')).toBeTruthy();
+    expect(screen.getByText(/found by its label/)).toBeTruthy();
+    expect(document.body.textContent).not.toContain('label_before_origins_existed');
+  });
+
+  it('says acceptance needs an identified reviewer ONLY when the server’s capability says so', async () => {
+    stub({
+      list: listResponse(),
+      detail: session({
+        reconstruction: { ...session().reconstruction!, candidates: TWO_SENDABLE },
+        capabilities: {
+          historical_file_ingestion: { enabled: false, reason: 'FAKE' },
+          proposal_acceptance: { available: false, reason: 'FAKE' },
+        },
+      }),
+      experiments: { experiments: [{ id: '01RECORD00000000000000001', title: 'Cu K-edge campaign, 2019' }] },
+      added: addedResponse(),
+    });
+    renderScreen();
+    fireEvent.click(await screen.findByRole('button', { name: IMPORT_COPY.actionStart }));
+    await sessionOpen();
+    // Not before a send: the note belongs beside the link to review.
+    expect(within(goTo(IMPORT_STAGE_COPY.add.title)).queryByText(IMPORT_STAGE_COPY.acceptanceNote)).toBeNull();
+    await chooseRecordAndAdd();
+    await screen.findByText(IMPORT_COPY.addWholeResultTitle);
+    expect(screen.getByText(IMPORT_STAGE_COPY.acceptanceNote)).toBeTruthy();
+  });
+
+  it('and says nothing about acceptance when the capability is available', async () => {
+    await openWithTwoSendable();
+    await chooseRecordAndAdd();
+    await screen.findByText(IMPORT_COPY.addWholeResultTitle);
+    expect(screen.queryByText(IMPORT_STAGE_COPY.acceptanceNote)).toBeNull();
+  });
+
+  it('offers "one run per measurement" only for an archive import', async () => {
+    await openWithTwoSendable();
+    expect(
+      within(goTo(IMPORT_STAGE_COPY.add.title)).queryByRole('checkbox', { name: IMPORT_STAGE_COPY.createRuns }),
+    ).toBeNull();
+  });
+});
+
+describe('§14 · per-scan variation is not counted or shown as a conflict', () => {
+  const VARIES: ApiImportCandidate = {
+    ...NO_WRITE_PATH,
+    candidate_id: '01CANDV0000000000000000009',
+    target_field_path: null,
+    proposed_value: null,
+    not_proposable_reason: 'FAKE registry reason.',
+    agreement: 'varies',
+    review_status: 'unmapped',
+    variation_basis: 'per_scan',
+    variation_scans: 2,
+    variation: [
+      { scan: '1', item: null, source: null, value: 'ZZ_unit · scan 1', source_ids: ['S1'], locators: ['l1'] },
+      { scan: '2', item: null, source: null, value: 'ZZ_unit · scan 2', source_ids: ['S2'], locators: ['l2'] },
+    ],
+  };
+
+  it('the Conflicts stage counts only real conflicts, and says where the variation went', async () => {
+    stub({
+      list: listResponse(),
+      detail: session({
+        reconstruction: {
+          ...session().reconstruction!,
+          candidates: [SENDABLE, DISAGREEING, NO_WRITE_PATH, STRUCTURAL, VARIES],
+        },
+      }),
+    });
+    renderScreen();
+    fireEvent.click(await screen.findByRole('button', { name: IMPORT_COPY.actionStart }));
+    await sessionOpen();
+    // ONE conflict — the disagreement — in the tab, the summary and the stage.
+    expect(screen.getByRole('tab', { name: new RegExp(IMPORT_STAGE_COPY.conflicts.title) }).textContent).toContain('1 open');
+    const conflictsCount = document.querySelector('.hi-summary-item[data-id="conflicts"] dd');
+    expect(conflictsCount?.textContent).toBe('1');
+    const panel = goTo(IMPORT_STAGE_COPY.conflicts.title);
+    expect(panel.querySelectorAll('li.hi-conflict')).toHaveLength(1);
+    const note = panel.querySelector('.hi-varies-note')!;
+    expect(note.textContent).toContain(IMPORT_STAGE_COPY.stateLabels.variesByScan);
+    expect(note.textContent).toContain('1 value');
+    expect(note.textContent).toContain('not conflicts');
+  });
+});
+
+describe('§15 · an act is announced and lands focus on what it produced', () => {
+  it('Add This Import: the report heading takes focus and the stage says it was sent', async () => {
+    await openWithTwoSendable();
+    await chooseRecordAndAdd();
+    const heading = await screen.findByRole('heading', { name: IMPORT_COPY.addWholeResultTitle });
+    await waitFor(() => expect(document.activeElement).toBe(heading));
+    const status = [...document.querySelectorAll('.hi-stages-card > [role="status"]')];
+    expect(status).toHaveLength(1);
+    expect(status[0].textContent).toBe('Sent to the record. The report is below.');
+  });
+
+  it('Reconstruct: moves to Runs & Candidates, focuses its heading and says so', async () => {
+    stub({ list: listResponse(), detail: session({ reconstruction: null, furthest_step: 'parse' }) });
+    const base = globalThis.fetch as unknown as (...a: unknown[]) => Promise<Response>;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(typeof input === 'string' ? input : (input as Request).url ?? input);
+        if (url.endsWith('/reconstruct')) {
+          return new Response(JSON.stringify({ import: session() }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          });
+        }
+        return base(input, init);
+      }),
+    );
+    renderScreen();
+    fireEvent.click(await screen.findByRole('button', { name: IMPORT_COPY.actionStart }));
+    await sessionOpen();
+    goTo(IMPORT_STAGE_COPY.runs.title);
+    fireEvent.click(screen.getByRole('button', { name: IMPORT_COPY.actionReconstruct }));
+    await waitFor(() =>
+      expect(document.querySelector('.hi-stages-card > [role="status"]')?.textContent).toBe(
+        'Candidates reconstructed. Showing Runs & Candidates.',
+      ),
+    );
+    const heading = screen.getByRole('heading', { name: IMPORT_STAGE_COPY.runs.title, level: 3 });
+    await waitFor(() => expect(document.activeElement).toBe(heading));
   });
 });

@@ -359,6 +359,28 @@ describe('one run choice per view (review #277, I-3)', () => {
     expect(panel.querySelector('.capture-map-run')).toBeNull();
   });
 
+  it('MUTATION-GUARDED (final review, P3): Voice with the recorder COLLAPSED shows the map’s own picker — never a dead end', async () => {
+    renderAt('?view=capture&method=voice');
+    const panel = await loadedCapture();
+    // The recorder's run select is inside the collapsed "Record Locally Instead", so
+    // the Record Map must offer its own choice rather than "Choose a run" with none.
+    const picker = await waitFor(() => {
+      const el = panel.querySelector('.capture-map-run');
+      if (el === null) throw new Error('no map picker');
+      return el as HTMLElement;
+    });
+    expect(picker.closest('.rsm-head')).not.toBeNull();
+    expect(within(picker).getByRole('combobox')).toBeVisible();
+    // Opening the recorder hands the choice to ITS select — still exactly one.
+    fireEvent.click(within(panel).getByRole('button', { name: /Record Locally Instead/ }));
+    await within(panel).findByLabelText(CAPTURE_COPY.runLabel);
+    await waitFor(() => expect(panel.querySelector('.capture-map-run')).toBeNull());
+    expect(runSelects(panel)).toHaveLength(1);
+    // And closing it again brings the map's picker back.
+    fireEvent.click(within(panel).getByRole('button', { name: /Record Locally Instead/ }));
+    await waitFor(() => expect(panel.querySelector('.capture-map-run')).not.toBeNull());
+  });
+
   it('Files, where no transcript form shows, puts the picker INSIDE the Record Map card', async () => {
     renderAt('?view=capture&method=files');
     const panel = await loadedCapture();

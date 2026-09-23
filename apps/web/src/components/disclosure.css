@@ -48,7 +48,13 @@
   color: var(--text-secondary);
   transition: transform 0.16s ease;
 }
-.disclosure.is-open .disclosure-trigger .disclosure-chevron {
+/* CHILD COMBINATORS, so a chevron shows ITS OWN disclosure's state. The descendant
+   form (`.disclosure.is-open .disclosure-trigger .disclosure-chevron`) also turned
+   every CLOSED disclosure nested inside an open one — measured on Extended Context's
+   concept groups, where each closed "Everything This Entry Records" row pointed down
+   inside an open group (final review of #279). */
+.disclosure.is-open > .disclosure-trigger > .disclosure-chevron,
+.disclosure.is-open > .disclosure-heading > .disclosure-trigger > .disclosure-chevron {
   transform: rotate(90deg);
 }
 .disclosure-summary {

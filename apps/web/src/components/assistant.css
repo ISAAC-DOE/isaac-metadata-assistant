@@ -2060,6 +2060,10 @@ button.assistant-source-chip-nav:focus-visible {
 .upcoming-row {
   display: flex;
   align-items: center;
+  /* WRAPS rather than overflowing (final review of #279, P4): at 320px the field
+     name on the right ran 30px past the card (`.upcoming-path` right=350). The name
+     drops under the question when the row cannot hold both. */
+  flex-wrap: wrap;
   gap: 12px;
   padding: 12px 16px;
   border: 1px solid var(--border-faint);
@@ -2077,10 +2081,22 @@ button.assistant-source-chip-nav:focus-visible {
   font-size: 11px;
   flex: none;
 }
-.upcoming-label { font-size: var(--font-size-body); color: var(--text-secondary); }
+.upcoming-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: var(--font-size-body);
+  color: var(--text-secondary);
+}
 /* A HUMAN name (`blockerDisplayName`), so it is set in the UI face at a readable
    tone — it used to be mono in `--text-quaternary`, which read as a raw path. */
-.upcoming-path { margin-left: auto; font-size: var(--font-size-meta); color: var(--text-secondary); }
+.upcoming-path {
+  margin-left: auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: var(--font-size-meta);
+  color: var(--text-secondary);
+}
 
 /* The withheld-questions disclosure. This screen holds a PAGE of the record's open
    questions (see `PENDING_PAGE` in GuidedCompletion), so it states how many it is not

@@ -432,6 +432,11 @@ def test_no_progress_indicator_can_ever_fill_and_the_digest_says_why(client):
         hist.EXPORT_BLOCKED_NO_DESCRIPTORS,
         mp.ASSETS_BLOCKED_REASON,
     ]
+    # AND IT IS TRUE OF A CORPUS THAT STATES A TEMPERATURE IN WORDS. Inverted
+    # 2026-09-22: the first blocker used to claim "this corpus states no temperature
+    # anywhere" for every archive. It still blocks — a words-only statement cannot
+    # satisfy `context.temperature_K` — and it no longer denies the statement.
+    assert "states no temperature anywhere" not in served[0]
 
 
 # --- PROOF 1: `.dat` files do not become Runs ---------------------------------
@@ -899,16 +904,22 @@ def test_alignment_is_never_a_run_and_its_values_are_reported_not_dropped(client
     assert ALIGNMENT_STEM not in {row["stem"] for row in body["created_runs"]}
 
     # ITS VALUES ARE REPORTED WITH A REASON, never silently dropped.
-    orphaned = [row for row in body["not_sent"] if row["error"] == "no_run_for_this_candidate"]
-    assert orphaned, body["not_sent"]
-    assert any(
-        row["reason"] == hist_reason
-        for row in orphaned
-        for hist_reason in (
-            _routes_reason("_IMPORT_CANDIDATE_UNIT_IS_NOT_A_RUN"),
-            _routes_reason("_IMPORT_CANDIDATE_IS_BEAMTIME_SCOPE"),
-        )
-    ), orphaned
+    #
+    # 2026-09-23: and the reason is known BEFORE sending. A run-owned value of a
+    # measurement that is not a Run used to look sendable — the Add stage said "11 can
+    # be sent" and the batch sent 9 — so it is now marked not proposable when the import
+    # is read, with the batch's own sentence, and reported as `candidate_not_proposable`.
+    not_a_run = _routes_reason("_IMPORT_CANDIDATE_UNIT_IS_NOT_A_RUN")
+    alignment_ids = set(units[ALIGNMENT_STEM]["candidate_ids"])
+    predicted = [
+        c for c in view["reconstruction"]["candidates"]
+        if c["candidate_id"] in alignment_ids and c["not_proposable_reason"] == not_a_run
+    ]
+    assert predicted, "the alignment's run-owned values are not marked before sending"
+    assert all(c["review_status"] != "ready" for c in predicted)
+    orphaned = [row for row in body["not_sent"] if row["reason"] == not_a_run]
+    assert {row["candidate_id"] for row in orphaned} >= {c["candidate_id"] for c in predicted}
+    assert {row["error"] for row in orphaned} == {"candidate_not_proposable"}
 
 
 def _routes_reason(name: str) -> str:
@@ -1259,7 +1270,12 @@ def test_the_walk_fabricates_no_value_and_every_candidate_names_its_evidence(cli
 
     # BOTH SETS ARE NON-EMPTY AND ARE COUNTED. A rate of 0 over an empty set is
     # not a measurement, and this is the assertion that says so.
-    assert len(candidates) >= 10, len(candidates)
+    #
+    # 10 -> 9 on 2026-09-23, and the drop is the fix: the SPEC `#D` line is the
+    # instrument's local clock with no zone, and it is no longer proposed into
+    # `timestamps.acquired_start_utc` (`hist.CANDIDATE_NOT_PROPOSABLE_LOCAL_TIME`). It
+    # moved to the valueless set, where it belongs.
+    assert len(candidates) >= 9, len(candidates)
     assert valueless >= 10, valueless
 
     # --- EVERY OTHER `Observed` FIELD THE SERVED PAYLOAD CAN SUPPLY -----------

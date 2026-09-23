@@ -160,8 +160,9 @@ export const PROSE_DISCLOSURES: Readonly<Record<string, number>> = Object.freeze
 export const FIELD_GROUP_SURFACES: ReadonlySet<string> = new Set(['record-detail']);
 
 /**
- * How many `details.bl15-digest-row` / `.bl15-disclosure` / `.bl15-unit-disclosure`
- * each surface mounts — the BL15-2 large-corpus review (`BL15R-012`).
+ * How many BL15-2 large-corpus review disclosures each surface mounts (`BL15R-012`)
+ * — since 2026-09-22 the shared `Disclosure` triggers inside `.bl15` / `.bl15-runs`
+ * and each measurement's `button.bl15-unit-toggle` (they were `details.bl15-*`).
  *
  * ── DECLARED AT ZERO, AND THE REASON CHANGED 2026-09-16 ───────────────────
  *
@@ -271,7 +272,8 @@ export const ASSET_DISCLOSURE_SURFACES: ReadonlySet<string> = new Set(['record-d
  * helper's own history shows reads as an accessibility win.
  *
  * WHAT IS *NOT* DECLARED, AND WHY THE NUMBER WOULD BE WRONG. The count of per-entry
- * `details.extctx-details` inside it is deliberately undeclared: it is one per
+ * raw-entry disclosures (`.extctx-details`, the shared `Disclosure` since the final
+ * review of #279 — a native `<details>` before) inside it is deliberately undeclared: it is one per
  * companion entry, and the seeded records this sweep reaches hold none, because
  * extended context arrives through historical import and through nothing else in
  * this build. Declaring `0` would be true today and would become a trap the first
@@ -338,8 +340,15 @@ export async function openUnreachableDisclosures(page: Page, surfaceId: string):
    * prose disclosures above; see `BL15_REVIEW_DISCLOSURES` for why the declared
    * count is 0 today and why it is written down anyway.
    */
+  /*
+   * RE-POINTED 2026-09-22 (owner QA H1): the review's `<details>` became the shared
+   * `Disclosure` (a button with `aria-expanded`) and each measurement's toggle a
+   * real button in its legacy cell. Counting the retired `details.bl15-*` classes
+   * would have kept this at 0 FOREVER, whatever a surface mounted — a guard that
+   * cannot fail. These are the review's own disclosures as they now render.
+   */
   const bl15 = page.locator(
-    'details.bl15-digest-row, details.bl15-disclosure, details.bl15-unit-disclosure'
+    '.bl15 .disclosure-trigger, .bl15-runs .disclosure-trigger, button.bl15-unit-toggle'
   );
   const expectedBl15 = BL15_REVIEW_DISCLOSURES[surfaceId] ?? 0;
   const bl15Count = await bl15.count();
@@ -353,8 +362,8 @@ export async function openUnreachableDisclosures(page: Page, surfaceId: string):
   ).toBe(expectedBl15);
   for (let i = 0; i < bl15Count; i++) {
     const one = bl15.nth(i);
-    await one.locator('> summary').click();
-    await expect(one).toHaveAttribute('open', '');
+    if ((await one.getAttribute('aria-expanded')) === 'false') await one.click();
+    await expect(one).toHaveAttribute('aria-expanded', 'true');
   }
 
   /*
@@ -474,19 +483,32 @@ export async function openExtendedContext(page: Page, surfaceId: string): Promis
   await toggle.first().click();
   await expect(page.locator(COLLAPSED)).toHaveCount(0);
   /* AND THE BODY IS REALLY OPEN — `aria-expanded` moving is the button's claim about
-     itself; this is the thing axe will scan, and the thing the inner `<summary>`
-     elements need in order to be clickable at all. */
+     itself; this is the thing axe will scan, and the thing the inner per-entry
+     disclosures need in order to be clickable at all. */
   await expect(page.locator('.extctx-collapsible .fg-body').first()).toBeVisible();
 
   /* THE PER-ENTRY RAW DISCLOSURES. Count NOT declared — see
      `EXTENDED_CONTEXT_DISCLOSURE_SURFACES` for why a number would be either false
-     now or a trap later. Whatever is there is opened. */
-  const raw = page.locator('details.extctx-details');
+     now or a trap later. Whatever is there is opened. The shared `Disclosure` since
+     the final review of #279 (a native `<details>` before): its trigger is a button
+     carrying `aria-expanded`, and its body is `hidden` until opened. */
+  /* THE CONCEPT GROUPS FIRST (final review of #279): a record holding more than
+     `GROUP_COLLAPSE_THRESHOLD` entries renders its entries inside closed concept
+     groups, and a raw-entry disclosure inside a closed group is not clickable. */
+  const groups = page.locator(
+    '.extctx-group-disclosure > .disclosure-heading > .disclosure-trigger[aria-expanded="false"]'
+  );
+  const groupCount = await groups.count();
+  for (let i = 0; i < groupCount; i++) {
+    await groups.first().click();
+  }
+  await expect(groups).toHaveCount(0);
+  const raw = page.locator('.extctx-details');
   const rawCount = await raw.count();
   for (let i = 0; i < rawCount; i++) {
-    const one = raw.nth(i);
-    await one.locator('> summary').click();
-    await expect(one).toHaveAttribute('open', '');
+    const trigger = raw.nth(i).locator('> .disclosure-trigger, > .disclosure-heading > .disclosure-trigger');
+    await trigger.click();
+    await expect(trigger).toHaveAttribute('aria-expanded', 'true');
   }
 }
 

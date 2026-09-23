@@ -2501,6 +2501,43 @@ describe('PR #277 review (pre-existing): Finalize twice used to mint duplicates'
     expect(screen.queryByText(CAPTURE_COPY.finalizeAlreadyRead)).not.toBeInTheDocument();
   });
 
+  it('MUTATION-GUARDED: focus lands on the result heading even when every frame runs BEFORE the commit that renders it', async () => {
+    /*
+     * THE FULL-PARALLEL-RUN FAILURE THIS PINS (2026-09-23, `wt-imp`). Starting the
+     * hand-off after the busy state cleared was still a RACE: `focusWhenPresent`
+     * polls once per frame and gives up after 60, so a worker that ran frames but
+     * had not yet committed the render showing the card lost the hand-off for
+     * good — focus stayed on <body> at ANY wait. Here every frame requested is
+     * run AT ONCE (the stub calls it synchronously), so a frame-polling hand-off
+     * exhausts its whole budget before React can commit anything — the worst case
+     * of "frames ran, the commit had not happened". Focus is now moved BY the
+     * commit that renders the heading, so no frame count is involved at all.
+     * (A microtask-per-frame stub did NOT reproduce it: measured, React had
+     * already committed by the first microtask, 1 frame used.)
+     */
+    const originalRaf = window.requestAnimationFrame;
+    let frames = 0;
+    window.requestAnimationFrame = ((cb: FrameRequestCallback) => {
+      frames += 1;
+      // Bounded, so a runaway poller cannot recurse forever.
+      if (frames <= 1000) cb(performance.now());
+      return frames;
+    }) as typeof window.requestAnimationFrame;
+    try {
+      stubFetchRoutes({ ...BASE_ROUTES, [TRANSCRIPT]: { body: reading() } } as never);
+      await renderPanel();
+      await typeAndFinalize();
+      const heading = await screen.findByRole('heading', { name: CAPTURE_COPY.summaryHeading });
+      await waitFor(() => expect(heading).toHaveFocus());
+      // Measured on the frame-polling version: 60 frames spent (its whole budget)
+      // before the heading existed, then focus stayed on <body>. The commit-driven
+      // hand-off requests none.
+      expect(frames).toBe(0);
+    } finally {
+      window.requestAnimationFrame = originalRaf;
+    }
+  });
+
   it('MUTATION-GUARDED: focus still lands on the result heading when the post-finalize runs read is SLOW (outlasts the 60-frame hand-off)', async () => {
     /*
      * THE CI FAILURE THIS PINS (PR #277, `d385f2b6`). The result card renders only
@@ -2543,9 +2580,11 @@ describe('PR #277 review (pre-existing): Finalize twice used to mint duplicates'
       const heading = await screen.findByRole('heading', { name: CAPTURE_COPY.summaryHeading });
       await waitFor(() => expect(heading).toHaveFocus());
       // Measured on the OLD ordering: the hand-off had already scheduled its 60
-      // frames during the hold (frames 2 → 60) and given up; this assertion then
-      // failed with focus on <body>.
-      expect(frames).toBeGreaterThan(0);
+      // frames during the hold (frames 2 → 60) and given up; the focus assertion
+      // above then failed with focus on <body>. Since 2026-09-23 the hand-off is
+      // moved by the commit that renders the heading and requests NO frames —
+      // asserted, so a return to frame polling is visible here too.
+      expect(frames).toBe(0);
     } finally {
       window.requestAnimationFrame = originalRaf;
     }

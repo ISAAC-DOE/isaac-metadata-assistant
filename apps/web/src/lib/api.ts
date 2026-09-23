@@ -50,6 +50,7 @@ import type {
   ApiGraphStatus,
   ApiHealth,
   ApiImportAddedToExperiment,
+  ApiImportRuleRecorded,
   ApiImportCandidateProposed,
   ApiImportListResponse,
   ApiImportSessionResponse,
@@ -3047,11 +3048,22 @@ export const api = {
    */
   async addImportToExperiment(
     importId: string,
-    opts: { experimentId: string; experimentVersion: string; runId?: string },
+    opts: {
+      experimentId: string;
+      experimentVersion: string;
+      runId?: string;
+      /**
+       * Make one run per measurement (an archive import). Sent only when `true`:
+       * the server validates the type and never coerces, and omitting it keeps the
+       * pre-2026-09-22 behaviour byte-for-byte.
+       */
+      createRuns?: boolean;
+    },
   ): Promise<ApiImportAddedToExperiment> {
     const path = `/imports/${enc(importId)}/add-to-experiment`;
     const body: Record<string, unknown> = { experiment_id: opts.experimentId };
     if (opts.runId !== undefined) body.run_id = opts.runId;
+    if (opts.createRuns === true) body.create_runs = true;
     const res = await request(path, {
       method: 'POST',
       body: JSON.stringify(body),
@@ -3060,6 +3072,46 @@ export const api = {
         : {}),
     });
     if (res.ok) return readJson<ApiImportAddedToExperiment>(res, path);
+    throw await mutationError(res, path);
+  },
+
+  /**
+   * Record ONE reviewed reading rule on an import (`POST /imports/{id}/rules`) and
+   * get the import back, re-read under it.
+   *
+   * A rule records how to READ sources — which convention applies to which runs,
+   * which of two disagreeing readings a scientist chose, which channel belongs to
+   * which element. It writes no value. `experiment` and `profile` scope store the
+   * rule on a RECORD, so they need that record's current version as `If-Match`;
+   * `import` scope needs none.
+   */
+  async recordImportRule(
+    importId: string,
+    rule: {
+      kind: 'profile_binding' | 'conflict_resolution' | 'signal_assignment';
+      scope: 'import' | 'experiment' | 'profile';
+      experimentId?: string;
+      experimentVersion?: string;
+      selector?: Record<string, unknown>;
+      body: Record<string, unknown>;
+      supersedes?: string;
+      derivedFrom?: string;
+    },
+  ): Promise<ApiImportRuleRecorded> {
+    const path = `/imports/${enc(importId)}/rules`;
+    const payload: Record<string, unknown> = { kind: rule.kind, scope: rule.scope, body: rule.body };
+    if (rule.experimentId) payload.experiment_id = rule.experimentId;
+    if (rule.selector && Object.keys(rule.selector).length > 0) payload.selector = rule.selector;
+    if (rule.supersedes) payload.supersedes = rule.supersedes;
+    if (rule.derivedFrom) payload.derived_from = rule.derivedFrom;
+    const res = await request(path, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+      ...(rule.experimentVersion
+        ? { headers: { 'If-Match': `"${rule.experimentVersion}"` } }
+        : {}),
+    });
+    if (res.ok) return readJson<ApiImportRuleRecorded>(res, path);
     throw await mutationError(res, path);
   },
 } as const;

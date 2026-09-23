@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import './activityHistory.css';
+import { Disclosure } from './Disclosure';
 import { api } from '../lib/api';
 import { LABELS, humanizeActivityToken as humanizeToken } from '../lib/labels';
 import type { ApiActivityEvent, ApiActivityResponse } from '../lib/types';
@@ -22,17 +23,17 @@ import type { ApiActivityEvent, ApiActivityResponse } from '../lib/types';
  * method that could: `api.listActivity` has no sibling mutator because
  * `activity.py` exposes none. An event is recorded by the act it describes.
  *
- * `ACT-003b` ADDS NATIVE `<details>` DISCLOSURES AND NO WRITE, and the test that
- * says so was STRENGTHENED rather than left alone. MEASURED, not assumed:
- * `<summary>` is NOT reported as a `button` by this environment's role mapping —
- * the pre-existing `queryAllByRole('button') === 0` passes on a page holding two of
- * them — so that number could not have seen a disclosure turn into a form control.
- * The test now asserts over TAGS, which no role mapping can soften: on a row with a
- * structured change there are ZERO `<button>` elements, ZERO
- * `input`/`textarea`/`select`/`form` elements, and exactly two `<details>`, each
- * with its own `<summary>`. `api` still exposes exactly one activity method.
- * Structure, not a promise — and the description above is the assertion list the
- * test body actually makes, not a summary of what it was meant to check.
+ * `ACT-003b` ADDED TWO DISCLOSURES AND NO WRITE, and the test that says so was
+ * STRENGTHENED rather than left alone. They were native `<details>`; since the final
+ * review of #279 they are the shared `Disclosure` — the native 11px triangles were the
+ * last ones on the record screen — so each is now a real `<button>` whose only act is
+ * to show or hide a body that is already in the DOM. The test therefore asserts over
+ * STRUCTURE, which no role mapping can soften: on a row with a structured change the
+ * ONLY `<button>` elements are the two disclosure toggles (each `type="button"`,
+ * carrying `aria-expanded` and an `aria-controls` that names its own hidden body),
+ * there are ZERO `input`/`textarea`/`select`/`form` elements, and `api` still
+ * exposes no activity mutator. Structure, not a promise — and the description above
+ * is the assertion list the test body actually makes.
  *
  * ── THE FOUR COUNTS ARE NEVER COLLAPSED ─────────────────────────────────────
  *
@@ -689,21 +690,23 @@ function attributionNote(events: readonly ApiActivityEvent[]): { summary: string
   return null;
 }
 
-/** The stored documents, behind the repo's native-`<details>` idiom (`HelpPanel`,
- *  `AssistantPanel`, `SchemaBrowser`, and this panel's own actor note): keyboard
- *  operable with no ARIA, announced as a disclosure, and reachable by
- *  find-in-page and `querySelectorAll` while closed. */
+/** The stored documents, behind the shared `Disclosure` (final review of #279 — a
+ *  native `<details>` before, the last 11px triangle on the record screen). Closed
+ *  by default; the body stays in the DOM while closed, so the documents are still
+ *  reachable by `querySelectorAll`, and a keyboard reader opens it with the button. */
 function StoredValues({ before, after }: { before: Side; after: Side }) {
   return (
-    <details className="activity-stored">
-      <summary className="activity-stored-summary">{LABELS.activityShowStored}</summary>
+    <Disclosure
+      summary={<span className="activity-stored-summary">{LABELS.activityShowStored}</span>}
+      className="activity-stored"
+    >
       <div className="activity-stored-body">
         <p className="activity-stored-label">{LABELS.activityBefore}</p>
         <pre className="activity-stored-pre">{storedText(before)}</pre>
         <p className="activity-stored-label">{LABELS.activityAfter}</p>
         <pre className="activity-stored-pre">{storedText(after)}</pre>
       </div>
-    </details>
+    </Disclosure>
   );
 }
 
@@ -1013,10 +1016,12 @@ export function ActivityHistoryPanel({ experimentId }: { experimentId: string })
           sentence appears — or whether any does — is now derived from the loaded
           events by `attributionNote`, from the same array `showActor` reads. */}
       {attribution !== null && (
-        <details className="activity-actor-details">
-          <summary className="activity-actor-summary">{attribution.summary}</summary>
+        <Disclosure
+          summary={<span className="activity-actor-summary">{attribution.summary}</span>}
+          className="activity-actor-details"
+        >
           <p className="activity-actor-note">{attribution.body}</p>
-        </details>
+        </Disclosure>
       )}
       {/* The only live region on this panel. Without it a screen-reader user hears
           nothing when a read finishes or an older page arrives, because the status

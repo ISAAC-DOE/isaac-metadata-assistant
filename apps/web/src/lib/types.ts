@@ -4244,7 +4244,7 @@ export interface ApiChangeFeedPage {
  *   application. These ARE read, because they are files this repository ships for
  *   exactly this purpose, and each says so in its own first lines.
  */
-export type ApiImportSourceKind = 'reference' | 'synthetic_fixture';
+export type ApiImportSourceKind = 'reference' | 'synthetic_fixture' | 'archive';
 
 /**
  * What happened when the parse ran, PER ENTRY — never a banner, because the
@@ -4339,7 +4339,66 @@ export interface ApiImportCandidate {
   not_proposable_reason: string | null;
   /** DERIVED by the server and served anyway, so no client recomputes the rule. */
   proposable: boolean;
+  /**
+   * 2026-09-22 — how many DISTINCT files state this, and whether they agree. Served
+   * by the server (`SemanticCandidate.agreement`) so no client decides that
+   * "several statements" means "the sources agree": `sources_agree` is claimed
+   * only when two or more distinct files state one reading.
+   */
+  agreement?: ApiImportAgreement;
+  /** The review state a surface renders — derived server-side, never here. */
+  review_status?: ApiImportReviewStatus;
+  distinct_sources?: number | null;
+  /** The confirmed rule that resolved this disagreement, when one did. */
+  resolved_by_rule?: string | null;
+  supporting_statement_total?: number | null;
+  /**
+   * 2026-09-22 — readings that LEGITIMATELY DIFFER, one row per scan (or item of a
+   * scan, or token of a file), for a concept whose registry cardinality says so
+   * (`bl15.mapping.RULE_CARDINALITY`). Never present beside a disagreement: a
+   * variation and a conflict are different facts. `agreement` is `varies` exactly
+   * when this is non-empty.
+   */
+  variation?: ApiImportVariationRow[];
+  variation_basis?: 'per_scan' | 'per_scan_item' | 'per_source' | null;
+  /** The true row count when `variation` is a window. */
+  variation_total?: number | null;
+  /** How many distinct scans (or files, for `per_source`) the variation spans. */
+  variation_scans?: number | null;
 }
+
+/** `hist.send_plan` — the batch's partition, published before anything is sent. */
+export interface ApiImportSendPlan {
+  sendable: string[];
+  /** candidate id -> the batch's own error code for it. */
+  not_sent: Record<string, string>;
+  /** Sendable ids the batch reports as `no_run_for_this_candidate` when it creates runs. */
+  no_run_when_creating_runs: string[];
+}
+
+/** One scan's (or item's, or file token's) own reading of a varying concept. */
+export interface ApiImportVariationRow {
+  scan: string | null;
+  item: string | null;
+  source: string | null;
+  value: string;
+  source_ids: string[];
+  locators: string[];
+}
+
+export type ApiImportAgreement =
+  | 'sources_agree'
+  | 'single_source'
+  | 'sources_conflict'
+  /** 2026-09-22 — the value differs from scan to scan, as the concept expects. */
+  | 'varies'
+  | 'no_source';
+export type ApiImportReviewStatus =
+  | 'ready'
+  | 'needs_review'
+  | 'sources_conflict'
+  | 'unmapped'
+  | 'resolved';
 
 export interface ApiImportReconstruction {
   provider_id: string;
@@ -4437,6 +4496,240 @@ export interface ApiImportSession {
   available_fixtures: string[];
   /** Archive names the server will walk, from its own allowlist. */
   available_archives: string[];
+  /**
+   * 2026-09-22 — the archive reading's per-measurement page. The server sends
+   * `null` (not an absent key) for a session with no archive — measured on a
+   * two-fixture session, where reading it as "absent" crashed the stage tabs.
+   */
+  archive?: ApiImportArchiveReading | null;
+  /** The archive's derived digest counts. `null` without an archive, as above. */
+  corpus_digest?: ApiImportCorpusDigest | null;
+  /** Registered naming conventions (profiles). */
+  profiles?: ApiImportProfile[];
+  /** The reviewed reading rules in force, and the suggestions from other records. */
+  rules?: ApiImportRulesView;
+  /**
+   * 2026-09-23 — what the batch will do with each candidate, computed by the SAME
+   * partition `POST …/add-to-experiment` uses (`hist.batch_partition`), so the Add stage
+   * predicts exactly what it then reports.
+   */
+  send_plan?: ApiImportSendPlan;
+  /** The two capability blocks, computed by the same functions `/api/health` uses. */
+  capabilities?: {
+    historical_file_ingestion: ApiIngestionCapability;
+    proposal_acceptance: ApiAcceptanceCapability;
+  };
+}
+
+/** One registered naming convention. A convention is never a person. */
+export interface ApiImportProfile {
+  profile_id: string;
+  profile_version: string;
+  display_name: string;
+  aliases: string[];
+  measured_on: string;
+  is_default: boolean;
+  unexercised_recognizers?: string[];
+}
+
+/** Which convention read one source, at what scope and why. */
+export interface ApiImportApplicability {
+  profile_ids: string[];
+  profile_versions: string[];
+  scope: string;
+  basis: string;
+  binding_ids: string[];
+  rule_refs: string[];
+  selector_description?: string;
+  ambiguous?: boolean;
+  ambiguity: string | null;
+  stale_bindings: string[];
+}
+
+export interface ApiImportChannelSummary {
+  channel: string;
+  scans_present: number;
+  scans_with_edge: number;
+  share: number | null;
+  edge_fraction: number | null;
+  liveness: 'live' | 'empty' | 'ambiguous' | 'absent';
+  reason: string;
+}
+
+export interface ApiImportChannelAssignment {
+  channel: string;
+  element: string;
+  edge: string | null;
+  basis: string;
+}
+
+/** The per-Run HERFD primary-signal selection. A suggestion unless confirmed. */
+export interface ApiImportSignalSelection {
+  selector_id: string;
+  system_id: string;
+  status: 'proposed' | 'unresolved' | 'confirmed' | 'needs_review';
+  reason_code: string;
+  reason: string;
+  primary_channel: string | null;
+  assignments: ApiImportChannelAssignment[];
+  channels: ApiImportChannelSummary[];
+  elements: { element: string; edge: string | null; source_path: string; locator: string; role: string; rule: string }[];
+  thresholds: Record<string, unknown>;
+  authority: string;
+  rule_ref: string | null;
+  evidence_not_used: string[];
+  writes_a_record_field: false;
+}
+
+export interface ApiImportDataQualityNote {
+  text: string;
+  source_path: string;
+  locator: string;
+  file_number: number | null;
+  label: string;
+  writes_qc_status: false;
+}
+
+/** A person a notes file names — PROVENANCE, never an actor, never a parsing rule. */
+export interface ApiImportContributor {
+  name: string;
+  label: string | null;
+  section: string | null;
+  source_path: string;
+  locator: string;
+  role: 'provenance';
+  is_actor: false;
+}
+
+/** One measurement of an archive reading. */
+export interface ApiImportUnitRow {
+  stem: string;
+  acquisition_path: string;
+  source_type: string;
+  run_candidate: boolean;
+  label: string;
+  legacy_number: number | null;
+  group_token: string | null;
+  scan_count: number;
+  source_count: number;
+  conflict_count: number;
+  candidate_ids: string[];
+  acquisition_identity?: string;
+  legacy_number_shared?: boolean;
+  applicability?: ApiImportApplicability | Record<string, never>;
+  signal_selection?: ApiImportSignalSelection | null;
+  data_quality_notes?: ApiImportDataQualityNote[];
+  contributors?: ApiImportContributor[];
+}
+
+export interface ApiImportArchiveReading {
+  archive_name: string;
+  root_label: string;
+  units_page: { rows: ApiImportUnitRow[]; total: number; limit: number; truncated: boolean };
+  shared_candidate_ids: string[];
+  candidate_total: number;
+  candidates_truncated: boolean;
+  run_candidate_unit_count: number;
+  statements_read: number;
+}
+
+export interface ApiImportCorpusDigest {
+  archive_name: string;
+  root_label: string;
+  total_sources: number;
+  measurement_units: number;
+  run_candidate_units: number;
+  sample_groups: number;
+  conflicts: number;
+  unattached_sources: number;
+  statements_read: number;
+  candidates: number;
+  refused_count: number;
+  truncated_reason: string | null;
+  [key: string]: unknown;
+}
+
+/** One reviewed reading rule, as the server states it. */
+export interface ApiConventionRule {
+  rule_id: string;
+  kind: 'profile_binding' | 'conflict_resolution' | 'signal_assignment';
+  scope: 'import' | 'experiment' | 'profile';
+  version: number;
+  body: Record<string, unknown>;
+  selector: Record<string, unknown>;
+  experiment_id: string | null;
+  import_id: string | null;
+  profile_id: string | null;
+  profile_version: string | null;
+  supersedes: string | null;
+  derived_from: string | null;
+  confirmed_utc: string;
+  /** `unattributed` in every deployment of this build. */
+  confirmed_by: string;
+  confirmed_trust_basis: string;
+  version_is_current: boolean;
+  is_official_field_value: false;
+  is_evidence: false;
+  active?: boolean;
+}
+
+export interface ApiReusableRule {
+  rule: ApiConventionRule;
+  from_experiment_id: string;
+  from_experiment_title: string;
+  applied_here: false;
+  how_to_reuse: string;
+  matches?: { units: number; stems: string[] };
+  differences?: string[];
+  difference_count?: number;
+  version_is_current?: boolean;
+  unreadable?: boolean;
+}
+
+export interface ApiImportRulesView {
+  target_experiment_id: string | null;
+  import: ApiConventionRule[];
+  import_durability: string;
+  import_unreadable: number;
+  experiment: ApiConventionRule[];
+  experiment_rules_as_of_version: string | null;
+  experiment_durability: string;
+  reusable_from_other_experiments: ApiReusableRule[];
+  reusable_scan?: {
+    experiments_listed: number;
+    experiments_scanned: number;
+    cap: number;
+    truncated: boolean;
+    listing_complete: boolean;
+    order: string;
+    not_offered_other_convention?: number;
+  };
+  reuse_policy: string;
+}
+
+export interface ApiIngestionCapability {
+  enabled: boolean;
+  reason: string | null;
+  basis?: string;
+  governance_gate?: string;
+  uploads_route_open?: false;
+  staged_archive_count?: number;
+  staged_archive_limit?: number;
+}
+
+export interface ApiAcceptanceCapability {
+  available: boolean | null;
+  reason: string | null;
+  basis?: string;
+  verifier_id?: string | null;
+  refusal_error?: string | null;
+  refusal_status?: number | null;
+}
+
+export interface ApiImportRuleRecorded {
+  rule: ApiConventionRule;
+  import: ApiImportSession;
+  experiment_version?: string;
 }
 
 /** A session IN A LIST: counts, never the bundle. */
@@ -4540,6 +4833,33 @@ export interface ApiImportAddedToExperiment {
     sent: number;
     already_sent: number;
     not_sent: number;
+    runs_created?: number;
   };
   experiment_version: string;
+  /** Present when the batch was asked to create one run per measurement. */
+  created_runs?: { run_id: string; label: string; ordinal?: number; stem: string }[];
+  /**
+   * Measurements that already had a run on this record. `matched_by` says HOW:
+   * `acquisition_identity` (the file's own identity) or
+   * `label_before_origins_existed` (a run made before identities were recorded).
+   */
+  runs_already_present?: {
+    run_id: string;
+    label: string;
+    ordinal?: number;
+    stem: string;
+    matched_by: 'acquisition_identity' | 'label_before_origins_existed' | string;
+    acquisition_identity?: string;
+  }[];
+  data_quality_notes?: {
+    label: string;
+    available: number;
+    captured_as_run_notes: number;
+    already_present: number;
+    writes_qc_status: false;
+  };
+  run_origins_recorded?: number;
+  /** The session was re-read under THIS record's rules before anything was minted. */
+  reread_for_target?: boolean;
+  nominal_offers?: unknown[];
 }

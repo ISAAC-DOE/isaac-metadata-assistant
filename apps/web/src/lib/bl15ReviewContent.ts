@@ -114,10 +114,13 @@ export const BL15_COLUMNS = [
  * observed instead of how far along something is.
  */
 export const BL15_UNIT_STATE_LABELS: Record<string, string> = {
-  values_read: 'Values read',
-  conflict: 'Sources disagree',
-  no_values: 'No values read',
-  reference: 'Alignment or standard',
+  values_read: 'Values Read',
+  /* The SHARED status word (owner QA H1, 2026-09-22): the same `Sources Conflict`
+     the Conflicts stage and every candidate row use, so one disagreement is not
+     called two different things on one screen. */
+  conflict: 'Sources Conflict',
+  no_values: 'No Values Read',
+  reference: 'Alignment or Standard',
 };
 
 /** What each unit state means, one line each. */
@@ -134,10 +137,10 @@ export const BL15_UNIT_STATE_NOTES: Record<string, string> = {
 /** Filter choices over the table. `all` first; the rest follow the state order. */
 export const BL15_FILTERS = [
   { id: 'all', label: 'All' },
-  { id: 'values_read', label: 'Values read' },
-  { id: 'conflict', label: 'Sources disagree' },
-  { id: 'no_values', label: 'No values read' },
-  { id: 'reference', label: 'Alignment or standard' },
+  { id: 'values_read', label: 'Values Read' },
+  { id: 'conflict', label: 'Sources Conflict' },
+  { id: 'no_values', label: 'No Values Read' },
+  { id: 'reference', label: 'Alignment or Standard' },
 ] as const;
 
 export type Bl15FilterId = (typeof BL15_FILTERS)[number]['id'];
