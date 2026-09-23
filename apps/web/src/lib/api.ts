@@ -896,6 +896,12 @@ export type { ApiProvenanceEntry, ApiProvenanceResponse } from './types';
  * SUCCEEDED, the bundle's own first error is thrown unchanged: a failed part is
  * reported exactly as before. `primary` must be one of the promises inside `bundle`
  * (the same promise, not a second request), so nothing extra is fetched.
+ *
+ * THE COST, stated rather than hidden (independent review of #280): on FAILURE the
+ * error now surfaces when the primary read settles, not when the first part fails —
+ * measured 32 ms instead of 10 ms in a simulation. These fetches carry no timeout, so a
+ * primary read that HANGS would delay a secondary's error for as long as it hangs.
+ * Accepted: the alternative is naming the wrong state, and success is never delayed.
  */
 export async function primaryReadWins<T>(primary: Promise<unknown>, bundle: Promise<T>): Promise<T> {
   try {

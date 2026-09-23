@@ -124,7 +124,7 @@ head with no cell movement from the redesign; #278's two new operations moved th
 
 *Angel:* `Q6` environment member, `Q7` reaction member, `Q8` JK cell type — unanswered by the 2026-09-22 reply. **New:** which acquisition quantities are legitimately per-scan (emission energy, energy grid, counting time, scan command kept per-measurement meanwhile), and whether the real corpus's 9 `acquisition_timestamp` / 9 `sample_position` conflicts are genuine.
 
-*Krish:* authenticated hosted final eyes on `v0.0.261`+ (hosted was observed serving `v0.0.260` read-only; the redesign images roll via Flux) · **true 200% browser zoom** (no CDP method drives it; the suite's zoom-200 project is a layout-equivalent emulation and says so) · a real macOS microphone indicator check for "Record Locally Instead" · subjective final sign-off · a data-governance call on `tests/fixtures/bl15/notes/beamtime-notes.txt` (committed 2026-09-16, before this session): a count-only check found a few low-sensitivity lab phrases in it that also occur verbatim in the private corpus — already in public history, which no agent can rewrite; reword-going-forward is yours to authorize.
+*Krish:* authenticated hosted final eyes on `v0.0.262`+ (hosted was observed read-only serving `v0.0.260`, then `v0.0.261` with the record redesign live; `v0.0.262` — Historical Import — and this PR's image roll via Flux) · **true 200% browser zoom** (no CDP method drives it; the suite's zoom-200 project is a layout-equivalent emulation and says so) · a real macOS microphone indicator check for "Record Locally Instead" · subjective final sign-off · a data-governance call on `tests/fixtures/bl15/notes/beamtime-notes.txt` (committed 2026-09-16, before this session): a count-only check found a few low-sensitivity lab phrases in it that also occur verbatim in the private corpus — already in public history, which no agent can rewrite; reword-going-forward is yours to authorize.
 
 *Named app-side residue, deliberately not built:* `RecordWorkbench`'s cross-view focus hand-off still polls (now bounded by 60 frames AND 3 s) because its destinations are rendered by child components; the 412 branch of the transcript finalize handler does a bare `loadRuns()` (a robustness gap, not a false claim); import sessions saved before the cardinality change keep old candidates until re-read (sessions are non-durable working areas); proposal action names kept ("Accept as Proposed / Reject… / More Actions") to avoid reopening the PR-D decision and its trusted e2e pins.
 
@@ -156,8 +156,12 @@ is never missed); a failed pass is shared rather than retried by every waiter (a
 longer stacks connect timeouts); genuine outages stay `503`, nothing became a `404`. A burst now
 holds one connection at a time. On the way it closed a real gap: a restore could overwrite a
 NEWER local working copy with an older stored document (the DB row is written before the file);
-a restore now creates a working copy and never replaces one. 6 tests, each failing or measurably
-different on the old code (`test_hydration_is_serialized.py`).
+a restore now creates a working copy and never replaces one. `test_hydration_is_serialized.py`:
+**5 of its first 6 tests fail on the old code**; the 6th pins the new reuse rule and fails under the
+"reuse any finished pass" mutation instead (corrected after the independent review of #280, which
+measured it — the first version of this sentence said all six). Two more pin the no-hard-link
+fallback, and the second was rewritten after a mutation check showed its first version was
+vacuous (the file it pre-created was refused before the fallback was ever reached).
 
 **Fix (frontend):** the primary record read decides the settled state (`primaryReadWins`): a
 primary `404` is "Record Not Found" whatever else failed, and — the reverse race, which was worse —

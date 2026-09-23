@@ -372,3 +372,59 @@ def test_a_restore_never_overwrites_a_working_copy_that_appeared_after_the_check
     assert json.loads(target.read_text())["title"] == "Saved a moment later"
     # And no staging file is left behind in the record's directory.
     assert sorted(p.name for p in target.parent.iterdir()) == ["experiment.json"]
+
+
+# --- the no-hard-link fallback (added 2026-09-23, from the independent review of #280) ---
+#
+# `restore_working_copy` hard-links a staged file into place so a restore can never REPLACE a
+# working copy; on a filesystem without hard links it falls back to one more existence check
+# and `os.replace`. That branch had no test. These pin its three promises with `os.link`
+# forced to fail the way such a filesystem fails (EPERM): it still CREATES a missing file, it
+# still REFUSES when a copy already exists, and it leaves no staging file behind either way.
+# (The fallback keeps a small check-then-replace window; the function's docstring says so.)
+
+
+def _no_hard_links(monkeypatch):
+    import errno
+    import os
+
+    def refuse(*_args, **_kwargs):
+        raise OSError(errno.EPERM, "hard links are not supported on this filesystem")
+
+    monkeypatch.setattr(os, "link", refuse)
+
+
+def _staging_files(directory):
+    return [p.name for p in directory.iterdir() if ".restore-" in p.name]
+
+
+def test_without_hard_links_a_restore_still_creates_a_missing_working_copy(monkeypatch, tmp_path):
+    _no_hard_links(monkeypatch)
+    target = tmp_path / "experiment.json"
+    assert ws.restore_working_copy(target, '{"restored": true}') is True
+    assert json.loads(target.read_text()) == {"restored": True}
+    assert _staging_files(tmp_path) == []
+
+
+def test_without_hard_links_a_restore_never_replaces_a_copy_that_appears_after_its_first_check(
+    monkeypatch, tmp_path
+):
+    """The fallback's own existence check is what this pins. A file present BEFORE the call is
+    refused by the function's first check and never reaches the fallback, so a test that only
+    pre-creates the file passes even with the fallback's check deleted (measured — that was this
+    test's first version). The window the fallback check guards is a working copy that appears
+    AFTER the first check: here a concurrent writer creates it at the moment the hard link is
+    refused, and the restore must leave that newer copy standing."""
+    import errno
+    import os
+
+    target = tmp_path / "experiment.json"
+
+    def concurrent_writer_then_refuse(*_args, **_kwargs):
+        target.write_text('{"newer": true}')
+        raise OSError(errno.EPERM, "hard links are not supported on this filesystem")
+
+    monkeypatch.setattr(os, "link", concurrent_writer_then_refuse)
+    assert ws.restore_working_copy(target, '{"older": true}') is False
+    assert json.loads(target.read_text()) == {"newer": True}
+    assert _staging_files(tmp_path) == []

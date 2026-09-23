@@ -10504,7 +10504,7 @@
       },
       {
         "path": "apps/web/src/lib/api.ts",
-        "sha256": "0caab4fcc71f420c4db0387ed5634bf7ec8d0874d9890ae9d0d772385dd9e564"
+        "sha256": "350e84addd99fcde81137751ffb549f653819cd52d1fb3762480b45ff4ac315f"
       },
       {
         "path": "apps/web/src/lib/assistant.ts",
@@ -11012,7 +11012,7 @@
       }
     ],
     "served_file_count": 200,
-    "served_manifest_fingerprint": "af22245a9ac94a664f5703298b3a15159d84e76d0bf93438de859b71a760c43c"
+    "served_manifest_fingerprint": "7927d54118b325246cb71c331567a9b7c460dd3f2228a904a964429601b17bc9"
   },
   "overview": {
     "built_at_commit": "caab1d0a69c1733524bda5dde495623bc4b7bad1",
