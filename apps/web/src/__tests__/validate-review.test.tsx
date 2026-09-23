@@ -1023,7 +1023,10 @@ describe('headings, live region and severity without colour', () => {
     await screen.findByText(/1 run checked/);
 
     const nameContainsLabel = () => {
-      const button = unitEl('RUN-1').querySelector('button')!;
+      // The DETAIL button, addressed by its container: since owner QA V1 the unit
+      // heading row also carries an icon-only `?` (the run/record identifiers),
+      // which is the first button in the unit and has no visible words.
+      const button = unitEl('RUN-1').querySelector('.vr-actions button')!;
       const visible = (button.textContent ?? '').trim();
       const accessible = button.getAttribute('aria-label') ?? '';
       expect(visible).not.toBe('');

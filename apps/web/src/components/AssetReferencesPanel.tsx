@@ -297,7 +297,6 @@ export function AssetReferencesPanel({
         >
           <Chevron className="fg-chevron" size={16} strokeWidth={2} aria-hidden="true" />
           <span className="fg-block">Asset References</span>
-          <span className="fg-sublabel">assets</span>
           {/* NO COUNT UNTIL THE READ ANSWERS. `null` is "not known yet", and it
               renders nothing — never a 0 this panel has not established. */}
           <span className="fg-summary">

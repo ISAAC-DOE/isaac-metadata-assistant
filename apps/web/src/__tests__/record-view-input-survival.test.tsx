@@ -199,7 +199,7 @@ describe('the record workspaces keep unsaved text', () => {
     fireEvent.change(transcript, { target: { value: 'the scan was repeated at 8979 eV' } });
 
     await go('Proposals');
-    const capture = await screen.findByLabelText('Capture a note');
+    const capture = await screen.findByLabelText('Capture a Note');
     fireEvent.change(capture, { target: { value: 'the second monochromator was warm' } });
 
     await go('Graph');
@@ -209,12 +209,12 @@ describe('the record workspaces keep unsaved text', () => {
      * one that can distinguish "hidden from the reader" from "absent from the DOM".
      */
     expect(screen.queryByRole('textbox', { name: 'Transcript' })).toBeNull();
-    expect(screen.queryByRole('textbox', { name: 'Capture a note' })).toBeNull();
+    expect(screen.queryByRole('textbox', { name: 'Capture a Note' })).toBeNull();
     expect(panel('capture')?.hidden).toBe(true);
     expect(panel('proposals')?.hidden).toBe(true);
 
     await go('Proposals');
-    expect((screen.getByLabelText('Capture a note') as HTMLTextAreaElement).value).toBe(
+    expect((screen.getByLabelText('Capture a Note') as HTMLTextAreaElement).value).toBe(
       'the second monochromator was warm',
     );
 
@@ -241,7 +241,7 @@ describe('the record workspaces keep unsaved text', () => {
       'the scan was repeated at 8979 eV',
     );
     await go('Proposals');
-    expect((screen.getByLabelText('Capture a note') as HTMLTextAreaElement).value).toBe(
+    expect((screen.getByLabelText('Capture a Note') as HTMLTextAreaElement).value).toBe(
       'the second monochromator was warm',
     );
   });

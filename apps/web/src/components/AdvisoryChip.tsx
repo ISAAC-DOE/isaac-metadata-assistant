@@ -31,15 +31,20 @@ export function AdvisoryChip({ advisory, explain }: AdvisoryChipProps) {
         // "seam" names nothing a reader can see.
         <p className="advisory-none">No advisory warnings.</p>
       ) : (
-        advisory.warnings.map((w) => (
-          <div key={w.code}>
-            <div className="advisory-code">
-              <span className="code mono">[{w.code}]</span>
-              <span>{w.message}</span>
+        <>
+          {advisory.warnings.map((w) => (
+            <div key={w.code}>
+              <div className="advisory-code">
+                <span className="code mono">[{w.code}]</span>
+                <span>{w.message}</span>
+              </div>
             </div>
-            {explain && <p className="advisory-explain">{explain}</p>}
-          </div>
-        ))
+          ))}
+          {/* ONCE, under the list (owner QA V1, 2026-09-22). It used to follow
+              every warning, so three advisories printed the same sentence three
+              times; it is a statement about the channel, not about any one entry. */}
+          {explain && <p className="advisory-explain">{explain}</p>}
+        </>
       )}
     </section>
   );

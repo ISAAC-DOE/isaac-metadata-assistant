@@ -162,7 +162,11 @@ describe('the affordance is reachable', () => {
 
   it('shows the name it is offering to change', () => {
     renderPanel();
-    expect(screen.getByText(TYPO)).toBeInTheDocument();
+    // Twice since owner QA F2 (2026-09-22): the collapsed header now shows the VALUE
+    // (the current name) where it used to show "What this experiment is called", and
+    // the open body still names it beside the control that changes it.
+    expect(document.querySelector('.rename-current-name')?.textContent).toBe(TYPO);
+    expect(document.querySelector('.record-section-value')?.textContent).toBe(TYPO);
   });
 
   it('the live region is in the DOM BEFORE there is anything to announce', () => {

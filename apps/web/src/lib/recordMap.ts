@@ -53,6 +53,49 @@ export const RECORD_MAP_STATE_LABEL: Record<RecordMapState, string> = {
 };
 
 /** One line in the map. A FIELD row addresses a path; a BLOCK row a schema block. */
+/**
+ * THE HUMAN NAME OF EACH TOP-LEVEL BLOCK (2026-09-22, owner QA R3).
+ *
+ * The map used to print the schema's own lowercase block names (`sample`,
+ * `system`, `links`…) as row labels. These are the names the record screen already
+ * gives the same blocks — `serialize._GROUP_TITLES` for the draft sections, and
+ * the record-level panels for `links` (Relationships) and `assets` (Asset
+ * References) — so a scientist meets one name per block across the product. The
+ * schema's own name is still shown, behind the row's `?` and in the full-schema
+ * listing, never removed.
+ */
+export const RECORD_MAP_BLOCK_LABEL: Readonly<Record<string, string>> = Object.freeze({
+  measurement: 'Measurement',
+  timestamps: 'Timestamps',
+  descriptors: 'Descriptors',
+  context: 'Environment & Context',
+  sample: 'Sample',
+  system: 'System & Instrument',
+  attribution: 'Attribution',
+  links: 'Relationships',
+  assets: 'Asset References',
+  tags: 'Tags',
+});
+
+export function recordMapBlockLabel(block: string): string {
+  return RECORD_MAP_BLOCK_LABEL[block] ?? block;
+}
+
+/**
+ * A HUMAN NAME FOR A DOTTED OFFICIAL PATH: the block's name, then the last
+ * segment humanized exactly as the server humanizes a draft row
+ * (`serialize._label`: underscores to spaces, title case). So
+ * `sample.material.name` reads "Sample · Name" and `system.facility.site` reads
+ * "System & Instrument · Site". A presentation of the path, never a claim about
+ * what the field means — the path itself stays one `?` away.
+ */
+export function fieldPathLabel(path: string): string {
+  const parts = path.split('.');
+  const last = (parts[parts.length - 1] ?? path).replace(/_/g, ' ').trim();
+  const titled = last.replace(/\w\S*/g, (w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase());
+  return parts.length > 1 ? `${recordMapBlockLabel(parts[0])} · ${titled}` : titled;
+}
+
 export interface RecordMapRow {
   /** Dotted official path (field row) or a top-level block name (block row). */
   path: string;
@@ -234,7 +277,7 @@ export function blockRows(
           : 'notShown';
     return {
       path: block,
-      label: block,
+      label: recordMapBlockLabel(block),
       state,
       // A BLOCK row never carries a value. `run.fields` is keyed by FIELD path
       // and `inherited` payloads are objects and lists; this surface has no

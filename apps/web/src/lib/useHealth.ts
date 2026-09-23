@@ -17,10 +17,33 @@ import type { ApiHealth } from './types';
 
 let cached: Promise<ApiHealth | undefined> | null = null;
 
+/**
+ * Consumers of `useHealthState` that want to hear about a DELIBERATE re-read
+ * (`refetchHealth`). The cache is still one promise for the session; this only
+ * lets a reader who pressed "Reload" see the new answer everywhere at once.
+ */
+const listeners = new Set<(health: ApiHealth | undefined) => void>();
+
 /** The shared, memoized health fetch. Resolves to `undefined` on any failure. */
 function primeHealth(): Promise<ApiHealth | undefined> {
   if (!cached) cached = api.health().catch(() => undefined);
   return cached;
+}
+
+/**
+ * RE-READ the health, on a person's request (a "Reload" beside a capability the
+ * server reported unavailable). Replaces the cached promise and tells every
+ * `useHealthState` consumer the new answer. Never throws — a failed re-read
+ * resolves to `undefined`, exactly as the first read does.
+ */
+export function refetchHealth(): Promise<ApiHealth | undefined> {
+  const next = api.health().catch(() => undefined);
+  cached = next;
+  void next.then((health) => {
+    if (cached !== next) return;
+    for (const listener of listeners) listener(health);
+  });
+  return next;
 }
 
 /** Test seam: drop the module-level cache so a test can prove a fresh fetch. */
@@ -61,8 +84,13 @@ export function useHealthState(): { settled: boolean; health: ApiHealth | undefi
     primeHealth().then((h) => {
       if (alive) setState({ settled: true, health: h });
     });
+    const listener = (h: ApiHealth | undefined) => {
+      if (alive) setState({ settled: true, health: h });
+    };
+    listeners.add(listener);
     return () => {
       alive = false;
+      listeners.delete(listener);
     };
   }, []);
   return state;

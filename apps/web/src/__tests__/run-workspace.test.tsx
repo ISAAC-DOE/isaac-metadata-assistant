@@ -1703,7 +1703,11 @@ describe('the denominator discloses its scope (review finding: invented denomina
      * "5 of 5" is still displayable on a run whose Check Run fails.
      */
     const progress = cardFor('RUNAAA').querySelector('.run-card-progress') as HTMLElement;
-    expect(progress.textContent).toMatch(/run fields on this screen/);
+    // Owner QA R1 (2026-09-22) shortened the visible clause to "recorded"; the
+    // SCOPE — that these are the RUN fields, not the record's — is still in the
+    // text (visually hidden before "recorded"), so a bare "of N" never reaches a
+    // screen reader or a reader of the DOM.
+    expect(progress.textContent).toMatch(/run fields recorded/);
     expect(progress.textContent).not.toMatch(/^\s*\d+ of \d+ set\s*$/);
     // The denominator is DERIVED, so it cannot drift from what the screen renders.
     expect(progress.textContent).toContain(`of ${RUN_FIELDS.length}`);

@@ -28,11 +28,8 @@
  * size, weight, family, placement — is the group header's, so the two sections
  * still read as the same kind of card as the blocks above them.
  */
-.record-section-key {
-  font-family: var(--font-mono);
-  font-size: 11px;
-  color: var(--text-muted);
-}
+/* ~~`.record-section-key`~~ — RETIRED 2026-09-22 (owner QA F1): no section header
+   shows a lowercase machine-side key any more. */
 /*
  * REGISTER 2, AND IT STILL STARTS WITH A CAPITAL — casing conformance,
  * 2026-09-14. At 12px / muted this is the "Helper / tertiary" tier
@@ -52,6 +49,17 @@
   margin-left: auto;
   font-size: 12px;
   color: var(--text-muted);
+}
+/* A VALUE in the summary slot (the experiment's name, its folder) — owner QA F2:
+   state and value first. Primary text, one line, truncated rather than pushing the
+   title aside; the full value is the page heading / the panel body. */
+.record-section-value {
+  min-width: 0;
+  max-width: 50%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-primary);
 }
 
 .record-info-note {
@@ -243,7 +251,6 @@
   .fg-header {
     flex-wrap: wrap;
   }
-  .record-section-key,
   .record-section-summary {
     min-width: 0;
     overflow-wrap: anywhere;
@@ -251,5 +258,9 @@
   .record-section-summary {
     margin-left: 0;
     flex-basis: 100%;
+  }
+  .record-section-value {
+    max-width: none;
+    white-space: normal;
   }
 }

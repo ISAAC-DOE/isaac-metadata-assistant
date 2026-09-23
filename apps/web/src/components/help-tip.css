@@ -37,6 +37,7 @@
   outline-offset: 2px;
 }
 .helptip-panel {
+  display: block;
   position: fixed;
   z-index: 40;
   padding: var(--space-sm) var(--space-md);
@@ -58,6 +59,13 @@
   margin: 0;
 }
 .helptip-panel p + p {
+  margin-top: var(--space-xs);
+}
+/* Phrasing children (where the tip sits inside a sentence) stack like paragraphs. */
+.helptip-panel > span {
+  display: block;
+}
+.helptip-panel > span + span {
   margin-top: var(--space-xs);
 }
 .helptip-panel code {

@@ -697,13 +697,12 @@ export const LABELS = {
    * implies something went wrong. Nothing here went wrong — the official ISAAC v1.05
    * record simply has no field for this information, which is what level 4 means.
    *
-   * `extendedContextSublabel` is the `.fg-sublabel` slot, which every collapsed section
-   * on this screen uses for the machine-side name of the thing (`assets`, and the draft
-   * blocks' own block keys). `level 4` is that name here: it is the level a scientist
-   * sees on a candidate in the import review, so the two surfaces say the same word.
+   * ~~`extendedContextSublabel` ('level 4') — the `.fg-sublabel` slot~~ — RETIRED
+   * 2026-09-22 (owner QA F1): no section header on this screen shows a machine-side
+   * name any more. The import review still says "level 4" on a candidate, where it
+   * is the classification a reviewer acts on.
    */
   extendedContextHeading: 'Extended Context',
-  extendedContextSublabel: 'level 4',
   /*
    * THE EMPTY STATE, AND IT MUST NOT READ AS AN ERROR OR A MISSING ARTIFACT.
    *
@@ -713,6 +712,11 @@ export const LABELS = {
    * take. `routes.get_artifacts` deliberately keeps the companion out of its `stale`
    * decision for this exact reason; this is that reasoning carried to the screen.
    */
+  /** The label over a sha256 answer box on Complete Missing Fields — the name of
+      what is typed, where the raw token `sha256` used to stand. */
+  hashInputLabel: 'SHA-256 Checksum',
+  /** The one visible line of the empty state; `extendedContextEmpty` is its `?`. */
+  extendedContextEmptyShort: 'No additional imported context.',
   extendedContextEmpty:
     'This record states no extended context. That is the ordinary case: extended ' +
     'context is recorded when an import reads something the official ISAAC record has ' +

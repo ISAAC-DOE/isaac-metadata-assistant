@@ -1,0 +1,65 @@
+/*
+ * BlockerItems — see `BlockerItems.tsx`. Tokens only. The field name leads in the
+ * body face; the validator's sentence follows, verbatim, at body size.
+ */
+.blocker-item {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2xs);
+  padding: var(--space-sm) 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.blocker-item + .blocker-item {
+  border-top: 1px solid var(--border-faint);
+}
+.blocker-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-xs) var(--space-sm);
+  min-width: 0;
+}
+.blocker-head:empty {
+  display: none;
+}
+.blocker-subject {
+  font-family: var(--font-ui);
+  font-size: var(--font-size-body);
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-heading);
+  overflow-wrap: anywhere;
+}
+.blocker-message {
+  font-family: var(--font-ui);
+  font-size: var(--font-size-body);
+  line-height: var(--line-height-normal);
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+.blocker-path {
+  overflow-wrap: anywhere;
+}
+.blocker-go {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+  margin-left: auto;
+  padding: var(--space-2xs) var(--space-sm);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-control);
+  color: var(--action);
+  font-family: var(--font-ui);
+  font-size: var(--font-size-meta);
+  font-weight: var(--font-weight-semibold);
+  text-decoration: none;
+  transition: background 0.12s ease, border-color 0.12s ease;
+}
+.blocker-go:hover {
+  background: var(--action-tint);
+  border-color: var(--action-selected-border);
+}
+.blocker-go:focus-visible {
+  outline: 2px solid var(--action);
+  outline-offset: 2px;
+}

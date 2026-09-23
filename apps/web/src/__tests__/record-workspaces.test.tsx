@@ -558,7 +558,11 @@ describe('the needs-you banner across the four workspaces', () => {
       /* The refusal sentence survives the fold. Without it the compact form is a
          number and a button, and a scientist meeting "6 Fields Need Your
          Confirmation" with no explanation reads it as an error. */
-      expect(screen.getByText(/values the system refuses to guess/), view).toBeInTheDocument();
+      /* Case-insensitive since owner QA G (2026-09-22): the one-line form on the
+         other workspaces opens the clause with a capital. What is asserted is
+         unchanged — the refusal clause and "not a failure" survive the fold. */
+      expect(screen.getByText(/values the system refuses to guess/i), view).toBeInTheDocument();
+      expect(screen.getByText(/expected, not a failure/), view).toBeInTheDocument();
       v.unmount();
     }
   });

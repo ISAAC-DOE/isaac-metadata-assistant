@@ -243,6 +243,24 @@
    act on level with the explanation rather than with the count it acts on. */
 .needsyou-action { flex: none; align-self: flex-start; }
 
+/* THE ONE-LINE FORM (owner QA G) — every workspace but Record Fields. The title and
+   the refusal clause share a row and wrap together; the action is centred on it. */
+.needsyou-compact {
+  align-items: center;
+  padding: var(--space-sm) var(--space-lg);
+}
+.needsyou-compact .needsyou-icon { margin-top: 0; }
+.needsyou-compact .needsyou-body {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 var(--space-sm);
+  min-width: 0;
+}
+.needsyou-compact .needsyou-title { font-size: var(--font-size-body); }
+.needsyou-compact .needsyou-text { margin-top: 0; }
+.needsyou-compact .needsyou-action { align-self: center; }
+
 /* ---- the Record Identity group (Record Fields workspace) ------------
  *
  * FOUR SECTIONS ABOUT THE WHOLE RECORD, marked off from the four scientific
@@ -1678,6 +1696,10 @@
   display: flex;
   flex-direction: column;
   gap: 5px;
+}
+/* The blocker rows carry their own rhythm and dividers (`blocker-items.css`). */
+.preexport-errors:has(> .blocker-item) {
+  gap: 0;
 }
 .preexport-error-path { color: var(--text-muted); }
 .preexport-coverage { padding: 14px 16px; }

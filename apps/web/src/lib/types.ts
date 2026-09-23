@@ -2084,6 +2084,25 @@ export interface ApiHealthMcp {
   posture: string | null;
 }
 
+/**
+ * The `proposal_acceptance` block on GET /api/health — whether THIS deployment can
+ * accept an ingestion proposal at all (owner QA P2, 2026-09-22).
+ *
+ * `available: false` is the server saying, before anyone clicks, what `accept`
+ * would otherwise answer with `409 human_actor_required`: no trusted scientist
+ * identity is configured. `reason` is widened to `string` so a future code is a
+ * value a client can name verbatim rather than a shape change.
+ *
+ * OPTIONAL, AND ABSENCE IS ITS OWN STATE. A build that predates the block, or a
+ * health read that failed, has none — and the proposals panel then behaves
+ * exactly as it did before the block existed: Accept is offered and a refusal is
+ * reported when it arrives. Absence is never read as `false`.
+ */
+export interface ApiHealthProposalAcceptance {
+  available: boolean;
+  reason: string | null;
+}
+
 export interface ApiHealth {
   status: string;
   mode: string;
@@ -2092,6 +2111,7 @@ export interface ApiHealth {
   database?: ApiHealthDatabase;
   experiment_storage?: ApiHealthExperimentStorage;
   mcp?: ApiHealthMcp;
+  proposal_acceptance?: ApiHealthProposalAcceptance;
 }
 
 // POST /api/demo/reset — the guarded example-workspace reset (DemoResetResponse in

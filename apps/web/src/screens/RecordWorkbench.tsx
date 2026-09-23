@@ -49,6 +49,8 @@ import { CAPTURE_COPY } from '../lib/transcriptCaptureContent';
 import { useDocumentTitle } from '../lib/useDocumentTitle';
 import { useFetch } from '../lib/useFetch';
 import { useRecordSession } from '../lib/useRecordSession';
+import { refetchHealth, useHealthState } from '../lib/useHealth';
+import { focusWhenPresent } from '../lib/focusHandoff';
 import { rememberRecordView } from '../lib/recordLastView';
 import { useWorkspaceScope, useWorkspaceScopeChanged } from '../lib/workspaceScope';
 import { TUTORIAL_ANCHORS } from '../lib/tutorialSteps';
@@ -605,6 +607,11 @@ function LoadedWorkbench({
   onAgentRefresh: () => void;
   refreshFailed: boolean;
 }) {
+  /* Whether THIS deployment can accept a proposal at all (owner QA P2). Read from
+     the shared, cached health call — the TopBar has already made it — and passed
+     to the proposals panel, which keeps today's behaviour exactly when the block
+     is absent. */
+  const { health } = useHealthState();
   const navigate = useNavigate();
   const location = useLocation();
   const { detail, pending, pendingTotal, validate, audit, warnings, evidence, graph } = bundle;
@@ -929,19 +936,32 @@ function LoadedWorkbench({
    * Held in a ref and consumed once the destination is the view on screen.
    */
   const pendingFocus = useRef<'proposals' | 'assets' | null>(null);
+  /*
+   * ~~TRIED ONCE~~ — the defect PR #277's trusted suite found (2026-09-22). The
+   * effect looked for the destination on the ONE commit that first saw the new
+   * view and returned for good if it was not there, so focus fell to `<body>`.
+   * The first visit to a workspace mounts it, and the navigation runs in a
+   * transition, so "is the heading in the document yet" depends on scheduling.
+   * `focusWhenPresent` retries once per frame, bounded, until the destination
+   * exists and is not inside a hidden workspace; leaving the destination view
+   * before it appears cancels the hand-off (the cleanup below).
+   */
   useEffect(() => {
     const want = pendingFocus.current;
     if (want === null) return;
-    const target =
-      want === 'proposals' && activeView === 'proposals'
-        ? document.getElementById('ingestion-proposals-heading')
-        : want === 'assets' && activeView === 'fields'
-          ? document.querySelector<HTMLElement>('[aria-controls="asset-references-body"]')
-          : null;
-    if (target === null) return;
-    pendingFocus.current = null;
-    if (typeof target.scrollIntoView === 'function') target.scrollIntoView({ block: 'start' });
-    target.focus();
+    const destination = want === 'proposals' ? 'proposals' : 'fields';
+    if (activeView !== destination) return;
+    return focusWhenPresent(
+      () =>
+        want === 'proposals'
+          ? document.getElementById('ingestion-proposals-heading')
+          : document.querySelector<HTMLElement>('[aria-controls="asset-references-body"]'),
+      () => {
+        // Consumed whether it landed or gave up: a hand-off that never found its
+        // target must not fire later, into whatever the reader is doing then.
+        if (pendingFocus.current === want) pendingFocus.current = null;
+      },
+    );
   }, [activeView]);
   const openProposals = useCallback(() => {
     pendingFocus.current = 'proposals';
@@ -1545,7 +1565,12 @@ function LoadedWorkbench({
           <div className="capture-task">
             <div className="capture-split">
               <div className="capture-task-main">
-                <IngestionProposalsPanel experimentId={id} activity={proposalActivity} />
+                <IngestionProposalsPanel
+                  experimentId={id}
+                  activity={proposalActivity}
+                  acceptance={health?.proposal_acceptance}
+                  onReloadAcceptance={refetchHealth}
+                />
                 <UnmappedNotesPanel experimentId={id} activity={notesActivity} />
               </div>
               <div className="capture-task-aside">
@@ -1782,14 +1807,34 @@ function NeedsYouBanner({
      below cannot claim to have shown a question it truncated. */
   const named = shownGroups.reduce((n, s) => n + s.questions.length, 0);
 
+  /*
+   * ONE LINE WHERE IT IS NOT THE SUBJECT (owner QA G, 2026-09-22). On Runs,
+   * Capture, Proposals and Graph the banner is a reminder beside the work, not the
+   * work — so it is one row: the count, the one clause that stops it reading as a
+   * failure, and the action. Nothing is withheld: the count is the same number, and
+   * the refusal clause survives the fold (a bare "3 Fields Need Your Confirmation"
+   * with no explanation reads as an error). Record Fields keeps the full banner,
+   * because the fields it itemises live there.
+   */
+  const compact = !listed;
   return (
-    <div className="needsyou-banner" role="note" data-tutorial-anchor={TUTORIAL_ANCHORS.recordPending}>
-      <CircleAlert className="needsyou-icon" size={20} strokeWidth={2.2} aria-hidden="true" />
+    <div
+      className={`needsyou-banner${compact ? ' needsyou-compact' : ''}`}
+      role="note"
+      data-tutorial-anchor={TUTORIAL_ANCHORS.recordPending}
+    >
+      <CircleAlert
+        className="needsyou-icon"
+        size={compact ? 18 : 20}
+        strokeWidth={2.2}
+        aria-hidden="true"
+      />
       <div className="needsyou-body">
         <div className="needsyou-title">{pendingTotal} Fields Need Your Confirmation</div>
         <p className="needsyou-text">
-          These are values the system refuses to guess. Confirm each before this record can
-          export — expected, not a failure.
+          {compact
+            ? 'Values the system refuses to guess — expected, not a failure.'
+            : 'These are values the system refuses to guess. Confirm each before this record can export — expected, not a failure.'}
         </p>
         {listed && (
         <>

@@ -26,10 +26,24 @@ import { CircleHelp } from './icons';
  */
 export function HelpTip({
   subject,
+  label,
+  describedBy,
   children,
 }: {
   /** What the tip is about — "Temperature". The trigger reads "About Temperature". */
   subject: string;
+  /**
+   * A full accessible name that REPLACES "About <subject>", for a tip that sits
+   * beside a form control or a row carrying the same words. A trigger named
+   * "About Temperature" next to an input labelled "Temperature" answers to that
+   * field's name too (Playwright's `getByLabel` matches a substring of
+   * `aria-label`, and a screen reader's form-field list is no better off), so
+   * such tips are named for what they hold ("Official Field Details") and point
+   * at the field's own label with `describedBy`.
+   */
+  label?: string;
+  /** Id of the element naming what this tip is about, when `label` is generic. */
+  describedBy?: string;
   /** The definition. Keep it to one to three short sentences. */
   children: ReactNode;
 }) {
@@ -37,7 +51,7 @@ export function HelpTip({
   const [open, setOpen] = useState(false);
   const [pos, setPos] = useState<{ top: number; left: number; width: number } | null>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
-  const panelRef = useRef<HTMLDivElement>(null);
+  const panelRef = useRef<HTMLSpanElement>(null);
 
   const place = useCallback(() => {
     const trigger = triggerRef.current;
@@ -88,7 +102,8 @@ export function HelpTip({
         ref={triggerRef}
         type="button"
         className="helptip-trigger"
-        aria-label={`About ${subject}`}
+        aria-label={label ?? `About ${subject}`}
+        aria-describedby={describedBy}
         aria-expanded={open}
         aria-controls={panelId}
         onClick={() => setOpen((current) => !current)}
@@ -96,8 +111,11 @@ export function HelpTip({
         <CircleHelp size={14} strokeWidth={2} aria-hidden="true" />
       </button>
       {/* Rendered while closed too (hidden), so `aria-controls` never dangles and
-          the definition is reachable by every DOM-reading guard. */}
-      <div
+          the definition is reachable by every DOM-reading guard. A `<span>`
+          (drawn as a block) so a tip is valid inside a sentence or a label row —
+          a `<div>` inside a `<p>` is invalid HTML and React says so. Pass
+          phrasing content (`<span>`) as children where the tip sits in a `<p>`. */}
+      <span
         ref={panelRef}
         id={panelId}
         className="helptip-panel"
@@ -106,7 +124,7 @@ export function HelpTip({
         style={pos === null ? undefined : { top: pos.top, left: pos.left, width: pos.width }}
       >
         {children}
-      </div>
+      </span>
     </span>
   );
 }

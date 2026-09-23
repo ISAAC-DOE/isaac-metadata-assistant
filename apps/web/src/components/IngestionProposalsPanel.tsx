@@ -122,8 +122,15 @@
  *       dependency then admits the request. `identity.py` records withdrawing exactly
  *       this over-claim once already. So Accept is rendered, the 409 is reported
  *       specifically and truthfully when it arrives, and nothing here asserts in
- *       either direction before asking. The server serves no capability flag for it;
- *       see the slice report for that gap.
+ *       either direction before asking. ~~The server serves no capability flag for
+ *       it; see the slice report for that gap.~~ — PARTLY CLOSED 2026-09-22 (owner QA
+ *       P2): `GET /api/health` MAY now carry `proposal_acceptance: {available,
+ *       reason}`. When it says `available: false` the SERVER has said, before any
+ *       click, that acceptance cannot succeed here — so Accept is shown LOCKED with
+ *       its reason, behind one compact panel notice. When the block is ABSENT this
+ *       panel behaves exactly as described above: Accept is offered and the 409 is
+ *       reported when it arrives. Absence is never read as `false`, and the 409
+ *       handling is unchanged either way.
  *
  * ONE VALIDATOR, THE RECORD'S. A proposal lives inside the experiment's own state
  * document, so every review carries the EXPERIMENT's version token — re-read from each
@@ -147,6 +154,13 @@ import type {
 } from '../lib/types';
 import { BackendDown, LoadingPanel } from './FetchStates';
 import { NewProposalForm } from './NewProposalForm';
+import { Disclosure } from './Disclosure';
+import { HelpTip } from './HelpTip';
+import { SemanticStatus, type SemanticState } from './SemanticStatus';
+import { findingFieldLabel } from './BlockerItems';
+import { ChevronDown, ChevronRight, Lock } from './icons';
+import { noteSourceLabel } from '../lib/noteSource';
+import type { ApiHealthProposalAcceptance } from '../lib/types';
 import './ingestionProposals.css';
 
 /** Same narrowing `UnmappedNotesPanel` uses — a non-`ApiError` throw still renders. */
@@ -221,6 +235,111 @@ const STATE_LABELS: Readonly<Record<string, string>> = {
 
 function stateLabel(state: string): string {
   return STATE_LABELS[state] ?? state;
+}
+
+/**
+ * THE VISIBLE STATE CHIP (owner QA P1, 2026-09-22): the shared `SemanticStatus`,
+ * with a short word, and — for the three closed states and `accepted` — the clause
+ * that stops the state reading as something it is not, kept BESIDE the chip rather
+ * than dropped. `STATE_LABELS` above is unchanged and still the card's accessible
+ * name, so the full sentence is what a screen reader hears.
+ *
+ * `rejected`, `superseded` and `withdrawn` are NEUTRAL on purpose: none is a
+ * failure, and none removed anything. Only `open` carries the amber "your turn"
+ * tone. An unrecognised state falls back to its own token, verbatim.
+ */
+const STATE_CHIP: Readonly<Record<string, { state: SemanticState; label: string; note?: string }>> = {
+  open: { state: 'awaitingJudgment', label: 'Awaiting Judgment' },
+  accepted: { state: 'complete', label: 'Accepted', note: 'a value was written' },
+  rejected: { state: 'notApplicable', label: 'Rejected', note: 'kept on the record' },
+  superseded: { state: 'notApplicable', label: 'Superseded', note: 'kept on the record' },
+  withdrawn: { state: 'notApplicable', label: 'Withdrawn', note: 'kept on the record' },
+};
+
+function StateChip({ state }: { state: string }) {
+  const chip = STATE_CHIP[state] ?? { state: 'unavailable' as const, label: state };
+  return (
+    <span className="proposal-state">
+      <SemanticStatus state={chip.state} label={chip.label} size="sm" />
+      {chip.note !== undefined && (
+        <span className="proposal-state-note">{` — ${chip.note}`}</span>
+      )}
+    </span>
+  );
+}
+
+/**
+ * The one line an acceptance lock carries, per reason (owner QA P2). Only the code
+ * this build has been taught gets a sentence of its own; any other is named
+ * VERBATIM rather than swept into a sentence that may not be true of it.
+ */
+function acceptanceLockLine(reason: string | null): string {
+  if (reason === 'no_verifier_configured') {
+    return 'Trusted scientist identity has not been enabled yet.';
+  }
+  return 'This deployment reports that no proposal can be accepted here.';
+}
+
+/**
+ * ONE COMPACT NOTICE FOR "ACCEPTING CANNOT SUCCEED HERE" (owner QA P2) — used for
+ * the health preflight (`available: false`) and for a `409 human_actor_required`
+ * that arrives anyway, so the two read as the same fact in the same form.
+ *
+ * What stays visible is exactly what DEC-35 forbids hiding: that accepting is
+ * unavailable, and that nothing was written. The longer account is behind `Why?`
+ * — a real disclosure, in the DOM — and `Reload` asks again.
+ */
+function AcceptanceNotice({
+  id,
+  title,
+  line,
+  children,
+  onReload,
+  reloadLabel,
+  role,
+}: {
+  id?: string;
+  title: string;
+  line: string;
+  children: React.ReactNode;
+  onReload: () => void;
+  reloadLabel: string;
+  role: 'note' | 'alert';
+}) {
+  /* `Why?` is a disclosure whose BODY opens below the whole notice — so it is its
+     own toggle rather than the boxed `Disclosure`, which would push `Reload` down
+     under the explanation. Mounted while closed (`hidden`), so the account is in
+     the DOM and `aria-controls` never dangles. */
+  const [whyOpen, setWhyOpen] = useState(false);
+  const whyId = useId();
+  const Chevron = whyOpen ? ChevronDown : ChevronRight;
+  return (
+    <div className="proposals-lock" role={role} id={id}>
+      <p className="proposals-lock-line">
+        <Lock size={15} strokeWidth={2.2} aria-hidden="true" className="proposals-lock-icon" />
+        <span className="proposals-lock-title">{title}</span>
+        <span className="proposals-lock-text">{line}</span>
+      </p>
+      <div className="proposals-lock-actions">
+        <button
+          type="button"
+          className="btn btn-secondary proposals-lock-why"
+          aria-expanded={whyOpen}
+          aria-controls={whyId}
+          onClick={() => setWhyOpen((open) => !open)}
+        >
+          <Chevron size={14} strokeWidth={2} aria-hidden="true" />
+          Why?
+        </button>
+        <button type="button" className="btn btn-secondary proposals-lock-reload" onClick={onReload}>
+          {reloadLabel}
+        </button>
+      </div>
+      <div className="proposals-lock-why-body" id={whyId} hidden={!whyOpen}>
+        {children}
+      </div>
+    </div>
+  );
 }
 
 /** Filter-option wording. Same fallback rule as `stateLabel`. */
@@ -616,8 +735,19 @@ type ListState =
 export function IngestionProposalsPanel({
   experimentId,
   activity,
+  acceptance,
+  onReloadAcceptance,
 }: {
   experimentId: string;
+  /**
+   * `GET /api/health`'s `proposal_acceptance`, passed down by the screen that
+   * already holds the shared health read — or `undefined` when the block is absent
+   * (an older server, a failed read). Absent keeps this panel's behaviour exactly as
+   * it was: Accept is offered and a refusal is reported when it arrives.
+   */
+  acceptance?: ApiHealthProposalAcceptance;
+  /** Re-read the health, for the lock notice's `Reload`. */
+  onReloadAcceptance?: () => unknown;
   /**
    * The change-feed summary this screen already holds, or null.
    *
@@ -640,12 +770,19 @@ export function IngestionProposalsPanel({
         <h2 className="proposals-title" id="ingestion-proposals-heading" tabIndex={-1}>
           Ingestion Proposals
         </h2>
+        {/* One line, and the full account one `?` away (DEC-35). */}
         <p className="proposals-sub">
-          Stored suggestions about one field each: a value, the field path it is for, and
-          the rule that produced them. Nothing here is a field value, evidence or a
-          confirmation — not even once it has been accepted — and nothing here is ever
-          deleted. Rejecting, superseding and withdrawing are states, and the note behind
-          a proposal survives all of them.
+          Stored suggestions about one field each. None is a field value, and nothing here
+          is ever deleted.{' '}
+          <HelpTip subject="Ingestion Proposals">
+            <span>
+              Each proposal is a value, the field path it is for, and the rule that
+              produced it. Nothing here is a field value, evidence or a confirmation — not
+              even once it has been accepted — and nothing here is ever deleted.
+              Rejecting, superseding and withdrawing are states, and the note behind a
+              proposal survives all of them.
+            </span>
+          </HelpTip>
         </p>
       </div>
       {/* Keyed on the record so switching records rebuilds this panel's state rather
@@ -654,6 +791,8 @@ export function IngestionProposalsPanel({
         key={experimentId}
         experimentId={experimentId}
         activity={activity ?? null}
+        acceptance={acceptance}
+        onReloadAcceptance={onReloadAcceptance}
       />
     </section>
   );
@@ -662,10 +801,17 @@ export function IngestionProposalsPanel({
 function ProposalsBrowser({
   experimentId,
   activity,
+  acceptance,
+  onReloadAcceptance,
 }: {
   experimentId: string;
   activity: RecordChangeSummary | null;
+  acceptance?: ApiHealthProposalAcceptance;
+  onReloadAcceptance?: () => unknown;
 }) {
+  /** The server said, before any click, that accepting cannot succeed here. */
+  const acceptLocked = acceptance?.available === false;
+  const lockNoticeId = useId();
   const [list, setList] = useState<ListState>({ status: 'loading' });
   const [filter, setFilter] = useState<string>('all');
   /**
@@ -726,6 +872,9 @@ function ProposalsBrowser({
   const [reloadNonce, setReloadNonce] = useState(0);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [refusal, setRefusal] = useState<string | null>(null);
+  /** The server's code for `refusal`, so a `human_actor_required` renders in the
+      same compact form as the health preflight (owner QA P2). */
+  const [refusalKind, setRefusalKind] = useState<string | undefined>(undefined);
   const [announcement, setAnnouncement] = useState('');
   /**
    * THE VISIBLE HALF OF AN ARRIVAL ANNOUNCEMENT — see the effect that sets it,
@@ -1241,6 +1390,7 @@ function ProposalsBrowser({
       if (!version) return;
       setBusyId(proposal.proposal_id);
       setRefusal(null);
+      setRefusalKind(undefined);
       try {
         const written = await api.reviewProposal(experimentId, proposal.proposal_id, {
           experimentVersion: version,
@@ -1256,6 +1406,7 @@ function ProposalsBrowser({
         reload(true);
       } catch (err: unknown) {
         setRefusal(recoverFromStale(err, action));
+        setRefusalKind(refusalCode(err));
         setAnnouncement('');
         /*
          * RETHROWN, so a caller can tell "recorded" from "refused". The editors that
@@ -1705,15 +1856,70 @@ function ProposalsBrowser({
         </p>
       )}
 
-      {refusal && (
-        <div className="proposals-error" role="alert">
-          <span className="proposals-error-text">{refusal}</span>
-          {/* SILENT — the loud reload would unmount every card and destroy the
-              corrected value the reader was offered this control to recover. */}
-          <button type="button" className="btn btn-secondary" onClick={() => reload(true)}>
-            Reload This Section
-          </button>
-        </div>
+      {/*
+        THE HEALTH PREFLIGHT (owner QA P2). ONE notice for the panel, not one per
+        card, and only when there is an open proposal it would apply to. Rendered
+        only when the server SAID `available: false`; an absent block renders
+        nothing and changes nothing.
+      */}
+      {acceptLocked &&
+        list.status === 'data' &&
+        list.loaded.proposals.some((proposal) => proposal.state === 'open') && (
+          <AcceptanceNotice
+            id={lockNoticeId}
+            role="note"
+            title="Acceptance unavailable on this deployment"
+            line={acceptanceLockLine(acceptance?.reason ?? null)}
+            reloadLabel="Reload"
+            onReload={() => {
+              void onReloadAcceptance?.();
+            }}
+          >
+            <p className="proposals-lock-why-text">
+              Accepting writes a scientific value into this record, which is an
+              attributable act. This deployment reports that it cannot currently
+              establish which scientist is acting, so an acceptance would be refused
+              and nothing would be written. That is how the deployment is configured —
+              not a fault in this record — and an operator resolves it. Rejecting,
+              superseding and withdrawing need no identity and still work.
+            </p>
+            {acceptance?.reason !== null &&
+              acceptance?.reason !== undefined &&
+              acceptance.reason !== 'no_verifier_configured' && (
+                <p className="proposals-lock-why-text">
+                  The server reported: <code className="mono">{acceptance.reason}</code>
+                </p>
+              )}
+          </AcceptanceNotice>
+        )}
+
+      {refusal && refusalKind === 'human_actor_required' ? (
+        /* THE SAME FACT, ARRIVING AS A 409 (a server with no preflight block, or
+           one whose answer changed): the same compact form, and the server-derived
+           account verbatim behind `Why?`. `role="alert"` as before. */
+        <AcceptanceNotice
+          role="alert"
+          title="Acceptance refused on this deployment"
+          line="Nothing was written — trusted scientist identity has not been enabled."
+          reloadLabel="Reload This Section"
+          onReload={() => {
+            void onReloadAcceptance?.();
+            reload(true);
+          }}
+        >
+          <p className="proposals-lock-why-text proposals-error-text">{refusal}</p>
+        </AcceptanceNotice>
+      ) : (
+        refusal && (
+          <div className="proposals-error" role="alert">
+            <span className="proposals-error-text">{refusal}</span>
+            {/* SILENT — the loud reload would unmount every card and destroy the
+                corrected value the reader was offered this control to recover. */}
+            <button type="button" className="btn btn-secondary" onClick={() => reload(true)}>
+              Reload This Section
+            </button>
+          </div>
+        )
       )}
 
       {/*
@@ -1812,6 +2018,7 @@ function ProposalsBrowser({
                      */
                     linked={deepLinkedId !== null && proposal.proposal_id === deepLinkedId}
                     busy={busyId === proposal.proposal_id || version === null}
+                    acceptLockedBy={acceptLocked ? lockNoticeId : null}
                     onReview={review}
                   />
                 </li>
@@ -1993,6 +2200,7 @@ function ProposalCard({
   duplicateRunLabels,
   linked,
   busy,
+  acceptLockedBy,
   onReview,
 }: {
   experimentId: string;
@@ -2011,6 +2219,12 @@ function ProposalCard({
    */
   linked: boolean;
   busy: boolean;
+  /**
+   * The id of the panel's acceptance notice when the server said `available:
+   * false`, else `null`. Accept controls are then rendered LOCKED — disabled, and
+   * described by that notice, so the reason is announced with the control.
+   */
+  acceptLockedBy: string | null;
   onReview: (
     proposal: ApiProposal,
     action: ApiProposalReviewAction,
@@ -2091,7 +2305,10 @@ function ProposalCard({
 
   const editorId = useId();
   const moreId = useId();
+  const fieldId = useId();
   const isOpen = proposal.state === 'open';
+  const locked = acceptLockedBy !== null;
+  const fieldLabel = findingFieldLabel(proposal.target_field_path) ?? proposal.target_field_path;
   const unavailable = acceptUnavailableReason(proposal, served);
   /*
    * THE TWO ACCEPT HALVES ARE GATED INDEPENDENTLY, AND THEY WERE NOT.
@@ -2151,9 +2368,30 @@ function ProposalCard({
       tabIndex={linked ? -1 : undefined}
       aria-label={`Proposal for ${proposal.target_field_path} — ${stateLabel(proposal.state)}`}
     >
+      {/*
+        THE HEADER (owner QA P1, 2026-09-22): the state chip, the FIELD in human
+        words, its official path one `?` away, the scope, and when. It used to lead
+        with the raw path in mono.
+      */}
       <header className="proposal-card-head">
-        <span className="proposal-state">{stateLabel(proposal.state)}</span>
-        <span className="proposal-path mono">{proposal.target_field_path}</span>
+        <StateChip state={proposal.state} />
+        {isOpen && proposal.target_stale === true && (
+          /* THE SERVER SAID THE TARGET MOVED — shown on the card's top line, never
+             only in prose. Not the danger tone: it is a warning, not a failure, and
+             the target can move back (`TargetState`). */
+          <SemanticStatus state="needsReview" label="Target Changed" size="sm" />
+        )}
+        <span className="proposal-field" id={fieldId}>
+          {fieldLabel}
+        </span>
+        <HelpTip subject={fieldLabel} label="Official Field Details" describedBy={fieldId}>
+          <span>
+            Official field: <code className="proposal-path mono">{proposal.target_field_path}</code>
+          </span>
+        </HelpTip>
+        {/* Scope and time on their own line under the subject, at every width —
+            so a narrow card wraps into two tidy lines rather than wherever. */}
+        <span className="proposal-card-meta">
         {(() => {
           if (proposal.run_id === null) {
             return <span className="proposal-scope">On the record</span>;
@@ -2188,32 +2426,26 @@ function ProposalCard({
           );
         })()}
         <span className="proposal-when">Proposed {proposal.proposed_utc}</span>
+        </span>
       </header>
 
-      {/* THE CLAIM THIS CARD MUST NOT LET A READER MISS, and it is made in every
-          state including `accepted` — because `is_field_value` is false there too. */}
-      <p className="proposal-nature">
-        A suggestion about this field. It is not the field&rsquo;s value and not evidence
-        for it.
-      </p>
-
+      {/* THE VALUE, LABELLED AS PROPOSED — the label is what keeps it from reading
+          as the record's. The value is rendered exactly as stored: no unit is added
+          that the proposal does not carry. */}
       <div className="proposal-value">
         <h3 className="proposal-value-label">Proposed value</h3>
         <pre className="proposal-value-body">{renderValue(proposal.proposed_value)}</pre>
       </div>
 
-      <p className="proposal-rule">
-        <span className="proposal-rule-label">Rule that produced it: </span>
-        {proposal.rule}
-      </p>
-
-      <p className="proposal-origin">
-        <span className="proposal-origin-label">From: </span>
-        {proposal.source} · note <span className="mono">{proposal.note_id}</span>
-      </p>
-
+      {/* THE WORDS IT WAS READ FROM, AND WHERE THEY CAME FROM — in product words;
+          the raw source token and the note id are behind "Why this was proposed". */}
       {proposal.excerpt !== null ? (
-        <blockquote className="proposal-excerpt">{proposal.excerpt}</blockquote>
+        <figure className="proposal-quote">
+          <blockquote className="proposal-excerpt">{proposal.excerpt}</blockquote>
+          <figcaption className="proposal-quote-source">
+            {noteSourceLabel(proposal.source)}
+          </figcaption>
+        </figure>
       ) : proposal.start_char !== null ? (
         <p className="proposal-excerpt-absent">
           This proposal records a span of the note, but the words at it could not be read
@@ -2221,9 +2453,12 @@ function ProposalCard({
         </p>
       ) : null}
 
-      <TargetState proposal={proposal} acceptOffered={canAccept || canEditAccept} />
-
-      <CurrentValue experimentId={experimentId} proposal={proposal} />
+      {/* A TARGET THAT MOVED, OR THAT COULD NOT BE CHECKED, IS NEVER DISCLOSED AWAY
+          (DEC-35: a conflict and an uncertainty stay visible). Only the reassuring
+          "unchanged" sentence goes behind the disclosure below. */}
+      {proposal.target_stale !== false && (
+        <TargetState proposal={proposal} acceptOffered={canAccept || canEditAccept} />
+      )}
 
       {proposal.state === 'accepted' && <AcceptanceRecord proposal={proposal} />}
 
@@ -2246,7 +2481,10 @@ function ProposalCard({
               <button
                 type="button"
                 className="btn btn-primary"
-                disabled={busy}
+                /* LOCKED when the server said acceptance cannot succeed here — and
+                   the reason is the panel notice, announced with the control. */
+                disabled={busy || locked}
+                aria-describedby={acceptLockedBy ?? undefined}
                 onClick={() =>
                   run(
                     'accept',
@@ -2349,7 +2587,8 @@ function ProposalCard({
                   className="btn btn-secondary"
                   aria-expanded={editor?.kind === 'edited'}
                   aria-controls={editor?.kind === 'edited' ? `${editorId}-edited` : undefined}
-                  disabled={busy}
+                  disabled={busy || locked}
+                  aria-describedby={acceptLockedBy ?? undefined}
                   onClick={() => {
                     setEditedError(null);
                     setEditor((open) => {
@@ -2425,7 +2664,8 @@ function ProposalCard({
                 <button
                   type="button"
                   className="btn btn-primary"
-                  disabled={busy}
+                  disabled={busy || locked}
+                  aria-describedby={acceptLockedBy ?? undefined}
                   onClick={() => {
                     let parsed: unknown;
                     try {
@@ -2525,14 +2765,50 @@ function ProposalCard({
             </div>
           )}
 
-          {/* THE PENDING PATH IS TAKING NO ACTION, and it is said rather than left to
+        </>
+      ) : null}
+
+      {/*
+        WHY THIS WAS PROPOSED — the provenance, one click away (owner QA P1,
+        2026-09-22). Everything that used to be stacked as prose on every card is
+        here, verbatim and still in the DOM: what a proposal is, the rule, the note
+        it came from, the reassuring "unchanged" target sentence (a changed or
+        unreadable target stays on the card above), the on-demand read of what the
+        record holds, what leaving it alone means, and the history.
+      */}
+      <Disclosure summary="Why This Was Proposed" className="proposal-why">
+      {/* THE CLAIM THIS CARD MUST NOT LET A READER MISS, made in every state
+          including `accepted` — because `is_field_value` is false there too. The
+          "Proposed value" label and the state chip carry it on the card itself. */}
+      <p className="proposal-nature">
+        A suggestion about this field. It is not the field&rsquo;s value and not evidence
+        for it.
+      </p>
+
+      <p className="proposal-rule">
+        <span className="proposal-rule-label">Rule that produced it: </span>
+        {proposal.rule}
+      </p>
+
+      <p className="proposal-origin">
+        <span className="proposal-origin-label">From: </span>
+        {proposal.source} · note <span className="mono">{proposal.note_id}</span>
+      </p>
+
+      {proposal.target_stale === false && (
+        <TargetState proposal={proposal} acceptOffered={canAccept || canEditAccept} />
+      )}
+
+      <CurrentValue experimentId={experimentId} proposal={proposal} />
+
+      {isOpen ? (
+          /* THE PENDING PATH IS TAKING NO ACTION, and it is said rather than left to
               be inferred. There is no "defer" act in this contract, and inventing one
-              would be a state the record cannot store. */}
+              would be a state the record cannot store. */
           <p className="proposal-pending-note">
             Leaving this proposal alone leaves it awaiting judgement. There is no
             &ldquo;decide later&rdquo; act to record — taking no action is that.
           </p>
-        </>
       ) : (
         <p className="proposal-closed-note">
           This proposal has been reviewed. Every recorded judgement stays exactly as it
@@ -2587,6 +2863,7 @@ function ProposalCard({
           </ol>
         )}
       </div>
+      </Disclosure>
     </article>
   );
 }

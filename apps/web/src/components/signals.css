@@ -261,15 +261,21 @@
  * the wording. It does not need a second, uncontrolled dimming on top.
  */
 .advisory-nongating {
-  font-size: 10.5px;
+  /* 11px, the documented floor — was 10.5px (Impeccable overlay, 2026-09-22). */
+  font-size: 11px;
   color: var(--advisory-text);
 }
 .advisory-code {
   margin-top: 10px;
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
+  /* The code above its sentence, not beside it (owner QA V1): side by side, a long
+     code like `[NO_MEASUREMENT_SERIES]` squeezed the sentence into a column a few
+     words wide in a half-width card. */
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-2xs);
   font-size: 13px;
+  line-height: var(--line-height-normal);
   color: var(--advisory-text);
 }
 .advisory-code .code {

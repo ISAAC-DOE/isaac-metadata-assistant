@@ -447,6 +447,8 @@ test('the proposed value and what the record holds are separate, labelled reads'
    * is no current value on the card at all.
    */
   await expect(card.locator('.proposal-current-label')).toHaveCount(0);
+  // Behind "Why This Was Proposed" since owner QA P1 (2026-09-22).
+  await card.getByRole('button', { name: 'Why This Was Proposed' }).click();
   await card.getByRole('button', { name: 'Show What the Record Holds Now' }).click();
 
   await expect(card.locator('.proposal-current-label')).toHaveText(
@@ -748,6 +750,8 @@ test('a rejected proposal stays readable with its history, and the note behind i
   );
 
   // The history is READABLE, both acts, in order, with the reason.
+  // Behind "Why This Was Proposed" since owner QA P1 (2026-09-22).
+  await card.getByRole('button', { name: 'Why This Was Proposed' }).click();
   await card.getByRole('button', { name: 'Show history (2 acts)' }).click();
   const acts = card.locator('.proposal-history-list li');
   await expect(acts).toHaveCount(2);
@@ -1074,11 +1078,20 @@ test('accepting is refused truthfully, and nothing is written', async ({ page, r
 
   // THE REFUSAL REACHES THE SCIENTIST, and it says the two things that matter: nothing
   // was written, and retrying will not help.
-  const banner = page.locator('.proposals-error[role="alert"]');
+  //
+  // Since owner QA P2 (2026-09-22) it arrives in the compact acceptance notice: the
+  // visible line says nothing was written and why; the server-derived account is one
+  // `Why?` away — opened here, so what is asserted is what a reader can reach.
+  const banner = page.locator('.proposals-lock[role="alert"]');
   await expect(banner).toBeVisible();
-  await expect(banner).toContainText('NOTHING WAS WRITTEN');
-  await expect(banner).toContainText('retrying will not change it');
-  await expect(banner).toContainText(
+  await expect(banner).toContainText('Acceptance refused on this deployment');
+  await expect(banner).toContainText('Nothing was written');
+  await banner.getByRole('button', { name: 'Why?' }).click();
+  const why = banner.locator('.proposals-lock-why-body');
+  await expect(why).toBeVisible();
+  await expect(why).toContainText('NOTHING WAS WRITTEN');
+  await expect(why).toContainText('retrying will not change it');
+  await expect(why).toContainText(
     'Rejecting, superseding and withdrawing need no actor and still work.'
   );
 

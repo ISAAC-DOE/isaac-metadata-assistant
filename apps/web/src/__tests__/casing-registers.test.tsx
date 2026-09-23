@@ -515,8 +515,10 @@ const RENDER_ALLOWLIST: Readonly<Record<string, string>> = {
      its spec run in the same change. */
   'Search runs':
     'RunsSection <label> — pinned by e2e/mutation/run-scale.bench.ts + scale-2026-08-27.bench.ts',
-  'Capture a note':
-    'UnmappedNotesPanel <label> — pinned by e2e/mutation/proposals.spec.ts + e2e/trusted/fixtures.ts',
+  /* ~~'Capture a note'~~ — FIXED 2026-09-22 (now "Capture a Note"), and the row is
+     dropped rather than kept stale. Its stated pin was false: the two e2e sites it
+     named were doc comments ("Capture a note. …") over API calls, so only unit
+     tests queried the label, and they moved with it. */
   'not written yet': 'RecordInfoPanel absence reason — pinned by e2e/specs/record-identity.spec.ts',
   'not read on this screen':
     'RecordInfoPanel absence reason — pinned by e2e/specs/record-identity.spec.ts',

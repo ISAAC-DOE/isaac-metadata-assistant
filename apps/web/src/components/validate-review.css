@@ -116,6 +116,14 @@
   padding-top: 4px;
 }
 
+.vr-unit-headrow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-xs) var(--space-sm);
+  min-width: 0;
+}
+
 .vr-unit-head {
   display: flex;
   flex-wrap: wrap;
@@ -127,28 +135,10 @@
   color: var(--text-heading);
 }
 
+/* The state chip is the shared `SemanticStatus` (icon + word + tone); only its
+   placement is set here, so a run reads the same as everywhere else. */
 .vr-state {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
   flex: none;
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-  padding: 2px 8px;
-  border-radius: var(--radius-token, 6px);
-  border: 1px solid var(--border);
-  background: var(--surface-subtle);
-  color: var(--text-slate);
-}
-/* Text colour only, and only on the FAIL word — the filled verdict treatment
-   stays reserved for VerdictCard. */
-.vr-state-fail {
-  color: var(--fail-text);
-  border-color: var(--border);
-}
-.vr-state-unavailable {
-  color: var(--text-tertiary);
 }
 
 .vr-unit-label {
@@ -157,9 +147,6 @@
 }
 
 .vr-unit-ids {
-  margin-top: 5px;
-  font-size: 11px;
-  color: var(--text-tertiary);
   overflow-wrap: anywhere;
 }
 
@@ -203,28 +190,20 @@
   margin: 6px 0 0;
   padding: 0;
   list-style: none;
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-  font-size: 11.5px;
-  line-height: 1.5;
-  color: var(--text-secondary);
-}
-.vr-errors li {
-  overflow-wrap: anywhere;
-}
-.vr-error-path {
-  color: var(--text-muted);
 }
 
 /* Advisory — the amber, non-gating channel, kept visually apart from the state
    above it so the two can never be read as one signal. */
 .vr-advisory {
   margin-top: 10px;
-  padding: 8px 10px;
-  border: 1px solid var(--advisory-border);
-  border-radius: var(--radius-inner, 10px);
+  border-color: var(--advisory-border);
   background: var(--advisory-bg);
+}
+.vr-advisory .disclosure-trigger {
+  min-height: 36px;
+}
+.vr-advisory .disclosure-body {
+  border-top-color: var(--advisory-border);
 }
 .vr-advisory-title {
   font-size: 11px;
@@ -360,20 +339,17 @@
 }
 
 /*
- * THE "WHAT THIS CHECKS" DRAWER — the description collapsed, the status left
- * visible. See `ValidateReview.tsx` for which sentence stays out and why.
+ * THE "WHAT THIS CHECKS" DRAWER and the "How to read these results" notes — the
+ * shared `Disclosure`, so the whole row is the target. See `ValidateReview.tsx`
+ * for which sentence stays out and why.
  */
-.vr-about {
+.vr-about,
+.vr-notes {
   margin-top: var(--space-sm);
 }
-.vr-about-summary {
-  cursor: pointer;
-  width: fit-content;
-  font-size: var(--font-size-meta);
-  color: var(--action);
+.vr-about .vr-sub {
+  margin-top: 0;
 }
-.vr-about-summary:focus-visible {
-  outline: 2px solid var(--action);
-  outline-offset: 2px;
-  border-radius: var(--radius-inner);
+.vr-notes .vr-note:first-child {
+  margin-top: 0;
 }

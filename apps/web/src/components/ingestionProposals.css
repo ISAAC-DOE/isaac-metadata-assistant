@@ -152,15 +152,35 @@
   margin-bottom: 6px;
 }
 
+/* The state: the shared `SemanticStatus` chip, then — for accepted and the three
+   closed states — the clause that says what the state did NOT do. */
 .proposal-state {
-  font-size: 11px;
-  font-weight: 650;
-  color: var(--text-strong);
-  background: var(--border-faint);
-  border-radius: 4px;
-  padding: 2px 6px;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+}
+.proposal-state-note {
+  font-size: var(--font-size-meta);
+  color: var(--text-secondary);
 }
 
+/* Scope and time: a line of their own under the subject. */
+.proposal-card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-xs) var(--space-md);
+  flex-basis: 100%;
+}
+
+/* The field, in human words — the card's subject. */
+.proposal-field {
+  font-size: var(--font-size-body);
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-heading);
+  overflow-wrap: anywhere;
+}
+
+/* The official path, now inside the `?` panel. */
 .proposal-path {
   font-size: 11px;
   color: var(--text-slate);
@@ -179,7 +199,7 @@
  */
 .proposal-nature {
   margin: 0 0 8px;
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.5;
   color: var(--text-tertiary);
   max-width: 68ch;
@@ -201,7 +221,8 @@
   margin: 0;
   padding: 8px 10px;
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: var(--font-size-heading-sm);
+  font-weight: var(--font-weight-semibold);
   line-height: 1.5;
   color: var(--text-primary);
   background: var(--surface-subtle);
@@ -222,7 +243,7 @@
   font-size: 12px;
   line-height: 1.5;
   color: var(--text-secondary);
-  max-width: 78ch;
+  max-width: 68ch;
 }
 
 .proposal-rule-label,
@@ -232,9 +253,20 @@
   color: var(--text-slate);
 }
 
+/* The note's own words, quoted, with where they came from beneath. */
+.proposal-quote {
+  margin: 0 0 8px;
+}
+.proposal-quote-source {
+  margin-top: var(--space-2xs);
+  padding-left: var(--space-md);
+  font-size: var(--font-size-meta);
+  color: var(--text-secondary);
+}
+
 /* The note's own words, quoted. Verbatim, so its own spacing is preserved. */
 .proposal-excerpt {
-  margin: 0 0 8px;
+  margin: 0;
   padding-left: 10px;
   border-left: 2px solid var(--border-strong);
   font-size: 12px;
@@ -248,10 +280,10 @@
 .proposal-pending-note,
 .proposal-current-absent {
   margin: 0 0 8px;
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.5;
   color: var(--text-tertiary);
-  max-width: 78ch;
+  max-width: 68ch;
 }
 
 /*
@@ -803,4 +835,85 @@
   padding-left: var(--space-sm);
   border-left: 2px solid var(--border-faint);
   color: var(--text-secondary);
+}
+
+/* ── Why this was proposed (owner QA P1, 2026-09-22) ──────────────────────────
+   The provenance disclosure on every card. The body's own paragraphs keep their
+   existing classes and spacing; only the box around them is the shared one. */
+.proposal-why {
+  margin-top: var(--space-sm);
+}
+.proposal-why .disclosure-trigger {
+  min-height: 36px;
+  font-size: var(--font-size-meta);
+}
+.proposal-why .proposal-history {
+  margin-top: var(--space-sm);
+}
+
+/* ── The acceptance notice (owner QA P2) ──────────────────────────────────────
+   One compact block for "accepting cannot succeed here", used for the health
+   preflight and for a 409 human_actor_required. Neutral, not the failure red:
+   nothing about the record is wrong, and nothing failed that a reader did. */
+.proposals-lock {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-sm) var(--space-md);
+  padding: var(--space-sm) var(--space-md);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-control);
+  background: var(--surface-subtle);
+}
+.proposals-lock-line {
+  /* Icon in its own column, so the title never wraps away from its lock. */
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: var(--space-2xs) var(--space-sm);
+  flex: 1 1 18rem;
+  min-width: 0;
+  margin: 0;
+  font-size: var(--font-size-body);
+  line-height: var(--line-height-snug);
+  color: var(--text-secondary);
+}
+.proposals-lock-icon {
+  flex: none;
+  color: var(--text-slate);
+}
+.proposals-lock-title {
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-heading);
+}
+.proposals-lock-text {
+  grid-column: 2;
+}
+.proposals-lock-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: var(--space-sm);
+}
+/* `Why?` opens its account BELOW the whole row, across the notice's width. */
+.proposals-lock-why {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+}
+.proposals-lock-why-body {
+  flex-basis: 100%;
+  max-width: 68ch;
+}
+.proposals-lock-why-body[hidden] {
+  display: none;
+}
+.proposals-lock-why-text {
+  margin: 0;
+  font-size: var(--font-size-meta);
+  line-height: var(--line-height-normal);
+  color: var(--text-secondary);
+}
+.proposals-lock-why-text + .proposals-lock-why-text {
+  margin-top: var(--space-xs);
 }

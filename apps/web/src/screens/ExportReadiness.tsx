@@ -8,6 +8,7 @@ import { RecordRail } from '../components/RecordRail';
 import { StatusBar } from '../components/StatusBar';
 import { VerdictCard } from '../components/VerdictCard';
 import { RunFindings } from '../components/RunFindings';
+import { BlockerItems } from '../components/BlockerItems';
 import { CoverageBadge } from '../components/CoverageBadge';
 import { AdvisoryChip } from '../components/AdvisoryChip';
 import { ArtifactCard } from '../components/ArtifactCard';
@@ -658,12 +659,8 @@ function LoadedExport({
                 {officialNoVerdictOnWrittenRecordSentence(officialFindingSource(validate))}
               </p>
               {validate.errors.length > 0 && (
-                <ul className="preexport-errors mono">
-                  {validate.errors.map((e, i) => (
-                    <li key={`${e.path}-${i}`}>
-                      <span className="preexport-error-path">{e.path}</span> — {e.message}
-                    </li>
-                  ))}
+                <ul className="preexport-errors">
+                  <BlockerItems errors={validate.errors} />
                 </ul>
               )}
               <button type="button" className="btn btn-secondary" onClick={() => onRefresh()}>
@@ -885,12 +882,15 @@ function LoadedExport({
                   officialCheckedDocument(validate),
                 )}
               </p>
-              <ul className="preexport-errors mono">
-                {validate.errors.map((e, i) => (
-                  <li key={`${e.path}-${i}`}>
-                    <span className="preexport-error-path">{e.path}</span> — {e.message}
-                  </li>
-                ))}
+              {/* One row per finding: the field in human words where the finding's
+                  own path names one (the official path one `?` away), then the
+                  validator's sentence VERBATIM — visible, because a blocking error
+                  is never disclosed away (DEC-35). No `Go to Field` here: these are
+                  the record's findings, not a run's, and the five run-level inputs
+                  are the only destinations a link could honestly reach (DEC-30).
+                  The per-run list below carries that control. */}
+              <ul className="preexport-errors">
+                <BlockerItems errors={validate.errors} />
               </ul>
               <button
                 type="button"
@@ -934,7 +934,7 @@ function LoadedExport({
           through untouched. It is separate from the verdict in the markup and in
           the copy, and no warning count enters any pass/fail figure. */}
       {validate.runs && validate.runs.length > 0 && (
-        <RunFindings runs={validate.runs} warningRuns={warnings.runs} />
+        <RunFindings runs={validate.runs} warningRuns={warnings.runs} experimentId={id} />
       )}
 
       {/* SUBMISSION HISTORY, AND IT IS DELIBERATELY BELOW EXPORT RATHER THAN BESIDE

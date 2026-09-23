@@ -448,7 +448,10 @@ test.describe('two scientists, two real browsers, one record', () => {
         const technique = techniqueOptions[0];
 
         const recordPanel = page.getByRole('region', {
-          name: 'Record Description (record-level values)',
+          // The region is named for its heading alone since owner QA F1 (2026-09-22) —
+      // the machine-side qualifier no longer reaches a screen reader.
+      name: 'Record Description',
+      exact: true,
         });
         await recordPanel.getByRole('button', { name: /^Record Description/ }).click();
 
@@ -771,12 +774,21 @@ test.describe('two scientists, two real browsers, one record', () => {
 
         // ---- "Review N Proposals" MOVES FOCUS ---------------------------------
         await bPage.getByRole('button', { name: `Review ${mintedByTranscript} Proposals` }).click();
-        const focused = await activeElement(bPage);
-        expect(
-          focused.id,
-          'step 3: the review control moved focus to the proposals heading rather than ' +
-            'only scrolling — a scroll is invisible to a keyboard reader',
-        ).toBe('ingestion-proposals-heading');
+        /*
+         * POLLED, NOT SAMPLED ONCE (2026-09-22). The hand-off lands after the view
+         * switch commits — the navigation runs in a React transition and the first
+         * visit MOUNTS the Proposals workspace — so a sample taken the instant the
+         * click resolves reads the button that was pressed. Measured locally: the
+         * button at +0 ms, the heading from ~15 ms. CI failed the one-shot read on
+         * both attempts. The claim is unchanged: focus ARRIVES at the heading.
+         */
+        await expect
+          .poll(async () => (await activeElement(bPage)).id, {
+            message:
+              'step 3: the review control moved focus to the proposals heading rather than ' +
+              'only scrolling — a scroll is invisible to a keyboard reader',
+          })
+          .toBe('ingestion-proposals-heading');
 
         // ---- and B proposes from a stored NOTE, at a different target ---------
         const notes = await serverNotes(request, id);
@@ -1026,6 +1038,8 @@ test.describe('two scientists, two real browsers, one record', () => {
           await runFieldValue(server, id, runTwo.id, TRANSCRIPT_TARGETS.temperature.path),
           'step 5: the server holds nothing at the temperature target yet',
         ).toBeUndefined();
+        // Behind "Why This Was Proposed" since owner QA P1 (2026-09-22).
+        await card.getByRole('button', { name: 'Why This Was Proposed' }).click();
         await card.getByRole('button', { name: 'Show What the Record Holds Now' }).click();
         await expect(
           card.locator('.proposal-current-absent'),
@@ -1052,6 +1066,8 @@ test.describe('two scientists, two real browsers, one record', () => {
           'step 5: the note-proposal names run two as well',
         ).toHaveText(`On run ${runTwo.label}`);
         await expect(envCard.locator('.proposal-value-body').first()).toContainText(envProposed);
+        // Behind "Why This Was Proposed" since owner QA P1 (2026-09-22).
+        await envCard.getByRole('button', { name: 'Why This Was Proposed' }).click();
         await envCard.getByRole('button', { name: 'Show What the Record Holds Now' }).click();
         const envCurrent = envCard.locator('.proposal-current-body .proposal-value-body');
         await expect(envCurrent, 'step 5: the current value is RUN TWO’s').toContainText(envTwo);

@@ -1,6 +1,8 @@
 import './assistant.css';
-import { useState } from 'react';
+import { useId, useState } from 'react';
 import { Check, CircleHelp, MessageSquare } from './icons';
+import { Disclosure } from './Disclosure';
+import { HelpTip } from './HelpTip';
 import { LABELS } from '../lib/labels';
 import { answerValuePreview } from '../lib/adapt';
 import { TUTORIAL_ANCHORS } from '../lib/tutorialSteps';
@@ -121,6 +123,7 @@ export function GuidedPrompt({
     setTextState(value);
     onTextChange?.(value);
   };
+  const questionId = useId();
   const [staged, setStaged] = useState(initialStaged); // structured: demo value accepted for confirm
   /* A QC verdict is two inputs that only mean something together — the verdict and
      the reasoning behind it — so they are staged together and submitted as one value.
@@ -309,7 +312,17 @@ export function GuidedPrompt({
         <span className="guided-index">
           Question {index + 1} of {total}
         </span>
-        <span className="guided-path">{blocker.path}</span>
+        {/* The official path is one `?` away (owner QA F4, 2026-09-22) — it used to
+            be a mono chip on every card, and again as the input's label. Named
+            generically and described by the question, so it never collides with
+            the question's own words. */}
+        <span className="guided-path-tip">
+          <HelpTip subject={blocker.label} label="Official Field Details" describedBy={questionId}>
+            <span>
+              Official field: <code className="guided-path">{blocker.path}</code>
+            </span>
+          </HelpTip>
+        </span>
       </div>
 
       {/* WHOSE QUESTION THIS IS. Without it, three runs each needing a spectrum render
@@ -325,7 +338,9 @@ export function GuidedPrompt({
         </p>
       )}
 
-      <h2 className="guided-question">{blocker.question}</h2>
+      <h2 className="guided-question" id={questionId}>
+        {blocker.question}
+      </h2>
       {blocker.context && <p className="guided-context">{blocker.context}</p>}
 
       {/* WHY the app is asking instead of answering. Rendered verbatim from the
@@ -334,13 +349,19 @@ export function GuidedPrompt({
           exposed as a data attribute so a test can assert the pairing of state
           and copy; a `supported_suggestion` would carry a value, and no blocker
           state ever does (see `inferability.blocker_inferability`). */}
+      {/* ONE LINE OF PROSE ON THE CARD, THE REASON ONE CLICK AWAY (owner QA,
+          DEC-35). The context line above stays visible — it says what to do; the
+          server's inferability explanation is WHY the app asks rather than answers,
+          and is still rendered verbatim, in the DOM, inside the disclosure. */}
       {blocker.inferability && (
-        <p
-          className="guided-inferability"
-          data-inferability-state={blocker.inferability.state}
-        >
-          {blocker.inferability.explanation}
-        </p>
+        <Disclosure summary="Why ISAAC Asks Instead of Filling It In" className="guided-why">
+          <p
+            className="guided-inferability"
+            data-inferability-state={blocker.inferability.state}
+          >
+            {blocker.inferability.explanation}
+          </p>
+        </Disclosure>
       )}
 
       {/* `role="group"` below: `generic` cannot carry a name, so "Example answer
@@ -371,7 +392,7 @@ export function GuidedPrompt({
       <div className="guided-field">
         {isVerdict ? (
           <>
-            <div className="guided-field-label">{blocker.path}</div>
+            <div className="guided-field-label">{blocker.label}</div>
             <div className="guided-verdict">
               <fieldset className="guided-verdict-set">
                 <legend className="guided-verdict-legend">QC verdict</legend>
@@ -430,7 +451,7 @@ export function GuidedPrompt({
           </>
         ) : structured ? (
           <>
-            <div className="guided-field-label">{blocker.path}</div>
+            <div className="guided-field-label">{blocker.label}</div>
             {demo ? (
               staged ? (
                 <div className="guided-staged" role="status">
@@ -493,7 +514,7 @@ export function GuidedPrompt({
         ) : (
           <>
             <div className="guided-field-label">
-              {blocker.inputType === 'hash' ? 'sha256' : blocker.path}
+              {blocker.inputType === 'hash' ? LABELS.hashInputLabel : blocker.label}
             </div>
             <div className="guided-input-row">
               <input

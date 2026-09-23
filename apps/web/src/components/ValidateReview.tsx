@@ -1,6 +1,9 @@
 import './validate-review.css';
 import { useId, useState } from 'react';
-import { Check, TriangleAlert, CircleHelp } from './icons';
+import { BlockerItems } from './BlockerItems';
+import { Disclosure } from './Disclosure';
+import { HelpTip } from './HelpTip';
+import { SemanticStatus, type SemanticState } from './SemanticStatus';
 import { FindingList } from './RunFindingList';
 import { runFindingState, type RunFindingState } from './RunFindings';
 import { count } from '../lib/assistantPaths';
@@ -144,11 +147,13 @@ const STATE_WORD: Record<RunFindingState, string> = {
   unavailable: 'No verdict',
 };
 
-const STATE_ICON = {
-  pass: Check,
-  fail: TriangleAlert,
-  unavailable: CircleHelp,
-} as const;
+/** The shared status chip for each state — icon + word, never colour alone. The
+    word is still `STATE_WORD`'s, so "No verdict" is never relabelled "Unavailable". */
+const STATE_SEMANTIC: Record<RunFindingState, SemanticState> = {
+  pass: 'ready',
+  fail: 'invalid',
+  unavailable: 'unavailable',
+};
 
 /**
  * The clause each state contributes to the section tally.
@@ -370,8 +375,7 @@ export function ValidateReview({ experimentId }: { experimentId: string }) {
         accessibility tree; the read-only promise inside it is therefore still
         present for a screen reader and still greppable.
       */}
-      <details className="vr-about">
-        <summary className="vr-about-summary">What this checks</summary>
+      <Disclosure summary="What this checks" className="vr-about">
       <p className="vr-sub">
         {review.status !== 'data'
           ? 'Checks this record against the same deterministic validators the export gate uses — each run separately if it has runs — and lists what was found, so you can decide what to fix. '
@@ -380,7 +384,7 @@ export function ValidateReview({ experimentId }: { experimentId: string }) {
             : 'Checks this record against the same deterministic validators the export gate uses, and lists what they found, so you can decide what to fix. '}
         Read-only: nothing here is written, exported, submitted, or repaired for you.
       </p>
-      </details>
+      </Disclosure>
 
       <div className="vr-actions">
         <button
@@ -418,6 +422,16 @@ export function ValidateReview({ experimentId }: { experimentId: string }) {
 
       {review.status === 'data' && (
         <>
+          {/*
+            THE TWO STANDING NOTES ARE REFERENCE, NOT FINDINGS (owner QA V1, DEC-35;
+            2026-09-22). They sat as two paragraphs ABOVE every run, so the first
+            thing a scientist read after pressing the button was prose rather than
+            what blocks export. They are one disclosure away now, and deliberately
+            still in the DOM: `help-claim-parity` §8 reads them, and each unit's own
+            heading still says, visibly, whether the official ISAAC schema produced
+            its findings — which is the misreading the second note guards against.
+          */}
+          <Disclosure summary="How to read these results" className="vr-notes">
           <p className="vr-note">
             {hasRuns
               ? 'Each run exports its own official ISAAC record, so each one is checked on its own. ' +
@@ -464,6 +478,7 @@ export function ValidateReview({ experimentId }: { experimentId: string }) {
             schema verdict, ISAAC&rsquo;s own findings and the combined verdict reported
             separately, use the Standalone Validator on Governance &amp; Safety.
           </p>
+          </Disclosure>
 
           <ul className="vr-list">
             {units.map((unit, i) => (
@@ -641,7 +656,6 @@ function UnitGroup({
      and WHICH document was read. See `lib/officialAttribution.ts`. */
   const source = officialFindingSource(unit.verdict);
   const documentSentence = officialDocumentSentence(officialCheckedDocument(unit.verdict));
-  const Icon = STATE_ICON[state];
   const errors = unit.verdict.errors;
   // `undefined` advice is NOT an empty advice list — see {@link adviceFor}. The
   // rendered list is empty either way (there is nothing attributable to render),
@@ -655,22 +669,29 @@ function UnitGroup({
       {/* A real heading, so a screen reader can jump run to run. `h3` because the
           section's own heading is `h2` and the findings blocks below are `h4` —
           no level is skipped anywhere in this subtree. */}
-      <h3 className="vr-unit-head">
-        {/* Icon + word: the state is never carried by colour alone. */}
-        <span className={`vr-state vr-state-${state}`}>
-          <Icon size={14} strokeWidth={2.2} aria-hidden="true" />
-          {STATE_WORD[state]}
-        </span>
-        <span className="vr-unit-label">{unit.label}</span>
-      </h3>
-
-      {(unit.runId !== null || unit.recordId) && (
-        <p className="vr-unit-ids mono">
-          {unit.runId ? <>run {unit.runId}</> : null}
-          {unit.runId && unit.recordId ? ' · ' : null}
-          {unit.recordId ? <>record {unit.recordId}</> : null}
-        </p>
-      )}
+      <div className="vr-unit-headrow">
+        <h3 className="vr-unit-head">
+          {/* Icon + word: the state is never carried by colour alone. */}
+          <SemanticStatus
+            state={STATE_SEMANTIC[state]}
+            label={STATE_WORD[state]}
+            size="sm"
+            className={`vr-state vr-state-${state}`}
+          />
+          <span className="vr-unit-label">{unit.label}</span>
+        </h3>
+        {/* The run and record ids are identifiers a curator may need and a
+            scientist reading the verdict does not — one `?` away, never removed. */}
+        {(unit.runId !== null || unit.recordId) && (
+          <HelpTip subject={`${unit.label} identifiers`} label={`Identifiers for ${unit.label}`}>
+            <span className="vr-unit-ids mono">
+              {unit.runId ? <>run {unit.runId}</> : null}
+              {unit.runId && unit.recordId ? ' · ' : null}
+              {unit.recordId ? <>record {unit.recordId}</> : null}
+            </span>
+          </HelpTip>
+        )}
+      </div>
 
       {/* WHICH DOCUMENT WAS CHECKED, and NOT CLAIMED AT ALL for a no-verdict unit.
           `_validate_unit`'s materialised-unreadable branch returns `dry_run: false`
@@ -712,26 +733,37 @@ function UnitGroup({
               {`Blocks export · ${count(errors.length, 'finding')} · ${officialFindingsHeading(source)}`}
             </h4>
           )}
-          <ul className="vr-errors mono">
-            {/* `err.path` is NOT unique — several missing required properties all
-                report at `$` — so the index is part of the key. The message is
-                verbatim: paraphrasing would change what the validator said. */}
-            {errors.map((err, j) => (
-              <li key={`${j}:${err.path}`}>
-                <span className="vr-error-path">{err.path}</span> — {err.message}
-              </li>
-            ))}
+          {/* One row per finding (`BlockerItems`): the field in human words where
+              the finding's own path names one, the official path one `?` away, the
+              message VERBATIM and visible — a blocking error is never disclosed
+              away (DEC-35) — and `Go to Field` only for the five run-level fields
+              the Runs editor renders an input for (DEC-30). */}
+          <ul className="vr-errors">
+            <BlockerItems
+              errors={errors}
+              experimentId={state === 'unavailable' ? undefined : experimentId}
+              runId={unit.runId}
+            />
           </ul>
         </>
       )}
 
       {adviceWarnings.length > 0 && (
-        <div className="vr-advisory">
-          <h4 className="vr-advisory-title">
-            Advisory · non-gating — {adviceWarnings.length}{' '}
-            {adviceWarnings.length === 1 ? 'note' : 'notes'}. These never change this
-            run&rsquo;s verdict and never block export.
-          </h4>
+        /* SECONDARY, AND ONE CLICK AWAY (owner QA V1). The count and "never
+           blocks export" stay in the visible summary, so an advisory can never be
+           read as a failure and is never hidden entirely; the entries themselves
+           are the detail. */
+        <Disclosure
+          className="vr-advisory"
+          headingLevel={4}
+          summary={
+            <span className="vr-advisory-title">
+              Advisory · non-gating — {adviceWarnings.length}{' '}
+              {adviceWarnings.length === 1 ? 'note' : 'notes'}. These never change this
+              run&rsquo;s verdict and never block export.
+            </span>
+          }
+        >
           <ul className="vr-advisory-list">
             {adviceWarnings.map((warning, j) => (
               <li key={`${j}:${warning.code}`}>
@@ -740,7 +772,7 @@ function UnitGroup({
               </li>
             ))}
           </ul>
-        </div>
+        </Disclosure>
       )}
 
       {onCheckDetail !== undefined && (

@@ -213,6 +213,29 @@ function methods(): string[] {
   return calls.map(([, init]) => (init?.method ?? 'GET').toUpperCase());
 }
 
+/**
+ * OWNER QA P1 (2026-09-22): each card's provenance — the rule, the note, the
+ * on-demand read of what the record holds, what leaving it alone means, and the
+ * history — sits behind "Why This Was Proposed". Opens every card's disclosure, as
+ * a reader would, so a test reaches what it names. Nothing inside it changed.
+ */
+function openWhy() {
+  for (const trigger of screen.queryAllByRole('button', { name: 'Why This Was Proposed' })) {
+    if (trigger.getAttribute('aria-expanded') === 'false') fireEvent.click(trigger);
+  }
+}
+
+/**
+ * The visible state line. Since owner QA P1 it is a `SemanticStatus` chip plus, for
+ * accepted and the closed states, the clause beside it — so the sentence is read off
+ * `.proposal-state` rather than one text node.
+ */
+function stateLine(): string[] {
+  return Array.from(document.querySelectorAll('.proposal-state')).map((el) =>
+    (el.textContent ?? '').replace(/\s+/g, ' ').trim(),
+  );
+}
+
 /** Every URL requested, so a paging cursor is assertable. */
 function urls(): string[] {
   const calls = (globalThis.fetch as Mock).mock.calls as [string, RequestInit?][];
@@ -854,6 +877,7 @@ describe('a proposal is never presented as the field value', () => {
     // NOT read on mount: a panel whose ordinary state is empty must not issue N reads.
     expect(urls().some((u) => u.includes('/runs/'))).toBe(false);
 
+    openWhy();
     fireEvent.click(screen.getByRole('button', { name: 'Show What the Record Holds Now' }));
 
     await screen.findByText("This run's own value, read just now");
@@ -904,6 +928,7 @@ describe('a proposal is never presented as the field value', () => {
     renderPanel();
 
     await screen.findByText('Proposed value');
+    openWhy();
     fireEvent.click(screen.getByRole('button', { name: 'Show What the Record Holds Now' }));
 
     await screen.findByText("This run's override of the record's value, read just now");
@@ -945,6 +970,7 @@ describe('a proposal is never presented as the field value', () => {
     renderPanel();
 
     await screen.findByText('Proposed value');
+    openWhy();
     fireEvent.click(screen.getByRole('button', { name: 'Show What the Record Holds Now' }));
 
     await screen.findByText("This run's own value, read just now");
@@ -981,6 +1007,7 @@ describe('a proposal is never presented as the field value', () => {
     renderPanel();
 
     await screen.findByText('Proposed value');
+    openWhy();
     fireEvent.click(screen.getByRole('button', { name: 'Show What the Record Holds Now' }));
 
     await screen.findByText("The record's own draft, read just now");
@@ -1018,6 +1045,7 @@ describe('a proposal is never presented as the field value', () => {
     renderPanel();
 
     await screen.findByText('Proposed value');
+    openWhy();
     fireEvent.click(screen.getByRole('button', { name: 'Show What the Record Holds Now' }));
 
     await screen.findByText('No value is stored at this field path.');
@@ -1727,7 +1755,7 @@ describe('a closed proposal', () => {
     });
     renderPanel();
 
-    await screen.findByText('Rejected — kept on the record');
+    await waitFor(() => expect(stateLine()).toEqual(['Rejected — kept on the record']));
     expect(screen.queryByRole('button', { name: 'Reject…' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Accept as Proposed' })).toBeNull();
 
@@ -1735,6 +1763,7 @@ describe('a closed proposal', () => {
     // a history that dropped the opening `propose` would read as starting at the
     // refusal, which is exactly the record it exists to keep complete.
     expect(screen.queryByText(/reason: the sheet says Cu2O/)).toBeNull();
+    openWhy();
     fireEvent.click(screen.getByRole('button', { name: /Show history \(2 acts\)/ }));
     expect(screen.getByText('propose')).toBeTruthy();
     expect(screen.getByText('reject')).toBeTruthy();
@@ -1748,7 +1777,7 @@ describe('a closed proposal', () => {
     });
     renderPanel();
 
-    await screen.findByText('Withdrawn — kept on the record');
+    await waitFor(() => expect(stateLine()).toEqual(['Withdrawn — kept on the record']));
     // The proposal's own content is still on screen. A card that hid it would be
     // presenting a state as a removal, which is the one thing none of these states is.
     expect(screen.getByText('Proposed value')).toBeTruthy();
@@ -2463,7 +2492,7 @@ describe('the state filter', () => {
     expect(select.value).toBe('all');
     // The FIRST read asked for no state at all.
     expect(urls()[0].endsWith('/proposals')).toBe(true);
-    expect(screen.getByText('Rejected — kept on the record')).toBeTruthy();
+    await waitFor(() => expect(stateLine()).toEqual(['Rejected — kept on the record']));
   });
 
   it('offers exactly the states the SERVER reported, with its own counts', async () => {
@@ -2693,5 +2722,139 @@ describe('run labels for the scope line (F1/F2, independent review of PR-D, post
     expect(scopeTwo?.textContent).toBe('On run Run 2');
     expect(scopeOne?.textContent).not.toContain(RUN_ONE);
     expect(scopeTwo?.textContent).not.toContain(RUN_TWO);
+  });
+});
+
+// --- 12. the acceptance preflight (owner QA P2, 2026-09-22) ---------------------
+//
+// `GET /api/health` MAY carry `proposal_acceptance: {available, reason}`. The screen
+// passes it down; this panel reads it in THREE states and they must stay distinct:
+// `true` and ABSENT behave exactly as before (Accept offered, a refusal reported
+// when it arrives), and only `false` — the server saying, before any click, that
+// accepting cannot succeed here — locks Accept, with its reason, behind ONE notice.
+
+describe('the acceptance preflight', () => {
+  function renderWith(
+    acceptance: { available: boolean; reason: string | null } | undefined,
+    onReloadAcceptance: () => unknown = () => undefined,
+  ) {
+    return render(
+      <MemoryRouter
+        initialEntries={['/']}
+        future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+      >
+        <IngestionProposalsPanel
+          experimentId={EXP}
+          activity={null}
+          acceptance={acceptance}
+          onReloadAcceptance={onReloadAcceptance}
+        />
+      </MemoryRouter>,
+    );
+  }
+  const notice = () => screen.queryByText('Acceptance unavailable on this deployment');
+
+  it('available: true — Accept is offered and no notice is shown', async () => {
+    stubFetchRoutes({ [LIST]: { body: page([proposalFixture()]) } });
+    renderWith({ available: true, reason: null });
+    const accept = await screen.findByRole('button', { name: 'Accept as Proposed' });
+    expect((accept as HTMLButtonElement).disabled).toBe(false);
+    expect(accept.getAttribute('aria-describedby')).toBeNull();
+    expect(notice()).toBeNull();
+  });
+
+  it('ABSENT — behaves exactly as before the block existed: offered, no notice', async () => {
+    stubFetchRoutes({ [LIST]: { body: page([proposalFixture()]) } });
+    renderWith(undefined);
+    const accept = await screen.findByRole('button', { name: 'Accept as Proposed' });
+    expect((accept as HTMLButtonElement).disabled).toBe(false);
+    expect(notice()).toBeNull();
+  });
+
+  it('available: false — ONE notice, Accept locked with its reason, refusing acts untouched', async () => {
+    stubFetchRoutes({
+      [LIST]: {
+        body: page([proposalFixture(), proposalFixture({ proposal_id: 'P2', note_id: 'N2' })]),
+      },
+    });
+    renderWith({ available: false, reason: 'no_verifier_configured' });
+
+    const accepts = await screen.findAllByRole('button', { name: 'Accept as Proposed' });
+    // ONE notice for the panel, not one per card.
+    expect(screen.getAllByText('Acceptance unavailable on this deployment')).toHaveLength(1);
+    expect(screen.getByText('Trusted scientist identity has not been enabled yet.')).toBeTruthy();
+    const lock = document.querySelector('.proposals-lock') as HTMLElement;
+    expect(lock.id).not.toBe('');
+    for (const accept of accepts) {
+      // LOCKED, and the reason is announced WITH the control.
+      expect((accept as HTMLButtonElement).disabled).toBe(true);
+      expect(accept.getAttribute('aria-describedby')).toBe(lock.id);
+    }
+    // The correction path is an acceptance too, so it is locked the same way.
+    fireEvent.click(screen.getAllByRole('button', { name: 'More Actions' })[0]);
+    const correct = screen.getByRole('button', { name: 'Correct the Value, Then Accept' });
+    expect((correct as HTMLButtonElement).disabled).toBe(true);
+    expect(correct.getAttribute('aria-describedby')).toBe(lock.id);
+    // Rejecting, superseding and withdrawing need no identity — never locked.
+    for (const reject of screen.getAllByRole('button', { name: 'Reject…' })) {
+      expect((reject as HTMLButtonElement).disabled).toBe(false);
+    }
+    expect((screen.getByRole('button', { name: 'Withdraw…' }) as HTMLButtonElement).disabled).toBe(
+      false,
+    );
+  });
+
+  it('Why? opens the account in place, and Reload asks the health again', async () => {
+    stubFetchRoutes({ [LIST]: { body: page([proposalFixture()]) } });
+    const reload = vi.fn();
+    renderWith({ available: false, reason: 'no_verifier_configured' }, reload);
+    await screen.findByText('Acceptance unavailable on this deployment');
+
+    const why = screen.getByRole('button', { name: 'Why?' });
+    expect(why.getAttribute('aria-expanded')).toBe('false');
+    fireEvent.click(why);
+    expect(why.getAttribute('aria-expanded')).toBe('true');
+    expect(screen.getByText(/an acceptance would be refused and nothing would be written/)).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Reload' }));
+    expect(reload).toHaveBeenCalledTimes(1);
+  });
+
+  it('an unrecognised reason is named verbatim, never swept into the identity sentence', async () => {
+    stubFetchRoutes({ [LIST]: { body: page([proposalFixture()]) } });
+    renderWith({ available: false, reason: 'maintenance_window' });
+    await screen.findByText('Acceptance unavailable on this deployment');
+    expect(screen.queryByText('Trusted scientist identity has not been enabled yet.')).toBeNull();
+    expect(
+      screen.getByText('This deployment reports that no proposal can be accepted here.'),
+    ).toBeTruthy();
+    expect(screen.getByText('maintenance_window')).toBeTruthy();
+  });
+
+  it('shows no notice when nothing in the window could be accepted anyway', async () => {
+    stubFetchRoutes({ [LIST]: { body: page([proposalFixture({ state: 'rejected' })]) } });
+    renderWith({ available: false, reason: 'no_verifier_configured' });
+    await waitFor(() => expect(stateLine()).toEqual(['Rejected — kept on the record']));
+    expect(notice()).toBeNull();
+  });
+
+  it('a 409 human_actor_required that arrives anyway renders in the same compact form', async () => {
+    stubFetchRoutes({
+      [LIST]: { body: page([proposalFixture()]) },
+      [`POST /api/experiments/${EXP}/proposals/P1/review`]: {
+        status: 409,
+        body: { error: 'human_actor_required' },
+      },
+    });
+    renderWith(undefined);
+    fireEvent.click(await screen.findByRole('button', { name: 'Accept as Proposed' }));
+    const alert = await screen.findByRole('alert');
+    expect(alert.classList.contains('proposals-lock')).toBe(true);
+    expect(within(alert).getByText('Acceptance refused on this deployment')).toBeTruthy();
+    expect(alert.textContent).toMatch(/Nothing was written/);
+    // The server-derived account is behind Why?, verbatim — still the whole claim.
+    expect(alert.textContent).toMatch(/retrying will not change it/);
+    expect(within(alert).getByRole('button', { name: 'Why?' })).toBeTruthy();
+    expect(within(alert).getByRole('button', { name: 'Reload This Section' })).toBeTruthy();
   });
 });
