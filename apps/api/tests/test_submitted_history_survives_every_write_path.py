@@ -452,6 +452,39 @@ def test_no_shipped_write_route_mutates_a_submitted_records_history(client, db):
             headers={"If-Match": _etag(client, eid)},
         )
 
+    def record_a_convention_rule():
+        """Store a reviewed convention rule ON this submitted record (2026-09-22).
+
+        SWEPT RATHER THAN EXEMPTED. The import-scoped form writes only the session,
+        but the `experiment`-scoped form names an experiment in its body and rewrites
+        that experiment's document — it appends to `state["convention_rules"]` and
+        records one activity event, under the record's `If-Match`. "It only touches
+        `convention_rules` and `activity`" is a claim about the code, and this file
+        establishes such claims by issuing the request. A rule writes no field, so
+        it is ACCEPTED on a submitted record exactly as a note is.
+        """
+        from isaac_api.bl15 import profiles as _profiles
+
+        created = client.post("/api/imports", json={"label": "sweep-rule"})
+        if created.status_code >= 300:  # pragma: no cover - the create cannot refuse
+            return created
+        import_id = created.json()["import"]["import_id"]
+        default = _profiles.PROFILES[_profiles.DEFAULT_PROFILE_ID]
+        return client.post(
+            f"/api/imports/{import_id}/rules",
+            json={
+                "kind": "profile_binding",
+                "scope": "experiment",
+                "experiment_id": eid,
+                "selector": {"legacy_range": [1, 1]},
+                "body": {
+                    "profile_id": default.profile_id,
+                    "profile_version": default.profile_version,
+                },
+            },
+            headers={"If-Match": _etag(client, eid)},
+        )
+
     attempts: list[tuple[str, object, object]] = [
         (
             "PATCH /experiments/{id}",
@@ -661,6 +694,13 @@ def test_no_shipped_write_route_mutates_a_submitted_records_history(client, db):
                 "whole batch is refused and nothing is written",
             ),
             add_a_whole_import,
+        ),
+        (
+            # A REVIEWED CONVENTION RULE STORED ON THE RECORD. See
+            # `record_a_convention_rule`: ACCEPTED, and it really writes.
+            "POST /imports/{id}/rules",
+            ACCEPTED,
+            record_a_convention_rule,
         ),
         (
             # ACCEPTED, AND THE ACCEPTANCE REALLY WRITES. This app fixture sets the
@@ -1331,6 +1371,7 @@ def test_the_sweep_covers_every_mutating_route_this_api_publishes(app):
             "POST",
             "/api/imports/{import_id}/add-to-experiment",
         ): "POST /imports/{id}/add-to-experiment",
+        ("POST", "/api/imports/{import_id}/rules"): "POST /imports/{id}/rules",
     }
 
     unaccounted = sorted(

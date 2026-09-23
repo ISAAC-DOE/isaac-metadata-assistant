@@ -427,8 +427,12 @@ def test_the_archive_reading_offers_only_level_four_statements(workspace):
     assert "sample_name" not in concepts
     assert "potential_magnitude" not in concepts
     assert "acquisition_timestamp" not in concepts
-    # THE PROFILE IS RECORDED, not assumed by a consumer — `DEC-43` (ii) keys on it.
-    assert reading.profile_id == "ssrl_bl152_angel"
+    # THE PROFILE IS RECORDED, not assumed by a consumer. ~~`ssrl_bl152_angel`~~ —
+    # renamed 2026-09-22 for the convention it encodes; the historical id resolves to it.
+    from isaac_api.bl15 import profiles
+
+    assert reading.profile_id == "ssrl_bl152_herfd_echem_naming"
+    assert profiles.canonical_profile_id("ssrl_bl152_angel") == reading.profile_id
     assert reading.profile_version == "1"
 
 
@@ -746,236 +750,186 @@ def test_an_orphan_companion_is_prunable_rather_than_permanent(workspace):
 
 
 # =============================================================================
-# W4 — `DEC-43`: the one nominal value, offered
+# W4 — ~~`DEC-43`: the one nominal value, offered~~ — SUPERSEDED 2026-09-22
 # =============================================================================
+#
+# These tests pinned that the BL15-2 profile's runs were OFFERED 298 K. The domain owner
+# withdrew that on 2026-09-22: missing temperature stays missing, with no automatic
+# insert and no automatic proposal. So the default-offer tests are INVERTED (nothing is
+# offered), and the safety properties the offer carried — the qualifier travels, the
+# value never reaches the run without a person, the default configuration refuses the
+# acceptance — are kept and now asserted of the REVIEWED-RULE path, enabled only through
+# the test seam `nominal.reviewed_rule_registered_for_tests`.
 
 
-def test_the_nominal_value_is_offered_as_a_proposal_with_its_disclosure(client):
-    """`DEC-43` CONDITIONS (i) AND (iv), TOGETHER, BECAUSE THEY ARE ONE DESIGN.
+def _test_rule(**over) -> nominal.NominalRule:
+    from isaac_api.bl15 import profiles
 
-    (iv) The value is supplied *on the scientist's authority, not the parser's*, so
-    it arrives as an OPEN proposal — the one object here that records a person taking
-    authority for a value — and NOT as a written field. Nothing is in the draft yet.
+    fields = dict(
+        rule_id="test-rule-satp",
+        rule_version="1",
+        profile_id=profiles.DEFAULT_PROFILE_ID,
+        profile_version=profiles.PROFILES[profiles.DEFAULT_PROFILE_ID].profile_version,
+        official_path=nominal.NOMINAL_TEMPERATURE_PATH,
+        convention=nominal.CONVENTION_SATP_STYLE,
+        reviewed_basis="synthetic test fixture — never a production rule",
+    )
+    fields.update(over)
+    return nominal.NominalRule(**fields)
 
-    (i) The provenance travels: the proposal's ``rule`` is
-    ``bl15.nominal.DISCLOSURE`` VERBATIM, and the proposal model refuses a blank
-    rule, so there is no path that stores the number without the qualifier.
+
+def test_no_nominal_value_is_offered_by_default(client):
+    """**INVERTED.** It asserted one 298 K offer per created run. There are none now.
+
+    The runs are created, the temperature field stays ABSENT on every one of them, and
+    no temperature proposal exists — "no automatic insert and no automatic proposal".
     """
     import_id = _imported(client)
     eid = _record(client)
     body = _add_to_experiment(client, import_id, eid, create_runs=True)
+    assert body["counts"]["runs_created"] >= 1
+    assert body["nominal_offers"] == [], body["nominal_offers"]
+    exp = ws.load_experiment(eid)
+    assert not [
+        p for p in exp.proposals if p.target_field_path == nominal.NOMINAL_TEMPERATURE_PATH
+    ]
+    for run in exp.runs:
+        assert nominal.NOMINAL_TEMPERATURE_PATH not in (run.draft.get("fields") or {})
+    serialised = json.dumps(body)
+    assert "298" not in serialised
+    assert "293.15" not in serialised
 
+
+def test_the_session_says_temperature_is_not_recorded(client):
+    """What a surface renders: Not recorded, no automatic value, no automatic proposal."""
+    import_id = _imported(client)
+    view = client.get(f"/api/imports/{import_id}").json()["import"]
+    temperature = view["corpus_review"]["temperature"]
+    assert temperature["status"] == "not_recorded"
+    assert temperature["display"] == "Temperature — Not recorded"
+    assert temperature["automatic_value"] is None
+    assert temperature["automatic_proposal"] is False
+    assert temperature["nominal_rule_enabled_for"] == []
+    assert "DEC-43" in temperature["superseded_decision"]
+
+
+def test_a_reviewed_rule_offers_a_labelled_nominal_that_requires_confirmation(client):
+    """The path that REPLACES the exception: a reviewed, convention-naming rule OFFERS.
+
+    The offer is a PROPOSAL (never a written field), its rule is the rule's own
+    disclosure verbatim, and the payload carries the convention, `measured: false`,
+    `requires_confirmation: true` and `determinism: inferred`.
+    """
+    with nominal.reviewed_rule_registered_for_tests(_test_rule()):
+        import_id = _imported(client)
+        eid = _record(client)
+        body = _add_to_experiment(client, import_id, eid, create_runs=True)
     offers = body["nominal_offers"]
     assert offers, body.keys()
     assert len(offers) == body["counts"]["runs_created"], (len(offers), body["counts"])
-
     exp = ws.load_experiment(eid)
     for offer in offers:
-        assert offer["target_field_path"] == nominal.NOMINAL_TEMPERATURE_PATH
-        assert offer["already_offered"] is False
         payload = offer["nominal"]
-        assert payload["value"] == nominal.NOMINAL_TEMPERATURE_K == 298
+        assert offer["target_field_path"] == nominal.NOMINAL_TEMPERATURE_PATH
+        assert payload["value"] == 298.15
         assert payload["unit"] == "K"
-        # THE WORD IT IS NEVER DESCRIBED BY.
         assert payload["measured"] is False
-        assert payload["basis"] == "nominal room temperature"
-        assert payload["source_class"] == nominal.SOURCE_CLASS
-        assert payload["decision_ref"] == "DEC-43"
-        assert payload["disclosure"] == nominal.DISCLOSURE
-
+        assert payload["requires_confirmation"] is True
+        assert payload["determinism"] == "inferred"
+        assert payload["convention"]["convention_id"] == "satp_style_298_15_K"
         proposal = exp.get_proposal(offer["proposal_id"])
-        assert proposal is not None
         assert proposal.state == proposals_module.STATE_OPEN
-        assert proposal.proposed_value == 298
-        assert proposal.rule == nominal.DISCLOSURE
-        assert proposal.run_id == offer["run_id"]
-        # THE NOTE CARRIES THE DISCLOSURE TOO, under a source that claims no file.
+        assert proposal.proposed_value == 298.15
+        assert proposal.rule == payload["disclosure"]
         note = exp.get_note(proposal.note_id)
-        assert note is not None
-        assert note.text == nominal.DISCLOSURE
+        assert note.text == payload["disclosure"]
         assert note.source == "domain_guidance_nominal"
-
         # AND THE VALUE IS NOT ON THE RUN. An OFFER is not a write.
         run = exp.get_run(offer["run_id"])
         assert nominal.NOMINAL_TEMPERATURE_PATH not in (run.draft.get("fields") or {})
+    assert '"measured": true' not in json.dumps(body).lower()
 
 
-def test_nothing_in_the_offer_calls_298_measured(client):
-    """`DEC-43` (i): *a record that shows 298 K without the qualifier is a defect.*
-
-    Asserted over the whole serialised response rather than over one field, because
-    the defect is a SURFACE showing the number bare — so the thing to check is that
-    every place the number appears, the disclosure appears too, and that the only
-    sentence containing "measured" says NOT measured.
-    """
-    import_id = _imported(client)
-    eid = _record(client)
-    body = _add_to_experiment(client, import_id, eid, create_runs=True)
-    assert body["nominal_offers"]
-
-    serialised = json.dumps(body)
-    assert "298" in serialised
-    # THE DISCLOSURE TRAVELS WITH THE NUMBER, once per offer, so no surface can
-    # render the value from this payload without having the qualifier available.
-    assert serialised.count(nominal.DISCLOSURE) >= len(body["nominal_offers"])
-    assert "NOT measured" in nominal.DISCLOSURE
-    # AND NOTHING CLAIMS THE OPPOSITE. `NominalValue.measured` is a derived,
-    # always-`False` property with no field behind it, so `true` here would mean
-    # somebody had replaced the property with a stored boolean.
-    assert '"measured": true' not in serialised.lower()
-    for offer in body["nominal_offers"]:
-        assert offer["nominal"]["measured"] is False
-
-
-def test_only_the_bl15_2_angel_profile_has_a_nominal_default(client, monkeypatch):
-    """`DEC-43` CONDITION (ii), STRUCTURALLY: every other profile leaves it ABSENT.
-
-    Two halves. The lookup itself answers ``None`` for anything else — including
-    ``None`` and an unregistered id — and the ROUTE goes through that lookup rather
-    than through a profile literal of its own, which is what makes the fence
-    structural. The second half is measured by moving the reading's profile id and
-    observing that no offer is made and no proposal is minted.
-    """
-    assert nominal.nominal_temperature_for("ssrl_bl152_angel") is not None
-    assert nominal.nominal_temperature_for(None) is None
-    assert nominal.nominal_temperature_for("") is None
-    assert nominal.nominal_temperature_for("some_other_beamline_profile") is None
-    # CONDITION (iii): exactly one default, and the count is the fence.
-    assert len(nominal.NOMINAL_DEFAULTS) == 1
-
-    # THE ROUTE CONTAINS NO PROFILE LITERAL, so it cannot re-decide the scope.
+def test_a_rule_for_another_convention_offers_nothing_here(client):
+    """A rule is scoped to ONE convention; the route contains no profile literal."""
     import pathlib
 
     source = pathlib.Path(routes.__file__).read_bytes()
     assert b"ssrl_bl152_angel" not in source
+    assert b"ssrl_bl152_herfd_echem_naming" not in source
+    from isaac_api.bl15 import profiles
 
-    import_id = _imported(client)
-    eid = _record(client)
-    session = hist.load_session(import_id)
-    session.archive_reading = hist.ArchiveReading.from_state(
-        {
-            **session.archive_reading.to_state(),
-            "profile_id": "some_other_beamline_profile",
-        }
+    other = profiles.NamingProfile(
+        profile_id="synthetic_other_convention",
+        profile_version="1",
+        display_name="A synthetic convention no archive here is read under",
+        description="Synthetic. Exists for this test only.",
+        token_recognizers=(profiles.RECOGNIZER_BARE_INTEGER,),
     )
-    hist.save_session(session)
-
-    body = _add_to_experiment(client, import_id, eid, create_runs=True)
-    assert body["nominal_offers"] == [], body["nominal_offers"]
-    exp = ws.load_experiment(eid)
-    assert not [
-        p
-        for p in exp.proposals
-        if p.target_field_path == nominal.NOMINAL_TEMPERATURE_PATH
-    ]
-    # THE FIELD STAYS ABSENT AND THE RECORD STAYS BLOCKED — the pre-`DEC-43`
-    # behaviour, preserved for every other profile.
-    for run in exp.runs:
-        assert nominal.NOMINAL_TEMPERATURE_PATH not in (run.draft.get("fields") or {})
+    with profiles.registered_for_tests(other):
+        with nominal.reviewed_rule_registered_for_tests(
+            _test_rule(profile_id=other.profile_id, profile_version="1")
+        ):
+            import_id = _imported(client)
+            eid = _record(client)
+            body = _add_to_experiment(client, import_id, eid, create_runs=True)
+    assert body["nominal_offers"] == []
 
 
-def test_the_offer_is_never_made_over_a_value_that_is_already_there(client):
-    """`DEC-43` supplies the value a scientist WOULD have supplied — not one they DID.
-
-    Asserted on the second leg of the same record, because "was not offered twice"
-    and "was not offered over an answer" are different facts and only the second is
-    about shadowing a person's work.
-    """
-    import_id = _imported(client)
-    eid = _record(client)
-    first = _add_to_experiment(client, import_id, eid, create_runs=True)
-    assert first["nominal_offers"]
-
-    # A SECOND BATCH ON THE SAME RUNS OFFERS NOTHING: every measurement already has
-    # a run, so `created_runs` is empty and there is nothing new to offer on.
-    second = _add_to_experiment(client, import_id, eid, create_runs=True)
+def test_the_offer_is_never_made_twice(client):
+    """A second batch on the same runs offers nothing: every measurement has its run."""
+    with nominal.reviewed_rule_registered_for_tests(_test_rule()):
+        import_id = _imported(client)
+        eid = _record(client)
+        first = _add_to_experiment(client, import_id, eid, create_runs=True)
+        assert first["nominal_offers"]
+        second = _add_to_experiment(client, import_id, eid, create_runs=True)
     assert second["counts"]["runs_created"] == 0, second["counts"]
     assert second["nominal_offers"] == [], second["nominal_offers"]
-
     exp = ws.load_experiment(eid)
     temperature_proposals = [
-        p
-        for p in exp.proposals
-        if p.target_field_path == nominal.NOMINAL_TEMPERATURE_PATH
+        p for p in exp.proposals if p.target_field_path == nominal.NOMINAL_TEMPERATURE_PATH
     ]
     assert len(temperature_proposals) == len(first["nominal_offers"])
 
 
-def test_accepting_the_nominal_offer_records_a_persons_act(armed_client):
-    """`DEC-43` (iv), END TO END: the value reaches the run on a PERSON's acceptance.
+def test_accepting_a_reviewed_rule_offer_records_a_persons_act(armed_client):
+    """The value reaches the run only on a PERSON's acceptance, with human-act evidence.
 
-    This is the whole reason the offer is a proposal rather than a direct write.
-    Acceptance goes through the same run-field writer manual entry uses, so the value
-    arrives with the ``user_confirmation`` evidence that is the only human-act
-    evidence type this build mints — and the recorded actor is the accepting person,
-    not the parser.
-
-    IT NEEDS THE FIXTURE VERIFIER, and that is stated rather than worked around:
-    ``accept`` answers ``409 human_actor_required`` in every deployment this build
-    ships. ``test_the_default_configuration_still_refuses_acceptance`` below asserts
-    that other leg so neither is quietly lost.
+    NEEDS THE FIXTURE VERIFIER, stated rather than worked around: acceptance answers
+    ``409 human_actor_required`` in every deployment this build ships, asserted by the
+    next test.
     """
     client = armed_client
-    import_id = _imported(client)
-    eid = _record(client)
-    body = _add_to_experiment(client, import_id, eid, create_runs=True)
+    with nominal.reviewed_rule_registered_for_tests(_test_rule()):
+        import_id = _imported(client)
+        eid = _record(client)
+        body = _add_to_experiment(client, import_id, eid, create_runs=True)
     offer = body["nominal_offers"][0]
-
     response = client.post(
         f"/api/experiments/{eid}/proposals/{offer['proposal_id']}/review",
-        # `confirmed_by_user` IS REQUIRED BY THE REVIEW ROUTE, and it is the product's
-        # own expression of `DEC-43` condition (iv): a review act is somebody saying
-        # so, and the route refuses `422 confirmation_required` without it.
-        # `accepted_from: candidate` IS "the proposed value is right and is written as
-        # it stands" — the claim a scientist adopting the nominal default is making,
-        # and neither it nor `confirmed_by_user` is a default the route will supply.
-        json={
-            "action": "accept",
-            "confirmed_by_user": True,
-            "accepted_from": "candidate",
-        },
+        json={"action": "accept", "confirmed_by_user": True, "accepted_from": "candidate"},
         headers={"If-Match": _etag(client, eid)},
     )
     assert response.status_code == 200, response.text
-
     exp = ws.load_experiment(eid)
     run = exp.get_run(offer["run_id"])
     envelope = (run.draft.get("fields") or {})[nominal.NOMINAL_TEMPERATURE_PATH]
-    assert envelope["value"] == 298
-    # THE HUMAN ACT, IN THE EVIDENCE. Nothing here claims a measurement.
+    assert envelope["value"] == 298.15
     kinds = {e.get("source_type") for e in envelope.get("evidence") or []}
     assert "user_confirmation" in kinds, envelope
-    accepted = exp.get_proposal(offer["proposal_id"])
-    assert accepted.state == proposals_module.STATE_ACCEPTED
-    assert accepted.accepted_value == 298
-    assert accepted.rule == nominal.DISCLOSURE
 
 
 def test_the_default_configuration_still_refuses_acceptance(client):
-    """THE OTHER LEG, in the same file, so the fixture verifier cannot hide it.
-
-    No trusted authentication boundary exists in this build, so accepting the offer
-    is refused ``409 human_actor_required`` in every shipped deployment. That is a
-    CONFIGURATION fact and no application change can close it.
-    """
-    import_id = _imported(client)
-    eid = _record(client)
-    body = _add_to_experiment(client, import_id, eid, create_runs=True)
+    """THE OTHER LEG: no trusted boundary, so accepting the offer is a 409."""
+    with nominal.reviewed_rule_registered_for_tests(_test_rule()):
+        import_id = _imported(client)
+        eid = _record(client)
+        body = _add_to_experiment(client, import_id, eid, create_runs=True)
     offer = body["nominal_offers"][0]
-
     response = client.post(
         f"/api/experiments/{eid}/proposals/{offer['proposal_id']}/review",
-        # `confirmed_by_user` IS REQUIRED BY THE REVIEW ROUTE, and it is the product's
-        # own expression of `DEC-43` condition (iv): a review act is somebody saying
-        # so, and the route refuses `422 confirmation_required` without it.
-        # `accepted_from: candidate` IS "the proposed value is right and is written as
-        # it stands" — the claim a scientist adopting the nominal default is making,
-        # and neither it nor `confirmed_by_user` is a default the route will supply.
-        json={
-            "action": "accept",
-            "confirmed_by_user": True,
-            "accepted_from": "candidate",
-        },
+        json={"action": "accept", "confirmed_by_user": True, "accepted_from": "candidate"},
         headers={"If-Match": _etag(client, eid)},
     )
     assert response.status_code == 409, response.text

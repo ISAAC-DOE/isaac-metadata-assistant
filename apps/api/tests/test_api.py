@@ -160,6 +160,17 @@ def test_health(client, monkeypatch):
                 {"id": "D2", "status": "DEFERRED 2026-08-12"},
             ],
         },
+        # 2026-09-22. TWO CAPABILITY SIBLINGS, written out in full for the reason the
+        # `mcp` block gives: an exact comparison is what stops a future key shipping
+        # unreviewed. TWO KEYS EACH, deliberately — the shape the frontend builds
+        # against; the detail (governance gate `EXT-13`, that `POST /api/uploads`
+        # stays 403 either way) is served by `GET /api/imports` and each import
+        # session, from the same function. Disabled in every shipped configuration.
+        "historical_file_ingestion": {"enabled": False, "reason": "governance_not_approved"},
+        # The acceptance route's OWN verifier resolution, run against a sentinel that
+        # is not a request, so a surface can say before a click that acceptance will
+        # be refused — and why — using the identical decision rather than a copy.
+        "proposal_acceptance": {"available": False, "reason": "no_verifier_configured"},
     }
     assert body["version"]
 

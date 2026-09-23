@@ -82,7 +82,7 @@ def statement_for(item: ev.SourceEvidence) -> EvidenceStatement:
     return EvidenceStatement(
         key=item.concept,
         value=item.raw_literal,
-        locator=f"{item.source_path} · {item.locator}",
+        locator=statement_locator(item),
     )
 
 
@@ -268,6 +268,7 @@ def _candidates_for_unit(
             },
         ),
         not_proposable_reason=RUN_CANDIDATE_NOT_PROPOSABLE,
+        distinct_sources=1,
     )
 
     yield from _candidates_from_evidence(
@@ -321,6 +322,9 @@ def _candidates_from_evidence(
 
         statements = tuple(statement_for(i).to_state() for i in group)
         ids = _ids_for(tuple(i.source_path for i in group), source_ids)
+        # DISTINCT FILES, not statements: sixteen scans stating one filter index are
+        # sixteen witnesses; one file read under two conventions is one.
+        witnesses = len({i.source_path for i in group})
 
         distinct = sorted({_reading_of(i) for i in group})
         if len(distinct) > 1:
@@ -356,6 +360,7 @@ def _candidates_from_evidence(
                     for value in distinct
                 ),
                 unresolved_reason=UNRESOLVED_SOURCES_DISAGREE,
+                distinct_sources=witnesses,
             )
             continue
 
@@ -378,6 +383,7 @@ def _candidates_from_evidence(
                 supporting_statements=statements,
                 target_field_path=entry.official_path if entry else None,
                 not_proposable_reason=reason,
+                distinct_sources=witnesses,
             )
             continue
 
@@ -394,6 +400,7 @@ def _candidates_from_evidence(
             supporting_statements=statements,
             target_field_path=entry.official_path,
             proposed_value=normalized,
+            distinct_sources=witnesses,
         )
 
 
@@ -434,6 +441,7 @@ def _candidate_from_conflict(
         ),
         unresolved_reason=UNRESOLVED_SOURCES_DISAGREE,
         not_proposable_reason=DISAGREEMENT_NOT_PROPOSABLE,
+        distinct_sources=len({r.source_path for r in conflict.readings}),
     )
 
 
@@ -486,6 +494,31 @@ def _normalized_of(group: Sequence[ev.SourceEvidence]):
         if item.normalized_value is not None:
             return item.normalized_value
     return group[0].raw_literal
+
+
+def value_of_reading(items: Sequence[ev.SourceEvidence], reading: str):
+    """The value a candidate proposes when ``reading`` is the one CHOSEN among ``items``.
+
+    Exactly what an AGREEING candidate over the items that state that reading would
+    propose (:func:`_normalized_of` over them): the normalised value when one of them
+    carries it, else the literal as written. ``None`` when no item states the reading.
+    Added 2026-09-22 so a scientist-confirmed resolution proposes the SAME value the
+    sources would have produced had they agreed — never a number regex-coerced out of
+    the comparison string (``'060'`` stays ``'060'``; ``'500 cycles'`` stays itself).
+    """
+    stating = [item for item in items if _reading_of(item) == reading]
+    return _normalized_of(stating) if stating else None
+
+
+#: The public name of :func:`_reading_of` — what a disagreement row's ``value`` is.
+def reading_of(item: ev.SourceEvidence) -> str:
+    return _reading_of(item)
+
+
+def statement_locator(item: ev.SourceEvidence) -> str:
+    """The ``locator`` :func:`statement_for` gives ``item`` — the key that links a
+    supporting statement back to the evidence it was built from."""
+    return f"{item.source_path} · {item.locator}"
 
 
 def _sources_stating(group: Sequence[ev.SourceEvidence], reading: str) -> list[str]:
@@ -542,4 +575,7 @@ def _candidate_state(candidate: SemanticCandidate) -> dict:
         "unresolved_reason": candidate.unresolved_reason,
         "not_proposable_reason": candidate.not_proposable_reason,
         "proposable": candidate.proposable,
+        "distinct_sources": candidate.distinct_sources,
+        "agreement": candidate.agreement,
+        "review_status": candidate.review_status,
     }

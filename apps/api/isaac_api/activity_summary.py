@@ -177,6 +177,7 @@ from typing import Iterable, Sequence
 from .activity import (
     ACTIVITY_ACTIONS,
     ACTIVITY_CHANNELS,
+    CHANNELS_WITHOUT_A_WRITE_SITE,
     ACTIVITY_OBJECT_TYPES,
     ACTOR_UNATTRIBUTED,
     ActivityEvent,
@@ -485,5 +486,9 @@ def summarize(
         # routes enforce.
         "actions": sorted(ACTIVITY_ACTIONS),
         "channels": sorted(ACTIVITY_CHANNELS),
+        # ADDED 2026-09-22: the channels no write site in this build records, with why.
+        # `by_channel` keeps every vocabulary member at its true count; this is what
+        # lets a surface say a zero is STRUCTURAL rather than a measured quiet week.
+        "channels_without_a_write_site": dict(CHANNELS_WITHOUT_A_WRITE_SITE),
         "object_types": sorted(ACTIVITY_OBJECT_TYPES),
     }

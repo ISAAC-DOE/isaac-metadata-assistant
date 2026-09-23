@@ -1923,6 +1923,12 @@ def test_health_keeps_its_original_keys_byte_identical(client, monkeypatch):
         # is derived from configuration alone, so it cannot influence this
         # operation's status code or fail a readiness probe.
         "mcp",
+        # FIFTH AND SIXTH SIBLINGS (2026-09-22), under the identical rule: whether
+        # historical files may be ingested, and whether a proposal can be accepted,
+        # are two more distinct questions. Both are derived from configuration alone
+        # and open no connection.
+        "historical_file_ingestion",
+        "proposal_acceptance",
     }
 
 

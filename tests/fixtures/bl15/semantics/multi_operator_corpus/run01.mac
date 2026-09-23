@@ -1,0 +1,11 @@
+# SYNTHETIC FIXTURE -- read as TEXT, never executed.
+qdo Zz_XAS.mac
+newfile 01_01_ZZ1_acid_beforeCycling_filter10_100mV
+newfile 02_01_ZZ1_acid_beforeCycling_filter10_200mV
+newfile 03_01_ZZ1_acid_beforeCycling_filter10_400mV
+newfile 04_02_ZZ2_base_after500Cycling_filter20_800mV
+newfile 05_02_ZZ2_base_after400Cycling_filter20_800mV
+newfile 05_02_ZZ2_base_after500Cycling_filter20_800mV
+newfile 06_03_ZZ3_alk_fresh_f30_900mV
+newfile 07_03_ZZ3_alk_fresh_f30_1000mV
+newfile 08_03_ZZ3_alk_cycled_f30_1000mV

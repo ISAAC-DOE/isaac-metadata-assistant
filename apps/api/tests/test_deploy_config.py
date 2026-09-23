@@ -210,6 +210,13 @@ def test_health_commit_null_when_neither_env_set(tmp_path, monkeypatch):
                 {"id": "D2", "status": "DEFERRED 2026-08-12"},
             ],
         },
+        # 2026-09-22. THE SHIPPED CONFIGURATION leaves historical file ingestion
+        # DISABLED — no deploy artifact sets `ISAAC_HISTORICAL_FILE_INGESTION` — and
+        # this exact banner is the assertion that no deployment silently enables it.
+        "historical_file_ingestion": {"enabled": False, "reason": "governance_not_approved"},
+        # And no shipped configuration names a verifier, so acceptance is reported
+        # unavailable for the same reason the acceptance route refuses it.
+        "proposal_acceptance": {"available": False, "reason": "no_verifier_configured"},
     }
 
 

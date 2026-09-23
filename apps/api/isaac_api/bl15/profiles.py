@@ -1,4 +1,24 @@
-"""Versioned naming profiles — **a registry, not one hard-coded convention.**
+"""Versioned naming CONVENTIONS — **a registry, not one hard-coded convention, and not a person.**
+
+**A CONVENTION IS NOT A SCIENTIST (corrected 2026-09-22).** The first profile here was
+registered as ``ssrl_bl152_angel`` — "Angel-style" — and applied to a whole archive,
+which quietly made "Angel-style" an architectural synonym for "every file Angel
+touched". The project owner named why that is wrong: one beamtime's Runs 1-5 may be one
+scientist's, 6-10 another's and 11-15 a third's; they may share a convention, use
+different ones, switch mid-way, or collaborate on one Run. So:
+
+* the profile is now named for the CONVENTION it encodes and the archive it was measured
+  on (:data:`SSRL_BL152_HERFD_ECHEM_V1`, id ``ssrl_bl152_herfd_echem_naming``);
+* the old id stays RESOLVABLE as a historical alias (:data:`PROFILE_ALIASES`), so every
+  session, evidence item and companion entry stamped ``ssrl_bl152_angel`` before the
+  rename still hydrates and still answers the same questions;
+* WHICH convention applies to WHICH sources is decided by
+  :mod:`bl15.applicability` — bindings at facility, beamline, acquisition-system,
+  experiment, Run-subset, source-family or single-source scope — and **never by who ran
+  a measurement**, which is provenance recorded beside the reading.
+
+The rest of this docstring predates the correction and is kept because every word of it
+about the convention's SHAPE is still true; read "one scientist's" as "one beamtime's".
 
 **WHY A REGISTRY.** The only naming convention this repository has measured
 evidence for belongs to ONE scientist's April-2025 beamtime
@@ -25,7 +45,9 @@ consulted.
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 from dataclasses import dataclass, field
+from typing import Iterator
 
 # --- recognizer names --------------------------------------------------------
 #
@@ -71,7 +93,9 @@ RECOGNIZER_NAMES: frozenset[str] = frozenset(
 
 @dataclass(frozen=True)
 class NamingProfile:
-    """One scientist's filename convention, versioned.
+    """One filename CONVENTION, versioned. ~~One scientist's filename convention~~ —
+    corrected 2026-09-22: a convention may be shared by several scientists and one
+    scientist may use several; see the module docstring.
 
     Alias tables are ``((source literal, canonical reading), ...)`` tuples rather
     than dicts so the profile stays frozen and hashable, and they are matched
@@ -111,6 +135,12 @@ class NamingProfile:
     #: letter). Empty string disables the shape rule for a profile that wants
     #: alias-only sample naming.
     sample_code_pattern: str = ""
+    #: Historical ids that resolve to this convention. A stamped id is never rewritten;
+    #: it is resolved, so old evidence keeps saying what it said.
+    aliases: tuple[str, ...] = ()
+    #: What the convention was MEASURED ON — the archive and beamtime — so a reader can
+    #: tell a convention observed once from a beamline standard. Descriptive only.
+    measured_on: str = ""
     #: Built in ``__post_init__`` from the alias tuples; ``compare=False`` keeps
     #: the dataclass hashable. Populated in place rather than rebound, which a
     #: frozen dataclass permits.
@@ -156,6 +186,22 @@ class NamingProfile:
         }
         return tuple(literal for literal, _ in mapping.get(table, ()))
 
+    def to_state(self) -> dict:
+        """What a surface lists about a convention. No alias TABLE is served — the
+        tables are this build's reading aid, and the review surface already shows every
+        reading with the rule that produced it."""
+        return {
+            "profile_id": self.profile_id,
+            "profile_version": self.profile_version,
+            "display_name": self.display_name,
+            "aliases": list(self.aliases),
+            "measured_on": self.measured_on,
+            "is_default": self.profile_id == DEFAULT_PROFILE_ID,
+            "unexercised_recognizers": sorted(
+                name for name in self.token_recognizers if name in UNEXERCISED_RECOGNIZERS
+            ),
+        }
+
 
 #: Recognizers this profile carries for which **no instance occurs anywhere in
 #: the measured filenames of the supplied archive.** The convention the project
@@ -175,14 +221,32 @@ _UNEXERCISED_IN_FILENAMES: frozenset[str] = frozenset(
 UNEXERCISED_RECOGNIZERS: frozenset[str] = _UNEXERCISED_IN_FILENAMES
 
 
-SSRL_BL152_ANGEL_V1 = NamingProfile(
-    profile_id="ssrl_bl152_angel",
+#: The id this convention was registered under until 2026-09-22. RESOLVABLE, never
+#: reused: see :data:`PROFILE_ALIASES`.
+HISTORICAL_ANGEL_PROFILE_ID = "ssrl_bl152_angel"
+
+SSRL_BL152_HERFD_ECHEM_V1 = NamingProfile(
+    profile_id="ssrl_bl152_herfd_echem_naming",
     profile_version="1",
-    display_name="SSRL BL15-2 — Angel-style historical naming profile v1",
+    display_name=(
+        "SSRL BL15-2 HERFD electrochemistry filename convention v1 — measured on "
+        "the April 2025 IrOx beamtime archive"
+    ),
+    aliases=(HISTORICAL_ANGEL_PROFILE_ID,),
+    measured_on=(
+        "One archive: a single April-2025 SSRL BL15-2 HERFD electrochemistry "
+        "beamtime (the IrOx archive the project owner supplied on 2026-09-16). "
+        "Registered until 2026-09-22 as `ssrl_bl152_angel`."
+    ),
     description=(
+        "A FILENAME CONVENTION, NOT A PERSON. ~~one scientist's habits~~ — "
+        "corrected 2026-09-22: the convention is what the FILES of one beamtime "
+        "show, and whoever ran a given measurement is provenance recorded beside "
+        "the reading, never the reason a file is read this way.\n"
+        "\n"
         "THE FIRST PROFILE IN THIS REPOSITORY, AND EXPLICITLY NOT A BEAMLINE "
         "STANDARD. It is built from ONE measured archive: a single April-2025 "
-        "SSRL BL15-2 beamtime, one scientist's habits, one element. Nothing in "
+        "SSRL BL15-2 beamtime, one element. Nothing in "
         "it is authority for how any other BL15-2 user names a file, and "
         "nothing in it is an ISAAC field mapping.\n"
         "\n"
@@ -281,19 +345,67 @@ SSRL_BL152_ANGEL_V1 = NamingProfile(
 )
 
 
+#: ~~SSRL_BL152_ANGEL_V1~~ — the OLD NAME, kept as an alias of the same object so a
+#: caller written before the rename keeps working. New code names the convention.
+SSRL_BL152_ANGEL_V1 = SSRL_BL152_HERFD_ECHEM_V1
+
 PROFILES: dict[str, NamingProfile] = {
-    SSRL_BL152_ANGEL_V1.profile_id: SSRL_BL152_ANGEL_V1,
+    SSRL_BL152_HERFD_ECHEM_V1.profile_id: SSRL_BL152_HERFD_ECHEM_V1,
 }
 
-#: What a caller with no profile preference gets. There is exactly one profile,
-#: and a future second one must be CHOSEN rather than defaulted into.
-DEFAULT_PROFILE_ID = SSRL_BL152_ANGEL_V1.profile_id
+#: ``historical id -> current id``. Derived from each profile's own ``aliases`` so the
+#: two cannot disagree; a stamped id is RESOLVED through this, never rewritten.
+PROFILE_ALIASES: dict[str, str] = {
+    alias: profile.profile_id
+    for profile in PROFILES.values()
+    for alias in profile.aliases
+}
+
+#: What a caller with no profile preference gets: the build's default BINDING
+#: (:func:`bl15.applicability.default_binding`), stated as a default wherever it is
+#: applied. A second convention must be CHOSEN — by a binding — never defaulted into.
+DEFAULT_PROFILE_ID = SSRL_BL152_HERFD_ECHEM_V1.profile_id
+
+
+def canonical_profile_id(profile_id: str | None) -> str | None:
+    """The current id for ``profile_id`` — itself, or what its historical alias names."""
+    if not profile_id:
+        return profile_id
+    return PROFILE_ALIASES.get(profile_id, profile_id)
 
 
 def profile_for(profile_id: str) -> NamingProfile | None:
-    """The profile with this id, or ``None``.
+    """The profile with this id — or with this HISTORICAL id — or ``None``.
 
     Returns ``None`` rather than raising: a reader handed an unknown profile id
     must REFUSE with a reason a scientist can read, not crash the import.
+    Alias-aware since 2026-09-22, so ``ssrl_bl152_angel`` still resolves.
     """
-    return PROFILES.get(profile_id)
+    return PROFILES.get(canonical_profile_id(profile_id) or "")
+
+
+def registered_profiles() -> list[dict]:
+    """Every registered convention, for a surface to list. Sorted by id."""
+    return [PROFILES[pid].to_state() for pid in sorted(PROFILES)]
+
+
+@contextmanager
+def registered_for_tests(profile: NamingProfile) -> Iterator[NamingProfile]:
+    """TEST-ONLY SEAM: register one additional convention for the duration of a block.
+
+    The second convention a multi-convention test needs must not look like a real
+    beamline standard, so it is never registered in production — no application module
+    calls this, and ``test_historical_semantics.py`` greps the package to keep it so.
+    """
+    if profile.profile_id in PROFILES:
+        raise ValueError(f"{profile.profile_id!r} is already registered")
+    PROFILES[profile.profile_id] = profile
+    added = [alias for alias in profile.aliases if alias not in PROFILE_ALIASES]
+    for alias in added:
+        PROFILE_ALIASES[alias] = profile.profile_id
+    try:
+        yield profile
+    finally:
+        del PROFILES[profile.profile_id]
+        for alias in added:
+            PROFILE_ALIASES.pop(alias, None)

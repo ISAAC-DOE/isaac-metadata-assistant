@@ -35,19 +35,27 @@ def test_every_examined_concept_has_a_placement_level_and_they_sum_to_the_whole(
     hierarchy — which is exactly the state this task was created to end.
     """
     levels = [m.placement_level for m in mp.MAPPINGS.values()]
-    assert len(levels) == len(ev.CONCEPTS) == 45
+    # 45 -> 47 on 2026-09-22: `temperature_statement` (level 4 — a source's WORDS about
+    # temperature have no numeric home) and `contributor_statement` (level 1 —
+    # `attribution.contributors` genuinely fits, and the judgement about identity is
+    # what keeps it unproposable). Both landed somewhere; nothing fell out.
+    assert len(levels) == len(ev.CONCEPTS) == 47
     assert set(levels) <= set(mp.PLACEMENT_LEVELS)
     placement = mp.placement_coverage()
-    assert sum(placement[str(level)] for level in mp.PLACEMENT_LEVELS) == 45
-    # Measured 2026-09-17 by deriving over the whole registry. Pinned so a row that
-    # changes its paths has to come here and say which way the information moved.
+    assert sum(placement[str(level)] for level in mp.PLACEMENT_LEVELS) == 47
+    # ~~Measured 2026-09-17: {1: 18, 2: 9, 3: 6, 4: 12, open 8, concepts-with-open 9}~~
+    # RE-MEASURED 2026-09-22 by deriving over the whole registry. Level 1 and level 4
+    # each rose by one (the two new concepts); the open-question count fell from 8 to 3
+    # because the domain owner's reply that day closed Q9, Q11, Q14, Q15 and Q16 — each
+    # in its own recorded way — and left Q6, Q7 and Q8 open, which now touch three
+    # concepts (dry_state, beamtime_purpose, echem_procedure).
     assert placement == {
-        "1": 18,
+        "1": 19,
         "2": 9,
         "3": 6,
-        "4": 12,
-        "open_domain_questions": 8,
-        "concepts_with_an_open_question": 9,
+        "4": 13,
+        "open_domain_questions": 3,
+        "concepts_with_an_open_question": 3,
     }
 
 
@@ -171,29 +179,49 @@ def test_a_build_blocker_is_not_recorded_as_a_schema_fact():
     assert entry.placement_level == mp.PLACEMENT_OFFICIAL_FIELD
 
 
-# --- the reconciled packet: 12 closed, 8 open -------------------------------
+# --- the reconciled packet: 17 closed, 3 open -------------------------------
 
 
-def test_exactly_eight_questions_remain_with_the_domain_owner_and_they_are_these():
-    """**The 8 that stay Angel's, named. Twelve closed on 2026-09-17.**
+def test_exactly_three_questions_remain_with_the_domain_owner_and_they_are_these():
+    """**The 3 that stay Angel's, named.** ~~The 8 that stay Angel's; twelve closed on
+    2026-09-17~~ — the eight became three on 2026-09-22, when the domain owner's reply
+    (relayed by the project owner) materially addressed Q9, Q11, Q14, Q15 and Q16 and did
+    NOT address Q6, Q7 or Q8. Renamed from ``test_exactly_eight_...`` rather than
+    deleted: the pin is the same kind of statement at a new value, and the struck
+    sentence is the history.
 
     Pinned as a set rather than a count, because a count would keep passing if one
     question closed and another re-opened — and the identities are what a future session
     needs in order not to re-ask a closed one.
     """
-    assert mp.open_domain_questions() == (
-        "Q6",
-        "Q7",
-        "Q8",
-        "Q9",
-        "Q11",
-        "Q14",
-        "Q15",
-        "Q16",
-    )
+    assert mp.open_domain_questions() == ("Q6", "Q7", "Q8")
     assert len(mp.DOMAIN_QUESTIONS) == 20
     closed = [q for q in mp.DOMAIN_QUESTIONS.values() if not q.is_open]
-    assert len(closed) == 12
+    assert len(closed) == 17
+
+
+def test_the_2026_09_22_answers_each_record_their_own_kind_of_closed():
+    """Five answers, four different dispositions — never flattened into "answered".
+
+    Q11 is a RULE that depends on each Run; Q9 and Q14 are "leave it missing"; Q15 is a
+    policy with an advisory layer; Q16 is "I do not know", and the conflict is kept
+    forever. Each carries the attribution that says who answered and how it arrived.
+    """
+    expected = {
+        "Q9": mp.QUESTION_INTENTIONALLY_LEFT_MISSING,
+        "Q11": mp.QUESTION_CONDITIONALLY_RESOLVED,
+        "Q14": mp.QUESTION_INTENTIONALLY_LEFT_MISSING,
+        "Q15": mp.QUESTION_POLICY_ADOPTED,
+        "Q16": mp.QUESTION_DOMAIN_OWNER_DOES_NOT_KNOW,
+    }
+    for qid, disposition in expected.items():
+        question = mp.DOMAIN_QUESTIONS[qid]
+        assert question.disposition == disposition, qid
+        assert not question.is_open, qid
+        assert question.attribution == mp.ANGEL_2026_09_22, qid
+        assert question.to_state()["attribution"] == mp.ANGEL_2026_09_22
+    for qid in ("Q6", "Q7", "Q8"):
+        assert "NOT addressed by" in mp.DOMAIN_QUESTIONS[qid].note, qid
 
 
 def test_a_closed_question_records_WHICH_KIND_of_closed_it_is():
@@ -213,7 +241,11 @@ def test_a_closed_question_records_WHICH_KIND_of_closed_it_is():
         for qid, q in mp.DOMAIN_QUESTIONS.items()
         if q.disposition == mp.QUESTION_CLOSED_BY_DOMAIN_OWNER
     ]
-    assert by_owner == ["Q1"], "only Q1 was answered by Angel"
+    # STILL ONLY Q1 under this disposition — and that is now a statement about the
+    # DISPOSITION, not about Angel: his 2026-09-22 reply closed five more questions, and
+    # each carries the finer disposition that says HOW (see the test above), because
+    # "closed_by_domain_owner" would have flattened five different answers into one.
+    assert by_owner == ["Q1"], "only Q1 closed as a plain domain-owner answer"
     assert mp.DOMAIN_QUESTIONS["Q5"].disposition == mp.QUESTION_CLOSED_BY_DOCUMENT
     assert (
         mp.DOMAIN_QUESTIONS["Q10"].disposition
@@ -237,9 +269,15 @@ def test_a_concept_is_never_presented_as_blocked_on_a_question_that_closed():
     assert entry.unresolved_questions == ()
     assert entry.status == mp.STATUS_NEEDS_DOMAIN_REVIEW
 
-    # and a concept whose question IS open says so
+    # and a concept whose question IS open says so. ~~`potential_reference_basis` ->
+    # ("Q9",)~~ — Q9 closed on 2026-09-22 (the unstated basis stays missing), so the
+    # example moves to a concept whose question is still open, and the old example now
+    # proves the other half: its question is recorded and nothing is waited for.
+    dry = mp.mapping_for(ev.CONCEPT_DRY_STATE)
+    assert dry.unresolved_questions == ("Q6",)
     basis = mp.mapping_for(ev.CONCEPT_POTENTIAL_REFERENCE)
-    assert basis.unresolved_questions == ("Q9",)
+    assert basis.domain_questions == ("Q9",)
+    assert basis.unresolved_questions == ()
 
 
 def test_every_open_question_is_reachable_from_at_least_one_concept():
@@ -254,10 +292,15 @@ def test_every_open_question_is_reachable_from_at_least_one_concept():
         q for m in mp.MAPPINGS.values() for q in m.unresolved_questions
     }
     assert reachable == set(mp.open_domain_questions())
-    assert mp.mapping_for(ev.CONCEPT_LEGACY_NUMBER).unresolved_questions == ("Q16",)
+    # Q15 and Q16 CLOSED on 2026-09-22 and are still ATTACHED to the concepts that
+    # anchor their conflicts, so a scientist meeting either concept still finds the
+    # question — now with the answer beside it, not a wait.
+    assert mp.mapping_for(ev.CONCEPT_LEGACY_NUMBER).domain_questions == ("Q16",)
+    assert mp.mapping_for(ev.CONCEPT_LEGACY_NUMBER).unresolved_questions == ()
+    assert mp.mapping_for(ev.CONCEPT_SPEC_FILE_DECLARATION).domain_questions == ("Q15",)
     assert mp.mapping_for(
         ev.CONCEPT_SPEC_FILE_DECLARATION
-    ).unresolved_questions == ("Q15",)
+    ).unresolved_questions == ()
 
 
 def test_the_review_rows_that_no_numbered_question_covers_are_named():
@@ -270,11 +313,19 @@ def test_the_review_rows_that_no_numbered_question_covers_are_named():
     subtract two numbers, because a row whose remaining judgement belongs to nobody in
     particular is the row that gets "fixed" by pointing it at a nearby field.
     """
+    # FOUR -> SIX on 2026-09-22, and the two new rows are the two concepts added that
+    # day. Neither corresponds to a packet question: temperature was a BOUNDARY in the
+    # packet (§2.2), not a question, and a named contributor was never asked about. Both
+    # are governed by the domain owner's general rule (missing stays missing) and by
+    # the identity boundary, and naming them here is what stops either being "fixed" by
+    # pointing it at a nearby question.
     assert mp.needs_review_without_a_question() == (
         "acquisition_method",
         "beamtime_dates",
+        "contributor_statement",
         "gas_condition",
         "repeat_marker",
+        "temperature_statement",
     )
     for concept in mp.needs_review_without_a_question():
         assert mp.MAPPINGS[concept].status == mp.STATUS_NEEDS_DOMAIN_REVIEW
@@ -299,11 +350,15 @@ def test_an_unresolved_question_is_never_given_a_placement_level():
     ``potential_reference_basis`` sits at level 1, with a real native field, and its
     enum member is blocked on Q9.
     """
-    assert mp.DOMAIN_QUESTIONS["Q9"].placement == mp.PLACEMENT_UNRESOLVED
+    # ~~Q9~~ -> Q6: Q9 closed on 2026-09-22, so the open-question example moves to one
+    # that is still open. The property is unchanged.
+    assert mp.DOMAIN_QUESTIONS["Q6"].placement == mp.PLACEMENT_UNRESOLVED
+    assert mp.DOMAIN_QUESTIONS["Q9"].placement != mp.PLACEMENT_UNRESOLVED
     assert mp.PLACEMENT_UNRESOLVED not in mp.PLACEMENT_LEVELS
     basis = mp.mapping_for(ev.CONCEPT_POTENTIAL_REFERENCE)
     assert basis.placement_level == mp.PLACEMENT_OFFICIAL_FIELD
-    assert basis.unresolved_questions == ("Q9",)
+    dry = mp.mapping_for(ev.CONCEPT_DRY_STATE)
+    assert dry.unresolved_questions == ("Q6",)
 
 
 def test_the_placement_block_round_trips_as_json():

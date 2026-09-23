@@ -55,6 +55,7 @@ from typing import Sequence
 from .activity import (
     ACTIVITY_ACTIONS,
     ACTIVITY_CHANNELS,
+    CHANNELS_WITHOUT_A_WRITE_SITE,
     ACTIVITY_OBJECT_TYPES,
     ActivityEvent,
 )
@@ -264,6 +265,10 @@ def activity_page(
         # frontend copy that is free to drift from the set the route enforces.
         "actions": sorted(ACTIVITY_ACTIONS),
         "channels": sorted(ACTIVITY_CHANNELS),
+        # 2026-09-22: which channels no write site in this build records, and why — so a
+        # filter offering `system` can say it will always be empty rather than imply
+        # the record simply has had no such activity yet.
+        "channels_without_a_write_site": dict(CHANNELS_WITHOUT_A_WRITE_SITE),
         "object_types": sorted(ACTIVITY_OBJECT_TYPES),
         "experiment_version": exp.version_token(),
     }
