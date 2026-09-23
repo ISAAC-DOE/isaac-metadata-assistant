@@ -143,6 +143,18 @@
   color: var(--text-slate);
 }
 
+/* RUN LABELS WRAP, NEVER CLIP (final review, P2). An imported label can be long and
+   can differ from its neighbour only in its last token, so a clipped label is a
+   different — or an indistinguishable — label. The same rule as `.run-card-name`. */
+.rc-side-label,
+.rc-context-label,
+.rc-detail-label,
+.rc-verdict-label,
+.rc-table th {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
 .rc-side-label {
   margin: 2px 0 0;
   font-size: 13.5px;

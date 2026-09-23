@@ -272,7 +272,8 @@ export const ASSET_DISCLOSURE_SURFACES: ReadonlySet<string> = new Set(['record-d
  * helper's own history shows reads as an accessibility win.
  *
  * WHAT IS *NOT* DECLARED, AND WHY THE NUMBER WOULD BE WRONG. The count of per-entry
- * `details.extctx-details` inside it is deliberately undeclared: it is one per
+ * raw-entry disclosures (`.extctx-details`, the shared `Disclosure` since the final
+ * review of #279 — a native `<details>` before) inside it is deliberately undeclared: it is one per
  * companion entry, and the seeded records this sweep reaches hold none, because
  * extended context arrives through historical import and through nothing else in
  * this build. Declaring `0` would be true today and would become a trap the first
@@ -482,19 +483,21 @@ export async function openExtendedContext(page: Page, surfaceId: string): Promis
   await toggle.first().click();
   await expect(page.locator(COLLAPSED)).toHaveCount(0);
   /* AND THE BODY IS REALLY OPEN — `aria-expanded` moving is the button's claim about
-     itself; this is the thing axe will scan, and the thing the inner `<summary>`
-     elements need in order to be clickable at all. */
+     itself; this is the thing axe will scan, and the thing the inner per-entry
+     disclosures need in order to be clickable at all. */
   await expect(page.locator('.extctx-collapsible .fg-body').first()).toBeVisible();
 
   /* THE PER-ENTRY RAW DISCLOSURES. Count NOT declared — see
      `EXTENDED_CONTEXT_DISCLOSURE_SURFACES` for why a number would be either false
-     now or a trap later. Whatever is there is opened. */
-  const raw = page.locator('details.extctx-details');
+     now or a trap later. Whatever is there is opened. The shared `Disclosure` since
+     the final review of #279 (a native `<details>` before): its trigger is a button
+     carrying `aria-expanded`, and its body is `hidden` until opened. */
+  const raw = page.locator('.extctx-details');
   const rawCount = await raw.count();
   for (let i = 0; i < rawCount; i++) {
-    const one = raw.nth(i);
-    await one.locator('> summary').click();
-    await expect(one).toHaveAttribute('open', '');
+    const trigger = raw.nth(i).locator('> .disclosure-trigger, > .disclosure-heading > .disclosure-trigger');
+    await trigger.click();
+    await expect(trigger).toHaveAttribute('aria-expanded', 'true');
   }
 }
 

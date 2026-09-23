@@ -72,6 +72,9 @@ export function CaptureWorkspace({
 }) {
   const location = useLocation();
   const [selectedRun, setSelectedRun] = useState<ApiRunView | null>(null);
+  /* Whether the Voice view's "Record Locally Instead" is open — reported by the
+     transcript panel, whose run select lives inside it. */
+  const [localRecorderShown, setLocalRecorderShown] = useState(false);
 
   /* Mounted on the first visit to Write or Voice, and kept; see the header. */
   const transcriptMounted = useRef(false);
@@ -132,6 +135,7 @@ export function CaptureWorkspace({
                   onSelectedRunChange={onCaptureRunChange}
                   onVoiceStateChange={onVoiceStateChange}
                   onCaptured={onCaptured}
+                  onLocalRecorderShownChange={setLocalRecorderShown}
                 />
               </div>
             )}
@@ -144,10 +148,15 @@ export function CaptureWorkspace({
                 onRunChange={onCaptureRunChange}
                 onRunResolved={setSelectedRun}
                 refreshKey={mapRefreshKey}
-                /* ONE run choice per view (review #277, I-3): the transcript form —
-                   on Write, and on Voice where the local recorder shares the same
-                   form — carries its own run select, so the map's is off there. */
-                picker={captureView === 'files'}
+                /* ONE run choice per view (review #277, I-3): the map's picker is off
+                   exactly while the transcript form's own run select is VISIBLE —
+                   always on Write; on Voice only while "Record Locally Instead" is
+                   open, because that select lives inside it. A collapsed recorder
+                   used to leave Voice with no picker at all and a Record Map saying
+                   "Choose a run" (final review, P3). */
+                picker={
+                  captureView === 'files' || (captureView === 'voice' && !localRecorderShown)
+                }
               />
             )}
           </div>

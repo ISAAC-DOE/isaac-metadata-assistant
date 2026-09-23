@@ -280,9 +280,13 @@ describe('every value is shown with where it came from', () => {
     const provenance = card.querySelector('.extctx-provenance')!;
     expect(provenance.textContent).toContain('a/b.0001');
     expect(provenance.textContent).toContain('line 9');
-    // …and none of that is inside the `<details>`, so a value never appears
-    // without its provenance.
-    expect(card.querySelector('details')?.contains(provenance)).toBe(false);
+    // …and none of that is inside the raw-entry disclosure, so a value never appears
+    // without its provenance. (The shared `Disclosure` since the final review of
+    // #279; this used to query a native `<details>`.)
+    const rawBody = card.querySelector('.extctx-details .disclosure-body')!;
+    expect(rawBody).not.toBeNull();
+    expect(rawBody.contains(provenance)).toBe(false);
+    expect(rawBody.contains(card.querySelector('.extctx-literal'))).toBe(false);
   });
 
   it('shows a normalized reading ONLY beside the named rule that produced it', async () => {
@@ -332,21 +336,34 @@ describe('every value is shown with where it came from', () => {
 /* ── the raw entry is a disclosure, not the default ─────────────────────── */
 
 describe('raw JSON', () => {
-  it('is behind a closed native <details> and is not the scientist’s first reading', async () => {
+  it('is behind a CLOSED shared Disclosure and is not the scientist’s first reading', async () => {
     /*
      * THE DEFECT THIS REFUSES WAS SHIPPED ONCE, on the Activity panel, and fixed.
      * A `<pre>` of the entry as the primary view is developer-side JSON wearing a
      * product surface.
+     *
+     * INVERTED FROM "a closed native <details>" (final review of #279, P1): the raw
+     * entry now sits in the shared `Disclosure`, like every other disclosure on the
+     * record screen. The property is unchanged — closed by default, the JSON inside,
+     * the human reading outside.
      */
     mount(body());
-    await screen.findByText('spec_user_string');
+    await screen.findByText('Spec User String');
     const card = document.querySelector('.extctx-entry')!;
-    const details = card.querySelector('details')!;
-    expect(details.hasAttribute('open')).toBe(false);
+    expect(card.querySelector('details')).toBeNull();
+    const trigger = within(card as HTMLElement).getByRole('button', {
+      name: 'Everything This Entry Records',
+    });
+    expect(trigger).toHaveAttribute('aria-expanded', 'false');
+    const rawBody = card.querySelector('.extctx-details .disclosure-body') as HTMLElement;
+    expect(rawBody.hidden).toBe(true);
     const pre = card.querySelector('pre.extctx-raw')!;
-    expect(details.contains(pre)).toBe(true);
+    expect(rawBody.contains(pre)).toBe(true);
     // And the human reading — concept, literal, source — is outside it.
-    expect(details.contains(card.querySelector('.extctx-literal'))).toBe(false);
+    expect(rawBody.contains(card.querySelector('.extctx-literal'))).toBe(false);
+    expect(rawBody.contains(card.querySelector('.extctx-concept'))).toBe(false);
+    fireEvent.click(trigger);
+    expect(pre).toBeVisible();
   });
 });
 
@@ -565,6 +582,105 @@ describe('scope', () => {
     await screen.findAllByText('spec_user_string');
     const cards = document.querySelectorAll('.extctx-entry');
     expect(within(cards[0] as HTMLElement).getByText('On the record')).toBeTruthy();
-    expect(within(cards[1] as HTMLElement).getByText('On run run-1')).toBeTruthy();
+    // With no label resolved (the runs read is not answered here), the run is named by
+    // its id — never wrong, only less friendly. Split across elements since the final
+    // review of #279, so the scope cell is read as a whole.
+    const scope = [...cards[1].querySelectorAll('.extctx-provenance-pair')].find(
+      (pair) => pair.querySelector('dt')?.textContent === 'Scope',
+    )!;
+    expect(scope.querySelector('dd')?.textContent).toBe('On run run-1');
+  });
+
+  it('MUTATION-GUARDED (final review of #279, P1): a run reads by its LABEL, with the id one hover away', async () => {
+    vi.spyOn(api, 'listRuns').mockResolvedValue({
+      runs: [
+        { id: 'run-1', label: 'Legacy 3 · 02 · SYN2 · base' },
+        { id: 'run-2', label: 'Legacy 1' },
+        { id: 'run-3', label: 'Legacy 1' },
+      ],
+    } as never);
+    mount(
+      body({
+        entries: [
+          entry({ entry_id: 'a', scope: 'run', run_id: 'run-1' }),
+          entry({ entry_id: 'b', scope: 'run', run_id: 'run-2' }),
+          entry({ entry_id: 'c', scope: 'run', run_id: 'run-9' }),
+        ],
+      }),
+    );
+    const run = await screen.findByText('Legacy 3 · 02 · SYN2 · base');
+    expect(run).toHaveAttribute('title', 'run-1');
+    const cards = document.querySelectorAll('.extctx-entry');
+    // A label two runs share is disambiguated by the id beside it.
+    expect(cards[1].textContent).toContain('Legacy 1');
+    expect(cards[1].querySelector('.extctx-run-id')?.textContent).toContain('run-2');
+    // A run the label read did not cover is named by its id.
+    expect(within(cards[2] as HTMLElement).getByText('run-9')).toBeTruthy();
+    // The raw id never leads the first card's scope line.
+    expect(cards[0].querySelector('.extctx-run-id')).toBeNull();
+  });
+
+  it('never reads the runs when no shown entry is run-scoped', async () => {
+    const spy = vi.spyOn(api, 'listRuns');
+    mount(body());
+    await screen.findByText('Spec User String');
+    expect(spy).not.toHaveBeenCalled();
+  });
+});
+
+/* ── what a scientist reads first (final review of #279, P1) ────────────── */
+
+describe('the default reading is the scientist’s words, and nothing is lost', () => {
+  it('a concept reads as its humanized key; the key itself is in the title and one `?` away', async () => {
+    mount(body({ entries: [entry({ concept: 'legacy_run_or_file_number' })] }));
+    const heading = await screen.findByText('Legacy Run Or File Number');
+    expect(heading).toHaveClass('extctx-concept');
+    expect(heading).toHaveAttribute('title', 'legacy_run_or_file_number');
+    const card = document.querySelector('.extctx-entry') as HTMLElement;
+    const tip = within(card).getByRole('button', { name: 'About This Entry' });
+    fireEvent.click(tip);
+    expect(within(card).getByText('legacy_run_or_file_number', { selector: 'code' })).toBeVisible();
+  });
+
+  it('the registry’s reason is behind the entry’s `?`, verbatim, not in the default reading', async () => {
+    const REASON = 'REFUSED ON PURPOSE, AND THIS IS THE ONE ENTRY THAT WOULD BE HARMFUL TO FIX.';
+    mount(body({ entries: [entry({ reason: REASON })] }));
+    await screen.findByText('Spec User String');
+    const card = document.querySelector('.extctx-entry') as HTMLElement;
+    const reason = within(card).getByText(REASON);
+    expect(reason).not.toBeVisible();
+    fireEvent.click(within(card).getByRole('button', { name: 'About This Entry' }));
+    expect(reason).toBeVisible();
+  });
+
+  it('a normalisation rule id is one `?` away inside the SAME pair, not in the visible label', async () => {
+    mount(
+      body({
+        entries: [
+          entry({
+            normalized_value: 35,
+            unit: 'mm',
+            normalization_rule: 'bl15.filter_index_v1',
+            determinism: 'normalized',
+          }),
+        ],
+      }),
+    );
+    await screen.findByText('35 mm');
+    const pair = screen.getByText('35 mm').closest('.extctx-provenance-pair') as HTMLElement;
+    const rule = within(pair).getByText('bl15.filter_index_v1');
+    expect(rule).not.toBeVisible();
+    fireEvent.click(within(pair).getByRole('button', { name: 'Which Rule Read This' }));
+    expect(rule).toBeVisible();
+  });
+
+  it('the intro is ONE visible line that still says it is not official; the server’s sentence is its `?`', async () => {
+    mount(body());
+    const line = await screen.findByText(/Not an official ISAAC record, and nothing here is a field value\./);
+    expect(line).toBeVisible();
+    const full = screen.getByText(NOT_OFFICIAL);
+    expect(full).not.toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: 'About Extended Context' }));
+    expect(full).toBeVisible();
   });
 });

@@ -342,6 +342,13 @@ export interface TranscriptCapturePanelProps {
    *  shows about the record (Capture Home's counts, the Proposals badge) now
    *  rather than a poll later. It carries nothing: the caller re-reads. */
   onCaptured?: () => void;
+  /**
+   * VOICE MODE ONLY: whether "Record Locally Instead" is showing its body — and so
+   * whether this panel's own run select is on screen. The caller shows its own run
+   * choice exactly while this one is NOT visible (one run choice per view), so a
+   * collapsed recorder never leaves the reader with no picker at all.
+   */
+  onLocalRecorderShownChange?: (shown: boolean) => void;
 }
 
 export function TranscriptCapturePanel({
@@ -354,6 +361,7 @@ export function TranscriptCapturePanel({
   onSelectedRunChange,
   onVoiceStateChange,
   onCaptured,
+  onLocalRecorderShownChange,
 }: TranscriptCapturePanelProps) {
   const ids = useId();
   const transcriptId = `${ids}-transcript`;
@@ -983,6 +991,19 @@ export function TranscriptCapturePanel({
   useEffect(() => {
     onVoiceStateChange?.(voice);
   }, [voice, onVoiceStateChange]);
+  /* The SAME open expression the voice-mode disclosure renders with (a recorder in
+     use is held open — see that branch), so the report cannot disagree with what is
+     on screen. */
+  const localRecorderShown =
+    mode === 'voice' &&
+    (localRecorderOpen ||
+      voice === 'requesting-permission' ||
+      voice === 'recording' ||
+      voice === 'paused' ||
+      voice === 'held');
+  useEffect(() => {
+    onLocalRecorderShownChange?.(localRecorderShown);
+  }, [localRecorderShown, onLocalRecorderShownChange]);
 
   /* ---- reads ------------------------------------------------------------- */
 

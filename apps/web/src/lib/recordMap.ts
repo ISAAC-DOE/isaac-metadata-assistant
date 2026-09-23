@@ -125,7 +125,9 @@ const GENERIC_LAST_SEGMENTS = new Set([
   'role',
 ]);
 
-function humanizeSegment(segment: string): string {
+/** Exported (final review of #279, P1) for Extended Context's concept keys: the same
+ *  casing-and-separators-only humanizer, so no second vocabulary is invented. */
+export function humanizeSegment(segment: string): string {
   return segment
     .split('_')
     .filter((word) => word !== '')

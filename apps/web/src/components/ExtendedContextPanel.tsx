@@ -86,8 +86,8 @@
  *   2. IT NEVER INTERPRETS A LITERAL. No unit conversion, no rounding, no parsing, no
  *      classification, no "did you mean". `raw_literal` is rendered as it arrived
  *      (`CLAUDE.md` §5). `normalized_value` is shown ONLY when the server sent one, and
- *      always beside the named rule that produced it, because an unexplained
- *      normalisation is indistinguishable from a guess.
+ *      always beside the named rule that produced it (one `?` inside the same pair),
+ *      because an unexplained normalisation is indistinguishable from a guess.
  *   3. IT NEVER SHOWS A VALUE WITHOUT ITS PROVENANCE. `source` and `locator` are on
  *      every card, never behind the disclosure. A literal stripped of where it came
  *      from is the prose dump `DEC-41` exists to prevent.
@@ -98,10 +98,32 @@
  *
  * ── THE RAW ENTRY IS UNDER DISCLOSURE, NOT THE DEFAULT ──────────────────────
  *
- * A native `<details>` per card, the repo idiom (`HelpPanel`, `AssistantPanel`,
- * `SchemaBrowser`, `ActivityHistoryPanel`'s actor note). Raw JSON as a scientist's
- * primary view is a defect that was just fixed on the Activity panel and must not come
- * back here. The default reading is the concept, the literal, and where it came from.
+ * ~~A native `<details>` per card~~ — the shared `Disclosure` since the final review of
+ * #279 (P1): the native triangle was the one disclosure on the record screen that did
+ * not look or behave like the others. Raw JSON as a scientist's primary view is a
+ * defect that was fixed on the Activity panel and must not come back here. The default
+ * reading is the concept, the literal, and where it came from.
+ *
+ * ── WHAT A SCIENTIST READS FIRST (final review of #279, P1) ─────────────────
+ *
+ * After an import the panel used to lead with registry vocabulary: raw concept keys as
+ * headings (`spec_file_declaration`), raw run ids ("On run 01M36K…"), a parser rule id
+ * in a label, the registry's ALL-CAPS internal reasoning as body text, and a six-line
+ * intro. Every one of those is still reachable — nothing is removed, because
+ * provenance must not be lost — but each is now one `?` or one disclosure away:
+ *
+ *   * the CONCEPT reads as a humanized form of its key (casing and separators only,
+ *     via the same humanizer the Record Map uses — no meaning is invented), with the
+ *     key itself in the heading's `title` and in the entry's `?`;
+ *   * a RUN reads by its label, the id in `title` (and beside the label when two runs
+ *     share one); an unresolved run falls back to its id, which is never wrong;
+ *   * the registry's REASON and a normalisation's RULE id are behind `?`s placed on
+ *     the entry and on the reading they explain;
+ *   * the intro is one visible line that still says the thing a reader must not miss —
+ *     this is not an official record and nothing in it is a field value — with the
+ *     server's own `not_official` sentence, verbatim, one `?` away.
+ *
+ * The LITERAL, SOURCE and LOCATOR stay visible on every card (rule 3 below).
  *
  * ── THE EMPTY STATE IS THE COMMON CASE AND MUST NOT READ AS AN ERROR ────────
  *
@@ -116,7 +138,10 @@ import { useCallback, useEffect, useId, useRef, useState } from 'react';
 
 import { api, ApiError } from '../lib/api';
 import { LABELS } from '../lib/labels';
+import { humanizeSegment } from '../lib/recordMap';
+import { RUNS_PAGE_SIZE } from '../lib/runPaging';
 import type { ApiExtendedContextEntry, ApiExtendedContextResponse } from '../lib/types';
+import { Disclosure } from './Disclosure';
 import { BackendDown, LoadingPanel } from './FetchStates';
 import { ChevronDown, ChevronRight } from './icons';
 import { HelpTip } from './HelpTip';
@@ -177,6 +202,31 @@ type LoadState =
  */
 const PAGE = 50;
 
+/**
+ * A READABLE NAME FOR A CONCEPT KEY — casing and separators only.
+ *
+ * `spec_file_declaration` -> "Spec File Declaration". Every word of the output is a
+ * word of the key, so nothing is claimed about what the concept MEANS; the server
+ * sends no label field for a concept, and inventing a gloss here would be exactly the
+ * guess `CLAUDE.md` §5 forbids. A dotted key humanizes each part. The key itself is
+ * always one `?` away and in the heading's `title`.
+ */
+export function conceptLabel(concept: string): string {
+  const parts = concept.split('.').filter((part) => part !== '');
+  if (parts.length === 0) return concept;
+  const label = parts.map((part) => humanizeSegment(part.replace(/-/g, '_'))).join(' · ');
+  return label === '' ? concept : label;
+}
+
+/** Display labels for the runs entries are scoped to, and which labels repeat. */
+interface RunLabels {
+  byId: Record<string, string>;
+  duplicated: Set<string>;
+}
+
+/** The visible short intro. The server's full `not_official` sentence is its `?`. */
+const NOT_OFFICIAL_SHORT = 'Not an official ISAAC record, and nothing here is a field value.';
+
 /** `unknown` -> something renderable, without asserting a shape it may not have. */
 function renderScalar(value: unknown): string {
   if (typeof value === 'string') return value;
@@ -192,11 +242,36 @@ function renderScalar(value: unknown): string {
  * nobody reads, and the four that are always there are the four that make the entry
  * auditable.
  */
-function EntryCard({ entry }: { entry: ApiExtendedContextEntry }) {
-  const scopeLine =
+function EntryCard({
+  entry,
+  runLabels,
+}: {
+  entry: ApiExtendedContextEntry;
+  runLabels: RunLabels | null;
+}) {
+  const label = conceptLabel(entry.concept);
+  /* A RUN BY ITS LABEL, the id one hover away (and beside the label only when two
+     runs share it, which is the one case the label alone cannot tell apart). An id
+     the label read did not resolve is shown as the id — never wrong, only less
+     friendly (`IngestionProposalsPanel` makes the same call). */
+  const runLabel =
     entry.scope === 'run' && entry.run_id !== null
-      ? `On run ${entry.run_id}`
-      : 'On the record';
+      ? (runLabels?.byId[entry.run_id] ?? null)
+      : null;
+  const scopeLine =
+    entry.scope === 'run' && entry.run_id !== null ? (
+      <>
+        On run{' '}
+        <span className="extctx-run" title={entry.run_id}>
+          {runLabel ?? entry.run_id}
+        </span>
+        {runLabel !== null && runLabels?.duplicated.has(runLabel) && (
+          <span className="extctx-run-id"> · {entry.run_id}</span>
+        )}
+      </>
+    ) : (
+      'On the record'
+    );
   /* `normalized_value` is shown ONLY WITH ITS RULE, and the condition is an AND for
      a reason rather than for tidiness: the server requires `normalization_rule`
      whenever `determinism` is not `read`, so a value arriving without one would mean
@@ -210,7 +285,21 @@ function EntryCard({ entry }: { entry: ApiExtendedContextEntry }) {
 
   return (
     <li className="extctx-entry">
-      <span className="extctx-concept">{entry.concept}</span>
+      <div className="extctx-head">
+        <span className="extctx-concept" title={entry.concept}>
+          {label}
+        </span>
+        {/* THE KEY AND THE REGISTRY'S REASON, one `?` away — reachable by keyboard,
+            which a `title` alone is not. The reason is the registry's own sentence,
+            verbatim; it is kept out of the default reading because it is written for
+            whoever maintains the registry, not for the scientist reading the card. */}
+        <HelpTip subject={label} label="About This Entry">
+          <span>
+            Concept key: <code className="mono">{entry.concept}</code>
+          </span>
+          {entry.reason !== '' && <span className="extctx-reason">{entry.reason}</span>}
+        </HelpTip>
+      </div>
       {/* THE SOURCE'S OWN WORDS. Never parsed, never converted, never shortened. */}
       <span className="extctx-literal">{entry.raw_literal}</span>
       <dl className="extctx-provenance">
@@ -228,26 +317,37 @@ function EntryCard({ entry }: { entry: ApiExtendedContextEntry }) {
         </div>
         {showNormalized && (
           <div className="extctx-provenance-pair">
-            {/* THE RULE IS IN THE LABEL, not a footnote, so a cleaned reading can
-                never appear without the name of what cleaned it. */}
-            <dt>Read by {entry.normalization_rule} as</dt>
+            {/* THE RULE STAYS IN THE SAME PAIR as the reading it produced — one `?`
+                beside the word "Read as" — so a cleaned reading can never appear
+                without the name of what cleaned it being right there. It used to be
+                the label itself ("Read by bl15.filter_index_v1 as"), which put a
+                parser id in the scientist's default reading (final review, P1). */}
+            <dt>
+              Read as
+              <HelpTip subject="This Reading" label="Which Rule Read This">
+                <span>
+                  Read by the stored rule{' '}
+                  <code className="mono">{entry.normalization_rule}</code>.
+                </span>
+              </HelpTip>
+            </dt>
             <dd>
-              {renderScalar(entry.normalized_value)}
-              {entry.unit === null ? '' : ` ${entry.unit}`}
+              <span className="extctx-normalized">
+                {renderScalar(entry.normalized_value)}
+                {entry.unit === null ? '' : ` ${entry.unit}`}
+              </span>
             </dd>
           </div>
         )}
       </dl>
-      {entry.reason !== '' && <p className="extctx-lead">{entry.reason}</p>}
-      <details className="extctx-details">
-        <summary className="extctx-summary">Everything this entry records</summary>
+      <Disclosure summary="Everything This Entry Records" className="extctx-details">
         {/* THE RAW ENTRY, VERBATIM AND COMPLETE — including the keys that are null,
             because the server sends them deliberately: omitting one would make "this
             reader looked and found no unit" indistinguishable from "this reader does
             not report units". This is an audit view, and it is under a disclosure so
             that it is never the scientist's primary reading. */}
         <pre className="extctx-raw">{JSON.stringify(entry, null, 2)}</pre>
-      </details>
+      </Disclosure>
     </li>
   );
 }
@@ -278,6 +378,44 @@ export function ExtendedContextPanel({
      a record switch can be in flight together, and a page-2 response must not be
      appended to a different record's page 1. */
   const requested = useRef(`${experimentId}::0`);
+
+  /*
+   * RUN LABELS, READ ONCE — and only when a shown entry is run-scoped. The same
+   * bounded first page `IngestionProposalsPanel` asks for (`RUNS_PAGE_SIZE`): this
+   * read exists only to NAME runs, never to enumerate them, so a run beyond it stays
+   * unresolved and its entry shows the id, which is never wrong. A failed read is
+   * silent for the same reason.
+   */
+  const [runLabels, setRunLabels] = useState<RunLabels | null>(null);
+  const runLabelsFor = useRef<string | null>(null);
+  const needsRunLabels =
+    state.status === 'data' && state.shown.some((entry) => entry.scope === 'run');
+  useEffect(() => {
+    if (!needsRunLabels || runLabelsFor.current === experimentId) return;
+    runLabelsFor.current = experimentId;
+    let alive = true;
+    api
+      .listRuns(experimentId, { limit: RUNS_PAGE_SIZE })
+      .then((res) => {
+        if (!alive) return;
+        const byId: Record<string, string> = {};
+        const seen: Record<string, number> = {};
+        for (const run of res.runs) {
+          byId[run.id] = run.label;
+          seen[run.label] = (seen[run.label] ?? 0) + 1;
+        }
+        setRunLabels({
+          byId,
+          duplicated: new Set(Object.keys(seen).filter((name) => seen[name] > 1)),
+        });
+      })
+      .catch(() => {
+        /* Left unresolved: entries fall back to the run id. */
+      });
+    return () => {
+      alive = false;
+    };
+  }, [needsRunLabels, experimentId]);
 
   /**
    * THE FIRST PAGE. Replaces everything — this is the read a reader ASKED for, so it
@@ -425,6 +563,7 @@ export function ExtendedContextPanel({
           <Loaded
             loaded={state.loaded}
             shown={state.shown}
+            runLabels={runLabels}
             appending={state.appending}
             appendError={state.appendError}
             onMore={loadMore}
@@ -438,6 +577,7 @@ export function ExtendedContextPanel({
 function Loaded({
   loaded,
   shown,
+  runLabels,
   appending,
   appendError,
   onMore,
@@ -446,6 +586,8 @@ function Loaded({
   loaded: ApiExtendedContextResponse;
   /** Every entry fetched so far, across pages. What the reader can actually see. */
   shown: ApiExtendedContextEntry[];
+  /** Run display labels, once read — `null` until then (entries show the run id). */
+  runLabels: RunLabels | null;
   appending: boolean;
   appendError: ApiError | null;
   onMore: () => void;
@@ -517,10 +659,18 @@ function Loaded({
 
   return (
     <>
-      {/* THE SERVER'S OWN SENTENCE, VERBATIM. Not paraphrased and not shortened: it
-          is the artifact's definition of itself, and every softening of it is a step
-          toward a reader treating a level-4 literal as a field value. */}
-      <p className="extctx-not-official">{loaded.not_official}</p>
+      {/* ONE VISIBLE LINE, THE SERVER'S OWN SENTENCE ONE `?` AWAY (final review of
+          #279, P1). The line states the two things a reader must not miss — this is
+          not an official record, and nothing in it is a field value — and stays
+          visible. The server's `not_official` sentence is still rendered VERBATIM,
+          never paraphrased or shortened, inside the tip: it is the artifact's
+          definition of itself, and six lines of it led every visit to this panel. */}
+      <p className="extctx-not-official">
+        {NOT_OFFICIAL_SHORT}{' '}
+        <HelpTip subject={LABELS.extendedContextHeading} label="About Extended Context">
+          <span className="extctx-not-official-full">{loaded.not_official}</span>
+        </HelpTip>
+      </p>
 
       <ul className="extctx-counts">
         {/* EVERY NUMBER DESCRIBING THE RECORD IS THE SERVER'S. `total` is what the
@@ -583,7 +733,7 @@ function Loaded({
       ) : (
         <ul className="extctx-list">
           {shown.map((entry) => (
-            <EntryCard key={entry.entry_id} entry={entry} />
+            <EntryCard key={entry.entry_id} entry={entry} runLabels={runLabels} />
           ))}
         </ul>
       )}

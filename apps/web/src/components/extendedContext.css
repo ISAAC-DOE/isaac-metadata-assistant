@@ -82,10 +82,31 @@
   background: var(--surface);
 }
 
+/* The concept's readable name and its `?` (the key and the registry's reason). */
+.extctx-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-xs);
+  min-width: 0;
+}
+
 .extctx-concept {
   font-size: var(--font-size-body);
   font-weight: var(--font-weight-semibold);
   color: var(--text-heading);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* The registry's sentence inside the entry's tip, set apart from the key above it. */
+.extctx-reason {
+  color: var(--text-secondary);
+}
+
+/* A run id shown BESIDE a label only when two runs share that label. */
+.extctx-run-id {
+  color: var(--text-muted);
 }
 
 /* THE LITERAL IS MONOSPACE AND WRAPS RATHER THAN TRUNCATES. A truncated literal is
@@ -111,6 +132,11 @@
 }
 
 .extctx-provenance dt {
+  display: inline-flex;
+  align-items: center;
+  /* A label never breaks inside itself ("Where in / it" at 390); its value wraps. */
+  flex: none;
+  white-space: nowrap;
   font-weight: var(--font-weight-medium);
 }
 
@@ -129,15 +155,11 @@
   min-width: 0;
 }
 
+/* The raw entry sits in the shared `Disclosure` (final review of #279, P1) — the
+   native `<details>` triangle was the one disclosure on the record screen that did
+   not look like the others. Only its type size is set here. */
 .extctx-details {
   font-size: var(--font-size-meta);
-  color: var(--text-secondary);
-}
-
-.extctx-summary {
-  cursor: pointer;
-  font-size: var(--font-size-meta);
-  font-weight: var(--font-weight-medium);
   color: var(--text-secondary);
 }
 
@@ -145,7 +167,7 @@
    Activity panel shipped raw JSON as its primary reading and it was fixed; this
    panel must not reintroduce it. */
 .extctx-raw {
-  margin: var(--space-xs) 0 0;
+  margin: 0;
   padding: var(--space-sm);
   background: var(--surface-subtle);
   border-radius: var(--radius-token);
