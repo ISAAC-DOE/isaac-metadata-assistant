@@ -1831,15 +1831,17 @@ button.assistant-source-chip-nav:focus-visible {
   font-size: 11.5px;
   color: var(--text-tertiary);
 }
-.guided-path {
+.guided-path-tip {
   margin-left: auto;
+}
+/* The official path, now inside the `?` panel (owner QA, 2026-09-22). */
+.guided-path {
   font-family: var(--font-mono);
   font-size: 11px;
   color: var(--text-slate);
-  background: var(--cover-bg);
-  border: 1px solid var(--cover-border);
-  border-radius: var(--radius-token);
-  padding: 2px 8px;
+}
+.guided-why {
+  margin-top: var(--space-sm);
 }
 .guided-question {
   font-size: 17px;
@@ -1903,8 +1905,8 @@ button.assistant-source-chip-nav:focus-visible {
   margin-top: 14px;
 }
 .guided-field-label {
-  font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: var(--font-size-meta);
+  font-weight: var(--font-weight-semibold);
   color: var(--text-slate);
   margin-bottom: 6px;
 }
@@ -2076,7 +2078,9 @@ button.assistant-source-chip-nav:focus-visible {
   flex: none;
 }
 .upcoming-label { font-size: var(--font-size-body); color: var(--text-secondary); }
-.upcoming-path { margin-left: auto; font-family: var(--font-mono); font-size: 11px; color: var(--text-quaternary); }
+/* A HUMAN name (`blockerDisplayName`), so it is set in the UI face at a readable
+   tone — it used to be mono in `--text-quaternary`, which read as a raw path. */
+.upcoming-path { margin-left: auto; font-size: var(--font-size-meta); color: var(--text-secondary); }
 
 /* The withheld-questions disclosure. This screen holds a PAGE of the record's open
    questions (see `PENDING_PAGE` in GuidedCompletion), so it states how many it is not
@@ -2170,7 +2174,10 @@ button.assistant-source-chip-nav:focus-visible {
 }
 .guided-owner-label {
   flex: none;
-  font-size: 10.5px;
+  /* 11px, the documented floor (`typography.md:57`) — it was 10.5px (Impeccable
+     overlay, undersized-ui-text, 2026-09-22). Numeric, because this rule paints
+     `--text-tertiary` and `palette-contrast` reads its size. */
+  font-size: 11px;
   letter-spacing: 0.05em;
   text-transform: uppercase;
   color: var(--text-tertiary);
@@ -2246,6 +2253,13 @@ button.assistant-source-chip-nav:focus-visible {
   color: var(--text-tertiary);
   line-height: 1.55;
   margin: 10px 0 0;
+  max-width: 68ch;
+}
+.structured-entry-more {
+  margin-top: var(--space-md);
+}
+.structured-entry-more .structured-entry-note:first-child {
+  margin-top: 0;
 }
 .structured-entry-error {
   font-size: 12px;

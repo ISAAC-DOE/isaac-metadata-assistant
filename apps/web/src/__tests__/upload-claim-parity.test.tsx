@@ -806,7 +806,25 @@ describe('R1b §4 · the guard rejects the exact strings that shipped', () => {
  * the voice section (`mcpRoute*`). The ratchet caught the change, which is what
  * it is for — a copy addition to this panel must be a decision, not a drift.
  */
-const CAPTURE_COPY_KEY_COUNTS = { total: 101, strings: 97, functions: 4 };
+/*
+ * 141/135/6, from 101/97/4 on 2026-09-22 (owner QA C1–C5): +48 new, −8 retired
+ * (the old chooser's card paragraphs, now unused). New: Capture Home's
+ * one-line routes, the three focused views' leads, the Write view's privacy line,
+ * the Claude voice path's states, the Files bridge and the live-microphone notice.
+ * Every new string is INSIDE the ban below and passes it as written — none says an
+ * upload route or endpoint does not exist. The two new FUNCTIONS
+ * (`summaryCompact`, `claudeStarter`) build counts and an instruction naming the
+ * record; neither makes an upload or file-reading claim.
+ */
+/*
+ * 143/137/6, from 141/135/6 on 2026-09-22 (PR #277 review): +2 strings.
+ * `homeVoiceLineWithClaude` — Capture Home's voice line is now posture-conditional,
+ * and names the Claude app ONLY when this deployment's Claude path is ready (the
+ * plain `homeVoiceLine` no longer advertises it); `finalizeAlreadyRead` — the
+ * reason Finalize is disabled after a successful reading. Both are INSIDE the ban
+ * and pass it as written: neither says an upload route or endpoint does not exist.
+ */
+const CAPTURE_COPY_KEY_COUNTS = { total: 143, strings: 137, functions: 6 };
 
 function captureVoiceAudioHandling(): string {
   return CAPTURE_COPY.voiceAudioHandling;

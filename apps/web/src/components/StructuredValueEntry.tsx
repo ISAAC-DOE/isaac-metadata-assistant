@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Disclosure } from './Disclosure';
 import {
   DESCRIPTOR_KINDS,
   DESCRIPTOR_NAME_SUGGESTIONS,
@@ -497,10 +498,11 @@ export function SeriesEntry({ text, onChange, idPrefix }: SeriesEntryProps) {
 
   return (
     <div className="structured-entry">
+      {/* ONE LINE ABOVE THE BOX (owner QA, DEC-35). The fuller explanation —
+          where the value comes from, and where custom conditions go — is one click
+          away below it, still rendered. */}
       <p className="structured-entry-lead">
-        A reduced spectrum comes out of your reduction pipeline — nobody types one. Paste
-        the reduction product&rsquo;s <code>measurement.series</code> JSON here. It is
-        stored exactly as given.
+        Paste the reduction product&rsquo;s series JSON. It is stored exactly as given.
       </p>
       <label className="structured-field" htmlFor={`${idPrefix}-series`}>
         <span className="structured-label">Series JSON</span>
@@ -546,13 +548,19 @@ export function SeriesEntry({ text, onChange, idPrefix }: SeriesEntryProps) {
         verbatim, and nothing reads it. Anything with no schema home at all still
         belongs in Unmapped Notes, which is the surface built for exactly that.
       */}
-      <p className="structured-entry-note">
-        Conditions the questions above do not cover go in each series&apos;{' '}
-        <code className="mono">conditions</code> object — your own keys, for example{' '}
-        <code className="mono">{'{"control_mode": "potentiostatic", "flow_sccm": 20}'}</code>.
-        The official schema accepts them there and they are exported verbatim;
-        ISAAC does not interpret them.
-      </p>
+      <Disclosure summary="About Series JSON" className="structured-entry-more">
+        <p className="structured-entry-note">
+          A reduced spectrum comes out of your reduction pipeline — nobody types one. It
+          goes into the record as its <code>measurement.series</code>.
+        </p>
+        <p className="structured-entry-note">
+          Conditions the questions above do not cover go in each series&apos;{' '}
+          <code className="mono">conditions</code> object — your own keys, for example{' '}
+          <code className="mono">{'{"control_mode": "potentiostatic", "flow_sccm": 20}'}</code>.
+          The official schema accepts them there and they are exported verbatim;
+          ISAAC does not interpret them.
+        </p>
+      </Disclosure>
     </div>
   );
 }

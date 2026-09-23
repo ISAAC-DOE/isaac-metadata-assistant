@@ -192,7 +192,14 @@ describe('a control is offered only where a record-level route accepts a value',
     ] as const) {
       const row = rowFor(section, path);
       expect(row.querySelector('input, select, textarea')).toBeNull();
-      expect(within(row).queryByRole('button')).toBeNull();
+      // No ACTION button. Since owner QA F1 (2026-09-22) every row carries one `?`
+      // (`.helptip-trigger`, the official path) — a disclosure of what the field is,
+      // not a way to write it — so it is the one button excluded, by class.
+      expect(
+        within(row)
+          .queryAllByRole('button')
+          .filter((b) => !b.classList.contains('helptip-trigger')),
+      ).toEqual([]);
     }
   });
 

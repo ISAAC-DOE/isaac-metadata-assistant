@@ -10400,7 +10400,7 @@
       },
       {
         "path": "apps/web/src/components/AdvisoryChip.tsx",
-        "sha256": "d611f69319710f9798039a96d528929ad94e6ad7ad08b1ea1750d2933dd45ca8"
+        "sha256": "a005d7ca4497bee628b209620b263b84a5c400be9eca1ef790c4adcd1a6e239d"
       },
       {
         "path": "apps/web/src/components/AppShell.tsx",
@@ -10440,11 +10440,11 @@
       },
       {
         "path": "apps/web/src/components/FieldGroup.tsx",
-        "sha256": "9b0be487103bf0c763df3e24c58f21b5c2510d945d2d6b7b3c631ec1ae589ca7"
+        "sha256": "8637b7a37b8f2a68fadb51c9dd5be5b195311f4e6de201c484965a967602c00a"
       },
       {
         "path": "apps/web/src/components/FieldRow.tsx",
-        "sha256": "572e24375b56e89a5fb8fd88ba9115179cfb5fbb2e49c5f806470ac516277aca"
+        "sha256": "b81e370378f98c4161228cbbaf0d34328c1466822c71521b01a433d296624d5a"
       },
       {
         "path": "apps/web/src/components/GovernanceBanner.tsx",
@@ -10456,7 +10456,7 @@
       },
       {
         "path": "apps/web/src/components/GuidedPrompt.tsx",
-        "sha256": "88800eab4b4344efa822d34c7fc1936f4fd028f7a9d8323c4750b2a92871fbff"
+        "sha256": "c1a6457cebaa94dfc6354bb6fc7be21313bbd4fc3532c8edd92b1495ee28152d"
       },
       {
         "path": "apps/web/src/components/HelpPanel.tsx",
@@ -10492,15 +10492,15 @@
       },
       {
         "path": "apps/web/src/components/WorkflowSpine.tsx",
-        "sha256": "6fe35d0ed1f74c3136cad029f6196131b8bbfd993af1d890237b7b6a929c8a08"
+        "sha256": "f53db3ced5fe2db80d3d1ff617fa989129454143816f822e4997c4b2f153fdcf"
       },
       {
         "path": "apps/web/src/components/icons.tsx",
-        "sha256": "c1ade8d479aeb73a477427140531ba0b0d9769573e9bc85649e2ffd35c9806fc"
+        "sha256": "f0f3aa3ce8b968ce437b8b4bd372c782863a224cb651a42adc4272f68cb4a1eb"
       },
       {
         "path": "apps/web/src/lib/adapt.ts",
-        "sha256": "6608f8b5d86f53ad7556eb5e1e41cda9557f3f44934042c713565bc8447a94f8"
+        "sha256": "97e731f8bb364a8d7bd0f782bac6458993be10d915f10f28bb36cb73088d4156"
       },
       {
         "path": "apps/web/src/lib/api.ts",
@@ -10512,11 +10512,11 @@
       },
       {
         "path": "apps/web/src/lib/labels.ts",
-        "sha256": "7024f3b3498bea30653370a3801edd9a093fd69a3c6d6d9aa0b8348de3415e56"
+        "sha256": "18f0521e97990cf11eaa61c7ab6a6b3d667857644e77005f70aeec9c1655b200"
       },
       {
         "path": "apps/web/src/lib/routes.ts",
-        "sha256": "6bda62bab25a80d8f3c4e88561eb9aab4f29f5c50bda51a0326895352c6f227b"
+        "sha256": "a65f8b1d30dd2c227f0a95c1b9d056d42aa73bb42433591963df9b0ae8380ee5"
       },
       {
         "path": "apps/web/src/lib/status.ts",
@@ -10524,7 +10524,7 @@
       },
       {
         "path": "apps/web/src/lib/types.ts",
-        "sha256": "6c98e7882744b7d2c240cd7dc1935a18409b1f9a1d3b234e65a16697d29d1127"
+        "sha256": "f0e5be8d31795601e54f9b04beb28ab73fd1c647ed88f97e6bd8c4bc4e3c4725"
       },
       {
         "path": "apps/web/src/lib/useFetch.ts",
@@ -10544,7 +10544,7 @@
       },
       {
         "path": "apps/web/src/screens/ExportReadiness.tsx",
-        "sha256": "79511e5d99308da374527e00e232f3f32607989c146b65adb4129165de07af69"
+        "sha256": "a0ce24a550157356bcb3fc7032eee3c225607d17bffbb0a3341e279d84729e06"
       },
       {
         "path": "apps/web/src/screens/GovernancePage.tsx",
@@ -10552,7 +10552,7 @@
       },
       {
         "path": "apps/web/src/screens/GuidedCompletion.tsx",
-        "sha256": "5f955c35e378cc97c3763cd2c8a0dddcf2f4cd967ee798727d0f93afe5afb1ed"
+        "sha256": "bd21d718e238c73b6ba795a9c3f48e204de181905914a05d83b235a73af13f73"
       },
       {
         "path": "apps/web/src/screens/LoadMaterials.tsx",
@@ -10564,7 +10564,7 @@
       },
       {
         "path": "apps/web/src/screens/RecordWorkbench.tsx",
-        "sha256": "74e88b16b1291ac5436f151a7e7f4cb624e397c293ec5bce58a3844d11ef6528"
+        "sha256": "3fb94cd73e72291a3f649d77466a1110d75f85b63ce22587517488f4b886353c"
       },
       {
         "path": "apps/web/src/screens/SettingsPage.tsx",
@@ -11012,7 +11012,7 @@
       }
     ],
     "served_file_count": 200,
-    "served_manifest_fingerprint": "34c11e0b7c65e7fc2037a510bbc5cce98fcffc750e66f25bfae41541b59ed079"
+    "served_manifest_fingerprint": "8b18ac49fc90e6caffe1cc10028eb79e7a9fd576f7640988bc3d874033419c30"
   },
   "overview": {
     "built_at_commit": "caab1d0a69c1733524bda5dde495623bc4b7bad1",

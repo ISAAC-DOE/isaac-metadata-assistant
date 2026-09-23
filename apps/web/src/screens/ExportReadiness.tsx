@@ -8,6 +8,7 @@ import { RecordRail } from '../components/RecordRail';
 import { StatusBar } from '../components/StatusBar';
 import { VerdictCard } from '../components/VerdictCard';
 import { RunFindings } from '../components/RunFindings';
+import { BlockerItems } from '../components/BlockerItems';
 import { CoverageBadge } from '../components/CoverageBadge';
 import { AdvisoryChip } from '../components/AdvisoryChip';
 import { ArtifactCard } from '../components/ArtifactCard';
@@ -27,6 +28,7 @@ import {
   officialCleanSentence,
   officialExportBlockedSentence,
   officialFindingSource,
+  officialFindingsHeading,
   officialNoVerdictOnWrittenRecordSentence,
 } from '../lib/officialAttribution';
 import { LABELS } from '../lib/labels';
@@ -35,6 +37,7 @@ import { compose } from '../lib/assistantComposer';
 import { api, ApiError } from '../lib/api';
 import { useRecordSession } from '../lib/useRecordSession';
 import { useWorkspaceScopeChanged } from '../lib/workspaceScope';
+import { useSettledErrorTitle } from '../lib/useSettledErrorTitle';
 import { toAdvisoryResult, toAuditResult, toValidationResult } from '../lib/adapt';
 import { TUTORIAL_ANCHORS } from '../lib/tutorialSteps';
 import type {
@@ -206,14 +209,34 @@ export function ExportReadiness() {
   // the record they were computed for, and a trust readout about a record that no
   // longer exists is the worst instance of showing destroyed content as current.
   const scopeChanged = useWorkspaceScopeChanged();
+  const settled = useSettledErrorTitle(load.name === 'error' ? load.error : null);
   if (scopeChanged) return <Navigate to={ROUTES.experiments} replace />;
 
   if (load.name !== 'data') {
+    /*
+     * PR #277 REVIEW (pre-existing) — A MISSING RECORD WAS DRESSED AS A LIVE ONE.
+     * The error branch kept the loading shape: the title said "Review Export
+     * Readiness", the breadcrumb linked to the record that does not exist, and the
+     * rail offered live Capture/Proposals/Runs/Activity links and a skeleton spine
+     * that would never settle. The rail is a LOADING shape here, exactly as on
+     * `RecordWorkbench` (N4); once settled in an error it is omitted, and the title
+     * names the state on screen.
+     */
     return (
       <AppShell
         variant="record"
-        topBar={<TopBar variant="record" title={LABELS.screenExport} recordId={id} />}
-        sidebar={<RecordRail recordId={id} workflow={null} activeView={null} />}
+        topBar={
+          <TopBar
+            variant="record"
+            title={settled.recordAbsent && settled.title !== null ? settled.title : LABELS.screenExport}
+            recordId={settled.recordAbsent ? undefined : id}
+          />
+        }
+        sidebar={
+          settled.recordAbsent ? undefined : (
+            <RecordRail recordId={id} workflow={null} activeView={null} />
+          )
+        }
         mainPad="pad"
       >
         <h1 className="sr-only">{LABELS.screenExport}</h1>
@@ -502,6 +525,19 @@ function LoadedExport({
   const officialMaySpeak = inSession !== null || mayNameOfficialSchema(validate);
   const coverage = audit.records.length > 0 ? toAuditResult(audit) : 'pending';
   const advisory = toAdvisoryResult(warnings);
+  /*
+   * VALIDATE & REVIEW, BY RUN — the per-run BLOCKERS. `validate.runs` is present ONLY
+   * for a record whose runs each export their own official record, so a zero-run
+   * record renders nothing here (its blockers are in the gate above instead).
+   *
+   * ADVISORIES ARE SHOWN ONCE (review #277, I-7): the advisory card beside Evidence
+   * Audit lists them, so this section is given no `warningRuns` and repeats none. The
+   * card's list is the deduplicated union the server computes over the same runs.
+   */
+  const runFindingsNode =
+    validate.runs && validate.runs.length > 0 ? (
+      <RunFindings runs={validate.runs} experimentId={id} />
+    ) : null;
 
   // A record whose runs each export their own official record has NO singular
   // record id or filename pair — the fields are singular and it has several — while
@@ -617,10 +653,17 @@ function LoadedExport({
         refreshFailed={refreshFailed}
         onRefresh={onRefresh}
       />
+      {/*
+        ONE BANNER FOR ONE FACT (review #277, I-7). While fields still need
+        confirming, this screen's own gate below says so and carries the action
+        ("Back to Complete"); the workflow banner's "N items need your attention"
+        was the same fact and a second call to action, one card above it.
+      */}
       <WorkflowProgressBanner
         workflow={detail.workflow}
         recordId={id}
         pendingCount={pendingCount}
+        excludeSteps={['complete_metadata']}
       />
 
       {/* P28.2 — the exported record changed after export (records are immutable):
@@ -658,12 +701,8 @@ function LoadedExport({
                 {officialNoVerdictOnWrittenRecordSentence(officialFindingSource(validate))}
               </p>
               {validate.errors.length > 0 && (
-                <ul className="preexport-errors mono">
-                  {validate.errors.map((e, i) => (
-                    <li key={`${e.path}-${i}`}>
-                      <span className="preexport-error-path">{e.path}</span> — {e.message}
-                    </li>
-                  ))}
+                <ul className="preexport-errors">
+                  <BlockerItems errors={validate.errors} />
                 </ul>
               )}
               <button type="button" className="btn btn-secondary" onClick={() => onRefresh()}>
@@ -779,6 +818,23 @@ function LoadedExport({
                   Export unlocks only when every field the system refused to guess is confirmed.
                   This is expected — not a failure.
                 </p>
+                {/*
+                  BLOCKERS FIRST (review #277, I-7). What the checks already report
+                  stands in the way is listed HERE, in the one gate, rather than below
+                  the advisory card. A record whose runs each export their own record
+                  lists them per run in "Findings by Run" directly below instead, so
+                  nothing is listed twice.
+                */}
+                {!(validate.runs && validate.runs.length > 0) && validate.errors.length > 0 && (
+                  <>
+                    <h3 className="preexport-blockers-title">
+                      {officialFindingsHeading(officialFindingSource(validate))}
+                    </h3>
+                    <ul className="preexport-errors">
+                      <BlockerItems errors={validate.errors} experimentId={id} />
+                    </ul>
+                  </>
+                )}
                 <button
                   type="button"
                   className="btn btn-primary"
@@ -885,12 +941,15 @@ function LoadedExport({
                   officialCheckedDocument(validate),
                 )}
               </p>
-              <ul className="preexport-errors mono">
-                {validate.errors.map((e, i) => (
-                  <li key={`${e.path}-${i}`}>
-                    <span className="preexport-error-path">{e.path}</span> — {e.message}
-                  </li>
-                ))}
+              {/* One row per finding: the field in human words where the finding's
+                  own path names one (the official path one `?` away), then the
+                  validator's sentence VERBATIM — visible, because a blocking error
+                  is never disclosed away (DEC-35). No `Go to Field` here: these are
+                  the record's findings, not a run's, and the five run-level inputs
+                  are the only destinations a link could honestly reach (DEC-30).
+                  The per-run list below carries that control. */}
+              <ul className="preexport-errors">
+                <BlockerItems errors={validate.errors} />
               </ul>
               <button
                 type="button"
@@ -902,6 +961,9 @@ function LoadedExport({
               </button>
             </section>
           )}
+
+          {/* BLOCKERS BEFORE ADVISORIES (review #277, I-7). */}
+          {runFindingsNode}
 
           <div className="signal-row" style={{ marginTop: 16 }}>
             <div className="preexport-coverage card" role="note">
@@ -933,9 +995,9 @@ function LoadedExport({
           The advisory half is `warnings.runs` from the SAME bundle, passed
           through untouched. It is separate from the verdict in the markup and in
           the copy, and no warning count enters any pass/fail figure. */}
-      {validate.runs && validate.runs.length > 0 && (
-        <RunFindings runs={validate.runs} warningRuns={warnings.runs} />
-      )}
+      {/* After export the per-run findings follow the verdict; before export they sit
+          directly under the gate, ahead of the advisory card (see above). */}
+      {exported && runFindingsNode}
 
       {/* SUBMISSION HISTORY, AND IT IS DELIBERATELY BELOW EXPORT RATHER THAN BESIDE
           IT. Export and submission are different acts and this screen must not blur

@@ -78,6 +78,7 @@ import {
   switchWorkspace,
   expect,
   proposalCard,
+  proposalCardInState,
   test,
   type ServerApi,
 } from './fixtures';
@@ -223,11 +224,10 @@ async function deriveRunTarget(
   );
 }
 
-/** A proposal card addressed by path AND state — the card's own accessible name. */
+/** A proposal card addressed by path AND state — the card's own accessible name,
+ *  which names the field in words since review #277 (`proposalCardInState`). */
 function cardInState(page: Page, path: string, stateLabel: string) {
-  return page.getByRole('article', {
-    name: new RegExp(`^Proposal for ${path.replace(/\./g, '\\.')} — ${stateLabel}`),
-  });
+  return proposalCardInState(page, path, stateLabel);
 }
 
 /**
@@ -296,7 +296,10 @@ test.describe('two scientists, one record, end to end', () => {
      * no exported artifact and (a moment ago) no runs still offers it.
      */
     const recordPanel = page.getByRole('region', {
-      name: 'Record Description (record-level values)',
+      // The region is named for its heading alone since owner QA F1 (2026-09-22) —
+      // the machine-side qualifier no longer reaches a screen reader.
+      name: 'Record Description',
+      exact: true,
     });
     await recordPanel.getByRole('button', { name: /^Record Description/ }).click();
     // A closed enum renders a `<select>`, and that is a schema fact rather than a
@@ -362,12 +365,13 @@ test.describe('two scientists, one record, end to end', () => {
     // ── STEP 5 — A opens the proposal-review surface, and it is EMPTY ─────────
     /*
      * AND THIS IS NOW A REAL "OPENS", which the step name always claimed. The
-     * proposal-review surface is the Experiment Data workspace; it used to be
+     * proposal-review surface is the Proposals view (2026-09-22; it was the
+     * Experiment Data workspace before that); it used to be
      * further down the same column, so the step asserted a heading it had not
      * navigated to. A opens it here and STAYS here for steps 6-17 — the live-arrival
      * assertion in step 7 depends on no navigation happening after this point.
      */
-    await switchWorkspace(page, 'capture');
+    await switchWorkspace(page, 'proposals');
     const proposals = page.getByRole('region', { name: 'Ingestion Proposals' });
     await expect(
       page.getByRole('heading', { name: 'Ingestion Proposals' }),
@@ -474,6 +478,8 @@ test.describe('two scientists, one record, end to end', () => {
     );
     // NOTHING IS READ UNTIL A PERSON ASKS — one current-value read per card on mount
     // would be N requests for a question nobody asked.
+    // Behind "Why This Was Proposed" since owner QA P1 (2026-09-22).
+    await recordCard.getByRole('button', { name: 'Why This Was Proposed' }).click();
     await recordCard.getByRole('button', { name: 'Show What the Record Holds Now' }).click();
     const recordCurrent = recordCard.locator('.proposal-current-body .proposal-value-body');
     await expect(recordCurrent, 'step 8: the CURRENT value is what A entered').toContainText(
@@ -659,6 +665,8 @@ test.describe('two scientists, one record, end to end', () => {
     ).toBe(1);
 
     // ── STEP 12 — three distinct values, and the label says whose ─────────────
+    // Behind "Why This Was Proposed" since owner QA P1 (2026-09-22).
+    await runCard.getByRole('button', { name: 'Why This Was Proposed' }).click();
     await runCard.getByRole('button', { name: 'Show What the Record Holds Now' }).click();
     const runCurrentLabel = runCard.locator('.proposal-current-label');
     const runCurrent = runCard.locator('.proposal-current-body .proposal-value-body');
@@ -802,7 +810,7 @@ test.describe('two scientists, one record, end to end', () => {
       Number.isFinite(revBeforeAccept),
       'step 14: the record version token must carry a numeric rev for step 17 to have a floor'
     ).toBe(true);
-    const liveRunCard = cardInState(page, runTarget.path, 'Awaiting your judgement');
+    const liveRunCard = cardInState(page, runTarget.path, 'Awaiting your judgment');
     await expect(liveRunCard, 'step 14: the open card is the one A acts on').toBeVisible({
       timeout: DISCOVERY_DEADLINE,
     });
@@ -964,7 +972,7 @@ test.describe('two scientists, one record, end to end', () => {
      * THE RUNS ARE READ ON THEIR OWN WORKSPACE, AND THE COUNT IS ASSERTED AS VISIBLE
      * RATHER THAN AS PRESENT.
      *
-     * The reload lands on `?view=capture`, where `RunsSection` is not mounted — so
+     * The reload lands on `?view=proposals`, where `RunsSection` is not mounted — so
      * this assertion has to switch. It is also strengthened while it moves:
      * `toHaveCount` counts the DOM and would pass over two hidden cards, which is
      * exactly the state a reader would experience as the runs having vanished. Each

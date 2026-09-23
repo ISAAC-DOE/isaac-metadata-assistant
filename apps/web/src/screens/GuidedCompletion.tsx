@@ -24,6 +24,7 @@ import { useFetch } from '../lib/useFetch';
 import { useRecordSession } from '../lib/useRecordSession';
 import { RecordActivityNote } from '../components/RecordActivityNote';
 import { useWorkspaceScopeChanged } from '../lib/workspaceScope';
+import { useSettledErrorTitle } from '../lib/useSettledErrorTitle';
 import {
   answerValuePreview,
   blockerDisplayName,
@@ -153,6 +154,7 @@ export function GuidedCompletion() {
   // record surfaces: a scope change destroys the record, so there is nothing to
   // re-read and nothing here may keep describing it.
   const scopeChanged = useWorkspaceScopeChanged();
+  const settled = useSettledErrorTitle(load.status === 'error' ? load.error : null);
 
   /*
    * THE STAGED ANSWER, HELD WHERE A REFRESH CANNOT REACH IT.
@@ -203,11 +205,24 @@ export function GuidedCompletion() {
   if (scopeChanged) return <Navigate to={ROUTES.experiments} replace />;
 
   if (load.status !== 'data') {
+    /* PR #277 REVIEW (pre-existing): the same missing-record fix as Export
+       Readiness — settled title, no link to the missing record, and the rail only
+       while LOADING. See `useSettledErrorTitle`. */
     return (
       <AppShell
         variant="record"
-        topBar={<TopBar variant="record" title={LABELS.screenComplete} recordId={id} />}
-        sidebar={<RecordRail recordId={id} workflow={null} activeView={null} />}
+        topBar={
+          <TopBar
+            variant="record"
+            title={settled.recordAbsent && settled.title !== null ? settled.title : LABELS.screenComplete}
+            recordId={settled.recordAbsent ? undefined : id}
+          />
+        }
+        sidebar={
+          settled.recordAbsent ? undefined : (
+            <RecordRail recordId={id} workflow={null} activeView={null} />
+          )
+        }
         mainPad="centered"
         width="readable"
       >

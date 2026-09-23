@@ -193,6 +193,20 @@ beforeEach(() => {
   vi.restoreAllMocks();
 });
 
+/**
+ * Render the panel and OPEN "Submission Details".
+ *
+ * Since owner QA V1 (2026-09-22) the panel is ONE visible status line and the
+ * cards sit behind that disclosure. `getByRole` ignores a `hidden` subtree, so a
+ * role query against a closed disclosure would make every "is NOT rendered"
+ * assertion in this file vacuous — it would pass because nothing is exposed, not
+ * because the panel declined to render it. Every data-state test opens first.
+ */
+async function renderOpen() {
+  render(<RevisionHistoryPanel experimentId={EXP} />);
+  fireEvent.click(await screen.findByRole('button', { name: 'Submission Details' }));
+}
+
 /* ── 1. cannot-know is never rendered as nothing ───────────────────────────── */
 
 describe('an unreadable history', () => {
@@ -222,7 +236,7 @@ describe('an unreadable history', () => {
         },
       },
     });
-    render(<RevisionHistoryPanel experimentId={EXP} />);
+    await renderOpen();
 
     expect(
       await screen.findByRole('heading', { name: /Submission history could not be read/i }),
@@ -238,7 +252,7 @@ describe('an unreadable history', () => {
 
   it('renders a genuinely empty history AS empty — the guard is not vacuous', async () => {
     stubFetchRoutes({ [LIST]: { body: history() } });
-    render(<RevisionHistoryPanel experimentId={EXP} />);
+    await renderOpen();
     expect(await screen.findByText(/This record has no submitted revisions/)).toBeTruthy();
     expect(
       screen.queryByRole('heading', { name: /could not be read/i }),
@@ -263,7 +277,7 @@ describe('an unreadable history', () => {
         }),
       },
     });
-    render(<RevisionHistoryPanel experimentId={EXP} />);
+    await renderOpen();
     expect(await screen.findByText(message)).toBeTruthy();
     expect(
       screen.queryByRole('heading', { name: /could not be read/i }),
@@ -284,7 +298,7 @@ describe('attribution', () => {
         }),
       },
     });
-    render(<RevisionHistoryPanel experimentId={EXP} />);
+    await renderOpen();
 
     expect(await screen.findByText(NO_ACTOR_TEXT)).toBeTruthy();
     const text = document.body.textContent ?? '';
@@ -304,7 +318,7 @@ describe('attribution', () => {
     stubFetchRoutes({
       [LIST]: { body: history({ revisions: [revision()], total: 1, returned: 1 }) },
     });
-    render(<RevisionHistoryPanel experimentId={EXP} />);
+    await renderOpen();
     expect(await screen.findByText(/ada\.lovelace/)).toBeTruthy();
     expect(screen.getByText(/not proof anyone authenticated/i)).toBeTruthy();
   });
@@ -317,7 +331,7 @@ describe('the lifecycle', () => {
     stubFetchRoutes({
       [LIST]: { body: history({ revisions: [], total: 0, returned: 0 }) },
     });
-    render(<RevisionHistoryPanel experimentId={EXP} />);
+    await renderOpen();
 
     expect(await screen.findByText('Ready to Submit')).toBeTruthy();
     const text = (document.body.textContent ?? '').toLowerCase();
@@ -385,7 +399,7 @@ describe('the lifecycle', () => {
         }),
       },
     });
-    render(<RevisionHistoryPanel experimentId={EXP} />);
+    await renderOpen();
 
     // The record's own state is UNCHANGED...
     expect(await screen.findByText('Ready to Submit')).toBeTruthy();
@@ -414,7 +428,7 @@ describe('the lifecycle', () => {
         }),
       },
     });
-    render(<RevisionHistoryPanel experimentId={EXP} />);
+    await renderOpen();
     expect(await screen.findByText('some_future_blocker')).toBeTruthy();
   });
 });
@@ -464,7 +478,7 @@ describe('comparing the record with a revision', () => {
         },
       ],
     });
-    render(<RevisionHistoryPanel experimentId={EXP} />);
+    await renderOpen();
 
     fireEvent.click(await screen.findByRole('button', { name: /Revision 1/ }));
     const table = await screen.findByRole('table');
@@ -494,7 +508,7 @@ describe('comparing the record with a revision', () => {
 
   it('states that nothing differs beside a matching signature', async () => {
     withRevision({ content_signature_matches: true, changes: [] });
-    render(<RevisionHistoryPanel experimentId={EXP} />);
+    await renderOpen();
     fireEvent.click(await screen.findByRole('button', { name: /Revision 1/ }));
     expect(
       await screen.findByText(/holds exactly the content that was submitted/i),
@@ -503,7 +517,7 @@ describe('comparing the record with a revision', () => {
 
   it('says the comparison did not look everywhere when the signature differs but no field does', async () => {
     withRevision({ content_signature_matches: false, changes: [] });
-    render(<RevisionHistoryPanel experimentId={EXP} />);
+    await renderOpen();
     fireEvent.click(await screen.findByRole('button', { name: /Revision 1/ }));
     expect(
       await screen.findByText(/Something outside draft field values differs/i),
@@ -528,7 +542,7 @@ describe('comparing the record with a revision', () => {
         },
       },
     });
-    render(<RevisionHistoryPanel experimentId={EXP} />);
+    await renderOpen();
     fireEvent.click(await screen.findByRole('button', { name: /Revision 1/ }));
     expect(await screen.findByText(note)).toBeTruthy();
     expect(screen.queryByRole('table')).toBeNull();
@@ -546,7 +560,7 @@ describe('comparing the record with a revision', () => {
         }),
       },
     });
-    render(<RevisionHistoryPanel experimentId={EXP} />);
+    await renderOpen();
     fireEvent.click(await screen.findByRole('button', { name: /Revision 1/ }));
     expect(
       await screen.findByText(/Recorded now and not in this revision: Run B/),
@@ -595,7 +609,7 @@ it('renders no evaluative or causal vocabulary anywhere it can reach', async () 
       }),
     },
   });
-  render(<RevisionHistoryPanel experimentId={EXP} />);
+  await renderOpen();
   fireEvent.click(await screen.findByRole('button', { name: /Revision 1/ }));
   await screen.findByRole('table');
 
@@ -722,7 +736,7 @@ describe('unit attribution in the diff table', () => {
         } as Partial<ApiRevisionDiff>),
       },
     });
-    render(<RevisionHistoryPanel experimentId={EXP} />);
+    await renderOpen();
     fireEvent.click(await screen.findByRole('button', { name: /Revision 1/ }));
 
     // BOTH rows are attributed, and to DIFFERENT units. Before the fix the
@@ -744,7 +758,7 @@ describe('unit attribution in the diff table', () => {
         } as Partial<ApiRevisionDiff>),
       },
     });
-    render(<RevisionHistoryPanel experimentId={EXP} />);
+    await renderOpen();
     fireEvent.click(await screen.findByRole('button', { name: /Revision 1/ }));
 
     // The id is shown AS an id, the treatment `RevisionSnapshot` already uses —
@@ -772,7 +786,7 @@ describe('unit attribution in the diff table', () => {
         } as Partial<ApiRevisionDiff>),
       },
     });
-    render(<RevisionHistoryPanel experimentId={EXP} />);
+    await renderOpen();
     fireEvent.click(await screen.findByRole('button', { name: /Revision 1/ }));
 
     expect(
@@ -934,7 +948,7 @@ describe('REV-002 · Last Submitted Revision versus Current Working Changes', ()
         }),
       },
     } as never);
-    render(<RevisionHistoryPanel experimentId={EXP} />);
+    await renderOpen();
 
     const card = await screen.findByRole('region', {
       name: `${SUBMITTED_REVISION_HEADING} and ${WORKING_CHANGES_HEADING}`,
@@ -1081,7 +1095,7 @@ describe('REV-002 · the third availability state, and the cell that read "None"
         }),
       },
     } as never);
-    render(<RevisionHistoryPanel experimentId={EXP} />);
+    await renderOpen();
 
     const card = await screen.findByRole('region', {
       name: `${SUBMITTED_REVISION_HEADING} and ${WORKING_CHANGES_HEADING}`,
@@ -1093,5 +1107,107 @@ describe('REV-002 · the third availability state, and the cell that read "None"
     // And the rename caution must NOT appear: it belongs to `unchanged` only, and
     // there is nothing here for a resubmission to be refused against.
     expect(within(card).queryByText(/Renaming this record does not count/)).toBeNull();
+  });
+});
+
+/* ── 9. ONE status line, the cards one click away (owner QA V1, 2026-09-22) ───
+ *
+ * The panel used to render four prose cards in full below the export verdict. It
+ * is now one visible line — the lifecycle label and what the server said about the
+ * history and this deployment — over a `Submission Details` disclosure. Each
+ * clause of the line is a server field or a heading the cards below already use,
+ * and the two facts DEC-35 forbids hiding (history unreadable; deployment cannot
+ * submit) are on the line, never only behind the disclosure.
+ */
+describe('the collapsed submission history', () => {
+  const statusLine = () => document.querySelector('.revhist-status') as HTMLElement;
+
+  it('shows one status line and keeps the cards closed until asked', async () => {
+    stubFetchRoutes({ [LIST]: { body: history() } });
+    render(<RevisionHistoryPanel experimentId={EXP} />);
+    const trigger = await screen.findByRole('button', { name: 'Submission Details' });
+    expect(trigger.getAttribute('aria-expanded')).toBe('false');
+    expect(statusLine().textContent).toContain('Ready to Submit');
+    expect(statusLine().textContent).toContain('No submitted revisions');
+    // The cards are not exposed while closed…
+    expect(
+      screen.queryByRole('region', {
+        name: `${SUBMITTED_REVISION_HEADING} and ${WORKING_CHANGES_HEADING}`,
+      }),
+    ).toBeNull();
+    // …and are once opened.
+    fireEvent.click(trigger);
+    expect(trigger.getAttribute('aria-expanded')).toBe('true');
+    expect(
+      screen.getByRole('region', {
+        name: `${SUBMITTED_REVISION_HEADING} and ${WORKING_CHANGES_HEADING}`,
+      }),
+    ).toBeTruthy();
+  });
+
+  it('says the lifecycle label ONCE, not once on the line and again in the card', async () => {
+    stubFetchRoutes({ [LIST]: { body: history() } });
+    await renderOpen();
+    expect(screen.getAllByText('Ready to Submit')).toHaveLength(1);
+  });
+
+  it('an UNREADABLE history says so on the line, and never reads as "no revisions"', async () => {
+    stubFetchRoutes({
+      [LIST]: {
+        status: 503,
+        body: history({
+          availability: {
+            state: 'unavailable',
+            reason: 'tables_absent',
+            message: TABLES_ABSENT_MESSAGE,
+          },
+          revisions: undefined,
+          total: undefined,
+          returned: undefined,
+        }),
+      },
+    } as never);
+    render(<RevisionHistoryPanel experimentId={EXP} />);
+    await screen.findByRole('button', { name: 'Submission Details' });
+    expect(statusLine().textContent).toContain('Submission history could not be read');
+    expect(statusLine().textContent).not.toMatch(/no submitted revisions/i);
+  });
+
+  it('a readable history gives its count', async () => {
+    stubFetchRoutes({
+      [LIST]: {
+        body: history({
+          revisions: [revision({ revision_no: 2 }), revision()],
+          total: 2,
+          returned: 2,
+        }),
+      },
+    });
+    render(<RevisionHistoryPanel experimentId={EXP} />);
+    await screen.findByRole('button', { name: 'Submission Details' });
+    expect(statusLine().textContent).toContain('2 submitted revisions');
+  });
+
+  it('a deployment that cannot submit is stated on the line, beside — not instead of — the label', async () => {
+    stubFetchRoutes({
+      [LIST]: {
+        body: history({
+          lifecycle: lifecycle({
+            submission_blocked_by_deployment: {
+              blocked: true,
+              blockers: ['no_attributable_actor'],
+              basis: 'configuration_only',
+              requires_attributable_actor: true,
+              actor_trust_basis: null,
+              message: 'This deployment cannot currently accept a submission of any record.',
+            },
+          }),
+        }),
+      },
+    });
+    render(<RevisionHistoryPanel experimentId={EXP} />);
+    await screen.findByRole('button', { name: 'Submission Details' });
+    expect(statusLine().textContent).toContain('Ready to Submit');
+    expect(statusLine().textContent).toContain('Submitting is unavailable in this deployment');
   });
 });

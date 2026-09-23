@@ -69,6 +69,8 @@ import type {
   ApiLifecycle,
 } from '../lib/types';
 import { BackendDown, LoadingPanel } from './FetchStates';
+import { Disclosure } from './Disclosure';
+import { HelpTip } from './HelpTip';
 
 /** Same narrowing the other panels use — a non-`ApiError` throw still renders. */
 function asApiError(err: unknown): ApiError {
@@ -100,11 +102,15 @@ export function RevisionHistoryPanel({ experimentId }: { experimentId: string })
         <h2 className="revhist-title" id="revision-history-heading">
           Submission History
         </h2>
-        <p className="revhist-sub">
-          Submitting a record captures an immutable snapshot of it and records who
-          submitted it and when. This is a read-only view of those snapshots — nothing
-          here changes the record, and no snapshot can be restored from this screen.
-        </p>
+        {/* The explanation is reference, read once — one `?` away (DEC-35). The
+            read-only promise inside it is still in the DOM for a screen reader. */}
+        <HelpTip subject="Submission History">
+          <span className="revhist-sub">
+            Submitting a record captures an immutable snapshot of it and records who
+            submitted it and when. This is a read-only view of those snapshots — nothing
+            here changes the record, and no snapshot can be restored from this screen.
+          </span>
+        </HelpTip>
       </div>
       {/* Keyed on the record so switching records rebuilds this panel's state rather
           than showing one record's history under another's heading. */}
@@ -152,6 +158,23 @@ function RevisionHistoryBrowser({ experimentId }: { experimentId: string }) {
   const { history } = list;
   return (
     <>
+      {/*
+        ONE STATUS LINE, THEN THE CARDS ONE CLICK AWAY (owner QA V1, 2026-09-22).
+        This panel sits below the export verdict and is not what the screen is
+        for; it used to render four prose cards in full on every visit. Every
+        clause of the line is a field the server sent — the lifecycle label, the
+        availability heading `AvailabilityBlock` already uses, the deployment
+        block's own heading — so nothing is summarised that the cards do not say.
+        What stays VISIBLE is exactly what DEC-35 forbids hiding: whether history
+        could be read, and whether this deployment can submit at all.
+      */}
+      <p className="revhist-status">
+        <span className="revhist-chip" data-state={history.lifecycle.state}>
+          {history.lifecycle.label}
+        </span>
+        <span className="revhist-status-text">{historyStatusText(history)}</span>
+      </p>
+      <Disclosure summary="Submission Details" className="revhist-details">
       <LifecycleCard lifecycle={history.lifecycle} />
       <SubmittedVersusWorking history={history} />
       <DeploymentBlockNote lifecycle={history.lifecycle} />
@@ -163,8 +186,34 @@ function RevisionHistoryBrowser({ experimentId }: { experimentId: string }) {
           onSelect={select}
         />
       )}
+      </Disclosure>
     </>
   );
+}
+
+/**
+ * The clauses of the visible status line, each one a server field or a sentence
+ * this panel already renders below. A history that could not be read says so
+ * (never "no revisions"); a readable one gives its count; a deployment that
+ * cannot submit says that too — it is a fact about the server, stated beside the
+ * record's own label and never folded into it (see `DeploymentBlockNote`).
+ */
+function historyStatusText(history: ApiRevisionHistory): string {
+  const clauses: string[] = [];
+  if (history.availability.state !== 'available') {
+    clauses.push(availabilityHeading(history.availability));
+  } else {
+    const total = history.total ?? (history.revisions ?? []).length;
+    clauses.push(
+      total === 0
+        ? 'No submitted revisions'
+        : `${total} submitted revision${total === 1 ? '' : 's'}`,
+    );
+  }
+  if (history.lifecycle.submission_blocked_by_deployment.blocked) {
+    clauses.push('Submitting is unavailable in this deployment');
+  }
+  return clauses.join(' · ');
 }
 
 /* ── REV-002 · the submitted snapshot versus the record now ───────────────── */
@@ -257,12 +306,10 @@ function LifecycleCard({ lifecycle }: { lifecycle: ApiLifecycle }) {
       <h3 className="revhist-card-title" id={headingId}>
         Where this record stands
       </h3>
+      {/* The label chip is the panel's status line now, visible above this card,
+          so it is said once — the WORD still carries the state, never colour alone
+          (`data-state` drives its surface). This card keeps what the label means. */}
       <p className="revhist-lifecycle">
-        {/* The chip carries a WORD, never colour alone — the repo's system-wide
-            rule. `data-state` drives the surface treatment. */}
-        <span className="revhist-chip" data-state={lifecycle.state}>
-          {lifecycle.label}
-        </span>{' '}
         <span className="revhist-lifecycle-note">{LIFECYCLE_NOTES[lifecycle.state]}</span>
       </p>
       <ul className="revhist-reasons">

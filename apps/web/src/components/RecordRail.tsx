@@ -1,10 +1,5 @@
-import { ExternalLink } from './icons';
-import { useNavigate } from 'react-router-dom';
-
-import { LABELS } from '../lib/labels';
-import { ROUTES, type RecordViewId } from '../lib/routes';
+import { type RecordViewId } from '../lib/routes';
 import type { ApiCaptureSummary, ApiWorkflow } from '../lib/types';
-import { TUTORIAL_ANCHORS } from '../lib/tutorialSteps';
 import { WorkflowSpine } from './WorkflowSpine';
 import { RecordCaptureNav, RecordWorkspaceNav } from './RecordWorkspaceNav';
 
@@ -84,9 +79,10 @@ export function RecordRail({
    * `completion-export.test.tsx` caught as `Found multiple elements with the
    * text: Evidence Trail`.
    *
-   * The rail still offers Experiment Data, Runs and Record Fields there, so the
-   * navigation this component exists for is intact; what is dropped is the one
-   * row whose name collides.
+   * The rail still offers Capture, Proposals, Runs and Activity there (and the
+   * spine's `Record Created` step reaches Record Fields), so the navigation this
+   * component exists for is intact; what is dropped is the one row whose name
+   * collides.
    */
   showEvidenceTrail?: boolean;
   /**
@@ -96,33 +92,23 @@ export function RecordRail({
    */
   onNavigate?: () => void;
 }) {
-  const navigate = useNavigate();
   const flush = onNavigate ?? (() => {});
 
+  /*
+   * 2026-09-22 (owner QA, N3): the Evidence Trail is a row of the WORKSPACES list
+   * rather than a separate card below it, so the rail reads as three groups —
+   * Data Capture, Workflow, Workspaces — and nothing trails after them.
+   */
   return (
     <div className="record-aside">
       <RecordCaptureNav active={activeView} captureSummary={captureSummary} onNavigate={flush} />
       <WorkflowSpine workflow={workflow} recordId={recordId} />
-      <RecordWorkspaceNav active={activeView} captureSummary={captureSummary} onNavigate={flush} />
-      {showEvidenceTrail && (
-      <button
-        type="button"
-        className="evidence-trail-link"
-        data-tutorial-anchor={TUTORIAL_ANCHORS.recordEvidenceTrail}
-        onClick={() => {
-          flush();
-          navigate(ROUTES.evidence(recordId));
-        }}
-      >
-        <ExternalLink size={14} strokeWidth={2} aria-hidden="true" />
-        <span className="evidence-trail-link-label">{LABELS.evidenceTrail}</span>
-        {evidenceCount !== null && (
-          <span className="evidence-trail-link-count">
-            {evidenceCount} {evidenceCount === 1 ? 'entry' : 'entries'}
-          </span>
-        )}
-      </button>
-      )}
+      <RecordWorkspaceNav
+        active={activeView}
+        captureSummary={captureSummary}
+        onNavigate={flush}
+        evidenceTrail={showEvidenceTrail ? { recordId, count: evidenceCount } : null}
+      />
     </div>
   );
 }

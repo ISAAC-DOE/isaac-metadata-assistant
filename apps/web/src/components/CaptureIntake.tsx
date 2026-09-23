@@ -1,198 +1,167 @@
 import { useId } from 'react';
-import { Link } from 'react-router-dom';
-import { FileText, AudioWaveform, ExternalLink, SlidersHorizontal } from './icons';
+import { Link, useLocation } from 'react-router-dom';
+import { AudioWaveform, ChevronRight, FileText, FolderIcon, SlidersHorizontal, type LucideIcon } from './icons';
+import { captureSummaryLine, railDestination } from './RecordWorkspaceNav';
 import { CAPTURE_COPY } from '../lib/transcriptCaptureContent';
-import { ROUTES } from '../lib/routes';
+import { MCP_ENDPOINT } from '../lib/mcpConnectContent';
+import { useHealthState } from '../lib/useHealth';
+import { claudeVoiceState } from './ClaudeVoicePath';
+import { RECORD_CAPTURE_METHOD_PARAM, type CaptureMethodId } from '../lib/routes';
+import type { ApiCaptureSummary } from '../lib/types';
 
 /**
- * THE FIRST THING ON THE CAPTURE WORKSPACE: how do you want to get this
- * experiment in?
+ * CAPTURE HOME — how do you want to get this experiment in? (owner QA
+ * 2026-09-22, C1).
  *
- * ── WHY IT EXISTS (project owner, 2026-09-13) ──────────────────────────────
+ * ── WHAT CHANGED, AND WHY ───────────────────────────────────────────────────
  *
- * Capture moved to the top of the record rail, and the owner's reason was that
- * this is where a scientist's own work starts — they arrive from the instrument
- * with something to write down, something to say, or files. Before this, the
- * capture workspace opened on a single collapsed button ("Capture Experiment
- * Notes") and a reader had to open it to discover what was inside, while the
- * file route lived on a different top-level destination entirely and the
- * recorder was three controls deep.
+ * This used to be four essay cards with the transcript panel, the notes queue and
+ * every proposal expanded inline beneath them — 1,795px tall with nothing
+ * captured, 4,297px after "Start Writing", and "Start Writing" and "Open Recorder"
+ * opened the SAME panel. Now it is only the choice: four ways in, one short line
+ * each, and each opens a FOCUSED view on this same record (`?method=`), with the
+ * experiment context kept. Review lives in its own destination (`?view=proposals`)
+ * and this page shows a one-line count with a link to it.
  *
- * ── THE HONEST PART, WHICH IS ALSO THE DESIGN ──────────────────────────────
+ * ── WHY ROWS AND NOT FOUR CARDS ─────────────────────────────────────────────
  *
- * The owner named two routes: files, and voice with transcription. Measured over
- * HTTP, BOTH are externally blocked in this build and the unnamed third is not:
+ * Four same-size cards of icon + heading + paragraph read as marketing tiles; this
+ * is an instrument's chooser. One list, one row per route, every row the same
+ * shape: glyph, name, one line, one action. The whole row is a pointer target
+ * (the action link is stretched over it), while the accessible name stays the
+ * action's own words, so a screen reader hears four distinct actions rather than
+ * four paragraphs.
  *
- *     POST .../transcript       -> 200   (typed/pasted text -> note -> proposals)
- *     POST /api/transcription   -> 501   no_provider_configured
- *     POST /api/uploads         -> 403   unconditional
+ * ── WHAT IT IS NOT ──────────────────────────────────────────────────────────
  *
- * A chooser offering only the two named would put a scientist in front of two
- * doors that do not open. So `Write It Down` is listed FIRST and is the only
- * primary-styled action, because it is the one route that reaches a proposal
- * today; the other two are offered with what they actually do.
- *
- * NOTHING HERE IMPLIES TRANSCRIPTION WORKS — `CLAUDE.md` §15 and
- * `ai-integration-decision-packet.md` §6 (no fake `Connected` state; "build
- * nothing that implies any of it exists"). Dean deferred D1–D9, so there is no
- * approved provider and no application change can create one. The limit is
- * stated ON the card, names whose decision it is, and says what the control
- * still does — a reader can tell a deferred decision from a broken feature.
- *
- * ── WHAT THIS IS NOT ───────────────────────────────────────────────────────
- *
- * NOT a workflow step. It has no completion state, no tick, no lock and no
- * `aria-current="step"`, for the reason `workflow.py:128-149` keeps submission
- * out of `CANONICAL_ORDER`: a step needs a criterion the record's own signals
- * can decide, and "the scientist has finished capturing" is not one. Being
- * FIRST and being a STEP are different claims, and only the first was asked for.
- *
- * NOT a second way to do any of these things. Each card routes to the ONE
- * existing surface that owns that intake — the capture panel below, or
- * Historical Import — so there is no duplicate implementation to drift.
+ * Not a workflow step (DEC-14): no tick, no lock, no `aria-current="step"`, no
+ * completion state — "the scientist has finished capturing" is not derivable from
+ * anything the record holds. The summary line states COUNTS, never a verdict.
  */
-export interface CaptureIntakeProps {
-  /** Opens the capture panel below. */
-  onOpenCapture: () => void;
-  /**
-   * Opens the capture panel below for the VOICE route.
-   *
-   * TODAY THIS DOES THE SAME THING AS {@link onOpenCapture}, and saying so is
-   * the point — an earlier version of this comment claimed it "focuses the
-   * recorder", which it does not: `RecordWorkbench` passes the same handler to
-   * both, and nothing here moves focus. The recorder controls are visible as
-   * soon as the panel opens, so the label is not false, but landing focus on
-   * them is NAMED RESIDUE rather than something this prop already does.
-   *
-   * It stays a separate prop because the two routes are genuinely different
-   * intents, and a caller that wants to distinguish them should not have to
-   * change this component's signature to do it.
-   */
-  onOpenRecorder: () => void;
-  /**
-   * The record's own id, so the fourth route can link to ITS runs workspace.
-   *
-   * Required rather than optional: a card that silently renders a dead link on a
-   * caller that forgot the prop is worse than a type error. The other three routes
-   * need no id — two open a panel on this same screen and one leaves for the
-   * globally-routed `/imports`.
-   */
-  experimentId: string;
+interface MethodRow {
+  route: CaptureMethodId | 'runs';
+  icon: LucideIcon;
+  title: string;
+  line: string;
+  action: string;
 }
 
-export function CaptureIntake({
-  onOpenCapture,
-  onOpenRecorder,
-  experimentId,
-}: CaptureIntakeProps) {
-  /* `useId`, not a literal — the same hazard `RecordWorkspaceNav` records: a
-     fixed `id` works while exactly one of these is mounted and becomes a silent
-     duplicate the moment a second is (a split view, a test rendering two).
-     A `<section>` whose `aria-labelledby` resolves to the wrong heading is
-     precisely the class of defect this slice already shipped once. */
+const METHODS: readonly MethodRow[] = [
+  {
+    route: 'write',
+    icon: FileText,
+    title: CAPTURE_COPY.intakeWriteTitle,
+    line: CAPTURE_COPY.homeWriteLine,
+    action: CAPTURE_COPY.intakeWriteAction,
+  },
+  {
+    route: 'voice',
+    icon: AudioWaveform,
+    title: CAPTURE_COPY.intakeVoiceTitle,
+    line: CAPTURE_COPY.homeVoiceLine,
+    action: CAPTURE_COPY.homeVoiceAction,
+  },
+  {
+    route: 'files',
+    icon: FolderIcon,
+    title: CAPTURE_COPY.intakeFilesTitle,
+    line: CAPTURE_COPY.homeFilesLine,
+    action: CAPTURE_COPY.homeFilesAction,
+  },
+  {
+    route: 'runs',
+    icon: SlidersHorizontal,
+    title: CAPTURE_COPY.intakeRunTitle,
+    line: CAPTURE_COPY.homeRunLine,
+    action: CAPTURE_COPY.intakeRunAction,
+  },
+];
+
+/** The `to` for one method row: a focused capture view, or the Runs workspace. */
+function methodDestination(search: string, route: MethodRow['route']): string {
+  if (route === 'runs') return railDestination(search, 'runs');
+  const next = new URLSearchParams(railDestination(search, 'capture'));
+  next.set(RECORD_CAPTURE_METHOD_PARAM, route);
+  return `?${next.toString()}`;
+}
+
+export interface CaptureIntakeProps {
+  /**
+   * The server's own capture totals (`detail.capture_summary`), or `null` when not
+   * known — which renders no summary line at all, never a zero.
+   */
+  captureSummary: ApiCaptureSummary | null;
+  /** The published agent address; injectable so the "ready" branch is testable. */
+  claudeEndpoint?: string | null;
+}
+
+export function CaptureIntake({ captureSummary, claudeEndpoint = MCP_ENDPOINT }: CaptureIntakeProps) {
   const headingId = useId();
+  const location = useLocation();
+  /* The voice row offers Claude dictation ONLY where the deployment says a Claude
+     connection can reach it (review #277, I-4). `claudeVoiceState` is the same
+     derivation the Voice view uses, so the two surfaces cannot disagree. */
+  const { settled, health } = useHealthState();
+  const claudeReady = claudeVoiceState(settled, health, claudeEndpoint).kind === 'ready';
+  const summaryLine = captureSummaryLine(captureSummary);
+  const hasSomethingToReview =
+    captureSummary !== null &&
+    (captureSummary.proposals_open > 0 ||
+      captureSummary.notes_total > 0 ||
+      captureSummary.unreadable_entries > 0);
+
   return (
     <section className="capture-intake" aria-labelledby={headingId}>
       <h2 className="capture-intake-heading" id={headingId}>
         {CAPTURE_COPY.intakeHeading}
       </h2>
-      <p className="capture-intake-intro">{CAPTURE_COPY.intakeIntro}</p>
+      <p className="capture-intake-intro">{CAPTURE_COPY.homeIntro}</p>
 
-      <ul className="capture-intake-grid">
-        <li className="capture-intake-card" data-route="write">
-          <span className="capture-intake-icon" aria-hidden="true">
-            <FileText size={18} strokeWidth={2} />
-          </span>
-          <h3 className="capture-intake-title">
-            {CAPTURE_COPY.intakeWriteTitle}
-          </h3>
-          {/* The one route that reaches a proposal today, so it is the one
-              labelled available. Text, not a colour — `interaction-states`
-              forbids a reserved hue carrying a verdict, and this is a fact
-              about the build rather than a status. */}
-          <p className="capture-intake-available">
-            {CAPTURE_COPY.intakeWriteAvailable}
-          </p>
-          <p className="capture-intake-body">{CAPTURE_COPY.intakeWriteBody}</p>
-          <button
-            type="button"
-            className="btn btn-primary"
-            onClick={onOpenCapture}
-          >
-            {CAPTURE_COPY.intakeWriteAction}
-          </button>
-        </li>
-
-        <li className="capture-intake-card" data-route="voice">
-          <span className="capture-intake-icon" aria-hidden="true">
-            <AudioWaveform size={18} strokeWidth={2} />
-          </span>
-          <h3 className="capture-intake-title">
-            {CAPTURE_COPY.intakeVoiceTitle}
-          </h3>
-          <p className="capture-intake-body">{CAPTURE_COPY.intakeVoiceBody}</p>
-          {/*
-            THE LIMIT IS NOT A DISABLED BUTTON. The recorder genuinely works —
-            it records, pauses and plays back — so disabling the control would
-            be false in the other direction, and a disabled control with no
-            reason is the pattern this repository bans. The button opens the
-            recorder; the note says which half is missing and why.
-          */}
-          <p className="capture-intake-limit" role="note">
-            {CAPTURE_COPY.intakeVoiceLimit}
-          </p>
-          <button
-            type="button"
-            className="btn btn-secondary"
-            onClick={onOpenRecorder}
-          >
-            {CAPTURE_COPY.intakeVoiceAction}
-          </button>
-        </li>
-
-        <li className="capture-intake-card" data-route="files">
-          <span className="capture-intake-icon" aria-hidden="true">
-            <ExternalLink size={18} strokeWidth={2} />
-          </span>
-          <h3 className="capture-intake-title">
-            {CAPTURE_COPY.intakeFilesTitle}
-          </h3>
-          <p className="capture-intake-body">{CAPTURE_COPY.intakeFilesBody}</p>
-          {/* A real <Link>: it leaves this record for a separately-routed
-              destination, so it must be middle-clickable and bookmarkable
-              rather than a button that only works on left-click. */}
-          <Link className="btn btn-secondary" to={ROUTES.imports}>
-            {CAPTURE_COPY.intakeFilesAction}
-          </Link>
-        </li>
-        {/*
-          THE FOURTH ROUTE IN — the scan itself (2026-09-14).
-          The owner's words: "the runs should be a part of the initial capture and
-          proposals". This screen asked how you want to get the experiment in and
-          then omitted the route that records what was measured; Runs sat as a
-          sibling workspace pill instead, so answering the question honestly could
-          still leave a record with no scan in it.
-
-          A real <Link> to this record's own `?view=runs`, for the same reason the
-          files card is one: it is a routed destination, so it must be
-          middle-clickable and bookmarkable. `?view=runs` is unchanged as an
-          address — `run-compare` deep links and every existing bookmark keep
-          working; this adds a way IN, it does not move the workspace.
-        */}
-        <li className="capture-intake-card" data-route="runs">
-          <span className="capture-intake-icon" aria-hidden="true">
-            <SlidersHorizontal size={18} strokeWidth={2} />
-          </span>
-          <h3 className="capture-intake-title">{CAPTURE_COPY.intakeRunTitle}</h3>
-          <p className="capture-intake-body">{CAPTURE_COPY.intakeRunBody}</p>
-          <Link
-            className="btn btn-secondary"
-            to={ROUTES.recordView(experimentId, 'runs')}
-          >
-            {CAPTURE_COPY.intakeRunAction}
-          </Link>
-        </li>
+      <ul className="capture-methods">
+        {METHODS.map((method, index) => {
+          const Icon = method.icon;
+          return (
+            <li key={method.route} className="capture-method" data-route={method.route}>
+              <span className="capture-method-icon" aria-hidden="true">
+                <Icon size={18} strokeWidth={2} />
+              </span>
+              <div className="capture-method-text">
+                <h3 className="capture-method-title">{method.title}</h3>
+                <p className="capture-method-line">
+                  {method.route === 'voice' && claudeReady
+                    ? CAPTURE_COPY.homeVoiceLineWithClaude
+                    : method.line}
+                </p>
+              </div>
+              {/* Writing is the one route that reaches a proposal in every
+                  deployment, so it is the one primary action on the page. */}
+              <Link
+                className={`btn ${index === 0 ? 'btn-primary' : 'btn-secondary'} capture-method-action`}
+                to={{ search: methodDestination(location.search, method.route) }}
+              >
+                {method.action}
+                <ChevronRight size={14} strokeWidth={2.2} aria-hidden="true" />
+              </Link>
+            </li>
+          );
+        })}
       </ul>
+
+      {summaryLine !== null && (
+        <p className="capture-home-summary">
+          <span className="capture-home-summary-label">{CAPTURE_COPY.homeSummaryLabel}</span>
+          <span className="capture-home-summary-counts">{summaryLine}</span>
+          {hasSomethingToReview && (
+            <Link
+              className="capture-home-summary-link"
+              to={{ search: railDestination(location.search, 'proposals') }}
+            >
+              {CAPTURE_COPY.homeReviewAction}
+              <span className="sr-only"> proposals and notes</span>
+            </Link>
+          )}
+        </p>
+      )}
     </section>
   );
 }

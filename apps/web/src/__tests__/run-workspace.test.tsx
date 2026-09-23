@@ -734,7 +734,7 @@ describe('autosave', () => {
     // this sentence and the Runs leave-confirmation dialog can no longer be read as
     // opposite conclusions) is pinned end to end.
     expect(note.textContent).toMatch(
-      /Switching to this record’s other workspaces — Record Fields, Experiment Data, Graph — and back keeps it/,
+      /Switching to this record’s other workspaces — Capture, Proposals, Record Fields — and back keeps it/,
     );
     // ...and it must still name what DOES lose it, rather than implying nothing does.
     expect(note.textContent).toMatch(/paging, searching or filtering the runs list, or reloading/);
@@ -980,6 +980,11 @@ describe('two runs on one screen', () => {
     expect(within(a).getByText('Run 1')).toBeInTheDocument();
     expect((within(a).getByLabelText('Temperature (K)') as HTMLInputElement).value).toBe('300');
     expect((within(a).getByLabelText('Environment') as HTMLSelectElement).value).toBe('in_situ');
+    // PR #277 review (minor): the option READS "In situ" while its value — what is
+    // stored — stays the raw schema token.
+    expect(
+      (within(a).getByLabelText('Environment') as HTMLSelectElement).selectedOptions[0].textContent,
+    ).toBe('In situ');
     expect(within(a).getByRole('status').textContent).toBe('');
     // And only ONE write ever happened, for Run 2 — reopening Run 1 issued no
     // PATCH of its own.
@@ -1703,7 +1708,11 @@ describe('the denominator discloses its scope (review finding: invented denomina
      * "5 of 5" is still displayable on a run whose Check Run fails.
      */
     const progress = cardFor('RUNAAA').querySelector('.run-card-progress') as HTMLElement;
-    expect(progress.textContent).toMatch(/run fields on this screen/);
+    // Owner QA R1 (2026-09-22) shortened the visible clause to "recorded"; the
+    // SCOPE — that these are the RUN fields, not the record's — is still in the
+    // text (visually hidden before "recorded"), so a bare "of N" never reaches a
+    // screen reader or a reader of the DOM.
+    expect(progress.textContent).toMatch(/run fields recorded/);
     expect(progress.textContent).not.toMatch(/^\s*\d+ of \d+ set\s*$/);
     // The denominator is DERIVED, so it cannot drift from what the screen renders.
     expect(progress.textContent).toContain(`of ${RUN_FIELDS.length}`);
@@ -1733,10 +1742,11 @@ describe('PHASE 2 — save state that outlives the card', () => {
   function toGraph() {
     return act(async () => {
       /* ~~clicked the sidebar's `Graph` link~~ — it left the list on 2026-09-13
-         (`EVG-002`/`DEC-04`). This assertion is about LEAVING the Runs
-         workspace, and any other destination leaves it identically; `Record
-         Fields` is the one every record always has. */
-      fireEvent.click(screen.getByRole('link', { name: 'Record Fields' }));
+         (`EVG-002`/`DEC-04`). ~~then `Record Fields`~~ — that row left the rail
+         on 2026-09-22 (N2). This assertion is about LEAVING the Runs workspace,
+         and any other destination leaves it identically; `Activity` is a rail
+         row every record always has. */
+      fireEvent.click(screen.getByRole('link', { name: 'Activity' }));
     });
   }
   function toRuns() {
@@ -2038,7 +2048,7 @@ describe('PHASE 2 — save state that outlives the card', () => {
     expect(cardFor('RUNAAA').textContent ?? '').not.toMatch(/saving live here only/);
     expect(cardFor('RUNAAA').textContent ?? '').not.toMatch(/this record.s views/);
     expect(cardFor('RUNAAA').textContent ?? '').toMatch(
-      /Switching to this record.s other workspaces — Record Fields, Experiment Data, Graph — and back keeps them/,
+      /Switching to this record.s other workspaces — Capture, Proposals, Record Fields — and back keeps them/,
     );
 
     // AND IT STAYS UP WHILE THE REQUEST IS IN FLIGHT. Gating on `pendingCount` hid it

@@ -209,7 +209,7 @@ export function RenameExperimentPanel({
   const Chevron = expanded ? ChevronDown : ChevronRight;
 
   return (
-    <section className="field-group" aria-label="Experiment Name (name)">
+    <section className="field-group" aria-label="Experiment Name">
       {/* A REAL HEADING LANDMARK — see `FieldGroup`'s own note for the measurement.
           `h2` at the level of this workspace's other sections, so the outline under
           the screen's single `h1` stays contiguous. A transparent wrapper: `.fg-heading`
@@ -230,11 +230,11 @@ export function RenameExperimentPanel({
         >
           <Chevron className="fg-chevron" size={16} strokeWidth={2} aria-hidden="true" />
           <span className="fg-block">Experiment Name</span>
-          {/* The same two quiet spans `RecordInfoPanel` uses, and for its reason:
-              `.fg-sublabel` / `.fg-summary` paint a colour already below the contrast
-              threshold on this screen. */}
-          <span className="record-section-key">name</span>
-          <span className="record-section-summary">What this experiment is called</span>
+          {/* THE VALUE, NOT A DESCRIPTION OF THE SECTION (owner QA F1/F2,
+              2026-09-22). The lowercase key `name` and the prose "What this
+              experiment is called" are gone; the header now says what the name IS.
+              Read from the served detail, so it moves when a rename lands. */}
+          <span className="record-section-summary record-section-value">{detail.title}</span>
         </button>
       </h2>
       {expanded && (

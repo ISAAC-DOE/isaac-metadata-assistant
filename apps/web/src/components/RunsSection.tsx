@@ -63,6 +63,7 @@ import { RunCard } from './RunCard';
 import { RunCompare } from './RunCompare';
 import { LoadingPanel, BackendDown } from './FetchStates';
 import { Plus } from './icons';
+import { HelpTip } from './HelpTip';
 import { api, ApiError } from '../lib/api';
 import { disposeRun } from '../lib/runAutosaveStore';
 import {
@@ -269,10 +270,16 @@ export function RunsSection({
           rows say which are which; this sentence states the default and names the
           exception instead of denying it.
         */}
+        {/* ONE SHORT LINE, and the rest behind `?` (owner brief, 2026-09-22). The
+            inheritance rule is reference material; what a run IS stays visible. */}
         <p className="runs-sub">
-          One run per set of measurement conditions. Values entered here belong to this run
-          alone; everything under Inherited from the record is read live from the record,
-          unless this run overrides it.
+          One run per set of measurement conditions.{' '}
+          <HelpTip subject="Runs">
+            <span>
+              Values entered here belong to this run alone; everything under Inherited from
+              the record is read live from the record, unless this run overrides it.
+            </span>
+          </HelpTip>
         </p>
       </div>
 
@@ -1995,7 +2002,7 @@ function RunsBrowser({
                     been sent anywhere. Leaving this run now — including switching to
                     a different run, reloading, paging, searching or filtering the
                     runs list — loses it, and it cannot be recovered. Switching to
-                    this record&rsquo;s other workspaces — Record Fields, Experiment Data, Graph — keeps it.
+                    this record&rsquo;s other workspaces — Capture, Proposals, Record Fields — keeps it.
                   </p>
                   <div className="runs-leave-confirm-actions">
                     <button
@@ -2133,10 +2140,22 @@ function RunsBrowser({
       */}
       {!focused && controlsFrame !== null && (controlsFrame.total > 0 || filtering) && (
         <div className="runs-controls">
-          <div className="runs-control">
-            <label className="runs-control-label" htmlFor={searchId}>
-              Search runs
-            </label>
+          <div className="runs-control runs-control-search">
+            <span className="runs-control-label-row">
+              <label className="runs-control-label" htmlFor={searchId}>
+                Search runs
+              </label>
+              {/* The scope note moved behind `?` so the three controls sit on one
+                  baseline (owner QA R1). It is STILL the input's description —
+                  `aria-describedby` reaches a hidden element — so a screen reader
+                  hears it on the box itself, as before. */}
+              <HelpTip subject="Searching Runs" label="What Search Matches">
+                <span id={searchHintId}>
+                  Matches a run&apos;s name, number, id, or the id of the record it exported
+                  to. Not the scientific values inside a run.
+                </span>
+              </HelpTip>
+            </span>
             <input
               ref={searchRef}
               id={searchId}
@@ -2146,19 +2165,6 @@ function RunsBrowser({
               aria-describedby={searchHintId}
               onChange={(e) => setSearchText(e.target.value)}
             />
-            {/*
-              WHAT IT SEARCHES, STATED, because the honest scope is much narrower
-              than a search box implies. The server matches a literal,
-              case-insensitive substring of the run's label, its id and its
-              exported record id, plus the run number when the whole query is
-              digits. It does not read field values, it is not fuzzy, and it is
-              not semantic — and a scientist who assumed any of those would read
-              an empty result as "no run recorded that temperature".
-            */}
-            <span className="runs-control-hint" id={searchHintId}>
-              Matches a run&apos;s name, number, id, or the id of the record it exported to.
-              Not the scientific values inside a run.
-            </span>
           </div>
 
           <div className="runs-control">

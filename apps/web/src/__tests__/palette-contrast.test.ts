@@ -249,7 +249,8 @@ const NON_INFORMATIONAL_INK = [
       'The value `--text-quaternary` used to carry (#9aa4af). WCAG 1.4.3 exempts text that is ' +
       'part of an INACTIVE user-interface component, which is exactly what a `:disabled` button ' +
       'with `cursor: not-allowed` is. It exists as a separate name so that the exemption is ' +
-      'claimed explicitly at two sites rather than inherited silently by 71.',
+      'claimed explicitly at enumerated sites (two, then three once `.btn-secondary:disabled` ' +
+      'gained a rule in PR #277) rather than inherited silently by 71.',
   },
   {
     token: '--text-faint',
@@ -601,6 +602,15 @@ const EXEMPT_SITES: readonly ExemptSite[] = [
     token: '--text-inactive',
     basis: 'inactive-control',
     why: 'Disabled destructive trigger. Same exemption as the row above.',
+  },
+  {
+    file: 'styles/base.css',
+    selector: '.btn-secondary:disabled',
+    token: '--text-inactive',
+    basis: 'inactive-control',
+    why:
+      'Disabled secondary button (PR #277 review — there was no disabled rule at all, so a ' +
+      'disabled secondary looked enabled). Same 1.4.3 inactive-component exemption as the rows above.',
   },
   {
     file: 'screens/screens.css',

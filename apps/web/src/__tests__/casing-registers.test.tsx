@@ -515,8 +515,10 @@ const RENDER_ALLOWLIST: Readonly<Record<string, string>> = {
      its spec run in the same change. */
   'Search runs':
     'RunsSection <label> — pinned by e2e/mutation/run-scale.bench.ts + scale-2026-08-27.bench.ts',
-  'Capture a note':
-    'UnmappedNotesPanel <label> — pinned by e2e/mutation/proposals.spec.ts + e2e/trusted/fixtures.ts',
+  /* ~~'Capture a note'~~ — FIXED 2026-09-22 (now "Capture a Note"), and the row is
+     dropped rather than kept stale. Its stated pin was false: the two e2e sites it
+     named were doc comments ("Capture a note. …") over API calls, so only unit
+     tests queried the label, and they moved with it. */
   'not written yet': 'RecordInfoPanel absence reason — pinned by e2e/specs/record-identity.spec.ts',
   'not read on this screen':
     'RecordInfoPanel absence reason — pinned by e2e/specs/record-identity.spec.ts',
@@ -748,8 +750,22 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-/** The record's four workspaces, which between them mount every briefed component. */
-const WORKSPACES = ['fields', 'runs', 'capture', 'graph'] as const;
+/** The record's workspaces, which between them mount every briefed component.
+ *
+ *  2026-09-22: `proposals` JOINED, because the notes queue and the proposals list
+ *  moved there from Capture (so "Capture a note" in `RENDER_ALLOWLIST` renders
+ *  there now), and the two focused capture views that render label slots of their
+ *  own — the Write form and the Voice view's Claude + local-recorder sections —
+ *  are swept too, addressed by their `?method=`. */
+const WORKSPACES = [
+  'fields',
+  'runs',
+  'capture',
+  'graph',
+  'proposals',
+  'capture&method=write',
+  'capture&method=voice',
+] as const;
 
 /** Render a workspace and open every collapsed group, as a reader would. */
 async function openedWorkspace(view: (typeof WORKSPACES)[number]) {

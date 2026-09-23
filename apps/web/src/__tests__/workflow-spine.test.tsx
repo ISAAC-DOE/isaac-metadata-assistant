@@ -159,3 +159,129 @@ describe('P28.1 · WorkflowSpine renders the backend workflow verbatim', () => {
     expect(src).not.toMatch(/\bactiveIndex\b/);
   });
 });
+
+/*
+ * OWNER QA 2026-09-22 (N1) — "WHERE AM I" IS NOT "HOW COMPLETE IS IT".
+ *
+ * `Complete Metadata` used to stay the only highlighted row on Runs, Capture,
+ * Activity and even `/export`, because the server's `current` step was the only
+ * row the spine could mark. Each row now carries two independent signals: its
+ * STATE (disc + a state word, from the server) and whether its destination is the
+ * PAGE ON SCREEN (a selected fill + `aria-current="page"`, from the URL).
+ */
+function renderSpineAt(path: string, workflow: ApiWorkflow | null, recordId = 'demo') {
+  return render(
+    <MemoryRouter
+      initialEntries={[path]}
+      future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+    >
+      <WorkflowSpine workflow={workflow} recordId={recordId} />
+    </MemoryRouter>,
+  );
+}
+
+describe('N1 · state and location are two signals', () => {
+  it('on Record Fields, Record Created is the page and the current requirement keeps "step"', () => {
+    const { container } = renderSpineAt('/record/demo', BLOCKED_WORKFLOW);
+    const created = stepLi(container, 'Record Created');
+    const current = stepLi(container, 'Complete Metadata');
+    expect(created).toHaveAttribute('aria-current', 'page');
+    expect(created.className).toContain('is-location');
+    expect(current).toHaveAttribute('aria-current', 'step');
+    expect(current.className).not.toContain('is-location');
+  });
+
+  it('on a workspace the spine does not own (Runs, Capture), NO row claims to be the page', () => {
+    for (const search of ['?view=runs', '?view=capture&method=write', '?view=activity']) {
+      const { container, unmount } = renderSpineAt(`/record/demo${search}`, BLOCKED_WORKFLOW);
+      const pages = container.querySelectorAll('[aria-current="page"]');
+      expect(pages, search).toHaveLength(0);
+      expect(container.querySelectorAll('.is-location'), search).toHaveLength(0);
+      // ...while the current requirement is still identified, by word and by `step`.
+      expect(stepLi(container, 'Complete Metadata')).toHaveAttribute('aria-current', 'step');
+      unmount();
+    }
+  });
+
+  it('on /complete the current step IS the page — "page" wins, and the word still says it is current', () => {
+    const { container } = renderSpineAt('/record/demo/complete', BLOCKED_WORKFLOW);
+    const current = stepLi(container, 'Complete Metadata');
+    expect(current).toHaveAttribute('aria-current', 'page');
+    expect(current.querySelector('.spine-state')?.textContent).toBe('Current requirement');
+    expect(container.querySelectorAll('[aria-current]')).toHaveLength(1);
+  });
+
+  it('on /export the page is Review Export Readiness — even while that step is locked, and it stays a non-link', () => {
+    const { container } = renderSpineAt('/record/demo/export', BLOCKED_WORKFLOW);
+    const readiness = stepLi(container, 'Review Export Readiness');
+    expect(readiness).toHaveAttribute('aria-current', 'page');
+    // Gating is untouched: a locked step is still not a link, page or not.
+    expect(readiness.querySelector('a')).toBeNull();
+    expect(readiness.getAttribute('aria-disabled')).toBe('true');
+    // The server's current requirement is NOT painted as the page.
+    expect(stepLi(container, 'Complete Metadata').className).not.toContain('is-location');
+  });
+
+  it('every row states its state in words: Complete, Current requirement, Locked, Needs review', () => {
+    const words = (wf: ApiWorkflow) => {
+      const { container, unmount } = renderSpineAt('/', wf);
+      const out = Array.from(container.querySelectorAll('li.spine-step')).map(
+        (li) => li.querySelector('.spine-state')?.textContent,
+      );
+      unmount();
+      return out;
+    };
+    expect(words(BLOCKED_WORKFLOW)).toEqual([
+      'Complete',
+      'Current requirement',
+      'Locked',
+      'Locked',
+      'Locked',
+    ]);
+    expect(words(MIXED_WORKFLOW)).toEqual([
+      'Complete',
+      'Current requirement',
+      'Needs review',
+      'Needs review',
+      'Complete',
+    ]);
+  });
+
+  it('the export step says "Ready" when it is the current requirement — readiness is satisfied then', () => {
+    const ready: ApiWorkflow = {
+      ordered_steps: [
+        step({ id: 'load_record', label: 'Record Created', state: 'completed' }),
+        step({ id: 'complete_metadata', label: 'Complete Metadata', state: 'completed' }),
+        step({ id: 'review_evidence', label: 'Review Evidence', state: 'completed' }),
+        step({ id: 'review_export_readiness', label: 'Review Export Readiness', state: 'completed' }),
+        step({ id: 'export', label: 'Export', state: 'current' }),
+      ],
+      current_step: 'export',
+      record_rev: 5,
+    };
+    const { container } = renderSpineAt('/', ready);
+    expect(stepLi(container, 'Export').querySelector('.spine-state')?.textContent).toBe('Ready');
+  });
+
+  it('the state word never replaces the reason: a blocked reason is still in the DOM', () => {
+    const { container } = renderSpineAt('/record/demo', BLOCKED_WORKFLOW);
+    expect(stepLi(container, 'Review Evidence').querySelector('.spine-meta')?.textContent).toBe(
+      "Complete 'Complete Metadata' first.",
+    );
+  });
+
+  it('Record Created keeps the rest of the record address, as the rail row it replaced did', () => {
+    const { container } = renderSpineAt('/record/demo?view=runs&run=RUNAAA', BLOCKED_WORKFLOW);
+    const href = stepLi(container, 'Record Created').querySelector('a')?.getAttribute('href') ?? '';
+    const query = new URLSearchParams(href.split('?')[1] ?? '');
+    expect(href.startsWith('/record/demo?')).toBe(true);
+    // `view=fields` is explicit, or a bare `?run=` would resolve to Runs.
+    expect(query.get('view')).toBe('fields');
+    expect(query.get('run')).toBe('RUNAAA');
+    // ...and from a sub-screen it is the plain record address, as before.
+    const { container: sub } = renderSpineAt('/record/demo/complete?x=1', BLOCKED_WORKFLOW);
+    expect(stepLi(sub, 'Record Created').querySelector('a')?.getAttribute('href')).toBe(
+      '/record/demo',
+    );
+  });
+});

@@ -50,6 +50,8 @@ import {
   stubFetchRoutes,
 } from '../test/apiFixtures';
 import { RECORD_PROPOSAL_PARAM, ROUTES } from '../lib/routes';
+// Cards and announcements name the field in WORDS since review #277 (I-5).
+import { fieldLabel } from '../lib/fieldLabels';
 import type { RecordChangeSummary } from '../lib/recordChanges';
 import type { ApiProposal, ApiProposalsResponse } from '../lib/types';
 
@@ -253,15 +255,15 @@ describe('a deep link that names a proposal IN the loaded window', () => {
       },
     });
     renderPanel(`?${RECORD_PROPOSAL_PARAM}=${LINKED}`);
-    await screen.findByLabelText(`Proposal for ${LINKED_PATH} — Awaiting your judgement`);
+    await screen.findByLabelText(`Proposal for ${fieldLabel(LINKED_PATH)} — Awaiting your judgment`);
 
     await waitFor(() => expect(markedCards()).toHaveLength(1));
     expect(markedCards()[0].getAttribute('aria-label')).toBe(
-      `Proposal for ${LINKED_PATH} — Awaiting your judgement`,
+      `Proposal for ${fieldLabel(LINKED_PATH)} — Awaiting your judgment`,
     );
     /* The OTHER card must carry the attribute at all, not merely carry it as
        `"false"` — the stylesheet and this assertion both key on presence. */
-    const other = screen.getByLabelText(`Proposal for ${OTHER_PATH} — Awaiting your judgement`);
+    const other = screen.getByLabelText(`Proposal for ${fieldLabel(OTHER_PATH)} — Awaiting your judgment`);
     expect(other.hasAttribute('data-linked-proposal')).toBe(false);
   });
 
@@ -275,11 +277,11 @@ describe('a deep link that names a proposal IN the loaded window', () => {
       },
     });
     renderPanel(`?${RECORD_PROPOSAL_PARAM}=${LINKED}`);
-    await screen.findByLabelText(`Proposal for ${LINKED_PATH} — Awaiting your judgement`);
+    await screen.findByLabelText(`Proposal for ${fieldLabel(LINKED_PATH)} — Awaiting your judgment`);
 
     await waitFor(() =>
       expect(document.activeElement?.getAttribute('aria-label')).toBe(
-        `Proposal for ${LINKED_PATH} — Awaiting your judgement`,
+        `Proposal for ${fieldLabel(LINKED_PATH)} — Awaiting your judgment`,
       ),
     );
   });
@@ -295,7 +297,7 @@ describe('a deep link that names a proposal IN the loaded window', () => {
 
     await waitFor(() =>
       expect(statusText()).toContain(
-        `The proposal this link names is shown below — ${LINKED_PATH}.`,
+        `The proposal this link names is shown below — ${fieldLabel(LINKED_PATH)}.`,
       ),
     );
     /*
@@ -354,7 +356,7 @@ describe('a deep link that names a proposal IN the loaded window', () => {
       },
     });
     const view = renderPanel(`?${RECORD_PROPOSAL_PARAM}=${LINKED}`, null);
-    await screen.findByLabelText(`Proposal for ${LINKED_PATH} — Awaiting your judgement`);
+    await screen.findByLabelText(`Proposal for ${fieldLabel(LINKED_PATH)} — Awaiting your judgment`);
     await waitFor(() => expect(markedCards()).toHaveLength(1));
 
     /*
@@ -717,7 +719,10 @@ describe('the record screen resolves a bare ?proposal= to the workspace that can
     );
   }
 
-  it('opens Experiment Data, and the panel honours the id it was sent', async () => {
+  /* 2026-09-22: the panel moved from Capture to the focused Proposals view, and a
+     bare `?proposal=` resolves there now. The property — the id lands on the
+     surface that can honour it — is unchanged. */
+  it('opens Proposals, and the panel honours the id it was sent', async () => {
     renderAt(`/record/${EXP}?${RECORD_PROPOSAL_PARAM}=${LINKED}`);
 
     /* The panel is MOUNTED — which is the thing a bare `?proposal=` used not to
@@ -737,9 +742,21 @@ describe('the record screen resolves a bare ?proposal= to the workspace that can
     expect(screen.queryByRole('heading', { name: 'Ingestion Proposals' })).toBeNull();
   });
 
+  it('a link minted by ROUTES.recordProposal (`view=capture&proposal=`) opens Proposals too', async () => {
+    // Every proposal link ever minted — including the MCP server's own
+    // (`mcp/links.py::proposal_link`) — names `view=capture`. Capture Home no
+    // longer mounts the panel, so the address must reach the view that does.
+    renderAt(ROUTES.recordProposal(EXP, LINKED));
+    await screen.findByRole('heading', { name: 'Ingestion Proposals' });
+    await waitFor(() => expect(noticeText()).not.toBeNull());
+    expect(noticeText()).toContain(LINKED);
+  });
+
   it('no parameter still opens Record Fields', async () => {
     renderAt(`/record/${EXP}`);
-    await screen.findByRole('link', { name: 'Record Fields' });
+    /* ~~`findByRole('link', { name: 'Record Fields' })`~~ — that rail row left on
+       2026-09-22 (N2); the Record Fields workspace is what renders. */
+    await screen.findByRole('region', { name: 'Record Fields workspace' });
     expect(screen.queryByRole('heading', { name: 'Ingestion Proposals' })).toBeNull();
   });
 });

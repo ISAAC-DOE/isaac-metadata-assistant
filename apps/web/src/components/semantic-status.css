@@ -1,0 +1,46 @@
+/*
+ * SemanticStatus — the tone mapping, and nothing else. Geometry is `.chip`
+ * (signals.css). See `SemanticStatus.tsx` for why success is teal-on-white and
+ * not pass-green, and for the computed ratio of every ink on its own fill.
+ *
+ * NO interaction-state rule lives here: a status is not a control, and
+ * `interaction-states.test.ts` forbids a verdict hue in any :hover/:focus/:active
+ * rule anywhere in the app.
+ */
+.semantic-status[data-tone='success'] {
+  color: var(--verified-text);
+  background: var(--surface);
+  border-color: var(--verified-border);
+}
+.semantic-status[data-tone='warning'] {
+  color: var(--needsyou-text);
+  background: var(--needsyou-bg);
+  border-color: var(--needsyou-border);
+}
+.semantic-status[data-tone='danger'] {
+  color: var(--fail-text);
+  background: var(--fail-bg);
+  border-color: var(--fail-border);
+}
+.semantic-status[data-tone='info'] {
+  color: var(--action-hover);
+  background: var(--action-tint);
+  border-color: var(--action-selected-border);
+}
+.semantic-status[data-tone='neutral'] {
+  color: var(--missing-text);
+  background: var(--missing-bg);
+  border-color: var(--missing-border);
+}
+/* SHAPE, not only hue: an absent value is drawn with a dashed edge, the same
+   convention `.chip-missing` already uses for "nothing is recorded here". */
+.semantic-status[data-state='missing'] {
+  border-style: dashed;
+}
+.semantic-status-sm {
+  gap: var(--space-xs);
+  /* A real inset top and bottom — at 2px the word sat flush against the border
+     (Impeccable overlay, cramped-padding, 2026-09-22). */
+  padding: var(--space-xs) var(--space-sm);
+  font-size: var(--font-size-meta);
+}

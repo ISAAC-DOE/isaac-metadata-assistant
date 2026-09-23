@@ -1,6 +1,9 @@
 import './run-findings.css';
 import { useId } from 'react';
-import { Check, TriangleAlert, CircleHelp } from './icons';
+import { BlockerItems } from './BlockerItems';
+import { Disclosure } from './Disclosure';
+import { HelpTip } from './HelpTip';
+import { Check, CircleHelp, TriangleAlert } from './icons';
 import { count, isValidationUnavailable } from '../lib/assistantPaths';
 import {
   officialCheckedDocument,
@@ -96,11 +99,35 @@ const STATE_WORD: Record<RunFindingState, string> = {
   unavailable: 'No verdict',
 };
 
+/*
+ * THE PER-RUN VERDICT IS A NEUTRAL CHIP WITH AN ICON AND A WORD (review #277, minor).
+ * Phase 2 painted it with `SemanticStatus`'s tinted success/danger fills — the
+ * vocabulary that primitive's own note keeps away from an official verdict, whose
+ * filled pass/fail treatment belongs to `VerdictCard` alone. The repo's established
+ * per-run treatment is restored instead: a neutral chip, the state carried by an icon
+ * and a word, and only the FAIL word in the fail text colour.
+ */
 const STATE_ICON = {
   pass: Check,
   fail: TriangleAlert,
   unavailable: CircleHelp,
 } as const;
+
+export function RunVerdictChip({
+  state,
+  className,
+}: {
+  state: RunFindingState;
+  className?: string;
+}) {
+  const Icon = STATE_ICON[state];
+  return (
+    <span className={`run-verdict run-verdict-${state}${className ? ` ${className}` : ''}`}>
+      <Icon size={12} strokeWidth={2.2} aria-hidden="true" />
+      <span>{STATE_WORD[state]}</span>
+    </span>
+  );
+}
 
 /**
  * How many run findings are DRAWN. See the long note in the component for why the
@@ -147,10 +174,13 @@ function labelFor(run: RunVerdict): string {
 export function RunFindings({
   runs,
   warningRuns,
+  experimentId,
 }: {
   runs: RunVerdict[];
   /** `warnings.runs` from the same bundle. Absent is a valid state: no advice shown. */
   warningRuns?: RunWarnings[];
+  /** Enables `Go to Field` on a finding at one of the five run-level fields. */
+  experimentId?: string;
 }) {
   // Named so the section is exposed as a region a screen reader can navigate to;
   // an unnamed <section> is not. Hooks run before the early return below.
@@ -249,7 +279,6 @@ export function RunFindings({
 
       <ul className="run-findings-list">
         {drawn.map(({ run, i, state }) => {
-          const Icon = STATE_ICON[state];
           const label = labelFor(run);
           const advice = adviceFor(run, i);
           /* The two questions, per run, asked once each. WHO produced the findings
@@ -260,21 +289,37 @@ export function RunFindings({
           const documentSentence = officialDocumentSentence(officialCheckedDocument(run));
           return (
             <li className="run-finding" key={`${i}:${run.record_id}`} data-state={state}>
+              {/*
+                THE VERDICT LINE FIRST (owner QA V1): `Run 1 · Failed · 1 blocker ·
+                2 advisory notes`. The blocker count is the run's own `errors`; the
+                advisory count is shown only where advice was matched to THIS run,
+                and it never enters the verdict or the tally above.
+              */}
               <div className="run-finding-head">
-                {/* Icon + word: the state is never carried by colour alone. */}
-                <span className={`run-finding-state run-finding-state-${state}`}>
-                  <Icon size={14} strokeWidth={2.2} aria-hidden="true" />
-                  {STATE_WORD[state]}
-                </span>
                 <span className="run-finding-label">{label}</span>
+                <RunVerdictChip
+                  state={state}
+                  className={`run-finding-state run-finding-state-${state}`}
+                />
+                {state !== 'pass' && run.errors.length > 0 && (
+                  <span className="run-finding-count">
+                    {count(run.errors.length, state === 'fail' ? 'blocker' : 'report')}
+                  </span>
+                )}
+                {advice && advice.warnings.length > 0 && (
+                  <span className="run-finding-count">
+                    {count(advice.warnings.length, 'advisory note')}
+                  </span>
+                )}
+                {/* The identifiers, so a finding is addressable — one `?` away
+                    rather than a line of mono under every run. `run_id` is
+                    nullable in the contract and is simply omitted when absent. */}
+                <HelpTip subject={`${label} identifiers`} label={`Identifiers for ${label}`}>
+                  <span className="run-finding-ids mono">
+                    {run.run_id ? <>run {run.run_id} · </> : null}record {run.record_id}
+                  </span>
+                </HelpTip>
               </div>
-
-              {/* The identifiers, so a finding is addressable. `run_id` is
-                  nullable in the contract and is simply omitted when absent;
-                  `record_id` is not. */}
-              <p className="run-finding-ids mono">
-                {run.run_id ? <>run {run.run_id} · </> : null}record {run.record_id}
-              </p>
 
               {/* WHICH DOCUMENT was checked, per unit — the same distinction the
                   route makes, and a DIFFERENT question from who produced the
@@ -333,34 +378,40 @@ export function RunFindings({
                 <p className="run-finding-caption">{officialFindingsCaption(source)}</p>
               )}
               {state !== 'pass' && run.errors.length > 0 && (
-                <ul className="run-finding-errors mono">
-                  {/* `err.path` is NOT unique — several missing required
-                      properties all report at `$` — so the index is part of the
-                      key, as in VerdictCard. The message is rendered verbatim:
-                      paraphrasing a schema error would change what the validator
-                      said. */}
-                  {run.errors.map((err, j) => (
-                    <li key={`${j}:${err.path}`}>
-                      <span className="run-finding-error-path">{err.path}</span> — {err.message}
-                    </li>
-                  ))}
+                <ul className="run-finding-errors">
+                  {/* One row per finding: the field in human words, the validator's
+                      sentence verbatim, the path behind `?`, and `Go to Field` only
+                      where the Runs editor has that field (`BlockerItems`). */}
+                  <BlockerItems
+                    errors={run.errors}
+                    experimentId={experimentId}
+                    runId={run.run_id}
+                  />
                 </ul>
               )}
 
               {advice && advice.warnings.length > 0 && (
                 <div className="run-finding-advisory">
-                  <p className="run-finding-advisory-caption">
-                    Advisory · non-gating — this never changes this run&rsquo;s verdict and never
-                    blocks export.
-                  </p>
-                  <ul className="run-finding-advisory-list">
-                    {advice.warnings.map((warning, j) => (
-                      <li key={`${j}:${warning.code}`}>
-                        <span className="mono">[{warning.code}]</span> {warning.where} —{' '}
-                        {warning.message}
-                      </li>
-                    ))}
-                  </ul>
+                  {/* ADVISORIES ARE SECONDARY AND SHOWN ONCE (owner QA V1): the
+                      export screen's advisory card already lists them, so here they
+                      are one closed row, never a second full list — and never styled
+                      as a failure. The body is `hidden`, not removed. */}
+                  <Disclosure
+                    summary={`${count(advice.warnings.length, 'advisory note')} · never blocks export`}
+                  >
+                    <p className="run-finding-advisory-caption">
+                      Advisory · non-gating — this never changes this run&rsquo;s verdict and
+                      never blocks export.
+                    </p>
+                    <ul className="run-finding-advisory-list">
+                      {advice.warnings.map((warning, j) => (
+                        <li key={`${j}:${warning.code}`}>
+                          <span className="mono">[{warning.code}]</span> {warning.where} —{' '}
+                          {warning.message}
+                        </li>
+                      ))}
+                    </ul>
+                  </Disclosure>
                 </div>
               )}
             </li>

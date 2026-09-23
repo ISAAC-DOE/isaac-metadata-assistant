@@ -13,7 +13,7 @@
  *
  * **That is no longer true, and this file is the consequence.** PR #228 made
  * `TranscriptCapturePanel`'s *Finalize and Read* mint durable proposals server-side,
- * and PR #231 added `UnmappedNotesPanel`'s *Propose a value from this note*. There
+ * and PR #231 added `UnmappedNotesPanel`'s *Propose a Value From This Note*. There
  * are now TWO surfaces a person can click to produce a proposal, so Scientist B can
  * be a **second browser context driving the real UI** rather than an HTTP client.
  *
@@ -100,6 +100,7 @@ import {
   openRun,
   openWorkspace,
   proposalCard,
+  proposalCardInState,
   switchWorkspace,
   test,
   type ServerApi,
@@ -238,11 +239,10 @@ async function proposalById(
   return found;
 }
 
-/** A proposal card addressed by path AND state — the card's own accessible name. */
+/** A proposal card addressed by path AND state — the card's own accessible name,
+ *  which names the field in words since review #277 (`proposalCardInState`). */
 function cardInState(page: Page, path: string, stateLabel: string) {
-  return page.getByRole('article', {
-    name: new RegExp(`^Proposal for ${path.replace(/\./g, '\\.')} — ${stateLabel}`),
-  });
+  return proposalCardInState(page, path, stateLabel);
 }
 
 /** The mark planted on A's `window` in step 1. */
@@ -384,8 +384,11 @@ async function bFinalizesATranscript(
    * experiment in?" first, and the panel renders nothing until a route is chosen.
    * So the click is on the page, and the region only exists afterwards.
    */
-  await bPage.getByRole('button', { name: 'Start Writing' }).click();
-  const capture = bPage.getByRole('region', { name: 'Transcript Capture' });
+  /* 2026-09-22 (owner QA C1/C2): "Start Writing" is a LINK on Capture Home to the
+     focused Write view, which draws the transcript form without the old panel's
+     region, so the form is addressed inside the capture workspace itself. */
+  await bPage.getByRole('link', { name: /Start Writing/ }).click();
+  const capture = bPage.locator('#record-workspace-capture');
   await capture.getByLabel('Run These Notes Describe').selectOption(runId);
   await capture.getByLabel('Transcript', { exact: true }).fill(text);
   await capture.getByRole('button', { name: 'Finalize and Read' }).click();
@@ -445,7 +448,10 @@ test.describe('two scientists, two real browsers, one record', () => {
         const technique = techniqueOptions[0];
 
         const recordPanel = page.getByRole('region', {
-          name: 'Record Description (record-level values)',
+          // The region is named for its heading alone since owner QA F1 (2026-09-22) —
+      // the machine-side qualifier no longer reaches a screen reader.
+      name: 'Record Description',
+      exact: true,
         });
         await recordPanel.getByRole('button', { name: /^Record Description/ }).click();
 
@@ -640,7 +646,7 @@ test.describe('two scientists, two real browsers, one record', () => {
 
       // ══ STEP 2 — A opens the review surface; it makes no recording claim ═════
       let seeded: ServerProposal | null = null;
-      await test.step('2 · A opens Experiment Data: one entry action, no recording claim', async () => {
+      await test.step('2 · A opens Capture Home, then the Proposals view: one entry action, no recording claim', async () => {
         /*
          * SEEDED FIRST, OVER HTTP, AND ONLY THIS ONE. It exists to prove the negative
          * control in step 4: a proposal that was ALREADY on the record when A's panel
@@ -669,89 +675,53 @@ test.describe('two scientists, two real browsers, one record', () => {
         await assertSameDocument(page, 'step 2: switching workspace did not reload the page');
 
         /*
-         * *** THIS PROPERTY MOVED; IT WAS NOT DROPPED. ***
+         * *** 2026-09-22 (owner QA C1): CAPTURE HOME IS THE CHOOSER ONLY. ***
          *
-         * It used to read: collapsed, the panel offers exactly ONE entry action and
-         * no second control beside it. The panel no longer renders AT ALL while the
-         * chooser owns the entry, so asserting over the panel here would pass
-         * vacuously on an empty region — the exact shape of vacuous guard this
-         * repository keeps catching. The property is therefore asserted where the
-         * entry now lives, and in the form that actually failed in a browser: the
-         * first build rendered "Start Writing" AND the panel's own "Capture
-         * Experiment Notes" ten pixels apart, both blue, both doing the same thing.
-         *
-         * So: exactly one PRIMARY control on the whole workspace, and the panel's own
-         * entry absent rather than merely hidden.
+         * The property this step pinned — ONE primary entry, and no second control
+         * doing the same thing — now holds on Capture Home, where each way in is a
+         * link to a focused view instead of a button expanding a panel beneath the
+         * chooser. So: exactly one primary among the four ways in, and no transcript
+         * form on the chooser at all (the old panel's region is gone, not hidden).
          */
         await expect(
-          page.getByRole('button', { name: 'Start Writing' }),
+          page.getByRole('link', { name: /Start Writing/ }),
           'step 2: the chooser offers the write route',
         ).toBeVisible();
-        /*
-         * SCOPED TO THE TWO ELEMENTS THE PROPERTY IS ABOUT, and the first version of
-         * this assertion was not — it counted `.btn-primary` page-wide and read 4,
-         * because the workflow spine, the notes queue and the proposals list each
-         * own a primary of their own and always did. A page-wide count would have
-         * had to be loosened to 4, which would then pass with the double CTA back
-         * (4 → 5 is invisible to `toBe(4)` only if you also update it, and nobody
-         * would know which of the five was the duplicate). Counting the chooser and
-         * the panel SEPARATELY names the defect exactly: it was one primary in each.
-         */
         expect(
-          await page.locator('.capture-intake .btn-primary:visible').count(),
+          await page.locator('.capture-methods .btn-primary:visible').count(),
           'step 2: the chooser offers exactly ONE primary route',
         ).toBe(1);
         await expect(
-          page.locator('.capture-section'),
-          'step 2: the panel renders NOTHING while the chooser owns the entry — ' +
-            'not an empty shell, which is what minted an aria-prohibited-attr node',
+          page.getByRole('textbox', { name: 'Transcript' }),
+          'step 2: Capture Home carries no transcript form',
         ).toHaveCount(0);
         await expect(
           page.getByRole('button', { name: 'Capture Experiment Notes' }),
-          'step 2: and so its own entry is absent, not merely hidden',
+          'step 2: and the old panel entry is absent, not merely hidden',
         ).toHaveCount(0);
 
-        await page.getByRole('button', { name: 'Start Writing' }).click();
-        const capture = page.getByRole('region', { name: 'Transcript Capture' });
         /*
-         * NO RECORDING CLAIM IN THE PANEL'S OWN INTRO. Unchanged in substance, and
-         * reworded because "while collapsed" stopped being true of this line the
-         * moment the chooser took the entry: the panel reached here is OPEN. The
-         * text being checked is the same text — `.capture-sub`, the panel's intro —
-         * and the reason is the same. Finalize posts TEXT, and turning a recording
-         * into text needs a transcription provider this build never ships
-         * configured, so an intro mentioning recording would present it as an
-         * equally finished path. That is the C1 correction
-         * `transcriptCaptureContent.ts` records making.
-         */
-        const introText = (await capture.locator('.capture-sub').textContent()) ?? '';
-        expect(introText.length, 'step 2: the panel intro says something').toBeGreaterThan(0);
-        for (const word of ['record', 'Record', 'audio', 'Audio', 'microphone', 'voice', 'Voice']) {
-          expect(
-            introText,
-            `step 2: the panel intro makes no recording claim — found ${JSON.stringify(word)}`,
-          ).not.toContain(word);
-        }
-
-        /*
-         * *** AND THE OTHER HALF OF THAT PROPERTY, WHICH THE CHOOSER NOW OWNS. ***
+         * *** THE HONEST HALF OF NAMING THE VOICE ROUTE, MOVED WITH IT. ***
          *
-         * The chooser DOES name recording — that is the point of offering the route
-         * the project owner asked for. What keeps it honest is that the voice card
-         * carries its limit ON the card, not behind a click: speech-to-text needs an
-         * approved transcription provider, and this build ships none, so
-         * `POST /api/transcription` answers 501 in every deployment. Naming the route
-         * without naming the limit would be exactly the "equally finished path"
-         * claim the check above exists to prevent — so the two assertions are two
-         * halves of one property and must travel together.
+         * The voice row names the route the owner asked for — and its ONE line says
+         * what recording here actually does: the words are typed. Speech-to-text needs
+         * an approved transcription provider this build never ships, so an unqualified
+         * "record" would present recording as a finished path to a proposal.
          */
-        const voiceCard = page.locator('[data-route="voice"]');
-        await expect(voiceCard, 'step 2: the chooser offers the voice route').toBeVisible();
-        const voiceText = (await voiceCard.textContent()) ?? '';
+        const voiceRow = page.locator('[data-route="voice"]');
+        await expect(voiceRow, 'step 2: the chooser offers the voice route').toBeVisible();
+        const voiceText = (await voiceRow.textContent()) ?? '';
         expect(
-          /transcription provider|not configured|no provider/i.test(voiceText),
-          `step 2: the voice route names its limit on the card — read ${JSON.stringify(voiceText)}`,
+          /type what was said/i.test(voiceText),
+          `step 2: the voice route states that recording here is typed from — read ${JSON.stringify(voiceText)}`,
         ).toBe(true);
+
+        // ...and A settles on the review surface the rest of this walk observes.
+        await switchWorkspace(page, 'proposals');
+        await expect(
+          page.getByRole('heading', { name: 'Ingestion Proposals' }),
+          'step 2: A is on the Proposals view',
+        ).toBeVisible();
       });
 
       // ══ STEP 3 — B, a SECOND BROWSER, mints proposals through the UI ═════════
@@ -760,8 +730,8 @@ test.describe('two scientists, two real browsers, one record', () => {
       await test.step('3 · B (a second browser) captures a transcript and proposes from a note', async () => {
         await bPage.goto(`/record/${id}?view=capture`);
         await expect(
-          bPage.getByRole('heading', { name: 'Ingestion Proposals' }),
-          'step 3: B is on the same record’s Experiment Data workspace',
+          bPage.getByRole('heading', { name: /How do you want to get this experiment in\?/ }),
+          'step 3: B is on the same record’s Capture Home',
         ).toBeVisible();
 
         mintedByTranscript = await bFinalizesATranscript(bPage, runTwo.id, TRANSCRIPT_TEXT);
@@ -804,12 +774,21 @@ test.describe('two scientists, two real browsers, one record', () => {
 
         // ---- "Review N Proposals" MOVES FOCUS ---------------------------------
         await bPage.getByRole('button', { name: `Review ${mintedByTranscript} Proposals` }).click();
-        const focused = await activeElement(bPage);
-        expect(
-          focused.id,
-          'step 3: the review control moved focus to the proposals heading rather than ' +
-            'only scrolling — a scroll is invisible to a keyboard reader',
-        ).toBe('ingestion-proposals-heading');
+        /*
+         * POLLED, NOT SAMPLED ONCE (2026-09-22). The hand-off lands after the view
+         * switch commits — the navigation runs in a React transition and the first
+         * visit MOUNTS the Proposals workspace — so a sample taken the instant the
+         * click resolves reads the button that was pressed. Measured locally: the
+         * button at +0 ms, the heading from ~15 ms. CI failed the one-shot read on
+         * both attempts. The claim is unchanged: focus ARRIVES at the heading.
+         */
+        await expect
+          .poll(async () => (await activeElement(bPage)).id, {
+            message:
+              'step 3: the review control moved focus to the proposals heading rather than ' +
+              'only scrolling — a scroll is invisible to a keyboard reader',
+          })
+          .toBe('ingestion-proposals-heading');
 
         // ---- and B proposes from a stored NOTE, at a different target ---------
         const notes = await serverNotes(request, id);
@@ -870,7 +849,7 @@ test.describe('two scientists, two real browsers, one record', () => {
           noteCard,
           'step 3: its card is on B’s screen once B reloads — see the finding above',
         ).toBeVisible();
-        await noteCard.getByRole('button', { name: /^Propose a value from this note$/i }).click();
+        await noteCard.getByRole('button', { name: /^Propose a Value From This Note$/i }).click();
         await noteCard.getByLabel('Field this value is for').selectOption('context.environment');
         await noteCard.getByLabel('Run this value is about').selectOption(runTwo.id);
         await noteCard.getByLabel('Environment', { exact: true }).selectOption(envProposed);
@@ -1059,6 +1038,8 @@ test.describe('two scientists, two real browsers, one record', () => {
           await runFieldValue(server, id, runTwo.id, TRANSCRIPT_TARGETS.temperature.path),
           'step 5: the server holds nothing at the temperature target yet',
         ).toBeUndefined();
+        // Behind "Why This Was Proposed" since owner QA P1 (2026-09-22).
+        await card.getByRole('button', { name: 'Why This Was Proposed' }).click();
         await card.getByRole('button', { name: 'Show What the Record Holds Now' }).click();
         await expect(
           card.locator('.proposal-current-absent'),
@@ -1085,6 +1066,8 @@ test.describe('two scientists, two real browsers, one record', () => {
           'step 5: the note-proposal names run two as well',
         ).toHaveText(`On run ${runTwo.label}`);
         await expect(envCard.locator('.proposal-value-body').first()).toContainText(envProposed);
+        // Behind "Why This Was Proposed" since owner QA P1 (2026-09-22).
+        await envCard.getByRole('button', { name: 'Why This Was Proposed' }).click();
         await envCard.getByRole('button', { name: 'Show What the Record Holds Now' }).click();
         const envCurrent = envCard.locator('.proposal-current-body .proposal-value-body');
         await expect(envCurrent, 'step 5: the current value is RUN TWO’s').toContainText(envTwo);
@@ -1136,7 +1119,7 @@ test.describe('two scientists, two real browsers, one record', () => {
         );
         const proposalCountBefore = (await server.proposals(id)).proposals.length;
 
-        const card = cardInState(page, TRANSCRIPT_TARGETS.atmosphere.path, 'Awaiting your judgement');
+        const card = cardInState(page, TRANSCRIPT_TARGETS.atmosphere.path, 'Awaiting your judgment');
         await expect(card, 'step 6: the atmosphere card is open for judgement').toBeVisible();
         await card.getByRole('button', { name: 'More Actions' }).click();
         await card.getByRole('button', { name: 'Correct the Value, Then Accept' }).click();
@@ -1191,7 +1174,7 @@ test.describe('two scientists, two real browsers, one record', () => {
         // ---- and a rejection writes NOTHING -----------------------------------
         const runOneBeforeReject = await server.runBody(id, runOne.id);
         const runTwoBeforeReject = await server.runBody(id, runTwo.id);
-        const seededCard = cardInState(page, 'sample.material.formula', 'Awaiting your judgement');
+        const seededCard = cardInState(page, 'sample.material.formula', 'Awaiting your judgment');
         await seededCard.getByRole('button', { name: 'Reject…' }).click();
         await seededCard.getByLabel('Reason (optional)').fill(REJECT_REASON);
         await seededCard.getByRole('button', { name: 'Confirm Reject' }).click();
@@ -1246,7 +1229,7 @@ test.describe('two scientists, two real browsers, one record', () => {
 
         // ---- A, who has still not reloaded, tries to accept -------------------
         await assertSameDocument(page, 'step 7: A’s page is still the document from step 1');
-        const card = cardInState(page, TRANSCRIPT_TARGETS.temperature.path, 'Awaiting your judgement');
+        const card = cardInState(page, TRANSCRIPT_TARGETS.temperature.path, 'Awaiting your judgment');
         await expect(
           card.locator('.proposal-target-state'),
           'step 7: the card tells the reader the value moved',
@@ -1297,7 +1280,7 @@ test.describe('two scientists, two real browsers, one record', () => {
             'on the SAME run, and this proposal is still fresh',
         ).toBe(false);
 
-        const card = cardInState(page, 'context.environment', 'Awaiting your judgement');
+        const card = cardInState(page, 'context.environment', 'Awaiting your judgment');
         await expect(card, 'step 8: the note-proposal is open for judgement').toBeVisible({
           timeout: DISCOVERY_DEADLINE,
         });
@@ -1479,7 +1462,7 @@ test.describe('two scientists, two real browsers, one record', () => {
           'step 9: with run two’s accepted value',
         ).toContainText(envProposed);
 
-        await switchWorkspace(page, 'capture');
+        await switchWorkspace(page, 'proposals');
         await expect(
           cardInState(page, 'context.environment', 'Accepted'),
           'step 9: the accepted proposal survives',
@@ -1489,7 +1472,7 @@ test.describe('two scientists, two real browsers, one record', () => {
           'step 9: and so does the rejected one — a rejection is KEPT, not deleted',
         ).toBeVisible();
         await expect(
-          cardInState(page, TRANSCRIPT_TARGETS.temperature.path, 'Awaiting your judgement'),
+          cardInState(page, TRANSCRIPT_TARGETS.temperature.path, 'Awaiting your judgment'),
           'step 9: and the refused one is still open, exactly as the refusal said',
         ).toBeVisible();
 
@@ -1520,7 +1503,7 @@ test.describe('two scientists, two real browsers, one record', () => {
          * assertion the brief asks for is made about the control that actually exists,
          * and the absence of a "Submit" one is asserted too rather than assumed.
          */
-        await switchWorkspace(page, 'capture');
+        await switchWorkspace(page, 'proposals');
         const proposals = page.getByRole('region', { name: 'Ingestion Proposals' });
         /*
          * THE REGION IS ASSERTED PRESENT BEFORE ANYTHING IS COUNTED IN IT — ADDED
@@ -1661,7 +1644,13 @@ test.describe('two scientists, two real browsers, one record', () => {
          * the loop, so a Graph link silently returning to the sidebar would fail
          * here rather than pass unnoticed.
          */
-        for (const workspace of ['Record Fields', 'Runs', 'Experiment Data'] as const) {
+        /*
+         * 2026-09-22 (owner QA N2/N3): the rail's destinations are Capture, Proposals
+         * and Runs (Data Capture), then Activity. ~~Record Fields~~ has no rail row —
+         * it is the spine's `Record Created` step, walked through above — so the walk
+         * covers the three capture-group destinations, which own a workspace panel.
+         */
+        for (const workspace of ['Capture', 'Proposals', 'Runs'] as const) {
           await page.locator('body').click({ position: { x: 2, y: 2 } });
           await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
           await tabUntil(
@@ -1723,9 +1712,9 @@ test.describe('two scientists, two real browsers, one record', () => {
             `step 11: and the panel it landed in is the one ${workspace} opened`,
           ).toBe(
             {
-              'Record Fields': 'record-workspace-fields',
+              Capture: 'record-workspace-capture',
+              Proposals: 'record-workspace-proposals',
               Runs: 'record-workspace-runs',
-              'Experiment Data': 'record-workspace-capture',
             }[workspace],
           );
         }
@@ -1817,7 +1806,7 @@ test.describe('two scientists, two real browsers, one record', () => {
       const runs = await server.runs(id);
       expect(runs, 'one run is enough for a run-scoped proposal').toHaveLength(1);
 
-      await switchWorkspace(page, 'capture');
+      await switchWorkspace(page, 'proposals');
       await expect(
         page.getByRole('region', { name: 'Ingestion Proposals' }).locator('.proposals-empty'),
         'A’s review surface starts empty, so the arrival below is unambiguous',

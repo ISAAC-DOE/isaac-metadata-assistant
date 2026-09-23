@@ -371,12 +371,12 @@ describe('the record screen live-refresh request graph', () => {
   });
 
   it('TEN proposal entries cost NO bundle at all — the record read is not stale for them', async () => {
-    /* `?view=capture` — the proposals list lives on the Experiment Data
-       workspace, and the negative-control assertion at the end of this test needs
-       the panel that owns that content to be MOUNTED. On Record Fields it is not,
-       and the control would pass vacuously: zero proposal reads before, zero
-       after. */
-    mount({}, 'capture');
+    /* ~~`?view=capture`~~ `?view=proposals` (2026-09-22) — the proposals list
+       moved from the capture workspace to its own focused view, and the
+       negative-control assertion at the end of this test needs the panel that owns
+       that content to be MOUNTED. On Record Fields it is not, and the control
+       would pass vacuously: zero proposal reads before, zero after. */
+    mount({}, 'proposals');
     await settle();
     const before = bundleCount(calls);
     const proposalsBefore = countPath(calls, `GET ${BASE}/proposals`);

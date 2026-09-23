@@ -193,7 +193,7 @@ export function MoveExperimentPanel({
   const current = detail.folder ?? '';
 
   return (
-    <section className="field-group" aria-label="Folder (folder)">
+    <section className="field-group" aria-label="Folder">
       <h2 className="fg-heading">
         <button
           type="button"
@@ -211,8 +211,12 @@ export function MoveExperimentPanel({
         >
           <Chevron className="fg-chevron" size={16} strokeWidth={2} aria-hidden="true" />
           <span className="fg-block">{LABELS.libraryMoveLabel}</span>
-          <span className="record-section-key">folder</span>
-          <span className="record-section-summary">Where this experiment is filed</span>
+          {/* The folder the record is filed in — the value, not a description of
+              the section (owner QA F1/F2). "Not in a folder" is the library's own
+              word for none, so the two surfaces agree. */}
+          <span className="record-section-summary record-section-value">
+            {detail.folder ? detail.folder : LABELS.libraryUnfiled}
+          </span>
         </button>
       </h2>
       {expanded && (

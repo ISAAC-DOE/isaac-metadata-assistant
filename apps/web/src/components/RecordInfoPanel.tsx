@@ -94,13 +94,11 @@ import type { ApiArtifactsResponse, ApiDraftGroup, ApiExperimentDetail } from '.
 function Section({
   id,
   title,
-  sublabel,
   summary,
   children,
 }: {
   id: string;
   title: string;
-  sublabel: string;
   summary: string;
   children: React.ReactNode;
 }) {
@@ -108,7 +106,7 @@ function Section({
   const Chevron = expanded ? ChevronDown : ChevronRight;
   const bodyId = `${id}-body`;
   return (
-    <section className="field-group" aria-label={`${title} (${sublabel})`}>
+    <section className="field-group" aria-label={title}>
       {/* A REAL HEADING LANDMARK — see `FieldGroup`'s own note for the measurement.
           `h2` at the level of this workspace's other sections, so the outline under
           the screen's single `h1` stays contiguous. A transparent wrapper: `.fg-heading`
@@ -123,11 +121,11 @@ function Section({
         >
           <Chevron className="fg-chevron" size={16} strokeWidth={2} aria-hidden="true" />
           <span className="fg-block">{title}</span>
-          {/* Not `.fg-sublabel` / `.fg-summary`: those two paint a colour that is
-              already below the contrast threshold on this screen, and reusing them
-              would have grown the measured `color-contrast` count by four. See the
-              rule's own comment in `record-info.css`. */}
-          <span className="record-section-key">{sublabel}</span>
+          {/* Not `.fg-summary`: it paints a colour that is already below the
+              contrast threshold on this screen. See the rule's own comment in
+              `record-info.css`. The lowercase key (`record`, `links`) that sat
+              beside the title is gone (owner QA F1, 2026-09-22) — the official
+              paths are named in each row below. */}
           <span className="record-section-summary">{summary}</span>
         </button>
       </h2>
@@ -207,17 +205,10 @@ export function RecordInfoPanel({
   // about how much of a record exists, computed by a panel that can only see
   // part of it — see CLAUDE.md §5.
   const summary =
-    artifacts.record !== null
-      ? 'Read from the exported record'
-      : 'Written when this record is exported';
+    artifacts.record !== null ? 'From the exported record' : 'Written at export';
 
   return (
-    <Section
-      id="record-info"
-      title="Record Info"
-      sublabel="record"
-      summary={summary}
-    >
+    <Section id="record-info" title="Record Info" summary={summary}>
       <p className="record-info-note">
         These values identify and classify the record itself. None of them is a measurement,
         and none of them is entered on this screen — each row says where its value comes
@@ -460,13 +451,13 @@ export function RecordLinksPanel({ artifacts }: { artifacts: ApiArtifactsRespons
   const links = readLinks(record);
   const summary =
     record === null
-      ? 'written into the official record at export'
+      ? 'Written at export'
       : links.length === 1
         ? '1 relationship'
         : `${links.length} relationships`;
 
   return (
-    <Section id="record-links" title="Relationships" sublabel="links" summary={summary}>
+    <Section id="record-links" title="Relationships" summary={summary}>
       <p className="record-info-note">
         A relationship declares how this record stands to another ISAAC record — what it was
         derived from, what it replicates, what it is a calibration of. The official schema

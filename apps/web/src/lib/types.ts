@@ -2069,6 +2069,40 @@ export interface ApiHealthExperimentStorage {
   };
 }
 
+/**
+ * The `mcp` block on GET /api/health (`apps/api/isaac_api/mcp/deployment.py::
+ * disclosure`), declared for the ONE field this client reads: `posture`.
+ *
+ * Derived from CONFIGURATION alone — the handler opens no socket and verifies no
+ * credential — so it says how this PROCESS is configured and never that anything
+ * can reach it, and never that any agent is connected. `null` means the server
+ * could not determine it, which is a different fact from `unmounted`. Widened to
+ * `string` so an unrecognised future posture is something a client can ignore.
+ * Optional because a build predating the block, or a failed health read, has none.
+ */
+export interface ApiHealthMcp {
+  posture: string | null;
+}
+
+/**
+ * The `proposal_acceptance` block on GET /api/health — whether THIS deployment can
+ * accept an ingestion proposal at all (owner QA P2, 2026-09-22).
+ *
+ * `available: false` is the server saying, before anyone clicks, what `accept`
+ * would otherwise answer with `409 human_actor_required`: no trusted scientist
+ * identity is configured. `reason` is widened to `string` so a future code is a
+ * value a client can name verbatim rather than a shape change.
+ *
+ * OPTIONAL, AND ABSENCE IS ITS OWN STATE. A build that predates the block, or a
+ * health read that failed, has none — and the proposals panel then behaves
+ * exactly as it did before the block existed: Accept is offered and a refusal is
+ * reported when it arrives. Absence is never read as `false`.
+ */
+export interface ApiHealthProposalAcceptance {
+  available: boolean;
+  reason: string | null;
+}
+
 export interface ApiHealth {
   status: string;
   mode: string;
@@ -2076,6 +2110,8 @@ export interface ApiHealth {
   version: string;
   database?: ApiHealthDatabase;
   experiment_storage?: ApiHealthExperimentStorage;
+  mcp?: ApiHealthMcp;
+  proposal_acceptance?: ApiHealthProposalAcceptance;
 }
 
 // POST /api/demo/reset — the guarded example-workspace reset (DemoResetResponse in

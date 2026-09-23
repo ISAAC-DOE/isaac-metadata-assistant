@@ -297,20 +297,14 @@ export const CAPTURE_COPY = {
    */
   intakeHeading: 'How do you want to get this experiment in?',
   /*
-   * "Four ways in", not three — the fourth card was added 2026-09-14.
-   *
-   * The project owner: *"the runs should be a part of the initial capture and
-   * proposals."* He was describing a real gap rather than a preference: this
-   * screen asks "How do you want to get this experiment in?" and then offered
-   * three routes, none of which was the one that records WHAT WAS MEASURED. A
-   * scientist could answer the question honestly, use every route on offer, and
-   * still have entered no scan. Runs were a sibling workspace pill instead.
+   * ~~`intakeIntro`, `intakeWriteBody`, `intakeWriteAvailable`, `intakeVoiceBody`,
+   * `intakeVoiceAction`, `intakeVoiceLimit`, `intakeFilesBody`, `intakeRunBody`~~ —
+   * RETIRED 2026-09-22 (owner QA C1). They were the old chooser's card paragraphs.
+   * Capture Home now gives each way in ONE line (`home*Line` below) and opens a
+   * focused view; the honest limits they carried moved with the task: the voice
+   * line itself says recording here is typed from, and the local recorder states
+   * the transcription seam's own report (`GET /api/providers/capabilities`).
    */
-  intakeIntro:
-    'Four ways in, and you can use more than one on the same record. Everything ' +
-    'you put in stays exactly as you wrote it — ISAAC proposes values from it and ' +
-    'you accept, correct or refuse each one.',
-
   /*
    * THE THREE CARD TITLES ARE REGISTER 1 — casing conformance, 2026-09-14.
    *
@@ -336,9 +330,9 @@ export const CAPTURE_COPY = {
    * THE DIRECT ROUTE, AND THE ONLY ONE THAT WRITES A VALUE ITSELF.
    *
    * The other three all end in a PROPOSAL a person decides on. This one is the
-   * scientist typing the conditions they set, so the honest body says so rather
-   * than implying a proposal step that does not exist here. Title Case per
-   * Register 1, same 15px/600 card tier as its three siblings.
+   * scientist typing the conditions they set, so its line (`homeRunLine`, below)
+   * says so rather than implying a proposal step that does not exist here. Title
+   * Case per Register 1, same 15px/600 tier as its three siblings.
    *
    * "one run per set of measurement conditions" is the Runs workspace's own
    * subtitle, reused verbatim so the card and its destination agree about what a
@@ -346,40 +340,15 @@ export const CAPTURE_COPY = {
    * a definition that already exists somewhere else.
    */
   intakeRunTitle: 'Enter the Scan Directly',
-  intakeRunBody:
-    'Type the conditions you set — one run per set of measurement conditions. ' +
-    'Unlike the other three routes this is you entering the value, not ISAAC ' +
-    'proposing one, so nothing here needs your confirmation afterwards.',
-  intakeRunAction: 'Add Run',
+  /* It goes to the Runs view, where "Add Run" is the button that creates one — so it
+     is named for where it goes, not for an act it does not perform (review #277). */
+  intakeRunAction: 'Go to Runs',
 
   intakeWriteTitle: 'Write It Down',
-  intakeWriteBody:
-    'Type or paste what happened at the instrument. ISAAC reads it for values, ' +
-    'asks about anything it will not guess, and keeps your exact words either way.',
   intakeWriteAction: 'Start Writing',
-  intakeWriteAvailable: 'Ready to use',
 
   intakeVoiceTitle: 'Record at the Instrument',
-  intakeVoiceBody:
-    'Record while your hands are busy. The audio stays in this tab and is never ' +
-    'uploaded — you can play it back here and type from it.',
-  intakeVoiceAction: 'Open Recorder',
-  /*
-   * THE LIMIT, ATTRIBUTED. It names WHAT is missing (an approved provider), WHO
-   * decides (not this application), and what the control still does — so a reader
-   * can tell a deferred decision from a broken feature.
-   */
-  intakeVoiceLimit:
-    'Speech-to-text is not turned on in this deployment: it needs a transcription ' +
-    'provider that has been approved for scientific audio, which is an ' +
-    'institutional decision rather than a setting here. Recording and playback ' +
-    'work now; the words have to be typed.',
-
   intakeFilesTitle: 'Bring Files You Already Have',
-  intakeFilesBody:
-    'Record where each file lives, with its checksum and your notes, so the record ' +
-    'points at the real material. One layout is read today; everything else is kept ' +
-    'as a reference for a later build that can read it.',
   intakeFilesAction: 'Go to Historical Import',
 
   // -- primary/secondary controls, per voice state --------------------------
@@ -678,6 +647,16 @@ export const CAPTURE_COPY = {
    */
   finalizePreflightNoRun:
     'No run selected — this will be stored as notes only, and will propose nothing.',
+  /*
+   * PR #277 REVIEW (pre-existing) — FINALIZE TWICE MINTED DUPLICATES. After a
+   * successful reading the text stayed in the box and Finalize stayed enabled,
+   * so a second press stored every segment again and minted a second proposal
+   * per value. The button is now disabled until the text changes, and this
+   * line — the button's accessible description while it is — says why and what
+   * to do, rather than leaving a greyed control to be guessed at.
+   */
+  finalizeAlreadyRead:
+    'This text has already been read and stored. Edit it to read it again, or choose Capture Another Note.',
   /** NEW — the `processing` state's own announcement, distinct from a generic busy. */
   processingLive: 'Reading transcript…',
 
@@ -709,4 +688,113 @@ export const CAPTURE_COPY = {
     'that produced a proposal. Rejecting a proposal therefore never loses the ' +
     'words behind it.',
   retentionHeading: 'Retention',
+
+  /*
+   * ── CAPTURE HOME AND THE FOCUSED TASK VIEWS (2026-09-22, owner QA C1–C5) ────
+   *
+   * Capture Home offers the four ways in, one short line each, and every one opens
+   * a focused view instead of expanding a panel beneath the chooser. The long
+   * explanations the old chooser carried (`intake*Body`, `intakeVoiceLimit`) are
+   * retired (see the note above the card titles) — each focused view states its own
+   * limits — and the chooser itself now says only what each route IS.
+   *
+   * THE VOICE LINE NAMES CLAUDE FIRST, and that is the honest order rather than a
+   * preference: text from a Claude app reaches this record as notes and proposals
+   * (`isaac_capture_transcript`), while audio recorded here can only be played back
+   * and typed from — every transcription provider answers 501. Neither line claims
+   * a connection exists; the voice view reads the deployment's own posture.
+   */
+  homeIntro: 'Choose a way in. You can use more than one on the same record.',
+  homeWriteLine: 'Type or paste your notes. ISAAC proposes values for you to review.',
+  /*
+   * WHAT IS TRUE TODAY (review #277, I-4; decision packet §9 — "build nothing that
+   * implies any of it exists"). The Claude half used to lead this line on every
+   * deployment, including ones whose agent interface is not mounted — which is all
+   * of them. It is now offered only where the deployment reports a reachable Claude
+   * connection AND publishes an address (`homeVoiceLineWithClaude`, read by
+   * `CaptureIntake` through `claudeVoiceState`); everywhere else the line states
+   * the one voice route that exists.
+   */
+  homeVoiceLine: 'Record here and type what was said.',
+  homeVoiceLineWithClaude:
+    'Dictate through your Claude app, or record here and type what was said.',
+  homeFilesLine: 'Reference files you already have — where each one lives, and its checksum.',
+  homeRunLine: 'Type the conditions you set — one run per set of measurement conditions.',
+  homeVoiceAction: 'Open Voice Capture',
+  homeFilesAction: 'Bring Files',
+  homeReviewAction: 'Review',
+  homeSummaryLabel: 'On This Record',
+  backToHome: 'All Capture Methods',
+
+  writeLead: 'Choose the run, type or paste what happened, then finalize. You decide on every value ISAAC proposes.',
+  /* Conditional on purpose: in a deployment whose Claude connection is not enabled
+     this sentence sits above "Not Enabled Here", so it must describe the path, not
+     assert that it works. */
+  voiceLead:
+    'With Claude, your spoken words arrive here as notes and proposals for you to review. Or record here and type what was said.',
+  filesLead: 'ISAAC keeps a reference to each file — where it lives, its checksum and your notes.',
+  mapNoRuns: 'This record has no runs yet, so there is nothing to map.',
+  mapChooseRun: 'Choose a run to see what it already holds.',
+  mapRunLabel: 'Run',
+
+  /* The focused Write view's one visible privacy line (DEC-35 keeps privacy state
+     visible). True of this path: finalize posts text to this ISAAC server only,
+     `transcript_capture.py` reads it with fixed rules and stores every segment as a
+     note, and no provider is called. */
+  writePrivacyLine:
+    'When you finalize, your words are stored with this record as notes. ISAAC sends them nowhere else.',
+  writeGuideHeading: 'How ISAAC Reads Your Notes',
+  runTipSubject: 'Choosing a Run',
+  transcriptTipSubject: 'Finalizing',
+  readingDetailsHeading: 'Details of This Reading',
+  summaryCompact: (notes: number, proposals: number) =>
+    `${notes} ${notes === 1 ? 'note' : 'notes'} stored · ${proposals} ` +
+    `${proposals === 1 ? 'proposal' : 'proposals'} ready for review`,
+
+  localRecorderHeading: 'Record Locally Instead',
+
+  /* ── the Claude path, state by state. `remote-ready` is a posture this build can
+     never report (`mcp/deployment.py::posture`), and an endpoint address is
+     published nowhere (`MCP_ENDPOINT` is `null`), so the "ready" state is real
+     code that no deployment of this build reaches. ── */
+  claudeHeading: 'Use Claude for Voice Capture',
+  claudeChecking: 'Checking how this deployment accepts Claude…',
+  /* No future promise ("…yet"): what is true today, and nothing implied beyond it. */
+  claudeUnmounted: 'This ISAAC deployment does not accept a remote Claude connection.',
+  claudeLocalOnly:
+    'This ISAAC deployment accepts agent connections only from its own machine, so a Claude app elsewhere cannot reach it.',
+  claudeNoAddress:
+    'This deployment has switched its agent interface on but has not published an address to add in Claude.',
+  claudeUnreported: 'This deployment has not reported whether it accepts a Claude connector.',
+  claudeConnectAction: 'Connect Your Agent',
+  claudeReadyHeading: 'ISAAC is ready for a Claude connector.',
+  claudeStepAdd: 'In your Claude app, add a custom connector with this address:',
+  claudeStepSignIn: 'Sign in as yourself when Claude asks.',
+  claudeStepSay: 'Start with the instruction below, then say what you observed.',
+  claudeStarterLabel: 'Starter instruction',
+  claudeCopy: 'Copy',
+  claudeCopied: 'Copied to the clipboard.',
+  claudeCopyFailed: 'Copying was refused by this browser. Select the text and copy it instead.',
+  claudeNotObservable:
+    'ISAAC cannot observe your Claude app, so this page shows no connection state. New notes and proposals appear on this record when they arrive.',
+  claudeHowHeading: 'How Voice Capture With Claude Works',
+  claudeStarter: (title: string, id: string, runLabel: string | null) =>
+    `Add these notes to my ISAAC experiment "${title}" (${id})` +
+    (runLabel === null ? '' : `, ${runLabel}`) +
+    ': ',
+  claudeStarterNoRun:
+    'No run is chosen, so the instruction names none — say which run your notes describe.',
+
+  /* Scoped exactly as Historical Import scopes itself (`historicalImportContent.lead`):
+     one layout read, everything else a reference, every candidate a suggestion. */
+  filesImportLine:
+    'Historical Import reads one file layout today and keeps anything else as a reference. Each value it finds is a suggestion you decide on.',
+  filesAssetsLine: 'To reference a single file from this record, add it under Asset References.',
+  filesAssetsAction: 'Open Asset References',
+
+  /* The shell-level notice while the recorder is live on a view that is not
+     showing it — a live microphone is a privacy state and is never left hidden. */
+  recordingElsewhere: 'Recording in progress — the microphone is on.',
+  pausedElsewhere: 'Recording paused — the microphone is still open.',
+  returnToRecorder: 'Return to Recorder',
 } as const;

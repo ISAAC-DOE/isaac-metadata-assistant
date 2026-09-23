@@ -1,0 +1,418 @@
+/*
+ * THE CAPTURE WORKSPACE — Capture Home and the focused task views
+ * (`CaptureWorkspace.tsx`). Tokens only: every size, weight, line-height and
+ * spacing value is a rung of `styles/tokens.css`, because
+ * `type-scale-and-spacing.test.ts` refuses a new hand-authored literal on those
+ * four axes. No new hue enters the app.
+ */
+
+/* ── Capture Home ────────────────────────────────────────────────────────── */
+
+.capture-methods {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-width: 880px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-card);
+}
+/* One row per way in: glyph · name and one line · one action. The action link is
+   stretched over the whole row (its `::after`), so the row is the pointer target
+   while the accessible name stays the action's own words. */
+.capture-method {
+  position: relative;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-md);
+  padding: var(--space-md) var(--space-lg);
+  transition: background 0.12s ease;
+}
+.capture-method + .capture-method {
+  border-top: 1px solid var(--border-faint);
+}
+.capture-method:first-child {
+  border-top-left-radius: var(--radius-card);
+  border-top-right-radius: var(--radius-card);
+}
+.capture-method:last-child {
+  border-bottom-left-radius: var(--radius-card);
+  border-bottom-right-radius: var(--radius-card);
+}
+.capture-method:hover {
+  background: var(--selected-row-bg);
+}
+.capture-method-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-control);
+  background: var(--screen-base);
+  color: var(--text-secondary);
+}
+.capture-method-text {
+  min-width: 0;
+}
+.capture-method-title {
+  margin: 0;
+  font-size: var(--font-size-heading-sm);
+  line-height: var(--line-height-snug);
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-primary);
+}
+.capture-method-line {
+  margin: var(--space-2xs) 0 0;
+  font-size: var(--font-size-body);
+  line-height: var(--line-height-normal);
+  color: var(--text-secondary);
+}
+.capture-method-action::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+}
+/* A lift would give the stretched `::after` a transformed containing block, so
+   the target would shrink to the button mid-hover and flicker. The ROW carries
+   the hover feedback here instead. */
+.capture-method .capture-method-action:hover {
+  transform: none;
+}
+.capture-home-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-sm);
+  max-width: 880px;
+  margin: var(--space-md) 0 0;
+  padding: var(--space-sm) var(--space-md);
+  background: var(--surface-subtle);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-inner);
+  font-size: var(--font-size-body);
+  line-height: var(--line-height-normal);
+  color: var(--text-secondary);
+}
+.capture-home-summary-label {
+  font-weight: var(--font-weight-medium);
+  color: var(--text-primary);
+}
+.capture-home-summary-link {
+  margin-left: auto;
+  padding: var(--space-2xs) var(--space-xs);
+  border-radius: var(--radius-token);
+  color: var(--action);
+  font-weight: var(--font-weight-medium);
+  text-decoration: none;
+}
+.capture-home-summary-link:hover {
+  text-decoration: underline;
+}
+.capture-home-summary-link:focus-visible {
+  outline: 2px solid var(--action);
+  outline-offset: 2px;
+}
+@media (max-width: 640px) {
+  .capture-method {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+  .capture-method-action {
+    grid-column: 2;
+    justify-self: start;
+  }
+}
+
+/* ── the focused task views ──────────────────────────────────────────────── */
+
+/* THE SPLIT KEYS ON THIS WORKSPACE'S OWN WIDTH, not the viewport's: with the
+   assistant rail expanded the main column at a 1510px window measured 955px, so a
+   viewport rule would squeeze the task pane exactly when it has least room. */
+.capture-task {
+  container-type: inline-size;
+  container-name: capture-task;
+}
+.capture-task[hidden] {
+  display: none;
+}
+.capture-task-head {
+  margin: 0 0 var(--space-lg);
+}
+.capture-task-back {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+  margin: 0 0 var(--space-sm) calc(-1 * var(--space-xs));
+  padding: var(--space-2xs) var(--space-xs);
+  border-radius: var(--radius-token);
+  color: var(--action);
+  font-size: var(--font-size-body);
+  font-weight: var(--font-weight-medium);
+  text-decoration: none;
+  transition: background 0.12s ease;
+}
+.capture-task-back:hover {
+  background: var(--border-faint);
+}
+.capture-task-back:active {
+  background: var(--action-tint);
+}
+.capture-task-back:focus-visible {
+  outline: 2px solid var(--action);
+  outline-offset: 2px;
+}
+.capture-task-title {
+  margin: 0;
+  font-size: var(--font-size-heading-md);
+  line-height: var(--line-height-tight);
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-heading);
+}
+.capture-task-lead {
+  margin: var(--space-xs) 0 0;
+  max-width: 68ch;
+  font-size: var(--font-size-body);
+  line-height: var(--line-height-normal);
+  color: var(--text-secondary);
+}
+.capture-split {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xl);
+}
+.capture-task-main {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-lg);
+}
+.capture-task-main > [hidden] {
+  display: none;
+}
+.capture-task-aside {
+  min-width: 0;
+}
+@container capture-task (min-width: 880px) {
+  .capture-split {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(280px, 340px);
+    align-items: start;
+  }
+  .capture-task-aside {
+    position: sticky;
+    top: var(--space-lg);
+  }
+}
+/* The map here is NOT an internal scroller: `.rsm`'s own desktop rule caps its
+   height and scrolls inside itself, which clipped its last line at the pane edge
+   (owner QA R3). Beside a capture task the page scrolls instead. */
+.capture-task-aside .rsm {
+  position: static;
+  max-height: none;
+  overflow: visible;
+}
+.capture-map {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+.capture-map-run {
+  /* In the Record Map card's header, where the run name would otherwise sit. */
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+  margin-left: auto;
+  min-width: 0;
+  max-width: 100%;
+}
+.capture-map-run .capture-label {
+  margin-top: 0;
+}
+.capture-map-run .capture-control {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* The task surfaces sit on one card each, matching the rest of the record page. */
+.capture-mode,
+.claude-voice,
+.capture-files {
+  padding: var(--space-lg);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-card);
+}
+.capture-mode[data-mode='voice'] {
+  padding: 0;
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+}
+
+/* ── Write ───────────────────────────────────────────────────────────────── */
+
+.capture-privacy {
+  margin: 0;
+  max-width: 68ch;
+  font-size: var(--font-size-body);
+  line-height: var(--line-height-normal);
+  color: var(--text-secondary);
+}
+.capture-mode .capture-form {
+  margin-top: var(--space-sm);
+}
+.capture-label-row {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+  margin-top: var(--space-sm);
+}
+.capture-label-row .capture-label {
+  margin-top: 0;
+}
+/* The form's Discard slot already reserves its own height below Finalize, so the
+   guide needs only a small step to read as the next, separate row. */
+.capture-mode .capture-guide {
+  margin-top: var(--space-sm);
+}
+.capture-mode .capture-reading-details {
+  margin-top: var(--space-lg);
+}
+.capture-reading-compact {
+  margin-top: var(--space-lg);
+  padding-top: var(--space-md);
+  border-top: 1px solid var(--border-faint);
+}
+.capture-reading-compact > .capture-subhead:first-child {
+  margin-top: 0;
+}
+
+/* ── Voice ───────────────────────────────────────────────────────────────── */
+
+.claude-voice-heading {
+  margin: 0;
+  font-size: var(--font-size-heading-sm);
+  line-height: var(--line-height-snug);
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-heading);
+}
+.claude-voice-state {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-sm);
+  margin-top: var(--space-sm);
+}
+.claude-voice-line,
+.claude-voice-note {
+  margin: 0;
+  max-width: 68ch;
+  font-size: var(--font-size-body);
+  line-height: var(--line-height-normal);
+  color: var(--text-secondary);
+}
+.claude-voice-note {
+  margin-top: var(--space-md);
+}
+.claude-voice-actions {
+  margin-top: var(--space-md);
+}
+.claude-voice-steps {
+  margin: var(--space-sm) 0 0;
+  padding-left: var(--space-xl);
+  font-size: var(--font-size-body);
+  line-height: var(--line-height-normal);
+  color: var(--text-primary);
+}
+.claude-voice-steps li + li {
+  margin-top: var(--space-xs);
+}
+.claude-voice-endpoint {
+  overflow-wrap: anywhere;
+}
+.claude-voice-starter {
+  margin-top: var(--space-md);
+}
+.claude-voice-starter-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-sm);
+  margin-top: var(--space-xs);
+}
+.claude-voice-starter-text {
+  flex: 1 1 20rem;
+  min-width: 0;
+  padding: var(--space-sm) var(--space-md);
+  background: var(--surface-subtle);
+  border: 1px solid var(--border-input);
+  border-radius: var(--radius-control);
+  font-size: var(--font-size-body);
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+.claude-voice .claude-voice-how {
+  margin-top: var(--space-lg);
+}
+.capture-local-summary {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-sm);
+}
+.capture-local .disclosure-body {
+  padding: var(--space-lg);
+}
+
+/* ── Files ───────────────────────────────────────────────────────────────── */
+
+.capture-files {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+}
+.capture-files-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-md);
+}
+.capture-files-row + .capture-files-row {
+  padding-top: var(--space-md);
+  border-top: 1px solid var(--border-faint);
+}
+.capture-files-line {
+  flex: 1 1 22rem;
+  margin: 0;
+  max-width: 68ch;
+  font-size: var(--font-size-body);
+  line-height: var(--line-height-normal);
+  color: var(--text-secondary);
+}
+
+/* ── the live-microphone notice, shown on any view that is not the recorder ─ */
+
+.capture-live-elsewhere {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-sm) var(--space-md);
+  margin: 0 0 var(--space-md);
+  padding: var(--space-sm) var(--space-md);
+  background: var(--needsyou-bg);
+  border: 1px solid var(--needsyou-border);
+  border-radius: var(--radius-inner);
+  color: var(--needsyou-text);
+  font-size: var(--font-size-body);
+  font-weight: var(--font-weight-medium);
+}
+.capture-live-elsewhere-text {
+  flex: 1 1 16rem;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-sm);
+}

@@ -664,7 +664,9 @@ describe('§5 the authored sentence reaches the screen', () => {
         <UnmappedNotesPanel experimentId="demo" />
       </MemoryRouter>,
     );
-    const box = await screen.findByLabelText('Capture a note');
+    // Behind "Add a Note" since owner QA P3 (2026-09-22).
+    fireEvent.click(await screen.findByRole('button', { name: /^Add a Note/ }));
+    const box = await screen.findByLabelText('Capture a Note');
     fireEvent.change(box, { target: { value: 'something worth keeping' } });
 
     const copy = DISCARD_COPY.noteCapture;

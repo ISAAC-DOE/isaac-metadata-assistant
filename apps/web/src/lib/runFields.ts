@@ -85,6 +85,22 @@ export interface RunFieldSpec {
   hint?: string;
 }
 
+/**
+ * The VISIBLE text of one enum option — PR #277 review (minor): the pickers showed
+ * the raw schema tokens (`in_situ`, `ex_situ`, `in_silico`).
+ *
+ * CASING AND SEPARATORS ONLY, and that is the whole contract: underscores become
+ * spaces and the first letter is capitalised (`in_situ` → "In situ"). Every word of
+ * the output is a word of the input, so no meaning is invented — this does not
+ * gloss "operando" or explain what "ex situ" means, which would be a scientific
+ * claim this file does not make. The `<option value>` stays the raw token, so what
+ * is STORED is unchanged byte for byte.
+ */
+export function enumOptionLabel(option: string): string {
+  const spaced = option.replace(/_+/g, ' ').trim();
+  return spaced === '' ? option : spaced.charAt(0).toUpperCase() + spaced.slice(1);
+}
+
 export const RUN_FIELDS: readonly RunFieldSpec[] = [
   {
     path: 'context.environment',

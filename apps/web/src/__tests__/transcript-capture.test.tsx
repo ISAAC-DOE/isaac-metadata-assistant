@@ -2210,6 +2210,36 @@ describe('the run selector empty state', () => {
     expect(screen.getByRole('button', { name: CAPTURE_COPY.runCreate })).toBeInTheDocument();
   });
 
+  it('PR #277 REVIEW: after Create a Run, focus lands on the run selector that replaced the button — never on <body>', async () => {
+    /*
+     * AN OUTCOME PIN, NOT A MUTATION GUARD — stated so nobody reads it as more.
+     * In jsdom React has already committed the selector by the time the old
+     * synchronous `runSelectRef.current?.focus()` ran, so reverting the fix
+     * leaves this green (measured: the ref was an HTMLSelectElement at call
+     * time). The DISCRIMINATING evidence is a real browser (Chromium, 1280×900,
+     * a fresh zero-run record, Capture → Write): the old code left
+     * `document.activeElement` on <body> at +0/+100/+500/+1500 ms with the
+     * pressed button's focusout and no further focusin; the fix focuses the
+     * selector ~45 ms after the click. See the PR #277 review-fix report.
+     */
+    let created = false;
+    stubFetchRoutes({
+      ...BASE_ROUTES,
+      [RUNS]: { body: () => (created ? runsPage : noRunsPage) },
+      [`POST /api/experiments/${EXP}/runs`]: {
+        body: () => {
+          created = true;
+          return { run: RUN, experiment_version: 'g1.5' };
+        },
+      },
+    } as never);
+    await renderPanel();
+    fireEvent.click(await screen.findByRole('button', { name: CAPTURE_COPY.runCreate }));
+    const select = await screen.findByLabelText(CAPTURE_COPY.runLabel);
+    await waitFor(() => expect(select).toHaveFocus());
+    expect((select as HTMLSelectElement).value).toBe('run-1');
+  });
+
   it('the run selector renders normally, with no permanent Create a Run button, once a run exists', async () => {
     stubFetchRoutes(BASE_ROUTES as never);
     await renderPanel();
@@ -2357,25 +2387,49 @@ describe('accessibility', () => {
     expect(within(item as HTMLElement).getByText('Not proposed')).toBeInTheDocument();
   });
 
-  it('finalizing announces BOTH numbers — read and stored — pointing at Proposals below', async () => {
+  it('finalizing announces BOTH numbers — read and stored — pointing at Proposals below, in real singulars', async () => {
     /*
      * I7, INDEPENDENT REVIEW OF PR-D: the announcement used to name only what
      * was STORED, dropping the READ count the build this replaces always
      * said. `reading()`'s fixture carries one candidate and one stored
-     * proposal, so "1 value(s) read" and "1 stored as proposal(s)" are the
+     * proposal, so "1 value read" and "1 stored as a proposal" are the
      * same number here — the negative-count test below is what actually
      * proves the two are tracked separately rather than one being echoed as
      * the other.
+     *
+     * INVERTED, PR #277 REVIEW (minor): this used to PIN the "(s)" placeholder
+     * ("1 segment(s) … 1 value(s) … 1 stored as proposal(s)"). It now pins the
+     * real singular, and asserts the placeholder is gone.
      */
     stubFetchRoutes({ ...BASE_ROUTES, [TRANSCRIPT]: { body: reading() } } as never);
     const { container } = await renderPanel();
     await typeAndFinalize();
     await screen.findByText(CAPTURE_COPY.summaryStored(1, 1));
     const status = container.querySelector('[role="status"]');
-    expect(status?.textContent).toMatch(/1 segment\(s\) stored with this record/);
-    expect(status?.textContent).toMatch(/1 value\(s\) read/);
-    expect(status?.textContent).toMatch(/1 stored as proposal\(s\)/);
+    expect(status?.textContent).toMatch(/1 segment stored with this record/);
+    expect(status?.textContent).toMatch(/1 value read/);
+    expect(status?.textContent).toMatch(/1 stored as a proposal/);
     expect(status?.textContent).toMatch(/Review them in Ingestion Proposals below/);
+    expect(status?.textContent).not.toMatch(/\(s\)/);
+  });
+
+  it('PR #277 REVIEW: the announcement pluralizes every count — "2 segments … 2 values … 2 stored as proposals"', async () => {
+    const two = reading({
+      capture: { ...(reading().capture as Record<string, unknown>), segments: 2 },
+      candidates: [candidate(), candidate({ field_path: 'context.pressure_Pa', proposed_value: 5 })],
+      proposals: [mintedFor(0), mintedFor(1)],
+    });
+    stubFetchRoutes({ ...BASE_ROUTES, [TRANSCRIPT]: { body: two } } as never);
+    const { container } = await renderPanel();
+    await typeAndFinalize();
+    await waitFor(() =>
+      expect(container.querySelector('[role="status"]')?.textContent).toMatch(/^Finalized\./),
+    );
+    const status = container.querySelector('[role="status"]');
+    expect(status?.textContent).toMatch(/2 segments stored with this record/);
+    expect(status?.textContent).toMatch(/2 values read/);
+    expect(status?.textContent).toMatch(/2 stored as proposals/);
+    expect(status?.textContent).not.toMatch(/\(s\)/);
   });
 
   it('MUTATION-GUARDED: the read and stored counts differ when a candidate could not be stored, and the announcement says both', async () => {
@@ -2396,11 +2450,156 @@ describe('accessibility', () => {
     await typeAndFinalize();
     await screen.findByText(/already holds the maximum number of proposals/);
     const status = container.querySelector('[role="status"]');
-    expect(status?.textContent).toMatch(/1 value\(s\) read/);
-    expect(status?.textContent).toMatch(/0 stored as proposal\(s\)/);
+    // Placeholder pins inverted to real plurals (PR #277 review, minor).
+    expect(status?.textContent).toMatch(/1 value read/);
+    expect(status?.textContent).toMatch(/0 stored as proposals/);
     // NOTHING was stored — the announcement must not direct a reader to an
     // empty Ingestion Proposals destination.
     expect(status?.textContent).not.toMatch(/Review them in Ingestion Proposals below/);
+  });
+});
+
+describe('PR #277 review (pre-existing): Finalize twice used to mint duplicates', () => {
+  it('MUTATION-GUARDED: after a successful reading, Finalize is disabled — with its reason as the accessible description — and a second press sends nothing', async () => {
+    const calls = stubFetchRoutes({ ...BASE_ROUTES, [TRANSCRIPT]: { body: reading() } } as never);
+    await renderPanel();
+    await typeAndFinalize();
+    await screen.findByText(CAPTURE_COPY.summaryStored(1, 1));
+    const finalizeButton = screen.getByRole('button', { name: CAPTURE_COPY.finalize });
+    expect(finalizeButton).toBeDisabled();
+    expect(finalizeButton).toHaveAccessibleDescription(CAPTURE_COPY.finalizeAlreadyRead);
+    expect(screen.getByText(CAPTURE_COPY.finalizeAlreadyRead)).toBeVisible();
+    fireEvent.click(finalizeButton);
+    fireEvent.submit(finalizeButton.closest('form') as HTMLFormElement);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(calls.filter((key) => key === TRANSCRIPT)).toHaveLength(1);
+  });
+
+  it('editing the text re-enables Finalize (there is something new to read)', async () => {
+    stubFetchRoutes({ ...BASE_ROUTES, [TRANSCRIPT]: { body: reading() } } as never);
+    await renderPanel();
+    await typeAndFinalize();
+    await screen.findByText(CAPTURE_COPY.summaryStored(1, 1));
+    fireEvent.change(screen.getByLabelText('Transcript'), {
+      target: { value: 'Temperature was 300 K. Pressure was 5 Pa.' },
+    });
+    const finalizeButton = screen.getByRole('button', { name: CAPTURE_COPY.finalize });
+    expect(finalizeButton).toBeEnabled();
+    expect(screen.queryByText(CAPTURE_COPY.finalizeAlreadyRead)).not.toBeInTheDocument();
+  });
+
+  it('a FAILED finalize never locks the button — Retry is never blocked', async () => {
+    stubFetchRoutes({
+      ...BASE_ROUTES,
+      [TRANSCRIPT]: { status: 500, body: { detail: 'boom' } },
+    } as never);
+    await renderPanel();
+    await typeAndFinalize();
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: CAPTURE_COPY.finalize })).toBeEnabled(),
+    );
+    expect(screen.queryByText(CAPTURE_COPY.finalizeAlreadyRead)).not.toBeInTheDocument();
+  });
+
+  it('MUTATION-GUARDED: focus still lands on the result heading when the post-finalize runs read is SLOW (outlasts the 60-frame hand-off)', async () => {
+    /*
+     * THE CI FAILURE THIS PINS (PR #277, `d385f2b6`). The result card renders only
+     * once the panel leaves its `finalize` busy state, and that happened in the
+     * `finally` AFTER `await loadRuns()`. The focus hand-off used to start BEFORE
+     * that read, so on a slow runner its bounded retry (60 frames) ran out while the
+     * card still did not exist, and focus stayed on <body>. Here the frame clock is
+     * made fast (each frame a 0 ms timer) and the SECOND runs read — the one issued
+     * after the capture — is held open well past 60 frames before it is released.
+     */
+    const originalRaf = window.requestAnimationFrame;
+    let frames = 0;
+    window.requestAnimationFrame = ((cb: FrameRequestCallback) => {
+      frames += 1;
+      return setTimeout(() => cb(performance.now()), 0) as unknown as number;
+    }) as typeof window.requestAnimationFrame;
+    try {
+      let runsReads = 0;
+      let releaseRuns: (() => void) | null = null;
+      stubFetchRoutes({
+        ...BASE_ROUTES,
+        [RUNS]: async () => {
+          runsReads += 1;
+          if (runsReads >= 2) {
+            await new Promise<void>((resolve) => {
+              releaseRuns = resolve;
+            });
+          }
+          return { body: runsPage };
+        },
+        [TRANSCRIPT]: { body: reading() },
+      } as never);
+      await renderPanel();
+      await typeAndFinalize();
+      // The capture has answered and the post-capture runs read is now held open.
+      await waitFor(() => expect(releaseRuns).not.toBeNull());
+      // Long enough for any hand-off already running to exhaust its 60 frames.
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      (releaseRuns as unknown as () => void)();
+      const heading = await screen.findByRole('heading', { name: CAPTURE_COPY.summaryHeading });
+      await waitFor(() => expect(heading).toHaveFocus());
+      // Measured on the OLD ordering: the hand-off had already scheduled its 60
+      // frames during the hold (frames 2 → 60) and given up; this assertion then
+      // failed with focus on <body>.
+      expect(frames).toBeGreaterThan(0);
+    } finally {
+      window.requestAnimationFrame = originalRaf;
+    }
+  });
+
+  it('MUTATION-GUARDED: a runs re-read that FAILS after a successful capture never says the transcript was NOT stored', async () => {
+    /*
+     * THE HONESTY DEFECT THIS PINS (found in the PR #277 review-fix round). The
+     * post-capture `loadRuns()` sat inside the same `try` as the capture, so a
+     * failed runs read fell into the capture's `catch` and showed
+     * `FALLBACK.finalize` — "This transcript was NOT stored and nothing was read
+     * from it" — about a transcript the server HAD stored, beside the card listing
+     * what it stored. The read now has its own handling: the result stays, the
+     * runs failure is reported as a runs failure with Try Again, and focus still
+     * lands on the result.
+     */
+    let runsReads = 0;
+    stubFetchRoutes({
+      ...BASE_ROUTES,
+      [RUNS]: () => {
+        runsReads += 1;
+        return runsReads === 2
+          ? { status: 500, body: { detail: 'runs read failed' } }
+          : { body: runsPage };
+      },
+      [TRANSCRIPT]: { body: reading() },
+    } as never);
+    const { container } = await renderPanel();
+    await typeAndFinalize();
+    const heading = await screen.findByRole('heading', { name: CAPTURE_COPY.summaryHeading });
+    // The result is on screen, with what was stored.
+    expect(screen.getByText(CAPTURE_COPY.summaryStored(1, 1))).toBeInTheDocument();
+    // The runs failure is reported AS a runs failure, recoverable…
+    const alert = await screen.findByRole('alert');
+    expect(alert.textContent).toMatch(/runs could not be re-read/);
+    expect(within(alert).getByRole('button', { name: CAPTURE_COPY.tryAgain })).toBeInTheDocument();
+    // …and nothing claims the capture failed.
+    expect(container.textContent).not.toMatch(/NOT stored/);
+    expect(runsReads).toBe(2);
+    await waitFor(() => expect(heading).toHaveFocus());
+    // Try Again repeats the RUNS read — not the capture — and clears the notice,
+    // leaving the result exactly where it was.
+    fireEvent.click(within(alert).getByRole('button', { name: CAPTURE_COPY.tryAgain }));
+    await waitFor(() => expect(screen.queryByRole('alert')).toBeNull());
+    expect(runsReads).toBe(3);
+    expect(screen.getByText(CAPTURE_COPY.summaryStored(1, 1))).toBeInTheDocument();
+  });
+
+  it('focus moves to the result heading after a successful finalize, never to <body>', async () => {
+    stubFetchRoutes({ ...BASE_ROUTES, [TRANSCRIPT]: { body: reading() } } as never);
+    await renderPanel();
+    await typeAndFinalize();
+    const heading = await screen.findByRole('heading', { name: CAPTURE_COPY.summaryHeading });
+    await waitFor(() => expect(heading).toHaveFocus());
   });
 });
 
@@ -3897,5 +4096,175 @@ describe('the elapsed indicator survives a throttled timer', () => {
     fireEvent.click(screen.getByRole('button', { name: CAPTURE_COPY.voiceStop }));
     expect(container.querySelector('.capture-elapsed')?.textContent).toBe('Held · 0:12');
     vi.useRealTimers();
+  });
+});
+
+/* ── THE FOCUSED VIEWS' MODES (2026-09-22, owner QA C2/C3) ────────────────────
+ *
+ * The record screen now draws this ONE panel as the Write view (`mode="write"`)
+ * or inside the Voice view's "Record Locally Instead" disclosure
+ * (`mode="voice"`). Every test above drives the composite (no `mode`), which is
+ * unchanged. These pin what the modes add and — the part a mode could quietly
+ * lose — what they must keep: the privacy state in sight, every server fact the
+ * reading returned still reachable, and a live microphone never folded away.
+ */
+function renderMode(mode: 'write' | 'voice', extra: Record<string, unknown> = {}) {
+  return render(
+    <MemoryRouter
+      initialEntries={['/']}
+      future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+    >
+      <TranscriptCapturePanel
+        experimentId={EXP}
+        open
+        onOpenChange={() => {}}
+        mode={mode}
+        {...extra}
+      />
+    </MemoryRouter>,
+  );
+}
+
+describe('mode="write" — the focused Write view', () => {
+  it('shows the privacy line, the form and a closed guide — and no panel entry, no voice controls', async () => {
+    installRecorder(vi.fn(async () => ({ getTracks: () => [{ stop: vi.fn() }] })));
+    stubFetchRoutes(BASE_ROUTES as never);
+    renderMode('write');
+    expect(await screen.findByLabelText('Transcript')).toBeInTheDocument();
+    expect(screen.getByText(CAPTURE_COPY.writePrivacyLine)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: CAPTURE_COPY.entryOpen })).toBeNull();
+    expect(screen.queryByRole('button', { name: CAPTURE_COPY.entryClose })).toBeNull();
+    expect(screen.queryByRole('button', { name: CAPTURE_COPY.voiceRecord })).toBeNull();
+    const guide = screen.getByRole('button', { name: CAPTURE_COPY.writeGuideHeading });
+    expect(guide).toHaveAttribute('aria-expanded', 'false');
+    // The guide's content is disclosed, not deleted.
+    const body = document.getElementById(guide.getAttribute('aria-controls')!)!;
+    expect(body.textContent).toContain(CAPTURE_GUIDANCE_SENTENCE);
+  });
+
+  it('moves the field hints behind accessible "?" tips instead of printing them', async () => {
+    stubFetchRoutes(BASE_ROUTES as never);
+    renderMode('write');
+    await screen.findByLabelText(CAPTURE_COPY.runLabel);
+    // In the DOM (so the definition stays reachable) but not shown until asked.
+    expect(screen.getByText(CAPTURE_COPY.runHint)).not.toBeVisible();
+    const tip = screen.getByRole('button', { name: `About ${CAPTURE_COPY.runTipSubject}` });
+    fireEvent.click(tip);
+    expect(screen.getByText(CAPTURE_COPY.runHint)).toBeVisible();
+    // The consequence of finalizing with no run is NOT a tip: it stays at the
+    // point of action, beside Finalize, once there is text to finalize.
+    fireEvent.change(screen.getByLabelText('Transcript'), { target: { value: 'x' } });
+    expect(screen.getByText(CAPTURE_COPY.finalizePreflightNoRun)).toBeInTheDocument();
+  });
+
+  it('the result is compact: counts and two actions first, every server detail one press away', async () => {
+    stubFetchRoutes({
+      ...BASE_ROUTES,
+      [TRANSCRIPT]: {
+        body: reading({
+          review_required: [
+            { field_path: 'context.temperature_K', outcome: 'review_required', reason: 'two values' },
+          ],
+        }),
+      },
+    } as never);
+    const onReviewProposals = vi.fn();
+    renderMode('write', { onReviewProposals });
+    await typeAndFinalize();
+    expect(await screen.findByText(CAPTURE_COPY.summaryCompact(1, 1))).toBeInTheDocument();
+    // A contradiction to resolve is NEVER disclosed away (DEC-35).
+    expect(screen.getByText(CAPTURE_COPY.reviewHeading)).toBeVisible();
+    // The rest — notes, retention, the accept contract — is behind one disclosure.
+    const details = screen.getByRole('button', { name: CAPTURE_COPY.readingDetailsHeading });
+    const body = document.getElementById(details.getAttribute('aria-controls')!)!;
+    expect(body.hidden).toBe(true);
+    expect(body.textContent).toContain('The finalized transcript is stored with this record as notes.');
+    expect(body.textContent).toContain('This operation writes no field.');
+
+    fireEvent.click(screen.getByRole('button', { name: CAPTURE_COPY.reviewProposals(1) }));
+    expect(onReviewProposals).toHaveBeenCalledTimes(1);
+    // The announcement names the destination the button goes to, not "below".
+    const status = Array.from(document.querySelectorAll('[role="status"]')).map((el) => el.textContent);
+    expect(status.some((t) => /Review them in Proposals\./.test(t ?? ''))).toBe(true);
+    expect(status.some((t) => /below/.test(t ?? ''))).toBe(false);
+  });
+
+  it('shares its run choice with the caller both ways, and never picks one itself', async () => {
+    stubFetchRoutes(BASE_ROUTES as never);
+    const onSelectedRunChange = vi.fn();
+    const view = renderMode('write', { selectedRunId: '', onSelectedRunChange });
+    const select = (await screen.findByLabelText(CAPTURE_COPY.runLabel)) as HTMLSelectElement;
+    await waitFor(() => expect(select.options.length).toBeGreaterThan(1));
+    expect(select.value).toBe('');
+    fireEvent.change(select, { target: { value: 'run-1' } });
+    expect(onSelectedRunChange).toHaveBeenLastCalledWith('run-1');
+    const withShared = (selectedRunId: string) => (
+      <MemoryRouter initialEntries={['/']} future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+        <TranscriptCapturePanel
+          experimentId={EXP}
+          open
+          onOpenChange={() => {}}
+          mode="write"
+          selectedRunId={selectedRunId}
+          onSelectedRunChange={onSelectedRunChange}
+        />
+      </MemoryRouter>
+    );
+    // The caller echoes the choice back: nothing moves, nothing loops.
+    view.rerender(withShared('run-1'));
+    expect((screen.getByLabelText(CAPTURE_COPY.runLabel) as HTMLSelectElement).value).toBe('run-1');
+    // A choice made ELSEWHERE (the Record Map's picker clearing it) arrives here.
+    view.rerender(withShared(''));
+    expect((screen.getByLabelText(CAPTURE_COPY.runLabel) as HTMLSelectElement).value).toBe('');
+  });
+});
+
+describe('mode="voice" — the local recorder, secondary', () => {
+  it('is behind a closed "Record Locally Instead" disclosure, with the audio-handling claim inside it', async () => {
+    installRecorder(vi.fn(async () => ({ getTracks: () => [{ stop: vi.fn() }] })));
+    stubFetchRoutes(BASE_ROUTES as never);
+    renderMode('voice');
+    const toggle = await screen.findByRole('button', { name: /Record Locally Instead/ });
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    fireEvent.click(toggle);
+    expect(await screen.findByRole('button', { name: CAPTURE_COPY.voiceRecord })).toBeVisible();
+    expect(screen.getByText(CAPTURE_COPY.voiceAudioHandling)).toBeVisible();
+    // The Claude explanation is NOT repeated inside the recorder.
+    expect(document.querySelector('.capture-mcp-route')).toBeNull();
+  });
+
+  it('MUTATION-GUARDED — a live microphone cannot be folded out of sight', async () => {
+    const stop = vi.fn();
+    installRecorder(vi.fn(async () => ({ getTracks: () => [{ stop }] })));
+    stubFetchRoutes(BASE_ROUTES as never);
+    renderMode('voice');
+    const toggle = await screen.findByRole('button', { name: /Record Locally Instead/ });
+    fireEvent.click(toggle);
+    await act(async () => {
+      fireEvent.click(await screen.findByRole('button', { name: CAPTURE_COPY.voiceRecord }));
+    });
+    await screen.findByRole('button', { name: CAPTURE_COPY.voiceStop });
+    // The row states the live state, and a press does not collapse it.
+    expect(toggle.textContent).toContain(CAPTURE_COPY.voiceRecordingBadge);
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByRole('button', { name: CAPTURE_COPY.voiceStop })).toBeVisible();
+    // Stopping releases the microphone, exactly as in the composite.
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: CAPTURE_COPY.voiceStop }));
+    });
+    expect(stop).toHaveBeenCalled();
+  });
+
+  it('reports the recorder state to the caller, which keeps a live microphone visible elsewhere', async () => {
+    installRecorder(vi.fn(async () => ({ getTracks: () => [{ stop: vi.fn() }] })));
+    stubFetchRoutes(BASE_ROUTES as never);
+    const onVoiceStateChange = vi.fn();
+    renderMode('voice', { onVoiceStateChange });
+    fireEvent.click(await screen.findByRole('button', { name: /Record Locally Instead/ }));
+    await act(async () => {
+      fireEvent.click(await screen.findByRole('button', { name: CAPTURE_COPY.voiceRecord }));
+    });
+    await waitFor(() => expect(onVoiceStateChange).toHaveBeenLastCalledWith('recording'));
   });
 });

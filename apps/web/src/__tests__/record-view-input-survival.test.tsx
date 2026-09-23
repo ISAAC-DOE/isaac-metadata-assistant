@@ -154,6 +154,12 @@ const go = (name: string) =>
       fireEvent.click(screen.getByTestId('view-probe-graph'));
       return;
     }
+    if (name === 'Record Fields') {
+      // 2026-09-22 (N2): no rail row any more — the fields are reached through
+      // the workflow spine's `Record Created` step, a real link to the same view.
+      fireEvent.click(screen.getByRole('link', { name: /^Record Created/ }));
+      return;
+    }
     fireEvent.click(screen.getByRole('link', { name }));
   });
 
@@ -175,60 +181,67 @@ describe('the record workspaces keep unsaved text', () => {
     renderRecord({ [`GET ${BASE}/runs`]: { body: runsPage([RUN]) } }, 'capture');
 
     /*
-     * The capture panel opens behind a disclosure; opening it is the reader's first
-     * act, and the box only exists after it. The control that opens it is "Start
-     * Writing", on the `CaptureIntake` chooser — NOT the panel's own
-     * "Capture Experiment Notes", which this workspace no longer renders at all,
-     * because two entry points for one action was the defect the chooser fixed.
-     *
-     * This selector change does not weaken what the test is for. The property under
-     * test is that typed text SURVIVES a round trip through another workspace, and
-     * that property now has a second way to fail — the panel is only kept mounted
-     * while the chooser owns its `open` state, so a future change that unmounts it
-     * on close would break this test exactly as it should.
+     * 2026-09-22 (owner QA C1–C3): the two boxes now live on two FOCUSED
+     * destinations — the transcript on Capture's Write view (`?method=write`,
+     * reached by the "Start Writing" link on Capture Home) and "Capture a note"
+     * on Proposals, beside the notes queue it feeds. The property under test is
+     * unchanged and now has MORE ways to fail: typed text must survive the Graph,
+     * a sibling workspace, AND a trip back to Capture Home, which hides the Write
+     * view without unmounting the one transcript panel behind it.
      */
-    fireEvent.click(await screen.findByRole('button', { name: 'Start Writing' }));
-    const transcript = screen.getByLabelText('Transcript');
+    const startWriting = () =>
+      act(async () => {
+        fireEvent.click(screen.getByRole('link', { name: /Start Writing/ }));
+      });
+    await screen.findByRole('link', { name: /Start Writing/ });
+    await startWriting();
+    const transcript = await screen.findByLabelText('Transcript');
     fireEvent.change(transcript, { target: { value: 'the scan was repeated at 8979 eV' } });
-    const capture = screen.getByLabelText('Capture a note');
+
+    await go('Proposals');
+    const capture = await screen.findByLabelText('Capture a Note');
     fireEvent.change(capture, { target: { value: 'the second monochromator was warm' } });
 
     await go('Graph');
     /*
-     * Nothing in the capture workspace is on screen. The query is BY ROLE on purpose:
+     * Nothing in either workspace is on screen. The query is BY ROLE on purpose:
      * `*ByRole` is the only family that respects the accessibility tree, so it is the
      * one that can distinguish "hidden from the reader" from "absent from the DOM".
-     * `queryByLabelText` matches a `display: none` textarea perfectly well and would
-     * assert nothing about what the reader can see — the first draft of this test used
-     * it and failed for that reason, not because the panel was visible.
      */
     expect(screen.queryByRole('textbox', { name: 'Transcript' })).toBeNull();
-    expect(screen.queryByRole('textbox', { name: 'Capture a note' })).toBeNull();
+    expect(screen.queryByRole('textbox', { name: 'Capture a Note' })).toBeNull();
     expect(panel('capture')?.hidden).toBe(true);
+    expect(panel('proposals')?.hidden).toBe(true);
 
-    await go('Experiment Data');
+    await go('Proposals');
+    expect((screen.getByLabelText('Capture a Note') as HTMLTextAreaElement).value).toBe(
+      'the second monochromator was warm',
+    );
+
+    // Capture Home hides the Write view; the text is still in the panel behind it.
+    await go('Capture');
+    expect(screen.queryByRole('textbox', { name: 'Transcript' })).toBeNull();
+    await startWriting();
     expect((screen.getByLabelText('Transcript') as HTMLTextAreaElement).value).toBe(
       'the scan was repeated at 8979 eV',
     );
-    expect((screen.getByLabelText('Capture a note') as HTMLTextAreaElement).value).toBe(
-      'the second monochromator was warm',
-    );
     expect(panel('capture')?.hidden).toBe(false);
 
-    /* THE SECOND ROUND TRIP — out to a SIBLING WORKSPACE rather than to the graph.
-       This is the leg the four-destination screen added: `Runs` is a hidden-but-
-       mounted panel like this one, so a bug that hid the wrong panel, or that
-       remounted this one on the way back, would show up here and nowhere else. */
+    /* THE SIBLING-WORKSPACE ROUND TRIP. `Runs` is a hidden-but-mounted panel like
+       these two, so a bug that hid the wrong panel, or that remounted one on the
+       way back, would show up here and nowhere else. */
     await go('Runs');
     expect(screen.queryByRole('textbox', { name: 'Transcript' })).toBeNull();
     expect(panel('capture')?.hidden).toBe(true);
     expect(panel('runs')?.hidden).toBe(false);
 
-    await go('Experiment Data');
+    await go('Capture');
+    await startWriting();
     expect((screen.getByLabelText('Transcript') as HTMLTextAreaElement).value).toBe(
       'the scan was repeated at 8979 eV',
     );
-    expect((screen.getByLabelText('Capture a note') as HTMLTextAreaElement).value).toBe(
+    await go('Proposals');
+    expect((screen.getByLabelText('Capture a Note') as HTMLTextAreaElement).value).toBe(
       'the second monochromator was warm',
     );
   });
@@ -262,7 +275,7 @@ describe('the record workspaces keep unsaved text', () => {
     );
 
     // ...and across a sibling workspace too, for the reason the first case records.
-    await go('Experiment Data');
+    await go('Capture');
     expect(screen.queryByRole('textbox', { name: /^Notes/ })).toBeNull();
     await go('Record Fields');
     expect((screen.getByLabelText(/^Notes/) as HTMLTextAreaElement).value).toBe(
