@@ -878,6 +878,35 @@ export interface ListProposalsQuery {
  */
 export type { ApiProvenanceEntry, ApiProvenanceResponse } from './types';
 
+/**
+ * A RECORD SCREEN'S READS, WHERE THE PRIMARY READ DECIDES WHAT A FAILURE MEANS.
+ *
+ * Every record screen fans out ONE `Promise.all` — the record itself
+ * (`GET /experiments/{id}`) plus its parts — and `Promise.all` rejects with whichever
+ * read rejects FIRST. Found read-only on hosted (2026-09-23): on a nonexistent id
+ * every read answered `404 experiment_not_found` except one `GET …/evidence` that
+ * answered 503, and the 503 won the race — the screen said "ISAAC Returned an Error"
+ * where the record read itself had said "not found". The reverse race is worse: a
+ * primary 503 lost to a secondary 404 claimed "Record Not Found" about a record whose
+ * read had merely failed.
+ *
+ * So when `bundle` fails, this waits for `primary` to settle, and if the primary read
+ * FAILED, ITS error is the one thrown — a primary 404 is "Record Not Found" however a
+ * secondary failed, and a primary 503 is the error it is. When the primary read
+ * SUCCEEDED, the bundle's own first error is thrown unchanged: a failed part is
+ * reported exactly as before. `primary` must be one of the promises inside `bundle`
+ * (the same promise, not a second request), so nothing extra is fetched.
+ */
+export async function primaryReadWins<T>(primary: Promise<unknown>, bundle: Promise<T>): Promise<T> {
+  try {
+    return await bundle;
+  } catch (first: unknown) {
+    const [settled] = await Promise.allSettled([primary]);
+    if (settled.status === 'rejected') throw settled.reason;
+    throw first;
+  }
+}
+
 export const api = {
   health(): Promise<ApiHealth> {
     return getJson<ApiHealth>('/health');
@@ -2635,18 +2664,22 @@ export const api = {
             pending,
             total: page?.total ?? pending.length,
           }));
+    const primary = this.getExperiment(id);
     const [detail, groups, pendingRead, validate, audit, warnings, evidence, graph, artifacts] =
-      await Promise.all([
-        this.getExperiment(id),
-        this.getDraftGroups(id),
-        readPending,
-        this.validate(id),
-        this.audit(id),
-        this.getWarnings(id),
-        this.getEvidence(id),
-        this.getGraphStatus(),
-        this.getArtifacts(id),
-      ]);
+      await primaryReadWins(
+        primary,
+        Promise.all([
+          primary,
+          this.getDraftGroups(id),
+          readPending,
+          this.validate(id),
+          this.audit(id),
+          this.getWarnings(id),
+          this.getEvidence(id),
+          this.getGraphStatus(),
+          this.getArtifacts(id),
+        ]),
+      );
     return {
       detail,
       groups,
@@ -2665,16 +2698,20 @@ export const api = {
   // from its own endpoint, fetched together but kept separate (never merged).
   // `artifacts` lets View/Download work on a fresh load of an exported record.
   async getExportReadiness(id: string): Promise<ExportReadinessBundle> {
+    const primary = this.getExperiment(id);
     const [detail, pending, validate, audit, warnings, graph, artifacts] =
-      await Promise.all([
-        this.getExperiment(id),
-        this.getPending(id),
-        this.validate(id),
-        this.audit(id),
-        this.getWarnings(id),
-        this.getGraphStatus(),
-        this.getArtifacts(id),
-      ]);
+      await primaryReadWins(
+        primary,
+        Promise.all([
+          primary,
+          this.getPending(id),
+          this.validate(id),
+          this.audit(id),
+          this.getWarnings(id),
+          this.getGraphStatus(),
+          this.getArtifacts(id),
+        ]),
+      );
     return { detail, pending, validate, audit, warnings, graph, artifacts };
   },
 
@@ -2682,13 +2719,17 @@ export const api = {
   // freshness, then the previews of every source fixture the evidence cites
   // (fetched after so we know which fixtures are actually referenced).
   async getEvidenceBundle(id: string): Promise<EvidenceBundle> {
-    const [detail, evidence, artifacts, graph, classification] = await Promise.all([
-      this.getExperiment(id),
-      this.getEvidence(id),
-      this.getArtifacts(id),
-      this.getGraphStatus(),
-      this.getEvidenceClassification(id),
-    ]);
+    const primary = this.getExperiment(id);
+    const [detail, evidence, artifacts, graph, classification] = await primaryReadWins(
+      primary,
+      Promise.all([
+        primary,
+        this.getEvidence(id),
+        this.getArtifacts(id),
+        this.getGraphStatus(),
+        this.getEvidenceClassification(id),
+      ]),
+    );
     const files = citedSourceFiles(evidence);
     const previews = await Promise.all(files.map((f) => this.getSourcePreview(id, f)));
     const sourcePreviews: Record<string, ApiSourcePreview> = {};
@@ -2708,16 +2749,20 @@ export const api = {
    * which is what makes a stale experiment graph structurally impossible.
    */
   async getExperimentGraphBundle(id: string): Promise<ExperimentGraphBundle> {
+    const primary = this.getExperiment(id);
     const [detail, groups, evidence, artifacts, validate, warnings, classification] =
-      await Promise.all([
-        this.getExperiment(id),
-        this.getDraftGroups(id),
-        this.getEvidence(id),
-        this.getArtifacts(id),
-        this.validate(id),
-        this.getWarnings(id),
-        this.getEvidenceClassification(id),
-      ]);
+      await primaryReadWins(
+        primary,
+        Promise.all([
+          primary,
+          this.getDraftGroups(id),
+          this.getEvidence(id),
+          this.getArtifacts(id),
+          this.validate(id),
+          this.getWarnings(id),
+          this.getEvidenceClassification(id),
+        ]),
+      );
     return { detail, groups, evidence, artifacts, validate, warnings, classification };
   },
 

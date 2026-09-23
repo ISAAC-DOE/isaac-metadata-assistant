@@ -10240,7 +10240,7 @@
       },
       {
         "path": "CLAUDE.md",
-        "sha256": "cb7b6f47efaad97d8fb88b898c4812851a0cb3be947e081d5a2caabf104c3802"
+        "sha256": "9c6cb0f045782cc9fd68ba0d13ed57ed8c90c48d05786bc09d8d7b4b2a708681"
       },
       {
         "path": "CONTRIBUTING.md",
@@ -10288,7 +10288,7 @@
       },
       {
         "path": "apps/api/isaac_api/workspace.py",
-        "sha256": "7768bc5528bd37924e524d22ed28e4b2dddf0fe69175335849a0e905b90337e3"
+        "sha256": "c917858bc00d4b901579f0f75799b490c6bbe3293b904f760421397a7adf6ba6"
       },
       {
         "path": "apps/api/tests/test_api.py",
@@ -10504,7 +10504,7 @@
       },
       {
         "path": "apps/web/src/lib/api.ts",
-        "sha256": "82c2e5de5f722bf95ee15df8a820010e350896a673f766ed5c5465e468703fab"
+        "sha256": "0caab4fcc71f420c4db0387ed5634bf7ec8d0874d9890ae9d0d772385dd9e564"
       },
       {
         "path": "apps/web/src/lib/assistant.ts",
@@ -10536,7 +10536,7 @@
       },
       {
         "path": "apps/web/src/screens/EvidenceExplorer.tsx",
-        "sha256": "0fd94a398a519994f6f498e0fbd4a92962326c926219ebbfe04367c836ae8f31"
+        "sha256": "1d565ffe5affb7b1044c287a55b71f18716c4adac640be3bc1f8cc7beececa41"
       },
       {
         "path": "apps/web/src/screens/ExperimentsHome.tsx",
@@ -10552,7 +10552,7 @@
       },
       {
         "path": "apps/web/src/screens/GuidedCompletion.tsx",
-        "sha256": "bd21d718e238c73b6ba795a9c3f48e204de181905914a05d83b235a73af13f73"
+        "sha256": "7aa6730b0c52b8a72b72e30da9efe39ae294042b99357c893247da0bab395c8e"
       },
       {
         "path": "apps/web/src/screens/LoadMaterials.tsx",
@@ -11012,7 +11012,7 @@
       }
     ],
     "served_file_count": 200,
-    "served_manifest_fingerprint": "d49730e5480436f43aa43997a42044ce68eb195c77e37e3e9dca828709460942"
+    "served_manifest_fingerprint": "af22245a9ac94a664f5703298b3a15159d84e76d0bf93438de859b71a760c43c"
   },
   "overview": {
     "built_at_commit": "caab1d0a69c1733524bda5dde495623bc4b7bad1",
