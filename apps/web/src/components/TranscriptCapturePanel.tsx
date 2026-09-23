@@ -104,7 +104,6 @@ import {
 } from '../lib/transcriptCapturePreference';
 import { markSelfMintedProposals } from '../lib/selfMintedProposals';
 import { count } from '../lib/assistantPaths';
-import { focusWhenPresent } from '../lib/focusHandoff';
 import type {
   ApiProviderCapabilities,
   ApiProviderRefusal,
@@ -534,6 +533,43 @@ export function TranscriptCapturePanel({
 
   /** `processing` — the ONE state that locks the whole form, not only its own button. */
   const formLocked = busyKind === 'finalize';
+
+  /*
+   * FOCUS HAND-OFFS ARE MOVED BY THE COMMIT THAT RENDERS THE DESTINATION — no
+   * polling, no frame or time budget (2026-09-23).
+   *
+   * THE HISTORY, because each step was a real failure. (1) Focus was not moved at
+   * all, and fell to <body> when the pressed control went disabled. (2) A
+   * frame-bounded `focusWhenPresent` started BEFORE the post-capture runs read
+   * raced that read and lost on a slow CI runner (`d385f2b6`). (3) Started after
+   * the busy state cleared, it still raced React: a full PARALLEL vitest run lost it
+   * twice in a row, at any wait, because the worker ran its 60 frames before
+   * committing the render that shows the card — and a slow real device can do the
+   * same. A budget can always be outlasted; the commit that renders the heading
+   * cannot be missed by an effect that runs on it.
+   *
+   * SO: an action that wants focus to land somewhere sets a PENDING flag; the
+   * effect below runs after every commit that could have rendered the destination,
+   * focuses it once it is present, connected, not inside a `[hidden]` subtree and
+   * actually took focus, and only then clears the flag. A failure, a record change
+   * or Capture Another Note clears it, so it can never fire later into whatever the
+   * reader is doing.
+   */
+  const pendingResultFocusRef = useRef(false);
+  const pendingRunSelectFocusRef = useRef(false);
+  useEffect(() => {
+    const land = (pending: { current: boolean }, el: HTMLElement | null, block: 'start' | 'nearest') => {
+      if (!pending.current || el === null) return;
+      if (!el.isConnected || el.closest('[hidden]') !== null) return;
+      if (typeof el.scrollIntoView === 'function') el.scrollIntoView({ block });
+      el.focus();
+      // Cleared only once focus really moved — a disabled control refuses it, and
+      // the next commit (e.g. the busy state clearing) gets another chance.
+      if (document.activeElement === el) pending.current = false;
+    };
+    land(pendingResultFocusRef, readingHeadingRef.current, 'start');
+    land(pendingRunSelectFocusRef, runSelectRef.current, 'nearest');
+  }, [reading, formLocked, runs, selectedRun, busyKind]);
 
   /**
    * OPENS A RECORD SCOPE FOR ONE ASYNCHRONOUS ACTION. Call it BEFORE the first
@@ -1068,6 +1104,9 @@ export function TranscriptCapturePanel({
      */
     recordGenerationRef.current += 1;
     dropAudio();
+    // A hand-off started for the record the reader left must not land here.
+    pendingResultFocusRef.current = false;
+    pendingRunSelectFocusRef.current = false;
 
     setReading(null);
     setFinalizedText(null);
@@ -1531,8 +1570,8 @@ export function TranscriptCapturePanel({
      * reproduced defect.
      */
     const isSameRecord = recordScope();
-    /* Set on success; the focus hand-off it triggers runs in `finally` — see there. */
-    let focusResult = false;
+    // A previous hand-off that never landed must not be satisfied by THIS reading.
+    pendingResultFocusRef.current = false;
     try {
       const payload = await api.captureTranscript(experimentId, {
         experimentVersion,
@@ -1584,19 +1623,21 @@ export function TranscriptCapturePanel({
             : '.'),
       );
       onCaptured?.();
-      focusResult = true;
+      // Focus goes to the result heading on the commit that renders it — once the
+      // busy state below clears. See `pendingResultFocusRef`.
+      pendingResultFocusRef.current = true;
       /*
        * ITS OWN ERROR HANDLING, NOT THE CAPTURE'S. This re-read used to be a bare
        * `await loadRuns()` inside this `try`, so its failure fell into the
        * `catch` below and announced "This transcript was NOT stored" beside the
        * card listing what WAS stored. `loadRunsAttempt` never rejects: a failure
        * is reported as a runs failure with its own Try Again, the result stays on
-       * screen, and focus still goes to it (`focusResult` is already set).
+       * screen, and focus still goes to it (the pending flag is already set).
        */
       await loadRunsAttempt('runsAfterCapture');
     } catch (cause: unknown) {
       // A refusal is now on screen instead; focus is not handed to a result.
-      focusResult = false;
+      pendingResultFocusRef.current = false;
       // `FALLBACK.finalize` reads "This transcript was NOT stored … Your text is
       // still in the box above" — two claims about a record the reader has left,
       // the second of which is false here because the reset emptied the box.
@@ -1607,24 +1648,9 @@ export function TranscriptCapturePanel({
       if (cause instanceof ApiError && cause.status === 412) await loadRuns();
     } finally {
       // See `requestTranscript`'s `finally` for why this is guarded.
-      if (isSameRecord()) {
-        setBusyKind(null);
-        /*
-         * PR #277 REVIEW (pre-existing) — FOCUS USED TO FALL TO <body>: the
-         * pressed button goes disabled while the read is in flight and the busy
-         * state it sat in is replaced by the result card. Focus moves to that
-         * card's heading, which is what the reader needs next.
-         *
-         * STARTED HERE, AFTER THE BUSY STATE CLEARS — NOT BEFORE `loadRuns()`.
-         * The card renders only once `formLocked` is false, i.e. after the
-         * `setBusyKind(null)` above. The first version started the hand-off before
-         * `await loadRuns()`, so its bounded retry (60 frames) raced that read: on
-         * a slow CI runner the frames ran out while the card did not yet exist and
-         * focus stayed on <body> (`d385f2b6`, CI only). From here the card is one
-         * commit away, independent of how long the runs read took.
-         */
-        if (focusResult) focusWhenPresent(() => readingHeadingRef.current);
-      }
+      // The commit this schedules renders the result card (it shows only once
+      // `formLocked` is false), and the hand-off effect focuses its heading then.
+      if (isSameRecord()) setBusyKind(null);
     }
   }
 
@@ -1677,6 +1703,7 @@ export function TranscriptCapturePanel({
    *  WITHOUT touching anything already stored (the notes and proposals stay on
    *  the record — this only clears what is on screen). */
   function captureAnother() {
+    pendingResultFocusRef.current = false;
     setReading(null);
     setFinalizedText(null);
     setText('');
@@ -1710,10 +1737,10 @@ export function TranscriptCapturePanel({
        * path that offers Create a Run (zero runs) the selector DOES NOT EXIST
        * yet: it replaces the "Create a Run" empty state on the commit these
        * updates schedule. So the ref was null, the pressed button unmounted,
-       * and focus dropped to <body>. Retry across frames until the selector is
-       * there.
+       * and focus dropped to <body>. It is now moved by the commit that renders
+       * the selector — see `pendingResultFocusRef` for why not a frame budget.
        */
-      focusWhenPresent(() => runSelectRef.current);
+      pendingRunSelectFocusRef.current = true;
       setAnnouncement(`Created ${created.run.label}. It is now selected.`);
     } catch (cause: unknown) {
       if (!isSameRecord()) return;
