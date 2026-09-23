@@ -28,11 +28,8 @@ import {
   SOURCE_KIND_LABELS,
 } from '../lib/historicalImportContent';
 import {
-  BUCKET_ORDER,
-  BUCKET_STATE,
-  bucketCounts,
-  candidateBucket,
   candidateLabel,
+  candidateReview,
   conflictCount,
   conflictViews,
   defaultStage,
@@ -44,7 +41,9 @@ import {
   stageReached,
   summaryItems,
   planFor,
-  readyToSend,
+  REVIEW_BUCKET_ORDER,
+  REVIEW_BUCKET_STATE,
+  reviewCounts,
   type ImportStageId,
 } from '../lib/importStages';
 import type {
@@ -800,7 +799,7 @@ function StageTabs({
   onSelect: (stage: ImportStageId) => void;
 }) {
   const candidates = session.reconstruction?.candidates ?? [];
-  const counts = bucketCounts(candidates.filter((c) => c.kind === 'field'));
+  const counts = reviewCounts(session);
   const conflicts = conflictCount(session);
   const measurements = session.corpus_digest?.measurement_units;
   const furthestStage = IMPORT_STAGES.filter((s) => STAGE_WORKFLOW_STEP[s] === session.furthest_step)[0];
@@ -819,7 +818,7 @@ function StageTabs({
         : plural(candidates.length, 'candidate', 'candidates'),
     conflicts: conflicts === 0 ? 'none' : plural(conflicts, 'open', 'open'),
     review: `${counts.needsReview.toLocaleString('en-US')} need review`,
-    add: unbuilt('add') ? STAGE.stateLabels.notBuilt : `${readyToSend(session).length.toLocaleString('en-US')} ready`,
+    add: unbuilt('add') ? STAGE.stateLabels.notBuilt : `${counts.ready.toLocaleString('en-US')} ready`,
   };
 
   const refs = useRef<Map<ImportStageId, HTMLButtonElement>>(new Map());
@@ -1322,6 +1321,11 @@ function ReadStage({
  * Stage 3 — Runs & Candidates.
  * -------------------------------------------------------------------------- */
 
+/** A record's title from the destinations the screen already loaded, if it is among them. */
+function recordTitle(destinations: ProposalDestinations, id: string): string | undefined {
+  return destinations.rows?.find((r) => r.id === id)?.title;
+}
+
 function useFilenameOf(data: ApiImportSession) {
   return useCallback(
     (sourceId: string) => data.sources.find((s) => s.source_id === sourceId)?.filename ?? sourceId,
@@ -1349,6 +1353,8 @@ function RunsStage({
   const archive = Boolean(data.corpus_review && data.archive);
   const structural = candidates.filter((c) => c.kind !== 'field' && !c.unresolved_reason);
   const fields = candidates.filter((c) => c.kind === 'field');
+  /* The session's one review categorisation — a sent candidate reads Sent in this stage too. */
+  const runsReview = candidateReview(data);
 
   return (
     <>
@@ -1396,6 +1402,7 @@ function RunsStage({
           busy={busy}
           onAct={onAct}
           destinations={destinations}
+          candidateReview={runsReview}
         />
       ) : (
         <>
@@ -1413,9 +1420,19 @@ function RunsStage({
             <section className="hi-group">
               <h4 className="hi-block-title">Candidate values</h4>
               <ul className="hi-cands">
-                {fields.map((c) => (
-                  <ImportCandidateRow key={c.candidate_id} candidate={c} filenameOf={filenameOf} />
-                ))}
+                {fields.map((c) => {
+                  const already = runsReview.sentOf(c.candidate_id);
+                  return (
+                    <ImportCandidateRow
+                      key={c.candidate_id}
+                      candidate={c}
+                      filenameOf={filenameOf}
+                      bucket={runsReview.bucketOf(c)}
+                      already={already}
+                      alreadyTitle={already ? recordTitle(destinations, already.experiment_id) : undefined}
+                    />
+                  );
+                })}
               </ul>
             </section>
           )}
@@ -1522,9 +1539,13 @@ function ReviewStage({
 }) {
   const fields = (data.reconstruction?.candidates ?? []).filter((c) => c.kind === 'field');
   const filenameOf = useFilenameOf(data);
-  const counts = bucketCounts(fields);
-  const buckets = BUCKET_ORDER.filter((b) => counts[b] > 0);
-  const sentReady = fields.filter((c) => candidateBucket(c) === 'ready' && data.proposed[c.candidate_id]).length;
+  /* ONE CATEGORISATION (2026-09-23): a candidate this import already sent is SENT — its own
+     group and chip — never "Ready to Send" again, exactly as the header and the Add stage
+     count it. `review` is built on the same plan they read. */
+  const review = candidateReview(data);
+  const counts = reviewCounts(data);
+  const buckets = REVIEW_BUCKET_ORDER.filter((b) => counts[b] > 0);
+  const titleOf = (id: string) => recordTitle(destinations, id);
   /* WHICH MEASUREMENT, for an archive: the unit that lists the candidate, named by its
      legacy number and label — the handle the Runs stage already uses. */
   const contextOf = new Map<string, string>();
@@ -1545,24 +1566,13 @@ function ReviewStage({
       ) : (
         <>
           <div className="hi-review-counts">
-            {buckets.map((b) => {
-              /* "Ready to Send" counts what can STILL go forward: a candidate this import
-                 already sent is counted as sent, beside it, not as ready again. */
-              const n = b === 'ready' ? counts.ready - sentReady : counts[b];
-              return n > 0 ? (
-                <SemanticStatus
-                  key={b}
-                  state={BUCKET_STATE[b]}
-                  label={`${n.toLocaleString('en-US')} ${STAGE.bucketTitles[b]}`}
-                />
-              ) : null;
-            })}
-            {sentReady > 0 && (
+            {buckets.map((b) => (
               <SemanticStatus
-                state="complete"
-                label={`${sentReady.toLocaleString('en-US')} ${STAGE.stateLabels.sent}`}
+                key={b}
+                state={REVIEW_BUCKET_STATE[b]}
+                label={`${counts[b].toLocaleString('en-US')} ${STAGE.bucketTitles[b]}`}
               />
-            )}
+            ))}
             {/* What sending does, one press away rather than a paragraph above the list. */}
             <HelpTip subject={STAGE.bucketTitles.ready}>{IMPORT_COPY.reviewLead}</HelpTip>
           </div>
@@ -1577,25 +1587,30 @@ function ReviewStage({
             >
               <ul className="hi-cands">
                 {fields
-                  .filter((c) => candidateBucket(c) === b)
-                  .map((candidate) => (
-                    <ImportCandidateRow
-                      key={candidate.candidate_id}
-                      candidate={candidate}
-                      filenameOf={filenameOf}
-                      already={data.proposed[candidate.candidate_id]}
-                      context={contextOf.get(candidate.candidate_id)}
-                    >
-                      <CandidateSendForm
+                  .filter((c) => review.bucketOf(c) === b)
+                  .map((candidate) => {
+                    const already = review.sentOf(candidate.candidate_id);
+                    return (
+                      <ImportCandidateRow
+                        key={candidate.candidate_id}
                         candidate={candidate}
-                        session={data}
-                        busy={busy}
-                        onAct={onAct}
-                        importId={importId}
-                        destinations={destinations}
-                      />
-                    </ImportCandidateRow>
-                  ))}
+                        filenameOf={filenameOf}
+                        already={already}
+                        alreadyTitle={already ? titleOf(already.experiment_id) : undefined}
+                        bucket={b}
+                        context={contextOf.get(candidate.candidate_id)}
+                      >
+                        <CandidateSendForm
+                          candidate={candidate}
+                          session={data}
+                          busy={busy}
+                          onAct={onAct}
+                          importId={importId}
+                          destinations={destinations}
+                        />
+                      </ImportCandidateRow>
+                    );
+                  })}
               </ul>
             </Disclosure>
           ))}
@@ -1870,7 +1885,7 @@ function AddStage({
     const target = data.proposed[id]?.experiment_id;
     if (target) sentTo.set(target, (sentTo.get(target) ?? 0) + 1);
   }
-  const titleOf = (id: string) => destinations.rows?.find((r) => r.id === id)?.title ?? 'a record';
+  const titleOf = (id: string) => recordTitle(destinations, id) ?? 'a record';
   const key = `add-whole:${importId}`;
   const step = data.workflow.find((s) => s.id === 'add_to_experiments');
   const acceptance = data.capabilities?.proposal_acceptance;

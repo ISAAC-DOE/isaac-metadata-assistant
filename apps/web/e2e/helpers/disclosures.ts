@@ -492,6 +492,17 @@ export async function openExtendedContext(page: Page, surfaceId: string): Promis
      now or a trap later. Whatever is there is opened. The shared `Disclosure` since
      the final review of #279 (a native `<details>` before): its trigger is a button
      carrying `aria-expanded`, and its body is `hidden` until opened. */
+  /* THE CONCEPT GROUPS FIRST (final review of #279): a record holding more than
+     `GROUP_COLLAPSE_THRESHOLD` entries renders its entries inside closed concept
+     groups, and a raw-entry disclosure inside a closed group is not clickable. */
+  const groups = page.locator(
+    '.extctx-group-disclosure > .disclosure-heading > .disclosure-trigger[aria-expanded="false"]'
+  );
+  const groupCount = await groups.count();
+  for (let i = 0; i < groupCount; i++) {
+    await groups.first().click();
+  }
+  await expect(groups).toHaveCount(0);
   const raw = page.locator('.extctx-details');
   const rawCount = await raw.count();
   for (let i = 0; i < rawCount; i++) {

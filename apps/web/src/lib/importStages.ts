@@ -1,5 +1,6 @@
 import type {
   ApiImportCandidate,
+  ApiImportProposedRow,
   ApiImportSession,
   ApiImportSignalSelection,
   ApiImportUnitRow,
@@ -204,7 +205,7 @@ export function summaryItems(session: ApiImportSession): SummaryItem[] {
   /* "Need review" and "ready to send" are counted over FIELD candidates, exactly as the
      Review stage and its tab count them — a structural candidate ("a measurement
      exists") is never sent, so counting it here made the header disagree with the tab. */
-  const counts = bucketCounts(candidates.filter((c) => c.kind === 'field'));
+  const counts = reviewCounts(session);
   const conflicts = conflictCount(session);
   const out: SummaryItem[] = [];
   const digest = session.corpus_digest;
@@ -223,7 +224,7 @@ export function summaryItems(session: ApiImportSession): SummaryItem[] {
     out.push({ id: 'needs-review', value: counts.needsReview, label: 'need review' });
     // WHAT CAN STILL GO FORWARD: the batch's own sendable set, less what this import has
     // already sent — so the header drops after a send instead of repeating the old count.
-    out.push({ id: 'ready', value: readyToSend(session).length, label: 'ready to send' });
+    out.push({ id: 'ready', value: counts.ready, label: 'ready to send' });
   }
   return out;
 }
@@ -642,6 +643,63 @@ export function planFor(session: ApiImportSession, createRuns: boolean) {
 /** Candidates that can go forward and have not been sent yet — the "ready to send" count. */
 export function readyToSend(session: ApiImportSession): string[] {
   return planFor(session, false).willSend;
+}
+
+/**
+ * THE REVIEW CATEGORISATION — A SENT CANDIDATE IS SENT, WHEREVER IT IS SHOWN (2026-09-23).
+ *
+ * The orchestrator's browser pass of #279 measured the header saying "4 Sent" and the Add
+ * stage "0 can be sent · 4 already sent" while Review listed the same four under "Ready to
+ * Send · 4", each chipped "Ready to Send": the rows read the candidate's own status and
+ * nothing else. This is the one function every candidate row and group now asks, and it is
+ * built on the same plan the header and the Add stage read — "Ready to Send" is exactly
+ * `readyToSend(session)`, and a candidate this import already sent is `sent`.
+ */
+export type ReviewBucket = CandidateBucket | 'sent';
+
+export const REVIEW_BUCKET_ORDER: readonly ReviewBucket[] = [
+  'ready',
+  'sent',
+  'conflict',
+  'needsReview',
+  'resolved',
+  'unmapped',
+];
+
+export const REVIEW_BUCKET_STATE: Readonly<Record<ReviewBucket, SemanticState>> = {
+  ...BUCKET_STATE,
+  sent: 'complete',
+};
+
+export interface CandidateReview {
+  bucketOf: (candidate: ApiImportCandidate) => ReviewBucket;
+  /** Where this import already sent the candidate, if it did. */
+  sentOf: (candidateId: string) => ApiImportProposedRow | undefined;
+}
+
+export function candidateReview(session: ApiImportSession): CandidateReview {
+  const ready = new Set(readyToSend(session));
+  const sent = session.proposed ?? {};
+  return {
+    sentOf: (id) => sent[id],
+    bucketOf: (candidate) => {
+      if (sent[candidate.candidate_id]) return 'sent';
+      const bucket = candidateBucket(candidate);
+      if (bucket !== 'ready') return bucket;
+      // "Ready" is the plan's set and nothing wider: a value the batch would not send is
+      // not offered as ready here either (unreachable while the server's `ready` status and
+      // its `send_plan` agree, which `test_import_send_plan.py` holds).
+      return ready.has(candidate.candidate_id) ? 'ready' : 'needsReview';
+    },
+  };
+}
+
+/** Field candidates per review bucket — the one count the header, the tab and Review read. */
+export function reviewCounts(session: ApiImportSession): Record<ReviewBucket, number> {
+  const review = candidateReview(session);
+  const out: Record<ReviewBucket, number> = { ready: 0, sent: 0, needsReview: 0, conflict: 0, unmapped: 0, resolved: 0 };
+  for (const c of session.reconstruction?.candidates ?? []) if (c.kind === 'field') out[review.bucketOf(c)] += 1;
+  return out;
 }
 
 export const MATCHED_BY_LABELS: Readonly<Record<string, string>> = {

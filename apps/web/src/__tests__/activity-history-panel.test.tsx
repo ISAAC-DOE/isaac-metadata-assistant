@@ -128,28 +128,34 @@ describe('the activity history panel', () => {
     expect(screen.queryByRole('button', { name: LABELS.activityShowOlder })).toBeNull();
   });
 
-  it('keeps the actor disclosure in the DOM behind a native details, not deleted', async () => {
+  it('keeps the actor disclosure in the DOM behind the shared Disclosure, not deleted', async () => {
     /*
      * `ACT-003` requires `unattributed` be rendered HONESTLY. Moving the explanation
-     * behind a `<details>` must not weaken that: a closed native disclosure is still
-     * in the DOM, still found by find-in-page, and still reachable by a screen
-     * reader — which is exactly why the repo uses it rather than conditional
-     * rendering. The SUMMARY also states the question, so nothing hides behind a
+     * behind a disclosure must not weaken that: a closed disclosure's body is still
+     * in the DOM, which is exactly why the repo renders it hidden rather than
+     * conditionally. The SUMMARY also states the question, so nothing hides behind a
      * neutral label.
+     *
+     * INVERTED FROM "a native details" (final review of #279): the shared
+     * `Disclosure` replaced the native 11px triangle. Same properties — closed by
+     * default, the question on its row, the sentence present while closed.
      */
     const { container } = mount();
     await screen.findByText('Experiment Renamed');
-    const details = container.querySelector('details.activity-actor-details');
-    expect(details).toBeTruthy();
-    expect(details?.hasAttribute('open')).toBe(false);
+    const disclosure = container.querySelector('.activity-actor-details');
+    expect(disclosure).toBeTruthy();
+    expect(container.querySelector('details')).toBeNull();
+    const trigger = disclosure!.querySelector('.disclosure-trigger')!;
+    expect(trigger).toHaveAttribute('aria-expanded', 'false');
     expect(container.querySelector('.activity-actor-summary')?.textContent).toBe(
       LABELS.activityWhyUnattributed,
     );
-    // The sentence itself is PRESENT while collapsed — `querySelectorAll` reaches
-    // inside a closed `<details>`, which is the property this relies on.
-    expect(container.querySelector('.activity-actor-note')?.textContent).toBe(
-      LABELS.activityActorUnattributed,
-    );
+    // The sentence itself is PRESENT while collapsed, in the hidden body.
+    const note = container.querySelector('.activity-actor-note');
+    expect(note?.textContent).toBe(LABELS.activityActorUnattributed);
+    expect(note?.closest('[hidden]')).not.toBeNull();
+    fireEvent.click(trigger);
+    expect(note).toBeVisible();
   });
 
   it('a failed OLDER page leaves the list it already showed intact', async () => {
@@ -291,14 +297,15 @@ describe('the activity history panel', () => {
      * asserts the surface as well — a button here would be a client asking for an
      * audit row, which is the one thing an audit log must not accept.
      *
-     * STRENGTHENED BY `ACT-003b`, WHICH ADDED TWO MORE NATIVE `<details>`. The
-     * original `queryAllByRole('button') === 0` still passes, and that is exactly
-     * why it needed strengthening: `<summary>` is NOT reported as a button by this
-     * environment's role mapping, so a disclosure could have become a form control
-     * without moving that number. The assertions below are over TAGS, which no role
-     * mapping can soften — every real `<button>` is enumerated, no form element of
-     * any kind exists, and the disclosures are counted so a third one arriving is a
-     * decision somebody makes rather than a diff nobody reads.
+     * STRENGTHENED BY `ACT-003b`, WHICH ADDED TWO DISCLOSURES. They were native
+     * `<details>` and are the shared `Disclosure` since the final review of #279, so
+     * each is now a real `<button>` — and "zero buttons" would be false for a reason
+     * that has nothing to do with writing. INVERTED, NOT DELETED: the claim is that
+     * no control WRITES, so every `<button>` is enumerated and each must be a
+     * disclosure toggle — `type="button"`, `aria-expanded`, and an `aria-controls`
+     * naming a body in this panel — no form element of any kind exists, and the
+     * disclosures are counted so a third one arriving is a decision somebody makes
+     * rather than a diff nobody reads.
      */
     const { container } = mount({
       events: [
@@ -311,15 +318,23 @@ describe('the activity history panel', () => {
     });
     await screen.findByText('Experiment Renamed');
     const panel = screen.getByRole('region', { name: LABELS.activityTitle });
-    expect(within(panel).queryAllByRole('button')).toHaveLength(0);
     expect(within(panel).queryAllByRole('textbox')).toHaveLength(0);
-    // No `<button>` at all on a page with no older entries to fetch, and never a
-    // form control: `input`, `textarea`, `select` and `form` are all absent.
-    expect(container.querySelectorAll('button')).toHaveLength(0);
+    // The ONLY buttons are the two disclosure toggles, and never a form control:
+    // `input`, `textarea`, `select` and `form` are all absent.
+    const buttons = [...container.querySelectorAll('button')];
+    expect(buttons).toHaveLength(2);
+    for (const button of buttons) {
+      expect(button).toHaveAttribute('type', 'button');
+      expect(button).toHaveClass('disclosure-trigger');
+      expect(button).toHaveAttribute('aria-expanded', 'false');
+      const body = container.querySelector(`[id="${button.getAttribute('aria-controls')}"]`);
+      expect(body).not.toBeNull();
+      expect(body).toHaveClass('disclosure-body');
+    }
     expect(container.querySelectorAll('input, textarea, select, form')).toHaveLength(0);
     // Two disclosures: the standing actor note, and this row's stored values.
-    expect(container.querySelectorAll('details')).toHaveLength(2);
-    expect(container.querySelectorAll('details > summary')).toHaveLength(2);
+    expect(container.querySelectorAll('.disclosure')).toHaveLength(2);
+    expect(container.querySelectorAll('details')).toHaveLength(0);
     expect('listActivity' in api).toBe(true);
     /*
      * WIDENED, NOT WEAKENED, 2026-09-18 (`ACT-004`). The list used to read
@@ -870,7 +885,7 @@ describe('ACT-003b · B · the act reads louder than its own metadata', () => {
       ],
     });
     await screen.findByText('Experiment Renamed');
-    expect(container.querySelectorAll('details.activity-actor-details')).toHaveLength(0);
+    expect(container.querySelectorAll('.activity-actor-details')).toHaveLength(0);
     expect(container.textContent ?? '').not.toContain(LABELS.activityActorUnattributed);
     expect(container.textContent ?? '').not.toContain(LABELS.activityActorSomeUnattributed);
     // The actor is still on the row: dropping the EXPLANATION is not dropping the FACT.
@@ -940,15 +955,19 @@ describe('ACT-003b · C · a structured change is not a JSON dump', () => {
     expect(rows[1]).not.toContain('r2');
   });
 
-  it('keeps the raw stored documents reachable, verbatim, behind a native details', async () => {
+  it('keeps the raw stored documents reachable, verbatim, behind the shared Disclosure', async () => {
     useFixedClock();
     const { container } = mount({ events: [objectEvent()] });
     await screen.findByText('Asset Updated');
 
-    const stored = container.querySelector('details.activity-stored');
+    // INVERTED FROM "a native details" (final review of #279): the shared
+    // `Disclosure`, closed by default, its row naming what it holds.
+    const stored = container.querySelector('.activity-stored');
     expect(stored).toBeTruthy();
-    expect(stored?.hasAttribute('open')).toBe(false);
-    expect(stored?.querySelector('summary')?.textContent).toBe(LABELS.activityShowStored);
+    expect(stored?.querySelector('.disclosure-trigger')).toHaveAttribute('aria-expanded', 'false');
+    expect(stored?.querySelector('.activity-stored-summary')?.textContent).toBe(
+      LABELS.activityShowStored,
+    );
     const pres = [...container.querySelectorAll('.activity-stored-pre')].map((n) => n.textContent);
     expect(pres).toHaveLength(2);
     // Verbatim — the internal key is NOT humanized inside the stored document, and
@@ -1021,7 +1040,7 @@ describe('ACT-003b · C · a structured change is not a JSON dump', () => {
     // No key diff for arrays: naming positions as "fields" would invent a structure
     // the value does not have. The stored documents are still one click away.
     expect(container.querySelectorAll('.activity-diff-key')).toHaveLength(0);
-    expect(container.querySelector('details.activity-stored')).toBeTruthy();
+    expect(container.querySelector('.activity-stored')).toBeTruthy();
   });
 
   it('says so when two documents differ only in stored order, rather than showing an empty diff', async () => {
@@ -1194,7 +1213,7 @@ describe('ACT-003b · C · a structured change is not a JSON dump', () => {
     expect(container.querySelectorAll('.activity-change-blocks')).toHaveLength(0);
     expect(container.querySelectorAll('.activity-diff')).toHaveLength(0);
     // ONE disclosure on the page: the standing actor note, and no stored-values one.
-    expect(container.querySelectorAll('details')).toHaveLength(1);
-    expect(container.querySelectorAll('details.activity-stored')).toHaveLength(0);
+    expect(container.querySelectorAll('.disclosure')).toHaveLength(1);
+    expect(container.querySelectorAll('.activity-stored')).toHaveLength(0);
   });
 });

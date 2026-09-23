@@ -460,6 +460,8 @@ export const IMPORT_STAGE_COPY = {
     needsReview: 'Needs Review',
     resolved: 'Resolved',
     unmapped: 'Unmapped',
+    /* A candidate this import already sent (2026-09-23) — its own group, never "Ready". */
+    sent: 'Sent',
   },
   summaryTitle: 'At a Glance',
   statementsTitle: 'What It Said',

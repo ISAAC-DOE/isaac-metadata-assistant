@@ -1,7 +1,10 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 
-import { ExtendedContextPanel } from '../components/ExtendedContextPanel';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+
+import { ExtendedContextPanel, GROUP_COLLAPSE_THRESHOLD } from '../components/ExtendedContextPanel';
 import { LABELS } from '../lib/labels';
 import { api, ApiError } from '../lib/api';
 import type {
@@ -465,7 +468,10 @@ describe('every count describes the record', () => {
       });
     });
     render(<ExtendedContextPanel experimentId="demo" collapsedByDefault={false} />);
-    await screen.findByText('LIT-e0');
+    // 300 entries of ONE concept: a single concept group, CLOSED because the record
+    // holds more than `GROUP_COLLAPSE_THRESHOLD` (since the grouping change). Its row
+    // counts what is loaded, never a record total.
+    await screen.findByRole('button', { name: /Spec User String\s*50 shown so far/ });
 
     // Six clicks at a 50-entry page walks the whole 300.
     for (let click = 0; click < 6; click += 1) {
@@ -482,16 +488,23 @@ describe('every count describes the record', () => {
     // never the thing bounding the read.
     expect(calls.every((c) => (c.limit ?? 0) <= CLAMP)).toBe(true);
 
-    // THE LAST ENTRY IS ON SCREEN — index 299, which the old panel could never reach.
-    expect(screen.getByText('LIT-e299')).toBeTruthy();
+    // THE LAST ENTRY IS REACHABLE — index 299, which the old panel could never reach.
+    // One click opens its group (a closed group renders no cards); every entry is
+    // then on screen.
+    fireEvent.click(screen.getByRole('button', { name: /Spec User String\s*300 entries/ }));
+    expect(await screen.findByText('LIT-e299')).toBeTruthy();
+    expect(screen.getByText('LIT-e0')).toBeTruthy();
     expect(document.querySelectorAll('.extctx-entry')).toHaveLength(TOTAL);
     // …and the control is GONE rather than permanently offered.
     expect(screen.queryByRole('button', { name: 'Show more' })).toBeNull();
   },
   // 15 s, not vitest's 5 s default (2026-09-23): this test renders 300 entries across
   // server-clamped pages, and each entry now carries a HelpTip and a run-label lookup.
-  // Measured 2.36 s alone and 6.2 s inside a full parallel run. It asserts
-  // REACHABILITY, not speed, so a longer budget hides no defect.
+  // Measured 2.36 s alone and 6.2 s inside a full parallel run — and, once grouped
+  // with every card rendered hidden, a 15 s TIMEOUT in a loaded parallel run. A closed
+  // group now renders no cards, so the pages append as one group row and the 300
+  // cards render once, when the group is opened. It asserts REACHABILITY, not speed,
+  // so the budget hides no defect.
   15_000);
 
   it('the control disappears at the end rather than staying permanently dead', async () => {
@@ -638,8 +651,10 @@ describe('scope', () => {
 describe('the default reading is the scientist’s words, and nothing is lost', () => {
   it('a concept reads as its humanized key; the key itself is in the title and one `?` away', async () => {
     mount(body({ entries: [entry({ concept: 'legacy_run_or_file_number' })] }));
+    // The humanized name heads the concept GROUP (since the grouping change); the
+    // card beneath it leads with the literal, and keeps the key in its `?`.
     const heading = await screen.findByText('Legacy Run Or File Number');
-    expect(heading).toHaveClass('extctx-concept');
+    expect(heading.closest('.extctx-group')).not.toBeNull();
     expect(heading).toHaveAttribute('title', 'legacy_run_or_file_number');
     const card = document.querySelector('.extctx-entry') as HTMLElement;
     const tip = within(card).getByRole('button', { name: 'About This Entry' });
@@ -687,5 +702,151 @@ describe('the default reading is the scientist’s words, and nothing is lost', 
     expect(full).not.toBeVisible();
     fireEvent.click(screen.getByRole('button', { name: 'About Extended Context' }));
     expect(full).toBeVisible();
+  });
+});
+
+/* ── summary first, then drill down (final review of #279) ──────────────── */
+
+describe('a large companion reads as concept groups with counts, not a flat dump', () => {
+  /* The GROUP's own row — not the per-entry "Everything This Entry Records"
+     disclosures nested inside it, which share the `Disclosure` classes. */
+  const GROUP_TRIGGER = '.extctx-group-disclosure > .disclosure-heading > .disclosure-trigger';
+  const GROUP_SUMMARY = `${GROUP_TRIGGER} > .disclosure-summary`;
+  /** Rendered and not inside any `hidden` subtree. */
+  const isShown = (el: Element) => el.closest('[hidden]') === null;
+
+  function manyEntries(): ApiExtendedContextEntry[] {
+    const five = Array.from({ length: 5 }, (_, i) =>
+      entry({ entry_id: `u${i}`, concept: 'spec_user_string', raw_literal: `user-${i}`, locator: `line ${i}` }),
+    );
+    const two = Array.from({ length: 2 }, (_, i) =>
+      entry({ entry_id: `f${i}`, concept: 'spec_file_declaration', raw_literal: `file-${i}`, locator: `row ${i}` }),
+    );
+    return [five[0], two[0], ...five.slice(1), two[1]];
+  }
+
+  it(`MUTATION-GUARDED: above ${GROUP_COLLAPSE_THRESHOLD} entries every group is CLOSED, and its concept and count are visible`, async () => {
+    mount(body({ entries: manyEntries(), concept_count: 2 }));
+    const user = await screen.findByRole('button', { name: /Spec User String\s*5 entries/ });
+    const file = screen.getByRole('button', { name: /Spec File Declaration\s*2 entries/ });
+    expect(user).toHaveAttribute('aria-expanded', 'false');
+    expect(file).toHaveAttribute('aria-expanded', 'false');
+    // Groups in the order each concept first appears.
+    const headings = [...document.querySelectorAll(GROUP_SUMMARY)].map((n) => n.textContent);
+    expect(headings).toEqual(['Spec User String', 'Spec File Declaration']);
+    // No card is rendered until a group is opened — the summary IS the first reading,
+    // and a closed group costs nothing to render however large it is …
+    expect(document.querySelectorAll('.extctx-entry')).toHaveLength(0);
+    // … and one click reaches every entry of a group.
+    fireEvent.click(user);
+    expect(document.querySelectorAll('.extctx-entry')).toHaveLength(5);
+  });
+
+  it('opening a group reveals EXACTLY that group’s entries, each with its provenance visible', async () => {
+    mount(body({ entries: manyEntries(), concept_count: 2 }));
+    const file = await screen.findByRole('button', { name: /Spec File Declaration\s*2 entries/ });
+    fireEvent.click(file);
+    const visible = [...document.querySelectorAll('.extctx-entry')].filter(isShown);
+    // Exactly the opened group's cards exist — the other group rendered none.
+    expect(document.querySelectorAll('.extctx-entry')).toHaveLength(visible.length);
+    expect(visible.map((card) => card.querySelector('.extctx-literal')?.textContent)).toEqual([
+      'file-0',
+      'file-1',
+    ]);
+    for (const card of visible) {
+      const provenance = card.querySelector('.extctx-provenance') as HTMLElement;
+      expect(provenance).toBeVisible();
+      expect(provenance.textContent).toContain('synthetic/mini/01_SYN1.0001');
+      expect(provenance.textContent).toMatch(/row \d/);
+    }
+  });
+
+  it(`at ${GROUP_COLLAPSE_THRESHOLD} entries or fewer the groups stay OPEN, so a small companion reads at a glance`, async () => {
+    const six = manyEntries().slice(0, GROUP_COLLAPSE_THRESHOLD);
+    mount(body({ entries: six, concept_count: 2 }));
+    await screen.findByText('Spec User String');
+    for (const trigger of document.querySelectorAll(GROUP_TRIGGER)) {
+      expect(trigger).toHaveAttribute('aria-expanded', 'true');
+    }
+    expect(document.querySelectorAll('.extctx-entry')).toHaveLength(GROUP_COLLAPSE_THRESHOLD);
+    for (const card of document.querySelectorAll('.extctx-entry')) expect(card).toBeVisible();
+  });
+
+  it('a group the reader opened stays open when "Show more" appends a page', async () => {
+    let call = 0;
+    vi.spyOn(api, 'getExtendedContext').mockImplementation(async () => {
+      call += 1;
+      const page1 = manyEntries();
+      const page2 = [entry({ entry_id: 'u9', concept: 'spec_user_string', raw_literal: 'user-9' })];
+      return body({
+        entries: call === 1 ? page1 : page2,
+        total: 8,
+        matched: 8,
+        returned: call === 1 ? 7 : 1,
+        offset: call === 1 ? 0 : 7,
+        has_more: call === 1,
+        concept_count: 2,
+      });
+    });
+    render(<ExtendedContextPanel experimentId="demo" collapsedByDefault={false} />);
+    fireEvent.click(await screen.findByRole('button', { name: /Spec User String\s*5 shown so far/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Show more' }));
+    const user = await screen.findByRole('button', { name: /Spec User String\s*6 entries/ });
+    expect(user).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByText('user-9')).toBeVisible();
+  });
+
+  it('while the list is PARTIAL a group counts what is loaded, never claiming a record total', async () => {
+    mount(
+      body({
+        entries: manyEntries(),
+        total: 40,
+        matched: 40,
+        has_more: true,
+        concept_count: 2,
+      }),
+    );
+    expect(await screen.findByRole('button', { name: /Spec User String\s*5 shown so far/ })).toBeTruthy();
+    expect(screen.queryByText('5 entries')).toBeNull();
+  });
+});
+
+describe('the collapsed panel really hides its body (final review of #279)', () => {
+  it('MUTATION-GUARDED: `.extctx-body[hidden]` restores display:none over the body’s own `display: flex`', () => {
+    /*
+     * jsdom applies no stylesheet, so the `hidden`-attribute tests above could never
+     * see this: `.extctx-body { display: flex }` beat the user-agent `[hidden]` rule
+     * and the "collapsed" panel rendered all 38 cards of an imported record under a
+     * header reading aria-expanded="false".
+     */
+    const css = readFileSync(join(__dirname, '../components/extendedContext.css'), 'utf8').replace(
+      /\/\*[\s\S]*?\*\//g,
+      '',
+    );
+    expect(css).toMatch(/\.extctx-body\s*\{[^}]*display:\s*flex/);
+    expect(css).toMatch(/\.extctx-body\[hidden\]\s*\{[^}]*display:\s*none/);
+  });
+});
+
+describe('a nested disclosure shows its OWN state (final review of #279)', () => {
+  it('MUTATION-GUARDED: the chevron turns only for its own open disclosure, never an ancestor’s', () => {
+    /*
+     * A concept group holds one "Everything This Entry Records" disclosure per card.
+     * The shared rule used a DESCENDANT selector, so every closed inner row showed an
+     * open chevron inside an open group — measured in a browser on the imported
+     * record. Child combinators bind the chevron to its own trigger.
+     */
+    const css = readFileSync(join(__dirname, '../components/disclosure.css'), 'utf8').replace(
+      /\/\*[\s\S]*?\*\//g,
+      '',
+    );
+    const rotate = /([^{}]+)\{[^}]*transform:\s*rotate\(90deg\)[^}]*\}/.exec(css);
+    expect(rotate).not.toBeNull();
+    const selectors = rotate![1].split(',').map((sel) => sel.trim());
+    expect(selectors.length).toBeGreaterThan(0);
+    for (const sel of selectors) {
+      expect(sel).toMatch(/^\.disclosure\.is-open\s*>/);
+      expect(sel).toMatch(/>\s*\.disclosure-chevron$/);
+    }
   });
 });

@@ -6,11 +6,12 @@ import { SemanticStatus } from './SemanticStatus';
 import { ROUTES } from '../lib/routes';
 import { DETERMINISM_LABELS, IMPORT_COPY, IMPORT_STAGE_COPY } from '../lib/historicalImportContent';
 import {
-  BUCKET_STATE,
+  REVIEW_BUCKET_STATE,
   candidateBucket,
   candidateLabel,
   candidateValue,
   sourceCount,
+  type ReviewBucket,
 } from '../lib/importStages';
 import type { ApiImportCandidate, ApiImportProposedRow } from '../lib/types';
 
@@ -33,6 +34,8 @@ export function ImportCandidateRow({
   candidate,
   filenameOf,
   already,
+  alreadyTitle,
+  bucket: reviewBucket,
   context,
   children,
 }: {
@@ -46,10 +49,18 @@ export function ImportCandidateRow({
   context?: string;
   /** Where this candidate was already sent, if it was. */
   already?: ApiImportProposedRow;
+  /** The title of the record it was sent to, when the screen knows it. */
+  alreadyTitle?: string;
+  /**
+   * The state to show, from `candidateReview(session).bucketOf` — so a candidate this
+   * import already sent reads SENT here exactly as it does in the header and the Add
+   * stage (2026-09-23). Without it the row still never calls a sent candidate ready.
+   */
+  bucket?: ReviewBucket;
   /** A send control, for a candidate that can go forward. */
   children?: ReactNode;
 }) {
-  const bucket = candidateBucket(candidate);
+  const bucket: ReviewBucket = reviewBucket ?? (already !== undefined ? 'sent' : candidateBucket(candidate));
   const value = candidateValue(candidate);
   const label = candidateLabel(candidate);
   const sources = sourceCount(candidate);
@@ -99,7 +110,7 @@ export function ImportCandidateRow({
         }
         meta={
           <span className="hi-cand-meta">
-            <SemanticStatus state={BUCKET_STATE[bucket]} label={labels[bucket]} size="sm" />
+            <SemanticStatus state={REVIEW_BUCKET_STATE[bucket]} label={labels[bucket]} size="sm" />
             {variation.length > 0 && <SemanticStatus state="notApplicable" label={variesLabel} size="sm" />}
             {agree && bucket !== 'conflict' && (
               <SemanticStatus state="sourcesAgree" label={labels.sourcesAgree} size="sm" />
@@ -203,7 +214,7 @@ export function ImportCandidateRow({
             <p className="hi-sent" role="note">
               {IMPORT_COPY.proposedNote}{' '}
               <Link to={ROUTES.recordProposal(already.experiment_id, already.proposal_id)}>
-                Open it on that record
+                {alreadyTitle ? `Open it on ${alreadyTitle}` : 'Open it on that record'}
               </Link>
             </p>
           ) : candidate.proposable ? (

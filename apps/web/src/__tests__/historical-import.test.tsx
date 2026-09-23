@@ -1065,12 +1065,63 @@ describe('§5 · a candidate that cannot be sent says why, and offers no control
     renderScreen();
     fireEvent.click(await screen.findByRole('button', { name: IMPORT_COPY.actionStart }));
     await sessionOpen();
-    openCandidate(goTo(IMPORT_STAGE_COPY.review.title), 'system.technique');
+    const row = openCandidate(goTo(IMPORT_STAGE_COPY.review.title), 'system.technique');
     const link = screen.getByRole('link', { name: 'Open it on that record' });
     expect(link.getAttribute('href')).toContain('proposal=01PROPOSAL0000000000000001');
-    // NEVER "applied": it is an open proposal awaiting review.
-    expect(screen.getByText(/awaiting review/)).toBeTruthy();
+    // NEVER "applied": it is an open proposal awaiting review. Scoped to the Review row:
+    // the Runs stage (mounted, hidden) now says the same of the same candidate.
+    expect(within(row).getByText(/awaiting review/)).toBeTruthy();
     expect(document.body.textContent).not.toContain('applied to that record');
+  });
+
+  it('after a send, Review shows 0 Ready and the sent candidate as SENT, with the record it went to', async () => {
+    /*
+     * The orchestrator's browser pass of #279: after Add to Experiment the header said
+     * "4 Sent" and the Add stage "0 can be sent · 4 already sent", while Review still
+     * listed the same four under "Ready to Send · 4", each chipped "Ready to Send". A
+     * sent candidate is SENT everywhere — one categorisation (`reviewBucketOf`, built on
+     * the same plan the Add stage and the header read).
+     */
+    stub({
+      list: listResponse(),
+      detail: session({
+        proposed: {
+          [SENDABLE.candidate_id]: {
+            experiment_id: '01RECORD00000000000000001',
+            proposal_id: '01PROPOSAL0000000000000001',
+            note_id: '01NOTE00000000000000000001',
+            proposed_utc: '2099-01-01T00:00:09Z',
+          },
+        },
+      }),
+      experiments: {
+        experiments: [{ id: '01RECORD00000000000000001', title: 'Cu K-edge campaign, 2019' }],
+      },
+    });
+    renderScreen();
+    fireEvent.click(await screen.findByRole('button', { name: IMPORT_COPY.actionStart }));
+    await sessionOpen();
+    const panel = goTo(IMPORT_STAGE_COPY.review.title);
+    const ready = IMPORT_STAGE_COPY.bucketTitles.ready;
+
+    // 0 Ready: no chip, no group, and the header agrees.
+    expect(panel.querySelector('.hi-review-counts')?.textContent ?? '').not.toContain(ready);
+    const groups = [...panel.querySelectorAll('.hi-bucket')].map(
+      (g) => g.querySelector('.disclosure-summary')?.textContent,
+    );
+    expect(groups).not.toContain(ready);
+    expect(groups).toContain('Sent');
+    expect(document.querySelector('.hi-summary-item[data-id="ready"] dd')?.textContent).toBe('0');
+
+    // The row reads Sent — never Ready to Send — and names the record it went to.
+    const row = openCandidate(panel, 'system.technique');
+    expect(within(row).getAllByText('Sent').length).toBeGreaterThan(0);
+    expect(within(row).queryByText(IMPORT_STAGE_COPY.stateLabels.ready)).toBeNull();
+    await waitFor(() =>
+      expect(within(row).getByRole('link', { name: /Cu K-edge campaign, 2019/ }).getAttribute('href')).toContain(
+        'proposal=01PROPOSAL0000000000000001',
+      ),
+    );
   });
 });
 

@@ -31,25 +31,19 @@
   max-width: 68ch;
 }
 
-/* The actor disclosure, now behind a native `<details>` (`HelpPanel`/`AssistantPanel`
-   idiom). The SUMMARY carries the question, so a closed disclosure still states what
-   it is about rather than hiding it behind a neutral label; the paragraph keeps its
-   set-apart treatment — structural, not hue — because it is the one paragraph here a
-   reader must not skim once opened. */
+/* The actor disclosure — the shared `Disclosure` since the final review of #279 (a
+   native `<details>` with an 11px triangle before). The SUMMARY carries the question,
+   so a closed disclosure still states what it is about rather than hiding it behind a
+   neutral label; the paragraph keeps its set-apart treatment — structural, not hue —
+   because it is the one paragraph here a reader must not skim once opened. The
+   trigger, focus ring and chevron are `Disclosure`'s own. */
 .activity-actor-details {
   font-size: var(--font-size-body);
   color: var(--text-secondary);
 }
 
-.activity-actor-summary {
-  cursor: pointer;
-  font-size: var(--font-size-body);
-  font-weight: var(--font-weight-bold);
-  color: var(--text-heading);
-}
-
 .activity-actor-note {
-  margin-top: var(--space-xs);
+  margin: 0;
   padding: var(--space-sm);
   /* `--space-2xs` as the stroke, the form `run-schema-mirror.css` already uses —
      a rung rather than a hand-authored `2px`, which `type-scale-and-spacing`
@@ -327,20 +321,11 @@
   overflow-wrap: anywhere;
 }
 
-/* ── THE STORED DOCUMENT, BEHIND A NATIVE DISCLOSURE ──────────────────────────
-   `HelpPanel`/`AssistantPanel`/`SchemaBrowser`'s idiom, and this panel's own actor
-   note: keyboard-operable with no ARIA. It reinvents NO interaction state — the
-   summary's focus ring is the browser's, which is `styles/base.css`'s standing
-   decision for native disclosures here. */
+/* ── THE STORED DOCUMENT, BEHIND THE SHARED DISCLOSURE ────────────────────────
+   A native `<details>` before the final review of #279. It reinvents NO interaction
+   state: the trigger, its focus ring and its chevron are `Disclosure`'s own. */
 .activity-stored {
   font-size: var(--font-size-meta);
-  color: var(--text-secondary);
-}
-
-.activity-stored-summary {
-  cursor: pointer;
-  font-size: var(--font-size-meta);
-  font-weight: var(--font-weight-semibold);
   color: var(--text-secondary);
 }
 
@@ -348,7 +333,6 @@
   display: flex;
   flex-direction: column;
   gap: var(--space-2xs);
-  margin-top: var(--space-xs);
   min-width: 0;
 }
 

@@ -45,6 +45,8 @@ import {
   planFor,
   unsentCategory,
   UNSENT_CATEGORY_LABELS,
+  candidateReview,
+  reviewCounts,
   type ConflictView,
 } from '../lib/importStages';
 import { normalizedText, type Bl15CorpusReview } from '../lib/bl15Review';
@@ -782,6 +784,50 @@ describe('§8 · statuses come from the server, and agreement is never inferred'
     expect(candidateBucket(candidate({ review_status: 'needs_review', proposable: true }))).toBe('needsReview');
     expect(candidateBucket(candidate({ review_status: 'sources_conflict' }))).toBe('conflict');
     expect(candidateBucket(candidate({ review_status: 'resolved' }))).toBe('resolved');
+  });
+
+  it('ONE REVIEW CATEGORISATION: a sent candidate is Sent, and Ready is exactly the plan', () => {
+    const session = {
+      reconstruction: {
+        candidates: [
+          candidate({ candidate_id: 'A', review_status: 'ready' } as never),
+          candidate({ candidate_id: 'B', review_status: 'ready' } as never),
+          // The server calls it ready but the batch would not send it: not offered as ready.
+          candidate({ candidate_id: 'C', review_status: 'ready' } as never),
+          candidate({ candidate_id: 'D', review_status: 'needs_review', proposable: false } as never),
+        ],
+      },
+      send_plan: { sendable: ['A', 'B'], not_sent: { C: 'candidate_not_proposable', D: 'candidate_not_proposable' }, no_run_when_creating_runs: [] },
+      proposed: { A: { experiment_id: 'E1', proposal_id: 'P', note_id: 'N', proposed_utc: 't' } },
+      sources: [],
+      source_counts: { parsed: 0 },
+    } as unknown as ApiImportSession;
+    const review = candidateReview(session);
+    const byId = Object.fromEntries(session.reconstruction!.candidates.map((c) => [c.candidate_id, review.bucketOf(c)]));
+    expect(byId).toEqual({ A: 'sent', B: 'ready', C: 'needsReview', D: 'needsReview' });
+    expect(review.sentOf('A')?.experiment_id).toBe('E1');
+    const counts = reviewCounts(session);
+    expect(counts).toMatchObject({ ready: 1, sent: 1, needsReview: 2 });
+    // The header's "ready to send" is the same number.
+    expect(summaryItems(session).find((i) => i.id === 'ready')?.value).toBe(1);
+  });
+
+  it('a row for a candidate already sent reads Sent — never Ready to Send — and names the record', () => {
+    const { container } = render(
+      <MemoryRouter>
+        <ul>
+          <ImportCandidateRow
+            candidate={candidate({ review_status: 'ready' } as never)}
+            filenameOf={(id) => id}
+            already={{ experiment_id: 'E1', proposal_id: 'P1', note_id: 'N', proposed_utc: 't' }}
+            alreadyTitle="FAKE campaign"
+          />
+        </ul>
+      </MemoryRouter>,
+    );
+    expect(container.textContent).toContain(C.stateLabels.sent);
+    expect(container.textContent).not.toContain(C.stateLabels.ready);
+    expect(within(container).getByRole('link', { name: 'Open it on FAKE campaign', hidden: true })).toBeTruthy();
   });
 
   it('shows Sources Agree ONLY when the server says two distinct files agree', () => {

@@ -113,8 +113,9 @@
  * provenance must not be lost — but each is now one `?` or one disclosure away:
  *
  *   * the CONCEPT reads as a humanized form of its key (casing and separators only,
- *     via the same humanizer the Record Map uses — no meaning is invented), with the
- *     key itself in the heading's `title` and in the entry's `?`;
+ *     via the same humanizer the Record Map uses — no meaning is invented) on the
+ *     heading of the concept GROUP the card sits in, with the key itself in that
+ *     heading's `title` and in each entry's `?`;
  *   * a RUN reads by its label, the id in `title` (and beside the label when two runs
  *     share one); an unresolved run falls back to its id, which is never wrong;
  *   * the registry's REASON and a normalisation's RULE id are behind `?`s placed on
@@ -124,6 +125,19 @@
  *     server's own `not_official` sentence, verbatim, one `?` away.
  *
  * The LITERAL, SOURCE and LOCATOR stay visible on every card (rule 3 below).
+ *
+ * ── SUMMARY FIRST ON A LARGE IMPORT (final review of #279) ───────────────────
+ *
+ * The entries are grouped by concept — a heading with the concept and its count,
+ * each group a shared `Disclosure`, closed by default once the record holds more than
+ * `GROUP_COLLAPSE_THRESHOLD` entries. The imported record this was measured on held
+ * 38 entries in 6 concepts and rendered every one as a full card, top to bottom.
+ *
+ * AND THE PANEL'S OWN COLLAPSE WAS A NO-OP. `.extctx-body { display: flex }` beat the
+ * user-agent `[hidden]` rule, so the "collapsed" section showed its whole body — the
+ * header said `aria-expanded="false"` over 6,391 px of cards. `.extctx-body[hidden]`
+ * now restores `display: none`, pinned by a stylesheet test (jsdom applies no CSS, so
+ * the `hidden`-attribute test above could never see it).
  *
  * ── THE EMPTY STATE IS THE COMMON CASE AND MUST NOT READ AS AN ERROR ────────
  *
@@ -224,6 +238,39 @@ interface RunLabels {
   duplicated: Set<string>;
 }
 
+/**
+ * SUMMARY FIRST, THEN DRILL DOWN — the owner's rule for large imports (final review
+ * of #279). Entries are grouped by concept, and the groups are CLOSED BY DEFAULT once
+ * the record holds more than this many entries.
+ *
+ * WHY SIX. An entry card is ~140 px tall at 1440 (measured on the synthetic BL15
+ * import), so six cards are one 900 px viewport. Up to that the whole companion reads
+ * at a glance and a closed group would only cost a click; beyond it a flat list stops
+ * being scannable — the imported record measured 38 cards and a 7,630 px Record
+ * Fields page — and the concept summary with its counts becomes the useful first
+ * reading. It is decided by the SERVER'S `total`, not by how many entries this page
+ * happens to hold, so paging never flips a record between the two layouts.
+ */
+export const GROUP_COLLAPSE_THRESHOLD = 6;
+
+/** Entries grouped by concept, in the order each concept first appears. */
+function groupByConcept(
+  entries: readonly ApiExtendedContextEntry[],
+): { concept: string; entries: ApiExtendedContextEntry[] }[] {
+  const order: string[] = [];
+  const byConcept = new Map<string, ApiExtendedContextEntry[]>();
+  for (const entry of entries) {
+    let bucket = byConcept.get(entry.concept);
+    if (bucket === undefined) {
+      bucket = [];
+      byConcept.set(entry.concept, bucket);
+      order.push(entry.concept);
+    }
+    bucket.push(entry);
+  }
+  return order.map((concept) => ({ concept, entries: byConcept.get(concept) ?? [] }));
+}
+
 /** The visible short intro. The server's full `not_official` sentence is its `?`. */
 const NOT_OFFICIAL_SHORT = 'Not an official ISAAC record, and nothing here is a field value.';
 
@@ -285,10 +332,11 @@ function EntryCard({
 
   return (
     <li className="extctx-entry">
+      {/* A card lives inside its CONCEPT GROUP, whose heading names the concept, so
+          the card leads with THE SOURCE'S OWN WORDS — never parsed, converted or
+          shortened — and keeps the concept key in its `?`. */}
       <div className="extctx-head">
-        <span className="extctx-concept" title={entry.concept}>
-          {label}
-        </span>
+        <span className="extctx-literal">{entry.raw_literal}</span>
         {/* THE KEY AND THE REGISTRY'S REASON, one `?` away — reachable by keyboard,
             which a `title` alone is not. The reason is the registry's own sentence,
             verbatim; it is kept out of the default reading because it is written for
@@ -300,8 +348,6 @@ function EntryCard({
           {entry.reason !== '' && <span className="extctx-reason">{entry.reason}</span>}
         </HelpTip>
       </div>
-      {/* THE SOURCE'S OWN WORDS. Never parsed, never converted, never shortened. */}
-      <span className="extctx-literal">{entry.raw_literal}</span>
       <dl className="extctx-provenance">
         <div className="extctx-provenance-pair">
           <dt>Source</dt>
@@ -593,6 +639,22 @@ function Loaded({
   onMore: () => void;
 }) {
   /*
+   * WHICH CONCEPT GROUPS THE READER HAS OPENED OR CLOSED — an override of the default
+   * (open at or below `GROUP_COLLAPSE_THRESHOLD`, closed above it). Held here, so a
+   * "Show more" (which keeps this component mounted) never re-closes a group the
+   * reader opened.
+   *
+   * A CLOSED GROUP RENDERS NO CARDS, and that is deliberate rather than an economy of
+   * markup. Each card carries two `HelpTip`s and a `Disclosure`; a 300-entry companion
+   * rendered hidden cost ~5x the render time of the plain cards before them
+   * (measured: the offset-paging test went 0.48 s -> 2.7 s alone, 6.3 s in a parallel
+   * run, then timed out at 15 s once grouped), and every "Show more" re-rendered all of
+   * them. The group's row carries the concept and the count; its cards are rendered
+   * the moment it is opened.
+   */
+  const [openOverride, setOpenOverride] = useState<Record<string, boolean>>({});
+  const groupsOpenByDefault = loaded.total <= GROUP_COLLAPSE_THRESHOLD;
+  /*
    * -- THREE EMPTY STATES, NOT TWO -- `CTX-004`, corrected after review ---------
    *
    * The first version had two, and the missing third made the panel say the opposite
@@ -731,10 +793,49 @@ function Loaded({
           </p>
         )
       ) : (
-        <ul className="extctx-list">
-          {shown.map((entry) => (
-            <EntryCard key={entry.entry_id} entry={entry} runLabels={runLabels} />
-          ))}
+        /* GROUPED BY CONCEPT, each group a shared `Disclosure` whose row states the
+           concept and how many entries it holds — summary first, drill down second.
+           Closed by default above `GROUP_COLLAPSE_THRESHOLD`; open below it. Every
+           entry stays reachable: a closed group's cards are one click away (rendered
+           when it opens — see `openOverride`), and "Show more" still pages by offset
+           into these same groups.
+
+           THE PER-GROUP COUNT IS OF WHAT IS LOADED, and says so while the list is
+           partial: the server reports no per-concept totals, so "7 entries" is
+           claimed only once every entry on the record is on screen (rule 4 above) —
+           before that it reads "7 shown so far". */
+        <ul className="extctx-groups">
+          {groupByConcept(shown).map((group) => {
+            const n = group.entries.length;
+            const complete = shownCount >= loaded.total;
+            const open = openOverride[group.concept] ?? groupsOpenByDefault;
+            return (
+              <li className="extctx-group" key={group.concept}>
+                <Disclosure
+                  summary={<span title={group.concept}>{conceptLabel(group.concept)}</span>}
+                  meta={
+                    complete
+                      ? `${n} ${n === 1 ? 'entry' : 'entries'}`
+                      : `${n} shown so far`
+                  }
+                  open={open}
+                  onOpenChange={(next) =>
+                    setOpenOverride((prev) => ({ ...prev, [group.concept]: next }))
+                  }
+                  headingLevel={3}
+                  className="extctx-group-disclosure"
+                >
+                  {open && (
+                    <ul className="extctx-list">
+                      {group.entries.map((entry) => (
+                        <EntryCard key={entry.entry_id} entry={entry} runLabels={runLabels} />
+                      ))}
+                    </ul>
+                  )}
+                </Disclosure>
+              </li>
+            );
+          })}
         </ul>
       )}
 

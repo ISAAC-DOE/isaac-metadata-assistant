@@ -24,6 +24,27 @@
      against the card edge (owner QA F3). */
   padding: var(--space-md) var(--space-lg);
 }
+/* THE COLLAPSE MUST ACTUALLY HIDE (final review of #279). The `display: flex` above
+   beats the user-agent `[hidden] { display: none }`, so the "collapsed" panel showed
+   its whole body — 38 cards, 6,391 px, under a header reading aria-expanded="false".
+   `display` is restored here for the hidden state only. */
+.extctx-body[hidden] {
+  display: none;
+}
+
+/* CONCEPT GROUPS — summary first, drill down second. Each is a shared `Disclosure`;
+   only the spacing between them and inside an open one is set here. */
+.extctx-groups {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.extctx-group-disclosure .disclosure-body {
+  padding: var(--space-sm);
+}
 
 .extctx-lead,
 .extctx-empty {
@@ -82,21 +103,16 @@
   background: var(--surface);
 }
 
-/* The concept's readable name and its `?` (the key and the registry's reason). */
+/* The literal and its `?` (the concept key and the registry's reason). */
 .extctx-head {
   display: flex;
-  align-items: center;
-  flex-wrap: wrap;
+  align-items: flex-start;
   gap: var(--space-xs);
   min-width: 0;
 }
-
-.extctx-concept {
-  font-size: var(--font-size-body);
-  font-weight: var(--font-weight-semibold);
-  color: var(--text-heading);
+.extctx-head > .extctx-literal {
+  flex: 1 1 auto;
   min-width: 0;
-  overflow-wrap: anywhere;
 }
 
 /* The registry's sentence inside the entry's tip, set apart from the key above it. */

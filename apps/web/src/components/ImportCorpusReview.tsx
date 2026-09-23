@@ -36,9 +36,10 @@ import {
 import { IMPORT_STAGE_COPY, archiveLabel } from '../lib/historicalImportContent';
 import {
   BASIS_LABELS,
-  BUCKET_ORDER,
   candidateBucket,
+  REVIEW_BUCKET_ORDER,
   SCOPE_LABELS,
+  type CandidateReview,
   shortConventionName,
   signalState,
   unitCandidates,
@@ -366,6 +367,7 @@ export function ArchiveRuns({
   busy,
   onAct,
   destinations,
+  candidateReview,
 }: {
   review: Bl15CorpusReview;
   units: ApiImportUnitRow[];
@@ -376,6 +378,8 @@ export function ArchiveRuns({
   busy: string | null;
   onAct: ActFn;
   destinations: ProposalDestinations;
+  /** The session's one review categorisation, so a SENT candidate reads Sent here too. */
+  candidateReview?: CandidateReview;
 }) {
   const index = useMemo(() => readingsByStem(review.evidence), [review.evidence]);
   const rowsByStem = useMemo(() => new Map(units.map((u) => [u.stem, u])), [units]);
@@ -510,6 +514,7 @@ export function ArchiveRuns({
                 busy={busy}
                 onAct={onAct}
                 destinations={destinations}
+                candidateReview={candidateReview}
               />
             </section>
           );
@@ -531,6 +536,7 @@ function UnitsTable({
   busy,
   onAct,
   destinations,
+  candidateReview,
 }: {
   units: Bl15MeasurementUnit[];
   index: Map<string, Map<string, Bl15SourceEvidence[]>>;
@@ -543,6 +549,7 @@ function UnitsTable({
   busy: string | null;
   onAct: ActFn;
   destinations: ProposalDestinations;
+  candidateReview?: CandidateReview;
 }) {
   const [open, setOpen] = useState<ReadonlySet<string>>(new Set());
   const baseId = useId();
@@ -628,6 +635,7 @@ function UnitsTable({
                     busy={busy}
                     onAct={onAct}
                     destinations={destinations}
+                    candidateReview={candidateReview}
                   />
                 </td>
               </tr>
@@ -655,6 +663,7 @@ function RunDetail({
   busy,
   onAct,
   destinations,
+  candidateReview,
 }: {
   unit: Bl15MeasurementUnit;
   row: ApiImportUnitRow | undefined;
@@ -666,6 +675,7 @@ function RunDetail({
   busy: string | null;
   onAct: ActFn;
   destinations: ProposalDestinations;
+  candidateReview?: CandidateReview;
 }) {
   const candidates = row ? unitCandidates(row, candidatesById).filter((c) => c.kind === 'field') : [];
   const applies = row?.applicability as ApiImportApplicability | undefined;
@@ -676,9 +686,13 @@ function RunDetail({
     const p = profiles.find((profile) => profile.profile_id === id);
     return p ? shortConventionName(p.display_name) : id;
   };
+  /* ONE CATEGORISATION (2026-09-23): the session's review buckets when the screen passes
+     them, so a candidate this import already sent reads — and sorts as — Sent. */
+  const bucketOf = (c: ApiImportCandidate) => candidateReview?.bucketOf(c) ?? candidateBucket(c);
   const sorted = [...candidates].sort(
-    (a, b) => BUCKET_ORDER.indexOf(candidateBucket(a)) - BUCKET_ORDER.indexOf(candidateBucket(b)),
+    (a, b) => REVIEW_BUCKET_ORDER.indexOf(bucketOf(a)) - REVIEW_BUCKET_ORDER.indexOf(bucketOf(b)),
   );
+  const titleOf = (id: string) => destinations.rows?.find((r) => r.id === id)?.title;
 
   return (
     <div className="bl15-run">
@@ -711,9 +725,19 @@ function RunDetail({
 
       {candidates.length > 0 && (
         <ul className="hi-cands">
-          {sorted.map((c) => (
-            <ImportCandidateRow key={c.candidate_id} candidate={c} filenameOf={filenameOf} />
-          ))}
+          {sorted.map((c) => {
+            const already = candidateReview?.sentOf(c.candidate_id);
+            return (
+              <ImportCandidateRow
+                key={c.candidate_id}
+                candidate={c}
+                filenameOf={filenameOf}
+                bucket={bucketOf(c)}
+                already={already}
+                alreadyTitle={already ? titleOf(already.experiment_id) : undefined}
+              />
+            );
+          })}
         </ul>
       )}
 
