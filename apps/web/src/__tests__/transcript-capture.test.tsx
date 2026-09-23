@@ -2501,6 +2501,99 @@ describe('PR #277 review (pre-existing): Finalize twice used to mint duplicates'
     expect(screen.queryByText(CAPTURE_COPY.finalizeAlreadyRead)).not.toBeInTheDocument();
   });
 
+  it('MUTATION-GUARDED: focus still lands on the result heading when the post-finalize runs read is SLOW (outlasts the 60-frame hand-off)', async () => {
+    /*
+     * THE CI FAILURE THIS PINS (PR #277, `d385f2b6`). The result card renders only
+     * once the panel leaves its `finalize` busy state, and that happened in the
+     * `finally` AFTER `await loadRuns()`. The focus hand-off used to start BEFORE
+     * that read, so on a slow runner its bounded retry (60 frames) ran out while the
+     * card still did not exist, and focus stayed on <body>. Here the frame clock is
+     * made fast (each frame a 0 ms timer) and the SECOND runs read — the one issued
+     * after the capture — is held open well past 60 frames before it is released.
+     */
+    const originalRaf = window.requestAnimationFrame;
+    let frames = 0;
+    window.requestAnimationFrame = ((cb: FrameRequestCallback) => {
+      frames += 1;
+      return setTimeout(() => cb(performance.now()), 0) as unknown as number;
+    }) as typeof window.requestAnimationFrame;
+    try {
+      let runsReads = 0;
+      let releaseRuns: (() => void) | null = null;
+      stubFetchRoutes({
+        ...BASE_ROUTES,
+        [RUNS]: async () => {
+          runsReads += 1;
+          if (runsReads >= 2) {
+            await new Promise<void>((resolve) => {
+              releaseRuns = resolve;
+            });
+          }
+          return { body: runsPage };
+        },
+        [TRANSCRIPT]: { body: reading() },
+      } as never);
+      await renderPanel();
+      await typeAndFinalize();
+      // The capture has answered and the post-capture runs read is now held open.
+      await waitFor(() => expect(releaseRuns).not.toBeNull());
+      // Long enough for any hand-off already running to exhaust its 60 frames.
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      (releaseRuns as unknown as () => void)();
+      const heading = await screen.findByRole('heading', { name: CAPTURE_COPY.summaryHeading });
+      await waitFor(() => expect(heading).toHaveFocus());
+      // Measured on the OLD ordering: the hand-off had already scheduled its 60
+      // frames during the hold (frames 2 → 60) and given up; this assertion then
+      // failed with focus on <body>.
+      expect(frames).toBeGreaterThan(0);
+    } finally {
+      window.requestAnimationFrame = originalRaf;
+    }
+  });
+
+  it('MUTATION-GUARDED: a runs re-read that FAILS after a successful capture never says the transcript was NOT stored', async () => {
+    /*
+     * THE HONESTY DEFECT THIS PINS (found in the PR #277 review-fix round). The
+     * post-capture `loadRuns()` sat inside the same `try` as the capture, so a
+     * failed runs read fell into the capture's `catch` and showed
+     * `FALLBACK.finalize` — "This transcript was NOT stored and nothing was read
+     * from it" — about a transcript the server HAD stored, beside the card listing
+     * what it stored. The read now has its own handling: the result stays, the
+     * runs failure is reported as a runs failure with Try Again, and focus still
+     * lands on the result.
+     */
+    let runsReads = 0;
+    stubFetchRoutes({
+      ...BASE_ROUTES,
+      [RUNS]: () => {
+        runsReads += 1;
+        return runsReads === 2
+          ? { status: 500, body: { detail: 'runs read failed' } }
+          : { body: runsPage };
+      },
+      [TRANSCRIPT]: { body: reading() },
+    } as never);
+    const { container } = await renderPanel();
+    await typeAndFinalize();
+    const heading = await screen.findByRole('heading', { name: CAPTURE_COPY.summaryHeading });
+    // The result is on screen, with what was stored.
+    expect(screen.getByText(CAPTURE_COPY.summaryStored(1, 1))).toBeInTheDocument();
+    // The runs failure is reported AS a runs failure, recoverable…
+    const alert = await screen.findByRole('alert');
+    expect(alert.textContent).toMatch(/runs could not be re-read/);
+    expect(within(alert).getByRole('button', { name: CAPTURE_COPY.tryAgain })).toBeInTheDocument();
+    // …and nothing claims the capture failed.
+    expect(container.textContent).not.toMatch(/NOT stored/);
+    expect(runsReads).toBe(2);
+    await waitFor(() => expect(heading).toHaveFocus());
+    // Try Again repeats the RUNS read — not the capture — and clears the notice,
+    // leaving the result exactly where it was.
+    fireEvent.click(within(alert).getByRole('button', { name: CAPTURE_COPY.tryAgain }));
+    await waitFor(() => expect(screen.queryByRole('alert')).toBeNull());
+    expect(runsReads).toBe(3);
+    expect(screen.getByText(CAPTURE_COPY.summaryStored(1, 1))).toBeInTheDocument();
+  });
+
   it('focus moves to the result heading after a successful finalize, never to <body>', async () => {
     stubFetchRoutes({ ...BASE_ROUTES, [TRANSCRIPT]: { body: reading() } } as never);
     await renderPanel();

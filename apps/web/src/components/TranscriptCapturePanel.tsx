@@ -162,7 +162,7 @@ type BusyKind = 'transcribe' | 'finalize' | 'createRun' | null;
  * `experimentVersion`/`text`/`selectedRun`, exactly as pressing the ORIGINAL
  * button would.
  */
-type RetryTag = 'runs' | 'transcribe' | 'finalize' | 'createRun' | null;
+type RetryTag = 'runs' | 'runsAfterCapture' | 'transcribe' | 'finalize' | 'createRun' | null;
 
 /**
  * WHY A REASON RATHER THAN A BOOLEAN — I8, INDEPENDENT REVIEW OF PR-D.
@@ -248,6 +248,20 @@ const FALLBACK = {
   transcription: 'The transcription request could not be completed. No audio was sent and nothing was changed.',
   finalize:
     'This transcript was NOT stored and nothing was read from it. Your text is still in the box above.',
+  /*
+   * PR #277 REVIEW-FIX (pre-existing honesty defect) — THE RUNS RE-READ THAT
+   * FOLLOWS A SUCCESSFUL CAPTURE. It used to fail into the capture's own `catch`
+   * and say `finalize` above: "This transcript was NOT stored" about a transcript
+   * the server HAD stored. It is a runs failure, and says so.
+   *
+   * NOT `runs` either, deliberately: that sentence ends "so no run can be selected
+   * yet. Nothing was changed." — true of a FIRST read that failed (no run list
+   * exists yet), false twice here: the run list already on screen is still
+   * selectable, and the capture a moment ago DID change the record.
+   */
+  runsAfterCapture:
+    'The transcript was stored and read, but this record’s runs could not be re-read ' +
+    'afterwards, so the run list shown may be out of date.',
   createRun: 'No run was created. Nothing else was changed.',
 } as const;
 
@@ -956,13 +970,18 @@ export function TranscriptCapturePanel({
   }, [experimentId]);
 
   /** Loads runs, and on failure leaves a `Try Again` behind that re-attempts THIS
-   *  call — never a stale generation's error clobbering a newer attempt's state. */
-  const loadRunsAttempt = useCallback(() => {
+   *  call — never a stale generation's error clobbering a newer attempt's state.
+   *  `tag` picks the sentence and is what `Try Again` repeats: `'runs'` for a
+   *  first read, `'runsAfterCapture'` for the re-read after a stored transcript
+   *  (see `FALLBACK.runsAfterCapture`). Returns a promise that never rejects, so
+   *  `finalize` can wait for the re-read without its failure reaching the
+   *  capture's own `catch`. */
+  const loadRunsAttempt = useCallback((tag: 'runs' | 'runsAfterCapture' = 'runs') => {
     const generation = ++loadGenerationRef.current;
     const opened = recordGenerationRef.current;
     setError(null);
     setRetryTag(null);
-    loadRuns().catch((cause: unknown) => {
+    return loadRuns().catch((cause: unknown) => {
       if (loadGenerationRef.current !== generation) return;
       // TWO DIFFERENT GENERATIONS, AND BOTH ARE NEEDED. `loadGenerationRef`
       // separates attempts at the SAME record, so an older attempt's failure
@@ -971,8 +990,8 @@ export function TranscriptCapturePanel({
       // reported about a record the reader is no longer looking at — and it
       // would leave a `Try Again` on screen for it.
       if (recordGenerationRef.current !== opened) return;
-      setError(mutationFailureCopy(cause, FALLBACK.runs));
-      setRetryTag('runs');
+      setError(mutationFailureCopy(cause, FALLBACK[tag]));
+      setRetryTag(tag);
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loadRuns]);
@@ -1138,7 +1157,7 @@ export function TranscriptCapturePanel({
   useEffect(() => {
     if (!open) return undefined;
     let live = true;
-    loadRunsAttempt();
+    void loadRunsAttempt();
     api
       .getProviderCapabilities()
       .then((payload) => {
@@ -1512,6 +1531,8 @@ export function TranscriptCapturePanel({
      * reproduced defect.
      */
     const isSameRecord = recordScope();
+    /* Set on success; the focus hand-off it triggers runs in `finally` — see there. */
+    let focusResult = false;
     try {
       const payload = await api.captureTranscript(experimentId, {
         experimentVersion,
@@ -1563,14 +1584,19 @@ export function TranscriptCapturePanel({
             : '.'),
       );
       onCaptured?.();
-      // PR #277 REVIEW (pre-existing) — FOCUS USED TO FALL TO <body>: the
-      // pressed button becomes disabled (above) and the busy state it sat in is
-      // replaced by the result card. Move focus to that card's heading, which is
-      // what the reader needs next. `focusWhenPresent` retries across the
-      // frames the card takes to commit.
-      focusWhenPresent(() => readingHeadingRef.current);
-      await loadRuns();
+      focusResult = true;
+      /*
+       * ITS OWN ERROR HANDLING, NOT THE CAPTURE'S. This re-read used to be a bare
+       * `await loadRuns()` inside this `try`, so its failure fell into the
+       * `catch` below and announced "This transcript was NOT stored" beside the
+       * card listing what WAS stored. `loadRunsAttempt` never rejects: a failure
+       * is reported as a runs failure with its own Try Again, the result stays on
+       * screen, and focus still goes to it (`focusResult` is already set).
+       */
+      await loadRunsAttempt('runsAfterCapture');
     } catch (cause: unknown) {
+      // A refusal is now on screen instead; focus is not handed to a result.
+      focusResult = false;
       // `FALLBACK.finalize` reads "This transcript was NOT stored … Your text is
       // still in the box above" — two claims about a record the reader has left,
       // the second of which is false here because the reset emptied the box.
@@ -1581,7 +1607,24 @@ export function TranscriptCapturePanel({
       if (cause instanceof ApiError && cause.status === 412) await loadRuns();
     } finally {
       // See `requestTranscript`'s `finally` for why this is guarded.
-      if (isSameRecord()) setBusyKind(null);
+      if (isSameRecord()) {
+        setBusyKind(null);
+        /*
+         * PR #277 REVIEW (pre-existing) — FOCUS USED TO FALL TO <body>: the
+         * pressed button goes disabled while the read is in flight and the busy
+         * state it sat in is replaced by the result card. Focus moves to that
+         * card's heading, which is what the reader needs next.
+         *
+         * STARTED HERE, AFTER THE BUSY STATE CLEARS — NOT BEFORE `loadRuns()`.
+         * The card renders only once `formLocked` is false, i.e. after the
+         * `setBusyKind(null)` above. The first version started the hand-off before
+         * `await loadRuns()`, so its bounded retry (60 frames) raced that read: on
+         * a slow CI runner the frames ran out while the card did not yet exist and
+         * focus stayed on <body> (`d385f2b6`, CI only). From here the card is one
+         * commit away, independent of how long the runs read took.
+         */
+        if (focusResult) focusWhenPresent(() => readingHeadingRef.current);
+      }
     }
   }
 
@@ -1689,7 +1732,8 @@ export function TranscriptCapturePanel({
    * `RetryTag` comment for the defect this replaces.
    */
   function retryAction() {
-    if (retryTag === 'runs') loadRunsAttempt();
+    if (retryTag === 'runs') void loadRunsAttempt('runs');
+    else if (retryTag === 'runsAfterCapture') void loadRunsAttempt('runsAfterCapture');
     else if (retryTag === 'transcribe') void requestTranscript();
     else if (retryTag === 'finalize') void finalize();
     else if (retryTag === 'createRun') void createRun();
