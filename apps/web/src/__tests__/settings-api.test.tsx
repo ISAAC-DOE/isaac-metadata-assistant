@@ -2578,7 +2578,24 @@ describe('the Full Description rule over the REAL generated contract', () => {
     // `run_is_another_measurement`, a run you added yourself taking one measurement's
     // values, and exactly-once across sessions). The total is the one this assertion
     // measured, never apportioned.
-    expect(total).toBe(176738);
+    //
+    // 176,738 -> 178,643 (+1,905), 2026-10-12: ONE description re-transcribed from
+    // `create_app().openapi()`, NO operation added, and its paragraph count UNCHANGED at 14
+    // — the new sentences (the "Also read from the archive" notes, creating runs as an act
+    // by itself when nothing can be sent, and "not reconstructed yet" as a `nothing_to_send`
+    // case) were woven into existing paragraphs for the `settings-explorer` reason above.
+    // Raw `description.length` of `POST .../add-to-experiment`, re-derived from the
+    // transcribed array at `bf02b8b6` and now: 7,742 -> 9,647 (+1,905); with no separator
+    // added the two deltas are equal, which is the check. The total is the one this
+    // assertion MEASURED (`expected 178643`), never apportioned.
+    //
+    // 178,643 -> 178,795 (+152), the same day, after independent review (I1/I2): the same
+    // ONE description, still 14 paragraphs — 9,647 -> 9,799 raw. "a person maps a line
+    // through note review" was false (that map takes one field for the whole note) and
+    // now names "Propose a Value From This Note"; the HERFD suggestion is no longer listed
+    // in the note, and the text says the build's conclusions are not. MEASURED
+    // (`expected 178795`), never apportioned.
+    expect(total).toBe(178795);
     // 104,045 -> 114,959 (+10,914): the four new operations, and NO existing
     // description changed — `test_contract_description_parity.py` proves that rather
     // than leaving it asserted here. RE-DERIVED from the served document and never

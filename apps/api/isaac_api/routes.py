@@ -25664,6 +25664,11 @@ def list_import_sessions(scope: TutorialScopeDep) -> dict:
         # archives ONLY while `historical_file_ingestion` is enabled by configuration)
         # and that capability, computed by the same function `/api/health` uses.
         "available_archives": list(hist.archive_names()),
+        # 2026-10-12: what a scientist sees for each committed archive, so the picker
+        # never shows a key. A staged archive has none and keeps its own file name.
+        "archive_display_names": hist.archive_display_names(),
+        # …and the one a picker opens on — the archive the hosted image ships.
+        "default_archive": hist.default_archive_name(),
         "historical_file_ingestion": capabilities.historical_file_ingestion(),
     }
 
@@ -26868,6 +26873,25 @@ def _dqn_request_key(identity: str, row: Mapping, notes_digest: str | None = Non
     return f"historical-dqn:{digest}"
 
 
+def _readings_note_key(
+    identity: str, *, run_id: str | None = None, measurement: str | None = None
+) -> str:
+    """The exactly-once key of one "Also read from the archive" note (2026-10-12).
+
+    For a measurement's note: the RUN it is on, the measurement's acquisition key
+    (``hist.measurement_key`` — the file's name and bytes, never its container) and the
+    canonical form of every reading it lists (``hist._readings_note``'s ``identity``,
+    built from file names and CONTENT digests, never paths). For a beamtime note, that
+    identity alone. Names no import session, so the same readings arriving again are the
+    same note; readings that differ are a different note, and the earlier one stays.
+    """
+    if run_id is None:
+        basis = f"v1|beamtime|{identity}"
+    else:
+        basis = f"v1|run|{run_id}|{measurement}|{identity}"
+    return "historical-readings:" + hashlib.sha256(basis.encode("utf-8")).hexdigest()[:32]
+
+
 def _dqn_legacy_request_key(identity: str, row: Mapping) -> str:
     """The key a record written before 2026-10-11 holds a remark under. Read, never minted."""
     basis = f"{identity}|{row.get('source_path')}|{row.get('locator')}"
@@ -27239,7 +27263,22 @@ def _import_extended_context(
 ) -> tuple[list, int]:
     """`DEC-41` level-4 entries from an archive reading, ready to merge onto a record.
 
-    Returns ``(entries, unreadable)``. The second number is stored rows this build
+    ~~Returns ``(entries, unreadable)``.~~ Returns ``(entries, unreadable, legacy_ids)``
+    since 2026-10-12: every entry carries its CONTENT id (:func:`_context_content_id`),
+    and ``legacy_ids`` maps each content id to the path-naming id the same entry was
+    stored under before, so the caller can match both.
+
+    **WHAT THE OLD-SPELLING MATCH CAN AND CANNOT DO (review item M3).** The old id names
+    the member's path in THIS reading, so it matches only when the record's companion was
+    written from the SAME layout: a record written before this change from a folder, then
+    re-imported from that folder (or any container that yields the same member paths),
+    adds nothing. A record written before this change from layout A and re-imported from
+    layout B — a ZIP nested ``outer/inner/`` — still gains a second copy of each entry
+    ONCE: its stored ids name A's paths and no digest was stored beside them, so nothing
+    honest can match them to B's files. Every entry written by this build carries a
+    content id, so from then on any layout matches.
+
+    The second number is stored rows this build
     could not read; they are REPORTED and skipped rather than carried onto the
     record, and that is the one place this differs from ``CLAUDE.md`` §11's
     read-a-malformed-persisted-value rule — deliberately. §11's rule protects a
@@ -27268,7 +27307,16 @@ def _import_extended_context(
         for unit in reading.units
         if unit.acquisition_path and unit.stem in run_of_stem
     }
+    digest_of_path = {
+        row.get("archive_path"): row.get("content_sha256")
+        for row in reading.manifest
+        if isinstance(row.get("archive_path"), str)
+        and isinstance(row.get("content_sha256"), str)
+        and row.get("content_sha256")
+    }
+    occurrence = _copy_occurrence(digest_of_path)
     entries: list = []
+    legacy_ids: dict[str, str] = {}
     unreadable = 0
     for row in reading.extended_context_entries:
         try:
@@ -27276,17 +27324,79 @@ def _import_extended_context(
         except ctx.UnsupportedContextEntry:
             unreadable += 1
             continue
+        # KEYED ON CONTENT (2026-10-12, carried from PR #282's review): ~~the reader's own
+        # `evidence_id`~~, which names the member's PATH inside the archive — so the same
+        # files staged as a ZIP nested `outer/inner/` gave every entry another id and the
+        # companion doubled (127 -> 254, measured on the semantics corpus), exactly the
+        # defect `_dqn_request_key` v2 closed for the Data Quality Notes. The id is now
+        # the concept, the NAME and BYTES of the file that said it and which copy of that
+        # file it is, the place inside that file and the literal — `_context_content_id` —
+        # and the old spelling is still matched by the caller, so a record written before
+        # this is not given every entry again.
+        content_id = _context_content_id(entry, digest_of_path, occurrence)
+        legacy_ids[content_id] = entry.entry_id
         bound_run = run_of_path.get(entry.source)
-        if bound_run is not None:
-            try:
-                entry = dataclasses.replace(
-                    entry, scope=ctx.SCOPE_RUN, run_id=bound_run
-                )
-            except ValueError:  # pragma: no cover - re-validation of a read entry
-                unreadable += 1
-                continue
+        try:
+            entry = dataclasses.replace(
+                entry,
+                entry_id=content_id,
+                **({"scope": ctx.SCOPE_RUN, "run_id": bound_run} if bound_run is not None else {}),
+            )
+        except ValueError:  # pragma: no cover - re-validation of a read entry
+            unreadable += 1
+            continue
         entries.append(entry)
-    return entries, unreadable
+    return entries, unreadable, legacy_ids
+
+
+def _copy_occurrence(digest_of_path: Mapping[str, str]) -> dict[str, int]:
+    """``archive path -> which copy it is`` among files with the same NAME and BYTES.
+
+    Copies of one file at several paths inside ONE archive are numbered in path order
+    (0, 1, …); a file with no twin is 0. Path order is kept by any wrapper a container
+    adds in front of every path (``outer/inner/``), so the numbering is the same however
+    the archive arrived — which is what lets a content id tell two copies apart without
+    naming either path.
+    """
+    groups: dict[tuple[str, str], list[str]] = {}
+    for path, digest in digest_of_path.items():
+        groups.setdefault((path.rsplit("/", 1)[-1], digest), []).append(path)
+    out: dict[str, int] = {}
+    for paths in groups.values():
+        for index, path in enumerate(sorted(paths)):
+            out[path] = index
+    return out
+
+
+def _context_content_id(
+    entry, digest_of_path: Mapping[str, str], occurrence: Mapping[str, int] | None = None
+) -> str:
+    """A companion entry's id, from WHAT it says and the file that said it.
+
+    ``concept``, the source file's NAME and the content digest of its bytes (its whole
+    path only when the manifest recorded no digest — container-scoped, exactly as
+    before), which COPY of that file it is (:func:`_copy_occurrence`), the locator INSIDE
+    that file, and the literal. No directory, no session, no container: the same
+    statement from the same file is the same entry however the archive arrived.
+
+    **THE NAME AND THE COPY ARE PART OF IT, NOT ONLY THE BYTES**, and two drafts of this
+    got that wrong, each measured: a digest-only key collapsed the semantics corpus's 127
+    entries to 116 — two scan exports with identical bytes and same-length names give
+    ``unknown_token`` the same literal at the same ``filename token 7 [chars …]``, and a
+    filename token is a statement about the NAME (``bl15.archive``'s acquisition identity
+    is ``<stem>@sha256:<digest>`` for the same reason) — and a name+digest key collapsed
+    the mini corpus's 38 to 32, because that corpus deliberately carries the same
+    acquisition file twice (beside its scan folder and inside it), and the companion
+    keeps both copies' statements, each with its own path.
+    """
+    where = digest_of_path.get(entry.source) or entry.source
+    name = entry.source.rsplit("/", 1)[-1]
+    copy = (occurrence or {}).get(entry.source, 0)
+    basis = json.dumps(
+        ["v2", entry.concept, name, where, copy, entry.locator, entry.raw_literal],
+        ensure_ascii=False,
+    )
+    return "ctx2:" + hashlib.sha256(basis.encode("utf-8")).hexdigest()[:32]
 
 
 def _mint_import_candidate(
@@ -27936,6 +28046,11 @@ def post_import_candidate_proposal(
     }
 
 
+# CORRECTED 2026-10-12 in the description below: it said ~~"every value this import read
+# arrives as an open proposal on the run it was read from"~~, which was false for every
+# reading that is not proposable — most of them, on the semantics corpus 191 of 200 —
+# and those were then kept nowhere durable. They are now listed in the run's "Also read
+# from the archive" note, and the sentence says which values become proposals.
 @router.post(
     "/imports/{import_id}/add-to-experiment",
     tags=[TAG_INGESTION],
@@ -28003,6 +28118,27 @@ def post_import_candidate_proposal(
         "import was last read for a different record, or under rules this record no "
         "longer holds, it is re-read for this record first — its own import-scoped "
         "rules plus this record's — and `reread_for_target` says so.\n\n"
+        "WHAT WAS READ AND NOT SENT IS KEPT AS NOTES, never as values (2026-10-12). Each "
+        "measurement this batch resolves a run for gets ONE note on that run, headed "
+        "\"Also read from the archive\": per concept, its plain label, the value exactly "
+        "as the source wrote it, and the file and place it was written — every reading of "
+        "that measurement that did not go out as a proposal and that the extended-context "
+        "companion does not already carry, and the people the beamtime notes name for it. "
+        "Every line is something a reader read; the build's own conclusions, such as a "
+        "suggested HERFD channel, are not listed. What the archive "
+        "states about the whole beamtime (a README's calibration and spectrometer lines, "
+        "the method macro) goes on the RECORD instead, one note per source file, because "
+        "copying it onto every run would say each run's files said it. The beamline "
+        "account string a SPEC header carries is never included. Each note is bounded "
+        "(values per concept, lines and characters) and says how much it left out. A note "
+        "is never a field value: to use one of its values, a person chooses Propose a Value "
+        "From This Note, which makes a proposal citing the note for a person to decide. "
+        "EXACTLY ONCE BY "
+        "CONTENT — the run, the measurement and every reading listed, each identified "
+        "by the name and bytes of the file that said it rather than its path — so the "
+        "same files again, in any session or container, add nothing; readings that "
+        "differ add a second note beside the first, which is never changed. "
+        "`readings_notes` reports them, outside `counts`. "
         "EVERY FREE-TEXT REMARK the beamtime notes make about a measurement's file is "
         "kept as a note on that measurement's run — a Data Quality Note, verbatim, "
         "with the file and row it came from — exactly once per acquisition and row "
@@ -28023,7 +28159,9 @@ def post_import_candidate_proposal(
         "the named run would receive values from two or more measurements "
         "(`422 values_from_several_measurements`) or was made from a different one "
         "(`422 run_is_another_measurement`); no candidate is sendable at "
-        "all (`422 nothing_to_send`, with the same `not_sent` report, so the "
+        "all and `create_runs` was not asked for — or was, and there is nothing to "
+        "create or the import has not been reconstructed yet (`422 nothing_to_send`, "
+        "with the same `not_sent` report, so the "
         "answer explains itself); or the record is at one of its note or proposal "
         "ceilings, where a partial batch would be a record filled to the brim "
         "with half an import.\n\n"
@@ -28035,12 +28173,17 @@ def post_import_candidate_proposal(
         "hand: same fields, same editing, same export path. Its label carries "
         "the legacy file number the archive already used plus the condition the "
         "filename states, exactly as the source wrote it — nothing in it is "
-        "expanded, corrected or translated.\n\n"
+        "expanded, corrected or translated. CREATING THE RUNS IS AN ACT BY ITSELF "
+        "(2026-10-12): when nothing in the import can be sent yet — every value needs a "
+        "decision first — the runs, their Data Quality Notes and their \"Also read from "
+        "the archive\" notes are still created, and the answer is `200` with `sent: 0`.\n\n"
         "**EVERY CREATED RUN'S DRAFT HOLDS NO VALUE FROM THE IMPORT.** A "
         "historical import proposes; it does not fill anything in. Each run "
-        "starts exactly as one added by hand does, and every value this import "
-        "read arrives as an open proposal on the run it was read from, with a "
-        "note carrying the source file and the line it came from.\n\n"
+        "starts exactly as one added by hand does. Every value this import can "
+        "propose arrives as an open proposal on the run it was read from, with a "
+        "note carrying the source file and the line it came from; every OTHER reading "
+        "of that measurement is listed in the run's \"Also read from the archive\" "
+        "note, which is a note and not a value.\n\n"
         "The runs and all the proposals are written in ONE record lock and ONE "
         "save, so the record's revision moves once for the whole batch however "
         "many runs it creates. Measurements this import does not offer as a "
@@ -28159,15 +28302,55 @@ def post_import_add_to_experiment(
     sendable, not_sent = hist.batch_partition(session)
 
     total_candidates = len(sendable) + len(not_sent)
-    if not sendable:
+    # WITH `create_runs`, MAKING THE RUNS IS ITSELF THE ACT (2026-10-12). ~~`if not
+    # sendable:` refused the batch whole~~ — so a scientist whose every value needs a
+    # decision first (sources that disagree, a time with no zone, a field this build
+    # cannot write) could not get the measurements onto a record AT ALL, though the runs,
+    # the Data Quality Notes and the "Also read from the archive" notes need no value to
+    # be decided. Without `create_runs` there is nothing else this batch could do, so that
+    # refusal is unchanged; with it, the batch refuses only when there is also nothing to
+    # create — no archive, or an archive that offers no measurement as a Run.
+    #
+    # NOT BEFORE A RECONSTRUCTION, though (measured in a real browser the same day): an
+    # archive that has been read but not reconstructed holds its measurements and no
+    # candidate at all, and the notes a batch writes are built FROM the candidates — so a
+    # batch then made nine runs whose notes listed almost nothing, and the reconstructed
+    # re-run that followed added nine more notes beside them. "Reconstruct it first" is
+    # still the answer while there is no candidate to read.
+    reading_for_runs = session.archive_reading
+    runs_to_make = bool(
+        create_runs
+        and total_candidates
+        and reading_for_runs is not None
+        and reading_for_runs.run_candidate_units()
+    )
+    if not sendable and not runs_to_make:
+        could_make_runs = bool(
+            reading_for_runs is not None and reading_for_runs.run_candidate_units()
+        )
         return JSONResponse(
             status_code=422,
             content={
                 "error": "nothing_to_send",
                 "message": (
-                    "Nothing in this import can be proposed onto a record, so "
-                    "there was nothing to send and nothing was written. Each "
-                    "candidate's own reason is listed."
+                    (
+                        "Nothing in this import can be proposed onto a record, and it "
+                        "holds no measurement a run could be made from, so there was "
+                        "nothing to send or create and nothing was written. Each "
+                        "candidate's own reason is listed."
+                    )
+                    if total_candidates and create_runs
+                    else (
+                        "Nothing in this import can be proposed onto a record, so "
+                        "there was nothing to send and nothing was written. Each "
+                        "candidate's own reason is listed."
+                        + (
+                            " To put its measurements on this record anyway, ask for "
+                            "one run per measurement (`create_runs: true`)."
+                            if could_make_runs
+                            else ""
+                        )
+                    )
                     if total_candidates
                     else "This import has no candidates yet — reconstruct it "
                     "first. Nothing was written."
@@ -28355,6 +28538,10 @@ def post_import_add_to_experiment(
         # inside the lock and BEFORE `If-Match`, because it reads the record's recorded
         # origins and a refusal must leave nothing written.
         route_of: dict[str, str] = {}
+        #: The measurement (at most one) whose values this batch puts on the NAMED run —
+        #: read by the "Also read from the archive" notes below, so that note lands on the
+        #: run its measurement's proposals land on and on no other.
+        named_run_units: list = []
         if not create_runs:
             for_named_run: list = []
             for candidate in needs_a_run:
@@ -28448,6 +28635,7 @@ def post_import_add_to_experiment(
                 )
                 if refused_for_contents is not None:
                     return refused_for_contents
+                named_run_units = [unit for unit, _ids in groups.values()]
                 for candidate in for_named_run:
                     route_of[candidate.candidate_id] = run_id
 
@@ -28859,11 +29047,27 @@ def post_import_add_to_experiment(
         reading = reading_for_nominal
         if reading is not None and reading.extended_context_entries:
             context_available = len(reading.extended_context_entries)
-            context_entries, context_unreadable = _import_extended_context(
+            context_entries, context_unreadable, legacy_ids = _import_extended_context(
                 reading, run_of_stem
             )
+            # EXACTLY-ONCE BY CONTENT, AND BY THE OLD SPELLING TOO (2026-10-12). An entry
+            # already on the record under its content id, or under the path-naming id it
+            # was given before content ids existed, is not added again; and two entries of
+            # this one batch with the same content id (the same bytes said the same thing
+            # at the same place) are one entry.
+            held = (
+                {entry.entry_id for entry in exp.extended_context.entries}
+                if exp.extended_context is not None
+                else set()
+            )
+            fresh: list = []
+            for entry in context_entries:
+                if entry.entry_id in held or legacy_ids.get(entry.entry_id) in held:
+                    continue
+                held.add(entry.entry_id)
+                fresh.append(entry)
             context_added = exp.add_extended_context_entries(
-                context_entries, generated_utc=_now_iso()
+                fresh, generated_utc=_now_iso()
             )
 
         # --- DATA QUALITY NOTES (2026-09-22): the scientist's own remarks, kept ----
@@ -28949,6 +29153,107 @@ def post_import_add_to_experiment(
                     note_keys.add(key)
                     dqn_captured += 1
 
+        # --- "ALSO READ FROM THE ARCHIVE" (2026-10-12): what was read and NOT sent ----
+        #
+        # MEASURED BEFORE THIS: after a create-runs batch on the multi-operator corpus every
+        # run's fields were `{}` and the companion held identifiers only, while the cycling
+        # state, potential, filter, medium, sample token and number, counting time, emission
+        # energy, energy grid, detector columns, scan command, element and edge, calibration,
+        # spectrometer configuration, the operator the notes name and the HERFD suggestion
+        # lived only in the import session — which is not durable and is gone on Discard.
+        # (All but the HERFD suggestion are kept now; it is the build's conclusion, not a
+        # reading — `hist`'s block comment above `READINGS_NOTE_TITLE`, review item I1.)
+        #
+        # `DEC-41` FORBIDS PUTTING THEM IN THE COMPANION — nearly all have a home at levels
+        # 1-3, and `check_placement` raises on a skip to 4 — so each measurement gets ONE
+        # NOTE on the run its proposals go to: per concept, the value exactly as written and
+        # the file and place it was written. Never a field value: a person proposes a value
+        # FROM the note ("Propose a Value From This Note"), one decision at a time —
+        # ~~"maps a line through the existing note review"~~, which was false (review I2):
+        # note review's map takes ONE field path for the whole note. The beamtime's own
+        # statements (calibration, spectrometer, element, the method macro) go on the
+        # RECORD, one note per source file (`hist.beamtime_readings_notes` says why per
+        # file), because copying a beamtime-wide reading onto every run would say it was
+        # read from each — the lie `bl15.reconstruct`'s shared context exists to avoid.
+        #
+        # WHICH RUN. With `create_runs`, the run made from (or already present for) that
+        # measurement. Without it, the run this record holds as made from that acquisition,
+        # and the named run for the ONE measurement whose values this batch puts on it —
+        # never a run the batch did not resolve for that measurement.
+        #
+        # EXACTLY-ONCE, KEYED ON CONTENT (`_readings_note_key`): the run, the measurement's
+        # acquisition key, and a digest of every reading the note lists — each as concept,
+        # literal, the BYTES of the file that said it and the place inside that file, never
+        # its path. So a re-import of the same files — another session, another container, a
+        # ZIP nested `outer/inner/` — adds nothing. THE RULE WHEN READINGS CHANGE: a re-import
+        # whose readings differ (a corrected scan export, a reading rule that now reads a
+        # token differently, a value that has since been sent as a proposal) adds a SECOND
+        # note beside the first, and the first is never altered — notes are never edited by
+        # an import and never removed.
+        readings_measurements = 0
+        readings_captured = 0
+        readings_already = 0
+        readings_not_listed = 0
+        beamtime_captured = 0
+        beamtime_already = 0
+        if reading_for_nominal is not None:
+            sent_ids = {row["candidate_id"] for row in sent}
+            run_for_unit: dict[str, str] = {}
+            if create_runs:
+                run_for_unit = dict(run_of_stem)
+            else:
+                for unit in reading_for_nominal.units:
+                    unit_key = hist.measurement_key(unit)
+                    own = exp.run_for_acquisition(unit_key) if unit_key else None
+                    if own is not None:
+                        run_for_unit[unit.stem] = own.id
+                for unit in named_run_units:
+                    run_for_unit.setdefault(unit.stem, run_id)
+            held_keys = {n.client_request_key for n in exp.notes if n.client_request_key}
+            to_capture: list[tuple[str | None, dict, str]] = []
+            for unit in reading_for_nominal.units:
+                target_run = run_for_unit.get(unit.stem)
+                if target_run is None:
+                    continue
+                note = hist.unit_readings_note(session, unit, sent_ids=sent_ids)
+                if note is None:
+                    continue
+                readings_measurements += 1
+                key = _readings_note_key(
+                    note["identity"],
+                    run_id=target_run,
+                    measurement=hist.measurement_key(unit) or unit.stem,
+                )
+                if key in held_keys:
+                    readings_already += 1
+                    continue
+                to_capture.append((target_run, note, key))
+            for beamtime in hist.beamtime_readings_notes(session, sent_ids=sent_ids):
+                key = _readings_note_key(beamtime["identity"])
+                if key in held_keys:
+                    beamtime_already += 1
+                else:
+                    to_capture.append((None, beamtime, key))
+            for target_run, note, key in to_capture:
+                too_big = _note_text_refusal(note["text"], what="This note")
+                if too_big is not None:  # pragma: no cover - bounded far below the limit
+                    return too_big
+                capacity = _note_capacity_refusal(exp)
+                if capacity is not None:
+                    return capacity
+                exp.capture_note(
+                    text=note["text"],
+                    source=_IMPORT_NOTE_SOURCE,
+                    run_id=target_run,
+                    client_request_key=key,
+                )
+                held_keys.add(key)
+                readings_not_listed += note["not_listed"]
+                if target_run is None:
+                    beamtime_captured += 1
+                else:
+                    readings_captured += 1
+
         # A CREATED RUN IS A WRITE EVEN IF EVERY CANDIDATE WAS ALREADY SENT, and
         # this `or` is why: `wrote_something` tracked minted proposals alone, so
         # re-running a batch that had already sent every candidate would have
@@ -28966,7 +29271,17 @@ def post_import_add_to_experiment(
         # candidate already sent, no run asked for) would have reported entries that
         # never reached disk. It is idempotent, so a re-run adds 0 and this stays a
         # genuine no-op.
-        if wrote_something or created_runs or context_added or origins_recorded or dqn_captured:
+        if (
+            wrote_something
+            or created_runs
+            or context_added
+            or origins_recorded
+            or dqn_captured
+            # THE SAME REASON AGAIN (2026-10-12): a batch whose only new content is an
+            # "Also read from the archive" note would otherwise report it and not save it.
+            or readings_captured
+            or beamtime_captured
+        ):
             # ACT-002, CHANNEL `historical_import`, for the reason
             # `post_import_candidate_proposal` gives: `DEC-44` has a fourth channel so
             # that archive-derived material is distinguishable from a typed value, and
@@ -29099,6 +29414,24 @@ def post_import_add_to_experiment(
             "captured_as_run_notes": dqn_captured,
             "already_present": dqn_already,
             "writes_qc_status": False,
+        },
+        # 2026-10-12. What was READ and not sent, kept as notes — under its own key and
+        # never inside `counts`, for `data_quality_notes`' reason: none of it is a candidate.
+        # `measurements` counts the measurements this batch resolved a run for that had
+        # anything to list; each of them is either `captured_as_run_notes` now or was
+        # `already_present` from an earlier import of the same readings.
+        "readings_notes": {
+            "label": hist.READINGS_NOTE_TITLE,
+            "measurements": readings_measurements,
+            "captured_as_run_notes": readings_captured,
+            "already_present": readings_already,
+            # One record-level note per beamtime SOURCE FILE (`beamtime_readings_notes`).
+            "beamtime_notes_captured": beamtime_captured,
+            "beamtime_notes_already_present": beamtime_already,
+            # Readings the notes captured NOW could not list within their bounds; each
+            # note says how many in its own text.
+            "not_listed": readings_not_listed,
+            "writes_field_values": False,
         },
         "run_origins_recorded": origins_recorded,
         "reread_for_target": reread_for_target,
