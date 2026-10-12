@@ -69,8 +69,17 @@ export function RecordRail({
    */
   evidenceCount?: number | null;
   /**
-   * Whether to offer the Evidence Trail link at all. `false` on Export
-   * Readiness, and for a reason worth stating rather than a layout preference:
+   * Whether to offer the Evidence Trail link at all.
+   *
+   * ~~`false` on Export Readiness~~ — **NO SCREEN PASSES `false` ANY MORE (QA audit
+   * A-20, 2026-10-11).** The auditor measured the rail differing between Complete and
+   * Export: Evidence Trail present on one, absent on the other, one click apart. The
+   * reason below was real but was a TEST-QUERY collision, not a reader's: the sidecar
+   * card is a labelled region in the main column and the rail row is a link in the
+   * navigation landmark, and a reader meets them in different places. The tests now
+   * scope their queries instead. The prop is kept, defaulting to `true`, so a future
+   * screen with a genuine reason can still say so. The original reasoning, kept as the
+   * record of why it was once `false`:
    * that screen already uses the words "Evidence Trail" for the exported
    * SIDECAR ARTIFACT in its record/sidecar toggle
    * (`ExportReadiness.tsx:1028`). Rendering the rail's navigation link there too
@@ -101,9 +110,15 @@ export function RecordRail({
    */
   return (
     <div className="record-aside">
-      <RecordCaptureNav active={activeView} captureSummary={captureSummary} onNavigate={flush} />
+      <RecordCaptureNav
+        recordId={recordId}
+        active={activeView}
+        captureSummary={captureSummary}
+        onNavigate={flush}
+      />
       <WorkflowSpine workflow={workflow} recordId={recordId} />
       <RecordWorkspaceNav
+        recordId={recordId}
         active={activeView}
         captureSummary={captureSummary}
         onNavigate={flush}

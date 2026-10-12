@@ -831,7 +831,26 @@ def test_every_operation_has_a_summary_that_is_not_the_function_name(client):
     # AT THIS HEAD: 83 PATHS AND 93 METHOD-OPERATIONS; `checked` is the second.
     #
     # MEASURED from `create_app().openapi()`, not derived from the line above it.
-    assert checked == 93, f"expected 93 documented operations, found {checked}"
+    #
+    #
+    # ── 93 -> 95, 2026-10-11: two READS, from an independent QA audit ────────────
+    # `GET /api/experiments/{experiment_id}/run-artifacts` (A-02) lists every
+    # exported run's official record and evidence sidecar, with content and per-run
+    # freshness. Before it a record with runs exported files no read operation could
+    # return, so the export screen could offer no View or Download and lost even the
+    # filenames on reload. `GET /api/experiments/{experiment_id}/structured-answers`
+    # (A-01/A-04) serves the confirmed reduced spectrum, QC verdict and descriptor —
+    # the three answers held in whole blocks, which no read operation served, so
+    # nothing could show them or reach their correction after the answering visit.
+    #
+    # BOTH ARE READ-ONLY AND NEITHER IS AN MCP OPERATION. No table, no migration, no
+    # new storage location: one reads files the export already wrote inside this
+    # record's own records directory, the other reads the run-level blocks already
+    # in the experiment document. `db_write.OWNED_TABLES` is unchanged.
+    #
+    # AT THIS HEAD: 85 PATHS AND 95 METHOD-OPERATIONS; `checked` is the second —
+    # re-derived over `create_app().openapi()`, not incremented.
+    assert checked == 95, f"expected 95 documented operations, found {checked}"
 
 
 def test_the_auto_summary_check_can_actually_fail(client):
@@ -1180,6 +1199,12 @@ EXPECTED_RESPONSE_CODES: dict[tuple[str, str], list[str]] = {
     # 2026-09-22. A READ over a record, so the same five as `/extended-context`: no
     # `412`/`428` because nothing is written.
     ("/api/experiments/{experiment_id}/convention-rules", "get"): ["200", "401", "404", "422", "503"],
+    # 2026-10-11 (QA audit A-02, A-01/A-04). Two READS over a record, so the same five
+    # as `/convention-rules`: no `412`/`428` because nothing is written. The `404`
+    # covers an unknown record on both and an unknown `run_id` on the second; the `422`
+    # is FastAPI's own refusal of an out-of-range `limit`/`offset`.
+    ("/api/experiments/{experiment_id}/run-artifacts", "get"): ["200", "401", "404", "422", "503"],
+    ("/api/experiments/{experiment_id}/structured-answers", "get"): ["200", "401", "404", "422", "503"],
     # The cross-experiment SUMMARY of that same history (`DEC-44`, ledger `ACT-004`).
     # THE SAME CODE SET AS THE PER-RECORD READ, and every member is there for the same
     # reason: no `412`/`428` because nothing is written, no `409` because there is

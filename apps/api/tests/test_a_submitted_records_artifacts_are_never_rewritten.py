@@ -404,10 +404,20 @@ def test_no_write_route_rewrites_a_submitted_records_artifacts_or_rows(client, d
                 f"/api/experiments/{eid}/runs/{run_a}/answers",
                 json={
                     "confirmed_by_user": True,
+                    # AN OFFICIAL-SHAPED descriptor, and the reason is ordering. Since
+                    # 2026-10-11 (QA audit A-03) a value the official schema refuses at
+                    # its path is refused as `official_shape_mismatch` BEFORE any state
+                    # screen — so the old `{"class": …, "values": …}` payload was
+                    # answered about its SHAPE and never reached the already-answered
+                    # check this row exists to pin. A descriptor the schema admits does.
                     "answers": {
                         "descriptor": {
-                            "class": "spectrum_summary",
-                            "values": {"edge_position_eV": 8979.0},
+                            "name": "edge_position",
+                            "kind": "absolute",
+                            "source": "manual",
+                            "value": 8979.0,
+                            "unit": "eV",
+                            "uncertainty": {"sigma": None},
                         }
                     },
                 },
