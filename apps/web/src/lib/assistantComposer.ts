@@ -17,7 +17,7 @@
 import {
   NO_BLOCKING_ISSUES,
   VALIDATION_UNAVAILABLE_SUMMARY,
-  blockingSummary,
+  classifyValidationPath,
   count,
   isValidationUnavailable,
   joinCapped,
@@ -26,10 +26,13 @@ import {
 import {
   NO_SERIES_COVERAGE_NOTE,
   UNREADABLE_BLOCKER_LABEL,
+  blockerDisplayName,
   carriesNoMeasurementSeries,
   isAnswerablePendingItem,
   toAdvisoryResult,
 } from './adapt';
+import { hasVerdictLanguage } from './assistant';
+import { isUnsafeString } from './assistantSession';
 import { ROUTES } from './routes';
 import type {
   ApiPendingItem,
@@ -72,7 +75,39 @@ function isUsableStr(x: unknown): x is string {
  * this never renders `undefined` and never invents a name.
  */
 function pendingLabel(p: ApiPendingItem): string {
-  if (isUsableStr(p.about)) return p.about;
+  return `${pendingBaseLabel(p)}${runClause(p)}`;
+}
+
+const RUN_UNLABELLED = 'an unlabelled run';
+const RUN_LABEL_WITHHELD = 'a run whose label is withheld';
+
+/**
+ * ` (on run <name>)` for a run-owned question, `''` for the record's own — a port of
+ * `assistant_query._run_clause`. Without it a record with three runs reads "3 fields still need
+ * you: Reduced Spectrum, Reduced Spectrum, Reduced Spectrum" — one field of three runs looking
+ * like three different fields, which is what the typed answer already avoids. The run label is
+ * the user's own string, so it is scrubbed HERE, alone, instead of letting the whole answer be
+ * discarded for it.
+ */
+function runClause(p: ApiPendingItem): string {
+  if (!p.run_id) return '';
+  const label = p.run_label;
+  if (typeof label !== 'string' || label.trim() === '') return ` (on ${RUN_UNLABELLED})`;
+  const trimmed = label.trim();
+  if (isUnsafeString(trimmed) || hasVerdictLanguage(trimmed)) return ` (on ${RUN_LABEL_WITHHELD})`;
+  return ` (on run ${trimmed})`;
+}
+
+function pendingBaseLabel(p: ApiPendingItem): string {
+  // `about` is display-mapped ONLY when it is a bare internal identifier (B-02) — the same
+  // predicate and the same words the server applies to the typed question
+  // (`assistant_query._blocker_display`, mirrored by `adapt.blockerDisplayName`), so the
+  // chip and the typed answer cannot call one field two things. A real locator comes back
+  // verbatim. Before this the first rung was `p.about` raw, and the chip answered
+  // "reduced_spectrum, qc_status, required_for_evidence_record" beside a typed answer that
+  // said "Reduced Spectrum, QC Status, Required For Evidence Record".
+  const named = blockerDisplayName(p.about);
+  if (named !== null) return named;
   if (isUsableStr(p.question)) return p.question;
   if (isUsableStr(p.id)) return p.id;
   if (isUsableStr(p.unavailable_reason)) return p.unavailable_reason;
@@ -165,30 +200,107 @@ export function resolveAssistantAction(raw: unknown): AssistantAction | undefine
  * unit's file, and its payload is correct); the interpretation is. No count and no
  * location are claimed, and no locator is disclosed — there is none to disclose.
  */
-function blockingPathsMessage(validate: ApiValidateResult | undefined | null): AssistantMessage | null {
+function blockingPathsMessage(
+  validate: ApiValidateResult | undefined | null,
+  open: readonly ApiPendingItem[] = [],
+  openTotal: number = open.length,
+): AssistantMessage | null {
   if (!validate) return null; // data absent → chip disabled
   const errors = validate.errors;
+  /*
+   * THE RECORD'S OWN OPEN QUESTIONS COME FIRST (review of B-04). This chip answered from the
+   * validation dry-run alone, so a record whose banner said "3 Fields Need Your Confirmation"
+   * was told "1 record-level validation issue may be blocking export" — while the TYPED
+   * question, answered by the server, led with the three open questions. It is the same
+   * composition as `assistant_query._compose` (EXPORT_BLOCKERS): open questions, then each
+   * distinct validation issue with the validator's own message. The count is the caller's
+   * total, never the length of a window (see the `pending_summary` chip).
+   */
+  const lead =
+    openTotal > 0
+      ? `${count(openTotal, 'field')} still ${openTotal === 1 ? 'needs' : 'need'} you before export: ` +
+        `${openListed(open, openTotal)}. `
+      : '';
+  const answeredFrom = lead === '' ? 'schema' : 'workflow';
   if (isValidationUnavailable(errors)) {
     return {
-      text: VALIDATION_UNAVAILABLE_SUMMARY,
-      answeredFrom: 'schema',
+      text: `${lead}${VALIDATION_UNAVAILABLE_SUMMARY}`,
+      answeredFrom,
       action: OPEN_VALIDATOR_ACTION,
     };
   }
   if (errors.length === 0) {
     return {
-      text: NO_BLOCKING_ISSUES,
-      answeredFrom: 'schema',
+      text: `${lead}${NO_BLOCKING_ISSUES}`,
+      answeredFrom,
       action: OPEN_VALIDATOR_ACTION,
     };
   }
   const paths = errors.map((e) => e.path);
+  const { noun, listed } = blockingIssueParts(errors);
+  const clause =
+    lead === ''
+      ? `${noun} may be blocking export: ${listed}.`
+      : `The deterministic schema check separately reports ${noun}: ${listed}.`;
   return {
-    text: blockingSummary(paths),
-    answeredFrom: 'schema',
+    text: `${lead}${clause}`,
+    answeredFrom,
     action: OPEN_VALIDATOR_ACTION,
     technicalPaths: technicalPaths(paths),
   };
+}
+
+/** The first three open-question labels and the remainder, counted off the TOTAL. */
+function openListed(open: readonly ApiPendingItem[], total: number): string {
+  const shown = open.slice(0, 3).map(pendingLabel);
+  const rest = total - shown.length;
+  return rest > 0 ? `${shown.join(', ')}, …and ${rest} more` : shown.join(', ');
+}
+
+/** Longest validator message shown inline — mirrors `assistant_query.MESSAGE_MAX_CHARS`. */
+export const MESSAGE_MAX_CHARS = 160;
+const MESSAGE_WITHHELD = '(message withheld)';
+
+/** The validator's OWN message for one finding: verbatim, bounded, and withheld alone if unsafe. */
+function issueMessage(error: { message?: unknown }): string {
+  const raw = typeof error.message === 'string' ? error.message.trim() : '';
+  if (raw === '') return '';
+  if (isUnsafeString(raw) || hasVerdictLanguage(raw)) return MESSAGE_WITHHELD;
+  return raw.length > MESSAGE_MAX_CHARS ? `${raw.slice(0, MESSAGE_MAX_CHARS - 1).trimEnd()}…` : raw;
+}
+
+/**
+ * `(noun phrase, listed entries)` for the validation half — a port of
+ * `assistant_query._blocking_issue_parts`: one entry per DISTINCT (locator, message), at most
+ * three, `<location> — <message>`, and a record-level-only set is named by its messages alone.
+ */
+function blockingIssueParts(errors: ApiValidateResult['errors']): { noun: string; listed: string } {
+  const distinct: { kind: string; label: string; message: string }[] = [];
+  const seen = new Set<string>();
+  for (const error of errors) {
+    const loc = classifyValidationPath(error.path);
+    const message = issueMessage(error);
+    const key = `${loc.technical}\u0000${message}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    distinct.push({ kind: loc.kind, label: loc.label, message });
+  }
+  const total = distinct.length;
+  const trimmed = (m: string) => (m.endsWith('.') && m !== MESSAGE_WITHHELD ? m.slice(0, -1) : m);
+  const allRecord = distinct.every((d) => d.kind === 'record');
+  const noun = allRecord
+    ? count(total, 'record-level validation issue')
+    : count(total, 'validation issue');
+  const entries = distinct.map((d) =>
+    allRecord
+      ? trimmed(d.message) || d.label
+      : d.message
+        ? `${d.label} — ${trimmed(d.message)}`
+        : d.label,
+  );
+  const rest = total - Math.min(total, 3);
+  const listed = entries.slice(0, 3).join('; ') + (rest > 0 ? `; …and ${rest} more` : '');
+  return { noun, listed };
 }
 
 // --- Record Workbench (context: 'review'; state = getRecordBundle) ----------
@@ -249,7 +361,11 @@ export const REVIEW_CATALOG: GroundedChip[] = [
     routed: true,
     resolve(state): AssistantMessage | null {
       if (state.context !== 'review') return null;
-      return blockingPathsMessage(state.bundle.validate);
+      return blockingPathsMessage(
+        state.bundle.validate,
+        state.bundle.pending ?? [],
+        state.bundle.pendingTotal ?? state.bundle.pending?.length ?? 0,
+      );
     },
   },
   {
@@ -379,7 +495,7 @@ export const EXPORT_CATALOG: GroundedChip[] = [
     // routes to the CLI. Never echoes `validate.ok`.
     resolve(state): AssistantMessage | null {
       if (state.context !== 'export') return null;
-      return blockingPathsMessage(state.bundle.validate);
+      return blockingPathsMessage(state.bundle.validate, state.bundle.pending ?? []);
     },
   },
   {

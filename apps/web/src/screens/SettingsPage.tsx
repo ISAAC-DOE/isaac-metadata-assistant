@@ -397,14 +397,17 @@ function SettingsSectionTabs({
                navigation never shows the third tab's reader the first tab's
                visible marker. */
             aria-describedby={tab.group ? SETTINGS_GROUP_DESC_ID : undefined}
+            /* B-22 — THE VISIBLE MARKER IS GENERATED CONTENT, NOT A NODE. It was an
+               `aria-hidden` span inside this button, which kept the accessible name right
+               but made the tab's TEXT read "AdvancedAPI Access" (`textContent`) /
+               "ADVANCEDAPI Access" (`innerText`): inline spans add no space and the gap
+               was a margin. `screens.css` paints it with `::before` from this attribute,
+               in the empty-alt form, so the DOM, the text and the name all read the label.
+               Set on the FIRST tab of a group only, like the span it replaces. */
+            data-group={startsGroup ? tab.group : undefined}
             onClick={() => onSelect(tab.id)}
             onKeyDown={(e) => onKeyDown(e, i)}
           >
-            {startsGroup && (
-              <span className="section-tab-group" aria-hidden="true">
-                {tab.group}
-              </span>
-            )}
             {tab.label}
           </button>
         );

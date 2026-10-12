@@ -43,8 +43,9 @@ from typing import Callable, Optional
 
 from .assistant_paths import (
     NO_BLOCKING_ISSUES,
+    RECORD,
     VALIDATION_UNAVAILABLE_SUMMARY,
-    blocking_summary,
+    classify_validation_path,
     count as _count,
     is_validation_unavailable,
     join_capped as _join_capped,
@@ -503,6 +504,107 @@ def _pending_labels(pending_items: list) -> list:
     return labels
 
 
+#: What stands where a validator message cannot be shown (it trips the path/secret scrub or
+#: carries reserved verdict language). A marker rather than a silent drop, so the issue still
+#: counts and the reader can see something was held back — the `WITHHELD_TECHNICAL` idiom.
+_MESSAGE_WITHHELD = "(message withheld)"
+
+#: The longest validator message shown inline (mirrored by the frontend chip). The full text is in
+#: the Validator, which the answer links to.
+MESSAGE_MAX_CHARS = 160
+
+
+def _issue_message(error) -> str:
+    """The validator's OWN message for one finding, or ``""`` when it reported none.
+
+    VERBATIM, because validation messages are verbatim by product decision (DEC-30 /
+    DEC-35) — this module neither paraphrases nor trims one into a different sentence.
+    It is scrubbed HERE, per issue, rather than left to the whole-answer guard in
+    :func:`answer`: that guard replaces the ENTIRE text on a hit, so a single message
+    echoing a sha256 or an absolute path would blank the record's open-questions list
+    too — letting one finding's wording decide whether the assistant answers at all.
+    The fragment is withheld instead (the idiom :func:`_run_clause` uses for a run label),
+    and the whole-answer guard still runs afterwards, unchanged.
+    """
+    message = error.get("message") if isinstance(error, dict) else None
+    if not isinstance(message, str) or not message.strip():
+        return ""
+    message = message.strip()
+    if _is_unsafe_string(message) or has_verdict_language(message):
+        return _MESSAGE_WITHHELD
+    # BOUNDED: a jsonschema enum message lists every allowed value (37 for
+    # `system.technique`). The leading part is shown verbatim; the rest is cut and said to be.
+    if len(message) > MESSAGE_MAX_CHARS:
+        message = message[: MESSAGE_MAX_CHARS - 1].rstrip() + "…"
+    return message
+
+
+def _blocking_issue_parts(errors: list) -> tuple:
+    """The validation half of "what's blocking export?" as ``(noun_phrase, listed)``.
+
+    ``noun_phrase`` is the count of DISTINCT findings ("2 validation issues", or "1
+    record-level validation issue" when every finding is root-level) and ``listed`` is up to
+    three entries, each ``<location> — <message>``, joined by ``"; "`` with a trailing
+    ``"…and K more"``. The caller composes the sentence, because the same parts read
+    differently on their own ("2 validation issues may be blocking export: …") than after the
+    record's open questions ("The deterministic schema check separately reports 2 validation
+    issues: …").
+
+    **WHAT THIS REPLACES.** The answer was ``blocking_summary(paths)`` — a count and up to
+    three LOCATIONS — which cannot say what is wrong at any of them, and which repeated a
+    location verbatim when two findings shared one (``measurement → series → 0,
+    measurement → series → 0``, measured). Each entry now carries the validator's own message,
+    so two findings at one locator are told apart by what they say instead of being listed
+    twice bare.
+
+    **ONLY AN EXACT REPEAT IS COLLAPSED**: the same locator AND the same message. Two
+    different messages at one locator are two findings and both are kept, and the count is of
+    DISTINCT findings. A finding with no message is still listed (by location alone) and still
+    counts. A root-level finding names the record, never the literal ``$``, and when EVERY
+    finding is root-level the location is dropped from the entry (it would repeat "the record
+    itself" and say nothing) so the messages are what tell them apart.
+
+    A message's single trailing full stop is dropped for the join only — the entries are
+    separated by ``"; "`` and ``"…completed.; …"`` reads as a typo; nothing else about a
+    message is touched.
+
+    ``technical_paths`` is deliberately NOT affected: the disclosure keeps one exact locator
+    per reported error, unchanged, so the exact validator output stays recoverable.
+    """
+    distinct: list = []
+    seen: set = set()
+    for error in errors:
+        raw = error.get("path") if isinstance(error, dict) else None
+        location = classify_validation_path(raw)
+        message = _issue_message(error)
+        key = (location["technical"], message)
+        if key in seen:
+            continue
+        seen.add(key)
+        distinct.append((location, message))
+
+    total = len(distinct)
+
+    def trimmed(message: str) -> str:
+        return message[:-1] if message.endswith(".") and message != _MESSAGE_WITHHELD else message
+
+    if all(loc["kind"] == RECORD for loc, _ in distinct):
+        noun = _count(total, "record-level validation issue")
+        entries = [trimmed(message) or loc["label"] for loc, message in distinct]
+    else:
+        noun = _count(total, "validation issue")
+        entries = [
+            f"{loc['label']} — {trimmed(message)}" if message else loc["label"]
+            for loc, message in distinct
+        ]
+    shown = entries[:3]
+    rest = total - len(shown)
+    listed = "; ".join(shown)
+    if rest > 0:
+        listed = f"{listed}; …and {rest} more"
+    return noun, listed
+
+
 def _humanize(path: str) -> str:
     """Humanize the last path segment (``sample.material.formula`` -> ``Formula``).
 
@@ -953,6 +1055,24 @@ def _compose(classified: ClassifiedIntent, ctx: AssistantContext, extras: dict):
 
     if intent == EXPORT_BLOCKERS:
         errors = (ctx.validate() or {}).get("errors") or []
+        # B-04 — THE RECORD'S OWN OPEN QUESTIONS COME FIRST. "What blocks export?" used to
+        # be answered from the validation dry-run alone, so a record the screen described
+        # as "3 fields still block export" was answered "1 record-level validation issue
+        # may be blocking export" — no open questions, and a count that agreed with
+        # nothing on the screen. The two are different gates (a question the scientist
+        # owes, a finding the schema reports) and both stop an export, so the answer
+        # states each, from its own source, and never merges them into one number. The
+        # labels and the count are `_pending_labels`' — the SAME ones "what still needs
+        # me?" gives, so one field is never called two things.
+        open_items = ctx.pending.get("pending") or []
+        lead = ""
+        if open_items:
+            lead_verb = "needs" if len(open_items) == 1 else "need"
+            lead = (
+                f"{_count(len(open_items), 'field')} still {lead_verb} you before export: "
+                f"{_join_capped(_pending_labels(open_items))}. "
+            )
+        grounding = ["workflow", "schema"] if open_items else ["schema"]
         # P36V.1 review IMPORTANT-1 — the CRASH SENTINEL, before anything is
         # described as a finding. `routes.py::_assistant_validate_dryrun` returns
         # `[{"path": "$", "message": "Validation could not be completed."}]` when the
@@ -965,9 +1085,9 @@ def _compose(classified: ClassifiedIntent, ctx: AssistantContext, extras: dict):
         # `insufficient_context` is the honest result: no count, no location, no
         # locator disclosure (there is none), and no verdict either way.
         if is_validation_unavailable(errors):
-            text = f"{VALIDATION_UNAVAILABLE_SUMMARY} {_ROUTE_TO_VALIDATE}"
+            text = f"{lead}{VALIDATION_UNAVAILABLE_SUMMARY} {_ROUTE_TO_VALIDATE}"
             extras["action"] = _open_validator_action()
-            return text, "insufficient_context", ["schema"], [], followups
+            return text, "insufficient_context", grounding, [], followups
         # P36V.1 Unit B — the locators are HUMANIZED by the shared formatter
         # (`assistant_paths`, mirrored in `assistantPaths.ts`). The old template
         # interpolated the raw locator list, so a root-level violation rendered as
@@ -978,9 +1098,18 @@ def _compose(classified: ClassifiedIntent, ctx: AssistantContext, extras: dict):
         # Details disclosure. Same errors, same count — presentation only.
         raw_paths = [e.get("path") for e in errors]
         if not errors:
-            text = f"{NO_BLOCKING_ISSUES} {_ROUTE_TO_VALIDATE}"
+            text = f"{lead}{NO_BLOCKING_ISSUES} {_ROUTE_TO_VALIDATE}"
         else:
-            text = f"{blocking_summary(raw_paths)} {_ROUTE_TO_VALIDATE}"
+            noun, listed = _blocking_issue_parts(errors)
+            if lead:
+                # `lead` is followed by a sentence that says the schema check is a SEPARATE
+                # gate: the open questions and the schema findings may be one underlying gap
+                # seen twice (a missing descriptor is both), and this must not claim they are
+                # not.
+                clause = f"The deterministic schema check separately reports {noun}: {listed}."
+            else:
+                clause = f"{noun} may be blocking export: {listed}."
+            text = f"{lead}{clause} {_ROUTE_TO_VALIDATE}"
             extras["technical_paths"] = technical_paths(raw_paths)
         # P36V.1 Unit B — the validate affordance is now a real typed ACTION
         # targeting the standalone Validator, replacing a cited-source chip labelled
@@ -989,7 +1118,7 @@ def _compose(classified: ClassifiedIntent, ctx: AssistantContext, extras: dict):
         # empty here: an action is not a citation, and the answer's plane label
         # (Schema Rules, from `grounding`) already states where it came from.
         extras["action"] = _open_validator_action()
-        return text, "answered", ["schema"], [], followups
+        return text, "answered", grounding, [], followups
 
     if intent == EXPORT_READINESS:
         pending_n = len(ctx.pending.get("pending") or [])

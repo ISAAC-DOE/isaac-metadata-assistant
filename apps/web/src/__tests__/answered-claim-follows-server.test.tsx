@@ -219,7 +219,7 @@ describe('S4 · a correction is shown only when the server reported it applied',
     fireEvent.click(screen.getByText('Save'));
 
     // The server-reported impact is surfaced, the editor closed, the row moved on.
-    await screen.findByText('Updated 1 field(s); no downstream steps reopened.');
+    await screen.findByText('Updated 1 field; no downstream steps reopened.');
     expect(screen.queryByDisplayValue('e'.repeat(64))).toBeNull();
     expect(screen.getByText(/^you answered /).textContent).toContain('eeee');
     expect(screen.queryByText(/Nothing was applied —/)).toBeNull();

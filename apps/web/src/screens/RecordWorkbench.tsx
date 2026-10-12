@@ -15,6 +15,7 @@ import { CaptureWorkspace } from '../components/CaptureWorkspace';
 import { CaptureRecordMap } from '../components/CaptureRecordMap';
 import { RenameExperimentPanel } from '../components/RenameExperimentPanel';
 import { MoveExperimentPanel } from '../components/MoveExperimentPanel';
+import { DiscardExperimentPanel } from '../components/DiscardExperimentPanel';
 import { RecordDescriptionPanel } from '../components/RecordDescriptionPanel';
 import { RunsSection } from '../components/RunsSection';
 import { RunSchemaMirror } from '../components/RunSchemaMirror';
@@ -449,7 +450,15 @@ export function RecordWorkbench() {
         }
         mainPad="pad"
       >
-        <h1 className="sr-only">{LABELS.screenReview}</h1>
+        {/* B-23: the page heading names the state on screen. It read "Review Record"
+            above a panel reading "Record Not Found" — the breadcrumb and the tab title had
+            already been corrected for this (see `useSettledErrorTitle`), and the one
+            heading a screen reader navigates by had not. Same rule as the breadcrumb: only
+            when the API said the record is NOT THERE; any other error keeps the screen's
+            name, since the record may well exist. */}
+        <h1 className="sr-only">
+          {settled.recordAbsent && settled.title !== null ? settled.title : LABELS.screenReview}
+        </h1>
         {bundle.status === 'loading' ? (
           <LoadingPanel label="Loading the record from the ISAAC API…" />
         ) : (
@@ -1446,6 +1455,11 @@ function LoadedWorkbench({
             <RecordDescriptionPanel experimentId={id} />
             <RecordInfoPanel detail={detail} groups={bundle.groups} artifacts={bundle.artifacts} />
             <RecordLinksPanel artifacts={bundle.artifacts} />
+            {/* THE ONE REMOVAL (B-08). Last in the identity column on purpose: it is the
+                only control here with no undo, so it follows everything a reader is
+                likely to want and nothing is placed after it. Same silent refresh as the
+                rename and the folder, for the identical reason given above. */}
+            <DiscardExperimentPanel detail={detail} onSaved={onAgentRefresh} />
           </div>
 
           {/*

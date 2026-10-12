@@ -685,9 +685,28 @@ function SourceIndexList({ available, files, focusFilePath }: SourceIndexListPro
   }
 
   const groups = groupFilesByType(files);
+  /*
+   * B-44 — THE SAME RULE `ConceptLookup` APPLIES (`onDiskSpread`), for the same reason. A
+   * snapshot-backed reader serves `on_disk` as BAKED — uniformly `false`, since a projection
+   * cannot check a filesystem it does not have — so a badge on every row is a missing-file
+   * claim the server cannot know, and it distinguishes nothing. The per-row marker appears
+   * only when it tells the listed rows apart (a live check, each row's claim known). A
+   * uniform "not carried" is ONE fact about the deployment and is said once, in words about
+   * the deployment (the wording `ConceptLookup` and the file detail already use); a uniform
+   * "carried" needs no sentence.
+   */
+  const onDisk = files.filter((f) => f.on_disk).length;
+  const showOnDiskBadge = onDisk > 0 && onDisk < files.length;
+  const noneOnDisk = files.length > 0 && onDisk === 0;
 
   return (
     <>
+      {noneOnDisk && (
+        <p className="source-index-uniform-note">
+          This deployment does not carry any of the files listed below — open them in the project
+          to read them.
+        </p>
+      )}
       <div className="source-index-groups">
         {groups.map((group) => {
           const headingId = domId('si-group', group.key);
@@ -703,6 +722,7 @@ function SourceIndexList({ available, files, focusFilePath }: SourceIndexListPro
                     key={file.path}
                     file={file}
                     expanded={expandedPath === file.path}
+                    showOnDiskBadge={showOnDiskBadge}
                     onToggle={() => toggle(file.path)}
                     onActivateFile={activate}
                   />
@@ -720,11 +740,19 @@ function SourceIndexList({ available, files, focusFilePath }: SourceIndexListPro
 interface SourceIndexRowProps {
   file: ApiMemoryFileSummary;
   expanded: boolean;
+  /** Only when the marker distinguishes the listed rows — see `SourceIndexList`. */
+  showOnDiskBadge: boolean;
   onToggle: () => void;
   onActivateFile: (path: string) => void;
 }
 
-function SourceIndexRow({ file, expanded, onToggle, onActivateFile }: SourceIndexRowProps) {
+function SourceIndexRow({
+  file,
+  expanded,
+  showOnDiskBadge,
+  onToggle,
+  onActivateFile,
+}: SourceIndexRowProps) {
   const panelId = domId('si-panel', file.path);
   const community = communityLabel(file);
   const Chevron = expanded ? ChevronDown : ChevronRight;
@@ -748,7 +776,9 @@ function SourceIndexRow({ file, expanded, onToggle, onActivateFile }: SourceInde
         <span className="source-index-meta">
           {community && <span className="source-index-community">{community}</span>}
           <span className="source-index-nodecount">{nodeCountLabel(file.node_count)}</span>
-          {!file.on_disk && <span className="source-index-badge">not on disk</span>}
+          {showOnDiskBadge && !file.on_disk && (
+            <span className="source-index-badge">not on disk</span>
+          )}
         </span>
       </button>
       {expanded && (

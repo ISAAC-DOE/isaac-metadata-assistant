@@ -1,0 +1,224 @@
+{
+  "_about": [
+    "Cases for the blocker answer, asserted from BOTH apps/api/tests/test_assistant_query.py (server composer) and apps/web/src/__tests__/blocker-answer-parity.test.ts (the chip composer). `expected` is the chip text; the server answer is `expected` + ' ' + its Open Validator sentence.",
+    "Regenerate by changing the SERVER composer first and re-deriving; never hand-edit one side."
+  ],
+  "cases": [
+    {
+      "name": "a fresh record: three bare blocker keys and a root-level finding",
+      "pending": [
+        {
+          "id": "reduced_spectrum",
+          "about": "reduced_spectrum",
+          "question": "q"
+        },
+        {
+          "id": "qc_status",
+          "about": "qc_status",
+          "question": "q"
+        },
+        {
+          "id": "required_for_evidence_record",
+          "about": "required_for_evidence_record",
+          "question": "q"
+        }
+      ],
+      "errors": [
+        {
+          "path": "$",
+          "message": "'descriptors' is a required property"
+        }
+      ],
+      "expected": "3 fields still need you before export: Reduced Spectrum, QC Status, Required For Evidence Record. The deterministic schema check separately reports 1 record-level validation issue: 'descriptors' is a required property."
+    },
+    {
+      "name": "run-tagged questions name their run, once per run",
+      "pending": [
+        {
+          "id": "reduced_spectrum",
+          "about": "reduced_spectrum",
+          "question": "q",
+          "run_id": "r1",
+          "run_label": "Run A"
+        },
+        {
+          "id": "qc_status",
+          "about": "qc_status",
+          "question": "q",
+          "run_id": "r1",
+          "run_label": "Run A"
+        },
+        {
+          "id": "reduced_spectrum",
+          "about": "reduced_spectrum",
+          "question": "q",
+          "run_id": "r2",
+          "run_label": "Run B"
+        },
+        {
+          "id": "qc_status",
+          "about": "qc_status",
+          "question": "q",
+          "run_id": "r2",
+          "run_label": "Run B"
+        }
+      ],
+      "errors": [],
+      "expected": "4 fields still need you before export: Reduced Spectrum (on run Run A), QC Status (on run Run A), Reduced Spectrum (on run Run B), …and 1 more. No blocking validation issues are listed in the current validation response."
+    },
+    {
+      "name": "an unlabelled run and a run whose label is unsafe",
+      "pending": [
+        {
+          "id": "reduced_spectrum",
+          "about": "reduced_spectrum",
+          "question": "q",
+          "run_id": "r1"
+        },
+        {
+          "id": "qc_status",
+          "about": "qc_status",
+          "question": "q",
+          "run_id": "r2",
+          "run_label": "/Users/me/secret"
+        }
+      ],
+      "errors": [],
+      "expected": "2 fields still need you before export: Reduced Spectrum (on an unlabelled run), QC Status (on a run whose label is withheld). No blocking validation issues are listed in the current validation response."
+    },
+    {
+      "name": "duplicate findings collapse; one locator with two messages stays two issues",
+      "pending": [],
+      "errors": [
+        {
+          "path": "assets",
+          "message": "'a' is a required property"
+        },
+        {
+          "path": "assets",
+          "message": "'a' is a required property"
+        },
+        {
+          "path": "assets",
+          "message": "'b' is a required property"
+        }
+      ],
+      "expected": "2 validation issues may be blocking export: assets — 'a' is a required property; assets — 'b' is a required property."
+    },
+    {
+      "name": "an unsafe message and a verdict-language message are withheld alone",
+      "pending": [
+        {
+          "id": "qc_status",
+          "about": "qc_status",
+          "question": "q"
+        }
+      ],
+      "errors": [
+        {
+          "path": "assets",
+          "message": "bad aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        {
+          "path": "sample.id",
+          "message": "PASS if fine"
+        }
+      ],
+      "expected": "1 field still needs you before export: QC Status. The deterministic schema check separately reports 2 validation issues: assets — (message withheld); sample → id — (message withheld)."
+    },
+    {
+      "name": "a message over 160 characters is bounded",
+      "pending": [],
+      "errors": [
+        {
+          "path": "system.technique",
+          "message": "'zzz' is not one of ['t0', 't1', 't2', 't3', 't4', 't5', 't6', 't7', 't8', 't9', 't10', 't11', 't12', 't13', 't14', 't15', 't16', 't17', 't18', 't19', 't20', 't21', 't22', 't23', 't24', 't25', 't26', 't27', 't28', 't29', 't30', 't31', 't32', 't33', 't34', 't35', 't36', 't37', 't38', 't39']"
+        }
+      ],
+      "expected": "1 validation issue may be blocking export: system → technique — 'zzz' is not one of ['t0', 't1', 't2', 't3', 't4', 't5', 't6', 't7', 't8', 't9', 't10', 't11', 't12', 't13', 't14', 't15', 't16', 't17', 't18', 't19', 't20', '…."
+    },
+    {
+      "name": "record-level findings only are named by their messages",
+      "pending": [],
+      "errors": [
+        {
+          "path": "$",
+          "message": "'sample' is a required property"
+        },
+        {
+          "path": "$",
+          "message": "'assets' is a required property."
+        }
+      ],
+      "expected": "2 record-level validation issues may be blocking export: 'sample' is a required property; 'assets' is a required property."
+    },
+    {
+      "name": "more than three issues are capped and counted",
+      "pending": [],
+      "errors": [
+        {
+          "path": "assets.0",
+          "message": "m0 is wrong"
+        },
+        {
+          "path": "assets.1",
+          "message": "m1 is wrong"
+        },
+        {
+          "path": "assets.2",
+          "message": "m2 is wrong"
+        },
+        {
+          "path": "assets.3",
+          "message": "m3 is wrong"
+        },
+        {
+          "path": "assets.4",
+          "message": "m4 is wrong"
+        }
+      ],
+      "expected": "5 validation issues may be blocking export: assets → 0 — m0 is wrong; assets → 1 — m1 is wrong; assets → 2 — m2 is wrong; …and 2 more."
+    },
+    {
+      "name": "open questions with a clean schema check",
+      "pending": [
+        {
+          "id": "qc_status",
+          "about": "qc_status",
+          "question": "q"
+        }
+      ],
+      "errors": [],
+      "expected": "1 field still needs you before export: QC Status. No blocking validation issues are listed in the current validation response."
+    },
+    {
+      "name": "open questions alongside a validation crash",
+      "pending": [
+        {
+          "id": "qc_status",
+          "about": "qc_status",
+          "question": "q"
+        }
+      ],
+      "errors": [
+        {
+          "path": "$",
+          "message": "Validation could not be completed."
+        }
+      ],
+      "expected": "1 field still needs you before export: QC Status. The deterministic schema check could not be completed for this record, so no blocking locations can be listed."
+    },
+    {
+      "name": "a real locator is shown verbatim",
+      "pending": [
+        {
+          "id": "ssrl-archive://BL15-2/2099_run_000/raw/scan_0044.dat",
+          "about": "ssrl-archive://BL15-2/2099_run_000/raw/scan_0044.dat",
+          "question": "q"
+        }
+      ],
+      "errors": [],
+      "expected": "1 field still needs you before export: ssrl-archive://BL15-2/2099_run_000/raw/scan_0044.dat. No blocking validation issues are listed in the current validation response."
+    }
+  ]
+}

@@ -1,5 +1,7 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
-import { render, waitFor } from '@testing-library/react';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { act, fireEvent, render, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { TopBar } from '../components/TopBar';
 import { LABELS } from '../lib/labels';
@@ -269,5 +271,138 @@ describe('QA-023 · the governance disclosure sits on a role that may carry a na
     const chip = container.querySelector<HTMLElement>('.mode-chip')!;
     expect(chip.getAttribute('role')).not.toBe('img');
     expect((chip.textContent ?? '').trim().length).toBeGreaterThan(0);
+  });
+});
+
+/*
+ * B-22 — THE CHIP'S CLAIMS WERE REACHABLE ONLY BY A SCREEN READER'S BROWSE CURSOR.
+ *
+ * The mode chip carries ~90 words of governance disclosure (file upload is refused, no
+ * official institutional record is shown, the test-database diagnostic) — and it was a
+ * non-focusable `<span>` whose only carrier was its `aria-label`. A sighted keyboard user,
+ * or anyone with a pointer, could never read what it claimed; it was not in the tab order
+ * and showed nothing on hover.
+ *
+ * The chip stays the same `span.mode-chip role="note"` with the same `aria-label` (so every
+ * assertion above and every browser locator is untouched), and gains: a place in the tab
+ * order, and a visible popover — on focus AND on hover — carrying EXACTLY the claims the
+ * accessible name carries. The popover is `aria-hidden`, because the name already speaks
+ * them: a second, announced copy would read ninety words twice.
+ */
+describe('B-22 · the claims are reachable by keyboard and by pointer', () => {
+  async function chip(): Promise<{ chip: HTMLElement; container: HTMLElement }> {
+    stubFetchRoutes({ 'GET /api/health': { body: healthSynthetic } });
+    const { container } = renderTopBar();
+    await waitFor(() => expect(container.querySelector('.mode-chip')).not.toBeNull());
+    return { chip: container.querySelector<HTMLElement>('.mode-chip')!, container };
+  }
+
+  /** The claims, as the accessible name carries them: everything after the visible word. */
+  const claimsOf = (el: HTMLElement) =>
+    (el.getAttribute('aria-label') ?? '').slice((el.textContent ?? '').length + ' — '.length);
+
+  it('is in the tab order', async () => {
+    const { chip: el } = await chip();
+    expect(el.tabIndex).toBe(0);
+    el.focus();
+    expect(document.activeElement).toBe(el);
+  });
+
+  it('shows nothing until it is focused or hovered (the default state is unchanged)', async () => {
+    const { container } = await chip();
+    expect(container.querySelector('.mode-chip-popover')).toBeNull();
+  });
+
+  it('focus shows the claims, verbatim; blur hides them', async () => {
+    const { chip: el, container } = await chip();
+    fireEvent.focus(el);
+    const pop = container.querySelector<HTMLElement>('.mode-chip-popover');
+    expect(pop).not.toBeNull();
+    expect(pop!.textContent).toBe(claimsOf(el));
+    expect(pop!.textContent).toMatch(/file upload is refused/i);
+    fireEvent.blur(el);
+    expect(container.querySelector('.mode-chip-popover')).toBeNull();
+  });
+
+  it('hover shows the claims too, and leaving hides them', async () => {
+    const { chip: el, container } = await chip();
+    const wrap = el.closest('.mode-chip-wrap')!;
+    fireEvent.mouseEnter(wrap);
+    expect(container.querySelector('.mode-chip-popover')?.textContent).toBe(claimsOf(el));
+    fireEvent.mouseLeave(wrap);
+    expect(container.querySelector('.mode-chip-popover')).toBeNull();
+  });
+
+  it('Escape dismisses it without moving focus (WCAG 1.4.13)', async () => {
+    const { chip: el, container } = await chip();
+    el.focus();
+    fireEvent.focus(el);
+    expect(container.querySelector('.mode-chip-popover')).not.toBeNull();
+    act(() => {
+      fireEvent.keyDown(document, { key: 'Escape' });
+    });
+    expect(container.querySelector('.mode-chip-popover')).toBeNull();
+    expect(document.activeElement).toBe(el);
+  });
+
+  it('the popover is hidden from assistive technology, so the claims are announced once', async () => {
+    const { chip: el, container } = await chip();
+    fireEvent.focus(el);
+    expect(container.querySelector('.mode-chip-popover')!.getAttribute('aria-hidden')).toBe('true');
+    // and the accessible name that speaks them is exactly what it was
+    expect(el.getAttribute('role')).toBe('note');
+    expect(claimsOf(el).length).toBeGreaterThan(60);
+  });
+
+  it('is shifted back on screen when it would start off the left edge (measured at 375px: x = -30)', async () => {
+    const { chip: el, container } = await chip();
+    const real = HTMLElement.prototype.getBoundingClientRect;
+    HTMLElement.prototype.getBoundingClientRect = function (this: HTMLElement) {
+      return this.classList.contains('mode-chip-popover')
+        ? ({ left: -30, right: 310, top: 62, bottom: 150, width: 340, height: 88, x: -30, y: 62, toJSON() {} } as DOMRect)
+        : real.call(this);
+    };
+    try {
+      fireEvent.focus(el);
+      const pop = container.querySelector<HTMLElement>('.mode-chip-popover')!;
+      expect(pop.style.transform).toBe('translateX(38px)');
+    } finally {
+      HTMLElement.prototype.getBoundingClientRect = real;
+    }
+  });
+
+  it('is left where it is when it already fits', async () => {
+    const { chip: el, container } = await chip();
+    const real = HTMLElement.prototype.getBoundingClientRect;
+    HTMLElement.prototype.getBoundingClientRect = function (this: HTMLElement) {
+      return this.classList.contains('mode-chip-popover')
+        ? ({ left: 863, right: 1203, top: 68, bottom: 156, width: 340, height: 88, x: 863, y: 68, toJSON() {} } as DOMRect)
+        : real.call(this);
+    };
+    try {
+      fireEvent.focus(el);
+      expect(container.querySelector<HTMLElement>('.mode-chip-popover')!.style.transform).toBe('');
+    } finally {
+      HTMLElement.prototype.getBoundingClientRect = real;
+    }
+  });
+
+  it('has a hover bridge across the gap between chip and popover (WCAG 1.4.13 hoverable)', () => {
+    // jsdom lays nothing out, so the property is asserted on the rule: the popover sits at
+    // `top: calc(100% + 6px)`, and a transparent child strip at least that tall closes the gap.
+    const css = readFileSync(resolve(__dirname, '..', 'components/chrome.css'), 'utf8');
+    const gap = Number(/\.mode-chip-popover\s*\{[^}]*top:\s*calc\(100%\s*\+\s*(\d+)px\)/.exec(css)?.[1]);
+    const bridge = /\.mode-chip-popover::before\s*\{([^}]*)\}/.exec(css)?.[1] ?? '';
+    expect(gap).toBeGreaterThan(0);
+    expect(bridge).toMatch(/position:\s*absolute/);
+    expect(Number(/height:\s*(\d+)px/.exec(bridge)?.[1])).toBeGreaterThanOrEqual(gap);
+    expect(Number(/top:\s*-(\d+)px/.exec(bridge)?.[1])).toBeGreaterThanOrEqual(gap);
+  });
+
+  it('the chip element itself still reads just the visible word (browser locators keep working)', async () => {
+    const { chip: el } = await chip();
+    fireEvent.focus(el);
+    expect(el.textContent).toBe(LABELS.modeOrdinaryWorkspace);
+    expect(el.tagName).toBe('SPAN');
   });
 });
