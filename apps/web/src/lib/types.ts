@@ -1724,6 +1724,20 @@ export interface ApiDemoStep {
   ok: boolean;
 }
 
+/**
+ * `POST /api/experiments/{id}/discard` — what was removed, as the SERVER measured it.
+ *
+ * `durable_rows_removed` is `0` on a deployment that stores experiments on the
+ * filesystem, which is the normal and honest answer there; a screen must not read it as
+ * "nothing was discarded". There is no `ETag`: the record no longer exists.
+ */
+export interface ApiDiscardResult {
+  discarded_experiment_id: string;
+  discarded_title: string;
+  discarded_run_count: number;
+  durable_rows_removed: number;
+}
+
 export interface ApiDemoRunResponse {
   experiment_id: string;
   steps: ApiDemoStep[];
@@ -2629,10 +2643,25 @@ export interface ApiRunView {
   /** `"<generation>.<rev>"` — the run's OWN optimistic-concurrency token. */
   version: string;
   record_id: string | null;
+  /**
+   * 2026-10-11 — which acquisition this run was RECORDED as made from by a historical
+   * import, or `null` for a run added by hand. `acquisition_identity` is the server's
+   * MATCHING KEY, the same string the import's `send_plan.measurement_of` carries, so a
+   * send form preselects a value's own run by comparing two strings and re-implements no
+   * rule. Optional only because a server older than this field does not send it.
+   */
+  historical_origin?: ApiRunHistoricalOrigin | null;
   /** Keyed by dotted official path. */
   fields: Record<string, ApiRunFieldEnvelope>;
   /** Keyed by namespaced draft address (`field:sample.material.name`). */
   inherited: Record<string, ApiRunInherited>;
+}
+
+/** `ApiRunView.historical_origin` — provenance, never science. */
+export interface ApiRunHistoricalOrigin {
+  acquisition_identity: string;
+  stem: string | null;
+  legacy_number: number | null;
 }
 
 /**
@@ -4469,6 +4498,14 @@ export interface ApiImportSendPlan {
   not_sent: Record<string, string>;
   /** Sendable ids the batch reports as `no_run_for_this_candidate` when it creates runs. */
   no_run_when_creating_runs: string[];
+  /**
+   * 2026-10-11 — sendable run-owned candidate id -> the MEASUREMENT it was read from, as
+   * the key a run's `historical_origin.acquisition_identity` carries. A run holds one
+   * measurement's values: the server sends a value to the run made from its own
+   * measurement, and refuses one named run for values of several. Optional only because
+   * an older server does not send it.
+   */
+  measurement_of?: Record<string, string>;
 }
 
 /** One scan's (or item's, or file token's) own reading of a varying concept. */

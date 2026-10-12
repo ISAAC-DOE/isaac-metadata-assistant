@@ -40,6 +40,7 @@ import {
   CAPABILITIES_BOUNDARY,
   CAPABILITIES_DRAFT_KEPT_NOTE,
   CAPABILITIES_INSERT_NOTE,
+  CAPABILITIES_RUN_NOTE,
   CAPABILITIES_MEMORY_SCOPE_NOTE,
   CAPABILITIES_TRIGGER_LABEL,
   GRAPH_CAPABILITY_GROUP,
@@ -393,6 +394,34 @@ describe('P36X · choosing an example fills the composer and sends nothing', () 
     expect((getByRole('textbox') as HTMLInputElement).value).toBe(
       RECORD_CAPABILITY_GROUPS[0].examples[0].text,
     );
+  });
+
+  /*
+   * B-10 — THE INSERT NOTE WAS FALSE OF TWO OF THE POPOVER'S THREE GROUPS.
+   * "Nothing is sent until you send it" sat under Suggested Questions and Agent
+   * Actions, which both RUN the moment they are picked. The note is now about
+   * examples only, and a second sentence says what the other two groups do — and the
+   * claim it makes is checked by doing it.
+   */
+  it('says Suggested Questions and Agent Actions run when picked, and that is true', () => {
+    const { dialog, container } = open();
+    expect(dialog.textContent).toContain(CAPABILITIES_RUN_NOTE);
+    expect(CAPABILITIES_RUN_NOTE).toMatch(/Suggested Questions and Agent Actions run as soon as you pick them/);
+    // the insert note is scoped to the one group it is true of
+    expect(CAPABILITIES_INSERT_NOTE).toMatch(/example/i);
+    expect(CAPABILITIES_INSERT_NOTE).not.toMatch(/Pick one/);
+    // …and the run claim is true: a pick answers without a "send".
+    const pill = [...dialog.querySelectorAll('button.assistant-prompt')][0] as HTMLElement;
+    fireEvent.click(pill);
+    expect(container.querySelector('.assistant-reply')?.textContent).toContain(
+      'Two fields still need you.',
+    );
+  });
+
+  it('does not claim anything runs when no such group is on the panel', () => {
+    const { dialog } = open({ prompts: [] });
+    expect(dialog.textContent).not.toContain(CAPABILITIES_RUN_NOTE);
+    expect(dialog.textContent).toContain(CAPABILITIES_INSERT_NOTE);
   });
 
   it('keeps an in-progress draft, says so first, and still closes and focuses the composer', () => {

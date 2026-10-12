@@ -1048,7 +1048,11 @@ describe('worked-example session — scope handling', () => {
     // By HEADING since PR #277's review: the breadcrumb now names the same state (it
     // said "Review Record" above this panel), so the bare text occurs twice.
     await waitFor(() =>
-      expect(view.getByRole('heading', { name: 'Worked Example Not Open' })).toBeInTheDocument(),
+      // `level: 2` (B-23): the page heading (h1) now names the state too, so the bare name
+      // matches two headings. The PANEL's title is the h2.
+      expect(
+        view.getByRole('heading', { name: 'Worked Example Not Open', level: 2 }),
+      ).toBeInTheDocument(),
     );
     expect(view.container.querySelector('.record-title')?.textContent).toBe(
       'Worked Example Not Open',

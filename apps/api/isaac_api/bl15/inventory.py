@@ -79,6 +79,12 @@ REFUSAL_TOO_DEEP = "path_too_deep"
 REFUSAL_PATH_TOO_LONG = "path_too_long"
 REFUSAL_UNREADABLE = "unreadable"
 REFUSAL_UNDECODABLE = "undecodable"
+#: An OPERATING-SYSTEM ARTEFACT, not a source (2026-10-11): ``__MACOSX/`` and
+#: ``.DS_Store``, which macOS Finder adds when it zips or opens a folder. Reported here
+#: rather than dropped silently, so a reader can see what was passed over — and NOT read,
+#: because a resource fork beside every file would otherwise become a second, garbled
+#: copy of the corpus. See ``bl15.archive.is_os_metadata``.
+REFUSAL_OS_METADATA = "operating_system_metadata"
 
 REFUSAL_REASONS: frozenset[str] = frozenset(
     {
@@ -93,6 +99,7 @@ REFUSAL_REASONS: frozenset[str] = frozenset(
         REFUSAL_PATH_TOO_LONG,
         REFUSAL_UNREADABLE,
         REFUSAL_UNDECODABLE,
+        REFUSAL_OS_METADATA,
     }
 )
 

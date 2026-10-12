@@ -22,6 +22,7 @@ import { API_BASE, isHostedBuild, RUN_COMMAND } from '../lib/api';
 import type { ApiError } from '../lib/api';
 import { isExampleRecordId } from '../lib/exampleRecords';
 import { LABELS } from '../lib/labels';
+import { serverMessageOf } from '../lib/mutationErrors';
 import { ROUTES } from '../lib/routes';
 import { useWorkspaceScope } from '../lib/workspaceScope';
 import {
@@ -243,6 +244,10 @@ export const SUB_RESOURCE_LABELS: Readonly<Record<string, string>> = {
   // ValidateReview, the Evidence Support chip); `conflicts` is the wire segment
   // and never reaches a scientist.
   conflicts: 'the conflicting evidence',
+  // `POST .../discard` (B-08). "The discard" in the register `export` uses: a write the
+  // reader asked for, named as the act. It is a wire segment only — `downCopy` reaches it
+  // when a discard answers a 404 on a record that was already gone.
+  discard: 'the discard',
   draft: 'the draft fields',
   edit: 'a field edit',
   evidence: 'the evidence trail',
@@ -532,7 +537,10 @@ export function downCopy(
       ],
       showRunCommand: false,
       offerReload: false,
-      offerExperimentsLink: false,
+      // B-23: a record that is not there is a dead end without a way out. The link is the
+      // same "My Experiments" one the worked-example variant above offers, and it is
+      // rendered only inside a router, so a bare unit render is unaffected.
+      offerExperimentsLink: true,
     };
   }
 
@@ -727,11 +735,16 @@ export function downCopy(
   }
 
   if (status !== undefined) {
+    // A 4xx refusal that carried its own `message` says it in the server's words
+    // (C-04) — the status alone is exactly what the reader could not act on. The
+    // wording is the server's, verbatim, and only the 4xx range reads a body.
+    const serverSaid = status >= 400 && status < 500 ? serverMessageOf(error) : undefined;
     return {
       kind: 'http_error',
       title: 'ISAAC Returned an Error',
       lines: [
         `The ISAAC API was reached but answered with HTTP ${status}, so this view has no server-derived data to show.`,
+        ...(serverSaid !== undefined ? [serverSaid] : []),
         'This prototype reads only server-derived truth — it will never show placeholder data.',
       ],
       showRunCommand: false,

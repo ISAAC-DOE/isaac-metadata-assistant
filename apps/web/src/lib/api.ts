@@ -40,6 +40,7 @@ import type {
   ApiCsvPreview,
   ApiDemoResetResult,
   ApiDemoRunResponse,
+  ApiDiscardResult,
   ApiDraftResponse,
   ApiEvidenceClassification,
   ApiEvidenceEntry,
@@ -420,14 +421,20 @@ function httpError(res: Response, path: string): ApiError {
  *     empty body, `{}`, or `{"detail": …}` (FastAPI's shape for an unrouted
  *     path) all yield "not observed" rather than a wrong reason. Consumers must
  *     degrade to their generic branch, which `downCopy` does.
- *  3. ONLY 404. Widening this to other statuses would read bodies that
- *     `mutationError` owns and could double-consume one; there is no need, and
- *     the narrow rule is the safe one.
+ *  3. ONLY 4xx. This used to be "ONLY 404", and the narrowness cost a measured
+ *     defect (C-04): a duplicate archive and a malformed checksum both reached the
+ *     screen as "That request was refused (422)" because the server's typed `error`
+ *     and `message` were never read for any status but 404. It is widened to the
+ *     4xx range because a 4xx is the server REFUSING a request it understood and
+ *     saying why. It is NOT widened to 5xx (a fault carries no reason a screen may
+ *     repeat), and it cannot double-consume a body: `mutationError` is a separate
+ *     function that no caller of this one also calls on the same response, and every
+ *     call site here throws immediately after.
  *
  * A BEHAVIOUR CHANGE RULE 3 CAUSES, DISCLOSED BECAUSE IT IS REAL AND NOT OBVIOUS.
- * Only the 404 path awaits `res.json()`, so a 404 now rejects one `await` LATER than
- * every other failing status. In a bundle whose members fail with MIXED statuses —
- * say a 404 on `GET /experiments/{id}` and a 500 on `POST /audit` — the non-404
+ * Only the 4xx path awaits `res.json()`, so a 4xx now rejects one `await` LATER than
+ * a failing 5xx. In a bundle whose members fail with MIXED statuses —
+ * say a 404 on `GET /experiments/{id}` and a 500 on `GET /warnings` — the non-404
  * rejection therefore wins the `Promise.all` systematically, where previously the
  * winner was whatever the network happened to deliver first. Three things to hold
  * onto: this is ORDERING, not information (no reason is lost, and a 404 reaching the
@@ -440,15 +447,23 @@ function httpError(res: Response, path: string): ApiError {
  */
 async function httpErrorWithReason(res: Response, path: string): Promise<ApiError> {
   const base = httpError(res, path);
-  if (res.status !== 404 || base.htmlIntercept) return base;
-  const body = (await res.json().catch(() => undefined)) as { error?: unknown } | undefined;
-  if (typeof body?.error !== 'string') return base;
+  // 4xx ONLY. A 5xx is a server fault, not a refusal with a reason, and its body is
+  // exactly what `mutationError`'s sibling rules leave unread (see rule 3).
+  if (res.status < 400 || res.status >= 500 || base.htmlIntercept) return base;
+  const parsed = await res.json().catch(() => undefined);
+  const body = (typeof parsed === 'object' && parsed !== null ? parsed : undefined) as
+    | { error?: unknown }
+    | undefined;
+  // `body` is attached whenever the response was JSON the server authored, so a
+  // screen can read the server's own `message` (`serverMessageOf`); `reason` stays
+  // `undefined` unless `error` is a string — "not observed", never a wrong reason.
   return new ApiError(base.message, {
     status: base.status,
     path: base.path,
     contentType: base.contentType,
     htmlIntercept: base.htmlIntercept,
-    reason: body.error,
+    reason: typeof body?.error === 'string' ? body.error : undefined,
+    body,
   });
 }
 
@@ -881,6 +896,28 @@ export interface ListProposalsQuery {
 export type { ApiProvenanceEntry, ApiProvenanceResponse } from './types';
 
 /**
+ * START A READ ONLY ONCE THE PRIMARY RECORD READ HAS SUCCEEDED (B-23).
+ *
+ * A record screen's bundle used to fan out every request at once, including `POST
+ * …/validate` and `POST …/audit` — the export gate and the audit, run server-side — so
+ * `/record/<an id that does not exist>` asked the server to check a record it did not
+ * hold, and every Retry asked again. Measured: eight requests, two of them POSTs.
+ *
+ * This chains `start` behind `primary`, so a primary 404 (or any primary failure) never
+ * issues it: the returned promise rejects with the primary's OWN error, which is what
+ * `primaryReadWins` is about to throw anyway. It sits INSIDE the bundle's `Promise.all`,
+ * so that rejection is always observed — no unhandled rejection — and it adds no request.
+ *
+ * THE COST, disclosed: on the SUCCESS path the two slowest reads now begin one primary
+ * round trip later than they did, instead of beside it. Only the POSTs are deferred; the
+ * plain GETs stay concurrent, because a GET against a missing record is a cheap 404 and
+ * deferring them would add the same delay to every part of the screen.
+ */
+function afterPrimary<T>(primary: Promise<unknown>, start: () => Promise<T>): Promise<T> {
+  return primary.then(() => start());
+}
+
+/**
  * A RECORD SCREEN'S READS, WHERE THE PRIMARY READ DECIDES WHAT A FAILURE MEANS.
  *
  * Every record screen fans out ONE `Promise.all` — the record itself
@@ -1169,6 +1206,60 @@ export const api = {
       ...(version ? { headers: { 'If-Match': `"${version}"` } } : {}),
     });
     if (res.ok) return readJson<ApiExperimentDetail>(res, path);
+    throw await mutationError(res, path);
+  },
+
+  /**
+   * DISCARD ONE UNSUBMITTED, UNEXPORTED EXPERIMENT — the control the backend has had
+   * since `d93b896` and no screen called (B-08).
+   *
+   * IT IS A POST TO A DOMAIN OPERATION, not an HTTP DELETE, by the owner's narrow
+   * authorization (`routes.py`, "4b. discard"): *explicit Discard semantics for
+   * unsubmitted Draft/capture state only*. The server refuses — `409`, removing nothing
+   * — a record that was submitted, exported, holds an exported run, has published
+   * artifacts on disk, or is a built-in worked example, and it names which in a typed
+   * `error` with a human `message` that ends "Nothing was removed.".
+   *
+   * `confirmed_by_user` IS SENT BY THIS FUNCTION AND NOT BY ITS CALLER, because there is
+   * no caller that should ever send `false`: the only door to this function is the
+   * confirmation dialog, whose affirmative button IS the confirmation. (Contrast the
+   * override operations, which take the flag as an argument for the opposite reason.)
+   *
+   * `If-Match` IS THE RECORD'S CURRENT TOKEN and is REQUIRED — omitted is `428`,
+   * malformed `400`, stale `412`, and `*` is refused with `400
+   * wildcard_precondition_refused` (this is the only operation that refuses it, because
+   * it is the only one with no undo). Guarded on truthiness like every other mutation
+   * here: a blank version sends NO header, so the server names the missing precondition
+   * rather than reporting a client bug as a server disagreement.
+   *
+   * A REPEATED DISCARD IS `404`, not a second `200` — the record is gone. The 503 body
+   * is read here too (`submission_history_unreadable` / `experiment_storage_unavailable`)
+   * because both are facts about the SERVER that say "nothing was removed", and
+   * `mutationError` leaves a 503 body unread.
+   */
+  async discardExperiment(id: string, version: string): Promise<ApiDiscardResult> {
+    const path = `/experiments/${enc(id)}/discard`;
+    const res = await request(path, {
+      method: 'POST',
+      body: JSON.stringify({ confirmed_by_user: true }),
+      ...(version ? { headers: { 'If-Match': `"${version}"` } } : {}),
+    });
+    if (res.ok) return readJson<ApiDiscardResult>(res, path);
+    if (res.status === 503) {
+      const base = httpError(res, path);
+      if (base.htmlIntercept) throw base;
+      const body = await res.json().catch(() => undefined);
+      throw new ApiError(base.message, {
+        status: base.status,
+        path,
+        contentType: base.contentType,
+        body,
+        reason:
+          typeof (body as { error?: unknown } | undefined)?.error === 'string'
+            ? (body as { error: string }).error
+            : undefined,
+      });
+    }
     throw await mutationError(res, path);
   },
 
@@ -2727,8 +2818,8 @@ export const api = {
           primary,
           this.getDraftGroups(id),
           readPending,
-          this.validate(id),
-          this.audit(id),
+          afterPrimary(primary, () => this.validate(id)),
+          afterPrimary(primary, () => this.audit(id)),
           this.getWarnings(id),
           this.getEvidence(id),
           this.getGraphStatus(),
@@ -2760,8 +2851,8 @@ export const api = {
         Promise.all([
           primary,
           this.getPending(id),
-          this.validate(id),
-          this.audit(id),
+          afterPrimary(primary, () => this.validate(id)),
+          afterPrimary(primary, () => this.audit(id)),
           this.getWarnings(id),
           this.getGraphStatus(),
           this.getArtifacts(id),
@@ -2813,7 +2904,7 @@ export const api = {
           this.getDraftGroups(id),
           this.getEvidence(id),
           this.getArtifacts(id),
-          this.validate(id),
+          afterPrimary(primary, () => this.validate(id)),
           this.getWarnings(id),
           this.getEvidenceClassification(id),
         ]),

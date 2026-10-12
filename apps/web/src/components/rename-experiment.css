@@ -111,3 +111,58 @@
   font-weight: 600;
   color: var(--text-heading);
 }
+
+/*
+ * DISCARD (B-08) — the reason a record cannot be discarded, and the confirmation
+ * dialog's own body. The dialog reuses the `.artifact-modal` shell and the reset
+ * dialog's disclosure/action rows (`screens/screens.css`); only what those do not
+ * already say lives here. No new tokens and no new colours.
+ */
+.discard-blocked {
+  margin: 0;
+  padding: var(--space-sm) var(--space-md);
+  border: 1px solid var(--border);
+  background: var(--surface-subtle);
+  border-radius: var(--radius-control);
+  font-size: 12.5px;
+  line-height: var(--line-height-normal);
+  color: var(--text-primary);
+  max-width: 62ch;
+}
+
+.discard-dialog {
+  width: min(520px, 100%);
+}
+
+.discard-dialog-body {
+  padding: var(--space-lg);
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+}
+
+.discard-dialog-record {
+  margin: 0;
+  font-size: 13px;
+  line-height: var(--line-height-normal);
+  color: var(--text-heading);
+  overflow-wrap: anywhere;
+}
+
+.discard-dialog-runs {
+  color: var(--text-secondary);
+}
+
+/* The server's refusal, verbatim. The failure colour carries the text; the words are
+   what says it — colour is never the only signal. */
+.discard-dialog-error {
+  margin: 0;
+  padding: var(--space-md);
+  border: 1px solid var(--fail-border);
+  background: var(--fail-bg);
+  border-radius: var(--radius-control);
+  font-size: 12.5px;
+  line-height: var(--line-height-normal);
+  color: var(--fail-text);
+}

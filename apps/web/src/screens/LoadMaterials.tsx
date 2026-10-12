@@ -1,6 +1,6 @@
 import './screens.css';
 import '../components/runner.css';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { AppShell } from '../components/AppShell';
 import { TopBar } from '../components/TopBar';
@@ -11,6 +11,7 @@ import { Play, ShieldCheck, Upload, TriangleAlert } from '../components/icons';
 import { LABELS } from '../lib/labels';
 import { ROUTES } from '../lib/routes';
 import { api, ApiError } from '../lib/api';
+import { startTutorial, useTutorialState } from '../lib/tutorialController';
 import { demoStepsToStages } from '../lib/adapt';
 import type { ApiDemoRunResponse } from '../lib/types';
 
@@ -112,6 +113,34 @@ export function LoadMaterials() {
   const [run, setRun] = useState<RunPhase>({ name: 'idle' });
   const [upload, setUpload] = useState<UploadPhase>({ name: 'idle' });
 
+  /*
+   * B-05 — THE PRIMARY CONTROL USED TO BE A BUTTON THAT COULD NOT WORK. The built-in
+   * example records exist only inside a worked-example session, and
+   * `POST /api/demo/run` answers `409 tutorial_scope_required` to any request that
+   * carries no session header. Outside a session the card's primary action therefore
+   * failed EVERY time, and the screen explained why only AFTER the press — a control
+   * that looks like it acts and does not.
+   *
+   * The signal is the one `api.ts::request` uses to decide whether to send the header
+   * (`sessionId` mirrors `getTutorialScope()`), so this screen and the server cannot
+   * disagree about whether a press would be scoped. Outside a session the card now
+   * offers the control that DOES work — the same "Launch Guided Demo" and the same
+   * audited disclosure the empty My Experiments state uses — and makes no demo-run
+   * request at all. It is an explicit press for exactly that purpose, so it is not
+   * the screen "quietly starting the walkthrough on the reader's behalf", which the
+   * scope-refusal panel below is still careful not to do.
+   *
+   * The `scopeRequired` refusal below is KEPT, as the fallback for the one case this
+   * gate cannot see: a session that ended between render and press.
+   */
+  const tutorial = useTutorialState();
+  const inWorkedExample = tutorial.sessionId !== null;
+  const launchRef = useRef<HTMLButtonElement>(null);
+  // The same double-submit guard `ExperimentsHome` documents: `startTutorial` awaits a
+  // round trip before it holds a session, so a second press in that window would open
+  // and orphan a second one.
+  const launchBusy = tutorial.phase !== 'idle';
+
   const startDemo = () => {
     setRun({ name: 'running' });
     api
@@ -186,14 +215,32 @@ export function LoadMaterials() {
               holds back the fields it won't guess, and — once you confirm them — validates against
               ISAAC v1.05.
             </p>
-            <button
-              type="button"
-              className="btn btn-primary"
-              onClick={startDemo}
-              disabled={run.name === 'running'}
-            >
-              {run.name === 'running' ? 'Running…' : LABELS.actionRunDemoShort}
-            </button>
+            {inWorkedExample ? (
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={startDemo}
+                disabled={run.name === 'running'}
+              >
+                {run.name === 'running' ? 'Running…' : LABELS.actionRunDemoShort}
+              </button>
+            ) : (
+              <>
+                <p className="onramp-body" id="load-launch-hint">
+                  {LABELS.demoRunsInsideGuidedDemo} {LABELS.launchGuidedDemoBody}
+                </p>
+                <button
+                  ref={launchRef}
+                  type="button"
+                  className="btn btn-primary"
+                  disabled={launchBusy}
+                  aria-describedby="load-launch-hint"
+                  onClick={() => startTutorial(launchRef.current)}
+                >
+                  {LABELS.actionLaunchGuidedDemo}
+                </button>
+              </>
+            )}
           </div>
 
           <div className="onramp">

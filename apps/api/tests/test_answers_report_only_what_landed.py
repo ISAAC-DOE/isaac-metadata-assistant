@@ -140,7 +140,7 @@ def test_a_declined_answer_on_a_legacy_run_names_no_updated_field(client):
 
     # THE FIX: no field is named, and the count in the sentence follows the list.
     assert invalidation["changed_fields"] == [], invalidation
-    assert "Updated 0 field(s)" in invalidation["reason"], invalidation
+    assert "Updated 0 fields;" in invalidation["reason"], invalidation
 
     # THE HALF THAT MUST NOT REGRESS: the document really did change (the derived
     # questions were materialised), so `changed` stays true.
@@ -201,7 +201,7 @@ def test_a_good_answer_on_a_legacy_run_is_still_named(client):
     assert response.status_code == 200, response.text
     invalidation = response.json()["invalidation"]
     assert invalidation["changed_fields"] == ["qc"], invalidation
-    assert "Updated 1 field(s)" in invalidation["reason"], invalidation
+    assert "Updated 1 field;" in invalidation["reason"], invalidation
     stored = ws.load_experiment(exp_id).get_run(run_id).draft
     assert stored["qc"] == {"status": "valid", "evidence": "I0 stable."}
 
@@ -262,7 +262,7 @@ def test_a_mixed_request_on_a_record_names_only_the_field_that_landed(client):
     invalidation = response.json()["invalidation"]
     assert invalidation["changed"] is True, invalidation
     assert invalidation["changed_fields"] == ["series"], invalidation
-    assert "Updated 1 field(s)" in invalidation["reason"], invalidation
+    assert "Updated 1 field;" in invalidation["reason"], invalidation
     stored = ws.load_experiment(exp_id).draft
     assert stored.get("descriptors_outputs") in (None, []), stored.get(
         "descriptors_outputs"

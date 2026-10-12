@@ -159,7 +159,15 @@ describe('P29.4b agent pills run real intents', () => {
     fireEvent.click(getByText('Identify the Next Missing Field'));
 
     const msgs = Array.from(container.querySelectorAll('.assistant-msg'));
-    expect(msgs.length).toBe(before + 1);
+    // B-03 CHANGED THIS FROM `before + 1` TO `before + 2`, deliberately. The assertion read
+    // as "one message per activation", which pinned the defect: an Agent Action wrote only
+    // the assistant's side, so the log never showed that the reader had asked for it. It now
+    // writes the reader's line (the action's label) and then the answer — two messages, in
+    // that order, newest at the bottom.
+    expect(msgs.length).toBe(before + 2);
+    const asked = msgs[msgs.length - 2];
+    expect(asked.classList.contains('assistant-msg-user')).toBe(true);
+    expect(asked.textContent).toContain('Identify the Next Missing Field');
     const appended = msgs[msgs.length - 1];
     // The real runIntent output (the ACTUAL first pending field), not a static string.
     expect(appended.textContent).toContain('Reduced Series');
@@ -178,11 +186,17 @@ describe('P29.4b agent pills run real intents', () => {
     expect(queryByText('Delete Everything')).toBeNull();
   });
 
-  it('one activation produces exactly one appended result (one request per activation)', () => {
+  it('one activation produces exactly one appended ANSWER (and the reader\'s own line)', () => {
     const { getByText, container } = panel();
-    const before = container.querySelectorAll('.assistant-msg').length;
+    const answers = () => container.querySelectorAll('.assistant-msg-assistant').length;
+    const lines = () => container.querySelectorAll('.assistant-msg-user').length;
+    const [beforeAnswers, beforeLines] = [answers(), lines()];
     fireEvent.click(getByText('Explain the Current Step'));
-    expect(container.querySelectorAll('.assistant-msg').length).toBe(before + 1);
+    // B-03: this counted ALL `.assistant-msg` and expected +1. The answer is still exactly
+    // one per activation — the assertion the test is named for — and the reader's line is
+    // the second, separately counted.
+    expect(answers()).toBe(beforeAnswers + 1);
+    expect(lines()).toBe(beforeLines + 1);
   });
 
   it('an appended result is version-bound and marked stale once the record advances', () => {
@@ -619,11 +633,13 @@ describe('agent output is announced to a screen reader', () => {
   });
 
   it('two agent actions producing byte-identical text still re-announce (alternating marker)', () => {
-    const { getByText, container } = panel();
+    const { getByText, getByRole, container } = panel();
     fireEvent.click(getByText('Explain the Current Step'));
     const first = announcer(container).textContent ?? '';
     reopenCatalog(container);
-    fireEvent.click(getByText('Explain the Current Step'));
+    // By ROLE, not by text: since B-03 the log also holds the reader's own line carrying
+    // the same words, so the bare text now matches two nodes. The control is the button.
+    fireEvent.click(getByRole('button', { name: /Explain the Current Step/ }));
     const second = announcer(container).textContent ?? '';
     // React must see a genuinely different string or it will not touch the DOM
     // node at all, and a screen reader announces nothing for an unchanged region.

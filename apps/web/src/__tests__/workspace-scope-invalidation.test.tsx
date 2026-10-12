@@ -410,22 +410,24 @@ describe('D2 · the walkthrough navigates on a step change, not continuously', (
     const open = screen.getByRole('button', { name: LABELS.actionRunDemo });
     fireEvent.click(open);
 
-    // It lands on Load Materials — and STAYS there. The old pin returned the reader
-    // to the current step's path on the very next render, so this button could never
-    // do anything at all.
-    await waitFor(() => expect(at()).toBe(ROUTES.load));
-    expect(
-      await screen.findByRole('button', { name: LABELS.actionRunDemoShort }),
-    ).toBeInTheDocument();
+    // B-06 — IT LANDS ON THE WORKED-EXAMPLE RECORD. This test used to assert it landed
+    // on Load Materials, and pinned that as the behaviour ("the example run this screen
+    // offers is the one that works"). That was the defect: the label says "Open the
+    // Worked Example", /load is a screen holding a button that RUNS one. (The
+    // walkthrough card still says "Not on this screen" at step 1 — the next test asserts it —
+    // because step 1's control is on My Experiments; that is not what this fixes.) The assertion
+    // was inverted to the record, not deleted — the property it protects (the button is
+    // not returned to the step's path by the old pin, so it does something) is intact.
+    await waitFor(() => expect(at()).toBe(ROUTES.record(PENDING_ID)));
+    expect(await screen.findByText(/Fields Need Your Confirmation/i)).toBeInTheDocument();
     // Settled, not merely in transit: several React flushes later, still there.
     await act(async () => {
       await Promise.resolve();
       await Promise.resolve();
     });
-    expect(at()).toBe(ROUTES.load);
+    expect(at()).toBe(ROUTES.record(PENDING_ID));
 
-    // The session is untouched by wandering, so the example run this screen offers
-    // is the one that works — and the bar is still there to leave by.
+    // The session is untouched by wandering, and the bar is still there to leave by.
     expect(getTutorialState().sessionId).toBe(TUTORIAL_SESSION_ID);
     expect(bar()).not.toBeNull();
   }, 30000);
@@ -437,7 +439,7 @@ describe('D2 · the walkthrough navigates on a step change, not continuously', (
     await waitFor(() => expect(mark()).not.toBeNull());
 
     fireEvent.click(screen.getByRole('button', { name: LABELS.actionRunDemo }));
-    await waitFor(() => expect(at()).toBe(ROUTES.load));
+    await waitFor(() => expect(at()).toBe(ROUTES.record(PENDING_ID)));
 
     // The walkthrough does not silently vanish — which is what waiting forever for
     // an anchor that is not on this screen used to do, taking Skip, Close and Escape
@@ -505,7 +507,7 @@ describe('D2 · the walkthrough navigates on a step change, not continuously', (
     // And a step change navigates even from a surface the READER chose, so wandering
     // is not a dead end.
     fireEvent.click(screen.getByRole('button', { name: LABELS.actionRunDemo }));
-    await waitFor(() => expect(at()).toBe(ROUTES.load));
+    await waitFor(() => expect(at()).toBe(ROUTES.record(PENDING_ID)));
     await goToSurface(ROUTES.export(READY_ID));
   }, 30000);
 });

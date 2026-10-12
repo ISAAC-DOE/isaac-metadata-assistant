@@ -678,7 +678,7 @@ def test_changed_fields_names_only_what_the_apply_shape_carried(client):
     inv = res.json()["invalidation"]
     assert inv["changed"] is True
     assert inv["changed_fields"] == [uri, "qc"], inv["changed_fields"]
-    assert "Updated 2 field(s)" in inv["reason"], inv["reason"]
+    assert "Updated 2 fields;" in inv["reason"], inv["reason"]
 
     after = tutorial_ws().load_experiment(rid).draft
     assert "totally_made_up_field" not in json.dumps(after)

@@ -189,7 +189,7 @@ describe('S4 · Guided Completion (live)', () => {
             changed_fields: ['series'],
             reopened_steps: [],
             artifact: { state: 'none' as const, reason: null },
-            reason: 'Updated 1 field(s); no downstream steps reopened.',
+            reason: 'Updated 1 field; no downstream steps reopened.',
           },
         },
       },
@@ -636,7 +636,7 @@ describe('P27.5 · optimistic-concurrency conflict UX', () => {
                   changed_fields: [pendingResponse.pending[1].id],
                   reopened_steps: [],
                   artifact: { state: 'none' as const, reason: null },
-                  reason: 'Updated 1 field(s); no downstream steps reopened.',
+                  reason: 'Updated 1 field; no downstream steps reopened.',
                 },
               };
         },
@@ -848,8 +848,9 @@ describe('S6 · Ready to Export — grounded assistant (P25.4)', () => {
       expect(el!.textContent).toContain('may be blocking export');
       return el as HTMLElement;
     })) as HTMLElement;
+    // INVERTED (B-04 review): this pinned the bare locations only; each issue now carries the validator's message.
     expect(reply.textContent).toContain(
-      '2 validation issues may be blocking export: the record itself, assets → 0 → sha256.',
+      "2 validation issues may be blocking export: the record itself — 'sample' is a required property; assets → 0 → sha256 — too short.",
     );
     // the primary answer carries NO raw locator …
     expect(reply.textContent).not.toContain('$');

@@ -1186,7 +1186,7 @@ def test_the_three_workflow_call_sites_agree_on_a_fully_exported_fan_out(client)
         DETAIL   workflow:        export: 'current'
         DETAIL exported: False | record_id: None | status: done
         ... and any later mutation: reopened_steps: ['export'],
-            "Updated 1 field(s); reopened: Export."
+            "Updated 1 field; reopened: Export."
 
     The export step did not reopen. A false ``reopened_steps`` is a claim about the
     scientist's work that did not happen.

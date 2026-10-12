@@ -241,23 +241,3 @@ export function classifyValidationPaths(raws: readonly unknown[]): ValidationLoc
 export function technicalPaths(raws: readonly unknown[]): string[] {
   return classifyValidationPaths(raws).map((l) => l.technical);
 }
-
-/**
- * The primary, user-facing blocker sentence.
- *
- * · no locators            → `NO_BLOCKING_ISSUES`
- * · every locator is root  → "N record-level validation issues may be blocking export."
- * · otherwise              → "N validation issues may be blocking export: <≤3 locations>."
- *
- * It states a COUNT and WHERE — never a validity conclusion, never `validate.ok`,
- * and never a bare `$`.
- */
-export function blockingSummary(raws: readonly unknown[]): string {
-  const locations = classifyValidationPaths(raws);
-  if (locations.length === 0) return NO_BLOCKING_ISSUES;
-  if (locations.every((l) => l.kind === 'record')) {
-    return `${count(locations.length, 'record-level validation issue')} may be blocking export.`;
-  }
-  const labels = joinCapped(locations.map((l) => l.label));
-  return `${count(locations.length, 'validation issue')} may be blocking export: ${labels}.`;
-}

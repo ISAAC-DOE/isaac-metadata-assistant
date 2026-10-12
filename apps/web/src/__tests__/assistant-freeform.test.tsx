@@ -201,7 +201,10 @@ describe('P34.2 preserved surfaces', () => {
     const before = container.querySelectorAll('.assistant-msg').length;
     fireEvent.click(getByText('Identify the Next Missing Field'));
     const msgs = Array.from(container.querySelectorAll('.assistant-msg'));
-    expect(msgs.length).toBe(before + 1);
+    // B-03: `before + 1` became `before + 2` — the Agent Action now also writes the
+    // reader's own line (its label) ahead of the answer. The answer is still the last
+    // message, and the run is still a real intent.
+    expect(msgs.length).toBe(before + 2);
     expect(msgs[msgs.length - 1].textContent).toContain('Reduced Series');
     // agent actions never route through the read-only query endpoint
     expect(spy).not.toHaveBeenCalled();

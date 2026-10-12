@@ -44,7 +44,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from './api';
-import { UNREADABLE_BLOCKER_LABEL, isAnswerablePendingItem } from './adapt';
+import { UNREADABLE_BLOCKER_LABEL, blockerDisplayName, isAnswerablePendingItem } from './adapt';
 import { useRecordSync } from './useRecordSync';
 import { useChangeFeed } from './useChangeFeed';
 import { isCaughtUp, summariseChanges, type RecordChangeSummary } from './recordChanges';
@@ -395,7 +395,8 @@ function deriveRev(
  * `serialize._unreadable_blocker` serves a wire field to avoid, and what this
  * repository's post-check-payload rule forbids.
  */
-function toPendingItems(pending: ApiPendingItem[] | undefined): PendingItem[] {
+/** Exported so the label ladder can be pinned directly (B-02); not part of the hook's API. */
+export function toPendingItems(pending: ApiPendingItem[] | undefined): PendingItem[] {
   if (!pending) return [];
   return pending.map((p) => ({
     id: p.id,
@@ -404,8 +405,13 @@ function toPendingItems(pending: ApiPendingItem[] | undefined): PendingItem[] {
     // ladder the composer uses so the two never disagree on a field's name.
     // For an unreadable entry every rung is null, so the ladder ends at the server's
     // own reason — never at an invented name for a question nobody could read.
+    // `about` goes through `blockerDisplayName` (B-02): a bare internal key
+    // (`reduced_spectrum`) becomes the words the server's typed answer uses, and a real
+    // locator is returned verbatim — so "Identify the Next Missing Field" no longer says
+    // `The next pending field is "reduced_spectrum"` beside a typed answer that says
+    // "Reduced Spectrum".
     label:
-      (typeof p.about === 'string' && p.about.trim() !== '' && p.about) ||
+      blockerDisplayName(p.about) ||
       (typeof p.question === 'string' && p.question.trim() !== '' && p.question) ||
       p.id ||
       p.unavailable_reason ||

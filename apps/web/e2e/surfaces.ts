@@ -80,12 +80,13 @@ export const SURFACES: readonly Surface[] = [
     name: 'Load Materials',
     path: '/load',
     // ORDINARY on purpose. `/load` renders regardless of what any workspace
-    // holds: its "Run the Worked Example" button is an ordinary control that
-    // POSTs `/api/demo/run`, and that endpoint's refusal outside a session is a
-    // BEHAVIOUR this suite asserts elsewhere rather than a reason to open the
-    // surface in a session.
+    // holds. Outside a worked-example session its primary control is "Launch
+    // Guided Demo" (B-05) — the "Run the Worked Example" button, which POSTs
+    // `/api/demo/run`, is offered only inside one, because that endpoint refuses
+    // any request without a session header. The refusal itself is a BEHAVIOUR this
+    // suite asserts elsewhere rather than a reason to open the surface in a session.
     scope: 'ordinary',
-    ready: { role: 'button', name: 'Run the Worked Example' },
+    ready: { role: 'button', name: 'Launch Guided Demo' },
     // FINDING A11Y-05 is CLOSED (2026-08-26). `LoadMaterials.tsx` renders
     // `<h1 class="sr-only">Load Materials</h1>`, so `expectH1: false` is gone
     // and `specs/structure.spec.ts` now holds this surface to the same
