@@ -402,6 +402,19 @@ describe('the request', () => {
     expect(call.body).toEqual({ confirmed_by_user: true });
   });
 
+  // B-A17 — "1 run remain in this record." The noun was pluralized and the VERB was not.
+  it('agrees the verb with the count: "1 run remains", "2 runs remain"', async () => {
+    stubBackend([mkRun(1), mkRun(2)]);
+    renderRecord();
+    await waitForList();
+    fireEvent.click(await openRemove('RUN002', 'Run 2'));
+    fireEvent.click(within(cardFor('RUN002')).getByRole('button', { name: 'Remove This Run' }));
+    await waitFor(() => expect(renderedIds()).toEqual(['RUN001']));
+    const note = await screen.findByText(/Removed Run 2\./);
+    expect(note.textContent).toContain('1 run remains in this record');
+    expect(note.textContent).not.toContain('1 run remain in');
+  });
+
   it('removes the card, re-reads the list, and announces the SERVER’s count', async () => {
     stubBackend([mkRun(1), mkRun(2), mkRun(3)]);
     renderRecord();

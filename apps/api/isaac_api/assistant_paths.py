@@ -240,24 +240,3 @@ def technical_paths(raws) -> list:
     """The EXACT technical locators, order preserved — the ``Technical Details``
     payload. This is the ONLY place a raw ``$`` is allowed to surface."""
     return [loc["technical"] for loc in classify_validation_paths(raws)]
-
-
-def blocking_summary(raws) -> str:
-    """The primary, user-facing blocker sentence.
-
-    * no locators           -> :data:`NO_BLOCKING_ISSUES`
-    * every locator is root -> ``N record-level validation issues may be blocking export.``
-    * otherwise             -> ``N validation issues may be blocking export: <=3 locations.``
-
-    It states a COUNT and WHERE — never a validity conclusion, never ``ok``, and
-    never a bare ``$``."""
-    locations = classify_validation_paths(raws)
-    if not locations:
-        return NO_BLOCKING_ISSUES
-    if all(loc["kind"] == RECORD for loc in locations):
-        return (
-            f"{count(len(locations), 'record-level validation issue')} "
-            "may be blocking export."
-        )
-    labels = join_capped([loc["label"] for loc in locations])
-    return f"{count(len(locations), 'validation issue')} may be blocking export: {labels}."

@@ -25,6 +25,7 @@ import { downCopy, DownTechnicalDetails, LoadingPanel } from './FetchStates';
 import { hasVerdictLanguage } from '../lib/assistant';
 import { Search } from './icons';
 import { crossRecordTriage } from '../lib/crossRecordTriage';
+import { searchShortcutHint } from '../lib/platform';
 import type { TriageIntent, TriageResult } from '../lib/crossRecordTriage';
 import type { ApiSearchMatch, ApiSearchResponse } from '../lib/types';
 import { useWorkspaceScope } from '../lib/workspaceScope';
@@ -330,7 +331,10 @@ export function SearchDialog() {
       >
         <Search size={14} strokeWidth={2} aria-hidden="true" />
         <span className="topbar-search-label">Search</span>
-        <kbd className="topbar-search-kbd">⌘K</kbd>
+        {/* B-A17: the hint names the key THIS keyboard has — ⌘K on Apple platforms,
+            "Ctrl K" elsewhere. The handler has always accepted both modifiers; only the
+            printed hint was Apple-only. */}
+        <kbd className="topbar-search-kbd">{searchShortcutHint()}</kbd>
       </button>
 
       {open && (

@@ -103,12 +103,17 @@ export function ExperimentRow({ exp }: ExperimentRowProps) {
           proposals` would be worse: it invites the reading that proposals are
           expected here.
         */}
-        {(exp.disambiguator ||
-          exp.folder ||
-          exp.technique ||
-          exp.beamline ||
-          exp.runCount ||
-          exp.openProposalCount) && (
+        {/* `Boolean(...)`, NOT the bare `||` chain: `||` returns its LAST operand when
+            none is truthy, and with `openProposalCount: 0` that is the number 0, which
+            React renders as a literal "0" under every empty row (B-01). */}
+        {Boolean(
+          exp.disambiguator ||
+            exp.folder ||
+            exp.technique ||
+            exp.beamline ||
+            exp.runCount ||
+            exp.openProposalCount,
+        ) && (
           <div className="exp-meta">
             {exp.disambiguator && (
               <span className="exp-meta-item exp-meta-id" title={exp.disambiguator}>

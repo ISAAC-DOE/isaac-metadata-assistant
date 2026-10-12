@@ -3,7 +3,8 @@ import { render, fireEvent, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, useLocation } from 'react-router-dom';
 import { AppRoutes } from '../App';
 import { LABELS } from '../lib/labels';
-import { __resetTutorialStore } from '../lib/tutorialController';
+import { __bootTutorialStore, __resetTutorialStore } from '../lib/tutorialController';
+import { setTutorialScope } from '../lib/api';
 import {
   EXP_ID,
   aboutResponse,
@@ -66,7 +67,27 @@ function LocationProbe() {
   return <div data-testid="pathname">{loc.pathname}</div>;
 }
 
+/**
+ * Render /load AS A TAB THAT IS INSIDE A WORKED EXAMPLE — which is the only state in
+ * which the card's primary control is "Run the Worked Example" (B-05).
+ *
+ * THIS HELPER USED TO RENDER THE ORDINARY WORKSPACE, and every test below clicked the
+ * run button from there. That was possible only because the button was offered
+ * unconditionally and answered `409 tutorial_scope_required` outside a session — i.e.
+ * the suite exercised the happy path, the drift refusal and the unreachable-backend
+ * state from a tab where, in production, the same press could not succeed. Those tests
+ * were INVERTED INTO a session rather than deleted: what each asserts about the
+ * response is unchanged, and the 409 `tutorial_scope_required` cases are kept as the
+ * fallback for a session that ended between render and press. The ordinary-workspace
+ * behaviour has its own file (`load-worked-example-session.test.tsx`).
+ */
 function renderLoad() {
+  setTutorialScope('session-for-load-tests');
+  __bootTutorialStore();
+  return renderLoadAsIs();
+}
+
+function renderLoadAsIs() {
   return render(
     <MemoryRouter initialEntries={['/load']} future={FUTURE}>
       <AppRoutes />
@@ -297,8 +318,10 @@ describe('S2 · demo run — 409 tutorial_scope_required is a refusal, not a fai
     // reader made for something else — and it would then have to explain what that
     // discarded, which is the walkthrough control's own job, in its own place.
     expect(calls.filter((k) => k.includes('/tutorial/sessions'))).toEqual([]);
-    // The refused run is the only request it made.
-    expect(calls).toEqual(['POST /api/demo/run']);
+    // The refused run is the only WRITE it made. (The read is filtered out because a
+    // tab inside a worked example also mounts the bar and the mode chip, which read
+    // `GET /api/health` — a request this screen does not make.)
+    expect(calls.filter((k) => !k.startsWith('GET '))).toEqual(['POST /api/demo/run']);
   });
 
   it('leaves Run Demo enabled so the refusal is not a dead end', async () => {

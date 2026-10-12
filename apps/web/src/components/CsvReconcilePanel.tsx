@@ -298,7 +298,8 @@ function ReconResults({
       )}
 
       <p className="csv-recon-summary">
-        Reconciled {preview.candidate_count} mapped field(s) against the current
+        Reconciled {preview.candidate_count} mapped{' '}
+        {preview.candidate_count === 1 ? 'field' : 'fields'} against the current
         record — {s.matches_current} in record, {s.conflicts_with_current} differ,{' '}
         {s.absent_from_record} not recorded.
       </p>

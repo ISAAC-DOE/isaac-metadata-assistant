@@ -2,7 +2,7 @@ import { describe, it, expect, afterEach, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { api, ApiError, API_BASE, RUN_COMMAND, isHostedBuild } from '../lib/api';
-import { mutationFailureCopy } from '../lib/mutationErrors';
+import { mutationFailureCopy, serverMessageOf } from '../lib/mutationErrors';
 // `downCopy` is the pure branch table `BackendDown` renders from, so the signal
 // and the screen it produces can be asserted in one place: a test that pinned
 // only `htmlIntercept` would not notice a branch table that stopped reading it.
@@ -1132,6 +1132,107 @@ describe('typed API client — the typed 404 reason', () => {
       expect(error.status).toBe(500);
       expect(error.reason).toBeUndefined();
     }
+  });
+});
+
+/*
+ * C-04 — A 4xx REFUSAL CARRIES THE SERVER'S OWN REASON AND MESSAGE.
+ *
+ * Measured in Chromium against the import flow: a duplicate archive and a malformed
+ * checksum both surfaced as "That request was refused (422) and nothing was changed."
+ * and dropped the server's typed `error` and its human `message`. `httpErrorWithReason`
+ * read a body only on 404, and `postJson` / `getJson` use it, so every other 4xx
+ * reached the screen as a bare status. The body is now read for the whole 4xx range
+ * (never for an HTML intercept, never for a 5xx) and attached as `body`, with its
+ * `error` on `reason` — the same two places `mutationError` already puts them.
+ */
+describe('typed API client — a 4xx refusal keeps the server\'s reason and message', () => {
+  function stubRefusal(status: number, text: string, contentType = 'application/json'): void {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        let consumed = false;
+        return {
+          ok: false,
+          status,
+          headers: {
+            get: (name: string) => (name.toLowerCase() === 'content-type' ? contentType : null),
+          },
+          json: async () => {
+            if (consumed) throw new TypeError('body stream already read');
+            consumed = true;
+            return JSON.parse(text) as unknown;
+          },
+        } as unknown as Response;
+      }),
+    );
+  }
+
+  const DUPLICATE = {
+    error: 'duplicate_archive',
+    message: 'This archive was already added to this import (same SHA-256).',
+  };
+
+  it('a POST 422 carries the typed error as `reason` and the whole body as `body`', async () => {
+    stubRefusal(422, JSON.stringify(DUPLICATE));
+    const error = (await api.createImport().catch((e: unknown) => e)) as ApiError;
+    expect(error).toBeInstanceOf(ApiError);
+    expect(error.status).toBe(422);
+    expect(error.reason).toBe('duplicate_archive');
+    expect(error.body).toEqual(DUPLICATE);
+    expect(serverMessageOf(error)).toBe(DUPLICATE.message);
+  });
+
+  it('a GET 409 and a GET 400 are read the same way', async () => {
+    for (const status of [400, 409, 412, 422, 429]) {
+      stubRefusal(status, JSON.stringify(DUPLICATE));
+      const error = (await api.getExperiment(EXP_ID).catch((e: unknown) => e)) as ApiError;
+      expect(error.status).toBe(status);
+      expect(error.reason).toBe('duplicate_archive');
+      expect(serverMessageOf(error)).toBe(DUPLICATE.message);
+    }
+  });
+
+  it('the human-readable ApiError.message is unchanged — only the typed fields are new', async () => {
+    stubRefusal(422, JSON.stringify(DUPLICATE));
+    const error = (await api.createImport().catch((e: unknown) => e)) as ApiError;
+    expect(error.message).toBe('Request failed (422).');
+  });
+
+  it('an HTML-bodied 4xx yields NO reason, NO body and no server message (an edge page is not ISAAC)', async () => {
+    stubRefusal(422, '<!doctype html><title>Sign in</title>', 'text/html; charset=utf-8');
+    const error = (await api.createImport().catch((e: unknown) => e)) as ApiError;
+    expect(error.htmlIntercept).toBe(true);
+    expect(error.reason).toBeUndefined();
+    expect(error.body).toBeUndefined();
+    expect(serverMessageOf(error)).toBeUndefined();
+  });
+
+  it('an unreadable, empty or untyped 4xx body degrades to "not observed", never to a wrong reason', async () => {
+    for (const text of ['not json at all', '{}', JSON.stringify({ detail: 'Unprocessable' }), JSON.stringify({ error: 7, message: 7 })]) {
+      stubRefusal(422, text);
+      const error = (await api.createImport().catch((e: unknown) => e)) as ApiError;
+      expect(error).toBeInstanceOf(ApiError);
+      expect(error.status).toBe(422);
+      expect(error.reason).toBeUndefined();
+      expect(serverMessageOf(error)).toBeUndefined();
+    }
+  });
+
+  it('a 5xx is still left unread (a server fault is not a refusal with a reason)', async () => {
+    stubRefusal(503, JSON.stringify({ error: 'experiment_storage_unavailable', message: 'x' }));
+    const error = (await api.createImport().catch((e: unknown) => e)) as ApiError;
+    expect(error.status).toBe(503);
+    expect(error.reason).toBeUndefined();
+    expect(error.body).toBeUndefined();
+  });
+
+  it('the generic http_error screen says what the server said when it said something', async () => {
+    stubRefusal(422, JSON.stringify(DUPLICATE));
+    const error = (await api.createImport().catch((e: unknown) => e)) as ApiError;
+    const copy = downCopy(error, true);
+    expect(copy.kind).toBe('http_error');
+    expect(copy.lines.join(' ')).toContain(DUPLICATE.message);
   });
 });
 

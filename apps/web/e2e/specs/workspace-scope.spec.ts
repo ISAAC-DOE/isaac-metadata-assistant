@@ -194,8 +194,8 @@ test.describe('@interaction the ordinary workspace', () => {
     await expect(page.getByRole('button', { name: /Reset Worked Example/i })).toHaveCount(0);
     // "Open the Worked Example" navigated to /load from this header and became a
     // dead control when `/demo/run` started requiring a session. It is gone from
-    // here; `/load`'s own "Run the Worked Example" button is a different control
-    // and is asserted separately.
+    // here; `/load`'s own primary control is a different one — "Launch Guided Demo"
+    // outside a session, "Run the Worked Example" inside one — asserted separately.
     await expect(page.getByRole('button', { name: 'Open the Worked Example' })).toHaveCount(0);
   });
 
@@ -352,41 +352,31 @@ test.describe('@interaction the example-workspace operations refuse outside a se
     });
   }
 
-  test('Load Materials keeps the ordinary workspace empty when its example button is pressed', async ({
+  test('Load Materials offers the guided demo, not a run it would refuse, outside a worked example', async ({
     page,
     app,
     request,
   }) => {
     /*
-     * WHAT THIS DELIBERATELY DOES NOT ASSERT, and why the gap is recorded here
-     * rather than pinned as correct.
+     * B-05. This spec used to press "Run the Worked Example" in the ordinary workspace
+     * and assert only that SOMETHING was stated, because the press produced "Backend
+     * Not Running" about a backend that had answered correctly — a gap the old comment
+     * recorded rather than pinned. The gap is closed at its source: outside a
+     * worked-example session the card offers "Launch Guided Demo" and does not offer a
+     * run button at all, so no press is a guaranteed refusal.
      *
-     * `POST /api/demo/run` answers 409 `tutorial_scope_required` outside a
-     * session. `LoadMaterials.startDemo` recognises exactly ONE 409 —
-     * `demo_target_drifted` — and everything else falls through to
-     * `{ name: 'error' }`, which renders `BackendDown`. So pressing this button
-     * in the ordinary workspace currently shows "Backend Not Running" about a
-     * backend that answered correctly and instantly. That is a UI honesty gap
-     * (reported, not fixed here), and a spec that asserted the "Backend Not
-     * Running" text would ratify it — the next person to fix the copy would
-     * then have to delete a passing test to do so.
-     *
-     * What IS asserted is the invariant that must hold whatever the screen says:
-     * the refusal wrote nothing, so the ordinary workspace is still empty.
+     * The invariant that must hold whatever the screen says is unchanged: the
+     * ordinary workspace is still empty. Nothing is pressed here, so nothing could
+     * have written to it — which is exactly the point.
      */
     await app.goto('/load');
-    const run = page.getByRole('button', { name: 'Run the Worked Example' });
-    await expect(run).toBeEnabled();
-    await run.click();
-
-    // Something is stated — the screen does not sit silently as though the
-    // press did nothing. (Which state it is, is the gap described above.)
-    await expect(page.getByRole('alert').first()).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByRole('button', { name: 'Launch Guided Demo' })).toBeEnabled();
+    await expect(page.getByRole('button', { name: 'Run the Worked Example' })).toHaveCount(0);
 
     const after = await request.get(`${API_BASE}/experiments`);
     expect(
       ((await after.json()) as { experiments?: unknown[] }).experiments ?? [],
-      'the refused example run must not have written into the ordinary workspace'
+      'viewing Load Materials must not have written into the ordinary workspace'
     ).toEqual([]);
   });
 });

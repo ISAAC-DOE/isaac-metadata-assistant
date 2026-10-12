@@ -7,7 +7,7 @@ import {
   type ReactNode,
   type RefObject,
 } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { AppShell } from '../components/AppShell';
 import { TopBar } from '../components/TopBar';
 import { LeftNav } from '../components/LeftNav';
@@ -224,6 +224,38 @@ function IncompleteListNote({
  */
 export function ExperimentsHome() {
   const navigate = useNavigate();
+  /*
+   * WHAT A DISCARD LEAVES BEHIND (B-08). `DiscardExperimentPanel` navigates here the
+   * moment the server confirms the removal, which unmounts the dialog that held focus
+   * and the screen that said what happened — so the destination says it instead, once.
+   * The router state is read into component state and then REPLACED away, so a reload,
+   * a Back or a later return to this screen does not repeat a sentence about an act that
+   * is no longer news. Typed narrowing, not a cast: router state is `unknown`, and a
+   * notice is only shown for a payload that actually has the shape this screen wrote.
+   */
+  const location = useLocation();
+  const [discarded] = useState<{ title: string } | null>(() => {
+    const state = location.state as { discarded?: { title?: unknown } } | null;
+    const title = state?.discarded?.title;
+    return typeof title === 'string' ? { title } : null;
+  });
+  /*
+   * THE NOTICE TAKES FOCUS. A `role="status"` node that arrives already holding its text is
+   * not reliably announced, and after the navigation focus sits on `<body>` (the dialog that
+   * held it is gone), so a screen-reader reader heard nothing about the act they had just
+   * confirmed. `tabIndex={-1}` makes it a programmatic target and moving focus here makes the
+   * sentence the first thing read; it is not in the tab order.
+   */
+  const noticeRef = useRef<HTMLParagraphElement>(null);
+  useEffect(() => {
+    if (discarded !== null) noticeRef.current?.focus();
+  }, [discarded]);
+  useEffect(() => {
+    if (discarded !== null) navigate(location.pathname + location.search, { replace: true, state: null });
+    // Run once for the state captured at mount; `navigate`/`location` change identity on
+    // that very replace and must not re-fire it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   /*
    * THE LIST IS KEYED ON THE WORKSPACE SCOPE, and that is a correctness fix rather
    * than an optimisation. `GET /api/experiments` answers about whichever scope the
@@ -650,6 +682,14 @@ export function ExperimentsHome() {
         idle), and `tutorial-flow.test.tsx` does it with a five-record stub.
       */}
       {result.status === 'data' && !queueIsEmpty && <TutorialPromotion />}
+
+      {discarded !== null && (
+        <p className="discard-notice" role="status" tabIndex={-1} ref={noticeRef}>
+          {LABELS.discardDoneBefore}
+          <strong>{discarded.title}</strong>
+          {LABELS.discardDoneAfter}
+        </p>
+      )}
 
       {/*
         THE COMPLETENESS CAVEAT, ABOVE THE THING IT QUALIFIES. Gated on the loaded

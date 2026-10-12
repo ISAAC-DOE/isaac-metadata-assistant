@@ -147,7 +147,7 @@ describe('S4 · summary-first edit of a confirmed field (P28.3)', () => {
     fireEvent.click(screen.getByText('Save'));
 
     // the honest downstream-impact (P28.2) is surfaced from the server response
-    await screen.findByText('Updated 1 field(s); no downstream steps reopened.');
+    await screen.findByText('Updated 1 field; no downstream steps reopened.');
 
     const posts = editPosts();
     expect(posts).toHaveLength(1);

@@ -37,11 +37,15 @@ afterEach(() => {
  * queries the backend — never a dead decorative input.
  */
 describe('P26 · TopBar search affordance is real and functional', () => {
-  it('renders the search landmark, the .topbar-search trigger, and a ⌘K hint', () => {
+  it('renders the search landmark, the .topbar-search trigger, and a shortcut hint', () => {
     const { container, getByText, getByRole } = renderTopBar();
     expect(container.querySelector('[role="search"]')).not.toBeNull();
     expect(container.querySelector('.topbar-search')).not.toBeNull();
-    expect(getByText(/⌘K/)).toBeInTheDocument();
+    // B-A17: the hint names the key this keyboard has — "⌘K" on Apple platforms, "Ctrl K"
+    // elsewhere. This asserted the literal ⌘K, which held only because jsdom reports no
+    // platform and the hint used to be Apple-only on every platform. The Apple and
+    // non-Apple cases are pinned separately in `search-command.test.tsx`.
+    expect(getByText(/^(⌘K|Ctrl K)$/)).toBeInTheDocument();
     expect(getByRole('button', { name: /search/i })).toBeInTheDocument();
   });
 

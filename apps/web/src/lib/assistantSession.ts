@@ -141,7 +141,7 @@ const VERDICT_KEYS = new Set(['draft', 'validate', 'audit', 'export', 'exported'
 
 const HEX_TOKEN_PATTERN = /\b[0-9a-f]{32,}\b/i;
 
-function isUnsafeString(value: string): boolean {
+export function isUnsafeString(value: string): boolean {
   if (value.includes('Bearer ')) return true;
   if (value.startsWith('/') || value.includes('/Users/') || value.includes('\\Users\\')) {
     return true;

@@ -247,7 +247,9 @@ describe('a record that does not exist', () => {
         <AppRoutes />
       </MemoryRouter>,
     );
-    await screen.findByRole('heading', { name: 'Record Not Found' });
+    // `level: 2` (B-23): the page heading (h1) now names the state as well, so the bare
+    // name matches two headings; the panel's own title is the h2.
+    await screen.findByRole('heading', { name: 'Record Not Found', level: 2 });
     // ~~"Record Fields · ISAAC Metadata Assistant"~~ — a false claim about a page
     // showing no fields at all.
     await waitFor(() => expect(document.title).toBe(`Record Not Found · ${APP_TITLE}`));
@@ -275,12 +277,18 @@ describe('a missing record, on each record screen that can be addressed directly
   }
 
   it.each([
-    ['/record/NOPE123', LABELS.screenReview],
-    ['/record/NOPE123/export', LABELS.screenExport],
-    ['/record/NOPE123/complete', LABELS.screenComplete],
+    // B-23 CHANGED THE FIRST ROW'S h1, DELIBERATELY. This table pinned "the sr-only h1 keeps
+    // naming the screen that was ASKED for" on all three screens; for the record screen that
+    // read "Review Record" above a panel reading "Record Not Found", and it is the one heading
+    // a screen reader navigates by. The record screen's h1 now names the state, like its tab
+    // title and breadcrumb already did. Export and Complete keep the older rule (their screens
+    // are outside this change) — which is why the expected h1 is its own column here.
+    ['/record/NOPE123', LABELS.screenReview, 'Record Not Found'],
+    ['/record/NOPE123/export', LABELS.screenExport, LABELS.screenExport],
+    ['/record/NOPE123/complete', LABELS.screenComplete, LABELS.screenComplete],
   ])(
     '%s: the tab and the breadcrumb name the state on screen; no rail and no link to the missing record',
-    async (path, screenLabel) => {
+    async (path, _screenLabel, expectedH1) => {
       stubAll404();
       render(
         <MemoryRouter
@@ -292,9 +300,10 @@ describe('a missing record, on each record screen that can be addressed directly
       );
       await screen.findByRole('heading', { name: 'Record Not Found', level: 2 });
       await waitFor(() => expect(document.title).toBe(`Record Not Found · ${APP_TITLE}`));
-      // The sr-only h1 keeps naming the screen that was ASKED for; the state is the
-      // panel's own h2, the tab title and the breadcrumb.
-      expect(screen.getByRole('heading', { level: 1 }).textContent).toBe(screenLabel);
+      // The sr-only h1 names the screen that was ASKED for (Export, Complete) — except on the
+      // record screen, where it names the state (B-23). The panel's own h2, the tab title and
+      // the breadcrumb name the state everywhere.
+      expect(screen.getByRole('heading', { level: 1 }).textContent).toBe(expectedH1);
       // The breadcrumb leaf names the state — never the screen's own name, and
       // never a link back to a record that does not exist.
       const crumb = document.querySelector('.record-title');

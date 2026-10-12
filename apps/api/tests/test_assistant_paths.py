@@ -77,12 +77,6 @@ def test_shared_case_table(case):
     paths = case["paths"]
     assert ap.classify_validation_paths(paths) == case["locations"]
     assert ap.technical_paths(paths) == case["technical"]
-    assert ap.blocking_summary(paths) == case["summary"]
-
-
-@pytest.mark.parametrize("case", CASES, ids=CASE_IDS)
-def test_no_raw_root_marker_reaches_a_primary_summary(case):
-    assert "$" not in ap.blocking_summary(case["paths"])
 
 
 def test_raw_root_marker_is_preserved_in_the_technical_payload():
@@ -142,9 +136,6 @@ def test_no_bare_root_marker_can_reach_a_label_or_a_summary_for_ANY_locator():
             assert ap.ROOT_MARKER not in loc["label"].split(ap.SEGMENT_SEPARATOR), raw
         else:
             assert loc["label"] in (ap.RECORD_LEVEL_LABEL, ap.UNKNOWN_LOCATION_LABEL), raw
-        assert "$" not in ap.blocking_summary([raw]), raw
-    # and over the whole corpus at once
-    assert "$" not in ap.blocking_summary(GENERATED)
 
 
 def test_a_dollar_segment_is_never_described_as_a_field_location():
@@ -199,12 +190,10 @@ def test_the_sentinel_message_matches_the_literal_routes_py_still_emits():
     assert src.count(ap.VALIDATION_UNAVAILABLE_MESSAGE) >= 2
 
 
-def test_without_the_predicate_the_sentinel_WOULD_read_as_a_validation_issue():
+def test_the_sentinel_is_recognised_as_a_crash_not_a_finding():
     """Documents exactly what IMPORTANT-1 was: run the sentinel through the locator
     formatter alone and the reader is told an issue was found."""
     sentinel = [{"path": "$", "message": ap.VALIDATION_UNAVAILABLE_MESSAGE}]
-    misleading = ap.blocking_summary([e["path"] for e in sentinel])
-    assert misleading == "1 record-level validation issue may be blocking export."
     # …which is why the predicate exists, and why callers must consult it FIRST
     assert ap.is_validation_unavailable(sentinel) is True
 
@@ -218,15 +207,6 @@ def test_the_unavailable_summary_claims_no_count_no_location_and_no_verdict():
     assert aq.has_verdict_language(text) is False
     assert aq._is_unsafe_string(text) is False
     assert not re.search(r"\b\d+\b", text), "no count may be stated for a crash"
-
-
-@pytest.mark.parametrize("case", CASES, ids=CASE_IDS)
-def test_every_summary_passes_the_verdict_guard(case):
-    text = ap.blocking_summary(case["paths"])
-    assert aq.has_verdict_language(text) is False
-    # The summary is also emitted inside an answer body, so it must not trip the
-    # path/secret scrub either (which would neutralize the whole answer).
-    assert aq._is_unsafe_string(text) is False
 
 
 # --- per-locator classification -----------------------------------------------
@@ -266,38 +246,6 @@ def test_reported_locator_is_preserved_byte_for_byte():
     loc = ap.classify_validation_path("  sample.id  ")
     assert loc["technical"] == "  sample.id  "
     assert loc["label"] == "sample → id"
-
-
-# --- summary counts + caps -----------------------------------------------------
-
-
-def test_empty_locator_list_is_the_honest_empty_answer():
-    assert ap.blocking_summary([]) == ap.NO_BLOCKING_ISSUES
-    assert ap.blocking_summary(None) == ap.NO_BLOCKING_ISSUES
-
-
-def test_stated_count_matches_the_locator_count_past_the_display_cap():
-    many = ["a", "b", "c", "d", "e", "f", "g"]
-    text = ap.blocking_summary(many)
-    assert text.startswith("7 validation issues")
-    assert "…and 4 more" in text
-    assert len(ap.technical_paths(many)) == 7
-
-
-def test_all_root_versus_any_non_root_wording():
-    assert ap.blocking_summary(["$", "$", "$"]) == (
-        "3 record-level validation issues may be blocking export."
-    )
-    assert ap.blocking_summary(["$", "$", "assets"]) == (
-        "3 validation issues may be blocking export: the record itself, "
-        "the record itself, assets."
-    )
-
-
-def test_summary_is_hedged_and_never_a_determination():
-    text = ap.blocking_summary(["$", "assets.0.sha256"])
-    assert "may be blocking export" in text
-    assert "valid" not in text.lower().replace("validation", "")
 
 
 # --- shared text helpers -------------------------------------------------------

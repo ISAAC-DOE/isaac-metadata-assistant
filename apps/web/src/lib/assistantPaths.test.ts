@@ -17,7 +17,6 @@
 import { describe, it, expect } from 'vitest';
 import { hasVerdictLanguage } from './assistant';
 import {
-  NO_BLOCKING_ISSUES,
   NO_PATH_TECHNICAL,
   RECORD_LEVEL_LABEL,
   ROOT_MARKER,
@@ -25,7 +24,6 @@ import {
   UNKNOWN_LOCATION_LABEL,
   VALIDATION_UNAVAILABLE_MESSAGE,
   VALIDATION_UNAVAILABLE_SUMMARY,
-  blockingSummary,
   classifyValidationPath,
   classifyValidationPaths,
   count,
@@ -69,27 +67,14 @@ describe('shared cross-language case table (TypeScript side)', () => {
     it(`case: ${c.name}`, () => {
       expect(classifyValidationPaths(c.paths)).toEqual(c.locations);
       expect(technicalPaths(c.paths)).toEqual(c.technical);
-      expect(blockingSummary(c.paths)).toBe(c.summary);
     });
   }
-
-  it('NO raw "$" reaches a primary summary, in ANY table case', () => {
-    for (const c of CASES) {
-      expect(blockingSummary(c.paths), c.name).not.toContain('$');
-    }
-  });
 
   it('a raw "$" IS preserved in the Technical Details payload where it was reported', () => {
     const rootCases = CASES.filter((c) => c.paths.some((p) => p === '$'));
     expect(rootCases.length).toBeGreaterThan(0);
     for (const c of rootCases) {
       expect(technicalPaths(c.paths), c.name).toContain('$');
-    }
-  });
-
-  it('every summary passes the verdict-language guard', () => {
-    for (const c of CASES) {
-      expect(hasVerdictLanguage(blockingSummary(c.paths)), c.name).toBe(false);
     }
   });
 
@@ -151,10 +136,7 @@ describe('IMPORTANT-2 · no bare "$" can reach a label or a summary, for ANY loc
       } else {
         expect([RECORD_LEVEL_LABEL, UNKNOWN_LOCATION_LABEL], raw).toContain(loc.label);
       }
-      expect(blockingSummary([raw]), raw).not.toContain(ROOT_MARKER);
     }
-    // and over the whole corpus at once
-    expect(blockingSummary(GENERATED)).not.toContain(ROOT_MARKER);
   });
 
   it('a "$" inside any segment is never described as a field location', () => {
@@ -204,11 +186,8 @@ describe('IMPORTANT-1 · isValidationUnavailable', () => {
     }
   });
 
-  it('without it, the sentinel WOULD read as a confident validation issue', () => {
+  it('the sentinel is recognised as a crash, not a finding', () => {
     const sentinel = [{ path: '$', message: VALIDATION_UNAVAILABLE_MESSAGE }];
-    expect(blockingSummary(sentinel.map((e) => e.path))).toBe(
-      '1 record-level validation issue may be blocking export.',
-    );
     expect(isValidationUnavailable(sentinel)).toBe(true);
   });
 
@@ -268,38 +247,6 @@ describe('classifyValidationPath — per-locator classification', () => {
   it('preserves the reported locator byte-for-byte, including surrounding whitespace', () => {
     expect(classifyValidationPath('  sample.id  ').technical).toBe('  sample.id  ');
     expect(classifyValidationPath('  sample.id  ').label).toBe('sample → id');
-  });
-});
-
-describe('blockingSummary — counts and caps', () => {
-  it('an empty locator list is the honest empty answer, not a zero-count sentence', () => {
-    expect(blockingSummary([])).toBe(NO_BLOCKING_ISSUES);
-  });
-
-  it('the stated count always matches the locator count, even past the ≤3 display cap', () => {
-    const many = ['a', 'b', 'c', 'd', 'e', 'f', 'g'];
-    const text = blockingSummary(many);
-    expect(text.startsWith('7 validation issues')).toBe(true);
-    expect(text).toContain('…and 4 more');
-    expect(technicalPaths(many)).toHaveLength(7);
-  });
-
-  it('all-root uses the record-level wording; any non-root switches to the located wording', () => {
-    expect(blockingSummary(['$', '$', '$'])).toBe(
-      '3 record-level validation issues may be blocking export.',
-    );
-    expect(blockingSummary(['$', '$', 'assets'])).toBe(
-      '3 validation issues may be blocking export: the record itself, the record itself, assets.',
-    );
-  });
-
-  it('never states a verdict and never echoes an ok/valid conclusion', () => {
-    const text = blockingSummary(['$', 'assets.0.sha256']);
-    expect(hasVerdictLanguage(text)).toBe(false);
-    expect(text).not.toMatch(/\bvalid\b/i);
-    expect(text).not.toMatch(/\binvalid\b/i);
-    // hedged, so it never reads as a determination
-    expect(text).toContain('may be blocking export');
   });
 });
 

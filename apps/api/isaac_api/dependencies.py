@@ -22,6 +22,7 @@ import json
 
 from isaac_records.export import transform
 
+from .assistant_paths import count as _count
 from .workflow import CANONICAL_LABELS, derive_workflow
 from .record_attribution import without_server_stamp
 from .workspace import ExportUnit, without_sibling_links
@@ -299,9 +300,9 @@ def build_invalidation(
     if not changed:
         reason = NO_OP_IDENTICAL_REASON if identical else NO_OP_UNKNOWN_REASON
     elif reopened:
-        reason = f"Updated {len(changed_fields)} field(s); reopened: {_labels(reopened)}."
+        reason = f"Updated {_count(len(changed_fields), 'field')}; reopened: {_labels(reopened)}."
     else:
-        reason = f"Updated {len(changed_fields)} field(s); no downstream steps reopened."
+        reason = f"Updated {_count(len(changed_fields), 'field')}; no downstream steps reopened."
 
     return {
         "changed": changed,
