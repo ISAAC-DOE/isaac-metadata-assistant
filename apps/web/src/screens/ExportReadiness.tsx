@@ -19,6 +19,7 @@ import { RecordActivityNote } from '../components/RecordActivityNote';
 import { needsCanonicalRefetch } from '../lib/recordChanges';
 import { WorkflowProgressBanner } from '../components/WorkflowProgressBanner';
 import { RevisionHistoryPanel } from '../components/RevisionHistoryPanel';
+import { RunArtifactsPanel } from '../components/RunArtifactsPanel';
 import { LoadingPanel, BackendDown } from '../components/FetchStates';
 import { Shield, TriangleAlert, Lock, Play } from '../components/icons';
 import { ROUTES } from '../lib/routes';
@@ -54,8 +55,10 @@ import type {
  * A LAST RESORT, NOT THE COPY. `artifact_refs.reason` is authored server-side and
  * is what renders; this exists only because the contract types `reason` as
  * optional, and a screen that has already established there is no single pair must
- * not fall back to silence. It deliberately does not name a place to find the
- * per-run files, because no read operation lists them yet.
+ * not fall back to silence. ~~It deliberately does not name a place to find the
+ * per-run files, because no read operation lists them yet.~~ — one does now
+ * (`GET .../run-artifacts`, QA audit A-02), and `RunArtifactsPanel` renders it on
+ * this screen; the sentence still names no place, because the list is right below.
  */
 const FAN_OUT_NO_SINGLE_PAIR =
   "This record's runs each export their own official record, so there is no single record file.";
@@ -273,7 +276,18 @@ function LoadedExport({
   const navigate = useNavigate();
   const { detail, pending, validate, audit, warnings, graph, artifacts } = data;
   const [phase, setPhase] = useState<ExportPhase>({ name: 'idle' });
-  const [viewing, setViewing] = useState<null | 'record' | 'sidecar'>(null);
+  /*
+   * WHAT THE ONE DIALOG IS SHOWING — the content travels WITH the request to view it.
+   *
+   * It was `'record' | 'sidecar'` and read the content from the singular pair, which
+   * is right for a record with no runs and impossible for one with several: a fan-out
+   * has no singular pair, so a per-run View had nothing to point at (QA audit A-02).
+   * Carrying the content keeps ONE focus-trapping dialog for both, rather than a
+   * second hand-rolled modal for the run list. `runLabel` names which run it is.
+   */
+  const [viewing, setViewing] = useState<
+    null | { kind: 'record' | 'sidecar'; content: unknown; runLabel?: string }
+  >(null);
   // P27.5 — the optimistic-concurrency token, sent as If-Match on export. Adopted
   // from a successful export and re-synced whenever a silent refetch swaps in a
   // fresh detail (LoadedExport is not remounted on refresh, so this effect keeps
@@ -330,9 +344,12 @@ function LoadedExport({
   // doesn't reliably focus the button first on macOS Safari/Firefox, so
   // document.activeElement alone can land the restore on <body>. Fall back to
   // document.activeElement for any non-click activation path.
-  const openViewer = (kind: 'record' | 'sidecar', trigger?: HTMLElement | null) => {
+  const openViewer = (
+    view: { kind: 'record' | 'sidecar'; content: unknown; runLabel?: string },
+    trigger?: HTMLElement | null,
+  ) => {
     modalTriggerRef.current = trigger ?? (document.activeElement as HTMLElement | null);
-    setViewing(kind);
+    setViewing(view);
   };
   const closeViewer = () => setViewing(null);
 
@@ -560,6 +577,19 @@ function LoadedExport({
   // sidecar card simply omits the path-count badge (ArtifactCard renders
   // nothing when pathCount is undefined) rather than guessing a number.
   const coverageTotal = coverage === 'pending' ? undefined : coverage.total;
+  /*
+   * A-06 — THE CARD ITSELF SAYS ITS FILE IS OLD. Only for the singular pair: a fan-out
+   * is judged per run, in `RunArtifactsPanel`, because "one of N changed" said about
+   * every card would be false of the others. A file that cannot be read is the other
+   * `stale` cause and is not this sentence's claim; it is excluded by `viewArtifacts`,
+   * which is null exactly when either half could not be read (`get_artifacts` forces
+   * `stale` there and serves a null payload). So the note keys on "stale AND both files
+   * read", which is the record having CHANGED, never on the state alone.
+   */
+  const singleStaleNote =
+    !fanOut && detail.artifact.state === 'stale' && viewArtifacts
+      ? 'Written before this record’s later changes — it does not include them.'
+      : undefined;
 
   const download = (content: unknown, filename: string) => {
     const name = filename || 'artifact.json';
@@ -618,7 +648,6 @@ function LoadedExport({
           captureSummary={detail.capture_summary ?? null}
           /* This screen already says "Evidence Trail" about the exported
              sidecar artifact; see the prop's note in `RecordRail`. */
-          showEvidenceTrail={false}
         />
       }
       rightPanel={rightPanel}
@@ -668,14 +697,22 @@ function LoadedExport({
 
       {/* P28.2 — the exported record changed after export (records are immutable):
           surface an honest, non-gating advisory so a stale artifact is never
-          presented as current. Icon + text (not color-only), announced politely. */}
+          presented as current. Icon + text (not color-only), announced politely.
+
+          QA audit A-06 (2026-10-11): the server's reason used to end "regenerate the
+          record (or reset the workspace) to refresh it" — and no regenerate control
+          exists anywhere, by design: an exported file is never rewritten. The reason
+          now states the two facts that are true and offers no remedy, and the heading
+          below says the same thing in its own words. The affected FILES say so too —
+          the artifact cards and the per-run rows — so "Exported" on a card is never
+          the only thing said about a file that no longer matches. */}
       {detail.artifact.state === 'stale' && (
         <div className="artifact-stale-note" role="status">
           <TriangleAlert size={16} strokeWidth={2} aria-hidden="true" />
           <span>
-            <strong>Exported artifact is out of date.</strong>{' '}
+            <strong>The exported file no longer matches this record.</strong>{' '}
             {detail.artifact.reason ??
-              'The record changed after export; the exported artifact no longer reflects the current record.'}
+              'This record has changed since it was exported. The exported file is fixed, so it does not include the later changes.'}
           </span>
         </div>
       )}
@@ -749,14 +786,32 @@ function LoadedExport({
                 <div className="artifact-row">
                   <ArtifactCard
                     artifact={{ kind: 'record', path: recordFilename, verdict: 'pass' }}
-                    onView={viewArtifacts ? (e) => openViewer('record', e.currentTarget) : undefined}
+                    staleNote={singleStaleNote}
+                    onView={
+                      viewArtifacts
+                        ? (e) =>
+                            openViewer(
+                              { kind: 'record', content: viewArtifacts.record },
+                              e.currentTarget,
+                            )
+                        : undefined
+                    }
                     onDownload={
                       viewArtifacts ? () => download(viewArtifacts.record, recordFilename) : undefined
                     }
                   />
                   <ArtifactCard
                     artifact={{ kind: 'sidecar', path: sidecarFilename, pathCount: coverageTotal }}
-                    onView={viewArtifacts ? (e) => openViewer('sidecar', e.currentTarget) : undefined}
+                    staleNote={singleStaleNote}
+                    onView={
+                      viewArtifacts
+                        ? (e) =>
+                            openViewer(
+                              { kind: 'sidecar', content: viewArtifacts.sidecar },
+                              e.currentTarget,
+                            )
+                        : undefined
+                    }
                     onDownload={
                       viewArtifacts ? () => download(viewArtifacts.sidecar, sidecarFilename) : undefined
                     }
@@ -999,6 +1054,26 @@ function LoadedExport({
           directly under the gate, ahead of the advisory card (see above). */}
       {exported && runFindingsNode}
 
+      {/* EXPORTED RUN RECORDS — every exported run's record and sidecar, read back
+          from the files the export wrote, with View and Download, surviving a reload
+          (QA audit A-02). Mounted for every record with runs and OUTSIDE the
+          verdict/gate branches above, because a PARTLY exported record (a run added
+          after export) is on the pre-export branch and its exported runs' files are
+          still real. The panel renders nothing while no run has been exported. */}
+      {detail.run_count > 0 && (
+        <RunArtifactsPanel
+          experimentId={id}
+          /* Re-read whenever the record's version moves (an export, an edit that
+             staled a run) — the list describes files, and which runs have them is a
+             property of the record at a version. */
+          reloadKey={`${detail.version}:${phase.name}`}
+          onView={(kind, content, runLabel, trigger) =>
+            openViewer({ kind, content, runLabel }, trigger)
+          }
+          onDownload={download}
+        />
+      )}
+
       {/* SUBMISSION HISTORY, AND IT IS DELIBERATELY BELOW EXPORT RATHER THAN BESIDE
           IT. Export and submission are different acts and this screen must not blur
           them: exporting writes official records, submitting is a person declaring
@@ -1007,10 +1082,13 @@ function LoadedExport({
           migration has not been applied — which is this one. */}
       <RevisionHistoryPanel experimentId={id} />
 
-      {/* The fan-out success report. It names what was WRITTEN — the export
+      {/* The fan-out success report. ~~It names what was WRITTEN — the export
           response is the only place those filenames exist; no read operation lists
-          them yet — and claims nothing about a singular pair this record does not
-          have. `role="status"`, not `alert`: it is good news. */}
+          them yet~~ — the files are now listed, with View and Download, by
+          `RunArtifactsPanel` above, read back from disk, so this report no longer
+          repeats the filenames in a second list that a reload would lose. It claims
+          nothing about a singular pair this record does not have. `role="status"`,
+          not `alert`: it is good news. */}
       {phase.name === 'fanout' && (
         <section className="preexport-ready" role="status">
           <div className="preexport-ready-head">
@@ -1022,17 +1100,10 @@ function LoadedExport({
           </div>
           <p className="preexport-text">
             Each run exported its own official ISAAC record and evidence sidecar, so this
-            record has no single record file. These are the files that were written.
-            Official records are immutable: written once, never overwritten.
+            record has no single record file. They are listed under Exported Run Records,
+            where each can be viewed or downloaded. Official records are immutable:
+            written once, never overwritten.
           </p>
-          <ul className="preexport-errors mono">
-            {phase.records.map((entry) => (
-              <li key={entry.record_id ?? entry.run_id ?? entry.run_label}>
-                <span className="preexport-error-path">{entry.run_label ?? 'Run'}</span> —{' '}
-                {entry.record_filename} · {entry.sidecar_filename}
-              </li>
-            ))}
-          </ul>
         </section>
       )}
 
@@ -1077,7 +1148,7 @@ function LoadedExport({
         </div>
       )}
 
-      {viewing && viewArtifacts && (
+      {viewing && (
         <div className="artifact-modal-backdrop" onClick={closeViewer}>
           <div
             ref={modalRef}
@@ -1090,8 +1161,11 @@ function LoadedExport({
           >
             <div className="artifact-modal-head">
               <span id={modalTitleId} className="artifact-modal-title">
-                {viewing === 'record' ? LABELS.officialRecord : LABELS.evidenceTrail}
-                {viewing === 'sidecar' && (
+                {viewing.kind === 'record' ? LABELS.officialRecord : LABELS.evidenceTrail}
+                {viewing.runLabel !== undefined && (
+                  <span className="artifact-modal-sub"> · {viewing.runLabel}</span>
+                )}
+                {viewing.kind === 'sidecar' && (
                   <span className="artifact-modal-sub"> · {LABELS.sidecarNotOfficial}</span>
                 )}
               </span>
@@ -1100,11 +1174,7 @@ function LoadedExport({
               </button>
             </div>
             <pre className="artifact-modal-body mono">
-              {JSON.stringify(
-                viewing === 'record' ? viewArtifacts.record : viewArtifacts.sidecar,
-                null,
-                2,
-              )}
+              {JSON.stringify(viewing.content, null, 2)}
             </pre>
           </div>
         </div>

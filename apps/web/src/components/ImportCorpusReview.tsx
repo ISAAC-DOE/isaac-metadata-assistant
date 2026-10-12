@@ -96,10 +96,13 @@ export function CorpusReadOverview({
   review,
   profiles,
   units,
+  archiveNames,
 }: {
   review: Bl15CorpusReview;
   profiles: ApiImportProfile[];
   units: ApiImportUnitRow[];
+  /** The server's names for committed archives (2026-10-12) — shown instead of the id. */
+  archiveNames?: Readonly<Record<string, string>>;
 }) {
   const digest = useMemo(() => corpusDigest(review), [review]);
   const unattached = useMemo(() => unattachedByType(review.relationships), [review]);
@@ -108,8 +111,8 @@ export function CorpusReadOverview({
   return (
     <section className="bl15" aria-labelledby="bl15-heading">
       <h4 className="bl15-heading" id="bl15-heading">
-        {archiveLabel(review.inventory.root_label)}{' '}
-        <HelpTip subject={`the archive ${archiveLabel(review.inventory.root_label)}`}>
+        {archiveLabel(review.inventory.root_label, archiveNames)}{' '}
+        <HelpTip subject={`the archive ${archiveLabel(review.inventory.root_label, archiveNames)}`}>
           Its id: <code>{review.inventory.root_label}</code>
         </HelpTip>
       </h4>

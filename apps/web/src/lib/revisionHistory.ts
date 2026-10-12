@@ -33,9 +33,12 @@
  * is worse than writing a new one.
  */
 
+import { api } from './api';
 import { categoryWord } from './runCompare';
 import { isUnrenderableValue, valueText } from './runOverrides';
+import { healthOnce } from './useHealth';
 import type {
+  ApiHealth,
   ApiHistoryAvailability,
   ApiRevisionActor,
   ApiRevisionHistory,
@@ -210,7 +213,66 @@ export const LIFECYCLE_UNKNOWN_NOTE =
 export function availabilityHeading(availability: ApiHistoryAvailability): string {
   if (availability.state === 'available') return 'Submission history';
   if (availability.state === 'not_applicable') return 'This record has no submission history';
+  /*
+   * B-25 (QA audit, 2026-10-11) — `no_durable_storage` IS CONFIGURATION, NOT A FAILED
+   * READ. The server sends it when this deployment has no application database at all
+   * (`routes._open_reader`), which is the normal state of a filesystem deployment, and
+   * the panel used to head it "could not be read" — the wording for a database that did
+   * not answer. Both are unknowns about the record and both stay `unavailable`; only the
+   * heading changes, to say which kind of absence it is. `tables_absent` and
+   * `database_unavailable` keep the failure heading.
+   */
+  if (availability.reason === 'no_durable_storage') return HISTORY_NOT_KEPT_HEADING;
   return 'Submission history could not be read';
+}
+
+/** The heading for a deployment that keeps no submission history (B-25). */
+export const HISTORY_NOT_KEPT_HEADING = 'This deployment keeps no submission history';
+
+/**
+ * The one line the panel shows when the deployment keeps no submission history and it
+ * therefore did not ask (B-25). It claims nothing about the RECORD — not that it was
+ * never submitted — only what this deployment can do.
+ */
+export const HISTORY_NOT_KEPT_LINE =
+  'This deployment keeps no submission history: it has no application database to record a submission in, so nothing can be submitted here and there is no history to read.';
+
+/**
+ * Does this deployment keep NO submission history at all — by CONFIGURATION?
+ *
+ * B-25 (QA audit, 2026-10-11): `GET .../revisions` answered `503` on every Export
+ * Readiness and Evidence Graph load of a filesystem deployment, logging a console error
+ * and reading "Submission history could not be read". The server is right to answer
+ * `503` (`availability.reason: no_durable_storage`) and that is not weakened here. What
+ * changes is that a client that ALREADY KNOWS the deployment has no application
+ * database does not ask.
+ *
+ * THE SIGNAL IS `experiment_storage.configured === false`, and it is the same fact the
+ * server gates on: `revision_history.reader()` returns no reader exactly when
+ * `experiment_repository._postgres_available` is false, and an unconfigured database
+ * (`PGHOST` unset) is the configuration half of that. A database that IS configured and
+ * failing — `configured: true`, `state: "unavailable"` — is NOT this case: the read is
+ * still made, and its `503` is still shown as the failure it is. An absent health body,
+ * or one without the block, is unknown and also still reads, so nothing that used to
+ * be shown can disappear on an old server.
+ */
+export function historyStoreNotConfigured(health: ApiHealth | undefined): boolean {
+  return health?.experiment_storage?.configured === false;
+}
+
+/** The submission history, or the statement that this deployment keeps none. */
+export type RevisionHistoryRead =
+  | { kept: false }
+  | { kept: true; history: ApiRevisionHistory };
+
+/**
+ * Read the submission history — unless the shared health read says this deployment
+ * keeps none (see {@link historyStoreNotConfigured}), in which case no request is made.
+ * Shared by both screens that read it so the two cannot decide differently.
+ */
+export async function readRevisionHistory(id: string): Promise<RevisionHistoryRead> {
+  if (historyStoreNotConfigured(await healthOnce())) return { kept: false };
+  return { kept: true, history: await api.getRevisionHistory(id) };
 }
 
 /* ── REV-002 · the submitted snapshot versus the record now ────────────────── */

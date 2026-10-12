@@ -46,6 +46,15 @@ export function refetchHealth(): Promise<ApiHealth | undefined> {
   return next;
 }
 
+/**
+ * The SAME shared health read as a promise, for a caller that must decide something
+ * before it issues a request of its own (the submission-history read, B-25). Resolves
+ * to `undefined` on any failure, exactly as the hook does, and adds no second request.
+ */
+export function healthOnce(): Promise<ApiHealth | undefined> {
+  return primeHealth();
+}
+
 /** Test seam: drop the module-level cache so a test can prove a fresh fetch. */
 export function __resetHealthCache(): void {
   cached = null;

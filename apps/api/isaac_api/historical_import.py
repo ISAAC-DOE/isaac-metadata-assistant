@@ -479,13 +479,73 @@ ARCHIVE_FIXTURE_ROOT = ws.REPO_ROOT
 #: contain a separator, the allowlist stops being the boundary. Here the CALLER
 #: only ever supplies a key, and the path is this module's own literal.
 #:
-#: The name is the scientist's handle and says what the corpus is. It
+#: ~~The name is the scientist's handle and says what the corpus is. It
 #: deliberately does not say "fixture" —
 #: ``product-facing-language.test.tsx`` retires that word as product copy, and
-#: this string reaches a screen.
+#: this string reaches a screen.~~ — **CORRECTED 2026-10-12: the KEY is the API's
+#: handle, and the screen shows :data:`ARCHIVE_DISPLAY_NAMES` instead.** The key did
+#: reach a screen, humanised on the client into "Bl15 synthetic mini corpus" — a code
+#: with spaces in it. It still must not say "fixture", because it is on the wire.
+#:
+#: **EVERY PATH HERE MUST ALSO BE COPIED INTO THE IMAGE** (``Dockerfile``, stage 2).
+#: :func:`archive_names` filters by existence, so a path the image lacks is simply not
+#: offered — measured 2026-10-12: the hosted image offered no archive at all, because
+#: none was copied. ``test_hosted_image_imports.py`` parses the Dockerfile and fails
+#: for a key whose path it does not copy.
+#:
+#: The second archive (added 2026-10-12) is the richer, independently reviewed
+#: multi-operator beamtime ``test_historical_semantics.py`` was built over: nine
+#: acquisitions, three invented operators, a systematic rename, a legacy number two
+#: acquisitions share, and the HERFD detector channels in every combination
+#: (``tests/fixtures/bl15/README.md``, the ``semantics/multi_operator_corpus/`` row).
 ARCHIVE_FIXTURES: Mapping[str, str] = {
     "bl15_synthetic_mini_corpus": "tests/fixtures/bl15/gold/mini_corpus",
+    "bl15_synthetic_semantics_corpus": "tests/fixtures/bl15/semantics/multi_operator_corpus",
 }
+
+#: ``archive key -> the name a scientist sees for it``. One per committed archive —
+#: asserted, so a new archive cannot ship with its key as its label. A STAGED archive
+#: has none: its only honest name is its own file name, which the client shows.
+#:
+#: Each says "synthetic" because each is, and the Sources step must not let an
+#: invented beamtime read as a real one; neither says "fixture" or "corpus", which are
+#: this repository's words rather than a scientist's.
+ARCHIVE_DISPLAY_NAMES: Mapping[str, str] = {
+    "bl15_synthetic_mini_corpus": "Example BL15-2 beamtime — small (synthetic)",
+    "bl15_synthetic_semantics_corpus": (
+        "Example BL15-2 beamtime — three operators, conflicts and detector signals "
+        "(synthetic)"
+    ),
+}
+
+
+#: The archive a picker opens on (2026-10-12, review item I3): the multi-operator
+#: beamtime, because it is the one the HOSTED image ships — the mini corpus is withheld
+#: from the image while its notes file waits on the same governance call as
+#: ``tests/fixtures/bl15/notes/``. Published as ``default_archive``.
+DEFAULT_ARCHIVE = "bl15_synthetic_semantics_corpus"
+
+
+def default_archive_name() -> str | None:
+    """:data:`DEFAULT_ARCHIVE` when this build offers it, else the first archive it
+    offers, else ``None`` — never a name the build cannot read."""
+    offered = archive_names()
+    if DEFAULT_ARCHIVE in offered:
+        return DEFAULT_ARCHIVE
+    return offered[0] if offered else None
+
+
+def archive_display_names() -> dict[str, str]:
+    """``key -> display name`` for every COMMITTED archive this build offers.
+
+    Restricted to :func:`archive_names`, so a name is never published for an archive
+    the build cannot read; staged archives are absent by design (see
+    :data:`ARCHIVE_DISPLAY_NAMES`).
+    """
+    offered = set(archive_names())
+    return {
+        name: label for name, label in ARCHIVE_DISPLAY_NAMES.items() if name in offered
+    }
 
 
 def archive_names() -> tuple[str, ...]:
@@ -3307,6 +3367,14 @@ def _extended_context_entries(
                         # reader's own ``evidence_id`` is already derived from the
                         # archive path and the locator, so re-reading the same archive
                         # produces the same ids.
+                        #
+                        # IT IS NO LONGER THE ID THE RECORD KEEPS (2026-10-12). It names the
+                        # member's PATH, so the same files in another container
+                        # (a ZIP nested `outer/inner/`) gave every entry a new one and the
+                        # record's companion doubled. The consumer now stores a CONTENT id
+                        # (`routes._context_content_id`) and matches this spelling too, so a
+                        # record written before is not given every entry again. This id stays
+                        # the SESSION's, where it is stable and unique within one reading.
                         entry_id=item.evidence_id
                         or f"ctx::{item.source_path}::{item.locator}::{item.concept}",
                         # EXPERIMENT-SCOPED HERE, ALWAYS. At read time no run exists —
@@ -4894,6 +4962,10 @@ def session_view(session: ImportSession) -> dict:
         },
         "available_fixtures": list(fixture_names()),
         "available_archives": list(archive_names()),
+        # 2026-10-12: the NAME each committed archive is shown by, so a picker never
+        # renders a key. Staged archives are absent by design.
+        "archive_display_names": archive_display_names(),
+        "default_archive": default_archive_name(),
         # THE DIGEST FIRST, because it is what a scientist reads first. `None`
         # for a bundle with no archive, which is an absence rather than zeroes.
         "corpus_digest": corpus_digest(session),
@@ -5449,3 +5521,467 @@ def candidates_of(session: ImportSession) -> Iterable[SemanticCandidate]:
     if session.reconstruction is None:
         return ()
     return session.reconstruction.candidates
+
+
+
+# --- "Also read from the archive": what the import READ and did not send -------
+#
+# ADDED 2026-10-12. Measured on the multi-operator corpus: after Add to Experiment with
+# one run per measurement, every created run's fields were `{}` and the record's extended
+# context held identifiers only — while the cycling state, the before/after state, the
+# potential, the filter, the medium, the sample token and number, the counting time, the
+# emission energy, the energy grid, the detector columns, the scan command, the element
+# and edge, the calibration, the spectrometer configuration, the operator the notes name
+# and the HERFD channel suggestion existed ONLY in this module's import session, which is
+# not durable (`SESSION_DURABILITY_DISCLOSURE`) and is gone on Discard or restart.
+#
+# `DEC-41` forbids the obvious fix. Most of those concepts have an official field (level
+# 1), a schema extension point (level 2) or a series-condition home (level 3), so placing
+# them in the level-4 companion is exactly the skip `bl15.mapping.check_placement` raises
+# on. So they are kept as what this build already uses for content with no confident
+# field: a NOTE — one per measurement, on that measurement's run, plus record-level notes
+# for what the beamtime states as a whole. A note is inert to export, can never present
+# as a confirmed value (`notes.py` invariant 2), and is the object a scientist proposes a
+# value FROM ("Propose a Value From This Note": a proposal citing the note, awaiting a
+# person) — which is the only way any of this becomes a value, one decision at a time.
+# ~~"the object the existing note review lets a scientist map to a field"~~ — corrected in
+# review (I2): note review's map takes ONE field path for the whole note, so it cannot
+# put one line of a many-line note anywhere.
+#
+# EVERY LINE IS A READING (review item I1). The HERFD selector's suggestion and its
+# element/edge-on-channel assignment were listed by the first version and are not now:
+# they are this build's CONCLUSIONS, and the note is sourced `historical_source_line` —
+# "a line a deterministic parser read" — so a proposal made from it would cite a
+# conclusion as a parsed file reading, which `notes.py`'s definition of that member
+# forbids. A channel a scientist CONFIRMS is a reviewed rule, kept on the experiment when
+# its scope is the experiment or the convention; an unconfirmed suggestion is recomputed
+# from the scans by any re-import.
+
+#: The first line of every such note — what a scientist reads in the notes list.
+READINGS_NOTE_TITLE = "Also read from the archive"
+#: At most this many distinct readings of ONE concept are listed per note. A SPEC header
+#: records ~180 motor positions per acquisition (measured on the real archive), and one
+#: concept must not crowd out every other.
+READINGS_NOTE_MAX_PER_CONCEPT = 8
+#: At most this many reading lines per note.
+READINGS_NOTE_MAX_ROWS = 60
+#: At most this many characters per note body. A JUDGEMENT, not a measurement: ~1/20 of
+#: one note's storable size (`routes._MAX_NOTE_BYTES`, 256 KiB). ~~"stays far inside the
+#: record's own note-document ceiling"~~ — STATED, NOT ASSERTED (review item M4): at the
+#: batch maximum of `routes._MAX_RUNS_PER_IMPORT_BATCH` (200) runs, every note at this cap
+#: is 200 x 12,000 = 2.4 MB of text against `routes._MAX_NOTE_STATE_BYTES` (4 MiB =
+#: 4,194,304 B), about 57% of it before any other note. MEASURED on the committed corpora
+#: (2026-10-12, UTF-8 bytes): run notes 3,159-4,102 B on the semantics corpus and
+#: 2,693-3,312 B on the mini corpus, beamtime notes 560-968 B — so a 94-measurement
+#: beamtime of that shape is ~0.4 MB, about 9% of the ceiling. The cap binds only on an unusually
+#: dense measurement, and the batch's own `_note_capacity_refusal` check still refuses the
+#: WHOLE batch — nothing truncated, nothing evicted — if a record is near its ceiling.
+READINGS_NOTE_MAX_CHARS = 12_000
+
+#: Concepts NEVER carried into such a note, even though they were read.
+#:
+#: ``spec_user_string`` is the one the mapping registry calls "ACTIVELY HARMFUL TO 'FIX'":
+#: a SPEC header's ``#C`` line carries the account string the beamline software ran under,
+#: and the schema's uploader field is server-stamped and requires a verified trust basis no
+#: verifier in this build mints. A value can be proposed FROM a note in one act ("Propose
+#: a Value From This Note"), so copying the account string into a note would put an
+#: attribution candidate one click from the field the trust boundary exists to withhold. It
+#: stays raw source evidence in the extended-context companion, as the registry says.
+#: (It is ALSO excluded by the companion rule below; it is named here as well so that a
+#: change to the companion cannot quietly let it through.)
+READINGS_NOTE_EXCLUDED_CONCEPTS: frozenset[str] = frozenset({"spec_user_string"})
+
+#: Plain labels. The same words the review surface already uses where it has one
+#: (``apps/web/src/lib/bl15ReviewContent.ts`` ``BL15_CONCEPT_LABELS``); a concept with no
+#: entry is humanised (underscores to spaces), never renamed.
+_READING_LABELS: Mapping[str, str] = {
+    "sample_name": "Sample name",
+    "sample_or_electrode_number": "Sample or electrode number",
+    "electrolyte_or_medium": "Electrolyte or medium",
+    "cycling_state": "Cycling state",
+    "before_after_state": "Before / after state",
+    "filter": "Filter",
+    "potential_magnitude": "Potential",
+    "potential_reference_basis": "Potential reference basis",
+    "scan_command": "Scan command",
+    "energy_grid": "Energy grid",
+    "counting_time": "Counting time",
+    "emission_energy": "Emission energy",
+    "detector_column": "Detector column",
+    "acquisition_timestamp": "Acquisition timestamp (instrument clock)",
+    "acquisition_epoch": "Acquisition time (epoch)",
+    "acquisition_method": "Acquisition method",
+    "motor_position": "Motor position",
+    "element": "Element",
+    "absorption_edge": "Absorption edge",
+    "monochromator_calibration": "Monochromator calibration",
+    "spectrometer_configuration": "Spectrometer configuration",
+    "beamsize": "Beam size",
+    "legacy_run_or_file_number": "Legacy run or file number",
+    "contributor_statement": "Named in the notes",
+}
+
+#: The order lines are listed in: what the sample WAS first, then how it was measured,
+#: then instrument state, then people and suggestions. A concept not named here follows,
+#: alphabetically, so nothing is left out for want of a slot.
+_READING_ORDER: tuple[str, ...] = (
+    "sample_name",
+    "sample_or_electrode_number",
+    "electrolyte_or_medium",
+    "cycling_state",
+    "before_after_state",
+    "potential_magnitude",
+    "potential_reference_basis",
+    "filter",
+    "acquisition_method",
+    "scan_command",
+    "energy_grid",
+    "counting_time",
+    "emission_energy",
+    "detector_column",
+    "acquisition_timestamp",
+    "acquisition_epoch",
+    "element",
+    "absorption_edge",
+    "monochromator_calibration",
+    "spectrometer_configuration",
+    "beamsize",
+    "contributor_statement",
+    "motor_position",
+)
+
+
+def _reading_label(concept: str) -> str:
+    label = _READING_LABELS.get(concept)
+    if label is not None:
+        return label
+    if re.fullmatch(r"[a-z][a-z0-9]*(_[a-z0-9]+)*", concept):
+        text = concept.replace("_", " ")
+        return text[:1].upper() + text[1:]
+    return concept
+
+
+def _companion_carries(concept: str) -> bool:
+    """Whether the extended-context companion is this concept's home.
+
+    True for a concept the registry places at level 4 and for one it has not examined —
+    exactly the set :func:`_extended_context_entries` writes into the companion, which
+    the same batch merges onto the record. Such a concept is left OUT of the note: it is
+    already kept, structured, where it belongs (and anything the companion's own tail cap
+    drops is counted there, in ``extended_context_dropped``).
+    """
+    from .bl15 import mapping as mp  # local: keeps import order flexible
+
+    entry = mp.mapping_for(concept)
+    return entry is None or entry.placement_level == mp.PLACEMENT_EXTENDED_CONTEXT
+
+
+def _digest_of_path(reading: "ArchiveReading") -> dict[str, str]:
+    return {
+        row["archive_path"]: row["content_sha256"]
+        for row in reading.manifest
+        if isinstance(row.get("archive_path"), str)
+        and isinstance(row.get("content_sha256"), str)
+        and row.get("content_sha256")
+    }
+
+
+def _candidate_concept(candidate: "SemanticCandidate") -> str | None:
+    for statement in candidate.supporting_statements:
+        if isinstance(statement.get("key"), str):
+            return statement["key"]
+    _head, separator, tail = candidate.candidate_id.rpartition("::")
+    return tail if separator and tail else None
+
+
+def _candidate_rows(
+    candidate: "SemanticCandidate", *, digest_of_path: Mapping[str, str]
+) -> tuple[list[dict], int]:
+    """``(rows, places the session did not keep)`` for one candidate a note lists.
+
+    Rows come from the candidate's supporting statements AND its per-scan ``variation``
+    rows, because a session keeps at most :data:`MAX_STATEMENTS_PER_CANDIDATE`
+    statements per candidate while ``variation`` keeps every scan/item reading of a
+    per-scan concept (measured: a detector-column candidate stores 5 of its 18
+    statements and 12 variation rows). Whatever neither kept is COUNTED, from the
+    candidate's own ``supporting_statement_total``, so the note can say so.
+    """
+    from .bl15 import reconstruct as rc  # local: keeps import order flexible
+
+    concept = _candidate_concept(candidate)
+    if (
+        concept is None
+        or concept in READINGS_NOTE_EXCLUDED_CONCEPTS
+        or _companion_carries(concept)
+    ):
+        return [], 0
+    pairs: list[tuple[str, str]] = []
+    for statement in candidate.supporting_statements:
+        value, locator = statement.get("value"), statement.get("locator")
+        if isinstance(value, str) and isinstance(locator, str):
+            pairs.append((value, locator))
+    for row in candidate.variation:
+        value = row.get("value")
+        if not isinstance(value, str):
+            continue
+        for locator in row.get("locators") or []:
+            if isinstance(locator, str):
+                pairs.append((value, locator))
+    rows: list[dict] = []
+    seen: set[tuple[str, str]] = set()
+    for value, locator in pairs:
+        if (value, locator) in seen:
+            continue
+        seen.add((value, locator))
+        located = rc.split_statement_locator(locator, digest_of_path.keys())
+        path, within = located if located is not None else (None, locator)
+        rows.append(
+            {
+                "concept": concept,
+                "value": value,
+                # VERBATIM — the file and the place in it, exactly as the reader wrote it.
+                "where": locator,
+                "file": (path or "").rsplit("/", 1)[-1],
+                # WHAT MAKES TWO READINGS THE SAME READING: the file's NAME and the bytes
+                # that said it, never the directory a container happened to put it in — the
+                # acquisition identity's own rule (`<stem>@sha256:<digest>`).
+                "basis": [
+                    concept,
+                    value,
+                    (path or "").rsplit("/", 1)[-1],
+                    digest_of_path.get(path or "") or path or "",
+                    within,
+                ],
+            }
+        )
+    total = candidate.supporting_statement_total
+    places = {locator for _value, locator in seen}
+    unkept = max(0, total - len(places)) if isinstance(total, int) else 0
+    return rows, unkept
+
+
+def _person_row(person: Mapping, digest_of_path: Mapping[str, str]) -> dict | None:
+    name, role = person.get("name"), person.get("label")
+    source_path, locator = person.get("source_path"), person.get("locator")
+    if not (isinstance(name, str) and name and isinstance(source_path, str) and isinstance(locator, str)):
+        return None
+    return {
+        "concept": "contributor_statement",
+        # THE ROLE THE NOTES GIVE, in the label rather than glued to the name.
+        "label": f"{role} named in the notes" if isinstance(role, str) and role else None,
+        "value": name,
+        "where": f"{source_path} · {locator}",
+        "file": source_path.rsplit("/", 1)[-1],
+        "basis": [
+            "contributor_statement",
+            name,
+            str(role),
+            source_path.rsplit("/", 1)[-1],
+            digest_of_path.get(source_path) or source_path,
+            locator,
+        ],
+    }
+
+
+def _unit_rows(
+    session: "ImportSession",
+    unit: UnitReading,
+    *,
+    sent_ids: set[str],
+) -> tuple[list[dict], int]:
+    """Every per-measurement reading of ``unit`` a note should list, and how many places
+    the session itself did not keep. See the block above.
+
+    From two places the session holds and the record otherwise does not: the unit's own
+    FIELD candidates that were not sent (a ``run`` candidate — "this measurement exists",
+    a conflict — is structural, not a reading), and the people the beamtime notes name
+    for it. ~~…the element and edge the HERFD selector used, and the selector's own
+    suggestion~~ — withdrawn in review (I1): those are the build's conclusions, not
+    readings; see the block comment above.
+    """
+    reading = session.archive_reading
+    if reading is None:
+        return [], 0
+    digest_of_path = _digest_of_path(reading)
+    by_id = {c.candidate_id: c for c in candidates_of(session)}
+    rows: list[dict] = []
+    unkept = 0
+    for candidate_id in unit.candidate_ids:
+        candidate = by_id.get(candidate_id)
+        if candidate is None or candidate.kind != "field" or candidate_id in sent_ids:
+            continue
+        more, missing = _candidate_rows(candidate, digest_of_path=digest_of_path)
+        rows.extend(more)
+        unkept += missing
+    for person in unit.contributors:
+        row = _person_row(person, digest_of_path)
+        if row is not None:
+            rows.append(row)
+    return rows, unkept
+
+
+def _beamtime_rows(session: "ImportSession", *, sent_ids: set[str]) -> tuple[list[dict], int]:
+    """Readings the archive states for the WHOLE beamtime, not for one measurement."""
+    reading = session.archive_reading
+    if reading is None:
+        return [], 0
+    digest_of_path = _digest_of_path(reading)
+    by_id = {c.candidate_id: c for c in candidates_of(session)}
+    rows: list[dict] = []
+    unkept = 0
+    for candidate_id in reading.shared_candidate_ids:
+        candidate = by_id.get(candidate_id)
+        if candidate is None or candidate.kind != "field" or candidate_id in sent_ids:
+            continue
+        more, missing = _candidate_rows(candidate, digest_of_path=digest_of_path)
+        rows.extend(more)
+        unkept += missing
+    for person in reading.beamtime_contributors:
+        row = _person_row(person, digest_of_path)
+        if row is not None:
+            rows.append(row)
+    return rows, unkept
+
+
+def _order_key(concept: str) -> tuple[int, str]:
+    try:
+        return (_READING_ORDER.index(concept), concept)
+    except ValueError:
+        return (len(_READING_ORDER), concept)
+
+
+def _readings_note(heading: str, lead: str, rows: Sequence[dict], unkept: int = 0) -> dict | None:
+    """The note text for ``rows``, bounded, plus what its exactly-once key is built from.
+
+    Returns ``None`` when there is nothing to list. Otherwise ``{"text", "identity",
+    "listed", "not_listed", "places_not_kept"}``: ``identity`` is the canonical form of
+    EVERY row's basis — listed or not — so a reading that changed is a different note
+    even when it falls past the cap. It is a string and NOT a digest: this module computes
+    no digest anywhere (``test_the_module_computes_no_digest_anywhere``), so the route
+    hashes it into the note's key (``routes._readings_note_key``).
+
+    One line per DISTINCT value of a concept, naming the first place it was written and
+    how many other places said the same; at most :data:`READINGS_NOTE_MAX_PER_CONCEPT`
+    values per concept, :data:`READINGS_NOTE_MAX_ROWS` lines and
+    :data:`READINGS_NOTE_MAX_CHARS` characters. Whatever is left out is COUNTED in the
+    note itself, never silently dropped — and so are the places the import's own session
+    never kept (``unkept``), which are a different fact and are said separately.
+
+    A value written over several lines (a README section) keeps its line breaks; each
+    continuation line is indented two spaces so the list stays a list. Nothing else in a
+    value is changed.
+    """
+    if not rows:
+        return None
+    identity = json.dumps(sorted(row["basis"] for row in rows), ensure_ascii=False)
+    grouped: dict[tuple[str, str], dict[str, dict]] = {}
+    for row in rows:
+        label = row.get("label") or _reading_label(row["concept"])
+        by_value = grouped.setdefault((row["concept"], label), {})
+        entry = by_value.get(row["value"])
+        if entry is None:
+            by_value[row["value"]] = {"where": row["where"], "places": {row["where"]}}
+        else:
+            entry["places"].add(row["where"])
+    lines: list[str] = []
+    not_listed = 0
+    for concept, label in sorted(grouped, key=lambda key: (_order_key(key[0]), key[1])):
+        values = grouped[(concept, label)]
+        for index, (value, entry) in enumerate(values.items()):
+            if index >= READINGS_NOTE_MAX_PER_CONCEPT or len(lines) >= READINGS_NOTE_MAX_ROWS:
+                not_listed += 1
+                continue
+            others = len(entry["places"]) - 1
+            shown = value.replace("\n", "\n  ")
+            line = f"- {label}: {shown} — {entry['where']}"
+            if others:
+                line += f" (and {others} other place{'s' if others != 1 else ''})"
+            lines.append(line)
+    header = f"{READINGS_NOTE_TITLE}{heading}\n\n{lead}\n"
+    body: list[str] = []
+    used = len(header)
+    for position, line in enumerate(lines):
+        # A RESERVE for the closing sentences, so the cap never cuts a disclosure.
+        if used + len(line) + 1 > READINGS_NOTE_MAX_CHARS - 600:
+            not_listed += len(lines) - position
+            break
+        body.append(line)
+        used += len(line) + 1
+    text = header + "\n" + "\n".join(body)
+    if not_listed:
+        text += (
+            f"\n\n{not_listed} more reading{'s are' if not_listed != 1 else ' is'} not listed "
+            f"here: one note lists at most {READINGS_NOTE_MAX_PER_CONCEPT} values of one kind "
+            f"and {READINGS_NOTE_MAX_ROWS} lines in all. The import's own review shows "
+            "every reading for as long as that import is kept."
+        )
+    if unkept:
+        text += (
+            f"\n\nThe import itself kept only the first {MAX_STATEMENTS_PER_CANDIDATE} "
+            f"places some of these values were written, so {unkept} further "
+            f"place{'s are' if unkept != 1 else ' is'} not in this note either."
+        )
+    return {
+        "text": text,
+        "identity": identity,
+        "listed": len(body),
+        "not_listed": not_listed,
+        "places_not_kept": unkept,
+    }
+
+
+#: What every such note says about itself, after its heading.
+#: ~~"read from this measurement's own files"~~ — corrected in review (I1): the operator
+#: line is read from the beamtime NOTES file, about this measurement. ~~"To use a line, map
+#: it to a field in note review"~~ — corrected (I2): that map takes one field for the whole
+#: note; the per-value act is "Propose a Value From This Note".
+_READINGS_USE = (
+    "To use one of these values, choose Propose a Value From This Note: the proposal "
+    "cites this note and waits for a person's decision."
+)
+_READINGS_LEAD_UNIT = (
+    "What this import read about this measurement and did not send as a proposal: each "
+    "value exactly as the source wrote it, and the file and place it was written. This "
+    "is a note — nothing in it is a field value, and nothing in it changes this run. "
+    + _READINGS_USE
+)
+_READINGS_LEAD_BEAMTIME = (
+    "What this import read about the beamtime as a whole — not about any one "
+    "measurement — and did not send as a proposal: each value exactly as the source "
+    "wrote it, and the file and place it was written. This is a note — nothing in it is "
+    "a field value, and nothing in it changes this record. " + _READINGS_USE
+)
+
+
+def unit_readings_note(
+    session: "ImportSession", unit: UnitReading, *, sent_ids: set[str]
+) -> dict | None:
+    """The "Also read from the archive" note for ONE measurement's run, or ``None``."""
+    rows, unkept = _unit_rows(session, unit, sent_ids=sent_ids)
+    return _readings_note(f"\nMeasurement: {unit.stem}", _READINGS_LEAD_UNIT, rows, unkept)
+
+
+def beamtime_readings_notes(session: "ImportSession", *, sent_ids: set[str]) -> list[dict]:
+    """The record-level notes for what the archive states about the whole beamtime.
+
+    **ONE NOTE PER SOURCE FILE**, each headed with that file's name, rather than one note
+    for the whole beamtime — and the reason is measured rather than tidy. The same files
+    staged as a ZIP nested ``outer/inner/`` leave the README one folder down, where the
+    shared-README reader does not look, so that reading states no element, calibration or
+    spectrometer at all (200 candidates become 197). One combined note would then be a
+    DIFFERENT note — a second, shorter copy of the first. Per file, the method macro's
+    note is the same note in both layouts and the README's is simply not produced again.
+    Each dict is :func:`_readings_note`'s, plus ``file``.
+    """
+    rows, unkept = _beamtime_rows(session, sent_ids=sent_ids)
+    by_file: dict[str, list[dict]] = {}
+    for row in rows:
+        by_file.setdefault(row.get("file") or "", []).append(row)
+    out: list[dict] = []
+    for name in sorted(by_file):
+        heading = f" — the whole beamtime, from {name}" if name else " — the whole beamtime"
+        # The places the session did not keep are counted once, on the first note.
+        note = _readings_note(heading, _READINGS_LEAD_BEAMTIME, by_file[name], unkept if not out else 0)
+        if note is not None:
+            out.append({**note, "file": name})
+    return out

@@ -42,7 +42,8 @@ import {
   primarySourceFile,
   provenanceFor,
 } from '../lib/adapt';
-import type { EvidenceBundle } from '../lib/types';
+import type { ApiRevisionHistory, EvidenceBundle } from '../lib/types';
+import { readRevisionHistory } from '../lib/revisionHistory';
 
 /**
  * S5 · Evidence & File Preview — "where did this come from?" answered in-app,
@@ -722,11 +723,26 @@ function EvidenceGraphView({
   const notes = useVersionedSubFetch(() => api.listNotes(id), [id], detail.version);
   const provenance = useVersionedSubFetch(() => api.getProvenance(id), [id], detail.version);
   const assets = useVersionedSubFetch(() => api.listAssets(id), [id], detail.version);
-  const revisions = useVersionedSubFetch(
-    () => api.getRevisionHistory(id),
+  /*
+   * B-25 (QA audit, 2026-10-11) — THROUGH `readRevisionHistory`, which makes NO request
+   * when the shared health read says this deployment keeps no submission history, so a
+   * filesystem deployment no longer logs a `503` on every graph mount. A deployment that
+   * keeps one reads exactly as before, and a real read failure still reaches the panel
+   * as the failure it is. "Keeps none" is handed to the graph as NO revision source at
+   * all (`undefined`) — the graph then draws and claims nothing about revisions, which is
+   * the truth about a deployment that cannot hold any.
+   */
+  const revisionsRead = useVersionedSubFetch(
+    () => readRevisionHistory(id),
     [id],
     detail.version,
   );
+  const revisions = useMemo<EvidenceSubFetch<ApiRevisionHistory> | undefined>(() => {
+    if (revisionsRead.state !== 'data') return revisionsRead;
+    return revisionsRead.data.kept
+      ? { state: 'data', data: revisionsRead.data.history }
+      : undefined;
+  }, [revisionsRead]);
 
   /*
    * TWO VERSIONS, AND CONFLATING THEM IS WHAT LEFT THE HEADLINE FALSE.
