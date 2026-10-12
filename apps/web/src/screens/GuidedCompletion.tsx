@@ -2,12 +2,13 @@ import './screens.css';
 import '../components/assistant.css';
 import { useEffect, useMemo, useState, useRef, type MutableRefObject } from 'react';
 import type { ReactNode } from 'react';
-import { Navigate, useNavigate, useParams } from 'react-router-dom';
+import { Link, Navigate, useNavigate, useParams } from 'react-router-dom';
 import { AppShell } from '../components/AppShell';
 import { TopBar } from '../components/TopBar';
 import { RecordRail } from '../components/RecordRail';
 import { StatusBar } from '../components/StatusBar';
 import { GuidedPrompt } from '../components/GuidedPrompt';
+import { ConfirmedAnswersPanel } from '../components/ConfirmedAnswersPanel';
 import { StatusChip } from '../components/StatusChip';
 import { AssistantPanel } from '../components/AssistantPanel';
 import { AssistantDrawer } from '../components/AssistantDrawer';
@@ -18,7 +19,8 @@ import { Check, CircleHelp, Pencil } from '../components/icons';
 import { LABELS } from '../lib/labels';
 import { ROUTES } from '../lib/routes';
 import { api, ApiError, primaryReadWins } from '../lib/api';
-import { isUnstorableFieldValue } from '../lib/mutationErrors';
+import { isUnstorableFieldValue, officialShapeMismatch } from '../lib/mutationErrors';
+import { ShapeMismatchNotice } from '../components/ShapeMismatchNotice';
 import { compose } from '../lib/assistantComposer';
 import { useFetch } from '../lib/useFetch';
 import { useRecordSession } from '../lib/useRecordSession';
@@ -469,6 +471,18 @@ function LoadedCompletion({
   // and re-adopted from every accepted answer response; sent as If-Match on the
   // next submit so a concurrent edit elsewhere is caught (412) instead of clobbered.
   const [currentVersion, setCurrentVersion] = useState(detail.version);
+  /*
+   * THE SERVER'S DERIVED WORKFLOW, ADOPTED FROM EVERY WRITE (QA audit A-07, 2026-10-11).
+   *
+   * The rail's spine and the progress banner read `detail.workflow` — the value from the
+   * parent's LAST LOAD. Every answer and correction response carries the workflow the
+   * server re-derived after the write (`_workflow_for`), and this screen ignored it, so
+   * answering the last open question left the spine saying "Complete Metadata — Current
+   * requirement" with every later step locked until a reload. It is adopted, never
+   * re-derived here: `workflow.py::derive_workflow` is the one definition, and the
+   * response is the server's own statement of it at the post-write revision.
+   */
+  const [workflow, setWorkflow] = useState(detail.workflow);
 
   // P27.6 — this surface holds STAGED, unsent input (the GuidedPrompt field), so
   // a change signal must NOT auto-refetch (that would discard the input) and must
@@ -604,6 +618,7 @@ function LoadedCompletion({
         // re-clicking is an inconvenience. The screen takes the inconvenience.
         adoptServerPending(resp);
         setCurrentVersion(resp.version); // adopt the fresh token for the next submit
+        if (resp.workflow) setWorkflow(resp.workflow); // A-07 — the server's re-derivation
         if (answerWasApplied(resp, blocker.key)) {
           // APPLIED, so the staged copy has done its job. Kept only until the record
           // holds the value: leaving it would re-offer a value the record already has
@@ -703,6 +718,7 @@ function LoadedCompletion({
       .then((token) => api.editField(id, { [blocker.id]: value }, token, blocker.runId))
       .then((resp) => {
         setCurrentVersion(resp.version);
+        if (resp.workflow) setWorkflow(resp.workflow); // A-07, as on the answer path
         // The window AND the record's total, and the paged-in depth resets here too —
         // see the note on the answer path above, and `adoptServerPending`.
         adoptServerPending(resp);
@@ -988,7 +1004,7 @@ function LoadedCompletion({
       sidebar={
         <RecordRail
           recordId={id}
-          workflow={detail.workflow}
+          workflow={workflow}
           activeView={null}
           captureSummary={detail.capture_summary ?? null}
         />
@@ -1031,11 +1047,9 @@ function LoadedCompletion({
         holdsUnsentInput
       />
       <LiveSyncNote degraded={degraded || session.feedDegraded} onRefresh={reload} />
-      <WorkflowProgressBanner
-        workflow={detail.workflow}
-        recordId={id}
-        pendingCount={detail.pending_count}
-      />
+      {/* A-07 — the adopted workflow and the record's CURRENT open count, both of
+          which move on every write; `detail` is the load before them. */}
+      <WorkflowProgressBanner workflow={workflow} recordId={id} pendingCount={pendingTotal} />
     </>
   );
 
@@ -1059,6 +1073,10 @@ function LoadedCompletion({
             Refresh
           </button>
         </div>
+      ) : officialShapeMismatch(editError) ? (
+        /* A-03 — the official schema's own rule for this field refused the value; each
+           failing record path is shown with the schema's message VERBATIM. */
+        <ShapeMismatchNotice {...officialShapeMismatch(editError)!} correcting />
       ) : isUnstorableFieldValue(editError) ? (
         /*
          * A VALUE THE RECORD CANNOT STORE, and the reason this branch exists rather
@@ -1258,10 +1276,14 @@ function LoadedCompletion({
             found this while writing a test whose fixture omitted `artifact`: the
             product crashed on the fixture instead of the test failing on the product,
             which is the wrong way round for a defect to surface. */}
+        {/* ~~"…records are immutable, so regenerate (or reset the workspace) to refresh
+            it."~~ — QA audit A-06: no regenerate control exists, by design, and the
+            reset does not touch a scientist's own record. The sentence now says what
+            is true and offers no remedy, because there is none. */}
         {editImpact.artifact?.state === 'stale' && (
           <p className="edit-impact-note">
-            The exported record is now out of date — records are immutable, so regenerate (or reset
-            the workspace) to refresh it.
+            The exported file no longer matches this record. It is fixed — official records
+            are written once and never rewritten — so it does not include this change.
           </p>
         )}
       </div>
@@ -1292,6 +1314,39 @@ function LoadedCompletion({
         {answeredRows}
         {editImpactNote}
         {answerNotAppliedNote}
+        {/*
+          A-01 / A-04 (QA audit, 2026-10-11) — THE DEAD LOOP, CLOSED HERE.
+
+          `answeredRows` is THIS VISIT's answers, held in component state, so a reader
+          who arrives with nothing open — after a reload, or sent back by Export
+          Readiness's "Back to Complete →" because a confirmed spectrum would not
+          validate — saw "No open questions." and nothing to act on, and the export
+          screen sent them straight back. The confirmed reduced spectrum, QC verdict and
+          descriptor are now READ FROM THE RECORD and correctable through the existing
+          correction operation, so the loop has an exit.
+
+          WHEN THIS VISIT ANSWERED SOMETHING, its rows above already carry Edit, and
+          rendering the durable panel too would put two editors for one field a few
+          lines apart — so this screen points to the record screen, where the same
+          panel lists every confirmed answer, earlier ones included.
+        */}
+        {answered.length === 0 ? (
+          <ConfirmedAnswersPanel
+            experimentId={id}
+            onCorrected={(resp) => {
+              setCurrentVersion(resp.version);
+              if (resp.workflow) setWorkflow(resp.workflow);
+              if (resp.invalidation?.changed) setEditImpact(resp.invalidation);
+            }}
+          />
+        ) : (
+          <p className="completion-done-text confirmed-elsewhere">
+            Every confirmed answer on this record, including any from an earlier visit, is
+            listed under Confirmed Answers on the{' '}
+            <Link to={ROUTES.record(id)}>{LABELS.workspaceFields}</Link> screen, where each
+            can be corrected.
+          </p>
+        )}
         {/* F4, second site on this screen. The title read "This record is ready to
             export." — the same claim the footer below it was corrected for, from the
             same basis (`remaining === 0`), and it renders SIMULTANEOUSLY with that
@@ -1608,6 +1663,10 @@ function LoadedCompletion({
                 Refresh
               </button>
             </div>
+          ) : officialShapeMismatch(submitError) ? (
+            /* A-03 — the answering half of the same refusal: the question stays open,
+               and the parts the official schema refused are named with its own words. */
+            <ShapeMismatchNotice {...officialShapeMismatch(submitError)!} correcting={false} />
           ) : isUnstorableFieldValue(submitError) ? (
             /*
              * A VALUE THE RECORD CANNOT STORE, ON THE ANSWERING PATH. The mirror of the

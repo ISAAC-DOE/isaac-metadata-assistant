@@ -1,0 +1,121 @@
+/*
+ * Exported Run Records (QA audit A-02/A-06) — one row per exported run, each with
+ * its official record and its evidence sidecar as two halves. Tokens only: every
+ * size, weight and gap is a declared scale step (`type-scale-and-spacing.test.ts`),
+ * and every colour a declared custom property (`palette-contrast.test.ts`).
+ */
+.run-artifacts {
+  margin-top: var(--space-lg);
+}
+.run-artifacts-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-sm) var(--space-md);
+}
+.run-artifacts-title {
+  font-size: var(--font-size-heading-sm);
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-heading);
+  margin: 0;
+}
+.run-artifacts-count {
+  font-size: var(--font-size-meta);
+  color: var(--text-muted);
+}
+.run-artifacts-lead {
+  margin: var(--space-xs) 0 var(--space-md);
+  font-size: var(--font-size-body);
+  line-height: var(--line-height-normal);
+  color: var(--text-secondary);
+}
+.run-artifacts-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+.run-artifact {
+  padding: var(--space-md) var(--space-lg);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-inner);
+}
+.run-artifact[data-state='stale'] {
+  border-color: var(--advisory-border);
+}
+.run-artifact-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-sm);
+}
+.run-artifact-label {
+  font-size: var(--font-size-body);
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-strong);
+}
+.run-artifact-changed {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+  padding: var(--space-2xs) var(--space-sm);
+  border-radius: var(--radius-pill);
+  background: var(--advisory-bg);
+  border: 1px solid var(--advisory-border);
+  color: var(--advisory-text);
+  font-size: var(--font-size-meta);
+  font-weight: var(--font-weight-semibold);
+}
+.run-artifact-reason {
+  margin: var(--space-xs) 0 0;
+  font-size: var(--font-size-meta);
+  line-height: var(--line-height-normal);
+  color: var(--text-secondary);
+}
+.run-artifact-half {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-xs) var(--space-md);
+  margin-top: var(--space-sm);
+  min-width: 0;
+}
+.run-artifact-half-label {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+  font-size: var(--font-size-meta);
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-secondary);
+  min-width: 0;
+}
+.run-artifact-file {
+  font-size: var(--font-size-meta);
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+.run-artifact-unreadable {
+  font-size: var(--font-size-meta);
+  color: var(--advisory-text);
+}
+.run-artifact-actions {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: var(--space-sm);
+  margin-left: auto;
+}
+.run-artifacts-more {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-md);
+  margin-top: var(--space-md);
+}
+.run-artifacts-more-note {
+  font-size: var(--font-size-meta);
+  color: var(--text-muted);
+}

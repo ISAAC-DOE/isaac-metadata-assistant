@@ -36,8 +36,10 @@ import {
  * The two controls are shaped differently because the two values are. A descriptor is
  * a handful of named scalars a person genuinely knows and can type. A reduced spectrum
  * is thousands of points that come out of a pipeline; nobody types one, so the honest
- * control is a place to put the reduction product's own JSON, validated against the
- * same shape rule the server applies rather than against a second copy of it.
+ * control is a place to put the reduction product's own JSON, ~~validated against the
+ * same shape rule the server applies rather than against a second copy of it~~ — pre-
+ * checked here for JSON and `series_id` only, and checked on the server against the
+ * official schema's own rule for the field (QA audit A-03; see `SERIES_CHECK_NOTE`).
  */
 
 /**
@@ -124,13 +126,17 @@ export function seriesShapeError(parsed: unknown): string | null {
    * left to official validation at export, and for the measurement that
    * narrowed this from all three.
    *
-   * The ASYMMETRY BEHIND IT IS NOT CLOSED and is named rather than implied:
+   * ~~The ASYMMETRY BEHIND IT IS NOT CLOSED and is named rather than implied:
    * `src/isaac_records/complete.py:239-240` skips evidence for a series with no
    * `series_id` (`if series_id is None: continue`) and accepts the answer, while
    * `draft_validator.py:592` makes the same absence an export error. An API
-   * caller can still reach that. Closing it belongs in the truth path, which
-   * `CLAUDE.md` section 13 puts behind its own slice and its own review; this
-   * closes the path a scientist can actually type into.
+   * caller can still reach that.~~ — CLOSED AT THE ROUTE, 2026-10-11 (QA audit
+   * A-03), without touching the truth path: every answering and correcting route
+   * now checks a series against the official schema's own rule for
+   * `measurement.series` (`isaac_api.official_shape`), which requires
+   * `series_id`, so an API caller is refused with `422 official_shape_mismatch`
+   * too. `complete.py` is unchanged and still tolerates the absence for any
+   * caller of the core that is not a route.
    */
   const missing = new Map<string, string[]>();
   for (const item of parsed as Record<string, unknown>[]) {
@@ -486,6 +492,39 @@ export function DescriptorForm({ value, onChange, idPrefix }: DescriptorFormProp
   );
 }
 
+/**
+ * The Series JSON box's placeholder — VALID JSON, and visibly an example SHAPE.
+ *
+ * ~~`[{"series_id": "averaged_spectrum", "independent_variables": [...]}]`~~ — QA audit
+ * A-03 (2026-10-11): that placeholder was not JSON at all (`[...]` is not a value), so a
+ * reader who copied its shape to start from was refused by `JSON.parse` before anything
+ * else, and it named a plausible real id (`averaged_spectrum`) that could be mistaken
+ * for data. This one parses (pinned by `structured-value-entry.test.tsx`), carries every
+ * key the official schema REQUIRES on a series item and on its variables and channels,
+ * and holds no number at all: every name is an `<angle-bracketed>` stand-in and every
+ * `values` list is empty, so nothing in it can pass for a measurement. `primary_signal`
+ * is one of the schema's own closed `role` values, shown as one.
+ */
+export const SERIES_PLACEHOLDER =
+  '[{"series_id": "<series id>", "independent_variables": [{"name": "<variable>", "unit": "<unit>", "values": []}], "channels": [{"name": "<channel>", "unit": "<unit>", "role": "primary_signal", "values": []}]}]';
+
+/**
+ * What the Series JSON box says about where the shape is checked — and it has to be
+ * TRUE, which the old sentence was not.
+ *
+ * ~~"The shape is checked here and again on the server; the values themselves are
+ * never inspected or altered."~~ — QA audit A-03: `[{"series_id": "x"}]` passed both
+ * checks and failed only at export. The client checks JSON and `series_id`
+ * (`seriesShapeError`) — deliberately narrower than the schema, see
+ * `SERIES_REQUIRED_KEYS` — and the server now checks the whole value against the official
+ * schema's own rule for `measurement.series` when the answer is confirmed, refusing with
+ * the failing paths and the schema's messages. This sentence says exactly that, and no
+ * more: there is no lightweight way to mirror the full schema here without adding a
+ * dependency, so the copy names which check happens where instead of implying parity.
+ */
+export const SERIES_CHECK_NOTE =
+  'This box checks that the text is JSON and that every series has a series_id. When you confirm, the server checks the whole value against the official ISAAC schema’s rule for a series and names any part that does not fit. The values themselves are never altered.';
+
 interface SeriesEntryProps {
   text: string;
   onChange: (next: string) => void;
@@ -514,7 +553,7 @@ export function SeriesEntry({ text, onChange, idPrefix }: SeriesEntryProps) {
           value={text}
           onBlur={() => setTouched(true)}
           onChange={(e) => onChange(e.target.value)}
-          placeholder={'[{"series_id": "averaged_spectrum", "independent_variables": [...]}]'}
+          placeholder={SERIES_PLACEHOLDER}
           aria-describedby={`${idPrefix}-series-status`}
         />
       </label>
@@ -523,8 +562,7 @@ export function SeriesEntry({ text, onChange, idPrefix }: SeriesEntryProps) {
         className={error ? 'structured-entry-error' : 'structured-entry-note'}
         role={error && touched ? 'alert' : undefined}
       >
-        {error ??
-          'The shape is checked here and again on the server; the values themselves are never inspected or altered.'}
+        {error ?? SERIES_CHECK_NOTE}
       </p>
       {/*
         ── THE SLOT FOR CONDITIONS THE FIVE QUESTIONS DO NOT ASK ABOUT ───────

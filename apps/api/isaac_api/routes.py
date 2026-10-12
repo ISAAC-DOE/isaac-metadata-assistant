@@ -71,6 +71,7 @@ from . import identity as identity_module
 from . import memory
 from . import memory_graph
 from . import notes
+from . import official_shape
 from . import proposals
 from . import provenance
 from . import revision_history
@@ -1511,10 +1512,22 @@ def _summary(
 #: here yet"). Found while rendering this string on the export screen, where a false
 #: instruction becomes a visible dead end. The export response's ``records[]`` is the
 #: one place the per-run filenames exist, and the sentence now says only that.
+#:
+#: ~~"The export response lists each run's record and sidecar filename; no read
+#: operation lists them yet."~~ — **STRUCK 2026-10-11 (QA audit A-02): a read operation
+#: lists them now**, `GET .../run-artifacts`, with each run's record and sidecar content
+#: and its own freshness. The sentence was true when written and became the reason the
+#: export screen could not offer View or Download after a reload.
+#:
+#: THE REPLACEMENT NAMES NO ROUTE, deliberately. This string is served to API callers AND
+#: rendered verbatim to scientists — on the export screen and appended to the Record Info
+#: rows (`recordIdentity.recordInfoRows`) — so a URL template here would put backend path
+#: vocabulary on a product screen. "Listed per run" is true on both: the export screen
+#: lists them, and the artifacts operation's own description names the read that does.
 FAN_OUT_ARTIFACT_REASON = (
     "This record's runs each export their own official record, so there is no "
-    "single record file. The export response lists each run's record and sidecar "
-    "filename; no read operation lists them yet."
+    "single record file. Each exported run's record and evidence sidecar are listed "
+    "per run."
 )
 
 
@@ -6260,6 +6273,142 @@ def _refuse_unstorable_answer(
     )
 
 
+#: How much of each schema message a refusal carries.
+#:
+#: A BOUND ON A RESPONSE, NOT ON WHAT WAS CHECKED. jsonschema's message for a type error
+#: QUOTES THE INSTANCE (``{…} is not of type 'array'``), so one finding about a large
+#: object can be as large as the object. A message cut short is flagged with
+#: ``message_truncated: true`` beside its verbatim HEAD — the text is never paraphrased,
+#: only ended early, and the flag says so. HOW MANY findings are collected at all is
+#: bounded where they are produced (``official_shape.FINDINGS_LIMIT``), because bounding
+#: only the response was measured costing gigabytes — see ``official_shape.shape_findings``.
+_SHAPE_MESSAGE_MAX = 600
+
+
+def _bounded_shape_findings(findings: list[dict]) -> list[dict]:
+    out = []
+    for finding in findings:
+        message = finding["message"]
+        entry = {"key": finding["key"], "path": finding["path"], "message": message}
+        if len(message) > _SHAPE_MESSAGE_MAX:
+            entry["message"] = message[:_SHAPE_MESSAGE_MAX]
+            entry["message_truncated"] = True
+        out.append(entry)
+    return out
+
+
+class _ShapeCheck(NamedTuple):
+    """The official-shape findings for one request body, computed BEFORE the record lock."""
+
+    findings: list
+    more: bool
+
+
+def _official_shape_check_before_the_lock(body: object) -> _ShapeCheck:
+    """Run the official-shape check on a request body WITHOUT holding the record lock.
+
+    **IT DEPENDS ONLY ON THE SUBMITTED VALUE**, so there is no reason for it to hold the
+    per-record lock that serialises every other write to the record — and an independent
+    review measured why it must not: a large spectrum is validated in time proportional to
+    its size, and inside the lock that time is time every other writer of the record
+    waits. So the four write paths compute this first and only CONSULT the result at the
+    refusal's position inside the lock, which keeps every refusal's ORDER exactly as it
+    was: a value the coarse screens refuse is still refused by them, by the same code, and
+    this result is never reported for it.
+
+    Only a value the coarse storability guard would ADMIT is checked
+    (``_correction_is_storable`` — size, depth, renderability and JSON type, all pure
+    functions of the value), so a value that one of those refusals will answer for never
+    reaches ``jsonschema`` at all — a 700-deep descriptor is not walked by a validator
+    here, it is refused for its depth inside the lock as before.
+    """
+    answers = body.get("answers") if isinstance(body, dict) else None
+    if not isinstance(answers, dict):
+        return _ShapeCheck([], False)
+    admitted = {
+        key: answers.get(key)
+        for key in official_shape.CHECKED_KEYS
+        if answers.get(key) not in (None, "") and _correction_is_storable(key, answers.get(key))
+    }
+    findings, more = official_shape.findings_for_answers(admitted)
+    return _ShapeCheck(findings, more)
+
+
+def _refuse_a_value_the_official_schema_does_not_admit(
+    check: _ShapeCheck, *, correcting: bool, identifiers: dict
+) -> JSONResponse | None:
+    """``422 official_shape_mismatch`` for a ``series``/``descriptor`` the schema refuses.
+
+    THE DEFECT THIS CLOSES (QA audit A-03, 2026-10-11): ``[{"series_id": "x"}]`` was
+    accepted on ``POST /answers``, the question closed, and the record could then never
+    export — refused only at export with the validator's text, by which point the
+    scientist had moved on. The entry control's own copy said *"The shape is checked
+    here and again on the server"*, and the server's check was a storability rule that
+    the official schema's rule is much narrower than. See :mod:`.official_shape`.
+
+    ``check`` IS COMPUTED BEFORE THE RECORD LOCK by
+    :func:`_official_shape_check_before_the_lock`; this only decides whether to refuse, at
+    its position among the refusals.
+
+    WHERE IT SITS, stated per path because the paths differ and the first version of this
+    docstring claimed one order for all four — false on both correcting paths. It is the
+    LAST VALUE screen everywhere and only ever answers for a value the coarse storability
+    guard admitted, so a value too big, too deep, or of the wrong JSON type is refused as
+    ``invalid_field_value`` and never described twice.
+
+    * On the two ANSWERING paths it runs BEFORE the state screen ``already_answered``: a
+      caller told "that question is already answered" about a value the record could
+      never hold has been told the less useful of two true things.
+    * On the two CORRECTING paths it runs AFTER the state screen ``not_yet_answered``,
+      because there the coarse value screen it follows (``invalid_field_value``) already
+      ran after it, and this check must not run ahead of the screen whose admitted values
+      it is defined over. A correction of a question nobody answered is therefore told
+      ``not_yet_answered`` whatever its shape — which is also the more useful answer, as
+      no shape could make that correction land.
+
+    WHAT THE BODY SAYS AND DOES NOT SAY. ``schema_errors`` names failing parts by the
+    record path each would occupy and quotes the schema's message verbatim — at most
+    ``official_shape.FINDINGS_LIMIT`` of them. ``schema_errors_more`` is ``true`` when at
+    least one more exists; NO TOTAL IS REPORTED, because counting them is the unbounded
+    work this check was measured doing. It says nothing about whether the RECORD is valid
+    — a value that fits its own sub-schema can still leave the record un-exportable for
+    reasons elsewhere — and the message says so rather than implying a verdict.
+    """
+    findings = check.findings
+    if not findings:
+        return None
+    keys: list[str] = []
+    for finding in findings:
+        if finding["key"] not in keys:
+            keys.append(finding["key"])
+    state = (
+        "The stored value is unchanged."
+        if correcting
+        else "Any value the record already held for it is unchanged, and any question "
+        "it would have answered is still open."
+    )
+    return JSONResponse(
+        status_code=422,
+        content={
+            "error": "official_shape_mismatch",
+            **identifiers,
+            "key": keys[0],
+            "keys": keys,
+            "schema_errors": _bounded_shape_findings(findings),
+            "schema_errors_more": check.more,
+            "message": (
+                "This value does not have the shape the official ISAAC schema gives "
+                "this field, so nothing was written. "
+                + state
+                + " Each entry in `schema_errors` names a record path that does not "
+                "fit and quotes the schema's own message; `schema_errors_more` says "
+                "whether there are more than are listed. This checks the value's "
+                "shape only; it is not a verdict on the whole record."
+            ),
+        },
+    )
+
+
 def _answers_to_apply_shape(
     answers_by_id: dict, draft: dict, timestamp: str, *, edit_only: bool = False
 ) -> dict:
@@ -6625,6 +6774,16 @@ _ANSWER_REFUSED_SHARED_BODY: str = (
     "asset sha256 is deliberately still a `200` with the blocker left open — "
     "but its `invalidation.reason` no longer claims the value was "
     "identical.\n\n"
+    "`official_shape_mismatch` — a `series` or `descriptor` of the right JSON "
+    "type that does not have the shape the official ISAAC schema gives that field: "
+    "a series item missing `independent_variables` or `channels`, a channel role "
+    "outside the schema's list, a descriptor without `uncertainty`. It is checked "
+    "against the vendored schema's OWN rule for the path the value is written to, "
+    "and nothing was written. The body is `{error, experiment_id, key, keys, "
+    "schema_errors, schema_errors_total, message}`, plus `run_id` on the run-level "
+    "operation; each `schema_errors` entry names the record path that does not fit "
+    "and quotes the schema's message verbatim. It judges the value's shape only, "
+    "never the whole record.\n\n"
     "`already_answered` \u2014 the body named a field whose question is already "
     "CLOSED and supplied a value DIFFERENT from the confirmed one, which this "
     "operation would have discarded. Nothing was written, the stored value is "
@@ -6868,6 +7027,9 @@ def post_answers(
     # it to ids that actually resolve to a record).
     if ws.load_experiment(experiment_id, session_id=scope) is None:
         return _not_found(experiment_id)
+    # The official-shape check depends only on the submitted value, so it runs HERE,
+    # outside the lock, and is consulted at its usual position inside it.
+    shape_check = _official_shape_check_before_the_lock(body)
     # The per-record lock serialises the entire load->precondition->mutate->save
     # compare-and-swap; the experiment is loaded FRESH inside the lock so two
     # writers holding the same token cannot both succeed.
@@ -6995,6 +7157,14 @@ def post_answers(
         # here no matter what this ordering does.
         refusal = _refuse_unstorable_answer(
             apply_shape, body.get("answers") or {}, size=False
+        )
+        if refusal is not None:
+            return refusal
+        # THE OFFICIAL SCHEMA'S OWN RULE FOR THE VALUE, last of the value screens — see
+        # `_refuse_a_value_the_official_schema_does_not_admit` for the defect (A-03) and
+        # for why it sits here rather than earlier or later.
+        refusal = _refuse_a_value_the_official_schema_does_not_admit(
+            shape_check, correcting=False, identifiers={"experiment_id": exp.id}
         )
         if refusal is not None:
             return refusal
@@ -7253,6 +7423,10 @@ _CORRECTION_REFUSED_HEAD_LEAD: str = (
     "no absorption-edge derivation for it to confirm — see the answers "
     "operation for the full description; it is the same refusal, because it is "
     "the same structural fact about the draft), "
+    "`official_shape_mismatch` (a `series` or `descriptor` correction that does not "
+    "have the shape the official ISAAC schema gives that field; `schema_errors` names "
+    "each failing record path with the schema's message verbatim, and the stored "
+    "value is unchanged), "
 )
 _CORRECTION_REFUSED_HEAD_TAIL: str = (
     "or `not_yet_answered`, described next. Nothing is written on any of "
@@ -7955,6 +8129,8 @@ def post_edit(
     # id never pins a permanent entry in the never-evicting per-record lock map.
     if ws.load_experiment(experiment_id, session_id=scope) is None:
         return _not_found(experiment_id)
+    # Outside the lock, for `post_answers`' reason.
+    shape_check = _official_shape_check_before_the_lock(body)
     # The per-record lock serialises load->precondition->mutate->save; the record is
     # loaded FRESH inside the lock so two writers holding the same token cannot both
     # succeed (compare-and-swap).
@@ -8143,6 +8319,14 @@ def post_edit(
                     ),
                 },
             )
+        # THE OFFICIAL SCHEMA'S OWN RULE, on the correction path too: a correction was the
+        # one way out of a value the answering path had admitted, and it admitted the same
+        # values. See `_refuse_a_value_the_official_schema_does_not_admit`.
+        refusal = _refuse_a_value_the_official_schema_does_not_admit(
+            shape_check, correcting=True, identifiers={"experiment_id": exp.id}
+        )
+        if refusal is not None:
+            return refusal
         # OVERWRITE the current value(s) for the recognized keys, recording a fresh
         # user_confirmation. apply_corrections never touches pending and never
         # invents a value (a malformed sha256 / off-enum qc leaves the value as-is).
@@ -11138,6 +11322,8 @@ def _apply_to_run(
     """
     if ws.load_experiment(experiment_id, session_id=scope) is None:
         return _not_found(experiment_id)
+    # Outside the lock, for `post_answers`' reason.
+    shape_check = _official_shape_check_before_the_lock(body)
     with ws.record_lock(experiment_id, session_id=scope):
         exp = ws.load_experiment(experiment_id, session_id=scope)
         if exp is None:
@@ -11282,6 +11468,13 @@ def _apply_to_run(
                         ),
                     },
                 )
+            refusal = _refuse_a_value_the_official_schema_does_not_admit(
+                shape_check,
+                correcting=True,
+                identifiers={"experiment_id": exp.id, "run_id": run.id},
+            )
+            if refusal is not None:
+                return refusal
             draft_before = run_draft
             run.draft = apply_corrections(run_draft, apply_shape)
         else:
@@ -11300,6 +11493,13 @@ def _apply_to_run(
             # could never have been stored has been told the less useful of two true
             # things.
             refusal = _refuse_unstorable_answer(apply_shape, body.get("answers") or {})
+            if refusal is not None:
+                return refusal
+            refusal = _refuse_a_value_the_official_schema_does_not_admit(
+                shape_check,
+                correcting=False,
+                identifiers={"experiment_id": exp.id, "run_id": run.id},
+            )
             if refusal is not None:
                 return refusal
             # THE MIRROR OF THE REFUSAL DIRECTLY ABOVE, on the answering side, and asked
@@ -22816,8 +23016,8 @@ def get_source_preview(
         "payloads rather than an error. Read-only.\n\n"
         "A record with **runs** exports one official record per run and has no "
         "single pair of its own, so this operation returns null payloads for it "
-        "together with a `reason` saying why. Those per-run files are not listed "
-        "here yet."
+        "together with a `reason` saying why. Those per-run files are read with "
+        "`GET /api/experiments/{experiment_id}/run-artifacts`."
     ),
     response_description=(
         "The record and sidecar JSON with their filenames, or nulls when nothing "
@@ -22869,9 +23069,10 @@ def get_artifacts(scope: TutorialScopeDep, experiment_id: ExperimentId):
             # per-run records ARE on disk and current — beside four nulls, which on
             # its own reads as "current, but there is nothing". This route still
             # serves the experiment's OWN pair and a fan-out has none, so the nulls
-            # are correct and the missing piece is the explanation. Listing the
+            # are correct and the missing piece is the explanation. ~~Listing the
             # per-run pairs is the Run-workspace slice's job (it is the slice with a
-            # UI for them); saying so is this one's.
+            # UI for them); saying so is this one's.~~ — the per-run pairs are listed
+            # by `get_run_artifacts` now (A-02), and the reason names it.
             payload["reason"] = FAN_OUT_ARTIFACT_REASON
         return payload
     record_path = exp.record_path()
@@ -22918,6 +23119,625 @@ def get_artifacts(scope: TutorialScopeDep, experiment_id: ExperimentId):
         "record_filename": record_path.name,
         "sidecar_filename": sidecar_path.name,
         "artifact": artifact,
+    }
+
+
+# --- 13b.1 per-run artifacts (a fan-out's exported records, read-only) --------
+
+#: How many exported runs ONE page carries when the caller names no ``limit``.
+#:
+#: A DEFAULT WINDOW, DELIBERATELY UNLIKE ``GET .../runs``, and the difference is the
+#: payload: the run list returns metadata, and omitting its ``limit`` returns every run
+#: on purpose. This operation returns each run's whole official record AND its evidence
+#: sidecar, so "every run" on a 1,000-run record is two thousand JSON documents in one
+#: response. ~~The CEILING is the run list's own, :data:`RUN_PAGE_MAX`~~ — it is smaller,
+#: see :data:`RUN_ARTIFACT_PAGE_MAX`. An offset is clamped the same way as on the run
+#: list, so the two pages walk alike, and ``total`` always says how many exist so a page
+#: is never mistaken for the whole set.
+RUN_ARTIFACT_WINDOW = 10
+
+#: The LARGEST page one request may ask for — deliberately NOT :data:`RUN_PAGE_MAX`.
+#:
+#: ~~"The CEILING is the run list's own, :data:`RUN_PAGE_MAX`"~~ — corrected after an
+#: independent review: a run-list row is metadata, and a row here carries two whole JSON
+#: documents, one of which holds the run's reduced spectrum — legitimately up to the 8 MiB
+#: a structured answer may be. 200 such rows is a response of gigabytes from one GET. 25
+#: keeps the worst page in the hundreds of megabytes while still letting a client walk a
+#: large record in few requests; `total` and `offset` work exactly as on the run list.
+RUN_ARTIFACT_PAGE_MAX = 25
+
+_RUN_ARTIFACT_LIMIT_DESC = (
+    f"Maximum exported runs to return, 1–{RUN_ARTIFACT_PAGE_MAX}. Omitted, the server "
+    f"returns its window of {RUN_ARTIFACT_WINDOW} — each entry carries two whole JSON "
+    "documents, so this operation is paged by default where the run list is not, and "
+    "its largest page is smaller. `total` always reports how many runs have been "
+    "exported."
+)
+
+#: The sentence a record WITHOUT runs is answered with. It names where its pair IS,
+#: because this operation is the per-run reader and a zero-run record's pair is not
+#: per-run — an empty list alone would read as "nothing was exported".
+_RUN_ARTIFACTS_NO_RUNS_REASON = (
+    "This record has no runs, so it exports one official record of its own rather "
+    "than one per run. Its record and evidence sidecar are read with "
+    "`GET /api/experiments/{experiment_id}/artifacts`."
+)
+
+
+@router.get(
+    "/experiments/{experiment_id}/run-artifacts",
+    tags=[TAG_EXPORT],
+    summary="List a Record's Exported Run Artifacts",
+    description=(
+        "For a record whose runs each export their own official ISAAC record: every "
+        "run that HAS been exported, in canonical run order, with the official record "
+        "and evidence-sidecar JSON that its export wrote and their filenames as bare "
+        "basenames — never a server path. Read-only, and paged.\n\n"
+        "Every file is resolved from the run's id inside this record's own records "
+        "directory, never from a caller-supplied path, and only a file this "
+        "application's export wrote for this record can be served. A file that is "
+        "missing or unreadable is a `null` payload with `artifact.state: \"stale\"`, "
+        "never an error.\n\n"
+        "**`artifact` is judged PER RUN.** `current` means the written record still "
+        "matches what exporting that run now would produce; `stale` means the run has "
+        "changed since it was exported. An exported file is never rewritten, so a stale "
+        "run's file is fixed and does not include the later changes — no operation "
+        "regenerates it.\n\n"
+        "`total` is how many runs have been exported and `runs_total` how many runs "
+        "exist, independent of the page. A record with no runs answers `200` with an "
+        "empty list and a `reason` naming where its single pair is read instead."
+    ),
+    response_description=(
+        "One page of exported runs, each with its record, sidecar, filenames and "
+        "per-run freshness."
+    ),
+    responses={**_R_STORAGE_UNAVAILABLE, **_R_UNAUTHORIZED, **_R_EXPERIMENT_NOT_FOUND},
+)
+def get_run_artifacts(
+    scope: TutorialScopeDep,
+    experiment_id: ExperimentId,
+    limit: Annotated[
+        int | None,
+        Query(ge=1, le=RUN_ARTIFACT_PAGE_MAX, description=_RUN_ARTIFACT_LIMIT_DESC),
+    ] = None,
+    offset: Annotated[int, Query(ge=0, description=_RUN_OFFSET_DESC)] = 0,
+):
+    """THE READ PATH A FAN-OUT NEVER HAD (QA audit A-02, 2026-10-11).
+
+    A record with runs exports one official record + sidecar PER RUN, and the only
+    place those filenames ever existed was the export response's ``records[]``. So the
+    export screen could list the names it had just written — with no View and no
+    Download — and after a reload even the names were gone: ``get_artifacts`` serves the
+    experiment's OWN pair and a fan-out has none (:data:`FAN_OUT_ARTIFACT_REASON`).
+    Every record Historical Import creates has runs, so the import's end-to-end path
+    stopped at files the scientist could not retrieve.
+
+    THE SAFETY IS ``get_artifacts``' OWN, NOT A SECOND COPY OF IT. Each path comes from
+    ``ExportUnit.record_path`` / ``sidecar_path``, which build ``<records_dir>/<id>``
+    only for an id that passes ``is_record_id`` — the same gate the single-record path
+    uses — and ``records_dir`` belongs to this one experiment. Nothing in the request
+    can name a file. ``_read_artifact_json`` is the shared reader, so an unreadable file
+    is a typed absence here exactly as it is there.
+
+    ``artifact`` IS PER RUN, through :func:`dependencies.unit_artifact_state`, which is
+    the body of the fan-out freshness loop extracted rather than restated (A-06). The
+    composition is ``exp.export_units()`` once per request — the sibling grouping is a
+    property of the SET, so a per-run composition would compare against a draft the
+    export never used — and the comparison runs only for the page returned.
+    """
+    exp = ws.load_experiment(experiment_id, session_id=scope)
+    if exp is None:
+        return _not_found(experiment_id)
+    page_limit = RUN_ARTIFACT_WINDOW if limit is None else limit
+    if not exp.runs:
+        return {
+            "experiment_id": exp.id,
+            "runs_total": 0,
+            "total": 0,
+            "returned": 0,
+            "offset": offset,
+            "limit": page_limit,
+            "artifacts": [],
+            "reason": _RUN_ARTIFACTS_NO_RUNS_REASON,
+        }
+    units = exp.export_units()
+    exported = [unit for unit in units if unit.run is not None and unit.current_record_id()]
+    window = exported[offset : offset + page_limit]
+    rows = []
+    for unit in window:
+        record_path = unit.record_path()
+        sidecar_path = unit.sidecar_path()
+        record = _read_artifact_json(record_path) if record_path is not None else None
+        sidecar = _read_artifact_json(sidecar_path) if sidecar_path is not None else None
+        # THE SAME RULE `get_artifacts` APPLIES: freshness judges the RECORD file only,
+        # so a readable record beside an absent sidecar would otherwise read `current`.
+        if record is None or sidecar is None:
+            artifact = {"state": "stale", "reason": dependencies.MISSING_REASON}
+        else:
+            artifact = dependencies.unit_artifact_state(unit)
+        context_path = (
+            exp.records_dir / extended_context.companion_filename(unit.target_id)
+            if is_record_id(unit.target_id)
+            else None
+        )
+        context_present = context_path is not None and context_path.is_file()
+        rows.append(
+            {
+                "run_id": unit.run_id,
+                "run_label": unit.run_label,
+                "record_id": unit.current_record_id(),
+                "record_filename": record_path.name if record_path is not None else None,
+                "sidecar_filename": sidecar_path.name if sidecar_path is not None else None,
+                "record": record,
+                "sidecar": sidecar,
+                # Named only when written, for the reason `get_artifacts` gives.
+                "extended_context": (
+                    _read_artifact_json(context_path) if context_present else None
+                ),
+                "extended_context_filename": context_path.name if context_present else None,
+                "artifact": artifact,
+            }
+        )
+    return {
+        "experiment_id": exp.id,
+        "runs_total": len(exp.runs),
+        "total": len(exported),
+        "returned": len(rows),
+        "offset": offset,
+        "limit": page_limit,
+        "artifacts": rows,
+        "reason": None,
+    }
+
+
+# --- 13b.2 confirmed structured answers (read-only) ---------------------------
+
+#: The structured answers this read reports, in the order a scientist meets them.
+#: They are the three ``complete.apply_answers`` builds whole blocks from, and the three
+#: whose value no other read surface serves: ``GET .../draft`` reports ``fields``, and a
+#: run's view reports its ``fields`` too, while these live in top-level blocks.
+STRUCTURED_ANSWER_KEYS: tuple[str, ...] = ("series", "qc", "descriptor")
+
+#: Default units per page. Same reasoning as :data:`RUN_ARTIFACT_WINDOW`: a confirmed
+#: reduced spectrum is legitimately large, so "every run" is not a sensible default.
+STRUCTURED_ANSWER_WINDOW = 10
+
+#: The largest page, for :data:`RUN_ARTIFACT_PAGE_MAX`'s reason: each unit carries its
+#: whole confirmed spectrum, which may be up to 8 MiB.
+STRUCTURED_ANSWER_PAGE_MAX = 25
+
+_STRUCTURED_LIMIT_DESC = (
+    f"Maximum units to return, 1–{STRUCTURED_ANSWER_PAGE_MAX}. Omitted, the server returns its "
+    f"window of {STRUCTURED_ANSWER_WINDOW}, because a confirmed reduced spectrum can be "
+    "large. `total` always reports how many units the request selected — the record "
+    "itself, every run, or the one run named by `run_id` — whatever this page returned."
+)
+_STRUCTURED_RUN_DESC = (
+    "Return only this run's answers. Refused with `404 run_not_found` when the record "
+    "holds no such run — never answered with an empty list."
+)
+
+#: Why a confirmed descriptor is shown but NOT offered for correction when the block
+#: holds more than one. ``complete.apply_corrections`` compares and rebuilds only
+#: ``outputs[0].descriptors[0]`` and replaces the WHOLE block with a single descriptor,
+#: so correcting one of several through it would silently delete the rest.
+_DESCRIPTOR_NOT_EDITABLE_REASON = (
+    "This record holds more than one descriptor. The correction operation replaces the "
+    "descriptor block with a single descriptor, so correcting one here would delete the "
+    "others; it is shown read-only."
+)
+
+
+#: The largest integer a browser carries exactly (`Number.MAX_SAFE_INTEGER`). The Confirmed
+#: Answers form round-trips a value through JavaScript, so an integer beyond it would be
+#: saved back as a DIFFERENT number nobody typed.
+_JS_SAFE_INTEGER = 2**53 - 1
+
+#: A string JavaScript's `Number()` reads as a number — decimal, exponent, or a 0x/0o/0b
+#: literal. The descriptor form's `typedValue` turns any such text into a number, so a
+#: stored STRING like ``"42"`` would be saved back as the number 42.
+_JS_NUMERIC_TEXT = re.compile(
+    r"\A[+-]?(?:\d+\.?\d*(?:[eE][+-]?\d+)?|\.\d+(?:[eE][+-]?\d+)?|0[xX][0-9a-fA-F]+|0[oO][0-7]+|0[bB][01]+)\Z"
+)
+
+#: What the descriptor correction form can show and write back — the keys
+#: ``StructuredValueEntry.descriptorDraftFrom`` reads and ``descriptorPayload`` writes.
+_DESCRIPTOR_FORM_KEYS = frozenset({"name", "kind", "source", "value", "unit", "uncertainty"})
+_DESCRIPTOR_FORM_UNCERTAINTY_KEYS = frozenset({"sigma", "unit", "basis"})
+
+
+def _js_exact_number(value: object) -> bool:
+    """A JSON number a browser will carry and re-serialise unchanged."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return False
+    if isinstance(value, int):
+        return abs(value) <= _JS_SAFE_INTEGER
+    return value == value and value not in (float("inf"), float("-inf"))
+
+
+def _form_text(value: object) -> bool:
+    """A string the form writes back byte for byte: it trims every text box it reads."""
+    return isinstance(value, str) and value != "" and value == value.strip()
+
+
+def _descriptor_form_cannot_show(desc: dict) -> str | None:
+    """Why the browser's descriptor form would NOT save this descriptor back unchanged,
+    or ``None`` when it would.
+
+    THE DEFECT, found by an independent review of this slice: the form keeps only the
+    fields it renders. A stored descriptor carrying ``at``, ``definition``,
+    ``uncertainty.bounds`` or ``uncertainty.notes`` — all of which the official schema
+    admits, and which an API or MCP caller can write — lost every one of them on Save, and
+    a STRING value ``"42"`` came back as the NUMBER 42 (`typedValue` parses text that
+    reads as a number). So a correction of one field wrote values the scientist never
+    entered and dropped ones they never touched. Merging the untouched fields back in was
+    considered and declined: the form cannot even display them, so a merge would write
+    content back that the person saving could not see — the same no-guessing problem in a
+    quieter form. Instead such a descriptor is shown, and declared not editable here with
+    this reason.
+
+    Every rule mirrors what `descriptorDraftFrom` → `descriptorPayload` does: keys it
+    reads, text it trims, a value it re-types, and the schema's closed `kind`/`source`
+    lists its selects offer (read from the vendored schema, never restated).
+
+    **ONLY A VALUE THAT IS PRESENT CAN BE CHANGED BY SAVING, so only a present value can
+    lock the descriptor.** The first version of this rule also refused a descriptor that
+    was MISSING something — "it has no uncertainty object, and the form would write one" —
+    and an independent re-review measured what that cost: canonical seed 4's descriptor
+    lacks `uncertainty`, export refuses it for exactly that, and the rule made it
+    read-only, so the record that needed the correction was the one record that could not
+    get it (the A-01/A-04 dead loop, again). An absent `name`, `kind`, `source`, `value`,
+    `uncertainty`, unit, basis or σ is a field the scientist fills in through the form,
+    which opens empty for it; nothing they did not type is written. Stated rather than
+    hidden: an uncertainty saved with no σ typed carries `sigma: null` — the form always
+    writes that key, and `null` is the schema's own "not reported", which is what a blank
+    σ means — so a stored uncertainty without a `sigma` key gains one.
+    """
+
+    def absent(owner: dict, field: str) -> bool:
+        return field not in owner or owner[field] is None or owner[field] == ""
+
+    extra = sorted(k for k in desc if k not in _DESCRIPTOR_FORM_KEYS)
+    if extra:
+        return f"it carries {', '.join(f'`{k}`' for k in extra)}, which the form does not show"
+    unc = desc.get("uncertainty")
+    if unc is not None and not isinstance(unc, dict):
+        return "its uncertainty is not an object the form writes back unchanged"
+    unc = unc if isinstance(unc, dict) else {}
+    extra = sorted(k for k in unc if k not in _DESCRIPTOR_FORM_UNCERTAINTY_KEYS)
+    if extra:
+        return (
+            "its uncertainty carries "
+            + ", ".join(f"`{k}`" for k in extra)
+            + ", which the form does not show"
+        )
+    if not absent(desc, "name") and not _form_text(desc.get("name")):
+        return "its name is not text the form writes back unchanged"
+    for field in ("kind", "source"):
+        if absent(desc, field):
+            continue
+        allowed = official_shape.descriptor_enum(field)
+        if allowed is None or desc.get(field) not in allowed:
+            return f"its `{field}` is not one of the values the form offers"
+    value = desc.get("value")
+    if not absent(desc, "value"):
+        if isinstance(value, str):
+            if not _form_text(value) or _JS_NUMERIC_TEXT.match(value):
+                return "its value is text the form would save back as a number or re-trim"
+        elif not _js_exact_number(value):
+            return "its value is not a number or text the form writes back unchanged"
+    for owner, field in ((desc, "unit"), (unc, "unit"), (unc, "basis")):
+        # PRESENT means present here, including an empty string: the form drops an
+        # empty unit or basis on save, so a stored `""` would vanish.
+        if field in owner and owner[field] is not None and not _form_text(owner[field]):
+            return f"a `{field}` is not text the form writes back unchanged"
+    sigma = unc.get("sigma")
+    if sigma is not None and not _js_exact_number(sigma):
+        return "its σ is not a number the form writes back unchanged"
+    return None
+
+
+def _series_form_cannot_show(series: list) -> str | None:
+    """Why the browser's Series JSON box would not save this spectrum back unchanged.
+
+    The box round-trips through `JSON.parse`/`JSON.stringify`, which is exact for every
+    JSON value but one: an integer beyond 2^53, which a browser rounds. So that is the only
+    refusal here. (A float written `1.0` comes back `1` — the same JSON number, and the
+    schema's `number` either way; nothing the scientist did not type is changed.)
+    """
+    stack: list = [series]
+    while stack:
+        node = stack.pop()
+        if isinstance(node, dict):
+            stack.extend(node.values())
+        elif isinstance(node, list):
+            stack.extend(node)
+        elif isinstance(node, int) and not isinstance(node, bool) and abs(node) > _JS_SAFE_INTEGER:
+            return "it holds an integer too large for a browser to carry exactly"
+    return None
+
+
+def _not_editable_here(detail: str) -> str:
+    return (
+        f"This value cannot be corrected here without changing it: {detail}. Saving the "
+        "form would change or drop part of it, so it is shown read-only."
+    )
+
+
+def _confirmation_of(entries_by_part: list) -> str:
+    """What a stored answer's OWN evidence says about how it got there.
+
+    ``confirmed`` — every part of it carries a ``user_confirmation`` entry; ``from_evidence``
+    — it carries evidence, and not a person's confirmation for every part (an extraction
+    from a spreadsheet, a derivation); ``no_evidence`` — none at all. RE-REVIEW (minor): the
+    panel used to call every stored value "Confirmed by You", and canonical seeds 1 and 4
+    hold a QC verdict whose only evidence is a spreadsheet row — a confirmation that never
+    happened. ``entries_by_part`` is one evidence list per part (one per series item; one
+    for a verdict or a descriptor), so a two-series spectrum confirmed for one series only
+    is not reported as confirmed.
+    """
+    if entries_by_part and all(
+        any(isinstance(e, dict) and e.get("source_type") == "user_confirmation" for e in part)
+        for part in entries_by_part
+    ):
+        return "confirmed"
+    if any(part for part in entries_by_part):
+        return "from_evidence"
+    return "no_evidence"
+
+
+def _structured_answer_states(
+    draft: dict, open_kinds: set, inherited_block_evidence: dict | None = None
+) -> dict:
+    """``{key: {state, value, editable[, label, count, reason]}}`` for one unit.
+
+    ``state`` is ``confirmed`` when the draft HOLDS a value for the key — the exact
+    test :func:`_refuse_correcting_an_unanswered_key` applies, so a row reported
+    ``editable`` here is one the correction operation will accept rather than answer
+    ``not_yet_answered``. ``open`` is a question still on the unit's list with no value
+    stored; ``absent`` is neither. Nothing is inferred and nothing is filled in: a value
+    is the stored value, deep-copied, and ``null`` otherwise.
+    """
+    out: dict = {}
+    # A run's composed draft reads the record's `block_evidence` beneath its own
+    # (`resolved_run_draft` merges it), so a confirmation is looked for in both.
+    block_evidence = {
+        **(inherited_block_evidence if isinstance(inherited_block_evidence, dict) else {}),
+        **(draft.get("block_evidence") if isinstance(draft.get("block_evidence"), dict) else {}),
+    }
+
+    def evidence_at(key: str) -> list:
+        entries = block_evidence.get(key)
+        return entries if isinstance(entries, list) else []
+
+    series = draft.get("series")
+    if isinstance(series, list) and series:
+        reason = _series_form_cannot_show(series)
+        out["series"] = {
+            "state": "confirmed",
+            "value": copy.deepcopy(series),
+            "editable": reason is None,
+            "confirmation": _confirmation_of(
+                [
+                    evidence_at(f"series:{item.get('series_id')}")
+                    for item in series
+                    if isinstance(item, dict)
+                ]
+            ),
+        }
+        if reason is not None:
+            out["series"]["reason"] = _not_editable_here(reason)
+    else:
+        out["series"] = {
+            "state": "open" if "series" in open_kinds else "absent",
+            "value": None,
+            "editable": False,
+        }
+
+    qc = draft.get("qc")
+    if isinstance(qc, dict) and qc.get("status") is not None:
+        value = {"status": qc.get("status")}
+        if qc.get("evidence") is not None:
+            value["evidence"] = qc.get("evidence")
+        # The verdict control trims the note it submits, so a stored note with outer
+        # whitespace, or one that is not text, would be saved back changed.
+        evidence = qc.get("evidence")
+        qc_reason = (
+            None
+            if evidence is None or _form_text(evidence)
+            else "its note is not text the form writes back unchanged"
+        )
+        out["qc"] = {
+            "state": "confirmed",
+            "value": copy.deepcopy(value),
+            "editable": qc_reason is None,
+            "confirmation": _confirmation_of([evidence_at("qc:status")]),
+        }
+        if qc_reason is not None:
+            out["qc"]["reason"] = _not_editable_here(qc_reason)
+    else:
+        out["qc"] = {
+            "state": "open" if "qc" in open_kinds else "absent",
+            "value": None,
+            "editable": False,
+        }
+
+    outputs = draft.get("descriptors_outputs")
+    first = None
+    first_evidence = None
+    count = 0
+    label = None
+    if isinstance(outputs, list):
+        for output in outputs:
+            if isinstance(output, dict) and isinstance(output.get("descriptors"), list):
+                count += len(output["descriptors"])
+        if outputs and isinstance(outputs[0], dict):
+            label = outputs[0].get("label") if isinstance(outputs[0].get("label"), str) else None
+            items = outputs[0].get("descriptors")
+            if isinstance(items, list) and items and isinstance(items[0], dict):
+                # `evidence` is the confirmation the core attached, not part of the
+                # value a person supplied — the same exclusion `apply_corrections`
+                # makes when it compares a correction against the current descriptor.
+                first = {k: v for k, v in items[0].items() if k != "evidence"}
+                first_evidence = items[0].get("evidence")
+    if first is not None:
+        form_reason = _descriptor_form_cannot_show(first) if count == 1 else None
+        entry = {
+            "state": "confirmed",
+            "value": copy.deepcopy(first),
+            "editable": count == 1 and form_reason is None,
+            "label": label,
+            "count": count,
+            "confirmation": _confirmation_of(
+                [first_evidence if isinstance(first_evidence, list) else []]
+            ),
+        }
+        if count != 1:
+            entry["reason"] = _DESCRIPTOR_NOT_EDITABLE_REASON
+        elif form_reason is not None:
+            entry["reason"] = _not_editable_here(form_reason)
+        out["descriptor"] = entry
+    else:
+        out["descriptor"] = {
+            "state": "open" if "descriptor" in open_kinds else "absent",
+            "value": None,
+            "editable": False,
+        }
+    return out
+
+
+@router.get(
+    "/experiments/{experiment_id}/structured-answers",
+    tags=[TAG_DRAFTS],
+    summary="Get a Record's Confirmed Structured Answers",
+    description=(
+        "The reduced spectrum (`series`), the QC verdict (`qc`) and the scientific "
+        "descriptor (`descriptor`) this record currently holds, for the record itself "
+        "when it has no runs and for each run when it has them — the three answers no "
+        "other read operation serves, because they live in whole blocks rather than in "
+        "the draft's fields. Read-only, and paged over runs.\n\n"
+        "Each answer carries `state`: `confirmed` (a value is stored, and is returned "
+        "verbatim), `open` (the question is still waiting for an answer) or `absent` "
+        "(neither). `editable` is `true` exactly when the correction operation named in "
+        "`edit_at` will accept a correction of it AND a correction form can carry the "
+        "stored value back unchanged; where it cannot, `reason` says why. "
+        "`confirmation` is what the value's own evidence says: `confirmed` (a person "
+        "confirmed every part), `from_evidence` (recorded evidence such as an extraction, "
+        "without a person's confirmation for every part) or `no_evidence`. Each unit's "
+        "`version` is the `If-Match` value that operation requires.\n\n"
+        "`exported` is `true` for a unit whose official record has been written. A "
+        "correction there changes the record's working copy only: the exported file is "
+        "never rewritten and will not include it. Nothing is inferred or filled in: a "
+        "value that was never supplied is `null`."
+    ),
+    response_description=(
+        "One page of units — the record, or its runs in canonical order — each with its "
+        "three structured answers, its correction operation and its current version."
+    ),
+    responses={
+        **_R_STORAGE_UNAVAILABLE,
+        **_R_UNAUTHORIZED,
+        **_R_EXPERIMENT_NOT_FOUND,
+        **_R_RUN_NOT_FOUND,
+    },
+)
+def get_structured_answers(
+    scope: TutorialScopeDep,
+    experiment_id: ExperimentId,
+    response: Response,
+    limit: Annotated[
+        int | None,
+        Query(ge=1, le=STRUCTURED_ANSWER_PAGE_MAX, description=_STRUCTURED_LIMIT_DESC),
+    ] = None,
+    offset: Annotated[int, Query(ge=0, description=_RUN_OFFSET_DESC)] = 0,
+    run_id: Annotated[
+        str | None, Query(max_length=RUN_QUERY_MAX, description=_STRUCTURED_RUN_DESC)
+    ] = None,
+):
+    """A DURABLE PLACE TO SEE — AND THEN CORRECT — A CONFIRMED STRUCTURED ANSWER.
+
+    THE DEFECT (QA audit A-01/A-04, 2026-10-11). A reduced spectrum, QC verdict or
+    descriptor could be corrected only during the visit in which it was answered:
+    ``GuidedCompletion`` holds its answered rows in component state, so after a reload
+    it said "No open questions" while Export Readiness, refusing the record, offered
+    "Back to Complete →" — a loop with no exit. The correction operations worked; no
+    screen could reach them, and no screen ever showed the confirmed value at all,
+    because no read operation served it. This is that read.
+
+    It reads the unit's own draft — ``exp.draft`` for a record with no runs, the run's
+    draft otherwise, because these are run-level blocks (``workspace.RUN_LEVEL_BLOCKS``)
+    and a record with runs exports nothing from its own copies. ``open`` is judged on the
+    same question list a scientist is shown: the record's stored ``pending`` for a
+    zero-run record, ``workspace.run_questions`` for a run (which materialises a legacy
+    run's derived list exactly as the write path does).
+    """
+    exp = ws.load_experiment(experiment_id, session_id=scope)
+    if exp is None:
+        return _not_found(experiment_id)
+    response.headers["ETag"] = exp.etag()
+    page_limit = STRUCTURED_ANSWER_WINDOW if limit is None else limit
+
+    def kinds(entries) -> set:
+        return {e.get("kind") for e in (entries or []) if isinstance(e, dict)}
+
+    if not exp.runs:
+        if run_id is not None:
+            return _run_not_found(exp.id, run_id)
+        draft = exp.draft if isinstance(exp.draft, dict) else {}
+        units = [
+            {
+                "run_id": None,
+                "run_label": None,
+                "version": exp.version_token(),
+                "edit_at": _EDIT_OPERATION_RECORD,
+                "exported": exp.record_id is not None,
+                "answers": _structured_answer_states(draft, kinds(draft.get("pending"))),
+            }
+        ]
+        window = units[offset : offset + page_limit]
+        return {
+            "experiment_id": exp.id,
+            "experiment_version": exp.version_token(),
+            "level": "record",
+            "units": window,
+            "total": 1,
+            "returned": len(window),
+            "offset": offset,
+            "limit": page_limit,
+        }
+
+    ordered = exp.sorted_runs()
+    if run_id is not None:
+        ordered = [run for run in ordered if run.id == run_id]
+        if not ordered:
+            return _run_not_found(exp.id, run_id)
+    window_runs = ordered[offset : offset + page_limit]
+    units = []
+    for run in window_runs:
+        draft = run.draft if isinstance(run.draft, dict) else {}
+        units.append(
+            {
+                "run_id": run.id,
+                "run_label": run.label,
+                "version": run.version_token(),
+                "edit_at": _EDIT_OPERATION_RUN,
+                "exported": run.record_id is not None,
+                "answers": _structured_answer_states(
+                    draft,
+                    kinds(ws.run_questions(run)),
+                    (exp.draft or {}).get("block_evidence") if isinstance(exp.draft, dict) else None,
+                ),
+            }
+        )
+    return {
+        "experiment_id": exp.id,
+        "experiment_version": exp.version_token(),
+        "level": "run",
+        "units": units,
+        "total": len(ordered),
+        "returned": len(units),
+        "offset": offset,
+        "limit": page_limit,
     }
 
 

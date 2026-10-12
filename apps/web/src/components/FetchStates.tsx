@@ -289,8 +289,15 @@ export const SUB_RESOURCE_LABELS: Readonly<Record<string, string>> = {
   // The three `/revisions…` reads. "Submission history" is the product's word for
   // them; `revisions` is the wire segment and never reaches a scientist.
   revisions: 'the submission history',
+  // `GET .../run-artifacts` (QA audit A-02, 2026-10-11): the official record and
+  // sidecar each exported RUN wrote. Named as what a scientist downloads, not as the
+  // wire's "artifacts".
+  'run-artifacts': 'the exported run files',
   runs: 'the measurement runs',
   'source-preview': 'a reference source file',
+  // `GET .../structured-answers` (QA audit A-01/A-04): the confirmed reduced spectrum,
+  // QC verdict and descriptor. "Confirmed answers" is the panel's own heading.
+  'structured-answers': 'the confirmed answers',
   transcript: 'the transcript capture',
   validate: 'validation',
   warnings: 'advisory warnings',

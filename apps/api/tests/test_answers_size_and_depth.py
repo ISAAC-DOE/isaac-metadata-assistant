@@ -55,6 +55,8 @@ import json
 import pytest
 from fastapi.testclient import TestClient
 
+from official_series import official_series_item
+
 from isaac_api.app import create_app
 
 from conftest import tutorial_client
@@ -241,7 +243,22 @@ def test_answers_and_edit_refuse_the_same_value_with_the_same_code(client, value
     correct refusal about the QUESTION rather than about the value — so the comparison
     is made on the record path after the descriptor has been answered.
     """
-    answered = _answer(client, PARTIAL, {"descriptor": {"value": 1.0, "uncertainty": 0.1}})
+    # ~~`{"value": 1.0, "uncertainty": 0.1}`~~ — the official schema refuses that
+    # descriptor four ways, and since 2026-10-11 (QA audit A-03) the answering route asks
+    # it, so the setup states a descriptor the schema admits. The subject is unchanged.
+    answered = _answer(
+        client,
+        PARTIAL,
+        {
+            "descriptor": {
+                "name": "inflection_point_energy",
+                "kind": "absolute",
+                "source": "manual",
+                "value": 1.0,
+                "uncertainty": {"sigma": 0.1},
+            }
+        },
+    )
     assert answered.status_code == 200, answered.text
 
     from_answers = _answer(client, PARTIAL, {"descriptor": value})
@@ -335,7 +352,10 @@ def test_a_legitimate_structured_answer_still_applies(client):
     response = _answer(
         client,
         PARTIAL,
-        {"series": [{"series_id": "s1", "mu": 0.1}, {"series_id": "s1", "mu": 0.2}]},
+        # Two official-shaped items: the subject is "a legitimate structured answer still
+        # applies", and since 2026-10-11 legitimate means the schema's own rule admits it
+        # (`{"series_id": "s1", "mu": 0.1}` does not — QA audit A-03).
+        {"series": [official_series_item("s1", 1.0, 0.1), official_series_item("s1", 2.0, 0.2)]},
     )
     assert response.status_code == 200, response.text
     assert "series" not in _pending_ids(client, PARTIAL)
@@ -349,7 +369,12 @@ def test_a_LARGE_but_legal_series_is_still_accepted(client):
     rather than a stricter one of its own. ~20,000 points is a real spectrum's order of
     magnitude and is nowhere near the cap.
     """
-    series = [{"series_id": "s1", "energy_eV": 7000.0 + i, "mu": 0.1} for i in range(20000)]
+    # ONE series of 20,000 points rather than 20,000 one-point items of a shape the
+    # official schema refuses (QA audit A-03, 2026-10-11): the size is what is under test,
+    # and a reduced spectrum's points live in `values`.
+    series = [official_series_item("s1", 7000.0, 0.1)]
+    series[0]["independent_variables"][0]["values"] = [7000.0 + i for i in range(20000)]
+    series[0]["channels"][0]["values"] = [0.1] * 20000
     response = _answer(client, PARTIAL, {"series": series})
     assert response.status_code == 200, response.status_code
     assert "series" not in _pending_ids(client, PARTIAL)

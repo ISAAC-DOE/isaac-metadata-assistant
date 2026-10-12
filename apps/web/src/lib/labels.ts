@@ -1008,6 +1008,12 @@ export const LABELS = {
   actionSave: 'Save',
   actionRevalidate: 'Re-Validate',
   actionDownload: 'Download',
+  /** The heading of the durable Confirmed Answers panel (QA audit A-01/A-04). */
+  confirmedAnswersHeading: 'Confirmed Answers',
+  /** The heading of the per-run exported files list on Export Readiness (A-02). */
+  exportedRunRecordsHeading: 'Exported Run Records',
+  /** A run row's own statement that its file predates later changes (A-06). */
+  chipChangedSinceExport: 'Changed Since Export',
   actionViewJson: 'View JSON',
   actionView: 'View',
   actionOpenSource: 'Open Source File',

@@ -27,6 +27,8 @@ import type {
   ApiActivitySummary,
   ApiAnswersResponse,
   ApiArtifactsResponse,
+  ApiRunArtifactsResponse,
+  ApiStructuredAnswersResponse,
   ApiAssetRemoved,
   ApiAssetWritten,
   ApiAssetsResponse,
@@ -2337,6 +2339,53 @@ export const api = {
   // the backend reads only the two files export wrote inside the workspace.
   getArtifacts(id: string): Promise<ApiArtifactsResponse> {
     return getJson<ApiArtifactsResponse>(`/experiments/${enc(id)}/artifacts`);
+  },
+
+  /**
+   * One page of a record's EXPORTED RUNS, each with the official record and evidence
+   * sidecar its export wrote and its own freshness (QA audit A-02/A-06).
+   *
+   * THE READ A FAN-OUT NEVER HAD. `getArtifacts` serves the experiment's own pair, and a
+   * record whose runs each export their own record has none, so the export screen could
+   * name the files it had just written — from the export RESPONSE — and nothing after a
+   * reload. Read-only; nothing is sent but the page.
+   *
+   * The query is appended to an unchanged path literal, for `getPendingPage`'s reason:
+   * `backend-down-state.test.tsx` derives its sub-read inventory from this file's
+   * template literals.
+   */
+  async getRunArtifacts(
+    id: string,
+    opts: { limit?: number; offset?: number } = {},
+  ): Promise<ApiRunArtifactsResponse> {
+    const params = new URLSearchParams();
+    if (opts.limit !== undefined) params.set('limit', String(opts.limit));
+    if (opts.offset) params.set('offset', String(opts.offset));
+    const query = params.toString();
+    const path = `/experiments/${enc(id)}/run-artifacts`;
+    return getJson<ApiRunArtifactsResponse>(query ? `${path}?${query}` : path);
+  },
+
+  /**
+   * The CONFIRMED reduced spectrum, QC verdict and descriptor this record holds — for
+   * the record itself, or per run (QA audit A-01/A-04).
+   *
+   * Before this read existed, those three answers could be seen and corrected only in
+   * the visit that answered them: they live in whole draft blocks, and no read served
+   * them. Each unit carries the `If-Match` value its correction takes (`version`), so a
+   * correction needs no second read for the token.
+   */
+  async getStructuredAnswers(
+    id: string,
+    opts: { limit?: number; offset?: number; runId?: string } = {},
+  ): Promise<ApiStructuredAnswersResponse> {
+    const params = new URLSearchParams();
+    if (opts.limit !== undefined) params.set('limit', String(opts.limit));
+    if (opts.offset) params.set('offset', String(opts.offset));
+    if (opts.runId) params.set('run_id', opts.runId);
+    const query = params.toString();
+    const path = `/experiments/${enc(id)}/structured-answers`;
+    return getJson<ApiStructuredAnswersResponse>(query ? `${path}?${query}` : path);
   },
 
   /**

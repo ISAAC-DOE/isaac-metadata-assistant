@@ -29,6 +29,8 @@ import asyncio
 
 import pytest
 
+from official_series import official_series, official_series_item
+
 import isaac_api.workspace as ws
 from isaac_api.mcp import (
     LocalLoopbackDeployment,
@@ -725,7 +727,18 @@ def test_update_draft_is_denied_to_a_read_only_caller(reader, writer):
 #: The seed with open `series` and `descriptor` questions and nothing else.
 PARTIAL_ID = "01SYNTHXANESSEED0000000002"
 #: A reduced spectrum shaped as the store keeps it. Synthetic, and obviously so.
-SPECTRUM = [{"energy_eV": 8979.0, "mu": 0.11}, {"energy_eV": 8999.0, "mu": 1.23}]
+#:
+#: ~~`[{"energy_eV": 8979.0, "mu": 0.11}, {"energy_eV": 8999.0, "mu": 1.23}]`~~ —
+#: CORRECTED 2026-10-11 (QA audit A-03). That was the STORABILITY rule's shape, and the
+#: official schema refuses every part of it: no `series_id` (required), no
+#: `independent_variables` or `channels` (required), two keys the item does not declare.
+#: The answering and correcting routes now ask the schema's own rule for the path, so a
+#: value this file calls "a reduced spectrum" has to be one. Two items, two ids, the same
+#: two numbers — so `SPECTRUM[:1]` is still a correction that DIFFERS.
+SPECTRUM = [
+    official_series_item("spectrum-a", 8979.0, 0.11),
+    official_series_item("spectrum-b", 8999.0, 1.23),
+]
 
 
 def questions(server: McpServer, experiment_id: str) -> list[dict]:
@@ -1036,8 +1049,10 @@ def test_what_a_CORRECTION_does_to_THE_EARLIER_CONFIRMATION_is_per_field(writer)
 
     # A `series_id` IS REQUIRED for the evidence entry to exist at all —
     # `complete.py` skips a series without one — so this test uses its own value
-    # rather than `SPECTRUM`, which deliberately has none.
-    identified = [{"energy_eV": 8979.0, "mu": 0.11, "series_id": "s1"}]
+    # ~~rather than `SPECTRUM`, which deliberately has none~~ (`SPECTRUM` carries ids
+    # since 2026-10-11, because the official schema requires one; this value is kept as
+    # its own single-item series because the assertions below count ONE evidence key).
+    identified = official_series("s1", 8979.0, 0.11)
 
     def stored():
         exp = ws.load_experiment(PARTIAL_ID, session_id=writer.binding.tutorial_session_id)
