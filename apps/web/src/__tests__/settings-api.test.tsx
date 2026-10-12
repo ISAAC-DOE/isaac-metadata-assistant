@@ -2565,7 +2565,20 @@ describe('the Full Description rule over the REAL generated contract', () => {
     // clause was still a universal claim — false for a labelled number
     // (`Temperature: 298 K`) — and now states what THIS BUILD does: "a required
     // temperature this build takes from no source". Measured, not apportioned.
-    expect(total).toBe(174788);
+    //
+    // 174,788 -> 176,738 (+1,950), 2026-10-11, QA findings `C-01`/`C-02` and their
+    // independent review: TWO descriptions re-transcribed from `create_app().openapi()`, NO
+    // operation added, and the paragraph counts UNCHANGED (14 and 8) — every new sentence
+    // was woven into an existing paragraph, for the `settings-explorer` reason recorded
+    // below. Per operation, raw `description.length` re-derived from the transcribed array
+    // at `origin/main` and now: `POST .../add-to-experiment` 6,467 -> 7,742 (+1,275: a
+    // run-owned value goes to its own measurement's run, the two new 422 codes, and an
+    // acquisition identity that names no archive) and
+    // `POST .../candidates/{candidate_id}/propose` 2,599 -> 3,274 (+675:
+    // `run_is_another_measurement`, a run you added yourself taking one measurement's
+    // values, and exactly-once across sessions). The total is the one this assertion
+    // measured, never apportioned.
+    expect(total).toBe(176738);
     // 104,045 -> 114,959 (+10,914): the four new operations, and NO existing
     // description changed — `test_contract_description_parity.py` proves that rather
     // than leaving it asserted here. RE-DERIVED from the served document and never

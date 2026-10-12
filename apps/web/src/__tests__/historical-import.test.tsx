@@ -228,10 +228,15 @@ const STRUCTURAL: ApiImportCandidate = {
   proposed_value: 'SYNTHETIC-bundle',
   disagreement: [],
   unresolved_reason: null,
+  /* THE SERVER'S CURRENT SENTENCE (`hist.CANDIDATE_NOT_PROPOSABLE_NO_EXPERIMENT_CREATION`).
+     ~~"Nothing in this build creates an experiment or a run from an import."~~ was false
+     once `HIST-005` shipped, and was corrected on the server 2026-10-11; a fixture that
+     kept it would describe a server that no longer answers that way. */
   not_proposable_reason:
-    'Nothing in this build creates an experiment or a run from an import. A proposal ' +
-    'is about one value at one official field path, so this candidate has no proposal ' +
-    'to become. Create the experiment yourself and propose the field candidates onto it.',
+    'This says an experiment or a run exists, not what one value is, so it has no ' +
+    'proposal to become. Make the record in the Add to Experiment step — for an ' +
+    'archive it can also make one run per measurement — and send the field values ' +
+    'onto it there.',
   proposable: false,
 };
 
@@ -343,6 +348,8 @@ function stub(
     added?: unknown;
     onAdd?: () => Response;
     experiments?: unknown;
+    /** `GET /api/experiments/{id}/runs`. Absent keeps the old answer (no runs). */
+    runs?: unknown;
   } = {},
 ) {
   seen.length = 0;
@@ -404,6 +411,9 @@ function stub(
          * pre-existing and shared, and closing it is its own change.
          */
         return json({ id: '01RECORD00000000000000009', title: 'A fictional 2099 CuO bundle' }, 201);
+      }
+      if (routes.runs !== undefined && /\/api\/experiments\/[^/]+\/runs(\?|$)/.test(url)) {
+        return json(routes.runs);
       }
       if (url.includes('/api/experiments')) {
         return json(routes.experiments ?? { experiments: [] });
@@ -994,7 +1004,8 @@ describe('§5 · a candidate that cannot be sent says why, and offers no control
     // A structural candidate is shown in Runs & Candidates ("What this looks like");
     // Review lists only the field candidates a proposal can carry.
     const card = openCandidate(goTo(IMPORT_STAGE_COPY.runs.title), 'SYNTHETIC-bundle');
-    expect(card.textContent).toContain('creates an experiment or a run from an import');
+    // The server's own reason, verbatim — re-pointed 2026-10-11 with that reason.
+    expect(card.textContent).toContain('has no proposal to become');
     expect(within(card).queryByRole('button', { name: IMPORT_COPY.actionPropose })).toBeNull();
   });
 
@@ -1993,5 +2004,194 @@ describe('§15 · an act is announced and lands focus on what it produced', () =
     expect(tabFor(IMPORT_STAGE_COPY.runs.title).getAttribute('aria-selected')).toBe('true');
     const heading = screen.getByRole('heading', { name: IMPORT_STAGE_COPY.runs.title, level: 3 });
     await waitFor(() => expect(document.activeElement).toBe(heading));
+  });
+});
+
+/* --------------------------------------------------------------------------
+ * §16 · a run-owned value goes to its OWN measurement's run (QA `C-01`, 2026-10-11)
+ *
+ * An independent QA audit measured, in a real browser, the single-candidate form
+ * defaulting to "No run" beside the run created from that very measurement, and
+ * measurement #2's value going onto #1's run without a word. The server now refuses
+ * that (`run_is_another_measurement`) and refuses one named run for the values of
+ * several measurements (`values_from_several_measurements`); these tests hold the
+ * screen to saying so first. Every match is the server's own key compared as a
+ * string: `send_plan.measurement_of` against each run's `historical_origin`.
+ * -------------------------------------------------------------------------- */
+
+const KEY_A = '01_FAKE_A@sha256:' + 'a'.repeat(64);
+const KEY_B = '02_FAKE_B@sha256:' + 'b'.repeat(64);
+
+const RUN_VALUE_A: ApiImportCandidate = {
+  ...SENDABLE,
+  candidate_id: '01_FAKE_A::sample_name',
+  target_field_path: 'sample.material.name',
+  proposed_value: 'FICTIONAL-A',
+  rule: 'Read verbatim from a fictional source A.',
+};
+
+const RUN_VALUE_B: ApiImportCandidate = {
+  ...SENDABLE,
+  candidate_id: '02_FAKE_B::acquisition_epoch',
+  target_field_path: 'timestamps.acquired_start_utc',
+  proposed_value: '2099-01-02T00:00:00+00:00',
+  rule: 'Read from a fictional epoch line B.',
+};
+
+function routedSession(): ApiImportSession {
+  const candidates = [SENDABLE, RUN_VALUE_A, RUN_VALUE_B];
+  return session({
+    reconstruction: { ...session().reconstruction!, candidates },
+    send_plan: {
+      sendable: candidates.map((c) => c.candidate_id),
+      not_sent: {},
+      no_run_when_creating_runs: [],
+      measurement_of: { [RUN_VALUE_A.candidate_id]: KEY_A, [RUN_VALUE_B.candidate_id]: KEY_B },
+    },
+  });
+}
+
+function run(id: string, label: string, key: string | null) {
+  return {
+    id,
+    experiment_id: '01RECORD00000000000000001',
+    label,
+    ordinal: 1,
+    created_utc: '2099-01-01T00:00:00Z',
+    updated_utc: '2099-01-01T00:00:00Z',
+    rev: 1,
+    version: 'g.1',
+    record_id: null,
+    historical_origin: key === null ? null : { acquisition_identity: key, stem: label, legacy_number: null },
+    fields: {},
+    inherited: {},
+  };
+}
+
+async function openRouted(runs: ReturnType<typeof run>[]) {
+  stub({
+    list: listResponse(),
+    detail: routedSession(),
+    experiments: {
+      experiments: [{ id: '01RECORD00000000000000001', title: 'Cu K-edge campaign, 2019' }],
+    },
+    runs: { runs, experiment_version: 'g.1', total: runs.length, matched: runs.length, returned: runs.length, offset: 0 },
+    onPropose: () =>
+      new Response(JSON.stringify({ deduplicated: false }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json', ETag: '"abc.1"' },
+      }),
+    added: addedResponse(),
+  });
+  renderScreen();
+  fireEvent.click(await screen.findByRole('button', { name: IMPORT_COPY.actionStart }));
+  await sessionOpen();
+}
+
+async function chooseRecordIn(scope: HTMLElement) {
+  const destination = await waitFor(() => {
+    const el = within(scope).queryByRole('combobox', { name: /which record/i });
+    if (el === null) throw new Error('no destination control yet');
+    return el;
+  });
+  fireEvent.change(destination, { target: { value: '01RECORD00000000000000001' } });
+}
+
+describe('§16 · a run-owned value goes to its own measurement’s run', () => {
+  it('MUTATION-GUARDED: preselects the run made from the value’s own measurement, and sends it', async () => {
+    /**
+     * MUTATION: dropping the `ownRun` preselection (the form's old "No run" default)
+     * makes this RED — the picker reads "" and the request carries no `run_id`.
+     */
+    await openRouted([run('R-A', 'run A', KEY_A), run('R-B', 'run B', KEY_B), run('R-FREE', 'by hand', null)]);
+    const card = openCandidate(goTo(IMPORT_STAGE_COPY.review.title), 'timestamps.acquired_start_utc');
+    await chooseRecordIn(card);
+    const picker = (await within(card).findByRole('combobox', { name: /which run/i })) as HTMLSelectElement;
+    await waitFor(() => expect(picker.value).toBe('R-B'));
+    expect(within(card).getByText(IMPORT_STAGE_COPY.ownRunPreselected)).toBeTruthy();
+
+    fireEvent.click(within(card).getByRole('button', { name: IMPORT_COPY.actionPropose }));
+    await waitFor(() => {
+      const propose = seen.find((r) => r.url.includes('/propose'));
+      expect(propose).toBeTruthy();
+      expect(JSON.parse(String(propose?.body ?? '{}')).run_id).toBe('R-B');
+    });
+  });
+
+  it('MUTATION-GUARDED: a run made from ANOTHER measurement is shown but cannot be chosen', async () => {
+    /** MUTATION: removing `disabled={another}` from the run option makes this RED. */
+    await openRouted([run('R-A', 'run A', KEY_A), run('R-B', 'run B', KEY_B), run('R-FREE', 'by hand', null)]);
+    const card = openCandidate(goTo(IMPORT_STAGE_COPY.review.title), 'timestamps.acquired_start_utc');
+    await chooseRecordIn(card);
+    const picker = await within(card).findByRole('combobox', { name: /which run/i });
+    const options = [...picker.querySelectorAll('option')];
+    const a = options.find((o) => o.value === 'R-A')!;
+    expect(a.disabled).toBe(true);
+    expect(a.textContent).toBe(`run A${IMPORT_STAGE_COPY.otherMeasurementRun}`);
+    // a run with NO recorded origin stays the scientist's choice
+    expect(options.find((o) => o.value === 'R-FREE')!.disabled).toBe(false);
+  });
+
+  it('never infers a run: with no run made from this measurement, nothing is preselected', async () => {
+    await openRouted([run('R-FREE', 'by hand', null)]);
+    const card = openCandidate(goTo(IMPORT_STAGE_COPY.review.title), 'timestamps.acquired_start_utc');
+    await chooseRecordIn(card);
+    const picker = (await within(card).findByRole('combobox', { name: /which run/i })) as HTMLSelectElement;
+    expect(picker.value).toBe('');
+    expect(within(card).queryByText(IMPORT_STAGE_COPY.ownRunPreselected)).toBeNull();
+  });
+
+  it('MUTATION-GUARDED: the batch says BEFORE submit that one run cannot hold two measurements', async () => {
+    /**
+     * MUTATION: never rendering `routingWarning` makes this RED (and the last test
+     * below); counting measurements that already HAVE a run here makes the next two
+     * tests RED.
+     */
+    await openRouted([run('R-FREE', 'by hand', null)]);
+    goTo(IMPORT_STAGE_COPY.add.title);
+    const panel = document.querySelector('.hi-addwhole') as HTMLElement;
+    expect(within(panel).getByText(IMPORT_COPY.addWholeRunNote)).toBeTruthy();
+    await chooseRecordIn(panel);
+    expect(await within(panel).findByText(IMPORT_STAGE_COPY.severalMeasurements(2))).toBeTruthy();
+  });
+
+  it('MUTATION-GUARDED: says nothing about naming a run when the record has no runs to name', async () => {
+    /**
+     * MUTATION: dropping `runs.length === 0` from the `routingWarning` guard makes this
+     * RED — the sentence then describes a run picker that is not on the screen.
+     */
+    await openRouted([]);
+    goTo(IMPORT_STAGE_COPY.add.title);
+    const panel = document.querySelector('.hi-addwhole') as HTMLElement;
+    await chooseRecordIn(panel);
+    await waitFor(() => expect(seen.some((r) => /\/runs(\?|$)/.test(r.url))).toBe(true));
+    expect(within(panel).queryByRole('combobox', { name: /which run/i })).toBeNull();
+    // WAITED FOR, not sampled once: the runs read resolves after the request is seen, so
+    // an immediate `queryByText` would pass before the warning had any chance to appear.
+    await expect(
+      within(panel).findByText(IMPORT_STAGE_COPY.severalMeasurements(2), {}, { timeout: 800 }),
+    ).rejects.toThrow();
+  });
+
+  it('says nothing more when every measurement already has its own run here', async () => {
+    await openRouted([run('R-A', 'run A', KEY_A), run('R-B', 'run B', KEY_B)]);
+    goTo(IMPORT_STAGE_COPY.add.title);
+    const panel = document.querySelector('.hi-addwhole') as HTMLElement;
+    await chooseRecordIn(panel);
+    await within(panel).findByRole('combobox', { name: /which run/i });
+    expect(within(panel).queryByText(IMPORT_STAGE_COPY.severalMeasurements(2))).toBeNull();
+    expect(within(panel).queryByText(IMPORT_STAGE_COPY.namedRunIsAnotherMeasurement)).toBeNull();
+  });
+
+  it('warns when the named run was made from another measurement', async () => {
+    await openRouted([run('R-A', 'run A', KEY_A), run('R-FREE', 'by hand', null)]);
+    goTo(IMPORT_STAGE_COPY.add.title);
+    const panel = document.querySelector('.hi-addwhole') as HTMLElement;
+    await chooseRecordIn(panel);
+    const picker = await within(panel).findByRole('combobox', { name: /which run/i });
+    fireEvent.change(picker, { target: { value: 'R-A' } });
+    expect(within(panel).getByText(IMPORT_STAGE_COPY.namedRunIsAnotherMeasurement)).toBeTruthy();
+    fireEvent.change(picker, { target: { value: 'R-FREE' } });
+    expect(within(panel).queryByText(IMPORT_STAGE_COPY.namedRunIsAnotherMeasurement)).toBeNull();
   });
 });
