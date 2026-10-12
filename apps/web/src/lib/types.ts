@@ -1629,6 +1629,20 @@ export interface ApiDemoStep {
   ok: boolean;
 }
 
+/**
+ * `POST /api/experiments/{id}/discard` — what was removed, as the SERVER measured it.
+ *
+ * `durable_rows_removed` is `0` on a deployment that stores experiments on the
+ * filesystem, which is the normal and honest answer there; a screen must not read it as
+ * "nothing was discarded". There is no `ETag`: the record no longer exists.
+ */
+export interface ApiDiscardResult {
+  discarded_experiment_id: string;
+  discarded_title: string;
+  discarded_run_count: number;
+  durable_rows_removed: number;
+}
+
 export interface ApiDemoRunResponse {
   experiment_id: string;
   steps: ApiDemoStep[];

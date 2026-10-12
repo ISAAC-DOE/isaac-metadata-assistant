@@ -57,6 +57,19 @@ function reviewState(overrides: Partial<RecordBundle> = {}): GroundingState {
   return { context: 'review', bundle: { ...base, ...overrides } };
 }
 
+/**
+ * B-04 (review): the blocker chip now LEADS with the record's open questions — the same
+ * composition as the typed answer — so on the full fixtures (five open questions) every
+ * blocker answer starts with this sentence. Tests of the VALIDATION half alone give the
+ * bundle no open questions.
+ */
+const OPEN_LEAD =
+  '5 fields still need you before export: ' +
+  'ssrl-archive://BL15-2/2099_run_000/notebooks/xanes_reduction_v2.ipynb, ' +
+  'ssrl-archive://BL15-2/2099_run_000/raw/scan_0044.dat, ' +
+  'ssrl-archive://BL15-2/2099_run_000/reduced/CuO2_merged.xdi, …and 2 more. ';
+const NO_OPEN = { pending: [], pendingTotal: 0 } as Partial<RecordBundle>;
+
 const VERDICT = /\b(PASS|FAIL)\b/;
 const INVALID_AGAINST = /\b(in)?valid against\b/i;
 
@@ -141,8 +154,11 @@ describe('compose({context:"review"}) — full fixture bundle', () => {
   // chip's conditions are unchanged; only the rendering is.
   it('blocking_paths echoes an issue count + humanized locations + offers Open Validator; never echoes validity', () => {
     expect(out.prompts[1].answer).toEqual({
-      text: '2 validation issues may be blocking export: assets, measurement → series.',
-      answeredFrom: 'schema',
+      text:
+        OPEN_LEAD +
+        'The deterministic schema check separately reports 2 validation issues: ' +
+        'assets — assets is a required property; measurement → series — series is a required property.',
+      answeredFrom: 'workflow',
       action: OPEN_VALIDATOR_ACTION,
       technicalPaths: ['$.assets', '$.measurement.series'],
     });
@@ -186,7 +202,7 @@ describe('compose review — degraded / edge branches', () => {
   });
 
   it('validate errors empty → no-blocking-issues message, still offers Open Validator', () => {
-    const out = compose(reviewState({ validate: { ...validateDryRun, errors: [] } }));
+    const out = compose(reviewState({ ...NO_OPEN, validate: { ...validateDryRun, errors: [] } }));
     expect(out.prompts[1].answer).toEqual({
       text: 'No blocking validation issues are listed in the current validation response.',
       answeredFrom: 'schema',
@@ -199,11 +215,12 @@ describe('compose review — degraded / edge branches', () => {
   it('validate is a singular path → grammatical "1 validation issue", plus the action', () => {
     const out = compose(
       reviewState({
+        ...NO_OPEN,
         validate: { ...validateDryRun, errors: [{ path: '$.assets', message: 'required' }] },
       }),
     );
     expect(out.prompts[1].answer!.text).toBe(
-      '1 validation issue may be blocking export: assets.',
+      '1 validation issue may be blocking export: assets — required.',
     );
     expect(out.prompts[1].answer!.action).toEqual(OPEN_VALIDATOR_ACTION);
     expect(out.prompts[1].answer!.technicalPaths).toEqual(['$.assets']);
@@ -215,11 +232,12 @@ describe('compose review — degraded / edge branches', () => {
   it('a ROOT-level violation reads as a record-level issue, never as the raw "$"', () => {
     const out = compose(
       reviewState({
+        ...NO_OPEN,
         validate: { ...validateDryRun, errors: [{ path: '$', message: "'sample' is required" }] },
       }),
     );
     const answer = out.prompts[1].answer!;
-    expect(answer.text).toBe('1 record-level validation issue may be blocking export.');
+    expect(answer.text).toBe('1 record-level validation issue may be blocking export: \'sample\' is required.');
     expect(answer.text).not.toContain('$');
     // …and the exact locator is still available, in the disclosure only
     expect(answer.technicalPaths).toEqual(['$']);
@@ -228,6 +246,7 @@ describe('compose review — degraded / edge branches', () => {
   it('a root-level and a nested violation together keep both locations distinct', () => {
     const out = compose(
       reviewState({
+        ...NO_OPEN,
         validate: {
           ...validateDryRun,
           errors: [
@@ -239,7 +258,8 @@ describe('compose review — degraded / edge branches', () => {
     );
     const answer = out.prompts[1].answer!;
     expect(answer.text).toBe(
-      '2 validation issues may be blocking export: the record itself, assets → 0 → sha256.',
+      "2 validation issues may be blocking export: the record itself — 'sample' is required; " +
+        'assets → 0 → sha256 — too short.',
     );
     expect(answer.text).not.toContain('$');
     expect(answer.technicalPaths).toEqual(['$', 'assets.0.sha256']);
@@ -254,6 +274,7 @@ describe('compose review — degraded / edge branches', () => {
   it('a validation CRASH is never described as a validation issue', () => {
     const out = compose(
       reviewState({
+        ...NO_OPEN,
         validate: {
           ...validateDryRun,
           ok: false,
@@ -276,6 +297,7 @@ describe('compose review — degraded / edge branches', () => {
   it('a GENUINE root-level violation is still reported as one (the fix is not a blanket mute)', () => {
     const out = compose(
       reviewState({
+        ...NO_OPEN,
         validate: {
           ...validateDryRun,
           ok: false,
@@ -284,13 +306,14 @@ describe('compose review — degraded / edge branches', () => {
       }),
     );
     const answer = out.prompts[1].answer!;
-    expect(answer.text).toBe('1 record-level validation issue may be blocking export.');
+    expect(answer.text).toBe("1 record-level validation issue may be blocking export: 'sample' is a required property.");
     expect(answer.technicalPaths).toEqual(['$']);
   });
 
   it('the sentinel alongside a real finding is still reported as findings', () => {
     const out = compose(
       reviewState({
+        ...NO_OPEN,
         validate: {
           ...validateDryRun,
           ok: false,
@@ -303,7 +326,8 @@ describe('compose review — degraded / edge branches', () => {
     );
     const answer = out.prompts[1].answer!;
     expect(answer.text).toBe(
-      '2 validation issues may be blocking export: the record itself, assets.',
+      "2 validation issues may be blocking export: the record itself — Validation could not be completed; " +
+        "assets — 'assets' is a required property.",
     );
     expect(answer.technicalPaths).toEqual(['$', 'assets']);
   });
@@ -595,11 +619,16 @@ describe('pending_summary — count and displayed list agree (6b)', () => {
   });
 
   it('plural grammar: 2 pending → "2 fields still need you"', () => {
+    // The `about` values are dotted locators on purpose (B-02): the bare words `one` and
+    // `two` match the bare-internal-key predicate and are now rendered "One", "Two" — the
+    // same as the server renders them — which is a real behaviour and not what this
+    // grammar test is about. A locator is shown verbatim, so the count grammar stays the
+    // only thing under test.
     const answer = summary([
-      { id: 'z1', kind: 'asset', question: 'q1', about: 'one' },
-      { id: 'z2', kind: 'asset', question: 'q2', about: 'two' },
+      { id: 'z1', kind: 'asset', question: 'q1', about: 'sample.one' },
+      { id: 'z2', kind: 'asset', question: 'q2', about: 'sample.two' },
     ]);
-    expect(answer.text).toBe('2 fields still need you: one, two.');
+    expect(answer.text).toBe('2 fields still need you: sample.one, sample.two.');
   });
 
   it('exact "…and K more" for a known count of 7 → K = 4', () => {
@@ -696,8 +725,9 @@ describe('compose({context:"export"}) — post-export fixture bundle', () => {
 
   it('blocking_paths (post-export, 0 errors) → no-blocking message, still offers Open Validator', () => {
     expect(out.prompts[1].answer).toEqual({
-      text: 'No blocking validation issues are listed in the current validation response.',
-      answeredFrom: 'schema',
+      text:
+        OPEN_LEAD + 'No blocking validation issues are listed in the current validation response.',
+      answeredFrom: 'workflow',
       action: OPEN_VALIDATOR_ACTION,
     });
   });
@@ -802,7 +832,9 @@ describe('compose export — coverage echo variants + pre-export fallback + disa
   it('audit payload absent → coverage chip DISABLED (answer undefined); reply falls to blocking', () => {
     const out = compose(exportState({ audit: undefined }));
     expect(out.prompts[0].answer).toBeUndefined();
-    expect(out.reply.answeredFrom).toBe('schema');
+    // B-04 (review): the fixture carries open questions, so the blocker answer is led by them
+    // and is grounded in the workflow plane (it was 'schema' when the answer was validation-only).
+    expect(out.reply.answeredFrom).toBe('workflow');
   });
 });
 
@@ -810,8 +842,11 @@ describe('compose export — blocking_paths routing (shares §5.1 template; neve
   it('2 errors → issue count + humanized locations + the Open Validator action (from validateDryRun)', () => {
     const out = compose(exportState({ validate: validateDryRun }));
     expect(out.prompts[1].answer).toEqual({
-      text: '2 validation issues may be blocking export: assets, measurement → series.',
-      answeredFrom: 'schema',
+      text:
+        OPEN_LEAD +
+        'The deterministic schema check separately reports 2 validation issues: ' +
+        'assets — assets is a required property; measurement → series — series is a required property.',
+      answeredFrom: 'workflow',
       action: OPEN_VALIDATOR_ACTION,
       technicalPaths: ['$.assets', '$.measurement.series'],
     });
@@ -820,11 +855,12 @@ describe('compose export — blocking_paths routing (shares §5.1 template; neve
   it('1 error → grammatical "1 validation issue", plus the action', () => {
     const out = compose(
       exportState({
+        pending: [],
         validate: { ...validateDryRun, errors: [{ path: '$.assets', message: 'required' }] },
       }),
     );
     expect(out.prompts[1].answer!.text).toBe(
-      '1 validation issue may be blocking export: assets.',
+      '1 validation issue may be blocking export: assets — required.',
     );
     expect(out.prompts[1].answer!.action).toEqual(OPEN_VALIDATOR_ACTION);
   });
@@ -833,17 +869,18 @@ describe('compose export — blocking_paths routing (shares §5.1 template; neve
   it('a ROOT-level violation reads as record-level on Ready to Export too', () => {
     const out = compose(
       exportState({
+        pending: [],
         validate: { ...validateDryRun, errors: [{ path: '$', message: "'assets' is required" }] },
       }),
     );
     expect(out.prompts[1].answer!.text).toBe(
-      '1 record-level validation issue may be blocking export.',
+      "1 record-level validation issue may be blocking export: 'assets' is required.",
     );
     expect(out.prompts[1].answer!.technicalPaths).toEqual(['$']);
   });
 
   it('0 errors (validateReadyDryRun) → no-blocking message, plus the action', () => {
-    const out = compose(exportState({ validate: validateReadyDryRun }));
+    const out = compose(exportState({ pending: [], validate: validateReadyDryRun }));
     expect(out.prompts[1].answer!.text).toBe(
       'No blocking validation issues are listed in the current validation response.',
     );
@@ -855,6 +892,7 @@ describe('compose export — blocking_paths routing (shares §5.1 template; neve
   it('a validation CRASH is never described as a validation issue on Ready to Export either', () => {
     const out = compose(
       exportState({
+        pending: [],
         validate: {
           ...validateDryRun,
           ok: false,
@@ -1325,6 +1363,61 @@ describe('compose({context:"complete"}) — full fixture (current item = pending
   });
 });
 
+/*
+ * B-02 — THE CHIP ANSWERED RAW KEYS WHILE THE TYPED QUESTION GOT THE HUMANIZED ANSWER.
+ *
+ * Measured on a record created through `POST /api/experiments`: the "What still needs
+ * me?" chip said "3 fields still need you: reduced_spectrum, qc_status,
+ * required_for_evidence_record." while typing the same question produced "…: Reduced
+ * Spectrum, QC Status, Required For Evidence Record." from the server. The chip's label
+ * ladder took `about` verbatim as its first rung; the server's applies the bare-identifier
+ * predicate first (`assistant_query._blocker_display`). The composer now uses the
+ * frontend mirror of that mapping (`adapt.blockerDisplayName`), so both surfaces call one
+ * field one thing — pinned beside the server's own table in
+ * `blocker-wording-parity.test.ts`.
+ */
+describe('pending_summary names the three internal blocker keys the way the server does (B-02)', () => {
+  const KEYS = [
+    { id: 'series', kind: 'series', about: 'reduced_spectrum', question: 'Provide the spectrum.' },
+    { id: 'qc', kind: 'qc', about: 'qc_status', question: 'What is the QC verdict?' },
+    {
+      id: 'required_for_evidence_record',
+      kind: 'required_for_evidence_record',
+      about: 'required_for_evidence_record',
+      question: 'Which evidence is required?',
+    },
+  ] as unknown as ApiPendingItem[];
+  const SERVER_SENTENCE =
+    '3 fields still need you: Reduced Spectrum, QC Status, Required For Evidence Record.';
+
+  it('the review chip says exactly the sentence the server gives', () => {
+    const answer = compose(reviewState({ pending: KEYS })).prompts[0].answer;
+    expect(answer?.text).toBe(SERVER_SENTENCE);
+  });
+
+  it('the review chip never prints a raw key', () => {
+    const text = compose(reviewState({ pending: KEYS })).prompts[0].answer?.text ?? '';
+    for (const key of ['reduced_spectrum', 'qc_status', 'required_for_evidence_record']) {
+      expect(text).not.toContain(key);
+    }
+  });
+
+  it('a real locator is still shown verbatim', () => {
+    const locator = 'ssrl-archive://BL15-2/2099_run_000/raw/scan_0044.dat';
+    const text =
+      compose(reviewState({ pending: [{ ...KEYS[0], about: locator }] as unknown as ApiPendingItem[] }))
+        .prompts[0].answer?.text ?? '';
+    expect(text).toBe(`1 field still needs you: ${locator}.`);
+  });
+
+  it('the Complete Metadata chip names them the same way', () => {
+    const answer = compose({ context: 'complete', pending: KEYS } as unknown as GroundingState).prompts[0]
+      .answer;
+    expect(answer?.text).toContain('Reduced Spectrum, QC Status, Required For Evidence Record');
+    expect(answer?.text).not.toContain('reduced_spectrum');
+  });
+});
+
 describe('compose complete — pending_summary echo variants + empty + disabled', () => {
   const summary = (pending: unknown) => compose(completeState(pending)).prompts[0].answer;
 
@@ -1445,5 +1538,73 @@ describe('compose complete — no-verdict guarantee across every composed string
         expect(s).not.toContain('null');
       }
     }
+  });
+});
+
+/*
+ * B-04 (review) — the blocker CHIP agrees with the typed answer and with the record's own count.
+ * The chip said "1 record-level validation issue may be blocking export" on a record whose banner
+ * said "3 Fields Need Your Confirmation" and whose typed answer led with the three open questions.
+ */
+describe('blocking_paths chip — same composition as the typed answer (B-04 review)', () => {
+  const THREE = ['reduced_spectrum', 'qc_status', 'required_for_evidence_record'].map((about) => ({
+    id: about,
+    kind: about,
+    about,
+    question: 'q',
+  })) as unknown as ApiPendingItem[];
+  const chip = (over: Partial<RecordBundle>) => compose(reviewState(over)).prompts[1].answer!;
+
+  it('leads with the open questions (humanized), then the validator\'s message — the typed answer, word for word', () => {
+    const a = chip({
+      pending: THREE,
+      validate: { ...validateDryRun, errors: [{ path: '$', message: "'descriptors' is a required property" }] },
+    });
+    expect(a.text).toBe(
+      '3 fields still need you before export: Reduced Spectrum, QC Status, Required For Evidence Record. ' +
+        "The deterministic schema check separately reports 1 record-level validation issue: 'descriptors' is a required property.",
+    );
+  });
+
+  it('counts off the TOTAL, not the window', () => {
+    const a = chip({ pending: THREE.slice(0, 1), pendingTotal: 30, validate: { ...validateDryRun, errors: [] } });
+    expect(a.text.startsWith('30 fields still need you before export: Reduced Spectrum, …and 29 more.')).toBe(true);
+  });
+
+  it('names two findings at one locator by their messages, never the bare location twice', () => {
+    const a = chip({
+      ...NO_OPEN,
+      validate: {
+        ...validateDryRun,
+        errors: [
+          { path: 'measurement.series.0', message: "'x' is a required property" },
+          { path: 'measurement.series.0', message: "'y' is a required property" },
+          { path: 'measurement.series.0', message: "'y' is a required property" },
+        ],
+      },
+    });
+    expect(a.text).toBe(
+      "2 validation issues may be blocking export: measurement → series → 0 — 'x' is a required property; " +
+        "measurement → series → 0 — 'y' is a required property.",
+    );
+  });
+
+  it('bounds a long message (an enum lists every allowed value) and withholds an unsafe one alone', () => {
+    const long = `'zzz' is not one of [${Array.from({ length: 40 }, (_, i) => `'t${i}'`).join(', ')}]`;
+    const a = chip({
+      pending: THREE,
+      validate: {
+        ...validateDryRun,
+        errors: [
+          { path: 'system.technique', message: long },
+          { path: 'assets', message: 'bad ' + 'a'.repeat(40) },
+        ],
+      },
+    });
+    expect(a.text).toContain('system → technique — \'zzz\' is not one of [\'t0\'');
+    expect(a.text).toContain('…');
+    expect(a.text).not.toContain("'t39'");
+    expect(a.text).toContain('(message withheld)');
+    expect(a.text.startsWith('3 fields still need you before export:')).toBe(true);
   });
 });

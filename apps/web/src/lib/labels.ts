@@ -1173,6 +1173,63 @@ export const LABELS = {
   renameFailed: 'The name could not be saved.',
 
   /*
+   * DISCARD A RECORD (B-08). `POST /api/experiments/{id}/discard` shipped in `d93b896`
+   * and nothing in the app called it, while Settings promised that "deliberate removal
+   * reaches … one unsubmitted, unexported record at a time". The copy below says only
+   * what the route's own contract says, and each sentence has a source:
+   *
+   *   · WHAT GOES — "the record, its runs, its answers, its notes and its assets"
+   *     (`_DISCARD_DESCRIPTION`). Nothing else is claimed to go, and nothing is claimed
+   *     to stay beyond what the same description names.
+   *   · WHAT IS REFUSED — submitted, exported, an exported run, published artifacts on
+   *     disk, or a built-in worked example (`_R_DISCARD_REFUSED`). The server decides;
+   *     this screen offers the control wherever the client can see nothing already
+   *     forbids it, and prints the server's own `message` verbatim when it refuses.
+   *   · NO UNDO — "There is no undo." is the route's own sentence.
+   *
+   * "KEEP" IS THE SAFE DEFAULT and takes focus on open; the destructive button is the
+   * second of the two, named for what it does rather than "OK" or "Yes".
+   */
+  discardSectionLabel: 'Discard',
+  discardSectionSummary: 'Remove this record',
+  discardIntro:
+    'Removes this record from the workspace entirely. Only a record that has never been submitted ' +
+    'and never exported can be discarded — ISAAC refuses anything that has published or declared something.',
+  discardAction: 'Discard This Record',
+  discardDialogTitle: 'Discard This Record?',
+  discardWhatGoes:
+    'This permanently removes the record, its runs, its answers, its notes and its assets. There is no undo.',
+  discardWhatStays:
+    'Nothing else is touched. If the record turns out to have been submitted or exported, ISAAC ' +
+    'refuses and removes nothing.',
+  discardKeep: 'Keep This Record',
+  discardConfirm: 'Discard Record',
+  discardPending: 'Discarding…',
+  discardBlockedExample:
+    'This is a built-in worked example. Worked examples are fixed teaching material that the ' +
+    'worked-example reset restores — they are not discarded.',
+  discardBlockedExported:
+    'This record has already produced an official ISAAC record. Published records are never removed ' +
+    'by this application, so it cannot be discarded.',
+  discardStale:
+    'This record changed since you opened this dialog, so nothing was removed. The record has ' +
+    'been reloaded. Close this dialog and reopen it to confirm against the current version.',
+  discardGone:
+    'This record is no longer in the workspace — it may already have been discarded.',
+  /** A refusal with no typed message: the status is all that is known, so say only that. */
+  discardRefusedPlain: 'ISAAC refused the discard.',
+  /** The request did not complete, or failed in a way that does not say what was done:
+   *  claiming "nothing was removed" would be a guess, so the sentence claims neither. */
+  discardUnknownOutcome:
+    'The discard request did not complete, so this screen cannot tell whether the record was ' +
+    'removed. Reload to check before trying again.',
+  discardBackToExperiments: 'Go to My Experiments',
+  /** My Experiments, once, after a discard: the sentence is split around the title so the
+   *  title can be set as text inside it. Only what the route's response measured. */
+  discardDoneBefore: 'Discarded ',
+  discardDoneAfter: ' — the record and its runs, answers, notes and assets were removed.',
+
+  /*
    * RENAME ONE RUN — a backend that had no control until now.
    *
    * `PATCH /api/experiments/{id}/runs/{run_id}` has always documented itself as
@@ -1389,6 +1446,11 @@ export const LABELS = {
     'this screen establishes that a record created now is stored durably.',
 
   actionLaunchGuidedDemo: 'Launch Guided Demo',
+  // /load, outside a worked example (B-05). One sentence of cause, ahead of the audited
+  // `launchGuidedDemoBody` it is always rendered with — so the screen says WHY the
+  // button offers a demo rather than a run, before the press, instead of refusing after.
+  demoRunsInsideGuidedDemo:
+    'This worked example runs inside the guided demo, which this browser tab has not opened.',
   launchGuidedDemoBody:
     'Starting it opens a worked example of its own — a temporary workspace holding five example ' +
     'records, discarded when the tour ends. No record of yours is created, changed, or removed.',

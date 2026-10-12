@@ -204,7 +204,8 @@ export function StatusBar({
         {advisoryResolved ? (
           <>
             <span className="statusbar-advisory">
-              {advisory.warnings.length} advisory · non-gating
+              {advisory.warnings.length} {advisory.warnings.length === 1 ? 'advisory' : 'advisories'} ·
+              non-gating
             </span>
             {eyebrow(LABELS.signalAdvisory)}
           </>

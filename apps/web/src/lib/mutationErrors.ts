@@ -34,6 +34,27 @@ export function statusOf(err: unknown): number | undefined {
 }
 
 /**
+ * The server's OWN human-readable `message` for a refusal, when the error carries a
+ * JSON body that has one — `undefined` otherwise, which callers must read as "not
+ * observed" and answer with their own generic sentence.
+ *
+ * Duck-typed for the same reason `statusOf` is. The body reaches an `ApiError` from
+ * either `mutationError` (412/400/422/409) or `httpErrorWithReason` (any 4xx), and an
+ * HTML intercept never gets one, so a sign-in page can never be mistaken for ISAAC
+ * speaking. The text is rendered verbatim by callers: it is the server's wording
+ * (DEC-30/DEC-35 keep validation messages verbatim), and this function neither
+ * trims it into a different sentence nor composes one.
+ */
+export function serverMessageOf(err: unknown): string | undefined {
+  if (typeof err !== 'object' || err === null) return undefined;
+  if ((err as { htmlIntercept?: unknown }).htmlIntercept === true) return undefined;
+  const body = (err as { body?: unknown }).body;
+  if (typeof body !== 'object' || body === null) return undefined;
+  const message = (body as { message?: unknown }).message;
+  return typeof message === 'string' && message.trim() !== '' ? message : undefined;
+}
+
+/**
  * Did the server refuse this write because the VALUE cannot be stored?
  *
  * Narrow on purpose. A 422 from `POST /edit` has three other causes — a missing

@@ -789,7 +789,12 @@ describe('the sub-read inventory this file derives from api.ts', () => {
     // counter hiding behind the first failure twice — once for `folder` and once for
     // `activity`. Every number read out of this test's own failure output, never
     // derived by adding a delta.
-    expect(experimentPathLiterals.length).toBe(49);
+    // 49 -> 50 (B-08): `discardExperiment`, the one-record discard
+    // (`POST .../discard`). ONE new literal, a new sub-read suffix (`discard`) and a new
+    // first segment, which is why `SUB_RESOURCE_LABELS` gained `discard` ("the discard")
+    // in the same change. Read out of this test's own failure output
+    // (`expected 50 to be 49`), not derived by adding a delta.
+    expect(experimentPathLiterals.length).toBe(50);
     expect(bareRecordLiterals.length).toBeGreaterThan(0);
     // 31 -> 33: `runs/SEG-1/answers` and `runs/SEG-1/edit`, the two run-level write
     // suffixes. Both are WRITES rather than reads, and they appear here because this
@@ -821,7 +826,8 @@ describe('the sub-read inventory this file derives from api.ts', () => {
     // that distinction before this history existed. Read out of this test's own
     // failure output (`have a length of 38 but got 39`), not derived by adding a delta.
     // 39 -> 40: `CTX-004`'s `extended-context`. See the literal-count note above.
-    expect(SUB_READ_SUFFIXES).toHaveLength(40);
+    // 40 -> 41: `discard`, B-08. See the literal-count note above.
+    expect(SUB_READ_SUFFIXES).toHaveLength(41);
     // 19, AND THE ROUTE TO THAT NUMBER IS WORTH KEEPING.
     //
     // THIS INCIDENT RECORD WAS LOST IN A MERGE RESOLUTION AND IS RESTORED HERE, an
@@ -882,7 +888,7 @@ describe('the sub-read inventory this file derives from api.ts', () => {
     // got 25`), not derived by adding a delta.
     // 25 -> 26: `CTX-004`'s `extended-context`, a first segment nothing else used.
     // See the literal-count note above for why all three moved together.
-    expect(SUB_READ_SEGMENTS).toHaveLength(26);
+    expect(SUB_READ_SEGMENTS).toHaveLength(27);
     // THE CONFLICT-RESOLUTION PAIR, and how these three numbers were arrived at.
     // `listConflicts` and `resolveConflict` add TWO literals and TWO suffixes —
     // `conflicts` and `conflicts/resolve`, the second of which carries no `${…}`
@@ -1330,7 +1336,12 @@ describe('an example-record 404 with no worked-example session open', () => {
     expect(copy.lines).toEqual([
       'This experiment id is not in the workspace — it may not have been created yet.',
     ]);
-    expect(copy.offerExperimentsLink).toBe(false);
+    // B-23 INVERTED THIS ASSERTION, NOT DELETED IT. It read `toBe(false)`: a missing
+    // record was a dead end with no way out of the page, and the test pinned that as
+    // "today's copy, unchanged". The WORDING above is still unchanged and still pinned;
+    // what changed is that the panel now offers the same "My Experiments" link the
+    // worked-example variant has always offered (rendered only inside a router).
+    expect(copy.offerExperimentsLink).toBe(true);
     // and the local build's wording is likewise untouched
     expect(downCopy(missing(`/experiments/${ORDINARY}`), false, null).lines).toEqual([
       'This experiment id is not in the local workspace — it may not have been created yet.',

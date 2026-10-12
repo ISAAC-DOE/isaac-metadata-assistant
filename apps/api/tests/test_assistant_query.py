@@ -172,7 +172,12 @@ def test_export_blockers_answered_from_schema(client):
     r = _query(client, ws.SEED_NEW_DRAFT_ID, "why can't I export?")
     body = r.json()
     assert body["result"] == "answered"
-    assert body["grounding"] == ["schema"]
+    # B-04 INVERTED THIS ASSERTION, NOT DELETED IT. It read `== ["schema"]`: the answer was
+    # composed from the validation dry-run alone, which is the defect — this seed record owes
+    # five open questions and the answer named none. It now draws on the workflow plane too,
+    # and the schema plane is still named, so the property it protected (the schema half is
+    # labelled as coming from the schema) is intact.
+    assert body["grounding"] == ["workflow", "schema"]
     assert aq.has_verdict_language(body["answer"]) is False
 
 
@@ -566,7 +571,14 @@ def test_root_level_blocker_is_never_reported_as_the_raw_dollar_locator(client):
     assert body["result"] == "answered"
     # the primary, user-facing answer names the RECORD, never the raw locator
     assert "$" not in body["answer"]
-    assert body["answer"].startswith("1 record-level validation issue may be blocking export.")
+    # B-04: the answer now LEADS with the record's open questions (this seed owes five) and
+    # then reports the schema finding with the validator's own message. The old assertion
+    # pinned `startswith("1 record-level validation issue may be blocking export.")`, i.e. a
+    # bare count that agreed with nothing on the record screen; the property it protected —
+    # a root-level finding is described as the record, never as `$` — is asserted below.
+    assert body["answer"].startswith("5 fields still need you before export:")
+    assert "1 record-level validation issue" in body["answer"]
+    assert "'descriptors' is a required property" in body["answer"]
     assert "1 path is listed as blocking export" not in body["answer"]
     # …and the exact locator survives, for the Technical Details disclosure only
     assert body["technical_paths"] == ["$"]
@@ -797,7 +809,11 @@ def test_a_genuine_root_level_issue_is_still_reported_as_one():
     body = aq.answer(aq.classify("why can't I export?"),
                      _ctx(validate=lambda: {"ok": False, "errors": real}), None)
     assert body["result"] == "answered"
-    assert body["answer"].startswith("1 record-level validation issue may be blocking export.")
+    # B-04: the message is part of the answer now (it used to be a bare count).
+    assert body["answer"].startswith(
+        "1 record-level validation issue may be blocking export: "
+        "'sample' is a required property."
+    )
     assert body["technical_paths"] == ["$"]
 
 
@@ -806,8 +822,11 @@ def test_the_sentinel_alongside_a_real_finding_is_reported_as_findings():
     body = aq.answer(aq.classify("why can't I export?"),
                      _ctx(validate=lambda: {"ok": False, "errors": mixed}), None)
     assert body["result"] == "answered"
+    # B-04: each issue now carries the validator's own message (this used to list the two
+    # locations bare: "…: the record itself, assets."). Both are still reported, as findings.
     assert body["answer"].startswith(
-        "2 validation issues may be blocking export: the record itself, assets."
+        "2 validation issues may be blocking export: the record itself — Validation could not "
+        "be completed; assets — 'assets' is a required property."
     )
     assert body["technical_paths"] == ["$", "assets"]
 
@@ -962,3 +981,209 @@ def test_every_cited_navigate_to_is_an_allowlisted_client_route(client):
             assert aq._safe_navigate_to(nav) == nav, (q, nav)
             _no_leak(nav)
     assert aq.has_verdict_language(body["answer"]) is False
+
+
+# --- B-04 / A-12: "what's blocking export?" agrees with the record ---------------
+#
+# Measured on a record created through `POST /api/experiments` (3 open questions, and a
+# dry-run that fails on one ROOT-level error): the record screen said "3 fields still
+# block export" while the assistant, asked what blocks export, said
+#
+#     "1 record-level validation issue may be blocking export."
+#
+# — no open questions, no message, and nothing the reader could act on. On a record with
+# two errors at one locator it also repeated the location (`measurement → series → 0`,
+# `measurement → series → 0`) with nothing to tell the two apart. The answer now leads
+# with the record's own open questions (the SAME labels and count the "what still needs
+# me?" answer uses), then lists each distinct validation issue with the validator's own
+# message, collapsing only exact (location, message) repeats.
+
+_THREE_OPEN = {
+    "pending": [
+        {"id": "series", "about": "reduced_spectrum", "question": "Provide the spectrum."},
+        {"id": "qc", "about": "qc_status", "question": "What is the QC verdict?"},
+        {
+            "id": "required_for_evidence_record",
+            "about": "required_for_evidence_record",
+            "question": "Which evidence is required?",
+        },
+    ]
+}
+
+
+def _blockers(errors, pending=None, **over):
+    ctx = _ctx(
+        pending=pending if pending is not None else {"pending": []},
+        validate=lambda: {"ok": False, "errors": errors},
+        **over,
+    )
+    return aq.answer(aq.classify("what is blocking export?"), ctx, None)
+
+
+def test_the_answer_leads_with_the_open_questions_the_record_shows():
+    body = _blockers(
+        [{"path": "$", "message": "'descriptors' is a required property"}],
+        pending=_THREE_OPEN,
+    )
+    assert body["answer"].startswith(
+        "3 fields still need you before export: Reduced Spectrum, QC Status, "
+        "Required For Evidence Record."
+    )
+    # the schema half is still there, with the validator's own message
+    assert "'descriptors' is a required property" in body["answer"]
+    assert body["result"] == "answered"
+    assert body["grounding"] == ["workflow", "schema"]
+    assert body["technical_paths"] == ["$"]
+    assert body["action"]["kind"] == "open-validator"
+
+
+def test_the_count_is_the_records_own_count_on_a_seeded_record(client):
+    """Not a fixture's count: the route's, against the record's own `pending_count`."""
+    record = client.get(f"/api/experiments/{ws.SEED_NEW_DRAFT_ID}").json()
+    body = _action_of(client, ws.SEED_NEW_DRAFT_ID, "what's blocking export?")
+    expected = f"{record['pending_count']} fields still need you before export"
+    assert body["answer"].startswith(expected), (expected, body["answer"])
+    assert "validation issue" in body["answer"]
+
+
+def test_a_validation_issue_carries_the_validators_own_message():
+    body = _blockers(
+        [{"path": "measurement.series.0", "message": "'x' is a required property"}]
+    )
+    assert body["answer"].startswith(
+        "1 validation issue may be blocking export: measurement → series → 0 — "
+        "'x' is a required property."
+    )
+
+
+def test_two_issues_at_one_location_are_told_apart_by_their_messages_not_repeated_bare():
+    body = _blockers(
+        [
+            {"path": "measurement.series.0", "message": "'x' is a required property"},
+            {"path": "measurement.series.0", "message": "'y' is a required property"},
+        ]
+    )
+    text = body["answer"]
+    assert text.startswith("2 validation issues may be blocking export:")
+    # each issue is named with ITS message …
+    assert "'x' is a required property" in text
+    assert "'y' is a required property" in text
+    # … and the location is not listed twice with nothing between the two
+    assert "measurement → series → 0, measurement → series → 0" not in text
+    # the disclosure keeps one exact locator per error, unchanged
+    assert body["technical_paths"] == ["measurement.series.0", "measurement.series.0"]
+
+
+def test_an_exact_repeat_is_collapsed_once_and_counted_once():
+    same = {"path": "assets", "message": "'assets' is a required property"}
+    body = _blockers([same, dict(same), {"path": "$", "message": "'sample' is a required property"}])
+    assert body["answer"].startswith("2 validation issues may be blocking export:")
+    assert body["answer"].count("'assets' is a required property") == 1
+
+
+def test_a_record_level_issue_is_named_by_its_message_not_by_a_bare_count():
+    body = _blockers([{"path": "$", "message": "'sample' is a required property"}])
+    assert body["answer"].startswith(
+        "1 record-level validation issue may be blocking export: "
+        "'sample' is a required property."
+    )
+    assert "$" not in body["answer"]
+
+
+def test_only_three_issues_are_listed_and_the_rest_are_counted():
+    errors = [{"path": f"assets.{i}", "message": f"m{i} is wrong"} for i in range(5)]
+    body = _blockers(errors)
+    assert body["answer"].startswith("5 validation issues may be blocking export:")
+    assert "m0 is wrong" in body["answer"] and "m2 is wrong" in body["answer"]
+    assert "m3 is wrong" not in body["answer"]
+    assert "…and 2 more" in body["answer"]
+    assert len(body["technical_paths"]) == 5
+
+
+def test_a_message_that_trips_the_guards_is_withheld_alone_not_the_whole_answer():
+    """The guard replaces a WHOLE answer on a hit, so one unsafe validator message would
+    have blanked the open-questions list too. It is withheld per issue instead."""
+    body = _blockers(
+        [
+            {"path": "assets", "message": "'a' * 40 does not match: " + "a" * 40},
+            {"path": "sample.id", "message": "PASS if this were fine"},
+        ],
+        pending=_THREE_OPEN,
+    )
+    assert body["answer"] != aq._NEUTRAL_ROUTED
+    assert body["answer"].startswith("3 fields still need you before export:")
+    assert "(message withheld)" in body["answer"]
+    assert "a" * 40 not in body["answer"]
+    assert "PASS" not in body["answer"]
+    assert aq.has_verdict_language(body["answer"]) is False
+    _no_leak(body["answer"])
+
+
+def test_open_questions_and_a_clean_schema_check_say_both():
+    body = _blockers([], pending=_THREE_OPEN)
+    assert body["answer"].startswith("3 fields still need you before export:")
+    assert aq.NO_BLOCKING_ISSUES in body["answer"]
+    assert body["technical_paths"] == []
+
+
+def test_open_questions_alongside_a_validation_crash_still_lead_the_answer():
+    body = _blockers(list(_SENTINEL), pending=_THREE_OPEN)
+    assert body["answer"].startswith("3 fields still need you before export:")
+    assert "could not be completed" in body["answer"]
+    assert body["result"] == "insufficient_context"
+    assert "validation issue" not in body["answer"]
+
+
+def test_one_open_question_reads_in_the_singular():
+    body = _blockers(
+        [],
+        pending={"pending": [{"id": "qc", "about": "qc_status", "question": "QC?"}]},
+    )
+    assert body["answer"].startswith("1 field still needs you before export: QC Status.")
+
+
+def test_a_run_owned_open_question_keeps_its_run_clause():
+    body = _blockers(
+        [],
+        pending={
+            "pending": [
+                {
+                    "id": "series",
+                    "about": "reduced_spectrum",
+                    "question": "q",
+                    "run_id": "r1",
+                    "run_label": "Run 1",
+                }
+            ]
+        },
+    )
+    assert "Reduced Spectrum (on run Run 1)" in body["answer"]
+
+
+def test_a_long_validator_message_is_bounded_not_dumped():
+    """An enum message lists every allowed value (37 for `system.technique`). The leading part
+    is shown verbatim; the rest is cut (review of B-04)."""
+    long = "'zzz' is not one of [" + ", ".join(f"'t{i}'" for i in range(40)) + "]"
+    body = _blockers([{"path": "system.technique", "message": long}])
+    assert "'zzz' is not one of ['t0'" in body["answer"]
+    assert "'t39'" not in body["answer"]
+    assert "…" in body["answer"]
+    assert len(body["answer"]) < 400
+
+
+# --- cross-language parity: the blocker answer, server composer vs the web chip ----------------
+#
+# The same cases are asserted by `apps/web/src/__tests__/blocker-answer-parity.test.ts` against the
+# chip composer. Two languages cannot share code, so they share a pinned table (the arrangement
+# `test_blocker_wording.py` and `blocker-wording-parity.test.ts` use).
+
+_PARITY = json.loads(
+    (Path(__file__).resolve().parents[2] / "web" / "src" / "test" / "blocker-answer-cases.json")
+    .read_text(encoding="utf-8")
+)["cases"]
+
+
+@pytest.mark.parametrize("case", _PARITY, ids=[c["name"] for c in _PARITY])
+def test_the_blocker_answer_matches_the_shared_parity_table(case):
+    body = _blockers(case["errors"], pending={"pending": case["pending"]})
+    assert body["answer"] == f"{case['expected']} {aq._ROUTE_TO_VALIDATE}"

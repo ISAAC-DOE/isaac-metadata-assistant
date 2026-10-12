@@ -81,12 +81,41 @@ export function RecordValidator() {
   const [outcome, setOutcome] = useState<ApiValidateRecordResult | null>(null);
   const [rejection, setRejection] = useState<string | null>(null);
   const [backendError, setBackendError] = useState<ApiError | null>(null);
+  /*
+   * B-07 — WHICH FILE, IF ANY, THE TEXTAREA'S CONTENT CAME FROM. Three facts were
+   * missing and each produced a measured defect: a rejected selection left the
+   * previous file loaded (so Validate passed a file the reader had just been told was
+   * not accepted), no file name was ever shown (so a verdict could not say what it was
+   * about), and a name that outlived an edit would have claimed a file the text no
+   * longer is. So it is set when a file's text lands in the box, cleared by ANY edit,
+   * and is also the only thing that tells a rejection which content is the file's to
+   * clear — text the reader typed is theirs and survives a rejected file.
+   */
+  const [loadedFile, setLoadedFile] = useState<string | null>(null);
+  /** The file a rejection is about (never the previous one) — named in the alert. */
+  const [rejectedFile, setRejectedFile] = useState<string | null>(null);
+  /** What the CURRENT verdict checked: a file's name, or `null` for pasted/typed text. */
+  const [checkedFile, setCheckedFile] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   function resetOutcome() {
     setOutcome(null);
     setRejection(null);
+    setRejectedFile(null);
     setBackendError(null);
+  }
+
+  /** A selection was refused: whatever an EARLIER file put in the box goes, so the
+   *  next Validate cannot return a verdict for a file the reader was just told no
+   *  about. Text the reader typed or pasted is left exactly as it was. */
+  function rejectFile(name: string, message: string) {
+    if (loadedFile !== null) {
+      setText('');
+      setLoadedFile(null);
+    }
+    setRejection(message);
+    setRejectedFile(name);
+    setPhase('rejected');
   }
 
   async function onFileChange(e: React.ChangeEvent<HTMLInputElement>) {
@@ -97,16 +126,18 @@ export function RecordValidator() {
     resetOutcome();
     setPhase('idle');
     if (file.size > MAX_BYTES) {
-      setRejection('That file is too large to validate here (over 512 KB). Upload a smaller record.');
-      setPhase('rejected');
+      rejectFile(
+        file.name,
+        'That file is too large to validate here (over 512 KB). Upload a smaller record.',
+      );
       return;
     }
     try {
       const content = await readFileText(file);
       setText(content);
+      setLoadedFile(file.name);
     } catch {
-      setRejection('That file could not be read.');
-      setPhase('rejected');
+      rejectFile(file.name, 'That file could not be read.');
     }
   }
 
@@ -132,9 +163,13 @@ export function RecordValidator() {
       return;
     }
     setPhase('validating');
+    // Captured NOW: the verdict describes the text sent, so the name it carries must be
+    // the one that text had when it was sent, not whatever the box holds later.
+    const sentFrom = loadedFile;
     try {
       const result = await api.validateRecord(parsed);
       setOutcome(result);
+      setCheckedFile(sentFrom);
       setPhase('result');
     } catch (e) {
       const err = e instanceof ApiError ? e : new ApiError('The record could not be validated.');
@@ -221,6 +256,8 @@ export function RecordValidator() {
           value={text}
           onChange={(e) => {
             setText(e.target.value);
+            // An edit makes the text no longer the file's, so the name is dropped.
+            setLoadedFile(null);
             if (phase !== 'validating') {
               setPhase('idle');
               resetOutcome();
@@ -259,6 +296,11 @@ export function RecordValidator() {
           </button>
         </div>
         <p className="rec-val-hint">Accepts JSON up to 512 KB.</p>
+        {loadedFile !== null && (
+          <p className="rec-val-file-line">
+            Loaded file: <span className="mono rec-val-file-name">{loadedFile}</span>
+          </p>
+        )}
       </div>
 
       {/* No outer aria-live wrapper: each state below already carries its own live
@@ -274,13 +316,34 @@ export function RecordValidator() {
         {phase === 'rejected' && rejection && (
           <div className="rec-val-rejected" role="alert">
             <TriangleAlert size={16} strokeWidth={2.2} aria-hidden="true" />
-            <p>{rejection}</p>
+            <div>
+              <p>{rejection}</p>
+              {rejectedFile !== null && (
+                <p className="rec-val-rejected-file">
+                  File: <span className="mono rec-val-file-name">{rejectedFile}</span> — nothing
+                  from it was loaded.
+                </p>
+              )}
+            </div>
           </div>
         )}
 
         {phase === 'result' && outcome && (
           <div className="rec-val-outcome">
             <VerdictCard result={toValidationResult(outcome)} />
+            {/* What the verdict is ABOUT. A verdict that does not say which input it
+                describes invites the reader to attach it to whatever they last picked
+                (B-07). The file name is shown as TEXT, never as a link or a path. */}
+            <p className="rec-val-source-line">
+              Checked:{' '}
+              {checkedFile !== null ? (
+                <>
+                  the file <span className="mono rec-val-file-name">{checkedFile}</span>
+                </>
+              ) : (
+                'the pasted or typed text'
+              )}
+            </p>
             <p className="rec-val-schema-line mono">
               Checked against official ISAAC schema v{outcome.schema_version}
             </p>

@@ -1,4 +1,5 @@
 import './chrome.css';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { AudioWaveform, Shield, ChevronRight } from './icons';
 import { LABELS } from '../lib/labels';
@@ -279,6 +280,53 @@ function WorkspaceChip() {
   // deliberately unchanged by this (it is still `synthetic-only` in both scopes),
   // while the chip describes the workspace the reader is currently looking at.
   const inExampleSession = useTutorialState().sessionId !== null;
+  /*
+   * B-22 — THE CLAIMS HAD NO VISIBLE CARRIER. They lived only in the `aria-label`, so the
+   * chip was invisible to a keyboard user (a `<span>` is not in the tab order) and to
+   * anyone with a pointer (nothing showed on hover). It is now focusable and shows the
+   * SAME claims — `chipAriaDetail`, not a paraphrase — in a popover on focus and on hover.
+   *
+   * WHY IT STAYS A `span role="note"` AND NOT A `<button>`. The chip is not a control: it
+   * does nothing when pressed, and a button that does nothing is a dead control. It is
+   * ancillary content that needs to be READABLE, which is what a focusable note with a
+   * revealing popover is. Staying a span also leaves every browser locator and every
+   * assertion about its accessible name untouched.
+   *
+   * THE POPOVER IS `aria-hidden`: the accessible name already speaks these ninety words, and
+   * a second, announced copy would read them twice. It dismisses on Escape without moving
+   * focus, stays open while the pointer is over it (a transparent bridge in `chrome.css` spans the 6px gap between chip and popover, so moving onto it never leaves the hover target), and
+   * persists while focus remains (WCAG 1.4.13 — dismissible, hoverable, persistent).
+   */
+  const [open, setOpen] = useState(false);
+  const popoverRef = useRef<HTMLSpanElement>(null);
+  // Named, not inline arrows: `casing-registers.test.tsx`'s label-slot scan reads JSX with a
+  // regex whose attribute match ends at the first `>`, and the `>` of `() =>` inside an
+  // attribute made it read the handler's source as the element's text.
+  const showClaims = () => setOpen(true);
+  const hideClaims = () => setOpen(false);
+  /*
+   * KEPT ON SCREEN. The popover hangs from the chip's RIGHT edge, which is right on a wide
+   * bar and wrong on a narrow one: measured in Chromium at 375px it painted from x = -30,
+   * with the first words of the disclosure off the left edge of the viewport. The bar
+   * wraps, so no fixed offset can be right at every width — it is measured once it is
+   * open, and shifted only as far as it must be. It only ever moves RIGHT (the wide-bar
+   * anchor already keeps the other edge on screen).
+   */
+  useLayoutEffect(() => {
+    const el = popoverRef.current;
+    if (!open || el === null) return;
+    el.style.transform = '';
+    const { left } = el.getBoundingClientRect();
+    if (left < 8) el.style.transform = `translateX(${8 - left}px)`;
+  }, [open]);
+  useEffect(() => {
+    if (!open) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpen(false);
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [open]);
   return (
     /*
      * `role="note"` — QA-023. THE `aria-label` BELOW WAS ON A BARE `<span>`, WHICH
@@ -313,9 +361,23 @@ function WorkspaceChip() {
      * `results.violations`, and violations go 0 -> 0. The `incomplete` bucket it
      * clears is the one nothing reads — see `QA-023`.
      */
-    <span className="mode-chip" role="note" aria-label={chipAriaLabel(health, inExampleSession)}>
-      <Shield size={13} strokeWidth={2} aria-hidden="true" />
-      {chipText(health, inExampleSession)}
+    <span className="mode-chip-wrap" onMouseEnter={showClaims} onMouseLeave={hideClaims}>
+      <span
+        className="mode-chip"
+        role="note"
+        tabIndex={0}
+        aria-label={chipAriaLabel(health, inExampleSession)}
+        onFocus={showClaims}
+        onBlur={hideClaims}
+      >
+        <Shield size={13} strokeWidth={2} aria-hidden="true" />
+        {chipText(health, inExampleSession)}
+      </span>
+      {open && (
+        <span className="mode-chip-popover" aria-hidden="true" ref={popoverRef}>
+          {chipAriaDetail(databaseChipState(health?.database), inExampleSession)}
+        </span>
+      )}
     </span>
   );
 }

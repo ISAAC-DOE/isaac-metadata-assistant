@@ -114,6 +114,42 @@ describe('ExperimentRow — D1 title & badges', () => {
     expect(container.querySelector('.exp-meta')).toBeNull();
   });
 
+  /*
+   * B-01 — A STRAY "0" UNDER EVERY ROW THAT HAD NOTHING TO SHOW. The metadata line's
+   * guard was `(a || b || … || exp.openProposalCount) && <div>`, and `||` returns its
+   * LAST operand when none is truthy — so with the server sending `openProposalCount:
+   * 0` the whole expression evaluated to the number 0, and React renders a bare 0.
+   * Measured in Chromium on every experiment with no folder, technique or runs. The
+   * test passes the counts the SERVER sends (explicit zeros), which is exactly what
+   * the omitted-key fixture above could not reach.
+   */
+  it('renders NO metadata line and NO stray "0" when the counts are explicit zeros', () => {
+    for (const counts of [
+      { runCount: 0, openProposalCount: 0 },
+      { runCount: 0 },
+      { openProposalCount: 0 },
+    ]) {
+      const { container, unmount } = renderRow({
+        ...draftNeedsAttention,
+        technique: undefined,
+        ...counts,
+      });
+      expect(container.querySelector('.exp-meta')).toBeNull();
+      expect(container.querySelector('.exp-main')?.textContent ?? '').not.toMatch(/(^|\D)0(\D|$)/);
+      unmount();
+    }
+  });
+
+  it('still renders the metadata line when only one of the counts is positive', () => {
+    const { container } = renderRow({
+      ...draftNeedsAttention,
+      technique: undefined,
+      runCount: 0,
+      openProposalCount: 2,
+    });
+    expect(container.querySelector('.exp-meta')?.textContent).toBe('2 proposals waiting');
+  });
+
   it('renders exactly one lifecycle badge (Draft / Exported)', () => {
     expect(renderRow(draftNeedsAttention).getByText('Draft')).toBeTruthy();
     expect(renderRow(exportedDone).getByText('Exported')).toBeTruthy();

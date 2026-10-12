@@ -29,6 +29,19 @@
   gap: 10px;
   flex: none;
 }
+/* B-08 — said once on My Experiments after a record is discarded. A plain surface, not a
+   reserved signal colour: nothing failed and nothing passed, an act completed. */
+.discard-notice {
+  margin: 0 0 var(--space-md);
+  padding: var(--space-sm) var(--space-lg);
+  border: 1px solid var(--border);
+  background: var(--surface-subtle);
+  border-radius: var(--radius-control);
+  font-size: 12.5px;
+  line-height: var(--line-height-normal);
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
 
 /*
  * ---- UX-002 · THE RECORD SCREEN'S PAGE TITLE -----------------------------
@@ -637,15 +650,27 @@
   border-left: 1px solid var(--border-faint);
 }
 
-.section-tab-group {
-  /* Inline, not a block above the label: a block would make this one tab taller
-     than its six siblings and pull the whole shared `.section-tabs` row out of
-     alignment on all four pages that use it. MEASURED in Chrome: all seven tabs
-     report the same `top` and the same 30.5px height with the marker in place.
-     
-     The marker sits EQUIDISTANT between the divider and the label it precedes
-     (12px each side). It was 16px/8px first, which put it nearer the label than
-     the boundary and invited reading "ADVANCED API Access" as one tab name. */
+.section-tab-group-start::before {
+  /* B-22 — the group word, as GENERATED content from the tab's `data-group`, so it is not
+     a DOM node and is never read into the tab's text or name.
+
+     TWO DECLARATIONS, IN THIS ORDER, ON PURPOSE. The second adds the empty alt-text
+     (`/ ""`), which tells every engine that supports it that this content has no text
+     alternative — so it is excluded from the accessible name (Chrome, Safari, Firefox 128+).
+     An engine that does not understand the slash form drops that declaration and keeps the
+     first, which shows the same word; the worst case there is the old behaviour of the
+     word being in the name, never a missing marker.
+
+     Inline, not a block above the label: a block would make this one tab taller than its
+     six siblings and pull the whole shared `.section-tabs` row out of alignment on all four
+     pages that use it. MEASURED in Chrome: all seven tabs report the same `top` and the
+     same 30.5px height with the marker in place.
+
+     The marker sits EQUIDISTANT between the divider and the label it precedes (12px each
+     side). It was 16px/8px first, which put it nearer the label than the boundary and
+     invited reading "ADVANCED API Access" as one tab name. */
+  content: attr(data-group);
+  content: attr(data-group) / "";
   margin-right: var(--space-md);
   font-size: var(--font-size-meta);
   font-weight: var(--font-weight-semibold);
@@ -656,8 +681,8 @@
 
 /* The marker does not brighten with its tab: it names the group, not the
    selection, and a reader should not have to re-read it as part of the label. */
-.section-tab.active .section-tab-group,
-.section-tab:hover .section-tab-group {
+.section-tab.active.section-tab-group-start::before,
+.section-tab:hover.section-tab-group-start::before {
   color: var(--text-muted);
 }
 
@@ -977,6 +1002,13 @@
   font-size: 11.5px;
   font-style: italic;
   color: var(--text-tertiary);
+}
+/* B-44 — the ONE sentence that replaces a "not on disk" badge on every row. */
+.source-index-uniform-note {
+  margin: 0 0 var(--space-md);
+  font-size: 12px;
+  line-height: var(--line-height-normal);
+  color: var(--text-muted);
 }
 .source-index-caption {
   margin-top: 14px;
@@ -1793,7 +1825,10 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 40;
+  /* 50, not 40: the Assistant drawer's trigger (45) and panel (47) sit at 375px and were
+     painted ABOVE a modal's backdrop and clickable while the Discard / Reset dialog was open.
+     Still below the walkthrough (60+). */
+  z-index: 50;
   padding: 40px;
 }
 .artifact-modal {

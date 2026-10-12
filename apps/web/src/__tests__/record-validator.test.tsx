@@ -219,6 +219,117 @@ describe('RecordValidator — file upload', () => {
   });
 });
 
+/*
+ * B-07 — A REJECTED FILE LEFT THE PREVIOUS ONE LOADED, AND VALIDATE THEN PASSED IT.
+ *
+ * Measured in Chromium: pick a good file, then pick one over 512 KB. The oversize one
+ * was rejected with a "too large" alert — and the textarea still held the first file,
+ * so pressing Validate returned PASS for a file the reader had just been told was not
+ * accepted. No file name appeared anywhere, so nothing on screen said WHICH file the
+ * verdict described. A rejected selection now clears what the previous selection
+ * loaded, and the verdict names the file it checked.
+ */
+describe('RecordValidator — a rejected file selection and the file name (B-07)', () => {
+  const goodContent = JSON.stringify(syntheticCandidateRecord, null, 2);
+
+  function oversized(name: string): File {
+    const file = new File(['x'.repeat(600 * 1024)], name, { type: 'application/json' });
+    Object.defineProperty(file, 'size', { value: 600 * 1024 });
+    return file;
+  }
+
+  it('an oversize file CLEARS the previous file, so Validate cannot pass the old one', async () => {
+    const hits = stubFetchRoutes({ [URL]: { body: validateRecordPass } });
+    render(<RecordValidator />);
+    fireEvent.change(fileInput(), {
+      target: { files: [new File([goodContent], 'good.json', { type: 'application/json' })] },
+    });
+    await waitFor(() => expect(textarea().value).toBe(goodContent));
+
+    fireEvent.change(fileInput(), { target: { files: [oversized('huge.json')] } });
+    expect(await screen.findByText(/too large/i)).toBeInTheDocument();
+    expect(textarea().value).toBe('');
+
+    clickValidate();
+    // The old file is gone, so nothing is sent and no PASS appears.
+    expect(await screen.findByText(/paste or upload a json record first/i)).toBeInTheDocument();
+    expect(hits).toHaveLength(0);
+    expect(screen.queryByRole('status', { name: /validation pass/i })).toBeNull();
+  });
+
+  it('names the rejected file, and says nothing from it was loaded', async () => {
+    render(<RecordValidator />);
+    fireEvent.change(fileInput(), { target: { files: [oversized('huge.json')] } });
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('huge.json');
+    expect(alert).toHaveTextContent(/nothing from it was loaded/i);
+  });
+
+  it('does not throw away text the reader typed when a later file is rejected', async () => {
+    render(<RecordValidator />);
+    paste('{"mine": true}');
+    fireEvent.change(fileInput(), { target: { files: [oversized('huge.json')] } });
+    await screen.findByText(/too large/i);
+    // Only what a FILE loaded is cleared; the reader's own text is still theirs and is
+    // still on screen, so validating it describes exactly what they can see.
+    expect(textarea().value).toBe('{"mine": true}');
+  });
+
+  it('an unreadable file clears the previous file too', async () => {
+    render(<RecordValidator />);
+    fireEvent.change(fileInput(), {
+      target: { files: [new File([goodContent], 'good.json', { type: 'application/json' })] },
+    });
+    await waitFor(() => expect(textarea().value).toBe(goodContent));
+    const broken = new File(['x'], 'broken.json', { type: 'application/json' });
+    Object.defineProperty(broken, 'text', {
+      value: () => Promise.reject(new Error('nope')),
+    });
+    fireEvent.change(fileInput(), { target: { files: [broken] } });
+    expect(await screen.findByText(/could not be read/i)).toBeInTheDocument();
+    expect(textarea().value).toBe('');
+  });
+
+  it('the verdict names the file it checked', async () => {
+    stubFetchRoutes({ [URL]: { body: validateRecordPass } });
+    render(<RecordValidator />);
+    fireEvent.change(fileInput(), {
+      target: { files: [new File([goodContent], 'candidate-2099.json', { type: 'application/json' })] },
+    });
+    await waitFor(() => expect(textarea().value).toBe(goodContent));
+    clickValidate();
+    await screen.findByRole('status', { name: /validation pass/i });
+    expect(document.querySelector('.rec-val-outcome')?.textContent).toContain(
+      'candidate-2099.json',
+    );
+  });
+
+  it('editing the text after loading a file drops the file name — the verdict never names a file it did not check', async () => {
+    stubFetchRoutes({ [URL]: { body: validateRecordPass } });
+    render(<RecordValidator />);
+    fireEvent.change(fileInput(), {
+      target: { files: [new File([goodContent], 'candidate-2099.json', { type: 'application/json' })] },
+    });
+    await waitFor(() => expect(textarea().value).toBe(goodContent));
+    paste(goodContent + '\n');
+    clickValidate();
+    await screen.findByRole('status', { name: /validation pass/i });
+    expect(document.querySelector('.rec-val-outcome')?.textContent).not.toContain(
+      'candidate-2099.json',
+    );
+    expect(document.querySelector('.rec-val-outcome')?.textContent).toMatch(/pasted or typed text/i);
+  });
+
+  it('pasted text is described as pasted, with no file name', async () => {
+    stubFetchRoutes({ [URL]: { body: validateRecordPass } });
+    render(<RecordValidator />);
+    paste(JSON.stringify(syntheticCandidateRecord));
+    clickValidate();
+    await screen.findByRole('status', { name: /validation pass/i });
+    expect(document.querySelector('.rec-val-outcome')?.textContent).toMatch(/pasted or typed text/i);
+  });
+});
+
 // --- verdict accessibility + backend-down -----------------------------------------
 
 describe('RecordValidator — accessibility + degraded backend', () => {

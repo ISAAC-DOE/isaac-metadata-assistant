@@ -23,7 +23,8 @@ export function AdvisoryChip({ advisory, explain }: AdvisoryChipProps) {
       <div className="advisory-head">
         <span className="advisory-title">
           <TriangleAlert size={15} strokeWidth={2.2} aria-hidden="true" />
-          {count === 0 ? 'No Advisory' : `${count} advisory`}
+          {/* "1 advisory" / "2 advisories": the bare adjective read "2 advisory" (B-A17). */}
+          {count === 0 ? 'No Advisory' : `${count} ${count === 1 ? 'advisory' : 'advisories'}`}
         </span>
         <span className="advisory-nongating">non-gating</span>
       </div>

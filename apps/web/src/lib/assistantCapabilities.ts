@@ -98,7 +98,25 @@ export const CAPABILITIES_TRIGGER_LABEL = 'What Can I Ask?';
  * note names the target ("the composer") instead of pointing at it.
  */
 export const CAPABILITIES_INSERT_NOTE =
-  'Pick one to put it in the composer. Nothing is sent until you send it.';
+  'Picking an example puts it in the composer. Nothing is sent until you send it.';
+
+/**
+ * The OTHER half of how this popover behaves (B-10).
+ *
+ * THE INSERT NOTE USED TO COVER THE WHOLE POPOVER AND WAS FALSE OF TWO OF ITS THREE
+ * GROUPS. "Pick one to put it in the composer. Nothing is sent until you send it." sat
+ * beneath Suggested Questions and Agent Actions as well as the examples, and both of those
+ * RUN THE MOMENT THEY ARE PICKED — a Suggested Question shows its answer, an Agent Action
+ * runs its intent and writes the result into the conversation. Measured in Chromium: the
+ * note was on screen while a click on a pill above it had already produced an answer.
+ *
+ * So the insert note now says "an example" (the one group it was ever true of), and this
+ * sentence says what the other two do. It is rendered only when one of those groups is on
+ * the panel, and it is deliberately NOT worded as "sends": neither group sends anything to
+ * a server by being picked — what is false is "nothing happens until you press send".
+ */
+export const CAPABILITIES_RUN_NOTE =
+  'Suggested Questions and Agent Actions run as soon as you pick them.';
 
 /**
  * Shown INSTEAD of the insert note while the composer already holds a draft.

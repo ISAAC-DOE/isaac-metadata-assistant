@@ -2105,7 +2105,7 @@ export const answersAfterNotebook = {
     changed_fields: [pendingResponse.pending[0].id],
     reopened_steps: [],
     artifact: { state: 'none' as const, reason: null },
-    reason: 'Updated 1 field(s); no downstream steps reopened.',
+    reason: 'Updated 1 field; no downstream steps reopened.',
   },
 };
 
@@ -2162,7 +2162,7 @@ export const editApplied = {
     changed_fields: ['ssrl-archive://BL15-2/2099_run_000/notebooks/xanes_reduction_v2.ipynb'],
     reopened_steps: [],
     artifact: { state: 'none' as const, reason: null },
-    reason: 'Updated 1 field(s); no downstream steps reopened.',
+    reason: 'Updated 1 field; no downstream steps reopened.',
   },
 };
 
