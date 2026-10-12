@@ -32,6 +32,7 @@ import {
   descriptorPayload,
   EMPTY_DESCRIPTOR,
   seriesParseError,
+  SERIES_PLACEHOLDER,
   seriesTextFrom,
   typedValue,
 } from '../components/StructuredValueEntry';
@@ -264,7 +265,37 @@ describe('the series entry', () => {
 
   it('does not claim the values are checked, only the shape', () => {
     renderEntry('series');
-    expect(screen.getByText(/never inspected or altered/i)).toBeInTheDocument();
+    expect(screen.getByText(/values themselves are never altered/i)).toBeInTheDocument();
+  });
+
+  /*
+   * QA audit A-03 (2026-10-11). The note read "The shape is checked here and again on
+   * the server", and `[{"series_id": "x"}]` passed both checks and failed only at export.
+   * The copy now names which check happens WHERE, and the server half is real
+   * (`official_shape_mismatch`, pinned in `test_structured_answer_official_shape.py`).
+   */
+  it('says exactly what is checked here and what the server checks — no claimed parity', () => {
+    renderEntry('series');
+    const note = screen.getByText(/checks that the text is JSON/i);
+    expect(note.textContent).toMatch(/every series has a series_id/);
+    expect(note.textContent).toMatch(/official ISAAC schema/);
+    // The retired claim, absent in either phrasing.
+    expect(document.body.textContent).not.toMatch(/checked here and again on the server/i);
+  });
+
+  it('the placeholder is valid JSON and an example SHAPE, carrying no number at all', () => {
+    renderEntry('series');
+    const box = screen.getByLabelText('Series JSON') as HTMLTextAreaElement;
+    expect(box.placeholder).toBe(SERIES_PLACEHOLDER);
+    const parsed = JSON.parse(box.placeholder) as Array<Record<string, unknown>>;
+    expect(Array.isArray(parsed)).toBe(true);
+    // Every key the official schema REQUIRES on an item is present…
+    expect(Object.keys(parsed[0])).toEqual(
+      expect.arrayContaining(['series_id', 'independent_variables', 'channels']),
+    );
+    // …and nothing in it could pass for a measurement.
+    expect(box.placeholder).not.toMatch(/\d/);
+    expect(seriesParseError(box.placeholder)).toBeNull();
   });
 });
 

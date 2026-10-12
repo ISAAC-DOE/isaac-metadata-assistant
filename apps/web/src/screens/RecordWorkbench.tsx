@@ -24,6 +24,7 @@ import { UnmappedNotesPanel } from '../components/UnmappedNotesPanel';
 import { IngestionProposalsPanel, type OpenProposalsSummary } from '../components/IngestionProposalsPanel';
 import { AssetReferencesPanel } from '../components/AssetReferencesPanel';
 import { ExtendedContextPanel } from '../components/ExtendedContextPanel';
+import { ConfirmedAnswersPanel } from '../components/ConfirmedAnswersPanel';
 import { ValidateReview } from '../components/ValidateReview';
 import { disposeExperiment, flushExperiment } from '../lib/runAutosaveStore';
 import { AssistantPanel, type AgentPrompt } from '../components/AssistantPanel';
@@ -1367,6 +1368,20 @@ function LoadedWorkbench({
             argument, applied again.
           */}
           <ExtendedContextPanel experimentId={id} />
+
+          {/*
+            CONFIRMED ANSWERS (QA audit A-01/A-04, 2026-10-11) — the reduced spectrum,
+            QC verdict and descriptor this record holds, for the record or for each run,
+            each correctable through the existing correction operation. Before this, a
+            confirmed one appeared on NO screen after the visit that answered it, and
+            Complete and Export Readiness sent the reader to each other in a loop.
+
+            BELOW THE BLOCKS, for the reason the Extended Context note above gives: the
+            first `.fg-header` must stay the first draft block. It SELF-FETCHES, and a
+            correction re-reads the record silently (`onAgentRefresh`, for the reason
+            the rename panel below states), so the bundle never shows a stale version.
+          */}
+          <ConfirmedAnswersPanel experimentId={id} onCorrected={() => onAgentRefresh()} />
 
           {/*
             ── THE RECORD IDENTITY GROUP ──────────────────────────────────────

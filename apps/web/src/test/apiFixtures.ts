@@ -1987,6 +1987,34 @@ export function resetDemoRoutes(
  * document holding only unreadable rows is `present: true` with `entry_count: 0`, and
  * a fixture for that case must say so rather than reusing this one.
  */
+/** `GET .../structured-answers` with no units — the neutral default (A-01/A-04). */
+export function structuredAnswersEmpty(id: string = EXP_ID) {
+  return {
+    experiment_id: id,
+    experiment_version: '1.1',
+    level: 'record' as const,
+    units: [],
+    total: 0,
+    returned: 0,
+    offset: 0,
+    limit: 10,
+  };
+}
+
+/** `GET .../run-artifacts` with nothing exported — the neutral default (A-02). */
+export function runArtifactsNone(id: string = EXP_ID) {
+  return {
+    experiment_id: id,
+    runs_total: 0,
+    total: 0,
+    returned: 0,
+    offset: 0,
+    limit: 10,
+    artifacts: [],
+    reason: null,
+  };
+}
+
 export const extendedContextAbsent = {
   entries: [] as unknown[],
   total: 0,
@@ -2064,6 +2092,15 @@ export function bundleRoutes(id: string = EXP_ID): Record<string, RouteEntry> {
     // this build, so almost every record has none, and the panel renders one sentence.
     // A test about extended context supplies its own body for this key.
     [`GET ${base}/extended-context`]: { body: extendedContextAbsent },
+    // Confirmed Answers (QA audit A-01/A-04) self-fetches on the Record Fields view
+    // and on a finished Complete screen. The neutral default is NO units — the panel
+    // renders its heading and one sentence and nothing else — for the reason every
+    // default above gives: without it the panel's honest API-down state lands on
+    // every record screen. A test about confirmed answers supplies its own body.
+    [`GET ${base}/structured-answers`]: { body: structuredAnswersEmpty(id) },
+    // Exported Run Records (A-02) self-fetches on Export Readiness for a record with
+    // runs. Neutral default: nothing exported, so the panel renders nothing at all.
+    [`GET ${base}/run-artifacts`]: { body: runArtifactsNone(id) },
     'GET /api/graph/status': { body: graphStatusUnavailable },
   };
 }
@@ -2867,7 +2904,7 @@ export function exportedReadyRoutes(id: string = EXP_ID): Record<string, RouteEn
  * artifact cards; it is what `routes.FAN_OUT_ARTIFACT_REASON` serves.
  */
 export const FAN_OUT_REASON =
-  "This record's runs each export their own official record, so there is no single record file. The export response lists each run's record and sidecar filename; no read operation lists them yet.";
+  "This record's runs each export their own official record, so there is no single record file. Each exported run's record and evidence sidecar are listed per run.";
 
 export function fanOutExportedRoutes(id: string = EXP_ID): Record<string, RouteEntry> {
   const base = `/api/experiments/${encodeURIComponent(id)}`;
@@ -2889,8 +2926,12 @@ export function fanOutExportedRoutes(id: string = EXP_ID): Record<string, RouteE
         },
         workflow: fixtureWorkflow({ pending_count: 0, draft_ok: true, ready: true, exported: true, rev: VERSION_FIELDS.rev }),
         artifact: { state: 'current' as const, reason: null },
+        // A fan-out HAS runs — it is what makes it one. The detail fixture's default of
+        // 0 described a record that could never have fanned out.
+        run_count: FAN_OUT_RUN_IDS.length,
       },
     },
+    [`GET ${base}/run-artifacts`]: { body: fanOutRunArtifacts(id) },
     ...pendingRoutes(base, { pending: [] }),
     [`POST ${base}/validate`]: { body: validateExported },
     [`POST ${base}/audit`]: { body: auditExported },
@@ -2916,6 +2957,44 @@ export function fanOutExportedRoutes(id: string = EXP_ID): Record<string, RouteE
 
 /** The two run record ids a fan-out export writes, shaped like real ULIDs. */
 export const FAN_OUT_RUN_IDS = ['01JQZ0FIXTURERUNONE000001', '01JQZ0FIXTURERUNTWO000001'];
+
+/**
+ * `GET .../run-artifacts` for the exported fan-out above (QA audit A-02): both runs,
+ * each with its written record and sidecar — the READ that survives a reload, which the
+ * export response's `records[]` did not. `stale` names a run id whose file predates a
+ * later change (A-06). The documents are tiny and obviously synthetic: the subject is
+ * which file is offered, not its science.
+ */
+export function fanOutRunArtifacts(id: string = EXP_ID, opts: { stale?: string } = {}) {
+  return {
+    experiment_id: id,
+    runs_total: FAN_OUT_RUN_IDS.length,
+    total: FAN_OUT_RUN_IDS.length,
+    returned: FAN_OUT_RUN_IDS.length,
+    offset: 0,
+    limit: 10,
+    reason: null,
+    artifacts: FAN_OUT_RUN_IDS.map((runId, i) => ({
+      run_id: runId,
+      run_label: `Run ${i + 1}`,
+      record_id: runId,
+      record_filename: `${runId}.json`,
+      sidecar_filename: `${runId}.evidence.json`,
+      record: { record_id: runId, isaac_record_version: '1.05', _synthetic: true },
+      sidecar: { record_id: runId, evidence: {}, _synthetic: true },
+      extended_context: null,
+      extended_context_filename: null,
+      artifact:
+        opts.stale === runId
+          ? {
+              state: 'stale' as const,
+              reason:
+                'This record has changed since it was exported. The exported file is fixed — official records are written once and never rewritten — so it does not include the later changes.',
+            }
+          : { state: 'current' as const, reason: null },
+    })),
+  };
+}
 
 /**
  * The FAN-OUT EXPORT RESPONSE — the SUCCESS one, which is the shape no fixture in
@@ -3572,7 +3651,9 @@ export const REAL_CONTRACT_DESCRIPTIONS: readonly { op: string; description: str
   { op: "GET /api/experiments/{experiment_id}/conflicts", description: "Every address on this record whose own evidence asserts more than one distinct value, with the competing answers themselves, the citations behind each one, a deterministic explanation of why they are treated as a disagreement, and whichever decision a person has already recorded about it. Read-only, and it takes no lock.\n\nTHIS OPERATION RETURNS THE COMPETING VALUES, and the conflict disclosure stored on a submission deliberately returns addresses only. The two are not an inconsistency to be tidied up in either direction: that disclosure exists for navigation — which addresses carried conflicts when the record was submitted — and the values live in the revision snapshot beside it, so copying them in would give one value two homes. This is the surface a person decides on, and a scientist cannot choose between answers they are not shown.\n\nA conflict is always WITHIN one address\'s own evidence list. It is not a disagreement between two fields, and it is not a disagreement about where a value came from: two citations asserting the same value are not in conflict however different their sources, so the answers are grouped by value and each group carries the citations that assert it.\n\nAN ALREADY-DECIDED ADDRESS IS STILL LISTED. Nothing in this API removes an evidence entry, so the competing citations remain stored forever and the address goes on classifying as conflicting; hiding it would hide the decision along with the disagreement. Read `resolution_state`, which is `absent` when nobody has decided, `current` for a decision that still covers exactly these answers, `stale` for one made over a different set because further competing evidence has arrived since, and `deferred` when a person looked and declined to decide. Only `current` clears a conflict, and a superseded decision is still returned in full rather than deleted.\n\nPass `run` to describe one run\'s OWN fields instead of the record\'s. An address a run inherits is decided once, at the record, so it is described there and not under each run — otherwise one disagreement could collect two decisions. `resolutions_without_conflict` reports the other direction: a stored decision whose address this subject carries no conflict at, reported rather than silently omitted. `unreadable_resolution_entries` counts stored decisions this build could not read; they are preserved in the record untouched and counted rather than rendered, because saying what one contains would mean inventing it." },
   { op: "POST /api/experiments/{experiment_id}/conflicts/resolve", description: "Records which of an address\'s competing answers a scientist stands behind — or that they looked and declined to decide — and returns the decision with its full history.\n\nIT DOES NOT CHANGE THE FIELD\'S VALUE, and that is a design decision rather than an omission. Recording which recorded answer a person chose and writing that answer into the field are two different acts, and the second already has exactly one path in this application: an answer or a correction sent with `confirmed_by_user: true`, stored as user-confirmation evidence. Wiring a decision into that path would create a second way for scientific content to change, which is a decision for its own slice. The stored decision reports `is_field_value: false` and `is_evidence: false` on the wire for the same reason.\n\nNOTHING PICKS A WINNER FOR YOU. `chosen_value` arrives only from a request that carried `confirmed_by_user: true`; an outcome of `resolved` with no chosen value is refused, so \"the system decided\" is not a state this API can be made to store. NOTHING IS REMOVED EITHER: the competing citations are untouched, the address goes on being reported as conflicting, and what changes is that `resolution_state` becomes `current`.\n\n`outcome` is `resolved` or `deferred`. `deferred` is a first-class outcome — a person may legitimately decline to decide — and it does NOT clear the conflict; it carries no chosen value and no `chosen_from`, because \"nobody chose\" and \"somebody chose and we filed it as undecided\" are different facts. For `resolved`, `chosen_from` says whether the value is one of the recorded answers (`candidate`) or a new one the scientist typed because all of them were wrong (`edited`); the two are different claims, and a value that was never asserted cannot be labelled `candidate`.\n\nRequires `confirmed_by_user: true` and the RECORD\'s current `ETag` in `If-Match` — omitted is `428`, malformed is `400`, and stale is `412` with nothing written. The record\'s validator is the right one even for a run-scoped decision, because a decision is stored inside the record\'s own document; there is deliberately no separate validator for a decision. Every part of the body is resolved BEFORE the precondition is checked, so a malformed request is refused whether or not the caller\'s `ETag` happens to be current, and a refused request leaves no partial act behind.\n\nREVISING AN EARLIER DECISION IS ALLOWED and never overwrites it silently: the act is appended to the decision\'s history together with the value it superseded and the set of answers that value was chosen from. Re-submitting an identical decision OVER THE SAME COMPETING SET is a no-op — no history entry, and the record\'s revision does not move. If new evidence has arrived since, the same body is a RE-AFFIRMATION rather than a no-op: it is recorded, carrying the digest of the set the earlier value was chosen from, because standing behind a value again after the disagreement changed is a different act from standing behind it the first time.\n\nAn address this subject does not carry, an address that is not currently in conflict, a `chosen_from` of `candidate` whose value is none of the competing answers, a missing confirmation, a `resolved` outcome with no value, an unknown run, and a wrong-typed body are each refused with `422` naming what was wrong. Nothing is written in any of those cases." },
   { op: "GET /api/experiments/{experiment_id}/source-preview", description: "The text of one committed reference source file, line by line, together with the one-based line numbers this record\'s evidence actually cites in it. Read-only.\n\nOnly the two committed reference files may be previewed. A name containing a path separator or a traversal fragment is rejected, and any other filename is refused with the allowed names listed in the response. The file that cites fields rather than lines yields no cited line numbers, which is expected rather than an error." },
-  { op: "GET /api/experiments/{experiment_id}/artifacts", description: "The official ISAAC record and the evidence-sidecar JSON that this record\'s export wrote, plus their filenames as bare basenames — never a server path.\n\nBoth files are resolved from the record id, never from a caller-supplied path. A record that has not been exported yet returns `200` with null payloads rather than an error. Read-only.\n\nA record with **runs** exports one official record per run and has no single pair of its own, so this operation returns null payloads for it together with a `reason` saying why. Those per-run files are not listed here yet." },
+  { op: "GET /api/experiments/{experiment_id}/artifacts", description: "The official ISAAC record and the evidence-sidecar JSON that this record\'s export wrote, plus their filenames as bare basenames — never a server path.\n\nBoth files are resolved from the record id, never from a caller-supplied path. A record that has not been exported yet returns `200` with null payloads rather than an error. Read-only.\n\nA record with **runs** exports one official record per run and has no single pair of its own, so this operation returns null payloads for it together with a `reason` saying why. Those per-run files are read with `GET /api/experiments/{experiment_id}/run-artifacts`." },
+  { op: "GET /api/experiments/{experiment_id}/run-artifacts", description: "For a record whose runs each export their own official ISAAC record: every run that HAS been exported, in canonical run order, with the official record and evidence-sidecar JSON that its export wrote and their filenames as bare basenames — never a server path. Read-only, and paged.\n\nEvery file is resolved from the run\'s id inside this record\'s own records directory, never from a caller-supplied path, and only a file this application\'s export wrote for this record can be served. A file that is missing or unreadable is a `null` payload with `artifact.state: \"stale\"`, never an error.\n\n**`artifact` is judged PER RUN.** `current` means the written record still matches what exporting that run now would produce; `stale` means the run has changed since it was exported. An exported file is never rewritten, so a stale run\'s file is fixed and does not include the later changes — no operation regenerates it.\n\n`total` is how many runs have been exported and `runs_total` how many runs exist, independent of the page. A record with no runs answers `200` with an empty list and a `reason` naming where its single pair is read instead." },
+  { op: "GET /api/experiments/{experiment_id}/structured-answers", description: "The reduced spectrum (`series`), the QC verdict (`qc`) and the scientific descriptor (`descriptor`) this record currently holds, for the record itself when it has no runs and for each run when it has them — the three answers no other read operation serves, because they live in whole blocks rather than in the draft\'s fields. Read-only, and paged over runs.\n\nEach answer carries `state`: `confirmed` (a value is stored, and is returned verbatim), `open` (the question is still waiting for an answer) or `absent` (neither). `editable` is `true` exactly when the correction operation named in `edit_at` will accept a correction of it AND a correction form can carry the stored value back unchanged; where it cannot, `reason` says why. `confirmation` is what the value\'s own evidence says: `confirmed` (a person confirmed every part), `from_evidence` (recorded evidence such as an extraction, without a person\'s confirmation for every part) or `no_evidence`. Each unit\'s `version` is the `If-Match` value that operation requires.\n\n`exported` is `true` for a unit whose official record has been written. A correction there changes the record\'s working copy only: the exported file is never rewritten and will not include it. Nothing is inferred or filled in: a value that was never supplied is `null`." },
   { op: "GET /api/graph/status", description: "Provider-agnostic status for the Project Memory plane: whether it is available, the integrity of its artifact, the provider serving it, whether its indexing policy is consistent, the freshness of its indexed sources together with the scope and basis of that judgement, the policy and served-manifest fingerprints, the served file count, and the snapshot schema version. Node, edge, community, file and concept counts are included when a graph is readable and are explicit nulls otherwise, so the response shape never changes.\n\nThe deployed app commit is reported as version metadata only and is never an input to any freshness judgement. A freshness status that cannot be proven is reported as unknown rather than assumed current.\n\nProject Memory provides leads and provenance to confirm against the cited files, never a correctness ruling. Read-only." },
   { op: "POST /api/uploads", description: "Always refuses with `403`. This is the write side of the synthetic-only governance boundary: no multipart form is declared or parsed, and no file is read, inspected, or stored. The refusal carries the reason and the current synthetic-only flag so a client can explain the boundary to a user.\n\nReal or private data ingestion is approval-gated and is not enabled in this prototype." },
   { op: "GET /api/memory/concepts", description: "The concepts Project Memory has indexed, each with the label and summary metadata the reader exposes.\n\nWhen no graph is readable this returns `200` with `available: false`, a stable machine-readable reason, and an empty list — never an error status and never a fabricated concept. Read-only. Project Memory returns leads to verify, never a validation verdict." },

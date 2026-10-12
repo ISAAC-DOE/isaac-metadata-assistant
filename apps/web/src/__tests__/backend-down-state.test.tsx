@@ -789,12 +789,20 @@ describe('the sub-read inventory this file derives from api.ts', () => {
     // counter hiding behind the first failure twice — once for `folder` and once for
     // `activity`. Every number read out of this test's own failure output, never
     // derived by adding a delta.
-    // 49 -> 50 (B-08): `discardExperiment`, the one-record discard
+    // 49 -> 51 on 2026-10-11, from an independent QA audit: `getRunArtifacts` (A-02,
+    // `GET .../run-artifacts`) and `getStructuredAnswers` (A-01/A-04,
+    // `GET .../structured-answers`). TWO new first segments, so all three counters move
+    // (literal 49 -> 51, suffix 40 -> 42, segments +2) and each needed a product word in
+    // `SUB_RESOURCE_LABELS` — "the exported run files" and "the confirmed answers". Both
+    // append their query to an unchanged path literal (the `getPendingPage` shape), so
+    // no query string registers as a suffix. Read out of this test's own failure output
+    // (`expected 51 to be 49`), and this whole file run to a clean pass afterwards.
+    // 49 -> 50 (B-08), in a sibling change: `discardExperiment`, the one-record discard
     // (`POST .../discard`). ONE new literal, a new sub-read suffix (`discard`) and a new
-    // first segment, which is why `SUB_RESOURCE_LABELS` gained `discard` ("the discard")
-    // in the same change. Read out of this test's own failure output
-    // (`expected 50 to be 49`), not derived by adding a delta.
-    expect(experimentPathLiterals.length).toBe(50);
+    // first segment, which is why `SUB_RESOURCE_LABELS` gained `discard` ("the discard").
+    // The two changes met in one merge; the combined figure below was READ from this
+    // test's own failure output after the merge, not derived by adding the deltas.
+    expect(experimentPathLiterals.length).toBe(52);
     expect(bareRecordLiterals.length).toBeGreaterThan(0);
     // 31 -> 33: `runs/SEG-1/answers` and `runs/SEG-1/edit`, the two run-level write
     // suffixes. Both are WRITES rather than reads, and they appear here because this
@@ -826,8 +834,10 @@ describe('the sub-read inventory this file derives from api.ts', () => {
     // that distinction before this history existed. Read out of this test's own
     // failure output (`have a length of 38 but got 39`), not derived by adding a delta.
     // 39 -> 40: `CTX-004`'s `extended-context`. See the literal-count note above.
-    // 40 -> 41: `discard`, B-08. See the literal-count note above.
-    expect(SUB_READ_SUFFIXES).toHaveLength(41);
+    // 40 -> 42 on 2026-10-11: `run-artifacts` and `structured-answers`; and `discard`,
+    // B-08, in the sibling change. Combined figure measured after the merge. See the
+    // literal-count note above.
+    expect(SUB_READ_SUFFIXES).toHaveLength(43);
     // 19, AND THE ROUTE TO THAT NUMBER IS WORTH KEEPING.
     //
     // THIS INCIDENT RECORD WAS LOST IN A MERGE RESOLUTION AND IS RESTORED HERE, an
@@ -888,7 +898,10 @@ describe('the sub-read inventory this file derives from api.ts', () => {
     // got 25`), not derived by adding a delta.
     // 25 -> 26: `CTX-004`'s `extended-context`, a first segment nothing else used.
     // See the literal-count note above for why all three moved together.
-    expect(SUB_READ_SEGMENTS).toHaveLength(27);
+    // 26 -> 28 on 2026-10-11: `run-artifacts` and `structured-answers`, two NEW first
+    // segments with their own words in `SUB_RESOURCE_LABELS`; plus `discard` (B-08) in the
+    // sibling change. Combined figure measured after the merge.
+    expect(SUB_READ_SEGMENTS).toHaveLength(29);
     // THE CONFLICT-RESOLUTION PAIR, and how these three numbers were arrived at.
     // `listConflicts` and `resolveConflict` add TWO literals and TWO suffixes —
     // `conflicts` and `conflicts/resolve`, the second of which carries no `${…}`

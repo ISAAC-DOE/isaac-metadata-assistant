@@ -1,5 +1,5 @@
 import './artifact.css';
-import { FileText, FileJson, Download } from './icons';
+import { FileText, FileJson, Download, TriangleAlert } from './icons';
 import { StatusChip } from './StatusChip';
 import { LABELS } from '../lib/labels';
 import type { Artifact } from '../lib/types';
@@ -12,6 +12,13 @@ interface ArtifactCardProps {
   // first (macOS Safari/Firefox), so document.activeElement alone isn't safe.
   onView?: (e: MouseEvent<HTMLButtonElement>) => void;
   onDownload?: () => void;
+  /**
+   * Set when this file was written before the record's later changes (QA audit A-06).
+   * The card says so ITSELF, beside its filename: the screen's banner was the only
+   * place that said it, and the card under it went on reading as the current record.
+   * It offers no remedy, because there is none — an exported file is never rewritten.
+   */
+  staleNote?: string;
 }
 
 /**
@@ -19,7 +26,7 @@ interface ArtifactCardProps {
  * two separate cards, never blended. The sidecar is clearly secondary and
  * clearly non-official; it never carries a verdict chip.
  */
-export function ArtifactCard({ artifact, onView, onDownload }: ArtifactCardProps) {
+export function ArtifactCard({ artifact, onView, onDownload, staleNote }: ArtifactCardProps) {
   const isRecord = artifact.kind === 'record';
   return (
     <section
@@ -50,6 +57,12 @@ export function ArtifactCard({ artifact, onView, onDownload }: ArtifactCardProps
       </div>
 
       <div className="artifact-path">{artifact.path}</div>
+      {staleNote && (
+        <p className="artifact-card-stale">
+          <TriangleAlert size={13} strokeWidth={2} aria-hidden="true" />
+          {staleNote}
+        </p>
+      )}
 
       <div className="artifact-actions">
         <button

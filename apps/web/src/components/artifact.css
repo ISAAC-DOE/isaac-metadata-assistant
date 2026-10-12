@@ -58,6 +58,17 @@
   display: flex;
   gap: 10px;
 }
+/* A-06 — the card's own statement that its file predates later changes. */
+.artifact-card-stale {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-xs);
+  margin: 0 0 var(--space-md);
+  font-size: var(--font-size-meta);
+  line-height: var(--line-height-normal);
+  color: var(--advisory-text);
+}
+.artifact-card-stale svg { flex: none; margin-top: var(--space-2xs); }
 .artifact-actions .btn { flex: 1; justify-content: center; }
 
 /* Sidecar-review note */
